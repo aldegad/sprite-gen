@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "cell_width": 256,
+  "cell_height": 256,
+  "safe_margin": 24,
+  "states": {
+    "idle": {
+      "frames": 4
+    },
+    "run": {
+      "frames": 6
+    },
+    "jump": {
+      "frames": 4
+    },
+    "talk": {
+      "frames": 4
+    }
+  },
+  "guides": {
+    "idle": {
+      "path": "assets/guides/square-256/idle.png",
+      "frames": 4,
+      "width": 1024,
+      "height": 256
+    },
+    "run": {
+      "path": "assets/guides/square-256/run.png",
+      "frames": 6,
+      "width": 1536,
+      "height": 256
+    },
+    "jump": {
+      "path": "assets/guides/square-256/jump.png",
+      "frames": 4,
+      "width": 1024,
+      "height": 256
+    },
+    "talk": {
+      "path": "assets/guides/square-256/talk.png",
+      "frames": 4,
+      "width": 1024,
+      "height": 256
+    }
+  },
+  "master_skeleton": {
+    "path": "assets/skeletons/sprite-gen-master-256.png",
+    "width": 1536,
+    "height": 1024,
+    "columns": 6,
+    "rows": 4,
+    "cell_width": 256,
+    "cell_height": 256,
+    "row_entries": [
+      {
+        "state": "idle",
+        "row": 0,
+        "frames": 4,
+        "columns": [
+          0,
+          3
+        ]
+      },
+      {
+        "state": "run",
+        "row": 1,
+        "frames": 6,
+        "columns": [
+          0,
+          5
+        ]
+      },
+      {
+        "state": "jump",
+        "row": 2,
+        "frames": 4,
+        "columns": [
+          0,
+          3
+        ]
+      },
+      {
+        "state": "talk",
+        "row": 3,
+        "frames": 4,
+        "columns": [
+          0,
+          3
+        ]
+      }
+    ]
+  },
+  "usage": [
+    "Attach master_skeleton plus the character base image for one-shot sheet generation experiments.",
+    "Attach row guide plus character base image for safer per-row generation.",
+    "Do not allow visible guide boxes, skeleton lines, labels, or guide colors in final generated sprites.",
+    "Normalize accepted per-row strips with scripts/normalize_strip_to_grid.py before game use.",
+    "One-shot master output does NOT land exactly on this 256px lattice (row frame counts vary, frames drift off-cell). After chroma-key (do NOT run repair_cell_padding on one-shot output \u2014 it re-cuts on the 256px grid and shreds drifted sprites), run scripts/extract_frame_layout.py to recover the real per-frame rectangles and write manifest.json.frame_layout; the game must follow frame_layout, not uniform cellWidth slicing."
+  ]
+}
