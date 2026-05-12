@@ -35,14 +35,50 @@ def edge_alpha_count(image: Image.Image, margin: int) -> int:
     return total
 
 
-def remove_chroma_background(image: Image.Image, chroma_key: tuple[int, int, int], threshold: float) -> Image.Image:
+def key_tint_score(color: tuple[int, int, int], chroma_key: tuple[int, int, int]) -> float:
+    keyed_channels = [index for index, value in enumerate(chroma_key) if value >= 192]
+    unkeyed_channels = [index for index, value in enumerate(chroma_key) if value < 64]
+    if not keyed_channels or not unkeyed_channels:
+        return 0.0
+    keyed_average = sum(color[index] for index in keyed_channels) / len(keyed_channels)
+    unkeyed_average = sum(color[index] for index in unkeyed_channels) / len(unkeyed_channels)
+    return keyed_average - unkeyed_average
+
+
+def neutralize_key_tint(color: tuple[int, int, int], chroma_key: tuple[int, int, int]) -> tuple[int, int, int]:
+    keyed_channels = [index for index, value in enumerate(chroma_key) if value >= 192]
+    unkeyed_channels = [index for index, value in enumerate(chroma_key) if value < 64]
+    if not keyed_channels or not unkeyed_channels:
+        neutral = round(sum(color) / 3)
+    else:
+        neutral = round(sum(color[index] for index in unkeyed_channels) / len(unkeyed_channels))
+    output = list(color)
+    for index in keyed_channels:
+        output[index] = min(output[index], neutral)
+    return tuple(output)
+
+
+def remove_chroma_background(
+    image: Image.Image,
+    chroma_key: tuple[int, int, int],
+    threshold: float,
+    fringe_threshold: float,
+    fringe_delta: float,
+) -> Image.Image:
     rgba = image.convert("RGBA")
     pixels = rgba.load()
     for y in range(rgba.height):
         for x in range(rgba.width):
             red, green, blue, alpha = pixels[x, y]
-            if alpha and color_distance((red, green, blue), chroma_key) <= threshold:
+            color = (red, green, blue)
+            distance = color_distance(color, chroma_key)
+            if alpha and distance <= threshold:
                 pixels[x, y] = (0, 0, 0, 0)
+            elif alpha and distance <= fringe_threshold and key_tint_score(color, chroma_key) >= fringe_delta:
+                pixels[x, y] = (0, 0, 0, 0)
+            elif alpha and key_tint_score(color, chroma_key) >= fringe_delta * 2:
+                neutral_red, neutral_green, neutral_blue = neutralize_key_tint(color, chroma_key)
+                pixels[x, y] = (neutral_red, neutral_green, neutral_blue, alpha)
             elif alpha == 0 and (red or green or blue):
                 pixels[x, y] = (0, 0, 0, 0)
     return rgba
@@ -223,15 +259,19 @@ def main() -> int:
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--states", default="all")
     parser.add_argument("--key-threshold", type=float, default=96.0)
+    parser.add_argument("--fringe-key-threshold", type=float, default=180.0)
+    parser.add_argument("--fringe-delta", type=float, default=18.0)
     parser.add_argument("--allow-slot-fallback", action="store_true")
     parser.add_argument("--min-used-pixels", type=int, default=400)
     parser.add_argument("--edge-margin", type=int, default=2)
     parser.add_argument("--edge-pixel-threshold", type=int, default=24)
     parser.add_argument("--chroma-adjacent-threshold", type=float, default=150.0)
-    parser.add_argument("--chroma-adjacent-pixel-threshold", type=int, default=800)
+    parser.add_argument("--chroma-adjacent-pixel-threshold", type=int, default=120)
     parser.add_argument("--small-outlier-ratio", type=float, default=0.35)
     parser.add_argument("--large-outlier-ratio", type=float, default=2.75)
     args = parser.parse_args()
+    if args.fringe_key_threshold < args.key_threshold:
+        raise SystemExit("--fringe-key-threshold must be greater than or equal to --key-threshold")
 
     run_dir = args.run_dir.expanduser().resolve()
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
@@ -253,7 +293,13 @@ def main() -> int:
             continue
         frame_count = int(request["states"][state]["frames"])
         with Image.open(raw_path) as opened:
-            strip = remove_chroma_background(opened, chroma_key, args.key_threshold)
+            strip = remove_chroma_background(
+                opened,
+                chroma_key,
+                args.key_threshold,
+                args.fringe_key_threshold,
+                args.fringe_delta,
+            )
         frames = extract_component_frames(strip, frame_count, cell_size, safe_margin)
         method = "components"
         if frames is None:
