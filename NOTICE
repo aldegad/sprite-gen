@@ -1,0 +1,6 @@
+sprite-gen
+Copyright 2026 Alex Kim
+
+This project is inspired by the Apache-2.0 licensed hatch-pet component-row
+workflow. sprite-gen targets generic game sprite atlases and does not include
+Codex pet assets, pet packages, or hatch-pet visual assets.

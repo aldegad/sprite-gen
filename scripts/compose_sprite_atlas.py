@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Compose component-row frames into a game atlas and runtime manifest."""
 
 from __future__ import annotations

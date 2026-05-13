@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Fail a browser/game screenshot when visible chroma-key magenta remains."""
 
 from __future__ import annotations

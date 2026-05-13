@@ -1,6 +1,7 @@
 ---
 name: sprite-gen
 description: "Generate clean 2D game sprites and animation atlases with the hatch-pet-proven component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, square-cell atlas composition, QA reports, and runtime manifest frame_layout."
+license: Apache-2.0
 depends_on:
   required_skills:
     - kuma:image-gen
@@ -14,7 +15,7 @@ modes:
 
 # Sprite Gen
 
-`sprite-gen` is the game-sprite version of the hatch-pet pipeline. It does not create Codex pets, `pet.json`, or the fixed 8x9 pet atlas. It reuses the proven shape of hatch-pet:
+`sprite-gen` is the game-sprite version of the hatch-pet-style component-row pipeline. It does not create Codex pets, `pet.json`, or the fixed 8x9 pet atlas. It reuses the proven workflow shape for generic game sprites:
 
 ```text
 sprite-request.json -> layout guides + prompts -> image-gen state rows
@@ -23,6 +24,10 @@ sprite-request.json -> layout guides + prompts -> image-gen state rows
 ```
 
 There is only one canonical engine: `component-row`. Do not use one-shot master sheets, fixed-grid atlas cutting, local drawing, or static fallback as a successful sprite result.
+
+## License And Attribution
+
+`sprite-gen` is released under Apache-2.0. The component-row workflow is inspired by the Apache-2.0 licensed `hatch-pet` skill, but this project does not include Codex pet assets, pet packages, or hatch-pet visual assets.
 
 ## SSoT
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Extract component-row sprite strips into clean square RGBA frames."""
 
 from __future__ import annotations

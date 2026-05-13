@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Prepare a sprite-gen component-row run.
 
 This script owns the numeric sprite recipe. It writes one request JSON, one

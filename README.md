@@ -26,6 +26,10 @@ python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-githu
 
 Component-row is the canonical engine. Fixed-grid cutting and one-shot master sheets are no longer part of the accepted path.
 
+## Attribution
+
+This skill is inspired by the Apache-2.0 licensed `hatch-pet` component-row workflow, but targets generic game sprite atlases instead of Codex pet packages.
+
 ## License
 
-MIT
+Apache-2.0
