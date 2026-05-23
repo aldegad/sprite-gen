@@ -11,6 +11,7 @@ depends_on:
     - scripts/compose_sprite_atlas.py
     - scripts/preview_animation.py
     - scripts/compose_selected_cycle.py
+    - scripts/compose_sprite_gif.py
 modes:
   default: component-row
 ---
@@ -535,7 +536,7 @@ python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/compose_selected_cycle.py \
   --state running-right \
   --frames 2,3,4,5 \
   --name running-right-selected-2-3-4-5 \
-  --duration-ms 190 \
+  --delay-ticks 19 \
   --note "human QA selected current best right-run loop"
 ```
 
@@ -547,11 +548,42 @@ qa/<name>-contact.png
 qa/<name>.json
 ```
 
-`qa/<name>.json` is the selected-cycle SSoT: it records the source state, exact 1-based selected frame numbers, runtime zero-based frame indices, duration, and SHA-256 for every source frame. Runtime integrations may consume the original atlas with the selected zero-based frame order, or export a derived atlas explicitly from that manifest.
+`qa/<name>.json` is the selected-cycle SSoT: it records the source state, exact 1-based selected frame numbers, runtime zero-based frame indices, delay/duration, and SHA-256 for every source frame. Runtime integrations may consume the original atlas with the selected zero-based frame order, or export a derived atlas explicitly from that manifest.
 
 Use this path for user-approved manual locomotion curation. It is not a silent fallback: report that full-row locomotion failed and that the selected subset is the accepted usable loop.
 
 For precise humanoid running today, the most reliable path is candidate generation plus human frame picking. Generate a few candidate rows, keep the best extracted frames, and let the user choose or reorder the 1-based frame sequence for `compose_selected_cycle.py`. Do not promise automatic frame-order selection yet; if the row only works after manual picking, record that as the current limitation in `qa-notes.md`.
+
+### Clean GIF Export
+
+Use `compose_sprite_gif.py` whenever you need a shareable transparent GIF from extracted frames or from a human-picked frame order. Do not hand-roll GIFs with ad-hoc `magick` commands unless you are debugging.
+
+```bash
+python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/compose_sprite_gif.py \
+  --frame-dir <target>/assets/generated/sprites/<character-id>/frames/running-right \
+  --frame-order 2,1,5,3 \
+  --delay-ticks 14 \
+  --output <target>/assets/generated/sprites/<character-id>/qa/running-right-picked.gif \
+  --contact-output <target>/assets/generated/sprites/<character-id>/qa/running-right-picked-contact.png \
+  --manifest-output <target>/assets/generated/sprites/<character-id>/qa/running-right-picked-gif.json
+```
+
+Delay ticks are GIF/ImageMagick ticks: `14` means about 140 ms per frame, `20` means about 200 ms, `30` means about 300 ms. State-specific timing is allowed, but it must be explicit in the output manifest or final delivery note. A typical preview profile can be:
+
+```text
+base/idle/rest/working/talking/success = 20 ticks
+running = 14 ticks
+sleep = 30 ticks
+```
+
+Clean GIF invariants:
+
+- Source PNG frames remain the truth. The GIF owns only frame order and timing.
+- Save as transparent GIF with a dedicated transparent palette index.
+- Use disposal method 2 so each frame clears before the next frame draws. This prevents "previous frame showing through" ghosts in Discord/browser previews.
+- Use infinite loop (`loop-count 0`) for looped states.
+- Keep contact sheets separate from GIFs. Contact sheets may use checker backgrounds for inspection; runtime/shareable GIFs should preserve transparency.
+- If a loop only works after dropping or reordering frames, record the selected 1-based frame order. Do not hide that as an automatic pass.
 
 ## Chroma And Alpha
 
@@ -626,6 +658,7 @@ python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/preview_animation.py \
 ```
 
 This writes `qa/<state>-contact.png` (frames left-to-right) and `qa/<state>.gif` (played at the state `fps`).
+The GIF is exported through the clean transparent GIF path (dedicated transparent index + disposal method 2), while the contact sheet uses a checker background for inspection.
 
 - **Cyclic locomotion (walk / run):** the motion must read as continuous locomotion, not static bobbing. Review body rhythm, limb motion, foot contact stability, and whether the loop communicates the requested direction and speed.
 - **Experimental locomotion boundary:** walk/run/frontwalk/45-frontwalk are not simple default pass states. They may be generated, but the report must call them experimental unless motion continuity passes cleanly.

@@ -19,6 +19,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from gif_utils import delay_ticks_to_duration_ms, save_clean_gif
+
 
 def checker(size: tuple[int, int], square: int = 16) -> Image.Image:
     """Neutral checker so transparent pixels and stray fringe are both visible."""
@@ -57,6 +59,11 @@ def contact_sheet(frames: list[Image.Image], gap: int = 4) -> Image.Image:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", required=True, type=Path)
+    parser.add_argument(
+        "--delay-ticks",
+        type=int,
+        help="override every GIF preview delay in 1/100 second ticks",
+    )
     args = parser.parse_args()
 
     run_dir = args.run_dir.expanduser().resolve()
@@ -88,18 +95,26 @@ def main() -> int:
         sheet.save(qa_dir / f"{state}-contact.png")
         state_sheets.append((state, sheet))
 
-        gif_frames = [flatten(f) for f in frames]
-        duration = max(1, round(1000 / fps))
-        gif_frames[0].save(
+        duration = (
+            delay_ticks_to_duration_ms(args.delay_ticks)
+            if args.delay_ticks
+            else max(1, round(1000 / fps))
+        )
+        save_clean_gif(
+            frames,
             qa_dir / f"{state}.gif",
-            save_all=True,
-            append_images=gif_frames[1:],
-            duration=duration,
+            duration_ms=duration,
             loop=0 if loop else 1,
-            disposal=2,
         )
         summary.append(
-            {"state": state, "ok": True, "frames": len(frames), "fps": fps, "loop": loop}
+            {
+                "state": state,
+                "ok": True,
+                "frames": len(frames),
+                "fps": fps,
+                "delay_ticks": round(duration / 10),
+                "loop": loop,
+            }
         )
 
     # stacked all-state contact sheet

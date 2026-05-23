@@ -17,6 +17,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from gif_utils import delay_ticks_to_duration_ms, save_clean_gif
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -82,6 +84,7 @@ def main() -> int:
     parser.add_argument("--frames", required=True, type=parse_frames, help="1-based frame numbers, for example 2,3,4,5")
     parser.add_argument("--name", required=True, help="output basename under qa/, without extension")
     parser.add_argument("--duration-ms", type=int, default=190)
+    parser.add_argument("--delay-ticks", type=int, help="GIF delay in 1/100 second ticks; overrides --duration-ms")
     parser.add_argument("--note", default="")
     args = parser.parse_args()
 
@@ -93,15 +96,13 @@ def main() -> int:
     frame_paths = [path for path, _image in selected]
     frames = [(number, image) for number, (_path, image) in zip(args.frames, selected)]
 
-    gif_frames = [flatten(frame) for _number, frame in frames]
+    duration_ms = delay_ticks_to_duration_ms(args.delay_ticks) if args.delay_ticks else max(1, args.duration_ms)
     gif_path = qa_dir / f"{args.name}.gif"
-    gif_frames[0].save(
+    save_clean_gif(
+        [frame for _number, frame in frames],
         gif_path,
-        save_all=True,
-        append_images=gif_frames[1:],
-        duration=max(1, args.duration_ms),
+        duration_ms=duration_ms,
         loop=0,
-        disposal=2,
     )
 
     contact_path = qa_dir / f"{args.name}-contact.png"
@@ -115,7 +116,8 @@ def main() -> int:
         "name": args.name,
         "selected_user_frames": args.frames,
         "selected_zero_based_frames": [frame - 1 for frame in args.frames],
-        "duration_ms": args.duration_ms,
+        "duration_ms": duration_ms,
+        "delay_ticks": round(duration_ms / 10),
         "loop": True,
         "note": args.note,
         "outputs": {
