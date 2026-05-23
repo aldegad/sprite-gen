@@ -481,9 +481,22 @@ def row_prompt(request: dict[str, Any], state: str, entry: dict[str, Any]) -> st
         )
     transparency_artifact_text = "\n".join(f"- {rule}" for rule in TRANSPARENCY_ARTIFACT_RULES)
     runtime_size = f"{cell_width}x{cell_height}"
+    reference_contract = (
+        "Use the attached accepted idle/direction anchor as the canonical character design for this row. "
+        "If a state anchor is attached for a non-locomotion state, treat it as approved state vocabulary only. "
+        "Use the attached layout guide image only for frame count, slot spacing, centering, and safe padding. "
+        "If an additional generated row strip is attached, use it only as a motion reference, never as a replacement identity source. "
+        "Do not simply copy the still reference pose. Generate distinct animation poses that create a readable cycle or action."
+    )
+    if character.get("base_image"):
+        reference_contract = (
+            "If this is a pre-idle/simple run, the attached base image may be used as the canonical character design. "
+            "In direction-anchor mode, do not use base images for final action rows; accepted idle/direction anchors own row identity. "
+            + reference_contract
+        )
     return f"""Create a single horizontal sprite strip for the game character `{character["id"]}` in the state `{state}`.
 
-Use the attached base character image as the canonical design. If direction idle or state anchor images are attached, treat them as already-approved identity/facing/state anchors. Use the attached layout guide image only for frame count, slot spacing, centering, and safe padding. If an additional generated row strip is attached, use it only as a motion reference, never as a replacement identity source. Do not simply copy the still reference pose. Generate distinct animation poses that create a readable cycle or action.
+{reference_contract}
 
 Character: {character.get("description") or character["id"]}.
 Style contract: {request["style"]}.
@@ -493,7 +506,8 @@ Use this prompt as an authoritative sprite-production spec. Do not expand it int
 Animation action: {entry["action"]}.
 
 Anchor lock:
-- The base image and any accepted idle/state anchors own character identity, outfit details, colors, face design, asymmetric markings, and side-specific accessories.
+- Accepted idle/direction anchors own character identity, outfit details, colors, face design, asymmetric markings, and side-specific accessories for final action rows.
+- Base character images and original character sheets are pre-idle sources only. Do not reinterpret or reintroduce base-character details inside a direction-anchor action row.
 - This row owns motion only. Spend the variation budget on limb contacts, arm counter-swing, body height, torso lean, head bob, hair bounce, and loop continuity.
 - Do not redesign or reinterpret identity details while animating. Keep face, hair shape, markings, palette, outline weight, body proportions, outfit, props, and silhouette copied from the approved anchors.
 - Preserve side-specific features exactly as the approved anchors show them. Do not solve hairpin side, earring side, logos, handed props, scars, one-sided markings, asymmetric clothing, or lighting cues from scratch inside the row.

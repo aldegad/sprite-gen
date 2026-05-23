@@ -91,9 +91,74 @@ Keep default simple actions short. More frames do not automatically create smoot
 
 If a user asks for 9 or 12 frames, run it as an explicit experiment and report `duplicate-heavy`, `blur/merge`, or `extract-fail` honestly instead of treating it as a normal pass.
 
-## Base Lock Gate (Stage 0, BLOCKING)
+## Idle Anchor Architecture (Stage 0, BLOCKING)
 
-Every state row is generated with the base idle attached as the `-i` identity reference. A weak base poisons every state — proportions, style, and identity drift compound across all rows. So before any row generation you must pass an explicit gate.
+The row-generation pipeline has one hard ownership rule:
+
+```text
+identity truth = accepted idle anchor
+motion truth   = layout guide + paired/basis row when needed
+base truth     = used only to create idle anchors, then removed from row inputs
+```
+
+Base character images, original character sheets, and broad style references are allowed only before idle anchors are accepted. Once an idle anchor exists for the requested direction, later state rows must not attach the base character image as insurance. Re-attaching base makes the row model solve identity again and weakens the purpose of the idle-anchor workflow.
+
+Terminal architecture:
+
+```text
+[USER REFS / CHARACTER SHEET]
+          |
+          v
++-----------------------------+
+| 0. BASE IDLE 생성            |
+| - 원본/캐릭터시트는 여기서만 사용 |
+| - 비율/스타일/색/소품 고정       |
++-----------------------------+
+          |
+          v
++-----------------------------+
+| 1. 방향별 IDLE ANCHOR 생성    |
+| - idle-front-right           |
+| - idle-front-left            |
+| - idle-back-right            |
+| - idle-back-left             |
++-----------------------------+
+          |
+          v
+        BASE CHARACTER 폐기
+        original refs 폐기
+        character sheet 폐기
+        이후 row 입력 금지
+          |
+          v
++-----------------------------+
+| 2. BASIS ROW 생성            |
+| input:                       |
+| - target-direction idle      |
+| - target-state layout only   |
+| output: basis row            |
++-----------------------------+
+          |
+          v
++-----------------------------+
+| 3. PAIRED ROW 생성           |
+| input:                       |
+| - paired-direction idle      |
+| - paired-state layout only   |
+| - basis row                  |
+| output: paired row           |
++-----------------------------+
+          |
+          v
++-----------------------------+
+| 4. GIF / SHEET 조립          |
+| - row crop                   |
+| - gif preview                |
+| - frame-index QA             |
++-----------------------------+
+```
+
+A weak idle anchor poisons every state — proportions, style, and identity drift compound across all rows. So before any row generation you must pass an explicit gate.
 
 Gate question, answered `y`/`n`:
 
@@ -109,7 +174,7 @@ The base idle locks only when **all** of these hold:
 
 If the answer is `n`: generate/iterate base candidates, review each against the criteria above, and re-gate. **Do not run `prepare_sprite_run.py` until a base is locked.** "Good enough for now" is not a pass — drift only grows once the rows start.
 
-When the answer is `y`, that exact file becomes `--base-image`. Keep the original generation around so the lock decision is auditable.
+When the answer is `y`, that exact file becomes the accepted idle anchor for its direction. Keep the original generation around so the lock decision is auditable, but do not attach it again after the idle anchors have replaced it as row identity truth.
 
 ## License And Attribution
 
@@ -181,10 +246,12 @@ frames/
 
 2. Generate one image per state with `kuma:image-gen`.
 
-For simple/default states, attach exactly two references:
+For simple/default states before direction-anchor mode exists, attach exactly two references:
 
 - `base-source.<ext>` — canonical character identity
 - `references/layout-guides/<state>.png` — layout-only guide
+
+For direction-anchor mode, do not attach `base-source.<ext>` to action rows. Attach the accepted target-direction idle anchor plus the state layout guide. For a paired row, also attach the already generated basis row as timing/scale/motion reference only.
 
 For hatch-pet-style locomotion, attach additional references only when they are part of the row plan and record them in `qa-notes.md`. Useful advanced references are:
 
@@ -267,9 +334,10 @@ in one image.
    - requested states and frame counts
    - style contract and cell size
 
-1. **Base idle gate** — create or accept one canonical base idle. It owns
-   identity, proportions, silhouette, palette, and style. Do not proceed if the
-   base is cropped, wrong style, or identity-weak.
+1. **Base idle gate** — create or accept one canonical base idle. It owns the
+   first identity lock only. Do not proceed if the base is cropped, wrong style,
+   or identity-weak. After direction idle anchors are accepted, this base must
+   not be attached to final action rows.
 
 2. **Direction gate** — create direction anchors before action rows:
    - front-only: one accepted front idle anchor
@@ -300,15 +368,15 @@ in one image.
 
 5. **Row generation gate** — generate the final row only after the matching
    direction idle anchor and state anchor exist. Reference ownership is:
-   - base image: identity
-   - direction idle anchor: facing/orientation plus visible side-specific
-     identity details for that direction
+   - base image: pre-idle source only, not a row-generation input
+   - direction idle anchor: identity, facing/orientation, and visible
+     side-specific identity details for that direction
    - state anchor: pose/state vocabulary plus the approved state-specific
      identity rendering, for non-locomotion states only
    - locomotion motion sheet/contact sheet: foot-contact phase and gait rhythm
    - paired basis row: timing, scale, and animation intensity
    - layout guide: frame count, slots, margins, optional motion phase
-   The row prompt must keep character detail as an already-approved input and
+   The row prompt must keep character detail as an already-approved idle-anchor input and
    spend its degrees of freedom on animation only: limb contacts, arm
    counter-swing, body height, torso lean, head bob, hair bounce, and loop seam.
    Do not ask the row to decide hairpin side, outfit details, colors, face
@@ -337,7 +405,7 @@ For 45-degree state packs, make direction a separate visual SSoT:
 
 - Preferred default: create and accept four canonical idle direction anchors first: `idle-front-right`, `idle-front-left`, `idle-back-right`, and `idle-back-left`.
 - Generate every later action row from its matching idle direction anchor. For example, `working-front-left`, `running-front-left`, and `walking-front-left` all attach the accepted `idle-front-left` anchor.
-- The base image owns character identity. The direction idle anchor owns facing/orientation. The action row owns motion/state. Do not collapse these three truths into one prompt burden.
+- The base image owns only the pre-idle source stage. The direction idle anchor owns row identity and facing/orientation. The action row owns motion/state. Do not collapse these truths into one prompt burden.
 - If four direction idle anchors do not exist yet, create or reuse one accepted 4-direction direction sheet/contact sheet before generating action rows.
 - Attach that direction sheet to **every** 45-degree row. Use it only for facing/orientation, not pose, state, identity, or timing.
 - Also attach one **single target-direction anchor** for the requested row direction (`front-right`, `front-left`, `back-right`, or `back-left`). Prefer the accepted idle anchor for that direction. This anchor is the highest-priority facing reference for that row.
@@ -353,13 +421,13 @@ For a left/right side pair:
 Reference order for the basis side row:
 
 ```text
-base-source.* -> optional character sheet/original reference -> optional accepted previous gait/contact reference -> references/layout-guides/running-right.png
+idle-right.png -> references/layout-guides/running-right.png
 ```
 
 Reference order for the paired side row:
 
 ```text
-base-source.* -> optional character sheet/original reference -> optional accepted previous gait/contact reference -> raw/running-right.png -> references/layout-guides/running-left.png
+idle-left.png -> raw/running-right.png -> references/layout-guides/running-left.png
 ```
 
 For any four-direction 45-degree state, use two basis rows and two paired rows:
@@ -382,13 +450,13 @@ The direction sheet is still required for both basis and paired rows. The paired
 Reference order for a 45-degree basis row:
 
 ```text
-base-source.* -> optional character sheet/original reference -> accepted 4-direction sheet/contact reference -> target-direction anchor -> optional accepted motion/contact reference -> references/layout-guides/<basis-state>.png
+idle-<basis-direction>.png -> references/layout-guides/<basis-state>.png
 ```
 
 Reference order for a 45-degree paired row:
 
 ```text
-base-source.* -> optional character sheet/original reference -> accepted 4-direction sheet/contact reference -> target-direction anchor -> optional accepted motion/contact reference -> raw/<basis-state>.png -> references/layout-guides/<paired-state>.png
+idle-<paired-direction>.png -> raw/<basis-state>.png -> references/layout-guides/<paired-state>.png
 ```
 
 If the target-direction anchor and paired basis row conflict, obey the target-direction anchor for facing and the paired basis row only for timing, scale, and animation intensity.
@@ -482,6 +550,8 @@ qa/<name>.json
 `qa/<name>.json` is the selected-cycle SSoT: it records the source state, exact 1-based selected frame numbers, runtime zero-based frame indices, duration, and SHA-256 for every source frame. Runtime integrations may consume the original atlas with the selected zero-based frame order, or export a derived atlas explicitly from that manifest.
 
 Use this path for user-approved manual locomotion curation. It is not a silent fallback: report that full-row locomotion failed and that the selected subset is the accepted usable loop.
+
+For precise humanoid running today, the most reliable path is candidate generation plus human frame picking. Generate a few candidate rows, keep the best extracted frames, and let the user choose or reorder the 1-based frame sequence for `compose_selected_cycle.py`. Do not promise automatic frame-order selection yet; if the row only works after manual picking, record that as the current limitation in `qa-notes.md`.
 
 ## Chroma And Alpha
 
