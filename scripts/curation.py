@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Shared curation sidecar logic for sprite-gen.
+
+`curation.json` is an optional, non-destructive sidecar in a run directory. It
+records which extracted frames a human selected (and in what order) plus a
+per-frame affine transform. The original `frames/<state>/frame-N.png` files are
+never rewritten — the atlas/GIF compose steps read this sidecar and apply the
+transform at compose time, so a curation decision is always reversible by
+editing or deleting `curation.json`.
+
+This module is the single source of truth for the curation schema and for how a
+transform is applied, so the webview server and the compose scripts can never
+drift apart.
+
+Schema (`curation.json`):
+
+    {
+      "version": 1,
+      "kind": "sprite-gen-curation",
+      "states": {
+        "<state>": {
+          "selected": [0, 1, 2, 3],          # 0-based frame indices, in play order
+          "transforms": {                      # keyed by 0-based frame index (string)
+            "0": {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0}
+          }
+        }
+      }
+    }
+
+Defaults when absent (explicit, not a silent fallback):
+- no `curation.json`           -> every state uses all extracted frames in order, identity transform.
+- state missing from sidecar   -> same all-frames default for that state.
+- `selected` missing/empty     -> all frames in extraction order.
+- frame missing from transforms -> identity transform.
+
+`rotate` is in degrees, counter-clockwise positive (PIL convention).
+`scale` is a multiplier about the frame center.
+`dx`/`dy` are pixel offsets inside the cell, +x right, +y down.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+from typing import Any
+
+from PIL import Image
+
+CURATION_FILENAME = "curation.json"
+SCHEMA_VERSION = 1
+IDENTITY = {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0, "shx": 0.0, "shy": 0.0}
+
+
+def curation_path(run_dir: Path) -> Path:
+    return run_dir / CURATION_FILENAME
+
+
+def load_curation(run_dir: Path) -> dict[str, Any] | None:
+    """Return the parsed sidecar, or None when there is no curation.json."""
+    path = curation_path(run_dir)
+    if not path.is_file():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("kind") != "sprite-gen-curation":
+        raise SystemExit(f"{path} is not a sprite-gen-curation file")
+    return data
+
+
+def normalize_transform(raw: Any) -> dict[str, float]:
+    """Coerce a stored transform into a full {rotate, scale, dx, dy, shx, shy} dict."""
+    if not isinstance(raw, dict):
+        return dict(IDENTITY)
+    return {
+        "rotate": float(raw.get("rotate", 0.0)),
+        "scale": float(raw.get("scale", 1.0)),
+        "dx": float(raw.get("dx", 0)),
+        "dy": float(raw.get("dy", 0)),
+        "shx": float(raw.get("shx", 0.0)),
+        "shy": float(raw.get("shy", 0.0)),
+    }
+
+
+def is_identity(transform: dict[str, float]) -> bool:
+    return (
+        abs(transform["rotate"]) < 1e-6
+        and abs(transform["scale"] - 1.0) < 1e-6
+        and abs(transform["dx"]) < 1e-6
+        and abs(transform["dy"]) < 1e-6
+        and abs(transform.get("shx", 0.0)) < 1e-6
+        and abs(transform.get("shy", 0.0)) < 1e-6
+    )
+
+
+def transform_matrix(t: dict[str, float]) -> tuple[float, float, float, float]:
+    """Forward 2x2 linear matrix (M00, M01, M10, M11) = Rotate · Shear · Scale.
+
+    Screen y-down. Positive `rotate` is counter-clockwise. This exact matrix is
+    mirrored in the webview (CSS `matrix()` + canvas), so what the user aligns to
+    the ground grid is what bakes — no preview/bake drift.
+    """
+    rr = math.radians(t["rotate"])
+    c, sn = math.cos(rr), math.sin(rr)
+    s, shx, shy = t["scale"], t.get("shx", 0.0), t.get("shy", 0.0)
+    m00 = s * (c + sn * shy)
+    m01 = s * (c * shx + sn)
+    m10 = s * (-sn + c * shy)
+    m11 = s * (c - sn * shx)
+    return m00, m01, m10, m11
+
+
+def state_plan(
+    curation: dict[str, Any] | None,
+    state: str,
+    default_count: int,
+) -> tuple[list[int], dict[int, dict[str, float]]]:
+    """Resolve the ordered frame indices and per-frame transforms for a state.
+
+    Returns (ordered_zero_based_indices, {frame_index: transform}).
+    """
+    default_order = list(range(default_count))
+    if not curation:
+        return default_order, {}
+    entry = curation.get("states", {}).get(state)
+    if not isinstance(entry, dict):
+        return default_order, {}
+
+    selected = entry.get("selected")
+    if isinstance(selected, list) and selected:
+        ordered = [int(i) for i in selected if 0 <= int(i) < default_count]
+        if not ordered:
+            ordered = default_order
+    else:
+        ordered = default_order
+
+    transforms_raw = entry.get("transforms", {})
+    transforms: dict[int, dict[str, float]] = {}
+    if isinstance(transforms_raw, dict):
+        for key, value in transforms_raw.items():
+            try:
+                index = int(key)
+            except (TypeError, ValueError):
+                continue
+            transform = normalize_transform(value)
+            if not is_identity(transform):
+                transforms[index] = transform
+    return ordered, transforms
+
+
+def apply_transform(
+    frame: Image.Image,
+    transform: dict[str, float] | None,
+    cell_size: tuple[int, int],
+) -> Image.Image:
+    """Apply scale/shear/rotate (about center) + translate, into a fresh cell.
+
+    Rendered with one inverse-affine `Image.transform` into the cell, so cell
+    size is preserved and the atlas layout never changes. Non-destructive: the
+    source frame is not modified. The forward matrix matches `transform_matrix`,
+    which the webview uses for its preview, so alignment to the ground grid is
+    faithful to the bake.
+    """
+    transform = normalize_transform(transform) if transform else dict(IDENTITY)
+    if is_identity(transform) and frame.size == cell_size:
+        return frame.convert("RGBA")
+
+    src = frame.convert("RGBA")
+    cw, ch = cell_size
+    m00, m01, m10, m11 = transform_matrix(transform)
+    det = m00 * m11 - m01 * m10
+    if abs(det) < 1e-6:
+        det = 1e-6 if det >= 0 else -1e-6
+    # inverse 2x2 (output -> input)
+    ia, ib = m11 / det, -m01 / det
+    id_, ie = -m10 / det, m00 / det
+    cin_x, cin_y = src.width / 2, src.height / 2
+    cout_x, cout_y = cw / 2 + transform["dx"], ch / 2 + transform["dy"]
+    c = -(ia * cout_x + ib * cout_y) + cin_x
+    f = -(id_ * cout_x + ie * cout_y) + cin_y
+    return src.transform((cw, ch), Image.AFFINE, (ia, ib, c, id_, ie, f), resample=Image.BICUBIC)
+
+
+def empty_curation() -> dict[str, Any]:
+    return {"version": SCHEMA_VERSION, "kind": "sprite-gen-curation", "states": {}}

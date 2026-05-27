@@ -13,6 +13,10 @@ depends_on:
     - scripts/compose_selected_cycle.py
     - scripts/compose_sprite_gif.py
     - scripts/gif_utils.py
+    - scripts/curation.py
+    - scripts/serve_curation.py
+    - scripts/unpack_atlas_run.py
+    - scripts/export_curated_pngs.py
 modes:
   default: component-row
 ---
@@ -37,9 +41,13 @@ The skill uses scripts as explicit pipeline commands, not as hidden imports. Eac
 - `extract_sprite_row_frames.py` — read generated `raw/<state>.png` strips, remove chroma background, extract connected sprite components, and write transparent frame PNGs plus `frames/frames-manifest.json`.
 - `compose_sprite_atlas.py` — compose extracted frames into `sprite-sheet-alpha.png` and runtime `manifest.json.frame_layout`.
 - `preview_animation.py` — build QA previews from extracted frames: contact sheets and state GIFs under `qa/`.
-- `compose_selected_cycle.py` — record a human-selected frame subset as an explicit selected-cycle manifest plus QA GIF/contact sheet.
+- `compose_selected_cycle.py` — record a human-selected frame subset as an explicit selected-cycle manifest plus QA GIF/contact sheet. Reads `curation.json` selection/transform by default; explicit `--frames` overrides it.
 - `compose_sprite_gif.py` — export a clean transparent GIF from selected frame PNGs and optional frame order.
 - `gif_utils.py` — shared transparent-GIF writer used by the GIF/QA scripts.
+- `curation.py` — shared curation sidecar logic (schema + transform application) used by the compose scripts and the curation webview server. Single source of truth so they never drift.
+- `serve_curation.py` — launch the standalone curation webview for one run dir (frame compare, select/reject, non-destructive rotate/scale/move). Standalone so it works from Claude Code Desktop, the Codex app, or any environment where the skill is installed.
+- `unpack_atlas_run.py` — inverse of compose: rebuild a curator-ready run dir (per-frame PNGs + synthesized `sprite-request.json`) from a finished sprite sheet, or import a folder of separate PNGs (`--pngs-dir`, e.g. a furniture pack). Layout source priority: explicit `--grid COLSxROWS` > `--manifest` rectangles > auto-detect (default). Auto-detect reads the atlas alpha and clusters content blobs into a grid, so it survives a character's internal transparency on packed sheets. With `--pngs-dir`, a sibling `meta.json` (item names + iso tile/anchor) is carried into the run so the curator can label items and draw the iso ground grid.
+- `export_curated_pngs.py` — export curated frames back to named PNGs (the curation transform baked in), keeping each item's original filename. Output goes inside the run dir (`<run-dir>/curated/`, provably writable, cross-platform); the skill never writes elsewhere in your tree. The right deliverable for an imported still set (furniture); the single-atlas `compose_sprite_atlas.py` is the deliverable for animation frames / runtime perf.
 - `check_visible_magenta.py` — optional screenshot QA guard for visible chroma-key leakage.
 
 ## Simple MVP Scope
@@ -286,6 +294,39 @@ python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/extract_sprite_row_frames.py \
 
 This removes the request chroma key, finds connected sprite components, fits each pose into a fresh transparent request-sized cell, and writes `frames/<state>/frame-N.png` plus `frames/frames-manifest.json`.
 
+3.5. (Optional) Curate frames in the webview:
+
+```bash
+python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \
+  --run-dir <target>/assets/generated/sprites/<character-id>
+```
+
+This launches a standalone local webview (no Studio dependency — usable from Claude Code Desktop, the Codex app, or any host with the skill installed). It shows every state's frames side by side so you can compare them in parallel, toggle which frames are selected, and apply a per-frame transform (drag = move, wheel = scale, top handle = rotate, bottom-left handle = shear) when a frame's angle or position is slightly off. A live preview animates the selected frames at the state fps.
+
+The webview UI is bilingual (English / Korean). Pass `--lang en|ko` to match the user's language (it is also toggleable in the app); default is `en`. For isometric sets imported with `--pngs-dir`, a sibling `meta.json` tile/anchor adds a ground-grid overlay for aligning furniture with the shear handle.
+
+All edits are **non-destructive**: they are saved to `curation.json` in the run dir, and the original `frames/<state>/frame-N.png` files are never rewritten. The compose step bakes `curation.json` deterministically, so any curation decision is reversible by editing or deleting that file. The "Compose 굽기" button re-runs `compose_sprite_atlas.py`.
+
+This step is optional. When there is no `curation.json`, every state uses all extracted frames in order with identity transform — an explicit default, not a silent fallback.
+
+### Editing a finished sprite sheet (no `frames/` source)
+
+When only the combined sheet survives (a deployed asset whose run dir is gone), rebuild a curator-ready run dir with the inverse step before curating:
+
+```bash
+# default: auto-detect the grid by reading the atlas alpha
+python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/unpack_atlas_run.py \
+  --atlas <sheet>.png --out-dir <run-dir> --force
+
+# when a manifest carries exact rectangles (position-faithful)
+python3 .../unpack_atlas_run.py --manifest <manifest>.json [--direction <dir>] --out-dir <run-dir>
+
+# when a human states the grid, e.g. "8x9"
+python3 .../unpack_atlas_run.py --atlas <sheet>.png --grid 8x9 --out-dir <run-dir>
+```
+
+The chosen layout source is always reported (`manifest` / `grid-explicit` / `auto-detect`) and stored in `unpack-source.json` for a later writeback. Then point `serve_curation.py` at the new run dir. Auto-detect is the no-instruction default; `--grid` and `--manifest` are position-faithful (they crop full cells), while auto-detect crops each blob's content bbox and centers it in the cell.
+
 4. Compose the runtime atlas:
 
 ```bash
@@ -353,13 +394,40 @@ One worker owns exactly one character folder:
   raw/<state>.png
   frames/<state>/frame-N.png
   frames/frames-manifest.json
+  curation.json            # optional, non-destructive curation sidecar
   sprite-sheet-alpha.png
   sprite-sheet-alpha.report.json
   manifest.json
   qa-notes.md
 ```
 
-Do not let multiple workers write the same character folder. If a folder exists from a previous run, create a timestamped sibling unless the user explicitly says to replace it.
+Do not let multiple workers write the same character folder.
+
+### Curation Sidecar (`curation.json`)
+
+`curation.json` is an optional, non-destructive sidecar written by the curation webview (`serve_curation.py`) and consumed by `compose_sprite_atlas.py` and `compose_selected_cycle.py`. It records a human selection plus a per-frame affine transform; the original frame PNGs are never modified.
+
+```json
+{
+  "version": 1,
+  "kind": "sprite-gen-curation",
+  "states": {
+    "idle": {
+      "selected": [0, 2, 3],
+      "transforms": {
+        "0": { "rotate": 15, "scale": 1.2, "dx": 10, "dy": -8 }
+      }
+    }
+  }
+}
+```
+
+- `selected` — 0-based frame indices in play order. Absent/empty → all extracted frames in order.
+- `transforms` — keyed by 0-based frame index. `rotate` degrees (counter-clockwise positive, PIL convention), `scale` multiplier about center, `dx`/`dy` pixel offsets in the cell (+x right, +y down). Absent → identity.
+- A state missing from the sidecar uses the all-frames identity default.
+- The transform is applied at compose time inside the request-sized cell, so atlas geometry never changes. `manifest.json.animation.rows.<state>.frames` reflects the curated frame count, and `manifest.json.curation_applied` records whether a sidecar was used.
+
+`curation.py` owns this schema and the transform math so the server and the compose scripts cannot drift. If a folder exists from a previous run, create a timestamped sibling unless the user explicitly says to replace it.
 
 ## Runtime Contract
 

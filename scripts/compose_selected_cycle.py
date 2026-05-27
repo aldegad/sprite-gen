@@ -17,6 +17,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from curation import apply_transform, load_curation, state_plan
 from gif_utils import delay_ticks_to_duration_ms, save_clean_gif
 
 
@@ -54,11 +55,20 @@ def parse_frames(value: str) -> list[int]:
     return frames
 
 
-def load_frame(run_dir: Path, state: str, user_frame: int) -> tuple[Path, Image.Image]:
+def load_frame(
+    run_dir: Path,
+    state: str,
+    user_frame: int,
+    transform: dict[str, float] | None = None,
+    cell_size: tuple[int, int] | None = None,
+) -> tuple[Path, Image.Image]:
     path = run_dir / "frames" / state / f"frame-{user_frame - 1}.png"
     if not path.is_file():
         raise SystemExit(f"missing selected frame {user_frame}: {path}")
-    return path, Image.open(path).convert("RGBA")
+    image = Image.open(path).convert("RGBA")
+    if transform and cell_size:
+        image = apply_transform(image, transform, cell_size)
+    return path, image
 
 
 def contact_sheet(frames: list[tuple[int, Image.Image]], gap: int = 4, label_height: int = 24) -> Image.Image:
@@ -81,7 +91,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--state", required=True)
-    parser.add_argument("--frames", required=True, type=parse_frames, help="1-based frame numbers, for example 2,3,4,5")
+    parser.add_argument("--frames", type=parse_frames, help="1-based frame numbers, for example 2,3,4,5; defaults to curation.json selection")
     parser.add_argument("--name", required=True, help="output basename under qa/, without extension")
     parser.add_argument("--duration-ms", type=int, default=190)
     parser.add_argument("--delay-ticks", type=int, help="GIF delay in 1/100 second ticks; overrides --duration-ms")
@@ -92,9 +102,28 @@ def main() -> int:
     qa_dir = run_dir / "qa"
     qa_dir.mkdir(parents=True, exist_ok=True)
 
-    selected = [load_frame(run_dir, args.state, frame_number) for frame_number in args.frames]
+    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    cell = request["cell"]
+    cell_size = (
+        int(cell.get("width", cell.get("size", 0))),
+        int(cell.get("height", cell.get("size", 0))),
+    )
+    default_count = int(request["states"][args.state]["frames"])
+    curation = load_curation(run_dir)
+    ordered, transforms = state_plan(curation, args.state, default_count)
+
+    # explicit --frames (1-based) wins; otherwise use the curation.json selection.
+    if args.frames is not None:
+        user_frames = args.frames
+    else:
+        user_frames = [index + 1 for index in ordered]
+
+    selected = [
+        load_frame(run_dir, args.state, number, transforms.get(number - 1), cell_size)
+        for number in user_frames
+    ]
     frame_paths = [path for path, _image in selected]
-    frames = [(number, image) for number, (_path, image) in zip(args.frames, selected)]
+    frames = [(number, image) for number, (_path, image) in zip(user_frames, selected)]
 
     duration_ms = delay_ticks_to_duration_ms(args.delay_ticks) if args.delay_ticks else max(1, args.duration_ms)
     gif_path = qa_dir / f"{args.name}.gif"
@@ -114,8 +143,10 @@ def main() -> int:
         "run_dir": str(run_dir),
         "state": args.state,
         "name": args.name,
-        "selected_user_frames": args.frames,
-        "selected_zero_based_frames": [frame - 1 for frame in args.frames],
+        "selected_user_frames": user_frames,
+        "selected_zero_based_frames": [frame - 1 for frame in user_frames],
+        "selection_source": "explicit-frames" if args.frames is not None else "curation.json",
+        "transforms_applied": {str(n - 1): transforms[n - 1] for n in user_frames if (n - 1) in transforms},
         "duration_ms": duration_ms,
         "delay_ticks": round(duration_ms / 10),
         "loop": True,
@@ -131,7 +162,7 @@ def main() -> int:
                 "path": str(path.relative_to(run_dir)),
                 "sha256": sha256(path),
             }
-            for user_frame, path in zip(args.frames, frame_paths)
+            for user_frame, path in zip(user_frames, frame_paths)
         ],
     }
     manifest_path = qa_dir / f"{args.name}.json"

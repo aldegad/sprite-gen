@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sprite-gen curation</title>
+    <link rel="stylesheet" href="/curator.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="title">
+        <strong>sprite-gen</strong> <span id="t-title"></span>
+        <span id="character" class="muted"></span>
+      </div>
+      <div class="actions">
+        <span id="status" class="status"></span>
+        <button id="lang-toggle" type="button" class="ghost"></button>
+        <button id="grid-toggle" type="button" class="ghost" hidden></button>
+        <button id="export" type="button"></button>
+        <button id="compose" type="button"></button>
+      </div>
+    </header>
+    <main id="states"></main>
+    <footer class="hintbar" id="hintbar"></footer>
+    <script src="/curator.js"></script>
+  </body>
+</html>

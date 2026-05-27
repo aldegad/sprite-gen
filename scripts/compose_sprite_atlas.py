@@ -11,6 +11,8 @@ from typing import Any
 
 from PIL import Image
 
+from curation import apply_transform, load_curation, state_plan
+
 
 def alpha_nonzero_count(image: Image.Image) -> int:
     return sum(image.getchannel("A").histogram()[1:])
@@ -41,7 +43,17 @@ def main() -> int:
 
     states = list(request["states"])
     cell_width, cell_height = cell_geometry(request["cell"])
-    max_frames = max(int(request["states"][state]["frames"]) for state in states)
+    cell_size = (cell_width, cell_height)
+
+    # curation.json is an optional non-destructive sidecar. When absent, every
+    # state uses all extracted frames in order with identity transform.
+    curation = load_curation(run_dir)
+    plans = {
+        state: state_plan(curation, state, int(request["states"][state]["frames"]))
+        for state in states
+    }
+
+    max_frames = max(len(ordered) for ordered, _transforms in plans.values())
     atlas = Image.new("RGBA", (max_frames * cell_width, len(states) * cell_height), (0, 0, 0, 0))
     frame_layout: dict[str, Any] = {
         "sheetWidth": atlas.width,
@@ -61,21 +73,23 @@ def main() -> int:
 
     for row_index, state in enumerate(states):
         entry = request["states"][state]
-        frame_count = int(entry["frames"])
+        ordered, transforms = plans[state]
         frames = []
-        for frame_index in range(frame_count):
+        for column, frame_index in enumerate(ordered):
             frame_path = run_dir / "frames" / state / f"frame-{frame_index}.png"
             if not frame_path.is_file():
                 errors.append(f"missing frame: {frame_path}")
                 continue
             with Image.open(frame_path) as opened:
-                frame = opened.convert("RGBA")
-            if frame.size != (cell_width, cell_height):
-                errors.append(f"{frame_path} is {frame.width}x{frame.height}; expected {cell_width}x{cell_height}")
+                source = opened.convert("RGBA")
+            if source.size != cell_size:
+                errors.append(f"{frame_path} is {source.width}x{source.height}; expected {cell_width}x{cell_height}")
+            # apply the human curation transform (identity when uncurated)
+            frame = apply_transform(source, transforms.get(frame_index), cell_size)
             nontransparent = alpha_nonzero_count(frame)
             if nontransparent < args.min_used_pixels:
                 errors.append(f"{state} frame {frame_index} is too sparse ({nontransparent})")
-            left = frame_index * cell_width
+            left = column * cell_width
             top = row_index * cell_height
             atlas.alpha_composite(frame, (left, top))
             rect = {"x": left, "y": top, "w": cell_width, "h": cell_height}
@@ -85,7 +99,7 @@ def main() -> int:
         frame_layout["rows"][state] = frames
         animation["rows"][state] = {
             "row": row_index,
-            "frames": frame_count,
+            "frames": len(ordered),
             "fps": int(entry.get("fps", 6)),
             "loop": bool(entry.get("loop", True)),
         }
@@ -93,6 +107,7 @@ def main() -> int:
     report = {
         "ok": not errors,
         "engine": "component-row",
+        "curation_applied": curation is not None,
         "errors": errors,
         "atlas": args.atlas,
         "manifest": args.manifest,
@@ -115,6 +130,7 @@ def main() -> int:
         "engine": "component-row",
         "game_input": args.atlas,
         "degraded_static_fallback": False,
+        "curation_applied": curation is not None,
         "sprite_sheet_alpha": args.atlas,
         "sprite_sheet_alpha_report": args.report,
         "base_image": request["character"].get("base_image"),
