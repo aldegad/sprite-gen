@@ -487,3 +487,7 @@ engine=component-row
 files=sprite-request,raw,frames,atlas,manifest
 qa_note=<one sentence>
 ```
+
+## Related Docs
+
+- [`docs/skill-improvement-plan.md`](docs/skill-improvement-plan.md) — SKILL.md / scripts 개선 후보 (quick wins · 중간 · 큰 변경) 우선순위 초안. DRAFT — 본 SKILL.md 의 SSoT 와 충돌하면 본 파일이 우선한다.
