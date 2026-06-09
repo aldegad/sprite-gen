@@ -1,0 +1,43 @@
+# .gitleaks.toml — safedeps starter secret-scan policy (public repo profile).
+#
+# safedeps OWNS execution (it runs gitleaks via `safedeps scan secrets`).
+# THIS FILE is the repo's POLICY — you own it. Tune the [allowlist] below for
+# this repo. `safedeps hooks init` scaffolds this file once and will NOT
+# overwrite it on a re-run, so your edits are safe.
+#
+# gitleaks config reference: https://github.com/gitleaks/gitleaks#configuration
+
+title = "safedeps secret-scan policy"
+
+# Inherit gitleaks' built-in ruleset (AWS / GCP / private keys / OAuth tokens /
+# generic high-entropy secrets, etc.). This is the bulk of the coverage.
+[extend]
+useDefault = true
+
+# --- Extra rules layered on top of the defaults -------------------------------
+
+# Flag a committed real dotenv file with an assigned secret. The .example /
+# .sample / .template variants are allowlisted below so docs stay committable.
+[[rules]]
+id = "safedeps-dotenv-file"
+description = "Committed .env file with an assigned secret value"
+path = '''(^|/)\.env(\.[\w.-]+)?$'''
+regex = '''(?i)(secret|token|password|passwd|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)\s*[:=]\s*\S{6,}'''
+  [rules.allowlist]
+  paths = [
+    '''(^|/)\.env\.example$''',
+    '''(^|/)\.env\.sample$''',
+    '''(^|/)\.env\.template$''',
+  ]
+
+# --- Repo-owned allowlist — CUSTOMIZE FOR THIS REPO ---------------------------
+[allowlist]
+description = "Repo-specific allowlist (tune me)"
+paths = [
+  '''(^|/)\.gitleaks\.toml$''',
+  '''(^|/)\.gitleaks\.private\.toml$''',
+  # Add test fixtures / docs that legitimately contain secret-shaped strings:
+  # '''(^|/)test/fixtures/''',
+]
+# regexes = ['''EXAMPLE_PLACEHOLDER_[A-Z0-9]+''']
+# stopwords = ["example", "dummy", "placeholder"]

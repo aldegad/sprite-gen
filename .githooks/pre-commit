@@ -1,0 +1,78 @@
+#!/bin/bash
+# .githooks/pre-commit — safedeps repo gate (scaffolded by `safedeps hooks init`).
+#
+# Two checks:
+#   1. Secret scan (always, fail-closed) — blocks a commit when gitleaks finds a
+#      secret in the STAGED changes, so a key or a real .env never enters
+#      history. The detection POLICY lives in this repo's .gitleaks.toml
+#      (public) / .gitleaks.private.toml (private); safedeps owns execution.
+#   2. Dependency audit (npm) — on every commit when this repo has an npm
+#      lockfile. Catches a vulnerable direct or *transitive* dependency,
+#      including a CVE published AFTER you installed it ("looked safe then,
+#      flagged now"). A real finding blocks (fail-closed); only the advisory DB
+#      being unreachable (offline) warns and lets the commit through — an
+#      observable availability failover, never a silent skip.
+#
+# Intentional bypass (use sparingly — you own the risk):  git commit --no-verify
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
+# Resolve the safedeps CLI: PATH first, then the known skill install locations.
+resolve_safedeps() {
+  if command -v safedeps >/dev/null 2>&1; then printf 'safedeps'; return 0; fi
+  local candidate
+  for candidate in \
+    "${SAFEDEPS_BIN:-}" \
+    "${HOME}/.claude/skills/safedeps/bin/safedeps" \
+    "${HOME}/.codex/skills/safedeps/bin/safedeps"; do
+    if [ -n "${candidate}" ] && [ -x "${candidate}" ]; then
+      printf '%s' "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! sd=$(resolve_safedeps); then
+  cat >&2 <<'EOF'
+safedeps pre-commit: cannot locate the `safedeps` CLI.
+
+The secret-scan gate is FAIL-CLOSED — the commit is blocked because the scanner
+could not run (no silent skip). Fix one of:
+  - put `safedeps` on PATH, or
+  - export SAFEDEPS_BIN=/path/to/bin/safedeps, or
+  - install the skill: node scripts/install/install-safedeps-hooks.mjs
+
+To bypass intentionally (you own the risk):  git commit --no-verify
+EOF
+  exit 1
+fi
+
+# 1. Secret scan (always). A non-zero exit means either a secret was found OR
+#    no scanner (gitleaks/docker) is available — both fail-closed, block commit.
+"${sd}" scan secrets --staged --root "${repo_root}"
+
+# 2. Dependency audit (npm) — every commit when this repo has an npm lockfile.
+#    `safedeps audit npm` exit codes: 0 clean / 1 vulnerable / 2 could-not-run.
+#      - vulnerable (1)  → BLOCK (fail-closed on the security verdict).
+#      - unreachable (2) → WARN and ALLOW (availability failover, observable):
+#        an offline commit is never silently dropped, and CI / the daily
+#        re-check still cover what this commit could not verify.
+if [ -f "${repo_root}/package-lock.json" ] || [ -f "${repo_root}/npm-shrinkwrap.json" ]; then
+  if "${sd}" audit npm --root "${repo_root}"; then
+    : # clean — no advisory at or above the audit level.
+  else
+    audit_rc=$?
+    if [ "${audit_rc}" -eq 2 ]; then
+      {
+        printf '\n'
+        printf 'safedeps pre-commit: dependency audit could not reach the advisory DB.\n'
+        printf '  -> commit ALLOWED without a fresh dependency verdict (offline failover).\n'
+        printf '  -> re-run `safedeps audit npm` once online; CI / the daily re-check also cover this.\n'
+      } >&2
+    else
+      exit "${audit_rc}"   # vulnerable (or unknown failure) -> fail-closed.
+    fi
+  fi
+fi
