@@ -1,5 +1,9 @@
 # sprite-gen
 
+<p align="center">
+  <img src="docs/claudecy-running.gif" width="160" alt="claudecy running" />
+</p>
+
 **English** · [한국어](README.ko.md) · [日本語](README.ja.md) · [简体中文](README.zh-Hans.md) · [Español](README.es.md) · [Français](README.fr.md)
 
 A Codex/Claude skill for generating clean 2D game sprites and animation atlases with a component-row pipeline — and a standalone webview for reviewing, curating, and fixing the frames before they bake.

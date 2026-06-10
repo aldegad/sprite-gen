@@ -1,5 +1,9 @@
 # sprite-gen
 
+<p align="center">
+  <img src="docs/claudecy-running.gif" width="160" alt="claudecy running" />
+</p>
+
 [English](README.md) · [한국어](README.ko.md) · **日本語** · [简体中文](README.zh-Hans.md) · [Español](README.es.md) · [Français](README.fr.md)
 
 コンポーネント行パイプラインでクリーンな2Dゲームスプライトとアニメーションアトラスを生成するためのCodex/Claudeスキル。焼き込み前にフレームをレビューし、キュレーションし、修正するためのスタンドアロンWebビューも提供します。
