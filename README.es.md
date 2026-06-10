@@ -53,6 +53,10 @@ python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # o ko
 ## Guía rápida
 
 ```bash
+# 0. instala las dependencias (Pillow) en un virtualenv nuevo
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+
 # 1. prepara una ejecución a partir de una imagen base
 python3 scripts/prepare_sprite_run.py --out-dir <run-dir> --character-id <id> --base-image base.png
 

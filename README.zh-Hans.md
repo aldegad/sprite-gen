@@ -53,6 +53,10 @@ python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # or ko
 ## 快速开始
 
 ```bash
+# 0. 在全新的 virtualenv 中安装依赖（Pillow）
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+
 # 1. 从基础图像准备一次运行
 python3 scripts/prepare_sprite_run.py --out-dir <run-dir> --character-id <id> --base-image base.png
 

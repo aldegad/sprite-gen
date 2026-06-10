@@ -53,6 +53,10 @@ python3 scripts/serve_curation.py --run-dir <run-dir> --lang ko   # 또는 en
 ## 빠른 시작
 
 ```bash
+# 0. 새 virtualenv 에 의존성(Pillow) 설치
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+
 # 1. base 이미지로 run 준비
 python3 scripts/prepare_sprite_run.py --out-dir <run-dir> --character-id <id> --base-image base.png
 

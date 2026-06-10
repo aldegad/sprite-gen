@@ -53,6 +53,10 @@ python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # または ko
 ## クイックスタート
 
 ```bash
+# 0. 新しいvirtualenvに依存関係（Pillow）をインストール
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+
 # 1. ベース画像から実行ディレクトリを準備
 python3 scripts/prepare_sprite_run.py --out-dir <run-dir> --character-id <id> --base-image base.png
 
