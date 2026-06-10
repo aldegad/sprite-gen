@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    background: #15171c;
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    position: relative;
+    color: #e8eaed;
+  }
+  .grid-bg {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .corner { position: absolute; font-size: 28px; }
+  .c-tl { top: 18px; left: 22px; }
+  .c-tr { top: 18px; right: 22px; }
+  .content { position: absolute; left: 64px; top: 78px; }
+  h1 {
+    font-size: 110px;
+    font-weight: 800;
+    letter-spacing: -3px;
+    line-height: 1;
+    color: #f4f5f7;
+  }
+  h1 .accent { color: #6cb6ff; }
+  .subtitle {
+    margin-top: 28px;
+    font-size: 34px;
+    font-weight: 400;
+    color: #b8bcc4;
+    letter-spacing: 0.2px;
+  }
+  .keywords {
+    margin-top: 22px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 24px;
+    color: #6cb6ff;
+    letter-spacing: 0.5px;
+  }
+  .keywords .dot { color: #4a4f59; padding: 0 6px; }
+  .sprites {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: 74px;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 36px;
+  }
+  .sprites img {
+    width: 150px; height: 150px;
+    image-rendering: pixelated;
+  }
+  .footer {
+    position: absolute;
+    left: 64px; bottom: 24px;
+    font-size: 20px;
+    color: #7d828c;
+  }
+  .footer .dot { padding: 0 8px; color: #4a4f59; }
+</style>
+</head>
+<body>
+  <div class="grid-bg"></div>
+  <div class="content">
+    <h1>sprite-<span class="accent">gen</span></h1>
+    <div class="subtitle">clean 2D game sprites&nbsp; +&nbsp; a curation webview</div>
+    <div class="keywords">select<span class="dot">·</span>transform<span class="dot">·</span>shear<span class="dot">·</span>iso-grid<span class="dot">·</span>unpack/export</div>
+  </div>
+  <div class="sprites">
+    <img src="claudecy-idle.png">
+    <img src="claudecy-running.png">
+    <img src="claudecy-success.png">
+    <img src="howl-idle.png">
+    <img src="howl-running.png">
+    <img src="howl-success.png">
+  </div>
+  <div class="footer">Apache-2.0<span class="dot">·</span>github.com/aldegad/sprite-gen</div>
+</body>
+</html>
