@@ -18,49 +18,49 @@
       linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
     background-size: 32px 32px;
   }
-  .corner { position: absolute; font-size: 28px; }
-  .c-tl { top: 18px; left: 22px; }
-  .c-tr { top: 18px; right: 22px; }
-  .content { position: absolute; left: 64px; top: 78px; }
+  .content { position: absolute; left: 64px; top: 52px; }
   h1 {
-    font-size: 110px;
+    font-size: 96px;
     font-weight: 800;
-    letter-spacing: -3px;
+    letter-spacing: -2.5px;
     line-height: 1;
     color: #f4f5f7;
   }
   h1 .accent { color: #6cb6ff; }
   .subtitle {
-    margin-top: 28px;
-    font-size: 34px;
+    margin-top: 22px;
+    font-size: 31px;
     font-weight: 400;
     color: #b8bcc4;
     letter-spacing: 0.2px;
   }
   .keywords {
-    margin-top: 22px;
+    margin-top: 18px;
     font-family: "SF Mono", Menlo, monospace;
-    font-size: 24px;
+    font-size: 22px;
     color: #6cb6ff;
     letter-spacing: 0.5px;
   }
   .keywords .dot { color: #4a4f59; padding: 0 6px; }
+  .ground {
+    position: absolute;
+    left: 0; right: 0; bottom: 64px;
+    height: 2px;
+    background: rgba(255,255,255,0.06);
+  }
   .sprites {
     position: absolute;
     left: 0; right: 0;
-    bottom: 74px;
+    bottom: 66px;
     display: flex;
     justify-content: center;
     align-items: flex-end;
-    gap: 36px;
+    gap: 40px;
   }
-  .sprites img {
-    width: 150px; height: 150px;
-    image-rendering: pixelated;
-  }
+  .sprites img { image-rendering: pixelated; display: block; }
   .footer {
     position: absolute;
-    left: 64px; bottom: 24px;
+    left: 64px; bottom: 22px;
     font-size: 20px;
     color: #7d828c;
   }
@@ -74,13 +74,14 @@
     <div class="subtitle">clean 2D game sprites&nbsp; +&nbsp; a curation webview</div>
     <div class="keywords">select<span class="dot">·</span>transform<span class="dot">·</span>shear<span class="dot">·</span>iso-grid<span class="dot">·</span>unpack/export</div>
   </div>
+  <div class="ground"></div>
   <div class="sprites">
-    <img src="claudecy-idle.png">
-    <img src="claudecy-running.png">
-    <img src="claudecy-success.png">
-    <img src="howl-idle.png">
-    <img src="howl-running.png">
-    <img src="howl-success.png">
+    <img src="claudecy-idle-crop.png" style="height:220px">
+    <img src="claudecy-running-crop.png" style="height:215px">
+    <img src="claudecy-success-crop.png" style="height:220px">
+    <img src="howl-idle-crop.png" style="height:260px">
+    <img src="howl-running-crop.png" style="height:260px">
+    <img src="howl-success-crop.png" style="height:260px">
   </div>
   <div class="footer">Apache-2.0<span class="dot">·</span>github.com/aldegad/sprite-gen</div>
 </body>
