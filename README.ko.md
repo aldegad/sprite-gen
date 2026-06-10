@@ -1,6 +1,6 @@
 # sprite-gen
 
-[English](README.md) · **한국어**
+[English](README.md) · **한국어** · [日本語](README.ja.md) · [简体中文](README.zh-Hans.md)
 
 깔끔한 2D 게임 스프라이트와 애니메이션 아틀라스를 component-row 파이프라인으로 생성하는 Codex/Claude 스킬. 그리고 굽기 전에 프레임을 검토·큐레이션·보정하는 독립 웹뷰를 함께 제공한다.
 
