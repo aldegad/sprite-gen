@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sprite-gen"
+version = "1.6.0"
+description = "Component-row pipeline for clean 2D game sprites and animation atlases"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "pillow>=12.0,<13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.urls]
+Repository = "https://github.com/aldegad/sprite-gen"
+
+# The pipeline ships as plain scripts under scripts/ (invoked as
+# `python3 scripts/<tool>.py`), not as an importable package. Installing
+# this project only resolves the runtime dependencies.
+[tool.setuptools]
+packages = []
