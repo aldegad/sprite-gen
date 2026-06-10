@@ -185,11 +185,13 @@ class CurationHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _safe_run_path(self, rel: str) -> Path | None:
-        """Resolve a run-relative path, refusing anything outside the run dir."""
-        candidate = (self.run_dir / unquote(rel)).resolve()
+    @staticmethod
+    def _safe_path(base: Path, rel: str) -> Path | None:
+        """Resolve `rel` under `base`, refusing anything that escapes it."""
+        base = base.resolve()
+        candidate = (base / unquote(rel)).resolve()
         try:
-            candidate.relative_to(self.run_dir)
+            candidate.relative_to(base)
         except ValueError:
             return None
         return candidate
@@ -213,18 +215,25 @@ class CurationHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 500)
             return
         if path.startswith("/curator/"):
-            self._send_file(CURATOR_DIR / path[len("/curator/"):])
+            resolved = self._safe_path(CURATOR_DIR, path[len("/curator/"):])
+            if resolved is None:
+                self._send_json({"error": "path escapes curator dir"}, 403)
+                return
+            self._send_file(resolved)
             return
         if path.startswith("/frames/") or path.startswith("/run/"):
             rel = path[len("/run/"):] if path.startswith("/run/") else path[1:]
-            resolved = self._safe_run_path(rel)
+            resolved = self._safe_path(self.run_dir, rel)
             if resolved is None:
                 self._send_json({"error": "path escapes run dir"}, 403)
                 return
             self._send_file(resolved)
             return
         # bare static asset (curator.js / curator.css served from /)
-        asset = CURATOR_DIR / path.lstrip("/")
+        asset = self._safe_path(CURATOR_DIR, path.lstrip("/"))
+        if asset is None:
+            self._send_json({"error": "path escapes curator dir"}, 403)
+            return
         if asset.is_file():
             self._send_file(asset)
             return
