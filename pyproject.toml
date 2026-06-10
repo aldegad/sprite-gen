@@ -22,6 +22,9 @@ dev = [
 [project.urls]
 Repository = "https://github.com/aldegad/sprite-gen"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 # The pipeline ships as plain scripts under scripts/ (invoked as
 # `python3 scripts/<tool>.py`), not as an importable package. Installing
 # this project only resolves the runtime dependencies.

@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "kind": "sprite-gen-request",
+  "engine": "component-row",
+  "character": {
+    "id": "goldenbot",
+    "description": "deterministic synthetic fixture character",
+    "base_image": null
+  },
+  "cell": {
+    "shape": "square",
+    "width": 96,
+    "height": 96,
+    "safe_margin_x": 8,
+    "safe_margin_y": 8,
+    "size": 96,
+    "safe_margin": 8
+  },
+  "chroma_key": {
+    "name": "magenta",
+    "hex": "#FF00FF",
+    "rgb": [255, 0, 255],
+    "selection": "fallback"
+  },
+  "states": {
+    "idle": {
+      "frames": 4,
+      "fps": 4,
+      "loop": true,
+      "action": "synthetic shapes for golden regression"
+    },
+    "walk": {
+      "frames": 3,
+      "fps": 8,
+      "loop": true,
+      "action": "synthetic shapes for golden regression"
+    }
+  },
+  "style": "synthetic golden fixture, flat solid shapes on magenta",
+  "motion_phase_guides": false
+}
