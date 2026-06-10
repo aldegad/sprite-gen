@@ -12,6 +12,7 @@ from typing import Any
 from PIL import Image
 
 from curation import apply_transform, load_curation, state_plan
+from runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
 
 
 def alpha_nonzero_count(image: Image.Image) -> int:
@@ -36,6 +37,7 @@ def main() -> int:
     args = parser.parse_args()
 
     run_dir = args.run_dir.expanduser().resolve()
+    acquire_run_dir_lock(run_dir, "compose_sprite_atlas")
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     frames_manifest = json.loads((run_dir / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))
     if not frames_manifest.get("ok"):
@@ -118,13 +120,13 @@ def main() -> int:
     }
 
     report_path = run_dir / args.report
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(report_path, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     if errors:
         print(json.dumps({k: v for k, v in report.items() if k != "cells"}, ensure_ascii=False, indent=2))
         return 1
 
     atlas_path = run_dir / args.atlas
-    atlas.save(atlas_path)
+    atomic_save_image(atlas, atlas_path)
     manifest = {
         "characterId": request["character"]["id"],
         "engine": "component-row",
@@ -139,10 +141,7 @@ def main() -> int:
         "animation": animation,
         "frame_layout": frame_layout,
     }
-    (run_dir / args.manifest).write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_text(run_dir / args.manifest, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps({"ok": True, "atlas": str(atlas_path), "manifest": str(run_dir / args.manifest)}, ensure_ascii=False, indent=2))
     return 0
 

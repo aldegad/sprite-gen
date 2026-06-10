@@ -13,6 +13,8 @@ from typing import Any
 
 from PIL import Image
 
+from runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
+
 
 def color_distance(left: tuple[int, int, int], right: tuple[int, int, int]) -> float:
     return math.sqrt(sum((left[index] - right[index]) ** 2 for index in range(3)))
@@ -286,6 +288,7 @@ def main() -> int:
         raise SystemExit("--fringe-key-threshold must be greater than or equal to --key-threshold")
 
     run_dir = args.run_dir.expanduser().resolve()
+    acquire_run_dir_lock(run_dir, "extract_sprite_row_frames")
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     states = list(request["states"]) if args.states == "all" else [state.strip() for state in args.states.split(",") if state.strip()]
     cell_width, cell_height, safe_margin_x, safe_margin_y = cell_geometry(request["cell"])
@@ -325,7 +328,7 @@ def main() -> int:
         output_paths = []
         for index, frame in enumerate(frames):
             output = state_dir / f"frame-{index}.png"
-            frame.save(output)
+            atomic_save_image(frame, output)
             output_paths.append(str(output.relative_to(run_dir)))
 
         errors, warnings, frame_records = inspect_frames(frames, chroma_key, args)
@@ -352,10 +355,7 @@ def main() -> int:
         "errors": all_errors,
         "warnings": all_warnings,
     }
-    (frames_root / "frames-manifest.json").write_text(
-        json.dumps(result, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_text(frames_root / "frames-manifest.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps({k: v for k, v in result.items() if k != "rows"}, ensure_ascii=False, indent=2))
     return 0 if result["ok"] else 1
 

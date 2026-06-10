@@ -28,6 +28,7 @@ from pathlib import Path
 from PIL import Image
 
 from curation import apply_transform, load_curation, state_plan
+from runio import acquire_run_dir_lock, atomic_save_image
 
 
 def main() -> int:
@@ -39,6 +40,7 @@ def main() -> int:
     args = parser.parse_args()
 
     run_dir = args.run_dir.expanduser().resolve()
+    acquire_run_dir_lock(run_dir, "export_curated_pngs")
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     cell = request["cell"]
     cell_size = (int(cell.get("width", cell.get("size", 0))), int(cell.get("height", cell.get("size", 0))))
@@ -74,7 +76,7 @@ def main() -> int:
             name = labels[index] if index < len(labels) and labels[index] else f"frame-{index}"
             filename = f"{state}-{name}.png" if multi_state else f"{name}.png"
             dest = out_dir / filename
-            baked.save(dest)
+            atomic_save_image(baked, dest)
             written.append(str(dest))
 
     # carry the original meta.json along so the curated set is self-contained

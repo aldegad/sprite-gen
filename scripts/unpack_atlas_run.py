@@ -34,6 +34,8 @@ from typing import Any
 
 from PIL import Image
 
+from runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
+
 ALPHA_THRESHOLD = 16  # a pixel counts as content above this alpha
 MIN_GUTTER = 1        # a fully-empty line of >= this many px separates frames
 
@@ -242,7 +244,7 @@ def write_run(
                 framed = Image.new("RGBA", (cell_w, cell_h), (0, 0, 0, 0))
                 framed.alpha_composite(crop, ((cell_w - w) // 2, (cell_h - h) // 2))
             out = state_dir / f"frame-{index}.png"
-            framed.save(out)
+            atomic_save_image(framed, out)
             files.append(str(out.relative_to(out_dir)))
         m = meta.get(name, {})
         request_states[name] = {
@@ -262,10 +264,10 @@ def write_run(
         "chroma_key": provenance.get("chroma_key", {"name": "magenta", "hex": "#FF00FF", "rgb": [255, 0, 255]}),
         "states": request_states,
     }
-    (out_dir / "sprite-request.json").write_text(json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    (frames_root / "frames-manifest.json").write_text(
+    atomic_write_text(out_dir / "sprite-request.json", json.dumps(request, ensure_ascii=False, indent=2) + "\n")
+    atomic_write_text(
+        frames_root / "frames-manifest.json",
         json.dumps({"ok": True, "engine": "component-row", "run_dir": str(out_dir), "cell": request["cell"], "rows": manifest_rows, "errors": [], "warnings": []}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
     )
     source_doc = {
         "version": 1,
@@ -274,7 +276,7 @@ def write_run(
         "cell": {"width": cell_w, "height": cell_h},
         **provenance,
     }
-    (out_dir / "unpack-source.json").write_text(json.dumps(source_doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(out_dir / "unpack-source.json", json.dumps(source_doc, ensure_ascii=False, indent=2) + "\n")
     return {"layout_source": layout_source, "states": [s["name"] for s in states], "cell": [cell_w, cell_h]}
 
 
@@ -297,7 +299,7 @@ def import_pngs(out_dir: Path, png_paths: list[Path], state_name: str, labels: l
             framed = Image.new("RGBA", (cell_w, cell_h), (0, 0, 0, 0))
             framed.alpha_composite(im, ((cell_w - im.width) // 2, (cell_h - im.height) // 2))
         out = state_dir / f"frame-{index}.png"
-        framed.save(out)
+        atomic_save_image(framed, out)
         files.append(str(out.relative_to(out_dir)))
 
     request = {
@@ -311,18 +313,18 @@ def import_pngs(out_dir: Path, png_paths: list[Path], state_name: str, labels: l
     }
     if iso:
         request["iso"] = iso  # ground-grid geometry for the curator overlay
-    (out_dir / "sprite-request.json").write_text(json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    (out_dir / "frames" / "frames-manifest.json").write_text(
+    atomic_write_text(out_dir / "sprite-request.json", json.dumps(request, ensure_ascii=False, indent=2) + "\n")
+    atomic_write_text(
+        out_dir / "frames" / "frames-manifest.json",
         json.dumps({"ok": True, "engine": "component-row", "run_dir": str(out_dir), "cell": request["cell"],
                     "rows": [{"state": state_name, "frames": len(imgs), "method": "imported-pngs", "files": files, "labels": labels, "ok": True}],
                     "errors": [], "warnings": []}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
     )
-    (out_dir / "unpack-source.json").write_text(
+    atomic_write_text(
+        out_dir / "unpack-source.json",
         json.dumps({"version": 1, "kind": "sprite-gen-unpack-source", "layout_source": "imported-pngs",
                     "cell": {"width": cell_w, "height": cell_h}, "source_dir": str(png_paths[0].parent),
                     "files": [p.name for p in png_paths], "labels": labels}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
     )
     return {"layout_source": "imported-pngs", "states": [state_name], "cell": [cell_w, cell_h], "frames": len(imgs)}
 
@@ -369,6 +371,7 @@ def main() -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise SystemExit(f"cannot create run dir next to the input: {out_dir}\n  {exc}\n  pass --out-dir <writable path> to choose another location")
+    acquire_run_dir_lock(out_dir, "unpack_atlas_run")
 
     # --pngs-dir: import a folder of separate PNGs (e.g. a furniture set)
     if args.pngs_dir:
