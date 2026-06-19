@@ -46,6 +46,7 @@ const STR = {
     ready: "ready", loaded: "loaded existing curation", runLoadFail: "failed to load run:",
     tRotate: "rotate", tShear: "shear — horizontal = shx, vertical = shy", tReset: "reset transform", tFlipX: "flip horizontally",
     tReorder: "drag ⠿ to reorder play sequence",
+    tPlay: "play", tPause: "pause", tPrev: "step back", tNext: "step forward", tSpeed: "playback speed",
     hints: ["⠿ grip = reorder", "drag = move", "wheel = scale", "top handle = rotate", "bottom-left = shear", "click card = select/deselect", "saved automatically"],
     exportDone: (n) => `${n} PNGs → curated/`,
   },
@@ -60,6 +61,7 @@ const STR = {
     ready: "준비됨", loaded: "기존 큐레이션 로드됨", runLoadFail: "run 로드 실패:",
     tRotate: "회전", tShear: "기울이기 — 가로=shx, 세로=shy", tReset: "보정 초기화", tFlipX: "좌우 반전",
     tReorder: "⠿ 드래그로 재생 순서 변경",
+    tPlay: "재생", tPause: "일시정지", tPrev: "이전 프레임", tNext: "다음 프레임", tSpeed: "재생 속도",
     hints: ["⠿ 그립 = 순서 변경", "드래그 = 이동", "휠 = 확대/축소", "상단 핸들 = 회전", "좌하단 = 기울이기", "카드 클릭 = 선택/해제", "자동 저장"],
     exportDone: (n) => `PNG ${n}장 → curated/`,
   },
@@ -71,8 +73,9 @@ function t(key) {
 }
 
 let run = null; // /api/run snapshot
-let entries = {}; // { stateName: { selected: [idx], transforms: { idx: {..} } } }
+let entries = {}; // { stateName: { order: [idx], sel: Set<idx>, transforms: { idx: {..} } } }
 const imageCache = new Map();
+const previews = {}; // stateName -> { playing, speed, cursor } preview transport state
 
 const statusEl = document.getElementById("status");
 let saveTimer = null;
@@ -537,45 +540,94 @@ function renderPreview(state) {
   box.className = "preview";
   box.dataset.state = state.name;
   const aspect = run.cell.height / run.cell.width;
+  const speedOpts = [0.25, 0.5, 1, 2, 4]
+    .map((v) => `<option value="${v}"${v === 1 ? " selected" : ""}>×${v}</option>`)
+    .join("");
   box.innerHTML =
     `<h4>${t("preview")}</h4>` +
     `<canvas width="${run.cell.width}" height="${run.cell.height}" style="height:${(160 * aspect).toFixed(0)}px"></canvas>` +
-    `<div class="count"></div>`;
+    `<div class="count"></div>` +
+    `<div class="pv-controls">` +
+    `<button type="button" class="ghost pv-prev" title="${t("tPrev")}">⏮</button>` +
+    `<button type="button" class="ghost pv-play" title="${t("tPause")}">⏸</button>` +
+    `<button type="button" class="ghost pv-next" title="${t("tNext")}">⏭</button>` +
+    `<select class="pv-speed" name="speed-${state.name}" aria-label="${t("tSpeed")}" title="${t("tSpeed")}">${speedOpts}</select>` +
+    `</div>` +
+    `<div class="pv-pos"></div>`;
   return box;
 }
 
 function startPreview(state) {
-  const canvas = document.querySelector(`.preview[data-state="${cssEscape(state.name)}"] canvas`);
+  const root = document.querySelector(`.preview[data-state="${cssEscape(state.name)}"]`);
+  const canvas = root.querySelector("canvas");
   const ctx = canvas.getContext("2d");
   const cw = run.cell.width;
   const ch = run.cell.height;
-  let cursor = 0;
+  const playBtn = root.querySelector(".pv-play");
+  const posEl = root.querySelector(".pv-pos");
+  const pv = (previews[state.name] = { playing: true, speed: 1, cursor: 0 });
   let last = 0;
+
+  const syncPlayBtn = () => {
+    playBtn.textContent = pv.playing ? "⏸" : "▶";
+    playBtn.title = pv.playing ? t("tPause") : t("tPlay");
+  };
+
+  // draw the frame at the current cursor; runs every rAF so live transform
+  // edits show even while paused. The matrix matches CSS + the compose bake.
+  const draw = () => {
+    const play = playList(state.name);
+    ctx.clearRect(0, 0, cw, ch);
+    if (!play.length) {
+      posEl.textContent = "0/0";
+      return;
+    }
+    pv.cursor = ((pv.cursor % play.length) + play.length) % play.length;
+    const idx = play[pv.cursor];
+    const f = state.frames[idx];
+    const image = f ? img(f.url) : null;
+    if (image && image.complete && image.naturalWidth) {
+      const tr = getTransform(state.name, idx);
+      const m = matrixOf(tr);
+      ctx.save();
+      ctx.translate(cw / 2 + tr.dx, ch / 2 + tr.dy);
+      ctx.transform(m.m00, m.m10, m.m01, m.m11, 0, 0);
+      ctx.drawImage(image, -cw / 2, -ch / 2, cw, ch);
+      ctx.restore();
+    }
+    posEl.textContent = `${pv.cursor + 1}/${play.length} · #${idx}`;
+  };
+
+  const step = (delta) => {
+    pv.playing = false;
+    syncPlayBtn();
+    const play = playList(state.name);
+    if (play.length) pv.cursor = (pv.cursor + delta + play.length) % play.length;
+    draw();
+  };
+  root.querySelector(".pv-prev").addEventListener("click", () => step(-1));
+  root.querySelector(".pv-next").addEventListener("click", () => step(1));
+  playBtn.addEventListener("click", () => {
+    pv.playing = !pv.playing;
+    syncPlayBtn();
+  });
+  root.querySelector(".pv-speed").addEventListener("change", (e) => {
+    pv.speed = parseFloat(e.target.value) || 1;
+  });
 
   function frame(ts) {
     const play = playList(state.name);
-    const interval = 1000 / Math.max(1, state.fps);
-    if (ts - last >= interval) {
-      last = ts;
-      cursor = play.length ? (cursor + 1) % play.length : 0;
-    }
-    ctx.clearRect(0, 0, cw, ch);
-    if (play.length) {
-      const idx = play[cursor % play.length];
-      const url = state.frames[idx] ? state.frames[idx].url : null;
-      const image = url ? img(url) : null;
-      if (image && image.complete && image.naturalWidth) {
-        const t = getTransform(state.name, idx);
-        const m = matrixOf(t);
-        ctx.save();
-        ctx.translate(cw / 2 + t.dx, ch / 2 + t.dy);
-        ctx.transform(m.m00, m.m10, m.m01, m.m11, 0, 0); // same matrix as CSS + bake
-        ctx.drawImage(image, -cw / 2, -ch / 2, cw, ch);
-        ctx.restore();
+    if (pv.playing && play.length) {
+      const interval = 1000 / Math.max(0.1, state.fps * pv.speed);
+      if (ts - last >= interval) {
+        last = ts;
+        pv.cursor = (pv.cursor + 1) % play.length;
       }
     }
+    draw();
     requestAnimationFrame(frame);
   }
+  syncPlayBtn();
   requestAnimationFrame(frame);
 }
 

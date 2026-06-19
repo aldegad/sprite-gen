@@ -246,6 +246,34 @@ body.show-grid .stage { background-image: none; background-color: #1a1d24; }
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
 .preview .count { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.pv-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+.pv-controls button.ghost {
+  padding: 3px 8px;
+  font-size: 13px;
+  line-height: 1;
+}
+.pv-controls .pv-play { min-width: 32px; }
+.pv-speed {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 3px 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.pv-pos {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
 
 .fatal {
   margin: 40px auto;
