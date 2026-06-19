@@ -99,8 +99,20 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
   user-select: none;
 }
 .card.selected { border-color: var(--accent); }
-.card.rejected { opacity: 0.45; }
 .card.missing { border-style: dashed; }
+
+/* two rows per state: sequence (top) + candidate pool (bottom) */
+.zones { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.zone { border-radius: 8px; padding: 6px 8px 4px; }
+.zone-seq { background: rgba(93, 176, 255, 0.06); border: 1px solid var(--accent-dim); }
+.zone-pool { background: rgba(255, 255, 255, 0.02); border: 1px dashed var(--line); }
+.zone-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 2px 2px 6px;
+  letter-spacing: 0.03em;
+}
+.zone .frames { flex: none; min-height: 64px; } /* droppable even when empty */
 
 .card-top {
   display: flex;

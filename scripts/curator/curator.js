@@ -47,7 +47,8 @@ const STR = {
     tRotate: "rotate", tShear: "shear — horizontal = shx, vertical = shy", tReset: "reset transform", tFlipX: "flip horizontally",
     tReorder: "drag ⠿ to reorder play sequence",
     tPlay: "play", tPause: "pause", tPrev: "step back", tNext: "step forward", tSpeed: "playback speed",
-    hints: ["⠿ grip = reorder", "drag = move", "wheel = scale", "top handle = rotate", "bottom-left = shear", "click card = select/deselect", "saved automatically"],
+    zoneSeq: "Running sequence", zonePool: "Candidate pool — drag a cut up to add it", addToSeq: "✓ add", removeFromSeq: "✗ remove",
+    hints: ["⠿ grip = reorder / move row", "drag pool→sequence to add", "wheel = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
     exportDone: (n) => `${n} PNGs → curated/`,
   },
   ko: {
@@ -62,7 +63,8 @@ const STR = {
     tRotate: "회전", tShear: "기울이기 — 가로=shx, 세로=shy", tReset: "보정 초기화", tFlipX: "좌우 반전",
     tReorder: "⠿ 드래그로 재생 순서 변경",
     tPlay: "재생", tPause: "일시정지", tPrev: "이전 프레임", tNext: "다음 프레임", tSpeed: "재생 속도",
-    hints: ["⠿ 그립 = 순서 변경", "드래그 = 이동", "휠 = 확대/축소", "상단 핸들 = 회전", "좌하단 = 기울이기", "카드 클릭 = 선택/해제", "자동 저장"],
+    zoneSeq: "달리기 시퀀스", zonePool: "후보 풀 — 마음에 드는 컷을 위로 끌어 추가", addToSeq: "✓ 넣기", removeFromSeq: "✗ 빼기",
+    hints: ["⠿ 그립 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "휠 = 확대/축소", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
     exportDone: (n) => `PNG ${n}장 → curated/`,
   },
 };
@@ -100,16 +102,10 @@ function getTransform(stateName, idx) {
   return t[idx];
 }
 
+// selected := the frame is in the sequence row (top). Moving a card between the
+// sequence and pool rows (drag or click) is what flips this; see moveCardToOtherZone.
 function isSelected(stateName, idx) {
   return entries[stateName].sel.has(idx);
-}
-
-// selection is a flag now; play order lives in `order`, so toggling no longer
-// sorts or moves a frame — its position in the sequence is preserved.
-function toggleSelect(stateName, idx) {
-  const { sel } = entries[stateName];
-  if (sel.has(idx)) sel.delete(idx);
-  else sel.add(idx);
 }
 
 // play sequence = display order filtered to selected frames.
@@ -197,15 +193,16 @@ function wireStage(stage, stateName, idx) {
       t.dy = start.dy + ddy / ds();
       applyCardTransform(stage, stateName, idx);
     };
-    const onUp = (e) => {
+    const onUp = () => {
       stage.releasePointerCapture(ev.pointerId);
       stage.removeEventListener("pointermove", onMove);
       stage.removeEventListener("pointerup", onUp);
       if (!moved) {
-        toggleSelect(stateName, idx);
-        renderSelectionState(stateName);
+        // a click (not a drag) sends the frame to the other row
+        moveCardToOtherZone(stage.closest(".card"), stateName);
+      } else {
+        scheduleSave();
       }
-      scheduleSave();
     };
     stage.addEventListener("pointermove", onMove);
     stage.addEventListener("pointerup", onUp);
@@ -280,22 +277,39 @@ function wireStage(stage, stateName, idx) {
   });
 }
 
-// --- frame reorder (drag the ⠿ grip to change play order) ------------------
+// --- frame reorder + two-zone curation (sequence row / candidate pool) ------
 //
-// The grip lives in `.card-top`, outside `.stage`, so reordering never collides
-// with the stage's move/scale/rotate/shear drags. Reorder is done by live DOM
-// moves of the card during the drag; `order` is recomputed from the DOM on drop.
+// Each state renders two `.frames` rows: the top is the play SEQUENCE (selected
+// frames, in order) and the bottom is the candidate POOL (everything else,
+// e.g. an extra generated take). Dragging the ⠿ grip reorders within a row OR
+// moves a card between rows; which row a card lands in *is* its selection. The
+// grip lives in `.card-top`, outside `.stage`, so it never collides with the
+// stage's move/scale/rotate/shear drags.
 
-function presentCards(framesEl) {
-  return [...framesEl.querySelectorAll(".card:not(.missing)")];
+function presentCards(container) {
+  return [...container.querySelectorAll(".card:not(.missing)")];
+}
+
+function zoneFrames(wrap) {
+  return { seq: wrap.querySelector(".seq-frames"), pool: wrap.querySelector(".pool-frames") };
+}
+
+// selection := membership of the sequence row. order := seq cards then pool
+// cards, so playList() (order ∩ sel) is exactly the sequence row, left to right.
+function commitZones(wrap, stateName) {
+  const { seq, pool } = zoneFrames(wrap);
+  const seqIdx = presentCards(seq).map((c) => Number(c.dataset.idx));
+  const poolIdx = presentCards(pool).map((c) => Number(c.dataset.idx));
+  entries[stateName].sel = new Set(seqIdx);
+  entries[stateName].order = [...seqIdx, ...poolIdx];
 }
 
 // the present card the dragged card should be inserted *before*, by pointer x
-// (the .frames strip is a single horizontal scroll row). null -> after them all.
-function reorderRefBefore(framesEl, dragCard, x) {
+// within one row. null -> after them all.
+function reorderRefBefore(container, dragCard, x) {
   let ref = null;
   let closest = -Infinity;
-  for (const card of presentCards(framesEl)) {
+  for (const card of presentCards(container)) {
     if (card === dragCard) continue;
     const box = card.getBoundingClientRect();
     const offset = x - (box.left + box.width / 2);
@@ -307,22 +321,30 @@ function reorderRefBefore(framesEl, dragCard, x) {
   return ref;
 }
 
-function commitOrderFromDom(framesEl, stateName) {
-  entries[stateName].order = presentCards(framesEl).map((c) => Number(c.dataset.idx));
+// pick the row (seq above, pool below) whose band the cursor y falls into.
+function pickZone(seq, pool, y) {
+  const s = seq.getBoundingClientRect();
+  const p = pool.getBoundingClientRect();
+  return y < (s.bottom + p.top) / 2 ? seq : pool;
 }
 
-// FLIP: animate the non-dragged cards sliding to their new slots. Measure
-// (First), reorder DOM (mutate), then invert + Play so flexbox reflow — which
-// CSS transitions can't animate on their own — reads as a smooth slide.
-function flipReorder(framesEl, mutate) {
-  const cards = [...framesEl.querySelectorAll(".card:not(.dragging)")];
-  const first = cards.map((c) => c.getBoundingClientRect().left);
+// FLIP across both rows: measure (First), reorder DOM (mutate), then invert +
+// Play in 2D so cards slide — including vertically when they cross rows —
+// since flexbox reflow can't be animated by CSS transitions alone.
+function flipReorder(containers, mutate) {
+  const cards = containers.flatMap((c) => [...c.querySelectorAll(".card:not(.dragging)")]);
+  const first = cards.map((c) => {
+    const b = c.getBoundingClientRect();
+    return { l: b.left, t: b.top };
+  });
   mutate();
   cards.forEach((c, i) => {
-    const dl = first[i] - c.getBoundingClientRect().left;
-    if (Math.abs(dl) < 0.5) return;
+    const b = c.getBoundingClientRect();
+    const dl = first[i].l - b.left;
+    const dt = first[i].t - b.top;
+    if (Math.abs(dl) < 0.5 && Math.abs(dt) < 0.5) return;
     c.style.transition = "none";
-    c.style.transform = `translateX(${dl}px)`;
+    c.style.transform = `translate(${dl}px, ${dt}px)`;
     requestAnimationFrame(() => {
       c.style.transition = "transform 0.18s ease";
       c.style.transform = "";
@@ -330,14 +352,26 @@ function flipReorder(framesEl, mutate) {
   });
 }
 
-function wireReorder(grip, card, framesEl, stateName) {
+// click affordance: send a card to the other row (sequence <-> pool), animated.
+function moveCardToOtherZone(card, stateName) {
+  const wrap = card.closest(".state");
+  const { seq, pool } = zoneFrames(wrap);
+  const dest = card.closest(".frames") === seq ? pool : seq;
+  flipReorder([seq, pool], () => dest.appendChild(card));
+  commitZones(wrap, stateName);
+  renderSelectionState(stateName);
+  scheduleSave();
+}
+
+function wireReorder(grip, card, wrap, stateName) {
   grip.addEventListener("pointerdown", (ev) => {
     if (ev.button) return; // primary pointer only
     ev.preventDefault();
     ev.stopPropagation();
+    const { seq, pool } = zoneFrames(wrap);
 
     // lift the card out of flow so it floats under the cursor; a placeholder
-    // of the same size holds the slot it will drop into.
+    // of the same size holds the slot it will drop into (in its current row).
     const rect = card.getBoundingClientRect();
     const grabDX = ev.clientX - rect.left;
     const grabDY = ev.clientY - rect.top;
@@ -345,7 +379,7 @@ function wireReorder(grip, card, framesEl, stateName) {
     ph.className = "card-placeholder";
     ph.style.width = `${rect.width}px`;
     ph.style.height = `${rect.height}px`;
-    framesEl.insertBefore(ph, card);
+    card.parentNode.insertBefore(ph, card);
 
     card.classList.add("dragging");
     card.style.width = `${rect.width}px`;
@@ -359,16 +393,15 @@ function wireReorder(grip, card, framesEl, stateName) {
     };
     moveCard(ev.clientX, ev.clientY);
 
-    // missing cards (if any) stay pinned at the tail; the gap never goes past them.
-    const firstMissing = framesEl.querySelector(".card.missing");
-
     // listeners on window (not the grip): the card is fixed/detached from flow,
     // so a grip-scoped pointerup could be missed — window catches release anywhere.
     const onMove = (e) => {
       moveCard(e.clientX, e.clientY);
-      const target = reorderRefBefore(framesEl, card, e.clientX) || firstMissing;
-      if (ph.nextElementSibling === target || target === ph) return; // gap already here
-      flipReorder(framesEl, () => framesEl.insertBefore(ph, target));
+      const zone = pickZone(seq, pool, e.clientY);
+      const firstMissing = zone.querySelector(".card.missing");
+      const refNode = reorderRefBefore(zone, card, e.clientX) || firstMissing;
+      if (ph.parentNode === zone && (ph.nextElementSibling === refNode || refNode === ph)) return;
+      flipReorder([seq, pool], () => zone.insertBefore(ph, refNode));
     };
     const end = () => {
       window.removeEventListener("pointermove", onMove);
@@ -378,7 +411,7 @@ function wireReorder(grip, card, framesEl, stateName) {
       card.classList.remove("dragging");
       card.style.position = card.style.left = card.style.top = "";
       card.style.width = card.style.height = card.style.zIndex = card.style.pointerEvents = "";
-      framesEl.insertBefore(card, ph);
+      ph.parentNode.insertBefore(card, ph);
       ph.remove();
       // settle: slide the dropped card from the release point into its slot.
       const toRect = card.getBoundingClientRect();
@@ -392,8 +425,8 @@ function wireReorder(grip, card, framesEl, stateName) {
           card.style.transform = "";
         });
       }
-      commitOrderFromDom(framesEl, stateName);
-      renderSelectionState(stateName); // refresh count text node reference after DOM move
+      commitZones(wrap, stateName);
+      renderSelectionState(stateName); // refresh selection classes + count
       scheduleSave();
     };
     window.addEventListener("pointermove", onMove);
@@ -412,12 +445,12 @@ function resetTransform(stateName, idx, stage) {
 
 function renderSelectionState(stateName) {
   document.querySelectorAll(`.card[data-state="${cssEscape(stateName)}"]`).forEach((card) => {
+    if (card.classList.contains("missing")) return;
     const idx = Number(card.dataset.idx);
-    const sel = isSelected(stateName, idx);
-    card.classList.toggle("selected", sel);
-    card.classList.toggle("rejected", !sel);
+    const inSeq = isSelected(stateName, idx);
+    card.classList.toggle("selected", inSeq);
     const btn = card.querySelector(".sel-btn");
-    if (btn) btn.textContent = sel ? t("selected") : t("excluded");
+    if (btn) btn.textContent = inSeq ? t("removeFromSeq") : t("addToSeq");
   });
   const state = run.states.find((s) => s.name === stateName);
   const countEl = document.querySelector(`.preview[data-state="${cssEscape(stateName)}"] .count`);
@@ -444,19 +477,34 @@ function renderState(state) {
   const body = document.createElement("div");
   body.className = "state-body";
 
-  const framesEl = document.createElement("div");
-  framesEl.className = "frames";
-  // render cards in play order (entries.order), so the strip reads as the
-  // sequence; missing frames are appended after, inert (not reorderable).
+  // two rows: sequence (selected, in play order) on top, candidate pool below.
+  const zones = document.createElement("div");
+  zones.className = "zones";
+  zones.innerHTML =
+    `<div class="zone zone-seq"><div class="zone-label">${t("zoneSeq")}</div>` +
+    `<div class="frames seq-frames"></div></div>` +
+    `<div class="zone zone-pool"><div class="zone-label">${t("zonePool")}</div>` +
+    `<div class="frames pool-frames"></div></div>`;
+  const seqFrames = zones.querySelector(".seq-frames");
+  const poolFrames = zones.querySelector(".pool-frames");
+
+  const e = entries[state.name];
   const frameByIdx = new Map(state.frames.map((f) => [f.index, f]));
-  for (const idx of entries[state.name].order) {
+  for (const idx of e.order) {
+    if (!e.sel.has(idx)) continue;
     const frame = frameByIdx.get(idx);
-    if (frame) framesEl.appendChild(renderCard(state, frame));
+    if (frame) seqFrames.appendChild(renderCard(state, frame));
+  }
+  for (const idx of e.order) {
+    if (e.sel.has(idx)) continue;
+    const frame = frameByIdx.get(idx);
+    if (frame) poolFrames.appendChild(renderCard(state, frame));
   }
   for (const frame of state.frames) {
-    if (!frame.present) framesEl.appendChild(renderCard(state, frame));
+    if (!frame.present) poolFrames.appendChild(renderCard(state, frame));
   }
-  body.appendChild(framesEl);
+
+  body.appendChild(zones);
   body.appendChild(renderPreview(state));
   wrap.appendChild(body);
 
@@ -471,7 +519,7 @@ function renderState(state) {
     applyCardTransform(stage, state.name, frame.index);
     if (run.iso) drawGroundGrid(stage);
     const grip = card.querySelector(".grip");
-    if (grip) wireReorder(grip, card, framesEl, state.name);
+    if (grip) wireReorder(grip, card, wrap, state.name);
   }
   renderSelectionState(state.name);
   startPreview(state);
@@ -509,9 +557,7 @@ function renderCard(state, frame) {
     `</div>`;
 
   card.querySelector(".sel-btn").addEventListener("click", () => {
-    toggleSelect(state.name, frame.index);
-    renderSelectionState(state.name);
-    scheduleSave();
+    if (frame.present) moveCardToOtherZone(card, state.name);
   });
   if (frame.present) {
     card.querySelector(".reset-btn").addEventListener("click", () =>
