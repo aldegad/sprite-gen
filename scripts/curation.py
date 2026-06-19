@@ -21,6 +21,10 @@ Schema (`curation.json`):
       "states": {
         "<state>": {
           "selected": [0, 1, 2, 3],          # 0-based frame indices, in play order
+          "order": [0, 1, 2, 3, 4, 5],        # optional, webview-owned; full display
+                                               #   order (sequence then candidate pool).
+                                               #   Restores the row arrangement on reload.
+                                               #   Consumers key off `selected`; ignored here.
           "transforms": {                      # keyed by 0-based frame index (string)
             "0": {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0}
           }
@@ -32,6 +36,7 @@ Defaults when absent (explicit, not a silent fallback):
 - no `curation.json`           -> every state uses all extracted frames in order, identity transform.
 - state missing from sidecar   -> same all-frames default for that state.
 - `selected` missing/empty     -> all frames in extraction order.
+- `order` missing               -> webview rebuilds arrangement from `selected`; bake is unaffected (state_plan reads `selected`, never `order`).
 - frame missing from transforms -> identity transform.
 
 `rotate` is in degrees, counter-clockwise positive (PIL convention).
@@ -135,7 +140,16 @@ def state_plan(
 
     selected = entry.get("selected")
     if isinstance(selected, list) and selected:
-        ordered = [int(i) for i in selected if 0 <= int(i) < default_count]
+        # tolerate a hand-edited / corrupt sidecar: skip non-integer or
+        # out-of-range entries instead of crashing the bake (mirrors transforms).
+        ordered = []
+        for raw in selected:
+            try:
+                index = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= index < default_count:
+                ordered.append(index)
         if not ordered:
             ordered = default_order
     else:

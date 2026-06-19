@@ -122,7 +122,13 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
   font-size: 12px;
   color: var(--muted);
 }
-.card-top .idx { color: var(--text); }
+.card-top .idx {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+} /* long imported labels truncate instead of breaking the card-top layout */
 .card-top .ct-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .grip {
   cursor: grab;

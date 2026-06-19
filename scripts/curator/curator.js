@@ -125,7 +125,14 @@ function buildPayload() {
     for (const [idx, t] of Object.entries(entry.transforms)) {
       if (t.rotate || t.scale !== 1 || t.dx || t.dy || t.shx || t.shy || t.flipX) transforms[idx] = t;
     }
-    states[name] = { selected: entry.order.filter((idx) => entry.sel.has(idx)), transforms };
+    // `selected` is the play order (what compose bakes). `order` is the full
+    // display order (sequence then pool) so the webview can restore the exact
+    // row arrangement on reload — compose/curation.py ignore it.
+    states[name] = {
+      selected: entry.order.filter((idx) => entry.sel.has(idx)),
+      order: entry.order.slice(),
+      transforms,
+    };
   }
   return { version: run.schemaVersion || 1, kind: "sprite-gen-curation", states };
 }
@@ -476,6 +483,18 @@ function cssEscape(s) {
   return s.replace(/"/g, '\\"');
 }
 
+// escape text that comes from run data (state name/action, frame labels from a
+// manifest / meta.json) before it goes into innerHTML, so an imported set can't
+// inject markup into the webview.
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function renderState(state) {
   const wrap = document.createElement("section");
   wrap.className = "state";
@@ -483,9 +502,9 @@ function renderState(state) {
   const head = document.createElement("div");
   head.className = "state-head";
   head.innerHTML =
-    `<span class="name">${state.name}</span>` +
+    `<span class="name">${escapeHtml(state.name)}</span>` +
     `<span class="meta">${state.requestFrames} ${t("frames")} · ${state.fps}fps · ${state.loop ? t("loop") : t("nonLoop")}</span>` +
-    (state.action ? `<span class="action">${state.action}</span>` : "") +
+    (state.action ? `<span class="action">${escapeHtml(state.action)}</span>` : "") +
     (state.extractOk ? "" : `<span class="state-warn">${t("extractFail")}</span>`);
   wrap.appendChild(head);
 
@@ -510,13 +529,13 @@ function renderState(state) {
     const frame = frameByIdx.get(idx);
     if (frame) seqFrames.appendChild(renderCard(state, frame));
   }
+  // pool = everything not in the sequence. `order` already contains every
+  // index (present + missing), so this single loop covers missing frames too
+  // — do NOT also iterate state.frames here or missing cards render twice.
   for (const idx of e.order) {
     if (e.sel.has(idx)) continue;
     const frame = frameByIdx.get(idx);
     if (frame) poolFrames.appendChild(renderCard(state, frame));
-  }
-  for (const frame of state.frames) {
-    if (!frame.present) poolFrames.appendChild(renderCard(state, frame));
   }
 
   body.appendChild(zones);
@@ -555,7 +574,7 @@ function renderCard(state, frame) {
       `<div class="shear-handle" title="${t("tShear")}"></div>`
     : `<div class="missing-label">missing</div>`;
 
-  const label = frame.label ? `${frame.label}` : `#${frame.index}`;
+  const label = frame.label ? escapeHtml(frame.label) : `#${frame.index}`;
   card.innerHTML =
     `<div class="card-top">` +
     `<span class="ct-left">` +
@@ -842,22 +861,39 @@ function seedEntries() {
   for (const state of run.states) {
     const present = state.frames.filter((f) => f.present).map((f) => f.index);
     const c = curated[state.name];
-    const savedSel =
-      c && Array.isArray(c.selected) && c.selected.length
-        ? c.selected.filter((i) => present.includes(i))
-        : null;
-    // order = full display sequence of present frames; sel = which are on.
-    // saved `selected` is the play order, so it leads; deselected frames trail.
+    // order = full display arrangement (sequence then pool); sel = which are on.
+    // Coerce to integers and de-dupe so a hand-edited / corrupt sidecar (string
+    // indices, duplicates) can't produce a duplicated or dropped frame.
     const missing = state.frames.filter((f) => !f.present).map((f) => f.index);
-    let order, sel;
-    if (savedSel && savedSel.length) {
+    const allIdx = [...present, ...missing];
+    const coerce = (arr, valid) => {
+      const seen = new Set();
+      const out = [];
+      for (const raw of Array.isArray(arr) ? arr : []) {
+        const i = Number(raw);
+        if (Number.isInteger(i) && valid.includes(i) && !seen.has(i)) {
+          seen.add(i);
+          out.push(i);
+        }
+      }
+      return out;
+    };
+    const savedSel = c && Array.isArray(c.selected) ? coerce(c.selected, present) : [];
+    const savedOrder = c && Array.isArray(c.order) ? coerce(c.order, allIdx) : [];
+    let order;
+    if (savedOrder.length) {
+      // restore the exact saved arrangement (incl. pool order); append any
+      // newly-extracted frames that weren't in the saved order.
+      const seen = new Set(savedOrder);
+      order = [...savedOrder, ...allIdx.filter((i) => !seen.has(i))];
+    } else if (savedSel.length) {
+      // older sidecar without `order`: selected leads, the rest trail.
       const inSel = new Set(savedSel);
       order = [...savedSel, ...present.filter((i) => !inSel.has(i)), ...missing];
-      sel = new Set(savedSel);
     } else {
-      order = [...present, ...missing];
-      sel = new Set(present);
+      order = allIdx;
     }
+    const sel = savedSel.length ? new Set(savedSel) : new Set(present);
     const transforms = {};
     if (c && c.transforms) {
       for (const [idx, t] of Object.entries(c.transforms)) {
