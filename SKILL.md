@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.9.0
+version: 1.9.1
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick."
 license: Apache-2.0
 depends_on:
@@ -61,7 +61,7 @@ The skill uses scripts as explicit pipeline commands, not as hidden imports. Eac
 
 ```bash
 SG=${ALEX_EXTENSIONS_DIR:-$HOME/Documents/workspace/personal/alex-extensions}/sprite-gen
-STAGE=$(mktemp -d /tmp/curation-XXXXXX); mkdir -p "$STAGE/pngs"
+STAGE=$(mktemp -d); mkdir -p "$STAGE/pngs"
 cp <후보들> "$STAGE/pngs/"   # 의미 있는 이름으로: 1-hub-cube.png, 2-hook-plug.png ... (timestamp/uuid 파일명 금지)
 python3 "$SG/scripts/unpack_atlas_run.py" --pngs-dir "$STAGE/pngs" --out-dir "$STAGE/run" --force
 nohup python3 "$SG/scripts/serve_curation.py" --run-dir "$STAGE/run" --lang ko > "$STAGE/server.log" 2>&1 &
@@ -455,8 +455,9 @@ Do not let multiple workers write the same character folder.
   "states": {
     "idle": {
       "selected": [0, 2, 3],
+      "order": [0, 2, 3, 1],
       "transforms": {
-        "0": { "rotate": 15, "scale": 1.2, "dx": 10, "dy": -8 }
+        "0": { "rotate": 15, "scale": 1.2, "dx": 10, "dy": -8, "flipX": 0 }
       }
     }
   }
@@ -464,7 +465,8 @@ Do not let multiple workers write the same character folder.
 ```
 
 - `selected` — 0-based frame indices in play order. Absent/empty → all extracted frames in order.
-- `transforms` — keyed by 0-based frame index. `rotate` degrees (counter-clockwise positive, PIL convention), `scale` multiplier about center, `dx`/`dy` pixel offsets in the cell (+x right, +y down). Absent → identity.
+- `order` — optional, webview-owned: the full display order (sequence row then candidate-pool row) so reopening the curator restores the exact arrangement of both rows. `compose` / `state_plan` ignore it and key off `selected`.
+- `transforms` — keyed by 0-based frame index. `rotate` degrees (counter-clockwise positive, PIL convention), `scale` multiplier about center, `dx`/`dy` pixel offsets in the cell (+x right, +y down), `shx`/`shy` shear, `flipX` (0|1) horizontal mirror. Absent → identity.
 - A state missing from the sidecar uses the all-frames identity default.
 - The transform is applied at compose time inside the request-sized cell, so atlas geometry never changes. `manifest.json.animation.rows.<state>.frames` reflects the curated frame count, and `manifest.json.curation_applied` records whether a sidecar was used.
 

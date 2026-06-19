@@ -51,9 +51,9 @@ Generation gets you 90%. The webview is where a human takes it to *shipped* — 
 
 ![curation webview — characters](docs/demo-character.gif)
 
-- **Compare frames side by side** per state, and **select / reject** individual frames.
-- **Non-destructive transform** per frame: drag = move, wheel = scale, top handle = rotate, bottom-left handle = shear. Edits live in a `curation.json` sidecar — source PNGs are never rewritten, and the compose step bakes the result deterministically. Preview and bake share one affine matrix, so what you align is what you get.
-- **Live preview** animates the selected frames at the state's fps.
+- **Two rows per state:** the **play sequence** on top and a **candidate pool** below (e.g. a second or third generated take). Drag a frame's ⠿ grip to reorder the sequence, or pull a cut up from the pool — rebuild one clean run loop from the best frames across takes. The arrangement is saved, so reopening restores it.
+- **Non-destructive transform** per frame: drag = move, wheel = scale, top handle = rotate, bottom-left = shear, plus a horizontal-flip toggle for left-right-reversed output. Edits live in a `curation.json` sidecar — source PNGs are never rewritten, and the compose step bakes the result deterministically. Preview and bake share one affine matrix, so what you align is what you get.
+- **Live preview** animates the sequence at the state's fps, with play/pause, frame-by-frame stepping, and a 0.25×–4× speed control.
 - Not just for sprites: point it at any folder of image candidates (icons, logos, generated drafts) with `unpack_atlas_run.py --pngs-dir` and use it as a general pick-the-winner view.
 
 ### Isometric ground grid

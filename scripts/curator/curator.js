@@ -845,7 +845,6 @@ document.getElementById("export").addEventListener("click", async (ev) => {
     if (!res.ok || !data.ok) throw new Error((data.stderr || data.error || "export failed").trim());
     const out = data.export || {};
     setStatus(STR[lang].exportDone(out.count || 0), "ok");
-    console.log("exported to:", out.out_dir, out.files);
   } catch (e) {
     setStatus(t("exportFail") + e.message, "err");
   } finally {
