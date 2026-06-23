@@ -45,10 +45,10 @@ const STR = {
     exporting: "exporting…", exportFail: "export failed: ",
     ready: "ready", loaded: "loaded existing curation", runLoadFail: "failed to load run:",
     tRotate: "rotate", tShear: "shear — horizontal = shx, vertical = shy", tReset: "reset transform", tFlipX: "flip horizontally",
-    tReorder: "drag ⠿ to reorder play sequence",
+    tReorder: "drag the card header to reorder; a plain click toggles sequence ⇄ pool",
     tPlay: "play", tPause: "pause", tPrev: "step back", tNext: "step forward", tSpeed: "playback speed",
     zoneSeq: "Running sequence", zonePool: "Candidate pool — drag a cut up to add it", addToSeq: "✓ add", removeFromSeq: "✗ remove",
-    hints: ["⠿ grip = reorder / move row", "drag pool→sequence to add", "wheel = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
+    hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "wheel = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
     exportDone: (n) => `${n} PNGs → curated/`,
   },
   ko: {
@@ -61,10 +61,10 @@ const STR = {
     exporting: "내보내는 중…", exportFail: "내보내기 실패: ",
     ready: "준비됨", loaded: "기존 큐레이션 로드됨", runLoadFail: "run 로드 실패:",
     tRotate: "회전", tShear: "기울이기 — 가로=shx, 세로=shy", tReset: "보정 초기화", tFlipX: "좌우 반전",
-    tReorder: "⠿ 드래그로 재생 순서 변경",
+    tReorder: "헤더를 잡고 드래그하면 순서변경, 그냥 클릭하면 시퀀스↔후보",
     tPlay: "재생", tPause: "일시정지", tPrev: "이전 프레임", tNext: "다음 프레임", tSpeed: "재생 속도",
     zoneSeq: "달리기 시퀀스", zonePool: "후보 풀 — 마음에 드는 컷을 위로 끌어 추가", addToSeq: "✓ 넣기", removeFromSeq: "✗ 빼기",
-    hints: ["⠿ 그립 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "휠 = 확대/축소", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
+    hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "휠 = 확대/축소", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
     exportDone: (n) => `PNG ${n}장 → curated/`,
   },
 };
@@ -385,39 +385,59 @@ function moveCardToOtherZone(card, stateName) {
   scheduleSave();
 }
 
-function wireReorder(grip, card, wrap, stateName) {
-  grip.addEventListener("pointerdown", (ev) => {
+// The card header (`.card-top`) is the drag handle. A press that moves past
+// DRAG_THRESHOLD lifts the card and reorders/moves it between rows; a press that
+// never moves is a click that toggles the card's row (sequence ⇄ pool), the same
+// affordance as clicking the stage. This is why the ✗/✓ button needs no separate
+// click handler, and why a drag *started on that button* still drags the card
+// instead of instantly excluding the frame (Alex 2026-06-23: grabbing the header,
+// including the ✗ button, must drag — only a clean click toggles).
+function wireReorder(handle, card, wrap, stateName) {
+  handle.addEventListener("pointerdown", (ev) => {
     if (ev.button || !ev.isPrimary) return; // primary button + primary pointer only (no multi-touch parallel drag)
     ev.preventDefault();
-    ev.stopPropagation();
     const { seq, pool } = zoneFrames(wrap);
+    const startX = ev.clientX;
+    const startY = ev.clientY;
+    let lifted = false;
+    let ph = null;
+    let grabDX = 0;
+    let grabDY = 0;
 
-    // lift the card out of flow so it floats under the cursor; a placeholder
-    // of the same size holds the slot it will drop into (in its current row).
-    const rect = card.getBoundingClientRect();
-    const grabDX = ev.clientX - rect.left;
-    const grabDY = ev.clientY - rect.top;
-    const ph = document.createElement("div");
-    ph.className = "card-placeholder";
-    ph.style.width = `${rect.width}px`;
-    ph.style.height = `${rect.height}px`;
-    card.parentNode.insertBefore(ph, card);
-
-    card.classList.add("dragging");
-    card.style.width = `${rect.width}px`;
-    card.style.height = `${rect.height}px`;
-    card.style.position = "fixed";
-    card.style.zIndex = "1000";
-    card.style.pointerEvents = "none";
     const moveCard = (x, y) => {
       card.style.left = `${x - grabDX}px`;
       card.style.top = `${y - grabDY}px`;
     };
-    moveCard(ev.clientX, ev.clientY);
 
-    // listeners on window (not the grip): the card is fixed/detached from flow,
-    // so a grip-scoped pointerup could be missed — window catches release anywhere.
+    // lift the card out of flow so it floats under the cursor; a placeholder of
+    // the same size holds the slot it will drop into (in its current row). Only
+    // happens once the press crosses DRAG_THRESHOLD, so a plain click never lifts.
+    const lift = () => {
+      const rect = card.getBoundingClientRect();
+      grabDX = startX - rect.left;
+      grabDY = startY - rect.top;
+      ph = document.createElement("div");
+      ph.className = "card-placeholder";
+      ph.style.width = `${rect.width}px`;
+      ph.style.height = `${rect.height}px`;
+      card.parentNode.insertBefore(ph, card);
+      card.classList.add("dragging");
+      card.style.width = `${rect.width}px`;
+      card.style.height = `${rect.height}px`;
+      card.style.position = "fixed";
+      card.style.zIndex = "1000";
+      card.style.pointerEvents = "none";
+      lifted = true;
+    };
+
+    // listeners on window (not the handle): once lifted the card is fixed/detached
+    // from flow, so a handle-scoped pointerup could be missed — window catches the
+    // release anywhere.
     const onMove = (e) => {
+      if (!lifted) {
+        if (Math.abs(e.clientX - startX) <= DRAG_THRESHOLD && Math.abs(e.clientY - startY) <= DRAG_THRESHOLD) return;
+        lift();
+      }
       moveCard(e.clientX, e.clientY);
       const zone = pickZone(seq, pool, e.clientY);
       const firstMissing = zone.querySelector(".card.missing");
@@ -429,6 +449,12 @@ function wireReorder(grip, card, wrap, stateName) {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
+      if (!lifted) {
+        // a press that never crossed the drag threshold is a click: toggle the
+        // card's row (sequence ⇄ pool). This is the ✗ 빼기 / ✓ 넣기 action.
+        moveCardToOtherZone(card, stateName);
+        return;
+      }
       const fromRect = card.getBoundingClientRect();
       card.classList.remove("dragging");
       card.style.position = card.style.left = card.style.top = "";
@@ -552,8 +578,10 @@ function renderState(state) {
     wireStage(stage, state.name, frame.index);
     applyCardTransform(stage, state.name, frame.index);
     if (run.iso) drawGroundGrid(stage);
-    const grip = card.querySelector(".grip");
-    if (grip) wireReorder(grip, card, wrap, state.name);
+    // the whole header strip is the drag handle (grip + label + ✗/✓ button),
+    // not just the ⠿ glyph — see wireReorder.
+    const cardTop = card.querySelector(".card-top");
+    if (cardTop) wireReorder(cardTop, card, wrap, state.name);
   }
   renderSelectionState(state.name);
   startPreview(state);
@@ -590,9 +618,9 @@ function renderCard(state, frame) {
     `<button type="button" class="ghost reset-btn" title="${t("tReset")}">↺</button>` +
     `</div>`;
 
-  card.querySelector(".sel-btn").addEventListener("click", () => {
-    if (frame.present) moveCardToOtherZone(card, state.name);
-  });
+  // No separate ✗/✓ click handler: the header strip (.card-top) owns the press —
+  // move past threshold = drag, clean click = toggle row — via wireReorder, so a
+  // click on the button toggles there. A handler here would double-fire the toggle.
   if (frame.present) {
     card.querySelector(".reset-btn").addEventListener("click", () =>
       resetTransform(state.name, frame.index, card.querySelector(".stage"))

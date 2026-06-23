@@ -121,7 +121,15 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
   margin-bottom: 6px;
   font-size: 12px;
   color: var(--muted);
+  /* (Alex 2026-06-23) the whole header is the drag handle: grab anywhere on it
+     (grip, label, the ✗/✓ button) and move past threshold to reorder; a press
+     that does not move toggles sequence ⇄ pool. So cursor=grab on the strip. */
+  cursor: grab;
+  padding: 2px 2px 2px 0;
+  touch-action: none; /* claim the pointer so the scroll row doesn't steal the drag */
 }
+.card-top:active { cursor: grabbing; }
+.card.dragging .card-top { cursor: grabbing; }
 .card-top .idx {
   color: var(--text);
   overflow: hidden;
@@ -133,15 +141,22 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 .grip {
   cursor: grab;
   color: var(--muted);
-  font-size: 13px;
+  /* (Alex 2026-06-23) bigger, easier-to-grab handle with breathing room on the
+     left edge of the card (was 13px / letter-spacing -1px / padding 0 2px and
+     hugged the border). */
+  font-size: 18px;
   line-height: 1;
-  letter-spacing: -1px;
-  padding: 0 2px;
+  letter-spacing: 0;
+  padding: 2px 4px;
+  margin-left: 2px;
   user-select: none;
   touch-action: none; /* claim the pointer so the scroll row doesn't steal the drag */
 }
-.grip:hover { color: var(--text); }
+.card-top:hover .grip { color: var(--text); }
 .grip:active { cursor: grabbing; }
+/* the ✗/✓ button lives in the drag-handle strip: keep it clickable as a toggle
+   but show the grab affordance so a press-and-move there drags instead. */
+.card-top .sel-btn { cursor: inherit; }
 .card.dragging {
   border-color: var(--accent);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
