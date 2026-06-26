@@ -14,6 +14,7 @@ import json
 import math
 import re
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -223,6 +224,12 @@ def sampled_reference_pixels(path: Path | None) -> list[tuple[int, int, int]]:
     return pixels
 
 
+# Mirrors the default --key-threshold in extract_sprite_row_frames.py: any subject
+# pixel within this color distance of the chroma key is removed at extraction, so a
+# key whose nearest subject pixel falls inside this radius will erase that feature.
+MIN_SUBJECT_KEY_DISTANCE = 96.0
+
+
 def choose_chroma_key(reference: Path | None, requested: str) -> dict[str, Any]:
     if requested.lower() != "auto":
         rgb = parse_hex_color(requested)
@@ -235,20 +242,35 @@ def choose_chroma_key(reference: Path | None, requested: str) -> dict[str, Any]:
         rgb = parse_hex_color("#FF00FF")
         return {"name": "magenta", "hex": "#FF00FF", "rgb": list(rgb), "selection": "fallback"}
 
-    scored: list[tuple[float, int, str, tuple[int, int, int]]] = []
+    scored: list[tuple[float, float, int, str, tuple[int, int, int]]] = []
     for preference_index, (name, hex_color) in enumerate(CHROMA_CANDIDATES):
         rgb = parse_hex_color(hex_color)
         distances = sorted(color_distance(rgb, pixel) for pixel in pixels)
         percentile_index = max(0, min(len(distances) - 1, int(len(distances) * 0.01)))
-        scored.append((distances[percentile_index], -preference_index, name, rgb))
-    score, _preference, name, rgb = max(scored)
-    return {
+        scored.append((distances[percentile_index], distances[0], -preference_index, name, rgb))
+
+    # Rank by the 1st-percentile distance, but that metric ignores sub-1% features
+    # (eyes, gems, ear lamps): a key can look "safe" while its nearest subject pixel
+    # is still inside the erase radius. Prefer candidates that clear every subject
+    # pixel; only fall back to the raw ranking (with a warning) when none do.
+    safe = [entry for entry in scored if entry[1] > MIN_SUBJECT_KEY_DISTANCE]
+    score, min_distance, _preference, name, rgb = max(safe) if safe else max(scored)
+    result = {
         "name": name,
         "hex": rgb_to_hex(rgb),
         "rgb": list(rgb),
         "selection": "auto",
         "score": round(score, 2),
+        "min_subject_distance": round(min_distance, 2),
     }
+    if min_distance <= MIN_SUBJECT_KEY_DISTANCE:
+        result["warning"] = (
+            f"nearest subject pixel is {min_distance:.1f} from {name} "
+            f"(<= {MIN_SUBJECT_KEY_DISTANCE:.0f}); that feature will be erased at extraction — "
+            f"recolor it or force a different --chroma-key"
+        )
+        print(f"WARNING: chroma_key auto: {result['warning']}", file=sys.stderr)
+    return result
 
 
 def normalize_states(raw: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
