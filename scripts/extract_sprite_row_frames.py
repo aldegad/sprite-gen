@@ -48,18 +48,6 @@ def key_tint_score(color: tuple[int, int, int], chroma_key: tuple[int, int, int]
     return keyed_average - unkeyed_average
 
 
-def neutralize_key_tint(color: tuple[int, int, int], chroma_key: tuple[int, int, int]) -> tuple[int, int, int]:
-    keyed_channels = [index for index, value in enumerate(chroma_key) if value >= 192]
-    unkeyed_channels = [index for index, value in enumerate(chroma_key) if value < 64]
-    if not keyed_channels or not unkeyed_channels:
-        neutral = round(sum(color) / 3)
-    else:
-        neutral = round(sum(color[index] for index in unkeyed_channels) / len(unkeyed_channels))
-    output = list(color)
-    for index in keyed_channels:
-        output[index] = min(output[index], neutral)
-    return tuple(output)
-
 
 def remove_chroma_background(
     image: Image.Image,
@@ -79,9 +67,6 @@ def remove_chroma_background(
                 pixels[x, y] = (0, 0, 0, 0)
             elif alpha and distance <= fringe_threshold and key_tint_score(color, chroma_key) >= fringe_delta:
                 pixels[x, y] = (0, 0, 0, 0)
-            elif alpha and key_tint_score(color, chroma_key) >= fringe_delta * 2:
-                neutral_red, neutral_green, neutral_blue = neutralize_key_tint(color, chroma_key)
-                pixels[x, y] = (neutral_red, neutral_green, neutral_blue, alpha)
             elif alpha == 0 and (red or green or blue):
                 pixels[x, y] = (0, 0, 0, 0)
     return rgba

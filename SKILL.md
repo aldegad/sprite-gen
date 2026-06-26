@@ -410,15 +410,15 @@ If image generation produces guide boxes, visible labels, overlapping poses, bac
 
 `prepare_sprite_run.py` chooses a chroma key by sampling the base image unless the request forces one. The generated character must not use the chroma color or chroma-adjacent colors.
 
-**Choose the chroma away from the subject's dominant hue — do not blindly default to magenta.** `extract_sprite_row_frames.py` neutralizes chroma-adjacent tint, so any character color that sits near the key gets eaten. The failure is hue-adjacency, not exact match:
+**Choose the chroma away from the subject's dominant hue — do not blindly default to magenta.** `extract_sprite_row_frames.py` removes chroma-adjacent antialias fringe, so a character color that sits *near* the key (within the fringe distance) gets eaten. Colors far from the key are kept intact (a saturated red body no longer turns olive under a magenta key), but the failure is still hue-adjacency, not exact match:
 
 - Deep-red / crimson / wine hair or clothing is **magenta-adjacent** (both high R). Magenta keying turns red hair near-black after extraction. Use **green** for red/crimson/warm subjects.
 - Green/teal/olive subjects → use **magenta**.
 - Blue subjects → avoid cyan/blue keys; magenta or green.
 
-When unsure, let `--chroma-key auto` sample the base (it scores candidates by distance from subject pixels). Only force a key when you know the subject hue is safely far from it. Verify after extraction that the dominant subject color survived — a black-where-it-should-be-colored frame means the key was adjacent to the subject.
+When unsure, let `--chroma-key auto` sample the base (it scores candidates by distance from subject pixels). `auto` now also refuses a key whose nearest subject pixel falls inside the erase radius when a safer candidate exists, records `min_subject_distance` in the request, and warns (stderr) when no candidate clears the subject — so a small but critical feature (eyes, a gem, an ear lamp) under 1% of the pixels is not silently deleted. Only force a key when you know the subject hue is safely far from it. Verify after extraction that the dominant subject color survived — a black-where-it-should-be-colored frame means the key was adjacent to the subject.
 
-`extract_sprite_row_frames.py` owns alpha cleanup for sprite rows. It removes pixels near the chroma key, removes chroma-tinted antialias fringe, neutralizes remaining key-color tint, clears fully transparent RGB, extracts connected components, and writes fresh transparent cells. This is intentionally closer to hatch-pet than to simple `magick -transparent`.
+`extract_sprite_row_frames.py` owns alpha cleanup for sprite rows. It removes pixels near the chroma key, removes chroma-tinted antialias fringe within the fringe band, clears fully transparent RGB, extracts connected components, and writes fresh transparent cells. This is intentionally closer to hatch-pet than to simple `magick -transparent`.
 
 If component extraction cannot find the declared frame count, the row is blocked. `--allow-slot-fallback` exists for explicit debugging only; it must be reported as `slots-explicit` and is not the default path.
 
