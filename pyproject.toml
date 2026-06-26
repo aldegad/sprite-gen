@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sprite-gen"
-version = "1.9.1"
+version = "1.9.2"
 description = "Component-row pipeline for clean 2D game sprites and animation atlases"
 readme = "README.md"
 license = "Apache-2.0"

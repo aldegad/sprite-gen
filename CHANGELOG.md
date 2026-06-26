@@ -2,7 +2,7 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
-## Unreleased — Chroma extraction no longer eats subject colors
+## v1.9.2 — Chroma extraction no longer eats subject colors
 
 Extraction fixes for subjects whose colors share a channel with the chroma key (e.g. a red/orange body under magenta, or any subject with small green/teal features).
 
