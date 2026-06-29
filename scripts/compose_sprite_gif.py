@@ -15,6 +15,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from curation import apply_transform, load_curation, state_plan
 from gif_utils import delay_ticks_to_duration_ms, gif_report, save_clean_gif
 
 
@@ -84,18 +85,81 @@ def contact_sheet(frames: list[tuple[int, Path, Image.Image]], gap: int = 4, lab
     return sheet
 
 
+def run_dir_mode(args: argparse.Namespace) -> int:
+    """Export one clean GIF per state from a finished run dir.
+
+    Reads `sprite-request.json` (per-state frames + fps), applies the
+    `curation.json` selection/order/transform via the shared `curation` module
+    (SSoT with the atlas compose), and writes `<out-dir>/<state>.gif` plus a
+    `gif-manifest.json`. This is the path both the v1 webview server and the v2
+    desktop app call so they never reimplement frame selection.
+    """
+    run_dir = args.run_dir.expanduser().resolve()
+    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    cell = request.get("cell", {})
+    cell_w = int(cell.get("width") or cell.get("size") or 0)
+    cell_h = int(cell.get("height") or cell.get("size") or 0)
+    states = request.get("states", {})
+    curation = load_curation(run_dir)
+    out_root = (args.out_dir.expanduser().resolve() if args.out_dir else run_dir / "exports")
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    exports: list[dict] = []
+    for state, spec in states.items():
+        count = int(spec.get("frames", 0))
+        if count <= 0:
+            continue
+        fps = float(spec.get("fps", 8)) or 8.0
+        ordered, transforms = state_plan(curation, state, count)
+        images: list[Image.Image] = []
+        for index in ordered:
+            path = run_dir / "frames" / state / f"frame-{index}.png"
+            if not path.is_file():
+                continue
+            frame = Image.open(path).convert("RGBA")
+            if cell_w and cell_h:
+                frame = apply_transform(frame, transforms.get(index), (cell_w, cell_h))
+            images.append(frame)
+        if not images:
+            continue
+        out_path = out_root / f"{state}.gif"
+        duration_ms = max(1, round(1000.0 / fps))
+        save_clean_gif(images, out_path, duration_ms=duration_ms, loop=args.loop_count, alpha_threshold=args.alpha_threshold)
+        exports.append({
+            "state": state,
+            "output": str(out_path),
+            "frames": len(images),
+            "fps": fps,
+            "loop": bool(spec.get("loop", True)),
+            "gif_report": gif_report(out_path),
+        })
+
+    manifest = {"version": 1, "kind": "sprite-gen-gif-run", "run_dir": str(run_dir), "exports": exports}
+    (out_root / "gif-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"ok": True, **manifest}, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", nargs="*", type=Path, help="ordered frame PNG files")
     parser.add_argument("--frame-dir", type=Path, help="directory containing frame-0.png, frame-1.png, ...")
     parser.add_argument("--frame-order", type=parse_frame_order, help="1-based order, for example 2,1,5,3")
-    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--run-dir", type=Path, help="run dir: export one GIF per state from sprite-request + curation")
+    parser.add_argument("--out-dir", type=Path, help="output dir for --run-dir mode (default <run-dir>/exports)")
+    parser.add_argument("--output", type=Path, help="output GIF (required unless --run-dir)")
     parser.add_argument("--delay-ticks", type=int, default=17, help="GIF delay in 1/100 second ticks")
     parser.add_argument("--loop-count", type=int, default=0, help="0 means infinite loop")
     parser.add_argument("--contact-output", type=Path)
     parser.add_argument("--manifest-output", type=Path)
     parser.add_argument("--alpha-threshold", type=int, default=8)
     args = parser.parse_args()
+
+    if args.run_dir:
+        return run_dir_mode(args)
+
+    if not args.output:
+        raise SystemExit("--output is required unless --run-dir is used")
 
     if bool(args.frame_dir) != bool(args.frame_order):
         raise SystemExit("--frame-dir and --frame-order must be used together")

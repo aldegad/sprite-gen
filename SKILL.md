@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.9.2
+version: 1.10.0
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick."
 license: Apache-2.0
 depends_on:
@@ -44,7 +44,7 @@ The skill uses scripts as explicit pipeline commands, not as hidden imports. Eac
 - `compose_sprite_atlas.py` — compose extracted frames into `sprite-sheet-alpha.png` and runtime `manifest.json.frame_layout`.
 - `preview_animation.py` — build QA previews from extracted frames: contact sheets and state GIFs under `qa/`.
 - `compose_selected_cycle.py` — record a human-selected frame subset as an explicit selected-cycle manifest plus QA GIF/contact sheet. Reads `curation.json` selection/transform by default; explicit `--frames` overrides it.
-- `compose_sprite_gif.py` — export a clean transparent GIF from selected frame PNGs and optional frame order.
+- `compose_sprite_gif.py` — export a clean transparent GIF. Single mode: from selected frame PNGs + optional frame order. Batch mode (`--run-dir`): one GIF per state from sprite-request fps + `curation.json` selection/order/transform (curation.py SSoT) into `<run-dir>/exports/`. The curation webview's "GIF 내보내기 / Export GIFs" button calls this via `POST /api/export-gif` (`serve_curation.run_export_gif`), and the v2 desktop app calls it via the `compose_sprite_gif` MCP tool's `run_dir` arg + the `export_curation_gif` Tauri command.
 - `gif_utils.py` — shared transparent-GIF writer used by the GIF/QA scripts.
 - `curation.py` — shared curation sidecar logic (schema + transform application) used by the compose scripts and the curation webview server. Single source of truth so they never drift.
 - `runio.py` — shared safe run-dir IO: the single-writer run-dir lock (`.sprite-gen.lock`) and atomic temp+replace writes used by the extract/compose/export/unpack writers, so two agents (for example Claude Code and Codex in parallel) cannot silently interleave writes into one character folder.

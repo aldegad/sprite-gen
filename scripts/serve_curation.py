@@ -156,6 +156,20 @@ def run_export(run_dir: Path) -> dict:
     return result
 
 
+def run_export_gif(run_dir: Path) -> dict:
+    """Export one clean transparent GIF per state under <run-dir>/exports/.
+
+    Reuses compose_sprite_gif.py --run-dir, which applies the same curation
+    selection/order/transform as the atlas compose (curation.py SSoT)."""
+    result = _run_script("compose_sprite_gif.py", run_dir)
+    if result["ok"] and result["stdout"]:
+        try:
+            result["gif"] = json.loads(result["stdout"])
+        except json.JSONDecodeError:
+            pass
+    return result
+
+
 class CurationHandler(BaseHTTPRequestHandler):
     run_dir: Path = Path(".")
     lang: str = "en"
@@ -253,6 +267,10 @@ class CurationHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/export":
                 result = run_export(self.run_dir)
+                self._send_json(result, 200 if result["ok"] else 500)
+                return
+            if path == "/api/export-gif":
+                result = run_export_gif(self.run_dir)
                 self._send_json(result, 200 if result["ok"] else 500)
                 return
         except Exception as exc:
