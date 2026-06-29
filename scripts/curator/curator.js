@@ -36,7 +36,7 @@ function matrixOf(t) {
 // --- i18n (en / ko; initial language from server --lang, toggle reloads) ----
 const STR = {
   en: {
-    title: "curation", compose: "Bake atlas", export: "Export PNGs",
+    title: "curation", compose: "Bake atlas", export: "Export PNGs", exportGif: "Export GIFs",
     groundGrid: "Ground grid", langOther: "한국어",
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
@@ -50,9 +50,10 @@ const STR = {
     zoneSeq: "Running sequence", zonePool: "Candidate pool — drag a cut up to add it", addToSeq: "✓ add", removeFromSeq: "✗ remove",
     hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "wheel = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
     exportDone: (n) => `${n} PNGs → curated/`,
+    exportGifDone: (n) => `${n} GIFs → exports/`,
   },
   ko: {
-    title: "큐레이션", compose: "아틀라스 굽기", export: "PNG 내보내기",
+    title: "큐레이션", compose: "아틀라스 굽기", export: "PNG 내보내기", exportGif: "GIF 내보내기",
     groundGrid: "바닥 그리드", langOther: "EN",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
@@ -66,6 +67,7 @@ const STR = {
     zoneSeq: "달리기 시퀀스", zonePool: "후보 풀 — 마음에 드는 컷을 위로 끌어 추가", addToSeq: "✓ 넣기", removeFromSeq: "✗ 빼기",
     hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "휠 = 확대/축소", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
     exportDone: (n) => `PNG ${n}장 → curated/`,
+    exportGifDone: (n) => `GIF ${n}개 → exports/`,
   },
 };
 let lang = "en";
@@ -836,6 +838,7 @@ function applyStaticLang() {
   document.getElementById("t-title").textContent = t("title");
   document.getElementById("compose").textContent = t("compose");
   document.getElementById("export").textContent = t("export");
+  document.getElementById("export-gif").textContent = t("exportGif");
   gridToggle.textContent = `${t("groundGrid")} ${document.body.classList.contains("show-grid") ? "▣" : "▢"}`;
   langToggle.textContent = t("langOther");
   document.getElementById("hintbar").innerHTML = t("hints").map((h) => `<span>${h}</span>`).join("");
@@ -873,6 +876,25 @@ document.getElementById("export").addEventListener("click", async (ev) => {
     if (!res.ok || !data.ok) throw new Error((data.stderr || data.error || "export failed").trim());
     const out = data.export || {};
     setStatus(STR[lang].exportDone(out.count || 0), "ok");
+  } catch (e) {
+    setStatus(t("exportFail") + e.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("export-gif").addEventListener("click", async (ev) => {
+  const btn = ev.currentTarget;
+  btn.disabled = true;
+  clearTimeout(saveTimer);
+  await save();
+  setStatus(t("exporting"));
+  try {
+    const res = await fetch("/api/export-gif", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error((data.stderr || data.error || "gif export failed").trim());
+    const gif = data.gif || {};
+    setStatus(STR[lang].exportGifDone((gif.exports || []).length), "ok");
   } catch (e) {
     setStatus(t("exportFail") + e.message, "err");
   } finally {
