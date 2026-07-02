@@ -1,17 +1,19 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+/* 깨끗한 라이트(화이트 베이스) 테마 — 중립 그레이 + 블루 액센트 1개 (2026-07-02) */
 :root {
-  --bg: #14161a;
-  --panel: #1c1f26;
-  --panel-2: #242832;
-  --line: #323844;
-  --text: #e7eaf0;
-  --muted: #8b93a3;
-  --accent: #5db0ff;
-  --accent-dim: #2c4a66;
-  --reject: #3a3f4a;
-  --danger: #ff6b6b;
-  --checker-a: #2a2e37;
-  --checker-b: #20242c;
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panel-2: #f1f3f6;
+  --line: #e4e7ec;
+  --text: #1f2430;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-dim: #dbe5fb;
+  --reject: #eceef2;
+  --danger: #dc2626;
+  --checker-a: #e9ebef;
+  --checker-b: #f4f5f7;
 }
 
 * { box-sizing: border-box; }
@@ -38,20 +40,21 @@ body {
 .muted { color: var(--muted); margin-left: 8px; font-weight: normal; }
 .actions { display: flex; align-items: center; gap: 12px; }
 .status { color: var(--muted); font-size: 12px; min-width: 80px; text-align: right; }
-.status.ok { color: #6fd08c; }
+.status.ok { color: #16a34a; }
 .status.err { color: var(--danger); }
 
 button {
-  background: var(--accent-dim);
+  background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 7px 14px;
   cursor: pointer;
   font-size: 13px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
-button:hover { background: #34597a; }
-button.ghost { background: transparent; padding: 3px 8px; font-size: 12px; }
+button:hover { background: var(--panel-2); border-color: #d3d8e0; }
+button.ghost { background: transparent; padding: 3px 8px; font-size: 12px; box-shadow: none; }
 button.ghost:hover { background: var(--panel-2); }
 /* (Alex 2026-05-28) flipX 활성 표시 — accent 색으로 강조. */
 button.ghost.flip-btn.active { background: var(--accent, #0ea5e9); color: #fff; }
@@ -104,8 +107,8 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 /* two rows per state: sequence (top) + candidate pool (bottom) */
 .zones { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .zone { border-radius: 8px; padding: 6px 8px 4px; }
-.zone-seq { background: rgba(93, 176, 255, 0.06); border: 1px solid var(--accent-dim); }
-.zone-pool { background: rgba(255, 255, 255, 0.02); border: 1px dashed var(--line); }
+.zone-seq { background: rgba(37, 99, 235, 0.04); border: 1px solid var(--accent-dim); }
+.zone-pool { background: rgba(17, 24, 39, 0.02); border: 1px dashed var(--line); }
 .zone-label {
   font-size: 11px;
   color: var(--muted);
@@ -159,7 +162,7 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 .card-top .sel-btn { cursor: inherit; }
 .card.dragging {
   border-color: var(--accent);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
   opacity: 0.97;
   cursor: grabbing;
   transition: none; /* fixed-positioned card must track the cursor 1:1 */
@@ -170,7 +173,7 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
   flex: 0 0 auto;
   border-radius: 8px;
   border: 2px dashed var(--accent-dim);
-  background: rgba(93, 176, 255, 0.07);
+  background: rgba(37, 99, 235, 0.05);
 }
 
 .stage {
@@ -210,7 +213,7 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
   pointer-events: none;
 }
 body.show-grid .grid-overlay { display: block; }
-body.show-grid .stage { background-image: none; background-color: #1a1d24; }
+body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .rotate-handle {
   position: absolute;
   top: 4px;

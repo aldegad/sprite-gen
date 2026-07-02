@@ -803,12 +803,12 @@ function drawGroundGrid(stage) {
       const [cx, cy] = center(gx, gy);
       diamond(cx, cy);
       const anchorTile = gx === 0 && gy === 0;
-      ctx.strokeStyle = anchorTile ? "rgba(93,176,255,0.95)" : "rgba(93,176,255,0.28)";
+      ctx.strokeStyle = anchorTile ? "rgba(37,99,235,0.9)" : "rgba(37,99,235,0.25)";
       ctx.stroke();
     }
   }
   // axis guide lines through the anchor (the true 2:1 slopes)
-  ctx.strokeStyle = "rgba(255,180,80,0.85)";
+  ctx.strokeStyle = "rgba(217,119,6,0.9)";
   ctx.lineWidth = 1.5;
   for (const [sx, sy] of [[1, 1], [1, -1]]) {
     ctx.beginPath();
