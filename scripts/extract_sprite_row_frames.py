@@ -148,19 +148,68 @@ def cell_geometry(cell: dict[str, Any]) -> tuple[int, int, int, int]:
     return width, height, safe_margin_x, safe_margin_y
 
 
-def _alpha_centroid_x(sprite: Image.Image) -> float:
+def _alpha_centroid_x(sprite: Image.Image, bottom_fraction: float = 1.0) -> float:
     alpha = sprite.getchannel("A")
     width, height = sprite.size
     pixels = alpha.load()
+    y_start = max(0, height - max(2, round(height * bottom_fraction)))
     total = 0
     weighted = 0.0
-    for y in range(height):
+    for y in range(y_start, height):
         for x in range(width):
             value = pixels[x, y]
             if value:
                 total += value
                 weighted += value * (x + 0.5)
+    if total == 0 and bottom_fraction < 1.0:
+        return _alpha_centroid_x(sprite, 1.0)
     return (weighted / total) if total else width / 2.0
+
+
+def _kcentroid_downscale(sprite: Image.Image, target_width: int, target_height: int) -> Image.Image:
+    # Astropulse kCentroid-style pixel-art downscale: each output pixel takes the
+    # centroid of the dominant 2-means color cluster of its source block, so dark
+    # outlines survive instead of being averaged away (LANCZOS) or arbitrarily
+    # sampled (NEAREST when the target grid does not match the art's pixel grid).
+    source = sprite.convert("RGBA")
+    source_width, source_height = source.size
+    src = source.load()
+    output = Image.new("RGBA", (target_width, target_height), (0, 0, 0, 0))
+    out = output.load()
+    for oy in range(target_height):
+        y0 = oy * source_height // target_height
+        y1 = max(y0 + 1, (oy + 1) * source_height // target_height)
+        for ox in range(target_width):
+            x0 = ox * source_width // target_width
+            x1 = max(x0 + 1, (ox + 1) * source_width // target_width)
+            block = [src[x, y] for y in range(y0, y1) for x in range(x0, x1)]
+            opaque = [p for p in block if p[3] >= 128]
+            if len(opaque) * 2 < len(block):
+                continue
+            if len(opaque) == 1:
+                out[ox, oy] = opaque[0]
+                continue
+            def luma(p):
+                return p[0] * 299 + p[1] * 587 + p[2] * 114
+            lo = min(opaque, key=luma)
+            hi = max(opaque, key=luma)
+            centroids = [lo[:3], hi[:3]]
+            assign = [0] * len(opaque)
+            for _ in range(3):
+                for i, p in enumerate(opaque):
+                    d0 = sum((p[c] - centroids[0][c]) ** 2 for c in range(3))
+                    d1 = sum((p[c] - centroids[1][c]) ** 2 for c in range(3))
+                    assign[i] = 0 if d0 <= d1 else 1
+                for cluster in (0, 1):
+                    members = [p for i, p in enumerate(opaque) if assign[i] == cluster]
+                    if members:
+                        centroids[cluster] = tuple(sum(p[c] for p in members) // len(members) for c in range(3))
+            dominant = 0 if assign.count(0) >= assign.count(1) else 1
+            members = [p for i, p in enumerate(opaque) if assign[i] == dominant]
+            color = tuple(sum(p[c] for p in members) // len(members) for c in range(3))
+            alpha_value = sum(p[3] for p in members) // len(members)
+            out[ox, oy] = (color[0], color[1], color[2], alpha_value)
+    return output
 
 
 def fit_to_cell(
@@ -172,17 +221,15 @@ def fit_to_cell(
     fit: dict[str, Any] | None = None,
 ) -> Image.Image:
     # `fit` comes from sprite-request.json ("fit" object) and is opt-in:
-    #   resample: "lanczos" (default) | "nearest"  — nearest keeps pixel-art edges crisp
-    #   align_x:  "bbox-center" (default) | "centroid" — centroid keeps the body stable
-    #             across frames whose content bbox width varies (extended arm/leg poses),
-    #             preventing per-frame horizontal jitter in walk/run rows
+    #   resample: "lanczos" (default) | "nearest" | "kcentroid" — kcentroid is the
+    #             pixel-art downscale that keeps 1px dark outlines readable
+    #   align_x:  "bbox-center" (default) | "centroid" | "foot-centroid" —
+    #             centroid stabilizes variable-width poses; foot-centroid anchors on
+    #             the bottom 20% alpha (the legs), so trailing hair/capes do not pull
+    #             the body off the cell axis (critical for runtime horizontal flip)
     #   align_y:  "center" (default) | "bottom" — bottom pins feet to a shared baseline
     fit = fit or {}
-    resample = (
-        Image.Resampling.NEAREST
-        if str(fit.get("resample", "lanczos")).lower() == "nearest"
-        else Image.Resampling.LANCZOS
-    )
+    resample_name = str(fit.get("resample", "lanczos")).lower()
     align_x = str(fit.get("align_x", "bbox-center")).lower()
     align_y = str(fit.get("align_y", "center")).lower()
     bbox = image.getbbox()
@@ -194,11 +241,21 @@ def fit_to_cell(
     max_height = max(1, cell_height - safe_margin_y * 2)
     scale = min(max_width / sprite.width, max_height / sprite.height, 1.0)
     if scale != 1.0:
-        sprite = sprite.resize(
-            (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
-            resample,
-        )
-    if align_x == "centroid":
+        new_size = (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale)))
+        if resample_name == "kcentroid":
+            sprite = _kcentroid_downscale(sprite, new_size[0], new_size[1])
+        else:
+            sprite = sprite.resize(
+                new_size,
+                Image.Resampling.NEAREST if resample_name == "nearest" else Image.Resampling.LANCZOS,
+            )
+        cropped = sprite.getbbox()
+        if cropped is not None:
+            sprite = sprite.crop(cropped)
+    if align_x == "foot-centroid":
+        left = round(cell_width / 2.0 - _alpha_centroid_x(sprite, 0.2))
+        left = max(0, min(cell_width - sprite.width, left))
+    elif align_x == "centroid":
         left = round(cell_width / 2.0 - _alpha_centroid_x(sprite))
         left = max(0, min(cell_width - sprite.width, left))
     else:
