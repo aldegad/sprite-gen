@@ -502,6 +502,14 @@ def register_row_frames(frames: list, slack_x: int = 8, slack_y: int = 3) -> lis
         canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
         canvas.alpha_composite(frame, (min(max(0, base_x + best_dx), canvas_width - frame.width), min(max(0, base_y + best_dy), canvas_height - frame.height)))
         registered.append(canvas)
+    # 공통 union bbox 로 크롭 — 슬랙 여백이 셀보다 커져 배치 시 하단(발)이
+    # 잘리는 것을 방지. 동일 박스 크롭이라 프레임 간 정합은 유지된다.
+    union = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
+    for canvas in registered:
+        union.alpha_composite(canvas)
+    bbox = union.getbbox()
+    if bbox is not None:
+        registered = [canvas.crop(bbox) for canvas in registered]
     return registered
 
 
