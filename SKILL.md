@@ -262,6 +262,14 @@ Optional `fit` object (opt-in; absent means legacy behavior). For pixel-art targ
 
 `prepare_sprite_run.py` exposes these as `--fit-resample`, `--fit-align-x`, `--fit-align-y`.
 
+For true pixel-perfect output (game-ready chunky pixel art with intact 1px outlines), use the `pixel_perfect` mode instead of `resample` — it removes ALL non-integer resampling:
+
+```json
+"fit": { "pixel_perfect": true, "logical_height": 32, "palette_size": 24, "align_x": "foot-centroid", "align_y": "bottom" }
+```
+
+Pipeline (unfake.js/pixeldetector-style): runs-based pixel pitch detection on the strip → edge-histogram grid phase alignment → dominant-cluster grid-snap downscale to true resolution → conform to `logical_height` (kCentroid) → run-wide shared median-cut palette (`palette_size`, kills frame-to-frame color flicker) → alpha binarization → integer NEAREST upscale into the cell. `detail_bias` (default true) prefers a near-black minority cluster (share ≥ 0.40, luma < 70/255) so eyes and outlines survive dominant voting. The final display scale is `cell_height // logical_height` — e.g. cell 64 + logical 32 → crisp 2× chunky pixels.
+
 Rectangular generation cells are allowed when the target motion benefits from hatch-pet-style row proportions:
 
 ```json
