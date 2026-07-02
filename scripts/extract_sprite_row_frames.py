@@ -148,7 +148,43 @@ def cell_geometry(cell: dict[str, Any]) -> tuple[int, int, int, int]:
     return width, height, safe_margin_x, safe_margin_y
 
 
-def fit_to_cell(image: Image.Image, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int) -> Image.Image:
+def _alpha_centroid_x(sprite: Image.Image) -> float:
+    alpha = sprite.getchannel("A")
+    width, height = sprite.size
+    pixels = alpha.load()
+    total = 0
+    weighted = 0.0
+    for y in range(height):
+        for x in range(width):
+            value = pixels[x, y]
+            if value:
+                total += value
+                weighted += value * (x + 0.5)
+    return (weighted / total) if total else width / 2.0
+
+
+def fit_to_cell(
+    image: Image.Image,
+    cell_width: int,
+    cell_height: int,
+    safe_margin_x: int,
+    safe_margin_y: int,
+    fit: dict[str, Any] | None = None,
+) -> Image.Image:
+    # `fit` comes from sprite-request.json ("fit" object) and is opt-in:
+    #   resample: "lanczos" (default) | "nearest"  — nearest keeps pixel-art edges crisp
+    #   align_x:  "bbox-center" (default) | "centroid" — centroid keeps the body stable
+    #             across frames whose content bbox width varies (extended arm/leg poses),
+    #             preventing per-frame horizontal jitter in walk/run rows
+    #   align_y:  "center" (default) | "bottom" — bottom pins feet to a shared baseline
+    fit = fit or {}
+    resample = (
+        Image.Resampling.NEAREST
+        if str(fit.get("resample", "lanczos")).lower() == "nearest"
+        else Image.Resampling.LANCZOS
+    )
+    align_x = str(fit.get("align_x", "bbox-center")).lower()
+    align_y = str(fit.get("align_y", "center")).lower()
     bbox = image.getbbox()
     target = Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0))
     if bbox is None:
@@ -160,15 +196,22 @@ def fit_to_cell(image: Image.Image, cell_width: int, cell_height: int, safe_marg
     if scale != 1.0:
         sprite = sprite.resize(
             (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
-            Image.Resampling.LANCZOS,
+            resample,
         )
-    left = (cell_width - sprite.width) // 2
-    top = (cell_height - sprite.height) // 2
+    if align_x == "centroid":
+        left = round(cell_width / 2.0 - _alpha_centroid_x(sprite))
+        left = max(0, min(cell_width - sprite.width, left))
+    else:
+        left = (cell_width - sprite.width) // 2
+    if align_y == "bottom":
+        top = max(0, cell_height - safe_margin_y - sprite.height)
+    else:
+        top = (cell_height - sprite.height) // 2
     target.alpha_composite(sprite, (left, top))
     return target
 
 
-def extract_component_frames(strip: Image.Image, frame_count: int, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int) -> list[Image.Image] | None:
+def extract_component_frames(strip: Image.Image, frame_count: int, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, fit: dict[str, Any] | None = None) -> list[Image.Image] | None:
     components = connected_components(strip)
     if not components:
         return None
@@ -197,16 +240,16 @@ def extract_component_frames(strip: Image.Image, frame_count: int, cell_width: i
         )
         groups[nearest_index].append(component)
 
-    return [fit_to_cell(component_group_image(strip, group), cell_width, cell_height, safe_margin_x, safe_margin_y) for group in groups]
+    return [fit_to_cell(component_group_image(strip, group), cell_width, cell_height, safe_margin_x, safe_margin_y, fit) for group in groups]
 
 
-def extract_slot_frames(strip: Image.Image, frame_count: int, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int) -> list[Image.Image]:
+def extract_slot_frames(strip: Image.Image, frame_count: int, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, fit: dict[str, Any] | None = None) -> list[Image.Image]:
     slot_width = strip.width / frame_count
     frames = []
     for index in range(frame_count):
         left = round(index * slot_width)
         right = round((index + 1) * slot_width)
-        frames.append(fit_to_cell(strip.crop((left, 0, right, strip.height)), cell_width, cell_height, safe_margin_x, safe_margin_y))
+        frames.append(fit_to_cell(strip.crop((left, 0, right, strip.height)), cell_width, cell_height, safe_margin_x, safe_margin_y, fit))
     return frames
 
 
@@ -277,6 +320,7 @@ def main() -> int:
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     states = list(request["states"]) if args.states == "all" else [state.strip() for state in args.states.split(",") if state.strip()]
     cell_width, cell_height, safe_margin_x, safe_margin_y = cell_geometry(request["cell"])
+    fit_config = request.get("fit") or {}
     chroma_key = tuple(int(value) for value in request["chroma_key"]["rgb"])
     frames_root = run_dir / "frames"
     rows = []
@@ -299,13 +343,13 @@ def main() -> int:
                 args.fringe_key_threshold,
                 args.fringe_delta,
             )
-        frames = extract_component_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y)
+        frames = extract_component_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
         method = "components"
         if frames is None:
             if not args.allow_slot_fallback:
                 all_errors.append(f"{state}: could not extract {frame_count} sprite components")
                 continue
-            frames = extract_slot_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y)
+            frames = extract_slot_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
             method = "slots-explicit"
 
         state_dir = frames_root / state
