@@ -604,6 +604,28 @@ def apply_palette(image: Image.Image, palette: list) -> Image.Image:
     return image
 
 
+def enforce_outline(image: Image.Image, strength: float = 0.62) -> Image.Image:
+    # 균일 오토 아웃라인: 실루엣 경계(투명 인접) 픽셀을 자기 색 기준으로 어둡게.
+    # 다운스케일에서 얇은 원본 외곽선이 패치워크로 살아남는 문제를 결정론으로 보정 —
+    # 모든 프레임/행에서 1 논리픽셀 외곽선이 보장돼 프레임 간 플리커도 줄인다.
+    pixels = image.load()
+    width, height = image.size
+    boundary = []
+    for y in range(height):
+        for x in range(width):
+            if pixels[x, y][3] < 128:
+                continue
+            for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                if nx < 0 or ny < 0 or nx >= width or ny >= height or pixels[nx, ny][3] < 128:
+                    boundary.append((x, y))
+                    break
+    keep = 1.0 - strength
+    for x, y in boundary:
+        r, g, b, _a = pixels[x, y]
+        pixels[x, y] = (int(r * keep), int(g * keep), int(b * keep), 255)
+    return image
+
+
 def fit_pixel_perfect(logical: Image.Image, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, scale: int, fit: dict[str, Any]) -> Image.Image:
     target = Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0))
     if logical.getbbox() is None:
@@ -838,8 +860,12 @@ def main() -> int:
         # 팔레트는 런 전체(모든 state 의 논리 프레임)에서 한 번 뽑아 공유한다 —
         # 프레임/행 간 색 흔들림(플리커) 제거 + 아이덴티티 색 고정.
         palette = build_shared_palette([f for entry in pending for f in entry["frames"]], palette_size)
+        outline_cfg = fit_config.get("outline", True)
         for entry in pending:
             quantized = [apply_palette(frame, palette) for frame in entry["frames"]]
+            if outline_cfg:
+                strength = 0.62 if outline_cfg is True else float(outline_cfg)
+                quantized = [enforce_outline(frame, strength) for frame in quantized]
             left, top = row_placement(quantized, cell_width, cell_height, safe_margin_y, pp_scale, fit_config)
             frames = [
                 place_row_frame(frame, cell_width, cell_height, pp_scale, left, top)
