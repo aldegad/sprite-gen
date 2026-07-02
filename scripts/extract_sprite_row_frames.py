@@ -166,7 +166,7 @@ def _alpha_centroid_x(sprite: Image.Image, bottom_fraction: float = 1.0) -> floa
     return (weighted / total) if total else width / 2.0
 
 
-def _kcentroid_downscale(sprite: Image.Image, target_width: int, target_height: int) -> Image.Image:
+def _kcentroid_downscale(sprite: Image.Image, target_width: int, target_height: int, detail_bias: bool = False) -> Image.Image:
     # Astropulse kCentroid-style pixel-art downscale: each output pixel takes the
     # centroid of the dominant 2-means color cluster of its source block, so dark
     # outlines survive instead of being averaged away (LANCZOS) or arbitrarily
@@ -189,25 +189,8 @@ def _kcentroid_downscale(sprite: Image.Image, target_width: int, target_height: 
             if len(opaque) == 1:
                 out[ox, oy] = opaque[0]
                 continue
-            def luma(p):
-                return p[0] * 299 + p[1] * 587 + p[2] * 114
-            lo = min(opaque, key=luma)
-            hi = max(opaque, key=luma)
-            centroids = [lo[:3], hi[:3]]
-            assign = [0] * len(opaque)
-            for _ in range(3):
-                for i, p in enumerate(opaque):
-                    d0 = sum((p[c] - centroids[0][c]) ** 2 for c in range(3))
-                    d1 = sum((p[c] - centroids[1][c]) ** 2 for c in range(3))
-                    assign[i] = 0 if d0 <= d1 else 1
-                for cluster in (0, 1):
-                    members = [p for i, p in enumerate(opaque) if assign[i] == cluster]
-                    if members:
-                        centroids[cluster] = tuple(sum(p[c] for p in members) // len(members) for c in range(3))
-            dominant = 0 if assign.count(0) >= assign.count(1) else 1
-            members = [p for i, p in enumerate(opaque) if assign[i] == dominant]
-            color = tuple(sum(p[c] for p in members) // len(members) for c in range(3))
-            alpha_value = sum(p[3] for p in members) // len(members)
+            color = _dominant_block_color(opaque, detail_bias)
+            alpha_value = sum(p[3] for p in opaque) // len(opaque)
             out[ox, oy] = (color[0], color[1], color[2], alpha_value)
     return output
 
@@ -268,7 +251,276 @@ def fit_to_cell(
     return target
 
 
-def extract_component_frames(strip: Image.Image, frame_count: int, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, fit: dict[str, Any] | None = None) -> list[Image.Image] | None:
+# --- pixel-perfect pipeline (fit.pixel_perfect) -----------------------------
+# unfake.js/pixeldetector 계열 접근: ① runs 기반으로 생성물의 논리 픽셀 pitch 검출
+# ② 에지 히스토그램으로 격자 위상(offset) 정렬 ③ 격자 단위 dominant-color 스냅
+# 다운스케일(진짜 해상도 복원) ④ 런 전체 공유 팔레트 양자화 + 알파 이진화
+# ⑤ 정수배 NEAREST 업스케일로 셀 배치. 비정수 리샘플이 전혀 없어 픽셀이 깨지지 않는다.
+
+
+def detect_pixel_pitch(strip: Image.Image, max_pitch: int = 24) -> int:
+    image = strip.convert("RGBA")
+    pixels = image.load()
+    width, height = image.size
+    histogram: dict[int, int] = {}
+
+    def quantized(p):
+        return (p[0] >> 4, p[1] >> 4, p[2] >> 4)
+
+    def record(run: int) -> None:
+        if 2 <= run <= max_pitch:
+            histogram[run] = histogram.get(run, 0) + 1
+
+    for y in range(0, height, 2):
+        run = 1
+        prev = None
+        for x in range(width):
+            p = pixels[x, y]
+            cur = None if p[3] < 128 else quantized(p)
+            if cur is not None and cur == prev:
+                run += 1
+            else:
+                if prev is not None:
+                    record(run)
+                run = 1
+            prev = cur
+        if prev is not None:
+            record(run)
+    for x in range(0, width, 2):
+        run = 1
+        prev = None
+        for y in range(height):
+            p = pixels[x, y]
+            cur = None if p[3] < 128 else quantized(p)
+            if cur is not None and cur == prev:
+                run += 1
+            else:
+                if prev is not None:
+                    record(run)
+                run = 1
+            prev = cur
+        if prev is not None:
+            record(run)
+    if not histogram:
+        return 1
+    pitch = max(histogram, key=lambda k: histogram[k])
+    return pitch if histogram[pitch] >= 24 and pitch >= 2 else 1
+
+
+def _grid_phase(image: Image.Image, pitch: int) -> tuple[int, int]:
+    pixels = image.convert("RGBA").load()
+    width, height = image.size
+    col_hits = [0] * pitch
+    row_hits = [0] * pitch
+    for y in range(0, height, 2):
+        for x in range(1, width):
+            a = pixels[x, y]
+            b = pixels[x - 1, y]
+            if abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2]) + abs(a[3] - b[3]) > 96:
+                col_hits[x % pitch] += 1
+    for x in range(0, width, 2):
+        for y in range(1, height):
+            a = pixels[x, y]
+            b = pixels[x, y - 1]
+            if abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2]) + abs(a[3] - b[3]) > 96:
+                row_hits[y % pitch] += 1
+    offset_x = max(range(pitch), key=lambda i: col_hits[i])
+    offset_y = max(range(pitch), key=lambda i: row_hits[i])
+    return offset_x, offset_y
+
+
+def _dominant_block_color(opaque: list, detail_bias: bool = False) -> tuple[int, int, int]:
+    if len(opaque) == 1:
+        return opaque[0][:3]
+
+    def luma(p):
+        return p[0] * 299 + p[1] * 587 + p[2] * 114
+
+    lo = min(opaque, key=luma)
+    hi = max(opaque, key=luma)
+    centroids = [lo[:3], hi[:3]]
+    assign = [0] * len(opaque)
+    for _ in range(3):
+        for i, p in enumerate(opaque):
+            d0 = sum((p[c] - centroids[0][c]) ** 2 for c in range(3))
+            d1 = sum((p[c] - centroids[1][c]) ** 2 for c in range(3))
+            assign[i] = 0 if d0 <= d1 else 1
+        for cluster in (0, 1):
+            members = [p for i, p in enumerate(opaque) if assign[i] == cluster]
+            if members:
+                centroids[cluster] = tuple(sum(p[c] for p in members) // len(members) for c in range(3))
+    dominant = 0 if assign.count(0) >= assign.count(1) else 1
+    if detail_bias:
+        # 눈/아웃라인 같은 어두운 소수 디테일 보존: 두 클러스터의 명도차가 크고
+        # 어두운 쪽 점유율이 1/3 이상이면 다수결 대신 어두운 클러스터를 택한다.
+        darker = 0 if luma(centroids[0]) <= luma(centroids[1]) else 1
+        share = assign.count(darker) / len(assign)
+        if (
+            darker != dominant
+            and share >= 0.40
+            and luma(centroids[darker]) < 70000
+            and luma(centroids[1 - darker]) - luma(centroids[darker]) > 50000
+        ):
+            dominant = darker
+    members = [p for i, p in enumerate(opaque) if assign[i] == dominant]
+    return tuple(sum(p[c] for p in members) // len(members) for c in range(3))
+
+
+def grid_snap_downscale(image: Image.Image, pitch: int, detail_bias: bool = False) -> Image.Image:
+    source = image.convert("RGBA")
+    width, height = source.size
+    offset_x, offset_y = _grid_phase(source, pitch)
+    x_edges = [0] + list(range(offset_x if offset_x > 0 else pitch, width, pitch)) + [width]
+    y_edges = [0] + list(range(offset_y if offset_y > 0 else pitch, height, pitch)) + [height]
+    x_edges = sorted(set(x_edges))
+    y_edges = sorted(set(y_edges))
+    pixels = source.load()
+    output = Image.new("RGBA", (len(x_edges) - 1, len(y_edges) - 1), (0, 0, 0, 0))
+    out = output.load()
+    for oy in range(len(y_edges) - 1):
+        for ox in range(len(x_edges) - 1):
+            block = [
+                pixels[x, y]
+                for y in range(y_edges[oy], y_edges[oy + 1])
+                for x in range(x_edges[ox], x_edges[ox + 1])
+            ]
+            opaque = [p for p in block if p[3] >= 128]
+            if len(opaque) * 2 < len(block):
+                continue
+            color = _dominant_block_color(opaque, detail_bias)
+            out[ox, oy] = (color[0], color[1], color[2], 255)
+    return output
+
+
+def binarize_alpha(image: Image.Image) -> Image.Image:
+    pixels = image.load()
+    for y in range(image.height):
+        for x in range(image.width):
+            p = pixels[x, y]
+            if p[3] < 128:
+                pixels[x, y] = (0, 0, 0, 0)
+            elif p[3] != 255:
+                pixels[x, y] = (p[0], p[1], p[2], 255)
+    return image
+
+
+def pixel_snap_logical(image: Image.Image, pitch: int, logical_width: int, logical_height: int, detail_bias: bool = True) -> Image.Image:
+    sprite = image
+    bbox = sprite.getbbox()
+    if bbox is not None:
+        sprite = sprite.crop(bbox)
+    if pitch >= 2:
+        sprite = grid_snap_downscale(sprite, pitch, detail_bias)
+        bbox = sprite.getbbox()
+        if bbox is not None:
+            sprite = sprite.crop(bbox)
+    if sprite.width > logical_width or sprite.height > logical_height:
+        scale = min(logical_width / sprite.width, logical_height / sprite.height)
+        sprite = _kcentroid_downscale(
+            sprite,
+            max(1, round(sprite.width * scale)),
+            max(1, round(sprite.height * scale)),
+            detail_bias,
+        )
+        bbox = sprite.getbbox()
+        if bbox is not None:
+            sprite = sprite.crop(bbox)
+    return binarize_alpha(sprite)
+
+
+def build_shared_palette(frames: list, size: int) -> list:
+    colors: list = []
+    for frame in frames:
+        pixels = frame.load()
+        for y in range(frame.height):
+            for x in range(frame.width):
+                p = pixels[x, y]
+                if p[3] >= 128:
+                    colors.append((p[0], p[1], p[2]))
+    if not colors:
+        return []
+
+    def box_widest(box):
+        best_range = -1
+        best_channel = 0
+        for channel in range(3):
+            lo = min(c[channel] for c in box)
+            hi = max(c[channel] for c in box)
+            if hi - lo > best_range:
+                best_range = hi - lo
+                best_channel = channel
+        return best_range, best_channel
+
+    boxes = [colors]
+    while len(boxes) < size:
+        best = None
+        for index, box in enumerate(boxes):
+            if len(box) < 2:
+                continue
+            spread, channel = box_widest(box)
+            if spread > 0 and (best is None or spread > best[0]):
+                best = (spread, channel, index)
+        if best is None:
+            break
+        _, channel, index = best
+        box = boxes.pop(index)
+        box.sort(key=lambda c: c[channel])
+        mid = len(box) // 2
+        boxes.append(box[:mid])
+        boxes.append(box[mid:])
+    return [
+        tuple(sum(c[channel] for c in box) // len(box) for channel in range(3))
+        for box in boxes
+        if box
+    ]
+
+
+def apply_palette(image: Image.Image, palette: list) -> Image.Image:
+    if not palette:
+        return image
+    pixels = image.load()
+    cache: dict = {}
+    for y in range(image.height):
+        for x in range(image.width):
+            p = pixels[x, y]
+            if p[3] < 128:
+                pixels[x, y] = (0, 0, 0, 0)
+                continue
+            key = (p[0], p[1], p[2])
+            if key not in cache:
+                cache[key] = min(
+                    palette,
+                    key=lambda c: (c[0] - key[0]) ** 2 + (c[1] - key[1]) ** 2 + (c[2] - key[2]) ** 2,
+                )
+            color = cache[key]
+            pixels[x, y] = (color[0], color[1], color[2], 255)
+    return image
+
+
+def fit_pixel_perfect(logical: Image.Image, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, scale: int, fit: dict[str, Any]) -> Image.Image:
+    target = Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0))
+    if logical.getbbox() is None:
+        return target
+    sprite = logical.resize((logical.width * scale, logical.height * scale), Image.Resampling.NEAREST)
+    align_x = str(fit.get("align_x", "foot-centroid")).lower()
+    align_y = str(fit.get("align_y", "bottom")).lower()
+    if align_x == "foot-centroid":
+        left = round(cell_width / 2.0 - _alpha_centroid_x(sprite, 0.2))
+    elif align_x == "centroid":
+        left = round(cell_width / 2.0 - _alpha_centroid_x(sprite))
+    else:
+        left = (cell_width - sprite.width) // 2
+    left = max(0, min(cell_width - sprite.width, left))
+    left -= left % scale  # 논리 픽셀 격자에 스냅(짝수 배치로 flip 대칭 보존)
+    if align_y == "bottom":
+        top = max(0, cell_height - safe_margin_y - sprite.height)
+    else:
+        top = (cell_height - sprite.height) // 2
+    target.alpha_composite(sprite, (left, top))
+    return target
+
+
+def extract_component_images(strip: Image.Image, frame_count: int) -> list[Image.Image] | None:
     components = connected_components(strip)
     if not components:
         return None
@@ -297,7 +549,14 @@ def extract_component_frames(strip: Image.Image, frame_count: int, cell_width: i
         )
         groups[nearest_index].append(component)
 
-    return [fit_to_cell(component_group_image(strip, group), cell_width, cell_height, safe_margin_x, safe_margin_y, fit) for group in groups]
+    return [component_group_image(strip, group) for group in groups]
+
+
+def extract_component_frames(strip: Image.Image, frame_count: int, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, fit: dict[str, Any] | None = None) -> list[Image.Image] | None:
+    images = extract_component_images(strip, frame_count)
+    if images is None:
+        return None
+    return [fit_to_cell(image, cell_width, cell_height, safe_margin_x, safe_margin_y, fit) for image in images]
 
 
 def extract_slot_frames(strip: Image.Image, frame_count: int, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, fit: dict[str, Any] | None = None) -> list[Image.Image]:
@@ -384,31 +643,19 @@ def main() -> int:
     all_errors: list[str] = []
     all_warnings: list[str] = []
 
-    for state in states:
-        if state not in request["states"]:
-            raise SystemExit(f"unknown state in request: {state}")
-        raw_path = run_dir / "raw" / f"{state}.png"
-        if not raw_path.is_file():
-            all_errors.append(f"{state}: missing raw strip {raw_path}")
-            continue
-        frame_count = int(request["states"][state]["frames"])
-        with Image.open(raw_path) as opened:
-            strip = remove_chroma_background(
-                opened,
-                chroma_key,
-                args.key_threshold,
-                args.fringe_key_threshold,
-                args.fringe_delta,
-            )
-        frames = extract_component_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
-        method = "components"
-        if frames is None:
-            if not args.allow_slot_fallback:
-                all_errors.append(f"{state}: could not extract {frame_count} sprite components")
-                continue
-            frames = extract_slot_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
-            method = "slots-explicit"
+    pixel_perfect = bool(fit_config.get("pixel_perfect"))
+    usable_width = max(1, cell_width - safe_margin_x * 2)
+    usable_height = max(1, cell_height - safe_margin_y * 2)
+    logical_height = int(fit_config.get("logical_height", usable_height // 2))
+    pp_scale = max(1, cell_height // max(1, logical_height))
+    if logical_height * pp_scale > cell_height:
+        pp_scale = max(1, usable_height // max(1, logical_height))
+    logical_width = max(1, cell_width // pp_scale)
+    pp_detail_bias = bool(fit_config.get("detail_bias", True))
+    palette_size = int(fit_config.get("palette_size", 24))
+    pending: list = []
 
+    def finalize_state(state: str, frames: list, frame_count: int, method: str) -> None:
         state_dir = frames_root / state
         state_dir.mkdir(parents=True, exist_ok=True)
         output_paths = []
@@ -429,6 +676,65 @@ def main() -> int:
                 "frame_records": frame_records,
                 "ok": not errors,
             }
+        )
+
+    for state in states:
+        if state not in request["states"]:
+            raise SystemExit(f"unknown state in request: {state}")
+        raw_path = run_dir / "raw" / f"{state}.png"
+        if not raw_path.is_file():
+            all_errors.append(f"{state}: missing raw strip {raw_path}")
+            continue
+        frame_count = int(request["states"][state]["frames"])
+        with Image.open(raw_path) as opened:
+            strip = remove_chroma_background(
+                opened,
+                chroma_key,
+                args.key_threshold,
+                args.fringe_key_threshold,
+                args.fringe_delta,
+            )
+        if pixel_perfect:
+            images = extract_component_images(strip, frame_count)
+            method = "components"
+            if images is None:
+                if not args.allow_slot_fallback:
+                    all_errors.append(f"{state}: could not extract {frame_count} sprite components")
+                    continue
+                slot_width = strip.width / frame_count
+                images = [
+                    strip.crop((round(i * slot_width), 0, round((i + 1) * slot_width), strip.height))
+                    for i in range(frame_count)
+                ]
+                method = "slots-explicit"
+            pitch = detect_pixel_pitch(strip)
+            logical_frames = [pixel_snap_logical(image, pitch, logical_width, logical_height, pp_detail_bias) for image in images]
+            pending.append({"state": state, "frame_count": frame_count, "method": method, "pitch": pitch, "frames": logical_frames})
+            continue
+        frames = extract_component_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
+        method = "components"
+        if frames is None:
+            if not args.allow_slot_fallback:
+                all_errors.append(f"{state}: could not extract {frame_count} sprite components")
+                continue
+            frames = extract_slot_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
+            method = "slots-explicit"
+        finalize_state(state, frames, frame_count, method)
+
+    if pixel_perfect and pending:
+        # 팔레트는 런 전체(모든 state 의 논리 프레임)에서 한 번 뽑아 공유한다 —
+        # 프레임/행 간 색 흔들림(플리커) 제거 + 아이덴티티 색 고정.
+        palette = build_shared_palette([f for entry in pending for f in entry["frames"]], palette_size)
+        for entry in pending:
+            quantized = [apply_palette(frame, palette) for frame in entry["frames"]]
+            frames = [
+                fit_pixel_perfect(frame, cell_width, cell_height, safe_margin_x, safe_margin_y, pp_scale, fit_config)
+                for frame in quantized
+            ]
+            finalize_state(entry["state"], frames, entry["frame_count"], entry["method"])
+        all_warnings.append(
+            "pixel-perfect: pitch=%s scale=%dx logical<=%dx%d palette=%d"
+            % (",".join(str(entry["pitch"]) for entry in pending), pp_scale, logical_width, logical_height, len(palette))
         )
 
     result = {
