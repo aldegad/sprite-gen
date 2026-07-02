@@ -366,10 +366,10 @@ def _dominant_block_color(opaque: list, detail_bias: bool = False) -> tuple[int,
     return tuple(sum(p[c] for p in members) // len(members) for c in range(3))
 
 
-def grid_snap_downscale(image: Image.Image, pitch: int, detail_bias: bool = False) -> Image.Image:
+def grid_snap_downscale(image: Image.Image, pitch: int, detail_bias: bool = False, phase: tuple[int, int] | None = None) -> Image.Image:
     source = image.convert("RGBA")
     width, height = source.size
-    offset_x, offset_y = _grid_phase(source, pitch)
+    offset_x, offset_y = phase if phase is not None else _grid_phase(source, pitch)
     x_edges = [0] + list(range(offset_x if offset_x > 0 else pitch, width, pitch)) + [width]
     y_edges = [0] + list(range(offset_y if offset_y > 0 else pitch, height, pitch)) + [height]
     x_edges = sorted(set(x_edges))
@@ -426,6 +426,113 @@ def pixel_snap_logical(image: Image.Image, pitch: int, logical_width: int, logic
         if bbox is not None:
             sprite = sprite.crop(bbox)
     return binarize_alpha(sprite)
+
+
+def conform_row_logical(images: list, logical_width: int, logical_height: int, detail_bias: bool = True) -> list:
+    # 행(row) 단위 크기 통일: 축소 배율을 행에서 가장 큰 프레임 기준 하나로 계산해
+    # 전 프레임에 동일 적용한다(프레임 간 크기 호흡 제거). 입력은 이미 격자 스냅된
+    # 논리 해상도 프레임들이다.
+    snapped = []
+    for image in images:
+        bbox = image.getbbox()
+        snapped.append(image.crop(bbox) if bbox else image)
+    max_width = max(s.width for s in snapped)
+    max_height = max(s.height for s in snapped)
+    if max_width > logical_width or max_height > logical_height:
+        scale = min(logical_width / max_width, logical_height / max_height)
+        conformed = []
+        for sprite in snapped:
+            resized = _kcentroid_downscale(
+                sprite,
+                max(1, round(sprite.width * scale)),
+                max(1, round(sprite.height * scale)),
+                detail_bias,
+            )
+            bbox = resized.getbbox()
+            conformed.append(resized.crop(bbox) if bbox else resized)
+        snapped = conformed
+    return [binarize_alpha(s) for s in snapped]
+
+
+def register_row_frames(frames: list, slack_x: int = 8, slack_y: int = 3) -> list:
+    # 프레임 간 정합: 로코모션에서 다리는 원래 움직이므로, 안정 부위(상체 65%)의
+    # 알파 겹침을 최대화하는 정수 시프트를 프레임마다 찾아 공통 캔버스에 앉힌다.
+    # 이후 배치는 행 공통(union) 기준 1회 계산 → 프레임 간 몸통 흔들림 제거.
+    cropped = []
+    for frame in frames:
+        bbox = frame.getbbox()
+        cropped.append(frame.crop(bbox) if bbox else frame)
+    canvas_width = max(f.width for f in cropped) + slack_x * 2
+    canvas_height = max(f.height for f in cropped) + slack_y * 2
+
+    def base_pos(f):
+        return ((canvas_width - f.width) // 2, canvas_height - slack_y - f.height)
+
+    reference = cropped[0]
+    ref_x, ref_y = base_pos(reference)
+    upper_limit = ref_y + int(reference.height * 0.65)
+    ref_pixels = reference.load()
+    ref_mask = set()
+    for y in range(reference.height):
+        if ref_y + y >= upper_limit:
+            break
+        for x in range(reference.width):
+            if ref_pixels[x, y][3] >= 128:
+                ref_mask.add((ref_x + x, ref_y + y))
+
+    registered = []
+    for index, frame in enumerate(cropped):
+        base_x, base_y = base_pos(frame)
+        best_dx, best_dy = 0, 0
+        if index > 0 and ref_mask:
+            pixels = frame.load()
+            points = [
+                (x, y)
+                for y in range(frame.height)
+                for x in range(frame.width)
+                if pixels[x, y][3] >= 128 and base_y + y < upper_limit
+            ]
+            best_score = -1
+            for dy in range(-slack_y, slack_y + 1):
+                for dx in range(-slack_x, slack_x + 1):
+                    score = sum(1 for (x, y) in points if (base_x + x + dx, base_y + y + dy) in ref_mask)
+                    if score > best_score:
+                        best_score = score
+                        best_dx, best_dy = dx, dy
+        canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
+        canvas.alpha_composite(frame, (min(max(0, base_x + best_dx), canvas_width - frame.width), min(max(0, base_y + best_dy), canvas_height - frame.height)))
+        registered.append(canvas)
+    return registered
+
+
+def row_placement(frames: list, cell_width: int, cell_height: int, safe_margin_y: int, scale: int, fit: dict[str, Any]) -> tuple[int, int]:
+    # 배치 오프셋을 행 union 기준으로 1회 계산해 전 프레임에 동일 적용한다.
+    union = Image.new("RGBA", frames[0].size, (0, 0, 0, 0))
+    for frame in frames:
+        union.alpha_composite(frame)
+    sprite = union.resize((union.width * scale, union.height * scale), Image.Resampling.NEAREST)
+    align_x = str(fit.get("align_x", "foot-centroid")).lower()
+    if align_x == "foot-centroid":
+        left = round(cell_width / 2.0 - _alpha_centroid_x(sprite, 0.2))
+    elif align_x == "centroid":
+        left = round(cell_width / 2.0 - _alpha_centroid_x(sprite))
+    else:
+        left = (cell_width - sprite.width) // 2
+    left = max(0, min(cell_width - sprite.width, left))
+    left -= left % scale
+    bbox = sprite.getbbox()
+    content_bottom = bbox[3] if bbox else sprite.height
+    top = max(0, cell_height - safe_margin_y - content_bottom)
+    return left, top
+
+
+def place_row_frame(frame: Image.Image, cell_width: int, cell_height: int, scale: int, left: int, top: int) -> Image.Image:
+    target = Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0))
+    if frame.getbbox() is None:
+        return target
+    sprite = frame.resize((frame.width * scale, frame.height * scale), Image.Resampling.NEAREST)
+    target.alpha_composite(sprite, (left, top))
+    return target
 
 
 def build_shared_palette(frames: list, size: int) -> list:
@@ -695,21 +802,27 @@ def main() -> int:
                 args.fringe_delta,
             )
         if pixel_perfect:
-            images = extract_component_images(strip, frame_count)
+            # 행 단위 픽셀퍼펙트: 스트립 전체를 공통 pitch/위상으로 먼저 스냅한 뒤
+            # 논리 해상도에서 컴포넌트를 추출한다 — 프레임 간 격자가 일치한다.
+            pitch = detect_pixel_pitch(strip)
+            work_strip = strip
+            if pitch >= 2:
+                work_strip = grid_snap_downscale(strip, pitch, pp_detail_bias, _grid_phase(strip.convert("RGBA"), pitch))
+            images = extract_component_images(work_strip, frame_count)
             method = "components"
             if images is None:
                 if not args.allow_slot_fallback:
                     all_errors.append(f"{state}: could not extract {frame_count} sprite components")
                     continue
-                slot_width = strip.width / frame_count
+                slot_width = work_strip.width / frame_count
                 images = [
-                    strip.crop((round(i * slot_width), 0, round((i + 1) * slot_width), strip.height))
+                    work_strip.crop((round(i * slot_width), 0, round((i + 1) * slot_width), work_strip.height))
                     for i in range(frame_count)
                 ]
                 method = "slots-explicit"
-            pitch = detect_pixel_pitch(strip)
-            logical_frames = [pixel_snap_logical(image, pitch, logical_width, logical_height, pp_detail_bias) for image in images]
-            pending.append({"state": state, "frame_count": frame_count, "method": method, "pitch": pitch, "frames": logical_frames})
+            logical_frames = conform_row_logical(images, logical_width, logical_height, pp_detail_bias)
+            registered = register_row_frames(logical_frames)
+            pending.append({"state": state, "frame_count": frame_count, "method": method, "pitch": pitch, "frames": registered})
             continue
         frames = extract_component_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
         method = "components"
@@ -727,8 +840,9 @@ def main() -> int:
         palette = build_shared_palette([f for entry in pending for f in entry["frames"]], palette_size)
         for entry in pending:
             quantized = [apply_palette(frame, palette) for frame in entry["frames"]]
+            left, top = row_placement(quantized, cell_width, cell_height, safe_margin_y, pp_scale, fit_config)
             frames = [
-                fit_pixel_perfect(frame, cell_width, cell_height, safe_margin_x, safe_margin_y, pp_scale, fit_config)
+                place_row_frame(frame, cell_width, cell_height, pp_scale, left, top)
                 for frame in quantized
             ]
             finalize_state(entry["state"], frames, entry["frame_count"], entry["method"])
