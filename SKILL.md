@@ -253,11 +253,11 @@ Every run starts with `sprite-request.json`. It owns the numeric recipe used by 
 Optional `fit` object (opt-in; absent means legacy behavior). For pixel-art targets and jitter-free locomotion use:
 
 ```json
-"fit": { "resample": "nearest", "align_x": "centroid", "align_y": "bottom" }
+"fit": { "resample": "kcentroid", "align_x": "foot-centroid", "align_y": "bottom" }
 ```
 
-- `resample` — `lanczos` (default) | `nearest`. Nearest keeps pixel-art edges crisp when the generated row is downscaled into the cell.
-- `align_x` — `bbox-center` (default) | `centroid`. Bbox-centering shifts the body left/right whenever a pose's content bbox width changes (extended arm/leg), which reads as per-frame horizontal jitter; alpha-centroid alignment keeps the body stable.
+- `resample` — `lanczos` (default) | `nearest` | `kcentroid`. `kcentroid` (Astropulse-style dominant-cluster downscale) keeps 1px dark outlines readable when the generated art's implied pixel grid does not match the target cell; `nearest` is crisp but drops off-grid outline pixels; `lanczos` blurs pixel art.
+- `align_x` — `bbox-center` (default) | `centroid` | `foot-centroid`. Bbox-centering shifts the body left/right whenever a pose's content bbox width changes (extended arm/leg), which reads as per-frame horizontal jitter. `centroid` aligns the whole-alpha centroid; `foot-centroid` aligns the bottom-20% alpha (the legs), so trailing hair/capes do not pull the body off the cell axis — use it when the runtime mirrors the cell for left/right facing (flip pivots on the leg axis instead of teleporting the body).
 - `align_y` — `center` (default) | `bottom`. Bottom pins feet to a shared baseline (`cell_height - safe_margin_y`).
 
 `prepare_sprite_run.py` exposes these as `--fit-resample`, `--fit-align-x`, `--fit-align-y`.
