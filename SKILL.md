@@ -250,6 +250,18 @@ Every run starts with `sprite-request.json`. It owns the numeric recipe used by 
 
 `256` is a default variable, not a hidden constant. Change it through the request, then regenerate guides, prompts, extraction, and atlas from the same request.
 
+Optional `fit` object (opt-in; absent means legacy behavior). For pixel-art targets and jitter-free locomotion use:
+
+```json
+"fit": { "resample": "nearest", "align_x": "centroid", "align_y": "bottom" }
+```
+
+- `resample` — `lanczos` (default) | `nearest`. Nearest keeps pixel-art edges crisp when the generated row is downscaled into the cell.
+- `align_x` — `bbox-center` (default) | `centroid`. Bbox-centering shifts the body left/right whenever a pose's content bbox width changes (extended arm/leg), which reads as per-frame horizontal jitter; alpha-centroid alignment keeps the body stable.
+- `align_y` — `center` (default) | `bottom`. Bottom pins feet to a shared baseline (`cell_height - safe_margin_y`).
+
+`prepare_sprite_run.py` exposes these as `--fit-resample`, `--fit-align-x`, `--fit-align-y`.
+
 Rectangular generation cells are allowed when the target motion benefits from hatch-pet-style row proportions:
 
 ```json

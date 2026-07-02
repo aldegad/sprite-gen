@@ -571,6 +571,9 @@ def main() -> int:
     parser.add_argument("--cell-height", type=int)
     parser.add_argument("--safe-margin", type=int, default=24)
     parser.add_argument("--chroma-key", default="auto", help="auto or #RRGGBB")
+    parser.add_argument("--fit-resample", choices=["lanczos", "nearest"], default=None, help="frame downscale filter; nearest keeps pixel-art edges crisp")
+    parser.add_argument("--fit-align-x", choices=["bbox-center", "centroid"], default=None, help="horizontal frame anchor; centroid stabilizes body position across variable-width poses")
+    parser.add_argument("--fit-align-y", choices=["center", "bottom"], default=None, help="vertical frame anchor; bottom pins feet to a shared baseline")
     parser.add_argument("--motion-phase-guides", action="store_true", help="draw simple per-frame motion phase hints into locomotion layout guides")
     parser.add_argument("--request", type=Path)
     parser.add_argument("--request-json")
@@ -615,6 +618,15 @@ def main() -> int:
         "style": raw_request.get("style", args.style),
         "motion_phase_guides": bool(raw_request.get("motion_phase_guides", args.motion_phase_guides)),
     }
+    fit = dict(raw_request.get("fit", {}))
+    if args.fit_resample is not None:
+        fit["resample"] = args.fit_resample
+    if args.fit_align_x is not None:
+        fit["align_x"] = args.fit_align_x
+    if args.fit_align_y is not None:
+        fit["align_y"] = args.fit_align_y
+    if fit:
+        request["fit"] = fit
 
     references = out_dir / "references" / "layout-guides"
     prompts = out_dir / "prompts"
