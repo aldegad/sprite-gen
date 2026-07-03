@@ -32,6 +32,11 @@ import os
 import subprocess
 import sys
 import tempfile
+
+try:
+    from PIL import Image
+except ImportError:  # pragma: no cover — 파이프라인 필수 의존성이지만 서버는 살아있게
+    Image = None
 import webbrowser
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -82,6 +87,17 @@ def build_run_state(run_dir: Path) -> dict:
             frame = {"index": index, "url": f"/{rel}", "present": present}
             if index < len(labels):
                 frame["label"] = labels[index]
+            if present and Image is not None:
+                # 실제 스프라이트 픽셀 크기(투명 패딩 제외 알파 bbox) — 사이즈 통일 검수용
+                try:
+                    with Image.open(run_dir / rel) as im:
+                        frame["size"] = [im.width, im.height]
+                        alpha = im.getchannel("A") if "A" in im.getbands() else None
+                        bbox = alpha.getbbox() if alpha is not None else im.getbbox()
+                        if bbox:
+                            frame["contentSize"] = [bbox[2] - bbox[0], bbox[3] - bbox[1]]
+                except OSError:
+                    pass
             frames.append(frame)
         states.append(
             {
