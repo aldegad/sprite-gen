@@ -63,6 +63,9 @@ The skill uses scripts as explicit pipeline commands, not as hidden imports. Eac
 SG=${ALEX_EXTENSIONS_DIR:-$HOME/Documents/workspace/personal/alex-extensions}/sprite-gen
 STAGE=$(mktemp -d); mkdir -p "$STAGE/pngs"
 cp <후보들> "$STAGE/pngs/"   # 의미 있는 이름으로: 1-hub-cube.png, 2-hook-plug.png ... (timestamp/uuid 파일명 금지)
+# 성격이 다른 이미지를 한 통에 붓지 마라 — 하위폴더 = 큐레이터 줄(state) 하나.
+# 예: pngs/reference/ (베이스/원본 레퍼런스 칸) + pngs/portraits/ (표정 세트 줄).
+# 셀 크기는 전 그룹 공유 최대치이므로, 거대한 레퍼런스는 미리 다른 후보 크기대로 축소해 넣는다.
 python3 "$SG/scripts/unpack_atlas_run.py" --pngs-dir "$STAGE/pngs" --out-dir "$STAGE/run" --force
 nohup python3 "$SG/scripts/serve_curation.py" --run-dir "$STAGE/run" --lang ko > "$STAGE/server.log" 2>&1 &
 sleep 2
