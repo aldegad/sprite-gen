@@ -624,6 +624,16 @@ function renderCard(state, frame) {
   // move past threshold = drag, clean click = toggle row — via wireReorder, so a
   // click on the button toggles there. A handler here would double-fire the toggle.
   if (frame.present) {
+    // 픽셀아트 확대 표시: 프레임 원본보다 크게 그려질 때만 pixelated (다운스케일 회화체는 부드럽게 유지)
+    const imgEl = card.querySelector(".stage img");
+    if (imgEl) {
+      const markPx = () =>
+        requestAnimationFrame(() => {
+          if (imgEl.naturalWidth && imgEl.clientWidth > imgEl.naturalWidth) imgEl.classList.add("px-upscale");
+        });
+      if (imgEl.complete) markPx();
+      else imgEl.addEventListener("load", markPx, { once: true });
+    }
     card.querySelector(".reset-btn").addEventListener("click", () =>
       resetTransform(state.name, frame.index, card.querySelector(".stage"))
     );
@@ -655,7 +665,7 @@ function renderPreview(state) {
     .join("");
   box.innerHTML =
     `<h4>${t("preview")}</h4>` +
-    `<canvas width="${run.cell.width}" height="${run.cell.height}" style="height:${(160 * aspect).toFixed(0)}px"></canvas>` +
+    `<canvas${run.cell.width < 160 ? ' class="px-upscale"' : ""} width="${run.cell.width}" height="${run.cell.height}" style="height:${(160 * aspect).toFixed(0)}px"></canvas>` +
     `<div class="count"></div>` +
     `<div class="pv-controls">` +
     `<button type="button" class="ghost pv-prev" title="${t("tPrev")}">⏮</button>` +
