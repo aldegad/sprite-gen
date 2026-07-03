@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -203,18 +204,20 @@ def fit_to_cell(
     safe_margin_y: int,
     fit: dict[str, Any] | None = None,
 ) -> Image.Image:
-    # `fit` comes from sprite-request.json ("fit" object) and is opt-in:
+    # `fit` comes from sprite-request.json ("fit" object):
     #   resample: "lanczos" (default) | "nearest" | "kcentroid" — kcentroid is the
     #             pixel-art downscale that keeps 1px dark outlines readable
-    #   align_x:  "bbox-center" (default) | "centroid" | "foot-centroid" —
-    #             centroid stabilizes variable-width poses; foot-centroid anchors on
-    #             the bottom 20% alpha (the legs), so trailing hair/capes do not pull
-    #             the body off the cell axis (critical for runtime horizontal flip)
-    #   align_y:  "center" (default) | "bottom" — bottom pins feet to a shared baseline
+    #   align_x:  "foot-centroid" (default) | "centroid" | "bbox-center" —
+    #             foot-centroid anchors on the bottom 20% alpha (the legs), so
+    #             trailing hair/capes do not pull the body off the cell axis
+    #             (critical for runtime horizontal flip)
+    #   align_y:  "bottom" (default) | "center" — bottom pins feet to a shared baseline
+    # 2026-07-04 (알렉스): 기본값을 foot-centroid/bottom 으로 승격 — 프레임 간
+    # "무게감"(발밑 기준선)이 기본으로 잡혀야 한다. pixel_perfect 경로와 동일 기본.
     fit = fit or {}
     resample_name = str(fit.get("resample", "lanczos")).lower()
-    align_x = str(fit.get("align_x", "bbox-center")).lower()
-    align_y = str(fit.get("align_y", "center")).lower()
+    align_x = str(fit.get("align_x", "foot-centroid")).lower()
+    align_y = str(fit.get("align_y", "bottom")).lower()
     bbox = image.getbbox()
     target = Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0))
     if bbox is None:
@@ -514,7 +517,8 @@ def register_row_frames(frames: list, slack_x: int = 8, slack_y: int = 3) -> lis
 
 
 def row_placement(frames: list, cell_width: int, cell_height: int, safe_margin_y: int, scale: int, fit: dict[str, Any]) -> tuple[int, int]:
-    # 배치 오프셋을 행 union 기준으로 1회 계산해 전 프레임에 동일 적용한다.
+    # 가로 배치 오프셋은 행 union 기준으로 1회 계산해 전 프레임에 동일 적용한다
+    # (플립 대칭·수평 안정). 세로는 place_row_frame 이 프레임별로 접지한다.
     union = Image.new("RGBA", frames[0].size, (0, 0, 0, 0))
     for frame in frames:
         union.alpha_composite(frame)
@@ -534,12 +538,22 @@ def row_placement(frames: list, cell_width: int, cell_height: int, safe_margin_y
     return left, top
 
 
-def place_row_frame(frame: Image.Image, cell_width: int, cell_height: int, scale: int, left: int, top: int) -> Image.Image:
+def place_row_frame(frame: Image.Image, cell_width: int, cell_height: int, scale: int, left: int, top: int, safe_margin_y: int | None = None, ground: bool = True) -> Image.Image:
+    # 2026-07-04 (알렉스): 세로는 프레임마다 콘텐츠 바닥을 공유 기준선에 접지한다 —
+    # 행 union 공동 top 만 쓰면 소스 스트립의 상하 요동이 이동으로 남아 프레임 간
+    # "무게감"(발밑 높이)이 들쭉해진다. perfectpixel-studio 의 프레임별 알파 가중
+    # 정렬과 같은 원리의 세로축 버전. 점프 같은 의도적 오프셋은 fit.ground_frames
+    # = false 로 끌 수 있다 (row_placement 의 공동 top 사용).
     target = Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0))
     if frame.getbbox() is None:
         return target
     sprite = frame.resize((frame.width * scale, frame.height * scale), Image.Resampling.NEAREST)
-    target.alpha_composite(sprite, (left, top))
+    frame_top = top
+    if ground and safe_margin_y is not None:
+        bbox = sprite.getbbox()
+        content_bottom = bbox[3] if bbox else sprite.height
+        frame_top = max(0, cell_height - safe_margin_y - content_bottom)
+    target.alpha_composite(sprite, (left, frame_top))
     return target
 
 
@@ -636,8 +650,12 @@ def enforce_outline(image: Image.Image, strength: float = 0.62) -> Image.Image:
 
 def fit_pixel_perfect(logical: Image.Image, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, scale: int, fit: dict[str, Any]) -> Image.Image:
     target = Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0))
-    if logical.getbbox() is None:
+    bbox = logical.getbbox()
+    if bbox is None:
         return target
+    # 콘텐츠 bbox 로 먼저 크롭 — 로지컬 셀의 투명 패딩째 바닥에 붙이면 패딩만큼
+    # 프레임마다 발이 떠서 바닥선("무게감")이 흔들린다 (알렉스 2026-07-04).
+    logical = logical.crop(bbox)
     sprite = logical.resize((logical.width * scale, logical.height * scale), Image.Resampling.NEAREST)
     align_x = str(fit.get("align_x", "foot-centroid")).lower()
     align_y = str(fit.get("align_y", "bottom")).lower()
@@ -677,6 +695,7 @@ def extract_component_images(strip: Image.Image, frame_count: int) -> list[Image
     groups: list[list[dict[str, Any]]] = [[seed] for seed in seeds]
     noise_threshold = max(12, largest_area * 0.002)
 
+    dropped = 0
     for component in components:
         if id(component) in seed_ids or component["area"] < noise_threshold:
             continue
@@ -684,7 +703,20 @@ def extract_component_images(strip: Image.Image, frame_count: int) -> list[Image
             range(len(seeds)),
             key=lambda index: abs(seeds[index]["center_x"] - component["center_x"]),
         )
-        groups[nearest_index].append(component)
+        # x 거리로만 붙이면 멀리 떨어진 파편(크로마 잔여물·분리된 이펙트)까지
+        # 병합돼 bbox 가 늘어나고 프레임 바닥선/크롭이 흔들린다 (알렉스 2026-07-04
+        # "이상한 거 딸려나오게 하지 마"). 시드 bbox 를 살짝 넓힌 근접 영역과
+        # 겹치는 위성만 병합하고, 나머지는 관측 가능하게 버린다.
+        sx0, sy0, sx1, sy1 = seeds[nearest_index]["bbox"]
+        pad_x = max(6, round((sx1 - sx0) * 0.15))
+        pad_y = max(6, round((sy1 - sy0) * 0.15))
+        cx0, cy0, cx1, cy1 = component["bbox"]
+        if cx0 < sx1 + pad_x and cx1 > sx0 - pad_x and cy0 < sy1 + pad_y and cy1 > sy0 - pad_y:
+            groups[nearest_index].append(component)
+        else:
+            dropped += 1
+    if dropped:
+        print(f"[extract] dropped {dropped} stray satellite component(s) outside seed proximity", file=sys.stderr)
 
     return [component_group_image(strip, group) for group in groups]
 
@@ -875,8 +907,9 @@ def main() -> int:
                 strength = 0.62 if outline_cfg is True else float(outline_cfg)
                 quantized = [enforce_outline(frame, strength) for frame in quantized]
             left, top = row_placement(quantized, cell_width, cell_height, safe_margin_y, pp_scale, fit_config)
+            ground_frames = bool(fit_config.get("ground_frames", True))
             frames = [
-                place_row_frame(frame, cell_width, cell_height, pp_scale, left, top)
+                place_row_frame(frame, cell_width, cell_height, pp_scale, left, top, safe_margin_y, ground_frames)
                 for frame in quantized
             ]
             finalize_state(entry["state"], frames, entry["frame_count"], entry["method"])
