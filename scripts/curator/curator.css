@@ -203,6 +203,9 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
   pointer-events: none;
   z-index: 1;
 }
+/* 원본 픽셀보다 확대 표시될 때만 붙는 클래스 — 픽셀아트 계단을 그대로 보여준다 */
+.stage img.px-upscale,
+.preview canvas.px-upscale { image-rendering: pixelated; }
 .grid-overlay {
   position: absolute;
   inset: 0;
