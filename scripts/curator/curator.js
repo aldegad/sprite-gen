@@ -48,6 +48,7 @@ const STR = {
     tReorder: "drag the card header to reorder; a plain click toggles sequence ⇄ pool",
     tPlay: "play", tPause: "pause", tPrev: "step back", tNext: "step forward", tSpeed: "playback speed",
     zoneSeq: "Running sequence", zonePool: "Candidate pool — drag a cut up to add it", addToSeq: "✓ add", removeFromSeq: "✗ remove",
+    cellPx: "cell", tContentPx: "actual sprite pixels (transparent padding excluded)",
     hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "wheel = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
     exportDone: (n) => `${n} PNGs → curated/`,
     exportGifDone: (n) => `${n} GIFs → exports/`,
@@ -65,6 +66,7 @@ const STR = {
     tReorder: "헤더를 잡고 드래그하면 순서변경, 그냥 클릭하면 시퀀스↔후보",
     tPlay: "재생", tPause: "일시정지", tPrev: "이전 프레임", tNext: "다음 프레임", tSpeed: "재생 속도",
     zoneSeq: "달리기 시퀀스", zonePool: "후보 풀 — 마음에 드는 컷을 위로 끌어 추가", addToSeq: "✓ 넣기", removeFromSeq: "✗ 빼기",
+    cellPx: "셀", tContentPx: "실제 스프라이트 픽셀 (투명 여백 제외)",
     hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "휠 = 확대/축소", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
     exportDone: (n) => `PNG ${n}장 → curated/`,
     exportGifDone: (n) => `GIF ${n}개 → exports/`,
@@ -531,7 +533,7 @@ function renderState(state) {
   head.className = "state-head";
   head.innerHTML =
     `<span class="name">${escapeHtml(state.name)}</span>` +
-    `<span class="meta">${state.requestFrames} ${t("frames")} · ${state.fps}fps · ${state.loop ? t("loop") : t("nonLoop")}</span>` +
+    `<span class="meta">${state.requestFrames} ${t("frames")} · ${state.fps}fps · ${state.loop ? t("loop") : t("nonLoop")} · ${t("cellPx")} ${run.cell.width}x${run.cell.height}px</span>` +
     (state.action ? `<span class="action">${escapeHtml(state.action)}</span>` : "") +
     (state.extractOk ? "" : `<span class="state-warn">${t("extractFail")}</span>`);
   wrap.appendChild(head);
@@ -615,6 +617,7 @@ function renderCard(state, frame) {
     `</div>` +
     `<div class="stage">${stageInner}</div>` +
     `<div class="card-controls">` +
+    `<span class="psize" title="${t("tContentPx")}">${frame.present && frame.contentSize ? `${frame.contentSize[0]}x${frame.contentSize[1]}px` : ""}</span>` +
     `<span class="tvals"></span>` +
     `<button type="button" class="ghost flip-btn" title="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
     `<button type="button" class="ghost reset-btn" title="${t("tReset")}">↺</button>` +
