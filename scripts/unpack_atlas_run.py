@@ -281,35 +281,59 @@ def write_run(
 
 
 def import_pngs(out_dir: Path, png_paths: list[Path], state_name: str, labels: list[str], iso: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Import a folder of separate PNGs as one state's frames (e.g. furniture set).
+    """단일 그룹 임포트 (하위호환 래퍼) — 그룹 지원 본체는 import_png_groups."""
+    return import_png_groups(out_dir, [{"name": state_name, "paths": png_paths, "labels": labels}], iso)
 
-    Each PNG becomes one frame so they can be compared side by side and given a
-    per-item transform in the curator. Originals are copied, not modified.
+
+def import_png_groups(out_dir: Path, groups: list[dict[str, Any]], iso: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Import separate PNGs as one or more curator rows (states).
+
+    groups: [{"name": str, "paths": [Path], "labels": [str]}] — 하위폴더 하나가
+    큐레이터 줄 하나가 된다 (예: reference/ 와 portraits/ 를 분리). 셀 크기는
+    전 그룹 공유 최대치라 카드 배율이 그룹 간에도 일관된다. 원본은 복사만 한다.
     """
-    imgs = [Image.open(p).convert("RGBA") for p in png_paths]
-    cell_w = max(i.width for i in imgs)
-    cell_h = max(i.height for i in imgs)
-    state_dir = out_dir / "frames" / state_name
-    state_dir.mkdir(parents=True, exist_ok=True)
-    files = []
-    for index, im in enumerate(imgs):
-        if im.size == (cell_w, cell_h):
-            framed = im
-        else:
-            framed = Image.new("RGBA", (cell_w, cell_h), (0, 0, 0, 0))
-            framed.alpha_composite(im, ((cell_w - im.width) // 2, (cell_h - im.height) // 2))
-        out = state_dir / f"frame-{index}.png"
-        atomic_save_image(framed, out)
-        files.append(str(out.relative_to(out_dir)))
+    loaded: list[tuple[dict[str, Any], list[Image.Image]]] = []
+    cell_w = 0
+    cell_h = 0
+    for group in groups:
+        imgs = [Image.open(p).convert("RGBA") for p in group["paths"]]
+        cell_w = max(cell_w, max(i.width for i in imgs))
+        cell_h = max(cell_h, max(i.height for i in imgs))
+        loaded.append((group, imgs))
 
+    request_states: dict[str, Any] = {}
+    manifest_rows = []
+    source_files: list[str] = []
+    source_labels: list[str] = []
+    for group, imgs in loaded:
+        state_name = str(group["name"])
+        labels = list(group.get("labels", []))
+        state_dir = out_dir / "frames" / state_name
+        state_dir.mkdir(parents=True, exist_ok=True)
+        files = []
+        for index, im in enumerate(imgs):
+            if im.size == (cell_w, cell_h):
+                framed = im
+            else:
+                framed = Image.new("RGBA", (cell_w, cell_h), (0, 0, 0, 0))
+                framed.alpha_composite(im, ((cell_w - im.width) // 2, (cell_h - im.height) // 2))
+            out = state_dir / f"frame-{index}.png"
+            atomic_save_image(framed, out)
+            files.append(str(out.relative_to(out_dir)))
+        request_states[state_name] = {"frames": len(imgs), "fps": 2, "loop": False, "action": "imported still set"}
+        manifest_rows.append({"state": state_name, "frames": len(imgs), "method": "imported-pngs", "files": files, "labels": labels, "ok": True})
+        source_files.extend(p.name for p in group["paths"])
+        source_labels.extend(labels)
+
+    first_dir = groups[0]["paths"][0].parent
     request = {
         "version": 1,
         "kind": "sprite-gen-request",
         "engine": "component-row",
-        "character": {"id": out_dir.name, "description": f"imported PNG set from {png_paths[0].parent}"},
+        "character": {"id": out_dir.name, "description": f"imported PNG set from {first_dir}"},
         "cell": {"shape": "square" if cell_w == cell_h else "rect", "width": cell_w, "height": cell_h, "size": cell_w, "safe_margin": 0},
         "chroma_key": {"name": "magenta", "hex": "#FF00FF", "rgb": [255, 0, 255]},
-        "states": {state_name: {"frames": len(imgs), "fps": 2, "loop": False, "action": "imported still set"}},
+        "states": request_states,
     }
     if iso:
         request["iso"] = iso  # ground-grid geometry for the curator overlay
@@ -317,16 +341,17 @@ def import_pngs(out_dir: Path, png_paths: list[Path], state_name: str, labels: l
     atomic_write_text(
         out_dir / "frames" / "frames-manifest.json",
         json.dumps({"ok": True, "engine": "component-row", "run_dir": str(out_dir), "cell": request["cell"],
-                    "rows": [{"state": state_name, "frames": len(imgs), "method": "imported-pngs", "files": files, "labels": labels, "ok": True}],
-                    "errors": [], "warnings": []}, ensure_ascii=False, indent=2) + "\n",
+                    "rows": manifest_rows, "errors": [], "warnings": []}, ensure_ascii=False, indent=2) + "\n",
     )
     atomic_write_text(
         out_dir / "unpack-source.json",
         json.dumps({"version": 1, "kind": "sprite-gen-unpack-source", "layout_source": "imported-pngs",
-                    "cell": {"width": cell_w, "height": cell_h}, "source_dir": str(png_paths[0].parent),
-                    "files": [p.name for p in png_paths], "labels": labels}, ensure_ascii=False, indent=2) + "\n",
+                    "cell": {"width": cell_w, "height": cell_h}, "source_dir": str(first_dir),
+                    "files": source_files, "labels": source_labels,
+                    "groups": [str(g["name"]) for g in groups]}, ensure_ascii=False, indent=2) + "\n",
     )
-    return {"layout_source": "imported-pngs", "states": [state_name], "cell": [cell_w, cell_h], "frames": len(imgs)}
+    return {"layout_source": "imported-pngs", "states": [str(g["name"]) for g in groups], "cell": [cell_w, cell_h],
+            "frames": sum(len(imgs) for _, imgs in loaded)}
 
 
 def parse_grid(value: str) -> tuple[int, int]:
@@ -373,20 +398,20 @@ def main() -> int:
         raise SystemExit(f"cannot create run dir next to the input: {out_dir}\n  {exc}\n  pass --out-dir <writable path> to choose another location")
     acquire_run_dir_lock(out_dir, "unpack_atlas_run")
 
-    # --pngs-dir: import a folder of separate PNGs (e.g. a furniture set)
+    # --pngs-dir: import a folder of separate PNGs (e.g. a furniture set).
+    # 하위폴더가 있으면 각 하위폴더가 큐레이터 줄(state) 하나가 된다 —
+    # 예: reference/ (베이스 이미지 칸) + portraits/ (표정 세트 줄).
     if args.pngs_dir:
         src = args.pngs_dir.expanduser().resolve()
-        png_paths = sorted(p for p in src.glob("*.png"))
-        if not png_paths:
-            raise SystemExit(f"no PNGs in {src}")
+        top_pngs = sorted(p for p in src.glob("*.png"))
+        subdirs = sorted(d for d in src.iterdir() if d.is_dir())
         # prefer human names from a sibling meta.json (file -> item name), else filename stem
-        labels = [p.stem for p in png_paths]
+        file_to_name: dict[str, str] = {}
         iso = None
         meta_path = src / "meta.json"
         if meta_path.is_file():
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             file_to_name = {info.get("file"): name for name, info in meta.get("items", {}).items() if isinstance(info, dict)}
-            labels = [file_to_name.get(p.name, p.stem) for p in png_paths]
             tile = meta.get("tile")
             anchor = meta.get("anchor")
             if tile and anchor:
@@ -396,7 +421,18 @@ def main() -> int:
                     "anchor_pixel": anchor.get("pixel", [128, 222]),
                     "canvas": meta.get("style", {}).get("canvas", [256, 256]),
                 }
-        result = import_pngs(out_dir, png_paths, args.state_name, labels, iso)
+        groups: list[dict[str, Any]] = []
+        if top_pngs:
+            groups.append({"name": args.state_name, "paths": top_pngs,
+                           "labels": [file_to_name.get(p.name, p.stem) for p in top_pngs]})
+        for sub in subdirs:
+            sub_pngs = sorted(p for p in sub.glob("*.png"))
+            if sub_pngs:
+                groups.append({"name": sub.name, "paths": sub_pngs,
+                               "labels": [file_to_name.get(p.name, p.stem) for p in sub_pngs]})
+        if not groups:
+            raise SystemExit(f"no PNGs in {src}")
+        result = import_png_groups(out_dir, groups, iso)
         result["ok"] = True
         result["out_dir"] = str(out_dir)
         print(json.dumps(result, ensure_ascii=False, indent=2))
