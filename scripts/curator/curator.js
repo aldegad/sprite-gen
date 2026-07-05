@@ -40,6 +40,7 @@ const STR = {
     groundGrid: "Ground grid", langOther: "한국어",
     ppApply: "Pixel-perfect", ppViewPixel: "View: perfected", ppViewPlain: "View: original",
     baseNote: "identity reference — not baked",
+    pxGrid: "Pixel grid", tPxGrid: "overlay the cell pixel raster (display only)",
     tPpApply: "bake the pixel-perfected frames (off = bake the pre-pixel-perfect originals)",
     tPpView: "toggle the displayed variant (view only — the checkbox decides the bake)",
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
@@ -62,6 +63,7 @@ const STR = {
     groundGrid: "바닥 그리드", langOther: "EN",
     ppApply: "픽셀퍼펙트 적용", ppViewPixel: "보기: 적용 후", ppViewPlain: "보기: 적용 전",
     baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
+    pxGrid: "픽셀 그리드", tPxGrid: "셀 픽셀 래스터 오버레이 (표시 전용)",
     tPpApply: "체크 = 픽셀퍼펙트 프레임으로 굽기, 해제 = 적용 전 원본으로 굽기",
     tPpView: "표시만 전/후 전환 (굽기는 체크박스가 결정)",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
@@ -98,6 +100,16 @@ let ppView = "pixel";    // which variant the cards/preview display right now
 
 function frameUrl(frame) {
   return ppView === "plain" && frame.plainUrl ? frame.plainUrl : frame.url;
+}
+
+// 픽셀 그리드 오버레이: 스테이지 표시 배율에 맞춰 셀 픽셀 간격을 계산한다.
+function sizePxGrids() {
+  document.querySelectorAll(".stage").forEach((stage) => {
+    const overlay = stage.querySelector(".pxgrid");
+    if (!overlay) return;
+    const ds = stage.clientWidth / run.cell.width;
+    overlay.style.backgroundSize = `${ds}px ${ds}px`;
+  });
 }
 
 function refreshVariantImages() {
@@ -644,6 +656,7 @@ function renderCard(state, frame) {
 
   const stageInner = frame.present
     ? (run.iso ? `<canvas class="grid-overlay"></canvas>` : "") +
+      `<div class="pxgrid"></div>` +
       `<img src="${frameUrl(frame)}" alt="frame ${frame.index}" draggable="false" />` +
       `<div class="rotate-handle" title="${t("tRotate")}"></div>` +
       `<div class="shear-handle" title="${t("tShear")}"></div>`
@@ -899,6 +912,10 @@ function applyStaticLang() {
   langToggle.textContent = t("langOther");
   const ppLabel = document.getElementById("pp-label");
   if (ppLabel) ppLabel.textContent = t("ppApply");
+  const pxLabel = document.getElementById("pxgrid-label");
+  if (pxLabel) pxLabel.textContent = t("pxGrid");
+  const pxWrap = document.getElementById("pxgrid-wrap");
+  if (pxWrap) pxWrap.title = t("tPxGrid");
   const ppWrap = document.getElementById("pp-wrap");
   if (ppWrap) ppWrap.title = t("tPpApply");
   const ppViewBtn = document.getElementById("pp-view");
@@ -1056,10 +1073,19 @@ async function boot() {
       refreshVariantImages();
     });
   }
+  // 픽셀 그리드 체크박스 — 표시 전용 오버레이 (굽기와 무관)
+  const pxWrap = document.getElementById("pxgrid-wrap");
+  const pxCheck = document.getElementById("pxgrid-check");
+  pxWrap.hidden = false;
+  pxCheck.addEventListener("change", () => {
+    document.body.classList.toggle("show-pxgrid", pxCheck.checked);
+    if (pxCheck.checked) sizePxGrids();
+  });
   seedEntries();
   if (run.baseUrl) renderBaseRow();
   for (const state of run.states) renderState(state);
   refreshVariantImages();
+  sizePxGrids();
   setStatus(run.curation && Object.keys(run.curation.states || {}).length ? t("loaded") : t("ready"));
 }
 
