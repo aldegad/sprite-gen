@@ -273,6 +273,10 @@ For true pixel-perfect output (game-ready chunky pixel art with intact 1px outli
 
 Pipeline (unfake.js/pixeldetector-style): runs-based pixel pitch detection on the strip → edge-histogram grid phase alignment → dominant-cluster grid-snap downscale to true resolution → conform to `logical_height` (kCentroid) → run-wide shared median-cut palette (`palette_size`, kills frame-to-frame color flicker) → alpha binarization → integer NEAREST upscale into the cell. `detail_bias` (default true) prefers a near-black minority cluster (share ≥ 0.40, luma < 70/255) so eyes and outlines survive dominant voting. The final display scale is `cell_height // logical_height` — e.g. cell 64 + logical 32 → crisp 2× chunky pixels.
 
+**Stage ownership (불변).** 픽셀퍼펙트는 **row 추출 단계에서만** 적용한다. 베이스/앵커 생성 단계는 타깃 스타일(픽셀 룩 vs 2D 일러스트 vs 3D/실사풍)을 프롬프트·레퍼런스로 잠글 뿐, 픽셀퍼펙트 후처리를 하지 않는다 — 베이스는 row 의 identity truth 라 가공 없이 원본으로 쓴다. 생성 프롬프트가 "TRUE NxN pixel grid" 를 명시하면 raw 가 로지컬 축소와 잘 맞물리지만, 모델이 완벽한 균일 그리드로 그리지는 않으므로(검증: 검출 피치 2) 정렬 강제는 여전히 추출 단계 몫이다.
+
+**전/후 쌍둥이 + 큐레이터 선택 (2026-07-05).** `fit.pixel_perfect` 런에서 추출은 픽셀퍼펙트 결과(`frame-N.png`, canonical)와 함께 **적용 전 쌍둥이 `frame-N.plain.png`** 도 저장한다(같은 스트립을 기존 fit 경로로 셀에 앉힌 결과; 실패 시 warning 으로 관측, plain 만 빠진다). 큐레이션 웹뷰 우측 상단에 **"보기: 적용 후/전" 토글**(표시만 전환)과 **"픽셀퍼펙트 적용" 체크박스**(굽기 결정 → `curation.json.pixel_perfect`)가 뜬다. 체크 해제 시 compose·GIF·PNG export 전부 `.plain.png` 변형을 굽고(`frame_variant`/`frame_filename` 리졸버 — curation.py SSoT), plain 파일이 없으면 조용한 폴백 없이 에러다. report/manifest 에 `frame_variant` 가 기록된다.
+
 Rectangular generation cells are allowed when the target motion benefits from hatch-pet-style row proportions:
 
 ```json
@@ -475,6 +479,7 @@ Do not let multiple workers write the same character folder.
 {
   "version": 1,
   "kind": "sprite-gen-curation",
+  "pixel_perfect": true,
   "states": {
     "idle": {
       "selected": [0, 2, 3],
@@ -487,6 +492,7 @@ Do not let multiple workers write the same character folder.
 }
 ```
 
+- `pixel_perfect` — top-level, 웹뷰 우측 상단 체크박스. `false` → compose/export 가 적용 전 쌍둥이(`frame-N.plain.png`)를 굽는다. 없거나 `true` → canonical `frame-N.png`. plain 쌍둥이가 없는 런에서는 무의미(비 pixel_perfect fit).
 - `selected` — 0-based frame indices in play order. Absent/empty → all extracted frames in order.
 - `order` — optional, webview-owned: the full display order (sequence row then candidate-pool row) so reopening the curator restores the exact arrangement of both rows. `compose` / `state_plan` ignore it and key off `selected`.
 - `transforms` — keyed by 0-based frame index. `rotate` degrees (counter-clockwise positive, PIL convention), `scale` multiplier about center, `dx`/`dy` pixel offsets in the cell (+x right, +y down), `shx`/`shy` shear, `flipX` (0|1) horizontal mirror. Absent → identity.

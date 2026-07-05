@@ -38,6 +38,9 @@ const STR = {
   en: {
     title: "curation", compose: "Bake atlas", export: "Export PNGs", exportGif: "Export GIFs",
     groundGrid: "Ground grid", langOther: "한국어",
+    ppApply: "Pixel-perfect", ppViewPixel: "View: perfected", ppViewPlain: "View: original",
+    tPpApply: "bake the pixel-perfected frames (off = bake the pre-pixel-perfect originals)",
+    tPpView: "toggle the displayed variant (view only — the checkbox decides the bake)",
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
@@ -56,6 +59,9 @@ const STR = {
   ko: {
     title: "큐레이션", compose: "아틀라스 굽기", export: "PNG 내보내기", exportGif: "GIF 내보내기",
     groundGrid: "바닥 그리드", langOther: "EN",
+    ppApply: "픽셀퍼펙트 적용", ppViewPixel: "보기: 적용 후", ppViewPlain: "보기: 적용 전",
+    tPpApply: "체크 = 픽셀퍼펙트 프레임으로 굽기, 해제 = 적용 전 원본으로 굽기",
+    tPpView: "표시만 전/후 전환 (굽기는 체크박스가 결정)",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
@@ -82,6 +88,26 @@ let run = null; // /api/run snapshot
 let entries = {}; // { stateName: { order: [idx], sel: Set<idx>, transforms: { idx: {..} } } }
 const imageCache = new Map();
 const previews = {}; // stateName -> { playing, speed, cursor } preview transport state
+
+// --- pixel-perfect variant (fit.pixel_perfect runs save a .plain.png twin) --
+let ppAvailable = false; // any frame has a plain (pre-pixel-perfect) twin
+let ppApply = true;      // curation.json `pixel_perfect` — what compose bakes
+let ppView = "pixel";    // which variant the cards/preview display right now
+
+function frameUrl(frame) {
+  return ppView === "plain" && frame.plainUrl ? frame.plainUrl : frame.url;
+}
+
+function refreshVariantImages() {
+  document.querySelectorAll(".card").forEach((card) => {
+    const st = run.states.find((s) => s.name === card.dataset.state);
+    const f = st && st.frames[Number(card.dataset.idx)];
+    const el = card.querySelector(".stage img");
+    if (f && el) el.src = frameUrl(f);
+  });
+  const viewBtn = document.getElementById("pp-view");
+  if (viewBtn) viewBtn.textContent = ppView === "plain" ? t("ppViewPlain") : t("ppViewPixel");
+}
 
 const statusEl = document.getElementById("status");
 let saveTimer = null;
@@ -138,7 +164,10 @@ function buildPayload() {
       transforms,
     };
   }
-  return { version: run.schemaVersion || 1, kind: "sprite-gen-curation", states };
+  const payload = { version: run.schemaVersion || 1, kind: "sprite-gen-curation", states };
+  // only meaningful when the run saved plain twins — the top-right checkbox
+  if (ppAvailable) payload.pixel_perfect = ppApply;
+  return payload;
 }
 
 function scheduleSave() {
@@ -601,7 +630,7 @@ function renderCard(state, frame) {
 
   const stageInner = frame.present
     ? (run.iso ? `<canvas class="grid-overlay"></canvas>` : "") +
-      `<img src="${frame.url}" alt="frame ${frame.index}" draggable="false" />` +
+      `<img src="${frameUrl(frame)}" alt="frame ${frame.index}" draggable="false" />` +
       `<div class="rotate-handle" title="${t("tRotate")}"></div>` +
       `<div class="shear-handle" title="${t("tShear")}"></div>`
     : `<div class="missing-label">missing</div>`;
@@ -709,7 +738,7 @@ function startPreview(state) {
     const idx = play[pv.cursor];
     pv.shown = idx; // remember which frame is on screen (for reanchoring on edits)
     const f = state.frames[idx];
-    const image = f ? img(f.url) : null;
+    const image = f ? img(frameUrl(f)) : null;
     if (image && image.complete && image.naturalWidth) {
       const tr = getTransform(state.name, idx);
       const m = matrixOf(tr);
@@ -854,6 +883,15 @@ function applyStaticLang() {
   document.getElementById("export-gif").textContent = t("exportGif");
   gridToggle.textContent = `${t("groundGrid")} ${document.body.classList.contains("show-grid") ? "▣" : "▢"}`;
   langToggle.textContent = t("langOther");
+  const ppLabel = document.getElementById("pp-label");
+  if (ppLabel) ppLabel.textContent = t("ppApply");
+  const ppWrap = document.getElementById("pp-wrap");
+  if (ppWrap) ppWrap.title = t("tPpApply");
+  const ppViewBtn = document.getElementById("pp-view");
+  if (ppViewBtn) {
+    ppViewBtn.title = t("tPpView");
+    ppViewBtn.textContent = ppView === "plain" ? t("ppViewPlain") : t("ppViewPixel");
+  }
   document.getElementById("hintbar").innerHTML = t("hints").map((h) => `<span>${h}</span>`).join("");
 }
 
@@ -979,11 +1017,34 @@ async function boot() {
   // initial language: ?lang= (set by the toggle) overrides the server --lang
   lang = new URLSearchParams(location.search).get("lang") || run.lang || "en";
   document.documentElement.lang = lang;
+  // pixel-perfect twin state must resolve BEFORE first render (frameUrl reads it)
+  ppAvailable = run.states.some((s) => s.frames.some((f) => f.plainUrl));
+  ppApply = !(run.curation && run.curation.pixel_perfect === false);
+  ppView = ppApply ? "pixel" : "plain";
   applyStaticLang();
   document.getElementById("character").textContent = `${run.characterId} · ${run.cell.width}×${run.cell.height}`;
   if (run.iso) gridToggle.hidden = false;
+  if (ppAvailable) {
+    const ppWrap = document.getElementById("pp-wrap");
+    const ppCheck = document.getElementById("pp-apply");
+    const ppViewBtn = document.getElementById("pp-view");
+    ppWrap.hidden = false;
+    ppViewBtn.hidden = false;
+    ppCheck.checked = ppApply;
+    ppCheck.addEventListener("change", () => {
+      ppApply = ppCheck.checked;
+      ppView = ppApply ? "pixel" : "plain"; // 표시가 선택을 따라간다
+      refreshVariantImages();
+      scheduleSave();
+    });
+    ppViewBtn.addEventListener("click", () => {
+      ppView = ppView === "pixel" ? "plain" : "pixel";
+      refreshVariantImages();
+    });
+  }
   seedEntries();
   for (const state of run.states) renderState(state);
+  refreshVariantImages();
   setStatus(run.curation && Object.keys(run.curation.states || {}).length ? t("loaded") : t("ready"));
 }
 

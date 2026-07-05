@@ -15,7 +15,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from curation import apply_transform, load_curation, state_plan
+from curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
 from gif_utils import delay_ticks_to_duration_ms, gif_report, save_clean_gif
 
 
@@ -113,7 +113,7 @@ def run_dir_mode(args: argparse.Namespace) -> int:
         ordered, transforms = state_plan(curation, state, count)
         images: list[Image.Image] = []
         for index in ordered:
-            path = run_dir / "frames" / state / f"frame-{index}.png"
+            path = run_dir / "frames" / state / frame_filename(index, frame_variant(curation))
             if not path.is_file():
                 continue
             frame = Image.open(path).convert("RGBA")
