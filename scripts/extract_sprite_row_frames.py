@@ -815,7 +815,10 @@ def main() -> int:
     pixel_perfect = bool(fit_config.get("pixel_perfect"))
     usable_width = max(1, cell_width - safe_margin_x * 2)
     usable_height = max(1, cell_height - safe_margin_y * 2)
-    logical_height = int(fit_config.get("logical_height", usable_height // 2))
+    # 기본 = 셀과 동일(1:1) — 생성 프롬프트가 "TRUE 셀xN pixel grid" 를 명시하는
+    # 현행 레시피에서 원본 그리드를 그대로 따라간다. 청키 2x 룩을 원할 때만
+    # 절반 값(예: 셀 64 + 로지컬 32)을 명시한다. (2026-07-05, 이전 기본은 usable//2)
+    logical_height = int(fit_config.get("logical_height", cell_height))
     pp_scale = max(1, cell_height // max(1, logical_height))
     if logical_height * pp_scale > cell_height:
         pp_scale = max(1, usable_height // max(1, logical_height))
