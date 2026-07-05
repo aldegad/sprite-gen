@@ -350,3 +350,19 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   margin: 0;
   cursor: pointer;
 }
+
+/* top base reference row */
+.base-row .base-stage {
+  padding: 12px;
+  display: flex;
+  justify-content: flex-start;
+}
+.base-row .base-stage img {
+  max-width: 100%;
+  max-height: 240px;
+  image-rendering: pixelated;
+  border: 1px solid var(--line, #3a3a3a);
+  border-radius: 8px;
+  background:
+    repeating-conic-gradient(#e8e8e8 0% 25%, #f7f7f7 0% 50%) 0 0 / 16px 16px;
+}
