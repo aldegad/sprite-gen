@@ -261,53 +261,68 @@ def fit_to_cell(
 # ⑤ 정수배 NEAREST 업스케일로 셀 배치. 비정수 리샘플이 전혀 없어 픽셀이 깨지지 않는다.
 
 
-def detect_pixel_pitch(strip: Image.Image, max_pitch: int = 24) -> int:
-    image = strip.convert("RGBA")
-    pixels = image.load()
+def _edge_histograms(image: Image.Image) -> tuple[list[int], list[int], int, int]:
+    """Color-transition edge counts indexed by x (vertical edges) and y
+    (horizontal edges). AA ramps register near the true block boundary, so the
+    boundary position signal survives anti-aliasing."""
+    pixels = image.convert("RGBA").load()
     width, height = image.size
-    histogram: dict[int, int] = {}
-
-    def quantized(p):
-        return (p[0] >> 4, p[1] >> 4, p[2] >> 4)
-
-    def record(run: int) -> None:
-        if 2 <= run <= max_pitch:
-            histogram[run] = histogram.get(run, 0) + 1
-
+    col_edges = [0] * width
+    row_edges = [0] * height
     for y in range(0, height, 2):
-        run = 1
-        prev = None
-        for x in range(width):
-            p = pixels[x, y]
-            cur = None if p[3] < 128 else quantized(p)
-            if cur is not None and cur == prev:
-                run += 1
-            else:
-                if prev is not None:
-                    record(run)
-                run = 1
-            prev = cur
-        if prev is not None:
-            record(run)
+        for x in range(1, width):
+            a = pixels[x, y]
+            b = pixels[x - 1, y]
+            if abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2]) + abs(a[3] - b[3]) > 96:
+                col_edges[x] += 1
     for x in range(0, width, 2):
-        run = 1
-        prev = None
-        for y in range(height):
-            p = pixels[x, y]
-            cur = None if p[3] < 128 else quantized(p)
-            if cur is not None and cur == prev:
-                run += 1
-            else:
-                if prev is not None:
-                    record(run)
-                run = 1
-            prev = cur
-        if prev is not None:
-            record(run)
-    if not histogram:
-        return 1
-    pitch = max(histogram, key=lambda k: histogram[k])
-    return pitch if histogram[pitch] >= 24 and pitch >= 2 else 1
+        for y in range(1, height):
+            a = pixels[x, y]
+            b = pixels[x, y - 1]
+            if abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2]) + abs(a[3] - b[3]) > 96:
+                row_edges[y] += 1
+    return col_edges, row_edges, width, height
+
+
+def detect_pixel_pitch(strip: Image.Image, max_pitch: int = 48) -> int:
+    """True pixel-block pitch via edge-to-gridline alignment scoring.
+
+    이전 구현(같은 색 런 길이 최빈값)은 AA 가장자리·블록 내부 질감이 만드는
+    2px 런에 지배당해 큰 블록(~16px)을 놓치고 항상 2 를 내놨다 — 그 결과
+    그리드 비정렬 축소로 이웃 픽셀이 섞여 뭉개졌다 (2026-07-05 사고).
+    새 방식: 후보 피치 p 와 위상마다 "색 경계가 그리드선 ±w 안에 모이는
+    비율"에서 우연 기대치 (2w+1)/p 를 뺀 점수의 argmax. 작은 p 가 공짜로
+    이기는 문제를 우연 보정이 막는다. 확신 없으면 1(스냅 안 함)로 관측
+    가능하게 떨어진다."""
+    image = strip.convert("RGBA")
+    col_edges, row_edges, width, height = _edge_histograms(image)
+    total_col = sum(col_edges) or 1
+    total_row = sum(row_edges) or 1
+
+    def axis_score(edges: list[int], total: int, p: int) -> float:
+        w = 1 if p >= 8 else 0
+        best = 0.0
+        for phase in range(p):
+            hit = 0
+            for offset in range(-w, w + 1):
+                start = (phase + offset) % p
+                hit += sum(edges[start::p])
+            frac = hit / total
+            chance = min(1.0, (2 * w + 1) / p)
+            score = frac - chance
+            if score > best:
+                best = score
+        return best
+
+    # 단순 argmax — 진짜 피치의 약수(p=7 vs 14)는 우연 기대치 (2w+1)/p 가
+    # 커서 자동으로 밀린다. 최고점이 문턱(0.2) 미만이면 그리드 확신 없음 →
+    # 1(스냅 안 함)로 관측 가능하게 폴백.
+    best_pitch, best_score = 1, 0.2
+    for p in range(2, max_pitch + 1):
+        score = axis_score(col_edges, total_col, p) + axis_score(row_edges, total_row, p)
+        if score > best_score:
+            best_pitch, best_score = p, score
+    return best_pitch
 
 
 def _grid_phase(image: Image.Image, pitch: int) -> tuple[int, int]:
@@ -880,6 +895,12 @@ def main() -> int:
             # 행 단위 픽셀퍼펙트: 스트립 전체를 공통 pitch/위상으로 먼저 스냅한 뒤
             # 논리 해상도에서 컴포넌트를 추출한다 — 프레임 간 격자가 일치한다.
             pitch = detect_pixel_pitch(strip)
+            # 행 raw 의 그리드가 일관되지 않아 검출이 확신 미달(1)일 때,
+            # 같은 베이스/모델에서 온 픽치 힌트(fit.pitch_hint — 보통 베이스
+            # 검출값)로 스냅한다. 무단 추측이 아니라 명시 설정 + warning 관측.
+            if pitch < 2 and int(fit_config.get("pitch_hint", 0)) >= 2:
+                pitch = int(fit_config["pitch_hint"])
+                all_warnings.append(f"{state}: pitch from fit.pitch_hint={pitch} (detection inconclusive)")
             work_strip = strip
             if pitch >= 2:
                 work_strip = grid_snap_downscale(strip, pitch, pp_detail_bias, _grid_phase(strip.convert("RGBA"), pitch))
