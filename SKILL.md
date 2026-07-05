@@ -268,8 +268,10 @@ Optional `fit` object (opt-in; absent means legacy behavior). For pixel-art targ
 For true pixel-perfect output (game-ready chunky pixel art with intact 1px outlines), use the `pixel_perfect` mode instead of `resample` — it removes ALL non-integer resampling:
 
 ```json
-"fit": { "pixel_perfect": true, "logical_height": 32, "palette_size": 24, "align_x": "foot-centroid", "align_y": "bottom" }
+"fit": { "pixel_perfect": true, "logical_height": 64, "palette_size": 24, "align_x": "foot-centroid", "align_y": "bottom" }
 ```
+
+`logical_height` 를 **생략하면 셀 높이와 동일(1:1)** 이 기본이다 — 생성 프롬프트가 "TRUE `<셀>`x`<셀>` pixel grid" 를 명시하는 현행 레시피에서 원본 그리드 해상도를 그대로 따라간다(권장). 더 청키한 저해상 룩을 원할 때만 작은 값을 명시한다: 셀 64 + 로지컬 32 → 2× 청키 픽셀. (2026-07-05 변경 — 이전 기본은 usable 높이의 절반이라 주인공이 로지컬 ~30 으로 뭉개졌던 원인.)
 
 Pipeline (unfake.js/pixeldetector-style): runs-based pixel pitch detection on the strip → edge-histogram grid phase alignment → dominant-cluster grid-snap downscale to true resolution → conform to `logical_height` (kCentroid) → run-wide shared median-cut palette (`palette_size`, kills frame-to-frame color flicker) → alpha binarization → integer NEAREST upscale into the cell. `detail_bias` (default true) prefers a near-black minority cluster (share ≥ 0.40, luma < 70/255) so eyes and outlines survive dominant voting. The final display scale is `cell_height // logical_height` — e.g. cell 64 + logical 32 → crisp 2× chunky pixels.
 
