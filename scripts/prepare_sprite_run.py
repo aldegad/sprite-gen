@@ -38,15 +38,17 @@ DEFAULT_STATES: dict[str, dict[str, Any]] = {
     },
 }
 
+# 스타일의 SSoT 는 첨부된 베이스/앵커 이미지다. 텍스트로 체형·등신·아웃라인
+# 굵기·디테일 밀도를 재기술하면 레퍼런스와 경쟁해 identity 가 흘러간다
+# (2026-07-05 사고: 기본값의 "compact chibi/chunky/thick outline" 조항이
+# 슬림 베이스를 계속 뭉툭하게 되돌렸다). 기본값은 레퍼런스 추종 + 금지선만.
 STYLE_DEFAULT = (
-    "pixel-art-adjacent low-resolution game sprite, compact chibi/mascot-friendly "
-    "proportions when the base allows it, chunky whole-body silhouette, thick dark "
-    "1-2 px outline, visible stepped/pixel edges, limited palette, flat cel shading "
-    "with at most one small highlight and one shadow step, simple readable face, "
-    "clear limbs, and no detail that disappears at small runtime size. Avoid polished "
+    "match the attached base/anchor reference image EXACTLY: same pixel density "
+    "(logical pixel block size), same body proportions, same outline weight, same "
+    "palette, same shading style, same level of detail. Do not restyle, do not "
+    "change proportions, do not add or remove detail density. Avoid polished "
     "illustration, painterly rendering, anime key art, 3D render, vector app-icon "
-    "polish, glossy lighting, soft gradients, anti-aliased high-detail edges, and "
-    "complex tiny accessories."
+    "polish, glossy lighting, soft gradients, and anti-aliased high-detail edges."
 )
 
 TRANSPARENCY_ARTIFACT_RULES = [
@@ -551,7 +553,7 @@ Layout requirements:
 - Center one complete pose in each slot. No pose may cross into the neighboring slot.
 - Use a perfectly flat pure {chroma["name"]} {chroma["hex"]} chroma-key background across the whole image.
 - Do not use {chroma["hex"]}, pure {chroma["name"]}, or chroma-adjacent colors in the character, highlights, props, shadows, or effects.
-- Keep the rendering sprite-like: chunky silhouette, dark pixel-style outline, limited palette, flat shading, minimal tiny detail.
+- Keep the rendering faithful to the attached reference sprite: same outline weight, same palette, same detail level — do not restyle it.
 - Keep every frame self-contained with at least {safe_margin_x} px horizontal and {safe_margin_y} px vertical safe padding. No character body part should be clipped by the frame slot.
 - Avoid motion blur. Use clear pose changes readable at {runtime_size}.
 - Preserve the same silhouette, face, proportions, palette, material, and props across every frame.
