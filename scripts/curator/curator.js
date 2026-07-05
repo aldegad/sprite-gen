@@ -38,11 +38,9 @@ const STR = {
   en: {
     title: "curation", compose: "Bake atlas", export: "Export PNGs", exportGif: "Export GIFs",
     groundGrid: "Ground grid", langOther: "한국어",
-    ppApply: "Pixel-perfect", ppViewPixel: "View: perfected", ppViewPlain: "View: original",
-    baseNote: "identity reference — not baked",
+    ppApply: "Pixel-perfect", baseNote: "identity reference — not baked",
     pxGrid: "Pixel grid", tPxGrid: "overlay the cell pixel raster (display only)",
-    tPpApply: "bake the pixel-perfected frames (off = bake the pre-pixel-perfect originals)",
-    tPpView: "toggle the displayed variant (view only — the checkbox decides the bake)",
+    tPpApply: "bake and show the pixel-perfected frames (off = the pre-pixel-perfect originals)",
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
@@ -61,11 +59,9 @@ const STR = {
   ko: {
     title: "큐레이션", compose: "아틀라스 굽기", export: "PNG 내보내기", exportGif: "GIF 내보내기",
     groundGrid: "바닥 그리드", langOther: "EN",
-    ppApply: "픽셀퍼펙트 적용", ppViewPixel: "보기: 적용 후", ppViewPlain: "보기: 적용 전",
-    baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
+    ppApply: "픽셀퍼펙트 적용", baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
     pxGrid: "픽셀 그리드", tPxGrid: "셀 픽셀 래스터 오버레이 (표시 전용)",
-    tPpApply: "체크 = 픽셀퍼펙트 프레임으로 굽기, 해제 = 적용 전 원본으로 굽기",
-    tPpView: "표시만 전/후 전환 (굽기는 체크박스가 결정)",
+    tPpApply: "체크 = 픽셀퍼펙트 프레임 표시·굽기, 해제 = 적용 전 원본 표시·굽기",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
@@ -119,8 +115,6 @@ function refreshVariantImages() {
     const el = card.querySelector(".stage img");
     if (f && el) el.src = frameUrl(f);
   });
-  const viewBtn = document.getElementById("pp-view");
-  if (viewBtn) viewBtn.textContent = ppView === "plain" ? t("ppViewPlain") : t("ppViewPixel");
 }
 
 const statusEl = document.getElementById("status");
@@ -918,11 +912,6 @@ function applyStaticLang() {
   if (pxWrap) pxWrap.title = t("tPxGrid");
   const ppWrap = document.getElementById("pp-wrap");
   if (ppWrap) ppWrap.title = t("tPpApply");
-  const ppViewBtn = document.getElementById("pp-view");
-  if (ppViewBtn) {
-    ppViewBtn.title = t("tPpView");
-    ppViewBtn.textContent = ppView === "plain" ? t("ppViewPlain") : t("ppViewPixel");
-  }
   document.getElementById("hintbar").innerHTML = t("hints").map((h) => `<span>${h}</span>`).join("");
 }
 
@@ -1058,19 +1047,14 @@ async function boot() {
   if (ppAvailable) {
     const ppWrap = document.getElementById("pp-wrap");
     const ppCheck = document.getElementById("pp-apply");
-    const ppViewBtn = document.getElementById("pp-view");
     ppWrap.hidden = false;
-    ppViewBtn.hidden = false;
     ppCheck.checked = ppApply;
+    // 체크박스 하나가 표시와 굽기를 함께 결정한다 (별도 보기 토글 없음).
     ppCheck.addEventListener("change", () => {
       ppApply = ppCheck.checked;
-      ppView = ppApply ? "pixel" : "plain"; // 표시가 선택을 따라간다
+      ppView = ppApply ? "pixel" : "plain";
       refreshVariantImages();
       scheduleSave();
-    });
-    ppViewBtn.addEventListener("click", () => {
-      ppView = ppView === "pixel" ? "plain" : "pixel";
-      refreshVariantImages();
     });
   }
   // 픽셀 그리드 체크박스 — 표시 전용 오버레이 (굽기와 무관)
