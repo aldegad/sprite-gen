@@ -366,3 +366,22 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   background:
     repeating-conic-gradient(#e8e8e8 0% 25%, #f7f7f7 0% 50%) 0 0 / 16px 16px;
 }
+
+/* 패시브 픽셀 렌더링 — 확대 표시에서 안티앨리어싱으로 뭉개지지 않게 항상 nearest */
+.stage img,
+.preview canvas,
+.base-row .base-stage img {
+  image-rendering: pixelated;
+}
+
+/* 픽셀 그리드 오버레이 (헤더 체크박스로 토글) — 셀 픽셀 래스터 시각화 */
+.stage .pxgrid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+  background-image:
+    linear-gradient(to right, rgba(220, 40, 40, 0.28) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(40, 110, 220, 0.28) 1px, transparent 1px);
+}
+body.show-pxgrid .stage .pxgrid { display: block; }

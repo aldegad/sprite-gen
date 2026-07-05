@@ -892,31 +892,49 @@ def main() -> int:
                 args.fringe_delta,
             )
         if pixel_perfect:
-            # 행 단위 픽셀퍼펙트: 스트립 전체를 공통 pitch/위상으로 먼저 스냅한 뒤
-            # 논리 해상도에서 컴포넌트를 추출한다 — 프레임 간 격자가 일치한다.
-            pitch = detect_pixel_pitch(strip)
-            # 행 raw 의 그리드가 일관되지 않아 검출이 확신 미달(1)일 때,
-            # 같은 베이스/모델에서 온 픽치 힌트(fit.pitch_hint — 보통 베이스
-            # 검출값)로 스냅한다. 무단 추측이 아니라 명시 설정 + warning 관측.
-            if pitch < 2 and int(fit_config.get("pitch_hint", 0)) >= 2:
-                pitch = int(fit_config["pitch_hint"])
-                all_warnings.append(f"{state}: pitch from fit.pitch_hint={pitch} (detection inconclusive)")
-            work_strip = strip
-            if pitch >= 2:
-                work_strip = grid_snap_downscale(strip, pitch, pp_detail_bias, _grid_phase(strip.convert("RGBA"), pitch))
-            images = extract_component_images(work_strip, frame_count)
+            # 프레임별 픽셀퍼펙트 (2026-07-05 재설계): 포즈 컴포넌트를 먼저
+            # 분리한 뒤 각 프레임마다 피치·위상을 독립 검출해 스냅한다.
+            # 스트립 전역 단일 격자는 프레임 간 위상 드리프트 때문에 일부
+            # 프레임이 항상 미끄러졌다 (알렉스 관찰: "격자가 픽셀에 안 맞음").
+            images = extract_component_images(strip, frame_count)
             method = "components"
             if images is None:
                 if not args.allow_slot_fallback:
                     all_errors.append(f"{state}: could not extract {frame_count} sprite components")
                     continue
-                slot_width = work_strip.width / frame_count
+                slot_width = strip.width / frame_count
                 images = [
-                    work_strip.crop((round(i * slot_width), 0, round((i + 1) * slot_width), work_strip.height))
+                    strip.crop((round(i * slot_width), 0, round((i + 1) * slot_width), strip.height))
                     for i in range(frame_count)
                 ]
                 method = "slots-explicit"
-            logical_frames = conform_row_logical(images, logical_width, logical_height, pp_detail_bias)
+            # 피치는 행 안에서 사실상 상수(모델의 블록 크기)고 드리프트하는 건
+            # 위상이다. 프레임별 검출값의 중앙값을 합의 피치로 쓰고(배수/노이즈
+            # 낚임 방지), 위상만 프레임별로 다시 잡는다.
+            hint = int(fit_config.get("pitch_hint", 0))
+            per_frame = [detect_pixel_pitch(component) for component in images]
+            confident = sorted(p for p in per_frame if p >= 2)
+            if confident:
+                consensus = confident[len(confident) // 2]
+            elif hint >= 2:
+                consensus = hint
+                all_warnings.append(f"{state}: pitch from fit.pitch_hint={hint} (all per-frame detections inconclusive)")
+            else:
+                consensus = detect_pixel_pitch(strip)
+                if consensus >= 2:
+                    all_warnings.append(f"{state}: pitch from whole-strip detection={consensus}")
+            outliers = [f"{i}:{p}" for i, p in enumerate(per_frame) if p >= 2 and abs(p - consensus) > max(2, consensus * 0.25)]
+            if outliers:
+                all_warnings.append(f"{state}: per-frame pitch outliers ({', '.join(outliers)}) snapped at consensus {consensus}")
+            snapped = []
+            if consensus >= 2:
+                for component in images:
+                    snapped.append(grid_snap_downscale(
+                        component, consensus, pp_detail_bias, _grid_phase(component.convert("RGBA"), consensus)))
+            else:
+                snapped = list(images)
+            pitch = consensus
+            logical_frames = conform_row_logical(snapped, logical_width, logical_height, pp_detail_bias)
             registered = register_row_frames(logical_frames)
             # 전/후 비교용 plain 쌍둥이: 같은 원본 스트립을 픽셀퍼펙트 없이
             # 기존 fit 경로로 셀에 앉힌 결과. 추출 실패 시 관측 가능하게 스킵.
