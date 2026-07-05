@@ -39,6 +39,7 @@ const STR = {
     title: "curation", compose: "Bake atlas", export: "Export PNGs", exportGif: "Export GIFs",
     groundGrid: "Ground grid", langOther: "한국어",
     ppApply: "Pixel-perfect", ppViewPixel: "View: perfected", ppViewPlain: "View: original",
+    baseNote: "identity reference — not baked",
     tPpApply: "bake the pixel-perfected frames (off = bake the pre-pixel-perfect originals)",
     tPpView: "toggle the displayed variant (view only — the checkbox decides the bake)",
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
@@ -60,6 +61,7 @@ const STR = {
     title: "큐레이션", compose: "아틀라스 굽기", export: "PNG 내보내기", exportGif: "GIF 내보내기",
     groundGrid: "바닥 그리드", langOther: "EN",
     ppApply: "픽셀퍼펙트 적용", ppViewPixel: "보기: 적용 후", ppViewPlain: "보기: 적용 전",
+    baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
     tPpApply: "체크 = 픽셀퍼펙트 프레임으로 굽기, 해제 = 적용 전 원본으로 굽기",
     tPpView: "표시만 전/후 전환 (굽기는 체크박스가 결정)",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
@@ -620,6 +622,18 @@ function renderState(state) {
   startPreview(state);
 }
 
+// 최상단 base 참조 줄 — 아이덴티티 truth 를 생성 결과와 나란히 비교하기 위한
+// 읽기 전용 표시 (선택/변형/굽기와 무관).
+function renderBaseRow() {
+  const wrap = document.createElement("section");
+  wrap.className = "state base-row";
+  wrap.innerHTML =
+    `<div class="state-head"><h3>base</h3>` +
+    `<span class="muted">${t("baseNote")}</span></div>` +
+    `<div class="base-stage"><img src="${run.baseUrl}" alt="base source" draggable="false" /></div>`;
+  document.getElementById("states").appendChild(wrap);
+}
+
 function renderCard(state, frame) {
   const card = document.createElement("div");
   card.className = "card";
@@ -1043,6 +1057,7 @@ async function boot() {
     });
   }
   seedEntries();
+  if (run.baseUrl) renderBaseRow();
   for (const state of run.states) renderState(state);
   refreshVariantImages();
   setStatus(run.curation && Object.keys(run.curation.states || {}).length ? t("loaded") : t("ready"));

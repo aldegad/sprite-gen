@@ -116,9 +116,16 @@ def build_run_state(run_dir: Path) -> dict:
         )
 
     curation = load_curation(run_dir) or empty_curation()
+    # 원본 베이스(아이덴티티 truth)가 있으면 큐레이터 최상단에 참조 줄로 노출
+    base_url = None
+    for candidate in sorted(run_dir.glob("base-source.*")):
+        if candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+            base_url = f"/run/{candidate.name}"
+            break
     return {
         "characterId": request["character"]["id"],
         "runDir": str(run_dir),
+        "baseUrl": base_url,
         "cell": cell_state,
         "schemaVersion": SCHEMA_VERSION,
         "states": states,
