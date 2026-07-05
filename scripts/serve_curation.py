@@ -85,6 +85,10 @@ def build_run_state(run_dir: Path) -> dict:
             rel = f"frames/{state}/frame-{index}.png"
             present = (run_dir / rel).is_file()
             frame = {"index": index, "url": f"/{rel}", "present": present}
+            # 픽셀퍼펙트 전 쌍둥이(.plain.png) — 있으면 큐레이터가 전/후 토글을 켠다
+            plain_rel = f"frames/{state}/frame-{index}.plain.png"
+            if (run_dir / plain_rel).is_file():
+                frame["plainUrl"] = f"/{plain_rel}"
             if index < len(labels):
                 frame["label"] = labels[index]
             if present and Image is not None:
@@ -122,6 +126,7 @@ def build_run_state(run_dir: Path) -> dict:
         "iso": request.get("iso"),
         "lang": CurationHandler.lang,
         "hasAtlas": (run_dir / "sprite-sheet-alpha.png").is_file(),
+        "fitPixelPerfect": bool((request.get("fit") or {}).get("pixel_perfect")),
     }
 
 

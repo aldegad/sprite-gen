@@ -11,7 +11,7 @@ from typing import Any
 
 from PIL import Image
 
-from curation import apply_transform, load_curation, state_plan
+from curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
 from runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
 
 
@@ -54,6 +54,9 @@ def main() -> int:
         state: state_plan(curation, state, int(request["states"][state]["frames"]))
         for state in states
     }
+    # 'plain' = pre-pixel-perfect twin (curator checkbox off). Fail loud when the
+    # twin is missing — a plain bake must never silently fall back to pixel.
+    variant = frame_variant(curation)
 
     max_frames = max(len(ordered) for ordered, _transforms in plans.values())
     atlas = Image.new("RGBA", (max_frames * cell_width, len(states) * cell_height), (0, 0, 0, 0))
@@ -78,9 +81,9 @@ def main() -> int:
         ordered, transforms = plans[state]
         frames = []
         for column, frame_index in enumerate(ordered):
-            frame_path = run_dir / "frames" / state / f"frame-{frame_index}.png"
+            frame_path = run_dir / "frames" / state / frame_filename(frame_index, variant)
             if not frame_path.is_file():
-                errors.append(f"missing frame: {frame_path}")
+                errors.append(f"missing frame ({variant} variant): {frame_path}")
                 continue
             with Image.open(frame_path) as opened:
                 source = opened.convert("RGBA")
@@ -110,6 +113,7 @@ def main() -> int:
         "ok": not errors,
         "engine": "component-row",
         "curation_applied": curation is not None,
+        "frame_variant": variant,
         "errors": errors,
         "atlas": args.atlas,
         "manifest": args.manifest,
@@ -133,6 +137,7 @@ def main() -> int:
         "game_input": args.atlas,
         "degraded_static_fallback": False,
         "curation_applied": curation is not None,
+        "frame_variant": variant,
         "sprite_sheet_alpha": args.atlas,
         "sprite_sheet_alpha_report": args.report,
         "base_image": request["character"].get("base_image"),

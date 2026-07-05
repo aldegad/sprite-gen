@@ -824,7 +824,8 @@ def main() -> int:
     palette_size = int(fit_config.get("palette_size", 24))
     pending: list = []
 
-    def finalize_state(state: str, frames: list, frame_count: int, method: str) -> None:
+    def finalize_state(state: str, frames: list, frame_count: int, method: str,
+                       plain_frames: list | None = None) -> None:
         state_dir = frames_root / state
         state_dir.mkdir(parents=True, exist_ok=True)
         output_paths = []
@@ -832,20 +833,29 @@ def main() -> int:
             output = state_dir / f"frame-{index}.png"
             atomic_save_image(frame, output)
             output_paths.append(str(output.relative_to(run_dir)))
+        # 픽셀퍼펙트 전 원본 변형(.plain.png) — 큐레이션뷰의 전/후 토글과
+        # curation.json `pixel_perfect: false` 굽기가 이 쌍둥이를 읽는다.
+        plain_paths = []
+        if plain_frames is not None:
+            for index, frame in enumerate(plain_frames):
+                output = state_dir / f"frame-{index}.plain.png"
+                atomic_save_image(frame, output)
+                plain_paths.append(str(output.relative_to(run_dir)))
 
         errors, warnings, frame_records = inspect_frames(frames, chroma_key, args)
         all_errors.extend(f"{state}: {error}" for error in errors)
         all_warnings.extend(f"{state}: {warning}" for warning in warnings)
-        rows.append(
-            {
-                "state": state,
-                "frames": frame_count,
-                "method": method,
-                "files": output_paths,
-                "frame_records": frame_records,
-                "ok": not errors,
-            }
-        )
+        row = {
+            "state": state,
+            "frames": frame_count,
+            "method": method,
+            "files": output_paths,
+            "frame_records": frame_records,
+            "ok": not errors,
+        }
+        if plain_paths:
+            row["plain_files"] = plain_paths
+        rows.append(row)
 
     for state in states:
         if state not in request["states"]:
@@ -884,7 +894,14 @@ def main() -> int:
                 method = "slots-explicit"
             logical_frames = conform_row_logical(images, logical_width, logical_height, pp_detail_bias)
             registered = register_row_frames(logical_frames)
-            pending.append({"state": state, "frame_count": frame_count, "method": method, "pitch": pitch, "frames": registered})
+            # 전/후 비교용 plain 쌍둥이: 같은 원본 스트립을 픽셀퍼펙트 없이
+            # 기존 fit 경로로 셀에 앉힌 결과. 추출 실패 시 관측 가능하게 스킵.
+            plain_frames = extract_component_frames(
+                strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
+            if plain_frames is None:
+                all_warnings.append(f"{state}: plain (pre-pixel-perfect) variant unavailable — component extraction differs")
+            pending.append({"state": state, "frame_count": frame_count, "method": method,
+                            "pitch": pitch, "frames": registered, "plain_frames": plain_frames})
             continue
         frames = extract_component_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
         method = "components"
@@ -912,7 +929,8 @@ def main() -> int:
                 place_row_frame(frame, cell_width, cell_height, pp_scale, left, top, safe_margin_y, ground_frames)
                 for frame in quantized
             ]
-            finalize_state(entry["state"], frames, entry["frame_count"], entry["method"])
+            finalize_state(entry["state"], frames, entry["frame_count"], entry["method"],
+                           plain_frames=entry.get("plain_frames"))
         all_warnings.append(
             "pixel-perfect: pitch=%s scale=%dx logical<=%dx%d palette=%d"
             % (",".join(str(entry["pitch"]) for entry in pending), pp_scale, logical_width, logical_height, len(palette))

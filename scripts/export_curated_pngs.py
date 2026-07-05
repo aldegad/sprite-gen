@@ -27,7 +27,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from curation import apply_transform, load_curation, state_plan
+from curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
 from runio import acquire_run_dir_lock, atomic_save_image
 
 
@@ -68,7 +68,7 @@ def main() -> int:
         labels = labels_by_state.get(state, [])
         multi_state = len(states) > 1
         for index in indices:
-            src_path = run_dir / "frames" / state / f"frame-{index}.png"
+            src_path = run_dir / "frames" / state / frame_filename(index, frame_variant(curation))
             if not src_path.is_file():
                 continue
             with Image.open(src_path) as opened:

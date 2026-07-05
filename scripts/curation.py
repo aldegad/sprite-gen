@@ -18,6 +18,12 @@ Schema (`curation.json`):
     {
       "version": 1,
       "kind": "sprite-gen-curation",
+      "pixel_perfect": true,                 # optional; false -> compose reads the
+                                              #   frame-N.plain.png variant (pre-
+                                              #   pixel-perfect). absent/true -> the
+                                              #   canonical frame-N.png. Only
+                                              #   meaningful when extraction saved
+                                              #   both variants (fit.pixel_perfect).
       "states": {
         "<state>": {
           "selected": [0, 1, 2, 3],          # 0-based frame indices, in play order
@@ -60,6 +66,25 @@ IDENTITY = {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0, "shx": 0.0, "shy": 0.
 
 def curation_path(run_dir: Path) -> Path:
     return run_dir / CURATION_FILENAME
+
+
+def frame_variant(curation: dict[str, Any] | None) -> str:
+    """Which extracted frame variant consumers read: 'pixel' or 'plain'.
+
+    'plain' only when the sidecar explicitly opts out of pixel-perfect
+    (`pixel_perfect: false` — the curator's top-right checkbox). Absent sidecar
+    or absent/true field -> the canonical pixel-perfected frames."""
+    if curation and curation.get("pixel_perfect") is False:
+        return "plain"
+    return "pixel"
+
+
+def frame_filename(index: int, variant: str = "pixel") -> str:
+    """Frame file name for a variant. 'pixel' = canonical frame-N.png; 'plain'
+    = the pre-pixel-perfect twin saved by extraction when fit.pixel_perfect."""
+    if variant == "plain":
+        return f"frame-{index}.plain.png"
+    return f"frame-{index}.png"
 
 
 def load_curation(run_dir: Path) -> dict[str, Any] | None:

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from curation import apply_transform, load_curation, state_plan
+from curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
 from gif_utils import delay_ticks_to_duration_ms, save_clean_gif
 
 
@@ -61,8 +61,9 @@ def load_frame(
     user_frame: int,
     transform: dict[str, float] | None = None,
     cell_size: tuple[int, int] | None = None,
+    variant: str = "pixel",
 ) -> tuple[Path, Image.Image]:
-    path = run_dir / "frames" / state / f"frame-{user_frame - 1}.png"
+    path = run_dir / "frames" / state / frame_filename(user_frame - 1, variant)
     if not path.is_file():
         raise SystemExit(f"missing selected frame {user_frame}: {path}")
     image = Image.open(path).convert("RGBA")
@@ -119,7 +120,7 @@ def main() -> int:
         user_frames = [index + 1 for index in ordered]
 
     selected = [
-        load_frame(run_dir, args.state, number, transforms.get(number - 1), cell_size)
+        load_frame(run_dir, args.state, number, transforms.get(number - 1), cell_size, frame_variant(curation))
         for number in user_frames
     ]
     frame_paths = [path for path, _image in selected]
