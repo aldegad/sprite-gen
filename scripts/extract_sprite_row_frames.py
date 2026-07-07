@@ -56,20 +56,55 @@ def remove_chroma_background(
     threshold: float,
     fringe_threshold: float,
     fringe_delta: float,
+    fringe_reach: int = 2,
 ) -> Image.Image:
     rgba = image.convert("RGBA")
+    width, height = rgba.size
     pixels = rgba.load()
-    for y in range(rgba.height):
-        for x in range(rgba.width):
+    background = bytearray(width * height)
+    frontier: list[int] = []
+    for y in range(height):
+        for x in range(width):
             red, green, blue, alpha = pixels[x, y]
-            color = (red, green, blue)
-            distance = color_distance(color, chroma_key)
-            if alpha and distance <= threshold:
+            if alpha == 0:
+                if red or green or blue:
+                    pixels[x, y] = (0, 0, 0, 0)
+                background[y * width + x] = 1
+                frontier.append(y * width + x)
+            elif color_distance((red, green, blue), chroma_key) <= threshold:
                 pixels[x, y] = (0, 0, 0, 0)
-            elif alpha and distance <= fringe_threshold and key_tint_score(color, chroma_key) >= fringe_delta:
-                pixels[x, y] = (0, 0, 0, 0)
-            elif alpha == 0 and (red or green or blue):
-                pixels[x, y] = (0, 0, 0, 0)
+                background[y * width + x] = 1
+                frontier.append(y * width + x)
+    # Fringe is antialias blend along the erased-background boundary, so only
+    # pixels spatially adjacent to background are candidates, peeled at most
+    # fringe_reach layers. Key-tinted *subject* colors (hot pink / purple under
+    # a magenta key) match the same color band but never touch the background,
+    # so they survive — the old position-blind cut erased them wholesale.
+    for _ in range(fringe_reach):
+        next_frontier: list[int] = []
+        for index in frontier:
+            x = index % width
+            y = index // width
+            for dy in (-1, 0, 1):
+                ny = y + dy
+                if ny < 0 or ny >= height:
+                    continue
+                for dx in (-1, 0, 1):
+                    nx = x + dx
+                    if nx < 0 or nx >= width:
+                        continue
+                    neighbor = ny * width + nx
+                    if background[neighbor]:
+                        continue
+                    red, green, blue, _alpha = pixels[nx, ny]
+                    color = (red, green, blue)
+                    if color_distance(color, chroma_key) <= fringe_threshold and key_tint_score(color, chroma_key) >= fringe_delta:
+                        pixels[nx, ny] = (0, 0, 0, 0)
+                        background[neighbor] = 1
+                        next_frontier.append(neighbor)
+        if not next_frontier:
+            break
+        frontier = next_frontier
     return rgba
 
 
@@ -803,6 +838,7 @@ def main() -> int:
     parser.add_argument("--key-threshold", type=float, default=96.0)
     parser.add_argument("--fringe-key-threshold", type=float, default=180.0)
     parser.add_argument("--fringe-delta", type=float, default=18.0)
+    parser.add_argument("--fringe-reach", type=int, default=2)
     parser.add_argument("--allow-slot-fallback", action="store_true")
     parser.add_argument("--min-used-pixels", type=int, default=400)
     parser.add_argument("--edge-margin", type=int, default=2)
@@ -814,6 +850,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.fringe_key_threshold < args.key_threshold:
         raise SystemExit("--fringe-key-threshold must be greater than or equal to --key-threshold")
+    if args.fringe_reach < 0:
+        raise SystemExit("--fringe-reach must be zero or positive")
 
     run_dir = args.run_dir.expanduser().resolve()
     acquire_run_dir_lock(run_dir, "extract_sprite_row_frames")
@@ -890,6 +928,7 @@ def main() -> int:
                 args.key_threshold,
                 args.fringe_key_threshold,
                 args.fringe_delta,
+                args.fringe_reach,
             )
         if pixel_perfect:
             # 프레임별 픽셀퍼펙트 (2026-07-05 재설계): 포즈 컴포넌트를 먼저

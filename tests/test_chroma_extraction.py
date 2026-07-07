@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Regression tests for chroma-key alpha cleanup and auto key selection.
 
-These guard two ways the extractor used to silently destroy real subject
+These guard three ways the extractor used to silently destroy real subject
 colors:
 
 1. ``remove_chroma_background`` ran a "neutralize key tint" pass on every pixel
@@ -13,6 +13,12 @@ colors:
    subject pixels, which discards sub-1% features (eyes, gems, ear lamps): the
    auto key could look safe while its nearest subject pixel was still inside the
    extraction erase radius and would be deleted.
+3. The fringe cut erased every pixel inside the fringe color band *anywhere in
+   the image* — hot pink (~129 from magenta) and purple (~153) subjects fell in
+   the band and were bleached wholesale (solvell seed_flower_pink /
+   herb_plant_star_bloom, 2026-07-07). Fringe is boundary antialiasing, so the
+   cut is now limited to pixels spatially adjacent to the keyed-out background
+   (peeled at most ``fringe_reach`` layers); interior subject pixels survive.
 """
 
 from __future__ import annotations
@@ -44,12 +50,24 @@ MAGENTA = (255, 0, 255)
 KEY_THRESHOLD = 96.0
 FRINGE_THRESHOLD = 180.0
 FRINGE_DELTA = 18.0
+FRINGE_REACH = 2
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+# Real accident colors: dominant subject pixels the old position-blind fringe
+# cut erased (solvell raws, magenta key). Both sit inside the fringe band.
+HOT_PINK = (250, 77, 150)  # seed_flower_pink petals, ~129 from magenta
+PURPLE = (213, 112, 246)  # herb_plant_star_bloom petals, ~153 from magenta
 
 
 def _key(pixel: tuple[int, int, int], chroma_key=MAGENTA):
     image = Image.new("RGBA", (1, 1), (*pixel, 255))
-    out = extract.remove_chroma_background(image, chroma_key, KEY_THRESHOLD, FRINGE_THRESHOLD, FRINGE_DELTA)
+    out = extract.remove_chroma_background(image, chroma_key, KEY_THRESHOLD, FRINGE_THRESHOLD, FRINGE_DELTA, FRINGE_REACH)
     return out.getpixel((0, 0))
+
+
+def _clean(image: Image.Image, chroma_key=MAGENTA) -> Image.Image:
+    return extract.remove_chroma_background(image, chroma_key, KEY_THRESHOLD, FRINGE_THRESHOLD, FRINGE_DELTA, FRINGE_REACH)
 
 
 def test_despill_preserves_far_subject_colors() -> None:
@@ -60,15 +78,92 @@ def test_despill_preserves_far_subject_colors() -> None:
         assert _key(pixel) == (*pixel, 255), f"{pixel} was mangled by despill"
 
 
-def test_despill_still_removes_key_and_fringe() -> None:
-    # Exact key -> fully transparent.
+def test_exact_key_is_removed_everywhere() -> None:
     assert _key(MAGENTA)[3] == 0
-    # A magenta antialias fringe (the key blended with a green subject edge)
-    # sits inside FRINGE_THRESHOLD with a strong key tint and must still go.
-    fringe = (147, 90, 157)
-    assert extract.color_distance(fringe, MAGENTA) <= FRINGE_THRESHOLD
-    assert extract.key_tint_score(fringe, MAGENTA) >= FRINGE_DELTA
-    assert _key(fringe)[3] == 0
+
+
+FRINGE = (147, 90, 157)  # magenta blended with a green subject edge
+
+
+def test_boundary_fringe_is_still_removed() -> None:
+    # Green subject on magenta background with a one-pixel antialias fringe
+    # ring between them: the background and the fringe must go, the subject
+    # must stay.
+    assert extract.color_distance(FRINGE, MAGENTA) <= FRINGE_THRESHOLD
+    assert extract.key_tint_score(FRINGE, MAGENTA) >= FRINGE_DELTA
+    green = (60, 170, 70)
+    image = Image.new("RGBA", (16, 16), (*MAGENTA, 255))
+    pixels = image.load()
+    for y in range(4, 12):
+        for x in range(4, 12):
+            pixels[x, y] = (*green, 255)
+    for x in range(3, 13):  # fringe ring just outside the subject block
+        for y in (3, 12):
+            pixels[x, y] = (*FRINGE, 255)
+            pixels[y, x] = (*FRINGE, 255)
+    out = _clean(image).load()
+    assert out[0, 0][3] == 0  # background gone
+    assert out[3, 3][3] == 0 and out[12, 8][3] == 0  # fringe ring gone
+    assert out[8, 8] == (*green, 255)  # subject intact
+
+
+def test_isolated_fringe_band_pixel_is_subject_not_fringe() -> None:
+    # The same fringe-band color *inside* a subject, nowhere near background,
+    # is a real material color and must survive (this is what the old
+    # position-blind cut destroyed).
+    green = (60, 170, 70)
+    image = Image.new("RGBA", (16, 16), (*green, 255))
+    image.load()[8, 8] = (*FRINGE, 255)
+    out = _clean(image).load()
+    assert out[8, 8] == (*FRINGE, 255)
+
+
+def test_key_tinted_subject_interior_survives() -> None:
+    # Hot pink / purple blocks on a magenta background: only the edge layers
+    # within FRINGE_REACH of the keyed-out background may be trimmed; the
+    # interior must keep its exact color.
+    for subject in (HOT_PINK, PURPLE):
+        distance = extract.color_distance(subject, MAGENTA)
+        assert KEY_THRESHOLD < distance <= FRINGE_THRESHOLD  # inside the trap band
+        assert extract.key_tint_score(subject, MAGENTA) >= FRINGE_DELTA
+        image = Image.new("RGBA", (32, 32), (*MAGENTA, 255))
+        pixels = image.load()
+        for y in range(8, 24):
+            for x in range(8, 24):
+                pixels[x, y] = (*subject, 255)
+        out = _clean(image).load()
+        assert out[0, 0][3] == 0  # background gone
+        # Edge peel is bounded by FRINGE_REACH: everything deeper survives.
+        for offset in range(8 + FRINGE_REACH, 24 - FRINGE_REACH):
+            assert out[offset, offset] == (*subject, 255), f"{subject} interior erased at {offset}"
+
+
+def _subject_band_survival(path: Path) -> float:
+    """Survival ratio of fringe-band subject pixels after cleanup."""
+    with Image.open(path) as opened:
+        image = opened.convert("RGBA")
+    source = image.load()
+    band = []
+    for y in range(image.height):
+        for x in range(image.width):
+            color = source[x, y][:3]
+            distance = extract.color_distance(color, MAGENTA)
+            if KEY_THRESHOLD < distance <= FRINGE_THRESHOLD and extract.key_tint_score(color, MAGENTA) >= FRINGE_DELTA:
+                band.append((x, y))
+    assert band, f"{path.name} has no fringe-band pixels; fixture is wrong"
+    out = _clean(image).load()
+    survived = sum(1 for x, y in band if out[x, y][3] != 0)
+    return survived / len(band)
+
+
+def test_accident_raws_keep_pink_and_purple_material() -> None:
+    # 1/8-size NEAREST copies of the real solvell accident raws (magenta key):
+    # a hot-pink seed packet and a purple star bloom. The old cut erased 100%
+    # of their fringe-band subject pixels; boundary-limited despill must keep
+    # nearly all of them (only genuine key-blend edge pixels may go).
+    for name in ("seed_flower_pink.png", "herb_plant_star_bloom.png"):
+        ratio = _subject_band_survival(FIXTURES / "accident" / name)
+        assert ratio >= 0.90, f"{name}: only {ratio:.1%} of key-tinted subject pixels survived"
 
 
 # A small, cyan-leaning teal feature: ~55 from the cyan key, so cyan would erase
