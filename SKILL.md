@@ -60,7 +60,7 @@ The skill uses scripts as explicit pipeline commands, not as hidden imports. Eac
 에이전트 채팅 surface 는 이미지를 못 보여주는 경우가 많다 — 이 웹뷰가 그 표시 수단이다.
 
 ```bash
-SG=${ALEX_EXTENSIONS_DIR:-$HOME/Documents/workspace/personal/alex-extensions}/sprite-gen
+SG=${ALEX_EXTENSIONS_DIR:-$HOME/Documents/workspace/personal/agent-extensions}/sprite-gen
 STAGE=$(mktemp -d); mkdir -p "$STAGE/pngs"
 cp <후보들> "$STAGE/pngs/"   # 의미 있는 이름으로: 1-hub-cube.png, 2-hook-plug.png ... (timestamp/uuid 파일명 금지)
 # 성격이 다른 이미지를 한 통에 붓지 마라 — 하위폴더 = 큐레이터 줄(state) 하나.
