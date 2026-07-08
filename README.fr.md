@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="docs/claudecy-idle.gif" width="110" alt="claudecy en attente" />
-  <img src="docs/claudecy-running.gif" width="110" alt="claudecy en course" />
-  <img src="docs/claudecy-success.gif" width="110" alt="claudecy succès" />
-  <img src="docs/claudecy-talking.gif" width="110" alt="claudecy en train de parler" />
-  <img src="docs/howl-idle.gif" width="110" alt="howl en attente" />
-  <img src="docs/howl-running.gif" width="110" alt="howl en course" />
-  <img src="docs/howl-success.gif" width="110" alt="howl succès" />
+  <img src="docs/claudecy-idle.gif" width="110" alt="claudecy idle" />
+  <img src="docs/claudecy-running.gif" width="110" alt="claudecy running" />
+  <img src="docs/claudecy-success.gif" width="110" alt="claudecy success" />
+  <img src="docs/claudecy-talking.gif" width="110" alt="claudecy talking" />
+  <img src="docs/howl-idle.gif" width="110" alt="howl idle" />
+  <img src="docs/howl-running.gif" width="110" alt="howl running" />
+  <img src="docs/howl-success.gif" width="110" alt="howl success" />
 </p>
 
 <h1 align="center">sprite-gen</h1>
@@ -20,11 +20,11 @@
 
 ---
 
-Demander à un modèle d'image une « sprite sheet » et vous obtenez généralement : un personnage dont le visage change à chaque image, un arrière-plan qui refuse la suppression de chroma, des poses qui se chevauchent et sortent de la grille, et un PNG que votre moteur de jeu ne sait pas vraiment utiliser. Démo mignonne, asset inutilisable.
+Demandez à un modèle d’image une « feuille de sprites » et vous savez ce que vous obtenez : un personnage dont le visage change à chaque frame, un arrière-plan impossible à supprimer proprement par chroma key, des poses qui se chevauchent et dérivent hors grille, et un PNG que votre moteur de jeu ne peut pas réellement consommer. Démo mignonne, asset inutile.
 
-`sprite-gen` est une skill Codex/Claude qui comble ce fossé. Donnez-lui **une image de base** et une liste d’actions — il génère ligne par ligne, verrouille l’identité du personnage, supprime le fond en chroma pour obtenir un vrai alpha, extrait chaque pose sous forme de frame transparente propre, et génère un atlas runtime avec un `manifest.json.frame_layout` lisible par machine. Chaque sprite ci-dessus a été réalisé ainsi.
+`sprite-gen` est une skill Codex/Claude qui comble cet écart. Donnez-lui **une image de base** et une liste d’actions — elle pilote la génération ligne par ligne, verrouille l’identité du personnage, retire l’arrière-plan chroma en véritable alpha, extrait chaque pose comme une frame transparente propre, et construit un atlas runtime **avec un `manifest.json.frame_layout` lisible par machine**. Tous les sprites ci-dessus ont été créés ainsi.
 
-Et pour les 10 % que la génération ne fait jamais correctement, il existe une **vue de curation** : comparez les frames côte à côte, rejetez celles qui sont cassées, ajustez rotation/échelle/position de façon non destructive, observez la boucle en direct — puis générez. Le pipeline effectue le travail; vous gardez la décision finale.
+Et pour les derniers 10 % que la génération ne réussit jamais tout à fait, il y a une **webview de curation** : comparez les frames côte à côte, rejetez celles qui sont cassées, ajustez rotation/échelle/position de manière non destructive, regardez la boucle en direct — puis bakez. Le pipeline fait le travail ; vous gardez le goût.
 
 ```text
 sprite-request.json → layout guides + prompts → image-gen state rows
@@ -33,50 +33,50 @@ sprite-request.json → layout guides + prompts → image-gen state rows
 ```
 
 <p align="center">
-  <img src="docs/architecture-diagram.png" width="640" alt="architecture sprite-gen — pipeline par ligne de composant" />
+  <img src="docs/architecture-diagram.png" width="640" alt="architecture sprite-gen — pipeline component-row" />
 </p>
 
 > Architecture complète : [`docs/architecture.md`](docs/architecture.md) · source du diagramme : [`docs/architecture-diagram.html`](docs/architecture-diagram.html)
 
-## Ce que vous obtenez en réalité
+## Ce que vous obtenez réellement
 
-- **Un atlas de sprites transparent** (`sprite-sheet-alpha.png`) — vrai alpha, sans bordure chroma résiduelle, vérifié sur fonds blancs.
-- **Un manifeste runtime** (`manifest.json.frame_layout`) — rectangles de frame absolus, fps par état et indicateurs de boucle. Votre moteur lit les rectangles; il ne devine jamais une grille.
-- **Un QA visuel** — GIF et planches de contact par état, pour juger le mouvement avant de livrer quoi que ce soit.
-- **Des labels honnêtes** — les actions courtes et lisibles (idle, jump, attack, wave) restent le chemin stable ; la locomotion cyclique (walk/run) est marquée expérimentale sauf si le QA motion la valide réellement. Pas de surpromesse silencieuse.
+- **Un atlas de sprites transparent** (`sprite-sheet-alpha.png`) — véritable alpha, aucun résidu chroma en bordure, vérifié sur fonds blancs.
+- **Un manifeste runtime** (`manifest.json.frame_layout`) — rectangles de frames absolus, fps et indicateurs de boucle par état. Votre moteur échantillonne des rectangles ; il ne devine jamais une grille.
+- **Une QA visible** — GIFs par état et planches-contact, pour juger le mouvement comme du mouvement avant toute livraison.
+- **Des libellés honnêtes** — les actions courtes et lisibles (idle, jump, attack, wave) sont le chemin stable ; la locomotion cyclique (walk/run) est marquée expérimentale sauf si la QA de mouvement réussit réellement. Pas de promesse excessive silencieuse.
 
-## Vue de curation
+## Webview de curation
 
-La génération vous donne 90 %. La curation est l’endroit où un humain transforme ça en état *livrable* — autonome, sans dépendance Studio ou framework, fonctionne partout où la skill est installée (Claude Code Desktop, l’application Codex, un terminal simple).
+La génération vous amène à 90 %. La webview est l’endroit où un humain l’amène jusqu’à *livré* — autonome, sans dépendance à Studio ni à un framework, exécutable partout où la skill est installée (Claude Code Desktop, l’app Codex, un simple terminal).
 
-![curation webview — personnages](docs/demo-character.gif)
+![webview de curation — personnages](docs/demo-character.gif)
 
-- **Deux rangées par état :** la **séquence de lecture** en haut et une **banque de candidats** en bas (par ex. une deuxième ou troisième prise générée). Faites glisser l’icône ⠿ d’une frame pour réordonner la séquence, ou récupérez une image depuis la banque — reconstruisez une boucle propre en sélectionnant les meilleures frames entre les prises. L’arrangement est sauvegardé, donc il est restauré au prochain chargement.
-- **Transformation non destructive** par frame : glisser = déplacer, molette = mettre à l’échelle, poignée du haut = rotation, bas-gauche = cisaillement, plus un basculement `horizontal-flip` pour obtenir une sortie inversée gauche-droite. Les modifications vivent dans un sidecar `curation.json` — les PNG source ne sont jamais réécrits, et l’étape de composition applique le résultat de façon déterministe. L’aperçu et la génération partagent une même matrice affine, donc ce que vous alignez est ce que vous obtenez.
-- **Prévisualisation live** qui anime la séquence à la fps de l’état, avec lecture/pause, pas à pas image par image, et un contrôle de vitesse de 0,25× à 4×.
-- Pas seulement pour les sprites : pointez-le sur n’importe quel dossier de candidats image (icônes, logos, brouillons générés) avec `unpack_atlas_run.py --pngs-dir` et utilisez-le comme vue de sélection du meilleur résultat.
+- **Deux lignes par état :** la **séquence de lecture** en haut et un **pool de candidats** en dessous (par exemple une deuxième ou troisième tentative générée). Faites glisser la poignée ⠿ d’une frame pour réordonner la séquence, ou remontez une coupe depuis le pool — reconstruisez une boucle de course propre à partir des meilleures frames de plusieurs tentatives. L’agencement est sauvegardé, donc il est restauré à la réouverture.
+- **Transformation non destructive** par frame : glisser = déplacer, molette = mettre à l’échelle, poignée supérieure = faire pivoter, bas gauche = cisaillement, plus un interrupteur de retournement horizontal pour une sortie inversée gauche-droite. Les modifications vivent dans un sidecar `curation.json` — les PNG sources ne sont jamais réécrits, et l’étape de composition bake le résultat de manière déterministe. L’aperçu et le bake partagent une seule matrice affine, donc ce que vous alignez est ce que vous obtenez.
+- **L’aperçu en direct** anime la séquence au fps de l’état, avec lecture/pause, avance frame par frame, et un contrôle de vitesse de 0,25× à 4×.
+- Pas seulement pour les sprites : pointez-la vers n’importe quel dossier de candidats image (icônes, logos, brouillons générés) avec `unpack_atlas_run.py --pngs-dir` et utilisez-la comme vue générale pour choisir le gagnant.
 
 ### Grille de sol isométrique
 
-Pour les sets isométriques, la vue de curation superpose la grille de sol (depuis `meta.json` tile/anchor) afin que vous puissiez aligner les meubles sur les axes en losange avec la poignée de cisaillement.
+Pour les ensembles isométriques, la webview superpose la grille de sol (depuis la tuile/l’ancre de `meta.json`) afin que vous puissiez aligner les meubles sur les axes du losange avec la poignée de cisaillement.
 
-![curation webview — mobilier isométrique](docs/demo-furniture.gif)
+![webview de curation — mobilier isométrique](docs/demo-furniture.gif)
 
-<img src="docs/curator-iso.png" width="520" alt="superposition de la grille de sol isométrique" />
+<img src="docs/curator-iso.png" width="520" alt="superposition de grille de sol isométrique" />
 
 ### Langues
 
-La vue de curation est disponible en anglais et en coréen. Passez `--lang en|ko` au lancement, ou utilisez le basculeur intégré :
+La webview est fournie en anglais et en coréen. Passez `--lang en|ko` au lancement, ou utilisez l’interrupteur intégré à l’app :
 
 ```bash
-python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # or ko
+python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # ou ko
 ```
 
-## Support Python
+## Prise en charge de Python
 
-`sprite-gen` supporte CPython 3.10+. La CI exécute la version minimale prise en charge (3.10) et la plus récente couverte (3.14) sur des runners GitHub-hosted.
+`sprite-gen` prend en charge CPython 3.10+. La CI exécute la version minimale prise en charge (3.10) et la dernière version couverte (3.14) sur des runners hébergés par GitHub.
 
-Le démarrage rapide nécessite une installation Python avec `venv`/`ensurepip` fonctionnels. Si `python3 -m venv` échoue avant l’installation des paquets dans une distribution locale, utilisez une build CPython standard d’une version supportée et relancez les mêmes commandes.
+Le démarrage rapide nécessite une installation Python avec `venv`/`ensurepip` fonctionnels. Si `python3 -m venv` échoue avant l’installation des packages dans une distribution locale, utilisez une build CPython standard de n’importe quelle version prise en charge et relancez les mêmes commandes.
 
 ## Démarrage rapide
 
@@ -101,7 +101,7 @@ python3 scripts/compose_sprite_atlas.py --run-dir <run-dir>
 
 ### Modifier une feuille terminée
 
-Quand seule la feuille combinée reste, reconstruisez un run dir prêt pour la curation, puis sélectionnez et exportez :
+Lorsqu’il ne reste que la feuille combinée, reconstruisez un run dir prêt pour le curateur, puis faites la curation et exportez :
 
 ```bash
 # rebuild frames: explicit --grid, --manifest rectangles, or alpha auto-detect (default)
@@ -113,22 +113,31 @@ python3 scripts/unpack_atlas_run.py --pngs-dir furniture/        # import a loos
 python3 scripts/export_curated_pngs.py --run-dir <run-dir>
 ```
 
-La sortie par défaut est un dossier `<source>-curator` repérable à côté de l’entrée.
+La sortie par défaut est un dossier `<source>-curator` facile à retrouver, placé à côté de l’entrée.
 
-Le workflow complet orienté agent et les contrats sont décrits dans [`SKILL.md`](SKILL.md).
+Le workflow complet destiné aux agents et les contrats se trouvent dans [`SKILL.md`](SKILL.md).
 
 ## Installation
 
-Depuis les flux d’installation de skill Codex, installez ce dépôt comme skill racine :
+Depuis les workflows d’installation de skills Codex, installez ce dépôt comme skill racine :
 
 ```bash
 python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
   --repo aldegad/sprite-gen --path .
 ```
 
+### Dépendance de skill requise
+
+Les images de lignes brutes (étape 2 du démarrage rapide) sont générées par la skill séparée [`image-gen`](https://github.com/aldegad/image-gen) (déclarée comme `kuma:image-gen` dans `depends_on` de `SKILL.md`). Installez-la de la même manière :
+
+```bash
+python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+  --repo aldegad/image-gen --path .
+```
+
 ## Attribution
 
-Le workflow en lignes de composant s’inspire de la skill `hatch-pet` sous licence Apache-2.0, mais cible des atlas de sprites de jeu génériques et n’inclut aucun package de pet ni assets visuels de pet.
+Le workflow component-row s’inspire de la skill `hatch-pet` sous licence Apache-2.0, mais cible des atlas de sprites de jeu génériques et n’inclut aucun package pet ni asset visuel pet.
 
 ## Licence
 
