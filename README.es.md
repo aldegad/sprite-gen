@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="docs/claudecy-idle.gif" width="110" alt="claudecy idle" />
-  <img src="docs/claudecy-running.gif" width="110" alt="claudecy running" />
-  <img src="docs/claudecy-success.gif" width="110" alt="claudecy success" />
-  <img src="docs/claudecy-talking.gif" width="110" alt="claudecy talking" />
-  <img src="docs/howl-idle.gif" width="110" alt="howl idle" />
-  <img src="docs/howl-running.gif" width="110" alt="howl running" />
-  <img src="docs/howl-success.gif" width="110" alt="howl success" />
+  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy idle" />
+  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy running" />
+  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy success" />
+  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy talking" />
+  <img src="docs/assets/howl-idle.gif" width="110" alt="howl idle" />
+  <img src="docs/assets/howl-running.gif" width="110" alt="howl running" />
+  <img src="docs/assets/howl-success.gif" width="110" alt="howl success" />
 </p>
 
 <h1 align="center">sprite-gen</h1>
@@ -55,7 +55,7 @@ flowchart LR
 
 La generación te lleva al 90%. La webview es donde una persona lo lleva a *enviado*: independiente, sin dependencia de Studio ni de ningún framework, funciona dondequiera que la skill esté instalada (Claude Code Desktop, la app de Codex, una terminal simple).
 
-![webview de curación — personajes](docs/demo-character.gif)
+![webview de curación — personajes](docs/assets/demo-character.gif)
 
 - **Dos filas por estado:** la **secuencia de reproducción** arriba y un **pool de candidatos** debajo (por ejemplo, una segunda o tercera toma generada). Arrastra el grip ⠿ de un fotograma para reordenar la secuencia, o sube un corte desde el pool: reconstruye un loop de carrera limpio con los mejores fotogramas de varias tomas. La disposición se guarda, así que al reabrir se restaura.
 - **Transformación no destructiva** por fotograma: arrastrar = mover, rueda = escalar, asa superior = rotar, inferior izquierda = sesgar, además de un toggle de volteo horizontal para salida invertida izquierda-derecha. Las ediciones viven en un sidecar `curation.json`: los PNG de origen nunca se reescriben, y el paso de composición hornea el resultado de forma determinista. La vista previa y el horneado comparten una matriz afín, así que lo que alineas es lo que obtienes.
@@ -66,9 +66,9 @@ La generación te lleva al 90%. La webview es donde una persona lo lleva a *envi
 
 Para sets isométricos, la webview superpone la cuadrícula del suelo (desde `meta.json` tile/anchor) para que puedas ajustar muebles a los ejes del diamante con el asa de sesgo.
 
-![webview de curación — muebles isométricos](docs/demo-furniture.gif)
+![webview de curación — muebles isométricos](docs/assets/demo-furniture.gif)
 
-<img src="docs/curator-iso.png" width="520" alt="superposición de cuadrícula de suelo isométrica" />
+<img src="docs/assets/curator-iso.png" width="520" alt="superposición de cuadrícula de suelo isométrica" />
 
 ### Idiomas
 

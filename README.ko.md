@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="docs/claudecy-idle.gif" width="110" alt="claudecy idle" />
-  <img src="docs/claudecy-running.gif" width="110" alt="claudecy running" />
-  <img src="docs/claudecy-success.gif" width="110" alt="claudecy success" />
-  <img src="docs/claudecy-talking.gif" width="110" alt="claudecy talking" />
-  <img src="docs/howl-idle.gif" width="110" alt="howl idle" />
-  <img src="docs/howl-running.gif" width="110" alt="howl running" />
-  <img src="docs/howl-success.gif" width="110" alt="howl success" />
+  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy idle" />
+  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy running" />
+  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy success" />
+  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy talking" />
+  <img src="docs/assets/howl-idle.gif" width="110" alt="howl idle" />
+  <img src="docs/assets/howl-running.gif" width="110" alt="howl running" />
+  <img src="docs/assets/howl-success.gif" width="110" alt="howl success" />
 </p>
 
 <h1 align="center">sprite-gen</h1>
@@ -55,7 +55,7 @@ flowchart LR
 
 생성은 90%까지 데려다줍니다. 웹뷰는 사람이 그것을 *출시 가능한 상태*로 가져가는 곳입니다. 독립 실행형이며 Studio나 프레임워크 의존성이 없고, 스킬이 설치된 어디서든 실행됩니다(Claude Code Desktop, Codex 앱, 일반 터미널).
 
-![curation webview — characters](docs/demo-character.gif)
+![curation webview — characters](docs/assets/demo-character.gif)
 
 - **상태마다 두 행:** 위에는 **재생 시퀀스**, 아래에는 **후보 풀**이 있습니다(예: 두 번째나 세 번째 생성 결과). 프레임의 ⠿ 그립을 드래그해 시퀀스를 재정렬하거나, 풀에서 컷을 위로 끌어올릴 수 있습니다. 여러 테이크의 가장 좋은 프레임으로 하나의 깨끗한 달리기 루프를 다시 구성하세요. 배열은 저장되므로 다시 열어도 복원됩니다.
 - 프레임별 **비파괴 변환**: 드래그 = 이동, 휠 = 스케일, 위쪽 핸들 = 회전, 왼쪽 아래 = 기울이기, 여기에 좌우 반전 출력용 horizontal-flip 토글이 더해집니다. 편집은 `curation.json` 사이드카에 저장됩니다. 원본 PNG는 절대 다시 쓰지 않으며, compose 단계가 결과를 결정적으로 굽습니다. 미리보기와 굽기는 하나의 affine matrix를 공유하므로, 정렬한 그대로 결과가 나옵니다.
@@ -66,9 +66,9 @@ flowchart LR
 
 아이소메트릭 세트의 경우, 웹뷰는 바닥 그리드(`meta.json`의 tile/anchor 기준)를 오버레이하므로 shear 핸들로 가구를 다이아몬드 축에 맞춰 스냅할 수 있습니다.
 
-![curation webview — isometric furniture](docs/demo-furniture.gif)
+![curation webview — isometric furniture](docs/assets/demo-furniture.gif)
 
-<img src="docs/curator-iso.png" width="520" alt="isometric ground grid overlay" />
+<img src="docs/assets/curator-iso.png" width="520" alt="isometric ground grid overlay" />
 
 ### 언어
 
