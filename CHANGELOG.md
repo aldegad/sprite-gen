@@ -2,6 +2,13 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.10.2 — Dependency source declared for `image-gen`
+
+Docs-only. A fresh installer could not resolve the `kuma:image-gen` dependency from its name alone.
+
+- **`SKILL.md` `depends_on.required_skills`** now declares the public source alongside the name: `name: kuma:image-gen`, `source: github:aldegad/image-gen`.
+- **README `## Install`** gains a "Required skill dependency" subsection with the `install-skill-from-github.py --repo aldegad/image-gen` command; all five translated READMEs (ko/ja/es/fr/zh-Hans) regenerated from the English source.
+
 ## v1.10.1 — Boundary-limited fringe cut (key-tinted subjects survive) + mandatory raw→deterministic gate
 
 Fixes the third way extraction destroyed real subject colors, and hardens the skill contract that a prior worker shortcut violated.
