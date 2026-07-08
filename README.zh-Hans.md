@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="docs/claudecy-idle.gif" width="110" alt="claudecy idle" />
-  <img src="docs/claudecy-running.gif" width="110" alt="claudecy running" />
-  <img src="docs/claudecy-success.gif" width="110" alt="claudecy success" />
-  <img src="docs/claudecy-talking.gif" width="110" alt="claudecy talking" />
-  <img src="docs/howl-idle.gif" width="110" alt="howl idle" />
-  <img src="docs/howl-running.gif" width="110" alt="howl running" />
-  <img src="docs/howl-success.gif" width="110" alt="howl success" />
+  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy idle" />
+  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy running" />
+  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy success" />
+  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy talking" />
+  <img src="docs/assets/howl-idle.gif" width="110" alt="howl idle" />
+  <img src="docs/assets/howl-running.gif" width="110" alt="howl running" />
+  <img src="docs/assets/howl-success.gif" width="110" alt="howl success" />
 </p>
 
 <h1 align="center">sprite-gen</h1>
@@ -55,7 +55,7 @@ flowchart LR
 
 生成能带你走完 90%。webview 是人类把它推进到*可发布*的地方：独立运行，不依赖 Studio 或框架，安装了该 skill 的地方都能运行（Claude Code Desktop、Codex app、普通终端）。
 
-![curation webview — characters](docs/demo-character.gif)
+![curation webview — characters](docs/assets/demo-character.gif)
 
 - **每个状态两行：**上方是**播放序列**，下方是**候选池**（例如第二次或第三次生成结果）。拖动帧的 ⠿ 把手来重排序列，或从候选池里拉一个片段上来——从多次生成的最佳帧中重建一段干净的奔跑循环。排列会被保存，所以重新打开时会恢复。
 - 每帧的**非破坏性变换**：拖动 = 移动，滚轮 = 缩放，顶部把手 = 旋转，左下 = 剪切，外加一个水平翻转开关，用于左右反转输出。编辑存放在 `curation.json` sidecar 中——源 PNG 永远不会被重写，compose 步骤会确定性地烘焙结果。预览和烘焙共用同一个仿射矩阵，所以你对齐的就是最终得到的。
@@ -66,9 +66,9 @@ flowchart LR
 
 对于等距视角资源集，webview 会叠加地面网格（来自 `meta.json` 的 tile/anchor），这样你就可以用剪切把手把家具贴合到菱形轴线上。
 
-![curation webview — isometric furniture](docs/demo-furniture.gif)
+![curation webview — isometric furniture](docs/assets/demo-furniture.gif)
 
-<img src="docs/curator-iso.png" width="520" alt="isometric ground grid overlay" />
+<img src="docs/assets/curator-iso.png" width="520" alt="isometric ground grid overlay" />
 
 ### 语言
 

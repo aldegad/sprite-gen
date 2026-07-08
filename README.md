@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="docs/claudecy-idle.gif" width="110" alt="claudecy idle" />
-  <img src="docs/claudecy-running.gif" width="110" alt="claudecy running" />
-  <img src="docs/claudecy-success.gif" width="110" alt="claudecy success" />
-  <img src="docs/claudecy-talking.gif" width="110" alt="claudecy talking" />
-  <img src="docs/howl-idle.gif" width="110" alt="howl idle" />
-  <img src="docs/howl-running.gif" width="110" alt="howl running" />
-  <img src="docs/howl-success.gif" width="110" alt="howl success" />
+  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy idle" />
+  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy running" />
+  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy success" />
+  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy talking" />
+  <img src="docs/assets/howl-idle.gif" width="110" alt="howl idle" />
+  <img src="docs/assets/howl-running.gif" width="110" alt="howl running" />
+  <img src="docs/assets/howl-success.gif" width="110" alt="howl success" />
 </p>
 
 <h1 align="center">sprite-gen</h1>
@@ -55,7 +55,7 @@ flowchart LR
 
 Generation gets you 90%. The webview is where a human takes it to *shipped* — standalone, no Studio or framework dependency, runs anywhere the skill is installed (Claude Code Desktop, the Codex app, a plain terminal).
 
-![curation webview — characters](docs/demo-character.gif)
+![curation webview — characters](docs/assets/demo-character.gif)
 
 - **Two rows per state:** the **play sequence** on top and a **candidate pool** below (e.g. a second or third generated take). Drag a frame's ⠿ grip to reorder the sequence, or pull a cut up from the pool — rebuild one clean run loop from the best frames across takes. The arrangement is saved, so reopening restores it.
 - **Non-destructive transform** per frame: drag = move, wheel = scale, top handle = rotate, bottom-left = shear, plus a horizontal-flip toggle for left-right-reversed output. Edits live in a `curation.json` sidecar — source PNGs are never rewritten, and the compose step bakes the result deterministically. Preview and bake share one affine matrix, so what you align is what you get.
@@ -66,9 +66,9 @@ Generation gets you 90%. The webview is where a human takes it to *shipped* — 
 
 For isometric sets, the webview overlays the floor grid (from `meta.json` tile/anchor) so you can snap furniture to the diamond axes with the shear handle.
 
-![curation webview — isometric furniture](docs/demo-furniture.gif)
+![curation webview — isometric furniture](docs/assets/demo-furniture.gif)
 
-<img src="docs/curator-iso.png" width="520" alt="isometric ground grid overlay" />
+<img src="docs/assets/curator-iso.png" width="520" alt="isometric ground grid overlay" />
 
 ### Languages
 
