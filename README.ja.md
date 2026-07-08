@@ -10,7 +10,7 @@
 
 <h1 align="center">sprite-gen</h1>
 
-<p align="center"><b>1枚の絵を入力。ゲーム対応のスプライトアトラスを出力。</b></p>
+<p align="center"><b>1枚の絵を入力。ゲームですぐ使えるスプライトアトラスを出力。</b></p>
 
 <p align="center">
 
@@ -20,11 +20,11 @@
 
 ---
 
-画像モデルに「sprite sheet」を頼むと、何が返ってくるかは分かっています。フレームごとに顔が変わるキャラクター、キーアウトできない背景、重なってグリッドからずれていくポーズ、そしてゲームエンジンでは実際には使えないPNG。かわいいデモ、使えないアセット。
+画像モデルに「スプライトシート」を頼むと、何が出てくるかはだいたいわかっています。フレームごとに顔が変わるキャラクター、キーアウトできない背景、重なり合ってグリッドからずれていくポーズ、そしてゲームエンジンが実際には扱えない PNG。かわいいデモではあるけれど、アセットとしては使い物になりません。
 
-`sprite-gen` は、そのギャップを埋める Codex/Claude スキルです。**1枚のベース画像**とアクションのリストを渡すと、行ごとに生成を進め、キャラクターの同一性を固定し、クロマ背景を本物のアルファに除去し、各ポーズをクリーンな透明フレームとして抽出し、**機械可読な `manifest.json.frame_layout`** を持つランタイム用アトラスに焼き込みます。上のスプライトはすべてこの方法で作られました。
+`sprite-gen` は、そのギャップを埋める Codex/Claude スキルです。**1枚のベース画像**とアクションのリストを渡すと、行ごとに生成を進め、キャラクターの同一性を固定し、クロマ背景を本物のアルファに取り除き、各ポーズをクリーンな透過フレームとして抽出し、**機械可読な `manifest.json.frame_layout`** 付きのランタイム用アトラスに焼き込みます。上にあるすべてのスプライトは、この方法で作られました。
 
-そして、生成がどうしても正しくできない最後の10%には、**curation webview** があります。フレームを横並びで比較し、壊れたものを却下し、回転/スケール/位置を非破壊で微調整し、ループをライブで確認してから焼き込みます。パイプラインが作業を担い、あなたはセンスを保ちます。
+そして、生成ではどうしても正しくならない最後の10%のために、**キュレーション webview** があります。フレームを横並びで比較し、壊れたものを却下し、回転・拡大縮小・位置を非破壊で微調整し、ループをライブで確認してから焼き込みます。パイプラインが作業を担い、あなたはセンスを保ちます。
 
 ```text
 sprite-request.json → layout guides + prompts → image-gen state rows
@@ -32,33 +32,39 @@ sprite-request.json → layout guides + prompts → image-gen state rows
 → sprite-sheet-alpha.png + manifest.json.frame_layout
 ```
 
-<p align="center">
-  <img src="docs/architecture-diagram.png" width="640" alt="sprite-gen architecture — component-row pipeline" />
-</p>
+```mermaid
+flowchart LR
+    REQ["sprite-request.json<br/>(numeric SSoT)"] --> GUIDES["layout guides<br/>+ prompts"]
+    GUIDES --> GEN["image-gen<br/>state row strips"]
+    GEN --> EXTRACT["chroma alpha →<br/>connected components"]
+    EXTRACT --> FRAMES["transparent frames"]
+    FRAMES --> ATLAS["sprite-sheet-alpha.png<br/>+ manifest.json.frame_layout"]
+    FRAMES -. "curation webview (optional)" .-> ATLAS
+```
 
-> 完全なアーキテクチャ: [`docs/architecture.md`](docs/architecture.md) · 図のソース: [`docs/architecture-diagram.html`](docs/architecture-diagram.html)
+> 全体アーキテクチャ: [`docs/architecture.md`](docs/architecture.md)
 
 ## 実際に得られるもの
 
-- **透明なスプライトアトラス** (`sprite-sheet-alpha.png`) — 本物のアルファ、残留クロマの縁なし、白背景に対して検証済み。
-- **ランタイムマニフェスト** (`manifest.json.frame_layout`) — 絶対フレーム矩形、状態ごとのfpsとループフラグ。エンジンは矩形をサンプリングし、グリッドを推測しません。
-- **見て確認できるQA** — 状態ごとのGIFとコンタクトシートにより、出荷前にモーションをモーションとして判断できます。
-- **正直なラベル** — 短く読みやすいアクション（idle, jump, attack, wave）が安定したパスです。循環ロコモーション（walk/run）は、モーションQAに実際に合格しない限り実験的として扱われます。黙って過剰に約束することはありません。
+- **透過スプライトアトラス** (`sprite-sheet-alpha.png`) — 本物のアルファ、クロマの残り縁なし、白背景に対して検証済み。
+- **ランタイム用マニフェスト** (`manifest.json.frame_layout`) — 絶対座標のフレーム矩形、ステートごとの fps とループフラグ。エンジンは矩形をサンプリングし、グリッドを推測する必要はありません。
+- **目で確認できる QA** — ステートごとの GIF とコンタクトシートにより、出荷前にモーションをモーションとして判断できます。
+- **誠実なラベル** — idle、jump、attack、wave のような短く読みやすいアクションが安定した経路です。walk/run のような周期的な移動は、モーション QA を実際に通過しない限り experimental として扱われます。黙って過剰な約束はしません。
 
-## Curation webview
+## キュレーション webview
 
-生成で90%まで到達します。webview は、人間がそれを *出荷可能* に仕上げる場所です。スタンドアロンで、Studio やフレームワークへの依存はなく、スキルがインストールされている場所ならどこでも動きます（Claude Code Desktop、Codex app、普通のターミナル）。
+生成で90%まで到達します。webview は、人間がそれを*出荷可能*な状態に持っていく場所です。スタンドアロンで、Studio やフレームワークへの依存はなく、このスキルがインストールされている場所ならどこでも動きます（Claude Code Desktop、Codex アプリ、通常のターミナル）。
 
 ![curation webview — characters](docs/demo-character.gif)
 
-- **状態ごとに2行:** 上に **play sequence**、下に **candidate pool**（例: 2回目または3回目に生成した別テイク）。フレームの ⠿ グリップをドラッグしてシーケンスを並べ替えるか、プールからカットを引き上げます。複数テイクの最良フレームから、1つのクリーンなランループを再構築できます。配置は保存されるため、再度開くと復元されます。
-- フレームごとの **非破壊 transform**: ドラッグ = 移動、ホイール = スケール、上ハンドル = 回転、左下 = シアー、さらに左右反転出力用の水平反転トグル。編集は `curation.json` サイドカーに保存されます。ソースPNGは一切書き換えられず、compose ステップが結果を決定的に焼き込みます。プレビューと焼き込みは同じアフィン行列を共有するため、整列したものがそのまま得られます。
-- **ライブプレビュー** は、状態のfpsでシーケンスをアニメーションし、再生/一時停止、フレーム単位のステップ、0.25×–4× の速度制御を備えます。
-- スプライトだけではありません。`unpack_atlas_run.py --pngs-dir` で任意の画像候補フォルダ（アイコン、ロゴ、生成ドラフト）を指定すれば、汎用的な勝者選定ビューとして使えます。
+- **ステートごとに2行:** 上に**再生シーケンス**、下に**候補プール**（例: 2回目または3回目の生成テイク）。フレームの ⠿ グリップをドラッグしてシーケンスを並べ替えたり、プールからカットを引き上げたりできます。複数テイクの最良フレームから、1つのクリーンなランループを再構築できます。配置は保存されるため、再度開くと復元されます。
+- フレームごとの**非破壊トランスフォーム**: ドラッグ = 移動、ホイール = 拡大縮小、上ハンドル = 回転、左下 = シアー、さらに左右反転出力用の水平反転トグル。編集内容は `curation.json` サイドカーに保存されます。ソース PNG は決して書き換えられず、合成ステップが結果を決定論的に焼き込みます。プレビューと焼き込みは同じアフィン行列を共有するため、整列したものがそのまま出力されます。
+- **ライブプレビュー** はステートの fps でシーケンスをアニメーションし、再生/一時停止、フレーム単位のステップ、0.25×–4× の速度制御を備えています。
+- スプライト専用ではありません。`unpack_atlas_run.py --pngs-dir` で任意の画像候補フォルダ（アイコン、ロゴ、生成ドラフト）を指定すれば、汎用の勝者選定ビューとして使えます。
 
 ### アイソメトリック地面グリッド
 
-アイソメトリックセットでは、webview が床グリッド（`meta.json` の tile/anchor 由来）をオーバーレイするため、シアーハンドルを使って家具をダイヤモンド軸にスナップできます。
+アイソメトリックセットでは、webview が床グリッド（`meta.json` の tile/anchor 由来）をオーバーレイするため、シアーハンドルで家具をダイヤモンド軸に合わせてスナップできます。
 
 ![curation webview — isometric furniture](docs/demo-furniture.gif)
 
@@ -66,7 +72,7 @@ sprite-request.json → layout guides + prompts → image-gen state rows
 
 ### 言語
 
-webview には英語と韓国語が同梱されています。起動時に `--lang en|ko` を渡すか、アプリ内トグルを使用します。
+webview には英語と韓国語が同梱されています。起動時に `--lang en|ko` を渡すか、アプリ内トグルを使用してください。
 
 ```bash
 python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # or ko
@@ -74,11 +80,11 @@ python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # or ko
 
 ## Python サポート
 
-`sprite-gen` は CPython 3.10+ をサポートします。CI は GitHub ホストランナー上で、最小サポートバージョン（3.10）と最新のカバー対象バージョン（3.14）を実行します。
+`sprite-gen` は CPython 3.10+ をサポートします。CI は GitHub-hosted runners 上で、サポートされる最小バージョン（3.10）と、対象範囲内の最新バージョン（3.14）を実行します。
 
-クイックスタートには、動作する `venv`/`ensurepip` を備えた Python インストールが必要です。ローカル配布版でパッケージインストール前に `python3 -m venv` が失敗する場合は、サポート対象バージョンの標準 CPython ビルドを使用し、同じコマンドを再実行してください。
+クイックスタートには、動作する `venv`/`ensurepip` を備えた Python インストールが必要です。ローカル配布環境でパッケージインストール前に `python3 -m venv` が失敗する場合は、サポート対象の任意のバージョンの標準 CPython ビルドを使用し、同じコマンドを再実行してください。
 
-## Quickstart
+## クイックスタート
 
 ```bash
 # 0. install dependencies (Pillow) into a fresh virtualenv
@@ -99,9 +105,9 @@ python3 scripts/serve_curation.py --run-dir <run-dir>
 python3 scripts/compose_sprite_atlas.py --run-dir <run-dir>
 ```
 
-### 完成済みシートを編集する
+### 完成済みシートの編集
 
-結合済みシートだけが残っている場合は、curator 対応の run dir を再構築してから、キュレーションしてエクスポートします。
+結合済みシートだけが残っている場合は、キュレーター対応の run dir を再構築してから、キュレーションしてエクスポートします。
 
 ```bash
 # rebuild frames: explicit --grid, --manifest rectangles, or alpha auto-detect (default)
@@ -113,13 +119,13 @@ python3 scripts/unpack_atlas_run.py --pngs-dir furniture/        # import a loos
 python3 scripts/export_curated_pngs.py --run-dir <run-dir>
 ```
 
-出力先のデフォルトは、入力の隣に作られる見つけやすい `<source>-curator` フォルダです。
+出力先はデフォルトで、入力の隣に見つけやすい `<source>-curator` フォルダになります。
 
-完全なエージェント向けワークフローと契約は [`SKILL.md`](SKILL.md) にあります。
+エージェント向けの完全なワークフローと契約は [`SKILL.md`](SKILL.md) にあります。
 
-## Install
+## インストール
 
-Codex スキルインストーラーワークフローから、このリポジトリをルートスキルとしてインストールします。
+Codex スキルインストーラーのワークフローから、このリポジトリをルートスキルとしてインストールします。
 
 ```bash
 python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
@@ -128,17 +134,17 @@ python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-githu
 
 ### 必須スキル依存関係
 
-生の行画像（クイックスタートのステップ2）は、別の [`image-gen`](https://github.com/aldegad/image-gen) スキル（`SKILL.md` の `depends_on` で `kuma:image-gen` として宣言）によって生成されます。同じ方法でインストールしてください。
+生の行画像（クイックスタートのステップ2）は、別の [`image-gen`](https://github.com/aldegad/image-gen) スキルによって生成されます（`SKILL.md` の `depends_on` では `kuma:image-gen` として宣言）。同じ方法でインストールしてください。
 
 ```bash
 python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
   --repo aldegad/image-gen --path .
 ```
 
-## Attribution
+## 帰属
 
-component-row ワークフローは、Apache-2.0 ライセンスの `hatch-pet` スキルに着想を得ていますが、汎用的なゲーム用スプライトアトラスを対象としており、ペット用パッケージやペットのビジュアルアセットは含みません。
+component-row ワークフローは Apache-2.0 ライセンスの `hatch-pet` スキルに着想を得ていますが、汎用的なゲーム用スプライトアトラスを対象としており、ペット用パッケージやペットのビジュアルアセットは含みません。
 
-## License
+## ライセンス
 
 Apache-2.0
