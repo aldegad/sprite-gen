@@ -32,11 +32,17 @@ sprite-request.json → layout guides + prompts → image-gen state rows
 → sprite-sheet-alpha.png + manifest.json.frame_layout
 ```
 
-<p align="center">
-  <img src="docs/architecture-diagram.png" width="640" alt="sprite-gen architecture — component-row pipeline" />
-</p>
+```mermaid
+flowchart LR
+    REQ["sprite-request.json<br/>(numeric SSoT)"] --> GUIDES["layout guides<br/>+ prompts"]
+    GUIDES --> GEN["image-gen<br/>state row strips"]
+    GEN --> EXTRACT["chroma alpha →<br/>connected components"]
+    EXTRACT --> FRAMES["transparent frames"]
+    FRAMES --> ATLAS["sprite-sheet-alpha.png<br/>+ manifest.json.frame_layout"]
+    FRAMES -. "curation webview (optional)" .-> ATLAS
+```
 
-> Full architecture: [`docs/architecture.md`](docs/architecture.md) · diagram source: [`docs/architecture-diagram.html`](docs/architecture-diagram.html)
+> Full architecture: [`docs/architecture.md`](docs/architecture.md)
 
 ## What you actually get
 
