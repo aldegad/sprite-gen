@@ -50,6 +50,58 @@ def key_tint_score(color: tuple[int, int, int], chroma_key: tuple[int, int, int]
 
 
 
+def despill_color(
+    color: tuple[int, int, int],
+    chroma_key: tuple[int, int, int],
+    key_tint: float,
+    tint: float,
+) -> tuple[float, tuple[int, int, int]]:
+    """Estimate the key fraction of a blend pixel and remove it from the RGB.
+
+    Blend model: observed = (1-k)*subject + k*key. key_tint_score is linear in
+    the channels and scores the key itself at `key_tint`, so k = tint/key_tint
+    recovers a subject estimate whose own tint score is ~0. Returns the
+    subject coverage (1-k) and the despilled color.
+    """
+    k = min(tint / key_tint, 1.0)
+    coverage = 1.0 - k
+    if coverage <= 0:
+        return 0.0, (0, 0, 0)
+    red, green, blue = (
+        min(255, max(0, round((color[index] - k * chroma_key[index]) / coverage)))
+        for index in range(3)
+    )
+    return coverage, (red, green, blue)
+
+
+def unmix_key_blend(
+    color: tuple[int, int, int],
+    alpha: int,
+    chroma_key: tuple[int, int, int],
+    key_tint: float,
+    tint: float,
+) -> tuple[int, int, int, int]:
+    """Separate a key/subject blend pixel into despilled RGB + partial alpha."""
+    coverage, despilled = despill_color(color, chroma_key, key_tint, tint)
+    out_alpha = round(alpha * coverage)
+    if out_alpha <= 0:
+        return (0, 0, 0, 0)
+    return (*despilled, out_alpha)
+
+
+# remove_chroma_background pixel classes, decided once on the source colors.
+_KEYED = 0  # erased: transparent input, hard key cut, or fringe peel
+_SUBJECT = 1  # not key-tinted — never touched, blocks the fringe peel
+_BLEND_IN_BAND = 2  # key-tinted, within fringe_threshold of the key
+_BLEND_OUT_OF_BAND = 3  # key-tinted, farther than fringe_threshold
+
+# A trapped-spill cluster must contain at least one strongly key-tinted pixel
+# to be treated. This is the plan's visible-residue detector (every keyed
+# channel clears every unkeyed channel by >40): warm subject colors (skin)
+# score a marginal tint just above fringe_delta and must not be "corrected".
+_SPILL_MIN_TINT = 40.0
+
+
 def remove_chroma_background(
     image: Image.Image,
     chroma_key: tuple[int, int, int],
@@ -57,30 +109,44 @@ def remove_chroma_background(
     fringe_threshold: float,
     fringe_delta: float,
     fringe_reach: int = 2,
+    unmix_reach: int = 4,
+    spill_max_fraction: float = 0.005,
 ) -> Image.Image:
     rgba = image.convert("RGBA")
     width, height = rgba.size
     pixels = rgba.load()
-    background = bytearray(width * height)
-    frontier: list[int] = []
+    classes = bytearray(width * height)
+    unseen = 255
+    depths = bytearray(b"\xff" * (width * height))  # chebyshev distance to keyed region
+    keyed: list[int] = []
     for y in range(height):
         for x in range(width):
             red, green, blue, alpha = pixels[x, y]
-            if alpha == 0:
-                if red or green or blue:
-                    pixels[x, y] = (0, 0, 0, 0)
-                background[y * width + x] = 1
-                frontier.append(y * width + x)
-            elif color_distance((red, green, blue), chroma_key) <= threshold:
+            index = y * width + x
+            color = (red, green, blue)
+            if alpha == 0 or color_distance(color, chroma_key) <= threshold:
                 pixels[x, y] = (0, 0, 0, 0)
-                background[y * width + x] = 1
-                frontier.append(y * width + x)
-    # Fringe is antialias blend along the erased-background boundary, so only
-    # pixels spatially adjacent to background are candidates, peeled at most
-    # fringe_reach layers. Key-tinted *subject* colors (hot pink / purple under
-    # a magenta key) match the same color band but never touch the background,
-    # so they survive — the old position-blind cut erased them wholesale.
-    for _ in range(fringe_reach):
+                classes[index] = _KEYED
+                depths[index] = 0
+                keyed.append(index)
+            elif key_tint_score(color, chroma_key) < fringe_delta:
+                classes[index] = _SUBJECT
+            elif color_distance(color, chroma_key) <= fringe_threshold:
+                classes[index] = _BLEND_IN_BAND
+            else:
+                classes[index] = _BLEND_OUT_OF_BAND
+
+    key_tint = key_tint_score(chroma_key, chroma_key)
+    max_reach = min(unseen - 1, max(fringe_reach, unmix_reach if key_tint > 0 else 0))
+
+    # Geometric distance to the nearest keyed-out pixel — outer background
+    # *and* interior holes (hair gaps) alike. Unlike the erase peel below this
+    # walk is not blocked by subject pixels, so an isolated key blend locked
+    # inside subject material still gets a depth.
+    frontier = keyed
+    depth = 0
+    while frontier and depth < max_reach:
+        depth += 1
         next_frontier: list[int] = []
         for index in frontier:
             x = index % width
@@ -94,17 +160,128 @@ def remove_chroma_background(
                     if nx < 0 or nx >= width:
                         continue
                     neighbor = ny * width + nx
-                    if background[neighbor]:
-                        continue
-                    red, green, blue, _alpha = pixels[nx, ny]
-                    color = (red, green, blue)
-                    if color_distance(color, chroma_key) <= fringe_threshold and key_tint_score(color, chroma_key) >= fringe_delta:
-                        pixels[nx, ny] = (0, 0, 0, 0)
-                        background[neighbor] = 1
+                    if depths[neighbor] == unseen:
+                        depths[neighbor] = depth
                         next_frontier.append(neighbor)
+        frontier = next_frontier
+
+    # Fringe erase peel — unchanged v1.10.1 contract: in-band key-tinted
+    # pixels chain-adjacent to the keyed region go entirely, at most
+    # fringe_reach layers, and subject pixels block the walk. Key-tinted
+    # *material* (hot pink / purple under a magenta key) deeper than the peel
+    # survives byte-identical.
+    frontier = keyed
+    for _ in range(fringe_reach):
+        next_frontier = []
+        for index in frontier:
+            x = index % width
+            y = index // width
+            for dy in (-1, 0, 1):
+                ny = y + dy
+                if ny < 0 or ny >= height:
+                    continue
+                for dx in (-1, 0, 1):
+                    nx = x + dx
+                    if nx < 0 or nx >= width:
+                        continue
+                    neighbor = ny * width + nx
+                    if classes[neighbor] != _BLEND_IN_BAND:
+                        continue
+                    pixels[nx, ny] = (0, 0, 0, 0)
+                    classes[neighbor] = _KEYED
+                    next_frontier.append(neighbor)
         if not next_frontier:
             break
         frontier = next_frontier
+
+    # Soft-alpha unmix — the binary erase above cannot represent antialiased
+    # coverage, and it never reaches blends that sit outside the fringe band
+    # or behind a subject pixel (dark hair × key pockets survived as opaque
+    # key-colored residue). Any key-tinted pixel within unmix_reach of the
+    # keyed region is separated into despilled RGB + partial alpha instead:
+    #   - out-of-band blends always (they are too subject-heavy to erase);
+    #   - in-band survivors only when they touch an untinted subject pixel —
+    #     a trapped blend borders the subject it was blended from, while a
+    #     key-tinted material interior is embedded in its own tint and must
+    #     stay byte-identical (v1.10.1 guardrail).
+    if key_tint > 0 and unmix_reach > 0:
+        for y in range(height):
+            for x in range(width):
+                index = y * width + x
+                if not 0 < depths[index] <= unmix_reach:
+                    continue
+                pixel_class = classes[index]
+                if pixel_class == _BLEND_IN_BAND:
+                    if not any(
+                        classes[ny * width + nx] == _SUBJECT
+                        for dy in (-1, 0, 1)
+                        for dx in (-1, 0, 1)
+                        if (dx or dy)
+                        and 0 <= (nx := x + dx) < width
+                        and 0 <= (ny := y + dy) < height
+                    ):
+                        continue
+                elif pixel_class != _BLEND_OUT_OF_BAND:
+                    continue
+                red, green, blue, alpha = pixels[x, y]
+                color = (red, green, blue)
+                pixels[x, y] = unmix_key_blend(
+                    color, alpha, chroma_key, key_tint, key_tint_score(color, chroma_key)
+                )
+
+    # Trapped-spill despill — generators paint key-colored spill *inside* the
+    # subject (a green streak buried in crimson hair, key reflections between
+    # strands) too far from any keyed pixel for depth-based treatment to
+    # reach. Among the still-tinted pixels left after the passes above, a
+    # small connected cluster is spill; a large one is intentional key-tinted
+    # material (the hot-pink seed packet) and stays untouched. Spill keeps its
+    # alpha — it sits inside opaque subject, so this is color correction, not
+    # coverage: partial alpha here would punch pinholes through the sprite.
+    if key_tint > 0 and keyed and spill_max_fraction > 0:
+        subject_count = sum(1 for pixel_class in classes if pixel_class != _KEYED)
+        spill_limit = max(32, round(subject_count * spill_max_fraction))
+        tints_left: dict[int, float] = {}
+        for y in range(height):
+            for x in range(width):
+                red, green, blue, alpha = pixels[x, y]
+                if not alpha:
+                    continue
+                tint = key_tint_score((red, green, blue), chroma_key)
+                if tint >= fringe_delta:
+                    tints_left[y * width + x] = tint
+        visited: set[int] = set()
+        for start in tints_left:
+            if start in visited:
+                continue
+            stack = [start]
+            visited.add(start)
+            cluster = []
+            while stack:
+                index = stack.pop()
+                cluster.append(index)
+                x = index % width
+                y = index // width
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        if 0 <= x + dx < width and 0 <= y + dy < height:
+                            neighbor = (y + dy) * width + (x + dx)
+                            if neighbor in tints_left and neighbor not in visited:
+                                visited.add(neighbor)
+                                stack.append(neighbor)
+            if len(cluster) > spill_limit:
+                continue
+            if max(tints_left[index] for index in cluster) <= _SPILL_MIN_TINT:
+                continue
+            for index in cluster:
+                x = index % width
+                y = index // width
+                red, green, blue, alpha = pixels[x, y]
+                color = (red, green, blue)
+                coverage, despilled = despill_color(
+                    color, chroma_key, key_tint, key_tint_score(color, chroma_key)
+                )
+                if coverage > 0:
+                    pixels[x, y] = (*despilled, alpha)
     return rgba
 
 
@@ -839,6 +1016,21 @@ def main() -> int:
     parser.add_argument("--fringe-key-threshold", type=float, default=180.0)
     parser.add_argument("--fringe-delta", type=float, default=18.0)
     parser.add_argument("--fringe-reach", type=int, default=2)
+    parser.add_argument(
+        "--fringe-unmix-reach",
+        type=int,
+        default=None,
+        help="peel depth for soft-alpha unmix of out-of-band key blends; "
+        "default from request chroma.unmix_reach, else 4; 0 disables",
+    )
+    parser.add_argument(
+        "--spill-max-fraction",
+        type=float,
+        default=None,
+        help="max size of a trapped key-spill cluster to despill, as a fraction "
+        "of subject pixels; default from request chroma.spill_max_fraction, "
+        "else 0.005; 0 disables",
+    )
     parser.add_argument("--allow-slot-fallback", action="store_true")
     parser.add_argument("--min-used-pixels", type=int, default=400)
     parser.add_argument("--edge-margin", type=int, default=2)
@@ -852,10 +1044,42 @@ def main() -> int:
         raise SystemExit("--fringe-key-threshold must be greater than or equal to --key-threshold")
     if args.fringe_reach < 0:
         raise SystemExit("--fringe-reach must be zero or positive")
+    if args.fringe_unmix_reach is not None and args.fringe_unmix_reach < 0:
+        raise SystemExit("--fringe-unmix-reach must be zero or positive")
+    if args.spill_max_fraction is not None and args.spill_max_fraction < 0:
+        raise SystemExit("--spill-max-fraction must be zero or positive")
 
     run_dir = args.run_dir.expanduser().resolve()
     acquire_run_dir_lock(run_dir, "extract_sprite_row_frames")
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    # 크로마 튜너블의 SSoT 는 request JSON `chroma` — CLI 는 명시 override 만.
+    # 실제 적용값은 request 에 되써서 런이 스스로 재현 가능하게 남긴다.
+    chroma_config = dict(request.get("chroma") or {})
+    unmix_reach = (
+        args.fringe_unmix_reach
+        if args.fringe_unmix_reach is not None
+        else int(chroma_config.get("unmix_reach", 4))
+    )
+    if unmix_reach < 0:
+        raise SystemExit("chroma.unmix_reach must be zero or positive")
+    spill_max_fraction = (
+        args.spill_max_fraction
+        if args.spill_max_fraction is not None
+        else float(chroma_config.get("spill_max_fraction", 0.005))
+    )
+    if spill_max_fraction < 0:
+        raise SystemExit("chroma.spill_max_fraction must be zero or positive")
+    effective_chroma = {
+        **chroma_config,
+        "unmix_reach": unmix_reach,
+        "spill_max_fraction": spill_max_fraction,
+    }
+    if effective_chroma != chroma_config:
+        request["chroma"] = effective_chroma
+        atomic_write_text(
+            run_dir / "sprite-request.json",
+            json.dumps(request, ensure_ascii=False, indent=2) + "\n",
+        )
     states = list(request["states"]) if args.states == "all" else [state.strip() for state in args.states.split(",") if state.strip()]
     cell_width, cell_height, safe_margin_x, safe_margin_y = cell_geometry(request["cell"])
     fit_config = request.get("fit") or {}
@@ -929,6 +1153,8 @@ def main() -> int:
                 args.fringe_key_threshold,
                 args.fringe_delta,
                 args.fringe_reach,
+                unmix_reach,
+                spill_max_fraction,
             )
         if pixel_perfect:
             # 프레임별 픽셀퍼펙트 (2026-07-05 재설계): 포즈 컴포넌트를 먼저
