@@ -14,7 +14,7 @@ Optional `fit` object (opt-in; absent means legacy behavior). For pixel-art targ
 - `align_x` — `bbox-center` (default) | `centroid` | `foot-centroid`. Bbox-centering shifts the body left/right whenever a pose's content bbox width changes (extended arm/leg), which reads as per-frame horizontal jitter. `centroid` aligns the whole-alpha centroid; `foot-centroid` aligns the bottom-20% alpha (the legs), so trailing hair/capes do not pull the body off the cell axis — use it when the runtime mirrors the cell for left/right facing (flip pivots on the leg axis instead of teleporting the body).
 - `align_y` — `center` (default) | `bottom`. Bottom pins feet to a shared baseline (`cell_height - safe_margin_y`).
 
-`prepare_sprite_run.py` exposes these as `--fit-resample`, `--fit-align-x`, `--fit-align-y`.
+`prepare_sprite_run.py` exposes these as `--fit-resample`, `--fit-align-x`, `--fit-align-y`, plus the `pixel_perfect` family below as `--fit-pixel-perfect`, `--fit-logical-height`, `--fit-palette-size`, `--fit-detail-bias`, `--fit-outline {on,off,STRENGTH}`, `--fit-pitch-hint`. CLI flags override the same keys in `--request` JSON; either way the merged result is recorded in the run's `sprite-request.json` `fit` object (SSoT).
 
 ## `pixel_perfect` mode
 

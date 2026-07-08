@@ -561,6 +561,22 @@ Layout requirements:
 Output only the sprite strip image."""
 
 
+def _outline_config(value: str):
+    """Parse --fit-outline: on -> True, off -> False, otherwise a 0..1 strength."""
+    lowered = value.strip().lower()
+    if lowered in {"on", "true"}:
+        return True
+    if lowered in {"off", "false"}:
+        return False
+    try:
+        strength = float(lowered)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected on, off, or a strength float: {value!r}")
+    if not 0.0 <= strength <= 1.0:
+        raise argparse.ArgumentTypeError(f"outline strength must be within 0..1: {value!r}")
+    return strength
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", required=True, type=Path)
@@ -573,9 +589,15 @@ def main() -> int:
     parser.add_argument("--cell-height", type=int)
     parser.add_argument("--safe-margin", type=int, default=24)
     parser.add_argument("--chroma-key", default="auto", help="auto or #RRGGBB")
-    parser.add_argument("--fit-resample", choices=["lanczos", "nearest"], default=None, help="frame downscale filter; nearest keeps pixel-art edges crisp")
-    parser.add_argument("--fit-align-x", choices=["bbox-center", "centroid"], default=None, help="horizontal frame anchor; centroid stabilizes body position across variable-width poses")
+    parser.add_argument("--fit-resample", choices=["lanczos", "nearest", "kcentroid"], default=None, help="frame downscale filter; nearest keeps pixel-art edges crisp, kcentroid keeps 1px outlines readable")
+    parser.add_argument("--fit-align-x", choices=["bbox-center", "centroid", "foot-centroid"], default=None, help="horizontal frame anchor; centroid stabilizes body position across variable-width poses, foot-centroid anchors on the bottom-20%% alpha (legs)")
     parser.add_argument("--fit-align-y", choices=["center", "bottom"], default=None, help="vertical frame anchor; bottom pins feet to a shared baseline")
+    parser.add_argument("--fit-pixel-perfect", action=argparse.BooleanOptionalAction, default=None, help="true pixel-perfect extraction: pitch detection -> grid snap -> kCentroid -> shared palette -> integer NEAREST (see docs/pixel-perfect.md)")
+    parser.add_argument("--fit-logical-height", type=int, default=None, help="pixel-perfect logical grid height; omit for 1:1 with the cell height")
+    parser.add_argument("--fit-palette-size", type=int, default=None, help="pixel-perfect run-wide shared palette size (default 24)")
+    parser.add_argument("--fit-detail-bias", action=argparse.BooleanOptionalAction, default=None, help="pixel-perfect dominant-color voting bias toward near-black detail clusters (default on)")
+    parser.add_argument("--fit-outline", type=_outline_config, default=None, metavar="{on,off,STRENGTH}", help="pixel-perfect outline enforcement: on (strength 0.62), off, or an explicit 0..1 strength")
+    parser.add_argument("--fit-pitch-hint", type=int, default=None, help="pixel-perfect fallback pixel pitch when per-frame detection is inconclusive")
     parser.add_argument("--motion-phase-guides", action="store_true", help="draw simple per-frame motion phase hints into locomotion layout guides")
     parser.add_argument("--request", type=Path)
     parser.add_argument("--request-json")
@@ -621,12 +643,20 @@ def main() -> int:
         "motion_phase_guides": bool(raw_request.get("motion_phase_guides", args.motion_phase_guides)),
     }
     fit = dict(raw_request.get("fit", {}))
-    if args.fit_resample is not None:
-        fit["resample"] = args.fit_resample
-    if args.fit_align_x is not None:
-        fit["align_x"] = args.fit_align_x
-    if args.fit_align_y is not None:
-        fit["align_y"] = args.fit_align_y
+    fit_overrides = {
+        "resample": args.fit_resample,
+        "align_x": args.fit_align_x,
+        "align_y": args.fit_align_y,
+        "pixel_perfect": args.fit_pixel_perfect,
+        "logical_height": args.fit_logical_height,
+        "palette_size": args.fit_palette_size,
+        "detail_bias": args.fit_detail_bias,
+        "outline": args.fit_outline,
+        "pitch_hint": args.fit_pitch_hint,
+    }
+    for key, value in fit_overrides.items():
+        if value is not None:
+            fit[key] = value
     if fit:
         request["fit"] = fit
 
