@@ -15,6 +15,7 @@ from sprite_gen import (
     extract,
     prepare,
     preview,
+    slice_sheet,
     unpack_atlas,
 )
 from sprite_gen.prepare import STYLE_DEFAULT, _outline_config
@@ -145,6 +146,26 @@ def _add_export_pngs(p: argparse.ArgumentParser) -> None:
     p.add_argument("--selected-only", action="store_true")
 
 
+def _add_slice_sheet(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--sheet", required=True, type=Path)
+    p.add_argument("--out-dir", required=True, type=Path)
+    p.add_argument("--chroma-key", required=True, help="magenta, green, or #RRGGBB")
+    p.add_argument("--grid", type=_parse_grid, default=(3, 2), help="COLSxROWS, default 3x2")
+    p.add_argument("--names", help="comma-separated output names, one per cell in reading order")
+    p.add_argument("--prefix", default="")
+    p.add_argument("--cell-width", type=int, default=512)
+    p.add_argument("--cell-height", type=int, default=768)
+    p.add_argument("--baseline-y", type=float, default=725.0)
+    p.add_argument("--target-height", type=float, default=645.0)
+    p.add_argument("--key-threshold", type=float, default=slice_sheet.DEFAULT_KEY_THRESHOLD)
+    p.add_argument("--fringe-key-threshold", type=float, default=slice_sheet.DEFAULT_FRINGE_KEY_THRESHOLD)
+    p.add_argument("--fringe-delta", type=float, default=slice_sheet.DEFAULT_FRINGE_DELTA)
+    p.add_argument("--fringe-unmix-reach", type=int, default=4)
+    p.add_argument("--spill-max-fraction", type=float, default=0.005)
+    p.add_argument("--noise-min", type=int, default=slice_sheet.DEFAULT_NOISE_MIN)
+    p.add_argument("--debris-fraction", type=float, default=slice_sheet.DEFAULT_DEBRIS_FRACTION)
+
+
 COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[..., int]]] = {
     "prepare": ("Prepare a sprite-gen component-row run.", _add_prepare, prepare.run),
     "extract": ("Extract component-row sprite strips into clean RGBA frames.", _add_extract, extract.run),
@@ -166,6 +187,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         unpack_atlas.run,
     ),
     "export-pngs": ("Export curated frames back to named PNGs.", _add_export_pngs, export_pngs.run),
+    "slice-sheet": (
+        "Slice a multi-figure grid sheet into per-cell standing cuts (tachi-e).",
+        _add_slice_sheet,
+        slice_sheet.run,
+    ),
 }
 
 
