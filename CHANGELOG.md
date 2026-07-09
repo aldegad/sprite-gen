@@ -2,6 +2,18 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.14.0 - Importable package SSoT, behavior unchanged
+
+This is a behavior-preserving structural release. The public pipeline scripts remain backwards-compatible CLI entrypoints, while the algorithm implementation now has one importable `sprite_gen` package SSoT. The release is minor because `sprite_gen` is a new public import surface for downstream apps and MCP hosts.
+
+- **`sprite_gen` package added.** The current script bodies were modularized into package modules instead of copying older desktop-v2 algorithm bodies, so v1.13.0 chroma unmix, despill, auto-key, fit, and pixel/plain frame behavior remains the algorithm truth.
+- **`scripts/*.py` are compatibility wrappers.** Existing script commands delegate to package modules and preserve the previous CLI surface; wrapper `--help` output diffed 0 against the pre-wrapper baseline.
+- **`runio` reentrant lock adopted from v2.** Same-process package calls can re-enter the run-dir lock without self-deadlocking, while atomic write/replace behavior stays unchanged.
+- **Curation schema merged both sides.** The main `frame_variant` / `frame_filename` selection and v2 `deleted` state now coexist, so plain-vs-pixel frame choice and permanent deletion both survive.
+- **Unified CLI added.** `sprite_gen.cli` exposes 8 subcommands: `prepare`, `extract`, `compose-atlas`, `preview`, `compose-cycle`, `compose-gif`, `unpack-atlas`, and `export-pngs`.
+- **Packaging activated.** `pyproject.toml` now includes the `sprite_gen` package for editable installs and keeps the package metadata version synchronized with `SKILL.md`.
+- **Behavior identity evidence.** The refactor regenerated the SSoT baseline commands and produced 118/118 identical output sha256 hashes against the pre-refactor baseline.
+
 ## v1.13.0 — Chroma peel removal, key-depth unmix, safer auto key sampling
 
 This release removes the legacy fringe erase peel that became harmful after v1.12.0's soft-alpha unmix. The peel ran before unmix, deleted the original 1.1-1.3 px antialias band wholesale, turned silhouettes into binary stair-steps, and could erode thin outlines or hair strands by 1-2 px. Soft-alpha unmix now owns chroma boundary cleanup.
