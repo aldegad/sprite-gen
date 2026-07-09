@@ -169,10 +169,11 @@ flowchart TD
 ## 6. Extraction internals (`extract_sprite_row_frames.py`)
 
 1. `remove_chroma_background()` — drop near-key pixels (color-distance ball,
-   `--key-threshold` default 96), drop chroma-tinted antialias fringe
-   **boundary-limited** to pixels spatially adjacent to the keyed-out
-   background (peeled at most `--fringe-reach` layers, default 2 — key-tinted
-   *interior* subject colors survive), clear fully-transparent RGB.
+   `--key-threshold` default 96), clear fully-transparent RGB, then solve
+   chroma-tinted boundary blends into despilled RGB + soft alpha. In-band
+   blends are limited to key-distance `<= 2`; out-of-band blends use
+   `--fringe-unmix-reach` (default 4). Small trapped spill clusters are
+   despilled in place, while deeper key-tinted subject material survives.
 2. `connected_components()` — flood-fill alpha blobs, record bbox + area +
    x-center.
 3. `extract_component_frames()` — pick `frame_count` seed blobs by area, sort by

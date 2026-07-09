@@ -51,6 +51,14 @@ flowchart LR
 - **目で確認できる QA** — ステートごとの GIF とコンタクトシートにより、出荷前にモーションをモーションとして判断できます。
 - **誠実なラベル** — idle、jump、attack、wave のような短く読みやすいアクションが安定した経路です。walk/run のような周期的な移動は、モーション QA を実際に通過しない限り experimental として扱われます。黙って過剰な約束はしません。
 
+## クロマアルファ品質
+
+抽出器はクロマ処理を決定的に行います。ソフトアルファ unmix が髪の細い束や細いアウトラインのアンチエイリアスを保つため、カバレッジを解く前に境界が削られません。
+
+![クロマ peel 前後比較 — イラストの髪束](docs/assets/chroma-peel-illustration-before-after.png)
+
+![クロマ peel 前後比較 — ピクセルアートのアウトライン](docs/assets/chroma-peel-pixelart-before-after.png)
+
 ## キュレーション webview
 
 生成で90%まで到達します。webview は、人間がそれを*出荷可能*な状態に持っていく場所です。スタンドアロンで、Studio やフレームワークへの依存はなく、このスキルがインストールされている場所ならどこでも動きます（Claude Code Desktop、Codex アプリ、通常のターミナル）。

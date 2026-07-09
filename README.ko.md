@@ -51,6 +51,14 @@ flowchart LR
 - **눈으로 확인 가능한 QA** — 상태별 GIF와 컨택트 시트로, 배포 전에 모션을 모션으로 판단합니다.
 - **정직한 라벨** — 짧고 읽기 쉬운 액션(idle, jump, attack, wave)이 안정적인 경로입니다. 순환 이동(walk/run)은 모션 QA가 실제로 통과하지 않는 한 experimental로 표시됩니다. 조용히 과장하지 않습니다.
 
+## 크로마 알파 품질
+
+추출기는 크로마 정리를 결정적으로 수행합니다. 소프트 알파 unmix가 머리카락 가닥과 얇은 아웃라인의 안티앨리어싱을 보존하므로, 커버리지를 계산하기 전에 경계가 깎여 나가지 않습니다.
+
+![크로마 peel 전후 비교 — 일러스트 머리카락 가닥](docs/assets/chroma-peel-illustration-before-after.png)
+
+![크로마 peel 전후 비교 — 픽셀아트 아웃라인](docs/assets/chroma-peel-pixelart-before-after.png)
+
 ## 큐레이션 웹뷰
 
 생성은 90%까지 데려다줍니다. 웹뷰는 사람이 그것을 *출시 가능한 상태*로 가져가는 곳입니다. 독립 실행형이며 Studio나 프레임워크 의존성이 없고, 스킬이 설치된 어디서든 실행됩니다(Claude Code Desktop, Codex 앱, 일반 터미널).

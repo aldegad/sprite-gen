@@ -51,6 +51,14 @@ flowchart LR
 - **可观看的 QA**——每个状态的 GIF 和接触表，所以在交付前，动作会作为动作来判断。
 - **诚实的标签**——简短可读的动作（idle、jump、attack、wave）是稳定路径；循环位移运动（walk/run）除非动作 QA 真正通过，否则会标记为实验性。不默默过度承诺。
 
+## Chroma alpha 质量
+
+提取器以确定性的方式清理 chroma。soft-alpha unmix 会保留头发细束和细描边的抗锯齿，不会在解出覆盖率之前把边界剥掉。
+
+![chroma peel 前后对比 — 插画头发细束](docs/assets/chroma-peel-illustration-before-after.png)
+
+![chroma peel 前后对比 — 像素画描边](docs/assets/chroma-peel-pixelart-before-after.png)
+
 ## 策展 webview
 
 生成能带你走完 90%。webview 是人类把它推进到*可发布*的地方：独立运行，不依赖 Studio 或框架，安装了该 skill 的地方都能运行（Claude Code Desktop、Codex app、普通终端）。
