@@ -15,6 +15,7 @@ import math
 import re
 import shutil
 import sys
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -208,28 +209,209 @@ def color_distance(left: tuple[int, int, int], right: tuple[int, int, int]) -> f
     return math.sqrt(sum((left[index] - right[index]) ** 2 for index in range(3)))
 
 
-def sampled_reference_pixels(path: Path | None) -> list[tuple[int, int, int]]:
-    if path is None or not path.is_file():
-        return []
-    pixels: list[tuple[int, int, int]] = []
-    with Image.open(path) as opened:
-        image = opened.convert("RGBA")
-        image.thumbnail((128, 128), Image.Resampling.LANCZOS)
-        data = image.tobytes()
-        for index in range(0, len(data), 4):
-            red, green, blue, alpha = data[index : index + 4]
-            if alpha <= 16:
-                continue
-            if red > 244 and green > 244 and blue > 244:
-                continue
-            pixels.append((red, green, blue))
-    return pixels
+# The reference is sampled with NEAREST, not LANCZOS: a resampling filter that
+# averages neighbours invents colors the base never contained, and every one of
+# those invented colors sits on the line between the chroma background and the
+# subject — exactly the region the candidate scoring must not see. 256px keeps
+# small features (eyes, gems) that a 128px sample would average away.
+REFERENCE_SAMPLE_SIZE = 256
 
+# A base for this pipeline is a subject on a flat chroma background, so the
+# background is recognisable from the border ring alone.
+BACKGROUND_TOLERANCE = 48.0
+BACKGROUND_MIN_OPAQUE_BORDER = 0.25
+BACKGROUND_BORDER_COVERAGE = 0.75
+
+# The subject is anti-aliased against the background over ~1-2px. Those blend
+# pixels are background contamination, not subject material; grow the background
+# mask to swallow the band.
+BACKGROUND_EDGE_DILATION = 2
+
+# A key-colored region enclosed by the subject is ambiguous: either a hole that
+# shows the background through the silhouette, or material the artist drew in the
+# key hue. A hole is a flat fill, so nearly all of it sits on the exact background
+# color; drawn material carries shading and spreads away from it. Holes are
+# background; drawn material stays subject so the erase-radius gate can reject the
+# key that would delete it (the v1.10.1 key-tint protection).
+BACKGROUND_FLAT_TOLERANCE = 16.0
+ENCLOSED_FLAT_FRACTION = 0.60
+
+# Generated art carries isolated spill/compression specks inside the silhouette
+# (a lone `(233, 7, 202)` in a hair gap). A single pixel is not a feature, and
+# the nearest-pixel safety gate is otherwise dominated by them. Keep only pixels
+# that belong to a region of their own color.
+SPECKLE_NEIGHBOR_TOLERANCE = 40.0
+SPECKLE_MIN_SIMILAR_NEIGHBORS = 3
 
 # Mirrors the default --key-threshold in extract_sprite_row_frames.py: any subject
 # pixel within this color distance of the chroma key is removed at extraction, so a
 # key whose nearest subject pixel falls inside this radius will erase that feature.
 MIN_SUBJECT_KEY_DISTANCE = 96.0
+
+_NEIGHBORS_4 = ((1, 0), (-1, 0), (0, 1), (0, -1))
+_NEIGHBORS_8 = ((-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1))
+
+
+def _border_coordinates(width: int, height: int) -> list[tuple[int, int]]:
+    if width < 2 or height < 2:
+        return [(x, y) for y in range(height) for x in range(width)]
+    ring = [(x, 0) for x in range(width)] + [(x, height - 1) for x in range(width)]
+    ring += [(0, y) for y in range(1, height - 1)] + [(width - 1, y) for y in range(1, height - 1)]
+    return ring
+
+
+def detect_reference_background(image: Image.Image) -> dict[str, Any]:
+    """Classify the base's background from its border ring.
+
+    Returns one of three observable modes. ``flat`` carries the background color;
+    ``transparent`` and ``heterogeneous`` carry none, and the caller excludes
+    nothing beyond the alpha and near-white rules.
+    """
+    width, height = image.size
+    pixels = image.load()
+    ring = _border_coordinates(width, height)
+    opaque = [(x, y) for x, y in ring if pixels[x, y][3] > 16]
+    opaque_fraction = len(opaque) / len(ring) if ring else 0.0
+    if opaque_fraction < BACKGROUND_MIN_OPAQUE_BORDER:
+        return {"mode": "transparent", "opaque_border_fraction": round(opaque_fraction, 3)}
+
+    # Quantize to 16-level buckets so a flat fill survives PNG/codec jitter, then
+    # recover the true color as the mean of the winning bucket.
+    buckets: dict[tuple[int, int, int], list[tuple[int, int, int]]] = {}
+    for x, y in opaque:
+        color = pixels[x, y][:3]
+        buckets.setdefault(tuple(channel // 16 for channel in color), []).append(color)
+    members = max(buckets.values(), key=len)
+    background = tuple(round(sum(m[index] for m in members) / len(members)) for index in range(3))
+
+    within = sum(1 for x, y in opaque if color_distance(pixels[x, y][:3], background) <= BACKGROUND_TOLERANCE)
+    coverage = within / len(opaque)
+    if coverage < BACKGROUND_BORDER_COVERAGE:
+        return {
+            "mode": "heterogeneous",
+            "opaque_border_fraction": round(opaque_fraction, 3),
+            "border_coverage": round(coverage, 3),
+            "note": (
+                f"border ring is not a flat fill (largest color covers {coverage:.0%} "
+                f"of it, needs {BACKGROUND_BORDER_COVERAGE:.0%}); no background pixels "
+                f"were excluded, so candidate distances may be skewed by the background"
+            ),
+        }
+    return {
+        "mode": "flat",
+        "hex": rgb_to_hex(background),
+        "rgb": list(background),
+        "opaque_border_fraction": round(opaque_fraction, 3),
+        "border_coverage": round(coverage, 3),
+    }
+
+
+def _background_mask(image: Image.Image, background: dict[str, Any]) -> list[list[bool]]:
+    """Mark every pixel that belongs to the base's background rather than its subject."""
+    width, height = image.size
+    pixels = image.load()
+    transparent = [[pixels[x, y][3] <= 16 for x in range(width)] for y in range(height)]
+    mask = [row[:] for row in transparent]
+
+    if background["mode"] == "flat":
+        key = tuple(background["rgb"])
+        near = [
+            [transparent[y][x] or color_distance(pixels[x, y][:3], key) <= BACKGROUND_TOLERANCE for x in range(width)]
+            for y in range(height)
+        ]
+        visited = [[False] * width for _ in range(height)]
+        enclosed_background = enclosed_material = 0
+        for start_y in range(height):
+            for start_x in range(width):
+                if not near[start_y][start_x] or visited[start_y][start_x]:
+                    continue
+                visited[start_y][start_x] = True
+                queue = deque([(start_x, start_y)])
+                component: list[tuple[int, int]] = []
+                grounded = False
+                while queue:
+                    x, y = queue.popleft()
+                    component.append((x, y))
+                    if x in (0, width - 1) or y in (0, height - 1) or transparent[y][x]:
+                        grounded = True
+                    for dx, dy in _NEIGHBORS_8:
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < width and 0 <= ny < height and near[ny][nx] and not visited[ny][nx]:
+                            visited[ny][nx] = True
+                            queue.append((nx, ny))
+                if not grounded:
+                    flat = sum(
+                        1 for x, y in component if color_distance(pixels[x, y][:3], key) <= BACKGROUND_FLAT_TOLERANCE
+                    )
+                    if flat / len(component) < ENCLOSED_FLAT_FRACTION:
+                        enclosed_material += len(component)
+                        continue  # drawn key-hued material: keep it as subject
+                    enclosed_background += len(component)
+                for x, y in component:
+                    mask[y][x] = True
+        background["enclosed_background_pixels"] = enclosed_background
+        background["enclosed_material_pixels"] = enclosed_material
+
+    for _ in range(BACKGROUND_EDGE_DILATION):
+        grown = [
+            (x, y)
+            for y in range(height)
+            for x in range(width)
+            if not mask[y][x]
+            and any(0 <= x + dx < width and 0 <= y + dy < height and mask[y + dy][x + dx] for dx, dy in _NEIGHBORS_4)
+        ]
+        for x, y in grown:
+            mask[y][x] = True
+    return mask
+
+
+def _subject_pixels(image: Image.Image, background: dict[str, Any]) -> list[tuple[int, int, int]]:
+    width, height = image.size
+    pixels = image.load()
+    mask = _background_mask(image, background)
+    candidate = [
+        [not mask[y][x] and not all(channel > 244 for channel in pixels[x, y][:3]) for x in range(width)]
+        for y in range(height)
+    ]
+    subject: list[tuple[int, int, int]] = []
+    for y in range(height):
+        for x in range(width):
+            if not candidate[y][x]:
+                continue
+            color = pixels[x, y][:3]
+            similar = 0
+            for dx, dy in _NEIGHBORS_8:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < width and 0 <= ny < height and candidate[ny][nx]:
+                    if color_distance(pixels[nx, ny][:3], color) <= SPECKLE_NEIGHBOR_TOLERANCE:
+                        similar += 1
+            if similar >= SPECKLE_MIN_SIMILAR_NEIGHBORS:
+                subject.append(color)
+    return subject
+
+
+def analyze_reference(path: Path | None) -> tuple[list[tuple[int, int, int]], dict[str, Any]]:
+    """Sample the base into (subject pixels, background classification)."""
+    if path is None or not path.is_file():
+        return [], {"mode": "absent"}
+    with Image.open(path) as opened:
+        image = opened.convert("RGBA")
+        image.thumbnail((REFERENCE_SAMPLE_SIZE, REFERENCE_SAMPLE_SIZE), Image.Resampling.NEAREST)
+        background = detect_reference_background(image)
+        pixels = _subject_pixels(image, background)
+    background["subject_pixels"] = len(pixels)
+    return pixels, background
+
+
+def sampled_reference_pixels(path: Path | None) -> list[tuple[int, int, int]]:
+    """Subject pixels of the base, with its chroma background excluded.
+
+    A base in this pipeline always carries a chroma background. Counting those
+    pixels as subject pins every candidate that matches the current background to
+    ``min_subject_distance ~= 0``, so ``auto`` could never re-select the key the
+    base was drawn against.
+    """
+    return analyze_reference(path)[0]
 
 
 def choose_chroma_key(reference: Path | None, requested: str) -> dict[str, Any]:
@@ -239,10 +421,26 @@ def choose_chroma_key(reference: Path | None, requested: str) -> dict[str, Any]:
         name = next((candidate_name for candidate_name, candidate_hex in CHROMA_CANDIDATES if candidate_hex == hex_value), "manual")
         return {"name": name, "hex": hex_value, "rgb": list(rgb), "selection": "manual"}
 
-    pixels = sampled_reference_pixels(reference)
+    pixels, background = analyze_reference(reference)
+    if background["mode"] == "heterogeneous":
+        print(f"WARNING: chroma_key auto: {background['note']}", file=sys.stderr)
     if not pixels:
         rgb = parse_hex_color("#FF00FF")
-        return {"name": "magenta", "hex": "#FF00FF", "rgb": list(rgb), "selection": "fallback"}
+        reason = (
+            "no base reference to sample"
+            if background["mode"] == "absent"
+            else "the base reference yielded no subject pixels once its background was excluded"
+        )
+        if background["mode"] != "absent":
+            print(f"WARNING: chroma_key auto: {reason}; defaulting to magenta", file=sys.stderr)
+        return {
+            "name": "magenta",
+            "hex": "#FF00FF",
+            "rgb": list(rgb),
+            "selection": "fallback",
+            "background": background,
+            "selection_reason": reason,
+        }
 
     scored: list[tuple[float, float, int, str, tuple[int, int, int]]] = []
     for preference_index, (name, hex_color) in enumerate(CHROMA_CANDIDATES):
@@ -264,6 +462,24 @@ def choose_chroma_key(reference: Path | None, requested: str) -> dict[str, Any]:
         "selection": "auto",
         "score": round(score, 2),
         "min_subject_distance": round(min_distance, 2),
+        "background": background,
+        "candidates": [
+            {
+                "name": entry[3],
+                "hex": rgb_to_hex(entry[4]),
+                "score": round(entry[0], 2),
+                "min_subject_distance": round(entry[1], 2),
+                "clears_erase_radius": entry[1] > MIN_SUBJECT_KEY_DISTANCE,
+            }
+            for entry in scored
+        ],
+        "selection_reason": (
+            f"highest 1st-percentile subject distance among the {len(safe)} candidate(s) "
+            f"clearing the {MIN_SUBJECT_KEY_DISTANCE:.0f} erase radius"
+            if safe
+            else f"no candidate clears the {MIN_SUBJECT_KEY_DISTANCE:.0f} erase radius; "
+            f"ranked by 1st-percentile subject distance alone"
+        ),
     }
     if min_distance <= MIN_SUBJECT_KEY_DISTANCE:
         result["warning"] = (
