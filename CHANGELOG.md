@@ -2,7 +2,7 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
-## v1.14.0 - Importable package SSoT, behavior unchanged
+## v1.56.0 "Sol Edge" - Importable package SSoT, behavior unchanged
 
 This is a behavior-preserving structural release. The public pipeline scripts remain backwards-compatible CLI entrypoints, while the algorithm implementation now has one importable `sprite_gen` package SSoT. The release is minor because `sprite_gen` is a new public import surface for downstream apps and MCP hosts.
 
