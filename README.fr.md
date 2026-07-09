@@ -55,6 +55,28 @@ flowchart LR
 
 L'extracteur garde le nettoyage chroma déterministe : le soft-alpha unmix préserve l'antialiasing des mèches fines et des contours minces, au lieu de les peler avant de résoudre la couverture.
 
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-illustration-magenta.png" width="640" alt="comparaison chroma plein corps: illustration sur clé magenta" /><br />
+  <em>Illustration, clé magenta : source, peel v1.12.0, soft-alpha unmix v1.13.0.</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-illustration-green.png" width="640" alt="comparaison chroma plein corps: illustration sur clé verte" /><br />
+  <em>Illustration, clé verte : source, peel v1.12.0, soft-alpha unmix v1.13.0.</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-pixelart-magenta.png" width="640" alt="comparaison chroma plein corps: pixel art sur clé magenta" /><br />
+  <em>Pixel art, clé magenta : source, peel v1.12.0, sortie binarisée v1.13.0.</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-pixelart-green.png" width="640" alt="comparaison chroma plein corps: pixel art sur clé verte" /><br />
+  <em>Pixel art, clé verte : source, peel v1.12.0, sortie binarisée v1.13.0.</em>
+</p>
+
+Les recadrages agrandis ci-dessous montrent le détail de bord derrière les comparaisons plein corps.
+
 ![comparaison avant et après chroma peel — mèche illustrée](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![comparaison avant et après chroma peel — contour pixel-art](docs/assets/chroma-peel-pixelart-before-after.png)

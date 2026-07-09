@@ -55,6 +55,28 @@ flowchart LR
 
 提取器以确定性的方式清理 chroma。soft-alpha unmix 会保留头发细束和细描边的抗锯齿，不会在解出覆盖率之前把边界剥掉。
 
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-illustration-magenta.png" width="640" alt="洋红键插画全身 chroma 对比" /><br />
+  <em>插画，洋红键：源图、v1.12.0 peel、v1.13.0 soft-alpha unmix。</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-illustration-green.png" width="640" alt="绿色键插画全身 chroma 对比" /><br />
+  <em>插画，绿色键：源图、v1.12.0 peel、v1.13.0 soft-alpha unmix。</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-pixelart-magenta.png" width="640" alt="洋红键像素画全身 chroma 对比" /><br />
+  <em>像素画，洋红键：源图、v1.12.0 peel、v1.13.0 二值化输出。</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-pixelart-green.png" width="640" alt="绿色键像素画全身 chroma 对比" /><br />
+  <em>像素画，绿色键：源图、v1.12.0 peel、v1.13.0 二值化输出。</em>
+</p>
+
+下面的放大裁切展示了全身对比背后的边缘细节。
+
 ![chroma peel 前后对比 — 插画头发细束](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![chroma peel 前后对比 — 像素画描边](docs/assets/chroma-peel-pixelart-before-after.png)
