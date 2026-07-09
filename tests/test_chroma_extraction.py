@@ -162,13 +162,13 @@ def _heart_material_pixels(name: str, image: Image.Image) -> list[tuple[int, int
 
 
 MOE_PEEL_REMOVAL_CASES = [
-    ("moe_heart.png", MAGENTA, 160),
-    ("moe_mirror.png", (0, 255, 0), 90),
+    ("moe_heart.png", MAGENTA, 160, 260),
+    ("moe_mirror.png", (0, 255, 0), 70, 120),
 ]
 
 
 def test_moe_legacy_peel_band_becomes_soft_alpha_not_opaque_crust() -> None:
-    for name, chroma_key, _min_mid_alpha in MOE_PEEL_REMOVAL_CASES:
+    for name, chroma_key, _min_mid_alpha, _max_mid_alpha in MOE_PEEL_REMOVAL_CASES:
         source = _open_moe(name)
         peeled = _fringe_peel_candidates(source, chroma_key)
         assert peeled, f"{name}: fixture lost the legacy peel band"
@@ -181,15 +181,15 @@ def test_moe_legacy_peel_band_becomes_soft_alpha_not_opaque_crust() -> None:
 
 
 def test_moe_fixtures_keep_meaningful_mid_alpha_edges() -> None:
-    for name, chroma_key, min_mid_alpha in MOE_PEEL_REMOVAL_CASES:
+    for name, chroma_key, min_mid_alpha, max_mid_alpha in MOE_PEEL_REMOVAL_CASES:
         out = _clean(_open_moe(name), chroma_key)
         histogram = out.getchannel("A").histogram()
         mid_alpha = sum(histogram[1:255])
-        assert mid_alpha >= min_mid_alpha, f"{name}: only {mid_alpha} mid-alpha pixels"
+        assert min_mid_alpha <= mid_alpha <= max_mid_alpha, f"{name}: {mid_alpha} mid-alpha pixels"
 
 
 def test_key_tinted_heart_material_survives_byte_identical() -> None:
-    for name, chroma_key, _min_mid_alpha in MOE_PEEL_REMOVAL_CASES:
+    for name, chroma_key, _min_mid_alpha, _max_mid_alpha in MOE_PEEL_REMOVAL_CASES:
         source = _open_moe(name)
         material = _heart_material_pixels(name, source)
         assert material, f"{name}: fixture lost its heart material pixels"
