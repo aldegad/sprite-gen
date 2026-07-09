@@ -27,7 +27,7 @@ import json
 import os
 import tempfile
 import time
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from PIL import Image
 
@@ -40,6 +40,12 @@ STALE_LOCK_SECONDS = 15 * 60
 # example a long-lived MCP server invoking prepare -> extract -> compose against
 # one run dir) must succeed; the single-writer rule is against other processes.
 _HELD_LOCKS: set[Path] = set()
+
+
+def relative_posix(path: PurePath, start: PurePath) -> str:
+    """Return a manifest-safe relative path with POSIX separators."""
+
+    return path.relative_to(start).as_posix()
 
 
 def _pid_alive(pid: int) -> bool:

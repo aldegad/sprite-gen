@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw
 
 from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, save_clean_gif
+from sprite_gen.runio import relative_posix
 
 
 def sha256(path: Path) -> str:
@@ -173,14 +174,14 @@ def _run(args: argparse.Namespace):
         "loop": True,
         "note": args.note,
         "outputs": {
-            "gif": str(gif_path.relative_to(run_dir)),
-            "contact": str(contact_path.relative_to(run_dir)),
+            "gif": relative_posix(gif_path, run_dir),
+            "contact": relative_posix(contact_path, run_dir),
         },
         "source_frames": [
             {
                 "user_frame": user_frame,
                 "zero_based_frame": user_frame - 1,
-                "path": str(path.relative_to(run_dir)),
+                "path": relative_posix(path, run_dir),
                 "sha256": sha256(path),
             }
             for user_frame, path in zip(user_frames, frame_paths)
