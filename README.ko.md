@@ -55,6 +55,28 @@ flowchart LR
 
 추출기는 크로마 정리를 결정적으로 수행합니다. 소프트 알파 unmix가 머리카락 가닥과 얇은 아웃라인의 안티앨리어싱을 보존하므로, 커버리지를 계산하기 전에 경계가 깎여 나가지 않습니다.
 
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-illustration-magenta.png" width="640" alt="마젠타 키 일러스트 전신 크로마 비교" /><br />
+  <em>일러스트, 마젠타 키: 원본, v1.12.0 peel, v1.13.0 소프트 알파 unmix.</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-illustration-green.png" width="640" alt="그린 키 일러스트 전신 크로마 비교" /><br />
+  <em>일러스트, 그린 키: 원본, v1.12.0 peel, v1.13.0 소프트 알파 unmix.</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-pixelart-magenta.png" width="640" alt="마젠타 키 픽셀아트 전신 크로마 비교" /><br />
+  <em>픽셀아트, 마젠타 키: 원본, v1.12.0 peel, v1.13.0 이진화 출력.</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-pixelart-green.png" width="640" alt="그린 키 픽셀아트 전신 크로마 비교" /><br />
+  <em>픽셀아트, 그린 키: 원본, v1.12.0 peel, v1.13.0 이진화 출력.</em>
+</p>
+
+아래 확대 크롭은 전신 비교의 경계 디테일을 보여줍니다.
+
 ![크로마 peel 전후 비교 — 일러스트 머리카락 가닥](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![크로마 peel 전후 비교 — 픽셀아트 아웃라인](docs/assets/chroma-peel-pixelart-before-after.png)

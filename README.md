@@ -55,6 +55,28 @@ flowchart LR
 
 The extractor keeps chroma cleanup deterministic: soft-alpha unmix preserves antialiased hair strands and thin outlines instead of peeling them away before coverage can be solved.
 
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-illustration-magenta.png" width="640" alt="full-body chroma comparison: illustration on magenta key" /><br />
+  <em>Illustration, magenta key: source, v1.12.0 peel, v1.13.0 soft-alpha unmix.</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-illustration-green.png" width="640" alt="full-body chroma comparison: illustration on green key" /><br />
+  <em>Illustration, green key: source, v1.12.0 peel, v1.13.0 soft-alpha unmix.</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-pixelart-magenta.png" width="640" alt="full-body chroma comparison: pixel art on magenta key" /><br />
+  <em>Pixel art, magenta key: source, v1.12.0 peel, v1.13.0 binarized output.</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-pixelart-green.png" width="640" alt="full-body chroma comparison: pixel art on green key" /><br />
+  <em>Pixel art, green key: source, v1.12.0 peel, v1.13.0 binarized output.</em>
+</p>
+
+The close-up crops below show the edge detail behind the full-body comparisons.
+
 ![chroma peel before and after — illustrated hair strand](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![chroma peel before and after — pixel-art outline](docs/assets/chroma-peel-pixelart-before-after.png)

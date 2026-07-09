@@ -55,6 +55,28 @@ flowchart LR
 
 抽出器はクロマ処理を決定的に行います。ソフトアルファ unmix が髪の細い束や細いアウトラインのアンチエイリアスを保つため、カバレッジを解く前に境界が削られません。
 
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-illustration-magenta.png" width="640" alt="マゼンタキーのイラスト全身クロマ比較" /><br />
+  <em>イラスト、マゼンタキー: 元画像、v1.12.0 peel、v1.13.0 soft-alpha unmix。</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-illustration-green.png" width="640" alt="グリーンキーのイラスト全身クロマ比較" /><br />
+  <em>イラスト、グリーンキー: 元画像、v1.12.0 peel、v1.13.0 soft-alpha unmix。</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-pixelart-magenta.png" width="640" alt="マゼンタキーのピクセルアート全身クロマ比較" /><br />
+  <em>ピクセルアート、マゼンタキー: 元画像、v1.12.0 peel、v1.13.0 二値化出力。</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/chroma-fullbody-pixelart-green.png" width="640" alt="グリーンキーのピクセルアート全身クロマ比較" /><br />
+  <em>ピクセルアート、グリーンキー: 元画像、v1.12.0 peel、v1.13.0 二値化出力。</em>
+</p>
+
+下の拡大クロップは、全身比較の境界ディテールを示します。
+
 ![クロマ peel 前後比較 — イラストの髪束](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![クロマ peel 前後比較 — ピクセルアートのアウトライン](docs/assets/chroma-peel-pixelart-before-after.png)
