@@ -245,7 +245,7 @@ def write_run(
                 framed.alpha_composite(crop, ((cell_w - w) // 2, (cell_h - h) // 2))
             out = state_dir / f"frame-{index}.png"
             atomic_save_image(framed, out)
-            files.append(str(out.relative_to(out_dir)))
+            files.append(out.relative_to(out_dir).as_posix())
         m = meta.get(name, {})
         request_states[name] = {
             "frames": len(state["rects"]),
@@ -319,7 +319,7 @@ def import_png_groups(out_dir: Path, groups: list[dict[str, Any]], iso: dict[str
                 framed.alpha_composite(im, ((cell_w - im.width) // 2, (cell_h - im.height) // 2))
             out = state_dir / f"frame-{index}.png"
             atomic_save_image(framed, out)
-            files.append(str(out.relative_to(out_dir)))
+            files.append(out.relative_to(out_dir).as_posix())
         request_states[state_name] = {"frames": len(imgs), "fps": 2, "loop": False, "action": "imported still set"}
         manifest_rows.append({"state": state_name, "frames": len(imgs), "method": "imported-pngs", "files": files, "labels": labels, "ok": True})
         source_files.extend(p.name for p in group["paths"])

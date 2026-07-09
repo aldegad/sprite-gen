@@ -153,14 +153,14 @@ def main() -> int:
         "loop": True,
         "note": args.note,
         "outputs": {
-            "gif": str(gif_path.relative_to(run_dir)),
-            "contact": str(contact_path.relative_to(run_dir)),
+            "gif": gif_path.relative_to(run_dir).as_posix(),
+            "contact": contact_path.relative_to(run_dir).as_posix(),
         },
         "source_frames": [
             {
                 "user_frame": user_frame,
                 "zero_based_frame": user_frame - 1,
-                "path": str(path.relative_to(run_dir)),
+                "path": path.relative_to(run_dir).as_posix(),
                 "sha256": sha256(path),
             }
             for user_frame, path in zip(user_frames, frame_paths)

@@ -888,7 +888,7 @@ def main() -> int:
         for index, frame in enumerate(frames):
             output = state_dir / f"frame-{index}.png"
             atomic_save_image(frame, output)
-            output_paths.append(str(output.relative_to(run_dir)))
+            output_paths.append(output.relative_to(run_dir).as_posix())
         # 픽셀퍼펙트 전 원본 변형(.plain.png) — 큐레이션뷰의 전/후 토글과
         # curation.json `pixel_perfect: false` 굽기가 이 쌍둥이를 읽는다.
         plain_paths = []
@@ -896,7 +896,7 @@ def main() -> int:
             for index, frame in enumerate(plain_frames):
                 output = state_dir / f"frame-{index}.plain.png"
                 atomic_save_image(frame, output)
-                plain_paths.append(str(output.relative_to(run_dir)))
+                plain_paths.append(output.relative_to(run_dir).as_posix())
 
         errors, warnings, frame_records = inspect_frames(frames, chroma_key, args)
         all_errors.extend(f"{state}: {error}" for error in errors)
