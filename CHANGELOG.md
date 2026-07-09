@@ -8,6 +8,7 @@ Patch release in the Sol Edge Runner line. Adds the `slice-sheet` tool, distille
 
 - **New module `sprite_gen.slice_sheet`** + wrapper `scripts/slice_sheet_cells.py` + CLI subcommand `sprite_gen.cli slice-sheet`. Alpha truth stays `remove_chroma_background` (v1.13 4-pass); the module owns only cell geometry.
 - **Geometry rules encode the field failures**: centroid component-to-cell assignment (grid cropping imported neighbour fragments), merged-figure split with in-cell re-label (a kunai-fused neighbour's hair shipped as a floating clothes fragment without it), border-touching debris drop at `--debris-fraction` 0.30 (in-cell effects like hearts survive), per-cell height normalization (a sheet shipped rows at visibly different body sizes under sheet-wide max scaling), feet pinned to `--baseline-y`, fail-loud empty cells.
+- **Manifest path separators are POSIX-stable on Windows**: frames manifests, selected-cycle manifests, and unpack manifests now serialize run-relative frame paths with `/` separators instead of host separators, reported and first fixed by @bokjk in #2.
 - **Docs**: new leaf `docs/sheet-slicing.md` (usage, geometry rules with their field accidents, sheet prompting guidance including the cream-background flood-fill ban); SKILL.md Script Map + Docs Topology entries.
 - **Tests**: `tests/test_slice_sheet.py` synthetic-sheet coverage — height/baseline normalization, neighbour-overhang drop vs effect survival, zero chroma residue; `slice_sheet` registered in the package-surface run() guard.
 

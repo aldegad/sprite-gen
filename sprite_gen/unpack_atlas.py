@@ -33,7 +33,7 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
+from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, relative_posix
 
 ALPHA_THRESHOLD = 16  # a pixel counts as content above this alpha
 MIN_GUTTER = 1        # a fully-empty line of >= this many px separates frames
@@ -244,7 +244,7 @@ def write_run(
                 framed.alpha_composite(crop, ((cell_w - w) // 2, (cell_h - h) // 2))
             out = state_dir / f"frame-{index}.png"
             atomic_save_image(framed, out)
-            files.append(str(out.relative_to(out_dir)))
+            files.append(relative_posix(out, out_dir))
         m = meta.get(name, {})
         request_states[name] = {
             "frames": len(state["rects"]),
@@ -318,7 +318,7 @@ def import_png_groups(out_dir: Path, groups: list[dict[str, Any]], iso: dict[str
                 framed.alpha_composite(im, ((cell_w - im.width) // 2, (cell_h - im.height) // 2))
             out = state_dir / f"frame-{index}.png"
             atomic_save_image(framed, out)
-            files.append(str(out.relative_to(out_dir)))
+            files.append(relative_posix(out, out_dir))
         request_states[state_name] = {"frames": len(imgs), "fps": 2, "loop": False, "action": "imported still set"}
         manifest_rows.append({"state": state_name, "frames": len(imgs), "method": "imported-pngs", "files": files, "labels": labels, "ok": True})
         source_files.extend(p.name for p in group["paths"])

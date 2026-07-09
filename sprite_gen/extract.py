@@ -13,7 +13,7 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
+from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, relative_posix
 
 
 def color_distance(left: tuple[int, int, int], right: tuple[int, int, int]) -> float:
@@ -1090,7 +1090,7 @@ def _run(args: argparse.Namespace):
         for index, frame in enumerate(frames):
             output = state_dir / f"frame-{index}.png"
             atomic_save_image(frame, output)
-            output_paths.append(str(output.relative_to(run_dir)))
+            output_paths.append(relative_posix(output, run_dir))
         # 픽셀퍼펙트 전 원본 변형(.plain.png) — 큐레이션뷰의 전/후 토글과
         # curation.json `pixel_perfect: false` 굽기가 이 쌍둥이를 읽는다.
         plain_paths = []
@@ -1098,7 +1098,7 @@ def _run(args: argparse.Namespace):
             for index, frame in enumerate(plain_frames):
                 output = state_dir / f"frame-{index}.plain.png"
                 atomic_save_image(frame, output)
-                plain_paths.append(str(output.relative_to(run_dir)))
+                plain_paths.append(relative_posix(output, run_dir))
 
         errors, warnings, frame_records = inspect_frames(frames, chroma_key, args)
         all_errors.extend(f"{state}: {error}" for error in errors)
