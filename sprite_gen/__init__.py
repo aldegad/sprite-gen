@@ -14,5 +14,6 @@ __all__ = [
     "prepare",
     "preview",
     "runio",
+    "slice_sheet",
     "unpack_atlas",
 ]

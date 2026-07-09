@@ -21,6 +21,7 @@ PACKAGE_RUN_MODULES = [
     "generate_image",
     "prepare",
     "preview",
+    "slice_sheet",
     "unpack_atlas",
 ]
 
