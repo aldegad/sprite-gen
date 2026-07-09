@@ -90,10 +90,11 @@ def unmix_key_blend(
 
 
 # remove_chroma_background pixel classes, decided once on the source colors.
-_KEYED = 0  # erased: transparent input, hard key cut, or fringe peel
-_SUBJECT = 1  # not key-tinted — never touched, blocks the fringe peel
+_KEYED = 0  # erased: transparent input or hard key cut
+_SUBJECT = 1  # not key-tinted — never touched
 _BLEND_IN_BAND = 2  # key-tinted, within fringe_threshold of the key
 _BLEND_OUT_OF_BAND = 3  # key-tinted, farther than fringe_threshold
+_IN_BAND_UNMIX_KEY_DEPTH = 2
 
 # A trapped-spill cluster must contain at least one strongly key-tinted pixel
 # to be treated. This is the plan's visible-residue detector (every keyed
@@ -108,7 +109,7 @@ def remove_chroma_background(
     threshold: float,
     fringe_threshold: float,
     fringe_delta: float,
-    fringe_reach: int = 2,
+    *,
     unmix_reach: int = 4,
     spill_max_fraction: float = 0.005,
 ) -> Image.Image:
@@ -137,12 +138,12 @@ def remove_chroma_background(
                 classes[index] = _BLEND_OUT_OF_BAND
 
     key_tint = key_tint_score(chroma_key, chroma_key)
-    max_reach = min(unseen - 1, max(fringe_reach, unmix_reach if key_tint > 0 else 0))
+    max_reach = min(unseen - 1, unmix_reach if key_tint > 0 else 0)
 
     # Geometric distance to the nearest keyed-out pixel — outer background
-    # *and* interior holes (hair gaps) alike. Unlike the erase peel below this
-    # walk is not blocked by subject pixels, so an isolated key blend locked
-    # inside subject material still gets a depth.
+    # *and* interior holes (hair gaps) alike. This walk is not blocked by
+    # subject pixels, so an isolated key blend locked inside subject material
+    # still gets a depth.
     frontier = keyed
     depth = 0
     while frontier and depth < max_reach:
@@ -165,45 +166,12 @@ def remove_chroma_background(
                         next_frontier.append(neighbor)
         frontier = next_frontier
 
-    # Fringe erase peel — unchanged v1.10.1 contract: in-band key-tinted
-    # pixels chain-adjacent to the keyed region go entirely, at most
-    # fringe_reach layers, and subject pixels block the walk. Key-tinted
-    # *material* (hot pink / purple under a magenta key) deeper than the peel
-    # survives byte-identical.
-    frontier = keyed
-    for _ in range(fringe_reach):
-        next_frontier = []
-        for index in frontier:
-            x = index % width
-            y = index // width
-            for dy in (-1, 0, 1):
-                ny = y + dy
-                if ny < 0 or ny >= height:
-                    continue
-                for dx in (-1, 0, 1):
-                    nx = x + dx
-                    if nx < 0 or nx >= width:
-                        continue
-                    neighbor = ny * width + nx
-                    if classes[neighbor] != _BLEND_IN_BAND:
-                        continue
-                    pixels[nx, ny] = (0, 0, 0, 0)
-                    classes[neighbor] = _KEYED
-                    next_frontier.append(neighbor)
-        if not next_frontier:
-            break
-        frontier = next_frontier
-
-    # Soft-alpha unmix — the binary erase above cannot represent antialiased
-    # coverage, and it never reaches blends that sit outside the fringe band
-    # or behind a subject pixel (dark hair × key pockets survived as opaque
-    # key-colored residue). Any key-tinted pixel within unmix_reach of the
-    # keyed region is separated into despilled RGB + partial alpha instead:
+    # Soft-alpha unmix — binary erase cannot represent antialiased coverage.
+    # Any key-tinted pixel within unmix_reach of the keyed region is separated
+    # into despilled RGB + partial alpha instead:
     #   - out-of-band blends always (they are too subject-heavy to erase);
-    #   - in-band survivors only when they touch an untinted subject pixel —
-    #     a trapped blend borders the subject it was blended from, while a
-    #     key-tinted material interior is embedded in its own tint and must
-    #     stay byte-identical (v1.10.1 guardrail).
+    #   - in-band blends only within the AA band nearest the key. Deeper
+    #     key-tinted material stays byte-identical (v1.10.1 guardrail).
     if key_tint > 0 and unmix_reach > 0:
         for y in range(height):
             for x in range(width):
@@ -212,14 +180,7 @@ def remove_chroma_background(
                     continue
                 pixel_class = classes[index]
                 if pixel_class == _BLEND_IN_BAND:
-                    if not any(
-                        classes[ny * width + nx] == _SUBJECT
-                        for dy in (-1, 0, 1)
-                        for dx in (-1, 0, 1)
-                        if (dx or dy)
-                        and 0 <= (nx := x + dx) < width
-                        and 0 <= (ny := y + dy) < height
-                    ):
+                    if depths[index] > _IN_BAND_UNMIX_KEY_DEPTH:
                         continue
                 elif pixel_class != _BLEND_OUT_OF_BAND:
                     continue
@@ -1015,7 +976,6 @@ def main() -> int:
     parser.add_argument("--key-threshold", type=float, default=96.0)
     parser.add_argument("--fringe-key-threshold", type=float, default=180.0)
     parser.add_argument("--fringe-delta", type=float, default=18.0)
-    parser.add_argument("--fringe-reach", type=int, default=2)
     parser.add_argument(
         "--fringe-unmix-reach",
         type=int,
@@ -1042,8 +1002,6 @@ def main() -> int:
     args = parser.parse_args()
     if args.fringe_key_threshold < args.key_threshold:
         raise SystemExit("--fringe-key-threshold must be greater than or equal to --key-threshold")
-    if args.fringe_reach < 0:
-        raise SystemExit("--fringe-reach must be zero or positive")
     if args.fringe_unmix_reach is not None and args.fringe_unmix_reach < 0:
         raise SystemExit("--fringe-unmix-reach must be zero or positive")
     if args.spill_max_fraction is not None and args.spill_max_fraction < 0:
@@ -1152,9 +1110,8 @@ def main() -> int:
                 args.key_threshold,
                 args.fringe_key_threshold,
                 args.fringe_delta,
-                args.fringe_reach,
-                unmix_reach,
-                spill_max_fraction,
+                unmix_reach=unmix_reach,
+                spill_max_fraction=spill_max_fraction,
             )
         if pixel_perfect:
             # 프레임별 픽셀퍼펙트 (2026-07-05 재설계): 포즈 컴포넌트를 먼저

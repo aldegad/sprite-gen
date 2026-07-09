@@ -51,6 +51,14 @@ flowchart LR
 - **QA you can watch** — per-state GIFs and contact sheets, so motion is judged as motion before anything ships.
 - **Honest labels** — short readable actions (idle, jump, attack, wave) are the stable path; cyclic locomotion (walk/run) is marked experimental unless motion QA actually passes. No silent overpromising.
 
+## Chroma alpha quality
+
+The extractor keeps chroma cleanup deterministic: soft-alpha unmix preserves antialiased hair strands and thin outlines instead of peeling them away before coverage can be solved.
+
+![chroma peel before and after — illustrated hair strand](docs/assets/chroma-peel-illustration-before-after.png)
+
+![chroma peel before and after — pixel-art outline](docs/assets/chroma-peel-pixelart-before-after.png)
+
 ## Curation webview
 
 Generation gets you 90%. The webview is where a human takes it to *shipped* — standalone, no Studio or framework dependency, runs anywhere the skill is installed (Claude Code Desktop, the Codex app, a plain terminal).

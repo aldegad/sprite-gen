@@ -12,9 +12,8 @@ magenta and a crimson-hair character keyed on green both extracted with
    hair strands survive cleanup. Measured on these fixtures: the survivors
    sit 1-4 layers from keyed-out pixels, but (a) dark blends drift 181-265
    color-distance from the key — outside the fringe band — so the band test
-   rejects them, (b) an out-of-band pixel blocks the peel from ever reaching
-   in-band pixels behind it, and (c) blend pockets run up to 4 layers deep
-   while ``fringe_reach`` peels only 2.
+   rejects them, and (b) blend pockets run up to 4 layers deep while the old
+   in-band peel only removed the nearest 2 layers.
 
 The fixtures are 1/8-size NEAREST copies of the repro raws (1024x1536 ->
 128x192), same recipe as ``tests/fixtures/accident/``:
@@ -60,12 +59,12 @@ extract = _load("extract_sprite_row_frames")
 KEY_THRESHOLD = 96.0
 FRINGE_THRESHOLD = 180.0
 FRINGE_DELTA = 18.0
-FRINGE_REACH = 2
 
 # Blend pockets in the repro raws run up to 4 layers deep, so a fix may
-# legitimately peel/unmix further than FRINGE_REACH. Pixels beyond this
-# margin from every keyed pixel are unambiguously subject interior and must
-# never be altered, whatever the fix does at the boundary.
+# legitimately unmix beyond the old 2-layer in-band band for out-of-band
+# pixels. Pixels beyond this margin from every keyed pixel are unambiguously
+# subject interior and must never be altered, whatever the fix does at the
+# boundary.
 INTERIOR_MARGIN = 8
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "moe"
@@ -81,7 +80,11 @@ CASES = [
 
 def _clean(image: Image.Image, chroma_key: tuple[int, int, int]) -> Image.Image:
     return extract.remove_chroma_background(
-        image, chroma_key, KEY_THRESHOLD, FRINGE_THRESHOLD, FRINGE_DELTA, FRINGE_REACH
+        image,
+        chroma_key,
+        threshold=KEY_THRESHOLD,
+        fringe_threshold=FRINGE_THRESHOLD,
+        fringe_delta=FRINGE_DELTA,
     )
 
 

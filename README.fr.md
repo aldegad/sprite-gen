@@ -51,6 +51,14 @@ flowchart LR
 - **Une QA observable** — GIFs par état et planches contact, afin que le mouvement soit jugé comme mouvement avant toute livraison.
 - **Des libellés honnêtes** — les actions courtes et lisibles (idle, jump, attack, wave) sont le chemin stable ; la locomotion cyclique (walk/run) est marquée expérimentale sauf si la QA du mouvement passe réellement. Pas de promesse excessive silencieuse.
 
+## Qualité de l'alpha chroma
+
+L'extracteur garde le nettoyage chroma déterministe : le soft-alpha unmix préserve l'antialiasing des mèches fines et des contours minces, au lieu de les peler avant de résoudre la couverture.
+
+![comparaison avant et après chroma peel — mèche illustrée](docs/assets/chroma-peel-illustration-before-after.png)
+
+![comparaison avant et après chroma peel — contour pixel-art](docs/assets/chroma-peel-pixelart-before-after.png)
+
 ## Webview de curation
 
 La génération vous amène à 90 %. La webview est l’endroit où un humain l’amène jusqu’à *livré* — autonome, sans dépendance à Studio ni à un framework, fonctionne partout où la skill est installée (Claude Code Desktop, l’app Codex, un terminal simple).
