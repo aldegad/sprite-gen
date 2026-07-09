@@ -5,3 +5,11 @@ __pycache__/
 .venv/
 .pytest_cache/
 /assets/
+app/build/dist/
+app/build/work/
+app/desktop/dist/
+app/desktop/node_modules/
+app/desktop/src-tauri/target/
+app/desktop/src-tauri/binaries/sprite-mcp-*
+.gjc/
+uv.lock
