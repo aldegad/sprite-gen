@@ -500,6 +500,104 @@ def detect_pixel_pitch(strip: Image.Image, max_pitch: int = 48) -> int:
     return best_pitch
 
 
+def _axis_refine(edges: list[int], pitch: float, w: float = 1.0, bin_step: float = 0.25) -> tuple[float, float]:
+    """소수 피치 p 에서 최적 위상과 그 점수. 잉여류를 히스토그램으로 접어 O(nnz + p/step).
+
+    정수 격자만 볼 수 있던 예전에는 참 피치 17.24 를 17 로 반올림했고, 그 0.24 가
+    스프라이트 폭을 가로지르며 누적돼(23칸이면 5.5px) 셀 경계가 블록 한가운데를
+    지났다. 작은 디테일은 두 셀에 반씩 걸려 평균에 먹혔다.
+    """
+    total = sum(edges) or 1
+    bins = max(4, int(round(pitch / bin_step)))
+    hist = [0] * bins
+    for x, count in enumerate(edges):
+        if count:
+            hist[int((x % pitch) / pitch * bins) % bins] += count
+    span = max(1, int(round((2 * w) / pitch * bins)) + 1)
+    chance = min(1.0, span / bins)
+    doubled = hist + hist
+    window = sum(doubled[:span])
+    best_score, best_bin = window / total - chance, 0
+    for start in range(1, bins):
+        window += doubled[start + span - 1] - doubled[start - 1]
+        score = window / total - chance
+        if score > best_score:
+            best_score, best_bin = score, start
+    # 창의 기하학적 중심이 아니라 창 안 엣지의 가중 무게중심을 쓴다. 중심을 쓰면
+    # 엣지가 한 bin 에 몰린 완전 정렬 격자에서도 위상이 반창(=w) 만큼 밀렸다.
+    weight = sum(doubled[best_bin : best_bin + span])
+    if weight:
+        centre = sum((best_bin + k) * doubled[best_bin + k] for k in range(span)) / weight
+    else:
+        centre = best_bin + (span - 1) / 2.0
+    return best_score, (centre % bins) / bins * pitch
+
+
+def detect_pixel_grid(strip: Image.Image, max_pitch: int = 48) -> tuple[float, tuple[float, float]]:
+    """참 픽셀 격자 = (소수 피치, 소수 위상). 정수 검출값을 씨앗으로 ±0.75 정밀화한다.
+
+    AI 가 그린 도트는 블록 폭이 정수로 떨어지지 않는다 (솔벨 주인공 base = 17.24px).
+    측정은 소수로 하고, 스냅 결과(논리 픽셀 수)는 정수로 떨어진다.
+    격자 확신이 없으면 (1.0, (0,0)) — 스냅하지 않는다.
+    """
+    image = strip.convert("RGBA")
+    seed = detect_pixel_pitch(image, max_pitch)
+    if seed <= 1:
+        return 1.0, (0.0, 0.0)
+    col_edges, row_edges, _, _ = _edge_histograms(image)
+
+    # 정수 씨앗은 참 피치의 정수배를 집을 수 있다 (참 16.5 -> 씨앗 33: 33 간격선은
+    # 엣지의 절반만 물지만, 정수만 보면 16 도 17 도 어긋나서 33 이 이긴다).
+    # 그래서 씨앗의 약수들도 후보로 함께 정밀화하고 점수로 고른다.
+    seeds = [float(seed)]
+    for divisor in (2, 3):
+        if seed / divisor >= 2.0:
+            seeds.append(seed / divisor)
+
+    best = (-1.0, float(seed), 0.0, 0.0)
+    half_span, step = 0.75, 0.02
+    for centre in seeds:
+        # centre 자체가 반드시 샘플에 들어가도록 대칭으로 훑는다 (예전엔 15.99/16.01 만 봐서
+        # 정확히 정수인 격자에서도 소수로 빗나갔다).
+        for i in range(-int(round(half_span / step)), int(round(half_span / step)) + 1):
+            pitch = centre + i * step
+            if pitch < 2.0 or pitch > max_pitch:
+                continue
+            score_x, phase_x = _axis_refine(col_edges, pitch)
+            score_y, phase_y = _axis_refine(row_edges, pitch)
+            total = score_x + score_y
+            if total > best[0] + 1e-9:
+                best = (total, pitch, phase_x, phase_y)
+    return best[1], (best[2], best[3])
+
+
+def _grid_edges(length: int, pitch: float, offset: float) -> list[int]:
+    """소수 피치를 정수 픽셀 경계로 확정한다.
+
+    핵심: 피치를 그대로 누적하면 오차가 폭 전체에 쌓인다 (17.24 를 17 로 쓰면 23칸 뒤 5.5px).
+    대신 셀 개수 n 을 먼저 정하고 length 를 n 등분한다 — 측정은 소수, 결과는 정수 격자.
+    선행 부분셀(offset>0, 스프라이트가 블록 중간에서 시작)은 그대로 보존한다.
+    """
+    if pitch <= 1.0:
+        return [0, length]
+    # 선행 부분셀은 스프라이트가 블록 중간에서 시작할 때만 의미가 있다. 컴포넌트는 bbox 로
+    # 잘려 블록 경계에서 시작하므로, 서브픽셀 오프셋(위상 추정 노이즈)은 0 으로 스냅한다.
+    raw_lead = offset % pitch
+    lead = 0 if (raw_lead < pitch * 0.25 or raw_lead > pitch * 0.75) else int(round(raw_lead))
+    body = length - lead
+    if body <= 0:
+        return [0, length]
+    cells = max(1, int(round(body / pitch)))
+    edges = [0] if lead == 0 else [0, lead]
+    for i in range(1, cells + 1):
+        e = lead + int(round(body * i / cells))
+        if e > edges[-1]:
+            edges.append(e)
+    if edges[-1] != length:
+        edges.append(length)
+    return edges
+
+
 def _grid_phase(image: Image.Image, pitch: int) -> tuple[int, int]:
     pixels = image.convert("RGBA").load()
     width, height = image.size
@@ -559,14 +657,24 @@ def _dominant_block_color(opaque: list, detail_bias: bool = False) -> tuple[int,
     return tuple(sum(p[c] for p in members) // len(members) for c in range(3))
 
 
-def grid_snap_downscale(image: Image.Image, pitch: int, detail_bias: bool = False, phase: tuple[int, int] | None = None) -> Image.Image:
+def grid_snap_downscale(
+    image: Image.Image,
+    pitch: float,
+    detail_bias: bool = False,
+    phase: tuple[float, float] | None = None,
+) -> Image.Image:
+    """pitch/phase 는 소수를 받는다 — 격자선만 정수 픽셀로 확정한다 (`_grid_edges`).
+
+    정수 pitch + 정수 phase 를 주면 예전과 같은 경계가 나온다 (골든 추출 회귀 없음).
+    """
     source = image.convert("RGBA")
     width, height = source.size
-    offset_x, offset_y = phase if phase is not None else _grid_phase(source, pitch)
-    x_edges = [0] + list(range(offset_x if offset_x > 0 else pitch, width, pitch)) + [width]
-    y_edges = [0] + list(range(offset_y if offset_y > 0 else pitch, height, pitch)) + [height]
-    x_edges = sorted(set(x_edges))
-    y_edges = sorted(set(y_edges))
+    if phase is None:
+        offset_x, offset_y = _grid_phase(source, max(2, int(round(pitch))))
+    else:
+        offset_x, offset_y = phase
+    x_edges = _grid_edges(width, pitch, offset_x)
+    y_edges = _grid_edges(height, pitch, offset_y)
     pixels = source.load()
     output = Image.new("RGBA", (len(x_edges) - 1, len(y_edges) - 1), (0, 0, 0, 0))
     out = output.load()
@@ -1156,26 +1264,36 @@ def _run(args: argparse.Namespace):
             # 피치는 행 안에서 사실상 상수(모델의 블록 크기)고 드리프트하는 건
             # 위상이다. 프레임별 검출값의 중앙값을 합의 피치로 쓰고(배수/노이즈
             # 낚임 방지), 위상만 프레임별로 다시 잡는다.
+            # 피치는 소수다 — AI 가 그린 블록은 정수 픽셀로 떨어지지 않는다(예: 17.24).
+            # 정수로 반올림하면 그 오차가 폭 전체에 누적돼 셀 경계가 블록 한가운데를 지난다.
+            # 측정은 소수로 하고, 격자선은 `_grid_edges` 가 길이를 등분해 정수로 확정한다.
             hint = int(fit_config.get("pitch_hint", 0))
-            per_frame = [detect_pixel_pitch(component) for component in images]
-            confident = sorted(p for p in per_frame if p >= 2)
+            grids = [detect_pixel_grid(component) for component in images]
+            per_frame = [pitch for pitch, _ in grids]
+            confident = sorted(p for p in per_frame if p >= 2.0)
             if confident:
                 consensus = confident[len(confident) // 2]
             elif hint >= 2:
-                consensus = hint
+                consensus = float(hint)
                 all_warnings.append(f"{state}: pitch from fit.pitch_hint={hint} (all per-frame detections inconclusive)")
             else:
-                consensus = detect_pixel_pitch(strip)
-                if consensus >= 2:
-                    all_warnings.append(f"{state}: pitch from whole-strip detection={consensus}")
-            outliers = [f"{i}:{p}" for i, p in enumerate(per_frame) if p >= 2 and abs(p - consensus) > max(2, consensus * 0.25)]
+                consensus, _ = detect_pixel_grid(strip)
+                if consensus >= 2.0:
+                    all_warnings.append(f"{state}: pitch from whole-strip detection={consensus:.2f}")
+            outliers = [
+                f"{i}:{p:.2f}"
+                for i, p in enumerate(per_frame)
+                if p >= 2.0 and abs(p - consensus) > max(2.0, consensus * 0.25)
+            ]
             if outliers:
-                all_warnings.append(f"{state}: per-frame pitch outliers ({', '.join(outliers)}) snapped at consensus {consensus}")
+                all_warnings.append(
+                    f"{state}: per-frame pitch outliers ({', '.join(outliers)}) snapped at consensus {consensus:.2f}"
+                )
             snapped = []
-            if consensus >= 2:
-                for component in images:
-                    snapped.append(grid_snap_downscale(
-                        component, consensus, pp_detail_bias, _grid_phase(component.convert("RGBA"), consensus)))
+            if consensus >= 2.0:
+                # 위상만 프레임별로 (행 안에서 드리프트하는 건 위상이다).
+                for component, (_, frame_phase) in zip(images, grids):
+                    snapped.append(grid_snap_downscale(component, consensus, pp_detail_bias, frame_phase))
             else:
                 snapped = list(images)
             pitch = consensus
