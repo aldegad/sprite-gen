@@ -2,6 +2,16 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.2 "Sol Edge Runner" - pixel-grid detection: fractional pitch, phase, divisor collapse
+
+Patch release in the Sol Edge Runner line. Three real bugs in `detect_pixel_pitch` / grid snapping, all found while rebuilding the Sol Valley protagonist base and all pinned by synthetic ground-truth tests (`tests/test_pitch_ground_truth.py`).
+
+- **참 피치가 자기 약수에게 졌다.** 창 폭이 `w = 1 if p >= 8 else 0` 이라, 창이 열린 참 피치(p>=8)는 우연 기대치가 3/p 로 부풀고 창이 닫힌 약수(p<8)는 1/p 만 물었다. 엣지가 격자에 100% 얹혀도 p=4(0.75) 가 p=8(0.625) 을 이겨서 k=8,10,12,14 가 정확히 k/2 로 붕괴했다. 창 폭을 모든 p 에 동일하게 고정하고 잉여류를 집합으로 세어(중복 합산 제거) 정수 검출 정확도 7/11 -> 11/11.
+- **피치를 소수로 잰다.** AI 가 그린 도트는 블록 폭이 정수로 떨어지지 않는다 (솔벨 주인공 base = 17.22px). 정수로 반올림하면 칸마다 오차가 쌓여 23칸 뒤에는 5.5px, 블록의 1/3 이 밀린다 — 셀 경계가 블록 한가운데를 지나 작은 디테일이 평균에 먹혔다. 새 `detect_pixel_grid()` 가 (소수 피치, 소수 위상) 을 내고, `_grid_edges()` 는 피치를 누적하는 대신 길이를 셀 개수로 등분한다: **측정은 소수, 결과는 항상 정수 격자.** 씨앗의 약수(2,3)도 후보로 재서 참 16.5 에서 배음 33 을 집던 문제를 막고, 정밀 탐색은 씨앗값 자체를 포함하며(예전엔 15.99/16.01 만 봐서 정확히 정수인 격자를 놓쳤다), 위상은 창의 기하 중심이 아니라 창 안 엣지의 가중 무게중심으로 잡는다(중심이면 완전 정렬 격자에서 반창만큼 밀렸다).
+- **큐레이션뷰 격자가 가짜였다.** 오버레이가 셀 픽셀마다 선을 그었지만 픽셀퍼펙트는 논리 픽셀 단위로 스냅한다 (`pp_scale = cell_height // logical_height`). founder_v4 는 64 셀에 logical 30 -> 실제 격자보다 정확히 2배 촘촘한 선을 보여줬다. 서버가 `pixelPerfect{logicalHeight, scale}` 를 payload 에 싣고 큐레이터가 그 간격으로 긋는다. 픽셀퍼펙트가 아닌 런은 스냅 격자가 없으므로 토글을 감춘다.
+- **측정 결과** (솔벨 주인공 base, 실제 블록 경계가 격자선 위에 얹힌 비율): 가로 30% -> 58%, 세로 5% -> 55%. 평균 오차 가로 2.10px -> 1.74px, 세로 5.04px -> 1.59px.
+- **회귀 테스트**: 소수 배율(12.0/14.35/16.0/16.2/17.24/20.0/23.7) 왕복 — 늘렸다 줄이면 원본 논리 도트가 돌아온다. 크기 복원 3/8 -> 8/8, 픽셀 완전복원 3/8 -> 6/8. (16.5 처럼 정확히 반픽셀 배율은 블록 경계가 화면 픽셀 한가운데에 걸려 잔차가 남는 원리적 한계.) 기존 62 테스트 전부 통과 — 정수 격자로 뽑은 기존 에셋은 출력이 바뀌지 않으므로 재추출 불필요.
+
 ## v1.56.1 "Sol Edge Runner" - slice-sheet: variant grid sheets to per-cell standing cuts
 
 Patch release in the Sol Edge Runner line. Adds the `slice-sheet` tool, distilled from the Sol Valley dialogue cut-in overhaul (2026-07-09): one generated image holding a COLSxROWS grid of the same character's expressions becomes per-cell 512x768 RGBA cuts with a shared feet baseline and normalized body height.
