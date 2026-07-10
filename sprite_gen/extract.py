@@ -574,9 +574,16 @@ def detect_pixel_grid(strip: Image.Image, max_pitch: int = 48) -> tuple[float, t
 def _grid_edges(length: int, pitch: float, offset: float) -> list[int]:
     """소수 피치를 정수 픽셀 경계로 확정한다.
 
-    핵심: 피치를 그대로 누적하면 오차가 폭 전체에 쌓인다 (17.24 를 17 로 쓰면 23칸 뒤 5.5px).
-    대신 셀 개수 n 을 먼저 정하고 length 를 n 등분한다 — 측정은 소수, 결과는 정수 격자.
-    선행 부분셀(offset>0, 스프라이트가 블록 중간에서 시작)은 그대로 보존한다.
+    두 경우를 가른다. 판정 기준은 body 가 피치의 정수배에 얼마나 가까운가다.
+
+    1) 정수배에 가까우면(잔차 <= 블록의 1/4) body 를 셀 개수로 **등분**한다. 피치 측정의 미세오차
+       (16.00 을 15.96 으로 재는 것 같은)를 흡수해 격자가 딱 떨어진다.
+    2) 정수배가 아니면 `lead + i*pitch` 를 직접 곱해 놓고, 남는 자투리는 마지막 셀이 흡수한다.
+       스프라이트 bbox 는 AA 프린지 때문에 블록의 정수배가 아닐 수 있다 (실사고: 849px =
+       27.46 블록). 이때 등분하면 셀 폭이 31.44px 로 늘어나 참 블록 30.92px 와 칸마다 0.52px
+       어긋나고, 오른쪽 끝에서 반 블록이 밀려 스냅 결과의 얼굴이 부서졌다 (v1.56.2 회귀).
+
+    어느 쪽이든 피치를 누적 덧셈하지 않으므로 부동소수 오차가 쌓이지 않는다.
     """
     if pitch <= 1.0:
         return [0, length]
@@ -587,11 +594,13 @@ def _grid_edges(length: int, pitch: float, offset: float) -> list[int]:
     body = length - lead
     if body <= 0:
         return [0, length]
-    cells = max(1, int(round(body / pitch)))
+    ratio = body / pitch
+    cells = max(1, int(round(ratio)))
+    integral = abs(ratio - cells) <= 0.25
     edges = [0] if lead == 0 else [0, lead]
-    for i in range(1, cells + 1):
-        e = lead + int(round(body * i / cells))
-        if e > edges[-1]:
+    for i in range(1, cells):
+        e = lead + int(round(body * i / cells if integral else i * pitch))
+        if edges[-1] < e < length:
             edges.append(e)
     if edges[-1] != length:
         edges.append(length)
