@@ -7,9 +7,15 @@
 """
 import random
 
+import pytest
 from PIL import Image
 
-from sprite_gen.extract import detect_pixel_pitch, _grid_phase
+from sprite_gen.extract import (
+    detect_pixel_grid,
+    detect_pixel_pitch,
+    grid_snap_downscale,
+    _grid_phase,
+)
 
 PALETTE = [
     (240, 210, 175),
@@ -65,3 +71,42 @@ def test_no_grid_falls_back_to_one():
         for x in range(200):
             px[x, y] = (rng.randrange(256), rng.randrange(256), rng.randrange(256))
     assert detect_pixel_pitch(noise) == 1
+
+
+def _upscaled(art: Image.Image, scale: float) -> Image.Image:
+    """AI 도트처럼 블록 폭이 정수로 안 떨어지는 판을 만든다 (NEAREST 라 색은 원본 그대로)."""
+    big = art.resize((art.width * 64, art.height * 64), Image.NEAREST)
+    return big.resize((round(art.width * scale), round(art.height * scale)), Image.NEAREST)
+
+
+def _mismatch(a: Image.Image, b: Image.Image) -> int:
+    pa, pb = a.convert("RGB").load(), b.convert("RGB").load()
+    return sum(1 for y in range(a.height) for x in range(a.width) if pa[x, y] != pb[x, y])
+
+
+@pytest.mark.parametrize("scale", [12.0, 14.35, 16.0, 16.2, 17.24, 20.0, 23.7])
+def test_fractional_pitch_roundtrips_to_the_original_logical_art(scale):
+    """소수 배율로 늘린 도트를 스냅하면 원본 논리 픽셀이 그대로 돌아와야 한다.
+
+    정수 피치만 보던 예전에는 배율 16.2 / 17.24 에서 셀이 밀려 크기부터 틀렸다
+    (25x41 등). 측정은 소수, 격자선은 길이 등분 -> 결과는 항상 정수 격자다.
+    """
+    art = _logical_art()
+    upscaled = _upscaled(art, scale)
+    pitch, phase = detect_pixel_grid(upscaled)
+    snapped = grid_snap_downscale(upscaled, pitch, phase=phase)
+
+    assert snapped.size == art.size, f"scale {scale}: {snapped.size} != {art.size}"
+    assert abs(pitch - scale) < 0.1, f"scale {scale}: detected {pitch:.3f}"
+    # 소수 배율은 블록 경계가 화면 픽셀 중간에 걸리므로 1% 이내의 색 불일치는 허용한다.
+    assert _mismatch(snapped, art) <= art.width * art.height // 100
+
+
+def test_integer_pitch_still_snaps_exactly():
+    art = _logical_art()
+    for scale in (12, 16, 20):
+        upscaled = _upscaled(art, float(scale))
+        pitch, phase = detect_pixel_grid(upscaled)
+        snapped = grid_snap_downscale(upscaled, pitch, phase=phase)
+        assert snapped.size == art.size
+        assert _mismatch(snapped, art) == 0
