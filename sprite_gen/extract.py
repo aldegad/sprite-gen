@@ -463,24 +463,27 @@ def detect_pixel_pitch(strip: Image.Image, max_pitch: int = 48) -> int:
     2px 런에 지배당해 큰 블록(~16px)을 놓치고 항상 2 를 내놨다 — 그 결과
     그리드 비정렬 축소로 이웃 픽셀이 섞여 뭉개졌다 (2026-07-05 사고).
     새 방식: 후보 피치 p 와 위상마다 "색 경계가 그리드선 ±w 안에 모이는
-    비율"에서 우연 기대치 (2w+1)/p 를 뺀 점수의 argmax. 작은 p 가 공짜로
-    이기는 문제를 우연 보정이 막는다. 확신 없으면 1(스냅 안 함)로 관측
-    가능하게 떨어진다."""
+    비율"에서 우연 기대치 (그 창이 덮는 잉여류 수)/p 를 뺀 점수의 argmax.
+    작은 p 가 공짜로 이기는 문제를 우연 보정이 막는다. 확신 없으면 1(스냅 안 함)로
+    관측 가능하게 떨어진다.
+
+    창 폭 w 는 모든 p 에 동일하다. 예전에는 `w = 1 if p >= 8 else 0` 이라
+    p>=8 에서만 창이 열렸고, 그 결과 참 피치(>=8)의 우연 기대치가 3/p 로
+    부풀어 창 없는 약수(p<8)에게 졌다 — k=8,10,12,14 에서 정확히 k/2 를
+    반환하던 원인 (합성 정답 테스트 test_pitch_ground_truth 로 고정).
+    창이 p 를 넘어 잉여류를 중복 합산하지 않도록 잉여류는 집합으로 센다."""
     image = strip.convert("RGBA")
     col_edges, row_edges, width, height = _edge_histograms(image)
     total_col = sum(col_edges) or 1
     total_row = sum(row_edges) or 1
 
-    def axis_score(edges: list[int], total: int, p: int) -> float:
-        w = 1 if p >= 8 else 0
+    def axis_score(edges: list[int], total: int, p: int, w: int = 1) -> float:
         best = 0.0
         for phase in range(p):
-            hit = 0
-            for offset in range(-w, w + 1):
-                start = (phase + offset) % p
-                hit += sum(edges[start::p])
+            residues = {(phase + offset) % p for offset in range(-w, w + 1)}
+            hit = sum(sum(edges[r::p]) for r in residues)
             frac = hit / total
-            chance = min(1.0, (2 * w + 1) / p)
+            chance = len(residues) / p
             score = frac - chance
             if score > best:
                 best = score
