@@ -2,6 +2,21 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.3 "Sol Edge Runner" - hotfix: 등분 격자가 bbox 자투리에 늘어나던 회귀
+
+v1.56.2 가 넣은 `_grid_edges` 의 "length 를 셀 개수로 등분" 이 스프라이트 bbox 가 블록의
+정수배가 아닐 때 격자를 늘렸다. 솔벨 주인공 chibi 베이스에서 발견 — bbox 849px = 27.46 블록
+(AA 프린지), 27 등분하면 셀 폭 31.44px 로 참 블록 30.92px 와 칸마다 0.52px 어긋나고 오른쪽
+끝에서 반 블록이 밀려 스냅 결과의 얼굴이 부서졌다(눈 하나 소실, 아웃라인 파편화).
+
+- **등분은 body 가 피치의 정수배에 가까울 때만**(잔차 <= 블록의 1/4) 쓴다. 이때는 피치 측정의
+  미세오차(16.00 을 15.96 으로 재는 것)를 흡수해 격자가 딱 떨어진다.
+- 정수배가 아니면 격자선을 `lead + i*pitch` 로 직접 놓고 남는 자투리는 **마지막 셀 하나가 흡수**한다.
+  어느 쪽이든 피치를 누적 덧셈하지 않아 부동소수 오차는 쌓이지 않는다.
+- **회귀 테스트**: bbox 오른쪽에 블록의 정수배가 아닌 자투리(1/7/14/20px)를 붙여도 마지막 셀을
+  뺀 모든 셀 폭이 참 피치 ±1px 여야 한다. v1.56.2 는 이 테스트에서 실패한다.
+- 기존 소수 배율 왕복 테스트 전부 유지. 74 tests OK.
+
 ## v1.56.2 "Sol Edge Runner" - pixel-grid detection: fractional pitch, phase, divisor collapse
 
 Patch release in the Sol Edge Runner line. Three real bugs in `detect_pixel_pitch` / grid snapping, all found while rebuilding the Sol Valley protagonist base and all pinned by synthetic ground-truth tests (`tests/test_pitch_ground_truth.py`).
