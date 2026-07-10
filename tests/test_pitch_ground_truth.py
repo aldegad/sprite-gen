@@ -98,7 +98,8 @@ def test_fractional_pitch_roundtrips_to_the_original_logical_art(scale):
     snapped = grid_snap_downscale(upscaled, pitch, phase=phase)
 
     assert snapped.size == art.size, f"scale {scale}: {snapped.size} != {art.size}"
-    assert abs(pitch - scale) < 0.1, f"scale {scale}: detected {pitch:.3f}"
+    assert abs(pitch[0] - scale) < 0.1, f"scale {scale}: detected {pitch[0]:.3f}"
+    assert abs(pitch[1] - scale) < 0.1, f"scale {scale}: detected {pitch[1]:.3f}"
     # 소수 배율은 블록 경계가 화면 픽셀 중간에 걸리므로 1% 이내의 색 불일치는 허용한다.
     assert _mismatch(snapped, art) <= art.width * art.height // 100
 
@@ -129,9 +130,34 @@ def test_non_integer_bbox_does_not_stretch_the_grid(fringe):
     padded.paste(upscaled, (0, 0))
 
     pitch, phase = detect_pixel_grid(padded)
-    edges = _grid_edges(padded.width, pitch, phase[0])
+    edges = _grid_edges(padded.width, pitch[0], phase[0])
     widths = [edges[i + 1] - edges[i] for i in range(len(edges) - 1)]
 
     # 마지막 셀만 자투리를 흡수한다. 나머지는 전부 참 피치 ±1px.
     for w in widths[:-1]:
         assert abs(w - k) <= 1, f"cell width {w} drifted from pitch {k} (widths={widths})"
+
+
+def test_pitch_is_detected_per_axis():
+    """가로/세로 블록 크기가 다르면 축별로 따로 잡아야 한다.
+
+    비균등 리스케일된 생성물은 가로 블록과 세로 블록이 어긋난다 (솔벨 chibi 베이스:
+    가로 30.38 / 세로 30.92). 한 피치를 두 축에 강제하면 한 축이 통째로 미끄러졌다
+    — 실측 가로 정렬률 11.7%.
+    """
+    art = _logical_art(width=20, height=24)
+    upscaled = art.resize((art.width * 24, art.height * 30), Image.NEAREST)
+
+    (pitch_x, pitch_y), _ = detect_pixel_grid(upscaled)
+
+    assert abs(pitch_x - 24) < 0.6, f"x pitch {pitch_x:.2f} != 24"
+    assert abs(pitch_y - 30) < 0.6, f"y pitch {pitch_y:.2f} != 30"
+
+
+def test_non_square_pitch_roundtrips():
+    art = _logical_art(width=20, height=24)
+    upscaled = art.resize((art.width * 24, art.height * 30), Image.NEAREST)
+    pitch, phase = detect_pixel_grid(upscaled)
+    snapped = grid_snap_downscale(upscaled, pitch, phase=phase)
+    assert snapped.size == art.size
+    assert _mismatch(snapped, art) == 0

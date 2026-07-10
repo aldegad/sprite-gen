@@ -474,27 +474,39 @@ def detect_pixel_pitch(strip: Image.Image, max_pitch: int = 48) -> int:
     창이 p 를 넘어 잉여류를 중복 합산하지 않도록 잉여류는 집합으로 센다."""
     image = strip.convert("RGBA")
     col_edges, row_edges, width, height = _edge_histograms(image)
-    total_col = sum(col_edges) or 1
-    total_row = sum(row_edges) or 1
 
-    def axis_score(edges: list[int], total: int, p: int, w: int = 1) -> float:
-        best = 0.0
-        for phase in range(p):
-            residues = {(phase + offset) % p for offset in range(-w, w + 1)}
-            hit = sum(sum(edges[r::p]) for r in residues)
-            frac = hit / total
-            chance = len(residues) / p
-            score = frac - chance
-            if score > best:
-                best = score
-        return best
-
-    # 단순 argmax — 진짜 피치의 약수(p=7 vs 14)는 우연 기대치 (2w+1)/p 가
+    # 단순 argmax — 진짜 피치의 약수(p=7 vs 14)는 우연 기대치 |잉여류|/p 가
     # 커서 자동으로 밀린다. 최고점이 문턱(0.2) 미만이면 그리드 확신 없음 →
     # 1(스냅 안 함)로 관측 가능하게 폴백.
     best_pitch, best_score = 1, 0.2
     for p in range(2, max_pitch + 1):
-        score = axis_score(col_edges, total_col, p) + axis_score(row_edges, total_row, p)
+        score = _axis_int_score(col_edges, p) + _axis_int_score(row_edges, p)
+        if score > best_score:
+            best_pitch, best_score = p, score
+    return best_pitch
+
+
+def _axis_int_score(edges: list[int], p: int, w: int = 1) -> float:
+    """정수 피치 p 의 축별 점수 = (그리드선 ±w 에 모인 엣지 비율) − 우연 기대치.
+
+    창 폭 w 는 모든 p 에 동일하고, 창이 덮는 잉여류는 집합으로 세어 중복 합산하지 않는다.
+    """
+    total = sum(edges) or 1
+    best = 0.0
+    for phase in range(p):
+        residues = {(phase + offset) % p for offset in range(-w, w + 1)}
+        hit = sum(sum(edges[r::p]) for r in residues)
+        score = hit / total - len(residues) / p
+        if score > best:
+            best = score
+    return best
+
+
+def _axis_int_seed(edges: list[int], max_pitch: int = 48) -> int:
+    """한 축만 보고 고른 정수 피치 씨앗. 확신 없으면 1."""
+    best_pitch, best_score = 1, 0.1
+    for p in range(2, max_pitch + 1):
+        score = _axis_int_score(edges, p)
         if score > best_score:
             best_pitch, best_score = p, score
     return best_pitch
@@ -533,42 +545,59 @@ def _axis_refine(edges: list[int], pitch: float, w: float = 1.0, bin_step: float
     return best_score, (centre % bins) / bins * pitch
 
 
-def detect_pixel_grid(strip: Image.Image, max_pitch: int = 48) -> tuple[float, tuple[float, float]]:
-    """참 픽셀 격자 = (소수 피치, 소수 위상). 정수 검출값을 씨앗으로 ±0.75 정밀화한다.
+def detect_pixel_grid(
+    strip: Image.Image, max_pitch: int = 48
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """참 픽셀 격자 = ((가로 피치, 세로 피치), (가로 위상, 세로 위상)). 전부 소수.
 
     AI 가 그린 도트는 블록 폭이 정수로 떨어지지 않는다 (솔벨 주인공 base = 17.24px).
     측정은 소수로 하고, 스냅 결과(논리 픽셀 수)는 정수로 떨어진다.
-    격자 확신이 없으면 (1.0, (0,0)) — 스냅하지 않는다.
+
+    **피치는 축마다 다를 수 있다.** 생성물이 비균등 비율로 리스케일되면 가로 블록과 세로 블록의
+    크기가 어긋난다 (솔벨 주인공 chibi 베이스: 가로 30.38 / 세로 30.92). 한 피치를 두 축에
+    강제하면 한 축이 통째로 미끄러진다 — 실측 가로 정렬률 11.7% (축별로 재면 75.7%).
+
+    격자 확신이 없으면 ((1.0, 1.0), (0,0)) — 스냅하지 않는다.
     """
     image = strip.convert("RGBA")
-    seed = detect_pixel_pitch(image, max_pitch)
-    if seed <= 1:
-        return 1.0, (0.0, 0.0)
+    combined = detect_pixel_pitch(image, max_pitch)
+    if combined <= 1:
+        return (1.0, 1.0), (0.0, 0.0)
     col_edges, row_edges, _, _ = _edge_histograms(image)
 
-    # 정수 씨앗은 참 피치의 정수배를 집을 수 있다 (참 16.5 -> 씨앗 33: 33 간격선은
-    # 엣지의 절반만 물지만, 정수만 보면 16 도 17 도 어긋나서 33 이 이긴다).
-    # 그래서 씨앗의 약수들도 후보로 함께 정밀화하고 점수로 고른다.
-    seeds = [float(seed)]
-    for divisor in (2, 3):
-        if seed / divisor >= 2.0:
-            seeds.append(seed / divisor)
-
-    best = (-1.0, float(seed), 0.0, 0.0)
     half_span, step = 0.75, 0.02
-    for centre in seeds:
-        # centre 자체가 반드시 샘플에 들어가도록 대칭으로 훑는다 (예전엔 15.99/16.01 만 봐서
-        # 정확히 정수인 격자에서도 소수로 빗나갔다).
-        for i in range(-int(round(half_span / step)), int(round(half_span / step)) + 1):
-            pitch = centre + i * step
-            if pitch < 2.0 or pitch > max_pitch:
-                continue
-            score_x, phase_x = _axis_refine(col_edges, pitch)
-            score_y, phase_y = _axis_refine(row_edges, pitch)
-            total = score_x + score_y
-            if total > best[0] + 1e-9:
-                best = (total, pitch, phase_x, phase_y)
-    return best[1], (best[2], best[3])
+    span = int(round(half_span / step))
+
+    def refine(edges: list[int]) -> tuple[float, float]:
+        # 씨앗 후보 = 축별 씨앗 + 두 축 합산 씨앗.
+        # - 축별만 쓰면: 한 축의 정수 검출이 노이즈에 흔들려 약수(참 17.24 -> 씨앗 9)로 빠진다.
+        # - 합산만 쓰면: 가로 24 / 세로 30 처럼 축마다 블록이 다른 그림에서 한 축의 참값이
+        #   ±0.75 정밀화 창 밖에 놓인다.
+        # 둘 다 후보로 두고 점수로 고르면 두 실패가 모두 막힌다.
+        axis_seed = _axis_int_seed(edges, max_pitch)
+        candidates = {float(s) for s in (axis_seed, combined) if s >= 2}
+        if not candidates:
+            return 1.0, 0.0
+        # 정수 씨앗은 참 피치의 정수배를 집을 수 있다 (참 16.5 -> 씨앗 33: 33 간격선은
+        # 엣지의 절반만 물지만, 정수만 보면 16 도 17 도 어긋나서 33 이 이긴다).
+        # 그래서 씨앗의 약수들도 후보로 함께 정밀화하고 점수로 고른다.
+        seeds = sorted(candidates | {s / d for s in candidates for d in (2, 3) if s / d >= 2.0})
+        best = (-1.0, float(max(candidates)), 0.0)
+        for centre in seeds:
+            # centre 자체가 반드시 샘플에 들어가도록 대칭으로 훑는다 (예전엔 15.99/16.01 만 봐서
+            # 정확히 정수인 격자에서도 소수로 빗나갔다).
+            for i in range(-span, span + 1):
+                pitch = centre + i * step
+                if pitch < 2.0 or pitch > max_pitch:
+                    continue
+                score, phase = _axis_refine(edges, pitch)
+                if score > best[0] + 1e-9:
+                    best = (score, pitch, phase)
+        return best[1], best[2]
+
+    pitch_x, phase_x = refine(col_edges)
+    pitch_y, phase_y = refine(row_edges)
+    return (pitch_x, pitch_y), (phase_x, phase_y)
 
 
 def _grid_edges(length: int, pitch: float, offset: float) -> list[int]:
@@ -666,24 +695,34 @@ def _dominant_block_color(opaque: list, detail_bias: bool = False) -> tuple[int,
     return tuple(sum(p[c] for p in members) // len(members) for c in range(3))
 
 
+def _pitch_pair(pitch: float | tuple[float, float]) -> tuple[float, float]:
+    """스칼라 피치는 두 축에 같은 값, 쌍이면 (가로, 세로)."""
+    if isinstance(pitch, (tuple, list)):
+        return float(pitch[0]), float(pitch[1])
+    return float(pitch), float(pitch)
+
+
 def grid_snap_downscale(
     image: Image.Image,
-    pitch: float,
+    pitch: float | tuple[float, float],
     detail_bias: bool = False,
     phase: tuple[float, float] | None = None,
 ) -> Image.Image:
     """pitch/phase 는 소수를 받는다 — 격자선만 정수 픽셀로 확정한다 (`_grid_edges`).
 
-    정수 pitch + 정수 phase 를 주면 예전과 같은 경계가 나온다 (골든 추출 회귀 없음).
+    pitch 는 스칼라 또는 (가로, 세로) 쌍. 축마다 블록 크기가 다른 생성물이 있어서
+    `detect_pixel_grid` 가 축별 피치를 낸다. 정수 pitch + 정수 phase 를 주면 예전과 같은
+    경계가 나온다 (골든 추출 회귀 없음).
     """
     source = image.convert("RGBA")
     width, height = source.size
+    pitch_x, pitch_y = _pitch_pair(pitch)
     if phase is None:
-        offset_x, offset_y = _grid_phase(source, max(2, int(round(pitch))))
+        offset_x, offset_y = _grid_phase(source, max(2, int(round(pitch_x))))
     else:
         offset_x, offset_y = phase
-    x_edges = _grid_edges(width, pitch, offset_x)
-    y_edges = _grid_edges(height, pitch, offset_y)
+    x_edges = _grid_edges(width, pitch_x, offset_x)
+    y_edges = _grid_edges(height, pitch_y, offset_y)
     pixels = source.load()
     output = Image.new("RGBA", (len(x_edges) - 1, len(y_edges) - 1), (0, 0, 0, 0))
     out = output.load()
@@ -1276,36 +1315,51 @@ def _run(args: argparse.Namespace):
             # 피치는 소수다 — AI 가 그린 블록은 정수 픽셀로 떨어지지 않는다(예: 17.24).
             # 정수로 반올림하면 그 오차가 폭 전체에 누적돼 셀 경계가 블록 한가운데를 지난다.
             # 측정은 소수로 하고, 격자선은 `_grid_edges` 가 길이를 등분해 정수로 확정한다.
+            # 피치는 소수이고 축마다 다를 수 있다 — AI 가 그린 블록은 정수 픽셀로 떨어지지 않고,
+            # 비균등 리스케일된 생성물은 가로/세로 블록 크기가 어긋난다.
+            # 측정은 소수·축별로 하고, 격자선은 `_grid_edges` 가 정수로 확정한다.
             hint = int(fit_config.get("pitch_hint", 0))
             grids = [detect_pixel_grid(component) for component in images]
-            per_frame = [pitch for pitch, _ in grids]
-            confident = sorted(p for p in per_frame if p >= 2.0)
-            if confident:
-                consensus = confident[len(confident) // 2]
-            elif hint >= 2:
-                consensus = float(hint)
-                all_warnings.append(f"{state}: pitch from fit.pitch_hint={hint} (all per-frame detections inconclusive)")
-            else:
-                consensus, _ = detect_pixel_grid(strip)
-                if consensus >= 2.0:
-                    all_warnings.append(f"{state}: pitch from whole-strip detection={consensus:.2f}")
+
+            def _consensus(axis: int) -> float:
+                confident = sorted(g[0][axis] for g in grids if g[0][axis] >= 2.0)
+                if confident:
+                    return confident[len(confident) // 2]
+                if hint >= 2:
+                    all_warnings.append(
+                        f"{state}: pitch from fit.pitch_hint={hint} (all per-frame detections inconclusive)"
+                    )
+                    return float(hint)
+                strip_pitch, _ = detect_pixel_grid(strip)
+                if strip_pitch[axis] >= 2.0:
+                    all_warnings.append(
+                        f"{state}: pitch from whole-strip detection={strip_pitch[axis]:.2f}"
+                    )
+                return strip_pitch[axis]
+
+            consensus_x, consensus_y = _consensus(0), _consensus(1)
             outliers = [
-                f"{i}:{p:.2f}"
-                for i, p in enumerate(per_frame)
-                if p >= 2.0 and abs(p - consensus) > max(2.0, consensus * 0.25)
+                f"{i}:{g[0][0]:.2f}"
+                for i, g in enumerate(grids)
+                if g[0][0] >= 2.0 and abs(g[0][0] - consensus_x) > max(2.0, consensus_x * 0.25)
             ]
             if outliers:
                 all_warnings.append(
-                    f"{state}: per-frame pitch outliers ({', '.join(outliers)}) snapped at consensus {consensus:.2f}"
+                    f"{state}: per-frame pitch outliers ({', '.join(outliers)}) snapped at consensus {consensus_x:.2f}"
                 )
             snapped = []
-            if consensus >= 2.0:
+            if min(consensus_x, consensus_y) >= 2.0:
                 # 위상만 프레임별로 (행 안에서 드리프트하는 건 위상이다).
                 for component, (_, frame_phase) in zip(images, grids):
-                    snapped.append(grid_snap_downscale(component, consensus, pp_detail_bias, frame_phase))
+                    snapped.append(
+                        grid_snap_downscale(component, (consensus_x, consensus_y), pp_detail_bias, frame_phase)
+                    )
             else:
                 snapped = list(images)
-            pitch = consensus
+            pitch = round(consensus_x, 2) if abs(consensus_x - consensus_y) < 0.05 else (
+                round(consensus_x, 2),
+                round(consensus_y, 2),
+            )
             logical_frames = conform_row_logical(snapped, logical_width, logical_height, pp_detail_bias)
             registered = register_row_frames(logical_frames)
             # 전/후 비교용 plain 쌍둥이: 같은 원본 스트립을 픽셀퍼펙트 없이
