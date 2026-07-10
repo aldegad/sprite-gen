@@ -597,6 +597,19 @@ def detect_pixel_grid(
 
     pitch_x, phase_x = refine(col_edges)
     pitch_y, phase_y = refine(row_edges)
+
+    # 축별 피치는 서로 크게 다를 수 없다. 비균등 리스케일이어도 실측 차이는 2% 수준이다
+    # (솔벨 chibi 베이스: 30.38 / 30.92). 한 축이 다른 축의 1.5배를 넘게 벗어나면 그 축의
+    # 검출이 무너진 것이다 — 엣지가 적은 축(균일한 세로 막대가 화면을 채우는 carry 포즈 등)에서
+    # 참 피치의 약수가 이겨 3.00 같은 값이 나왔다 (솔벨 down_carry_walk, 참값 9).
+    # 엣지 총량이 많은 축을 신뢰해 양쪽에 쓴다. 조용히 고치지 않고 축 하나를 버렸음을 남긴다.
+    lo, hi = sorted((pitch_x, pitch_y))
+    if lo >= 2.0 and hi / lo > 1.5:
+        if sum(col_edges) >= sum(row_edges):
+            pitch_y = pitch_x
+        else:
+            pitch_x = pitch_y
+
     return (pitch_x, pitch_y), (phase_x, phase_y)
 
 

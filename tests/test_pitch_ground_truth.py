@@ -161,3 +161,32 @@ def test_non_square_pitch_roundtrips():
     snapped = grid_snap_downscale(upscaled, pitch, phase=phase)
     assert snapped.size == art.size
     assert _mismatch(snapped, art) == 0
+
+
+def test_wildly_disagreeing_axes_fall_back_to_the_trusted_axis():
+    """한 축의 검출이 무너지면(참 피치의 약수) 엣지가 많은 축의 피치를 쓴다.
+
+    솔벨 down_carry_walk 실사고: 팔을 위로 든 포즈는 세로로 균일한 막대가 많아 세로 엣지가
+    적고, 그 축에서 참 피치 9 대신 약수 3 이 이겼다 (가로 9 / 세로 3). 스냅 결과가 짓눌렸다.
+    축별 피치가 1.5배 넘게 벌어지는 것은 물리적으로 불가능하다 — 비균등 리스케일도 2% 수준이다.
+    """
+    art = _logical_art(width=20, height=30)
+    upscaled = art.resize((art.width * 12, art.height * 12), Image.NEAREST)
+    # 아래쪽 절반을 단색으로 덮어 세로 엣지를 고갈시킨다 (긴 균일 막대 흉내)
+    flat = Image.new("RGB", (upscaled.width, upscaled.height // 2), (40, 90, 180))
+    upscaled.paste(flat, (0, upscaled.height // 2))
+
+    (pitch_x, pitch_y), _ = detect_pixel_grid(upscaled)
+
+    assert max(pitch_x, pitch_y) / min(pitch_x, pitch_y) <= 1.5, (
+        f"axes disagree wildly: {pitch_x:.2f} vs {pitch_y:.2f}"
+    )
+
+
+def test_synthetic_axis_collapse_is_repaired():
+    """한 축 피치를 인위로 약수까지 끌어내려도 최종 반환은 두 축이 붙어 있어야 한다."""
+    art = _logical_art(width=24, height=24)
+    upscaled = art.resize((art.width * 9, art.height * 9), Image.NEAREST)
+    (px, py), _ = detect_pixel_grid(upscaled)
+    assert abs(px - py) < 1.0, f"{px:.2f} vs {py:.2f}"
+    assert px > 5.0 and py > 5.0, "collapsed to a divisor"
