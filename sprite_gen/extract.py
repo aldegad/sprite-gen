@@ -525,7 +525,7 @@ def _axis_refine(edges: list[int], pitch: float, w: float = 1.0, bin_step: float
     for x, count in enumerate(edges):
         if count:
             hist[int((x % pitch) / pitch * bins) % bins] += count
-    span = max(1, int(round((2 * w) / pitch * bins)) + 1)
+    span = min(bins, max(1, int(round((2 * w) / pitch * bins)) + 1))
     chance = min(1.0, span / bins)
     doubled = hist + hist
     window = sum(doubled[:span])
@@ -1337,7 +1337,17 @@ def _run(args: argparse.Namespace):
             def _consensus(axis: int) -> float:
                 confident = sorted(g[0][axis] for g in grids if g[0][axis] >= 2.0)
                 if confident:
-                    return confident[len(confident) // 2]
+                    # 붕괴한 프레임(참 피치의 약수로 떨어진 값)이 중앙값을 오염시킨다 —
+                    # 솔벨 down_carry_run 은 6 프레임 중 절반이 3.00 으로 무너져 합의가 5.00 이 됐다.
+                    # 행 안에서 참 피치는 거의 같으므로, 최대값의 60% 미만은 붕괴로 보고 버린다.
+                    ceiling = confident[-1]
+                    trusted = [p for p in confident if p >= ceiling * 0.6]
+                    dropped = len(confident) - len(trusted)
+                    if dropped:
+                        all_warnings.append(
+                            f"{state}: dropped {dropped} collapsed per-frame pitch(es) below {ceiling * 0.6:.2f}"
+                        )
+                    return trusted[len(trusted) // 2]
                 if hint >= 2:
                     all_warnings.append(
                         f"{state}: pitch from fit.pitch_hint={hint} (all per-frame detections inconclusive)"
