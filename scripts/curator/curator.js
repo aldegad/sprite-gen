@@ -39,7 +39,7 @@ const STR = {
     title: "curation", compose: "Bake atlas", export: "Export PNGs", exportGif: "Export GIFs",
     groundGrid: "Ground grid", langOther: "한국어",
     ppApply: "Pixel-perfect", baseNote: "identity reference — not baked",
-    pxGrid: "Pixel grid", tPxGrid: "overlay the cell pixel raster (display only)",
+    pxGrid: "Pixel-perfect grid", tPxGrid: "overlay the logical pixel grid the pixel-perfect stage snapped to (display only)",
     tPpApply: "bake and show the pixel-perfected frames (off = the pre-pixel-perfect originals)",
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
@@ -60,7 +60,7 @@ const STR = {
     title: "큐레이션", compose: "아틀라스 굽기", export: "PNG 내보내기", exportGif: "GIF 내보내기",
     groundGrid: "바닥 그리드", langOther: "EN",
     ppApply: "픽셀퍼펙트 적용", baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
-    pxGrid: "픽셀 그리드", tPxGrid: "셀 픽셀 래스터 오버레이 (표시 전용)",
+    pxGrid: "픽셀퍼펙트 격자", tPxGrid: "픽셀퍼펙트가 실제로 스냅한 논리 픽셀 격자 오버레이 (표시 전용)",
     tPpApply: "체크 = 픽셀퍼펙트 프레임 표시·굽기, 해제 = 적용 전 원본 표시·굽기",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
@@ -98,12 +98,16 @@ function frameUrl(frame) {
   return ppView === "plain" && frame.plainUrl ? frame.plainUrl : frame.url;
 }
 
-// 픽셀 그리드 오버레이: 스테이지 표시 배율에 맞춰 셀 픽셀 간격을 계산한다.
+// 픽셀퍼펙트 격자 오버레이: 픽셀퍼펙트가 실제로 스냅한 논리 픽셀 간격을 그린다.
+// run.pixelPerfect.scale = 논리 픽셀 1칸이 차지하는 셀 픽셀 수 (extract 의 pp_scale).
+// 예전엔 셀 픽셀마다(scale 무시) 그어서, logical_height < cell 인 런에서 실제 스냅
+// 격자보다 촘촘한 거짓 격자를 보여줬다. 픽셀퍼펙트가 아닌 런은 격자 자체가 없다.
 function sizePxGrids() {
+  const step = run.pixelPerfect ? run.pixelPerfect.scale : 1;
   document.querySelectorAll(".stage").forEach((stage) => {
     const overlay = stage.querySelector(".pxgrid");
     if (!overlay) return;
-    const ds = stage.clientWidth / run.cell.width;
+    const ds = (stage.clientWidth / run.cell.width) * step;
     overlay.style.backgroundSize = `${ds}px ${ds}px`;
   });
 }
@@ -1057,10 +1061,11 @@ async function boot() {
       scheduleSave();
     });
   }
-  // 픽셀 그리드 체크박스 — 표시 전용 오버레이 (굽기와 무관)
+  // 픽셀퍼펙트 격자 체크박스 — 표시 전용 오버레이 (굽기와 무관).
+  // 픽셀퍼펙트가 아닌 런에는 스냅 격자가 없다 → 토글을 감춘다 (가짜 격자를 보여주지 않는다).
   const pxWrap = document.getElementById("pxgrid-wrap");
   const pxCheck = document.getElementById("pxgrid-check");
-  pxWrap.hidden = false;
+  pxWrap.hidden = !run.pixelPerfect;
   pxCheck.addEventListener("change", () => {
     document.body.classList.toggle("show-pxgrid", pxCheck.checked);
     if (pxCheck.checked) sizePxGrids();
