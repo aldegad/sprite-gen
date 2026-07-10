@@ -74,6 +74,15 @@ def build_run_state(run_dir: Path) -> dict:
         "height": int(cell.get("height", cell.get("size", 0))),
     }
 
+    # 픽셀퍼펙트 격자: 논리 픽셀 1칸이 셀 픽셀 몇 칸인가. extract 의 pp_scale 과 같은 식이어야
+    # 큐레이터 오버레이가 "실제로 스냅된 격자"를 그린다 (셀 래스터가 아니라).
+    fit = request.get("fit") or {}
+    pixel_perfect = None
+    if fit.get("pixel_perfect"):
+        logical_height = int(fit.get("logical_height", cell_state["height"]))
+        scale = max(1, cell_state["height"] // max(1, logical_height))
+        pixel_perfect = {"logicalHeight": logical_height, "scale": scale}
+
     states = []
     for state, entry in request["states"].items():
         row = rows_by_state.get(state, {})
@@ -127,6 +136,7 @@ def build_run_state(run_dir: Path) -> dict:
         "runDir": str(run_dir),
         "baseUrl": base_url,
         "cell": cell_state,
+        "pixelPerfect": pixel_perfect,
         "schemaVersion": SCHEMA_VERSION,
         "states": states,
         "curation": curation,
