@@ -1,6 +1,6 @@
 # sprite-gen — Implemented Architecture
 
-> Status: reference (describes the code as it actually is, v1.10.x, 2026-07-08).
+> Status: reference (describes the code as it actually is, v1.56.x, 2026-07-11).
 > Canonical behavior contract lives in [`../SKILL.md`](../SKILL.md); this doc
 > explains *how* the scripts realize that contract. If this doc and `SKILL.md`
 > ever disagree, `SKILL.md` wins and this doc is the bug.
@@ -17,7 +17,7 @@ cells into a single sheet described by a runtime manifest.
 flowchart TD
     REQ["sprite-request.json<br/>(numeric SSoT)"] --> PREP["prepare_sprite_run.py"]
     PREP --> GUIDES["references/layout-guides/&lt;state&gt;.png<br/>prompts/&lt;state&gt;.txt"]
-    GUIDES --> GEN["kuma:image-gen<br/>(one image per state — the only AI step)"]
+    GUIDES --> GEN["sprite-gen gen<br/>(codex or grok; one image per state — the only AI step)"]
     GEN --> RAW["raw/&lt;state&gt;.png<br/>(one horizontal strip per state)"]
     RAW --> EXTRACT["extract_sprite_row_frames.py<br/>chroma removal → connected components<br/>→ fit_to_cell or pixel-perfect path"]
     EXTRACT --> FRAMES["frames/&lt;state&gt;/frame-N.png (+ frame-N.plain.png twin)<br/>frames/frames-manifest.json"]
@@ -33,7 +33,7 @@ flowchart TD
 | Stage | Script | Input | Output |
 |---|---|---|---|
 | Prepare | `prepare_sprite_run.py` | base image + request flags/JSON | `sprite-request.json`, per-state layout guide, per-state prompt, empty `raw/`+`frames/` |
-| Generate | `kuma:image-gen` (external) | `prompts/<state>.txt` + refs | `raw/<state>.png` strip |
+| Generate | `sprite-gen gen` (`generate_sprite_image.py` wrapper) | `prompts/<state>.txt` + refs | verified `raw/<state>.png` strip + audit raw/report |
 | Extract | `extract_sprite_row_frames.py` | `raw/<state>.png` | `frames/<state>/frame-N.png` (+ `.plain.png` twin on pixel-perfect runs), `frames/frames-manifest.json` |
 | Curate (opt) | `serve_curation.py` + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
@@ -80,8 +80,9 @@ Every run starts here. It owns the recipe consumed by both prompts and scripts:
   "character": { "id": "howl", "description": "...", "base_image": "base-source.png" },
   "cell": { "shape": "square", "size": 256, "safe_margin": 24 },
   "chroma_key": { "name": "magenta", "hex": "#FF00FF", "rgb": [255, 0, 255] },
+  "chroma": { "mode": "rgb" },
   "states": { "idle": { "frames": 4, "fps": 4, "loop": true, "action": "..." } },
-  "fit": { "pixel_perfect": true, "logical_height": 64, "palette_size": 24, "align_x": "foot-centroid", "align_y": "bottom" },
+  "fit": { "pixel_perfect": true, "logical_height": 64, "palette_size": 24, "align_x": "foot-centroid", "align_y": "bottom", "segmentation": "components" },
   "style": "...",
   "motion_phase_guides": false
 }
@@ -97,6 +98,11 @@ Every run starts here. It owns the recipe consumed by both prompts and scripts:
 - `fit` is optional (absent = legacy behavior): `resample`/`align_x`/`align_y`
   tuning, or the full deterministic `pixel_perfect` mode (§6.1). Behavior
   contract: [`pixel-perfect.md`](pixel-perfect.md).
+- `fit.segmentation` is `components` by default; opt-in `projection` is the
+  fused-pose recovery path (§6). The extract CLI can explicitly override it.
+- `chroma.mode` is `rgb` by default; opt-in `ycbcr` is owned by
+  [`chroma-alpha.md`](chroma-alpha.md). The extract and inspect CLIs can
+  explicitly override it.
 - `motion_phase_guides` only does something for 8-frame locomotion states.
 
 ## 4. The cell model (read this — it is the most misunderstood part)
@@ -186,19 +192,28 @@ flowchart TD
    blends are limited to key-distance `<= 2`; out-of-band blends use
    `--fringe-unmix-reach` (default 4). Small trapped spill clusters are
    despilled in place, while deeper key-tinted subject material survives.
+   With request `chroma.mode: "ycbcr"` or CLI `--chroma-mode ycbcr`, the
+   extractor uses `remove_chroma_background_ycbcr()` instead: border-mode key
+   detection and chrominance-plane flood fill tolerate shaded keys and JPEG
+   chroma noise. RGB remains the default.
 2. `connected_components()` — flood-fill alpha blobs, record bbox + area +
    x-center.
-3. `extract_component_frames()` — pick `frame_count` seed blobs by area, sort by
+3. `separate_fused_poses()` — only when `fit.segmentation: "projection"` or
+   `--segmentation projection` is selected, projection profiles plus dynamic
+   programming find the minimum-cost vertical cuts for poses joined by thin
+   bridges. The default `components` path stays byte-identical and fails
+   loudly when the declared pose count cannot be recovered.
+4. `extract_component_frames()` — pick `frame_count` seed blobs by area, sort by
    x-center, attach smaller noise blobs to the nearest seed; one group = one
    pose. If it cannot find `frame_count` poses, the row is **blocked** (no
    silent fallback). `--allow-slot-fallback` exists for debugging only and is
    reported as `method: slots-explicit`.
-4. `fit_to_cell()` — crop, aspect-preserving downscale (`resample`:
+5. `fit_to_cell()` — crop, aspect-preserving downscale (`resample`:
    lanczos | nearest | kcentroid), `align_x`/`align_y` placement, into the
    cell. On `fit.pixel_perfect` runs this legacy path still runs once per
    frame to produce the `.plain.png` twin (§6.1); the canonical frame goes
    through the pixel-perfect path instead.
-5. `inspect_frames()` — per-frame QA: empty/sparse, edge bleed, chroma-adjacent
+6. `inspect_frames()` — per-frame QA: empty/sparse, edge bleed, chroma-adjacent
    pixels, size outliers → `frames-manifest.json`.
 
 This is intentionally closer to hatch-pet's cleanup than to a plain
@@ -216,7 +231,11 @@ the code realizes it. The path is unfake.js/pixeldetector-style and contains
    argmax. Detection runs **per frame**; the **median** across frames becomes
    the consensus pitch (multiple-of-pitch traps are avoided, outlier frames are
    warned). If detection confidence is too low, `fit.pitch_hint` (usually the
-   base image's detected pitch) is used.
+   base image's detected pitch) is used. `estimate_pixel_grid_runlen()` then
+   derives an independent modal run-length estimate; `crosscheck_pitch_runlen()`
+   records divisor/harmonic or axis-ratio disagreement as observable warnings.
+   The run-length estimate is a crosscheck only and never silently replaces the
+   canonical grid score.
 2. **Grid-phase snap** — `_grid_phase()` re-derives the grid offset **per
    frame**, then `grid_snap_downscale()` collapses each detected pixel block to
    one output pixel via `_dominant_block_color()` voting. `detail_bias`
@@ -236,7 +255,10 @@ the code realizes it. The path is unfake.js/pixeldetector-style and contains
 7. **Outline** — `enforce_outline()` draws a uniform 1px silhouette outline.
 8. **Integer placement** — `fit_pixel_perfect()` / `row_placement()` upscale by
    the integer factor `cell_height // logical_height` (NEAREST) and place with
-   row-constant offsets honoring `align_x`/`align_y`.
+   offsets honoring `align_x`/`align_y`. `align_x: "alpha-centroid"` computes
+   the fringe-insensitive alpha-weighted centroid per frame (alpha ≤ 10 is
+   ignored), cancelling residual horizontal registration jitter without
+   flattening vertical motion arcs.
 
 Alongside each canonical `frame-N.png`, the extractor writes the pre-pixel-
 perfect twin `frame-N.plain.png` (same strip through the legacy fit path; if
@@ -350,5 +372,6 @@ whole atlas in a single generation.
 - [`pixel-perfect.md`](pixel-perfect.md) — `fit`/`pixel_perfect` behavior contract
 - [`curation.md`](curation.md) — webview usage + `curation.json` field semantics
 - [`chroma-alpha.md`](chroma-alpha.md) — chroma key selection + alpha cleanup contract
+- [`gen.md`](gen.md) — provider CLI, verified PNG/report contract, and `image-gen` shuttle boundary
 - [`directional-anchor-workflow.md`](directional-anchor-workflow.md) — 방향성/45도 앵커 체인
 - [`locomotion-curation.md`](locomotion-curation.md) — selected-cycle + clean GIF export
