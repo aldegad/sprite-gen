@@ -14,6 +14,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, relative_posix
+from sprite_gen.segment import separate_fused_poses
 
 
 def color_distance(left: tuple[int, int, int], right: tuple[int, int, int]) -> float:
@@ -1194,6 +1195,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "of subject pixels; default from request chroma.spill_max_fraction, "
         "else 0.005; 0 disables",
     )
+    parser.add_argument(
+        "--segmentation",
+        choices=("components", "projection"),
+        default=None,
+        help="frame separation mode; overrides request fit.segmentation "
+        "(projection = projection-profile + DP optimal cut for fused poses, "
+        "default components)",
+    )
     parser.add_argument("--allow-slot-fallback", action="store_true")
     parser.add_argument("--min-used-pixels", type=int, default=400)
     parser.add_argument("--edge-margin", type=int, default=2)
@@ -1337,6 +1346,7 @@ def _run(args: argparse.Namespace):
                 unmix_reach=unmix_reach,
                 spill_max_fraction=spill_max_fraction,
             )
+        strip = separate_fused_poses(strip, frame_count, fit_config, args.segmentation, state)
         if pixel_perfect:
             # 프레임별 픽셀퍼펙트 (2026-07-05 재설계): 포즈 컴포넌트를 먼저
             # 분리한 뒤 각 프레임마다 피치·위상을 독립 검출해 스냅한다.

@@ -78,6 +78,7 @@ def _add_extract(p: argparse.ArgumentParser) -> None:
     p.add_argument("--fringe-delta", type=float, default=18.0)
     p.add_argument("--fringe-unmix-reach", type=int, default=None)
     p.add_argument("--spill-max-fraction", type=float, default=None)
+    p.add_argument("--segmentation", choices=("components", "projection"), default=None)
     p.add_argument("--allow-slot-fallback", action="store_true")
     p.add_argument("--min-used-pixels", type=int, default=400)
     p.add_argument("--edge-margin", type=int, default=2)

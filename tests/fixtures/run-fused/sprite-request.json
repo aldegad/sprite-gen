@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "kind": "sprite-gen-request",
+  "engine": "component-row",
+  "character": {
+    "id": "fusedbot",
+    "description": "fused-pose synthetic fixture for projection-DP segmentation",
+    "base_image": null
+  },
+  "cell": {
+    "shape": "square",
+    "width": 96,
+    "height": 96,
+    "safe_margin_x": 8,
+    "safe_margin_y": 8,
+    "size": 96,
+    "safe_margin": 8
+  },
+  "chroma_key": {
+    "name": "magenta",
+    "hex": "#FF00FF",
+    "rgb": [255, 0, 255],
+    "selection": "fallback"
+  },
+  "states": {
+    "kick": {
+      "frames": 3,
+      "fps": 8,
+      "loop": true,
+      "action": "three touching poses whose arms fuse into one connected component"
+    },
+    "pair": {
+      "frames": 2,
+      "fps": 4,
+      "loop": true,
+      "action": "two separated control poses that extract without segmentation"
+    }
+  },
+  "fit": {
+    "segmentation": "projection",
+    "align_x": "bbox-center"
+  },
+  "style": "synthetic fused fixture, flat solid shapes on magenta",
+  "motion_phase_guides": false
+}
