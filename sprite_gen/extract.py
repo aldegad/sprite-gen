@@ -970,6 +970,151 @@ def detect_pixel_grid(
     return (pitch_x, pitch_y), (phase_x, phase_y)
 
 
+# --- run-length pitch estimator (perfectpixel-studio unfake 이식) ------------
+# detect_pixel_grid(경계 히스토그램)의 세컨드 오피니언. 추정 전용 — 스냅 경로는
+# 이 값을 절대 쓰지 않는다. 두 추정기가 벌어지면 경고로만 표면화한다.
+
+RUNLEN_ALPHA_THRESHOLD = 10  # perfectpixel alphaThreshold — 소프트 매팅 프린지 제외
+RUNLEN_RGB_TOLERANCE = 12  # perfectpixel nearRGB tol — AA 미세 노이즈는 같은 색
+RUNLEN_MIN_RUNS = 32  # 축 전체 런이 이보다 적으면 추정 포기 (사진/노이즈)
+RUNLEN_MODE_SHARE = 0.5  # 최빈값 ±1 창이 가중 질량의 절반 미만이면 확신 없음
+
+
+def _runlen_axis_estimate(pixels, outer: int, inner: int, horizontal: bool, cap: int) -> float:
+    """한 축의 동일색 런 길이 히스토그램 → 가중 최빈값의 소수 추정. 확신 없으면 1.0.
+
+    짧은 런(AA 잔재·질감)이 개수로는 항상 많으므로 원본과 같이 run 길이로 가중한다
+    (hist[s]·s). AI 도트의 블록 폭은 정수로 안 떨어지므로 최빈값 하나가 아니라
+    ±1 창의 가중 무게중심을 쓴다 — 참 피치 30.56 이면 30/31 런이 44:56 으로 섞여
+    나오고, 그 무게중심이 소수 피치를 복원한다.
+    """
+    hist = [0] * (cap + 2)
+    for o in range(0, outer, 2):
+        prev = pixels[0, o] if horizontal else pixels[o, 0]
+        run = 1
+        for i in range(1, inner):
+            cur = pixels[i, o] if horizontal else pixels[o, i]
+            if (cur[3] <= RUNLEN_ALPHA_THRESHOLD and prev[3] <= RUNLEN_ALPHA_THRESHOLD) or (
+                cur[3] > RUNLEN_ALPHA_THRESHOLD
+                and prev[3] > RUNLEN_ALPHA_THRESHOLD
+                and abs(cur[0] - prev[0]) <= RUNLEN_RGB_TOLERANCE
+                and abs(cur[1] - prev[1]) <= RUNLEN_RGB_TOLERANCE
+                and abs(cur[2] - prev[2]) <= RUNLEN_RGB_TOLERANCE
+            ):
+                run += 1
+            else:
+                if 2 <= run <= cap:
+                    hist[run] += 1
+                run = 1
+            prev = cur
+        if 2 <= run <= cap:
+            hist[run] += 1
+    if sum(hist) < RUNLEN_MIN_RUNS:
+        return 1.0
+    weighted = [count * length for length, count in enumerate(hist)]
+    mode = max(range(2, cap + 1), key=weighted.__getitem__)
+    lo, hi = max(2, mode - 1), min(cap, mode + 1)
+    window = sum(weighted[lo : hi + 1])
+    if not weighted[mode]:
+        return 1.0
+    # 확신 게이트: 최빈값의 고조파 패밀리(k·mode ±1)가 가중 질량의 절반은 차지해야
+    # 한다. 인접 논리 픽셀이 같은 색이면 런이 2·mode, 3·mode 로 늘어나므로 고조파는
+    # 최빈값을 반박하는 게 아니라 지지하는 증거다 (실측: founder_v7 down_idle 은
+    # 11 과 함께 22~23, 34~35 에 질량이 실린다). 패밀리 밖에 질량 절반이 흩어져
+    # 있으면 블록 구조 확신이 없는 것 — 1.0 으로 관측 가능하게 포기한다.
+    family = 0
+    for k in range(1, cap // mode + 2):
+        centre = k * mode
+        family += sum(weighted[max(2, centre - k) : min(cap, centre + k) + 1])
+    if family < sum(weighted) * RUNLEN_MODE_SHARE:
+        return 1.0
+    return sum(length * weighted[length] for length in range(lo, hi + 1)) / window
+
+
+def estimate_pixel_grid_runlen(strip: Image.Image, max_pitch: int = 48) -> tuple[float, float]:
+    """동일색 런 길이 최빈값으로 축별 피치를 추정한다 — 추정 전용 세컨드 오피니언.
+
+    perfectpixel-studio internal/sprite/pixelize.go 의 unfake(DetectPixelScale)
+    이식 (MIT — NOTICE 표기). 원본은 수평/수직 런을 한 히스토그램에 합치지만,
+    우리 목적은 detect_pixel_grid 의 축 붕괴 방어라 축별로 분리해 센다 — 실사고:
+    솔벨 주인공 컴포넌트에서 y 피치가 x 값(29.52)으로 붕괴, 실측 30.56. 붕괴
+    메커니즘은 정수 씨앗 로터리 실패(참 소수 피치가 어떤 씨앗의 ±0.75 정밀화 창에도
+    안 들어감)라 경계 히스토그램 안에서는 자기 진단이 안 된다. 런 길이는 완전히
+    다른 신호(경계 위치가 아니라 경계 사이 거리)라 세컨드 오피니언이 된다.
+
+    확신 없는 축은 1.0 — 런 수 부족(RUNLEN_MIN_RUNS), 최빈값 창 질량 미달
+    (RUNLEN_MODE_SHARE), 32px 미만 이미지 전부 관측 가능하게 포기한다.
+    """
+    image = strip.convert("RGBA")
+    width, height = image.size
+    if width < 32 or height < 32:
+        return (1.0, 1.0)
+    cap = min(max_pitch, min(width, height) // 8)
+    if cap < 2:
+        return (1.0, 1.0)
+    pixels = image.load()
+    return (
+        _runlen_axis_estimate(pixels, height, width, True, cap),
+        _runlen_axis_estimate(pixels, width, height, False, cap),
+    )
+
+
+def crosscheck_pitch_runlen(
+    grid_pitch: tuple[float, float],
+    runlen_pitch: tuple[float, float],
+    axis_tolerance: float = 0.12,
+    ratio_tolerance: float = 0.02,
+) -> list[str]:
+    """detect_pixel_grid vs 런길이 추정의 교차검증. 이견은 경고 문자열 목록으로.
+
+    추정 전용 — 어느 값도 바꾸지 않는다. 자동 교체 금지: 어느 쪽이 맞는지는
+    사람이/상위 게이트가 판단한다 (No Silent Fallback).
+
+    runlen 의 오차 모델이 규칙 모양을 정한다: AA 가 런 양끝을 갉아먹으므로 runlen 은
+    참 피치를 **한쪽(하향)으로만** 빗나간다 — 픽셀 단위 절대 바이어스라 작은 피치일수록
+    상대 오차가 커진다 (실측: 피치 30 에서 −0.8px≈3%, 피치 9 에서 −2px≈20%).
+
+    - 약수 오검출 (runlen 이 grid 보다 훨씬 큼): grid 가 참 피치의 약수로 떨어진 것
+      (참 29.5 를 14.73 으로). runlen 은 과대추정하지 않으므로 슬랙 2px 만 두면 된다.
+    - 배수/고조파 오검출 (grid 가 runlen 보다 훨씬 큼): grid 가 참 피치의 배수·고조파에
+      낚인 것. runlen 하향 바이어스(≤3px) 를 슬랙으로 흡수한 뒤에도 크게 남으면 경고.
+    - 축비(y/x) 불일치: 축 붕괴 (y 가 x 값으로). 실사고의 축차는 3.5%(29.52 vs 30.56)라
+      축별 오차로는 임계 밑에 숨는다. AA 하향 바이어스의 공통 성분은 비율에서
+      상쇄되지만(실측: 붕괴 신호 2.8%, 건강한 검출의 비 오차 0.7%), 축별 편차는
+      남는다 — 편차는 절대량(서브픽셀, 축당 ~±0.35px)이라 비율 노이즈가 ~0.7/피치 로
+      작은 피치에서 커진다 (founder_v7 실측: 8~15px 대역에서 3~9% 드리프트가 흔함,
+      진위 판별 불가). 그래서 0.7/피치 를 하한 슬랙으로 둔다: 히어로 스케일(30px)의
+      실붕괴 신호(2.8%)는 임계(2.4%) 위, 소피치 대역의 판별 불가 드리프트는 밑.
+    """
+    notes: list[str] = []
+    for name, grid, runlen in (
+        ("x", grid_pitch[0], runlen_pitch[0]),
+        ("y", grid_pitch[1], runlen_pitch[1]),
+    ):
+        if grid < 2.0 or runlen < 2.0:
+            continue
+        if runlen - grid > max(axis_tolerance * grid, 2.0):
+            notes.append(
+                f"pitch crosscheck: run-length mode estimates {name}={runlen:.2f} but grid "
+                f"detection returned {name}={grid:.2f} — likely a divisor misdetection"
+            )
+        elif grid - runlen > axis_tolerance * grid + 3.0:
+            notes.append(
+                f"pitch crosscheck: run-length mode estimates {name}={runlen:.2f} but grid "
+                f"detection returned {name}={grid:.2f} — likely a multiple/harmonic misdetection"
+            )
+    if min(*grid_pitch, *runlen_pitch) >= 2.0:
+        grid_ratio = grid_pitch[1] / grid_pitch[0]
+        runlen_ratio = runlen_pitch[1] / runlen_pitch[0]
+        drift = abs(runlen_ratio / grid_ratio - 1.0)
+        if drift > max(ratio_tolerance, 0.7 / min(grid_pitch)):
+            notes.append(
+                f"pitch crosscheck: axis ratio y/x disagrees — run-length {runlen_ratio:.3f} vs "
+                f"grid {grid_ratio:.3f} ({drift:.1%}); one axis may have collapsed to the other"
+            )
+    return notes
+
+
 def _grid_edges(length: int, pitch: float, offset: float) -> list[int]:
     """소수 피치를 정수 픽셀 경계로 확정한다.
 
@@ -1763,6 +1908,20 @@ def _run(args: argparse.Namespace):
                 all_warnings.append(
                     f"{state}: per-frame pitch outliers ({', '.join(outliers)}) snapped at consensus {consensus_x:.2f}"
                 )
+            # 세컨드 오피니언 (perfectpixel unfake 이식): 동일색 런 최빈값으로 축별
+            # 피치를 따로 추정해 합의 피치와 교차검증한다. 경고 전용 — 스냅은 아래에서
+            # 계속 detect_pixel_grid 합의만 쓴다 (자동 교체 금지, No Silent Fallback).
+            runlen_axes = [estimate_pixel_grid_runlen(component) for component in images]
+
+            def _runlen_consensus(axis: int) -> float:
+                confident = sorted(e[axis] for e in runlen_axes if e[axis] >= 2.0)
+                return confident[len(confident) // 2] if confident else 1.0
+
+            for note in crosscheck_pitch_runlen(
+                (consensus_x, consensus_y), (_runlen_consensus(0), _runlen_consensus(1))
+            ):
+                all_warnings.append(f"{state}: {note}")
+                print(f"[pitch-crosscheck] {state}: {note}", file=sys.stderr)
             snapped = []
             if min(consensus_x, consensus_y) >= 2.0:
                 # 위상만 프레임별로 (행 안에서 드리프트하는 건 위상이다).

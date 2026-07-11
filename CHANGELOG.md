@@ -5,6 +5,41 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.10 "Sol Edge Runner" - 런길이 최빈값 피치 추정기 (perfectpixel-studio 이식, 교차검증 전용)
+
+perfectpixel-studio `internal/sprite/pixelize.go`(MIT) 의 unfake(동일색 런 길이
+최빈값으로 실블록 크기 추정)를 이식. `detect_pixel_grid`(경계 히스토그램)는 정수
+씨앗 ±0.75 창 안에서만 소수 피치를 정밀화하므로 씨앗 로터리가 실패하면 조용히
+틀린다 — 실사고: 솔벨 주인공 컴포넌트에서 y 피치가 x 값(29.52)으로 붕괴(실측
+30.56, 참값의 정밀화 점수 0.78 vs 붕괴값 0.07 — 창 밖이라 후보조차 못 됐다).
+런 길이는 경계 히스토그램과 독립인 신호(경계 위치가 아니라 경계 사이 거리)라
+세컨드 오피니언이 된다.
+
+- **`estimate_pixel_grid_runlen` 신규 (추정 전용)** — 원본과 달리 축별 분리
+  히스토그램(축 붕괴를 잡으려면 필수), 런 길이 가중 `hist[s]·s`(원본 동일, 짧은 런
+  지배 방지), 최빈값 ±1 창의 가중 무게중심으로 소수화(참 30.56 → 30/31 런 44:56
+  혼합 → 무게중심이 복원). 확신 게이트: 런 수 부족·고조파 패밀리(k·mode±k) 질량
+  절반 미만·32px 미만이면 (1.0, 1.0) 으로 관측 가능하게 포기.
+- **`crosscheck_pitch_runlen` 신규 + 픽셀퍼펙트 합의 직후 훅 (기본 on, 경고 전용)**
+  — 불일치는 report `warnings` + stderr `[pitch-crosscheck]` 로만 표면화. 스냅은
+  계속 `detect_pixel_grid` 합의만 쓴다 (자동 교체 금지, No Silent Fallback — 어느
+  쪽을 쓸지는 사람이/상위 게이트가 판단). runlen 의 오차 모델(AA 가 런 양끝을
+  갉아 픽셀 단위 하향 바이어스)이 규칙 모양을 정한다:
+  - 약수 오검출(runlen ≫ grid, 슬랙 2px): 참 29.5 를 14.73 으로 잡는 모드.
+  - 배수/고조파 오검출(grid ≫ runlen, 슬랙 12%+3px).
+  - 축비(y/x) 불일치 > max(2%, 0.7/피치): 축 붕괴 모드 — 축차 3.5% 는 축별 규칙
+    밑에 숨지만 AA 공통 바이어스가 비율에서 상쇄돼 잡힌다. 0.7/피치 하한은 축별
+    바이어스 편차(서브픽셀)의 소피치 확대를 흡수 — founder_v7 8~15px 대역의 판별
+    불가 드리프트(3~9%)는 침묵, 히어로 스케일(30px) 실붕괴 신호(2.8%)는 발화.
+- **실측 (founder_v7 22 state, 읽기 전용)**: 건강한 20 state 경고 0, 경고는 정확히
+  실고장 2건 — down_carry_run grid (4.00, 4.00) vs runlen (6.91, 7.96) (플랜 기록
+  참값 ~9, 약수 붕괴), side_carry_idle grid x=6.00 vs runlen 10.99.
+- 110 tests OK (신규 10: 정수/소수 축별 정답 · 노이즈/소형 확신-없음 · 정상합의
+  침묵 2종 · 약수 픽스처(20x36@29.5/30.6) · y축 붕괴 픽스처(28x60@29/30.3, 실사고
+  메커니즘 결정론 재현) · 확신 게이트 · 파이프라인 통합: 경고 표면화 + runlen 중화
+  시 프레임 비트 동일 = 스냅 영향 0 고정). 기존 100 테스트 회귀 0.
+- NOTICE 에 MIT 출처 표기 (perfectpixel-studio internal/sprite/pixelize.go).
+
 ## v1.56.9 "Sol Edge Runner" - chroma.mode: ycbcr (perfectpixel-studio 이식, 옵트인)
 
 perfectpixel-studio `internal/sprite/chroma.go`(MIT) 의 색차(CbCr) 평면 매팅을 이식.
