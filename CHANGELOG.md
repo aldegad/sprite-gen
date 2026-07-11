@@ -5,6 +5,24 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.13 "Sol Forge" - PerfectPixel 통합 완료와 실생성 교정 루프 증명
+
+PerfectPixel 이식 작업을 하나의 검증 가능한 릴리스로 닫았다. v1.56.7부터 v1.56.12까지
+추가한 결정론 후처리, 자동 검사/교정, Codex/Grok 생성 계층을 실제 Sol Valley row에
+연결하고, 최대 3패스 계약 안에서 수렴과 best-candidate 보존을 재현했다.
+
+- 실제 Grok `up_idle` 생성-추출-검사-힌트-재생성 루프가 score **91 -> 100**으로
+  2번째 attempt에서 수렴했다. `min_attempts=2`를 명시해 첫 후보가 gate를 넘더라도
+  교정 루프 자체를 검증할 수 있게 했다.
+- best/candidate의 request, raw, manifest SHA-256이 모두 일치해 최고 후보 보존을
+  확인했다. attempt별 원본/격자/pixel-perfect 3장 proof set 자동 검사도 통과했다.
+- 대표 row에서 projection 분리는 4/4 유지, x-centroid sigma는 **0.302 -> 0.108**,
+  YCbCr 오류는 0, run-length 경고는 **3 -> 0**으로 개선됐다.
+- 사용자 문서를 실제 엔진 계약에 맞췄다. projection, alpha-centroid, YCbCr,
+  run-length cross-check, inspect/score/correction-loop, `gen`, image-gen shuttle을
+  README 번역본과 architecture 문서에 반영했다.
+- 전체 회귀 테스트 **128 passed**. 기존 추출 골든 경로는 그대로 유지한다.
+
 ## v1.56.12 "Sol Forge" - 생성 SSoT 통합 (`sprite_gen/gen/`, perfectpixel-studio C-gen)
 
 생성 계층을 엔진 모듈 하나로 통합했다. 기존 `image-gen` 스킬의 독립 구현
