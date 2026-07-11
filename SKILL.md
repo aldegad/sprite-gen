@@ -297,6 +297,8 @@ python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/run_correction_loop.py \
 This writes `correction-loop.report.json`, per-attempt `inspect.json`, `score.json`,
 and `correction-hints.txt`. A real regeneration loop must pass an explicit
 provider command; there is no silent fallback generator.
+Use `--min-attempts 2` for a live E2E that must exercise at least one provider
+regeneration even when the seed candidate already clears the score gate.
 
 ### Motion Continuity (BLOCKING)
 

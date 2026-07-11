@@ -22,6 +22,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--states", default="all")
     parser.add_argument("--out-dir", type=Path)
     parser.add_argument("--max-passes", type=int, default=3)
+    parser.add_argument("--min-attempts", type=int, default=1)
     parser.add_argument("--pass-score", type=float, default=90.0)
     parser.add_argument("--provider-command", help="optional command template; {prompt_file}, {next_run_dir}, {attempt}")
     parser.add_argument("--dry-run", action="store_true")
@@ -70,6 +71,7 @@ def run_loop(
     states: str = "all",
     out_dir: Path | None = None,
     max_passes: int = 3,
+    min_attempts: int = 1,
     pass_score: float = 90.0,
     provider_command: str | None = None,
     dry_run: bool = False,
@@ -77,6 +79,8 @@ def run_loop(
 ) -> dict[str, Any]:
     if max_passes < 1:
         raise SystemExit("--max-passes must be at least 1")
+    if min_attempts < 1 or min_attempts > max_passes:
+        raise SystemExit("--min-attempts must be between 1 and --max-passes")
     run_dir = run_dir.expanduser().resolve()
     out_dir = (out_dir or (run_dir / "correction-loop")).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -108,7 +112,9 @@ def run_loop(
             best["overall_score"],
         ):
             best = record
-        if scored["ok"] and float(scored["overall_score"]) >= pass_score:
+        if attempt >= min_attempts and scored["ok"] and float(scored["overall_score"]) >= pass_score:
+            break
+        if attempt == max_passes:
             break
         if dry_run:
             break
@@ -142,6 +148,7 @@ def run_loop(
         "ok": bool(attempts and attempts[-1]["ok"] and float(attempts[-1]["overall_score"]) >= pass_score),
         "kind": "sprite-gen-correction-loop-report",
         "dry_run": dry_run,
+        "min_attempts": min_attempts,
         "max_passes": max_passes,
         "attempts": attempts,
         "best_candidate": best,
@@ -157,6 +164,7 @@ def _run(args: argparse.Namespace) -> int:
         states=args.states,
         out_dir=args.out_dir,
         max_passes=args.max_passes,
+        min_attempts=args.min_attempts,
         pass_score=args.pass_score,
         provider_command=args.provider_command,
         dry_run=args.dry_run,
