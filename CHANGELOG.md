@@ -1,8 +1,11 @@
 # Changelog
 
+> 버전 정책 (2026-07-11 수홍): **1.56.x 고정** — Sol(5.6) 오마주로 마이너 56 을 유지하고 패치만 올린다.
+> v1.57.0/v1.58.0/v1.59.0 으로 나갔던 세 릴리스는 v1.56.7/8/9 로 소급 정정 (커밋 메시지의 옛 라벨은 히스토리 보존).
+
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
-## v1.59.0 "Sol Edge Runner" - chroma.mode: ycbcr (perfectpixel-studio 이식, 옵트인)
+## v1.56.9 "Sol Edge Runner" - chroma.mode: ycbcr (perfectpixel-studio 이식, 옵트인)
 
 perfectpixel-studio `internal/sprite/chroma.go`(MIT) 의 색차(CbCr) 평면 매팅을 이식.
 현행 RGB 경로는 키와의 RGB 거리로 분류하므로 배경 쉐이딩·그라디언트·JPEG 4:2:0
@@ -31,7 +34,7 @@ CbCr 평면에서만 분리해 명암 변화에 강건하다.
   despill/직교 보존 · flood 내부 보존 · 자가진단 폴백 관측 · CLI e2e · 기본 rgb 고정).
 - NOTICE: MIT 출처 표기.
 
-## v1.58.0 "Sol Edge Runner" - segmentation: projection (perfectpixel-studio 이식, 옵트인)
+## v1.56.8 "Sol Edge Runner" - segmentation: projection (perfectpixel-studio 이식, 옵트인)
 
 perfectpixel-studio `internal/sprite/segment.go`(MIT) 의 projection-profile + DP 최적 컷
 프레임 분리를 `sprite_gen/segment.py` 로 이식. connected-components 는 팔·소품이 이웃
@@ -54,7 +57,7 @@ P[x]=Σα 의 골(gutter)로 자연 포즈 수를 세고, 골이 사라지면 DP
   3→1 덩어리로 붕괴(추출 실패), projection 은 전부 6/6 분리.
 - 93 tests OK (신규 10: 융착 골든·옵트인 부재 실패·CLI 활성/무효화·비트동일·순수함수).
 
-## v1.57.0 "Sol Edge Runner" - align_x: alpha-centroid (perfectpixel-studio 이식, 옵트인)
+## v1.56.7 "Sol Edge Runner" - align_x: alpha-centroid (perfectpixel-studio 이식, 옵트인)
 
 perfectpixel-studio `internal/sprite/extract.go`(MIT) 의 알파 가중 무게중심 정렬을 fit 에 이식.
 bbox 중심은 팔/무기가 뻗은 프레임에서 몸통을 반대로 밀어 재생 시 좌우 지터를 만들고,
