@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.56.10
+version: 1.56.11
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick."
 license: Apache-2.0
 depends_on:
@@ -14,6 +14,9 @@ depends_on:
     - scripts/preview_animation.py
     - scripts/compose_selected_cycle.py
     - scripts/compose_sprite_gif.py
+    - scripts/inspect_sprite_run.py
+    - scripts/score_sprite_run.py
+    - scripts/run_correction_loop.py
     - scripts/gif_utils.py
     - scripts/curation.py
     - scripts/runio.py
@@ -82,6 +85,9 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 - `preview_animation.py` — QA previews from extracted frames: contact sheets + state GIFs under `qa/`.
 - `compose_selected_cycle.py` — record a human-selected frame subset as a selected-cycle manifest + QA GIF/contact sheet (reads `curation.json` by default; `--frames` overrides).
 - `compose_sprite_gif.py` — clean transparent GIF export: single frame set, or `--run-dir` batch (one GIF per state from request fps + `curation.json`) into `<run-dir>/exports/`; called by the webview's Export-GIFs button and the v2 desktop app.
+- `inspect_sprite_run.py` — deterministic row inspection for the automatic correction loop: expected vs found frame count, 64-bin RGB histogram similarity, dHash silhouette similarity, motion presence, centroid jitter, and extraction warnings.
+- `score_sprite_run.py` — score an inspect report (0-100), preserve the best-candidate rank signal, and turn measured defects into provider-ready correction hints.
+- `run_correction_loop.py` — bounded inspect → score → correction-hint loop (max 3 passes by default). It can run as a dry-run verifier without a provider, or call an explicit provider command; missing provider without `--dry-run` fails loudly.
 - `gif_utils.py` — shared transparent-GIF writer.
 - `curation.py` — curation sidecar SSoT (schema + transform math) shared by the compose scripts and the webview server so they never drift.
 - `runio.py` — safe run-dir IO: single-writer lock (`.sprite-gen.lock`) + atomic writes for the extract/compose/export/unpack writers, so parallel agents cannot interleave writes into one character folder.
@@ -265,6 +271,19 @@ Automated checks (must all pass before reporting done):
 - no frame is empty or near-opaque background
 - no frame has excessive edge pixels or chroma-adjacent pixels
 - browser screenshots pass `scripts/check_visible_magenta.py` when used in a game
+
+Automatic correction-loop dry run:
+
+```bash
+python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/run_correction_loop.py \
+  --run-dir <target>/assets/generated/sprites/<character-id> \
+  --states <state> \
+  --dry-run
+```
+
+This writes `correction-loop.report.json`, per-attempt `inspect.json`, `score.json`,
+and `correction-hints.txt`. A real regeneration loop must pass an explicit
+provider command; there is no silent fallback generator.
 
 ### Motion Continuity (BLOCKING)
 

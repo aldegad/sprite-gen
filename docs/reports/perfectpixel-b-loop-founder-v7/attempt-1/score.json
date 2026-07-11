@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "kind": "sprite-gen-score-report",
+  "source_report": "/Users/soohongkim/Documents/workspace/personal/solvell-worktrees/feat-image/godot/assets/generated/sprites/founder_v7",
+  "overall_score": 91.0,
+  "candidate_rank": 397,
+  "rows": [
+    {
+      "state": "up_idle",
+      "score": 91.0,
+      "candidate_rank": 397,
+      "expected_frames": 4,
+      "found_frames": 4,
+      "errors": [],
+      "warnings": [
+        "up_idle: dropped 2 collapsed per-frame pitch(es) below 7.80",
+        "up_idle: dropped 2 collapsed per-frame pitch(es) below 7.80",
+        "up_idle: per-frame pitch outliers (0:4.00, 1:6.00) snapped at consensus 13.00"
+      ],
+      "hints": [
+        "up_idle: Pixel-grid pitch instability was detected. Regenerate with a clearer true low-resolution pixel grid, or rerun extraction with the runlen crosscheck visible and review the before/after grid proof."
+      ]
+    }
+  ],
+  "hints": [
+    "up_idle: Pixel-grid pitch instability was detected. Regenerate with a clearer true low-resolution pixel grid, or rerun extraction with the runlen crosscheck visible and review the before/after grid proof."
+  ]
+}

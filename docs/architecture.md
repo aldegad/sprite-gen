@@ -38,6 +38,9 @@ flowchart TD
 | Curate (opt) | `serve_curation.py` + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
 | QA | `preview_animation.py` | `frames/` | `qa/<state>-contact.png`, `qa/<state>.gif` |
+| Inspect | `inspect_sprite_run.py` | `sprite-request.json`, `raw/` or `frames/` | `sprite-inspect.report.json` |
+| Score | `score_sprite_run.py` | `sprite-inspect.report.json` | `sprite-score.report.json`, correction hints |
+| Correction loop | `run_correction_loop.py` | run dir + optional provider command | `correction-loop.report.json`, per-attempt inspect/score/hints, best-candidate record |
 | GIF export | `compose_sprite_gif.py`, `gif_utils.py` | selected frames | clean transparent GIF |
 | Selected cycle | `compose_selected_cycle.py` | `curation.json` / `--frames` | selected-cycle manifest + QA |
 | Inverse / import | `unpack_atlas_run.py` | finished atlas **or** `--pngs-dir` | curator-ready run dir |
@@ -49,12 +52,21 @@ imports are `curation.py` (schema + transform math + the `frame_variant`/
 `frame_filename` resolver, kept single-source so the webview server and the
 compose scripts cannot drift) and `runio.py` (safe run-dir IO: a single-writer
 lock file `.sprite-gen.lock` taken by the extract/compose/export/unpack
-writers, plus atomic temp+`os.replace` writes for frames, atlas, and
-manifests). The lock enforces the "one worker owns one character folder" rule
-at runtime — a second writer on the same run dir fails loudly with the holder's
-pid; a dead holder's lock is reclaimed automatically. `curation.json` stays
-outside the lock: the webview writes it atomically and compose reads one
-consistent snapshot, so human edit sessions never block on a running compose.
+writers, plus atomic temp+`os.replace` writes for frames, atlas, manifests, and
+inspect/score/loop reports). The lock enforces the "one worker owns one
+character folder" rule at runtime — a second writer on the same run dir fails
+loudly with the holder's pid; a dead holder's lock is reclaimed automatically.
+`curation.json` stays outside the lock: the webview writes it atomically and
+compose reads one consistent snapshot, so human edit sessions never block on a
+running compose.
+
+The automatic correction loop is intentionally split into three owners:
+`inspect.py` measures deterministic signals (frame count, RGB histogram, dHash,
+motion presence, centroid jitter, existing extraction warnings), `score.py`
+turns only that report into scores and correction hints, and
+`correction_loop.py` preserves the best candidate while optionally invoking an
+explicit provider command. In dry-run mode it never generates new pixels; it
+only proves the defect → score → hint path.
 
 ## 3. The numeric SSoT: `sprite-request.json`
 

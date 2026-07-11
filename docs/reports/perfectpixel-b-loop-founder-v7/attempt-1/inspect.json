@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "engine": "component-row",
+  "kind": "sprite-gen-inspect-report",
+  "run_dir": "/Users/soohongkim/Documents/workspace/personal/solvell-worktrees/feat-image/godot/assets/generated/sprites/founder_v7",
+  "states": [
+    "up_idle"
+  ],
+  "thresholds": {
+    "histogram_min": 0.0,
+    "dhash_min": 0.55,
+    "motion_min": 0.01
+  },
+  "rows": [
+    {
+      "state": "up_idle",
+      "source": "frames",
+      "expected_frames": 4,
+      "found_frames": 4,
+      "natural_pose_count": 4,
+      "frame_files": [
+        "frames/up_idle/frame-0.png",
+        "frames/up_idle/frame-1.png",
+        "frames/up_idle/frame-2.png",
+        "frames/up_idle/frame-3.png"
+      ],
+      "metrics": {
+        "histogram_intersection": {
+          "min": 0.9744372235538313,
+          "mean": 0.979273195491779
+        },
+        "dhash_similarity": {
+          "min": 0.953125,
+          "mean": 0.9765625
+        },
+        "motion_presence": 0.015527822457107843,
+        "centroid_sigma": {
+          "x": 0.30156710531455067,
+          "y": 0.2774392906604329
+        }
+      },
+      "ok": true,
+      "errors": [],
+      "warnings": [
+        "up_idle: dropped 2 collapsed per-frame pitch(es) below 7.80",
+        "up_idle: dropped 2 collapsed per-frame pitch(es) below 7.80",
+        "up_idle: per-frame pitch outliers (0:4.00, 1:6.00) snapped at consensus 13.00"
+      ]
+    }
+  ],
+  "errors": [],
+  "warnings": [
+    "up_idle: dropped 2 collapsed per-frame pitch(es) below 7.80",
+    "up_idle: dropped 2 collapsed per-frame pitch(es) below 7.80",
+    "up_idle: per-frame pitch outliers (0:4.00, 1:6.00) snapped at consensus 13.00"
+  ]
+}

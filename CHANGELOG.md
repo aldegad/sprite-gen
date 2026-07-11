@@ -5,6 +5,31 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.11 "Sol Edge Runner" - 자동 inspect/score/correction loop (perfectpixel-studio B-loop)
+
+perfectpixel-studio `inspect.go` / `score.go` 의 폐루프 구조를 sprite-gen 엔진에
+이식했다. 생성 호출은 아직 C-gen 단계가 소유하므로, 이번 릴리스는 결정론 계측과
+교정 힌트 생성, 그리고 provider 없는 dry-run loop 까지만 닫는다.
+
+- **`sprite_gen.inspect` + `scripts/inspect_sprite_run.py` + CLI `inspect`** —
+  `sprite-request.json` 기준 expected/found frame count, 64-bin RGB histogram,
+  dHash silhouette similarity, motion presence, centroid σ, 기존
+  `frames-manifest.json` 의 state별 warning/error 를 하나의 report 로 합친다.
+  추출 frames 가 없으면 raw strip 을 읽어 projection 신호로 자연 포즈 수를 측정한다.
+- **`sprite_gen.score` + `scripts/score_sprite_run.py` + CLI `score`** —
+  inspect report 만 입력으로 받아 0-100 score, `candidate_rank`
+  (`found*100-errors*10-warnings`), provider-ready correction hints 를 만든다.
+  중복 힌트는 순서 보존 dedupe.
+- **`sprite_gen.correction_loop` + `scripts/run_correction_loop.py` + CLI
+  `correction-loop`** — 최대 3패스 inspect → score → hint 루프. dry-run 은 생성 없이
+  리포트만 남기고, 실제 재생성은 `--provider-command` 가 명시된 경우만 실행한다
+  (없으면 fail-loud). 작은 fixture 테스트에서 best-candidate 보존 경로를 고정.
+- **founder_v7 실데이터 dry-run**:
+  `docs/reports/perfectpixel-b-loop-founder-v7/` 에 `up_idle` A-runlen 경고
+  (collapsed pitch/outlier) → score 91 → pixel-grid correction hint 로그를 보존.
+- 신규 테스트 3개 + package surface 업데이트. 기존 골든 추출 경로는 읽기 전용으로만
+  참조해 기본 extract/compose 동작을 바꾸지 않는다.
+
 ## v1.56.10 "Sol Edge Runner" - 런길이 최빈값 피치 추정기 (perfectpixel-studio 이식, 교차검증 전용)
 
 perfectpixel-studio `internal/sprite/pixelize.go`(MIT) 의 unfake(동일색 런 길이

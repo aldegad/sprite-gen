@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "kind": "sprite-gen-correction-loop-report",
+  "dry_run": true,
+  "max_passes": 3,
+  "attempts": [
+    {
+      "attempt": 1,
+      "run_dir": "/Users/soohongkim/Documents/workspace/personal/solvell-worktrees/feat-image/godot/assets/generated/sprites/founder_v7",
+      "inspect_report": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-founder-v7/attempt-1/inspect.json",
+      "score_report": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-founder-v7/attempt-1/score.json",
+      "hint_file": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-founder-v7/attempt-1/correction-hints.txt",
+      "ok": true,
+      "overall_score": 91.0,
+      "candidate_rank": 397
+    }
+  ],
+  "best_candidate": {
+    "attempt": 1,
+    "run_dir": "/Users/soohongkim/Documents/workspace/personal/solvell-worktrees/feat-image/godot/assets/generated/sprites/founder_v7",
+    "inspect_report": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-founder-v7/attempt-1/inspect.json",
+    "score_report": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-founder-v7/attempt-1/score.json",
+    "hint_file": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-founder-v7/attempt-1/correction-hints.txt",
+    "ok": true,
+    "overall_score": 91.0,
+    "candidate_rank": 397
+  },
+  "preserved_best": null
+}
