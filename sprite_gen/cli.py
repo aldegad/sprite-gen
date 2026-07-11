@@ -11,10 +11,13 @@ from sprite_gen import (
     compose_atlas,
     compose_cycle,
     compose_gif,
+    correction_loop,
     export_pngs,
     extract,
+    inspect,
     prepare,
     preview,
+    score,
     slice_sheet,
     unpack_atlas,
 )
@@ -56,7 +59,7 @@ def _add_prepare(p: argparse.ArgumentParser) -> None:
     p.add_argument("--safe-margin", type=int, default=24)
     p.add_argument("--chroma-key", default="auto", help="auto or #RRGGBB")
     p.add_argument("--fit-resample", choices=["lanczos", "nearest", "kcentroid"], default=None)
-    p.add_argument("--fit-align-x", choices=["bbox-center", "centroid", "foot-centroid"], default=None)
+    p.add_argument("--fit-align-x", choices=["bbox-center", "centroid", "foot-centroid", "alpha-centroid"], default=None)
     p.add_argument("--fit-align-y", choices=["center", "bottom"], default=None)
     p.add_argument("--fit-pixel-perfect", action=argparse.BooleanOptionalAction, default=None)
     p.add_argument("--fit-logical-height", type=int, default=None)
@@ -167,6 +170,39 @@ def _add_slice_sheet(p: argparse.ArgumentParser) -> None:
     p.add_argument("--debris-fraction", type=float, default=slice_sheet.DEFAULT_DEBRIS_FRACTION)
 
 
+def _add_inspect(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--run-dir", required=True, type=Path)
+    p.add_argument("--states", default="all")
+    p.add_argument("--report", default="sprite-inspect.report.json")
+    p.add_argument("--histogram-min", type=float, default=inspect.DEFAULT_HISTOGRAM_MIN)
+    p.add_argument("--dhash-min", type=float, default=inspect.DEFAULT_DHASH_MIN)
+    p.add_argument("--motion-min", type=float, default=inspect.DEFAULT_MOTION_MIN)
+    p.add_argument("--key-threshold", type=float, default=96.0)
+    p.add_argument("--fringe-key-threshold", type=float, default=180.0)
+    p.add_argument("--fringe-delta", type=float, default=18.0)
+    p.add_argument("--fringe-unmix-reach", type=int, default=None)
+    p.add_argument("--spill-max-fraction", type=float, default=None)
+    p.add_argument("--chroma-mode", choices=("rgb", "ycbcr"), default=None)
+    p.add_argument("--no-write", action="store_true")
+
+
+def _add_score(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--inspect-report", required=True, type=Path)
+    p.add_argument("--output", default="sprite-score.report.json")
+    p.add_argument("--no-write", action="store_true")
+
+
+def _add_correction_loop(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--run-dir", required=True, type=Path)
+    p.add_argument("--states", default="all")
+    p.add_argument("--out-dir", type=Path)
+    p.add_argument("--max-passes", type=int, default=3)
+    p.add_argument("--pass-score", type=float, default=90.0)
+    p.add_argument("--provider-command")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--no-preserve-best", action="store_true")
+
+
 COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[..., int]]] = {
     "prepare": ("Prepare a sprite-gen component-row run.", _add_prepare, prepare.run),
     "extract": ("Extract component-row sprite strips into clean RGBA frames.", _add_extract, extract.run),
@@ -192,6 +228,13 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Slice a multi-figure grid sheet into per-cell standing cuts (tachi-e).",
         _add_slice_sheet,
         slice_sheet.run,
+    ),
+    "inspect": ("Inspect sprite rows for frame-count, identity, and motion defects.", _add_inspect, inspect.run),
+    "score": ("Score a sprite inspect report and emit correction hints.", _add_score, score.run),
+    "correction-loop": (
+        "Run a bounded inspect -> score -> correction-hint loop.",
+        _add_correction_loop,
+        correction_loop.run,
     ),
 }
 
