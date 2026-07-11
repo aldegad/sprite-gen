@@ -14,6 +14,7 @@ from sprite_gen import (
     correction_loop,
     export_pngs,
     extract,
+    gen,
     inspect,
     prepare,
     preview,
@@ -192,6 +193,10 @@ def _add_score(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-write", action="store_true")
 
 
+def _add_gen(p: argparse.ArgumentParser) -> None:
+    gen.add_arguments(p)
+
+
 def _add_correction_loop(p: argparse.ArgumentParser) -> None:
     p.add_argument("--run-dir", required=True, type=Path)
     p.add_argument("--states", default="all")
@@ -228,6 +233,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Slice a multi-figure grid sheet into per-cell standing cuts (tachi-e).",
         _add_slice_sheet,
         slice_sheet.run,
+    ),
+    "gen": (
+        "Generate one image via a provider (codex image_gen / grok Imagine) into a verified PNG.",
+        _add_gen,
+        gen.run,
     ),
     "inspect": ("Inspect sprite rows for frame-count, identity, and motion defects.", _add_inspect, inspect.run),
     "score": ("Score a sprite inspect report and emit correction hints.", _add_score, score.run),

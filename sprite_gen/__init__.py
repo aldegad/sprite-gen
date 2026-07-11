@@ -10,6 +10,7 @@ __all__ = [
     "curation",
     "export_pngs",
     "extract",
+    "gen",
     "generate_image",
     "gif_utils",
     "inspect",

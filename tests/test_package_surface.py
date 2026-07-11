@@ -19,6 +19,7 @@ PACKAGE_RUN_MODULES = [
     "correction_loop",
     "export_pngs",
     "extract",
+    "gen",
     "generate_image",
     "inspect",
     "prepare",

@@ -1,14 +1,17 @@
 ---
 name: sprite-gen
-version: 1.56.11
+version: 1.56.12
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick."
 license: Apache-2.0
 depends_on:
-  required_skills:
-    - name: kuma:image-gen
-      source: github:aldegad/image-gen
+  required_bins:
+    - name: codex
+      why: "gen --provider codex (image_gen via ChatGPT OAuth)"
+    - name: grok
+      why: "gen --provider grok (Imagine via xAI OAuth)"
   required_scripts:
     - scripts/prepare_sprite_run.py
+    - scripts/generate_sprite_image.py
     - scripts/extract_sprite_row_frames.py
     - scripts/compose_sprite_atlas.py
     - scripts/preview_animation.py
@@ -125,7 +128,17 @@ raw/
 frames/
 ```
 
-2. Generate one image per state with `kuma:image-gen`. Use `prompts/<state>.txt` as the prompt; save the selected image as `raw/<state>.png`. Reference attachment rules:
+2. Generate one image per state with the engine's own `gen` command (generation is engine-owned; the `image-gen` skill is now a thin shuttle over this — [`docs/gen.md`](docs/gen.md)):
+
+```bash
+python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/generate_sprite_image.py \
+  --provider codex \
+  --prompt-file <run>/prompts/<state>.txt \
+  --out <run>/raw/<state>.png \
+  --ref <run>/base-source.<ext> --ref <run>/references/layout-guides/<state>.png
+```
+
+Use `prompts/<state>.txt` as the prompt; save the selected image as `raw/<state>.png`. `--provider grok` is the faster backend; codex adheres tighter to negative constraints. Keep the request chroma key on the background (extraction removes it). Reference attachment rules:
 
 - Simple/default states (before direction-anchor mode exists): attach exactly two references — `base-source.<ext>` (canonical identity) + `references/layout-guides/<state>.png` (layout only).
 - Direction-anchor mode: do **not** attach `base-source.<ext>` to action rows. Attach the accepted target-direction idle anchor + the state layout guide; for a paired row also attach the basis row as timing/scale/motion reference only. Chain details: [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md).
