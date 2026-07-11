@@ -2,6 +2,35 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.59.0 "Sol Edge Runner" - chroma.mode: ycbcr (perfectpixel-studio 이식, 옵트인)
+
+perfectpixel-studio `internal/sprite/chroma.go`(MIT) 의 색차(CbCr) 평면 매팅을 이식.
+현행 RGB 경로는 키와의 RGB 거리로 분류하므로 배경 쉐이딩·그라디언트·JPEG 4:2:0
+크로마 노이즈가 erase 반경(96)을 벗어나면 잔존한다 — 이 경로는 루마를 통째로 무시하고
+CbCr 평면에서만 분리해 명암 변화에 강건하다.
+
+- **`chroma.mode: "ycbcr"` 신규 값 (옵트인, 기본값 "rgb" 불변)** — CLI `--chroma-mode
+  {rgb,ycbcr}` 는 request 를 덮는 명시 override, effective 값은 request 에 되써진다.
+  기본 경로는 비트 동일 (골든 회귀 0).
+- 파이프라인: 배경키 = 코너 패치+얇은 테두리의 **CbCr 히스토그램 최빈값**(평균 금지,
+  그라디언트에 안 밀림; 선언 키 계열이 테두리 샘플 12%+ 면 그 클러스터 우선) →
+  Hermite smoothstep 소프트 매팅(24→72) → **키 방향 성분만 빼는 despill**(직교 색
+  보존) → 테두리 4-연결 flood fill(내부 고립 키계열 픽셀 보존) → 고립 점 제거·핀홀
+  메움 → **자가진단 폴백**: 불투명율 스파이크(피사체 오삭제) 또는 선언키 잔존
+  스파이크(배경 미제거) 시 순수 선언 키로 재매팅, 더 나은 쪽 채택 — 폴백은 추출
+  warnings 로 관측 가능 (No Silent Fallback).
+- **실측 (그린키)**: 열화 소스 합성 픽스처(루마만 낮춘 쉐이딩 그린 밴드 — RGB 거리
+  115 로 erase 반경 밖, unmix 도달 깊이 밖) 그린 틴트 잔존 **1728 → 0**, 밴드 불투명
+  잔존 **1920 → 0**. 반면 founder_v7 클린 플랫키 raw 22 state 합계: fringe(RGB≤150)
+  0→0 · CbCr 잔존 0→0 로 동률, 그린 틴트 엣지 잔존은 rgb 9 vs ycbcr 2779 (0.92 고정
+  스케일 despill 은 현행 exact-solve unmix 와 달리 틴트를 완전히 못 뺌, 피사체 손실
+  아님 — 불투명 커버리지 차 -1~-2.3% 는 엣지 수렴 차이). **결론: 클린 소스는 기본
+  rgb 유지, ycbcr 는 열화 소스(쉐이딩/그라디언트/JPEG) 전용 옵트인** —
+  `docs/chroma-alpha.md` 에 명시.
+- 100 tests OK (신규 7: 쉐이딩 배경 rgb/ycbcr 대비 · 최빈값 키 검출 2분기 · 키방향
+  despill/직교 보존 · flood 내부 보존 · 자가진단 폴백 관측 · CLI e2e · 기본 rgb 고정).
+- NOTICE: MIT 출처 표기.
+
 ## v1.58.0 "Sol Edge Runner" - segmentation: projection (perfectpixel-studio 이식, 옵트인)
 
 perfectpixel-studio `internal/sprite/segment.go`(MIT) 의 projection-profile + DP 최적 컷
