@@ -2,6 +2,25 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.57.0 "Sol Edge Runner" - align_x: alpha-centroid (perfectpixel-studio 이식, 옵트인)
+
+perfectpixel-studio `internal/sprite/extract.go`(MIT) 의 알파 가중 무게중심 정렬을 fit 에 이식.
+bbox 중심은 팔/무기가 뻗은 프레임에서 몸통을 반대로 밀어 재생 시 좌우 지터를 만들고,
+cx=Σ(x·α)/Σα 는 면적이 큰 몸통이 지배해 축이 안정된다 (상류 실측 σ 27.2px→0.2px).
+
+- **`fit.align_x: "alpha-centroid"` 신규 값 (옵트인, 기본값 foot-centroid 불변)** —
+  소프트 매팅 프린지(α ≤ 10)를 무게에서 제외하는 알파 가중 무게중심을 셀 중앙에 정렬.
+  `fit_to_cell` / `fit_pixel_perfect` / `row_placement` 세 경로 모두 지원, 출처 주석 표기.
+- **픽셀퍼펙트 행 경로에서는 프레임별 배치** — 기존 모드들은 행 union 공동 left 하나를
+  전 프레임에 쓰므로 `register_row_frames` 의 정합 잔차가 align_x 선택과 무관하게 그대로
+  지터로 남는다(실측: bbox-center 와 foot-centroid 의 σ 가 동일). alpha-centroid 만
+  프레임마다 무게중심을 셀 중앙에 앉힌다(논리 격자 스냅으로 flip 대칭 보존). 점프 아크는
+  기존 `ground_frames: false` 가 담당(상류 baseline 오프셋과 동일 역할).
+- **`scripts/measure_align_sigma.py`** — align_x 변형별 프레임 무게중심 X 의 σ 를 리포트
+  (원본 run 은 읽기 전용, 스크래치 복사 후 재추출). founder_v7 실측: down_run σ
+  0.53px→0.17px (−68%), down_walk 은 0.03px 로 이미 포화(동일).
+- 83 tests OK (신규 5: 프린지 불감·옵트인 보증·per-frame 지터 상쇄·격자 스냅/클램프).
+
 ## v1.56.6 "Sol Edge Runner" - 붕괴 프레임이 행 합의 피치를 오염시키던 문제 + span 중복 합산
 
 솔벨 `down_carry_run` 6 프레임 중 3개가 피치 3.00 으로 무너졌고(참값 8.56), 중앙값 합의가

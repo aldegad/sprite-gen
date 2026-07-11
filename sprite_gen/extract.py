@@ -321,7 +321,15 @@ def cell_geometry(cell: dict[str, Any]) -> tuple[int, int, int, int]:
     return width, height, safe_margin_x, safe_margin_y
 
 
-def _alpha_centroid_x(sprite: Image.Image, bottom_fraction: float = 1.0) -> float:
+# align_x "alpha-centroid" 는 perfectpixel-studio internal/sprite/extract.go 이식
+# (github.com/gykim80/perfectpixel-studio, MIT). bbox 중심 정렬은 팔/무기가 뻗은
+# 프레임에서 면적이 큰 몸통을 반대로 밀어 재생 시 좌우 지터를 만들고, 알파 가중
+# 무게중심 cx=Σ(x·α)/Σα 는 몸통이 지배해 축이 안정된다. α ≤ 10 은 소프트 매팅
+# 프린지로 보고 무게에서 제외한다 (원본 alphaThreshold 와 동일).
+ALPHA_CENTROID_MIN_ALPHA = 10
+
+
+def _alpha_centroid_x(sprite: Image.Image, bottom_fraction: float = 1.0, min_alpha: int = 0) -> float:
     alpha = sprite.getchannel("A")
     width, height = sprite.size
     pixels = alpha.load()
@@ -331,12 +339,23 @@ def _alpha_centroid_x(sprite: Image.Image, bottom_fraction: float = 1.0) -> floa
     for y in range(y_start, height):
         for x in range(width):
             value = pixels[x, y]
-            if value:
+            if value > min_alpha:
                 total += value
                 weighted += value * (x + 0.5)
     if total == 0 and bottom_fraction < 1.0:
-        return _alpha_centroid_x(sprite, 1.0)
+        return _alpha_centroid_x(sprite, 1.0, min_alpha)
     return (weighted / total) if total else width / 2.0
+
+
+def _alpha_centroid_row_left(frame: Image.Image, cell_width: int, scale: int) -> int:
+    # 픽셀퍼펙트 행 경로의 프레임별 가로 배치 (align_x: alpha-centroid 전용).
+    # 행 union 공동 left 는 register_row_frames 의 정합 잔차가 그대로 지터로
+    # 남는다 — perfectpixel 방식대로 프레임마다 무게중심을 셀 중앙에 앉힌다.
+    # NEAREST xN 업스케일은 논리 픽셀 중심 (x+0.5) 을 scale·(x+0.5) 로 보내므로
+    # 논리 해상도에서 잰 무게중심에 scale 을 곱하면 리샘플 없이 정확하다.
+    left = round(cell_width / 2.0 - scale * _alpha_centroid_x(frame, 1.0, ALPHA_CENTROID_MIN_ALPHA))
+    left = max(0, min(cell_width - frame.width * scale, left))
+    return left - left % scale  # 논리 픽셀 격자 스냅 (flip 대칭 보존)
 
 
 def _kcentroid_downscale(sprite: Image.Image, target_width: int, target_height: int, detail_bias: bool = False) -> Image.Image:
@@ -379,10 +398,14 @@ def fit_to_cell(
     # `fit` comes from sprite-request.json ("fit" object):
     #   resample: "lanczos" (default) | "nearest" | "kcentroid" — kcentroid is the
     #             pixel-art downscale that keeps 1px dark outlines readable
-    #   align_x:  "foot-centroid" (default) | "centroid" | "bbox-center" —
+    #   align_x:  "foot-centroid" (default) | "centroid" | "alpha-centroid" |
+    #             "bbox-center" —
     #             foot-centroid anchors on the bottom 20% alpha (the legs), so
     #             trailing hair/capes do not pull the body off the cell axis
-    #             (critical for runtime horizontal flip)
+    #             (critical for runtime horizontal flip); alpha-centroid is the
+    #             perfectpixel-studio port — full alpha-weighted centroid that
+    #             ignores soft-matte fringe (α ≤ 10), and in the pixel-perfect
+    #             row path it is applied per frame instead of the row union
     #   align_y:  "bottom" (default) | "center" — bottom pins feet to a shared baseline
     # 2026-07-04 (알렉스): 기본값을 foot-centroid/bottom 으로 승격 — 프레임 간
     # "무게감"(발밑 기준선)이 기본으로 잡혀야 한다. pixel_perfect 경로와 동일 기본.
@@ -415,6 +438,9 @@ def fit_to_cell(
         left = max(0, min(cell_width - sprite.width, left))
     elif align_x == "centroid":
         left = round(cell_width / 2.0 - _alpha_centroid_x(sprite))
+        left = max(0, min(cell_width - sprite.width, left))
+    elif align_x == "alpha-centroid":
+        left = round(cell_width / 2.0 - _alpha_centroid_x(sprite, 1.0, ALPHA_CENTROID_MIN_ALPHA))
         left = max(0, min(cell_width - sprite.width, left))
     else:
         left = (cell_width - sprite.width) // 2
@@ -887,6 +913,10 @@ def row_placement(frames: list, cell_width: int, cell_height: int, safe_margin_y
         left = round(cell_width / 2.0 - _alpha_centroid_x(sprite, 0.2))
     elif align_x == "centroid":
         left = round(cell_width / 2.0 - _alpha_centroid_x(sprite))
+    elif align_x == "alpha-centroid":
+        # union 기준 값 — 실제 배치는 _run 이 프레임별로 _alpha_centroid_row_left
+        # 를 쓴다 (per-frame 이 이 모드의 핵심).
+        left = round(cell_width / 2.0 - _alpha_centroid_x(sprite, 1.0, ALPHA_CENTROID_MIN_ALPHA))
     else:
         left = (cell_width - sprite.width) // 2
     left = max(0, min(cell_width - sprite.width, left))
@@ -1022,6 +1052,8 @@ def fit_pixel_perfect(logical: Image.Image, cell_width: int, cell_height: int, s
         left = round(cell_width / 2.0 - _alpha_centroid_x(sprite, 0.2))
     elif align_x == "centroid":
         left = round(cell_width / 2.0 - _alpha_centroid_x(sprite))
+    elif align_x == "alpha-centroid":
+        left = round(cell_width / 2.0 - _alpha_centroid_x(sprite, 1.0, ALPHA_CENTROID_MIN_ALPHA))
     else:
         left = (cell_width - sprite.width) // 2
     left = max(0, min(cell_width - sprite.width, left))
@@ -1416,8 +1448,14 @@ def _run(args: argparse.Namespace):
                 quantized = [enforce_outline(frame, strength) for frame in quantized]
             left, top = row_placement(quantized, cell_width, cell_height, safe_margin_y, pp_scale, fit_config)
             ground_frames = bool(fit_config.get("ground_frames", True))
+            # alpha-centroid 는 프레임별 가로 배치 — 행 union 공동 left 로는
+            # register_row_frames 의 정합 잔차가 지터로 남는다.
+            per_frame_centroid = str(fit_config.get("align_x", "foot-centroid")).lower() == "alpha-centroid"
             frames = [
-                place_row_frame(frame, cell_width, cell_height, pp_scale, left, top, safe_margin_y, ground_frames)
+                place_row_frame(
+                    frame, cell_width, cell_height, pp_scale,
+                    _alpha_centroid_row_left(frame, cell_width, pp_scale) if per_frame_centroid else left,
+                    top, safe_margin_y, ground_frames)
                 for frame in quantized
             ]
             finalize_state(entry["state"], frames, entry["frame_count"], entry["method"],
