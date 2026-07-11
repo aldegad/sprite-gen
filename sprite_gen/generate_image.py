@@ -1,11 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Placeholder for the v2 desktop-only image generation module.
+"""Deprecated shim — image generation now lives in `sprite_gen.gen`.
 
-The public sprite-gen package intentionally keeps provider/app generation out of
-this refactor. This module exists so the v2 MCP import surface resolves during
-the package split, but runtime use fails loudly instead of falling back.
+This module previously stood in as a desktop-only placeholder during the package
+split. Provider-backed generation (codex `image_gen`, grok Imagine) is now a
+first-class engine module: `sprite_gen.gen` / CLI `sprite-gen gen`. Keeping two
+generation surfaces would violate SSoT, so this shim redirects and fails loudly
+if called directly.
 """
+
+from __future__ import annotations
 
 
 def run(**_kwargs: object) -> int:
-    raise SystemExit("sprite_gen.generate_image is desktop-app scope and is not shipped in this public package refactor")
+    raise SystemExit(
+        "sprite_gen.generate_image is retired — use `sprite_gen.gen` "
+        "(CLI: `sprite-gen gen --provider codex|grok --prompt ... --out ...`)"
+    )

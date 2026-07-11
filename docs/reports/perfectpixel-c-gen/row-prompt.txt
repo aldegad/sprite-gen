@@ -1,0 +1,1 @@
+A horizontal sprite strip of a cute round mushroom character, exactly 4 evenly spaced idle frames left to right, flat 2D game art, clean thick outline, simple cel shading, consistent character identity across all frames, centered in each cell, SOLID FLAT MAGENTA #FF00FF background, no shadow, no gradient, no texture, no labels, no grid lines

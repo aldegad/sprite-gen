@@ -5,6 +5,34 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.12 "Sol Forge" - 생성 SSoT 통합 (`sprite_gen/gen/`, perfectpixel-studio C-gen)
+
+생성 계층을 엔진 모듈 하나로 통합했다. 기존 `image-gen` 스킬의 독립 구현
+(codex `image_gen` 세션추출 + 크로마 후처리)을 엔진으로 이식하고, grok Imagine
+어댑터를 추가했다. Gemini/OpenRouter/fal/BytePlus 프로바이더는 넣지 않는다.
+
+- **`sprite_gen/gen/` 신설 + CLI `gen` + `scripts/generate_sprite_image.py`** —
+  프롬프트(+옵션 ref) → 검증된 raw PNG 한 장. `--provider codex|grok`,
+  `--transparent --chroma-key magenta|green`(결정론 투명 계약 이식),
+  `--report`(provider·`elapsed_seconds`·`session_id`·크로마 지표).
+- **codex 어댑터** (`codex_provider.py`) — fresh `codex exec --json` (프롬프트 캐시
+  분리), `thread.started.thread_id`(구버전 `session id:` 텍스트도 지원)로 rollout
+  해석, 인라인 base64를 결정론 디코드(`image_generation_call`/`image_generation_end`
+  둘 다), 모델 보고 경로 불신, 추출 후 세션 jsonl 청소.
+- **grok 어댑터** (`grok_provider.py`) — `grok -p --sandbox workspace --always-approve`
+  로 정확한 경로에 저장 지시 후 PNG magic 검증(`--effort` 미전달 — 미디어 모델 400).
+  `--ref` 는 `image_edit` 경로.
+- **투명 계약 이식** (`chroma.py`) — image-gen `chroma_key_transparent.py` 를 엔진
+  함수로. 투명 픽셀 잔여 RGB 는 fail-loud (No Silent Fallback).
+- `sprite_gen.generate_image` placeholder 는 `sprite_gen.gen` 리다이렉트 shim 으로
+  교체(두 생성 surface 금지 — SSoT). `image-gen` 스킬은 엔진 셔틀로 개편, 구현은
+  DEPRECATED/archive.
+- **실 e2e**: 같은 row 프롬프트를 codex(39.02s)·grok(18.42s) 양쪽 생성, 속도 비교 +
+  side-by-side proof 를 `docs/reports/perfectpixel-c-gen/` 에 보존(grok ~2.1× 빠름).
+- 신규 테스트 `tests/test_gen.py`(추출·chroma·prompt·오케스트레이터 fake provider,
+  네트워크 없음) + package surface 에 `gen` 추가. 문서 `docs/gen.md`. 기존 골든 추출
+  경로 회귀 0.
+
 ## v1.56.11 "Sol Edge Runner" - 자동 inspect/score/correction loop (perfectpixel-studio B-loop)
 
 perfectpixel-studio `inspect.go` / `score.go` 의 폐루프 구조를 sprite-gen 엔진에

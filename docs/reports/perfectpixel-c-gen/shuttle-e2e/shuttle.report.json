@@ -1,0 +1,28 @@
+{
+  "kind": "sprite-gen-image-report",
+  "provider": "grok",
+  "prompt": "a cozy pixel-art campfire at night with warm orange glow, SOLID FLAT MAGENTA #FF00FF background, no shadow, no gradient, no text",
+  "out": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-c-gen/shuttle-e2e/campfire.png",
+  "raw": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-c-gen/shuttle-e2e/campfire.png.raw.png",
+  "raw_bytes": 539764,
+  "elapsed_seconds": 15.259,
+  "model": null,
+  "session_id": null,
+  "refs": [],
+  "transparent": true,
+  "chroma": {
+    "out": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-c-gen/shuttle-e2e/campfire.png",
+    "mode": "RGBA",
+    "size": "864x1152",
+    "key": "magenta",
+    "keyed_pixels": 106,
+    "fringe_pixels": 0,
+    "cleaned_transparent_rgb_pixels": 0,
+    "alpha_zero_pct": 0.01,
+    "stale_transparent_rgb_pixels": 0,
+    "white_check": "docs/reports/perfectpixel-c-gen/shuttle-e2e/campfire.white.png"
+  },
+  "extra": {
+    "stdout_tail": "/var/folders/w5/34c09w191vl257qzh63tryxw0000gn/T/sprite-gen-gen-2zg83x5f/raw.png"
+  }
+}

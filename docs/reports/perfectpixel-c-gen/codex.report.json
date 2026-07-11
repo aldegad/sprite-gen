@@ -1,0 +1,29 @@
+{
+  "kind": "sprite-gen-image-report",
+  "provider": "codex",
+  "prompt": "A horizontal sprite strip of a cute round mushroom character, exactly 4 evenly spaced idle frames left to right, flat 2D game art, clean thick outline, simple cel shading, consistent character identity across all frames, centered in each cell, SOLID FLAT MAGENTA #FF00FF background, no shadow, no gradient, no texture, no labels, no grid lines",
+  "out": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-c-gen/codex-mushroom.png",
+  "raw": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-c-gen/codex-mushroom.png.raw.png",
+  "raw_bytes": 1211487,
+  "elapsed_seconds": 39.018,
+  "model": null,
+  "session_id": "019f50c8-9acc-7892-8a67-dc70c352aab9",
+  "refs": [],
+  "transparent": true,
+  "chroma": {
+    "out": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-c-gen/codex-mushroom.png",
+    "mode": "RGBA",
+    "size": "2172x724",
+    "key": "magenta",
+    "keyed_pixels": 1088225,
+    "fringe_pixels": 0,
+    "cleaned_transparent_rgb_pixels": 0,
+    "alpha_zero_pct": 69.2,
+    "stale_transparent_rgb_pixels": 0,
+    "white_check": "docs/reports/perfectpixel-c-gen/codex-mushroom.white.png"
+  },
+  "extra": {
+    "inline_results": 1,
+    "rollout_cleaned": true
+  }
+}
