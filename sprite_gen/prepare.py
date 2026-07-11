@@ -805,7 +805,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--safe-margin", type=int, default=24)
     parser.add_argument("--chroma-key", default="auto", help="auto or #RRGGBB")
     parser.add_argument("--fit-resample", choices=["lanczos", "nearest", "kcentroid"], default=None, help="frame downscale filter; nearest keeps pixel-art edges crisp, kcentroid keeps 1px outlines readable")
-    parser.add_argument("--fit-align-x", choices=["bbox-center", "centroid", "foot-centroid"], default=None, help="horizontal frame anchor; centroid stabilizes body position across variable-width poses, foot-centroid anchors on the bottom-20%% alpha (legs)")
+    parser.add_argument("--fit-align-x", choices=["bbox-center", "centroid", "foot-centroid", "alpha-centroid"], default=None, help="horizontal frame anchor; centroid stabilizes body position across variable-width poses, foot-centroid anchors on the bottom-20%% alpha (legs), alpha-centroid is the perfectpixel-studio per-frame alpha-weighted centroid (fringe-insensitive, per-frame in the pixel-perfect row path)")
     parser.add_argument("--fit-align-y", choices=["center", "bottom"], default=None, help="vertical frame anchor; bottom pins feet to a shared baseline")
     parser.add_argument("--fit-pixel-perfect", action=argparse.BooleanOptionalAction, default=None, help="true pixel-perfect extraction: pitch detection -> grid snap -> kCentroid -> shared palette -> integer NEAREST (see docs/pixel-perfect.md)")
     parser.add_argument("--fit-logical-height", type=int, default=None, help="pixel-perfect logical grid height; omit for 1:1 with the cell height")

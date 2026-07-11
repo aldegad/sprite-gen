@@ -4,3 +4,8 @@ Copyright 2026 Alex Kim
 This project is inspired by the Apache-2.0 licensed hatch-pet component-row
 workflow. sprite-gen targets generic game sprite atlases and does not include
 Codex pet assets, pet packages, or hatch-pet visual assets.
+
+The `align_x: "alpha-centroid"` frame alignment (sprite_gen/extract.py) is a
+port of the alpha-weighted mass-centroid alignment from perfectpixel-studio
+(https://github.com/gykim80/perfectpixel-studio, internal/sprite/extract.go),
+Copyright Andrew Kim (gykim80), MIT License.
