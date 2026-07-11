@@ -1,0 +1,40 @@
+{
+  "ok": true,
+  "kind": "sprite-gen-correction-loop-report",
+  "dry_run": false,
+  "min_attempts": 2,
+  "max_passes": 3,
+  "attempts": [
+    {
+      "attempt": 1,
+      "run_dir": "/Users/soohongkim/Documents/workspace/personal/solvell-worktrees/feat-image/godot/assets/generated/sprites/founder_v7",
+      "inspect_report": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/attempt-1/inspect.json",
+      "score_report": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/attempt-1/score.json",
+      "hint_file": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/attempt-1/correction-hints.txt",
+      "ok": true,
+      "overall_score": 91.0,
+      "candidate_rank": 397
+    },
+    {
+      "attempt": 2,
+      "run_dir": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/candidate-2",
+      "inspect_report": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/attempt-2/inspect.json",
+      "score_report": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/attempt-2/score.json",
+      "hint_file": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/attempt-2/correction-hints.txt",
+      "ok": true,
+      "overall_score": 100.0,
+      "candidate_rank": 400
+    }
+  ],
+  "best_candidate": {
+    "attempt": 2,
+    "run_dir": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/candidate-2",
+    "inspect_report": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/attempt-2/inspect.json",
+    "score_report": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/attempt-2/score.json",
+    "hint_file": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/attempt-2/correction-hints.txt",
+    "ok": true,
+    "overall_score": 100.0,
+    "candidate_rank": 400
+  },
+  "preserved_best": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/best-candidate"
+}

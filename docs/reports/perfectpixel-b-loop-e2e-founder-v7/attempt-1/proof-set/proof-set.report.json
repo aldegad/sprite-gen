@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "contract": [
+    "1-original.png",
+    "2-grid.png",
+    "3-pixelperfect.png"
+  ],
+  "pitch": {
+    "grid": [
+      4.0,
+      4.0
+    ],
+    "runlen": [
+      10.18,
+      10.78
+    ]
+  },
+  "a_methods": {
+    "projection": false,
+    "alpha_centroid": false,
+    "ycbcr": false,
+    "runlen_crosscheck": true
+  },
+  "frame_count": {
+    "expected": 4,
+    "found": 4
+  },
+  "warnings": [
+    "up_idle: dropped 2 collapsed per-frame pitch(es) below 7.80",
+    "up_idle: dropped 2 collapsed per-frame pitch(es) below 7.80",
+    "up_idle: per-frame pitch outliers (0:4.00, 1:6.00) snapped at consensus 13.00",
+    "pixel-perfect: pitch=13.0 scale=1x logical<=64x48 palette=24"
+  ],
+  "chroma_notes": []
+}

@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "contract": [
+    "1-original.png",
+    "2-grid.png",
+    "3-pixelperfect.png"
+  ],
+  "pitch": {
+    "grid": [
+      7.06,
+      7.14
+    ],
+    "runlen": [
+      1.0,
+      6.14
+    ]
+  },
+  "a_methods": {
+    "projection": true,
+    "alpha_centroid": true,
+    "ycbcr": true,
+    "runlen_crosscheck": true
+  },
+  "frame_count": {
+    "expected": 4,
+    "found": 4
+  },
+  "warnings": [
+    "pixel-perfect: pitch=(7.86, 8.0) scale=1x logical<=64x48 palette=24"
+  ],
+  "chroma_notes": []
+}

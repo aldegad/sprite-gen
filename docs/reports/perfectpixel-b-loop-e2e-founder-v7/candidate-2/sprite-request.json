@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "kind": "sprite-gen-request",
+  "engine": "component-row",
+  "character": {
+    "id": "founder_v7",
+    "description": "",
+    "base_image": "base-source.png"
+  },
+  "cell": {
+    "shape": "square",
+    "width": 64,
+    "height": 64,
+    "safe_margin_x": 6,
+    "safe_margin_y": 6,
+    "size": 64,
+    "safe_margin": 6
+  },
+  "chroma_key": {
+    "name": "green",
+    "hex": "#00FF00",
+    "rgb": [
+      0,
+      255,
+      0
+    ],
+    "selection": "auto",
+    "score": 226.15,
+    "min_subject_distance": 215.38,
+    "background": {
+      "mode": "flat",
+      "hex": "#0BEE1B",
+      "rgb": [
+        11,
+        238,
+        27
+      ],
+      "opaque_border_fraction": 1.0,
+      "border_coverage": 1.0,
+      "enclosed_background_pixels": 0,
+      "enclosed_material_pixels": 0,
+      "subject_pixels": 19008
+    },
+    "candidates": [
+      {
+        "name": "magenta",
+        "hex": "#FF00FF",
+        "score": 209.27,
+        "min_subject_distance": 206.48,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "green",
+        "hex": "#00FF00",
+        "score": 226.15,
+        "min_subject_distance": 215.38,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "cyan",
+        "hex": "#00FFFF",
+        "score": 206.69,
+        "min_subject_distance": 191.02,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "blue",
+        "hex": "#004DFF",
+        "score": 106.74,
+        "min_subject_distance": 94.45,
+        "clears_erase_radius": false
+      }
+    ],
+    "selection_reason": "highest 1st-percentile subject distance among the 3 candidate(s) clearing the 96 erase radius"
+  },
+  "states": {
+    "up_idle": {
+      "frames": 4,
+      "fps": 4,
+      "loop": true,
+      "action": "standing idle in STRICT BACK view facing directly AWAY from the viewer (no face visible, blue cape covering the back), arms hanging down at the sides, subtle breathing. HAIR RULE: HIGH ponytail seen from behind - the gold hair tie sits HIGH near the crown of the head, off-center toward the image-LEFT, and the ponytail tuft VISIBLY RISES ABOVE the top of the head silhouette (a small arc above the skull line) before flowing down the left half of the back. Match the attached back-view reference for everything else. No wind-blown hair, tidy single tail."
+    }
+  },
+  "style": "match the attached base/anchor reference image EXACTLY: same pixel density (logical pixel block size), same body proportions, same outline weight, same palette, same shading style, same level of detail. Do not restyle, do not change proportions, do not add or remove detail density. Avoid polished illustration, painterly rendering, anime key art, 3D render, vector app-icon polish, glossy lighting, soft gradients, and anti-aliased high-detail edges.",
+  "motion_phase_guides": false,
+  "fit": {
+    "pixel_perfect": true,
+    "logical_height": 48,
+    "pitch_hint": 15,
+    "segmentation": "projection",
+    "align_x": "alpha-centroid"
+  },
+  "chroma": {
+    "unmix_reach": 4,
+    "spill_max_fraction": 0.005,
+    "mode": "ycbcr"
+  }
+}

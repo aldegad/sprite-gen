@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "kind": "sprite-gen-score-report",
+  "source_report": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/candidate-2",
+  "overall_score": 100.0,
+  "candidate_rank": 400,
+  "rows": [
+    {
+      "state": "up_idle",
+      "score": 100.0,
+      "candidate_rank": 400,
+      "expected_frames": 4,
+      "found_frames": 4,
+      "errors": [],
+      "warnings": [],
+      "hints": []
+    }
+  ],
+  "hints": []
+}

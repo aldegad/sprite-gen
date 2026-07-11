@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "provider": "grok",
+  "state": "up_idle",
+  "pass_score": 90.0,
+  "min_attempts": 2,
+  "max_passes": 3,
+  "attempts": [
+    {
+      "attempt": 1,
+      "score": 91.0,
+      "candidate_rank": 397,
+      "warnings": 3,
+      "found_frames": 4,
+      "centroid_sigma": {"x": 0.3015671053, "y": 0.2774392907},
+      "motion_presence": 0.0155278225,
+      "a_methods": {"projection": false, "alpha_centroid": false, "ycbcr": false, "runlen_crosscheck": true}
+    },
+    {
+      "attempt": 2,
+      "score": 100.0,
+      "candidate_rank": 400,
+      "warnings": 0,
+      "found_frames": 4,
+      "centroid_sigma": {"x": 0.1077269955, "y": 0.7081331787},
+      "motion_presence": 0.0122691834,
+      "a_methods": {"projection": true, "alpha_centroid": true, "ycbcr": true, "runlen_crosscheck": true}
+    }
+  ],
+  "best_candidate": {
+    "attempt": 2,
+    "preserved": true,
+    "sha256": {
+      "raw/up_idle.png": "88064b16c4843d6c554bea000d59cebf4888815339a9b58b26530dd91593113b",
+      "sprite-request.json": "7e3fcee5eb53e7b9755e549d85bc7dc5187978f14364fb734af9e57cdae4050e",
+      "frames/frames-manifest.json": "cd87343dfccfaffcb2c787b411a12f19ac7682a1272c2c8eda565f6bd34f9732"
+    },
+    "preserved_sha256": {
+      "raw/up_idle.png": "88064b16c4843d6c554bea000d59cebf4888815339a9b58b26530dd91593113b",
+      "sprite-request.json": "7e3fcee5eb53e7b9755e549d85bc7dc5187978f14364fb734af9e57cdae4050e",
+      "frames/frames-manifest.json": "cd87343dfccfaffcb2c787b411a12f19ac7682a1272c2c8eda565f6bd34f9732"
+    }
+  },
+  "proof_contract": {
+    "attempt_1": true,
+    "attempt_2": true,
+    "files": ["1-original.png", "2-grid.png", "3-pixelperfect.png"]
+  }
+}

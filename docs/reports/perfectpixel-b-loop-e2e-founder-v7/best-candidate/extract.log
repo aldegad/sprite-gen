@@ -1,0 +1,78 @@
+{
+  "ok": true,
+  "engine": "component-row",
+  "run_dir": "/Users/soohongkim/Documents/workspace/personal/agent-extensions/sprite-gen/docs/reports/perfectpixel-b-loop-e2e-founder-v7/candidate-2",
+  "cell": {
+    "shape": "square",
+    "width": 64,
+    "height": 64,
+    "safe_margin_x": 6,
+    "safe_margin_y": 6,
+    "size": 64,
+    "safe_margin": 6
+  },
+  "chroma_key": {
+    "name": "green",
+    "hex": "#00FF00",
+    "rgb": [
+      0,
+      255,
+      0
+    ],
+    "selection": "auto",
+    "score": 226.15,
+    "min_subject_distance": 215.38,
+    "background": {
+      "mode": "flat",
+      "hex": "#0BEE1B",
+      "rgb": [
+        11,
+        238,
+        27
+      ],
+      "opaque_border_fraction": 1.0,
+      "border_coverage": 1.0,
+      "enclosed_background_pixels": 0,
+      "enclosed_material_pixels": 0,
+      "subject_pixels": 19008
+    },
+    "candidates": [
+      {
+        "name": "magenta",
+        "hex": "#FF00FF",
+        "score": 209.27,
+        "min_subject_distance": 206.48,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "green",
+        "hex": "#00FF00",
+        "score": 226.15,
+        "min_subject_distance": 215.38,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "cyan",
+        "hex": "#00FFFF",
+        "score": 206.69,
+        "min_subject_distance": 191.02,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "blue",
+        "hex": "#004DFF",
+        "score": 106.74,
+        "min_subject_distance": 94.45,
+        "clears_erase_radius": false
+      }
+    ],
+    "selection_reason": "highest 1st-percentile subject distance among the 3 candidate(s) clearing the 96 erase radius"
+  },
+  "errors": [],
+  "warnings": [
+    "pixel-perfect: pitch=(7.86, 8.0) scale=1x logical<=64x48 palette=24"
+  ]
+}
+
+--- stderr ---
+[segment] up_idle: projection split at columns [331, 641, 954] (natural poses=4)
