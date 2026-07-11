@@ -140,6 +140,12 @@ python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/generate_sprite_image.py \
 
 Use `prompts/<state>.txt` as the prompt; save the selected image as `raw/<state>.png`. `--provider grok` is the faster backend; codex adheres tighter to negative constraints. Keep the request chroma key on the background (extraction removes it). Reference attachment rules:
 
+Generation providers are engine backends, not Studio workers. Selecting `grok`
+launches a headless `grok -p` agent process owned by `GrokProvider`; it does not
+require or route through a separate user-facing skill/task. A visible worker is
+created independently with `kuma spawn`. The canonical topology and command chain live in
+[`docs/gen.md`](docs/gen.md#provider-and-visible-worker-topology).
+
 - Simple/default states (before direction-anchor mode exists): attach exactly two references — `base-source.<ext>` (canonical identity) + `references/layout-guides/<state>.png` (layout only).
 - Direction-anchor mode: do **not** attach `base-source.<ext>` to action rows. Attach the accepted target-direction idle anchor + the state layout guide; for a paired row also attach the basis row as timing/scale/motion reference only. Chain details: [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md).
 - Hatch-pet-style locomotion may attach additional references only when they are part of the row plan, recorded in `qa-notes.md`: original sheet / canonical base (identity support only), a previous gait row such as `raw/running-right.png` (motion rhythm only), or an accepted motion-QA artifact (gait readability support only).

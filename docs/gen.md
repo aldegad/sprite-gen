@@ -12,6 +12,24 @@ Providers (Gemini/OpenRouter/fal/BytePlus are intentionally **not** included):
 | `codex` | codex `image_gen` | ChatGPT OAuth | inline base64 in the session rollout jsonl, decoded deterministically |
 | `grok` | grok Imagine `image_gen` / `image_edit` | xAI OAuth | file grok is told to write, verified by PNG magic |
 
+## Provider and visible-worker topology
+
+Provider selection and Studio worker selection are orthogonal:
+
+| Layer | Canonical path | Responsibility |
+|---|---|---|
+| Generation request | `generate_sprite_image.py --provider grok` | Select the engine provider for one image request. |
+| Provider adapter | `GrokProvider` | Build the prompt, choose Imagine `image_gen` or `image_edit`, and verify the requested PNG. |
+| Headless provider process | `grok -p --sandbox workspace --always-approve` | Execute the xAI-authenticated Imagine tool call. |
+| Image model tool | Imagine `image_gen` / `image_edit` | Generate a new image, or edit from references. |
+| Visible Studio worker | `kuma spawn` | Create the visible worker surface that may invoke the generation request; it does not select or replace the provider. |
+
+Therefore the direct Grok chain is `generate_sprite_image.py --provider grok`
+→ `GrokProvider` → `grok -p --always-approve` → Imagine
+`image_gen`/`image_edit`. `GrokProvider` owns the headless agent process lifecycle;
+the chain does not require or route through a separate user-facing skill/task, and
+it is not a second visible-worker topology.
+
 ## CLI
 
 ```bash
