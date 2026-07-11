@@ -2,6 +2,29 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.58.0 "Sol Edge Runner" - segmentation: projection (perfectpixel-studio 이식, 옵트인)
+
+perfectpixel-studio `internal/sprite/segment.go`(MIT) 의 projection-profile + DP 최적 컷
+프레임 분리를 `sprite_gen/segment.py` 로 이식. connected-components 는 팔·소품이 이웃
+프레임과 닿으면 붙은 포즈를 한 덩어리로 합쳐 추출이 실패한다 — 세로 알파 프로젝션
+P[x]=Σα 의 골(gutter)로 자연 포즈 수를 세고, 골이 사라지면 DP 로 `Σ P[cut] +
+λ·(width−ideal)²` 최소 컷을 찾아 정확히 기대 프레임 수로 분리한다.
+
+- **`fit.segmentation: "projection"` 신규 값 (옵트인, 기본값 components 불변)** — CLI
+  `--segmentation {components,projection}` 은 request 를 덮는 명시 override. 활성 시
+  크로마 제거 직후 스트립을 컷 경계에서 갈라 투명 거터를 넣어 재조립하는 pre-pass 라
+  하류 connected-components·위성 병합·pixel-perfect 경로는 무변경으로 그대로 동작한다.
+  분리 실패는 스트립을 건드리지 않고 stderr 로 보고 — 하류가 기존 에러로 관측 가능하게
+  실패한다 (No Silent Fallback).
+- **융착 픽스처 골든** (`tests/fixtures/run-fused/`) — 팔이 닿아 한 덩어리가 된 3포즈
+  스트립: components 는 실패(에러 기록), projection 은 3/3 분리 (골든 매니페스트 고정).
+- **분리된 스트립에는 완전 투명** — 기존 골든 런에 projection 을 켜도 매니페스트가
+  비트 동일함을 테스트로 고정.
+- founder_v7 실측: carry/action 8개 state 회귀 0 (natural 골짜기로 기대 수 그대로).
+  down_carry_walk 프레임을 16/24/32px 겹쳐 재조립한 실제 융착 스트립에서 components 는
+  3→1 덩어리로 붕괴(추출 실패), projection 은 전부 6/6 분리.
+- 93 tests OK (신규 10: 융착 골든·옵트인 부재 실패·CLI 활성/무효화·비트동일·순수함수).
+
 ## v1.57.0 "Sol Edge Runner" - align_x: alpha-centroid (perfectpixel-studio 이식, 옵트인)
 
 perfectpixel-studio `internal/sprite/extract.go`(MIT) 의 알파 가중 무게중심 정렬을 fit 에 이식.

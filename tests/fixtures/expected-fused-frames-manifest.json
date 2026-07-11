@@ -1,0 +1,112 @@
+{
+  "ok": true,
+  "engine": "component-row",
+  "cell": {
+    "shape": "square",
+    "width": 96,
+    "height": 96,
+    "safe_margin_x": 8,
+    "safe_margin_y": 8,
+    "size": 96,
+    "safe_margin": 8
+  },
+  "chroma_key": {
+    "name": "magenta",
+    "hex": "#FF00FF",
+    "rgb": [
+      255,
+      0,
+      255
+    ],
+    "selection": "fallback"
+  },
+  "rows": [
+    {
+      "state": "kick",
+      "frames": 3,
+      "method": "components",
+      "files": [
+        "frames/kick/frame-0.png",
+        "frames/kick/frame-1.png",
+        "frames/kick/frame-2.png"
+      ],
+      "frame_records": [
+        {
+          "index": 0,
+          "nontransparent_pixels": 1926,
+          "bbox": [
+            13,
+            28,
+            82,
+            88
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 1,
+          "nontransparent_pixels": 1932,
+          "bbox": [
+            13,
+            28,
+            83,
+            88
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 2,
+          "nontransparent_pixels": 1926,
+          "bbox": [
+            13,
+            28,
+            82,
+            88
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        }
+      ],
+      "ok": true
+    },
+    {
+      "state": "pair",
+      "frames": 2,
+      "method": "components",
+      "files": [
+        "frames/pair/frame-0.png",
+        "frames/pair/frame-1.png"
+      ],
+      "frame_records": [
+        {
+          "index": 0,
+          "nontransparent_pixels": 2400,
+          "bbox": [
+            28,
+            28,
+            68,
+            88
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 1,
+          "nontransparent_pixels": 2400,
+          "bbox": [
+            28,
+            28,
+            68,
+            88
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        }
+      ],
+      "ok": true
+    }
+  ],
+  "errors": [],
+  "warnings": []
+}
