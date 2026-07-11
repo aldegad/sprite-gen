@@ -330,6 +330,7 @@ Leaf docs are one link deep from this hub. Read them on these triggers:
 - [`docs/pixel-perfect.md`](docs/pixel-perfect.md) — pixel-art targets: `fit` / `pixel_perfect` parameters, stage ownership, style/pixel-density reference rules, plain-twin curator toggle.
 - [`docs/curation.md`](docs/curation.md) — the curation webview, the standalone image-candidate curation path (icons/logos/drafts — not sprites), finished-sheet editing (`unpack_atlas_run.py`), multi-agent launch rules, the `curation.json` schema.
 - [`docs/chroma-alpha.md`](docs/chroma-alpha.md) — chroma key selection branches, `--chroma-key auto` scoring, extraction-side alpha cleanup, slot-fallback policy.
+- [`docs/gen.md`](docs/gen.md) — `sprite-gen gen` provider CLI, verified PNG/report contract, and the thin `image-gen` shuttle boundary.
 - [`docs/sheet-slicing.md`](docs/sheet-slicing.md) — multi-figure variant sheets → per-cell standing cuts (`slice-sheet`): geometry rules, field failure modes, sheet prompting. Read when cutting tachi-e/portrait sheets.
 - [`docs/qa-motion.md`](docs/qa-motion.md) — Motion Continuity verdict criteria in full.
 - [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md) — directional / 45° anchor chains, hatch-pet locomotion patterns, advanced gates.
