@@ -30,6 +30,18 @@ The unmix/spill tunables live in the run's `sprite-request.json` under `chroma` 
 
 If component extraction cannot find the declared frame count, the row is blocked. `--allow-slot-fallback` exists for explicit debugging only; it must be reported as `slots-explicit` and is not the default path.
 
+## `chroma.mode: "ycbcr"` — chrominance-plane matting (opt-in)
+
+Port of perfectpixel-studio's `chroma.go` (MIT, see NOTICE). The default RGB path above classifies pixels by RGB distance to the key, so a *shaded or gradient* key background (dark green under a green key) or JPEG 4:2:0 chroma noise can drift past the erase radius and survive. The ycbcr path ignores luma entirely and separates on the CbCr plane, where shading does not move the key cluster:
+
+1. **Key detection** — CbCr histogram *mode* of corner patches + thin borders (never a mean — a mean drifts on gradients); when enough border samples sit in the declared key's chroma family, that cluster wins outright.
+2. **Soft matte** — Hermite smoothstep alpha ramp over CbCr distance (24 → 72).
+3. **Despill** — subtracts only the key-direction chroma component inside the despill band; colors orthogonal to the key keep their saturation.
+4. **Border flood fill** — 4-connected from the image borders through lenient key-chroma pixels; interior key-family pixels (gems, highlights) never connect and survive.
+5. **Self-diagnostic rematte** — an opaque-fraction spike (subject erased) or declared-key residue spike (background survived) triggers a rematte with the declared pure key; the better result wins and the fallback is reported via extraction warnings (never silent).
+
+Select with request `chroma.mode: "ycbcr"` or `--chroma-mode ycbcr`. **The default stays `"rgb"`**: on clean flat-key raws the RGB path's exact-solve unmix already removes key tint completely, while ycbcr's fixed-scale despill leaves a small tinted soft-edge halo — ycbcr is for degraded sources (shaded/gradient backgrounds, JPEG chroma noise), not a general upgrade.
+
 ## Related
 
 - [`../SKILL.md`](../SKILL.md) — 필수 게이트 (크로마 키 소재색 분기 + 변환 후 소재색 보존 검증)
