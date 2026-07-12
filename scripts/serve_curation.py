@@ -41,12 +41,20 @@ import webbrowser
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, load_curation
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 CURATOR_DIR = SCRIPTS_DIR / "curator"
+
+
+def _url(*parts) -> str:
+    """/-rooted URL with every path segment percent-encoded. base/ref/state/frame names
+    can contain `#`, `%`, space, quotes, non-ASCII — unencoded they break the URL (a `#`
+    becomes a fragment → 404) or leak into HTML attributes. do_GET unquote()s on serving,
+    so this round-trips; unreserved names (e.g. down_walk, frame-0.png) are unchanged."""
+    return "/" + "/".join(quote(str(p), safe="") for p in parts)
 
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -143,15 +151,15 @@ def _state_refs(run_dir, state):
     if direction is not None:
         anchor = run_dir / "raw" / f"{direction}_idle.png"
         if state != f"{direction}_idle" and anchor.is_file():
-            refs.append({"role": "anchor", "name": anchor.name, "url": f"/run/raw/{anchor.name}"})
+            refs.append({"role": "anchor", "name": anchor.name, "url": _url("run", "raw", anchor.name)})
         base = state[len(direction) + 1:] if state.startswith(direction + "_") else None
         if base and direction != "down":
             basis = run_dir / "raw" / f"down_{base}.png"
             if basis.is_file():
-                refs.append({"role": "basis", "name": basis.name, "url": f"/run/raw/{basis.name}"})
+                refs.append({"role": "basis", "name": basis.name, "url": _url("run", "raw", basis.name)})
     guide = run_dir / "references" / "layout-guides" / f"{state}.png"
     if guide.is_file():
-        refs.append({"role": "guide", "name": guide.name, "url": f"/run/references/layout-guides/{state}.png"})
+        refs.append({"role": "guide", "name": guide.name, "url": _url("run", "references", "layout-guides", f"{state}.png")})
     # imported runs (--pngs-dir): references/imported/<state>/<role>-<name>.png → 생성 재료 칩.
     # role 은 파일명 접두(첫 '-' 앞)에서 파싱, 미지 role 은 guide 로 강등. 역할 파싱 SSoT = 여기 한 곳.
     imported_dir = run_dir / "references" / "imported" / state
@@ -161,7 +169,7 @@ def _state_refs(run_dir, state):
             if role not in _IMPORTED_REF_ROLES:
                 role = "guide"
             refs.append({"role": role, "name": ref.name,
-                         "url": f"/run/references/imported/{state}/{ref.name}"})
+                         "url": _url("run", "references", "imported", state, ref.name)})
     return refs
 
 
@@ -201,15 +209,15 @@ def build_run_state(run_dir: Path) -> dict:
         for index in range(frame_count):
             rel = f"frames/{state}/frame-{index}.png"
             present = (run_dir / rel).is_file()
-            frame = {"index": index, "url": f"/{rel}", "present": present}
+            frame = {"index": index, "url": _url("frames", state, f"frame-{index}.png"), "present": present}
             # pp 해제 토글 표시본: 원본 화질(orig/ 고해상본) 우선, 없으면 셀 크기 .plain.png.
             # 둘 중 하나라도 있으면 큐레이터가 전/후 토글을 켠다.
             orig_rel = f"frames/{state}/orig/frame-{index}.png"
             plain_rel = f"frames/{state}/frame-{index}.plain.png"
             if (run_dir / orig_rel).is_file():
-                frame["plainUrl"] = f"/{orig_rel}"
+                frame["plainUrl"] = _url("frames", state, "orig", f"frame-{index}.png")
             elif (run_dir / plain_rel).is_file():
-                frame["plainUrl"] = f"/{plain_rel}"
+                frame["plainUrl"] = _url("frames", state, f"frame-{index}.plain.png")
             if index < len(labels):
                 frame["label"] = labels[index]
             if present and Image is not None:
@@ -251,7 +259,7 @@ def build_run_state(run_dir: Path) -> dict:
     base_url = None
     for candidate in sorted(run_dir.glob("base-source.*")):
         if candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
-            base_url = f"/run/{candidate.name}"
+            base_url = _url("run", candidate.name)
             break
     # 뷰 계약 자가 보고 (run-contract.md §3): base 참조 줄 / 생성 재료 칩 / 픽셀 격자
     # 충족 여부. 셋 다 없으면 "소스 없는 뷰" — 세션마다 경험이 갈라지는 신호.

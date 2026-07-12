@@ -594,8 +594,8 @@ function renderState(state) {
       state.refs
         .map(
           (r) =>
-            `<a class="ref-chip" href="${r.url}" target="_blank" title="${escapeHtml(r.name)}">` +
-            `<img src="${r.url}" alt="${escapeHtml(r.role)}" loading="lazy" />` +
+            `<a class="ref-chip" href="${escapeHtml(r.url)}" target="_blank" title="${escapeHtml(r.name)}">` +
+            `<img src="${escapeHtml(r.url)}" alt="${escapeHtml(r.role)}" loading="lazy" />` +
             `<span>${t("ref_" + r.role)}</span></a>`
         )
         .join("");
@@ -663,7 +663,7 @@ function renderBaseRow() {
   wrap.innerHTML =
     `<div class="state-head"><h3>base</h3>` +
     `<span class="muted">${t("baseNote")}</span></div>` +
-    `<div class="base-stage"><img src="${run.baseUrl}" alt="base source" draggable="false" /></div>`;
+    `<div class="base-stage"><img src="${escapeHtml(run.baseUrl)}" alt="base source" draggable="false" /></div>`;
   document.getElementById("states").appendChild(wrap);
 }
 
@@ -678,7 +678,7 @@ function renderCard(state, frame) {
   const stageInner = frame.present
     ? (run.iso ? `<canvas class="grid-overlay"></canvas>` : "") +
       `<div class="pxgrid"></div>` +
-      `<img src="${frameUrl(frame)}" alt="frame ${frame.index}" draggable="false" />` +
+      `<img src="${escapeHtml(frameUrl(frame))}" alt="frame ${frame.index}" draggable="false" />` +
       `<div class="rotate-handle" title="${t("tRotate")}"></div>` +
       `<div class="shear-handle" title="${t("tShear")}"></div>`
     : `<div class="missing-label">missing</div>`;
