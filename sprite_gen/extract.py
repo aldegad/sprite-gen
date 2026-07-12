@@ -1794,10 +1794,6 @@ def _run(args: argparse.Namespace):
     # mid-extract. The manifest records the FINAL `frames/<state>/...` paths regardless of the
     # staging write location. Writer-writer exclusion stays the separate `.sprite-gen.lock`.
     frames_final = run_dir / "frames"
-    # Is there a prior complete generation to protect? (a re-extract, vs a first extract on a
-    # freshly prepared run.) A failed re-extract keeps it; a failed first extract publishes the
-    # failure state (see the publish decision at the end).
-    had_prior_generation = (frames_final / "frames-manifest.json").is_file()
     frames_root = run_dir / ".frames.sg-staging"
     if frames_root.exists():
         shutil.rmtree(frames_root)
@@ -2076,15 +2072,24 @@ def _run(args: argparse.Namespace):
         "errors": all_errors,
         "warnings": all_warnings,
     }
-    atomic_write_text(frames_root / "frames-manifest.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n")
-    if result["ok"] or not had_prior_generation:
-        # Publish on success — or on a FIRST extract with no prior generation to protect, where
-        # the failed manifest + partial frames are the (observable) failure state to record.
+    failure_evidence = run_dir / "extract-failure.json"
+    if result["ok"]:
+        # Whole-generation atomicity: canonical frames/ only ever holds a COMPLETE generation.
+        # Publish the staging generation, then clear any prior failed-attempt diagnostics — the
+        # failure is resolved, so a stale signal must not linger and re-flag a now-good state
+        # to the correction loop (Consistency).
+        atomic_write_text(frames_root / "frames-manifest.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n")
         _publish_frames(run_dir, frames_root, frames_final)
+        failure_evidence.unlink(missing_ok=True)
     else:
-        # A failed RE-extract must not corrupt the run: discard the incomplete staging and leave
-        # the prior complete frames generation byte-intact (Atomicity — a failed regeneration
-        # must never destroy the previously-good frames). Exit code 1 + printed errors signal it.
+        # A failed extract — FIRST or re-extract — never publishes a partial/ok:false generation
+        # to canonical frames/ (strict Atomicity: the operation fully succeeds or leaves canonical
+        # state untouched). The per-state failure signal is recorded OUTSIDE frames/ as
+        # extract-failure.json so it stays observable (No Silent Fallback) and still drives the
+        # automatic correction loop (inspect._manifest_state_notes reads it → score → hint →
+        # regenerate). A failed re-extract additionally leaves the prior complete generation
+        # byte-intact. Exit code 1 + printed errors signal the failure.
+        atomic_write_text(failure_evidence, json.dumps(result, ensure_ascii=False, indent=2) + "\n")
         shutil.rmtree(frames_root, ignore_errors=True)
     print(json.dumps({k: v for k, v in result.items() if k != "rows"}, ensure_ascii=False, indent=2))
     return 0 if result["ok"] else 1

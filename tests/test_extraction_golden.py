@@ -45,6 +45,9 @@ def test_extraction_fails_without_raw_strip(fixture_run_dir: Path) -> None:
     (fixture_run_dir / "raw" / "walk.png").unlink()
     result = run_script("extract_sprite_row_frames.py", "--run-dir", str(fixture_run_dir))
     assert result.returncode == 1
-    manifest = json.loads((fixture_run_dir / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["ok"] is False
-    assert any("missing raw strip" in error for error in manifest["errors"])
+    # Strict whole-generation atomicity: a failed FIRST extract publishes no partial generation
+    # to canonical frames/; the observable ok:false failure signal lives in extract-failure.json.
+    assert not (fixture_run_dir / "frames").exists()
+    failure = json.loads((fixture_run_dir / "extract-failure.json").read_text(encoding="utf-8"))
+    assert failure["ok"] is False
+    assert any("missing raw strip" in error for error in failure["errors"])

@@ -253,24 +253,47 @@ def _similarity_summary(frames: list[Image.Image]) -> dict[str, Any]:
 
 
 def _manifest_state_notes(run_dir: Path, state: str) -> tuple[dict[str, Any] | None, list[str], list[str]]:
-    manifest_path = run_dir / "frames" / "frames-manifest.json"
-    if not manifest_path.is_file():
-        return None, [], []
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    state_errors = [
-        str(message)
-        for message in manifest.get("errors", [])
-        if str(message).startswith(f"{state}:")
-    ]
-    state_warnings = [
-        str(message)
-        for message in manifest.get("warnings", [])
-        if str(message).startswith(f"{state}:")
-    ]
-    for row in manifest.get("rows", []):
-        if row.get("state") == state:
-            return row, state_errors, state_warnings
-    return None, state_errors, state_warnings
+    """Per-state manifest row + failure notes for `state`, gathered from two sources:
+
+    - `frames/frames-manifest.json` — the current COMPLETE generation (only ever published
+      on a successful extract, so it carries the row for a good state, no failure errors).
+    - `extract-failure.json` — the last failed extract's per-state diagnostics, written
+      OUTSIDE canonical frames/ because a failed extract publishes no partial generation
+      (whole-generation atomicity). This is the signal the automatic correction loop needs to
+      know *which state failed and why* and drive error-driven regeneration; a successful
+      extract removes it, so it never re-flags a now-good state.
+
+    The row comes only from the published manifest (real frames); errors/warnings merge both."""
+    manifest_row: dict[str, Any] | None = None
+    state_errors: list[str] = []
+    state_warnings: list[str] = []
+
+    def _collect(path: Path, take_row: bool) -> None:
+        nonlocal manifest_row
+        if not path.is_file():
+            return
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        prefix = f"{state}:"
+        for message in manifest.get("errors", []):
+            text = str(message)
+            if text.startswith(prefix) and text not in state_errors:
+                state_errors.append(text)
+        for message in manifest.get("warnings", []):
+            text = str(message)
+            if text.startswith(prefix) and text not in state_warnings:
+                state_warnings.append(text)
+        if take_row and manifest_row is None:
+            for row in manifest.get("rows", []):
+                if row.get("state") == state:
+                    manifest_row = row
+                    break
+
+    _collect(run_dir / "frames" / "frames-manifest.json", take_row=True)
+    _collect(run_dir / "extract-failure.json", take_row=False)
+    return manifest_row, state_errors, state_warnings
 
 
 def inspect_run(run_dir: Path, states: str = "all", **kwargs: object) -> dict[str, Any]:

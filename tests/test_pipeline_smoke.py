@@ -138,3 +138,46 @@ def test_failed_subset_reextract_preserves_prior_generation(fixture_run_dir: Pat
     assert (run / "frames" / "frames-manifest.json").read_bytes() == prior_manifest
     assert not (run / ".frames.sg-staging").exists()          # staging discarded, no leak
     assert run_script("compose_sprite_atlas.py", "--run-dir", str(run)).returncode == 0
+
+
+def test_failed_reextract_signal_reaches_correction_loop_consumer(fixture_run_dir: Path) -> None:
+    """The automatic correction loop drives error-driven regeneration off inspect's per-state
+    errors. A failed RE-extract keeps the prior good frames byte-intact, so inspect's own
+    frame-count check sees nothing wrong — the ONLY channel for 'this state's re-extract failed,
+    and why' is extract-failure.json (frames/ stays complete-only). This proves the strict-
+    atomicity fix keeps that signal wired, so auto-correction never goes blind."""
+    from sprite_gen.inspect import _manifest_state_notes
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    target = sorted(json.loads((run / "sprite-request.json").read_text())["states"])[0]
+
+    (run / "raw" / f"{target}.png").unlink()                  # break only this state's raw strip
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", target).returncode == 1
+
+    assert (run / "frames" / target).is_dir()                 # prior good frames intact (re-extract)
+    assert (run / "extract-failure.json").is_file()           # signal recorded OUTSIDE frames/
+    _row, errors, _warnings = _manifest_state_notes(run, target)
+    assert errors and all(e.startswith(f"{target}:") for e in errors), errors  # consumer reads it
+
+
+def test_successful_extract_clears_prior_failure_evidence(fixture_run_dir: Path) -> None:
+    """A success resolves any prior failure: extract-failure.json must be removed so inspect and
+    the correction loop never re-flag a now-good state with a stale signal (Consistency)."""
+    from sprite_gen.inspect import _manifest_state_notes
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    target = sorted(json.loads((run / "sprite-request.json").read_text())["states"])[0]
+
+    raw = run / "raw" / f"{target}.png"
+    saved = raw.read_bytes()
+    raw.unlink()
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", target).returncode == 1
+    assert (run / "extract-failure.json").is_file()           # failure recorded
+
+    raw.write_bytes(saved)                                    # fix the input, re-extract succeeds
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", target).returncode == 0
+    assert not (run / "extract-failure.json").exists()        # success cleared the stale signal
+    _row, errors, _warnings = _manifest_state_notes(run, target)
+    assert not errors                                         # consumer sees a clean state again

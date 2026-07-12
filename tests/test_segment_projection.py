@@ -77,8 +77,13 @@ def test_fused_strip_fails_without_opt_in(fused_run_dir: Path) -> None:
     _set_segmentation(fused_run_dir, None)
     result = run_script("extract_sprite_row_frames.py", "--run-dir", str(fused_run_dir))
     assert result.returncode == 1
-    manifest = json.loads((fused_run_dir / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))
-    assert any("could not extract 3 sprite components" in error for error in manifest["errors"])
+    # Strict whole-generation atomicity: a failed FIRST extract publishes no partial generation
+    # to canonical frames/ — the per-state failure signal is written OUTSIDE frames/ as
+    # extract-failure.json (still observable, still consumed by the correction loop).
+    assert not (fused_run_dir / "frames").exists()
+    failure = json.loads((fused_run_dir / "extract-failure.json").read_text(encoding="utf-8"))
+    assert failure["ok"] is False
+    assert any("could not extract 3 sprite components" in error for error in failure["errors"])
 
 
 def test_cli_flag_enables_projection_without_request_opt_in(fused_run_dir: Path) -> None:
@@ -102,8 +107,10 @@ def test_cli_flag_components_overrides_request_projection(fused_run_dir: Path) -
         "--segmentation", "components",
     )
     assert result.returncode == 1
-    manifest = json.loads((fused_run_dir / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))
-    assert any("could not extract 3 sprite components" in error for error in manifest["errors"])
+    # Failed first extract: no partial frames/ published; failure signal in extract-failure.json.
+    assert not (fused_run_dir / "frames").exists()
+    failure = json.loads((fused_run_dir / "extract-failure.json").read_text(encoding="utf-8"))
+    assert any("could not extract 3 sprite components" in error for error in failure["errors"])
 
 
 def test_projection_is_bit_identical_on_separated_golden_run(tmp_path: Path) -> None:
