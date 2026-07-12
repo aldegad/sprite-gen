@@ -233,6 +233,12 @@ throughout, so a concurrent **writer** cannot preempt (writer Isolation).
 > `HTTP 500`. The reader blocks only for the brief swap. The rwlock is a sidecar (beside
 > the run dir), so it survives content swaps and is never itself published; it degrades to
 > a no-op only where `fcntl` is unavailable.
+>
+> The curation **write** (`POST /api/curation`) takes the same exclusive publish lock, so
+> a `select`/`reorder`/`transform` autosave is serialized with a concurrent re-import; and
+> a POST whose states are no longer in the current run is **rejected** (`HTTP 409`) — a
+> stale autosave from a webview still on the pre-re-import run can never mix old-state
+> curation into the new run (Consistency).
 
 ## 5. Conformance status
 

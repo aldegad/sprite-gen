@@ -14,10 +14,15 @@ example Claude Code and the Codex app driving the skill in parallel):
   + `os.replace`, so a concurrent reader never observes a half-written
   atlas/manifest/frame.
 
-`curation.json` is intentionally NOT under the lock: the curation surface writes
-it with the same atomic replace, and the compose scripts read one consistent
-snapshot of it. Concurrent curation edits on one run dir remain last-write-wins
-by design; the lock guards pipeline outputs, not human edit sessions.
+`curation.json` is intentionally NOT under this pipeline write lock: the curation
+surface writes it with the same atomic replace, and the compose scripts read one
+consistent snapshot of it, so a curation edit never blocks on a running
+compose/extract. Concurrent curation edits on one run dir remain last-write-wins
+by design; the lock guards pipeline outputs, not human edit sessions. The curation
+*write* IS serialized against a `--force` re-import publish through the separate
+publish rwlock (`read_guard`/`publish_guard`), and the server rejects a curation
+whose states no longer match the current run — so a stale edit can't mix old-state
+curation into a freshly re-imported run.
 """
 
 from __future__ import annotations

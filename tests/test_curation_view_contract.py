@@ -308,3 +308,50 @@ def test_api_run_reader_isolated_from_concurrent_publish(tmp_path):
     assert "err" not in outcome, outcome.get("err")
     assert outcome.get("states"), "reader got no complete snapshot"
     assert outcome["at"] >= released_at, "reader returned before the publish released"
+
+
+def test_stale_curation_post_rejected_after_reimport(tmp_path):
+    """A curation POST whose states aren't in the current run is rejected (409) and never
+    written — a stale autosave from a webview on the pre-re-import run must not mix
+    old-state curation into the new run (Consistency; observable, not a silent overwrite)."""
+    import json as _json
+    import threading
+    import urllib.error
+    import urllib.request
+    from functools import partial
+    from http.server import ThreadingHTTPServer
+
+    from serve_curation import CurationHandler
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "old" / "1-a.png")
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+    shutil.rmtree(pngs)                       # re-import replaces the run with a different state
+    _png(pngs / "new" / "1-a.png")
+    assert _run_import(pngs, out, "--force").returncode == 0
+
+    CurationHandler.run_dir = out
+    CurationHandler.lang = "en"
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), partial(CurationHandler))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+
+    def post(states):
+        body = _json.dumps({"version": 1, "kind": "sprite-gen-curation", "states": states}).encode()
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/curation", data=body, method="POST")
+        try:
+            return urllib.request.urlopen(req).status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+
+    try:
+        stale_code = post({"old": {"selected": [0]}})   # state from the discarded run
+        assert stale_code == 409, stale_code
+        assert not (out / "curation.json").exists(), "stale curation polluted the new run"
+        fresh_code = post({"new": {"selected": [0]}})    # state of the current run
+        assert fresh_code == 200, fresh_code
+        assert (out / "curation.json").is_file()
+        assert set(_json.loads((out / "curation.json").read_text())["states"]) == {"new"}
+    finally:
+        srv.shutdown()

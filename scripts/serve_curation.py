@@ -44,7 +44,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
 from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported_ref_role, load_curation
-from runio import read_guard
+from runio import publish_guard, read_guard
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 CURATOR_DIR = SCRIPTS_DIR / "curator"
@@ -454,8 +454,24 @@ class CurationHandler(BaseHTTPRequestHandler):
         try:
             if path == "/api/curation":
                 payload = self._read_body()
-                write_curation_atomic(self.run_dir, payload)
-                self._send_json({"ok": True})
+                # Serialize the curation write with a concurrent --force publish (same
+                # publish_guard the swap holds), and reject a payload whose states are no
+                # longer in the current run. So a stale autosave from a webview still on the
+                # pre-re-import run can neither interleave with the swap nor land old-state
+                # curation on the new run (Consistency/Isolation — observable 409, not a
+                # silent overwrite). This uses the rwlock, not the pipeline write lock, so
+                # normal curation edits still never block on a running compose/extract.
+                with publish_guard(self.run_dir):
+                    request = json.loads((self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+                    run_states = set(request.get("states", {}))
+                    stale = [s for s in (payload.get("states") or {}) if s not in run_states]
+                    if not stale:
+                        write_curation_atomic(self.run_dir, payload)
+                if stale:
+                    self._send_json({"error": "curation states are not in the current run "
+                                     f"(the run changed under this session): {stale}"}, 409)
+                else:
+                    self._send_json({"ok": True})
                 return
             if path == "/api/compose":
                 result = run_compose(self.run_dir)
