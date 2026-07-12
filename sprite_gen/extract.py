@@ -1798,7 +1798,26 @@ def _run(args: argparse.Namespace):
     if frames_root.exists():
         shutil.rmtree(frames_root)
     frames_root.mkdir(parents=True)
+    # A subset `--states` re-extract (auto-correction / single-row regeneration) must preserve
+    # the states it is NOT rebuilding — the staging generation, which is swapped in whole, is
+    # seeded with those states' current frames and carries their prior manifest rows, so the
+    # swap replaces only the rebuilt states and never deletes the others (SSoT/Idempotency).
+    target = set(states)
     rows = []
+    if frames_final.is_dir():
+        prior = frames_final / "frames-manifest.json"
+        prior_rows = []
+        if prior.is_file():
+            try:
+                prior_rows = json.loads(prior.read_text(encoding="utf-8")).get("rows", [])
+            except (OSError, ValueError):
+                prior_rows = []
+        rows = [row for row in prior_rows if row.get("state") not in target]
+        for state_name in request["states"]:
+            if state_name not in target:
+                src = frames_final / state_name
+                if src.is_dir():
+                    shutil.copytree(src, frames_root / state_name)
     all_errors: list[str] = []
     all_warnings: list[str] = []
 
