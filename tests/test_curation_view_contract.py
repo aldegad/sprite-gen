@@ -397,3 +397,31 @@ def test_stored_curation_ignored_after_frame_regeneration(tmp_path):
     assert cur.load_curation(out) is None                # stale sidecar ignored at the single gate
     st = build_run_state(out)
     assert st["curation"]["states"] == {}                # server serves no stale curation
+
+
+def test_unstamped_curation_ignored(tmp_path):
+    """A curation.json with no run_revision (legacy / hand-written / copied from a doc example)
+    is unverifiable against the current frames, so load_curation ignores it (all-frames default)
+    rather than silently applying stale selections/transforms — the single gate has no bypass."""
+    import json as _json
+
+    from serve_curation import build_run_state
+    from sprite_gen import curation as cur
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    _png(pngs / "items" / "2-b.png")
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+
+    # an UNSTAMPED sidecar written directly, as a legacy/manual file would be
+    (out / "curation.json").write_text(_json.dumps({
+        "version": 1, "kind": "sprite-gen-curation",
+        "states": {"items": {"selected": [1], "transforms": {"1": {"dx": 9}}}}}))
+    assert cur.load_curation(out) is None                 # unstamped -> ignored, not applied
+    assert build_run_state(out)["curation"]["states"] == {}
+    # a valid save (via the stamping writer) then applies for the matching generation
+    from serve_curation import write_curation_atomic
+    write_curation_atomic(out, {"version": 1, "kind": "sprite-gen-curation",
+                                "states": {"items": {"selected": [0]}}})
+    assert cur.load_curation(out) is not None

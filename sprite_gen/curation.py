@@ -47,6 +47,10 @@ Schema (`curation.json`):
 
 Defaults when absent (explicit, not a silent fallback):
 - no `curation.json`           -> every state uses all extracted frames in order, identity transform.
+- missing/mismatched `run_revision` -> the sidecar is stale (frames regenerated under it, or a
+                                   legacy/manual file that predates stamping) and is ignored (same
+                                   all-frames default), with an observable stderr warning — never
+                                   applied to frames it cannot be verified against.
 - state missing from sidecar   -> same all-frames default for that state.
 - `selected` missing/empty     -> all non-deleted frames in extraction order.
 - `deleted` missing             -> no frames are deleted.
@@ -150,10 +154,17 @@ def load_curation(run_dir: Path) -> dict[str, Any] | None:
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("kind") != "sprite-gen-curation":
         raise SystemExit(f"{path} is not a sprite-gen-curation file")
+    # A curation applies only when its run_revision stamp matches the current frame
+    # generation exactly. A **missing** stamp (a legacy/manual/example sidecar) is treated
+    # as stale too — it carries no proof it was made for these frames, so it is ignored
+    # rather than silently applied to frames it may not belong to (No Silent Fallback).
     stamped = data.get("run_revision")
-    if stamped is not None and stamped != run_revision(run_dir):
-        print(f"[curation] ignoring stale {CURATION_FILENAME} (run_revision {stamped} != current "
-              f"frame generation — frames were regenerated under it): {run_dir}", file=sys.stderr)
+    current = run_revision(run_dir)
+    if stamped != current:
+        reason = ("no run_revision stamp (legacy/manual sidecar — unverifiable against the "
+                  "current frames)" if stamped is None
+                  else f"run_revision {stamped} != current {current} (frames were regenerated under it)")
+        print(f"[curation] ignoring stale {CURATION_FILENAME} ({reason}): {run_dir}", file=sys.stderr)
         return None
     return data
 

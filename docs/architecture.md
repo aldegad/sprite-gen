@@ -270,12 +270,16 @@ consumed by `compose_sprite_atlas.py` and `compose_selected_cycle.py`. The
 original `frames/<state>/frame-N.png` files are never rewritten.
 
 ```json
-{ "version": 1, "kind": "sprite-gen-curation",
+{ "version": 1, "kind": "sprite-gen-curation", "run_revision": "9f3c1a0b7e2d4c58",
   "pixel_perfect": true,
   "states": { "idle": { "selected": [0,2,3], "order": [0,2,3,1],
     "transforms": { "0": { "rotate": 15, "scale": 1.2, "dx": 10, "dy": -8, "flipX": 0 } } } } }
 ```
 
+- `run_revision` — **required** frame-generation stamp. `load_curation` applies the
+  sidecar only when it matches the current run; a mismatched **or missing** stamp is
+  stale and ignored (all-frames default, stderr-warned) — a re-import/re-extract or a
+  legacy/hand-written sidecar never applies to frames it isn't proven to belong to.
 - `pixel_perfect` — top-level bake decision: `false` → compose/export bake the
   `.plain.png` twins (§6.1); absent/`true` → canonical `frame-N.png`.
 - `selected` — 0-based indices in play order; absent → all frames in order.
