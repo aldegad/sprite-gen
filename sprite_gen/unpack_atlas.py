@@ -393,26 +393,45 @@ def _new_staging(out_dir: Path) -> Path:
     return staging
 
 
+_PUBLISH_BACKUP = ".sg-backup"
+
+
 def _publish_run(staging: Path, out_dir: Path) -> None:
-    """Atomically replace out_dir with the fully-built staging run, keeping lock
-    ownership consistent across the swap. Two same-filesystem directory renames do the
-    swap; if the second rename fails, the prior run is rolled back byte-intact and no
-    partial new run is exposed. Called only after a successful build, so a failed rebuild
-    never destroys or half-exposes a run (Atomicity: a rebuild fully succeeds or rolls back)."""
-    backup = out_dir.parent / f".{out_dir.name}.sg-backup"
+    """Publish the fully-built staging run into out_dir.
+
+    Named isolation strategy: **out_dir (and the `.sprite-gen.lock` inside it) never
+    disappears** during the publish. Prior content is relocated into an in-place
+    `.sg-backup` subdir and staging content moved in — out_dir is never renamed away, so a
+    concurrent writer's `acquire_run_dir_lock(out_dir)` always finds the held lock and
+    blocks (runio single-writer contract holds across the whole publish). On an I/O failure
+    the swap rolls back to the prior run byte-intact (Atomicity: succeed or roll back).
+    Called only after a successful build."""
+    reserved = {LOCK_FILENAME, _PUBLISH_BACKUP}
+    backup = out_dir / _PUBLISH_BACKUP
     if backup.exists():
         shutil.rmtree(backup)
-    # carry the held lock into the new run so out_dir still holds a valid lock after the swap
-    lock = out_dir / LOCK_FILENAME
-    if lock.is_file():
-        shutil.copy2(lock, staging / LOCK_FILENAME)
-    out_dir.rename(backup)                  # (1) prior run -> backup (atomic)
+    backup.mkdir()
+    moved: list[str] = []
+    phase1_done = False
     try:
-        staging.rename(out_dir)             # (2) new run -> out_dir (atomic)
+        for child in [c for c in out_dir.iterdir() if c.name not in reserved]:
+            child.rename(backup / child.name)          # prior content -> in-place backup
+            moved.append(child.name)
+        phase1_done = True
+        for child in [c for c in staging.iterdir() if c.name != LOCK_FILENAME]:
+            child.rename(out_dir / child.name)          # new content -> out_dir
     except OSError:
-        backup.rename(out_dir)              # rollback: prior run restored byte-intact
+        # roll back to the prior run byte-intact.
+        if phase1_done:
+            # all prior content is safe in backup; drop any partial new content we placed.
+            for child in [c for c in out_dir.iterdir() if c.name not in reserved]:
+                shutil.rmtree(child) if child.is_dir() else child.unlink()
+        # restore relocated prior content (a phase-1-partial failure left the rest in place)
+        for name in moved:
+            (backup / name).rename(out_dir / name)
         raise
-    shutil.rmtree(backup, ignore_errors=True)  # committed: drop the prior run
+    finally:
+        shutil.rmtree(backup, ignore_errors=True)
 
 
 def parse_grid(value: str) -> tuple[int, int]:
