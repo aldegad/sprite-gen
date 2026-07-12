@@ -1,0 +1,18 @@
+route_key: validator-1f28e583857781dab6a7
+validator-reject
+
+mode: blast-radius 전체검수 - run-dir 및 curation payload 계약 변경이라 문서 SSoT, importer, server, webview, compose/export/gif/cycle/inspect/measure 소비자와 실제 CLI 재실행을 확인했다. P2 fallback - registry 기준 worker=jetbi/codex, validator=darami/codex인 same-engine different-member 검증이다.
+
+종료 불가. 재현 가능한 계약 위반 2건이 남아 있다.
+
+1. --force 재임포트가 이전 source truth를 제거하지 않아 provenance와 화면이 모순된다. 같은 out-dir에 첫 실행은 _base/base.png와 items/_refs/mystery-source.png를 포함하고, 두 번째 실행은 두 소스 폴더를 제거한 뒤 --force로 다시 임포트했다. 두 번째 unpack-source.json은 base_source=null, imported_refs={}였지만 run/base-source.png와 run/references/imported/items/mystery-source.png가 그대로 남았다. build_run_state 결과도 baseUrl=/run/base-source.png, refsStates=1, sourceless=false였다. 즉 현재 입력과 canonical provenance에는 소스가 없는데 뷰는 이전 소스가 있다고 보고한다. sprite_gen/unpack_atlas.py의 --force 경로가 out-dir을 비우거나 새로운 run을 원자 교체하지 않고 기존 트리에 덮어쓰기만 하기 때문이다. Done Criteria 2와 4, Consistency, Idempotency, SSoT를 깨며 재실행 결과가 이전 out-dir 상태에 의존한다.
+
+재현 핵심: 첫 import 후 입력의 _base와 _refs를 제거하고 동일 out-dir에 scripts/unpack_atlas_run.py --force를 재실행한다. 관측값은 provenance {base_source:null, imported_refs:{}} 대 payload {baseUrl:/run/base-source.png, refs:[mystery-source.png], sourceless:false}다. 재현 디렉터리는 /tmp/sprite-gen-validator.MQfN80 이다.
+
+2. 알 수 없는 imported ref role이 관측 없이 guide로 강등된다. fresh import에서 items/_refs/mystery-source.png를 넣자 build_run_state는 role=guide를 반환했다. scripts/serve_curation.py의 _state_refs가 anchor, basis, guide 외 접두를 guide로 바꾸는 silent fallback이다. run-contract §3/§4의 role 의미와 No Silent Fallback을 위반한다. 허용 role만 받아 fail-loud하거나, 명시적인 observable validation 상태로 처리해야 한다.
+
+통과 증거: .venv/bin/pytest -q 결과 135 passed, python compileall 및 node --check 통과. 특수문자 URL 회귀 테스트와 실제 HTTP 200 경로도 통과했다. feat-image의 founder_v6/v7 payload는 각각 12/12, 36/36 refs state와 grid/base 계약을 충족했다. diff 밖 소비자는 compose_atlas, export_pngs, compose_gif, compose_cycle이 frame_filename을 사용하고 inspect/measure는 비재귀 frame glob이라 orig 하위폴더와 충돌하지 않음을 확인했다.
+
+브라우저 확인은 Browser runtime에 available browser가 0개라 시각 surface 재현이 불가능했다. 이는 기각 근거가 아니라 검증 환경 한계다. 서버 시작 로그와 API/HTTP 경로는 직접 재현했다.
+
+evidence_refs: docs/run-contract.md; sprite_gen/unpack_atlas.py; scripts/serve_curation.py; scripts/curator/curator.js; tests/test_curation_view_contract.py; /tmp/sprite-gen-validator.MQfN80

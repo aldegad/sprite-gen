@@ -1,0 +1,20 @@
+route_key: validator-1f28e583857781dab6a7
+validator-reject
+
+mode: blast-radius 전체검수 - run import/publish 계약, runio single-writer lock, importer/server 공유 role SSoT, orig/plain 소비자, 문서 포인터와 전체 테스트를 확인했다. P2 fallback - worker=jetbi/codex, validator=darami/codex로 registry 기준 same-engine different-member다.
+
+재현 가능한 종료 차단 finding:
+
+- [Atomicity, Isolation] `sprite_gen/unpack_atlas.py::_publish_run`의 두 directory rename 사이에 `out_dir`가 존재하지 않는 경쟁 창이 있다. 이때 두 번째 writer가 같은 run path를 `mkdir`하고 `.sprite-gen.lock`을 만들면, 첫 writer의 `staging.rename(out_dir)`가 실패하고 이어지는 `backup.rename(out_dir)` rollback도 `Directory not empty`로 실패한다. 결과적으로 이전 canonical run은 `.sg-backup`에 고립되고, canonical `out_dir`에는 두 번째 writer의 lock만 남아 `old_at_out=False`, `old_in_backup=True`, `staging_exists=True`, `backup_exists=True`가 재현됐다. 이는 문서의 "failed re-import leaves prior run byte-intact"와 runio의 single-writer 계약을 모두 위반한다.
+- 재현 방법: 임시 `out_dir`에 `old.txt`와 lock, sibling staging에 `new.txt`를 만든 뒤 `Path.rename`을 감싸 첫 `out_dir.rename(backup)` 직후 두 번째 writer처럼 `out_dir.mkdir()`와 lock 생성을 주입하고 `_publish_run(staging, out_dir)`을 호출했다. 실제 출력은 `OSError: Directory not empty: .run.sg-backup -> run`; `out_files=['.sprite-gen.lock']`; 이전 파일은 backup에만 남았다.
+- 기존 `test_publish_phase_failure_rolls_back`은 두 번째 writer가 목적 경로를 선점하지 않는 단일 프로세스 I/O 실패만 검증하므로 이 race를 잡지 못한다. `runio.py`의 명시적 Isolation 정책에 맞춰 publish 전체에 path가 사라지지 않는 named strategy를 적용하고, 경쟁 writer 선점 주입 회귀테스트를 추가해야 한다.
+
+통과한 증거:
+
+- `.venv/bin/python -m pytest -q tests/test_curation_view_contract.py` -> 11 passed.
+- `.venv/bin/python -m pytest -q` -> 139 passed.
+- `.venv/bin/python -m compileall -q sprite_gen scripts`, `node --check scripts/curator/curator.js`, `git diff --check` 통과.
+- `kuma plan lint --strict .../pipeline-run-contract-standardization.md` -> pass, `validator-same-engine-as-worker` P2 warning 관측.
+- diff 밖 sweep: `frame_filename`의 compose/export/gif/cycle 소비자는 `orig/`을 읽지 않았고, `IMPORTED_REF_ROLES`/`imported_ref_role`은 importer와 server가 공유했으며, `run-contract.md`가 구조/display 계약 owner로 연결된 점은 일치했다.
+
+결론: rename 사이의 canonical-path race와 rollback 실패를 고친 뒤 fresh validator 재요청이 필요하다.

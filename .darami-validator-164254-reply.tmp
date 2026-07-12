@@ -1,0 +1,23 @@
+route_key: validator-1f28e583857781dab6a7
+validator-reject
+
+mode: blast-radius 전체검수, P2 same-engine-different-member fallback - pipeline/run-dir 계약, extract 부분 실행, reader/writer lock, curation API/static GET, compose/export/GIF 소비자, 문서와 실제 호출부를 전수 확인했다. registry 기준 worker=jetbi/codex, validator=darami/codex 경고를 관측했다.
+
+재현 가능한 종료 차단 finding 1건:
+
+1. 최신 frames 디렉터리 staging/swap 변경이 `extract --states <subset>`의 기존 부분 재추출 계약을 깨고, 선택하지 않은 모든 state를 삭제한다.
+   - 코드 근거: `sprite_gen/extract.py:1655,1787`은 `--states`로 일부 state만 처리하는 공개 CLI를 유지한다. 그러나 `sprite_gen/extract.py:1796-1800`은 빈 `.frames.sg-staging`에서 시작하고 선택 state만 채운 뒤, `sprite_gen/extract.py:2056-2057`이 그 staging 전체를 기존 `frames/`와 교체한다. manifest도 선택 state row만 기록한다.
+   - 독립 재현: `tests/fixtures/run`을 임시 복사해 전체 extract를 실행한 뒤 `extract_sprite_row_frames.py --run-dir <tmp> --states idle`을 실행했다.
+   - 실제 출력: 실행 전 frame dirs=`idle, walk`; 실행 후=`idle`; manifest states=`['idle']`, request states=`['idle','walk']`. 이어서 `compose_sprite_atlas.py --run-dir <tmp>`는 `frames/walk/frame-0.png`부터 frame-2까지 missing으로 exit 1을 반환했다.
+   - blast-radius 근거: 부분 실행은 죽은 옵션이 아니다. `scripts/measure_align_sigma.py:75,82-96`이 state subset을 `extract.run(... states=...)`으로 넘기고, `docs/reports/perfectpixel-b-loop-e2e-founder-v7/provider_command.py:71-77`도 단일 state 재생성 후 `--states <state>`를 호출한다. 자동 보정/단일 행 재추출이 다른 완료 state를 파괴하면 pipeline SSoT와 Idempotency/Consistency를 위반한다.
+   - 필요한 수정: subset extract의 staging을 기존 frames generation에서 시작해 대상 state와 manifest row만 원자 교체하거나, state별 generation publish 전략을 사용해 비대상 state를 보존해야 한다. `full extract -> subset state raw 변경/재추출 -> 비대상 frame bytes와 manifest rows 보존 -> compose 성공` 회귀테스트가 필요하다. reader는 publish 중 old-or-new 완전 snapshot만 관측해야 한다.
+
+통과 증거:
+- 최신 `_publish_frames`는 전체 디렉터리 publish 자체에 대해 `publish_guard`와 `read_guard`를 올바르게 직렬화했고, 단일 generation swap 테스트가 통과했다.
+- `TMPDIR=/tmp .venv/bin/pytest -q` -> 146 passed in 37.88s.
+- `node --check scripts/curator/curator.js`, 전체 Python `ast.parse`, `git diff --check` 통과.
+- `kuma plan lint --strict sprite-gen/pipeline-run-contract-standardization` 통과, P2 warning 관측.
+
+diff 밖에서 본 범위: `sprite_gen/extract.py`, `runio.py`, `curation.py`, `unpack_atlas.py`, `scripts/serve_curation.py`, curator JS, compose atlas/GIF/cycle/export 소비자, `scripts/measure_align_sigma.py`, 단일-state provider command, run-contract/curation/architecture/SKILL 포인터와 전체 tests.
+
+evidence refs: sprite_gen/extract.py:1655,1787,1796-1800,2046-2057; scripts/measure_align_sigma.py:75,82-96; docs/reports/perfectpixel-b-loop-e2e-founder-v7/provider_command.py:71-77; sprite_gen/compose_atlas.py:99-106; commit 4eb84d3; plan sprite-gen/pipeline-run-contract-standardization
