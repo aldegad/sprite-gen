@@ -213,24 +213,26 @@ sources, identical rendering. A `_base`/`_refs`-free import still works (frames 
 no base row, no chips), but then the view honestly shows "no source material" rather
 than a divergent experience.
 
-**`--force` re-import is an atomic clean rebuild.** It validates all inputs, builds the
-new run into a staging dir, then publishes it over the run dir. A **successful**
-re-import reflects **only** the current input — removing a `_base`/`_refs` source and
-re-importing leaves no stale `base-source.png` / `references/imported/*` behind, so
-provenance (`unpack-source.json`) and the served view never disagree (Idempotency/SSoT:
-the result never depends on the prior out-dir state). A **failed or invalid** re-import
-(e.g. a bad `_refs` role) leaves the prior run **byte-intact** — it is never
-cleared-then-failed (Atomicity: a rebuild fully succeeds or rolls back). The publish
-holds the run-dir single-writer lock in place throughout, so a concurrent **writer**
-cannot preempt (Isolation).
+**`--force` re-import is a writer-isolated, rollback-safe rebuild — but not (yet)
+reader-atomic** (see the limitation below). It validates all inputs, builds the new run
+into a staging dir, then publishes it over the run dir. A **successful** re-import
+reflects **only** the current input — removing a `_base`/`_refs` source and re-importing
+leaves no stale `base-source.png` / `references/imported/*` behind, so provenance
+(`unpack-source.json`) and the served view never disagree (Idempotency/SSoT: the result
+never depends on the prior out-dir state). A **failed or invalid** re-import (e.g. a bad
+`_refs` role) leaves the prior run **byte-intact** — it is never cleared-then-failed
+(write-side Atomicity: a rebuild fully succeeds or rolls back). The publish holds the
+run-dir single-writer lock in place throughout, so a concurrent **writer** cannot
+preempt (writer Isolation).
 
-> **Known limitation — reader atomicity (tracked).** The publish swaps run-dir content
-> in place, so a webview **serving that same run dir concurrently** can, at the instant
-> `sprite-request.json` moves, get a transient `HTTP 500` from `/api/run`
-> (non-destructive; a refresh self-heals once the swap completes). Full reader atomicity
-> (a serving `/api/run` always sees a complete old-or-new snapshot) requires moving the
-> lock to a sidecar + an atomic directory swap — a shared-infra (`runio`) change tracked
-> in the follow-up plan `sprite-gen/curation-reader-isolation-atomic-swap`.
+> **Known limitation — reader atomicity (NOT yet provided; tracked).** The publish swaps
+> run-dir content in place, so a webview **serving that same run dir concurrently** can
+> observe an intermediate state — at the instant `sprite-request.json` moves, `/api/run`
+> returns a transient `HTTP 500` (non-destructive; a refresh self-heals once the swap
+> completes). A serving `/api/run` is **not** guaranteed to see a complete old-or-new
+> snapshot during a re-import. Full reader atomicity requires moving the lock to a
+> sidecar + an atomic directory swap — a shared-infra (`runio`) change tracked in the
+> follow-up plan `sprite-gen/curation-reader-isolation-atomic-swap`.
 
 ## 5. Conformance status
 
