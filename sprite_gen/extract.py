@@ -1809,10 +1809,32 @@ def _require_generation_consistency(run_dir: Path, manifest: dict, name: str) ->
     orphan = sorted(physical_states - row_state_set)
     if orphan:
         raise SystemExit(f"corrupt {name} {run_dir}: physical frames for state(s) {orphan} have no manifest row (orphan/stale generation)")
+    request_states_spec = request.get("states", {})
     for row in manifest["rows"]:
-        for rel in row.get("files", []):
+        state = row["state"]
+        files = row.get("files")
+        if not isinstance(files, list) or not files:
+            raise SystemExit(f"corrupt {name} {run_dir}: manifest row '{state}' has no frame files (empty generation)")
+        prefix = f"frames/{state}/"
+        for rel in files:
+            if not isinstance(rel, str) or not rel.startswith(prefix):
+                raise SystemExit(f"corrupt {name} {run_dir}: row '{state}' file {rel!r} is not under {prefix} (state boundary)")
             if not (run_dir / rel).is_file():
-                raise SystemExit(f"corrupt {name} {run_dir}: manifest row '{row['state']}' references missing frame {rel}")
+                raise SystemExit(f"corrupt {name} {run_dir}: manifest row '{state}' references missing frame {rel}")
+        # the canonical physical frames for this state must EXACTLY equal the row's files — no
+        # missing (the `files:[]` / deleted-frames case) and no extra (a stale frame on disk).
+        state_dir = frames_root / state
+        physical = sorted(
+            f"{prefix}{f.name}" for f in state_dir.glob("frame-*.png") if not f.name.endswith(".plain.png")
+        ) if state_dir.is_dir() else []
+        if physical != sorted(files):
+            raise SystemExit(f"corrupt {name} {run_dir}: row '{state}' files {sorted(files)} != physical canonical frames {physical}")
+        # a complete generation has exactly the request's frame count for the state
+        expected = int(request_states_spec.get(state, {}).get("frames", len(files)))
+        if len(files) != expected:
+            raise SystemExit(f"corrupt {name} {run_dir}: row '{state}' has {len(files)} frame(s), request expects {expected}")
+        if "frames" in row and row["frames"] != len(files):
+            raise SystemExit(f"corrupt {name} {run_dir}: row '{state}' row.frames={row['frames']} != {len(files)} files")
 
 
 def load_consistent_frames_manifest(run_dir: Path, name: str = "frames manifest") -> dict:
