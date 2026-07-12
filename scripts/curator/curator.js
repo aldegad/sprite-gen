@@ -183,6 +183,10 @@ function buildPayload() {
     };
   }
   const payload = { version: run.schemaVersion || 1, kind: "sprite-gen-curation", states };
+  // echo the run generation this view was loaded with; the server rejects the autosave
+  // (409) if the run was re-imported/re-extracted under this session so stale selections
+  // never land on new frames.
+  if (run.runRevision) payload.runRevision = run.runRevision;
   // only meaningful when the run saved plain twins — the top-right checkbox
   if (ppAvailable) payload.pixel_perfect = ppApply;
   return payload;

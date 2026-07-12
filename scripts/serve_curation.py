@@ -27,6 +27,7 @@ API:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -173,6 +174,32 @@ def _state_refs(run_dir, state):
     return refs
 
 
+def _run_revision(run_dir: Path) -> str:
+    """A content fingerprint identifying the current run generation. It changes whenever
+    the frames are (re)written — a `--force` re-import (even one that keeps the same state
+    names but swaps the candidate images) or a re-extract — so a curation autosave carrying
+    a prior revision is detected as stale and rejected, and old-session selections/transforms
+    never apply to new images (run identity, not just state membership)."""
+    h = hashlib.sha256()
+    for name in ("sprite-request.json", "frames/frames-manifest.json"):
+        try:
+            h.update((run_dir / name).read_bytes())
+        except OSError:
+            h.update(b"\0")
+    frames_root = run_dir / "frames"
+    if frames_root.is_dir():
+        for state_dir in sorted(d for d in frames_root.iterdir() if d.is_dir()):
+            for fp in sorted(state_dir.glob("frame-*.png")):
+                if fp.name.endswith(".plain.png"):
+                    continue
+                try:
+                    st = fp.stat()
+                    h.update(f"{state_dir.name}/{fp.name}:{st.st_size}:{st.st_mtime_ns}".encode())
+                except OSError:
+                    pass
+    return h.hexdigest()[:16]
+
+
 def build_run_state(run_dir: Path) -> dict:
     """Assemble the run snapshot the SPA needs. Read under the run dir's shared read_guard
     so a concurrent `--force` re-import (which holds the exclusive publish_guard for its
@@ -292,6 +319,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         "cell": cell_state,
         "pixelPerfect": pixel_perfect if pixel_perfect is not None else ({"source": "auto", "label": "auto", "scale": None} if any(st.get("pixelScale") for st in states) else None),
         "schemaVersion": SCHEMA_VERSION,
+        "runRevision": _run_revision(run_dir),
         "states": states,
         "curation": curation,
         "iso": request.get("iso"),
@@ -462,14 +490,18 @@ class CurationHandler(BaseHTTPRequestHandler):
                 # silent overwrite). This uses the rwlock, not the pipeline write lock, so
                 # normal curation edits still never block on a running compose/extract.
                 with publish_guard(self.run_dir):
-                    request = json.loads((self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
-                    run_states = set(request.get("states", {}))
-                    stale = [s for s in (payload.get("states") or {}) if s not in run_states]
+                    # reject a stale autosave: the POST must echo the runRevision it was
+                    # loaded with. If the run generation changed under this session — a
+                    # `--force` re-import or a re-extract, even one keeping the same state
+                    # names but swapping the candidate images — old selections/transforms
+                    # must not apply to the new frames (Consistency: observable 409, not a
+                    # silent overwrite). runRevision is a content fingerprint of the frames.
+                    stale = payload.get("runRevision") != _run_revision(self.run_dir)
                     if not stale:
                         write_curation_atomic(self.run_dir, payload)
                 if stale:
-                    self._send_json({"error": "curation states are not in the current run "
-                                     f"(the run changed under this session): {stale}"}, 409)
+                    self._send_json({"error": "curation is from a different run generation "
+                                     "(the run changed under this session; reload the view)"}, 409)
                 else:
                     self._send_json({"ok": True})
                 return

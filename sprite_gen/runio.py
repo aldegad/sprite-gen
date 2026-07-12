@@ -21,8 +21,8 @@ compose/extract. Concurrent curation edits on one run dir remain last-write-wins
 by design; the lock guards pipeline outputs, not human edit sessions. The curation
 *write* IS serialized against a `--force` re-import publish through the separate
 publish rwlock (`read_guard`/`publish_guard`), and the server rejects a curation
-whose states no longer match the current run — so a stale edit can't mix old-state
-curation into a freshly re-imported run.
+POST whose echoed run generation (`runRevision`) no longer matches — so a stale edit
+can't apply old selections/transforms to a freshly re-imported run's frames.
 """
 
 from __future__ import annotations
