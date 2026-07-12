@@ -266,6 +266,26 @@ Verified end-to-end on three views — founder v6 (`base=yes refs=12/12 grid=yes
 founder v7 (`refs=36/36`, anchor/basis/guide chips across down/side/up), and a
 comprehensive `_base`+`_refs` import — plus a sourceless run that emits the warning.
 
+## 6. Known behavior — failed extract publishes an observable `ok:false` manifest
+
+The frames publish is atomic across generations: a re-import or re-**extract** stages
+the new frames and swaps them into `frames/` under `publish_guard` only on success, and
+a failed **re-extract** leaves the prior complete generation byte-intact (§4). But a
+failed **first** extract (no prior generation to protect) *does* publish its `ok:false`
+`frames-manifest.json` — with per-state `errors` — plus any frames that succeeded. This
+is a deliberate, **contracted and observable** failure output, not a silent partial:
+
+- `manifest.ok` is `false` and the CLI exits `1`; `compose_atlas` refuses a non-ok
+  manifest (`compose_sprite_atlas.py`), so the partial never becomes an atlas.
+- The **automatic correction loop depends on it**: `inspect._manifest_state_notes` reads
+  `manifest.errors` per state to drive inspect → score → correction-hint → regeneration.
+  A strict "write nothing on failure" rollback would erase the *which state failed, and
+  why* signal and break error-driven regeneration.
+
+Making a failed first extract publish *nothing* (strict whole-generation atomicity) is a
+tracked follow-up (`sprite-gen/extract-failed-generation-strict-atomicity`), gated on
+first migrating the correction loop off the failed-manifest signal.
+
 ## Related
 
 - [`../SKILL.md`](../SKILL.md) — behavior contract (Workflow, Base Lock Gate, Runtime Contract)
