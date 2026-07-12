@@ -213,12 +213,14 @@ sources, identical rendering. A `_base`/`_refs`-free import still works (frames 
 no base row, no chips), but then the view honestly shows "no source material" rather
 than a divergent experience.
 
-**`--force` re-import is a clean rebuild.** Re-importing into an existing run dir with
-`--force` first drops every prior artifact (the run reflects **only** the current
-input), so removing a `_base`/`_refs` source and re-importing leaves no stale
-`base-source.png` / `references/imported/*` behind — provenance (`unpack-source.json`)
-and the served view never disagree (Idempotency/SSoT: the result never depends on the
-prior out-dir state).
+**`--force` re-import is an atomic clean rebuild.** It validates all inputs, builds the
+new run into a staging dir, then publishes it over the run dir. A **successful**
+re-import reflects **only** the current input — removing a `_base`/`_refs` source and
+re-importing leaves no stale `base-source.png` / `references/imported/*` behind, so
+provenance (`unpack-source.json`) and the served view never disagree (Idempotency/SSoT:
+the result never depends on the prior out-dir state). A **failed or invalid** re-import
+(e.g. a bad `_refs` role) leaves the prior run **byte-intact** — it is never
+cleared-then-failed (Atomicity: a rebuild fully succeeds or rolls back).
 
 ## 5. Conformance status
 

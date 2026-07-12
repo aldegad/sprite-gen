@@ -142,3 +142,28 @@ def test_unknown_ref_role_fails_loud(tmp_path):
     assert "mystery-source.png" in combined
     assert "anchor-/basis-/guide-" in combined
     assert not out.exists() or not (out / "references" / "imported").exists()
+
+
+def _snapshot(run: Path) -> dict:
+    return {p.relative_to(run): p.read_bytes()
+            for p in run.rglob("*") if p.is_file() and p.name != ".sprite-gen.lock"}
+
+
+def test_force_reimport_failure_preserves_prior_run(tmp_path):
+    """A failed --force re-import must leave the prior valid run byte-intact (Atomicity:
+    a rebuild fully succeeds or rolls back — never clear-then-fail)."""
+    pngs = tmp_path / "pngs"
+    _png(pngs / "_base" / "b.png", size=(96, 96))
+    _png(pngs / "items" / "1-a.png")
+    _png(pngs / "items" / "_refs" / "anchor-x.png")
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+    before = _snapshot(out)
+    assert (out / "base-source.png").is_file() and before  # a real prior run exists
+    # make the next import invalid (unknown role) and re-run --force → must fail...
+    _png(pngs / "items" / "_refs" / "mystery-source.png")
+    r = _run_import(pngs, out, "--force")
+    assert r.returncode != 0
+    # ...and the prior run must be untouched (not destroyed / emptied), no staging leak
+    assert _snapshot(out) == before
+    assert not (out.parent / f".{out.name}.sg-staging").exists()
