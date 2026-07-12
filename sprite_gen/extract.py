@@ -1737,6 +1737,48 @@ def _publish_frames(run_dir: Path, staging: Path, final: Path) -> None:
     shutil.rmtree(backup, ignore_errors=True)
 
 
+def _merge_failure_evidence(run_dir: Path, result: dict, target_states: set, all_states: set) -> None:
+    """Maintain extract-failure.json as the union of the run's CURRENTLY-UNRESOLVED per-state
+    extract failures, kept OUTSIDE canonical frames/ (whole-generation atomicity).
+
+    A subset `--states` extract — the formal single-row / auto-correction regeneration path —
+    only determines the outcome of the states it targets. So a success on one state must NOT
+    erase another state's still-unresolved failure, and a new failure must NOT overwrite a
+    different state's prior failure. Carry forward prior evidence for states this attempt did not
+    touch, replace the target states with this attempt's outcome (a target state that succeeded
+    drops out), and delete the file only when no per-state failure remains (Consistency)."""
+    path = run_dir / "extract-failure.json"
+
+    def _state_of(message: object):
+        head = str(message).split(":", 1)[0]
+        return head if head in all_states else None
+
+    prior: dict = {}
+    if path.is_file():
+        try:
+            prior = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            prior = {}
+
+    # keep prior per-state failures for states this attempt did not re-run ...
+    kept_errors = [e for e in prior.get("errors", []) if _state_of(e) not in target_states and _state_of(e) is not None]
+    kept_warnings = [w for w in prior.get("warnings", []) if _state_of(w) not in target_states and _state_of(w) is not None]
+    # ... and add this attempt's per-state failures for the states it did run (empty on success).
+    new_errors = [e for e in result.get("errors", []) if _state_of(e) is not None]
+    new_warnings = [w for w in result.get("warnings", []) if _state_of(w) is not None]
+    merged_errors = kept_errors + new_errors
+    merged_warnings = kept_warnings + new_warnings
+
+    if not merged_errors:
+        path.unlink(missing_ok=True)  # every recorded per-state failure is resolved
+        return
+    evidence = dict(result)
+    evidence["ok"] = False
+    evidence["errors"] = merged_errors
+    evidence["warnings"] = merged_warnings
+    atomic_write_text(path, json.dumps(evidence, ensure_ascii=False, indent=2) + "\n")
+
+
 def _run(args: argparse.Namespace):
     if args.fringe_key_threshold < args.key_threshold:
         raise SystemExit("--fringe-key-threshold must be greater than or equal to --key-threshold")
@@ -2072,24 +2114,25 @@ def _run(args: argparse.Namespace):
         "errors": all_errors,
         "warnings": all_warnings,
     }
-    failure_evidence = run_dir / "extract-failure.json"
+    all_state_names = set(request["states"])
     if result["ok"]:
         # Whole-generation atomicity: canonical frames/ only ever holds a COMPLETE generation.
-        # Publish the staging generation, then clear any prior failed-attempt diagnostics — the
-        # failure is resolved, so a stale signal must not linger and re-flag a now-good state
-        # to the correction loop (Consistency).
+        # Publish the staging generation, then resolve THIS attempt's target states in the failure
+        # evidence — a subset --states extract does not touch the other states, so their unresolved
+        # failures are preserved (the file is removed only once nothing remains — Consistency).
         atomic_write_text(frames_root / "frames-manifest.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n")
         _publish_frames(run_dir, frames_root, frames_final)
-        failure_evidence.unlink(missing_ok=True)
+        _merge_failure_evidence(run_dir, result, target, all_state_names)
     else:
         # A failed extract — FIRST or re-extract — never publishes a partial/ok:false generation
         # to canonical frames/ (strict Atomicity: the operation fully succeeds or leaves canonical
         # state untouched). The per-state failure signal is recorded OUTSIDE frames/ as
         # extract-failure.json so it stays observable (No Silent Fallback) and still drives the
         # automatic correction loop (inspect._manifest_state_notes reads it → score → hint →
-        # regenerate). A failed re-extract additionally leaves the prior complete generation
-        # byte-intact. Exit code 1 + printed errors signal the failure.
-        atomic_write_text(failure_evidence, json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+        # regenerate). The evidence merges per state, so one state's failure never overwrites
+        # another's still-unresolved failure. A failed re-extract additionally leaves the prior
+        # complete generation byte-intact. Exit code 1 + printed errors signal the failure.
+        _merge_failure_evidence(run_dir, result, target, all_state_names)
         shutil.rmtree(frames_root, ignore_errors=True)
     print(json.dumps({k: v for k, v in result.items() if k != "rows"}, ensure_ascii=False, indent=2))
     return 0 if result["ok"] else 1
