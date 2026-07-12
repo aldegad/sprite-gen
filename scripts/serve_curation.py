@@ -253,6 +253,18 @@ def build_run_state(run_dir: Path) -> dict:
         if candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
             base_url = f"/run/{candidate.name}"
             break
+    # 뷰 계약 자가 보고 (run-contract.md §3): base 참조 줄 / 생성 재료 칩 / 픽셀 격자
+    # 충족 여부. 셋 다 없으면 "소스 없는 뷰" — 세션마다 경험이 갈라지는 신호.
+    has_base = base_url is not None
+    refs_states = sum(1 for st in states if st.get("refs"))
+    has_grid = pixel_perfect is not None or any(st.get("pixelScale") for st in states)
+    contract = {
+        "base": has_base,
+        "refs": refs_states > 0,
+        "refsStates": refs_states,
+        "grid": has_grid,
+        "sourceless": not (has_base or refs_states > 0 or has_grid),
+    }
     return {
         "characterId": request["character"]["id"],
         "runDir": str(run_dir),
@@ -266,6 +278,7 @@ def build_run_state(run_dir: Path) -> dict:
         "lang": CurationHandler.lang,
         "hasAtlas": (run_dir / "sprite-sheet-alpha.png").is_file(),
         "fitPixelPerfect": bool((request.get("fit") or {}).get("pixel_perfect")),
+        "contract": contract,
     }
 
 
@@ -462,6 +475,20 @@ def main() -> int:
     url = f"http://{host}:{port}/"
     print(f"sprite-gen curation webview: {url}")
     print(f"  run-dir: {run_dir}")
+    # 뷰 계약 자가 보고 — base 참조 줄 / 생성 재료 칩 / 픽셀 격자 충족 여부를 한 줄로.
+    # 셋 다 없으면 "소스 없는 뷰" 경고 (관측 가능하게 — No Silent Fallback).
+    try:
+        snapshot = build_run_state(run_dir)
+        c = snapshot.get("contract", {})
+        n_states = len(snapshot.get("states", []))
+        print(f"  view-contract: base={'yes' if c.get('base') else 'no'} · "
+              f"refs={c.get('refsStates', 0)}/{n_states} states · "
+              f"grid={'yes' if c.get('grid') else 'no'}")
+        if c.get("sourceless"):
+            print("  WARNING: sourceless view — no base-source, no generation-material refs, no pixel grid. "
+                  "이 뷰는 세션마다 경험이 갈라진다 (run-contract.md §3/§4: _base/_refs 동봉 또는 fit.pixel_perfect 권장).")
+    except Exception as exc:  # 계약 보고 실패는 서빙을 막지 않는다 — 관측만
+        print(f"  view-contract: unavailable ({exc})")
     print("  Ctrl-C to stop.")
     if not args.no_open:
         webbrowser.open(url)
