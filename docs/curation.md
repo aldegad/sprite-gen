@@ -13,8 +13,10 @@ SG=${ALEX_EXTENSIONS_DIR:-$HOME/Documents/workspace/personal/agent-extensions}/s
 STAGE=$(mktemp -d); mkdir -p "$STAGE/pngs"
 cp <후보들> "$STAGE/pngs/"   # 의미 있는 이름으로: 1-hub-cube.png, 2-hook-plug.png ... (timestamp/uuid 파일명 금지)
 # 성격이 다른 이미지를 한 통에 붓지 마라 — 하위폴더 = 큐레이터 줄(state) 하나.
-# 예: pngs/reference/ (베이스/원본 레퍼런스 칸) + pngs/portraits/ (표정 세트 줄).
+# 예: pngs/portraits/ (표정 세트 줄) + pngs/idle/ (idle 줄).
 # 셀 크기는 전 그룹 공유 최대치이므로, 거대한 레퍼런스는 미리 다른 후보 크기대로 축소해 넣는다.
+# 소스 1급 수용(run-contract.md §4): pngs/_base/<img> → 베이스 참조 줄, pngs/<group>/_refs/<role>-<name>.png
+#   (role=anchor|basis|guide) → 그 줄의 생성 재료 칩. _base·_refs 는 예약 폴더라 큐레이터 줄이 되지 않는다.
 python3 "$SG/scripts/unpack_atlas_run.py" --pngs-dir "$STAGE/pngs" --out-dir "$STAGE/run" --force
 nohup python3 "$SG/scripts/serve_curation.py" --run-dir "$STAGE/run" --lang ko > "$STAGE/server.log" 2>&1 &
 sleep 2

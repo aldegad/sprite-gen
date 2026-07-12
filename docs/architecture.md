@@ -247,14 +247,17 @@ the code realizes it. The path is unfake.js/pixeldetector-style and contains
    ignored), cancelling residual horizontal registration jitter without
    flattening vertical motion arcs.
 
-Alongside each canonical `frame-N.png`, the extractor writes the pre-pixel-
-perfect twin `frame-N.plain.png` (same strip through the legacy fit path; if
-twin production fails it is a warning, only the plain twin is dropped). The
-curation webview toggles between the two for display, and
-`curation.json.pixel_perfect: false` makes compose/GIF/PNG export bake the
-`.plain.png` variant — missing plain files are a hard error, not a silent
-fallback. The chosen variant is recorded as `frame_variant` in reports and the
-manifest.
+Alongside each canonical `frame-N.png`, the extractor writes two pre-pixel-
+perfect twins (same strip through the legacy fit path; if twin production fails
+it is a warning, only that twin is dropped): the cell-sized `frame-N.plain.png`
+and the hi-res `orig/frame-N.png` (legacy fit at S×cell, `S = min(4, 1024//cell)`,
+display-only). The curation webview toggles the display to `orig/` when present
+(crisp "off = original", else `.plain.png`), while `curation.json.pixel_perfect:
+false` makes compose/GIF/PNG export bake the cell-sized `.plain.png` variant —
+missing plain files are a hard error, not a silent fallback. The hi-res twin
+lives in a subdir so non-recursive `frame-*.png` globs (inspect, measure) never
+pick it up. The chosen variant is recorded as `frame_variant` in reports and the
+manifest. Display-contract SSoT: [`run-contract.md`](run-contract.md) §3.
 
 ## 7. Curation sidecar (`curation.json`)
 
