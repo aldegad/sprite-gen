@@ -225,11 +225,13 @@ A **failed or invalid** re-import (e.g. a bad `_refs` role) leaves the prior run
 succeeds or rolls back). The publish holds the run-dir single-writer lock in place
 throughout, so a concurrent **writer** cannot preempt (writer Isolation).
 
-> **Reader isolation (named strategy: reader/writer locking).** The publish holds the run
-> dir's *exclusive* publish lock — a sidecar `.<name>.sg-rwlock` `flock`, `runio.publish_guard`
-> — around the content swap, while `serve_curation` reads (`/api/run` **and** run-dir file
-> requests) under the matching *shared* read lock (`runio.read_guard`). So a webview
-> serving that same run dir concurrently always sees a **complete old-or-new snapshot** —
+> **Reader isolation (named strategy: reader/writer locking).** Every operation that
+> republishes frames — a `--force` re-import **and** a re-extract (`extract` builds into a
+> staging dir, then swaps `frames/` into place) — holds the run dir's *exclusive* publish
+> lock (a sidecar `.<name>.sg-rwlock` `flock`, `runio.publish_guard`) around the swap, while
+> `serve_curation` reads (`/api/run` **and** run-dir file requests) under the matching
+> *shared* read lock (`runio.read_guard`). So a webview serving that same run dir
+> concurrently always sees a **complete old-or-new snapshot** —
 > never a half-published (old/new-mixed or missing-file) state, and never a transient
 > `HTTP 500`. The reader blocks only for the brief swap. The rwlock is a sidecar (beside
 > the run dir), so it survives content swaps and is never itself published; it degrades to

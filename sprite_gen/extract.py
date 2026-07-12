@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import shutil
 import sys
 from pathlib import Path
 from statistics import median
@@ -13,7 +14,7 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, relative_posix
+from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, publish_guard, relative_posix
 from sprite_gen.segment import separate_fused_poses
 
 
@@ -1715,6 +1716,27 @@ def _namespace_from_kwargs(**kwargs: object) -> argparse.Namespace:
         names = ", ".join(sorted(remaining))
         raise TypeError(f"unexpected keyword argument(s): {names}")
     return argparse.Namespace(**values)
+def _publish_frames(run_dir: Path, staging: Path, final: Path) -> None:
+    """Swap the freshly-built staging frames dir into `frames/` as one generation, holding
+    the run dir's exclusive publish_guard so a concurrent curation reader (read_guard) blocks
+    for the brief swap and never observes a mix of old/new frame generations. On an I/O
+    failure the prior frames are restored (Atomicity). Writer-writer exclusion stays the
+    separate `.sprite-gen.lock` held across the whole extract."""
+    backup = run_dir / ".frames.sg-backup"
+    with publish_guard(run_dir):
+        if backup.exists():
+            shutil.rmtree(backup)
+        if final.exists():
+            final.rename(backup)
+        try:
+            staging.rename(final)
+        except OSError:
+            if backup.exists() and not final.exists():
+                backup.rename(final)          # rollback: restore the prior frames byte-intact
+            raise
+    shutil.rmtree(backup, ignore_errors=True)
+
+
 def _run(args: argparse.Namespace):
     if args.fringe_key_threshold < args.key_threshold:
         raise SystemExit("--fringe-key-threshold must be greater than or equal to --key-threshold")
@@ -1766,7 +1788,16 @@ def _run(args: argparse.Namespace):
     cell_width, cell_height, safe_margin_x, safe_margin_y = cell_geometry(request["cell"])
     fit_config = request.get("fit") or {}
     chroma_key = tuple(int(value) for value in request["chroma_key"]["rgb"])
-    frames_root = run_dir / "frames"
+    # Build the new frames in a staging dir, then swap it into place as one generation under
+    # publish_guard (below). Extract rewrites many frame files; without this, a live curation
+    # reader (serve_curation read_guard) would observe a mix of old/new frame generations
+    # mid-extract. The manifest records the FINAL `frames/<state>/...` paths regardless of the
+    # staging write location. Writer-writer exclusion stays the separate `.sprite-gen.lock`.
+    frames_final = run_dir / "frames"
+    frames_root = run_dir / ".frames.sg-staging"
+    if frames_root.exists():
+        shutil.rmtree(frames_root)
+    frames_root.mkdir(parents=True)
     rows = []
     all_errors: list[str] = []
     all_warnings: list[str] = []
@@ -1797,7 +1828,7 @@ def _run(args: argparse.Namespace):
         for index, frame in enumerate(frames):
             output = state_dir / f"frame-{index}.png"
             atomic_save_image(frame, output)
-            output_paths.append(relative_posix(output, run_dir))
+            output_paths.append(f"frames/{state}/frame-{index}.png")  # final location (staging is swapped in)
         # 픽셀퍼펙트 전 원본 변형(.plain.png) — curation.json `pixel_perfect: false`
         # 굽기(compose)가 이 셀 크기 쌍둥이를 읽는다. 아틀라스 슬롯 = 셀 크기라 여긴
         # 셀 해상도로 유지한다 (compose_atlas 가 정확히 셀 크기를 요구, 기하 불변).
@@ -1806,7 +1837,7 @@ def _run(args: argparse.Namespace):
             for index, frame in enumerate(plain_frames):
                 output = state_dir / f"frame-{index}.plain.png"
                 atomic_save_image(frame, output)
-                plain_paths.append(relative_posix(output, run_dir))
+                plain_paths.append(f"frames/{state}/frame-{index}.plain.png")
         # 원본 화질 표시용 고해상 쌍둥이 — 큐레이션뷰 pp 해제 토글이 읽는다. 셀 크기
         # .plain.png 는 확대 시 흐리므로 별도 서브폴더(orig/)에 S×셀로 굽는다. 서브폴더라
         # frame-*.png glob 소비자(inspect/measure/compose)와 충돌하지 않고 순수 표시용이다.
@@ -1817,7 +1848,7 @@ def _run(args: argparse.Namespace):
             for index, frame in enumerate(orig_frames):
                 output = orig_dir / f"frame-{index}.png"
                 atomic_save_image(frame, output)
-                orig_paths.append(relative_posix(output, run_dir))
+                orig_paths.append(f"frames/{state}/orig/frame-{index}.png")
 
         errors, warnings, frame_records = inspect_frames(frames, chroma_key, args)
         all_errors.extend(f"{state}: {error}" for error in errors)
@@ -2023,6 +2054,7 @@ def _run(args: argparse.Namespace):
         "warnings": all_warnings,
     }
     atomic_write_text(frames_root / "frames-manifest.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    _publish_frames(run_dir, frames_root, frames_final)   # atomic generation swap under publish_guard
     print(json.dumps({k: v for k, v in result.items() if k != "rows"}, ensure_ascii=False, indent=2))
     return 0 if result["ok"] else 1
 
