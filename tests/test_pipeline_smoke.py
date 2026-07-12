@@ -81,3 +81,34 @@ def test_extract_then_compose_bakes_atlas(fixture_run_dir: Path) -> None:
                 "w": cell["width"],
                 "h": cell["height"],
             }
+
+
+def test_subset_reextract_preserves_other_states(fixture_run_dir: Path) -> None:
+    """A subset `--states` re-extract (auto-correction / single-row regeneration) preserves the
+    frames AND manifest rows of the states it does not rebuild, so a later compose still finds
+    every state (SSoT/Idempotency: a single-row re-extract must not delete other states)."""
+    import hashlib
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    states = sorted(json.loads((run / "sprite-request.json").read_text())["states"])
+    assert len(states) >= 2
+    target, others = states[0], states[1:]
+
+    before = {}
+    for state in others:
+        for frame in sorted((run / "frames" / state).glob("frame-*.png")):
+            if not frame.name.endswith(".plain.png"):
+                before[str(frame.relative_to(run))] = hashlib.sha256(frame.read_bytes()).hexdigest()
+    assert before
+
+    r = run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", target)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    for rel, digest in before.items():                       # non-target frame bytes preserved
+        assert (run / rel).is_file(), f"{rel} deleted by subset re-extract"
+        assert hashlib.sha256((run / rel).read_bytes()).hexdigest() == digest
+    manifest = json.loads((run / "frames" / "frames-manifest.json").read_text())
+    assert sorted(row["state"] for row in manifest["rows"]) == states  # manifest keeps all rows
+    compose = run_script("compose_sprite_atlas.py", "--run-dir", str(run))
+    assert compose.returncode == 0, compose.stdout + compose.stderr  # was exit 1 before the fix
