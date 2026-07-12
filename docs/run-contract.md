@@ -26,7 +26,7 @@ canonical files, not hidden imports.
 |---|---|---|---|
 | Prepare | `prepare_sprite_run.py` | base image + request flags/JSON | `sprite-request.json`, per-state layout guide, per-state prompt, empty `raw/`+`frames/` |
 | Generate | `sprite-gen gen` (`generate_sprite_image.py`) | `prompts/<state>.txt` + refs | verified `raw/<state>.png` strip + audit raw/report |
-| Extract | `extract_sprite_row_frames.py` | `raw/<state>.png` | `frames/<state>/frame-N.png` (+ `.plain.png` twin on pixel-perfect runs), `frames/frames-manifest.json` |
+| Extract | `extract_sprite_row_frames.py` | `raw/<state>.png` | on success: `frames/<state>/frame-N.png` (+ `.plain.png` twin on pixel-perfect runs), `frames/frames-manifest.json`; on failure: nothing in `frames/`, `extract-failure.json` instead (§6) |
 | Curate (opt) | `serve_curation.py` + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
 | QA | `preview_animation.py` | `frames/` | `qa/<state>-contact.png`, `qa/<state>.gif` |
@@ -62,7 +62,8 @@ not restate it elsewhere; point here.
   frames/<state>/frame-N.png         # extracted transparent cells (canonical)
   frames/<state>/frame-N.plain.png   # pixel-perfect runs only: cell-sized pre-pixel-perfect twin, baked by compose on pixel_perfect:false (§3)
   frames/<state>/orig/frame-N.png    # pixel-perfect runs only: hi-res original twin (display-only), drives the pp-off toggle at original quality (§3)
-  frames/frames-manifest.json        # per-row extract report (files, labels, ok)
+  frames/frames-manifest.json        # per-row extract report (files, labels, ok) — only ever a COMPLETE ok generation (§6)
+  extract-failure.json               # only after a FAILED extract: per-state ok:false diagnostics, OUTSIDE frames/ (§6); removed on the next success
   curation.json                      # optional, non-destructive sidecar (selected/order/transforms/pixel_perfect)
   sprite-sheet-alpha.png             # composed runtime atlas
   sprite-sheet-alpha.report.json     # compose report
@@ -270,25 +271,34 @@ Verified end-to-end on three views — founder v6 (`base=yes refs=12/12 grid=yes
 founder v7 (`refs=36/36`, anchor/basis/guide chips across down/side/up), and a
 comprehensive `_base`+`_refs` import — plus a sourceless run that emits the warning.
 
-## 6. Known behavior — failed extract publishes an observable `ok:false` manifest
+## 6. Failed extract is atomic — no partial generation in `frames/`
 
-The frames publish is atomic across generations: a re-import or re-**extract** stages
-the new frames and swaps them into `frames/` under `publish_guard` only on success, and
-a failed **re-extract** leaves the prior complete generation byte-intact (§4). But a
-failed **first** extract (no prior generation to protect) *does* publish its `ok:false`
-`frames-manifest.json` — with per-state `errors` — plus any frames that succeeded. This
-is a deliberate, **contracted and observable** failure output, not a silent partial:
+Canonical `frames/` only ever holds a **complete** generation. A failed extract — the
+**first** extract on a fresh run *or* a re-extract — publishes **nothing** to `frames/`
+(strict whole-generation Atomicity: the operation fully succeeds or leaves canonical state
+untouched). A failed re-extract additionally leaves the prior complete generation
+byte-intact, and the frames publish stays reader-atomic under `publish_guard` (§4).
 
-- `manifest.ok` is `false` and the CLI exits `1`; `compose_atlas` refuses a non-ok
-  manifest (`compose_sprite_atlas.py`), so the partial never becomes an atlas.
-- The **automatic correction loop depends on it**: `inspect._manifest_state_notes` reads
-  `manifest.errors` per state to drive inspect → score → correction-hint → regeneration.
-  A strict "write nothing on failure" rollback would erase the *which state failed, and
-  why* signal and break error-driven regeneration.
+The per-state failure signal is **not** discarded — it is written **outside** `frames/` as
+`extract-failure.json` in the run-dir root, so it stays observable (No Silent Fallback) and
+still drives the automatic correction loop:
 
-Making a failed first extract publish *nothing* (strict whole-generation atomicity) is a
-tracked follow-up (`sprite-gen/extract-failed-generation-strict-atomicity`), gated on
-first migrating the correction loop off the failed-manifest signal.
+- `extract-failure.json` mirrors the failed attempt's result — `ok:false`, per-state
+  `errors`, `warnings`, and any rows that did succeed — and the CLI exits `1`.
+- The **automatic correction loop** consumes it: `inspect._manifest_state_notes` reads the
+  per-state `errors` from `extract-failure.json` (alongside the published
+  `frames/frames-manifest.json` row) to drive inspect → score → correction-hint →
+  regeneration. So error-driven regeneration keeps its *which state failed, and why* signal
+  even though `frames/` holds only complete generations.
+- A **successful** extract removes `extract-failure.json` — the failure is resolved, so a
+  stale signal never re-flags a now-good state (Consistency).
+- `compose_atlas` requires a complete generation: it fails loud if
+  `frames/frames-manifest.json` is absent (a failed extract published none) and refuses a
+  non-`ok` manifest, so a partial never becomes an atlas.
+
+The curation view tolerates a failed first extract with no `frames/`: `serve_curation`
+falls back to an empty row set and `curation.run_revision` treats the missing manifest as an
+empty fingerprint, so the view shows the run's request/state scaffold rather than erroring.
 
 ## Related
 

@@ -59,7 +59,13 @@ def _run(args: argparse.Namespace):
     run_dir = args.run_dir.expanduser().resolve()
     acquire_run_dir_lock(run_dir, "compose_sprite_atlas")
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
-    frames_manifest = json.loads((run_dir / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))
+    manifest_path = run_dir / "frames" / "frames-manifest.json"
+    if not manifest_path.is_file():
+        raise SystemExit(
+            "frames/frames-manifest.json not found; run a successful extract before composing "
+            "(a failed extract publishes no partial generation — see extract-failure.json)"
+        )
+    frames_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not frames_manifest.get("ok"):
         raise SystemExit("frames-manifest.json is not ok; fix extraction before composing atlas")
 
