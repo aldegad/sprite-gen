@@ -373,22 +373,26 @@ boundary of the run-dir's atomicity and concurrency guarantees. What is **in for
   re-entry is intentionally allowed so one interpreter can run prepare → extract → compose in
   sequence.
 
-What is **deferred** (tracked in `sprite-gen/run-dir-durability-concurrency-hardening`) — not
-claimed here:
+What is **intentionally out of scope** for this local, single-user, re-runnable tool — and so
+not claimed here (a decision, not a deferral: 수홍 2026-07-12):
 
 - **Process-kill durability.** A hard `SIGKILL` *between* the commit's rename steps can leave a
-  new generation beside a stale `extract-failure.json` plus an orphan `.sg-backup`. In-process
-  rollback does not cover a killed process; there is **no journal / self-heal replay** yet. A
-  leftover `.sg-backup` / `.sg-staging` after a crash is reconciled only by the next extract's
-  cleanup, not by a recovery protocol.
+  new generation beside a stale `extract-failure.json` plus an orphan `.sg-backup`. This is **not
+  silent corruption**: the consistency gate (§6) catches the mixed state and fails loud, and a
+  re-run fixes it (the next extract's cleanup reconciles the leftover `.sg-backup` / `.sg-staging`).
+  A journal / self-heal replay protocol would auto-heal it instead, but that is database-grade
+  durability that a local sprite-curation tool does not need — observable-fail-loud + re-run is
+  the deliberate design. In-process rollback (above) still covers every raised-exception case.
 - **Thread-level write isolation.** `.sprite-gen.lock` re-entry is keyed per process, not per
-  thread, so a multi-threaded host that drove two concurrent writers against the **same** run
-  dir in one process would not be serialized. This is out of the single-worker model above; a
-  thread-aware per-run mutex is deferred.
+  thread. This is a **non-scenario** under the pipeline's one-worker-owns-one-folder rule (§2,
+  SKILL.md): concurrent writers on the same run dir are already excluded, and same-process
+  re-entry is the *intended* path for one interpreter to run prepare → extract → compose in
+  sequence. A thread-aware per-run mutex would only matter for a multi-threaded server host, which
+  is not this tool.
 
-These two are genuine but are a separate durability/concurrency hardening effort, not the view
-contract this doc owns; §4/§6's atomicity claims are scoped to the in-process cases above and do
-not contradict this boundary.
+Both are deliberate boundaries, not TODOs; §4/§6's atomicity claims are scoped to the in-process
+cases above and do not contradict this. If sprite-gen is ever re-homed as a multi-user or server
+service, revisit both here.
 
 ## Related
 
