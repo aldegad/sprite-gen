@@ -1802,9 +1802,15 @@ def _require_generation_consistency(run_dir: Path, manifest: dict, name: str) ->
     if dupes:
         raise SystemExit(f"corrupt {name} {run_dir}: duplicate manifest rows for state(s) {dupes}")
     row_state_set = set(row_states)
+    # request states and manifest row states must match EXACTLY, both directions: a missing row is
+    # an incomplete generation, an extra row is a stale/unknown state some consumers would render
+    # while serve (request-driven) hides it — a per-consumer divergence.
     missing = sorted(request_states - row_state_set)
     if missing:
         raise SystemExit(f"corrupt {name} {run_dir}: manifest missing row(s) for request state(s) {missing} — incomplete generation")
+    unknown = sorted(row_state_set - request_states)
+    if unknown:
+        raise SystemExit(f"corrupt {name} {run_dir}: manifest has row(s) for state(s) {unknown} not in the request (stale/unknown state)")
     physical_states = {d.name for d in frames_root.iterdir() if d.is_dir()} if frames_root.is_dir() else set()
     orphan = sorted(physical_states - row_state_set)
     if orphan:
