@@ -104,6 +104,13 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
 }
 ```
 
+- `run_revision` — top-level, stamped at write by `curation.run_revision`: the frame
+  generation (a fingerprint of the request + frames-manifest + each frame's name/size/mtime)
+  this curation was made for. `load_curation` compares it to the current run and **ignores a
+  stale sidecar** (all-frames default, warned on stderr) if the frames were later regenerated
+  by a `--force` re-import or a re-extract — so old selections/transforms never apply to new
+  frames. The `POST /api/curation` autosave echoes it as `runRevision` and the server rejects
+  a mismatched write (`HTTP 409`). See [`run-contract.md`](run-contract.md) §4.
 - `pixel_perfect` — top-level, 웹뷰 우측 상단 체크박스. `false` → compose/export 가 적용 전 쌍둥이(`frame-N.plain.png`)를 굽는다. 없거나 `true` → canonical `frame-N.png`. plain 쌍둥이가 없는 런에서는 무의미(비 pixel_perfect fit). 상세는 [`pixel-perfect.md`](pixel-perfect.md).
 - `selected` — 0-based frame indices in play order. Absent/empty → all extracted frames in order.
 - `order` — optional, webview-owned: the full display order (sequence row then candidate-pool row) so reopening the curator restores the exact arrangement of both rows. `compose` / `state_plan` ignore it and key off `selected`.

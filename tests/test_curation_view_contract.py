@@ -366,3 +366,34 @@ def test_stale_curation_post_rejected_across_run_generations(tmp_path):
         assert (out / "curation.json").is_file()
     finally:
         srv.shutdown()
+
+
+def test_stored_curation_ignored_after_frame_regeneration(tmp_path):
+    """A saved curation.json is ignored once the frames are regenerated under it (re-extract
+    or re-import): load_curation returns None, so the server, compose, and export all fall
+    back to the all-frames default — stale selections/transforms never apply to new frames.
+    This is the single load_curation gate every consumer passes through."""
+    import time
+
+    from serve_curation import build_run_state, write_curation_atomic
+    from sprite_gen import curation as cur
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    _png(pngs / "items" / "2-b.png")
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+
+    # save a curation stamped for the current generation (a selection + a transform)
+    write_curation_atomic(out, {"version": 1, "kind": "sprite-gen-curation",
+                                "states": {"items": {"selected": [1], "transforms": {"1": {"dx": 9}}}}})
+    assert cur.load_curation(out) is not None            # applies now (same generation)
+    rev_before = cur.run_revision(out)
+
+    time.sleep(0.01)
+    _png(out / "frames" / "items" / "frame-0.png", color=(1, 2, 3, 255))  # a re-extract-style frame rewrite
+    assert cur.run_revision(out) != rev_before          # the run generation changed
+
+    assert cur.load_curation(out) is None                # stale sidecar ignored at the single gate
+    st = build_run_state(out)
+    assert st["curation"]["states"] == {}                # server serves no stale curation

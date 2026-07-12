@@ -17,6 +17,12 @@ Schema (`curation.json`):
     {
       "version": 1,
       "kind": "sprite-gen-curation",
+      "run_revision": "9f3c1a0b7e2d4c58",    # stamped at write = the frame generation this
+                                              #   curation was made for. If the frames are
+                                              #   later regenerated (re-import/re-extract),
+                                              #   load_curation detects the mismatch and
+                                              #   ignores this sidecar (all-frames default)
+                                              #   so stale edits never apply to new frames.
       "pixel_perfect": true,                 # optional; false -> compose reads the
                                               #   frame-N.plain.png variant (pre-
                                               #   pixel-perfect). absent/true -> the
@@ -54,8 +60,10 @@ Defaults when absent (explicit, not a silent fallback):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -103,14 +111,50 @@ def frame_filename(index: int, variant: str = "pixel") -> str:
     return f"frame-{index}.png"
 
 
+def run_revision(run_dir: Path) -> str:
+    """Frame-content fingerprint of the run's current generation: the request + frames
+    manifest bytes plus each canonical frame file's name/size/mtime. It changes whenever
+    the frames are (re)written (`--force` re-import, re-extract), so a curation sidecar
+    stamped for a prior generation is detected as stale. Single source of run identity for
+    the server, compose, export, and the webview."""
+    h = hashlib.sha256()
+    for name in ("sprite-request.json", "frames/frames-manifest.json"):
+        try:
+            h.update((run_dir / name).read_bytes())
+        except OSError:
+            h.update(b"\0")
+    frames_root = run_dir / "frames"
+    if frames_root.is_dir():
+        for state_dir in sorted(d for d in frames_root.iterdir() if d.is_dir()):
+            for frame in sorted(state_dir.glob("frame-*.png")):
+                if frame.name.endswith(".plain.png"):
+                    continue
+                try:
+                    st = frame.stat()
+                    h.update(f"{state_dir.name}/{frame.name}:{st.st_size}:{st.st_mtime_ns}".encode())
+                except OSError:
+                    pass
+    return h.hexdigest()[:16]
+
+
 def load_curation(run_dir: Path) -> dict[str, Any] | None:
-    """Return the parsed sidecar, or None when there is no curation.json."""
+    """Return the parsed sidecar, or None when there is no curation.json OR when the stored
+    curation is **stale** — its `run_revision` stamp no longer matches the current frame
+    generation (a re-import/re-extract regenerated the frames under it). A stale sidecar is
+    ignored (the all-frames identity default) rather than silently applied to frames it was
+    not made for; the skip is reported on stderr (observable, not a silent fallback). This is
+    the single gate every consumer (server, compose, export, GIF) passes through."""
     path = curation_path(run_dir)
     if not path.is_file():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("kind") != "sprite-gen-curation":
         raise SystemExit(f"{path} is not a sprite-gen-curation file")
+    stamped = data.get("run_revision")
+    if stamped is not None and stamped != run_revision(run_dir):
+        print(f"[curation] ignoring stale {CURATION_FILENAME} (run_revision {stamped} != current "
+              f"frame generation — frames were regenerated under it): {run_dir}", file=sys.stderr)
+        return None
     return data
 
 

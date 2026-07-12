@@ -27,7 +27,6 @@ API:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import subprocess
@@ -44,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
-from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported_ref_role, load_curation
+from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported_ref_role, load_curation, run_revision
 from runio import publish_guard, read_guard
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -174,32 +173,6 @@ def _state_refs(run_dir, state):
     return refs
 
 
-def _run_revision(run_dir: Path) -> str:
-    """A content fingerprint identifying the current run generation. It changes whenever
-    the frames are (re)written — a `--force` re-import (even one that keeps the same state
-    names but swaps the candidate images) or a re-extract — so a curation autosave carrying
-    a prior revision is detected as stale and rejected, and old-session selections/transforms
-    never apply to new images (run identity, not just state membership)."""
-    h = hashlib.sha256()
-    for name in ("sprite-request.json", "frames/frames-manifest.json"):
-        try:
-            h.update((run_dir / name).read_bytes())
-        except OSError:
-            h.update(b"\0")
-    frames_root = run_dir / "frames"
-    if frames_root.is_dir():
-        for state_dir in sorted(d for d in frames_root.iterdir() if d.is_dir()):
-            for fp in sorted(state_dir.glob("frame-*.png")):
-                if fp.name.endswith(".plain.png"):
-                    continue
-                try:
-                    st = fp.stat()
-                    h.update(f"{state_dir.name}/{fp.name}:{st.st_size}:{st.st_mtime_ns}".encode())
-                except OSError:
-                    pass
-    return h.hexdigest()[:16]
-
-
 def build_run_state(run_dir: Path) -> dict:
     """Assemble the run snapshot the SPA needs. Read under the run dir's shared read_guard
     so a concurrent `--force` re-import (which holds the exclusive publish_guard for its
@@ -319,7 +292,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         "cell": cell_state,
         "pixelPerfect": pixel_perfect if pixel_perfect is not None else ({"source": "auto", "label": "auto", "scale": None} if any(st.get("pixelScale") for st in states) else None),
         "schemaVersion": SCHEMA_VERSION,
-        "runRevision": _run_revision(run_dir),
+        "runRevision": run_revision(run_dir),
         "states": states,
         "curation": curation,
         "iso": request.get("iso"),
@@ -331,9 +304,14 @@ def _build_run_state_impl(run_dir: Path) -> dict:
 
 
 def write_curation_atomic(run_dir: Path, payload: dict) -> None:
-    """Atomically replace curation.json (temp file in the same dir + os.replace)."""
+    """Atomically replace curation.json (temp file in the same dir + os.replace). Stamps the
+    sidecar with the current run generation (`run_revision`) so a later re-import/re-extract
+    that regenerates the frames makes this curation detectably stale (load_curation ignores
+    it). `runRevision` is a transport-only echo field and is not stored."""
     if payload.get("kind") != "sprite-gen-curation":
         raise ValueError("payload is not a sprite-gen-curation document")
+    payload = {k: v for k, v in payload.items() if k != "runRevision"}
+    payload["run_revision"] = run_revision(run_dir)
     target = run_dir / CURATION_FILENAME
     text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     fd, tmp_name = tempfile.mkstemp(dir=str(run_dir), prefix=".curation-", suffix=".tmp")
@@ -496,7 +474,7 @@ class CurationHandler(BaseHTTPRequestHandler):
                     # names but swapping the candidate images — old selections/transforms
                     # must not apply to the new frames (Consistency: observable 409, not a
                     # silent overwrite). runRevision is a content fingerprint of the frames.
-                    stale = payload.get("runRevision") != _run_revision(self.run_dir)
+                    stale = payload.get("runRevision") != run_revision(self.run_dir)
                     if not stale:
                         write_curation_atomic(self.run_dir, payload)
                 if stale:
