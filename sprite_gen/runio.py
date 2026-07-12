@@ -23,6 +23,7 @@ by design; the lock guards pipeline outputs, not human edit sessions.
 from __future__ import annotations
 
 import atexit
+import contextlib
 import json
 import os
 import tempfile
@@ -31,7 +32,16 @@ from pathlib import Path, PurePath
 
 from PIL import Image
 
+try:  # Unix advisory locks; on a platform without fcntl the guards no-op (best-effort).
+    import fcntl
+except ImportError:  # pragma: no cover - non-Unix
+    fcntl = None
+
 LOCK_FILENAME = ".sprite-gen.lock"
+# Sidecar (beside the run dir) reader/writer coordination lock for the publish swap.
+# It lives outside the run dir so it survives content swaps and is never itself
+# published; a run dir named `foo` uses `.foo.sg-rwlock` in the parent.
+RWLOCK_SUFFIX = ".sg-rwlock"
 # reclaim threshold for locks whose holder pid cannot be verified
 # (unreadable lock file, or a writer on another host of a shared volume)
 STALE_LOCK_SECONDS = 15 * 60
@@ -124,6 +134,55 @@ def acquire_run_dir_lock(run_dir: Path, owner: str) -> Path:
 
     atexit.register(_release)
     return lock_path
+
+
+def _rwlock_path(run_dir: Path) -> Path:
+    run_dir = Path(run_dir).resolve()
+    return run_dir.parent / f".{run_dir.name}{RWLOCK_SUFFIX}"
+
+
+@contextlib.contextmanager
+def read_guard(run_dir: Path):
+    """Shared (reader) lock on the run dir's publish rwlock. While a publish holds the
+    exclusive lock for its content swap, a reader inside this guard blocks — so it never
+    observes a half-published run (no old/new file mix, no missing file). Advisory
+    cross-process flock; a no-op if fcntl is unavailable or the sidecar can't be created
+    (best-effort — reader isolation degrades gracefully, serving never hard-fails)."""
+    if fcntl is None:
+        yield
+        return
+    try:
+        fd = os.open(_rwlock_path(run_dir), os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError:
+        yield
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def publish_guard(run_dir: Path):
+    """Exclusive (writer) lock on the run dir's publish rwlock — held only around the
+    content swap so concurrent readers block briefly and never see a partial publish.
+    Same sidecar file as read_guard. A no-op if fcntl is unavailable."""
+    if fcntl is None:
+        yield
+        return
+    fd = os.open(_rwlock_path(run_dir), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def _atomic_replace(target: Path, write_payload) -> None:

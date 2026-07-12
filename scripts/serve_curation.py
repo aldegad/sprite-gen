@@ -44,6 +44,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
 from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported_ref_role, load_curation
+from runio import read_guard
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 CURATOR_DIR = SCRIPTS_DIR / "curator"
@@ -173,6 +174,15 @@ def _state_refs(run_dir, state):
 
 
 def build_run_state(run_dir: Path) -> dict:
+    """Assemble the run snapshot the SPA needs. Read under the run dir's shared read_guard
+    so a concurrent `--force` re-import (which holds the exclusive publish_guard for its
+    swap) can never expose a half-published state to `/api/run` — the reader sees either
+    the complete prior run or the complete new run (reader isolation)."""
+    with read_guard(run_dir):
+        return _build_run_state_impl(run_dir)
+
+
+def _build_run_state_impl(run_dir: Path) -> dict:
     """Assemble the run snapshot the SPA needs, from the canonical SSoT files."""
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     frames_manifest_path = run_dir / "frames" / "frames-manifest.json"
@@ -421,7 +431,10 @@ class CurationHandler(BaseHTTPRequestHandler):
             if resolved is None:
                 self._send_json({"error": "path escapes run dir"}, 403)
                 return
-            self._send_file(resolved)
+            # read_guard: serve run-dir files under the shared reader lock so a concurrent
+            # publish swap can't 404 a file mid-move (reader isolation, same as /api/run).
+            with read_guard(self.run_dir):
+                self._send_file(resolved)
             return
         # bare static asset (curator.js / curator.css served from /)
         asset = self._safe_path(CURATOR_DIR, path.lstrip("/"))
