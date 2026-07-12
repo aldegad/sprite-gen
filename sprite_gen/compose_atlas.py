@@ -11,6 +11,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
+from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
 
 
@@ -59,15 +60,7 @@ def _run(args: argparse.Namespace):
     run_dir = args.run_dir.expanduser().resolve()
     acquire_run_dir_lock(run_dir, "compose_sprite_atlas")
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
-    manifest_path = run_dir / "frames" / "frames-manifest.json"
-    if not manifest_path.is_file():
-        raise SystemExit(
-            "frames/frames-manifest.json not found; run a successful extract before composing "
-            "(a failed extract publishes no partial generation — see extract-failure.json)"
-        )
-    frames_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if not frames_manifest.get("ok"):
-        raise SystemExit("frames-manifest.json is not ok; fix extraction before composing atlas")
+    frames_manifest = require_frames_manifest(run_dir)  # fail loud if absent/corrupt/not-ok
 
     states = list(request["states"])
     cell_width, cell_height = cell_geometry(request["cell"])

@@ -310,6 +310,22 @@ def test_api_run_reader_isolated_from_concurrent_publish(tmp_path):
     assert outcome["at"] >= released_at, "reader returned before the publish released"
 
 
+def test_serve_run_state_scaffolds_absent_but_fails_loud_on_broken_manifest(fixture_run_dir):
+    """serve build_run_state serves the request/state scaffold when the manifest is ABSENT (a run
+    with no generation yet — legitimate), but a present-but-broken `{}` manifest fails loud
+    (surfaces as HTTP 500 in do_GET), never a silent empty-rows view (No Silent Fallback)."""
+    from conftest import run_script
+
+    run = fixture_run_dir
+    st = build_run_state(run)                     # absent manifest -> scaffold from request states
+    assert st["states"], "scaffold should list the run's states even before extraction"
+
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "frames" / "frames-manifest.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(SystemExit):               # present-but-broken -> fail loud (do_GET -> 500)
+        build_run_state(run)
+
+
 def test_inspect_reader_isolated_from_concurrent_commit(fixture_run_dir):
     """inspect_run reads frames-manifest.json + extract-failure.json together under read_guard,
     so it blocks while an extract commit holds the exclusive publish_guard and never observes a

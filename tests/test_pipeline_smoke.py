@@ -275,6 +275,8 @@ _BROKEN_EVIDENCE = [
     '{"ok": true, "errors": ["idle: x"], "warnings": [], "rows": []}',  # wrong ok (must be false)
     '{"ok": false, "errors": [], "warnings": [], "rows": []}',       # empty errors
     '{"ok": false, "warnings": [], "rows": []}',                     # missing errors
+    '{"ok": false, "errors": [null], "warnings": [], "rows": []}',   # null error entry (would be silently dropped)
+    '{"ok": false, "errors": ["no state prefix"], "warnings": [], "rows": []}',  # not state-scoped
 ]
 
 
@@ -342,3 +344,37 @@ def test_inspect_fails_loud_on_broken_frames_manifest(fixture_run_dir: Path) -> 
     r = run_script("inspect_sprite_run.py", "--run-dir", str(run), "--no-write")
     assert r.returncode != 0, "inspect silently accepted a broken frames manifest"
     assert "frames manifest" in (r.stdout + r.stderr).lower()
+
+
+@pytest.mark.parametrize("script,extra", [
+    ("compose_sprite_atlas.py", []),
+    ("export_curated_pngs.py", []),
+    ("preview_animation.py", []),
+    ("compose_sprite_gif.py", []),
+    ("compose_selected_cycle.py", ["--state", "walk", "--name", "cyc"]),
+])
+def test_finished_generation_consumers_fail_loud_on_broken_manifest(fixture_run_dir: Path, script, extra) -> None:
+    """Every consumer of a completed generation validates the manifest before producing output.
+    A `{}`-broken manifest must fail loud — never yield stale/empty output from unvalidated
+    physical frames (No Silent Fallback / Consistency)."""
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "frames" / "frames-manifest.json").write_text("{}", encoding="utf-8")
+
+    r = run_script(script, "--run-dir", str(run), *extra)
+    assert r.returncode != 0, f"{script} silently accepted a broken manifest"
+    assert "frames manifest" in (r.stdout + r.stderr).lower()
+
+
+def test_require_frames_manifest_distinguishes_absent_from_broken(tmp_path: Path) -> None:
+    """The shared finished-generation gate: {} for a genuinely absent manifest, but fail loud for
+    a present-but-broken one (absent-vs-broken, No Silent Fallback)."""
+    from sprite_gen.extract import require_frames_manifest
+
+    run = tmp_path / "run"
+    (run / "frames").mkdir(parents=True)
+    with pytest.raises(SystemExit):                       # absent -> no finished generation
+        require_frames_manifest(run)
+    (run / "frames" / "frames-manifest.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(SystemExit):                       # present-but-broken -> fail loud
+        require_frames_manifest(run)
