@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw
 
 from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
 from sprite_gen.extract import require_frames_manifest
+from sprite_gen.runio import read_guard
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, gif_report, save_clean_gif
 
 
@@ -95,6 +96,13 @@ def run_dir_mode(args: argparse.Namespace) -> int:
     desktop app call so they never reimplement frame selection.
     """
     run_dir = args.run_dir.expanduser().resolve()
+    # Reader isolation: read manifest + request + curation + frame tree under one shared read_guard
+    # so a concurrent publish swap never yields a mid-swap/partial read (runio.read_guard ↔ publish_guard).
+    with read_guard(run_dir):
+        return _run_dir_mode_guarded(args, run_dir)
+
+
+def _run_dir_mode_guarded(args, run_dir):
     require_frames_manifest(run_dir)  # fail loud if this generation's manifest is absent/corrupt
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     cell = request.get("cell", {})

@@ -19,7 +19,7 @@ from PIL import Image, ImageDraw
 from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, save_clean_gif
-from sprite_gen.runio import relative_posix
+from sprite_gen.runio import read_guard, relative_posix
 
 
 def sha256(path: Path) -> str:
@@ -122,6 +122,13 @@ def _namespace_from_kwargs(**kwargs: object) -> argparse.Namespace:
 def _run(args: argparse.Namespace):
 
     run_dir = args.run_dir.expanduser().resolve()
+    # Reader isolation: read manifest + request + curation + frames under one shared read_guard so
+    # a concurrent publish swap never yields a mid-swap/partial read (runio.read_guard ↔ publish_guard).
+    with read_guard(run_dir):
+        return _run_guarded(args, run_dir)
+
+
+def _run_guarded(args, run_dir):
     require_frames_manifest(run_dir)  # fail loud if this generation's manifest is absent/corrupt
     qa_dir = run_dir / "qa"
     qa_dir.mkdir(parents=True, exist_ok=True)
