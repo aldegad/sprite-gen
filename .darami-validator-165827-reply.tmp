@@ -1,0 +1,27 @@
+route_key: validator-1f28e583857781dab6a7
+validator-reject
+
+mode: blast-radius 전체검수 (P2 same-engine-different-member fallback) - pipeline/run-dir 계약과 extract 세대 publish, reader/writer isolation, curation revision, 전체 소비자와 테스트를 독립 재검증했다. registry 기준 worker=jetbi/codex, validator=darami/codex 경고를 관측했다.
+
+재현 가능한 종료 차단 finding:
+
+1. 실패한 최초 extract가 partial frames generation을 canonical `frames/`에 게시한다 (Atomicity/Consistency 위반).
+   - 재현: `tests/fixtures/run` 복사본에서 기존 `frames/frames-manifest.json`이 없는 상태로 `raw/idle.png`를 제거하고 `extract_sprite_row_frames.py --run-dir <run>`을 실행했다.
+   - 실제: rc=1인데도 `frames/frames-manifest.json`과 성공한 `frames/walk/frame-{0,1,2}.png`가 게시됐다. manifest는 `ok:false`, rows는 walk만 포함했고, compose는 rc=1이었다.
+   - 원인: `sprite_gen/extract.py`는 `had_prior_generation`을 manifest 파일 존재 여부로만 잡고, `result["ok"]`가 false여도 prior manifest가 없으면 `_publish_frames(...)`를 호출한다. 실패 operation이 일부 state만 담긴 세대를 canonical 위치에 노출한다.
+   - 기대: 최초 extract도 성공한 complete generation만 publish해야 한다. 실패 시 staging을 폐기하고 stdout/별도 실패 evidence로 fail-loud해야 하며, `first extract -> one state failure -> frames canonical generation 미게시` 회귀테스트가 필요하다. 최신 73f182b의 실패한 재추출 보존은 통과했지만 최초 실패 경로는 남아 있다.
+
+2. reader isolation이 `fcntl` 비가용/lock-open 실패에서 관측 없이 no-op으로 바뀐다 (No Silent Fallback/Consistency 위반).
+   - 코드: `sprite_gen/runio.py::read_guard`는 `fcntl is None` 또는 sidecar open `OSError`에서 경고/오류 없이 yield하고, `publish_guard`도 `fcntl is None`이면 no-op이다. 같은 파일과 `docs/run-contract.md`는 이를 no-op degradation으로 명시하면서도 바로 앞에서 webview가 "always" complete old-or-new snapshot을 본다고 보장해 계약이 모순된다.
+   - 독립 재현: `runio.fcntl=None`으로 만든 뒤 한 `read_guard` 안에서 generation을 읽고 `_publish_frames`를 병렬 실행했다. 같은 guard 안의 두 읽기가 `('old', 'new')`로 갈라졌다. 즉 named isolation strategy가 실제로 사라져도 runtime에서 관측되지 않는다.
+   - 기대: 지원하지 않는 플랫폼/sidecar 생성 실패는 fail-loud하거나, 명시적이고 관측 가능한 failover가 동일한 snapshot 계약을 제공해야 한다. 최소한 silent no-op은 허용할 수 없다.
+
+통과 evidence:
+- `.venv/bin/pytest -q` -> 148 passed in 38.56s.
+- `python3 -m py_compile sprite_gen/*.py scripts/*.py tests/*.py`, `node --check scripts/curator/curator.js`, `git diff --check` 통과.
+- `kuma plan lint --strict sprite-gen/pipeline-run-contract-standardization` 통과, P2 warning 관측.
+- 최신 73f182b의 `failed subset re-extract -> prior frames/manifest byte-intact -> compose success` 회귀는 통과했다.
+
+diff 밖에서 본 범위: `docs/run-contract.md`, `docs/architecture.md`, `SKILL.md`, `sprite_gen/extract.py`, `runio.py`, `curation.py`, `unpack_atlas.py`, `scripts/serve_curation.py`, compose/GIF/cycle/export/inspect/measure 소비자와 전체 tests.
+
+evidence refs: commit 73f182b; `sprite_gen/extract.py` `_run` publish decision; `sprite_gen/runio.py` `read_guard`/`publish_guard`; `docs/run-contract.md` section 4; `/tmp/sprite-gen-first-fail.OOdgXm`; plan `sprite-gen/pipeline-run-contract-standardization`.

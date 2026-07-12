@@ -310,6 +310,23 @@ def test_api_run_reader_isolated_from_concurrent_publish(tmp_path):
     assert outcome["at"] >= released_at, "reader returned before the publish released"
 
 
+def test_publish_guards_fail_loud_without_fcntl(tmp_path, monkeypatch):
+    """Where advisory locks can't be established (no fcntl), read_guard/publish_guard must
+    RAISE, not degrade to a no-op. A no-op guard is a failover that changes canonical truth
+    (a reader could see a half-published run), which the isolation contract forbids — so the
+    guarded code refuses to run rather than serve/publish a partial run."""
+    from sprite_gen import runio
+
+    run = tmp_path / "run"
+    run.mkdir()
+    monkeypatch.setattr(runio, "fcntl", None)
+
+    for guard in (runio.read_guard, runio.publish_guard):
+        with pytest.raises(runio.RWLockUnavailable):
+            with guard(run):
+                pass  # pragma: no cover - the guard must raise before yielding
+
+
 def test_stale_curation_post_rejected_across_run_generations(tmp_path):
     """A curation autosave must echo the runRevision it was loaded with. A `--force`
     re-import — even one keeping the SAME state name but swapping the candidate images —

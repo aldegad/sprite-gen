@@ -1,0 +1,25 @@
+route_key: validator-1f28e583857781dab6a7
+validator-reject
+
+mode: blast-radius 전체검수 - pipeline/run-dir 계약, importer/publisher, serve_curation GET/POST, curator payload, curation sidecar 소비자, 문서 SSoT를 전수 확인했다. P2 same-engine-different-member fallback이다(worker registry=jetbi/codex, validator=darami/codex; cross-engine unavailable).
+
+재현 가능한 종료 차단 결함 1건:
+
+- stale curation 판별이 state 이름 집합만 비교해서, 같은 state 이름으로 정상 재임포트된 새 run을 구분하지 못한다. scripts/serve_curation.py:464-469는 payload state가 현재 sprite-request.json에 존재하면 저장하고, scripts/curator/curator.js:169-188 payload에는 run revision/fingerprint가 없다. 따라서 동일한 `items` state를 유지하면서 후보 이미지만 교체한 `--force` 재임포트 뒤, 이전 웹뷰의 select/reorder/transform autosave가 새 이미지에 그대로 적용된다. docs/run-contract.md:237-241의 "stale autosave from a pre-re-import run can never mix into the new run" Consistency 계약을 깨며, Task Card의 웹뷰 전체 기능 blast-radius 안이다.
+
+독립 재현(.venv Python, old `items` 2프레임 -> new `items` 2프레임 재임포트 -> old-session payload POST):
+STALE_SAME_STATE_HTTP 200
+NEW_FRAME_LABELS ['frame-0.png', 'frame-1.png']
+STALE_SELECTION_PERSISTED [1]
+STALE_TRANSFORM_PERSISTED {'1': {'dx': 9}}
+
+즉 state membership은 session/run identity가 아니다. `/api/run`이 불변 run revision/fingerprint를 제공하고 curator POST가 이를 echo하여 publish lock 안에서 현재 revision과 비교해 불일치 시 HTTP 409로 fail-loud 하는 식의 세대 식별 계약과, 같은-state 재임포트 stale POST 회귀테스트가 필요하다.
+
+통과 증거:
+- `.venv/bin/pytest -q`: 143 passed in 37.79s
+- `.venv/bin/python -m py_compile sprite_gen/runio.py sprite_gen/unpack_atlas.py scripts/serve_curation.py sprite_gen/curation.py`: pass
+- `node --check scripts/curator/curator.js`: pass
+- `git diff --check`: pass
+- 기존 different-state stale POST 409 테스트는 통과하지만 동일-state 세대 교체를 덮지 못함을 확인했다.
+
+evidence refs: scripts/serve_curation.py:455-474; scripts/curator/curator.js:169-203; docs/run-contract.md:227-241; tests/test_curation_view_contract.py:312-358; commit d3d0b40; plan sprite-gen/pipeline-run-contract-standardization

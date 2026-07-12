@@ -235,9 +235,13 @@ throughout, so a concurrent **writer** cannot preempt (writer Isolation).
 > never a half-published (old/new-mixed or missing-file) state, and never a transient
 > `HTTP 500`. The reader blocks only for the brief swap. The rwlock is a sidecar (beside
 > the run dir), so it survives content swaps and is never itself published. Where `fcntl`
-> is unavailable or the sidecar can't be created (a non-Unix platform), the guard degrades
-> to a no-op **and reports it on stderr** (once per run dir) — the lost isolation is
-> observable, never a silent fallback.
+> is unavailable or the sidecar can't be created, the guard **fails loud** (raises
+> `runio.RWLockUnavailable`) rather than degrading to a no-op: a no-op would be a failover
+> that lets canonical truth change inside a read transaction (a reader could observe a
+> half-published run), and the isolation contract permits an availability failover only
+> when it stays observable **and does not change canonical truth**. The pipeline runs on
+> platforms with `fcntl` advisory locks (macOS/Linux); a platform without them refuses the
+> publish/read rather than silently serving a partial run.
 >
 > The curation **write** (`POST /api/curation`) takes the same exclusive publish lock, so
 > a `select`/`reorder`/`transform` autosave is serialized with a concurrent re-import; and

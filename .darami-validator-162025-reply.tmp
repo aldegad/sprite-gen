@@ -1,0 +1,24 @@
+route_key: validator-1f28e583857781dab6a7
+validator-reject
+
+mode: blast-radius 전체검수, P2 same-engine-different-member fallback - run-dir 계약, 세대 식별, curation schema/loader, 웹 GET/POST, compose/export/GIF 소비자와 문서 SSoT를 전수 확인했다. registry 기준 worker=jetbi/codex, validator=darami/codex 경고를 관측했다.
+
+재현 가능한 종료 차단 finding 1건:
+
+1. `run_revision`이 없는 기존/수기 `curation.json`은 프레임 세대가 바뀌어도 stale 판별을 완전히 우회한다.
+   - 재현: 임시 run에 `items/frame-0.png`와 `dx=9` transform을 가진 schema v1 curation sidecar를 만들되, 현재 docs/curation.md와 docs/architecture.md의 JSON 예시처럼 `run_revision`을 생략했다. 그 뒤 frame-0.png를 다른 이미지로 재생성하고 `load_curation`과 `state_plan`을 다시 호출했다.
+   - 실제 출력: `generation_changed=True`, `unstamped_sidecar_accepted_after=True`, `stale_transform_dx=9.0`. 즉 run revision은 `404482e25c1e403f -> 971fa538f84cb161`로 바뀌었는데 old transform이 새 프레임에 그대로 적용됐다.
+   - 원인: `sprite_gen/curation.py:153-157`은 `stamped is not None`일 때만 mismatch를 검사하고, 표식이 없으면 sidecar를 정상 데이터로 반환한다. 따라서 최신 웹 POST로 저장한 sidecar만 보호되고 기존 파일, 수기 파일, 문서 예시를 따라 만든 파일은 단일 게이트를 우회한다.
+   - 계약/SSoT 모순: `docs/run-contract.md:240-245`와 `docs/curation.md:107-112`는 pre-re-extract/re-import curation이 새 프레임에 적용되지 않는다고 보장하지만, `docs/curation.md:91-104`와 `docs/architecture.md:273`의 canonical schema 예시는 `run_revision`을 생략한다. 코드 docstring도 필드가 stamp된 schema라고 설명하면서 runtime은 누락을 허용한다. No Silent Fallback과 Consistency 위반이다.
+   - 필요한 수정: `run_revision` 누락을 명시적 stale/invalid로 처리해 모든 소비자가 fail-loud 또는 관측 가능한 all-frames default로 거부하고, unstamped sidecar -> frame regeneration -> 웹/compose/export/GIF에서 transform 미적용 회귀테스트를 추가해야 한다. 문서 schema 예시도 required field 또는 명시적인 legacy 처리 계약으로 일치시켜야 한다.
+
+통과 증거:
+- `TMPDIR=/tmp .venv/bin/pytest -q tests/test_curation_view_contract.py` -> 16 passed.
+- `TMPDIR=/tmp .venv/bin/pytest -q` -> 144 passed in 37.53s.
+- `node --check scripts/curator/curator.js`, 전체 Python `ast.parse`, `git diff --check` 통과.
+- `kuma plan lint --strict sprite-gen/pipeline-run-contract-standardization` 통과, P2 warning 관측.
+- 최신 수정은 stamped sidecar의 re-extract stale 무효화와 동일-state re-import stale POST 409를 정상 처리함을 테스트로 확인했다. 차단 finding은 오직 unstamped sidecar 경로다.
+
+diff 밖에서 본 범위: `sprite_gen/curation.py` 단일 loader와 run identity, `runio` reader/publish guard, unpack publish, extract frame writer, serve GET/POST/static, curator bootstrap/autosave, compose atlas/GIF/cycle/export 소비자, run-contract/curation/architecture/SKILL 포인터, 전체 테스트.
+
+evidence refs: sprite_gen/curation.py:114-158; scripts/serve_curation.py:295-317,470-479; docs/run-contract.md:227-245; docs/curation.md:91-112; docs/architecture.md:273; tests/test_curation_view_contract.py:372-397; commit 7c85009; plan sprite-gen/pipeline-run-contract-standardization
