@@ -366,6 +366,52 @@ def test_finished_generation_consumers_fail_loud_on_broken_manifest(fixture_run_
     assert "frames manifest" in (r.stdout + r.stderr).lower()
 
 
+@pytest.mark.parametrize("mutate,expect", [
+    (lambda m: m.update(rows=[]), "missing row"),                       # empty rows, but frames exist
+    (lambda m: m["rows"].pop(), "missing row"),                         # drop a state's row
+    (lambda m: m["rows"].append({**m["rows"][0]}), "duplicate"),        # duplicate state row
+])
+def test_consumer_fails_loud_on_inconsistent_manifest(fixture_run_dir: Path, mutate, expect) -> None:
+    """Beyond JSON schema: a manifest that disagrees with the request/frame tree (empty/missing/
+    duplicate rows) must fail loud, never let a consumer build output from a partial generation
+    (Consistency / No Silent Fallback)."""
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    p = run / "frames" / "frames-manifest.json"
+    m = json.loads(p.read_text()); mutate(m); p.write_text(json.dumps(m), encoding="utf-8")
+
+    r = run_script("compose_sprite_atlas.py", "--run-dir", str(run))
+    assert r.returncode != 0, f"consumer accepted inconsistent manifest ({expect})"
+    assert expect in (r.stdout + r.stderr).lower()
+
+
+@pytest.mark.parametrize("tool,extra", [("compose_sprite_atlas.py", []), ("compose_sprite_gif.py", [])])
+def test_consumer_fails_loud_on_deleted_frame(fixture_run_dir: Path, tool, extra) -> None:
+    """A physical frame the manifest references is deleted → the consumer fails loud, never
+    silently produces a shorter output (No Silent Fallback)."""
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    victim = sorted((run / "frames" / "idle").glob("frame-*.png"))[0]  # a canonical frame (fixture is non-pp)
+    victim.unlink()
+
+    r = run_script(tool, "--run-dir", str(run), *extra)
+    assert r.returncode != 0, f"{tool} accepted a missing frame"
+    assert "missing frame" in (r.stdout + r.stderr).lower()
+
+
+def test_orphan_frames_without_manifest_fail_loud(fixture_run_dir: Path) -> None:
+    """Physical frames with NO manifest are an orphan/stale generation, not a fresh scaffold —
+    consumers and inspect must fail loud, not read the stale frames as a valid generation."""
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "frames" / "frames-manifest.json").unlink()
+
+    for tool, extra in (("compose_sprite_atlas.py", []), ("inspect_sprite_run.py", ["--no-write"])):
+        r = run_script(tool, "--run-dir", str(run), *extra)
+        assert r.returncode != 0, f"{tool} accepted orphan frames"
+        assert "orphan" in (r.stdout + r.stderr).lower()
+
+
 def test_require_frames_manifest_distinguishes_absent_from_broken(tmp_path: Path) -> None:
     """The shared finished-generation gate: {} for a genuinely absent manifest, but fail loud for
     a present-but-broken one (absent-vs-broken, No Silent Fallback)."""

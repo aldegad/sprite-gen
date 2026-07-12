@@ -310,6 +310,34 @@ def test_api_run_reader_isolated_from_concurrent_publish(tmp_path):
     assert outcome["at"] >= released_at, "reader returned before the publish released"
 
 
+def test_serve_fails_loud_on_orphan_frames(fixture_run_dir):
+    """serve serves a scaffold only for a genuinely ungenerated run. Physical frames with NO
+    manifest are an orphan/stale generation, not a fresh scaffold — build_run_state must fail loud
+    (HTTP 500 in do_GET), never expose stale frames as present (No Silent Fallback / Consistency)."""
+    from conftest import run_script
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "frames" / "frames-manifest.json").unlink()               # orphan: frames, no manifest
+    with pytest.raises(SystemExit):
+        build_run_state(run)
+
+
+def test_import_fails_loud_on_multiple_base_images(tmp_path):
+    """`_base/` is the run's single identity image; multiple images must fail loud, not silently
+    pick the first (identity SSoT / No Silent Fallback)."""
+    from conftest import run_script  # noqa: F401  (ensures scripts path is set up like siblings)
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "_base" / "a.png")
+    _png(pngs / "_base" / "b.png")
+    _png(pngs / "items" / "1-x.png")
+
+    r = _run_import(pngs, tmp_path / "run", "--force")
+    assert r.returncode != 0, "import silently picked one of several _base images"
+    assert "_base" in (r.stdout + r.stderr).lower()
+
+
 def test_serve_run_state_scaffolds_absent_but_fails_loud_on_broken_manifest(fixture_run_dir):
     """serve build_run_state serves the request/state scaffold when the manifest is ABSENT (a run
     with no generation yet — legitimate), but a present-but-broken `{}` manifest fails loud

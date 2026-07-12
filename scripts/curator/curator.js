@@ -755,7 +755,7 @@ function renderPreview(state) {
     `<button type="button" class="ghost pv-prev" title="${t("tPrev")}">⏮</button>` +
     `<button type="button" class="ghost pv-play" title="${t("tPause")}">⏸</button>` +
     `<button type="button" class="ghost pv-next" title="${t("tNext")}">⏭</button>` +
-    `<select class="pv-speed" name="speed-${state.name}" aria-label="${t("tSpeed")}" title="${t("tSpeed")}">${speedOpts}</select>` +
+    `<select class="pv-speed" name="speed-${escapeHtml(state.name)}" aria-label="${t("tSpeed")}" title="${t("tSpeed")}">${speedOpts}</select>` +
     `</div>` +
     `<div class="pv-pos"></div>`;
   return box;

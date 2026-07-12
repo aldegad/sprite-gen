@@ -65,16 +65,25 @@ not restate it elsewhere; point here.
   frames/frames-manifest.json        # per-row extract report (files, labels, ok) — only ever a COMPLETE ok generation (§6)
   extract-failure.json               # while any state's extract is unresolved: per-state ok:false diagnostics, OUTSIDE frames/ (§6); merged per state, removed once all resolved
   curation.json                      # optional, non-destructive sidecar (selected/order/transforms/pixel_perfect)
+  unpack-source.json                 # import runs only (unpack_atlas_run.py): provenance — atlas/pngs source, base_source, imported_refs
   sprite-sheet-alpha.png             # composed runtime atlas
   sprite-sheet-alpha.report.json     # compose report
   manifest.json                      # runtime SSoT: frame_layout absolute rects
+  sprite-inspect.report.json         # inspect_sprite_run.py output (per-state health rows)
+  sprite-score.report.json           # score_sprite_run.py output (overall score + correction hints)
+  correction-loop/                   # run_correction_loop.py: attempt-N/ (inspect/score/hints) + candidate-N/ regenerated run dirs
   qa/<state>-contact.png             # QA contact sheet
   qa/<state>.gif                     # QA state GIF
+  qa/<name>.gif, qa/<name>-contact.png, qa/<name>.json   # compose_selected_cycle.py: named selected-frame cycle + its manifest
   qa-notes.md                        # per-state motion verdict + reference-plan notes
   curated/                           # only when export_curated_pngs.py runs
-  exports/                           # only when compose_sprite_gif.py --run-dir runs
-  .sprite-gen.lock                   # single-writer lock (runio.py); a live holder blocks a second writer
+  exports/                           # only when compose_sprite_gif.py --run-dir runs (per-state GIF + gif-manifest.json)
+  .sprite-gen.lock                   # single-writer lock (runio.py); a live holder blocks a second writer (§7 guarantee boundary)
+  .frames.sg-staging/                # transient: extract builds the new generation here, swapped into frames/ under publish_guard
 ```
+Transient publish sidecars exist only during an extract/import commit: `.frames.sg-backup`
+and `.extract-failure.sg-backup` (in-place rollback copies) and `.<name>.sg-rwlock` (in the
+parent dir — the publish reader/writer lock). Their durability/concurrency boundary is §7.
 
 Rules the display depends on:
 
@@ -299,9 +308,20 @@ still drives the automatic correction loop:
   state, never silently drop a still-broken one).
 - Advancing the two canonical surfaces is **one transaction**: `extract` swaps `frames/`
   and (re)writes/removes `extract-failure.json` under a single `publish_guard`, rolling
-  **both** back together on any I/O failure, so a reader never sees a new generation beside a
-  stale failure record. Readers that combine them (`inspect` / the correction loop, via
-  `inspect_run`) hold the matching `read_guard` for the whole read.
+  **both** back together on any **in-process** I/O failure (a raised exception), so a reader
+  never sees a new generation beside a stale failure record. Readers that combine them
+  (`inspect` / the correction loop, via `inspect_run`) hold the matching `read_guard` for the
+  whole read. (This rollback covers raised exceptions; a hard **process kill** mid-swap is a
+  known durability gap — see the guarantee boundary in §7.)
+- A **complete generation** is enforced beyond JSON schema: a finished-generation consumer
+  (`compose_*` / `export_pngs` / `preview`) calls `extract.require_frames_manifest`, and
+  `serve_curation` / `inspect` call `extract.load_consistent_frames_manifest`, which verify the
+  manifest AGREES with the physical frame tree and the request — every request state has exactly
+  one row, no physical frame dir is an orphan the manifest omits, and every row's canonical
+  frames exist on disk. `{"ok":true,"rows":[]}` over real frames, a deleted frame, or frames with
+  **no** manifest (an orphan, distinct from a fresh scaffold) all fail loud; `compose_gif` /
+  `export_pngs` likewise fail on a missing selected frame instead of silently skipping it. A run
+  with no generation at all (no manifest, no frames) still serves the request/state scaffold.
 - A **corrupt** canonical record fails loud on **every** path — the writer *and* every reader.
   Extract's subset-seeding + commit, `inspect._manifest_state_notes`, and every
   finished-generation consumer (`compose_atlas` / `compose_cycle` / `compose_gif` /
@@ -321,9 +341,46 @@ still drives the automatic correction loop:
   `frames/frames-manifest.json` is absent (a failed extract published none) and refuses a
   non-`ok` manifest, so a partial never becomes an atlas.
 
-The curation view tolerates a failed first extract with no `frames/`: `serve_curation`
-falls back to an empty row set and `curation.run_revision` treats the missing manifest as an
-empty fingerprint, so the view shows the run's request/state scaffold rather than erroring.
+The curation view tolerates a run with **no generation** (no `frames/`, no manifest):
+`serve_curation` falls back to an empty row set and `curation.run_revision` treats the missing
+manifest as an empty fingerprint, so the view shows the request/state scaffold rather than
+erroring. Physical frames *without* a manifest are an orphan, not a scaffold — that fails loud
+(see the complete-generation bullet above).
+
+## 7. Guarantee boundary — atomicity & concurrency (honest scope)
+
+To avoid claiming guarantees the code does not provide (No Silent Fallback), this is the exact
+boundary of the run-dir's atomicity and concurrency guarantees. What is **in force today**:
+
+- **In-process transaction rollback.** The `frames/` + `extract-failure.json` commit (§6) and
+  the `--force` re-import publish (§4) roll back on any raised exception, leaving the prior
+  generation byte-intact. `atomic_write_text` / `os.replace` make each file write torn-free.
+- **Reader isolation.** A concurrent reader (`serve_curation` `/api/run` + static, `inspect`)
+  holds a shared `read_guard`; a publish holds the exclusive `publish_guard` for its swap, so a
+  reader sees a complete old-or-new snapshot, never a mix (§4). Where advisory locks are
+  unavailable the guard **fails loud** (`RWLockUnavailable`), never a silent no-op.
+- **Cross-process single-writer.** `.sprite-gen.lock` blocks a second **process** from writing
+  the same run dir; the pipeline's **one worker owns one character folder** rule (§2, SKILL.md)
+  is what excludes concurrent writers on the same run dir in the first place. Same-process
+  re-entry is intentionally allowed so one interpreter can run prepare → extract → compose in
+  sequence.
+
+What is **deferred** (tracked in `sprite-gen/run-dir-durability-concurrency-hardening`) — not
+claimed here:
+
+- **Process-kill durability.** A hard `SIGKILL` *between* the commit's rename steps can leave a
+  new generation beside a stale `extract-failure.json` plus an orphan `.sg-backup`. In-process
+  rollback does not cover a killed process; there is **no journal / self-heal replay** yet. A
+  leftover `.sg-backup` / `.sg-staging` after a crash is reconciled only by the next extract's
+  cleanup, not by a recovery protocol.
+- **Thread-level write isolation.** `.sprite-gen.lock` re-entry is keyed per process, not per
+  thread, so a multi-threaded host that drove two concurrent writers against the **same** run
+  dir in one process would not be serialized. This is out of the single-worker model above; a
+  thread-aware per-run mutex is deferred.
+
+These two are genuine but are a separate durability/concurrency hardening effort, not the view
+contract this doc owns; §4/§6's atomicity claims are scoped to the in-process cases above and do
+not contradict this boundary.
 
 ## Related
 

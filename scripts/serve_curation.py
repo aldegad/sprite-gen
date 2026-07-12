@@ -44,7 +44,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
 from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported_ref_role, load_curation, run_revision
-from extract import load_frames_manifest
+from extract import load_consistent_frames_manifest
 from runio import publish_guard, read_guard
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -186,10 +186,11 @@ def build_run_state(run_dir: Path) -> dict:
 def _build_run_state_impl(run_dir: Path) -> dict:
     """Assemble the run snapshot the SPA needs, from the canonical SSoT files."""
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
-    # Absent manifest → the run has no finished generation yet; serve the request/state scaffold
-    # (legitimate). A present-but-corrupt manifest fails loud (load_frames_manifest raises) and
-    # surfaces as an HTTP 500 in do_GET — never a silent empty-rows fallback (No Silent Fallback).
-    frames_manifest = load_frames_manifest(run_dir / "frames" / "frames-manifest.json") or {"rows": []}
+    # No generation yet (no manifest AND no physical frames) → serve the request/state scaffold
+    # (legitimate). A present-but-corrupt/inconsistent manifest, or an orphan (frames without a
+    # manifest), fails loud (load_consistent_frames_manifest raises) and surfaces as HTTP 500 in
+    # do_GET — never a silent empty-rows / stale-frame fallback (No Silent Fallback / Consistency).
+    frames_manifest = load_consistent_frames_manifest(run_dir) or {"rows": []}
     rows_by_state = {row["state"]: row for row in frames_manifest.get("rows", [])}
 
     cell = request["cell"]

@@ -306,6 +306,10 @@ def inspect_run(run_dir: Path, states: str = "all", **kwargs: object) -> dict[st
 def _inspect_run_impl(run_dir: Path, states: str = "all", **kwargs: object) -> dict[str, Any]:
     args = _namespace_from_kwargs(run_dir=run_dir, states=states, no_write=True, **kwargs)
     run_dir = args.run_dir.expanduser().resolve()
+    # Fail loud on a corrupt/inconsistent generation or orphan frames (frames with no manifest) —
+    # otherwise the correction loop would read stale frames as ok:true (No Silent Fallback). A run
+    # with no generation at all ({}) is fine: inspect falls back to raw-projection below.
+    extract.load_consistent_frames_manifest(run_dir)
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     selected = _state_list(request, args.states)
     rows: list[dict[str, Any]] = []
