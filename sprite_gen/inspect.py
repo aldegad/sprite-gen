@@ -13,7 +13,7 @@ from typing import Any
 from PIL import Image, ImageChops
 
 from sprite_gen import extract
-from sprite_gen.runio import acquire_run_dir_lock, atomic_write_text, relative_posix
+from sprite_gen.runio import acquire_run_dir_lock, atomic_write_text, read_guard, relative_posix
 from sprite_gen.segment import segment_strip
 
 
@@ -297,6 +297,16 @@ def _manifest_state_notes(run_dir: Path, state: str) -> tuple[dict[str, Any] | N
 
 
 def inspect_run(run_dir: Path, states: str = "all", **kwargs: object) -> dict[str, Any]:
+    """Inspect the run holding a shared read_guard, so the combined read of frames/,
+    frames-manifest.json, and extract-failure.json sees ONE consistent snapshot — never a
+    mid-publish mix of a newly-swapped frames generation with a stale failure record. The
+    correction loop reads through here, so its diagnostics stay isolated from a concurrent
+    extract commit (which advances both surfaces under the matching publish_guard)."""
+    with read_guard(Path(run_dir).expanduser().resolve()):
+        return _inspect_run_impl(run_dir, states=states, **kwargs)
+
+
+def _inspect_run_impl(run_dir: Path, states: str = "all", **kwargs: object) -> dict[str, Any]:
     args = _namespace_from_kwargs(run_dir=run_dir, states=states, no_write=True, **kwargs)
     run_dir = args.run_dir.expanduser().resolve()
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))

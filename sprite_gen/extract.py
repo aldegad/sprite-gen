@@ -1716,67 +1716,108 @@ def _namespace_from_kwargs(**kwargs: object) -> argparse.Namespace:
         names = ", ".join(sorted(remaining))
         raise TypeError(f"unexpected keyword argument(s): {names}")
     return argparse.Namespace(**values)
-def _publish_frames(run_dir: Path, staging: Path, final: Path) -> None:
-    """Swap the freshly-built staging frames dir into `frames/` as one generation, holding
-    the run dir's exclusive publish_guard so a concurrent curation reader (read_guard) blocks
-    for the brief swap and never observes a mix of old/new frame generations. On an I/O
-    failure the prior frames are restored (Atomicity). Writer-writer exclusion stays the
-    separate `.sprite-gen.lock` held across the whole extract."""
-    backup = run_dir / ".frames.sg-backup"
-    with publish_guard(run_dir):
-        if backup.exists():
-            shutil.rmtree(backup)
-        if final.exists():
-            final.rename(backup)
-        try:
-            staging.rename(final)
-        except OSError:
-            if backup.exists() and not final.exists():
-                backup.rename(final)          # rollback: restore the prior frames byte-intact
-            raise
-    shutil.rmtree(backup, ignore_errors=True)
+def _read_prior_failure_evidence(path: Path) -> dict:
+    """Load the existing extract-failure.json, or {} if none. Fail LOUD if the file exists but
+    cannot be read/parsed — it records which states still failed extraction, so silently
+    treating an unreadable record as empty would drop still-unresolved failures on the next
+    success (No Silent Fallback). The operator must inspect/repair or delete it deliberately."""
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SystemExit(
+            f"cannot read existing failure evidence {path}: {exc}\n"
+            f"  it records which states still failed extraction; refusing to proceed and "
+            f"silently drop that unresolved-failure truth. Inspect/repair or delete it deliberately."
+        )
 
 
-def _merge_failure_evidence(run_dir: Path, result: dict, target_states: set, all_states: set) -> None:
-    """Maintain extract-failure.json as the union of the run's CURRENTLY-UNRESOLVED per-state
-    extract failures, kept OUTSIDE canonical frames/ (whole-generation atomicity).
-
-    A subset `--states` extract — the formal single-row / auto-correction regeneration path —
-    only determines the outcome of the states it targets. So a success on one state must NOT
-    erase another state's still-unresolved failure, and a new failure must NOT overwrite a
-    different state's prior failure. Carry forward prior evidence for states this attempt did not
-    touch, replace the target states with this attempt's outcome (a target state that succeeded
-    drops out), and delete the file only when no per-state failure remains (Consistency)."""
-    path = run_dir / "extract-failure.json"
-
+def _merged_failure_lists(prior: dict, result: dict, target_states: set, all_states: set):
+    """Compute the union of the run's CURRENTLY-UNRESOLVED per-state failures. A subset
+    `--states` extract only determines the outcome of the states it targets, so carry forward
+    prior failures for untouched states and replace the target states with this attempt's
+    outcome (a target state that succeeded drops out). Warnings are scoped to states that still
+    have an error, so a resolved state never leaves a stray warning in the failure evidence.
+    Returns (errors, warnings); empty errors means every recorded failure is resolved."""
     def _state_of(message: object):
         head = str(message).split(":", 1)[0]
         return head if head in all_states else None
 
-    prior: dict = {}
-    if path.is_file():
-        try:
-            prior = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            prior = {}
-
-    # keep prior per-state failures for states this attempt did not re-run ...
-    kept_errors = [e for e in prior.get("errors", []) if _state_of(e) not in target_states and _state_of(e) is not None]
-    kept_warnings = [w for w in prior.get("warnings", []) if _state_of(w) not in target_states and _state_of(w) is not None]
-    # ... and add this attempt's per-state failures for the states it did run (empty on success).
+    kept_errors = [e for e in prior.get("errors", []) if _state_of(e) is not None and _state_of(e) not in target_states]
     new_errors = [e for e in result.get("errors", []) if _state_of(e) is not None]
-    new_warnings = [w for w in result.get("warnings", []) if _state_of(w) is not None]
     merged_errors = kept_errors + new_errors
-    merged_warnings = kept_warnings + new_warnings
+    unresolved = {str(e).split(":", 1)[0] for e in merged_errors}
+    kept_warnings = [w for w in prior.get("warnings", []) if _state_of(w) not in target_states and _state_of(w) in unresolved]
+    new_warnings = [w for w in result.get("warnings", []) if _state_of(w) in unresolved]
+    return merged_errors, kept_warnings + new_warnings
 
-    if not merged_errors:
-        path.unlink(missing_ok=True)  # every recorded per-state failure is resolved
-        return
-    evidence = dict(result)
-    evidence["ok"] = False
-    evidence["errors"] = merged_errors
-    evidence["warnings"] = merged_warnings
-    atomic_write_text(path, json.dumps(evidence, ensure_ascii=False, indent=2) + "\n")
+
+def _commit_generation(run_dir: Path, staging: Path | None, result: dict, target_states: set, all_states: set) -> None:
+    """Advance the run's two canonical surfaces — the frames/ generation and the per-state
+    failure evidence (extract-failure.json) — as ONE transaction under a single publish_guard.
+
+    `staging` is the new complete frames dir to swap into frames/ on success, or None to leave
+    frames/ untouched on failure. The evidence is (re)written from the merged unresolved
+    failures, or removed when none remain. Either BOTH surfaces advance or, on any I/O failure,
+    both roll back to their pre-commit state (Atomicity/Consistency). Because the whole commit
+    holds publish_guard, a reader under read_guard never observes the new frames alongside a
+    stale failure record (Isolation) — the old defect where a swapped-in generation and a not-
+    yet-merged prior failure were briefly visible together."""
+    frames_final = run_dir / "frames"
+    evidence = run_dir / "extract-failure.json"
+    frames_backup = run_dir / ".frames.sg-backup"
+    evidence_backup = run_dir / ".extract-failure.sg-backup"
+
+    def _discard(p: Path) -> None:
+        if p.is_dir():
+            shutil.rmtree(p, ignore_errors=True)
+        elif p.exists():
+            p.unlink()
+
+    with publish_guard(run_dir):
+        prior = _read_prior_failure_evidence(evidence)  # fail-loud on a corrupt record
+        merged_errors, merged_warnings = _merged_failure_lists(prior, result, target_states, all_states)
+
+        _discard(frames_backup)
+        _discard(evidence_backup)
+        frames_backed_up = False
+        frames_swapped = False
+        evidence_backed_up = False
+        evidence_written = False
+        try:
+            if staging is not None:
+                if frames_final.exists():
+                    frames_final.rename(frames_backup)
+                    frames_backed_up = True
+                staging.rename(frames_final)
+                frames_swapped = True
+            if evidence.exists():
+                evidence.rename(evidence_backup)
+                evidence_backed_up = True
+            if merged_errors:
+                payload = dict(result)
+                payload["ok"] = False
+                payload["errors"] = merged_errors
+                payload["warnings"] = merged_warnings
+                atomic_write_text(evidence, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+                evidence_written = True
+            # else: leave evidence absent — every recorded per-state failure is resolved
+        except BaseException:
+            # roll BOTH surfaces back to their pre-commit state, in reverse order
+            if evidence_written:
+                _discard(evidence)
+            if evidence_backed_up and not evidence.exists():
+                evidence_backup.rename(evidence)
+            if frames_swapped:
+                _discard(frames_final)
+                if frames_backed_up:
+                    frames_backup.rename(frames_final)
+            elif frames_backed_up and not frames_final.exists():
+                frames_backup.rename(frames_final)
+            raise
+        _discard(frames_backup)
+        _discard(evidence_backup)
 
 
 def _run(args: argparse.Namespace):
@@ -2117,12 +2158,12 @@ def _run(args: argparse.Namespace):
     all_state_names = set(request["states"])
     if result["ok"]:
         # Whole-generation atomicity: canonical frames/ only ever holds a COMPLETE generation.
-        # Publish the staging generation, then resolve THIS attempt's target states in the failure
-        # evidence — a subset --states extract does not touch the other states, so their unresolved
-        # failures are preserved (the file is removed only once nothing remains — Consistency).
+        # Swap in the staging generation AND resolve this attempt's target states in the failure
+        # evidence as ONE publish transaction — a subset --states extract does not touch the other
+        # states, so their unresolved failures are preserved (file removed only once nothing
+        # remains, Consistency), and a reader never sees new frames beside a stale failure record.
         atomic_write_text(frames_root / "frames-manifest.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n")
-        _publish_frames(run_dir, frames_root, frames_final)
-        _merge_failure_evidence(run_dir, result, target, all_state_names)
+        _commit_generation(run_dir, frames_root, result, target, all_state_names)
     else:
         # A failed extract — FIRST or re-extract — never publishes a partial/ok:false generation
         # to canonical frames/ (strict Atomicity: the operation fully succeeds or leaves canonical
@@ -2130,9 +2171,9 @@ def _run(args: argparse.Namespace):
         # extract-failure.json so it stays observable (No Silent Fallback) and still drives the
         # automatic correction loop (inspect._manifest_state_notes reads it → score → hint →
         # regenerate). The evidence merges per state, so one state's failure never overwrites
-        # another's still-unresolved failure. A failed re-extract additionally leaves the prior
-        # complete generation byte-intact. Exit code 1 + printed errors signal the failure.
-        _merge_failure_evidence(run_dir, result, target, all_state_names)
+        # another's still-unresolved failure. A failed re-extract leaves the prior complete
+        # generation byte-intact. Exit code 1 + printed errors signal the failure.
+        _commit_generation(run_dir, None, result, target, all_state_names)
         shutil.rmtree(frames_root, ignore_errors=True)
     print(json.dumps({k: v for k, v in result.items() if k != "rows"}, ensure_ascii=False, indent=2))
     return 0 if result["ok"] else 1

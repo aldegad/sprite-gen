@@ -310,6 +310,46 @@ def test_api_run_reader_isolated_from_concurrent_publish(tmp_path):
     assert outcome["at"] >= released_at, "reader returned before the publish released"
 
 
+def test_inspect_reader_isolated_from_concurrent_commit(fixture_run_dir):
+    """inspect_run reads frames-manifest.json + extract-failure.json together under read_guard,
+    so it blocks while an extract commit holds the exclusive publish_guard and never observes a
+    newly-swapped frames generation beside a stale failure record (the correction loop reads
+    through inspect_run, so its diagnostics stay isolated from a concurrent commit)."""
+    import threading
+    import time
+
+    from conftest import run_script
+    from sprite_gen import runio
+    from sprite_gen.inspect import inspect_run
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+
+    outcome: dict = {}
+    ready = threading.Event()
+
+    def reader():
+        ready.wait()
+        try:
+            rep = inspect_run(run, states="all")  # read_guard SH -> blocks under the publish EX lock
+            outcome["states"] = len(rep["rows"])
+        except Exception as exc:  # a mid-commit read would raise / see a torn snapshot
+            outcome["err"] = repr(exc)
+        outcome["at"] = time.monotonic()
+
+    th = threading.Thread(target=reader)
+    th.start()
+    with runio.publish_guard(run):            # simulate an extract commit holding the exclusive lock
+        ready.set()
+        time.sleep(0.25)
+        assert "at" not in outcome, "inspect reader was not blocked by publish_guard (no isolation)"
+        released_at = time.monotonic()
+    th.join(5)
+    assert "err" not in outcome, outcome.get("err")
+    assert outcome.get("states"), "inspect reader got no snapshot"
+    assert outcome["at"] >= released_at, "inspect returned before the commit released"
+
+
 def test_publish_guards_fail_loud_without_fcntl(tmp_path, monkeypatch):
     """Where advisory locks can't be established (no fcntl), read_guard/publish_guard must
     RAISE, not degrade to a no-op. A no-op guard is a failover that changes canonical truth
@@ -445,14 +485,14 @@ def test_unstamped_curation_ignored(tmp_path):
 
 
 def test_extract_frame_publish_holds_publish_guard(tmp_path):
-    """extract publishes its rebuilt frames as one generation via _publish_frames, which
-    holds publish_guard — so it serializes with a curation reader (read_guard) and the reader
-    never observes a half-swapped frames dir (a mix of old/new frame generations)."""
+    """extract advances frames/ + extract-failure.json as one generation via _commit_generation,
+    which holds publish_guard for the whole transaction — so it serializes with a curation reader
+    (read_guard) and the reader never observes a half-swapped frames dir or a new generation
+    beside a stale failure record."""
     import threading
-    import time
 
     from sprite_gen import runio
-    from sprite_gen.extract import _publish_frames
+    from sprite_gen.extract import _commit_generation
 
     run = tmp_path / "run"
     (run / "frames" / "items").mkdir(parents=True)
@@ -460,6 +500,7 @@ def test_extract_frame_publish_holds_publish_guard(tmp_path):
     staging = run / ".frames.sg-staging"
     (staging / "items").mkdir(parents=True)
     (staging / "items" / "frame-0.png").write_bytes(b"NEW")
+    result = {"ok": True, "errors": [], "warnings": [], "rows": []}
 
     reader_holding = threading.Event()
     release_reader = threading.Event()
@@ -475,13 +516,14 @@ def test_extract_frame_publish_holds_publish_guard(tmp_path):
     published = threading.Event()
 
     def publisher():
-        _publish_frames(run, staging, run / "frames")
+        _commit_generation(run, staging, result, {"items"}, {"items"})
         published.set()
 
     threading.Thread(target=publisher).start()
-    assert not published.wait(0.3), "extract frame publish did not block on the reader (no isolation)"
+    assert not published.wait(0.3), "extract commit did not block on the reader (no isolation)"
     release_reader.set()
     published.wait(3)
     assert published.is_set()
+    assert (run / "frames" / "items" / "frame-0.png").read_bytes() == b"NEW"
     assert (run / "frames" / "items" / "frame-0.png").read_bytes() == b"NEW"  # single new generation
     assert not staging.exists()

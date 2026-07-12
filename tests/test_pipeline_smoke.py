@@ -4,6 +4,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from conftest import run_script
@@ -219,3 +220,53 @@ def test_consecutive_state_failures_accumulate_in_evidence(fixture_run_dir: Path
     _row, walk_errors, _w = _manifest_state_notes(run, "walk")
     assert idle_errors, "idle failure was overwritten by the later walk failure"
     assert walk_errors, "walk failure missing"
+
+
+def test_commit_generation_rolls_back_both_surfaces_on_evidence_failure(tmp_path, monkeypatch):
+    """The frames swap and the failure-evidence update are ONE publish transaction: if the
+    evidence write fails, BOTH canonical surfaces must roll back to their pre-commit state — the
+    run must never end with a new frames generation beside a stale failure record (Atomicity)."""
+    from sprite_gen import extract
+
+    run = tmp_path / "run"
+    for st, tag in (("idle", b"IDLE_OLD"), ("walk", b"WALK_OLD")):   # prior complete generation
+        (run / "frames" / st).mkdir(parents=True)
+        (run / "frames" / st / "frame-0.png").write_bytes(tag)
+    prior_evidence = {"ok": False, "errors": ["idle: broke"], "warnings": [], "rows": []}
+    (run / "extract-failure.json").write_text(json.dumps(prior_evidence), encoding="utf-8")
+    staging = run / ".frames.sg-staging"                              # new generation (walk rebuilt)
+    for st, tag in (("idle", b"IDLE_OLD"), ("walk", b"WALK_NEW")):
+        (staging / st).mkdir(parents=True)
+        (staging / st / "frame-0.png").write_bytes(tag)
+
+    real_write = extract.atomic_write_text
+    def flaky(target, text):
+        if Path(target).name == "extract-failure.json":
+            raise OSError("injected evidence write failure")
+        return real_write(target, text)
+    monkeypatch.setattr(extract, "atomic_write_text", flaky)
+
+    with pytest.raises(OSError):
+        # walk success with idle still failed -> merged errors [idle] -> evidence WRITE -> boom
+        extract._commit_generation(run, staging, {"ok": True, "errors": [], "warnings": [], "rows": []},
+                                   {"walk"}, {"idle", "walk"})
+
+    assert (run / "frames" / "walk" / "frame-0.png").read_bytes() == b"WALK_OLD"   # not the new gen
+    assert (run / "frames" / "idle" / "frame-0.png").read_bytes() == b"IDLE_OLD"
+    assert json.loads((run / "extract-failure.json").read_text()) == prior_evidence  # evidence intact
+    assert not (run / ".frames.sg-backup").exists()                  # no backup leak
+    assert not (run / ".extract-failure.sg-backup").exists()
+
+
+def test_corrupt_failure_evidence_fails_loud(fixture_run_dir: Path) -> None:
+    """An unreadable/corrupt extract-failure.json must NOT be silently treated as empty — that
+    would drop still-unresolved failures on the next success (No Silent Fallback). The extract
+    fails loud and leaves the corrupt record in place for the operator."""
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "extract-failure.json").write_text("{ this is not json", encoding="utf-8")
+
+    r = run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", "walk")
+    assert r.returncode != 0, "corrupt evidence was silently accepted"
+    assert "failure evidence" in (r.stdout + r.stderr).lower()
+    assert (run / "extract-failure.json").exists()                   # not silently deleted
