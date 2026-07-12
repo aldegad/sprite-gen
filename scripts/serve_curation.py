@@ -125,6 +125,8 @@ def detect_pixel_pitch(path):
 
 
 _REF_DIRECTIONS = ("down45", "up45", "down", "side", "up", "left", "right", "front", "back")
+# 프런트 i18n(curator.js)이 아는 role 어휘. 미지 role 은 guide 로 강등해 깨진 칩을 막는다.
+_IMPORTED_REF_ROLES = ("anchor", "basis", "guide")
 
 
 def _state_refs(run_dir, state):
@@ -150,6 +152,16 @@ def _state_refs(run_dir, state):
     guide = run_dir / "references" / "layout-guides" / f"{state}.png"
     if guide.is_file():
         refs.append({"role": "guide", "name": guide.name, "url": f"/run/references/layout-guides/{state}.png"})
+    # imported runs (--pngs-dir): references/imported/<state>/<role>-<name>.png → 생성 재료 칩.
+    # role 은 파일명 접두(첫 '-' 앞)에서 파싱, 미지 role 은 guide 로 강등. 역할 파싱 SSoT = 여기 한 곳.
+    imported_dir = run_dir / "references" / "imported" / state
+    if imported_dir.is_dir():
+        for ref in sorted(imported_dir.glob("*.png")):
+            role = ref.stem.split("-", 1)[0] if "-" in ref.stem else "guide"
+            if role not in _IMPORTED_REF_ROLES:
+                role = "guide"
+            refs.append({"role": role, "name": ref.name,
+                         "url": f"/run/references/imported/{state}/{ref.name}"})
     return refs
 
 
