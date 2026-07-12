@@ -383,6 +383,30 @@ def import_png_groups(out_dir: Path, groups: list[dict[str, Any]], iso: dict[str
             "base_source": base_out_name, "imported_refs": imported_refs_manifest}
 
 
+def _new_staging(out_dir: Path) -> Path:
+    """A fresh empty staging dir beside out_dir. The run is built here first, then
+    published atomically, so a failed/partial build never touches the prior run."""
+    staging = out_dir.parent / f".{out_dir.name}.sg-staging"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+    return staging
+
+
+def _publish_run(staging: Path, out_dir: Path) -> None:
+    """Replace out_dir's contents with the fully-built staging run, keeping the held
+    lock. Called only after a successful build — so validation/build failures leave the
+    prior canonical run untouched (Atomicity: a rebuild fully succeeds or rolls back)."""
+    for child in out_dir.iterdir():
+        if child.name == LOCK_FILENAME:
+            continue
+        shutil.rmtree(child) if child.is_dir() else child.unlink()
+    for child in staging.iterdir():
+        if child.name == LOCK_FILENAME:  # never clobber the lock we hold
+            continue
+        shutil.move(str(child), str(out_dir / child.name))
+
+
 def parse_grid(value: str) -> tuple[int, int]:
     cols, rows = value.lower().split("x")
     return int(cols), int(rows)
@@ -447,16 +471,6 @@ def _run(args: argparse.Namespace):
     except OSError as exc:
         raise SystemExit(f"cannot create run dir next to the input: {out_dir}\n  {exc}\n  pass --out-dir <writable path> to choose another location")
     acquire_run_dir_lock(out_dir, "unpack_atlas_run")
-    if args.force:
-        # --force rebuilds from scratch: drop every prior artifact (except the lock we
-        # hold) so the run reflects ONLY the current input. Without this, re-importing
-        # after removing _base/_refs leaves stale base-source/references/frames on disk,
-        # so provenance (unpack-source.json) says "no sources" while the view still shows
-        # the old ones — a re-run that depends on prior out-dir state (Idempotency/SSoT).
-        for child in out_dir.iterdir():
-            if child.name == LOCK_FILENAME:
-                continue
-            shutil.rmtree(child) if child.is_dir() else child.unlink()
 
     # --pngs-dir: import a folder of separate PNGs (e.g. a furniture set).
     # 하위폴더가 있으면 각 하위폴더가 큐레이터 줄(state) 하나가 된다 —
@@ -519,7 +533,15 @@ def _run(args: argparse.Namespace):
         if bad_refs:
             raise SystemExit("invalid _refs role prefix — expected anchor-/basis-/guide-<name>.png, got: "
                              + ", ".join(bad_refs))
-        result = import_png_groups(out_dir, groups, iso, base_src=base_src)
+        # atomic rebuild: all validation above ran before any mutation; build into a
+        # staging dir, then publish over out_dir. A --force re-import that fails (or is
+        # invalid) leaves the prior run intact — never clear-then-fail.
+        staging = _new_staging(out_dir)
+        try:
+            result = import_png_groups(staging, groups, iso, base_src=base_src)
+            _publish_run(staging, out_dir)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         result["ok"] = True
         result["out_dir"] = str(out_dir)
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -564,7 +586,14 @@ def _run(args: argparse.Namespace):
                 states[i]["name"] = name
 
     provenance["atlas"] = str(atlas_path)
-    result = write_run(out_dir, atlas, states, cell, meta, layout_source, provenance)
+    # atomic rebuild (see --pngs-dir): atlas/layout resolution above is read-only; build
+    # into staging, then publish over out_dir so a failed rebuild leaves the prior run intact.
+    staging = _new_staging(out_dir)
+    try:
+        result = write_run(staging, atlas, states, cell, meta, layout_source, provenance)
+        _publish_run(staging, out_dir)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     result["ok"] = True
     result["out_dir"] = str(out_dir)
     print(json.dumps(result, ensure_ascii=False, indent=2))
