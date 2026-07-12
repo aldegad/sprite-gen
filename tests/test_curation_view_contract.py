@@ -354,6 +354,51 @@ def test_serve_run_state_scaffolds_absent_but_fails_loud_on_broken_manifest(fixt
         build_run_state(run)
 
 
+@pytest.mark.parametrize("modname,kwargs", [
+    ("preview", {}),
+    ("compose_gif", {}),
+    ("compose_cycle", {"state": "walk", "name": "cyc"}),
+])
+def test_finished_consumer_reader_isolated_from_concurrent_publish(fixture_run_dir, modname, kwargs):
+    """preview / run-dir compose_gif / compose_cycle read the manifest + curation + frame tree under
+    one shared read_guard, so they block during a concurrent publish swap and never observe a
+    mid-swap (missing/partial) generation — same reader-isolation contract as serve/inspect."""
+    import importlib
+    import threading
+    import time
+
+    from conftest import run_script
+    from sprite_gen import runio
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    mod = importlib.import_module(f"sprite_gen.{modname}")
+
+    outcome: dict = {}
+    ready = threading.Event()
+
+    def reader():
+        ready.wait()
+        try:
+            mod.run(run_dir=run, **kwargs)   # read_guard SH -> blocks under the publish EX lock
+            outcome["ok"] = True
+        except Exception as exc:  # a mid-swap read would raise
+            outcome["err"] = repr(exc)
+        outcome["at"] = time.monotonic()
+
+    th = threading.Thread(target=reader)
+    th.start()
+    with runio.publish_guard(run):           # model an extract commit holding the exclusive lock
+        ready.set()
+        time.sleep(0.25)
+        assert "at" not in outcome, f"{modname} did not block on read_guard during a publish"
+        released_at = time.monotonic()
+    th.join(20)
+    assert "err" not in outcome, outcome.get("err")
+    assert outcome.get("ok"), f"{modname} did not complete after the publish released"
+    assert outcome["at"] >= released_at, f"{modname} returned before the publish released"
+
+
 def test_inspect_reader_isolated_from_concurrent_commit(fixture_run_dir):
     """inspect_run reads frames-manifest.json + extract-failure.json together under read_guard,
     so it blocks while an extract commit holds the exclusive publish_guard and never observes a

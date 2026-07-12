@@ -355,10 +355,18 @@ boundary of the run-dir's atomicity and concurrency guarantees. What is **in for
 - **In-process transaction rollback.** The `frames/` + `extract-failure.json` commit (§6) and
   the `--force` re-import publish (§4) roll back on any raised exception, leaving the prior
   generation byte-intact. `atomic_write_text` / `os.replace` make each file write torn-free.
-- **Reader isolation.** A concurrent reader (`serve_curation` `/api/run` + static, `inspect`)
-  holds a shared `read_guard`; a publish holds the exclusive `publish_guard` for its swap, so a
-  reader sees a complete old-or-new snapshot, never a mix (§4). Where advisory locks are
-  unavailable the guard **fails loud** (`RWLockUnavailable`), never a silent no-op.
+- **Reader isolation.** A publish holds the exclusive `publish_guard` for its swap; a reader
+  sees a complete old-or-new snapshot, never a mix (§4). Where advisory locks are unavailable the
+  guard **fails loud** (`RWLockUnavailable`), never a silent no-op. Every finished-generation
+  consumer has exactly one named isolation strategy against a concurrent extract/import publish:
+  - **shared `read_guard`** wrapping the whole manifest + curation + frame read —
+    `serve_curation` (`/api/run` + static), `inspect`, `preview`, run-dir `compose_gif`,
+    `compose_cycle`. They block only for the brief swap, then read a complete generation.
+  - **writer exclusion** via the run-dir single-writer lock (`acquire_run_dir_lock`) —
+    `compose_atlas`, `export_pngs`. They serialize with the extract writer, so they never overlap
+    a publish at all.
+  A consumer that only calls the manifest gate once but then reads the frame tree unguarded would
+  leave a TOCTOU window; the full read must be inside the strategy.
 - **Cross-process single-writer.** `.sprite-gen.lock` blocks a second **process** from writing
   the same run dir; the pipeline's **one worker owns one character folder** rule (§2, SKILL.md)
   is what excludes concurrent writers on the same run dir in the first place. Same-process

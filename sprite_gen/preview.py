@@ -19,6 +19,7 @@ from pathlib import Path
 from PIL import Image
 
 from sprite_gen.extract import require_frames_manifest
+from sprite_gen.runio import read_guard
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, save_clean_gif
 
 
@@ -88,6 +89,14 @@ def _namespace_from_kwargs(**kwargs: object) -> argparse.Namespace:
 def _run(args: argparse.Namespace):
 
     run_dir = args.run_dir.expanduser().resolve()
+    # Read the manifest + request + frame tree under one shared read_guard, so a concurrent publish
+    # swap never lets preview observe a mid-swap state (a missing/partial generation). Reader
+    # isolation, same contract as serve/inspect (runio.read_guard ↔ publish_guard).
+    with read_guard(run_dir):
+        return _run_guarded(args, run_dir)
+
+
+def _run_guarded(args, run_dir):
     manifest = require_frames_manifest(run_dir)  # fail loud if absent/corrupt
     request_path = run_dir / "sprite-request.json"
     request = json.loads(request_path.read_text(encoding="utf-8")) if request_path.is_file() else {}
