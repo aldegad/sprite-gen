@@ -425,3 +425,46 @@ def test_unstamped_curation_ignored(tmp_path):
     write_curation_atomic(out, {"version": 1, "kind": "sprite-gen-curation",
                                 "states": {"items": {"selected": [0]}}})
     assert cur.load_curation(out) is not None
+
+
+def test_extract_frame_publish_holds_publish_guard(tmp_path):
+    """extract publishes its rebuilt frames as one generation via _publish_frames, which
+    holds publish_guard — so it serializes with a curation reader (read_guard) and the reader
+    never observes a half-swapped frames dir (a mix of old/new frame generations)."""
+    import threading
+    import time
+
+    from sprite_gen import runio
+    from sprite_gen.extract import _publish_frames
+
+    run = tmp_path / "run"
+    (run / "frames" / "items").mkdir(parents=True)
+    (run / "frames" / "items" / "frame-0.png").write_bytes(b"OLD")
+    staging = run / ".frames.sg-staging"
+    (staging / "items").mkdir(parents=True)
+    (staging / "items" / "frame-0.png").write_bytes(b"NEW")
+
+    reader_holding = threading.Event()
+    release_reader = threading.Event()
+
+    def reader():
+        with runio.read_guard(run):
+            reader_holding.set()
+            release_reader.wait(3)
+
+    threading.Thread(target=reader).start()
+    reader_holding.wait(3)
+
+    published = threading.Event()
+
+    def publisher():
+        _publish_frames(run, staging, run / "frames")
+        published.set()
+
+    threading.Thread(target=publisher).start()
+    assert not published.wait(0.3), "extract frame publish did not block on the reader (no isolation)"
+    release_reader.set()
+    published.wait(3)
+    assert published.is_set()
+    assert (run / "frames" / "items" / "frame-0.png").read_bytes() == b"NEW"  # single new generation
+    assert not staging.exists()
