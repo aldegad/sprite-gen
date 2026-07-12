@@ -34,7 +34,14 @@ curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/"   # 200 = posit
 - 선택 회수는 `"$STAGE/run/curation.json"` 의 `selected` 인덱스를 파일명으로 역매핑. 비어 있으면 다시 묻는다 — 추측 진행 금지.
 - 결정 후 서버 kill + `$STAGE` 정리. 후보가 1장이면 큐레이션이 아니다 — 경로만 보고하고 끝.
 
-## Curation Webview (파이프라인 스텝 3.5)
+## Curation Webview (파이프라인 스텝 3.5) — 캐릭터 검수의 정식 뷰
+
+**캐릭터/스프라이트 검수의 정식 뷰 = run dir 를 직접 서빙하는 이 파이프라인 뷰다** (수홍 채택 2026-07-12).
+채택 근거가 된 세 요소가 이 뷰의 계약이다:
+
+- **base 참조 줄** — `base-source.*` 가 있으면 최상단에 순수 이미지(프리뷰/선택 UI 없음)로 노출. 아이덴티티 truth 를 굽기와 무관하게 항상 보여준다.
+- **상태별 "생성 재료" ref 칩** — 각 줄 헤더 아래에 그 줄을 무엇으로 생성했는지(방향 앵커 / basis row / 레이아웃 가이드) run dir 실재 파일 기준으로 표시한다. 어떤 ref 로 뭘 생성하는지가 뷰에서 바로 보여야 한다.
+- **픽셀 격자** — `fit.pixel_perfect` 계약이 있으면 그 논리 크기 라벨(예: `48px`)로 스냅 격자를 그리고, 계약 없는 런(임포트 등)은 줄별로 블록 피치를 자동 측정(`auto` 라벨)해 격자를 친다. 측정 실패한 줄(회화체·다운스케일)은 격자를 그리지 않는다 — 가짜 격자 금지.
 
 ```bash
 python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \

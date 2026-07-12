@@ -39,7 +39,7 @@ const STR = {
     title: "curation", compose: "Bake atlas", export: "Export PNGs", exportGif: "Export GIFs",
     groundGrid: "Ground grid", langOther: "한국어",
     ppApply: "Pixel-perfect", baseNote: "identity reference — not baked",
-    pxGrid: "Pixel-perfect grid", tPxGrid: "overlay the logical pixel grid the pixel-perfect stage snapped to (display only)",
+    pxGrid: "Pixel grid", refsLabel: "generated from", ref_anchor: "direction anchor", ref_basis: "basis row", ref_guide: "layout guide", tPxGrid: "overlay the logical pixel grid the pixel-perfect stage snapped to (display only)",
     tPpApply: "bake and show the pixel-perfected frames (off = the pre-pixel-perfect originals)",
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
@@ -60,7 +60,7 @@ const STR = {
     title: "큐레이션", compose: "아틀라스 굽기", export: "PNG 내보내기", exportGif: "GIF 내보내기",
     groundGrid: "바닥 그리드", langOther: "EN",
     ppApply: "픽셀퍼펙트 적용", baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
-    pxGrid: "픽셀퍼펙트 격자", tPxGrid: "픽셀퍼펙트가 실제로 스냅한 논리 픽셀 격자 오버레이 (표시 전용)",
+    pxGrid: "픽셀 격자", refsLabel: "생성 재료", ref_anchor: "방향 앵커", ref_basis: "basis row", ref_guide: "레이아웃 가이드", tPxGrid: "픽셀퍼펙트가 실제로 스냅한 논리 픽셀 격자 오버레이 (표시 전용)",
     tPpApply: "체크 = 픽셀퍼펙트 프레임 표시·굽기, 해제 = 적용 전 원본 표시·굽기",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
@@ -103,10 +103,16 @@ function frameUrl(frame) {
 // 예전엔 셀 픽셀마다(scale 무시) 그어서, logical_height < cell 인 런에서 실제 스냅
 // 격자보다 촘촘한 거짓 격자를 보여줬다. 픽셀퍼펙트가 아닌 런은 격자 자체가 없다.
 function sizePxGrids() {
-  const step = run.pixelPerfect ? run.pixelPerfect.scale : 1;
-  document.querySelectorAll(".stage").forEach((stage) => {
-    const overlay = stage.querySelector(".pxgrid");
+  // 줄 단위 격자: 계약 런은 전 줄 동일 scale, 계약 없는 런은 줄별 자동 측정값
+  // (state.pixelScale). 측정 실패한 줄은 오버레이를 숨긴다 — 가짜 격자 금지.
+  document.querySelectorAll(".card").forEach((card) => {
+    const overlay = card.querySelector(".pxgrid");
     if (!overlay) return;
+    const stage = card.querySelector(".stage");
+    const st = run.states.find((s) => s.name === card.dataset.state);
+    const step = (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null;
+    if (!step || !stage) { overlay.style.display = "none"; return; }
+    overlay.style.display = "";
     const ds = (stage.clientWidth / run.cell.width) * step;
     overlay.style.backgroundSize = `${ds}px ${ds}px`;
   });
@@ -579,6 +585,23 @@ function renderState(state) {
     (state.extractOk ? "" : `<span class="state-warn">${t("extractFail")}</span>`);
   wrap.appendChild(head);
 
+  // 이 줄을 "무엇으로 생성했는가" — run dir 실재 파일 기준 ref 체인 (앵커/basis/가이드)
+  if (state.refs && state.refs.length) {
+    const refs = document.createElement("div");
+    refs.className = "state-refs";
+    refs.innerHTML =
+      `<span class="refs-label">${t("refsLabel")}</span>` +
+      state.refs
+        .map(
+          (r) =>
+            `<a class="ref-chip" href="${r.url}" target="_blank" title="${escapeHtml(r.name)}">` +
+            `<img src="${r.url}" alt="${escapeHtml(r.role)}" loading="lazy" />` +
+            `<span>${t("ref_" + r.role)}</span></a>`
+        )
+        .join("");
+    wrap.appendChild(refs);
+  }
+
   const body = document.createElement("div");
   body.className = "state-body";
 
@@ -911,7 +934,7 @@ function applyStaticLang() {
   const ppLabel = document.getElementById("pp-label");
   if (ppLabel) ppLabel.textContent = t("ppApply");
   const pxLabel = document.getElementById("pxgrid-label");
-  if (pxLabel) pxLabel.textContent = t("pxGrid");
+  if (pxLabel) pxLabel.textContent = t("pxGrid") + (run.pixelPerfect && run.pixelPerfect.label ? " \u00b7 " + run.pixelPerfect.label : "");
   const pxWrap = document.getElementById("pxgrid-wrap");
   if (pxWrap) pxWrap.title = t("tPxGrid");
   const ppWrap = document.getElementById("pp-wrap");
