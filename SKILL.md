@@ -247,25 +247,7 @@ If image generation produces guide boxes, visible labels, overlapping poses, bac
 
 ## Output Contract
 
-One worker owns exactly one character folder:
-
-```text
-<target>/assets/generated/sprites/<character-id>/
-  sprite-request.json
-  base-source.<ext>
-  references/layout-guides/<state>.png
-  prompts/<state>.txt
-  raw/<state>.png
-  frames/<state>/frame-N.png
-  frames/frames-manifest.json
-  curation.json            # optional, non-destructive curation sidecar
-  sprite-sheet-alpha.png
-  sprite-sheet-alpha.report.json
-  manifest.json
-  qa-notes.md
-```
-
-Do not let multiple workers write the same character folder. The `curation.json` sidecar schema (selected/order/transforms/pixel_perfect) and its folder-collision rule: [`docs/curation.md`](docs/curation.md).
+One worker owns exactly one character folder. The canonical run-dir folder tree — every input/output file and which ones drive the curation view — is owned by [`docs/run-contract.md`](docs/run-contract.md) §2. Do not let multiple workers write the same character folder. The `curation.json` sidecar schema (selected/order/transforms/pixel_perfect) and its folder-collision rule: [`docs/curation.md`](docs/curation.md).
 
 ## Runtime Contract
 
@@ -331,6 +313,7 @@ qa_note=<one sentence>
 
 Leaf docs are one link deep from this hub. Read them on these triggers:
 
+- [`docs/run-contract.md`](docs/run-contract.md) — the structural contract the scripts enforce: pipeline stage I/O table, the canonical run-dir folder tree, the curation-view display contract (base reference row, generation-material chips, pixel grid, original-quality toggle), and the `--pngs-dir` import source rule. Read when you need the folder/stage/view contract itself. Owns those tables; this SKILL.md and architecture.md point to it rather than restating them.
 - [`docs/architecture.md`](docs/architecture.md) — how the scripts realize this contract: pipeline stages, cell geometry, idle-anchor ownership flow, extraction internals, hatch-pet comparison. Read when you need code-level behavior. Describes the code as-is; if it disagrees with this SKILL.md, this file wins.
 - [`docs/states-and-frames.md`](docs/states-and-frames.md) — choosing states and frame counts: Simple MVP scope (default vs experimental states), the Quick Path request JSON, frame-count guidance (4/5/6/8/9/12).
 - [`docs/pixel-perfect.md`](docs/pixel-perfect.md) — pixel-art targets: `fit` / `pixel_perfect` parameters, stage ownership, style/pixel-density reference rules, plain-twin curator toggle.

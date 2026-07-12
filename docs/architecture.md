@@ -30,22 +30,9 @@ flowchart TD
 
 ## 2. Stage ownership (each script does one job)
 
-| Stage | Script | Input | Output |
-|---|---|---|---|
-| Prepare | `prepare_sprite_run.py` | base image + request flags/JSON | `sprite-request.json`, per-state layout guide, per-state prompt, empty `raw/`+`frames/` |
-| Generate | `sprite-gen gen` (`generate_sprite_image.py` wrapper) | `prompts/<state>.txt` + refs | verified `raw/<state>.png` strip + audit raw/report |
-| Extract | `extract_sprite_row_frames.py` | `raw/<state>.png` | `frames/<state>/frame-N.png` (+ `.plain.png` twin on pixel-perfect runs), `frames/frames-manifest.json` |
-| Curate (opt) | `serve_curation.py` + `curation.py` | `frames/` | `curation.json` sidecar |
-| Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
-| QA | `preview_animation.py` | `frames/` | `qa/<state>-contact.png`, `qa/<state>.gif` |
-| Inspect | `inspect_sprite_run.py` | `sprite-request.json`, `raw/` or `frames/` | `sprite-inspect.report.json` |
-| Score | `score_sprite_run.py` | `sprite-inspect.report.json` | `sprite-score.report.json`, correction hints |
-| Correction loop | `run_correction_loop.py` | run dir + optional provider command | `correction-loop.report.json`, per-attempt inspect/score/hints, best-candidate record |
-| GIF export | `compose_sprite_gif.py`, `gif_utils.py` | selected frames | clean transparent GIF |
-| Selected cycle | `compose_selected_cycle.py` | `curation.json` / `--frames` | selected-cycle manifest + QA |
-| Inverse / import | `unpack_atlas_run.py` | finished atlas **or** `--pngs-dir` | curator-ready run dir |
-| Export stills | `export_curated_pngs.py` | curated `frames/` | named PNGs under `<run-dir>/curated/` |
-| Chroma guard | `check_visible_magenta.py` | screenshot | leakage warning |
+The canonical stage → script → input → output table is owned by
+[`run-contract.md`](run-contract.md) §1. This section explains the shared-import
+and locking behavior *behind* that table.
 
 The scripts are explicit pipeline commands, not hidden imports. The shared
 imports are `curation.py` (schema + transform math + the `frame_variant`/
@@ -316,24 +303,10 @@ blocked; it must not create `sprite-sheet-alpha.png` and is not a pass.
 
 ## 9. Output directory (one worker owns one character folder)
 
-```text
-<target>/assets/generated/sprites/<character-id>/
-  sprite-request.json
-  base-source.<ext>
-  references/layout-guides/<state>.png
-  prompts/<state>.txt
-  raw/<state>.png
-  frames/<state>/frame-N.png
-  frames/<state>/frame-N.plain.png   # pixel-perfect runs only (pre-fit twin)
-  frames/frames-manifest.json
-  curation.json                 # optional sidecar
-  sprite-sheet-alpha.png
-  sprite-sheet-alpha.report.json
-  manifest.json
-  qa/<state>-contact.png, qa/<state>.gif
-  qa-notes.md
-  curated/                      # only when export_curated_pngs.py runs
-```
+The canonical run-dir folder tree (every input/output file, plus which files drive
+the curation view) is owned by [`run-contract.md`](run-contract.md) §2. The
+single-writer lock that enforces "one worker owns one character folder" at runtime is
+`runio.py`'s `.sprite-gen.lock` (§2 above).
 
 ## 10. Inverse paths (editing finished assets)
 
