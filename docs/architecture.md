@@ -47,9 +47,9 @@ loudly with the holder's pid; a dead holder's lock is reclaimed automatically.
 atomically and compose reads one consistent snapshot, so human edit sessions never
 block on a running compose. The curation write is, however, serialized against a
 `--force` re-import publish via the separate publish rwlock (`read_guard`/
-`publish_guard`), and a curation whose states no longer match the current run is
-rejected — a stale autosave cannot mix old-state curation into a re-imported run
-(run-contract.md §4).
+`publish_guard`), and a curation POST whose echoed run generation (`runRevision`)
+no longer matches is rejected — a stale autosave cannot apply old selections to a
+re-imported run's frames, even when it keeps the same state names (run-contract.md §4).
 
 The automatic correction loop is intentionally split into three owners:
 `inspect.py` measures deterministic signals (frame count, RGB histogram, dHash,

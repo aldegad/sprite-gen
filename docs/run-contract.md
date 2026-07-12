@@ -127,6 +127,7 @@ including non-display fields like `states[].action`, is assembled by
   "pixelPerfect": { "logicalHeight": 48, "scale": 5, "source": "request", "label": "48px" },
                                             // or { "source": "auto", "label": "auto", "scale": null }; null when no grid anywhere
   "fitPixelPerfect": true,                   // request opted into the deterministic pixel-perfect path
+  "runRevision": "9f3c1a0b7e2d4c58",         // frame-content fingerprint of this generation; POST /api/curation echoes it (stale ⇒ 409)
   "hasAtlas": true,
   "iso": null,                               // sibling meta.json iso tile/anchor → ground-grid overlay
   "lang": "ko",
@@ -236,9 +237,12 @@ throughout, so a concurrent **writer** cannot preempt (writer Isolation).
 >
 > The curation **write** (`POST /api/curation`) takes the same exclusive publish lock, so
 > a `select`/`reorder`/`transform` autosave is serialized with a concurrent re-import; and
-> a POST whose states are no longer in the current run is **rejected** (`HTTP 409`) — a
-> stale autosave from a webview still on the pre-re-import run can never mix old-state
-> curation into the new run (Consistency).
+> the POST must echo the `runRevision` (a frame-content fingerprint) it was loaded with —
+> a POST from a different run generation is **rejected** (`HTTP 409`). So a stale autosave
+> from a webview still on a pre-re-import (or pre-re-extract) run can never apply old
+> selections/transforms to new frames, **even when the re-import keeps the same state
+> names** but swaps the candidate images (Consistency — run identity, not just state
+> membership).
 
 ## 5. Conformance status
 

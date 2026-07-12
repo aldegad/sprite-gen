@@ -310,10 +310,12 @@ def test_api_run_reader_isolated_from_concurrent_publish(tmp_path):
     assert outcome["at"] >= released_at, "reader returned before the publish released"
 
 
-def test_stale_curation_post_rejected_after_reimport(tmp_path):
-    """A curation POST whose states aren't in the current run is rejected (409) and never
-    written — a stale autosave from a webview on the pre-re-import run must not mix
-    old-state curation into the new run (Consistency; observable, not a silent overwrite)."""
+def test_stale_curation_post_rejected_across_run_generations(tmp_path):
+    """A curation autosave must echo the runRevision it was loaded with. A `--force`
+    re-import — even one keeping the SAME state name but swapping the candidate images —
+    changes the run generation, so an old-session POST is rejected (409) and never applied;
+    a POST echoing the current revision saves (200) (Consistency: run identity, not just
+    state membership; observable, not a silent overwrite)."""
     import json as _json
     import threading
     import urllib.error
@@ -324,11 +326,9 @@ def test_stale_curation_post_rejected_after_reimport(tmp_path):
     from serve_curation import CurationHandler
 
     pngs = tmp_path / "pngs"
-    _png(pngs / "old" / "1-a.png")
+    _png(pngs / "items" / "1-a.png", color=(200, 0, 0, 255))
+    _png(pngs / "items" / "2-b.png", color=(0, 200, 0, 255))
     out = tmp_path / "run"
-    assert _run_import(pngs, out, "--force").returncode == 0
-    shutil.rmtree(pngs)                       # re-import replaces the run with a different state
-    _png(pngs / "new" / "1-a.png")
     assert _run_import(pngs, out, "--force").returncode == 0
 
     CurationHandler.run_dir = out
@@ -337,8 +337,12 @@ def test_stale_curation_post_rejected_after_reimport(tmp_path):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     port = srv.server_address[1]
 
-    def post(states):
-        body = _json.dumps({"version": 1, "kind": "sprite-gen-curation", "states": states}).encode()
+    def get_revision():
+        return _json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/run").read())["runRevision"]
+
+    def post(revision):
+        body = _json.dumps({"version": 1, "kind": "sprite-gen-curation", "runRevision": revision,
+                            "states": {"items": {"selected": [1], "transforms": {"1": {"dx": 9}}}}}).encode()
         req = urllib.request.Request(f"http://127.0.0.1:{port}/api/curation", data=body, method="POST")
         try:
             return urllib.request.urlopen(req).status
@@ -346,12 +350,19 @@ def test_stale_curation_post_rejected_after_reimport(tmp_path):
             return exc.code
 
     try:
-        stale_code = post({"old": {"selected": [0]}})   # state from the discarded run
-        assert stale_code == 409, stale_code
-        assert not (out / "curation.json").exists(), "stale curation polluted the new run"
-        fresh_code = post({"new": {"selected": [0]}})    # state of the current run
-        assert fresh_code == 200, fresh_code
+        old_rev = get_revision()                          # the webview loads generation 1
+        # re-import the SAME state name with DIFFERENT images (new candidates)
+        shutil.rmtree(pngs)
+        _png(pngs / "items" / "1-a.png", color=(0, 0, 200, 255))
+        _png(pngs / "items" / "2-b.png", color=(200, 200, 0, 255))
+        assert _run_import(pngs, out, "--force").returncode == 0
+        new_rev = get_revision()
+        assert new_rev != old_rev, "run generation did not change on same-state re-import"
+        # the old session autosaves against the stale generation -> rejected, not applied
+        assert post(old_rev) == 409
+        assert not (out / "curation.json").exists(), "stale curation applied to the new run"
+        # a POST echoing the current generation saves
+        assert post(new_rev) == 200
         assert (out / "curation.json").is_file()
-        assert set(_json.loads((out / "curation.json").read_text())["states"]) == {"new"}
     finally:
         srv.shutdown()
