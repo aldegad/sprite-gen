@@ -167,3 +167,32 @@ def test_force_reimport_failure_preserves_prior_run(tmp_path):
     # ...and the prior run must be untouched (not destroyed / emptied), no staging leak
     assert _snapshot(out) == before
     assert not (out.parent / f".{out.name}.sg-staging").exists()
+
+
+def test_publish_phase_failure_rolls_back(tmp_path, monkeypatch):
+    """If the atomic swap's second rename fails mid-publish, the prior run is rolled back
+    byte-intact, no partial new run is exposed, and staging/backup are cleaned."""
+    import pathlib
+
+    from sprite_gen import unpack_atlas as ua
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+    before = _snapshot(out)
+    _png(pngs / "items" / "2-b.png")  # a real change the re-import would publish
+
+    orig_rename = pathlib.Path.rename
+
+    def flaky(self, target):
+        if str(self).endswith(".sg-staging"):  # the new-run -> out_dir swap
+            raise OSError("injected publish failure")
+        return orig_rename(self, target)
+
+    monkeypatch.setattr(pathlib.Path, "rename", flaky)
+    with pytest.raises((OSError, SystemExit)):
+        ua.run(pngs_dir=pngs, out_dir=out, force=True)
+    assert _snapshot(out) == before                            # prior run byte-intact
+    assert not (out.parent / f".{out.name}.sg-staging").exists()  # staging cleaned
+    assert not (out.parent / f".{out.name}.sg-backup").exists()   # backup rolled back / cleaned

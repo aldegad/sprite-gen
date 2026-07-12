@@ -394,17 +394,25 @@ def _new_staging(out_dir: Path) -> Path:
 
 
 def _publish_run(staging: Path, out_dir: Path) -> None:
-    """Replace out_dir's contents with the fully-built staging run, keeping the held
-    lock. Called only after a successful build — so validation/build failures leave the
-    prior canonical run untouched (Atomicity: a rebuild fully succeeds or rolls back)."""
-    for child in out_dir.iterdir():
-        if child.name == LOCK_FILENAME:
-            continue
-        shutil.rmtree(child) if child.is_dir() else child.unlink()
-    for child in staging.iterdir():
-        if child.name == LOCK_FILENAME:  # never clobber the lock we hold
-            continue
-        shutil.move(str(child), str(out_dir / child.name))
+    """Atomically replace out_dir with the fully-built staging run, keeping lock
+    ownership consistent across the swap. Two same-filesystem directory renames do the
+    swap; if the second rename fails, the prior run is rolled back byte-intact and no
+    partial new run is exposed. Called only after a successful build, so a failed rebuild
+    never destroys or half-exposes a run (Atomicity: a rebuild fully succeeds or rolls back)."""
+    backup = out_dir.parent / f".{out_dir.name}.sg-backup"
+    if backup.exists():
+        shutil.rmtree(backup)
+    # carry the held lock into the new run so out_dir still holds a valid lock after the swap
+    lock = out_dir / LOCK_FILENAME
+    if lock.is_file():
+        shutil.copy2(lock, staging / LOCK_FILENAME)
+    out_dir.rename(backup)                  # (1) prior run -> backup (atomic)
+    try:
+        staging.rename(out_dir)             # (2) new run -> out_dir (atomic)
+    except OSError:
+        backup.rename(out_dir)              # rollback: prior run restored byte-intact
+        raise
+    shutil.rmtree(backup, ignore_errors=True)  # committed: drop the prior run
 
 
 def parse_grid(value: str) -> tuple[int, int]:
