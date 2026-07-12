@@ -146,8 +146,12 @@ def _run(args: argparse.Namespace):
             y += s.height + gap
         stacked.save(qa_dir / "all-contact.png")
 
-    print(json.dumps({"ok": True, "qa_dir": str(qa_dir), "states": summary}, ensure_ascii=False, indent=2))
-    return 0
+    # Any per-state failure makes the whole preview fail loud — never a top-level ok:true over a
+    # broken state (No Silent Fallback). The complete-generation gate above already rejects a
+    # missing/empty generation; this guards the residual per-state paths.
+    all_ok = bool(summary) and all(s.get("ok") for s in summary)
+    print(json.dumps({"ok": all_ok, "qa_dir": str(qa_dir), "states": summary}, ensure_ascii=False, indent=2))
+    return 0 if all_ok else 1
 
 
 

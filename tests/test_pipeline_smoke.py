@@ -412,6 +412,44 @@ def test_orphan_frames_without_manifest_fail_loud(fixture_run_dir: Path) -> None
         assert "orphan" in (r.stdout + r.stderr).lower()
 
 
+def test_empty_files_generation_fails_loud(fixture_run_dir: Path) -> None:
+    """A manifest that claims every state but with empty `files` over deleted frames (zero physical
+    frames) must fail loud on every consumer — never be exposed/consumed as a present-but-empty
+    generation (No Silent Fallback / Consistency). This is darami's exact counterexample."""
+    import shutil
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    for d in (run / "frames").iterdir():
+        if d.is_dir():
+            shutil.rmtree(d)                                          # 0 physical frames
+    p = run / "frames" / "frames-manifest.json"
+    m = json.loads(p.read_text())
+    m["rows"] = [{"state": r["state"], "files": [], "ok": True} for r in m["rows"]]
+    p.write_text(json.dumps(m), encoding="utf-8")
+
+    for tool, extra in (("compose_sprite_atlas.py", []), ("preview_animation.py", []),
+                        ("inspect_sprite_run.py", ["--no-write"])):
+        r = run_script(tool, "--run-dir", str(run), *extra)
+        assert r.returncode != 0, f"{tool} accepted an empty-files generation"
+        assert "no frame files" in (r.stdout + r.stderr).lower()
+
+
+def test_frame_count_mismatch_fails_loud(fixture_run_dir: Path) -> None:
+    """A manifest row whose canonical files disagree with the physical frame set (here: one file
+    dropped while the frame stays on disk) is an inconsistent generation — fail loud."""
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    p = run / "frames" / "frames-manifest.json"
+    m = json.loads(p.read_text())
+    m["rows"][0]["files"] = m["rows"][0]["files"][:-1]               # drop one; physical still has it
+    p.write_text(json.dumps(m), encoding="utf-8")
+
+    r = run_script("compose_sprite_atlas.py", "--run-dir", str(run))
+    assert r.returncode != 0, "consumer accepted a files/physical-frame mismatch"
+    assert "!= physical" in (r.stdout + r.stderr).lower()
+
+
 def test_require_frames_manifest_distinguishes_absent_from_broken(tmp_path: Path) -> None:
     """The shared finished-generation gate: {} for a genuinely absent manifest, but fail loud for
     a present-but-broken one (absent-vs-broken, No Silent Fallback)."""
