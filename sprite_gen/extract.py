@@ -1716,32 +1716,60 @@ def _namespace_from_kwargs(**kwargs: object) -> argparse.Namespace:
         names = ", ".join(sorted(remaining))
         raise TypeError(f"unexpected keyword argument(s): {names}")
     return argparse.Namespace(**values)
-def load_run_json(path: Path, kind: str) -> dict:
-    """Read a canonical run JSON record (frames-manifest.json / extract-failure.json), FAILING
-    LOUD on any corruption — unreadable, unparseable, or a broken minimal contract — instead of
-    silently treating it as absent/empty. EVERY reader (extract's subset seeding + commit,
-    inspect / the correction loop) must go through here: silently swallowing a parse error would
-    drop a still-unresolved failure (extract-failure.json) or a real generation
-    (frames-manifest.json) from view, so a corrupt record would read as "all clear" and the
-    correction loop would call a broken run done (No Silent Fallback / Consistency). Returns {}
-    only when the file is genuinely absent — the caller decides whether absence is allowed."""
+def _load_validated(path: Path, name: str, require) -> dict:
+    """Read a canonical run JSON record, FAILING LOUD on any corruption — unreadable,
+    unparseable, or a broken schema — instead of silently treating it as absent/empty. EVERY
+    reader (extract's subset seeding + commit, inspect / the correction loop) goes through here:
+    silently reading a `{}`, a missing-field, or a wrong-`ok` record as empty would drop a
+    still-unresolved failure (extract-failure.json) or a real generation (frames-manifest.json)
+    from view, so a corrupt record would read as "all clear" (No Silent Fallback / Consistency).
+    Returns {} ONLY when the file is genuinely absent — an existing-but-broken record never reads
+    as empty. `require` enforces the kind-specific contract on top of the shared shape."""
     if not path.is_file():
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise SystemExit(
-            f"corrupt {kind} {path}: {exc}\n"
+            f"corrupt {name} {path}: {exc}\n"
             f"  refusing to treat a canonical run record as empty; inspect/repair or delete it deliberately."
         )
     if not isinstance(data, dict):
-        raise SystemExit(f"corrupt {kind} {path}: expected a JSON object, got {type(data).__name__}")
+        raise SystemExit(f"corrupt {name} {path}: expected a JSON object, got {type(data).__name__}")
     for key in ("errors", "warnings", "rows"):
-        if key in data and not isinstance(data[key], list):
-            raise SystemExit(f"corrupt {kind} {path}: '{key}' must be a list, got {type(data[key]).__name__}")
-    if any(not isinstance(row, dict) for row in data.get("rows", [])):
-        raise SystemExit(f"corrupt {kind} {path}: every 'rows' entry must be a JSON object")
+        if not isinstance(data.get(key), list):  # required list, not merely list-if-present
+            raise SystemExit(f"corrupt {name} {path}: '{key}' must be a list")
+    for row in data["rows"]:
+        if not isinstance(row, dict) or not isinstance(row.get("state"), str) or not row.get("state"):
+            raise SystemExit(f"corrupt {name} {path}: every 'rows' entry needs a non-empty string 'state'")
+    require(data, path, name)
     return data
+
+
+def _require_complete_manifest(data: dict, path: Path, name: str) -> None:
+    if data.get("ok") is not True:
+        raise SystemExit(f"corrupt {name} {path}: a published frames manifest must have 'ok': true")
+
+
+def _require_failure_evidence(data: dict, path: Path, name: str) -> None:
+    if data.get("ok") is not False:
+        raise SystemExit(f"corrupt {name} {path}: failure evidence must have 'ok': false")
+    if not data["errors"]:
+        raise SystemExit(f"corrupt {name} {path}: failure evidence must have a non-empty 'errors' list")
+
+
+def load_frames_manifest(path: Path) -> dict:
+    """Read a published frames-manifest.json (a COMPLETE generation), failing loud on corruption
+    or a broken schema (`ok`:true, required `rows`/`errors`/`warnings` lists, rows carry a
+    `state`). Returns {} only when genuinely absent (No Silent Fallback — see _load_validated)."""
+    return _load_validated(path, "frames manifest", _require_complete_manifest)
+
+
+def load_failure_evidence(path: Path) -> dict:
+    """Read extract-failure.json (the run's unresolved per-state failures), failing loud on
+    corruption or a broken schema (`ok`:false, non-empty `errors`, `warnings`/`rows` lists).
+    Returns {} only when genuinely absent (No Silent Fallback — see _load_validated)."""
+    return _load_validated(path, "failure evidence", _require_failure_evidence)
 
 
 def _merged_failure_lists(prior: dict, result: dict, target_states: set, all_states: set):
@@ -1787,7 +1815,7 @@ def _commit_generation(run_dir: Path, staging: Path | None, result: dict, target
             p.unlink()
 
     with publish_guard(run_dir):
-        prior = load_run_json(evidence, "failure evidence")  # fail-loud on a corrupt record
+        prior = load_failure_evidence(evidence)  # fail-loud on a corrupt/broken-schema record
         merged_errors, merged_warnings = _merged_failure_lists(prior, result, target_states, all_states)
 
         _discard(frames_backup)
@@ -1899,7 +1927,7 @@ def _run(args: argparse.Namespace):
     # and we never publish an incomplete manifest that disagrees with the carried frame tree.
     rows = []
     if frames_final.is_dir():
-        prior_manifest = load_run_json(frames_final / "frames-manifest.json", "frames manifest")
+        prior_manifest = load_frames_manifest(frames_final / "frames-manifest.json")
         rows = [row for row in prior_manifest.get("rows", []) if row.get("state") not in target]
     if frames_root.exists():
         shutil.rmtree(frames_root)

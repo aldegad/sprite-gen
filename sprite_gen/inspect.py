@@ -268,9 +268,8 @@ def _manifest_state_notes(run_dir: Path, state: str) -> tuple[dict[str, Any] | N
     state_errors: list[str] = []
     state_warnings: list[str] = []
 
-    def _collect(path: Path, take_row: bool, kind: str) -> None:
+    def _collect(manifest: dict, take_row: bool) -> None:
         nonlocal manifest_row
-        manifest = extract.load_run_json(path, kind)  # {} if absent, fail-loud if corrupt
         if not manifest:
             return
         prefix = f"{state}:"
@@ -288,8 +287,9 @@ def _manifest_state_notes(run_dir: Path, state: str) -> tuple[dict[str, Any] | N
                     manifest_row = row
                     break
 
-    _collect(run_dir / "frames" / "frames-manifest.json", take_row=True, kind="frames manifest")
-    _collect(run_dir / "extract-failure.json", take_row=False, kind="failure evidence")
+    # fail-loud on a corrupt/broken canonical record (No Silent Fallback), {} only if absent
+    _collect(extract.load_frames_manifest(run_dir / "frames" / "frames-manifest.json"), take_row=True)
+    _collect(extract.load_failure_evidence(run_dir / "extract-failure.json"), take_row=False)
     return manifest_row, state_errors, state_warnings
 
 
