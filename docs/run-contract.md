@@ -220,7 +220,17 @@ re-importing leaves no stale `base-source.png` / `references/imported/*` behind,
 provenance (`unpack-source.json`) and the served view never disagree (Idempotency/SSoT:
 the result never depends on the prior out-dir state). A **failed or invalid** re-import
 (e.g. a bad `_refs` role) leaves the prior run **byte-intact** — it is never
-cleared-then-failed (Atomicity: a rebuild fully succeeds or rolls back).
+cleared-then-failed (Atomicity: a rebuild fully succeeds or rolls back). The publish
+holds the run-dir single-writer lock in place throughout, so a concurrent **writer**
+cannot preempt (Isolation).
+
+> **Known limitation — reader atomicity (tracked).** The publish swaps run-dir content
+> in place, so a webview **serving that same run dir concurrently** can, at the instant
+> `sprite-request.json` moves, get a transient `HTTP 500` from `/api/run`
+> (non-destructive; a refresh self-heals once the swap completes). Full reader atomicity
+> (a serving `/api/run` always sees a complete old-or-new snapshot) requires moving the
+> lock to a sidecar + an atomic directory swap — a shared-infra (`runio`) change tracked
+> in the follow-up plan `sprite-gen/curation-reader-isolation-atomic-swap`.
 
 ## 5. Conformance status
 
