@@ -1794,6 +1794,10 @@ def _run(args: argparse.Namespace):
     # mid-extract. The manifest records the FINAL `frames/<state>/...` paths regardless of the
     # staging write location. Writer-writer exclusion stays the separate `.sprite-gen.lock`.
     frames_final = run_dir / "frames"
+    # Is there a prior complete generation to protect? (a re-extract, vs a first extract on a
+    # freshly prepared run.) A failed re-extract keeps it; a failed first extract publishes the
+    # failure state (see the publish decision at the end).
+    had_prior_generation = (frames_final / "frames-manifest.json").is_file()
     frames_root = run_dir / ".frames.sg-staging"
     if frames_root.exists():
         shutil.rmtree(frames_root)
@@ -2073,7 +2077,15 @@ def _run(args: argparse.Namespace):
         "warnings": all_warnings,
     }
     atomic_write_text(frames_root / "frames-manifest.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n")
-    _publish_frames(run_dir, frames_root, frames_final)   # atomic generation swap under publish_guard
+    if result["ok"] or not had_prior_generation:
+        # Publish on success — or on a FIRST extract with no prior generation to protect, where
+        # the failed manifest + partial frames are the (observable) failure state to record.
+        _publish_frames(run_dir, frames_root, frames_final)
+    else:
+        # A failed RE-extract must not corrupt the run: discard the incomplete staging and leave
+        # the prior complete frames generation byte-intact (Atomicity — a failed regeneration
+        # must never destroy the previously-good frames). Exit code 1 + printed errors signal it.
+        shutil.rmtree(frames_root, ignore_errors=True)
     print(json.dumps({k: v for k, v in result.items() if k != "rows"}, ensure_ascii=False, indent=2))
     return 0 if result["ok"] else 1
 
