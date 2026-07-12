@@ -170,8 +170,8 @@ def test_force_reimport_failure_preserves_prior_run(tmp_path):
 
 
 def test_publish_phase_failure_rolls_back(tmp_path, monkeypatch):
-    """If the atomic swap's second rename fails mid-publish, the prior run is rolled back
-    byte-intact, no partial new run is exposed, and staging/backup are cleaned."""
+    """If a publish move fails mid-swap, the prior run is rolled back byte-intact, no
+    partial new run is exposed, and staging/backup are cleaned."""
     import pathlib
 
     from sprite_gen import unpack_atlas as ua
@@ -186,13 +186,52 @@ def test_publish_phase_failure_rolls_back(tmp_path, monkeypatch):
     orig_rename = pathlib.Path.rename
 
     def flaky(self, target):
-        if str(self).endswith(".sg-staging"):  # the new-run -> out_dir swap
+        if ".sg-staging" in str(self):  # moving new content out of staging into out_dir
             raise OSError("injected publish failure")
         return orig_rename(self, target)
 
     monkeypatch.setattr(pathlib.Path, "rename", flaky)
     with pytest.raises((OSError, SystemExit)):
         ua.run(pngs_dir=pngs, out_dir=out, force=True)
-    assert _snapshot(out) == before                            # prior run byte-intact
+    assert _snapshot(out) == before                             # prior run byte-intact
     assert not (out.parent / f".{out.name}.sg-staging").exists()  # staging cleaned
-    assert not (out.parent / f".{out.name}.sg-backup").exists()   # backup rolled back / cleaned
+    assert not (out / ".sg-backup").exists()                    # in-place backup cleaned
+
+
+def test_publish_never_removes_out_dir(tmp_path, monkeypatch):
+    """out_dir (and the lock inside it) must never disappear during publish, so a
+    concurrent writer cannot mkdir+lock the run path mid-swap (Isolation)."""
+    import pathlib
+
+    from sprite_gen import unpack_atlas as ua
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+    from sprite_gen.runio import LOCK_FILENAME
+    _png(pngs / "items" / "2-b.png")
+
+    orig_rename = pathlib.Path.rename
+    vanished = {"path": False, "lock": False}
+
+    def watch(self, target):
+        # check both before and after every rename that happens during the publish
+        for _ in range(1):
+            if not out.exists():
+                vanished["path"] = True
+            elif not (out / LOCK_FILENAME).exists():
+                vanished["lock"] = True
+        r = orig_rename(self, target)
+        if not out.exists():
+            vanished["path"] = True
+        elif not (out / LOCK_FILENAME).exists():
+            vanished["lock"] = True
+        return r
+
+    monkeypatch.setattr(pathlib.Path, "rename", watch)
+    assert ua.run(pngs_dir=pngs, out_dir=out, force=True) == 0
+    assert not vanished["path"], "out_dir vanished during publish (isolation window)"
+    assert not vanished["lock"], "run-dir lock vanished during publish (isolation window)"
+    # the new run published cleanly
+    assert (out / "frames" / "items" / "frame-1.png").is_file()
