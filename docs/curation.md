@@ -22,6 +22,12 @@ PORT=$(lsof -nP -a -p $! -iTCP -sTCP:LISTEN | awk 'END{sub(".*:","",$9); print $
 curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/"   # 200 = positive proof, 그 후 URL 보고
 ```
 
+- **캐릭터/스프라이트 세트 표시 기본지침 = 상태별 대표 1장.** 줄(state)은 `base`, `idle`,
+  `walk`, `run` … 처럼 개념 단위로 만들고, 각 줄에는 단일 컷 이미지를 넣는다 (대표컷 기본 =
+  extracted `frame-0`). 아틀라스 시트 통짜·raw 멀티프레임 row·비교용 합성 시트를 그대로 붓지
+  않는다 — 그런 통짜 이미지는 셀 크기를 폭발시키고 "무엇을 고르는가"를 흐린다. 여러 프레임을
+  비교·선택하는 작업은 이 standalone 경로가 아니라 run dir 를 직접 서빙하는 파이프라인
+  큐레이션(아래 스텝 3.5)의 몫이다. (수홍 확정 2026-07-12)
 - 사용자 로컬이면 브라우저 자동 오픈이 기본, headless/원격이면 `--no-open` + URL 전달.
 - 선택 회수는 `"$STAGE/run/curation.json"` 의 `selected` 인덱스를 파일명으로 역매핑. 비어 있으면 다시 묻는다 — 추측 진행 금지.
 - 결정 후 서버 kill + `$STAGE` 정리. 후보가 1장이면 큐레이션이 아니다 — 경로만 보고하고 끝.
