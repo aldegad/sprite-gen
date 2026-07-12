@@ -13,3 +13,6 @@ app/desktop/src-tauri/target/
 app/desktop/src-tauri/binaries/sprite-mcp-*
 .gjc/
 uv.lock
+
+# transient validator reply scratch (never track)
+.darami-validator-*.tmp
