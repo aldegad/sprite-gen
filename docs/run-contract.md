@@ -60,7 +60,8 @@ not restate it elsewhere; point here.
   prompts/<state>.txt                # generated row prompt (frame count, safe margin, anchor lock)
   raw/<state>.png                    # one horizontal image-gen strip per state (the only AI output)
   frames/<state>/frame-N.png         # extracted transparent cells (canonical)
-  frames/<state>/frame-N.plain.png   # pixel-perfect runs only: pre-pixel-perfect twin, drives the pp toggle (§3)
+  frames/<state>/frame-N.plain.png   # pixel-perfect runs only: cell-sized pre-pixel-perfect twin, baked by compose on pixel_perfect:false (§3)
+  frames/<state>/orig/frame-N.png    # pixel-perfect runs only: hi-res original twin (display-only), drives the pp-off toggle at original quality (§3)
   frames/frames-manifest.json        # per-row extract report (files, labels, ok)
   curation.json                      # optional, non-destructive sidecar (selected/order/transforms/pixel_perfect)
   sprite-sheet-alpha.png             # composed runtime atlas
@@ -86,8 +87,12 @@ Rules the display depends on:
 - **`references/imported/<group>/`** is the imported-run equivalent of those raw
   anchors: an imported row carries its generation material here so the view produces
   the same chips (§4).
-- **`frames/<state>/frame-N.plain.png`** (pixel-perfect runs only) is the pre-fit
-  twin the view toggles to when the user turns pixel-perfect off — "off = original".
+- **`frames/<state>/frame-N.plain.png`** (pixel-perfect runs only) is the *cell-sized*
+  pre-fit twin that `compose` bakes when the sidecar sets `pixel_perfect:false` — the
+  atlas slot is cell-sized, so this twin must be too. **`frames/<state>/orig/frame-N.png`**
+  is the *hi-res* (S×cell, capped) pre-fit twin the view displays when the user turns
+  pixel-perfect off, so "off = original" is crisp instead of an upscaled cell blur. The
+  view prefers `orig/`, falling back to `.plain.png` when no hi-res twin exists.
   Sidecar-baking semantics are owned by [`pixel-perfect.md`](pixel-perfect.md); the
   display contract for the toggle is §3.
 
@@ -107,7 +112,7 @@ whole point is that the experience does not vary by who launched it.
 | **Base reference row** | `base-source.*` exists | `baseUrl` (null if absent) | Top row, pure image — no preview/select UI. Identity truth, always visible. |
 | **Generation-material chips** | the state has resolvable material | `states[].refs[]` — each `{role, name, url}` | Per-state header shows *what generated this row*. `role ∈ {anchor, basis, guide}`, labelled `방향 앵커` / `basis row` / `레이아웃 가이드` (i18n key `ref_<role>`). Only run-dir files that actually exist appear. |
 | **Pixel grid** | grid is known or measurable | `states[].pixelScale` + `pixelPerfect{label,scale}` | Snap grid at the logical pixel size. `fit.pixel_perfect` runs → request scale, label `48px`-style. Import/plain runs → per-row auto-measured block pitch, label `auto`. A row where the pitch cannot be measured draws **no grid** — no fake grid. |
-| **Original-quality toggle** | any frame has a `.plain.png` twin | `states[].frames[].plainUrl` + `fitPixelPerfect` | Top-right checkbox. Checked = canonical pixel-perfect `frame-N.png`; unchecked = the pre-fit `plainUrl` twin ("off = original"). Absent twins hide the toggle. |
+| **Original-quality toggle** | any frame has a pre-fit twin | `states[].frames[].plainUrl` + `fitPixelPerfect` | Top-right checkbox. Checked = canonical pixel-perfect `frame-N.png`; unchecked = `plainUrl` — the hi-res `orig/frame-N.png` when present (crisp "off = original"), else the cell-sized `.plain.png`. Absent twins hide the toggle. |
 
 `GET /api/run` payload — the display-relevant subset below (the full snapshot,
 including non-display fields like `states[].action`, is assembled by
@@ -137,12 +142,14 @@ including non-display fields like `states[].action`, is assembled by
       "fps": 8, "loop": true, "requestFrames": 6, "extractOk": true,
       "frames": [
         { "index": 0, "url": "/frames/down_walk/frame-0.png",
-          "plainUrl": "/frames/down_walk/frame-0.plain.png",   // present ⇒ toggle available
+          "plainUrl": "/frames/down_walk/orig/frame-0.png",    // hi-res orig/ twin (else cell-sized .plain.png); present ⇒ toggle available
           "present": true, "label": "step-1",
           "size": [256, 256], "contentSize": [120, 210] }      // contentSize = alpha bbox, for size-parity review
       ]
     }
   ],
+  "contract": { "base": true, "refs": true, "refsStates": 1, "grid": true, "sourceless": false },
+                                            // self-report (§4): sourceless=true when base+refs+grid all absent → server warns at startup
   "curation": { /* current sidecar snapshot, or empty */ }
 }
 ```
@@ -206,12 +213,21 @@ than a divergent experience.
 
 ## 5. Conformance status
 
-The stage table (§1), folder tree (§2), and the base-row / chips / grid / toggle
-elements of §3 are enforced by the shipped scripts today. The `--pngs-dir` `_base`/
-`_refs` embedding (§4) and the "off = original quality" fidelity of the plain twin
-(§3, the twin is currently written at cell resolution) are being wired by the active
-**pipeline-run-contract-standardization** plan; this doc is the target they conform to.
-Do not treat an unwired part as done — check the plan, not this sentence, for status.
+All four contracts are enforced by the shipped scripts today:
+
+- Stage table (§1), folder tree (§2), and the base-row / chips / grid elements of §3.
+- The "off = original quality" toggle (§3): extract writes a hi-res `orig/` twin the
+  view prefers, so pp-off is crisp; the cell-sized `.plain.png` stays for the `compose`
+  bake. Canonical `frame-N.png` bytes are unchanged (deterministic — verified
+  byte-identical on re-extraction of founder v6/v7).
+- The `--pngs-dir` `_base`/`_refs` embedding (§4): imported runs reach the same base
+  row + chips as real runs.
+- The view-contract self-report (§4): serve_curation logs base/refs/grid coverage at
+  startup and warns on a sourceless view.
+
+Verified end-to-end on three views — founder v6 (`base=yes refs=12/12 grid=yes`),
+founder v7 (`refs=36/36`, anchor/basis/guide chips across down/side/up), and a
+comprehensive `_base`+`_refs` import — plus a sourceless run that emits the warning.
 
 ## Related
 
