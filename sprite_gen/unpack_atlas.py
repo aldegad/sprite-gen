@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -284,12 +285,19 @@ def import_pngs(out_dir: Path, png_paths: list[Path], state_name: str, labels: l
     return import_png_groups(out_dir, [{"name": state_name, "paths": png_paths, "labels": labels}], iso)
 
 
-def import_png_groups(out_dir: Path, groups: list[dict[str, Any]], iso: dict[str, Any] | None = None) -> dict[str, Any]:
+def import_png_groups(out_dir: Path, groups: list[dict[str, Any]], iso: dict[str, Any] | None = None,
+                      base_src: Path | None = None) -> dict[str, Any]:
     """Import separate PNGs as one or more curator rows (states).
 
-    groups: [{"name": str, "paths": [Path], "labels": [str]}] — 하위폴더 하나가
-    큐레이터 줄 하나가 된다 (예: reference/ 와 portraits/ 를 분리). 셀 크기는
-    전 그룹 공유 최대치라 카드 배율이 그룹 간에도 일관된다. 원본은 복사만 한다.
+    groups: [{"name": str, "paths": [Path], "labels": [str], "refs": [Path]}] —
+    하위폴더 하나가 큐레이터 줄 하나가 된다 (예: reference/ 와 portraits/ 를 분리).
+    셀 크기는 전 그룹 공유 최대치라 카드 배율이 그룹 간에도 일관된다. 원본은 복사만 한다.
+
+    소스 1급 수용 (run-contract.md §4): `base_src` 는 아이덴티티 truth →
+    `base-source.<ext>` (큐레이션뷰 베이스 참조 줄). group 의 `refs` 는 그 줄의
+    생성 재료 `<role>-<name>.png` → `references/imported/<state>/` (상태별 생성 재료
+    칩). 역할(anchor/basis/guide) 해석은 serve_curation `_state_refs` 가 파일명에서
+    단독 수행한다 (여긴 파일명 보존 복사만 — 역할 파싱 SSoT 이원화 금지).
     """
     loaded: list[tuple[dict[str, Any], list[Image.Image]]] = []
     cell_w = 0
@@ -304,6 +312,7 @@ def import_png_groups(out_dir: Path, groups: list[dict[str, Any]], iso: dict[str
     manifest_rows = []
     source_files: list[str] = []
     source_labels: list[str] = []
+    imported_refs_manifest: dict[str, list[str]] = {}
     for group, imgs in loaded:
         state_name = str(group["name"])
         labels = list(group.get("labels", []))
@@ -323,6 +332,24 @@ def import_png_groups(out_dir: Path, groups: list[dict[str, Any]], iso: dict[str
         manifest_rows.append({"state": state_name, "frames": len(imgs), "method": "imported-pngs", "files": files, "labels": labels, "ok": True})
         source_files.extend(p.name for p in group["paths"])
         source_labels.extend(labels)
+        # generation-material refs → references/imported/<state>/ (큐레이터 생성 재료 칩).
+        # 파일명을 보존해 복사한다 — role 파싱은 serve_curation 이 단독으로.
+        ref_paths = [Path(r) for r in group.get("refs", [])]
+        if ref_paths:
+            ref_dir = out_dir / "references" / "imported" / state_name
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            for rp in ref_paths:
+                shutil.copy2(rp, ref_dir / rp.name)
+            imported_refs_manifest[state_name] = [rp.name for rp in ref_paths]
+
+    # base 아이덴티티 truth → base-source.<ext> (큐레이션뷰 베이스 참조 줄). prepare.py 와
+    # 동일하게 원본 확장자 보존 복사 (identity 는 재인코딩 없이 pristine 유지).
+    base_out_name = None
+    if base_src is not None:
+        base_src = Path(base_src)
+        base_out = out_dir / f"base-source{base_src.suffix.lower() or '.png'}"
+        shutil.copy2(base_src, base_out)
+        base_out_name = base_out.name
 
     first_dir = groups[0]["paths"][0].parent
     request = {
@@ -347,10 +374,12 @@ def import_png_groups(out_dir: Path, groups: list[dict[str, Any]], iso: dict[str
         json.dumps({"version": 1, "kind": "sprite-gen-unpack-source", "layout_source": "imported-pngs",
                     "cell": {"width": cell_w, "height": cell_h}, "source_dir": str(first_dir),
                     "files": source_files, "labels": source_labels,
-                    "groups": [str(g["name"]) for g in groups]}, ensure_ascii=False, indent=2) + "\n",
+                    "groups": [str(g["name"]) for g in groups],
+                    "base_source": base_out_name, "imported_refs": imported_refs_manifest}, ensure_ascii=False, indent=2) + "\n",
     )
     return {"layout_source": "imported-pngs", "states": [str(g["name"]) for g in groups], "cell": [cell_w, cell_h],
-            "frames": sum(len(imgs) for _, imgs in loaded)}
+            "frames": sum(len(imgs) for _, imgs in loaded),
+            "base_source": base_out_name, "imported_refs": imported_refs_manifest}
 
 
 def parse_grid(value: str) -> tuple[int, int]:
@@ -424,7 +453,23 @@ def _run(args: argparse.Namespace):
     if args.pngs_dir:
         src = args.pngs_dir.expanduser().resolve()
         top_pngs = sorted(p for p in src.glob("*.png"))
-        subdirs = sorted(d for d in src.iterdir() if d.is_dir())
+        # reserved underscore dirs carry sources, not curator rows (run-contract.md §4):
+        #   _base/ = whole-set identity image, <group>/_refs/ = that row's generation material.
+        reserved = {"_base", "_refs"}
+        subdirs = sorted(d for d in src.iterdir() if d.is_dir() and d.name not in reserved)
+        # _base/<img> → base-source (base reference row). Accept the same formats serve_curation shows.
+        base_src = None
+        base_dir = src / "_base"
+        if base_dir.is_dir():
+            base_candidates = sorted(p for p in base_dir.iterdir()
+                                     if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"))
+            if base_candidates:
+                base_src = base_candidates[0]
+
+        def _group_refs(group_dir: Path) -> list[Path]:
+            rd = group_dir / "_refs"
+            return sorted(rd.glob("*.png")) if rd.is_dir() else []
+
         # prefer human names from a sibling meta.json (file -> item name), else filename stem
         file_to_name: dict[str, str] = {}
         iso = None
@@ -444,15 +489,17 @@ def _run(args: argparse.Namespace):
         groups: list[dict[str, Any]] = []
         if top_pngs:
             groups.append({"name": args.state_name, "paths": top_pngs,
-                           "labels": [file_to_name.get(p.name, p.stem) for p in top_pngs]})
+                           "labels": [file_to_name.get(p.name, p.stem) for p in top_pngs],
+                           "refs": _group_refs(src)})
         for sub in subdirs:
             sub_pngs = sorted(p for p in sub.glob("*.png"))
             if sub_pngs:
                 groups.append({"name": sub.name, "paths": sub_pngs,
-                               "labels": [file_to_name.get(p.name, p.stem) for p in sub_pngs]})
+                               "labels": [file_to_name.get(p.name, p.stem) for p in sub_pngs],
+                               "refs": _group_refs(sub)})
         if not groups:
             raise SystemExit(f"no PNGs in {src}")
-        result = import_png_groups(out_dir, groups, iso)
+        result = import_png_groups(out_dir, groups, iso, base_src=base_src)
         result["ok"] = True
         result["out_dir"] = str(out_dir)
         print(json.dumps(result, ensure_ascii=False, indent=2))
