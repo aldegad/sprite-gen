@@ -112,3 +112,29 @@ def test_subset_reextract_preserves_other_states(fixture_run_dir: Path) -> None:
     assert sorted(row["state"] for row in manifest["rows"]) == states  # manifest keeps all rows
     compose = run_script("compose_sprite_atlas.py", "--run-dir", str(run))
     assert compose.returncode == 0, compose.stdout + compose.stderr  # was exit 1 before the fix
+
+
+def test_failed_subset_reextract_preserves_prior_generation(fixture_run_dir: Path) -> None:
+    """A failed subset re-extract must leave the prior COMPLETE frames generation byte-intact
+    and discard staging (Atomicity: publish only on success). Otherwise a single-row
+    regeneration that fails would destroy the previously-good frames for that row."""
+    import hashlib
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    target = sorted(json.loads((run / "sprite-request.json").read_text())["states"])[0]
+
+    before = {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest()
+              for p in (run / "frames").rglob("frame-*.png")}
+    prior_manifest = (run / "frames" / "frames-manifest.json").read_bytes()
+
+    (run / "raw" / f"{target}.png").unlink()                  # break the target's raw strip
+    r = run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", target)
+    assert r.returncode == 1                                  # failed loudly
+
+    for rel, digest in before.items():                        # prior generation byte-intact
+        assert (run / rel).is_file(), f"{rel} destroyed by a failed subset re-extract"
+        assert hashlib.sha256((run / rel).read_bytes()).hexdigest() == digest
+    assert (run / "frames" / "frames-manifest.json").read_bytes() == prior_manifest
+    assert not (run / ".frames.sg-staging").exists()          # staging discarded, no leak
+    assert run_script("compose_sprite_atlas.py", "--run-dir", str(run)).returncode == 0
