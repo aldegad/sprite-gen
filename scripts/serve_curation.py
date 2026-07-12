@@ -57,6 +57,102 @@ CONTENT_TYPES = {
 }
 
 
+
+# ── 픽셀 격자 자동 측정 ──────────────────────────────────────────────
+# fit.pixel_perfect 계약이 없는 런(예: --pngs-dir 임포트)에서도 격자 오버레이를 켠다:
+# 인접픽셀 색경계 위치가 한 간격의 배수에 몰려 있으면 그 간격이 블록 피치다.
+# 축별 브루트포스(경계 질량 ≥80% 인 최대 간격). 측정 실패한 줄은 격자를 그리지 않는다
+# (가짜 격자 금지). 결과는 (경로, mtime) 키로 캐시.
+_PITCH_CACHE: dict = {}
+
+
+def _axis_pitch(edge_mass, length):
+    total = sum(edge_mass)
+    if total <= 0 or length < 8:
+        return None
+    best = None
+    for pitch in range(2, min(96, length // 3) + 1):
+        phase = [0] * pitch
+        for pos, mass in enumerate(edge_mass):
+            if mass:
+                phase[pos % pitch] += mass
+        if max(phase) / total >= 0.8:
+            best = pitch
+    return best
+
+
+def detect_pixel_pitch(path):
+    """프레임 한 장의 블록 피치(셀px/논리px)를 측정한다. 실패 시 None."""
+    if Image is None:
+        return None
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    key = (str(path), stat.st_mtime_ns)
+    if key in _PITCH_CACHE:
+        return _PITCH_CACHE[key]
+    pitch = None
+    try:
+        with Image.open(path) as im:
+            im = im.convert("RGBA")
+            px = im.load()
+            w, h = im.size
+            col = [0] * max(0, w - 1)
+            row = [0] * max(0, h - 1)
+            for y in range(h):
+                for x in range(w - 1):
+                    a, b = px[x, y], px[x + 1, y]
+                    if abs(a[0]-b[0]) + abs(a[1]-b[1]) + abs(a[2]-b[2]) + abs(a[3]-b[3]) > 48:
+                        col[x] += 1
+            for x in range(w):
+                for y in range(h - 1):
+                    a, b = px[x, y], px[x, y + 1]
+                    if abs(a[0]-b[0]) + abs(a[1]-b[1]) + abs(a[2]-b[2]) + abs(a[3]-b[3]) > 48:
+                        row[y] += 1
+        pw, ph = _axis_pitch(col, w), _axis_pitch(row, h)
+        if pw and ph:
+            if max(pw, ph) % min(pw, ph) == 0 or abs(pw - ph) <= 1:
+                pitch = min(pw, ph)
+        else:
+            pitch = pw or ph
+        if pitch is not None and pitch < 2:
+            pitch = None
+    except OSError:
+        pitch = None
+    _PITCH_CACHE[key] = pitch
+    return pitch
+
+
+_REF_DIRECTIONS = ("down45", "up45", "down", "side", "up", "left", "right", "front", "back")
+
+
+def _state_refs(run_dir, state):
+    """상태 하나의 생성 레퍼런스 체인(방향 앵커/basis row/레이아웃 가이드).
+
+    directional-anchor 규약의 관례 유도 — run dir 에 실재하는 파일만 노출한다.
+    """
+    refs = []
+    direction = None
+    for d in _REF_DIRECTIONS:
+        if state == d or state.startswith(d + "_"):
+            direction = d
+            break
+    if direction is not None:
+        anchor = run_dir / "raw" / f"{direction}_idle.png"
+        if state != f"{direction}_idle" and anchor.is_file():
+            refs.append({"role": "anchor", "name": anchor.name, "url": f"/run/raw/{anchor.name}"})
+        base = state[len(direction) + 1:] if state.startswith(direction + "_") else None
+        if base and direction != "down":
+            basis = run_dir / "raw" / f"down_{base}.png"
+            if basis.is_file():
+                refs.append({"role": "basis", "name": basis.name, "url": f"/run/raw/{basis.name}"})
+    guide = run_dir / "references" / "layout-guides" / f"{state}.png"
+    if guide.is_file():
+        refs.append({"role": "guide", "name": guide.name, "url": f"/run/references/layout-guides/{state}.png"})
+    return refs
+
+
 def build_run_state(run_dir: Path) -> dict:
     """Assemble the run snapshot the SPA needs, from the canonical SSoT files."""
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
@@ -81,7 +177,7 @@ def build_run_state(run_dir: Path) -> dict:
     if fit.get("pixel_perfect"):
         logical_height = int(fit.get("logical_height", cell_state["height"]))
         scale = max(1, cell_state["height"] // max(1, logical_height))
-        pixel_perfect = {"logicalHeight": logical_height, "scale": scale}
+        pixel_perfect = {"logicalHeight": logical_height, "scale": scale, "source": "request", "label": f"{logical_height}px"}
 
     states = []
     for state, entry in request["states"].items():
@@ -112,9 +208,19 @@ def build_run_state(run_dir: Path) -> dict:
                 except OSError:
                     pass
             frames.append(frame)
+        state_scale = None
+        if pixel_perfect is not None:
+            state_scale = pixel_perfect["scale"]
+        else:
+            for fr in frames:
+                if fr.get("present"):
+                    state_scale = detect_pixel_pitch(run_dir / fr["url"].lstrip("/"))
+                    break
         states.append(
             {
                 "name": state,
+                "pixelScale": state_scale,
+                "refs": _state_refs(run_dir, state),
                 "fps": int(entry.get("fps", 6)),
                 "loop": bool(entry.get("loop", True)),
                 "action": entry.get("action", ""),
@@ -136,7 +242,7 @@ def build_run_state(run_dir: Path) -> dict:
         "runDir": str(run_dir),
         "baseUrl": base_url,
         "cell": cell_state,
-        "pixelPerfect": pixel_perfect,
+        "pixelPerfect": pixel_perfect if pixel_perfect is not None else ({"source": "auto", "label": "auto", "scale": None} if any(st.get("pixelScale") for st in states) else None),
         "schemaVersion": SCHEMA_VERSION,
         "states": states,
         "curation": curation,
