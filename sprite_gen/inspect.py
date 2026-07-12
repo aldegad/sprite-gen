@@ -268,13 +268,10 @@ def _manifest_state_notes(run_dir: Path, state: str) -> tuple[dict[str, Any] | N
     state_errors: list[str] = []
     state_warnings: list[str] = []
 
-    def _collect(path: Path, take_row: bool) -> None:
+    def _collect(path: Path, take_row: bool, kind: str) -> None:
         nonlocal manifest_row
-        if not path.is_file():
-            return
-        try:
-            manifest = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        manifest = extract.load_run_json(path, kind)  # {} if absent, fail-loud if corrupt
+        if not manifest:
             return
         prefix = f"{state}:"
         for message in manifest.get("errors", []):
@@ -291,8 +288,8 @@ def _manifest_state_notes(run_dir: Path, state: str) -> tuple[dict[str, Any] | N
                     manifest_row = row
                     break
 
-    _collect(run_dir / "frames" / "frames-manifest.json", take_row=True)
-    _collect(run_dir / "extract-failure.json", take_row=False)
+    _collect(run_dir / "frames" / "frames-manifest.json", take_row=True, kind="frames manifest")
+    _collect(run_dir / "extract-failure.json", take_row=False, kind="failure evidence")
     return manifest_row, state_errors, state_warnings
 
 

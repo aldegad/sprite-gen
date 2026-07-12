@@ -270,3 +270,40 @@ def test_corrupt_failure_evidence_fails_loud(fixture_run_dir: Path) -> None:
     assert r.returncode != 0, "corrupt evidence was silently accepted"
     assert "failure evidence" in (r.stdout + r.stderr).lower()
     assert (run / "extract-failure.json").exists()                   # not silently deleted
+
+
+def test_inspect_fails_loud_on_corrupt_failure_evidence(fixture_run_dir: Path) -> None:
+    """The correction loop reads per-state failures through inspect_run. A corrupt
+    extract-failure.json must fail loud on the READ path too — not be silently read as 'no
+    failures' — or the loop would call an unresolved-failure run all-clear. Writer fail-loud
+    alone is not enough; the canonical reader must fail loud too (No Silent Fallback)."""
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "extract-failure.json").write_text("{ malformed", encoding="utf-8")
+
+    r = run_script("inspect_sprite_run.py", "--run-dir", str(run), "--no-write")
+    assert r.returncode != 0, "inspect silently accepted corrupt failure evidence"
+    assert "failure evidence" in (r.stdout + r.stderr).lower()
+    assert (run / "extract-failure.json").exists()                   # not silently removed
+
+
+def test_subset_reextract_fails_loud_on_corrupt_prior_manifest(fixture_run_dir: Path) -> None:
+    """A subset --states re-extract seeds untouched states from the prior complete generation.
+    If that generation's manifest is corrupt it must fail loud BEFORE publishing — not read the
+    prior as empty and then publish an incomplete manifest that disagrees with the carried frame
+    tree (No Silent Fallback / Consistency / Atomicity). The prior generation stays byte-intact."""
+    import hashlib
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "frames" / "frames-manifest.json").write_text("{ malformed", encoding="utf-8")
+    before = {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest()
+              for p in (run / "frames").rglob("*") if p.is_file()}
+
+    r = run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", "walk")
+    assert r.returncode != 0, "subset re-extract silently accepted a corrupt prior manifest"
+    assert "frames manifest" in (r.stdout + r.stderr).lower()
+    after = {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest()
+             for p in (run / "frames").rglob("*") if p.is_file()}
+    assert after == before, "prior generation was mutated by a failed subset re-extract"
+    assert not (run / ".frames.sg-staging").exists()                 # failed before staging created
