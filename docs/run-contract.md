@@ -63,7 +63,7 @@ not restate it elsewhere; point here.
   frames/<state>/frame-N.plain.png   # pixel-perfect runs only: cell-sized pre-pixel-perfect twin, baked by compose on pixel_perfect:false (§3)
   frames/<state>/orig/frame-N.png    # pixel-perfect runs only: hi-res original twin (display-only), drives the pp-off toggle at original quality (§3)
   frames/frames-manifest.json        # per-row extract report (files, labels, ok) — only ever a COMPLETE ok generation (§6)
-  extract-failure.json               # only after a FAILED extract: per-state ok:false diagnostics, OUTSIDE frames/ (§6); removed on the next success
+  extract-failure.json               # while any state's extract is unresolved: per-state ok:false diagnostics, OUTSIDE frames/ (§6); merged per state, removed once all resolved
   curation.json                      # optional, non-destructive sidecar (selected/order/transforms/pixel_perfect)
   sprite-sheet-alpha.png             # composed runtime atlas
   sprite-sheet-alpha.report.json     # compose report
@@ -283,15 +283,20 @@ The per-state failure signal is **not** discarded — it is written **outside** 
 `extract-failure.json` in the run-dir root, so it stays observable (No Silent Fallback) and
 still drives the automatic correction loop:
 
-- `extract-failure.json` mirrors the failed attempt's result — `ok:false`, per-state
-  `errors`, `warnings`, and any rows that did succeed — and the CLI exits `1`.
+- `extract-failure.json` holds the **union of the run's currently-unresolved per-state
+  failures** — `ok:false`, per-state `errors`/`warnings` — and the CLI exits `1`.
 - The **automatic correction loop** consumes it: `inspect._manifest_state_notes` reads the
   per-state `errors` from `extract-failure.json` (alongside the published
   `frames/frames-manifest.json` row) to drive inspect → score → correction-hint →
   regeneration. So error-driven regeneration keeps its *which state failed, and why* signal
   even though `frames/` holds only complete generations.
-- A **successful** extract removes `extract-failure.json` — the failure is resolved, so a
-  stale signal never re-flags a now-good state (Consistency).
+- The evidence is maintained **per state**, because a subset `--states` extract (the formal
+  single-row / auto-correction path) only determines the outcome of the states it targets: a
+  target state that succeeds is removed, a target state that fails is (re)recorded, and states
+  the attempt did not touch keep their prior failure. So a `walk` success never erases an
+  unresolved `idle` failure, and an `idle` failure never overwrites a `walk` one. The file is
+  deleted only once **no** per-state failure remains (Consistency — never re-flag a now-good
+  state, never silently drop a still-broken one).
 - `compose_atlas` requires a complete generation: it fails loud if
   `frames/frames-manifest.json` is absent (a failed extract published none) and refuses a
   non-`ok` manifest, so a partial never becomes an atlas.

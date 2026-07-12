@@ -181,3 +181,41 @@ def test_successful_extract_clears_prior_failure_evidence(fixture_run_dir: Path)
     assert not (run / "extract-failure.json").exists()        # success cleared the stale signal
     _row, errors, _warnings = _manifest_state_notes(run, target)
     assert not errors                                         # consumer sees a clean state again
+
+
+def test_subset_success_preserves_other_state_failure(fixture_run_dir: Path) -> None:
+    """A subset --states extract is the formal single-row / auto-correction path: it only
+    determines the outcome of the states it targets. A SUCCESS on one state must never erase
+    another state's still-unresolved failure — else the correction loop goes blind to it
+    (Consistency / No Silent Fallback). walk-success must keep idle's failure signal."""
+    from sprite_gen.inspect import _manifest_state_notes
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "raw" / "idle.png").unlink()                       # break only idle
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", "idle").returncode == 1
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", "walk").returncode == 0
+
+    assert (run / "extract-failure.json").is_file()           # walk-success did NOT delete it
+    _row, idle_errors, _w = _manifest_state_notes(run, "idle")
+    assert idle_errors and all(e.startswith("idle:") for e in idle_errors), idle_errors  # idle still failed
+    _row, walk_errors, _w = _manifest_state_notes(run, "walk")
+    assert not walk_errors                                    # walk is resolved — no stale signal
+
+
+def test_consecutive_state_failures_accumulate_in_evidence(fixture_run_dir: Path) -> None:
+    """A new failure must not overwrite a different state's prior unresolved failure — the
+    evidence merges per state. Break idle, then walk; both failures must stay visible."""
+    from sprite_gen.inspect import _manifest_state_notes
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "raw" / "idle.png").unlink()
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", "idle").returncode == 1
+    (run / "raw" / "walk.png").unlink()
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", "walk").returncode == 1
+
+    _row, idle_errors, _w = _manifest_state_notes(run, "idle")
+    _row, walk_errors, _w = _manifest_state_notes(run, "walk")
+    assert idle_errors, "idle failure was overwritten by the later walk failure"
+    assert walk_errors, "walk failure missing"
