@@ -116,7 +116,11 @@ def run_dir_mode(args: argparse.Namespace) -> int:
         for index in ordered:
             path = run_dir / "frames" / state / frame_filename(index, frame_variant(curation))
             if not path.is_file():
-                continue
+                raise SystemExit(
+                    f"selected frame {path} is missing — the generation is incomplete or the "
+                    f"'{frame_variant(curation)}' variant was not baked (re-extract before composing); "
+                    f"skipping it would silently produce a shorter GIF."
+                )
             frame = Image.open(path).convert("RGBA")
             if cell_w and cell_h:
                 frame = apply_transform(frame, transforms.get(index), (cell_w, cell_h))

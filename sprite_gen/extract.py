@@ -1783,13 +1783,64 @@ def load_failure_evidence(path: Path) -> dict:
     return _load_validated(path, "failure evidence", _require_failure_evidence)
 
 
+def _require_generation_consistency(run_dir: Path, manifest: dict, name: str) -> None:
+    """Beyond JSON schema, a published generation must AGREE with the physical frame tree and the
+    request. Frames and the manifest are published together as one transaction, so a disagreement
+    means corruption/staleness: fail loud rather than let a consumer build output from stale,
+    partial, or orphan frames (Consistency / No Silent Fallback). Checks:
+      - every request state has exactly one row (no missing state, no duplicate row);
+      - no physical frame state dir is an orphan the manifest omits;
+      - every row's canonical frames exist on disk."""
+    frames_root = run_dir / "frames"
+    try:
+        request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"cannot read sprite-request.json for {run_dir}: {exc}")
+    request_states = set(request.get("states", {}))
+    row_states = [row["state"] for row in manifest["rows"]]
+    dupes = sorted({s for s in row_states if row_states.count(s) > 1})
+    if dupes:
+        raise SystemExit(f"corrupt {name} {run_dir}: duplicate manifest rows for state(s) {dupes}")
+    row_state_set = set(row_states)
+    missing = sorted(request_states - row_state_set)
+    if missing:
+        raise SystemExit(f"corrupt {name} {run_dir}: manifest missing row(s) for request state(s) {missing} — incomplete generation")
+    physical_states = {d.name for d in frames_root.iterdir() if d.is_dir()} if frames_root.is_dir() else set()
+    orphan = sorted(physical_states - row_state_set)
+    if orphan:
+        raise SystemExit(f"corrupt {name} {run_dir}: physical frames for state(s) {orphan} have no manifest row (orphan/stale generation)")
+    for row in manifest["rows"]:
+        for rel in row.get("files", []):
+            if not (run_dir / rel).is_file():
+                raise SystemExit(f"corrupt {name} {run_dir}: manifest row '{row['state']}' references missing frame {rel}")
+
+
+def load_consistent_frames_manifest(run_dir: Path, name: str = "frames manifest") -> dict:
+    """For readers that TOLERATE an ungenerated run (serve scaffold, inspect from raw): return the
+    validated + consistent manifest if present; {} only when the run genuinely has NO generation
+    (no manifest AND no physical frame dirs); fail loud if the manifest is corrupt/inconsistent, OR
+    absent while physical frames exist (an orphan/stale generation — not a fresh scaffold)."""
+    frames_root = run_dir / "frames"
+    manifest = load_frames_manifest(frames_root / "frames-manifest.json")
+    if not manifest:
+        physical = sorted(d.name for d in frames_root.iterdir() if d.is_dir()) if frames_root.is_dir() else []
+        if physical:
+            raise SystemExit(
+                f"orphan frames in {run_dir}: physical frame dir(s) {physical} exist but "
+                f"frames/frames-manifest.json is absent — not a fresh scaffold. Re-extract or remove them."
+            )
+        return {}
+    _require_generation_consistency(run_dir, manifest, name)
+    return manifest
+
+
 def require_frames_manifest(run_dir: Path) -> dict:
-    """Gate for a finished-generation consumer (compose / export / preview / gif / cycle): load
-    the published frames manifest, failing loud if it is absent OR corrupt (No Silent Fallback).
-    Every consumer of a completed generation must call this before reading physical frames, so a
-    run whose canonical manifest is missing or broken never silently produces output from stale
-    or unvalidated frames."""
-    manifest = load_frames_manifest(run_dir / "frames" / "frames-manifest.json")
+    """Gate for a finished-generation consumer (compose / export / preview / gif / cycle): the
+    published frames manifest must be present, schema-valid, AND consistent with the physical frame
+    tree + request (No Silent Fallback / Consistency). A consumer of a completed generation must
+    call this before reading physical frames, so it never silently produces output from a missing,
+    broken, stale, partial, or orphan generation."""
+    manifest = load_consistent_frames_manifest(run_dir)
     if not manifest:
         raise SystemExit(
             f"frames/frames-manifest.json not found in {run_dir}; run a successful extract before "

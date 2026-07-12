@@ -526,6 +526,13 @@ def _run(args: argparse.Namespace):
         if base_dir.is_dir():
             base_candidates = sorted(p for p in base_dir.iterdir()
                                      if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"))
+            if len(base_candidates) > 1:
+                # _base is the run's single identity image; picking one of several silently would
+                # make identity SSoT ambiguous (No Silent Fallback).
+                raise SystemExit(
+                    f"_base/ has {len(base_candidates)} images ({', '.join(p.name for p in base_candidates)}); "
+                    f"provide exactly one identity image."
+                )
             if base_candidates:
                 base_src = base_candidates[0]
 

@@ -91,7 +91,11 @@ def _run(args: argparse.Namespace):
         for index in indices:
             src_path = run_dir / "frames" / state / frame_filename(index, frame_variant(curation))
             if not src_path.is_file():
-                continue
+                raise SystemExit(
+                    f"selected frame {src_path} is missing — the generation is incomplete or the "
+                    f"'{frame_variant(curation)}' variant was not baked (re-extract before exporting); "
+                    f"skipping it would silently drop a PNG."
+                )
             with Image.open(src_path) as opened:
                 baked = apply_transform(opened.convert("RGBA"), transforms.get(index), cell_size)
             name = labels[index] if index < len(labels) and labels[index] else f"frame-{index}"
