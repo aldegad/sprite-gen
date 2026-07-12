@@ -43,9 +43,13 @@ writers, plus atomic temp+`os.replace` writes for frames, atlas, manifests, and
 inspect/score/loop reports). The lock enforces the "one worker owns one
 character folder" rule at runtime — a second writer on the same run dir fails
 loudly with the holder's pid; a dead holder's lock is reclaimed automatically.
-`curation.json` stays outside the lock: the webview writes it atomically and
-compose reads one consistent snapshot, so human edit sessions never block on a
-running compose.
+`curation.json` stays outside the pipeline write lock: the webview writes it
+atomically and compose reads one consistent snapshot, so human edit sessions never
+block on a running compose. The curation write is, however, serialized against a
+`--force` re-import publish via the separate publish rwlock (`read_guard`/
+`publish_guard`), and a curation whose states no longer match the current run is
+rejected — a stale autosave cannot mix old-state curation into a re-imported run
+(run-contract.md §4).
 
 The automatic correction loop is intentionally split into three owners:
 `inspect.py` measures deterministic signals (frame count, RGB histogram, dHash,
