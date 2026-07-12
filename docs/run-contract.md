@@ -109,7 +109,8 @@ whole point is that the experience does not vary by who launched it.
 | **Pixel grid** | grid is known or measurable | `states[].pixelScale` + `pixelPerfect{label,scale}` | Snap grid at the logical pixel size. `fit.pixel_perfect` runs → request scale, label `48px`-style. Import/plain runs → per-row auto-measured block pitch, label `auto`. A row where the pitch cannot be measured draws **no grid** — no fake grid. |
 | **Original-quality toggle** | any frame has a `.plain.png` twin | `states[].frames[].plainUrl` + `fitPixelPerfect` | Top-right checkbox. Checked = canonical pixel-perfect `frame-N.png`; unchecked = the pre-fit `plainUrl` twin ("off = original"). Absent twins hide the toggle. |
 
-`GET /api/run` payload — the display-relevant fields (full snapshot in
+`GET /api/run` payload — the display-relevant subset below (the full snapshot,
+including non-display fields like `states[].action`, is assembled by
 `build_run_state`):
 
 ```jsonc
@@ -118,17 +119,17 @@ whole point is that the experience does not vary by who launched it.
   "runDir": "<abs path>",
   "baseUrl": "/run/base-source.png",        // base reference row; null when no base-source.*
   "cell": { "width": 256, "height": 256 },
-  "pixelPerfect": { "label": "48px", "scale": 4, "source": "request" },
+  "pixelPerfect": { "logicalHeight": 48, "scale": 5, "source": "request", "label": "48px" },
                                             // or { "source": "auto", "label": "auto", "scale": null }; null when no grid anywhere
   "fitPixelPerfect": true,                   // request opted into the deterministic pixel-perfect path
   "hasAtlas": true,
   "iso": null,                               // sibling meta.json iso tile/anchor → ground-grid overlay
   "lang": "ko",
-  "schemaVersion": 3,
+  "schemaVersion": 1,
   "states": [
     {
       "name": "down_walk",
-      "pixelScale": 4,                       // request scale, or auto-measured pitch, or null (no grid)
+      "pixelScale": 5,                       // request scale, or auto-measured pitch, or null (no grid)
       "refs": [                              // generation-material chips
         { "role": "anchor", "name": "down_idle.png", "url": "/run/raw/down_idle.png" },
         { "role": "guide",  "name": "down_walk.png", "url": "/run/references/layout-guides/down_walk.png" }
@@ -145,6 +146,14 @@ whole point is that the experience does not vary by who launched it.
   "curation": { /* current sidecar snapshot, or empty */ }
 }
 ```
+
+`pixelPerfect.scale` is `cell.height // fit.logical_height` (integer floor), so the
+example's `256 // 48 = 5` (not 5.33 — floor); `label` is `"<logical_height>px"` and
+`logicalHeight` echoes `fit.logical_height`. `states[].pixelScale` mirrors that scale
+on a `fit.pixel_perfect` run, or carries the per-row auto-measured block pitch on a
+run with no pixel-perfect contract (import/plain), or `null` when a row's pitch cannot
+be measured. Real runs are usually smaller than this synthetic 256 example — the
+founder v7 anchor is `cell 56 / logical 48 → 56 // 48 = 1`.
 
 Display invariants (enforced by the server, not by the launching agent):
 
