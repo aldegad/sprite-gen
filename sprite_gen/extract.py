@@ -1716,21 +1716,32 @@ def _namespace_from_kwargs(**kwargs: object) -> argparse.Namespace:
         names = ", ".join(sorted(remaining))
         raise TypeError(f"unexpected keyword argument(s): {names}")
     return argparse.Namespace(**values)
-def _read_prior_failure_evidence(path: Path) -> dict:
-    """Load the existing extract-failure.json, or {} if none. Fail LOUD if the file exists but
-    cannot be read/parsed — it records which states still failed extraction, so silently
-    treating an unreadable record as empty would drop still-unresolved failures on the next
-    success (No Silent Fallback). The operator must inspect/repair or delete it deliberately."""
+def load_run_json(path: Path, kind: str) -> dict:
+    """Read a canonical run JSON record (frames-manifest.json / extract-failure.json), FAILING
+    LOUD on any corruption — unreadable, unparseable, or a broken minimal contract — instead of
+    silently treating it as absent/empty. EVERY reader (extract's subset seeding + commit,
+    inspect / the correction loop) must go through here: silently swallowing a parse error would
+    drop a still-unresolved failure (extract-failure.json) or a real generation
+    (frames-manifest.json) from view, so a corrupt record would read as "all clear" and the
+    correction loop would call a broken run done (No Silent Fallback / Consistency). Returns {}
+    only when the file is genuinely absent — the caller decides whether absence is allowed."""
     if not path.is_file():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise SystemExit(
-            f"cannot read existing failure evidence {path}: {exc}\n"
-            f"  it records which states still failed extraction; refusing to proceed and "
-            f"silently drop that unresolved-failure truth. Inspect/repair or delete it deliberately."
+            f"corrupt {kind} {path}: {exc}\n"
+            f"  refusing to treat a canonical run record as empty; inspect/repair or delete it deliberately."
         )
+    if not isinstance(data, dict):
+        raise SystemExit(f"corrupt {kind} {path}: expected a JSON object, got {type(data).__name__}")
+    for key in ("errors", "warnings", "rows"):
+        if key in data and not isinstance(data[key], list):
+            raise SystemExit(f"corrupt {kind} {path}: '{key}' must be a list, got {type(data[key]).__name__}")
+    if any(not isinstance(row, dict) for row in data.get("rows", [])):
+        raise SystemExit(f"corrupt {kind} {path}: every 'rows' entry must be a JSON object")
+    return data
 
 
 def _merged_failure_lists(prior: dict, result: dict, target_states: set, all_states: set):
@@ -1776,7 +1787,7 @@ def _commit_generation(run_dir: Path, staging: Path | None, result: dict, target
             p.unlink()
 
     with publish_guard(run_dir):
-        prior = _read_prior_failure_evidence(evidence)  # fail-loud on a corrupt record
+        prior = load_run_json(evidence, "failure evidence")  # fail-loud on a corrupt record
         merged_errors, merged_warnings = _merged_failure_lists(prior, result, target_states, all_states)
 
         _discard(frames_backup)
@@ -1878,24 +1889,22 @@ def _run(args: argparse.Namespace):
     # staging write location. Writer-writer exclusion stays the separate `.sprite-gen.lock`.
     frames_final = run_dir / "frames"
     frames_root = run_dir / ".frames.sg-staging"
-    if frames_root.exists():
-        shutil.rmtree(frames_root)
-    frames_root.mkdir(parents=True)
+    target = set(states)
     # A subset `--states` re-extract (auto-correction / single-row regeneration) must preserve
     # the states it is NOT rebuilding — the staging generation, which is swapped in whole, is
     # seeded with those states' current frames and carries their prior manifest rows, so the
     # swap replaces only the rebuilt states and never deletes the others (SSoT/Idempotency).
-    target = set(states)
+    # Read+validate the prior manifest FIRST, before staging is even created: a corrupt prior
+    # generation fails loud here (No Silent Fallback), so the prior generation stays byte-intact
+    # and we never publish an incomplete manifest that disagrees with the carried frame tree.
     rows = []
     if frames_final.is_dir():
-        prior = frames_final / "frames-manifest.json"
-        prior_rows = []
-        if prior.is_file():
-            try:
-                prior_rows = json.loads(prior.read_text(encoding="utf-8")).get("rows", [])
-            except (OSError, ValueError):
-                prior_rows = []
-        rows = [row for row in prior_rows if row.get("state") not in target]
+        prior_manifest = load_run_json(frames_final / "frames-manifest.json", "frames manifest")
+        rows = [row for row in prior_manifest.get("rows", []) if row.get("state") not in target]
+    if frames_root.exists():
+        shutil.rmtree(frames_root)
+    frames_root.mkdir(parents=True)
+    if frames_final.is_dir():
         for state_name in request["states"]:
             if state_name not in target:
                 src = frames_final / state_name

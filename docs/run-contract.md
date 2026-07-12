@@ -297,6 +297,20 @@ still drives the automatic correction loop:
   unresolved `idle` failure, and an `idle` failure never overwrites a `walk` one. The file is
   deleted only once **no** per-state failure remains (Consistency — never re-flag a now-good
   state, never silently drop a still-broken one).
+- Advancing the two canonical surfaces is **one transaction**: `extract` swaps `frames/`
+  and (re)writes/removes `extract-failure.json` under a single `publish_guard`, rolling
+  **both** back together on any I/O failure, so a reader never sees a new generation beside a
+  stale failure record. Readers that combine them (`inspect` / the correction loop, via
+  `inspect_run`) hold the matching `read_guard` for the whole read.
+- A **corrupt** canonical record fails loud on **every** path — the writer *and* every reader
+  (`extract` subset-seeding + commit, `inspect._manifest_state_notes`) go through one
+  validated loader (`extract.load_run_json`) that refuses an unreadable / unparseable / broken
+  (`dict`; `errors`/`warnings`/`rows` lists) record rather than treating it as empty. Silently
+  reading a corrupt `extract-failure.json` as "no failures", or a corrupt
+  `frames/frames-manifest.json` as "no prior rows" (then publishing an incomplete manifest that
+  disagrees with the carried frame tree), is exactly the No-Silent-Fallback violation this
+  forbids. A corrupt prior manifest fails a subset re-extract loud **before** it stages
+  anything, so the prior generation stays byte-intact.
 - `compose_atlas` requires a complete generation: it fails loud if
   `frames/frames-manifest.json` is absent (a failed extract published none) and refuses a
   non-`ok` manifest, so a partial never becomes an atlas.
