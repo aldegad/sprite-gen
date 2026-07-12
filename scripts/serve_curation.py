@@ -202,9 +202,13 @@ def build_run_state(run_dir: Path) -> dict:
             rel = f"frames/{state}/frame-{index}.png"
             present = (run_dir / rel).is_file()
             frame = {"index": index, "url": f"/{rel}", "present": present}
-            # 픽셀퍼펙트 전 쌍둥이(.plain.png) — 있으면 큐레이터가 전/후 토글을 켠다
+            # pp 해제 토글 표시본: 원본 화질(orig/ 고해상본) 우선, 없으면 셀 크기 .plain.png.
+            # 둘 중 하나라도 있으면 큐레이터가 전/후 토글을 켠다.
+            orig_rel = f"frames/{state}/orig/frame-{index}.png"
             plain_rel = f"frames/{state}/frame-{index}.plain.png"
-            if (run_dir / plain_rel).is_file():
+            if (run_dir / orig_rel).is_file():
+                frame["plainUrl"] = f"/{orig_rel}"
+            elif (run_dir / plain_rel).is_file():
                 frame["plainUrl"] = f"/{plain_rel}"
             if index < len(labels):
                 frame["label"] = labels[index]

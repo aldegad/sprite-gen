@@ -1784,10 +1784,13 @@ def _run(args: argparse.Namespace):
     logical_width = max(1, cell_width // pp_scale)
     pp_detail_bias = bool(fit_config.get("detail_bias", True))
     palette_size = int(fit_config.get("palette_size", 24))
+    # 원본 화질 표시 쌍둥이(orig/)의 배율: 같은 legacy fit 을 S×셀에 앉혀 확대 흐림을
+    # 없앤다. 4배(상한 1024px)로 캡. 셀이 이미 커서 S<=1 이면 굽지 않는다(.plain 로 충분).
+    plain_display_scale = max(1, min(4, 1024 // max(1, cell_width, cell_height)))
     pending: list = []
 
     def finalize_state(state: str, frames: list, frame_count: int, method: str,
-                       plain_frames: list | None = None) -> None:
+                       plain_frames: list | None = None, orig_frames: list | None = None) -> None:
         state_dir = frames_root / state
         state_dir.mkdir(parents=True, exist_ok=True)
         output_paths = []
@@ -1795,14 +1798,26 @@ def _run(args: argparse.Namespace):
             output = state_dir / f"frame-{index}.png"
             atomic_save_image(frame, output)
             output_paths.append(relative_posix(output, run_dir))
-        # 픽셀퍼펙트 전 원본 변형(.plain.png) — 큐레이션뷰의 전/후 토글과
-        # curation.json `pixel_perfect: false` 굽기가 이 쌍둥이를 읽는다.
+        # 픽셀퍼펙트 전 원본 변형(.plain.png) — curation.json `pixel_perfect: false`
+        # 굽기(compose)가 이 셀 크기 쌍둥이를 읽는다. 아틀라스 슬롯 = 셀 크기라 여긴
+        # 셀 해상도로 유지한다 (compose_atlas 가 정확히 셀 크기를 요구, 기하 불변).
         plain_paths = []
         if plain_frames is not None:
             for index, frame in enumerate(plain_frames):
                 output = state_dir / f"frame-{index}.plain.png"
                 atomic_save_image(frame, output)
                 plain_paths.append(relative_posix(output, run_dir))
+        # 원본 화질 표시용 고해상 쌍둥이 — 큐레이션뷰 pp 해제 토글이 읽는다. 셀 크기
+        # .plain.png 는 확대 시 흐리므로 별도 서브폴더(orig/)에 S×셀로 굽는다. 서브폴더라
+        # frame-*.png glob 소비자(inspect/measure/compose)와 충돌하지 않고 순수 표시용이다.
+        orig_paths = []
+        if orig_frames is not None:
+            orig_dir = state_dir / "orig"
+            orig_dir.mkdir(parents=True, exist_ok=True)
+            for index, frame in enumerate(orig_frames):
+                output = orig_dir / f"frame-{index}.png"
+                atomic_save_image(frame, output)
+                orig_paths.append(relative_posix(output, run_dir))
 
         errors, warnings, frame_records = inspect_frames(frames, chroma_key, args)
         all_errors.extend(f"{state}: {error}" for error in errors)
@@ -1817,6 +1832,8 @@ def _run(args: argparse.Namespace):
         }
         if plain_paths:
             row["plain_files"] = plain_paths
+        if orig_paths:
+            row["orig_files"] = orig_paths
         rows.append(row)
 
     for state in states:
@@ -1943,8 +1960,18 @@ def _run(args: argparse.Namespace):
                 strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
             if plain_frames is None:
                 all_warnings.append(f"{state}: plain (pre-pixel-perfect) variant unavailable — component extraction differs")
+            # 원본 화질 표시용 고해상본: 동일 legacy fit 을 S×셀에 앉힌다 (표시 전용).
+            orig_frames = None
+            if plain_display_scale > 1:
+                s = plain_display_scale
+                orig_frames = extract_component_frames(
+                    strip, frame_count, cell_width * s, cell_height * s,
+                    safe_margin_x * s, safe_margin_y * s, fit_config)
+                if orig_frames is None:
+                    all_warnings.append(f"{state}: original-quality (orig/) display twin unavailable — component extraction differs")
             pending.append({"state": state, "frame_count": frame_count, "method": method,
-                            "pitch": pitch, "frames": registered, "plain_frames": plain_frames})
+                            "pitch": pitch, "frames": registered,
+                            "plain_frames": plain_frames, "orig_frames": orig_frames})
             continue
         frames = extract_component_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
         method = "components"
@@ -1979,7 +2006,7 @@ def _run(args: argparse.Namespace):
                 for frame in quantized
             ]
             finalize_state(entry["state"], frames, entry["frame_count"], entry["method"],
-                           plain_frames=entry.get("plain_frames"))
+                           plain_frames=entry.get("plain_frames"), orig_frames=entry.get("orig_frames"))
         all_warnings.append(
             "pixel-perfect: pitch=%s scale=%dx logical<=%dx%d palette=%d"
             % (",".join(str(entry["pitch"]) for entry in pending), pp_scale, logical_width, logical_height, len(palette))
