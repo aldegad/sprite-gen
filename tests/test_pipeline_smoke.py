@@ -435,6 +435,30 @@ def test_empty_files_generation_fails_loud(fixture_run_dir: Path) -> None:
         assert "no frame files" in (r.stdout + r.stderr).lower()
 
 
+def test_unknown_state_row_fails_loud(fixture_run_dir: Path) -> None:
+    """request states and manifest rows must match BOTH directions: a 'ghost' state row + physical
+    frames not in the request must fail loud, not be rendered by compose/preview while serve (which
+    is request-driven) hides it — a per-consumer divergence (Consistency / SSoT). darami's repro."""
+    import shutil
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    # add a ghost state: physical frame + a matching manifest row, but no request entry
+    ghost_dir = run / "frames" / "ghost"
+    ghost_dir.mkdir()
+    shutil.copy(sorted((run / "frames" / "idle").glob("frame-*.png"))[0], ghost_dir / "frame-0.png")
+    p = run / "frames" / "frames-manifest.json"
+    m = json.loads(p.read_text())
+    m["rows"].append({"state": "ghost", "frames": 1, "files": ["frames/ghost/frame-0.png"], "ok": True})
+    p.write_text(json.dumps(m), encoding="utf-8")
+
+    for tool, extra in (("compose_sprite_atlas.py", []), ("preview_animation.py", []),
+                        ("inspect_sprite_run.py", ["--no-write"])):
+        r = run_script(tool, "--run-dir", str(run), *extra)
+        assert r.returncode != 0, f"{tool} accepted an unknown 'ghost' state"
+        assert "not in the request" in (r.stdout + r.stderr).lower()
+
+
 def test_frame_count_mismatch_fails_loud(fixture_run_dir: Path) -> None:
     """A manifest row whose canonical files disagree with the physical frame set (here: one file
     dropped while the frame stays on disk) is an inconsistent generation — fail loud."""
