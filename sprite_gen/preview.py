@@ -18,6 +18,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from sprite_gen.extract import require_frames_manifest
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, save_clean_gif
 
 
@@ -87,11 +88,7 @@ def _namespace_from_kwargs(**kwargs: object) -> argparse.Namespace:
 def _run(args: argparse.Namespace):
 
     run_dir = args.run_dir.expanduser().resolve()
-    manifest_path = run_dir / "frames" / "frames-manifest.json"
-    if not manifest_path.is_file():
-        raise SystemExit(f"missing frames manifest: {manifest_path} (run extract first)")
-
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = require_frames_manifest(run_dir)  # fail loud if absent/corrupt
     request_path = run_dir / "sprite-request.json"
     request = json.loads(request_path.read_text(encoding="utf-8")) if request_path.is_file() else {}
     state_meta = request.get("states", {})

@@ -1739,6 +1739,10 @@ def _load_validated(path: Path, name: str, require) -> dict:
     for key in ("errors", "warnings", "rows"):
         if not isinstance(data.get(key), list):  # required list, not merely list-if-present
             raise SystemExit(f"corrupt {name} {path}: '{key}' must be a list")
+    for key in ("errors", "warnings"):
+        for item in data[key]:
+            if not isinstance(item, str) or not item.strip():  # e.g. null / "" slipping through
+                raise SystemExit(f"corrupt {name} {path}: every '{key}' entry must be a non-empty string")
     for row in data["rows"]:
         if not isinstance(row, dict) or not isinstance(row.get("state"), str) or not row.get("state"):
             raise SystemExit(f"corrupt {name} {path}: every 'rows' entry needs a non-empty string 'state'")
@@ -1756,6 +1760,13 @@ def _require_failure_evidence(data: dict, path: Path, name: str) -> None:
         raise SystemExit(f"corrupt {name} {path}: failure evidence must have 'ok': false")
     if not data["errors"]:
         raise SystemExit(f"corrupt {name} {path}: failure evidence must have a non-empty 'errors' list")
+    # every diagnostic is a per-state message (`<state>: ...`) — the correction loop keys on the
+    # state prefix, so a prefix-less or empty entry is a silently-lost failure (e.g. a `null`
+    # entry would be dropped by the per-state merge and delete the whole record on next success).
+    for key in ("errors", "warnings"):
+        for item in data[key]:
+            if ":" not in item or not item.split(":", 1)[0].strip():
+                raise SystemExit(f"corrupt {name} {path}: every '{key}' entry must be state-scoped ('<state>: ...'), got {item!r}")
 
 
 def load_frames_manifest(path: Path) -> dict:
@@ -1767,9 +1778,24 @@ def load_frames_manifest(path: Path) -> dict:
 
 def load_failure_evidence(path: Path) -> dict:
     """Read extract-failure.json (the run's unresolved per-state failures), failing loud on
-    corruption or a broken schema (`ok`:false, non-empty `errors`, `warnings`/`rows` lists).
-    Returns {} only when genuinely absent (No Silent Fallback — see _load_validated)."""
+    corruption or a broken schema (`ok`:false, non-empty state-scoped `errors`, `warnings`/`rows`
+    lists). Returns {} only when genuinely absent (No Silent Fallback — see _load_validated)."""
     return _load_validated(path, "failure evidence", _require_failure_evidence)
+
+
+def require_frames_manifest(run_dir: Path) -> dict:
+    """Gate for a finished-generation consumer (compose / export / preview / gif / cycle): load
+    the published frames manifest, failing loud if it is absent OR corrupt (No Silent Fallback).
+    Every consumer of a completed generation must call this before reading physical frames, so a
+    run whose canonical manifest is missing or broken never silently produces output from stale
+    or unvalidated frames."""
+    manifest = load_frames_manifest(run_dir / "frames" / "frames-manifest.json")
+    if not manifest:
+        raise SystemExit(
+            f"frames/frames-manifest.json not found in {run_dir}; run a successful extract before "
+            f"consuming this generation."
+        )
+    return manifest
 
 
 def _merged_failure_lists(prior: dict, result: dict, target_states: set, all_states: set):

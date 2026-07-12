@@ -27,6 +27,7 @@ from pathlib import Path
 from PIL import Image
 
 from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
+from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image
 
 
@@ -66,7 +67,7 @@ def _run(args: argparse.Namespace):
     cell_size = (int(cell.get("width", cell.get("size", 0))), int(cell.get("height", cell.get("size", 0))))
     curation = load_curation(run_dir)
 
-    frames_manifest = json.loads((run_dir / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))
+    frames_manifest = require_frames_manifest(run_dir)  # fail loud if absent/corrupt
     labels_by_state = {row["state"]: row.get("labels", []) for row in frames_manifest.get("rows", [])}
 
     out_dir = (args.out_dir.expanduser().resolve() if args.out_dir else run_dir / "curated")

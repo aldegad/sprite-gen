@@ -151,7 +151,7 @@ including non-display fields like `states[].action`, is assembled by
     }
   ],
   "contract": { "base": true, "refs": true, "refsStates": 1, "grid": true, "sourceless": false },
-                                            // self-report (§4): sourceless=true when base+refs+grid all absent → server warns at startup
+                                            // self-report (§3): sourceless=true when base+refs+grid all absent → server warns at startup
   "curation": { /* current sidecar snapshot, or empty */ }
 }
 ```
@@ -264,7 +264,7 @@ All four contracts are enforced by the shipped scripts today:
   byte-identical on re-extraction of founder v6/v7).
 - The `--pngs-dir` `_base`/`_refs` embedding (§4): imported runs reach the same base
   row + chips as real runs.
-- The view-contract self-report (§4): serve_curation logs base/refs/grid coverage at
+- The view-contract self-report (§3): serve_curation logs base/refs/grid coverage at
   startup and warns on a sourceless view.
 
 Verified end-to-end on three views — founder v6 (`base=yes refs=12/12 grid=yes`),
@@ -302,11 +302,17 @@ still drives the automatic correction loop:
   **both** back together on any I/O failure, so a reader never sees a new generation beside a
   stale failure record. Readers that combine them (`inspect` / the correction loop, via
   `inspect_run`) hold the matching `read_guard` for the whole read.
-- A **corrupt** canonical record fails loud on **every** path — the writer *and* every reader
-  (`extract` subset-seeding + commit, `inspect._manifest_state_notes`) go through one
-  validated loader (`extract.load_run_json`) that refuses an unreadable / unparseable / broken
-  (`dict`; `errors`/`warnings`/`rows` lists) record rather than treating it as empty. Silently
-  reading a corrupt `extract-failure.json` as "no failures", or a corrupt
+- A **corrupt** canonical record fails loud on **every** path — the writer *and* every reader.
+  Extract's subset-seeding + commit, `inspect._manifest_state_notes`, and every
+  finished-generation consumer (`compose_atlas` / `compose_cycle` / `compose_gif` /
+  `export_pngs` / `preview` via `extract.require_frames_manifest`, and `serve_curation` via
+  `extract.load_frames_manifest`) go through the shared typed loaders
+  (`extract.load_frames_manifest` / `load_failure_evidence`) that refuse an unreadable /
+  unparseable / broken-schema record (must be a `dict`; `errors`/`warnings`/`rows` lists whose
+  entries are non-empty strings / `state`-bearing objects; a frames manifest must be `ok:true`,
+  failure evidence `ok:false` with non-empty `state`-scoped `errors`) rather than treating it as
+  empty. Absence still returns empty (a run with no generation yet); only an existing-but-broken
+  record fails loud. Silently reading a corrupt `extract-failure.json` as "no failures", or a corrupt
   `frames/frames-manifest.json` as "no prior rows" (then publishing an incomplete manifest that
   disagrees with the carried frame tree), is exactly the No-Silent-Fallback violation this
   forbids. A corrupt prior manifest fails a subset re-extract loud **before** it stages
