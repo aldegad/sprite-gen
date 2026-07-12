@@ -83,6 +83,39 @@ def test_sourceless_import_is_reported(tmp_path):
     assert st["contract"]["sourceless"] is True
 
 
+def _checker_png(path: Path, pitch: int = 4, size: int = 48) -> None:
+    """A checkerboard PNG with a `pitch`-px block size so detect_pixel_pitch finds a grid."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 255))
+    px = im.load()
+    for y in range(size):
+        for x in range(size):
+            if ((x // pitch) + (y // pitch)) % 2 == 0:
+                px[x, y] = (240, 240, 240, 255)
+    im.save(path)
+
+
+def test_special_char_state_name_keeps_pixel_grid(tmp_path):
+    """A special-char group/state name must not break auto pixel-grid measurement. The
+    frame url is percent-encoded for HTTP, but pixelScale is measured from the real
+    decoded file path (regression: measuring off the encoded url silently null-ed the
+    grid + reported contract.grid=false for special-char imports)."""
+    pngs = tmp_path / "pngs"
+    _checker_png(pngs / "walk" / "1-a.png")
+    _checker_png(pngs / "walk #한글 %" / "1-a.png")  # same image, special-char group name
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+    st = build_run_state(out)
+    plain = next(s for s in st["states"] if s["name"] == "walk")
+    special = next(s for s in st["states"] if s["name"] == "walk #한글 %")
+    assert plain["pixelScale"] is not None
+    assert special["pixelScale"] == plain["pixelScale"]  # measured, not silently null
+    assert st["contract"]["grid"] is True
+    url = special["frames"][0]["url"]  # frame url still percent-encoded + serves
+    assert "#" not in url and " " not in url
+    assert _serve_status(out, url) == 200
+
+
 @pytest.mark.parametrize("name", ["guide-a#b.png", "anchor-c d.png", "basis-100%done.png", "guide-café.png"])
 def test_special_char_ref_filename_is_url_encoded_and_serves(tmp_path, name):
     run = _build_import(tmp_path, [name])

@@ -247,7 +247,10 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         else:
             for fr in frames:
                 if fr.get("present"):
-                    state_scale = detect_pixel_pitch(run_dir / fr["url"].lstrip("/"))
+                    # measure from the real (decoded) file path, not fr["url"] — the url is
+                    # percent-encoded for HTTP, so a special-char state name would point the
+                    # measurement at a nonexistent encoded dir → pixelScale silently null.
+                    state_scale = detect_pixel_pitch(run_dir / "frames" / state / f"frame-{fr['index']}.png")
                     break
         states.append(
             {
