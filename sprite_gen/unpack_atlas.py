@@ -34,7 +34,8 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, relative_posix
+from sprite_gen.curation import imported_ref_role
+from sprite_gen.runio import LOCK_FILENAME, acquire_run_dir_lock, atomic_save_image, atomic_write_text, relative_posix
 
 ALPHA_THRESHOLD = 16  # a pixel counts as content above this alpha
 MIN_GUTTER = 1        # a fully-empty line of >= this many px separates frames
@@ -446,6 +447,16 @@ def _run(args: argparse.Namespace):
     except OSError as exc:
         raise SystemExit(f"cannot create run dir next to the input: {out_dir}\n  {exc}\n  pass --out-dir <writable path> to choose another location")
     acquire_run_dir_lock(out_dir, "unpack_atlas_run")
+    if args.force:
+        # --force rebuilds from scratch: drop every prior artifact (except the lock we
+        # hold) so the run reflects ONLY the current input. Without this, re-importing
+        # after removing _base/_refs leaves stale base-source/references/frames on disk,
+        # so provenance (unpack-source.json) says "no sources" while the view still shows
+        # the old ones — a re-run that depends on prior out-dir state (Idempotency/SSoT).
+        for child in out_dir.iterdir():
+            if child.name == LOCK_FILENAME:
+                continue
+            shutil.rmtree(child) if child.is_dir() else child.unlink()
 
     # --pngs-dir: import a folder of separate PNGs (e.g. a furniture set).
     # 하위폴더가 있으면 각 하위폴더가 큐레이터 줄(state) 하나가 된다 —
@@ -499,6 +510,15 @@ def _run(args: argparse.Namespace):
                                "refs": _group_refs(sub)})
         if not groups:
             raise SystemExit(f"no PNGs in {src}")
+        # imported ref roles are validated fail-loud (run-contract §4). A _refs file whose
+        # prefix isn't a known role (anchor/basis/guide) is malformed input — reject it
+        # loudly instead of silently relabeling it as guide (No Silent Fallback).
+        bad_refs = [f"{g['name']}/_refs/{Path(r).name}"
+                    for g in groups for r in g.get("refs", [])
+                    if imported_ref_role(Path(r).name) is None]
+        if bad_refs:
+            raise SystemExit("invalid _refs role prefix — expected anchor-/basis-/guide-<name>.png, got: "
+                             + ", ".join(bad_refs))
         result = import_png_groups(out_dir, groups, iso, base_src=base_src)
         result["ok"] = True
         result["out_dir"] = str(out_dir)

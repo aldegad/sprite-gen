@@ -202,14 +202,23 @@ Mapping into the run dir (so both view code paths resolve identically):
 - `pngs/_base/<img>` → `base-source.png` → drives the base reference row (`baseUrl`).
 - `pngs/<group>/<frames>.png` → `frames/<group>/frame-N.png` → the row's frames.
 - `pngs/<group>/_refs/<role>-<name>.png` → `references/imported/<group>/<role>-<name>.png`
-  → the row's generation-material chips, role parsed from the filename prefix
-  (`anchor` / `basis` / `guide`, same vocabulary as §3).
+  → the row's generation-material chips. The role is the filename prefix and **must** be
+  `anchor` / `basis` / `guide` (same vocabulary as §3, owned by `curation.IMPORTED_REF_ROLES`).
+  A `_refs` file with any other prefix is malformed input: the importer **fails loud**
+  (lists the offending files) — it never silently relabels an unknown role as `guide`.
 
 `serve_curation.py`'s `_state_refs` resolves chips from `raw/` anchors for real runs
 and from `references/imported/<group>/` for imported runs — one chip vocabulary, two
 sources, identical rendering. A `_base`/`_refs`-free import still works (frames only,
 no base row, no chips), but then the view honestly shows "no source material" rather
 than a divergent experience.
+
+**`--force` re-import is a clean rebuild.** Re-importing into an existing run dir with
+`--force` first drops every prior artifact (the run reflects **only** the current
+input), so removing a `_base`/`_refs` source and re-importing leaves no stale
+`base-source.png` / `references/imported/*` behind — provenance (`unpack-source.json`)
+and the served view never disagree (Idempotency/SSoT: the result never depends on the
+prior out-dir state).
 
 ## 5. Conformance status
 

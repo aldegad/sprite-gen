@@ -65,6 +65,20 @@ CURATION_FILENAME = "curation.json"
 SCHEMA_VERSION = 1
 IDENTITY = {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0, "shx": 0.0, "shy": 0.0, "flipX": 0}
 
+# Generation-material chip roles for imported `_refs/<role>-<name>.png` files
+# (run-contract.md §4). Single source shared by the importer (fail-loud on an
+# unknown role) and the webview server (render), so neither silently invents a role.
+IMPORTED_REF_ROLES = ("anchor", "basis", "guide")
+
+
+def imported_ref_role(filename: str) -> str | None:
+    """Role for an imported `_refs` filename `<role>-<name>.png`, or None if the
+    prefix is not a known role. Callers must handle None explicitly (the importer
+    fails loud, the server skips) — never silently relabel an unknown role."""
+    stem = Path(filename).stem
+    prefix = stem.split("-", 1)[0] if "-" in stem else ""
+    return prefix if prefix in IMPORTED_REF_ROLES else None
+
 
 def curation_path(run_dir: Path) -> Path:
     return run_dir / CURATION_FILENAME
