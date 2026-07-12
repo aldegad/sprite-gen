@@ -43,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
-from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, load_curation
+from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported_ref_role, load_curation
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 CURATOR_DIR = SCRIPTS_DIR / "curator"
@@ -133,8 +133,6 @@ def detect_pixel_pitch(path):
 
 
 _REF_DIRECTIONS = ("down45", "up45", "down", "side", "up", "left", "right", "front", "back")
-# 프런트 i18n(curator.js)이 아는 role 어휘. 미지 role 은 guide 로 강등해 깨진 칩을 막는다.
-_IMPORTED_REF_ROLES = ("anchor", "basis", "guide")
 
 
 def _state_refs(run_dir, state):
@@ -161,13 +159,14 @@ def _state_refs(run_dir, state):
     if guide.is_file():
         refs.append({"role": "guide", "name": guide.name, "url": _url("run", "references", "layout-guides", f"{state}.png")})
     # imported runs (--pngs-dir): references/imported/<state>/<role>-<name>.png → 생성 재료 칩.
-    # role 은 파일명 접두(첫 '-' 앞)에서 파싱, 미지 role 은 guide 로 강등. 역할 파싱 SSoT = 여기 한 곳.
+    # role 파싱 SSoT = curation.imported_ref_role. 미지 role 은 스킵한다 — import 가 fail-loud
+    # 로 걸러 여기 도달하지 않지만, 손으로 놓인 파일도 조용히 guide 로 relabel 하지 않는다.
     imported_dir = run_dir / "references" / "imported" / state
     if imported_dir.is_dir():
         for ref in sorted(imported_dir.glob("*.png")):
-            role = ref.stem.split("-", 1)[0] if "-" in ref.stem else "guide"
-            if role not in _IMPORTED_REF_ROLES:
-                role = "guide"
+            role = imported_ref_role(ref.name)
+            if role is None:
+                continue
             refs.append({"role": role, "name": ref.name,
                          "url": _url("run", "references", "imported", state, ref.name)})
     return refs

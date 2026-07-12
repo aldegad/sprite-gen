@@ -7,6 +7,9 @@ fragment → 404)."""
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 import sys
 import threading
 import urllib.request
@@ -93,3 +96,49 @@ def test_url_helper_encodes_only_unsafe_segments():
     assert _url("run", "raw", "down_idle.png") == "/run/raw/down_idle.png"  # unreserved unchanged
     assert _url("run", "a b#c.png") == "/run/a%20b%23c.png"
     assert _url("frames", "down_walk", "frame-0.png") == "/frames/down_walk/frame-0.png"
+
+
+def _run_import(pngs: Path, out: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "unpack_atlas_run.py"),
+         "--pngs-dir", str(pngs), "--out-dir", str(out), *extra],
+        capture_output=True, text=True,
+    )
+
+
+def test_force_reimport_is_a_clean_rebuild(tmp_path):
+    """--force re-import must not leave stale source truth (Idempotency/SSoT)."""
+    pngs = tmp_path / "pngs"
+    _png(pngs / "_base" / "b.png", size=(96, 96))
+    _png(pngs / "items" / "1-a.png")
+    _png(pngs / "items" / "_refs" / "anchor-x.png")
+    out = tmp_path / "run"
+    r1 = _run_import(pngs, out, "--force")
+    assert r1.returncode == 0, r1.stderr
+    assert (out / "base-source.png").is_file()
+    assert (out / "references" / "imported" / "items" / "anchor-x.png").is_file()
+    # remove both sources from the input, re-import into the SAME out-dir
+    shutil.rmtree(pngs / "_base")
+    shutil.rmtree(pngs / "items" / "_refs")
+    r2 = _run_import(pngs, out, "--force")
+    assert r2.returncode == 0, r2.stderr
+    assert not (out / "base-source.png").exists()          # stale base gone
+    assert not (out / "references" / "imported").exists()  # stale refs gone
+    prov = json.loads((out / "unpack-source.json").read_text())
+    assert prov["base_source"] is None and prov["imported_refs"] == {}
+    st = build_run_state(out)
+    assert st["baseUrl"] is None and st["contract"]["sourceless"] is True
+
+
+def test_unknown_ref_role_fails_loud(tmp_path):
+    """A _refs file with an unknown role prefix is rejected, not relabeled to guide."""
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    _png(pngs / "items" / "_refs" / "mystery-source.png")
+    out = tmp_path / "run"
+    r = _run_import(pngs, out, "--force")
+    assert r.returncode != 0
+    combined = r.stderr + r.stdout
+    assert "mystery-source.png" in combined
+    assert "anchor-/basis-/guide-" in combined
+    assert not out.exists() or not (out / "references" / "imported").exists()
