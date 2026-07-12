@@ -46,6 +46,14 @@ in one image.
    - 45-degree 4-way: accepted `idle-front-right`, `idle-front-left`,
      `idle-back-right`, `idle-back-left`
 
+   **A direction anchor is exactly ONE single-pose image (앵커 = 1장).**
+   A multi-frame idle row is NOT a valid direction anchor: attaching a row
+   makes the model read frame-to-frame micro-motion as identity variance and
+   dilutes the facing lock. If only an idle row exists, crop one pose
+   deterministically (frame 0 by default) and lock that single image as the
+   anchor; the row itself stays a motion/timing artifact, never an anchor.
+   (수홍 확정 2026-07-12 — solvell founder 5-anchor 사고에서 도출.)
+
 3. **State anchor gate** — for each requested non-locomotion state and
    direction, create one representative state anchor before generating the
    multi-frame row. For example, `working-front-right-anchor` can show the
@@ -70,7 +78,8 @@ in one image.
    direction idle anchor and state anchor exist. Reference ownership is:
    - base image: pre-idle source only, not a row-generation input
    - direction idle anchor: identity, facing/orientation, and visible
-     side-specific identity details for that direction
+     side-specific identity details for that direction — always a
+     **single-pose single image**, never a multi-frame row
    - state anchor: pose/state vocabulary plus the approved state-specific
      identity rendering, for non-locomotion states only
    - locomotion motion sheet/contact sheet: foot-contact phase and gait rhythm
