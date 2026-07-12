@@ -235,3 +235,43 @@ def test_publish_never_removes_out_dir(tmp_path, monkeypatch):
     assert not vanished["lock"], "run-dir lock vanished during publish (isolation window)"
     # the new run published cleanly
     assert (out / "frames" / "items" / "frame-1.png").is_file()
+
+
+def test_api_run_reader_isolated_from_concurrent_publish(tmp_path):
+    """build_run_state reads under read_guard, so it blocks while a publish holds the
+    exclusive publish_guard and returns a COMPLETE snapshot — never a mid-publish 500 or
+    old/new mix (reader isolation)."""
+    import threading
+    import time
+
+    from serve_curation import build_run_state
+    from sprite_gen import runio
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    run = tmp_path / "run"
+    assert _run_import(pngs, run, "--force").returncode == 0
+
+    outcome: dict = {}
+    ready = threading.Event()
+
+    def reader():
+        ready.wait()
+        try:
+            st = build_run_state(run)  # read_guard SH -> blocks under the publish EX lock
+            outcome["states"] = len(st["states"])
+        except Exception as exc:  # a mid-publish read would raise / 500
+            outcome["err"] = repr(exc)
+        outcome["at"] = time.monotonic()
+
+    th = threading.Thread(target=reader)
+    th.start()
+    with runio.publish_guard(run):          # simulate a publish holding the exclusive lock
+        ready.set()
+        time.sleep(0.25)                     # reader must be blocked for this whole window
+        assert "at" not in outcome, "reader was not blocked by publish_guard (no isolation)"
+        released_at = time.monotonic()
+    th.join(3)
+    assert "err" not in outcome, outcome.get("err")
+    assert outcome.get("states"), "reader got no complete snapshot"
+    assert outcome["at"] >= released_at, "reader returned before the publish released"

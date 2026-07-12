@@ -35,7 +35,14 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen.curation import imported_ref_role
-from sprite_gen.runio import LOCK_FILENAME, acquire_run_dir_lock, atomic_save_image, atomic_write_text, relative_posix
+from sprite_gen.runio import (
+    LOCK_FILENAME,
+    acquire_run_dir_lock,
+    atomic_save_image,
+    atomic_write_text,
+    publish_guard,
+    relative_posix,
+)
 
 ALPHA_THRESHOLD = 16  # a pixel counts as content above this alpha
 MIN_GUTTER = 1        # a fully-empty line of >= this many px separates frames
@@ -408,30 +415,34 @@ def _publish_run(staging: Path, out_dir: Path) -> None:
     Called only after a successful build."""
     reserved = {LOCK_FILENAME, _PUBLISH_BACKUP}
     backup = out_dir / _PUBLISH_BACKUP
-    if backup.exists():
-        shutil.rmtree(backup)
-    backup.mkdir()
-    moved: list[str] = []
-    phase1_done = False
-    try:
-        for child in [c for c in out_dir.iterdir() if c.name not in reserved]:
-            child.rename(backup / child.name)          # prior content -> in-place backup
-            moved.append(child.name)
-        phase1_done = True
-        for child in [c for c in staging.iterdir() if c.name != LOCK_FILENAME]:
-            child.rename(out_dir / child.name)          # new content -> out_dir
-    except OSError:
-        # roll back to the prior run byte-intact.
-        if phase1_done:
-            # all prior content is safe in backup; drop any partial new content we placed.
+    # publish_guard (exclusive) blocks concurrent readers (serve_curation read_guard) for
+    # the whole swap, so a serving /api/run never observes the half-published state
+    # (reader isolation — a reader sees the complete prior run or the complete new run).
+    with publish_guard(out_dir):
+        if backup.exists():
+            shutil.rmtree(backup)
+        backup.mkdir()
+        moved: list[str] = []
+        phase1_done = False
+        try:
             for child in [c for c in out_dir.iterdir() if c.name not in reserved]:
-                shutil.rmtree(child) if child.is_dir() else child.unlink()
-        # restore relocated prior content (a phase-1-partial failure left the rest in place)
-        for name in moved:
-            (backup / name).rename(out_dir / name)
-        raise
-    finally:
-        shutil.rmtree(backup, ignore_errors=True)
+                child.rename(backup / child.name)          # prior content -> in-place backup
+                moved.append(child.name)
+            phase1_done = True
+            for child in [c for c in staging.iterdir() if c.name != LOCK_FILENAME]:
+                child.rename(out_dir / child.name)          # new content -> out_dir
+        except OSError:
+            # roll back to the prior run byte-intact.
+            if phase1_done:
+                # all prior content is safe in backup; drop any partial new content we placed.
+                for child in [c for c in out_dir.iterdir() if c.name not in reserved]:
+                    shutil.rmtree(child) if child.is_dir() else child.unlink()
+            # restore relocated prior content (a phase-1-partial failure left the rest in place)
+            for name in moved:
+                (backup / name).rename(out_dir / name)
+            raise
+        finally:
+            shutil.rmtree(backup, ignore_errors=True)
 
 
 def parse_grid(value: str) -> tuple[int, int]:
