@@ -31,6 +31,7 @@ import atexit
 import contextlib
 import json
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path, PurePath
@@ -146,19 +147,40 @@ def _rwlock_path(run_dir: Path) -> Path:
     return run_dir.parent / f".{run_dir.name}{RWLOCK_SUFFIX}"
 
 
+# Which run dirs have already reported a degraded (no-op) publish guard, so the warning
+# is observable but not repeated on every request.
+_RWLOCK_DEGRADED_WARNED: set[str] = set()
+
+
+def _warn_rwlock_degraded(run_dir: Path, why: str) -> None:
+    """Report — once per run dir — that publish reader/writer isolation could not be
+    established, so the old-or-new snapshot guarantee is not in force. Observable failover,
+    never a silent no-op (No Silent Fallback)."""
+    key = str(run_dir)
+    if key in _RWLOCK_DEGRADED_WARNED:
+        return
+    _RWLOCK_DEGRADED_WARNED.add(key)
+    print(f"[runio] WARNING: publish reader/writer isolation degraded ({why}) for {run_dir} — "
+          f"a concurrent --force re-import / re-extract MAY expose a partial run to /api/run "
+          f"(old-or-new snapshot NOT guaranteed on this platform)", file=sys.stderr)
+
+
 @contextlib.contextmanager
 def read_guard(run_dir: Path):
     """Shared (reader) lock on the run dir's publish rwlock. While a publish holds the
     exclusive lock for its content swap, a reader inside this guard blocks — so it never
     observes a half-published run (no old/new file mix, no missing file). Advisory
-    cross-process flock; a no-op if fcntl is unavailable or the sidecar can't be created
-    (best-effort — reader isolation degrades gracefully, serving never hard-fails)."""
+    cross-process flock. If the platform has no fcntl or the sidecar can't be created, the
+    guard degrades to a no-op but reports it (once per run dir) so the lost isolation is
+    observable — never a silent fallback."""
     if fcntl is None:
+        _warn_rwlock_degraded(run_dir, "fcntl unavailable")
         yield
         return
     try:
         fd = os.open(_rwlock_path(run_dir), os.O_RDWR | os.O_CREAT, 0o644)
-    except OSError:
+    except OSError as exc:
+        _warn_rwlock_degraded(run_dir, f"cannot create rwlock sidecar: {exc}")
         yield
         return
     try:
@@ -175,11 +197,18 @@ def read_guard(run_dir: Path):
 def publish_guard(run_dir: Path):
     """Exclusive (writer) lock on the run dir's publish rwlock — held only around the
     content swap so concurrent readers block briefly and never see a partial publish.
-    Same sidecar file as read_guard. A no-op if fcntl is unavailable."""
+    Same sidecar file as read_guard. Degrades to a no-op (reported once, see read_guard) if
+    fcntl is unavailable or the sidecar can't be created — observable, never silent."""
     if fcntl is None:
+        _warn_rwlock_degraded(run_dir, "fcntl unavailable")
         yield
         return
-    fd = os.open(_rwlock_path(run_dir), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fd = os.open(_rwlock_path(run_dir), os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as exc:
+        _warn_rwlock_degraded(run_dir, f"cannot create rwlock sidecar: {exc}")
+        yield
+        return
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         try:

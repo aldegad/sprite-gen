@@ -234,8 +234,10 @@ throughout, so a concurrent **writer** cannot preempt (writer Isolation).
 > concurrently always sees a **complete old-or-new snapshot** —
 > never a half-published (old/new-mixed or missing-file) state, and never a transient
 > `HTTP 500`. The reader blocks only for the brief swap. The rwlock is a sidecar (beside
-> the run dir), so it survives content swaps and is never itself published; it degrades to
-> a no-op only where `fcntl` is unavailable.
+> the run dir), so it survives content swaps and is never itself published. Where `fcntl`
+> is unavailable or the sidecar can't be created (a non-Unix platform), the guard degrades
+> to a no-op **and reports it on stderr** (once per run dir) — the lost isolation is
+> observable, never a silent fallback.
 >
 > The curation **write** (`POST /api/curation`) takes the same exclusive publish lock, so
 > a `select`/`reorder`/`transform` autosave is serialized with a concurrent re-import; and
