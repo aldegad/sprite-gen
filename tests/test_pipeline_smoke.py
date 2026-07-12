@@ -258,52 +258,87 @@ def test_commit_generation_rolls_back_both_surfaces_on_evidence_failure(tmp_path
     assert not (run / ".extract-failure.sg-backup").exists()
 
 
-def test_corrupt_failure_evidence_fails_loud(fixture_run_dir: Path) -> None:
-    """An unreadable/corrupt extract-failure.json must NOT be silently treated as empty — that
-    would drop still-unresolved failures on the next success (No Silent Fallback). The extract
-    fails loud and leaves the corrupt record in place for the operator."""
+# Broken canonical records that must all fail loud, NOT be read as empty/absent. Beyond
+# unparseable JSON: a syntactically-valid `{}`, a missing required field, a wrong `ok`, an
+# empty failure `errors`, or a row without a `state` are all schema corruption (No Silent
+# Fallback — an existing-but-broken record never reads as "all clear").
+_BROKEN_MANIFESTS = [
+    "{ malformed",                                                    # unparseable
+    "{}",                                                             # empty dict (missing all)
+    '{"ok": false, "rows": [], "errors": [], "warnings": []}',       # wrong ok (must be true)
+    '{"ok": true, "errors": [], "warnings": []}',                    # missing rows
+    '{"ok": true, "rows": [{"files": []}], "errors": [], "warnings": []}',  # row without state
+]
+_BROKEN_EVIDENCE = [
+    "{ malformed",                                                    # unparseable
+    "{}",                                                             # empty dict (missing all)
+    '{"ok": true, "errors": ["idle: x"], "warnings": [], "rows": []}',  # wrong ok (must be false)
+    '{"ok": false, "errors": [], "warnings": [], "rows": []}',       # empty errors
+    '{"ok": false, "warnings": [], "rows": []}',                     # missing errors
+]
+
+
+@pytest.mark.parametrize("payload", _BROKEN_EVIDENCE)
+def test_commit_fails_loud_on_broken_failure_evidence(fixture_run_dir: Path, payload: str) -> None:
+    """WRITER path: a subset --states success reads the prior extract-failure.json to merge. A
+    broken record (unparseable OR valid-but-wrong-schema, incl. `{}`) must fail loud, never be
+    read as 'no failures' and silently dropped on the successful publish (No Silent Fallback)."""
     run = fixture_run_dir
     assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
-    (run / "extract-failure.json").write_text("{ this is not json", encoding="utf-8")
+    (run / "extract-failure.json").write_text(payload, encoding="utf-8")
 
     r = run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", "walk")
-    assert r.returncode != 0, "corrupt evidence was silently accepted"
+    assert r.returncode != 0, f"commit silently accepted broken evidence: {payload!r}"
     assert "failure evidence" in (r.stdout + r.stderr).lower()
-    assert (run / "extract-failure.json").exists()                   # not silently deleted
+    assert (run / "extract-failure.json").read_text(encoding="utf-8") == payload  # not deleted/rewritten
 
 
-def test_inspect_fails_loud_on_corrupt_failure_evidence(fixture_run_dir: Path) -> None:
-    """The correction loop reads per-state failures through inspect_run. A corrupt
-    extract-failure.json must fail loud on the READ path too — not be silently read as 'no
-    failures' — or the loop would call an unresolved-failure run all-clear. Writer fail-loud
-    alone is not enough; the canonical reader must fail loud too (No Silent Fallback)."""
+@pytest.mark.parametrize("payload", _BROKEN_EVIDENCE)
+def test_inspect_fails_loud_on_broken_failure_evidence(fixture_run_dir: Path, payload: str) -> None:
+    """READER path: the correction loop reads per-state failures through inspect_run. A broken
+    extract-failure.json must fail loud on the read too — never be read as 'no failures' — or an
+    unresolved-failure run is judged all-clear (No Silent Fallback)."""
     run = fixture_run_dir
     assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
-    (run / "extract-failure.json").write_text("{ malformed", encoding="utf-8")
+    (run / "extract-failure.json").write_text(payload, encoding="utf-8")
 
     r = run_script("inspect_sprite_run.py", "--run-dir", str(run), "--no-write")
-    assert r.returncode != 0, "inspect silently accepted corrupt failure evidence"
+    assert r.returncode != 0, f"inspect silently accepted broken evidence: {payload!r}"
     assert "failure evidence" in (r.stdout + r.stderr).lower()
     assert (run / "extract-failure.json").exists()                   # not silently removed
 
 
-def test_subset_reextract_fails_loud_on_corrupt_prior_manifest(fixture_run_dir: Path) -> None:
-    """A subset --states re-extract seeds untouched states from the prior complete generation.
-    If that generation's manifest is corrupt it must fail loud BEFORE publishing — not read the
-    prior as empty and then publish an incomplete manifest that disagrees with the carried frame
-    tree (No Silent Fallback / Consistency / Atomicity). The prior generation stays byte-intact."""
+@pytest.mark.parametrize("payload", _BROKEN_MANIFESTS)
+def test_subset_reextract_fails_loud_on_broken_prior_manifest(fixture_run_dir: Path, payload: str) -> None:
+    """WRITER path: a subset --states re-extract seeds untouched states from the prior complete
+    generation. A broken prior manifest (unparseable OR `{}`/missing-rows/wrong-ok/row-without-
+    state) must fail loud BEFORE staging — never be read as 'no prior rows' and then publish an
+    incomplete manifest that disagrees with the carried frame tree (No Silent Fallback /
+    Consistency / Atomicity). The prior generation stays byte-intact and no staging leaks."""
     import hashlib
 
     run = fixture_run_dir
     assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
-    (run / "frames" / "frames-manifest.json").write_text("{ malformed", encoding="utf-8")
+    (run / "frames" / "frames-manifest.json").write_text(payload, encoding="utf-8")
     before = {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in (run / "frames").rglob("*") if p.is_file()}
 
     r = run_script("extract_sprite_row_frames.py", "--run-dir", str(run), "--states", "walk")
-    assert r.returncode != 0, "subset re-extract silently accepted a corrupt prior manifest"
+    assert r.returncode != 0, f"subset re-extract silently accepted broken manifest: {payload!r}"
     assert "frames manifest" in (r.stdout + r.stderr).lower()
     after = {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest()
              for p in (run / "frames").rglob("*") if p.is_file()}
     assert after == before, "prior generation was mutated by a failed subset re-extract"
     assert not (run / ".frames.sg-staging").exists()                 # failed before staging created
+
+
+def test_inspect_fails_loud_on_broken_frames_manifest(fixture_run_dir: Path) -> None:
+    """READER path: inspect reads the frames manifest too; an `{}`-broken manifest must fail loud,
+    not read as an empty generation (No Silent Fallback)."""
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "frames" / "frames-manifest.json").write_text("{}", encoding="utf-8")
+
+    r = run_script("inspect_sprite_run.py", "--run-dir", str(run), "--no-write")
+    assert r.returncode != 0, "inspect silently accepted a broken frames manifest"
+    assert "frames manifest" in (r.stdout + r.stderr).lower()
