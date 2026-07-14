@@ -181,6 +181,11 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 .folder-collapsed > .tree-node.folder .caret { transform: rotate(0deg); }
 .folder-collapsed > ul { display: none; }
 .tree-node.folder.clickable:hover { border: none; background: var(--panel-2); border-radius: 6px; }
+/* 파이프라인 / 파일 — 사이드바 상위 블록 */
+.tree-block { margin-bottom: 10px; }
+.tree-block > .tree-node.folder { font-weight: 700; }
+.tree-block > .tree-node.folder .tn-label { font-family: inherit; font-size: 12.5px; letter-spacing: 0.02em; text-transform: uppercase; }
+.tree-block > ul { margin-top: 2px; }
 
 /* 트리에서 이동해 온 대상 패널 하이라이트 — ~1.8초 유지 후 스르륵 페이드아웃 */
 @keyframes target-flash {
