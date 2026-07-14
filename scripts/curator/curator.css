@@ -174,9 +174,21 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 .tree-node.anchor .tn-label { color: var(--accent, #0ea5e9); }
 .tree-node.mirror { border-style: dashed; font-style: italic; color: var(--muted); }
 .tree-node.tree-root { background: var(--panel); font-size: 13px; }
-/* 폴더 노드 — 파일트리 뼈대. 박스 없이 아이콘+경로 라벨만 */
+/* 폴더 노드 — 파일트리 뼈대. 박스 없이 아이콘+경로 라벨만. 클릭 = 접기/펴기 */
 .tree-node.folder { border: none; background: transparent; padding: 2px 2px; }
 .tree-node.folder svg { color: var(--muted); flex: none; }
+.tree-node.folder .caret { transition: transform 0.2s ease; transform: rotate(90deg); }
+.folder-collapsed > .tree-node.folder .caret { transform: rotate(0deg); }
+.folder-collapsed > ul { display: none; }
+.tree-node.folder.clickable:hover { border: none; background: var(--panel-2); border-radius: 6px; }
+
+/* 트리에서 이동해 온 대상 패널 하이라이트 — ~1.8초 유지 후 스르륵 페이드아웃 */
+@keyframes target-flash {
+  0% { box-shadow: 0 0 0 2px var(--accent), 0 8px 28px rgba(37, 99, 235, 0.16); }
+  60% { box-shadow: 0 0 0 2px var(--accent), 0 8px 28px rgba(37, 99, 235, 0.16); }
+  100% { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0), 0 8px 28px rgba(37, 99, 235, 0); }
+}
+.state.flash-target { animation: target-flash 3s ease 1; }
 .tree-node.folder .tn-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
 /* 런 경로: 한 줄 + 앞쪽 말줄임 — 뒤(폴더명)가 중요하므로 끝을 보여주고 앞을 …로.
    direction:rtl 트릭; 전체 경로는 hover 툴팁(title). */

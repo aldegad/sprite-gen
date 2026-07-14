@@ -964,11 +964,23 @@ function treeNode(label, note, thumbUrl, targetState, extra) {
     node.title = t("tTreeNode");
     node.classList.add("clickable");
     node.addEventListener("click", () => {
-      const section = document.querySelector(`.state[data-state="${cssEscape(targetState)}"]`);
-      if (section) section.scrollIntoView({ behavior: "smooth", block: "start" });
+      const section = targetState === "__base__"
+        ? document.querySelector(".base-row")
+        : document.querySelector(`.state[data-state="${cssEscape(targetState)}"]`);
+      if (!section) return;
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+      flashSection(section);
     });
   }
   return node;
+}
+
+// 이동한 대상 패널을 ~3초 하이라이트 후 스르륵 페이드아웃 — "지금 여기"를 보여준다
+function flashSection(el) {
+  el.classList.remove("flash-target");
+  void el.offsetWidth; // 연속 클릭 시 애니메이션 재시작
+  el.classList.add("flash-target");
+  el.addEventListener("animationend", () => el.classList.remove("flash-target"), { once: true });
 }
 
 // 생성 진행 스냅샷 (트리 실시간 갱신): stateName -> {raw, frames}. 초기값은 /api/run,
@@ -1010,6 +1022,8 @@ function renderPipelineTree() {
   const addTop = (...nodes) => {
     const el = document.createElement("li");
     for (const n of nodes) if (n) el.appendChild(n);
+    const folder = el.querySelector(":scope > .tree-node.folder .tn-label");
+    if (folder && collapsedFolders.has(folder.textContent)) el.classList.add("folder-collapsed");
     top.appendChild(el);
     return el;
   };
@@ -1031,7 +1045,7 @@ function renderPipelineTree() {
   };
 
   // base 파일
-  if (run.baseUrl) addTop(treeNode("base-source", t("treeBaseNote"), run.baseUrl, null, "tree-root"));
+  if (run.baseUrl) addTop(treeNode("base-source", t("treeBaseNote"), run.baseUrl, "__base__", "tree-root"));
 
   // raw/ — 생성 스트립이 저장되는 폴더
   const rawLi = addTop(folderNode("raw/", t("treeRawFolder")));
@@ -1097,15 +1111,34 @@ function renderPipelineTree() {
   else document.getElementById("sidebar").appendChild(wrap);
 }
 
-// 폴더 노드 — SVG 폴더 아이콘 + 경로 라벨 (이모지 금지 규칙)
+// 폴더 노드 — SVG 폴더 아이콘 + 경로 라벨 (이모지 금지 규칙).
+// 클릭 = 접기/펴기. 트리는 진행 폴링으로 재렌더되므로 접힘 상태를 라벨 키로 유지한다.
+const collapsedFolders = new Set();
+
 function folderNode(label, note) {
   const node = document.createElement("span");
-  node.className = "tree-node folder";
+  node.className = "tree-node folder clickable";
   node.innerHTML =
+    '<svg class="caret" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true">' +
+    '<path d="M5 3.5 10.5 8 5 12.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
     '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">' +
     '<path d="M1.5 4A1.5 1.5 0 0 1 3 2.5h2.6a1 1 0 0 1 .8.4l.9 1.1H13A1.5 1.5 0 0 1 14.5 5.5v6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5V4z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
   node.appendChild(Object.assign(document.createElement("span"), { className: "tn-label", textContent: label }));
   if (note) node.appendChild(Object.assign(document.createElement("span"), { className: "tn-note", textContent: note }));
+  node.addEventListener("click", () => {
+    const li = node.parentElement;
+    const collapsed = !li.classList.contains("folder-collapsed");
+    li.classList.toggle("folder-collapsed", collapsed);
+    if (collapsed) collapsedFolders.add(label);
+    else {
+      collapsedFolders.delete(label);
+      for (const ul of li.querySelectorAll(":scope > ul")) {
+        ul.animate(
+          [{ opacity: 0, transform: "translateY(-5px)" }, { opacity: 1, transform: "none" }],
+          { duration: 190, easing: "ease" });
+      }
+    }
+  });
   return node;
 }
 
