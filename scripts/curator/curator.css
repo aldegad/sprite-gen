@@ -434,7 +434,10 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .zoom-head { display: flex; align-items: center; gap: 8px; }
 .zoom-head .zoom-title { font-weight: 600; font-size: 15px; margin-right: 6px; }
 .zoom-head .row-controls { margin-left: auto; display: inline-flex; gap: 8px; }
-.zoom-card .stage { width: 480px; }
+/* flex 컨테이너(column)가 높이를 눌러 aspect-ratio 를 깨지 않게 — 확대는 스크롤로 수용.
+   (실사고 2026-07-14: max-height 94vh 에 닿으면 flex-shrink 가 스테이지 높이만 줄여
+   스프라이트/격자가 가로로 찌그러졌다.) */
+.zoom-card .stage { width: 480px; flex: 0 0 auto; }
 .card-top .ct-right { display: inline-flex; align-items: center; gap: 4px; }
 .card-top .zoom-btn { cursor: zoom-in; }
 .ref-chip { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: inherit;
