@@ -294,6 +294,13 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         for target, source in (directions_cfg.get("mirror") or {}).items():
             direction_groups.append({"direction": target, "mirrorOf": source, "states": []})
 
+    # 방향 앵커 파일 (references/anchors/*.png) — 파일트리 표시용
+    anchors_dir = run_dir / "references" / "anchors"
+    anchor_files = []
+    if anchors_dir.is_dir():
+        for path in sorted(anchors_dir.glob("*.png")):
+            anchor_files.append({"name": path.name, "url": _url("run", "references", "anchors", path.name)})
+
     curation = load_curation(run_dir) or empty_curation()
     # 원본 베이스(아이덴티티 truth)가 있으면 큐레이터 최상단에 참조 줄로 노출
     base_url = None
@@ -322,6 +329,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         "schemaVersion": SCHEMA_VERSION,
         "runRevision": run_revision(run_dir),
         "directionGroups": direction_groups,
+        "anchorFiles": anchor_files,
         "states": states,
         "curation": curation,
         "iso": request.get("iso"),
