@@ -42,7 +42,7 @@ const STR = {
     ppState: "Pixel-perfect",
     tPpState: "toggle pixel-perfect for THIS row only — what it displays and what compose bakes",
     pxGrid: "Pixel grid", pxGridAll: "Pixel grid (all)",
-    tGridState: "overlay the snapped logical pixel grid on THIS row (display only)",
+    tGridState: "grid overlay for THIS row — output pixel raster on the pixel-perfect view, the DETECTED cut lines (green) on the original view (display only)",
     refsLabel: "generated from", ref_anchor: "direction anchor", ref_basis: "basis row", ref_guide: "layout guide", tPxGrid: "toggle the pixel-grid overlay for ALL rows at once (display only; each row has its own checkbox)",
     tPpApply: "toggle pixel-perfect for ALL rows at once (each row has its own checkbox)",
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
@@ -70,7 +70,7 @@ const STR = {
     ppState: "픽셀퍼펙트",
     tPpState: "이 줄만 픽셀퍼펙트 켜기/끄기 — 표시와 굽기가 같이 바뀐다",
     pxGrid: "픽셀 격자", pxGridAll: "픽셀 격자 전체",
-    tGridState: "이 줄에만 스냅된 논리 픽셀 격자 오버레이 (표시 전용)",
+    tGridState: "이 줄 격자 오버레이 — 픽셀퍼펙트 뷰에선 출력 픽셀 눈금, 원본 뷰에선 실제로 자른 검출 절단선(초록) (표시 전용)",
     refsLabel: "생성 재료", ref_anchor: "방향 앵커", ref_basis: "basis row", ref_guide: "레이아웃 가이드", tPxGrid: "모든 줄의 격자 오버레이를 한번에 켜기/끄기 (표시 전용; 줄별 체크박스는 각 줄에)",
     tPpApply: "모든 줄의 픽셀퍼펙트를 한번에 켜기/끄기 (줄별 체크박스는 각 줄에)",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
@@ -169,24 +169,63 @@ function drawFrameInto(ctx, image, t, cw, ch, snap) {
 // 예전엔 셀 픽셀마다(scale 무시) 그어서, logical_height < cell 인 런에서 실제 스냅
 // 격자보다 촘촘한 거짓 격자를 보여줬다. 픽셀퍼펙트가 아닌 런은 격자 자체가 없다.
 function sizePxGrids() {
-  // 줄 단위 격자: 그 줄의 격자 체크박스가 켜져 있을 때만 그린다. 계약 런은 전 줄
-  // 동일 scale, 계약 없는 런은 줄별 자동 측정값(state.pixelScale). 측정 실패한
-  // 줄은 오버레이를 숨긴다 — 가짜 격자 금지.
-  // 픽셀퍼펙트를 끈 줄(plain 표시) 위에도 그린다 — 타깃 논리 격자를 원본에 겹쳐
-  // 스냅 전/후를 비교하는 용도 (수홍 요청 2026-07-14).
+  // 줄 단위 격자: 그 줄의 격자 체크박스가 켜져 있을 때만 그린다.
+  // - 픽셀퍼펙트 표시 줄: 출력 격자(빨/파, 셀 픽셀 눈금) — 결과가 앉은 격자 그 자체.
+  // - 원본(plain) 표시 줄: 검출된 입력 격자(초록, 추출이 실제로 자른 절단선;
+  //   manifest input_grids). 절단선 기록이 없는 줄만 출력 격자를 참고로 겹친다.
+  // 측정/계약이 없는 줄은 오버레이를 숨긴다 — 가짜 격자 금지.
   document.querySelectorAll(".card").forEach((card) => {
     const overlay = card.querySelector(".pxgrid");
-    if (!overlay) return;
+    const ingrid = card.querySelector(".ingrid");
+    if (!overlay && !ingrid) return;
     const stage = card.querySelector(".stage");
     const st = run.states.find((s) => s.name === card.dataset.state);
-    const step = gridStates[card.dataset.state]
+    const frame = st && st.frames[Number(card.dataset.idx)];
+    const on = !!gridStates[card.dataset.state];
+    const plainShown = ppTwinStates.has(card.dataset.state) && !ppOn(card.dataset.state);
+    const useInput = on && plainShown && frame && frame.inputGrid && stage;
+    if (ingrid) {
+      if (useInput) {
+        drawInputGrid(ingrid, stage, frame.inputGrid);
+        ingrid.style.display = "block";
+      } else {
+        ingrid.style.display = "none";
+      }
+    }
+    const step = on && !useInput
       ? (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null
       : null;
+    if (!overlay) return;
     if (!step || !stage) { overlay.style.display = "none"; return; }
     overlay.style.display = "block";
     const ds = (stage.clientWidth / run.cell.width) * step;
     overlay.style.backgroundSize = `${ds}px ${ds}px`;
   });
+}
+
+// 검출된 입력 격자: 추출이 원본에서 실제로 자른 절단선(셀 좌표)을 스프라이트 범위에만
+// 그린다 — 균일 간격이 아니다(등분 스냅·프레임별 위상). 출력 눈금과 구분되게 초록.
+function drawInputGrid(canvas, stage, grid) {
+  const w = Math.max(1, Math.round(stage.clientWidth));
+  const h = Math.max(1, Math.round(stage.clientHeight));
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = "rgba(21, 128, 61, 0.6)";
+  ctx.lineWidth = 1;
+  const sx = w / run.cell.width;
+  const sy = h / run.cell.height;
+  const x0 = grid.x[0] * sx, x1 = grid.x[grid.x.length - 1] * sx;
+  const y0 = grid.y[0] * sy, y1 = grid.y[grid.y.length - 1] * sy;
+  for (const x of grid.x) {
+    const px = Math.round(x * sx) + 0.5;
+    ctx.beginPath(); ctx.moveTo(px, y0); ctx.lineTo(px, y1); ctx.stroke();
+  }
+  for (const y of grid.y) {
+    const py = Math.round(y * sy) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x0, py); ctx.lineTo(x1, py); ctx.stroke();
+  }
 }
 
 function refreshVariantImages() {
@@ -866,6 +905,7 @@ function renderCard(state, frame) {
   const stageInner = frame.present
     ? (run.iso ? `<canvas class="grid-overlay"></canvas>` : "") +
       `<div class="pxgrid"></div>` +
+      `<canvas class="ingrid"></canvas>` +
       `<img src="${escapeHtml(frameUrl(state.name, frame))}" alt="frame ${frame.index}" draggable="false" />` +
       `<canvas class="snap-canvas"></canvas>` +
       `<div class="rotate-handle" title="${t("tRotate")}"></div>` +
@@ -1101,6 +1141,7 @@ function openZoom(stateName, idx, keepWidth) {
     `</div>` +
     `<div class="stage" title="${t("tZoomStage")}">` +
     `<div class="pxgrid"></div>` +
+    `<canvas class="ingrid"></canvas>` +
     `<img src="${escapeHtml(frameUrl(stateName, frame))}" alt="frame ${idx}" draggable="false" class="px-upscale" />` +
     `<canvas class="snap-canvas"></canvas>` +
     `<div class="rotate-handle" title="${t("tRotate")}"></div>` +

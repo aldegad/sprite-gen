@@ -110,6 +110,19 @@ def test_twins_share_pixel_perfect_footprint(tmp_path) -> None:
         # same footprint: identical box within grid-rounding tolerance (contain fit)
         for a, b in zip(pb, lb):
             assert abs(a - b) <= 2, f"frame {index}: pixel bbox {pb} vs plain bbox {lb}"
+
+    # detected input grid (the actual cut lines) is recorded per frame, mapped into
+    # cell coords: the lattice must cover the plain twin's content bbox.
+    grids = row.get("input_grids")
+    assert grids and len(grids) == 2
+    for index, grid in enumerate(grids):
+        assert grid and grid["x"] and grid["y"], f"frame {index}: missing input grid"
+        plain = Image.open(run_dir / "frames" / "walk" / f"frame-{index}.plain.png").convert("RGBA")
+        lb = plain.getchannel("A").getbbox()
+        assert grid["x"][0] <= lb[0] + 2 and grid["x"][-1] >= lb[2] - 2
+        assert grid["y"][0] <= lb[1] + 2 and grid["y"][-1] >= lb[3] - 2
+        # ~one logical pixel per cut cell: line count tracks the sprite's logical size
+        assert len(grid["x"]) - 1 >= 10 and len(grid["y"]) - 1 >= 20
         if row.get("orig_files"):
             orig = Image.open(run_dir / "frames" / "walk" / "orig" / f"frame-{index}.png").convert("RGBA")
             scale = orig.width // pixel.width
