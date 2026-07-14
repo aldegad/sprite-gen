@@ -2,6 +2,36 @@
 
 > `SKILL.md` 에서 분리한 시나리오 상세. 방향성·45도·locomotion 행 생성 시 이 문서를 따른다. 기본 simple sprite (`idle`/`jump`/`attack`/`wave`) 에는 필요 없다. 내용은 손실 없이 `SKILL.md` 본문에서 그대로 옮겨졌다.
 
+### 전체 체인 한눈에 (그림)
+
+```text
+[0] 유저 입력
+      ref 이미지 ──(생성)──▶ base          또는     유저가 base 직접 지정
+                               │
+                               ▼
+[1] base — 딱 1장. down(정면) 기본자세. identity 의 최초 truth.
+                               │
+                               │  base 를 ref 로 붙여 방향별 idle "행" 생성 (stage 1)
+        ┌──────────────────────┼──────────────────────┐
+        ▼                      ▼                      ▼
+[2] down_idle 행           side_idle 행            up_idle 행      ← 4프레임 idle 애니메이션.
+    (정면, 숨쉬기)          (우측 프로필)            (뒷모습)          게임의 idle 로도 그대로 쓴다.
+        │                      │                      │
+        │ frame-0 을 1장 크롭 = 그 방향의 앵커 ("앵커 = 1장" 규칙)
+        ▼                      ▼                      ▼
+    down 앵커 1장          side 앵커 1장           up 앵커 1장     ← 사실상 "방향별 base".
+        │                      │                      │              이 시점부터 원래 base 는 은퇴
+        │                      │                      │              (행 생성에 재부착 금지).
+        ▼                      ▼                      ▼
+[3] down_walk/run/...      side_walk/run/...       up_walk/run/...  ← 각 행 = 자기 방향 앵커(identity)
+                                                                       + 레이아웃 가이드(모션 슬롯)로 생성 (stage 2)
+[4] left 방향 = side 의 런타임 미러 — 생성하지 않는 것이 기본 (계약으로 기록).
+      └ 미러 품질이 부족해 재생성할 때만: side 행을 timing/scale 참조로만 부착하고,
+        left 앵커(1장)를 먼저 새로 뽑은 뒤 그 앵커를 identity 로 left 행을 생성.
+```
+
+각 층의 소유권: base = 최초 identity(앵커 생성까지만) · 방향 앵커 1장 = 그 방향의 identity+facing · idle 행 = 앵커의 원천이자 게임 idle 애니메이션 · 각 행 = 모션만 · 미러 방향 = 생성 생략 계약. 이 그림이 곧 `references/generation-plan.json` 의 stage 1 → stage 2 → mirrored_directions 이다.
+
 ### Prepare 스캐폴딩 (`--directions`, 2026-07-14)
 
 이 워크플로는 이제 문서 절차만이 아니라 **prepare 가 구조로 스캐폴딩**한다 (수홍 확정 — base = down 정면 기본자세, 방향 앵커를 base 에서 뽑고 각 행은 자기 앵커에서 뽑는다):
