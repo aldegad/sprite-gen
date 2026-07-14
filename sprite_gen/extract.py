@@ -14,6 +14,7 @@ from typing import Any
 
 from PIL import Image
 
+from sprite_gen.layout import frames_dir_rel, raw_rel
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, publish_guard, relative_posix
 from sprite_gen.segment import separate_fused_poses
 
@@ -1842,24 +1843,38 @@ def _require_generation_consistency(run_dir: Path, manifest: dict, name: str,
     # while serve (request-driven) hides it — a per-consumer divergence.
     missing = sorted(request_states - row_state_set)
     if missing:
-        physical_now = {d.name for d in frames_root.iterdir() if d.is_dir()} if frames_root.is_dir() else set()
-        pending_only = [m for m in missing if m not in physical_now]
+        pending_only = [
+            m for m in missing
+            if not (run_dir / frames_dir_rel(request, m)).is_dir()
+        ]
         if not (allow_pending_states and pending_only == missing):
             raise SystemExit(f"corrupt {name} {run_dir}: manifest missing row(s) for request state(s) {missing} — incomplete generation")
     unknown = sorted(row_state_set - request_states)
     if unknown:
         raise SystemExit(f"corrupt {name} {run_dir}: manifest has row(s) for state(s) {unknown} not in the request (stale/unknown state)")
-    physical_states = {d.name for d in frames_root.iterdir() if d.is_dir()} if frames_root.is_dir() else set()
-    orphan = sorted(physical_states - row_state_set)
+    # 물리 고아 탐지 (경로 기반): 캐노니컬 프레임을 직접 담은 모든 디렉토리가
+    # 어떤 row 의 파일 디렉토리이거나 요청 상태의 예약 위치여야 한다.
+    row_dirs = set()
+    for row in manifest["rows"]:
+        for rel in row.get("files") or []:
+            if isinstance(rel, str):
+                row_dirs.add(str(Path(rel).parent))
+    physical_dirs = set()
+    if frames_root.is_dir():
+        for frame in frames_root.rglob("frame-*.png"):
+            if frame.name.endswith(".plain.png") or frame.parent.name == "orig":
+                continue
+            physical_dirs.add(str(Path("frames") / frame.parent.relative_to(frames_root)))
+    orphan = sorted(physical_dirs - row_dirs)
     if orphan:
-        raise SystemExit(f"corrupt {name} {run_dir}: physical frames for state(s) {orphan} have no manifest row (orphan/stale generation)")
+        raise SystemExit(f"corrupt {name} {run_dir}: physical frames under {orphan} have no manifest row (orphan/stale generation)")
     request_states_spec = request.get("states", {})
     for row in manifest["rows"]:
         state = row["state"]
         files = row.get("files")
         if not isinstance(files, list) or not files:
             raise SystemExit(f"corrupt {name} {run_dir}: manifest row '{state}' has no frame files (empty generation)")
-        prefix = f"frames/{state}/"
+        prefix = frames_dir_rel(request, state) + "/"
         for rel in files:
             if not isinstance(rel, str) or not rel.startswith(prefix):
                 raise SystemExit(f"corrupt {name} {run_dir}: row '{state}' file {rel!r} is not under {prefix} (state boundary)")
@@ -1867,7 +1882,7 @@ def _require_generation_consistency(run_dir: Path, manifest: dict, name: str,
                 raise SystemExit(f"corrupt {name} {run_dir}: manifest row '{state}' references missing frame {rel}")
         # the canonical physical frames for this state must EXACTLY equal the row's files — no
         # missing (the `files:[]` / deleted-frames case) and no extra (a stale frame on disk).
-        state_dir = frames_root / state
+        state_dir = run_dir / frames_dir_rel(request, state)
         physical = sorted(
             f"{prefix}{f.name}" for f in state_dir.glob("frame-*.png") if not f.name.endswith(".plain.png")
         ) if state_dir.is_dir() else []
@@ -2080,9 +2095,11 @@ def _run(args: argparse.Namespace):
     if frames_final.is_dir():
         for state_name in request["states"]:
             if state_name not in target:
-                src = frames_final / state_name
+                rel = frames_dir_rel(request, state_name).removeprefix("frames/")
+                src = frames_final / rel
                 if src.is_dir():
-                    shutil.copytree(src, frames_root / state_name)
+                    (frames_root / rel).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(src, frames_root / rel)
     all_errors: list[str] = []
     all_warnings: list[str] = []
 
@@ -2107,13 +2124,14 @@ def _run(args: argparse.Namespace):
     def finalize_state(state: str, frames: list, frame_count: int, method: str,
                        plain_frames: list | None = None, orig_frames: list | None = None,
                        input_grids: list | None = None) -> None:
-        state_dir = frames_root / state
+        rel_dir = frames_dir_rel(request, state)  # e.g. frames/down/idle (taxonomy) | frames/down_idle (legacy)
+        state_dir = frames_root / rel_dir.removeprefix("frames/")
         state_dir.mkdir(parents=True, exist_ok=True)
         output_paths = []
         for index, frame in enumerate(frames):
             output = state_dir / f"frame-{index}.png"
             atomic_save_image(frame, output)
-            output_paths.append(f"frames/{state}/frame-{index}.png")  # final location (staging is swapped in)
+            output_paths.append(f"{rel_dir}/frame-{index}.png")  # final location (staging is swapped in)
         # 픽셀퍼펙트 전 원본 변형(.plain.png) — curation.json `pixel_perfect: false`
         # 굽기(compose)가 이 셀 크기 쌍둥이를 읽는다. 아틀라스 슬롯 = 셀 크기라 여긴
         # 셀 해상도로 유지한다 (compose_atlas 가 정확히 셀 크기를 요구, 기하 불변).
@@ -2122,7 +2140,7 @@ def _run(args: argparse.Namespace):
             for index, frame in enumerate(plain_frames):
                 output = state_dir / f"frame-{index}.plain.png"
                 atomic_save_image(frame, output)
-                plain_paths.append(f"frames/{state}/frame-{index}.plain.png")
+                plain_paths.append(f"{rel_dir}/frame-{index}.plain.png")
         # 원본 화질 표시용 고해상 쌍둥이 — 큐레이션뷰 pp 해제 토글이 읽는다. 셀 크기
         # .plain.png 는 확대 시 흐리므로 별도 서브폴더(orig/)에 S×셀로 굽는다. 서브폴더라
         # frame-*.png glob 소비자(inspect/measure/compose)와 충돌하지 않고 순수 표시용이다.
@@ -2133,7 +2151,7 @@ def _run(args: argparse.Namespace):
             for index, frame in enumerate(orig_frames):
                 output = orig_dir / f"frame-{index}.png"
                 atomic_save_image(frame, output)
-                orig_paths.append(f"frames/{state}/orig/frame-{index}.png")
+                orig_paths.append(f"{rel_dir}/orig/frame-{index}.png")
 
         errors, warnings, frame_records = inspect_frames(frames, chroma_key, args)
         all_errors.extend(f"{state}: {error}" for error in errors)
@@ -2158,7 +2176,7 @@ def _run(args: argparse.Namespace):
     for state in states:
         if state not in request["states"]:
             raise SystemExit(f"unknown state in request: {state}")
-        raw_path = run_dir / "raw" / f"{state}.png"
+        raw_path = run_dir / raw_rel(request, state)
         if not raw_path.is_file():
             all_errors.append(f"{state}: missing raw strip {raw_path}")
             continue

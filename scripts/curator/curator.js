@@ -1008,7 +1008,18 @@ function flashSection(el) {
 let treeProgress = new Map();
 let treeRevision = null;
 
-function seedTreeProgress() {
+async function seedTreeProgress() {
+  // 초기값도 /api/progress 로 — 경로(rawUrl/frame0Url/relRaw)는 서버 리졸버가 SSoT
+  // (택소노미/flat 레이아웃을 클라이언트가 패턴 조립하지 않는다).
+  try {
+    const res = await fetch("/api/progress");
+    const next = await res.json();
+    if (next.states) {
+      treeProgress = new Map(next.states.map((p) => [p.name, p]));
+      treeRevision = next.runRevision;
+      return;
+    }
+  } catch { /* 아래 폴백 */ }
   treeProgress = new Map(run.states.map((s) => [s.name, {
     raw: !!s.rawPresent,
     frames: s.frames.filter((f) => f.present).length,
@@ -1019,11 +1030,13 @@ function seedTreeProgress() {
 function renderPipelineTree() {
   const frameThumb = (name) => {
     const p = treeProgress.get(name);
-    return p && p.frames > 0 ? `/frames/${encodeURIComponent(name)}/frame-0.png?v=${treeRevision || 0}` : false;
+    if (!(p && p.frames > 0)) return false;
+    return `${p.frame0Url || `/frames/${encodeURIComponent(name)}/frame-0.png`}?v=${treeRevision || 0}`;
   };
   const rawThumb = (name) => {
     const p = treeProgress.get(name);
-    return p && p.raw ? `/run/raw/${encodeURIComponent(name)}.png?v=${treeRevision || 0}` : false;
+    if (!(p && p.raw)) return false;
+    return `${p.rawUrl || `/run/raw/${encodeURIComponent(name)}.png`}?v=${treeRevision || 0}`;
   };
   const frameCount = (name) => {
     const p = treeProgress.get(name);
@@ -1116,14 +1129,18 @@ function renderPipelineTree() {
   for (const st of run.states) {
     const thumb = rawThumb(st.name);
     const note = thumb && frameCount(st.name) === 0 ? t("treeRawNote") : null;
-    chipItem(rawUl, treeNode(`${st.name}.png`, note, thumb ? { raw: thumb } : false, st.name));
+    const rel = (treeProgress.get(st.name) || {}).relRaw;
+    const label = rel ? rel.replace(/^raw\//, "") : `${st.name}.png`;
+    chipItem(rawUl, treeNode(label, note, thumb ? { raw: thumb } : false, st.name));
   }
   rawLi.appendChild(rawUl);
   const framesLi = liWith(fileUl, folderNode("frames/", t("treeFramesFolder")));
   const framesUl = chipList();
   for (const st of run.states) {
     const n = frameCount(st.name);
-    chipItem(framesUl, treeNode(`${st.name}/`, n > 0 ? STR[lang].treeFrameCount(n) : t("treePending"), frameThumb(st.name), st.name));
+    const rel = (treeProgress.get(st.name) || {}).relFrames;
+    const label = rel ? rel.replace(/^frames\//, "") + "/" : `${st.name}/`;
+    chipItem(framesUl, treeNode(label, n > 0 ? STR[lang].treeFrameCount(n) : t("treePending"), frameThumb(st.name), st.name));
   }
   framesLi.appendChild(framesUl);
   if (run.anchorFiles && run.anchorFiles.length) {
@@ -1225,7 +1242,7 @@ async function pollTreeProgress() {
     const prev = JSON.stringify([...treeProgress.entries()].map(([n, p]) => [n, p.raw, p.frames]));
     const revChanged = next.runRevision !== treeRevision;
     if (sig !== prev || revChanged) {
-      treeProgress = new Map(next.states.map((p) => [p.name, { raw: p.raw, frames: p.frames }]));
+      treeProgress = new Map(next.states.map((p) => [p.name, p]));
       treeRevision = next.runRevision;
       renderPipelineTree();
       // 우측 상태 패널은 로드 시점 스냅샷이라 새 raw/프레임을 모른다 — 생성을
@@ -1847,7 +1864,7 @@ async function boot() {
   if (run.directionGroups && run.directionGroups.length) {
     anchorStates = new Set(run.directionGroups.map((g) => g.anchor).filter(Boolean));
   }
-  seedTreeProgress();
+  await seedTreeProgress();
   renderPipelineTree();
   setInterval(pollTreeProgress, 3000);
   if (run.baseUrl) renderBaseRow();

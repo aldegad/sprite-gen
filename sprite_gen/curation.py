@@ -161,15 +161,17 @@ def run_revision(run_dir: Path) -> str:
             h.update(b"\0")
     frames_root = run_dir / "frames"
     if frames_root.is_dir():
-        for state_dir in sorted(d for d in frames_root.iterdir() if d.is_dir()):
-            for frame in sorted(state_dir.glob("frame-*.png")):
-                if frame.name.endswith(".plain.png"):
-                    continue
-                try:
-                    st = frame.stat()
-                    h.update(f"{state_dir.name}/{frame.name}:{st.st_size}:{st.st_mtime_ns}".encode())
-                except OSError:
-                    pass
+        # 재귀 걷기 — 택소노미(frames/<dir>/<pose>/)와 flat 레거시 둘 다 커버.
+        # orig/ 표시 쌍둥이는 세대 정체성에 불포함 (레거시 스탬프와 동일 규칙).
+        for frame in sorted(frames_root.rglob("frame-*.png")):
+            if frame.name.endswith(".plain.png") or frame.parent.name == "orig":
+                continue
+            try:
+                st = frame.stat()
+                rel = frame.relative_to(frames_root).as_posix()
+                h.update(f"{rel}:{st.st_size}:{st.st_mtime_ns}".encode())
+            except OSError:
+                pass
     return h.hexdigest()[:16]
 
 
