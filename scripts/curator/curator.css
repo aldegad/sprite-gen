@@ -126,6 +126,27 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 .tree-node.tree-root { background: var(--panel); font-size: 13px; }
 .tree-rows { display: flex; flex-wrap: wrap; gap: 0 4px; }
 .tree-rows li { padding-right: 0; }
+/* raw 는 생성됐고 추출 전 — 중간 진행 상태 (raw 스트립 썸네일) */
+.tree-node.raw-only { border-style: dotted; }
+.tree-node.raw-only img { width: 52px; object-fit: cover; }
+
+/* 런 세대 변경 배너 — 폴링이 프레임 재생성을 감지하면 표시 */
+#reload-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 3000;
+  background: var(--accent, #0ea5e9);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
 
 .state-body { display: flex; gap: 18px; align-items: flex-start; min-width: 0; }
 .frames {

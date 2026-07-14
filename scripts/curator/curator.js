@@ -70,6 +70,8 @@ const STR = {
     treeAnchorNote: "anchor · single frame-0 crop",
     treeMirror: (d, src) => `${d} — runtime mirror of ${src} (not generated)`,
     treePending: "not generated yet",
+    treeRawNote: "raw · awaiting extract",
+    reloadBanner: "run updated — click to reload the view",
     tTreeNode: "click to scroll to this row",
     tMarginNote: "some frames exceed the safe area but fit within the margin zone — informational, not a reroll flag",
     hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "wheel = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
@@ -111,6 +113,8 @@ const STR = {
     treeAnchorNote: "앵커 · frame-0 크롭 1장",
     treeMirror: (d, src) => `${d} — ${src} 런타임 미러 (생성 없음)`,
     treePending: "미생성",
+    treeRawNote: "raw 생성됨 · 추출 전",
+    reloadBanner: "런이 갱신됐어 — 클릭해서 새로고침",
     tTreeNode: "클릭하면 해당 줄로 이동",
     tMarginNote: "안전영역은 넘었지만 안전마진 안에 있음 — 정보성 알림, 리롤 대상 아님",
     hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "휠 = 확대/축소", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
@@ -926,9 +930,16 @@ function renderState(state) {
 // base → 방향별 idle 행 → 앵커(frame-0 크롭 1장) → 각 행. 방향 계약 없는 런은
 // base → 행 2단. 미생성 노드는 점선(진행 현황판 겸용), 클릭 = 해당 줄로 스크롤.
 function treeNode(label, note, thumbUrl, targetState, extra) {
+  const rawOnly = thumbUrl && typeof thumbUrl === "object" && thumbUrl.raw;
+  if (rawOnly && !note) note = t("treeRawNote");
   const node = document.createElement("span");
-  node.className = "tree-node" + (thumbUrl === false ? " pending" : "") + (extra ? " " + extra : "");
-  if (thumbUrl) {
+  node.className = "tree-node" + (thumbUrl === false ? " pending" : "") + (rawOnly ? " raw-only" : "") + (extra ? " " + extra : "");
+  if (rawOnly) {
+    const img = document.createElement("img");
+    img.src = thumbUrl.raw;
+    img.alt = label;
+    node.appendChild(img);
+  } else if (thumbUrl) {
     const img = document.createElement("img");
     img.src = thumbUrl;
     img.alt = label;
@@ -949,12 +960,25 @@ function treeNode(label, note, thumbUrl, targetState, extra) {
   return node;
 }
 
+// 생성 진행 스냅샷 (트리 실시간 갱신): stateName -> {raw, frames}. 초기값은 /api/run,
+// 이후 /api/progress 3초 폴링이 갱신한다.
+let treeProgress = new Map();
+let treeRevision = null;
+
+function seedTreeProgress() {
+  treeProgress = new Map(run.states.map((s) => [s.name, {
+    raw: !!s.rawPresent,
+    frames: s.frames.filter((f) => f.present).length,
+  }]));
+  treeRevision = run.runRevision;
+}
+
 function renderPipelineTree() {
-  const byName = new Map(run.states.map((s) => [s.name, s]));
   const frame0 = (name) => {
-    const st = byName.get(name);
-    const f = st && st.frames.find((fr) => fr.index === 0 && fr.present);
-    return f ? frameUrl(name, f) : false; // false = 미생성 표시
+    const p = treeProgress.get(name);
+    if (p && p.frames > 0) return `/frames/${encodeURIComponent(name)}/frame-0.png?v=${treeRevision || 0}`;
+    if (p && p.raw) return { raw: `/run/raw/${encodeURIComponent(name)}.png?v=${treeRevision || 0}` };
+    return false; // false = 미생성 표시
   };
   const wrap = document.createElement("section");
   wrap.className = "state pipeline-tree";
@@ -1005,7 +1029,41 @@ function renderPipelineTree() {
     root.appendChild(rowChips(run.states.map((s) => s.name)));
   }
   wrap.appendChild(root);
-  document.getElementById("states").appendChild(wrap);
+  const existing = document.querySelector(".pipeline-tree");
+  if (existing) existing.replaceWith(wrap);
+  else document.getElementById("states").appendChild(wrap);
+}
+
+// 3초 폴링: 생성/추출 진행을 트리에 실시간 반영. 프레임 세대(runRevision)가 바뀌면
+// 아래 상태 줄들은 구세대라 새로고침 배너를 띄운다 (편집 중 강제 리로드는 하지 않는다).
+async function pollTreeProgress() {
+  try {
+    const res = await fetch("/api/progress");
+    if (!res.ok) return;
+    const next = await res.json();
+    if (!next.states) return;
+    const sig = JSON.stringify(next.states.map((p) => [p.name, p.raw, p.frames]));
+    const prev = JSON.stringify([...treeProgress.entries()].map(([n, p]) => [n, p.raw, p.frames]));
+    const revChanged = next.runRevision !== treeRevision;
+    if (sig !== prev || revChanged) {
+      treeProgress = new Map(next.states.map((p) => [p.name, { raw: p.raw, frames: p.frames }]));
+      treeRevision = next.runRevision;
+      renderPipelineTree();
+    }
+    if (next.runRevision !== run.runRevision) showReloadBanner();
+  } catch {
+    /* 서버 일시 중단은 조용히 재시도 */
+  }
+}
+
+function showReloadBanner() {
+  if (document.getElementById("reload-banner")) return;
+  const banner = document.createElement("button");
+  banner.id = "reload-banner";
+  banner.type = "button";
+  banner.textContent = t("reloadBanner");
+  banner.addEventListener("click", () => location.reload());
+  document.body.appendChild(banner);
 }
 
 // 최상단 base 참조 줄 — 아이덴티티 truth 를 생성 결과와 나란히 비교하기 위한
@@ -1577,7 +1635,9 @@ async function boot() {
   if (run.directionGroups && run.directionGroups.length) {
     anchorStates = new Set(run.directionGroups.map((g) => g.anchor).filter(Boolean));
   }
+  seedTreeProgress();
   renderPipelineTree();
+  setInterval(pollTreeProgress, 3000);
   if (run.baseUrl) renderBaseRow();
   // 방향 계약 런: 방향별 그룹(앵커 우선) + 미러 방향(생성 생략) 스트립으로 렌더.
   // 계약 없는 런은 기존 flat 순서 그대로.
