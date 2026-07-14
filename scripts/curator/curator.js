@@ -41,8 +41,10 @@ const STR = {
     ppApply: "Pixel-perfect (all)", baseNote: "identity reference — not baked",
     ppState: "Pixel-perfect",
     tPpState: "toggle pixel-perfect for THIS row only — what it displays and what compose bakes",
-    pxGrid: "Pixel grid", refsLabel: "generated from", ref_anchor: "direction anchor", ref_basis: "basis row", ref_guide: "layout guide", tPxGrid: "overlay the logical pixel grid the pixel-perfect stage snapped to (display only)",
-    tPpApply: "toggle pixel-perfect for ALL rows at once (each row header has its own toggle)",
+    pxGrid: "Pixel grid", pxGridAll: "Pixel grid (all)",
+    tGridState: "overlay the snapped logical pixel grid on THIS row (display only)",
+    refsLabel: "generated from", ref_anchor: "direction anchor", ref_basis: "basis row", ref_guide: "layout guide", tPxGrid: "toggle the pixel-grid overlay for ALL rows at once (display only; each row has its own checkbox)",
+    tPpApply: "toggle pixel-perfect for ALL rows at once (each row has its own checkbox)",
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
@@ -64,8 +66,10 @@ const STR = {
     ppApply: "픽셀퍼펙트 전체", baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
     ppState: "픽셀퍼펙트",
     tPpState: "이 줄만 픽셀퍼펙트 켜기/끄기 — 표시와 굽기가 같이 바뀐다",
-    pxGrid: "픽셀 격자", refsLabel: "생성 재료", ref_anchor: "방향 앵커", ref_basis: "basis row", ref_guide: "레이아웃 가이드", tPxGrid: "픽셀퍼펙트가 실제로 스냅한 논리 픽셀 격자 오버레이 (표시 전용)",
-    tPpApply: "모든 줄의 픽셀퍼펙트를 한번에 켜기/끄기 (줄별 토글은 각 줄 헤더에)",
+    pxGrid: "픽셀 격자", pxGridAll: "픽셀 격자 전체",
+    tGridState: "이 줄에만 스냅된 논리 픽셀 격자 오버레이 (표시 전용)",
+    refsLabel: "생성 재료", ref_anchor: "방향 앵커", ref_basis: "basis row", ref_guide: "레이아웃 가이드", tPxGrid: "모든 줄의 격자 오버레이를 한번에 켜기/끄기 (표시 전용; 줄별 체크박스는 각 줄에)",
+    tPpApply: "모든 줄의 픽셀퍼펙트를 한번에 켜기/끄기 (줄별 체크박스는 각 줄에)",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
@@ -101,6 +105,12 @@ let ppAvailable = false;       // any state has a plain (pre-pixel-perfect) twin
 let ppTwinStates = new Set();  // states that actually saved a twin
 let ppStates = {};             // stateName -> bool (true = pixel-perfect variant)
 
+// --- pixel-grid overlay (display only, never persisted) ---------------------
+// Same per-state + toggle-all shape as pixel-perfect: each grid-capable row has
+// its own checkbox, the header checkbox sets all rows at once.
+let gridCapableStates = new Set(); // states with a known/measured snap grid
+let gridStates = {};               // stateName -> bool (overlay shown)
+
 function ppOn(stateName) {
   return ppStates[stateName] !== false;
 }
@@ -114,8 +124,9 @@ function frameUrl(stateName, frame) {
 // 예전엔 셀 픽셀마다(scale 무시) 그어서, logical_height < cell 인 런에서 실제 스냅
 // 격자보다 촘촘한 거짓 격자를 보여줬다. 픽셀퍼펙트가 아닌 런은 격자 자체가 없다.
 function sizePxGrids() {
-  // 줄 단위 격자: 계약 런은 전 줄 동일 scale, 계약 없는 런은 줄별 자동 측정값
-  // (state.pixelScale). 측정 실패한 줄은 오버레이를 숨긴다 — 가짜 격자 금지.
+  // 줄 단위 격자: 그 줄의 격자 체크박스가 켜져 있을 때만 그린다. 계약 런은 전 줄
+  // 동일 scale, 계약 없는 런은 줄별 자동 측정값(state.pixelScale). 측정 실패한
+  // 줄은 오버레이를 숨긴다 — 가짜 격자 금지.
   // 픽셀퍼펙트를 끈 줄(plain 표시)도 숨긴다 — plain 은 스냅된 격자가 아니다.
   document.querySelectorAll(".card").forEach((card) => {
     const overlay = card.querySelector(".pxgrid");
@@ -123,9 +134,10 @@ function sizePxGrids() {
     const stage = card.querySelector(".stage");
     const st = run.states.find((s) => s.name === card.dataset.state);
     const plainShown = ppTwinStates.has(card.dataset.state) && !ppOn(card.dataset.state);
-    const step = plainShown ? null : (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null;
+    const wanted = !!gridStates[card.dataset.state] && !plainShown;
+    const step = wanted ? (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null : null;
     if (!step || !stage) { overlay.style.display = "none"; return; }
-    overlay.style.display = "";
+    overlay.style.display = "block";
     const ds = (stage.clientWidth / run.cell.width) * step;
     overlay.style.backgroundSize = `${ds}px ${ds}px`;
   });
@@ -141,21 +153,28 @@ function refreshVariantImages() {
   sizePxGrids();
 }
 
-// per-state toggle buttons + the header toggle-all checkbox reflect ppStates
+// aggregate checkbox state: checked = all on, unchecked = all off, else indeterminate
+function syncAggregate(checkbox, names, isOn) {
+  if (!checkbox || !names.size) return;
+  const vals = [...names].map(isOn);
+  const allOn = vals.every(Boolean);
+  checkbox.checked = allOn;
+  checkbox.indeterminate = !allOn && !vals.every((v) => !v);
+}
+
+// per-state row checkboxes + the header toggle-all checkboxes reflect ppStates/gridStates
 function syncPpControls() {
-  document.querySelectorAll(".pp-state-btn").forEach((btn) => {
-    const on = ppOn(btn.dataset.state);
-    btn.classList.toggle("active", on);
-    btn.textContent = `${t("ppState")} ${on ? "◼" : "◻"}`;
+  document.querySelectorAll(".pp-state-check").forEach((el) => {
+    el.checked = ppOn(el.dataset.state);
   });
-  const ppCheck = document.getElementById("pp-apply");
-  if (ppCheck && ppAvailable) {
-    const vals = [...ppTwinStates].map((n) => ppOn(n));
-    const allOn = vals.every(Boolean);
-    const allOff = vals.every((v) => !v);
-    ppCheck.checked = allOn;
-    ppCheck.indeterminate = !allOn && !allOff;
-  }
+  syncAggregate(document.getElementById("pp-apply"), ppTwinStates, ppOn);
+}
+
+function syncGridControls() {
+  document.querySelectorAll(".grid-state-check").forEach((el) => {
+    el.checked = !!gridStates[el.dataset.state];
+  });
+  syncAggregate(document.getElementById("pxgrid-check"), gridCapableStates, (n) => !!gridStates[n]);
 }
 
 const statusEl = document.getElementById("status");
@@ -625,37 +644,59 @@ function renderState(state) {
     `<span class="meta">${state.requestFrames} ${t("frames")} · ${state.fps}fps · ${state.loop ? t("loop") : t("nonLoop")} · ${t("cellPx")} ${run.cell.width}x${run.cell.height}px</span>` +
     (state.action ? `<span class="action">${escapeHtml(state.action)}</span>` : "") +
     (state.extractOk ? "" : `<span class="state-warn">${t("extractFail")}</span>`);
-  // 줄별 픽셀퍼펙트 토글 — 쌍둥이(plain/orig)가 실재하는 줄에만 노출
-  if (ppTwinStates.has(state.name)) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "ghost pp-state-btn";
-    btn.dataset.state = state.name;
-    btn.title = t("tPpState");
-    btn.addEventListener("click", () => {
-      ppStates[state.name] = !ppOn(state.name);
-      syncPpControls();
-      refreshVariantImages();
-      scheduleSave();
-    });
-    head.appendChild(btn);
-  }
   wrap.appendChild(head);
 
-  // 이 줄을 "무엇으로 생성했는가" — run dir 실재 파일 기준 ref 체인 (앵커/basis/가이드)
-  if (state.refs && state.refs.length) {
+  // 이 줄을 "무엇으로 생성했는가" — run dir 실재 파일 기준 ref 체인 (앵커/basis/가이드).
+  // 같은 줄 우측 = 줄별 표시/굽기 컨트롤(픽셀 격자 · 픽셀퍼펙트 체크박스) — 이미지 바로 위.
+  const hasRefs = state.refs && state.refs.length;
+  const showGridToggle = gridCapableStates.has(state.name);
+  const showPpToggle = ppTwinStates.has(state.name);
+  if (hasRefs || showGridToggle || showPpToggle) {
     const refs = document.createElement("div");
     refs.className = "state-refs";
-    refs.innerHTML =
-      `<span class="refs-label">${t("refsLabel")}</span>` +
-      state.refs
-        .map(
-          (r) =>
-            `<a class="ref-chip" href="${escapeHtml(r.url)}" target="_blank" title="${escapeHtml(r.name)}">` +
-            `<img src="${escapeHtml(r.url)}" alt="${escapeHtml(r.role)}" loading="lazy" />` +
-            `<span>${t("ref_" + r.role)}</span></a>`
-        )
-        .join("");
+    refs.innerHTML = hasRefs
+      ? `<span class="refs-label">${t("refsLabel")}</span>` +
+        state.refs
+          .map(
+            (r) =>
+              `<a class="ref-chip" href="${escapeHtml(r.url)}" target="_blank" title="${escapeHtml(r.name)}">` +
+              `<img src="${escapeHtml(r.url)}" alt="${escapeHtml(r.role)}" loading="lazy" />` +
+              `<span>${t("ref_" + r.role)}</span></a>`
+          )
+          .join("")
+      : "";
+    const controls = document.createElement("span");
+    controls.className = "row-controls";
+    const rowToggle = (cls, label, title, checked, onChange) => {
+      const el = document.createElement("label");
+      el.className = "pp-apply row-toggle";
+      el.title = title;
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.className = cls;
+      input.dataset.state = state.name;
+      input.checked = checked;
+      input.addEventListener("change", onChange);
+      el.appendChild(input);
+      el.appendChild(Object.assign(document.createElement("span"), { textContent: label }));
+      return el;
+    };
+    if (showGridToggle) {
+      controls.appendChild(rowToggle("grid-state-check", t("pxGrid"), t("tGridState"), !!gridStates[state.name], (ev) => {
+        gridStates[state.name] = ev.target.checked;
+        syncGridControls();
+        sizePxGrids();
+      }));
+    }
+    if (showPpToggle) {
+      controls.appendChild(rowToggle("pp-state-check", t("ppState"), t("tPpState"), ppOn(state.name), (ev) => {
+        ppStates[state.name] = ev.target.checked;
+        syncPpControls();
+        refreshVariantImages();
+        scheduleSave();
+      }));
+    }
+    refs.appendChild(controls);
     wrap.appendChild(refs);
   }
 
@@ -991,7 +1032,7 @@ function applyStaticLang() {
   const ppLabel = document.getElementById("pp-label");
   if (ppLabel) ppLabel.textContent = t("ppApply");
   const pxLabel = document.getElementById("pxgrid-label");
-  if (pxLabel) pxLabel.textContent = t("pxGrid") + (run.pixelPerfect && run.pixelPerfect.label ? " \u00b7 " + run.pixelPerfect.label : "");
+  if (pxLabel) pxLabel.textContent = t("pxGridAll") + (run.pixelPerfect && run.pixelPerfect.label ? " \u00b7 " + run.pixelPerfect.label : "");
   const pxWrap = document.getElementById("pxgrid-wrap");
   if (pxWrap) pxWrap.title = t("tPxGrid");
   const ppWrap = document.getElementById("pp-wrap");
@@ -1131,6 +1172,10 @@ async function boot() {
     const c = run.curation && run.curation.states && run.curation.states[s.name];
     ppStates[s.name] = c && typeof c.pixel_perfect === "boolean" ? c.pixel_perfect : ppDefault;
   }
+  // 격자 오버레이 가능 줄(계약 scale 또는 줄별 측정 피치) — 표시 전용, 저장 안 함, 기본 off
+  const contractScale = run.pixelPerfect && run.pixelPerfect.scale;
+  gridCapableStates = new Set(run.states.filter((s) => s.pixelScale || contractScale).map((s) => s.name));
+  gridStates = {};
   applyStaticLang();
   document.getElementById("character").textContent = `${run.characterId} · ${run.cell.width}×${run.cell.height}`;
   if (run.iso) gridToggle.hidden = false;
@@ -1148,19 +1193,22 @@ async function boot() {
       scheduleSave();
     });
   }
-  // 픽셀퍼펙트 격자 체크박스 — 표시 전용 오버레이 (굽기와 무관).
-  // 픽셀퍼펙트가 아닌 런에는 스냅 격자가 없다 → 토글을 감춘다 (가짜 격자를 보여주지 않는다).
+  // 픽셀 격자 전체 토글 — 표시 전용 오버레이 (굽기와 무관), 줄별 체크박스와 같은 truth.
+  // 격자를 알 수 있는 줄이 하나도 없으면 감춘다 (가짜 격자를 보여주지 않는다).
   const pxWrap = document.getElementById("pxgrid-wrap");
   const pxCheck = document.getElementById("pxgrid-check");
-  pxWrap.hidden = !run.pixelPerfect;
+  pxWrap.hidden = gridCapableStates.size === 0;
   pxCheck.addEventListener("change", () => {
-    document.body.classList.toggle("show-pxgrid", pxCheck.checked);
-    if (pxCheck.checked) sizePxGrids();
+    const on = pxCheck.checked;
+    for (const n of gridCapableStates) gridStates[n] = on;
+    syncGridControls();
+    sizePxGrids();
   });
   seedEntries();
   if (run.baseUrl) renderBaseRow();
   for (const state of run.states) renderState(state);
   syncPpControls();
+  syncGridControls();
   refreshVariantImages();
   setStatus(run.curation && Object.keys(run.curation.states || {}).length ? t("loaded") : t("ready"));
 }
