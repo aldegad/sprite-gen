@@ -120,6 +120,8 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 14px 16px 18px;
+  /* 클릭 스크롤 도착 시 sticky 상단바가 타이틀을 가리지 않게 */
+  scroll-margin-top: calc(var(--topbar-h, 49px) + 14px);
 }
 .state-head {
   display: flex;
@@ -263,13 +265,16 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
   .tree-block.pipeline svg.branch .dash { animation: none; }
 }
 
-/* 트리에서 이동해 온 대상 패널 하이라이트 — ~1.8초 유지 후 스르륵 페이드아웃 */
+/* 트리에서 이동해 온 대상 패널 하이라이트 — 도착 후 파랗게 따닥 두 번 깜빡이고 사라짐 */
 @keyframes target-flash {
-  0% { box-shadow: 0 0 0 2px var(--accent), 0 8px 28px rgba(37, 99, 235, 0.16); }
-  60% { box-shadow: 0 0 0 2px var(--accent), 0 8px 28px rgba(37, 99, 235, 0.16); }
-  100% { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0), 0 8px 28px rgba(37, 99, 235, 0); }
+  0% { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0); }
+  10% { box-shadow: 0 0 0 2px var(--accent); }
+  26% { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0); }
+  42% { box-shadow: 0 0 0 2px var(--accent); }
+  70% { box-shadow: 0 0 0 2px var(--accent); }
+  100% { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0); }
 }
-.state.flash-target { animation: target-flash 3s ease 1; }
+.state.flash-target { animation: target-flash 1.1s ease 1; }
 .tree-node.folder .tn-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
 /* 런 경로: 한 줄 + 앞쪽 말줄임 — 뒤(폴더명)가 중요하므로 끝을 보여주고 앞을 …로.
    direction:rtl 트릭; 전체 경로는 hover 툴팁(title). */

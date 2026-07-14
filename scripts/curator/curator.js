@@ -979,12 +979,21 @@ function treeNode(label, note, thumbUrl, targetState, extra) {
   return node;
 }
 
-// 이동한 대상 패널을 ~3초 하이라이트 후 스르륵 페이드아웃 — "지금 여기"를 보여준다
+// 이동한 대상 패널 하이라이트: 스크롤이 끝난 뒤 따닥 두 번 깜빡이고 사라진다.
+// scrollend 지원 브라우저는 도착 즉시, 아니면 짧은 타임아웃 폴백.
 function flashSection(el) {
-  el.classList.remove("flash-target");
-  void el.offsetWidth; // 연속 클릭 시 애니메이션 재시작
-  el.classList.add("flash-target");
-  el.addEventListener("animationend", () => el.classList.remove("flash-target"), { once: true });
+  let fired = false;
+  const fire = () => {
+    if (fired) return;
+    fired = true;
+    window.removeEventListener("scrollend", fire);
+    el.classList.remove("flash-target");
+    void el.offsetWidth; // 연속 클릭 시 애니메이션 재시작
+    el.classList.add("flash-target");
+    el.addEventListener("animationend", () => el.classList.remove("flash-target"), { once: true });
+  };
+  window.addEventListener("scrollend", fire, { once: true });
+  setTimeout(fire, 750); // 스크롤이 필요 없거나 scrollend 미지원일 때
 }
 
 // 생성 진행 스냅샷 (트리 실시간 갱신): stateName -> {raw, frames}. 초기값은 /api/run,
