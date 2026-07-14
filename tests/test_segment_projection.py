@@ -67,6 +67,11 @@ def test_fused_extraction_matches_golden_manifest(fused_run_dir: Path) -> None:
 
     manifest = json.loads((fused_run_dir / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))
     manifest.pop("run_dir")
+    # 엔진 소스 해시/기록 플래그는 휘발성 스탬프 — 골든 비교 대상이 아니다
+    manifest.pop("engine_revision", None)
+    manifest.pop("extract_args", None)
+    for _row in manifest.get("rows", []):
+        _row.pop("engine_revision", None)
     assert manifest == EXPECTED_FUSED
     assert "[segment] kick: projection split at columns" in result.stderr
 
@@ -96,6 +101,11 @@ def test_cli_flag_enables_projection_without_request_opt_in(fused_run_dir: Path)
     assert result.returncode == 0, result.stdout + result.stderr
     manifest = json.loads((fused_run_dir / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))
     manifest.pop("run_dir")
+    # 엔진 소스 해시/기록 플래그는 휘발성 스탬프 — 골든 비교 대상이 아니다
+    manifest.pop("engine_revision", None)
+    manifest.pop("extract_args", None)
+    for _row in manifest.get("rows", []):
+        _row.pop("engine_revision", None)
     assert manifest == EXPECTED_FUSED
 
 
@@ -127,6 +137,11 @@ def test_projection_is_bit_identical_on_separated_golden_run(tmp_path: Path) -> 
     assert result.returncode == 0, result.stdout + result.stderr
     manifest = json.loads((run_dir / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))
     manifest.pop("run_dir")
+    # 엔진 소스 해시/기록 플래그는 휘발성 스탬프 — 골든 비교 대상이 아니다
+    manifest.pop("engine_revision", None)
+    manifest.pop("extract_args", None)
+    for _row in manifest.get("rows", []):
+        _row.pop("engine_revision", None)
     assert manifest == EXPECTED_SEPARATED
 
 
