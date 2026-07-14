@@ -141,11 +141,33 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 
 /* 생성 구조 트리 — base → idle 행 → 앵커 → rows 파이프라인 개요 */
 .pipeline-tree .tree { padding: 4px 2px 2px; }
-.pipeline-tree .tree ul { list-style: none; margin: 4px 0 0; padding-left: 26px; border-left: 1px solid var(--line); }
+.pipeline-tree .tree ul { list-style: none; margin: 2px 0 0; padding-left: 26px; }
 .pipeline-tree .tree > ul { margin-left: 13px; }
 .pipeline-tree .tree li { position: relative; padding: 5px 0 3px 14px; }
-.pipeline-tree .tree li::before { content: ""; position: absolute; left: 0; top: 18px; width: 12px; height: 1px; background: var(--line); }
+/* ├ 세로선: li 마다 자기 구간을 긋고, 마지막 자식은 tick 높이까지만 (└ 엘보) —
+   컨테이너 전체에 긋던 방식은 마지막 가지 아래로 선이 삐져나갔다 */
+.pipeline-tree .tree li::before {
+  content: "";
+  position: absolute;
+  left: -13px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+.pipeline-tree .tree li:last-child::before { bottom: auto; height: 19px; }
+/* ─ 가로 tick: 세로선에서 노드 왼쪽 모서리까지 정확히 잇는다 */
+.pipeline-tree .tree li::after {
+  content: "";
+  position: absolute;
+  left: -13px;
+  top: 18px;
+  width: 27px;
+  height: 1px;
+  background: var(--line);
+}
 .tree-node {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -187,24 +209,15 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 .tree-block > .tree-node.folder .tn-label { font-family: inherit; font-size: 12.5px; letter-spacing: 0.02em; text-transform: uppercase; }
 .tree-block > ul { margin-top: 2px; }
 
-/* 파이프라인 블록 — 연결선이 파이프처럼 아래로 흐른다 (대시가 흘러내리는 애니메이션) */
-.tree-block.pipeline ul {
-  border-left: none;
-  position: relative;
-}
-.tree-block.pipeline ul::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  pointer-events: none;
+/* 파이프라인 블록 — 연결선이 파이프처럼 아래로 흐른다 (대시가 흘러내리는 애니메이션).
+   세로 구간(li::before)마다 대시가 흐르고, 가로 tick(li::after)은 액센트,
+   각 노드 왼쪽에 화살촉이 붙어 흐름 방향이 읽힌다. */
+.tree-block.pipeline li::before {
   background:
     repeating-linear-gradient(to bottom,
       rgba(37, 99, 235, 0) 0 11px,
       rgba(37, 99, 235, 0.75) 11px 16px),
-    linear-gradient(var(--line), var(--line));
+    linear-gradient(rgba(37, 99, 235, 0.28), rgba(37, 99, 235, 0.28));
   background-size: 1px 27px, 1px 100%;
   background-repeat: repeat-y, no-repeat;
   animation: pipe-flow 1.15s linear infinite;
@@ -212,20 +225,18 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 @keyframes pipe-flow {
   to { background-position: 0 27px, 0 0; }
 }
-/* 가로 tick 은 액센트 + 노드를 가리키는 화살촉 */
-.tree-block.pipeline .tree li::before,
-.tree-block.pipeline li::before { background: rgba(37, 99, 235, 0.4); }
-.tree-block.pipeline li::after {
+.tree-block.pipeline li::after { background: rgba(37, 99, 235, 0.4); }
+.tree-block.pipeline li > .tree-node:first-of-type::before {
   content: "";
   position: absolute;
-  left: 12px;
-  top: 15px;
-  border: 3px solid transparent;
-  border-left: 4px solid rgba(37, 99, 235, 0.55);
+  left: -6px;
+  top: 10px;
+  border: 3.5px solid transparent;
+  border-right: none;
+  border-left: 4.5px solid rgba(37, 99, 235, 0.6);
 }
-#sidebar .tree-block.pipeline li::after { left: 7px; }
 @media (prefers-reduced-motion: reduce) {
-  .tree-block.pipeline ul::before { animation: none; }
+  .tree-block.pipeline li::before { animation: none; }
 }
 
 /* 트리에서 이동해 온 대상 패널 하이라이트 — ~1.8초 유지 후 스르륵 페이드아웃 */
@@ -257,7 +268,8 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 #sidebar .pipeline-tree .state-head .name { font-size: 13px; }
 #sidebar .pipeline-tree .tree ul { padding-left: 14px; }
 #sidebar .pipeline-tree .tree li { padding-left: 8px; }
-#sidebar .pipeline-tree .tree li::before { width: 7px; }
+#sidebar .pipeline-tree .tree li::before { left: -7px; }
+#sidebar .pipeline-tree .tree li::after { left: -7px; width: 15px; }
 #sidebar .tree-rows { flex-direction: column; gap: 2px; }
 #sidebar .tree-node { font-size: 12px; padding: 2px 7px; max-width: 100%; }
 #sidebar .tree-node .tn-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
