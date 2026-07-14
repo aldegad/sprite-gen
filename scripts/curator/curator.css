@@ -269,10 +269,10 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 @keyframes target-flash {
   0%, 24% { box-shadow: 0 0 0 2px var(--accent); }
   25%, 44% { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0); }
-  45%, 82% { box-shadow: 0 0 0 2px var(--accent); }
-  100% { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0); }
+  45%, 60% { box-shadow: 0 0 0 2px var(--accent); }
+  72%, 100% { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0); }
 }
-.state.flash-target { animation: target-flash 0.48s linear 1; }
+.state.flash-target { animation: target-flash 0.44s linear 1; }
 .tree-node.folder .tn-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
 /* 런 경로: 한 줄 + 앞쪽 말줄임 — 뒤(폴더명)가 중요하므로 끝을 보여주고 앞을 …로.
    direction:rtl 트릭; 전체 경로는 hover 툴팁(title). */
