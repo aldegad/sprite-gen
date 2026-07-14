@@ -78,6 +78,8 @@ const STR = {
     tArchiveChip: "click to open — drop a card here to archive it",
     tArchiveBtn: "archive (remove even from the candidate pool)",
     tScaleScrub: "sprite scale — click arrows to step, drag the magnifier left/right",
+    penTool: "pen", eraserTool: "eraser", undoEdit: "undo", clearEdits: "clear edits",
+    editNote: "pixel editing — shown untransformed (source coordinates)",
     archiveHint: "drag a card out to restore it into the sequence or pool",
     missingRawWait: "generated · awaiting extract",
     treeRawFolder: "generated strip originals",
@@ -136,6 +138,8 @@ const STR = {
     tArchiveChip: "클릭 = 열기 · 카드를 여기로 끌어오면 보관",
     tArchiveBtn: "보관함으로 (후보 풀에서도 제외)",
     tScaleScrub: "스프라이트 크기 — 화살표 클릭 = 단계 조절, 돋보기 좌우 드래그 = 연속 조절",
+    penTool: "연필", eraserTool: "지우개", undoEdit: "되돌리기", clearEdits: "편집 비우기",
+    editNote: "픽셀 편집 중 — 변형 없이 원본 좌표로 표시",
     archiveHint: "카드를 끌어내 시퀀스/후보로 복구",
     missingRawWait: "생성됨 · 추출 대기",
     treeRawFolder: "생성 스트립 원본",
@@ -178,6 +182,16 @@ let gridCapableStates = new Set(); // states with a known/measured snap grid
 let gridStates = {};               // stateName -> bool (overlay shown)
 let anchorStates = new Set();      // direction-anchor states (directionGroups runs)
 
+// --- 픽셀 편집 (사이드카 pixels — 원본 PNG 불변) -----------------------------
+let pixelEdit = null; // 모달 편집 세션: {state, idx, tool: 'pen'|'eraser', color, journal: []}
+
+function getPixelOps(stateName, idx) {
+  const e = entries[stateName];
+  if (!e || !e.pixels) return null;
+  const ops = e.pixels[idx];
+  return ops && Object.keys(ops).length ? ops : null;
+}
+
 function ppOn(stateName) {
   return ppStates[stateName] !== false;
 }
@@ -201,7 +215,7 @@ function isIdentityTransform(t) {
 // 변형을 셀 캔버스에 NEAREST 로 그리고, 논리 격자(snap px/논리픽셀)로 재양자화한다.
 // curation.apply_transform 의 snap_scale 경로를 캔버스로 미러링 — 드래그/회전 중에도
 // 스프라이트가 셀 고정 격자에 실시간으로 스냅되어 보인다 (격자는 그대로, 그림이 스냅).
-function drawFrameInto(ctx, image, t, cw, ch, snap) {
+function drawFrameInto(ctx, image, t, cw, ch, snap, edits) {
   if (snap) ctx.imageSmoothingEnabled = false;
   const m = matrixOf(t);
   ctx.save();
@@ -222,6 +236,20 @@ function drawFrameInto(ctx, image, t, cw, ch, snap) {
     ctx.clearRect(0, 0, cw, ch);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(tmp, 0, 0, lw, lh, 0, 0, lw * snap, lh * snap);
+  }
+  // 사이드카 픽셀 편집 합성 — 굽기(apply_pixel_edits)와 동일 좌표 공간(셀 픽셀).
+  // 변형 이전 공간의 편집이므로, 변형이 있는 프레임은 편집 모드에서 identity 로 표시된다.
+  if (edits) {
+    for (const [key, val] of Object.entries(edits)) {
+      const [x, y] = key.split(",").map(Number);
+      if (!(x >= 0 && x < cw && y >= 0 && y < ch)) continue;
+      if (val) {
+        ctx.fillStyle = val;
+        ctx.fillRect(x, y, 1, 1);
+      } else {
+        ctx.clearRect(x, y, 1, 1);
+      }
+    }
   }
 }
 
@@ -422,6 +450,12 @@ function buildPayload() {
     };
     // 보관함 = 스키마의 deleted (UI 행/굽기 기본값에서 제외 — state_plan SSoT)
     if (entry.archived && entry.archived.length) states[name].deleted = entry.archived.slice();
+    // 픽셀 편집 사이드카 (빈 프레임 엔트리는 정리)
+    const px = {};
+    for (const [i, ops] of Object.entries(entry.pixels || {})) {
+      if (ops && Object.keys(ops).length) px[i] = ops;
+    }
+    if (Object.keys(px).length) states[name].pixels = px;
     // per-state pixel-perfect (the row's own toggle) — only for rows with a twin
     if (ppTwinStates.has(name)) states[name].pixel_perfect = ppOn(name);
   }
@@ -474,7 +508,10 @@ function applyCardTransform(stage, stateName, idx) {
   const m = matrixOf(t);
   const snap = snapScaleFor(stateName);
   const canvas = stage.querySelector(".snap-canvas");
-  if (snap && canvas && !isIdentityTransform(t)) {
+  const edits = getPixelOps(stateName, idx);
+  const editingThis = pixelEdit && pixelEdit.state === stateName && pixelEdit.idx === idx
+    && stage.closest("#zoom-modal");
+  if (canvas && (edits || editingThis || (snap && !isIdentityTransform(t)))) {
     // 픽셀퍼펙트 줄의 변형은 CSS(서브픽셀, 부드럽게)가 아니라 격자 재양자화로
     // 미리 본다 — 굽기(snap_scale bake)와 같은 결과. 격자 오버레이는 셀 고정.
     el.style.transform = "";
@@ -485,7 +522,9 @@ function applyCardTransform(stage, stateName, idx) {
       canvas.height = run.cell.height;
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawFrameInto(ctx, el, getTransform(stateName, idx), canvas.width, canvas.height, snap);
+      // 편집 세션 중에는 변형 없이 원본 좌표로 (편집 = 변형 이전 공간)
+      const tt = editingThis ? IDENTITY() : getTransform(stateName, idx);
+      drawFrameInto(ctx, el, tt, canvas.width, canvas.height, snap, getPixelOps(stateName, idx));
     };
     if (el.complete && el.naturalWidth) render();
     else el.addEventListener("load", render, { once: true });
@@ -1626,7 +1665,7 @@ function startPreview(state) {
     if (image && image.complete && image.naturalWidth) {
       const tr = getTransform(state.name, idx);
       // 픽셀퍼펙트 줄은 카드와 동일하게 격자 재양자화로 그린다 (프리뷰 = 굽기)
-      drawFrameInto(ctx, image, tr, cw, ch, snapScaleFor(state.name));
+      drawFrameInto(ctx, image, tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
     }
     posEl.textContent = `${pv.cursor + 1}/${play.length} · #${idx}`;
   };
@@ -1692,6 +1731,7 @@ function startPreview(state) {
 let zoomView = null; // { stateName, idx, width }
 
 function closeZoom() {
+  pixelEdit = null;
   const modal = document.getElementById("zoom-modal");
   if (modal) modal.remove();
   zoomView = null;
@@ -1769,6 +1809,145 @@ function openZoom(stateName, idx, keepWidth) {
   card.querySelector(".reset-btn").addEventListener("click", () => resetTransform(stateName, idx));
   card.querySelector(".flip-btn").addEventListener("click", () => toggleFlipX(stateName, idx));
   stage.appendChild(makeScaleScrub(stateName, idx));
+
+  // ── 픽셀 편집 툴바: 연필/지우개 + 프레임 팔레트 + 컬러피커 + 되돌리기/비우기 ──
+  const toolbar = document.createElement("div");
+  toolbar.className = "edit-toolbar";
+  toolbar.innerHTML =
+    `<button type="button" class="ghost et-pen">` +
+    '<svg viewBox="0 0 16 16" width="11" height="11"><path d="m2 14 .8-3.2L11 2.6l2.4 2.4L5.2 13.2 2 14z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+    `<span>${t("penTool")}</span></button>` +
+    `<button type="button" class="ghost et-eraser">` +
+    '<svg viewBox="0 0 16 16" width="11" height="11"><path d="M9.5 2.5 2.8 9.2a1 1 0 0 0 0 1.4l2.6 2.6h4.1l4-4a1 1 0 0 0 0-1.4L9.5 2.5zM5.5 13.2 9.9 8.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+    `<span>${t("eraserTool")}</span></button>` +
+    `<span class="et-swatches"></span>` +
+    `<input type="color" class="et-color" value="#1f2430" title="color" />` +
+    `<button type="button" class="ghost et-undo">${t("undoEdit")}</button>` +
+    `<button type="button" class="ghost et-clear">${t("clearEdits")}</button>` +
+    `<span class="et-note muted" hidden>${t("editNote")}</span>`;
+  card.insertBefore(toolbar, stage);
+  const penBtn = toolbar.querySelector(".et-pen");
+  const eraserBtn = toolbar.querySelector(".et-eraser");
+  const colorInput = toolbar.querySelector(".et-color");
+  const swatchBox = toolbar.querySelector(".et-swatches");
+  const editNote = toolbar.querySelector(".et-note");
+  const syncToolbar = () => {
+    penBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "pen");
+    eraserBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "eraser");
+    stage.classList.toggle("pixel-editing", !!pixelEdit);
+    editNote.hidden = !pixelEdit;
+  };
+  const setTool = (tool) => {
+    if (pixelEdit && pixelEdit.tool === tool) pixelEdit = null; // 같은 툴 재클릭 = 끔
+    else pixelEdit = { state: stateName, idx, tool, color: colorInput.value,
+                       journal: (pixelEdit && pixelEdit.journal) || [] };
+    syncToolbar();
+    applyFrameTransformAll(stateName, idx); // 편집 모드 = identity 표시 전환
+  };
+  penBtn.addEventListener("click", () => setTool("pen"));
+  eraserBtn.addEventListener("click", () => setTool("eraser"));
+  colorInput.addEventListener("input", () => { if (pixelEdit) pixelEdit.color = colorInput.value; });
+  toolbar.querySelector(".et-undo").addEventListener("click", () => {
+    if (!pixelEdit || !pixelEdit.journal.length) return;
+    const j = pixelEdit.journal.pop();
+    const e = entries[stateName];
+    if (j.full) e.pixels[idx] = j.full;
+    else {
+      const ops = e.pixels[idx] || (e.pixels[idx] = {});
+      if (j.had) ops[j.key] = j.prev;
+      else delete ops[j.key];
+    }
+    applyFrameTransformAll(stateName, idx);
+    scheduleSave();
+  });
+  toolbar.querySelector(".et-clear").addEventListener("click", () => {
+    const e = entries[stateName];
+    const ops = e.pixels[idx];
+    if (!ops || !Object.keys(ops).length) return;
+    if (pixelEdit) pixelEdit.journal.push({ full: { ...ops } });
+    e.pixels[idx] = {};
+    applyFrameTransformAll(stateName, idx);
+    scheduleSave();
+  });
+  // 프레임 고유색 팔레트 (빈도순 상위 12)
+  const buildPalette = () => {
+    const imgEl = stage.querySelector("img");
+    if (!(imgEl.complete && imgEl.naturalWidth)) {
+      imgEl.addEventListener("load", buildPalette, { once: true });
+      return;
+    }
+    const tmp = document.createElement("canvas");
+    tmp.width = run.cell.width;
+    tmp.height = run.cell.height;
+    const c2 = tmp.getContext("2d");
+    c2.imageSmoothingEnabled = false;
+    c2.drawImage(imgEl, 0, 0, tmp.width, tmp.height);
+    const data = c2.getImageData(0, 0, tmp.width, tmp.height).data;
+    const counts = new Map();
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 200) continue;
+      const hex = "#" + [data[i], data[i + 1], data[i + 2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+      counts.set(hex, (counts.get(hex) || 0) + 1);
+    }
+    swatchBox.innerHTML = "";
+    for (const [hex] of [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "swatch";
+      b.style.background = hex;
+      b.title = hex;
+      b.addEventListener("click", () => {
+        colorInput.value = hex;
+        if (pixelEdit) { pixelEdit.color = hex; if (pixelEdit.tool !== "pen") setTool("pen"); }
+        else setTool("pen"), (pixelEdit.color = hex);
+      });
+      swatchBox.appendChild(b);
+    }
+  };
+  buildPalette();
+
+  // 페인트: 편집 툴 활성 시 스테이지 드래그는 그리기 (다른 핸들러보다 먼저 등록해 가로챔)
+  stage.addEventListener("pointerdown", (ev) => {
+    if (!pixelEdit || pixelEdit.state !== stateName || pixelEdit.idx !== idx) return;
+    if (ev.button || !ev.isPrimary) return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    try { stage.setPointerCapture(ev.pointerId); } catch { /* 일부 펜/합성 포인터 */ }
+    const s = snapScaleFor(stateName) || 1;
+    const e = entries[stateName];
+    if (!e.pixels[idx]) e.pixels[idx] = {};
+    const ops = e.pixels[idx];
+    const paint = (e2) => {
+      const r = stage.getBoundingClientRect();
+      const x = Math.floor(((e2.clientX - r.left) / r.width) * run.cell.width);
+      const y = Math.floor(((e2.clientY - r.top) / r.height) * run.cell.height);
+      if (!(x >= 0 && x < run.cell.width && y >= 0 && y < run.cell.height)) return;
+      const bx = Math.floor(x / s) * s;
+      const by = Math.floor(y / s) * s;
+      const value = pixelEdit.tool === "eraser" ? null : pixelEdit.color;
+      let changed = false;
+      for (let dy = 0; dy < s; dy++) {
+        for (let dx = 0; dx < s; dx++) {
+          const key = `${bx + dx},${by + dy}`;
+          if (ops[key] === value && key in ops) continue;
+          pixelEdit.journal.push({ key, had: key in ops, prev: ops[key] });
+          ops[key] = value;
+          changed = true;
+        }
+      }
+      if (changed) applyFrameTransformAll(stateName, idx);
+    };
+    paint(ev);
+    const onMove = (e2) => paint(e2);
+    const onUp = () => {
+      try { stage.releasePointerCapture(ev.pointerId); } catch { /* no-op */ }
+      stage.removeEventListener("pointermove", onMove);
+      stage.removeEventListener("pointerup", onUp);
+      scheduleSave();
+    };
+    stage.addEventListener("pointermove", onMove);
+    stage.addEventListener("pointerup", onUp);
+  });
 
   // 뷰 확대: 휠/핀치(ctrl+휠). wireStage 의 휠(스프라이트 스케일)보다 먼저 등록해
   // 가로채고, Shift+휠만 스프라이트 스케일로 통과시킨다.
@@ -2013,7 +2192,14 @@ function seedEntries() {
         transforms[idx] = { ...IDENTITY(), ...t };
       }
     }
-    entries[state.name] = { order, sel, transforms, archived };
+    const pixels = {};
+    if (c && c.pixels && typeof c.pixels === "object") {
+      for (const [k, v] of Object.entries(c.pixels)) {
+        const i = Number(k);
+        if (Number.isInteger(i) && v && typeof v === "object" && Object.keys(v).length) pixels[i] = { ...v };
+      }
+    }
+    entries[state.name] = { order, sel, transforms, archived, pixels };
   }
 }
 

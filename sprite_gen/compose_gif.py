@@ -14,7 +14,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from sprite_gen.curation import apply_transform, frame_variant, load_curation, pixel_snap_scale, state_plan
+from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import read_guard
@@ -132,7 +132,7 @@ def _run_dir_mode_guarded(args, run_dir):
                     f"'{variant}' variant was not baked (re-extract before composing); "
                     f"skipping it would silently produce a shorter GIF."
                 )
-            frame = Image.open(path).convert("RGBA")
+            frame = apply_pixel_edits(Image.open(path).convert("RGBA"), state_pixel_ops(curation, state).get(index))
             if cell_w and cell_h:
                 frame = apply_transform(frame, transforms.get(index), (cell_w, cell_h),
                                         snap_scale=pixel_snap_scale(request) if variant == "pixel" else None)

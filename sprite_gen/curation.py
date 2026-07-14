@@ -43,7 +43,11 @@ Schema (`curation.json`):
                                                #   Consumers key off `selected`; ignored here.
           "transforms": {                      # keyed by 0-based frame index (string)
             "0": {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0}
-          }
+          },
+          "pixels": {                          # optional per-frame pixel edits (sidecar,
+            "0": {"12,34": "#1f2430",          #   originals never rewritten): cell-coord
+                  "13,34": null}                #   "x,y" -> paint hex | null = erase.
+          }                                     #   Applied before the transform at bake.
         }
       }
     }
@@ -267,6 +271,46 @@ def transform_matrix(t: dict[str, float]) -> tuple[float, float, float, float]:
     if t.get("flipX"):
         m00, m10 = -m00, -m10
     return m00, m01, m10, m11
+
+
+def state_pixel_ops(curation: dict[str, Any] | None, state: str) -> dict[int, dict[str, Any]]:
+    """프레임별 픽셀 편집 ops — {frame_index: {"x,y": "#rrggbb"|None}}. 손상 항목은 스킵."""
+    entry = ((curation or {}).get("states") or {}).get(state)
+    raw = entry.get("pixels") if isinstance(entry, dict) else None
+    ops: dict[int, dict[str, Any]] = {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            try:
+                index = int(key)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(value, dict) and value:
+                ops[index] = value
+    return ops
+
+
+def apply_pixel_edits(frame: Image.Image, ops: dict[str, Any] | None) -> Image.Image:
+    """사이드카 픽셀 편집을 프레임 사본에 합성 (원본 불변). 좌표는 셀 픽셀 공간,
+    변형(apply_transform) 이전에 적용한다 — 웹뷰 오버레이와 같은 순서."""
+    if not ops:
+        return frame
+    edited = frame.convert("RGBA").copy()
+    px = edited.load()
+    for key, value in ops.items():
+        try:
+            x_str, y_str = str(key).split(",", 1)
+            x, y = int(x_str), int(y_str)
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= x < edited.width and 0 <= y < edited.height):
+            continue
+        if value is None:
+            px[x, y] = (0, 0, 0, 0)
+        elif isinstance(value, str) and value.startswith("#") and len(value) in (7, 9):
+            r, g, b = int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16)
+            a = int(value[7:9], 16) if len(value) == 9 else 255
+            px[x, y] = (r, g, b, a)
+    return edited
 
 
 def state_plan(

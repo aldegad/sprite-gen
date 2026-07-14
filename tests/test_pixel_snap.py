@@ -186,3 +186,15 @@ def test_partial_generation_view_tolerance(tmp_path) -> None:
     assert [r["state"] for r in manifest["rows"]] == ["walk"]
     with _pytest.raises(SystemExit, match="incomplete generation"):
         load_consistent_frames_manifest(run_dir)
+
+
+def test_apply_pixel_edits_sidecar() -> None:
+    """픽셀 편집 사이드카: 칠하기/지우기 합성, 원본 불변, 손상 키 무시."""
+    from sprite_gen.curation import apply_pixel_edits
+    frame = Image.new("RGBA", (8, 8), (10, 20, 30, 255))
+    out = apply_pixel_edits(frame, {"1,1": "#ff0000", "2,2": None, "bad": "#000000", "99,0": "#000000"})
+    assert out.getpixel((1, 1)) == (255, 0, 0, 255)
+    assert out.getpixel((2, 2)) == (0, 0, 0, 0)
+    assert out.getpixel((3, 3)) == (10, 20, 30, 255)
+    assert frame.getpixel((1, 1)) == (10, 20, 30, 255)  # 원본 불변
+    assert apply_pixel_edits(frame, None) is frame
