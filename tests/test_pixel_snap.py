@@ -53,19 +53,43 @@ def _build_pp_run(root):
     return run_dir
 
 
-def test_conform_false_keeps_native_logical_size(tmp_path) -> None:
-    """fit.conform=false skips the contract squeeze: the output keeps the snapped
-    native logical size even when it exceeds logical_height (physical cap only)."""
+def _conform_request(run_dir, conform):
+    """cell 48 (pp_scale=1, cap 42) + logical_height 30 < art's native 36 logical."""
     import json as _json
-    run_dir = _build_pp_run(tmp_path)
     request = _json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
-    request["fit"]["logical_height"] = 30  # art is 36 logical tall -> conform would squeeze to 30
-    request["fit"]["conform"] = False
+    request["cell"] = {"shape": "square", "width": 48, "height": 48,
+                      "safe_margin_x": 6, "safe_margin_y": 6, "size": 48, "safe_margin": 6}
+    request["fit"]["logical_height"] = 30
+    if conform is not None:
+        request["fit"]["conform"] = conform
     (run_dir / "sprite-request.json").write_text(_json.dumps(request), encoding="utf-8")
-    assert extract_module.run(run_dir=run_dir) == 0
+
+
+def _walk_frame0_height(run_dir) -> int:
     im = Image.open(run_dir / "frames" / "walk" / "frame-0.png").convert("RGBA")
     bb = im.getchannel("A").getbbox()
-    assert bb[3] - bb[1] > 30, f"native size squeezed anyway: {bb}"
+    return bb[3] - bb[1]
+
+
+def test_default_keeps_native_logical_size(tmp_path) -> None:
+    """DEFAULT (no conform key) skips the contract squeeze: the output keeps the
+    snapped native logical size (36) even though logical_height is 30 (physical
+    cap 42 only). The squeeze runs only on explicit `fit.conform: true`."""
+    run_dir = _build_pp_run(tmp_path)
+    _conform_request(run_dir, conform=None)
+    assert extract_module.run(run_dir=run_dir) == 0
+    height = _walk_frame0_height(run_dir)
+    assert height > 30, f"native size squeezed by default: {height}"
+
+
+def test_conform_true_squeezes_to_contract(tmp_path) -> None:
+    """Explicit fit.conform=true restores the legacy contract squeeze (36 -> <=30).
+    min_used_pixels lowered: the squeezed 30px fixture sprite is legitimately small."""
+    run_dir = _build_pp_run(tmp_path)
+    _conform_request(run_dir, conform=True)
+    assert extract_module.run(run_dir=run_dir, min_used_pixels=200) == 0
+    height = _walk_frame0_height(run_dir)
+    assert height <= 30, f"conform=true did not squeeze: {height}"
 
 
 def test_pixel_snap_scale_resolution() -> None:
