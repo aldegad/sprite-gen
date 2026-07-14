@@ -554,6 +554,144 @@ def state_motion_phases(state: str, frames: int) -> list[dict[str, Any]]:
     return []
 
 
+# --- 방향 계약 (directions block) -------------------------------------------
+# base = down(정면) 기본자세 하나. 방향 앵커(<dir>_<anchor_suffix>)를 base 에서 먼저
+# 뽑고, 각 행은 자기 방향 앵커를 identity 로 생성한다 (directional-anchor-workflow.md).
+# mirror 에 오른 방향은 생성을 생략하고 런타임 미러로 커버한다 (수홍 확정 2026-07-14).
+DIRECTION_FACING = {
+    "down": "facing the viewer (front view)",
+    "up": "facing away from the viewer (back view, no visible face)",
+    "side": "pure side profile view facing camera-right",
+    "right": "pure side profile view facing camera-right",
+    "left": "pure side profile view facing camera-left",
+    "down45": "45-degree three-quarter-front view",
+    "up45": "45-degree three-quarter-back view",
+}
+
+
+def normalize_directions(raw: dict[str, Any] | None, states: dict[str, Any]) -> dict[str, Any] | None:
+    """Validate/normalize the request `directions` block. None = 방향 계약 없음(기존 flat)."""
+    if not raw:
+        return None
+    dir_set = [str(d) for d in raw.get("set", [])]
+    if not dir_set:
+        raise SystemExit("directions.set must list at least one direction")
+    mirror = {str(k): str(v) for k, v in (raw.get("mirror") or {}).items()}
+    for target, source in mirror.items():
+        if source not in dir_set:
+            raise SystemExit(f"directions.mirror source '{source}' is not in directions.set")
+        if target in dir_set:
+            raise SystemExit(f"directions.mirror target '{target}' must not also be a generated direction")
+    anchor_suffix = str(raw.get("anchor_suffix", "idle"))
+    for state in states:
+        if not any(state.startswith(d + "_") for d in dir_set):
+            raise SystemExit(
+                f"state '{state}' does not start with a declared direction prefix "
+                f"({', '.join(dir_set)}) — direction-contract runs name states <direction>_<state>")
+    return {"set": dir_set, "mirror": mirror, "anchor_suffix": anchor_suffix}
+
+
+def direction_anchor_states(directions: dict[str, Any]) -> dict[str, str]:
+    """direction -> anchor state name (<dir>_<anchor_suffix>)."""
+    return {d: f"{d}_{directions['anchor_suffix']}" for d in directions["set"]}
+
+
+def ensure_direction_anchors(directions: dict[str, Any], states: dict[str, Any]) -> dict[str, Any]:
+    """방향 앵커 상태가 요청에 없으면 합성해 앞에 끼운다 — 앵커 없는 방향 행 생성 금지."""
+    synthesized: dict[str, Any] = {}
+    for direction, anchor in direction_anchor_states(directions).items():
+        if anchor not in states:
+            facing = DIRECTION_FACING.get(direction, f"facing the {direction} direction")
+            synthesized[anchor] = {
+                "frames": 4,
+                "fps": 4,
+                "loop": True,
+                "action": f"standing idle, {facing}; subtle breathing; canonical direction anchor derived from the base",
+            }
+    return {**synthesized, **states}
+
+
+def state_direction(state: str, directions: dict[str, Any] | None) -> str | None:
+    if not directions:
+        return None
+    return next((d for d in directions["set"] if state.startswith(d + "_")), None)
+
+
+def build_generation_plan(request: dict[str, Any]) -> dict[str, Any] | None:
+    """생성 체인 SSoT: 1단계 방향 앵커(base 기반) -> 2단계 행(방향 앵커 기반).
+
+    미러 방향은 생성 생략을 명시적으로 기록한다 — 조용한 누락이 아니라 계약이다."""
+    directions = request.get("directions")
+    if not directions:
+        return None
+    anchors = direction_anchor_states(directions)
+    anchor_names = set(anchors.values())
+    stage_anchors = [
+        {
+            "state": anchors[d],
+            "role": "direction-anchor",
+            "direction": d,
+            "refs": ["base-source.*", f"references/layout-guides/{anchors[d]}.png"],
+            "note": "base 는 방향 앵커 생성까지만 identity 소스다 — 앵커 수락 후 행 생성에 base 를 재부착하지 않는다",
+        }
+        for d in directions["set"]
+    ]
+    stage_rows = [
+        {
+            "state": state,
+            "role": "action-row",
+            "direction": state_direction(state, directions),
+            "refs": [
+                f"<accepted single-pose crop of raw/{anchors[state_direction(state, directions)]}.png>",
+                f"references/layout-guides/{state}.png",
+            ],
+        }
+        for state in request["states"]
+        if state not in anchor_names and state_direction(state, directions)
+    ]
+    mirrored = [
+        {
+            "direction": target,
+            "mirror_of": source,
+            "note": ("생성 생략 — 런타임 미러가 기본. 미러로 부족해 재생성할 때는 반대편 행"
+                     f"(raw/{source}_*.png)을 timing/scale 참조로만 부착하고, 대상 방향 앵커를"
+                     " 새로 뽑아 identity 로 쓴다 (directional-anchor-workflow.md 좌우 게이트)"),
+        }
+        for target, source in directions["mirror"].items()
+    ]
+    return {
+        "version": 1,
+        "kind": "sprite-gen-generation-plan",
+        "order": [
+            {"stage": 1, "name": "direction-anchors", "items": stage_anchors},
+            {"stage": 2, "name": "action-rows", "items": stage_rows},
+        ],
+        "mirrored_directions": mirrored,
+    }
+
+
+def direction_prefix_requirements(request: dict[str, Any], state: str) -> list[str]:
+    """방향 계약 런의 프롬프트 방향 잠금 — 앵커 행은 base 기반, 일반 행은 앵커 기반."""
+    directions = request.get("directions")
+    direction = state_direction(state, directions)
+    if direction is None:
+        return []
+    facing = DIRECTION_FACING.get(direction, f"facing the {direction} direction")
+    requirements = [
+        f"Lock the whole row to {facing}. Do not average it into a different facing.",
+    ]
+    if state == direction_anchor_states(directions).get(direction):
+        requirements.append(
+            "This row is the CANONICAL DIRECTION ANCHOR for this facing: derive identity from the "
+            "attached base image, change only the facing/orientation, and keep poses minimal "
+            "(subtle breathing) so a single frame can be cropped as the anchor.")
+    else:
+        requirements.append(
+            "Derive identity from the attached accepted direction anchor for this facing, "
+            "not from any base character image.")
+    return requirements
+
+
 def directional_parts(state: str) -> tuple[str, str] | None:
     match = re.search(r"-(front|back)-(left|right)$", state)
     if not match:
@@ -697,7 +835,11 @@ def row_prompt(request: dict[str, Any], state: str, entry: dict[str, Any]) -> st
     cell_height = int(cell["height"])
     safe_margin_x = int(cell["safe_margin_x"])
     safe_margin_y = int(cell["safe_margin_y"])
-    state_requirements = [*directional_requirements(state), *STATE_REQUIREMENTS.get(state, [])]
+    state_requirements = [
+        *direction_prefix_requirements(request, state),
+        *directional_requirements(state),
+        *STATE_REQUIREMENTS.get(state, []),
+    ]
     state_requirement_text = ""
     if state_requirements:
         state_requirement_text = "\n\nState-specific requirements:\n" + "\n".join(
@@ -814,6 +956,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fit-outline", type=_outline_config, default=None, metavar="{on,off,STRENGTH}", help="pixel-perfect outline enforcement: on (strength 0.62), off, or an explicit 0..1 strength")
     parser.add_argument("--fit-pitch-hint", type=int, default=None, help="pixel-perfect fallback pixel pitch when per-frame detection is inconclusive")
     parser.add_argument("--motion-phase-guides", action="store_true", help="draw simple per-frame motion phase hints into locomotion layout guides")
+    parser.add_argument("--directions", help="comma list of generated directions (e.g. down,side,up); states must be named <direction>_<state>; missing <direction>_idle anchors are synthesized and a generation plan is written")
+    parser.add_argument("--mirror", help="comma list of target=source pairs covered by runtime mirroring instead of generation (e.g. left=side)")
     parser.add_argument("--request", type=Path)
     parser.add_argument("--request-json")
     parser.add_argument("--force", action="store_true")
@@ -846,6 +990,21 @@ def _run(args: argparse.Namespace):
 
     raw_request = load_request(args.request, args.request_json)
     states = normalize_states(raw_request.get("states"))
+    # 방향 계약: CLI 가 request JSON 을 override 한다 (fit 과 동일 규칙)
+    raw_directions = dict(raw_request.get("directions") or {})
+    if args.directions:
+        raw_directions["set"] = [d.strip() for d in args.directions.split(",") if d.strip()]
+    if args.mirror:
+        mirror = dict(raw_directions.get("mirror") or {})
+        for pair in args.mirror.split(","):
+            if "=" not in pair:
+                raise SystemExit(f"--mirror expects target=source pairs, got: {pair!r}")
+            target, source = pair.split("=", 1)
+            mirror[target.strip()] = source.strip()
+        raw_directions["mirror"] = mirror
+    directions = normalize_directions(raw_directions or None, states)
+    if directions:
+        states = ensure_direction_anchors(directions, states)
     raw_cell = dict(raw_request.get("cell", {}))
     if args.cell_width is not None:
         raw_cell["width"] = args.cell_width
@@ -878,6 +1037,8 @@ def _run(args: argparse.Namespace):
         "style": raw_request.get("style", args.style),
         "motion_phase_guides": bool(raw_request.get("motion_phase_guides", args.motion_phase_guides)),
     }
+    if directions:
+        request["directions"] = directions
     fit = dict(raw_request.get("fit", {}))
     fit_overrides = {
         "resample": args.fit_resample,
@@ -913,12 +1074,19 @@ def _run(args: argparse.Namespace):
         )
         (prompts / f"{state}.txt").write_text(row_prompt(request, state, entry).rstrip() + "\n", encoding="utf-8")
 
+    # 방향 계약 런: 생성 체인 SSoT(1단계 앵커 -> 2단계 행, 미러 방향 명시)를 기록
+    plan = build_generation_plan(request)
+    if plan:
+        (out_dir / "references" / "generation-plan.json").write_text(
+            json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
     (out_dir / "sprite-request.json").write_text(
         json.dumps(request, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
-    print(json.dumps({"ok": True, "run_dir": str(out_dir), "states": list(states)}, ensure_ascii=False, indent=2))
+    print(json.dumps({"ok": True, "run_dir": str(out_dir), "states": list(states),
+                      "generation_plan": bool(plan)}, ensure_ascii=False, indent=2))
     return 0
 
 
