@@ -229,10 +229,6 @@ def _build_run_state_impl(run_dir: Path) -> dict:
                 frame["plainUrl"] = _url("frames", state, f"frame-{index}.plain.png")
             if index < len(labels):
                 frame["label"] = labels[index]
-            # 검출된 입력 격자(추출이 실제로 자른 선, 셀 좌표) — 원본 쌍둥이 표시에 겹친다
-            input_grids = row.get("input_grids") or []
-            if index < len(input_grids) and input_grids[index]:
-                frame["inputGrid"] = input_grids[index]
             if present and Image is not None:
                 # 실제 스프라이트 픽셀 크기(투명 패딩 제외 알파 bbox) — 사이즈 통일 검수용
                 try:
@@ -242,6 +238,9 @@ def _build_run_state_impl(run_dir: Path) -> dict:
                         bbox = alpha.getbbox() if alpha is not None else im.getbbox()
                         if bbox:
                             frame["contentSize"] = [bbox[2] - bbox[0], bbox[3] - bbox[1]]
+                            # 최종 픽셀 콘텐츠 bbox(셀 좌표) — 원본 뷰의 "최종 대응 격자"
+                            # (칸 수 = 최종 픽셀 수)가 이 상자를 균등 분할해 그린다
+                            frame["contentBox"] = list(bbox)
                 except OSError:
                     pass
             frames.append(frame)
