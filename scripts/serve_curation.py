@@ -217,6 +217,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         files = row.get("files", [])
         labels = row.get("labels", [])
         frame_count = int(entry["frames"])
+        raw_present = (run_dir / "raw" / f"{state}.png").is_file()
         frames = []
         for index in range(frame_count):
             rel = f"frames/{state}/frame-{index}.png"
@@ -261,6 +262,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         states.append(
             {
                 "name": state,
+                "rawPresent": raw_present,
                 "pixelScale": state_scale,
                 "refs": _state_refs(run_dir, state),
                 "fps": int(entry.get("fps", 6)),
@@ -452,6 +454,27 @@ class CurationHandler(BaseHTTPRequestHandler):
             try:
                 self._send_json(build_run_state(self.run_dir))
             except (Exception, SystemExit) as exc:  # incl. load_frames_manifest fail-loud; no silent fallback
+                self._send_json({"error": str(exc)}, 500)
+            return
+        if path == "/api/progress":
+            # 가벼운 생성 진행 스냅샷 (트리 실시간 갱신용 폴링 대상): 상태별 raw 유무 +
+            # 추출 프레임 수 + 런 세대. /api/run 전체 스냅샷(프레임 이미지 오픈)보다 훨씬 싸다.
+            try:
+                with read_guard(self.run_dir):
+                    request = json.loads((self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+                    progress = []
+                    for state in request["states"]:
+                        state_dir = self.run_dir / "frames" / state
+                        count = 0
+                        if state_dir.is_dir():
+                            count = sum(1 for f in state_dir.glob("frame-*.png") if not f.name.endswith(".plain.png"))
+                        progress.append({
+                            "name": state,
+                            "raw": (self.run_dir / "raw" / f"{state}.png").is_file(),
+                            "frames": count,
+                        })
+                    self._send_json({"states": progress, "runRevision": run_revision(self.run_dir)})
+            except (Exception, SystemExit) as exc:
                 self._send_json({"error": str(exc)}, 500)
             return
         if path.startswith("/curator/"):
