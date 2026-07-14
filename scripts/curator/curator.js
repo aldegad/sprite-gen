@@ -65,6 +65,8 @@ const STR = {
     dirGroupLabel: (d) => `direction · ${d}`,
     dirMirrorLabel: (d, src) => `direction · ${d} — runtime mirror of ${src} (not generated)`,
     treeTitle: "generation structure",
+    treePipeline: "pipeline",
+    treeFiles: "files",
     treeBaseNote: "base — first identity truth",
     treeIdleRow: "idle row",
     treeAnchorNote: "anchor · single frame-0 crop",
@@ -114,6 +116,8 @@ const STR = {
     dirGroupLabel: (d) => `방향 · ${d}`,
     dirMirrorLabel: (d, src) => `방향 · ${d} — ${src} 런타임 미러 (생성 없음)`,
     treeTitle: "생성 구조",
+    treePipeline: "파이프라인",
+    treeFiles: "파일",
     treeBaseNote: "base — 최초 identity",
     treeIdleRow: "idle 행",
     treeAnchorNote: "앵커 · frame-0 크롭 1장",
@@ -1009,23 +1013,16 @@ function renderPipelineTree() {
     const p = treeProgress.get(name);
     return p ? p.frames : 0;
   };
-
-  const wrap = document.createElement("section");
-  wrap.className = "state pipeline-tree";
-  wrap.innerHTML =
-    `<div class="state-head"><span class="name">${t("treeTitle")}</span>` +
-    `<span class="meta tree-path" title="${escapeHtml(run.runDir)}">${escapeHtml(run.runDir)}</span></div>`;
-  const root = document.createElement("div");
-  root.className = "tree";
-  const top = document.createElement("ul");
-
-  const addTop = (...nodes) => {
-    const el = document.createElement("li");
-    for (const n of nodes) if (n) el.appendChild(n);
-    const folder = el.querySelector(":scope > .tree-node.folder .tn-label");
-    if (folder && collapsedFolders.has(folder.textContent)) el.classList.add("folder-collapsed");
-    top.appendChild(el);
-    return el;
+  // 생성 진행을 반영한 대표 썸네일: 추출 프레임 > raw 스트립 > 미생성
+  const bestThumb = (name) => {
+    const f = frameThumb(name);
+    if (f) return f;
+    const r = rawThumb(name);
+    return r ? { raw: r } : false;
+  };
+  const anchorFileThumb = (direction) => {
+    const f = (run.anchorFiles || []).find((a) => a.name === `${direction}.png`);
+    return f ? `${f.url}?v=${treeRevision || 0}` : null;
   };
   const chipList = () => {
     const ul = document.createElement("ul");
@@ -1037,18 +1034,68 @@ function renderPipelineTree() {
     el.appendChild(node);
     ul.appendChild(el);
   };
-  // frames/ 하위 상태 폴더 노드: <state>/ · N프레임 (미생성이면 점선)
-  const stateFolderNode = (name, extraNote, extraCls) => {
+  const liWith = (parentUl, ...nodes) => {
+    const el = document.createElement("li");
+    for (const n of nodes) if (n) el.appendChild(n);
+    parentUl.appendChild(el);
+    return el;
+  };
+  // 접을 수 있는 블록 (파이프라인 / 파일) — folderNode 의 접힘 상태 공유
+  const block = (label, ul) => {
+    const div = document.createElement("div");
+    div.className = "tree-block";
+    div.appendChild(folderNode(label, null));
+    div.appendChild(ul);
+    if (collapsedFolders.has(label)) div.classList.add("folder-collapsed");
+    return div;
+  };
+  const stateChip = (name, extraNote, extraCls) => {
     const n = frameCount(name);
     const note = [n > 0 ? STR[lang].treeFrameCount(n) : t("treePending"), extraNote].filter(Boolean).join(" · ");
-    return treeNode(`${name}/`, note, frameThumb(name), name, extraCls);
+    return treeNode(name, note, bestThumb(name), name, extraCls);
   };
 
-  // base 파일
-  if (run.baseUrl) addTop(treeNode("base-source", t("treeBaseNote"), run.baseUrl, "__base__", "tree-root"));
+  // ── 파이프라인 블록: base → <dir>_idle 행 → 방향 앵커 → rows 체인 ──────────
+  const chainUl = document.createElement("ul");
+  let chainHost = chainUl;
+  if (run.baseUrl) {
+    const baseLi = liWith(chainUl, treeNode("base", t("treeBaseNote"), run.baseUrl, "__base__", "tree-root"));
+    chainHost = document.createElement("ul");
+    baseLi.appendChild(chainHost);
+  }
+  if (run.directionGroups && run.directionGroups.length) {
+    for (const group of run.directionGroups) {
+      if (group.mirrorOf) {
+        liWith(chainHost, treeNode(STR[lang].treeMirror(group.direction, group.mirrorOf), null, undefined, null, "mirror"));
+        continue;
+      }
+      if (group.anchor) {
+        const idleLi = liWith(chainHost, stateChip(group.anchor, t("treeIdleRow")));
+        const anchorUl = document.createElement("ul");
+        idleLi.appendChild(anchorUl);
+        const anchorLi = liWith(anchorUl, treeNode(
+          `${group.direction} ${t("dirAnchorBadge")}`, t("treeAnchorNote"),
+          anchorFileThumb(group.direction) || bestThumb(group.anchor), group.anchor, "anchor"));
+        const rows = chipList();
+        for (const name of group.states.filter((n) => n !== group.anchor)) chipItem(rows, stateChip(name));
+        anchorLi.appendChild(rows);
+      } else {
+        const rows = chipList();
+        for (const name of group.states) chipItem(rows, stateChip(name));
+        liWith(chainHost, treeNode(group.direction, null, undefined, null)).appendChild(rows);
+      }
+    }
+  } else {
+    const rows = chipList();
+    for (const st of run.states) chipItem(rows, stateChip(st.name));
+    const holder = liWith(chainHost);
+    holder.appendChild(rows);
+  }
 
-  // raw/ — 생성 스트립이 저장되는 폴더
-  const rawLi = addTop(folderNode("raw/", t("treeRawFolder")));
+  // ── 파일 블록: 폴더 뼈대 (어디에 저장되는가) ──────────────────────────────
+  const fileUl = document.createElement("ul");
+  if (run.baseUrl) liWith(fileUl, treeNode("base-source", null, run.baseUrl, "__base__"));
+  const rawLi = liWith(fileUl, folderNode("raw/", t("treeRawFolder")));
   const rawUl = chipList();
   for (const st of run.states) {
     const thumb = rawThumb(st.name);
@@ -1056,55 +1103,34 @@ function renderPipelineTree() {
     chipItem(rawUl, treeNode(`${st.name}.png`, note, thumb ? { raw: thumb } : false, st.name));
   }
   rawLi.appendChild(rawUl);
-
-  // frames/ — 추출 프레임 (방향 체인 구조 유지: idle 앵커 원천 아래 그 방향의 행들)
-  const framesLi = addTop(folderNode("frames/", t("treeFramesFolder")));
-  const framesUl = document.createElement("ul");
-  if (run.directionGroups && run.directionGroups.length) {
-    for (const group of run.directionGroups) {
-      const gli = document.createElement("li");
-      if (group.mirrorOf) {
-        gli.appendChild(treeNode(STR[lang].treeMirror(group.direction, group.mirrorOf), null, undefined, null, "mirror"));
-        framesUl.appendChild(gli);
-        continue;
-      }
-      if (group.anchor) {
-        gli.appendChild(stateFolderNode(group.anchor, STR[lang].treeAnchorOrigin(group.direction), "anchor"));
-        const rows = chipList();
-        for (const name of group.states.filter((n) => n !== group.anchor)) chipItem(rows, stateFolderNode(name));
-        gli.appendChild(rows);
-      } else {
-        const rows = chipList();
-        for (const name of group.states) chipItem(rows, stateFolderNode(name));
-        gli.appendChild(rows);
-      }
-      framesUl.appendChild(gli);
-    }
-  } else {
-    const gli = document.createElement("li");
-    const rows = chipList();
-    for (const st of run.states) chipItem(rows, stateFolderNode(st.name));
-    gli.appendChild(rows);
-    framesUl.appendChild(gli);
+  const framesLi = liWith(fileUl, folderNode("frames/", t("treeFramesFolder")));
+  const framesUl = chipList();
+  for (const st of run.states) {
+    const n = frameCount(st.name);
+    chipItem(framesUl, treeNode(`${st.name}/`, n > 0 ? STR[lang].treeFrameCount(n) : t("treePending"), frameThumb(st.name), st.name));
   }
   framesLi.appendChild(framesUl);
-
-  // references/anchors/ — 방향 앵커 1장 크롭
   if (run.anchorFiles && run.anchorFiles.length) {
-    const aLi = addTop(folderNode("references/anchors/", t("treeAnchorsFolder")));
+    const aLi = liWith(fileUl, folderNode("references/anchors/", t("treeAnchorsFolder")));
     const aUl = chipList();
     for (const a of run.anchorFiles) {
       chipItem(aUl, treeNode(a.name, t("treeAnchorNote"), `${a.url}?v=${treeRevision || 0}`, null, "anchor"));
     }
     aLi.appendChild(aUl);
   }
-
-  // 최종 아틀라스 파일
   if (run.hasAtlas) {
-    addTop(treeNode("sprite-sheet-alpha.png", t("treeAtlasNote"), `/run/sprite-sheet-alpha.png?v=${treeRevision || 0}`, null));
+    liWith(fileUl, treeNode("sprite-sheet-alpha.png", t("treeAtlasNote"), `/run/sprite-sheet-alpha.png?v=${treeRevision || 0}`, null));
   }
 
-  root.appendChild(top);
+  const wrap = document.createElement("section");
+  wrap.className = "state pipeline-tree";
+  wrap.innerHTML =
+    `<div class="state-head"><span class="name">${t("treeTitle")}</span>` +
+    `<span class="meta tree-path" title="${escapeHtml(run.runDir)}">${escapeHtml(run.runDir)}</span></div>`;
+  const root = document.createElement("div");
+  root.className = "tree";
+  root.appendChild(block(t("treePipeline"), chainUl));
+  root.appendChild(block(t("treeFiles"), fileUl));
   wrap.appendChild(root);
   const existing = document.querySelector(".pipeline-tree");
   if (existing) existing.replaceWith(wrap);
