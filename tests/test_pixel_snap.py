@@ -198,3 +198,37 @@ def test_apply_pixel_edits_sidecar() -> None:
     assert out.getpixel((3, 3)) == (10, 20, 30, 255)
     assert frame.getpixel((1, 1)) == (10, 20, 30, 255)  # 원본 불변
     assert apply_pixel_edits(frame, None) is frame
+
+
+def test_padded_component_no_ghost_bottom_row() -> None:
+    """실사고 2026-07-14 회귀 (down_idle blink 발밑 1px 돌출, 수홍 발견).
+
+    component_group_image 의 4px 투명 패딩 + 위상 추정 노이즈(참 lead 4 를 2.8 로
+    측정 → _grid_edges 가 0 으로 스냅) 조합이 격자를 패딩만큼 위로 밀었다. 꼬리에
+    자투리 셀이 생기고, 발바닥 블록의 쪼개진 하단 + 문턱 근처 알파(~134) 프린지가
+    유령 픽셀로 응고해 최종 프레임 발밑에 1px 이 돌출했다. 스냅 전 알파 bbox 로
+    조이면(tighten_components) 콘텐츠가 블록 정수배가 되어 격자가 등분으로 떨어진다.
+    """
+    pitch = 13.213
+    blocks_w, blocks_h = 8, 6
+    pad = 4
+    solid_h = round(blocks_h * pitch) - 1  # 마지막 블록의 1px 은 프린지가 채운다 (실사고 기하)
+    width = round(blocks_w * pitch)
+    comp = Image.new("RGBA", (width + pad * 2, solid_h + 1 + pad * 2), (0, 0, 0, 0))
+    for y in range(solid_h):
+        for x in range(width):
+            comp.putpixel((pad + x, pad + y), (60, 90, 180, 255))
+    for x in range(width):  # 문턱(128) 살짝 위의 접지 프린지 — 육안으론 거의 안 보인다
+        comp.putpixel((pad + x, pad + solid_h), (60, 90, 180, 134))
+
+    noisy_phase = (2.8, 2.8)  # 참 lead=4 인데 lead-스냅 문턱(pitch/4=3.3) 아래로 측정된 실사고 값
+
+    # 버그 경로 재현: 패딩째 스냅하면 유령 바닥 행이 응고한다 (테스트가 무는지 자기검증)
+    buggy = extract_module.grid_snap_downscale(comp, (pitch, pitch), True, noisy_phase)
+    assert buggy.getbbox()[3] > blocks_h
+
+    tight = extract_module.tighten_components([comp])[0]
+    assert tight.size == (width, solid_h + 1)
+    fixed = extract_module.grid_snap_downscale(tight, (pitch, pitch), True, noisy_phase)
+    bbox = fixed.getbbox()
+    assert bbox[3] - bbox[1] == blocks_h, f"ghost row survived: {fixed.size} bbox={bbox}"
