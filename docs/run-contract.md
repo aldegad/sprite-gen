@@ -104,7 +104,10 @@ Rules the display depends on:
   atlas slot is cell-sized, so this twin must be too. **`frames/<state>/orig/frame-N.png`**
   is the *hi-res* (S×cell, capped) pre-fit twin the view displays when the user turns
   pixel-perfect off, so "off = original" is crisp instead of an upscaled cell blur. The
-  view prefers `orig/`, falling back to `.plain.png` when no hi-res twin exists.
+  view prefers `orig/`, falling back to `.plain.png` when no hi-res twin exists. Both
+  twins are fitted into the pixel-perfect frame's content bbox (same footprint), so the
+  toggle compares pixel treatment at identical size and a plain bake keeps the same
+  character size as pixel rows.
   Sidecar-baking semantics are owned by [`pixel-perfect.md`](pixel-perfect.md); the
   display contract for the toggle is §3.
 

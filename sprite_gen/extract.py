@@ -1543,6 +1543,27 @@ def fit_pixel_perfect(logical: Image.Image, cell_width: int, cell_height: int, s
     return target
 
 
+def fit_component_to_bbox(component: Image.Image, cell_width: int, cell_height: int,
+                          bbox: tuple[int, int, int, int], scale: int = 1) -> Image.Image:
+    """원본 컴포넌트를 픽셀퍼펙트 프레임의 콘텐츠 bbox(×scale) 풋프린트에 앉힌다.
+
+    plain/orig 쌍둥이용: 픽셀퍼펙트 결과와 같은 크기·같은 자리에 원본 화질 스프라이트를
+    두어, 큐레이터의 픽셀퍼펙트 토글이 크기 변화 없이 픽셀 처리 품질만 비교하게 한다
+    (contain 맞춤 + 하단 정렬 + 가로 중앙 — bbox 종횡비와의 오차는 격자 반올림 수준)."""
+    target = Image.new("RGBA", (cell_width * scale, cell_height * scale), (0, 0, 0, 0))
+    src_bbox = component.getbbox()
+    if src_bbox is None:
+        return target
+    src = component.crop(src_bbox)
+    x0, y0, x1, y1 = (v * scale for v in bbox)
+    box_w, box_h = max(1, x1 - x0), max(1, y1 - y0)
+    ratio = min(box_w / src.width, box_h / src.height)
+    tw, th = max(1, round(src.width * ratio)), max(1, round(src.height * ratio))
+    resized = src.resize((tw, th), Image.Resampling.LANCZOS)
+    target.alpha_composite(resized, (x0 + (box_w - tw) // 2, y1 - th))
+    return target
+
+
 def extract_component_images(strip: Image.Image, frame_count: int) -> list[Image.Image] | None:
     components = connected_components(strip)
     if not components:
@@ -2229,24 +2250,12 @@ def _run(args: argparse.Namespace):
             )
             logical_frames = conform_row_logical(snapped, logical_width, logical_height, pp_detail_bias)
             registered = register_row_frames(logical_frames)
-            # 전/후 비교용 plain 쌍둥이: 같은 원본 스트립을 픽셀퍼펙트 없이
-            # 기존 fit 경로로 셀에 앉힌 결과. 추출 실패 시 관측 가능하게 스킵.
-            plain_frames = extract_component_frames(
-                strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
-            if plain_frames is None:
-                all_warnings.append(f"{state}: plain (pre-pixel-perfect) variant unavailable — component extraction differs")
-            # 원본 화질 표시용 고해상본: 동일 legacy fit 을 S×셀에 앉힌다 (표시 전용).
-            orig_frames = None
-            if plain_display_scale > 1:
-                s = plain_display_scale
-                orig_frames = extract_component_frames(
-                    strip, frame_count, cell_width * s, cell_height * s,
-                    safe_margin_x * s, safe_margin_y * s, fit_config)
-                if orig_frames is None:
-                    all_warnings.append(f"{state}: original-quality (orig/) display twin unavailable — component extraction differs")
+            # 전/후 비교 쌍둥이(plain/orig)는 픽셀퍼펙트 프레임의 최종 콘텐츠 bbox 가
+            # 확정된 뒤(아래 pending 루프) 같은 풋프린트에 앉힌다 — 여기서는 원본
+            # 컴포넌트만 보관한다. (이전: legacy fit 이 가용영역을 채워 pp 결과보다
+            # 크게 앉음 → 토글 순간 크기가 튀어 품질 비교가 안 됐다.)
             pending.append({"state": state, "frame_count": frame_count, "method": method,
-                            "pitch": pitch, "frames": registered,
-                            "plain_frames": plain_frames, "orig_frames": orig_frames})
+                            "pitch": pitch, "frames": registered, "components": images})
             continue
         frames = extract_component_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
         method = "components"
@@ -2280,8 +2289,27 @@ def _run(args: argparse.Namespace):
                     top, safe_margin_y, ground_frames)
                 for frame in quantized
             ]
+            # 전/후 비교 쌍둥이: 픽셀퍼펙트 프레임의 최종 콘텐츠 bbox 와 같은 풋프린트에
+            # 원본 컴포넌트를 앉힌다 (plain=셀 크기 굽기용, orig=S×셀 표시용). 빈 프레임은
+            # 관측 가능하게 스킵 — 조용한 폴백 없음.
+            plain_frames = []
+            orig_frames = [] if plain_display_scale > 1 else None
+            for index, (component, frame) in enumerate(zip(entry["components"], frames)):
+                frame_bbox = frame.getbbox()
+                if frame_bbox is None:
+                    all_warnings.append(
+                        f"{entry['state']}: frame {index} is empty — plain/orig twin skipped")
+                    plain_frames.append(Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0)))
+                    if orig_frames is not None:
+                        orig_frames.append(Image.new(
+                            "RGBA", (cell_width * plain_display_scale, cell_height * plain_display_scale), (0, 0, 0, 0)))
+                    continue
+                plain_frames.append(fit_component_to_bbox(component, cell_width, cell_height, frame_bbox))
+                if orig_frames is not None:
+                    orig_frames.append(fit_component_to_bbox(
+                        component, cell_width, cell_height, frame_bbox, plain_display_scale))
             finalize_state(entry["state"], frames, entry["frame_count"], entry["method"],
-                           plain_frames=entry.get("plain_frames"), orig_frames=entry.get("orig_frames"))
+                           plain_frames=plain_frames, orig_frames=orig_frames)
         all_warnings.append(
             "pixel-perfect: pitch=%s scale=%dx logical<=%dx%d palette=%d"
             % (",".join(str(entry["pitch"]) for entry in pending), pp_scale, logical_width, logical_height, len(palette))

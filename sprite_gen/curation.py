@@ -128,6 +128,25 @@ def frame_filename(index: int, variant: str = "pixel") -> str:
     return f"frame-{index}.png"
 
 
+def pixel_snap_scale(request: dict[str, Any]) -> int | None:
+    """Logical-grid scale (cell px per logical px) for a `fit.pixel_perfect` run, or None
+    for a legacy run. Mirrors extract's pp_scale so a curation transform baked onto the
+    canonical pixel frames re-snaps to the SAME grid the extraction snapped to. Single
+    source for compose/GIF/PNG-export/cycle and (mirrored) the webview preview."""
+    fit = request.get("fit") or {}
+    if not fit.get("pixel_perfect"):
+        return None
+    cell = request.get("cell", {})
+    cell_height = int(cell.get("height", cell.get("size", 0)))
+    margin_y = int(cell.get("safe_margin_y", cell.get("safe_margin", 0)))
+    usable_height = max(1, cell_height - margin_y * 2)
+    logical_height = int(fit.get("logical_height", cell_height))
+    scale = max(1, cell_height // max(1, logical_height))
+    if logical_height * scale > cell_height:
+        scale = max(1, usable_height // max(1, logical_height))
+    return scale
+
+
 def run_revision(run_dir: Path) -> str:
     """Frame-content fingerprint of the run's current generation: the request + frames
     manifest bytes plus each canonical frame file's name/size/mtime. It changes whenever
@@ -298,6 +317,7 @@ def apply_transform(
     frame: Image.Image,
     transform: dict[str, float] | None,
     cell_size: tuple[int, int],
+    snap_scale: int | None = None,
 ) -> Image.Image:
     """Apply scale/shear/rotate (about center) + translate, into a fresh cell.
 
@@ -306,6 +326,13 @@ def apply_transform(
     source frame is not modified. The forward matrix matches `transform_matrix`,
     which the webview uses for its preview, so alignment to the ground grid is
     faithful to the bake.
+
+    `snap_scale` (a `fit.pixel_perfect` run baking the canonical pixel variant,
+    from `pixel_snap_scale`): the transform is sampled NEAREST and the result is
+    re-quantized to the fixed logical grid (cell-anchored, `snap_scale` px per
+    logical px), so a curated move/scale/rotate cannot smear the pixel grid —
+    the sprite lands back on the same grid the extraction snapped to. The webview
+    mirrors this quantization live while editing (curator.js drawSnapped).
     """
     transform = normalize_transform(transform) if transform else dict(IDENTITY)
     if is_identity(transform) and frame.size == cell_size:
@@ -324,7 +351,18 @@ def apply_transform(
     cout_x, cout_y = cw / 2 + transform["dx"], ch / 2 + transform["dy"]
     c = -(ia * cout_x + ib * cout_y) + cin_x
     f = -(id_ * cout_x + ie * cout_y) + cin_y
-    return src.transform((cw, ch), Image.AFFINE, (ia, ib, c, id_, ie, f), resample=Image.BICUBIC)
+    if not snap_scale:
+        return src.transform((cw, ch), Image.AFFINE, (ia, ib, c, id_, ie, f), resample=Image.BICUBIC)
+    out = src.transform((cw, ch), Image.AFFINE, (ia, ib, c, id_, ie, f), resample=Image.NEAREST)
+    if snap_scale > 1:
+        logical_w, logical_h = max(1, cw // snap_scale), max(1, ch // snap_scale)
+        out = out.resize((logical_w, logical_h), Image.Resampling.NEAREST)
+        out = out.resize((logical_w * snap_scale, logical_h * snap_scale), Image.Resampling.NEAREST)
+        if out.size != (cw, ch):  # cell not divisible by scale: pad back to exact cell
+            padded = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+            padded.alpha_composite(out, (0, 0))
+            out = padded
+    return out
 
 
 def empty_curation() -> dict[str, Any]:

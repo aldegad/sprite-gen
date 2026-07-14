@@ -209,6 +209,17 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 /* 원본 픽셀보다 확대 표시될 때만 붙는 클래스 — 픽셀아트 계단을 그대로 보여준다 */
 .stage img.px-upscale,
 .preview canvas.px-upscale { image-rendering: pixelated; }
+/* 변형 편집 중 실시간 격자 스냅 프리뷰 캔버스 (픽셀퍼펙트 줄 전용, applyCardTransform 소유) */
+.stage .snap-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  display: none;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
 .grid-overlay {
   position: absolute;
   inset: 0;
