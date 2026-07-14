@@ -53,6 +53,21 @@ def _build_pp_run(root):
     return run_dir
 
 
+def test_conform_false_keeps_native_logical_size(tmp_path) -> None:
+    """fit.conform=false skips the contract squeeze: the output keeps the snapped
+    native logical size even when it exceeds logical_height (physical cap only)."""
+    import json as _json
+    run_dir = _build_pp_run(tmp_path)
+    request = _json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request["fit"]["logical_height"] = 30  # art is 36 logical tall -> conform would squeeze to 30
+    request["fit"]["conform"] = False
+    (run_dir / "sprite-request.json").write_text(_json.dumps(request), encoding="utf-8")
+    assert extract_module.run(run_dir=run_dir) == 0
+    im = Image.open(run_dir / "frames" / "walk" / "frame-0.png").convert("RGBA")
+    bb = im.getchannel("A").getbbox()
+    assert bb[3] - bb[1] > 30, f"native size squeezed anyway: {bb}"
+
+
 def test_pixel_snap_scale_resolution() -> None:
     assert pixel_snap_scale({"cell": {"size": 64}}) is None  # no fit
     assert pixel_snap_scale({"cell": {"size": 64}, "fit": {"resample": "kcentroid"}}) is None
