@@ -144,8 +144,10 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 .pipeline-tree .tree ul { list-style: none; margin: 2px 0 0; padding-left: 26px; }
 .pipeline-tree .tree > ul { margin-left: 13px; }
 .pipeline-tree .tree li { position: relative; padding: 5px 0 3px 14px; }
-/* ├ 세로선: li 마다 자기 구간을 긋고, 마지막 자식은 tick 높이까지만 (└ 엘보) —
-   컨테이너 전체에 긋던 방식은 마지막 가지 아래로 선이 삐져나갔다 */
+/* 커넥터 기하:
+   - 트렁크(li::before) = 계속 아래로 내려가는 직선. 마지막 자식은 트렁크 없음.
+   - 가지(li::after)   = 트렁크에서 노드로 꺾여 들어가는 └ 모양, 모서리는 라운드.
+   모든 가지가 부드러운 곡선으로 노드에 붙고, 마지막 가지는 곡선만 남아 끝난다. */
 .pipeline-tree .tree li::before {
   content: "";
   position: absolute;
@@ -155,16 +157,18 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
   width: 1px;
   background: var(--line);
 }
-.pipeline-tree .tree li:last-child::before { bottom: auto; height: 19px; }
-/* ─ 가로 tick: 세로선에서 노드 왼쪽 모서리까지 정확히 잇는다 */
+.pipeline-tree .tree li:last-child::before { display: none; }
 .pipeline-tree .tree li::after {
   content: "";
   position: absolute;
   left: -13px;
-  top: 18px;
+  top: 0;
   width: 27px;
-  height: 1px;
-  background: var(--line);
+  height: 19px;
+  border-left: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-bottom-left-radius: 9px;
+  pointer-events: none;
 }
 .tree-node {
   position: relative;
@@ -209,9 +213,8 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 .tree-block > .tree-node.folder .tn-label { font-family: inherit; font-size: 12.5px; letter-spacing: 0.02em; text-transform: uppercase; }
 .tree-block > ul { margin-top: 2px; }
 
-/* 파이프라인 블록 — 연결선이 파이프처럼 아래로 흐른다 (대시가 흘러내리는 애니메이션).
-   세로 구간(li::before)마다 대시가 흐르고, 가로 tick(li::after)은 액센트,
-   각 노드 왼쪽에 화살촉이 붙어 흐름 방향이 읽힌다. */
+/* 파이프라인 블록 — 트렁크에 대시가 아래로 흐른다 (파이프에 물 흐르듯, 느긋하게).
+   가지 곡선은 액센트 정적, 가지 끝(노드 왼쪽 모서리)에 화살촉이 정확히 붙는다. */
 .tree-block.pipeline li::before {
   background:
     repeating-linear-gradient(to bottom,
@@ -220,20 +223,21 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
     linear-gradient(rgba(37, 99, 235, 0.28), rgba(37, 99, 235, 0.28));
   background-size: 1px 27px, 1px 100%;
   background-repeat: repeat-y, no-repeat;
-  animation: pipe-flow 1.15s linear infinite;
+  animation: pipe-flow 2.3s linear infinite;
 }
 @keyframes pipe-flow {
   to { background-position: 0 27px, 0 0; }
 }
-.tree-block.pipeline li::after { background: rgba(37, 99, 235, 0.4); }
+.tree-block.pipeline li::after { border-color: rgba(37, 99, 235, 0.45); }
+/* 화살촉: 가지 밑변(y=19px 라인) 연장선상에서 노드 모서리에 밀착 (li 좌표 기준) */
 .tree-block.pipeline li > .tree-node:first-of-type::before {
   content: "";
   position: absolute;
-  left: -6px;
+  left: -5px;
   top: 10px;
-  border: 3.5px solid transparent;
-  border-right: none;
-  border-left: 4.5px solid rgba(37, 99, 235, 0.6);
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  border-left: 5px solid rgba(37, 99, 235, 0.6);
 }
 @media (prefers-reduced-motion: reduce) {
   .tree-block.pipeline li::before { animation: none; }
@@ -269,7 +273,7 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 #sidebar .pipeline-tree .tree ul { padding-left: 14px; }
 #sidebar .pipeline-tree .tree li { padding-left: 8px; }
 #sidebar .pipeline-tree .tree li::before { left: -7px; }
-#sidebar .pipeline-tree .tree li::after { left: -7px; width: 15px; }
+#sidebar .pipeline-tree .tree li::after { left: -7px; width: 15px; border-bottom-left-radius: 7px; }
 #sidebar .tree-rows { flex-direction: column; gap: 2px; }
 #sidebar .tree-node { font-size: 12px; padding: 2px 7px; max-width: 100%; }
 #sidebar .tree-node .tn-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
