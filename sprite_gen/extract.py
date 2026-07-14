@@ -2284,6 +2284,17 @@ def _run(args: argparse.Namespace):
                     all_warnings.append(
                         f"{state}: native logical exceeds the physical cap "
                         f"{cap_w}x{cap_h} — capped frames (reroll candidates): {', '.join(over)}")
+                # 안전영역(사방 여백 준수 상한)은 넘었지만 물리캡 이내 = 여백 침범.
+                # 리롤 대상 아님 — 정보성 알림만 (수홍 확정 2026-07-14).
+                safe_w = max(1, (cell_width - safe_margin_x * 2) // pp_scale)
+                safe_h = max(1, (cell_height - safe_margin_y * 2) // pp_scale)
+                soft = [f"{i}:{s.width}x{s.height}" for i, s in enumerate(snapped)
+                        if (s.width > safe_w or s.height > safe_h)
+                        and s.width <= cap_w and s.height <= cap_h]
+                if soft:
+                    all_warnings.append(
+                        f"{state}: frames exceed the safe area {safe_w}x{safe_h} but fit "
+                        f"within the margin zone (informational, no action): {', '.join(soft)}")
                 logical_frames = conform_row_logical(snapped, cap_w, cap_h, pp_detail_bias)
             registered = register_row_frames(logical_frames)
             # 전/후 비교 쌍둥이(plain/orig)는 픽셀퍼펙트 프레임의 최종 콘텐츠 bbox 가

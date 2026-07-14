@@ -197,6 +197,9 @@ def _build_run_state_impl(run_dir: Path) -> dict:
     cell_state = {
         "width": int(cell.get("width", cell.get("size", 0))),
         "height": int(cell.get("height", cell.get("size", 0))),
+        # 안전영역/여백 알림 계산용 (여백 침범 = 정보성, 리롤 대상 아님)
+        "safeMarginX": int(cell.get("safe_margin_x", cell.get("safe_margin", 0))),
+        "safeMarginY": int(cell.get("safe_margin_y", cell.get("safe_margin", 0))),
     }
 
     # 픽셀퍼펙트 격자: 논리 픽셀 1칸이 셀 픽셀 몇 칸인가. extract 의 pp_scale 과 같은 식이어야

@@ -81,6 +81,8 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 .state-head .meta { color: var(--muted); font-size: 12px; }
 .state-head .action { color: var(--muted); font-size: 12px; font-style: italic; }
 .state-warn { color: var(--danger); font-size: 12px; }
+/* 여백 침범 정보 알림 — 경고가 아니라 순한 안내 톤 (리롤 대상 아님) */
+.state-note { color: var(--muted); font-size: 12px; border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; }
 
 .state-body { display: flex; gap: 18px; align-items: flex-start; min-width: 0; }
 .frames {
