@@ -758,6 +758,17 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .card-controls .flip-btn, .card-controls .reset-btn, .card-controls .arch-btn { flex: none; }
 .card-controls .arch-btn:hover { color: var(--accent, #0ea5e9); }
 
+/* 픽셀 편집 툴바 (확대 모달) */
+.edit-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.edit-toolbar .ghost { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 6px; }
+.edit-toolbar .ghost.active { background: var(--accent, #0ea5e9); color: #fff; border-color: transparent; }
+.et-swatches { display: inline-flex; gap: 3px; }
+.swatch { width: 18px; height: 18px; padding: 0; border: 1px solid rgba(0, 0, 0, 0.18); border-radius: 4px; cursor: pointer; box-shadow: none; }
+.et-color { width: 26px; height: 22px; padding: 0 1px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); cursor: pointer; }
+.et-note { font-size: 11px; }
+.stage.pixel-editing { cursor: crosshair; }
+.stage.pixel-editing .rotate-handle, .stage.pixel-editing .shear-handle, .stage.pixel-editing .scale-scrub { display: none; }
+
 /* 확대 편집 모달 — 한 프레임 크게, 격자/픽셀퍼펙트 토글하며 조정 */
 #zoom-modal { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; }
 #zoom-modal .zoom-backdrop { position: absolute; inset: 0; background: rgba(15, 18, 24, 0.5); }

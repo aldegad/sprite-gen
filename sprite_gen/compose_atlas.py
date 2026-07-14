@@ -10,7 +10,7 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.curation import apply_transform, frame_variant, load_curation, pixel_snap_scale, state_plan
+from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
@@ -113,7 +113,7 @@ def _run(args: argparse.Namespace):
                 errors.append(f"missing frame ({variant} variant): {frame_path}")
                 continue
             with Image.open(frame_path) as opened:
-                source = opened.convert("RGBA")
+                source = apply_pixel_edits(opened.convert("RGBA"), state_pixel_ops(curation, state).get(frame_index))
             if source.size != cell_size:
                 errors.append(f"{frame_path} is {source.width}x{source.height}; expected {cell_width}x{cell_height}")
             # apply the human curation transform (identity when uncurated)
