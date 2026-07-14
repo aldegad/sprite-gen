@@ -73,9 +73,10 @@ def _run(args: argparse.Namespace):
         state: state_plan(curation, state, int(request["states"][state]["frames"]))
         for state in states
     }
-    # 'plain' = pre-pixel-perfect twin (curator checkbox off). Fail loud when the
-    # twin is missing — a plain bake must never silently fall back to pixel.
-    variant = frame_variant(curation)
+    # 'plain' = pre-pixel-perfect twin (curator toggle off). Resolved per state
+    # (per-row curator toggle > run-wide default). Fail loud when the twin is
+    # missing — a plain bake must never silently fall back to pixel.
+    variants = {state: frame_variant(curation, state) for state in states}
 
     max_frames = max(len(ordered) for ordered, _transforms in plans.values())
     atlas = Image.new("RGBA", (max_frames * cell_width, len(states) * cell_height), (0, 0, 0, 0))
@@ -98,6 +99,7 @@ def _run(args: argparse.Namespace):
     for row_index, state in enumerate(states):
         entry = request["states"][state]
         ordered, transforms = plans[state]
+        variant = variants[state]
         frames = []
         for column, frame_index in enumerate(ordered):
             frame_path = run_dir / "frames" / state / frame_filename(frame_index, variant)
@@ -126,13 +128,19 @@ def _run(args: argparse.Namespace):
             "frames": len(ordered),
             "fps": int(entry.get("fps", 6)),
             "loop": bool(entry.get("loop", True)),
+            "frame_variant": variant,
         }
+
+    # top-level summary: uniform value when every row agrees, else 'mixed'
+    # (per-row truth lives in animation.rows.<state>.frame_variant).
+    unique_variants = set(variants.values())
+    variant_summary = unique_variants.pop() if len(unique_variants) == 1 else "mixed"
 
     report = {
         "ok": not errors,
         "engine": "component-row",
         "curation_applied": curation is not None,
-        "frame_variant": variant,
+        "frame_variant": variant_summary,
         "errors": errors,
         "atlas": args.atlas,
         "manifest": args.manifest,
@@ -156,7 +164,7 @@ def _run(args: argparse.Namespace):
         "game_input": args.atlas,
         "degraded_static_fallback": False,
         "curation_applied": curation is not None,
-        "frame_variant": variant,
+        "frame_variant": variant_summary,
         "sprite_sheet_alpha": args.atlas,
         "sprite_sheet_alpha_report": args.report,
         "base_image": request["character"].get("base_image"),

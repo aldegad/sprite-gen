@@ -98,7 +98,9 @@ Rules the display depends on:
   anchors: an imported row carries its generation material here so the view produces
   the same chips (§4).
 - **`frames/<state>/frame-N.plain.png`** (pixel-perfect runs only) is the *cell-sized*
-  pre-fit twin that `compose` bakes when the sidecar sets `pixel_perfect:false` — the
+  pre-fit twin that `compose` bakes when the sidecar turns pixel-perfect off for that
+  state (`states.<state>.pixel_perfect:false`, or the run-wide `pixel_perfect:false`
+  default — resolver: `curation.frame_variant(curation, state)`) — the
   atlas slot is cell-sized, so this twin must be too. **`frames/<state>/orig/frame-N.png`**
   is the *hi-res* (S×cell, capped) pre-fit twin the view displays when the user turns
   pixel-perfect off, so "off = original" is crisp instead of an upscaled cell blur. The
@@ -122,7 +124,7 @@ whole point is that the experience does not vary by who launched it.
 | **Base reference row** | `base-source.*` exists | `baseUrl` (null if absent) | Top row, pure image — no preview/select UI. Identity truth, always visible. |
 | **Generation-material chips** | the state has resolvable material | `states[].refs[]` — each `{role, name, url}` | Per-state header shows *what generated this row*. `role ∈ {anchor, basis, guide}`, labelled `방향 앵커` / `basis row` / `레이아웃 가이드` (i18n key `ref_<role>`). Only run-dir files that actually exist appear. |
 | **Pixel grid** | grid is known or measurable | `states[].pixelScale` + `pixelPerfect{label,scale}` | Snap grid at the logical pixel size. `fit.pixel_perfect` runs → request scale, label `48px`-style. Import/plain runs → per-row auto-measured block pitch, label `auto`. A row where the pitch cannot be measured draws **no grid** — no fake grid. |
-| **Original-quality toggle** | any frame has a pre-fit twin | `states[].frames[].plainUrl` + `fitPixelPerfect` | Top-right checkbox. Checked = canonical pixel-perfect `frame-N.png`; unchecked = `plainUrl` — the hi-res `orig/frame-N.png` when present (crisp "off = original"), else the cell-sized `.plain.png`. Absent twins hide the toggle. |
+| **Original-quality toggle** | any frame has a pre-fit twin | `states[].frames[].plainUrl` + `fitPixelPerfect` | **Per-state** toggle button in each twin-bearing row's header (on = canonical pixel-perfect `frame-N.png`; off = `plainUrl` — the hi-res `orig/frame-N.png` when present, else the cell-sized `.plain.png`; off also hides that row's pixel grid). The top-right checkbox is a **toggle-all** over the same per-state truth (indeterminate when rows are mixed). Absent twins hide both the row button and the checkbox. |
 
 `GET /api/run` payload — the display-relevant subset below (the full snapshot,
 including non-display fields like `states[].action`, is assembled by

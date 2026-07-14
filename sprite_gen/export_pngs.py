@@ -88,12 +88,13 @@ def _run(args: argparse.Namespace):
         indices = ordered if args.selected_only else list(range(default_count))
         labels = labels_by_state.get(state, [])
         multi_state = len(states) > 1
+        variant = frame_variant(curation, state)
         for index in indices:
-            src_path = run_dir / "frames" / state / frame_filename(index, frame_variant(curation))
+            src_path = run_dir / "frames" / state / frame_filename(index, variant)
             if not src_path.is_file():
                 raise SystemExit(
                     f"selected frame {src_path} is missing — the generation is incomplete or the "
-                    f"'{frame_variant(curation)}' variant was not baked (re-extract before exporting); "
+                    f"'{variant}' variant was not baked (re-extract before exporting); "
                     f"skipping it would silently drop a PNG."
                 )
             with Image.open(src_path) as opened:

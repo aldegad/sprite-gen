@@ -150,7 +150,7 @@ def _run_guarded(args, run_dir):
         user_frames = [index + 1 for index in ordered]
 
     selected = [
-        load_frame(run_dir, args.state, number, transforms.get(number - 1), cell_size, frame_variant(curation))
+        load_frame(run_dir, args.state, number, transforms.get(number - 1), cell_size, frame_variant(curation, args.state))
         for number in user_frames
     ]
     frame_paths = [path for path, _image in selected]

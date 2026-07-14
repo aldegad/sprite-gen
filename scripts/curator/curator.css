@@ -81,6 +81,10 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 .state-head .meta { color: var(--muted); font-size: 12px; }
 .state-head .action { color: var(--muted); font-size: 12px; font-style: italic; }
 .state-warn { color: var(--danger); font-size: 12px; }
+/* 줄별 픽셀퍼펙트 토글 — 켜짐(픽셀퍼펙트 표시·굽기)일 때 accent 강조 */
+.state-head .pp-state-btn { margin-left: auto; border: 1px solid var(--line); border-radius: 6px; align-self: center; }
+.state-head .pp-state-btn.active { background: var(--accent, #0ea5e9); color: #fff; border-color: transparent; }
+.state-head .pp-state-btn.active:hover { background: var(--accent, #0ea5e9); filter: brightness(1.1); }
 
 .state-body { display: flex; gap: 18px; align-items: flex-start; min-width: 0; }
 .frames {

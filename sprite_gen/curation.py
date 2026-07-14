@@ -23,14 +23,17 @@ Schema (`curation.json`):
                                               #   load_curation detects the mismatch and
                                               #   ignores this sidecar (all-frames default)
                                               #   so stale edits never apply to new frames.
-      "pixel_perfect": true,                 # optional; false -> compose reads the
-                                              #   frame-N.plain.png variant (pre-
+      "pixel_perfect": true,                 # optional run-wide DEFAULT; false -> compose
+                                              #   reads the frame-N.plain.png variant (pre-
                                               #   pixel-perfect). absent/true -> the
                                               #   canonical frame-N.png. Only
                                               #   meaningful when extraction saved
                                               #   both variants (fit.pixel_perfect).
       "states": {
         "<state>": {
+          "pixel_perfect": false,            # optional per-state override of the run-wide
+                                              #   default above (the curator's per-row
+                                              #   toggle). absent -> the run-wide value.
           "selected": [0, 1, 2, 3],          # 0-based frame indices, in play order
           "deleted": [4],                    # optional 0-based frame indices
                                                #   excluded from UI rows and bake.
@@ -96,13 +99,23 @@ def curation_path(run_dir: Path) -> Path:
     return run_dir / CURATION_FILENAME
 
 
-def frame_variant(curation: dict[str, Any] | None) -> str:
+def frame_variant(curation: dict[str, Any] | None, state: str | None = None) -> str:
     """Which extracted frame variant consumers read: 'pixel' or 'plain'.
 
-    'plain' only when the sidecar explicitly opts out of pixel-perfect
-    (`pixel_perfect: false` — the curator's top-right checkbox). Absent sidecar
-    or absent/true field -> the canonical pixel-perfected frames."""
-    if curation and curation.get("pixel_perfect") is False:
+    Resolution order (single source for every consumer):
+    1. the state's own `states.<state>.pixel_perfect` (the curator's per-row toggle),
+    2. the run-wide `pixel_perfect` default (the curator's toggle-all),
+    3. absent sidecar / absent fields -> the canonical pixel-perfected frames.
+
+    Called without `state` it resolves the run-wide default only (legacy callers,
+    single-state tools that pass their state explicitly elsewhere)."""
+    if not curation:
+        return "pixel"
+    if state is not None:
+        entry = curation.get("states", {}).get(state)
+        if isinstance(entry, dict) and isinstance(entry.get("pixel_perfect"), bool):
+            return "pixel" if entry["pixel_perfect"] else "plain"
+    if curation.get("pixel_perfect") is False:
         return "plain"
     return "pixel"
 
