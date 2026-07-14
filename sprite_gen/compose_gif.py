@@ -120,13 +120,14 @@ def _run_dir_mode_guarded(args, run_dir):
             continue
         fps = float(spec.get("fps", 8)) or 8.0
         ordered, transforms = state_plan(curation, state, count)
+        variant = frame_variant(curation, state)
         images: list[Image.Image] = []
         for index in ordered:
-            path = run_dir / "frames" / state / frame_filename(index, frame_variant(curation))
+            path = run_dir / "frames" / state / frame_filename(index, variant)
             if not path.is_file():
                 raise SystemExit(
                     f"selected frame {path} is missing — the generation is incomplete or the "
-                    f"'{frame_variant(curation)}' variant was not baked (re-extract before composing); "
+                    f"'{variant}' variant was not baked (re-extract before composing); "
                     f"skipping it would silently produce a shorter GIF."
                 )
             frame = Image.open(path).convert("RGBA")

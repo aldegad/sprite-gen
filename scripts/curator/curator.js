@@ -38,9 +38,11 @@ const STR = {
   en: {
     title: "curation", compose: "Bake atlas", export: "Export PNGs", exportGif: "Export GIFs",
     groundGrid: "Ground grid", langOther: "한국어",
-    ppApply: "Pixel-perfect", baseNote: "identity reference — not baked",
+    ppApply: "Pixel-perfect (all)", baseNote: "identity reference — not baked",
+    ppState: "Pixel-perfect",
+    tPpState: "toggle pixel-perfect for THIS row only — what it displays and what compose bakes",
     pxGrid: "Pixel grid", refsLabel: "generated from", ref_anchor: "direction anchor", ref_basis: "basis row", ref_guide: "layout guide", tPxGrid: "overlay the logical pixel grid the pixel-perfect stage snapped to (display only)",
-    tPpApply: "bake and show the pixel-perfected frames (off = the pre-pixel-perfect originals)",
+    tPpApply: "toggle pixel-perfect for ALL rows at once (each row header has its own toggle)",
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
@@ -59,9 +61,11 @@ const STR = {
   ko: {
     title: "큐레이션", compose: "아틀라스 굽기", export: "PNG 내보내기", exportGif: "GIF 내보내기",
     groundGrid: "바닥 그리드", langOther: "EN",
-    ppApply: "픽셀퍼펙트 적용", baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
+    ppApply: "픽셀퍼펙트 전체", baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
+    ppState: "픽셀퍼펙트",
+    tPpState: "이 줄만 픽셀퍼펙트 켜기/끄기 — 표시와 굽기가 같이 바뀐다",
     pxGrid: "픽셀 격자", refsLabel: "생성 재료", ref_anchor: "방향 앵커", ref_basis: "basis row", ref_guide: "레이아웃 가이드", tPxGrid: "픽셀퍼펙트가 실제로 스냅한 논리 픽셀 격자 오버레이 (표시 전용)",
-    tPpApply: "체크 = 픽셀퍼펙트 프레임 표시·굽기, 해제 = 적용 전 원본 표시·굽기",
+    tPpApply: "모든 줄의 픽셀퍼펙트를 한번에 켜기/끄기 (줄별 토글은 각 줄 헤더에)",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
@@ -90,12 +94,19 @@ const imageCache = new Map();
 const previews = {}; // stateName -> { playing, speed, cursor } preview transport state
 
 // --- pixel-perfect variant (fit.pixel_perfect runs save a .plain.png twin) --
-let ppAvailable = false; // any frame has a plain (pre-pixel-perfect) twin
-let ppApply = true;      // curation.json `pixel_perfect` — what compose bakes
-let ppView = "pixel";    // which variant the cards/preview display right now
+// Per-STATE toggles: each row with a twin gets its own on/off (what that row
+// displays AND bakes, persisted as curation.json states.<state>.pixel_perfect).
+// The header checkbox is a toggle-ALL over the same per-state truth.
+let ppAvailable = false;       // any state has a plain (pre-pixel-perfect) twin
+let ppTwinStates = new Set();  // states that actually saved a twin
+let ppStates = {};             // stateName -> bool (true = pixel-perfect variant)
 
-function frameUrl(frame) {
-  return ppView === "plain" && frame.plainUrl ? frame.plainUrl : frame.url;
+function ppOn(stateName) {
+  return ppStates[stateName] !== false;
+}
+
+function frameUrl(stateName, frame) {
+  return !ppOn(stateName) && frame.plainUrl ? frame.plainUrl : frame.url;
 }
 
 // 픽셀퍼펙트 격자 오버레이: 픽셀퍼펙트가 실제로 스냅한 논리 픽셀 간격을 그린다.
@@ -105,12 +116,14 @@ function frameUrl(frame) {
 function sizePxGrids() {
   // 줄 단위 격자: 계약 런은 전 줄 동일 scale, 계약 없는 런은 줄별 자동 측정값
   // (state.pixelScale). 측정 실패한 줄은 오버레이를 숨긴다 — 가짜 격자 금지.
+  // 픽셀퍼펙트를 끈 줄(plain 표시)도 숨긴다 — plain 은 스냅된 격자가 아니다.
   document.querySelectorAll(".card").forEach((card) => {
     const overlay = card.querySelector(".pxgrid");
     if (!overlay) return;
     const stage = card.querySelector(".stage");
     const st = run.states.find((s) => s.name === card.dataset.state);
-    const step = (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null;
+    const plainShown = ppTwinStates.has(card.dataset.state) && !ppOn(card.dataset.state);
+    const step = plainShown ? null : (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null;
     if (!step || !stage) { overlay.style.display = "none"; return; }
     overlay.style.display = "";
     const ds = (stage.clientWidth / run.cell.width) * step;
@@ -123,8 +136,26 @@ function refreshVariantImages() {
     const st = run.states.find((s) => s.name === card.dataset.state);
     const f = st && st.frames[Number(card.dataset.idx)];
     const el = card.querySelector(".stage img");
-    if (f && el) el.src = frameUrl(f);
+    if (f && el) el.src = frameUrl(card.dataset.state, f);
   });
+  sizePxGrids();
+}
+
+// per-state toggle buttons + the header toggle-all checkbox reflect ppStates
+function syncPpControls() {
+  document.querySelectorAll(".pp-state-btn").forEach((btn) => {
+    const on = ppOn(btn.dataset.state);
+    btn.classList.toggle("active", on);
+    btn.textContent = `${t("ppState")} ${on ? "◼" : "◻"}`;
+  });
+  const ppCheck = document.getElementById("pp-apply");
+  if (ppCheck && ppAvailable) {
+    const vals = [...ppTwinStates].map((n) => ppOn(n));
+    const allOn = vals.every(Boolean);
+    const allOff = vals.every((v) => !v);
+    ppCheck.checked = allOn;
+    ppCheck.indeterminate = !allOn && !allOff;
+  }
 }
 
 const statusEl = document.getElementById("status");
@@ -181,14 +212,21 @@ function buildPayload() {
       order: entry.order.slice(),
       transforms,
     };
+    // per-state pixel-perfect (the row's own toggle) — only for rows with a twin
+    if (ppTwinStates.has(name)) states[name].pixel_perfect = ppOn(name);
   }
   const payload = { version: run.schemaVersion || 1, kind: "sprite-gen-curation", states };
   // echo the run generation this view was loaded with; the server rejects the autosave
   // (409) if the run was re-imported/re-extracted under this session so stale selections
   // never land on new frames.
   if (run.runRevision) payload.runRevision = run.runRevision;
-  // only meaningful when the run saved plain twins — the top-right checkbox
-  if (ppAvailable) payload.pixel_perfect = ppApply;
+  // run-wide default field: written only when every twin row agrees (uniform),
+  // so a consumer without per-state awareness still bakes the right variant.
+  // Mixed rows -> omitted; the per-state values above are the truth.
+  if (ppAvailable) {
+    const vals = [...ppTwinStates].map((n) => ppOn(n));
+    if (vals.every((v) => v === vals[0])) payload.pixel_perfect = vals[0];
+  }
   return payload;
 }
 
@@ -587,6 +625,21 @@ function renderState(state) {
     `<span class="meta">${state.requestFrames} ${t("frames")} · ${state.fps}fps · ${state.loop ? t("loop") : t("nonLoop")} · ${t("cellPx")} ${run.cell.width}x${run.cell.height}px</span>` +
     (state.action ? `<span class="action">${escapeHtml(state.action)}</span>` : "") +
     (state.extractOk ? "" : `<span class="state-warn">${t("extractFail")}</span>`);
+  // 줄별 픽셀퍼펙트 토글 — 쌍둥이(plain/orig)가 실재하는 줄에만 노출
+  if (ppTwinStates.has(state.name)) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ghost pp-state-btn";
+    btn.dataset.state = state.name;
+    btn.title = t("tPpState");
+    btn.addEventListener("click", () => {
+      ppStates[state.name] = !ppOn(state.name);
+      syncPpControls();
+      refreshVariantImages();
+      scheduleSave();
+    });
+    head.appendChild(btn);
+  }
   wrap.appendChild(head);
 
   // 이 줄을 "무엇으로 생성했는가" — run dir 실재 파일 기준 ref 체인 (앵커/basis/가이드)
@@ -682,7 +735,7 @@ function renderCard(state, frame) {
   const stageInner = frame.present
     ? (run.iso ? `<canvas class="grid-overlay"></canvas>` : "") +
       `<div class="pxgrid"></div>` +
-      `<img src="${escapeHtml(frameUrl(frame))}" alt="frame ${frame.index}" draggable="false" />` +
+      `<img src="${escapeHtml(frameUrl(state.name, frame))}" alt="frame ${frame.index}" draggable="false" />` +
       `<div class="rotate-handle" title="${t("tRotate")}"></div>` +
       `<div class="shear-handle" title="${t("tShear")}"></div>`
     : `<div class="missing-label">missing</div>`;
@@ -790,7 +843,7 @@ function startPreview(state) {
     const idx = play[pv.cursor];
     pv.shown = idx; // remember which frame is on screen (for reanchoring on edits)
     const f = state.frames[idx];
-    const image = f ? img(frameUrl(f)) : null;
+    const image = f ? img(frameUrl(state.name, f)) : null;
     if (image && image.complete && image.naturalWidth) {
       const tr = getTransform(state.name, idx);
       const m = matrixOf(tr);
@@ -1068,10 +1121,16 @@ async function boot() {
   // initial language: ?lang= (set by the toggle) overrides the server --lang
   lang = new URLSearchParams(location.search).get("lang") || run.lang || "en";
   document.documentElement.lang = lang;
-  // pixel-perfect twin state must resolve BEFORE first render (frameUrl reads it)
-  ppAvailable = run.states.some((s) => s.frames.some((f) => f.plainUrl));
-  ppApply = !(run.curation && run.curation.pixel_perfect === false);
-  ppView = ppApply ? "pixel" : "plain";
+  // pixel-perfect twin state must resolve BEFORE first render (frameUrl reads it):
+  // per-state truth = states.<state>.pixel_perfect override > run-wide default > on.
+  ppTwinStates = new Set(run.states.filter((s) => s.frames.some((f) => f.plainUrl)).map((s) => s.name));
+  ppAvailable = ppTwinStates.size > 0;
+  const ppDefault = !(run.curation && run.curation.pixel_perfect === false);
+  ppStates = {};
+  for (const s of run.states) {
+    const c = run.curation && run.curation.states && run.curation.states[s.name];
+    ppStates[s.name] = c && typeof c.pixel_perfect === "boolean" ? c.pixel_perfect : ppDefault;
+  }
   applyStaticLang();
   document.getElementById("character").textContent = `${run.characterId} · ${run.cell.width}×${run.cell.height}`;
   if (run.iso) gridToggle.hidden = false;
@@ -1079,11 +1138,12 @@ async function boot() {
     const ppWrap = document.getElementById("pp-wrap");
     const ppCheck = document.getElementById("pp-apply");
     ppWrap.hidden = false;
-    ppCheck.checked = ppApply;
-    // 체크박스 하나가 표시와 굽기를 함께 결정한다 (별도 보기 토글 없음).
+    // 전체 토글: 클릭 = 쌍둥이 있는 모든 줄을 새 값으로 일괄 설정. 줄들이 섞여
+    // 있으면(일부 on/일부 off) indeterminate 로 표시한다 (syncPpControls).
     ppCheck.addEventListener("change", () => {
-      ppApply = ppCheck.checked;
-      ppView = ppApply ? "pixel" : "plain";
+      const on = ppCheck.checked;
+      for (const n of ppTwinStates) ppStates[n] = on;
+      syncPpControls();
       refreshVariantImages();
       scheduleSave();
     });
@@ -1100,8 +1160,8 @@ async function boot() {
   seedEntries();
   if (run.baseUrl) renderBaseRow();
   for (const state of run.states) renderState(state);
+  syncPpControls();
   refreshVariantImages();
-  sizePxGrids();
   setStatus(run.curation && Object.keys(run.curation.states || {}).length ? t("loaded") : t("ready"));
 }
 

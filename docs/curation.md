@@ -95,6 +95,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   "pixel_perfect": true,
   "states": {
     "idle": {
+      "pixel_perfect": false,
       "selected": [0, 2, 3],
       "order": [0, 2, 3, 1],
       "transforms": {
@@ -114,7 +115,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   (all-frames default, warned on stderr), never applied to frames it isn't proven to belong to.
   The `POST /api/curation` autosave echoes it as `runRevision` and the server rejects a
   mismatched write (`HTTP 409`). See [`run-contract.md`](run-contract.md) §4.
-- `pixel_perfect` — top-level, 웹뷰 우측 상단 체크박스. `false` → compose/export 가 적용 전 쌍둥이(`frame-N.plain.png`)를 굽는다. 없거나 `true` → canonical `frame-N.png`. plain 쌍둥이가 없는 런에서는 무의미(비 pixel_perfect fit). 상세는 [`pixel-perfect.md`](pixel-perfect.md).
+- `pixel_perfect` — **두 층위**. top-level = 런 전체 기본값(웹뷰 우측 상단 "전체 토글" — 모든 줄을 한번에 설정; 줄별 값이 섞이면 웹뷰는 이 필드를 생략한다). `states.<state>.pixel_perfect` = 줄별 override(각 줄 헤더의 토글). 해석 순서는 `curation.frame_variant(curation, state)` 가 SSoT: 줄별 값 > top-level > 기본 `true`. `false` 인 줄은 compose/export/GIF 가 적용 전 쌍둥이(`frame-N.plain.png`)를 굽고, 없거나 `true` 인 줄은 canonical `frame-N.png`. plain 쌍둥이가 없는 런에서는 무의미(비 pixel_perfect fit). manifest 는 줄별 `animation.rows.<state>.frame_variant` 와 top-level 요약(`pixel`/`plain`/`mixed`)을 기록한다. 상세는 [`pixel-perfect.md`](pixel-perfect.md).
 - `selected` — 0-based frame indices in play order. Absent/empty → all extracted frames in order.
 - `order` — optional, webview-owned: the full display order (sequence row then candidate-pool row) so reopening the curator restores the exact arrangement of both rows. `compose` / `state_plan` ignore it and key off `selected`.
 - `transforms` — keyed by 0-based frame index. `rotate` degrees (counter-clockwise positive, PIL convention), `scale` multiplier about center, `dx`/`dy` pixel offsets in the cell (+x right, +y down), `shx`/`shy` shear, `flipX` (0|1) horizontal mirror. Absent → identity.
