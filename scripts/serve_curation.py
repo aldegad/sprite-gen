@@ -50,7 +50,7 @@ from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported
 from extract import heal_run, load_consistent_frames_manifest
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from sprite_gen.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel
+from sprite_gen.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel, state_frame_total
 from runio import publish_guard, read_guard
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -224,7 +224,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         row = rows_by_state.get(state, {})
         files = row.get("files", [])
         labels = row.get("labels", [])
-        frame_count = int(entry["frames"])
+        frame_count = state_frame_total(request, state)
         state_raw_rel = raw_rel(request, state)
         raw_present = (run_dir / state_raw_rel).is_file()
         state_frames_rel = frames_dir_rel(request, state)

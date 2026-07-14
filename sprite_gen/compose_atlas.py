@@ -12,7 +12,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, state_pixel_ops, state_plan
-from sprite_gen.layout import row_frame_rel
+from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import heal_run, require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
 
@@ -80,7 +80,7 @@ def _run(args: argparse.Namespace):
     # state uses all extracted frames in order with identity transform.
     curation = load_curation(run_dir)
     plans = {
-        state: state_plan(curation, state, int(request["states"][state]["frames"]))
+        state: state_plan(curation, state, state_frame_total(request, state))
         for state in states
     }
     # 'plain' = pre-pixel-perfect twin (curator toggle off). Resolved per state

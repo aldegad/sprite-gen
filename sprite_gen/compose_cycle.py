@@ -17,7 +17,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, state_pixel_ops, state_plan
-from sprite_gen.layout import row_frame_rel
+from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, save_clean_gif
 from sprite_gen.runio import read_guard, relative_posix
@@ -144,7 +144,7 @@ def _run_guarded(args, run_dir):
         int(cell.get("width", cell.get("size", 0))),
         int(cell.get("height", cell.get("size", 0))),
     )
-    default_count = int(request["states"][args.state]["frames"])
+    default_count = state_frame_total(request, args.state)
     curation = load_curation(run_dir)
     ordered, transforms = state_plan(curation, args.state, default_count)
 

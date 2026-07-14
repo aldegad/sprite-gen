@@ -225,6 +225,15 @@ Every run starts with `sprite-request.json`. It owns the numeric recipe used by 
 
 `256` is a default variable, not a hidden constant. Change it through the request, then regenerate guides, prompts, extraction, and atlas from the same request.
 
+**테이크(takes)** — 같은 상태의 후보/보강 스트립은 수동 병합이 아니라 request 로 선언한다:
+`"states": { "down_idle": { "frames": 4, ..., "takes": [{ "label": "blink", "frames": 4 }] } }`
++ `raw/<...>.takes/<label>.png`. 추출이 primary 뒤에 이어붙여 한 행의 프레임 풀을 만들고
+manifest `labels`("blink#0"…)로 큐레이션 뷰에 표시된다. 계약 상세: `docs/run-contract.md` §2.
+
+**실시간 계약** — `frames/` 는 (raw + request + 엔진)의 파생 캐시다. 큐레이션 뷰·compose·
+다운로드가 진입 시 `heal_run` 으로 stale 행을 자동 재유도하므로 "재추출" 을 별도 스텝으로
+지시할 필요가 없다 (raw 없는 행은 보존 + 관측 노트). 캐시 키 = 행별 `engine_revision`.
+
 Optional `fit` object (opt-in; absent means legacy behavior), exposed by `prepare_sprite_run.py` as `--fit-*` flags:
 
 - `"fit": { "resample": "kcentroid", "align_x": "foot-centroid", "align_y": "bottom" }` — pixel-art-aware downscale and jitter-free frame alignment. `align_x: "alpha-centroid"` (opt-in, perfectpixel-studio port) aligns the fringe-insensitive alpha-weighted centroid per frame — the strongest anti-jitter anchor for walk/run rows.

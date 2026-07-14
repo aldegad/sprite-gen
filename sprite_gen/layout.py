@@ -54,6 +54,17 @@ def raw_rel(request: dict[str, Any], state: str) -> str:
     return _joined("raw", request, state, ".png")
 
 
+def state_frame_total(request: dict[str, Any], state: str) -> int:
+    """상태의 행 프레임 풀 총량 = primary `frames` + 선언된 테이크들의 `frames` 합.
+
+    소비자(합성/뷰/검사)가 행 크기를 request 에서 셀 때는 반드시 이 값을 쓴다 —
+    primary 만 세면 takes 가 있는 행이 '초과 프레임'으로 오판된다."""
+    spec = request["states"][state]
+    total = int(spec.get("frames", 0))
+    total += sum(int(take.get("frames", 0)) for take in (spec.get("takes") or []))
+    return total
+
+
 def take_raw_rel(request: dict[str, Any], state: str, label: str) -> str:
     """추가 테이크(같은 상태의 후보/보강 생성 스트립) 원본 경로.
 
