@@ -53,7 +53,15 @@ This launches a standalone local webview (no Studio dependency — usable from C
 
 The webview UI is bilingual (English / Korean). Pass `--lang en|ko` to match the user's language (it is also toggleable in the app); default is `en`. For isometric sets imported with `--pngs-dir`, a sibling `meta.json` tile/anchor adds a ground-grid overlay for aligning furniture with the shear handle.
 
-All edits are **non-destructive**: they are saved to `curation.json` in the run dir, and the original `frames/<state>/frame-N.png` files are never rewritten. The compose step bakes `curation.json` deterministically, so any curation decision is reversible by editing or deleting that file. The "Compose 굽기" button re-runs `compose_sprite_atlas.py`.
+All edits are **non-destructive**: they are saved to `curation.json` in the run dir, and the original `frames/<state>/frame-N.png` files are never rewritten. The compose step bakes `curation.json` deterministically, so any curation decision is reversible by editing or deleting that file.
+
+**실시간 계약 (수홍 확정 2026-07-14/15)** — 뷰에는 '재추출' 개념이 없다. 뷰가 보여주는 것은
+항상 (raw + request + 현재 엔진 + 큐레이션)의 실시간 결과다: `/api/run`·`/api/progress` 가
+요청마다 stale 프레임 캐시를 자가치유(heal)하고, 엔진이 바뀌면 열려 있는 페이지도 다음 폴에서
+자동 재계산·리로드된다 (자세한 캐시 키 계약은 run-contract.md §2 frames-manifest 절).
+상단 버튼 3종(**아틀라스/PNG/GIF 다운로드**, `GET /download/{atlas,pngs,gifs}`)은 '게임에 적용'이
+아니라 지금 보이는 라이브 상태를 그 자리에서 계산해 zip 으로 내려주는 **다운로드**다 — 계산
+산출물은 런 폴더에도 남는다 (런 폴더 = 작업장, 다운로드 = 핸드오프).
 
 This step is optional. When there is no `curation.json`, every state uses all extracted frames in order with identity transform — an explicit default, not a silent fallback.
 

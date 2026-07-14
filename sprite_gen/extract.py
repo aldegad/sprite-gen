@@ -1908,8 +1908,11 @@ def _require_generation_consistency(run_dir: Path, manifest: dict, name: str,
         ) if state_dir.is_dir() else []
         if physical != sorted(files):
             raise SystemExit(f"corrupt {name} {run_dir}: row '{state}' files {sorted(files)} != physical canonical frames {physical}")
-        # a complete generation has exactly the request's frame count for the state
-        expected = int(request_states_spec.get(state, {}).get("frames", len(files)))
+        # a complete generation has exactly the request's frame count for the state —
+        # 행 프레임 풀 = primary + 선언된 테이크들 (takes 1급 계약)
+        state_spec = request_states_spec.get(state, {})
+        expected = int(state_spec.get("frames", len(files)))
+        expected += sum(int(take.get("frames", 0)) for take in (state_spec.get("takes") or []))
         if len(files) != expected:
             raise SystemExit(f"corrupt {name} {run_dir}: row '{state}' has {len(files)} frame(s), request expects {expected}")
         if "frames" in row and row["frames"] != len(files):

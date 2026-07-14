@@ -13,7 +13,7 @@ from typing import Any
 from PIL import Image, ImageChops
 
 from sprite_gen import extract
-from sprite_gen.layout import frames_dir_rel, raw_rel
+from sprite_gen.layout import frames_dir_rel, raw_rel, state_frame_total
 from sprite_gen.runio import acquire_run_dir_lock, atomic_write_text, read_guard, relative_posix
 from sprite_gen.segment import segment_strip
 
@@ -318,7 +318,7 @@ def _inspect_run_impl(run_dir: Path, states: str = "all", **kwargs: object) -> d
     warnings: list[str] = []
 
     for state in selected:
-        expected = int(request["states"][state]["frames"])
+        expected = state_frame_total(request, state)
         frames, files = _load_extracted_frames(run_dir, state, request)
         source = "frames"
         natural_found: int | None = None

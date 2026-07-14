@@ -15,7 +15,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, state_pixel_ops, state_plan
-from sprite_gen.layout import row_frame_rel
+from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import read_guard
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, gif_report, save_clean_gif
@@ -117,7 +117,7 @@ def _run_dir_mode_guarded(args, run_dir):
 
     exports: list[dict] = []
     for state, spec in states.items():
-        count = int(spec.get("frames", 0))
+        count = state_frame_total(request, state)
         if count <= 0:
             continue
         fps = float(spec.get("fps", 8)) or 8.0

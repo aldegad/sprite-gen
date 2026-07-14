@@ -27,7 +27,7 @@ from pathlib import Path
 from PIL import Image
 
 from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, state_pixel_ops, state_plan
-from sprite_gen.layout import row_frame_rel
+from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image
 
@@ -85,7 +85,7 @@ def _run(args: argparse.Namespace):
     for state in states:
         if state not in request["states"]:
             raise SystemExit(f"unknown state: {state}")
-        default_count = int(request["states"][state]["frames"])
+        default_count = state_frame_total(request, state)
         ordered, transforms = state_plan(curation, state, default_count)
         indices = ordered if args.selected_only else list(range(default_count))
         labels = labels_by_state.get(state, [])

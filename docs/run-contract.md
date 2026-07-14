@@ -67,12 +67,24 @@ not restate it elsewhere; point here.
   # (row_frame_rel) — 패턴 조립 금지. layout 필드 없는 legacy 런은 flat 유지.
   # 프로젝트별 정비 방식이 지침으로 오면 지침이 우선한다.
   raw/<direction>/<pose>.png                 # 택소노미: 생성 스트립
+  raw/<direction>/<pose>.takes/<label>.png   # 테이크: 같은 상태의 추가 후보/보강 스트립 (아래 참조)
   frames/<direction>/<pose>/frame-N.png      # 택소노미: 추출 프레임 (+ .plain / orig/)
   references/layout-guides/<direction>/<pose>.png
   prompts/<direction>/<pose>.txt
+  # ── 테이크 (takes 1급 계약, 2026-07-15) ── request `states.<s>.takes: [{label, frames}]`
+  # 가 선언하면 추출이 primary 스트립 뒤에 각 테이크 스트립을 이어붙여 한 행의 프레임
+  # 풀을 만든다 (스트립별 합의 피치로 따로 스냅, 행 정합·팔레트·배치는 함께).
+  # manifest row 에 labels("blink#0"…)/takes(start·frames·raw)가 남고, 소비자가 행
+  # 크기를 request 에서 셀 때는 layout.state_frame_total(primary+takes 합)을 쓴다.
+  # 어느 스트립 하나라도 실패하면 행 전체가 이전 세대로 남는다 (부분 풀 게시 금지).
   frames/<state>/frame-N.plain.png   # pixel-perfect runs only: cell-sized pre-pixel-perfect twin, baked by compose on pixel_perfect:false (§3)
   frames/<state>/orig/frame-N.png    # pixel-perfect runs only: hi-res original twin (display-only), drives the pp-off toggle at original quality (§3)
   frames/frames-manifest.json        # per-row extract report (files, labels, ok) — only ever a COMPLETE ok generation (§6)
+  # frames/ 는 (raw + request + 엔진)의 파생 캐시다 (실시간 계약, 수홍 확정 2026-07-14):
+  # 행별 engine_revision(엔진 소스 해시) 스탬프가 캐시 키. 소비자(큐레이션 뷰 /api/run·
+  # /api/progress, compose_atlas, /download/*)는 진입 시 extract.heal_run 으로 stale 행을
+  # raw 에서 자동 재유도한다 — 뷰에 '재추출' 개념이 없다. raw 가 없는 행은 보존 + 관측
+  # 노트(kept_stale). manifest 의 extract_args 가 재유도 플래그 재현을 보장한다.
   extract-failure.json               # while any state's extract is unresolved: per-state ok:false diagnostics, OUTSIDE frames/ (§6); merged per state, removed once all resolved
   curation.json                      # optional, non-destructive sidecar (selected/order/transforms/pixel_perfect)
   unpack-source.json                 # import runs only (unpack_atlas_run.py): provenance — atlas/pngs source, base_source, imported_refs
