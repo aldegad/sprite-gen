@@ -57,7 +57,7 @@ const STR = {
     zoneSeq: "Running sequence", zonePool: "Candidate pool — drag a cut up to add it", addToSeq: "✓ add", removeFromSeq: "✗ remove",
     cellPx: "cell", tContentPx: "actual sprite pixels (transparent padding excluded)",
     tZoomOpen: "inspect large (double-click the image works too)",
-    tZoomStage: "wheel/pinch = view zoom · drag = move · Shift+wheel = sprite scale",
+    tZoomStage: "wheel/pinch = view zoom · drag = move · bottom-right magnifier = sprite scale",
     zoomClose: "✕", tZoomPrev: "previous frame", tZoomNext: "next frame",
     marginNote: "in margin zone",
     dirAnchorBadge: "direction anchor",
@@ -89,7 +89,7 @@ const STR = {
     reloadBanner: "run updated — click to reload the view",
     tTreeNode: "click to scroll to this row",
     tMarginNote: "some frames exceed the safe area but fit within the margin zone — informational, not a reroll flag",
-    hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "wheel = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
+    hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "hover a frame -> bottom-right magnifier = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
     exportDone: (n) => `${n} PNGs → curated/`,
     exportGifDone: (n) => `${n} GIFs → exports/`,
   },
@@ -115,7 +115,7 @@ const STR = {
     zoneSeq: "달리기 시퀀스", zonePool: "후보 풀 — 마음에 드는 컷을 위로 끌어 추가", addToSeq: "✓ 넣기", removeFromSeq: "✗ 빼기",
     cellPx: "셀", tContentPx: "실제 스프라이트 픽셀 (투명 여백 제외)",
     tZoomOpen: "크게 보기 (이미지 더블클릭도 됨)",
-    tZoomStage: "휠/핀치 = 화면 확대 · 드래그 = 이동 · Shift+휠 = 스프라이트 크기",
+    tZoomStage: "휠/핀치 = 화면 확대 · 드래그 = 이동 · 우하단 돋보기 = 스프라이트 크기",
     zoomClose: "✕", tZoomPrev: "이전 프레임", tZoomNext: "다음 프레임",
     marginNote: "여백 침범",
     dirAnchorBadge: "방향 앵커",
@@ -147,7 +147,7 @@ const STR = {
     reloadBanner: "런이 갱신됐어 — 클릭해서 새로고침",
     tTreeNode: "클릭하면 해당 줄로 이동",
     tMarginNote: "안전영역은 넘었지만 안전마진 안에 있음 — 정보성 알림, 리롤 대상 아님",
-    hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "휠 = 확대/축소", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
+    hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "프레임 호버 → 우하단 돋보기 = 크기", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
     exportDone: (n) => `PNG ${n}장 → curated/`,
     exportGifDone: (n) => `GIF ${n}개 → exports/`,
   },
@@ -552,19 +552,7 @@ function wireStage(stage, stateName, idx) {
     stage.addEventListener("pointerup", onUp);
   });
 
-  // scale with the wheel
-  stage.addEventListener(
-    "wheel",
-    (ev) => {
-      ev.preventDefault();
-      const t = getTransform(stateName, idx);
-      const factor = ev.deltaY < 0 ? 1.05 : 1 / 1.05;
-      t.scale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, t.scale * factor));
-      applyFrameTransformAll(stateName, idx);
-      scheduleSave();
-    },
-    { passive: false }
-  );
+  // (휠 스케일 제거 — 맥 터치패드 오작동. 크기 조절은 우하단 돋보기 스크러버로.)
 
   // rotate via the top handle
   const handle = stage.querySelector(".rotate-handle");
@@ -867,11 +855,14 @@ function makeScaleScrub(stateName, idx) {
   wrap.title = t("tScaleScrub");
   wrap.innerHTML =
     '<button type="button" class="ghost ss-step" data-dir="-1" aria-label="smaller">' +
-    '<svg viewBox="0 0 8 12" width="6" height="9"><path d="M6.5 1 2 6l4.5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
+    '<svg viewBox="0 0 10 10" width="9" height="9"><path d="M2 5h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>' +
     '<span class="ss-grab" aria-label="drag to scale">' +
-    '<svg viewBox="0 0 16 16" width="12" height="12"><circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.2 10.2 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>' +
+    '<svg viewBox="0 0 16 16" width="13" height="13">' +
+    '<circle cx="7" cy="7" r="4.4" fill="none" stroke="currentColor" stroke-width="1.4"/>' +
+    '<path d="M7 5.2v3.6M5.2 7h3.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>' +
+    '<path d="M10.4 10.4 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>' +
     '<button type="button" class="ghost ss-step" data-dir="1" aria-label="bigger">' +
-    '<svg viewBox="0 0 8 12" width="6" height="9"><path d="M1.5 1 6 6l-4.5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>';
+    '<svg viewBox="0 0 10 10" width="9" height="9"><path d="M2 5h6M5 2v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
   const clamp = (v) => Math.min(SCALE_MAX, Math.max(SCALE_MIN, v));
   wrap.querySelectorAll(".ss-step").forEach((btn) => {
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
@@ -1564,8 +1555,7 @@ function renderCard(state, frame) {
     const archBtn = card.querySelector(".arch-btn");
     archBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
     archBtn.addEventListener("click", () => archiveFrame(state.name, frame.index));
-    const controls = card.querySelector(".card-controls");
-    controls.insertBefore(makeScaleScrub(state.name, frame.index), card.querySelector(".flip-btn"));
+    card.querySelector(".stage").appendChild(makeScaleScrub(state.name, frame.index));
   }
   return card;
 }
@@ -1778,12 +1768,11 @@ function openZoom(stateName, idx, keepWidth) {
   modal.querySelector(".zoom-backdrop").addEventListener("click", closeZoom);
   card.querySelector(".reset-btn").addEventListener("click", () => resetTransform(stateName, idx));
   card.querySelector(".flip-btn").addEventListener("click", () => toggleFlipX(stateName, idx));
-  card.querySelector(".card-controls").insertBefore(makeScaleScrub(stateName, idx), card.querySelector(".flip-btn"));
+  stage.appendChild(makeScaleScrub(stateName, idx));
 
   // 뷰 확대: 휠/핀치(ctrl+휠). wireStage 의 휠(스프라이트 스케일)보다 먼저 등록해
   // 가로채고, Shift+휠만 스프라이트 스케일로 통과시킨다.
   stage.addEventListener("wheel", (ev) => {
-    if (ev.shiftKey) return;
     ev.preventDefault();
     ev.stopImmediatePropagation();
     const factor = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
