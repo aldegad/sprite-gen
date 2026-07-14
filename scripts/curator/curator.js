@@ -64,6 +64,13 @@ const STR = {
     tDirAnchorBadge: "canonical facing anchor for this direction — generated from the base; every other row of this direction derives identity from it",
     dirGroupLabel: (d) => `direction · ${d}`,
     dirMirrorLabel: (d, src) => `direction · ${d} — runtime mirror of ${src} (not generated)`,
+    treeTitle: "generation structure",
+    treeBaseNote: "base — first identity truth",
+    treeIdleRow: "idle row",
+    treeAnchorNote: "anchor · single frame-0 crop",
+    treeMirror: (d, src) => `${d} — runtime mirror of ${src} (not generated)`,
+    treePending: "not generated yet",
+    tTreeNode: "click to scroll to this row",
     tMarginNote: "some frames exceed the safe area but fit within the margin zone — informational, not a reroll flag",
     hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "wheel = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
     exportDone: (n) => `${n} PNGs → curated/`,
@@ -98,6 +105,13 @@ const STR = {
     tDirAnchorBadge: "이 방향의 canonical 앵커 — base 에서 생성되고, 이 방향의 다른 모든 행이 여기서 identity 를 가져온다",
     dirGroupLabel: (d) => `방향 · ${d}`,
     dirMirrorLabel: (d, src) => `방향 · ${d} — ${src} 런타임 미러 (생성 없음)`,
+    treeTitle: "생성 구조",
+    treeBaseNote: "base — 최초 identity",
+    treeIdleRow: "idle 행",
+    treeAnchorNote: "앵커 · frame-0 크롭 1장",
+    treeMirror: (d, src) => `${d} — ${src} 런타임 미러 (생성 없음)`,
+    treePending: "미생성",
+    tTreeNode: "클릭하면 해당 줄로 이동",
     tMarginNote: "안전영역은 넘었지만 안전마진 안에 있음 — 정보성 알림, 리롤 대상 아님",
     hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "휠 = 확대/축소", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
     exportDone: (n) => `PNG ${n}장 → curated/`,
@@ -808,6 +822,7 @@ function escapeHtml(s) {
 function renderState(state) {
   const wrap = document.createElement("section");
   wrap.className = "state";
+  wrap.dataset.state = state.name;
 
   const head = document.createElement("div");
   head.className = "state-head";
@@ -905,6 +920,92 @@ function renderState(state) {
   }
   renderSelectionState(state.name);
   startPreview(state);
+}
+
+// --- 생성 구조 트리 (파이프라인 개요) ----------------------------------------
+// base → 방향별 idle 행 → 앵커(frame-0 크롭 1장) → 각 행. 방향 계약 없는 런은
+// base → 행 2단. 미생성 노드는 점선(진행 현황판 겸용), 클릭 = 해당 줄로 스크롤.
+function treeNode(label, note, thumbUrl, targetState, extra) {
+  const node = document.createElement("span");
+  node.className = "tree-node" + (thumbUrl === false ? " pending" : "") + (extra ? " " + extra : "");
+  if (thumbUrl) {
+    const img = document.createElement("img");
+    img.src = thumbUrl;
+    img.alt = label;
+    node.appendChild(img);
+  } else if (thumbUrl === false) {
+    node.appendChild(Object.assign(document.createElement("span"), { className: "thumb-missing" }));
+  }
+  node.appendChild(Object.assign(document.createElement("span"), { className: "tn-label", textContent: label }));
+  if (note) node.appendChild(Object.assign(document.createElement("span"), { className: "tn-note", textContent: note }));
+  if (targetState) {
+    node.title = t("tTreeNode");
+    node.classList.add("clickable");
+    node.addEventListener("click", () => {
+      const section = document.querySelector(`.state[data-state="${cssEscape(targetState)}"]`);
+      if (section) section.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+  return node;
+}
+
+function renderPipelineTree() {
+  const byName = new Map(run.states.map((s) => [s.name, s]));
+  const frame0 = (name) => {
+    const st = byName.get(name);
+    const f = st && st.frames.find((fr) => fr.index === 0 && fr.present);
+    return f ? frameUrl(name, f) : false; // false = 미생성 표시
+  };
+  const wrap = document.createElement("section");
+  wrap.className = "state pipeline-tree";
+  wrap.innerHTML = `<div class="state-head"><span class="name">${t("treeTitle")}</span></div>`;
+  const root = document.createElement("div");
+  root.className = "tree";
+  // 루트: base
+  root.appendChild(treeNode("base", t("treeBaseNote"), run.baseUrl || false, null, "tree-root"));
+  const branches = document.createElement("ul");
+  const rowChips = (names) => {
+    const ul = document.createElement("ul");
+    ul.className = "tree-rows";
+    for (const name of names) {
+      const li = document.createElement("li");
+      li.appendChild(treeNode(name, null, frame0(name), name));
+      ul.appendChild(li);
+    }
+    return ul;
+  };
+  if (run.directionGroups && run.directionGroups.length) {
+    for (const group of run.directionGroups) {
+      const li = document.createElement("li");
+      if (group.mirrorOf) {
+        li.appendChild(treeNode(STR[lang].treeMirror(group.direction, group.mirrorOf), null, undefined, null, "mirror"));
+        branches.appendChild(li);
+        continue;
+      }
+      const anchorThumb = group.anchor ? frame0(group.anchor) : false;
+      if (group.anchor) {
+        li.appendChild(treeNode(group.anchor, t("treeIdleRow"), anchorThumb, group.anchor));
+        const anchorUl = document.createElement("ul");
+        const anchorLi = document.createElement("li");
+        anchorLi.appendChild(treeNode(`${group.direction} ${t("dirAnchorBadge")}`, t("treeAnchorNote"), anchorThumb, group.anchor, "anchor"));
+        anchorLi.appendChild(rowChips(group.states.filter((n) => n !== group.anchor)));
+        anchorUl.appendChild(anchorLi);
+        li.appendChild(anchorUl);
+      } else {
+        li.appendChild(treeNode(group.direction, null, undefined, null));
+        li.appendChild(rowChips(group.states));
+      }
+      branches.appendChild(li);
+    }
+  }
+  if (branches.children.length) {
+    root.appendChild(branches);
+  } else {
+    // 방향 계약 없는 런(이펙트 등): base → 행 2단
+    root.appendChild(rowChips(run.states.map((s) => s.name)));
+  }
+  wrap.appendChild(root);
+  document.getElementById("states").appendChild(wrap);
 }
 
 // 최상단 base 참조 줄 — 아이덴티티 truth 를 생성 결과와 나란히 비교하기 위한
@@ -1473,11 +1574,14 @@ async function boot() {
     sizePxGrids();
   });
   seedEntries();
+  if (run.directionGroups && run.directionGroups.length) {
+    anchorStates = new Set(run.directionGroups.map((g) => g.anchor).filter(Boolean));
+  }
+  renderPipelineTree();
   if (run.baseUrl) renderBaseRow();
   // 방향 계약 런: 방향별 그룹(앵커 우선) + 미러 방향(생성 생략) 스트립으로 렌더.
   // 계약 없는 런은 기존 flat 순서 그대로.
   if (run.directionGroups && run.directionGroups.length) {
-    anchorStates = new Set(run.directionGroups.map((g) => g.anchor).filter(Boolean));
     const byName = new Map(run.states.map((s) => [s.name, s]));
     const rendered = new Set();
     for (const group of run.directionGroups) {
