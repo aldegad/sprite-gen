@@ -1094,7 +1094,7 @@ function renderPipelineTree() {
   wrap.appendChild(root);
   const existing = document.querySelector(".pipeline-tree");
   if (existing) existing.replaceWith(wrap);
-  else document.getElementById("states").appendChild(wrap);
+  else document.getElementById("sidebar").appendChild(wrap);
 }
 
 // 폴더 노드 — SVG 폴더 아이콘 + 경로 라벨 (이모지 금지 규칙)

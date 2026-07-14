@@ -63,7 +63,21 @@ button.ghost:hover { background: var(--panel-2); }
 button.ghost.flip-btn.active { background: var(--accent, #0ea5e9); color: #fff; }
 button.ghost.flip-btn.active:hover { background: var(--accent, #0ea5e9); filter: brightness(1.1); }
 
-main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
+/* 좌측 파일트리 사이드바 + 본문 2단 레이아웃 (쿠마피커 도크 스타일) */
+#layout { display: flex; align-items: flex-start; min-width: 0; }
+#sidebar {
+  position: sticky;
+  top: 49px; /* .topbar 높이 아래 */
+  flex: 0 0 320px;
+  width: 320px;
+  max-height: calc(100vh - 49px);
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  padding: 12px 10px 24px 12px;
+}
+#sidebar:empty { display: none; }
+main { flex: 1; min-width: 0; padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 
 .state {
   background: var(--panel);
@@ -84,7 +98,7 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 /* 여백 침범 정보 알림 — 경고가 아니라 순한 안내 톤 (리롤 대상 아님) */
 .state-note { color: var(--muted); font-size: 12px; border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; }
 /* 방향 앵커 배지 — 이 줄이 해당 방향의 identity 원천임을 표시 */
-.anchor-badge { color: var(--accent, #0ea5e9); font-size: 12px; font-weight: 600; border: 1px solid var(--accent-dim, rgba(14,165,233,0.35)); border-radius: 5px; padding: 1px 7px; }
+.anchor-badge { color: var(--accent, #0ea5e9); font-size: 12px; font-weight: 600; border: 1px solid var(--accent-dim, rgba(14,165,233,0.35)); border-radius: 5px; padding: 1px 7px; white-space: nowrap; flex: none; }
 /* 방향 그룹 구분 헤더 (directions 계약 런) */
 .dir-head { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: var(--muted); margin: 6px 2px -16px; text-transform: uppercase; }
 .dir-head.dir-mirror { font-weight: 500; font-style: italic; margin-bottom: -14px; }
@@ -129,6 +143,21 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 .tree-node.folder svg { color: var(--muted); flex: none; }
 .tree-node.folder .tn-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
 .pipeline-tree .tree-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; word-break: break-all; }
+
+/* 사이드바 안에서는 카드 껍데기를 벗고 세로 밀도 위주로 */
+#sidebar .pipeline-tree { background: transparent; border: none; border-radius: 0; padding: 2px 2px 8px; }
+#sidebar .pipeline-tree .state-head { flex-direction: column; align-items: flex-start; gap: 3px; margin-bottom: 8px; }
+#sidebar .pipeline-tree .state-head .name { font-size: 13px; }
+#sidebar .pipeline-tree .tree ul { padding-left: 14px; }
+#sidebar .pipeline-tree .tree li { padding-left: 8px; }
+#sidebar .pipeline-tree .tree li::before { width: 7px; }
+#sidebar .tree-rows { flex-direction: column; gap: 2px; }
+#sidebar .tree-node { font-size: 12px; padding: 2px 7px; max-width: 100%; }
+#sidebar .tree-node .tn-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sidebar .tree-node .tn-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sidebar .tree-node img { height: 22px; width: 22px; }
+#sidebar .tree-node.raw-only img { width: 40px; }
+#sidebar .tree-node.tree-root img { height: 28px; width: 28px; }
 .tree-rows { display: flex; flex-wrap: wrap; gap: 0 4px; }
 .tree-rows li { padding-right: 0; }
 /* raw 는 생성됐고 추출 전 — 중간 진행 상태 (raw 스트립 썸네일) */
