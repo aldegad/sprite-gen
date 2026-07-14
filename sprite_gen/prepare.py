@@ -20,6 +20,8 @@ from typing import Any
 
 from PIL import Image, ImageDraw
 
+from sprite_gen.layout import TAXONOMY, guide_rel, prompt_rel, raw_rel
+
 
 DEFAULT_STATES: dict[str, dict[str, Any]] = {
     "idle": {"frames": 4, "fps": 4, "loop": True, "action": "subtle breathing and blinking"},
@@ -631,7 +633,7 @@ def build_generation_plan(request: dict[str, Any]) -> dict[str, Any] | None:
             "state": anchors[d],
             "role": "direction-anchor",
             "direction": d,
-            "refs": ["base-source.*", f"references/layout-guides/{anchors[d]}.png"],
+            "refs": ["base-source.*", guide_rel(request, anchors[d])],
             "note": "base 는 방향 앵커 생성까지만 identity 소스다 — 앵커 수락 후 행 생성에 base 를 재부착하지 않는다",
         }
         for d in directions["set"]
@@ -642,8 +644,8 @@ def build_generation_plan(request: dict[str, Any]) -> dict[str, Any] | None:
             "role": "action-row",
             "direction": state_direction(state, directions),
             "refs": [
-                f"<accepted single-pose crop of raw/{anchors[state_direction(state, directions)]}.png>",
-                f"references/layout-guides/{state}.png",
+                f"<accepted single-pose crop of {raw_rel(request, anchors[state_direction(state, directions)])}>",
+                guide_rel(request, state),
             ],
         }
         for state in request["states"]
@@ -654,7 +656,7 @@ def build_generation_plan(request: dict[str, Any]) -> dict[str, Any] | None:
             "direction": target,
             "mirror_of": source,
             "note": ("생성 생략 — 런타임 미러가 기본. 미러로 부족해 재생성할 때는 반대편 행"
-                     f"(raw/{source}_*.png)을 timing/scale 참조로만 부착하고, 대상 방향 앵커를"
+                     f"(raw/{source}/*.png)을 timing/scale 참조로만 부착하고, 대상 방향 앵커를"
                      " 새로 뽑아 identity 로 쓴다 (directional-anchor-workflow.md 좌우 게이트)"),
         }
         for target, source in directions["mirror"].items()
@@ -1039,6 +1041,9 @@ def _run(args: argparse.Namespace):
     }
     if directions:
         request["directions"] = directions
+    # 파일 택소노미 계약: 신규 런 기본. 방향 계약과 결합 시 raw/frames/guides/prompts
+    # 가 <direction>/<pose> 로 나뉜다 (layout.py SSoT). legacy 런은 필드 없음 = flat.
+    request["layout"] = TAXONOMY
     fit = dict(raw_request.get("fit", {}))
     fit_overrides = {
         "resample": args.fit_resample,
@@ -1057,22 +1062,23 @@ def _run(args: argparse.Namespace):
     if fit:
         request["fit"] = fit
 
-    references = out_dir / "references" / "layout-guides"
-    prompts = out_dir / "prompts"
-    raw = out_dir / "raw"
-    frames = out_dir / "frames"
-    for directory in (references, prompts, raw, frames):
+    for directory in (out_dir / "references" / "layout-guides", out_dir / "prompts",
+                      out_dir / "raw", out_dir / "frames"):
         directory.mkdir(parents=True, exist_ok=True)
 
     for state, entry in states.items():
+        guide_path = out_dir / guide_rel(request, state)
+        prompt_path = out_dir / prompt_rel(request, state)
+        for parent in (guide_path.parent, prompt_path.parent, (out_dir / raw_rel(request, state)).parent):
+            parent.mkdir(parents=True, exist_ok=True)
         draw_guide(
-            references / f"{state}.png",
+            guide_path,
             state,
             int(entry["frames"]),
             cell,
             motion_phase_guides=bool(request["motion_phase_guides"]),
         )
-        (prompts / f"{state}.txt").write_text(row_prompt(request, state, entry).rstrip() + "\n", encoding="utf-8")
+        prompt_path.write_text(row_prompt(request, state, entry).rstrip() + "\n", encoding="utf-8")
 
     # 방향 계약 런: 생성 체인 SSoT(1단계 앵커 -> 2단계 행, 미러 방향 명시)를 기록
     plan = build_generation_plan(request)

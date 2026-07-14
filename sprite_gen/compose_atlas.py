@@ -10,7 +10,8 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, pixel_snap_scale, state_plan
+from sprite_gen.curation import apply_transform, frame_variant, load_curation, pixel_snap_scale, state_plan
+from sprite_gen.layout import row_frame_rel
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
 
@@ -61,6 +62,7 @@ def _run(args: argparse.Namespace):
     acquire_run_dir_lock(run_dir, "compose_sprite_atlas")
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     frames_manifest = require_frames_manifest(run_dir)  # fail loud if absent/corrupt/not-ok
+    rows_by_state = {row["state"]: row for row in frames_manifest.get("rows", [])}
 
     states = list(request["states"])
     cell_width, cell_height = cell_geometry(request["cell"])
@@ -105,7 +107,8 @@ def _run(args: argparse.Namespace):
         variant = variants[state]
         frames = []
         for column, frame_index in enumerate(ordered):
-            frame_path = run_dir / "frames" / state / frame_filename(frame_index, variant)
+            # 파일 위치의 SSoT 는 manifest row 의 files — 패턴 조립 금지 (택소노미/flat 공용)
+            frame_path = run_dir / row_frame_rel(rows_by_state[state], frame_index, variant)
             if not frame_path.is_file():
                 errors.append(f"missing frame ({variant} variant): {frame_path}")
                 continue

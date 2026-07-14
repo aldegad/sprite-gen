@@ -45,6 +45,9 @@ from urllib.parse import quote, unquote, urlparse
 
 from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported_ref_role, load_curation, run_revision
 from extract import load_consistent_frames_manifest
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from sprite_gen.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel
 from runio import publish_guard, read_guard
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -137,7 +140,7 @@ def detect_pixel_pitch(path):
 _REF_DIRECTIONS = ("down45", "up45", "down", "side", "up", "left", "right", "front", "back")
 
 
-def _state_refs(run_dir, state):
+def _state_refs(run_dir, state, request):
     """상태 하나의 생성 레퍼런스 체인(방향 앵커/basis row/레이아웃 가이드).
 
     directional-anchor 규약의 관례 유도 — run dir 에 실재하는 파일만 노출한다.
@@ -149,14 +152,16 @@ def _state_refs(run_dir, state):
             direction = d
             break
     if direction is not None:
-        anchor = run_dir / "raw" / f"{direction}_idle.png"
+        anchor_rel = raw_rel(request, f"{direction}_idle")
+        anchor = run_dir / anchor_rel
         if state != f"{direction}_idle" and anchor.is_file():
-            refs.append({"role": "anchor", "name": anchor.name, "url": _url("run", "raw", anchor.name)})
+            refs.append({"role": "anchor", "name": anchor.name, "url": _url("run", *anchor_rel.split("/"))})
         base = state[len(direction) + 1:] if state.startswith(direction + "_") else None
         if base and direction != "down":
-            basis = run_dir / "raw" / f"down_{base}.png"
+            basis_rel = raw_rel(request, f"down_{base}")
+            basis = run_dir / basis_rel
             if basis.is_file():
-                refs.append({"role": "basis", "name": basis.name, "url": _url("run", "raw", basis.name)})
+                refs.append({"role": "basis", "name": basis.name, "url": _url("run", *basis_rel.split("/"))})
     guide = run_dir / "references" / "layout-guides" / f"{state}.png"
     if guide.is_file():
         refs.append({"role": "guide", "name": guide.name, "url": _url("run", "references", "layout-guides", f"{state}.png")})
@@ -217,20 +222,29 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         files = row.get("files", [])
         labels = row.get("labels", [])
         frame_count = int(entry["frames"])
-        raw_present = (run_dir / "raw" / f"{state}.png").is_file()
+        state_raw_rel = raw_rel(request, state)
+        raw_present = (run_dir / state_raw_rel).is_file()
+        state_frames_rel = frames_dir_rel(request, state)
         frames = []
         for index in range(frame_count):
-            rel = f"frames/{state}/frame-{index}.png"
+            # 파일 위치 SSoT = manifest row files (병합 후보 등 비패턴 경로 포함).
+            # row 가 없거나(index 초과 포함) 미생성이면 리졸버의 예약 위치로 표시.
+            row_files = row.get("files") or []
+            if index < len(row_files):
+                rel = row_files[index]
+            else:
+                rel = f"{state_frames_rel}/frame-{index}.png"
             present = (run_dir / rel).is_file()
-            frame = {"index": index, "url": _url("frames", state, f"frame-{index}.png"), "present": present}
+            frame = {"index": index, "url": _url(*rel.split("/")), "present": present}
             # pp 해제 토글 표시본: 원본 화질(orig/ 고해상본) 우선, 없으면 셀 크기 .plain.png.
             # 둘 중 하나라도 있으면 큐레이터가 전/후 토글을 켠다.
-            orig_rel = f"frames/{state}/orig/frame-{index}.png"
-            plain_rel = f"frames/{state}/frame-{index}.plain.png"
+            head, _, tail = rel.rpartition("/")
+            orig_rel = f"{head}/orig/{tail}"
+            plain_rel = rel[: -len(".png")] + ".plain.png"
             if (run_dir / orig_rel).is_file():
-                frame["plainUrl"] = _url("frames", state, "orig", f"frame-{index}.png")
+                frame["plainUrl"] = _url(*orig_rel.split("/"))
             elif (run_dir / plain_rel).is_file():
-                frame["plainUrl"] = _url("frames", state, f"frame-{index}.plain.png")
+                frame["plainUrl"] = _url(*plain_rel.split("/"))
             if index < len(labels):
                 frame["label"] = labels[index]
             if present and Image is not None:
@@ -257,14 +271,16 @@ def _build_run_state_impl(run_dir: Path) -> dict:
                     # measure from the real (decoded) file path, not fr["url"] — the url is
                     # percent-encoded for HTTP, so a special-char state name would point the
                     # measurement at a nonexistent encoded dir → pixelScale silently null.
-                    state_scale = detect_pixel_pitch(run_dir / "frames" / state / f"frame-{fr['index']}.png")
+                    row_files_m = row.get("files") or []
+                    rel_m = row_files_m[fr["index"]] if fr["index"] < len(row_files_m) else f"{state_frames_rel}/frame-{fr['index']}.png"
+                    state_scale = detect_pixel_pitch(run_dir / rel_m)
                     break
         states.append(
             {
                 "name": state,
                 "rawPresent": raw_present,
                 "pixelScale": state_scale,
-                "refs": _state_refs(run_dir, state),
+                "refs": _state_refs(run_dir, state, request),
                 "fps": int(entry.get("fps", 6)),
                 "loop": bool(entry.get("loop", True)),
                 "action": entry.get("action", ""),
@@ -472,14 +488,21 @@ class CurationHandler(BaseHTTPRequestHandler):
                     request = json.loads((self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
                     progress = []
                     for state in request["states"]:
-                        state_dir = self.run_dir / "frames" / state
+                        state_frames = frames_dir_rel(request, state)
+                        state_raw = raw_rel(request, state)
+                        state_dir = self.run_dir / state_frames
                         count = 0
                         if state_dir.is_dir():
                             count = sum(1 for f in state_dir.glob("frame-*.png") if not f.name.endswith(".plain.png"))
                         progress.append({
                             "name": state,
-                            "raw": (self.run_dir / "raw" / f"{state}.png").is_file(),
+                            "raw": (self.run_dir / state_raw).is_file(),
                             "frames": count,
+                            # 트리 썸네일용 실제 경로 URL (클라이언트 패턴 조립 금지)
+                            "rawUrl": _url("run", *state_raw.split("/")),
+                            "frame0Url": _url(*f"{state_frames}/frame-0.png".split("/")),
+                            "relRaw": state_raw,
+                            "relFrames": state_frames,
                         })
                     self._send_json({"states": progress, "runRevision": run_revision(self.run_dir)})
             except (Exception, SystemExit) as exc:

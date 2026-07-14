@@ -13,6 +13,7 @@ from typing import Any
 from PIL import Image, ImageChops
 
 from sprite_gen import extract
+from sprite_gen.layout import frames_dir_rel, raw_rel
 from sprite_gen.runio import acquire_run_dir_lock, atomic_write_text, read_guard, relative_posix
 from sprite_gen.segment import segment_strip
 
@@ -87,8 +88,8 @@ def _frame_sort_key(path: Path) -> int:
         return 10**9
 
 
-def _load_extracted_frames(run_dir: Path, state: str) -> tuple[list[Image.Image], list[str]]:
-    state_dir = run_dir / "frames" / state
+def _load_extracted_frames(run_dir: Path, state: str, request: dict[str, Any]) -> tuple[list[Image.Image], list[str]]:
+    state_dir = run_dir / frames_dir_rel(request, state)
     if not state_dir.is_dir():
         return [], []
     paths = sorted(
@@ -99,7 +100,7 @@ def _load_extracted_frames(run_dir: Path, state: str) -> tuple[list[Image.Image]
 
 
 def _strip_for_state(run_dir: Path, request: dict[str, Any], state: str, args: argparse.Namespace) -> Image.Image | None:
-    raw_path = run_dir / "raw" / f"{state}.png"
+    raw_path = run_dir / raw_rel(request, state)
     if not raw_path.is_file():
         return None
     chroma_config = dict(request.get("chroma") or {})
@@ -318,7 +319,7 @@ def _inspect_run_impl(run_dir: Path, states: str = "all", **kwargs: object) -> d
 
     for state in selected:
         expected = int(request["states"][state]["frames"])
-        frames, files = _load_extracted_frames(run_dir, state)
+        frames, files = _load_extracted_frames(run_dir, state, request)
         source = "frames"
         natural_found: int | None = None
         if not frames:

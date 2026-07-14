@@ -60,6 +60,16 @@ not restate it elsewhere; point here.
   prompts/<state>.txt                # generated row prompt (frame count, safe margin, anchor lock)
   raw/<state>.png                    # one horizontal image-gen strip per state (the only AI output)
   frames/<state>/frame-N.png         # extracted transparent cells (canonical)
+  # ── 파일 택소노미 (layout: taxonomy/v1 — 신규 런 기본, 수홍 확정 2026-07-14) ──
+  # 방향 계약(directions) 런은 위 두 경로가 방향/자세 폴더로 나뉜다. 상태 ID 는 그대로
+  # <direction>_<pose>, 파일 경로만 분리. 리졸버 SSoT = sprite_gen/layout.py.
+  # 이미 추출된 프레임을 읽는 소비자는 frames-manifest 의 row.files 경로를 따른다
+  # (row_frame_rel) — 패턴 조립 금지. layout 필드 없는 legacy 런은 flat 유지.
+  # 프로젝트별 정비 방식이 지침으로 오면 지침이 우선한다.
+  raw/<direction>/<pose>.png                 # 택소노미: 생성 스트립
+  frames/<direction>/<pose>/frame-N.png      # 택소노미: 추출 프레임 (+ .plain / orig/)
+  references/layout-guides/<direction>/<pose>.png
+  prompts/<direction>/<pose>.txt
   frames/<state>/frame-N.plain.png   # pixel-perfect runs only: cell-sized pre-pixel-perfect twin, baked by compose on pixel_perfect:false (§3)
   frames/<state>/orig/frame-N.png    # pixel-perfect runs only: hi-res original twin (display-only), drives the pp-off toggle at original quality (§3)
   frames/frames-manifest.json        # per-row extract report (files, labels, ok) — only ever a COMPLETE ok generation (§6)
