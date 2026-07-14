@@ -42,7 +42,7 @@ const STR = {
     ppState: "Pixel-perfect",
     tPpState: "toggle pixel-perfect for THIS row only — what it displays and what compose bakes",
     pxGrid: "Pixel grid", pxGridAll: "Pixel grid (all)",
-    tGridState: "grid overlay for THIS row — output pixel raster on the pixel-perfect view, the DETECTED cut lines (green) on the original view (display only)",
+    tGridState: "grid overlay for THIS row — output pixel raster on the pixel-perfect view; on the original view the FINAL correspondence grid (green): one cell = one result pixel (display only)",
     refsLabel: "generated from", ref_anchor: "direction anchor", ref_basis: "basis row", ref_guide: "layout guide", tPxGrid: "toggle the pixel-grid overlay for ALL rows at once (display only; each row has its own checkbox)",
     tPpApply: "toggle pixel-perfect for ALL rows at once (each row has its own checkbox)",
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
@@ -70,7 +70,7 @@ const STR = {
     ppState: "픽셀퍼펙트",
     tPpState: "이 줄만 픽셀퍼펙트 켜기/끄기 — 표시와 굽기가 같이 바뀐다",
     pxGrid: "픽셀 격자", pxGridAll: "픽셀 격자 전체",
-    tGridState: "이 줄 격자 오버레이 — 픽셀퍼펙트 뷰에선 출력 픽셀 눈금, 원본 뷰에선 실제로 자른 검출 절단선(초록) (표시 전용)",
+    tGridState: "이 줄 격자 오버레이 — 픽셀퍼펙트 뷰에선 출력 픽셀 눈금, 원본 뷰에선 최종 대응 격자(초록, 칸 하나 = 결과 픽셀 하나) (표시 전용)",
     refsLabel: "생성 재료", ref_anchor: "방향 앵커", ref_basis: "basis row", ref_guide: "레이아웃 가이드", tPxGrid: "모든 줄의 격자 오버레이를 한번에 켜기/끄기 (표시 전용; 줄별 체크박스는 각 줄에)",
     tPpApply: "모든 줄의 픽셀퍼펙트를 한번에 켜기/끄기 (줄별 체크박스는 각 줄에)",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
@@ -171,8 +171,10 @@ function drawFrameInto(ctx, image, t, cw, ch, snap) {
 function sizePxGrids() {
   // 줄 단위 격자: 그 줄의 격자 체크박스가 켜져 있을 때만 그린다.
   // - 픽셀퍼펙트 표시 줄: 출력 격자(빨/파, 셀 픽셀 눈금) — 결과가 앉은 격자 그 자체.
-  // - 원본(plain) 표시 줄: 검출된 입력 격자(초록, 추출이 실제로 자른 절단선;
-  //   manifest input_grids). 절단선 기록이 없는 줄만 출력 격자를 참고로 겹친다.
+  // - 원본(plain) 표시 줄: 최종 대응 격자(초록) — 최종 픽셀 콘텐츠 bbox 를 픽셀 수만큼
+  //   균등 분할해 원본 위에 겹친다. 칸 하나 = 최종 픽셀 하나 (칸 수 = 픽셀 수 보장).
+  //   1차 절단 뒤 48 계약 conform 축소가 칸을 합칠 수 있어 절단선(manifest input_grids)은
+  //   최종 대응이 아니다 — 진단 기록으로만 남긴다 (수홍 발견 2026-07-14).
   // 측정/계약이 없는 줄은 오버레이를 숨긴다 — 가짜 격자 금지.
   document.querySelectorAll(".card").forEach((card) => {
     const overlay = card.querySelector(".pxgrid");
@@ -183,18 +185,17 @@ function sizePxGrids() {
     const frame = st && st.frames[Number(card.dataset.idx)];
     const on = !!gridStates[card.dataset.state];
     const plainShown = ppTwinStates.has(card.dataset.state) && !ppOn(card.dataset.state);
-    const useInput = on && plainShown && frame && frame.inputGrid && stage;
+    const scale = (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null;
+    const useFinal = on && plainShown && frame && frame.contentBox && scale && stage;
     if (ingrid) {
-      if (useInput) {
-        drawInputGrid(ingrid, stage, frame.inputGrid);
+      if (useFinal) {
+        drawFinalGrid(ingrid, stage, frame.contentBox, scale);
         ingrid.style.display = "block";
       } else {
         ingrid.style.display = "none";
       }
     }
-    const step = on && !useInput
-      ? (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null
-      : null;
+    const step = on && !useFinal ? scale : null;
     if (!overlay) return;
     if (!step || !stage) { overlay.style.display = "none"; return; }
     overlay.style.display = "block";
@@ -203,9 +204,9 @@ function sizePxGrids() {
   });
 }
 
-// 검출된 입력 격자: 추출이 원본에서 실제로 자른 절단선(셀 좌표)을 스프라이트 범위에만
-// 그린다 — 균일 간격이 아니다(등분 스냅·프레임별 위상). 출력 눈금과 구분되게 초록.
-function drawInputGrid(canvas, stage, grid) {
+// 최종 대응 격자: 최종 픽셀 콘텐츠 bbox(셀 좌표)를 논리 픽셀 수만큼 균등 분할해
+// 원본 쌍둥이 위에 그린다 — 초록 칸 하나가 결과 픽셀 하나에 정확히 대응한다.
+function drawFinalGrid(canvas, stage, box, scale) {
   const w = Math.max(1, Math.round(stage.clientWidth));
   const h = Math.max(1, Math.round(stage.clientHeight));
   canvas.width = w;
@@ -216,14 +217,16 @@ function drawInputGrid(canvas, stage, grid) {
   ctx.lineWidth = 1;
   const sx = w / run.cell.width;
   const sy = h / run.cell.height;
-  const x0 = grid.x[0] * sx, x1 = grid.x[grid.x.length - 1] * sx;
-  const y0 = grid.y[0] * sy, y1 = grid.y[grid.y.length - 1] * sy;
-  for (const x of grid.x) {
-    const px = Math.round(x * sx) + 0.5;
+  const cellsX = Math.max(1, Math.round((box[2] - box[0]) / scale));
+  const cellsY = Math.max(1, Math.round((box[3] - box[1]) / scale));
+  const x0 = box[0] * sx, x1 = box[2] * sx;
+  const y0 = box[1] * sy, y1 = box[3] * sy;
+  for (let k = 0; k <= cellsX; k++) {
+    const px = Math.round(x0 + ((x1 - x0) * k) / cellsX) + 0.5;
     ctx.beginPath(); ctx.moveTo(px, y0); ctx.lineTo(px, y1); ctx.stroke();
   }
-  for (const y of grid.y) {
-    const py = Math.round(y * sy) + 0.5;
+  for (let k = 0; k <= cellsY; k++) {
+    const py = Math.round(y0 + ((y1 - y0) * k) / cellsY) + 0.5;
     ctx.beginPath(); ctx.moveTo(x0, py); ctx.lineTo(x1, py); ctx.stroke();
   }
 }
