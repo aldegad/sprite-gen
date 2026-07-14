@@ -142,3 +142,38 @@ def test_heal_keeps_stale_row_without_raw(tmp_path: Path) -> None:
     assert report["notes"]
     # 재료가 없으면 이전 세대를 바이트 그대로 보존한다
     assert (run_dir / "frames" / "walk" / "frame-0.png").read_bytes() == frame_bytes
+
+
+def test_view_heals_and_downloads_live_state(tmp_path: Path) -> None:
+    """뷰/다운로드 계약: 스냅샷 요청이 stale 캐시를 자가치유하고, 버튼 3종은
+    현재 라이브 상태를 계산해 zip 으로 내려준다 (게임 적용 의미 없음)."""
+    import sys as _sys
+    import io
+    import zipfile
+
+    run_dir = _build_run(tmp_path)
+    assert extract_module.run(run_dir=run_dir) == 0
+    manifest_path = run_dir / "frames" / "frames-manifest.json"
+    manifest = _manifest(run_dir)
+    manifest["rows"][0]["engine_revision"] = "0" * 12
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import serve_curation
+
+    heal = serve_curation.maybe_heal(run_dir)
+    assert heal is not None and heal["healed"] == ["walk"]
+    assert serve_curation.maybe_heal(run_dir) is None  # 신선하면 no-op
+
+    built = serve_curation.build_download(run_dir, "atlas")
+    assert not isinstance(built, dict), built
+    data, filename = built
+    assert filename == "takebot-atlas.zip"
+    names = set(zipfile.ZipFile(io.BytesIO(data)).namelist())
+    assert names == {"sprite-sheet-alpha.png", "manifest.json"}
+
+    built = serve_curation.build_download(run_dir, "gifs")
+    assert not isinstance(built, dict), built
+    data, filename = built
+    assert filename == "takebot-gifs.zip"
+    assert any(n.endswith("walk.gif") for n in zipfile.ZipFile(io.BytesIO(data)).namelist())

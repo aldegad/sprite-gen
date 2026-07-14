@@ -415,19 +415,34 @@ def test_orphan_frames_without_manifest_fail_loud(fixture_run_dir: Path) -> None
 def test_empty_files_generation_fails_loud(fixture_run_dir: Path) -> None:
     """A manifest that claims every state but with empty `files` over deleted frames (zero physical
     frames) must fail loud on every consumer — never be exposed/consumed as a present-but-empty
-    generation (No Silent Fallback / Consistency). This is darami's exact counterexample."""
+    generation (No Silent Fallback / Consistency). This is darami's exact counterexample.
+
+    실시간 계약 이후 갱신 (2026-07-15): raw 가 남아 있으면 compose 는 손상을
+    fail 하는 대신 heal(재유도)로 복구한다 — 그것도 '조용한 소비'가 아니라
+    관측 가능한 복구다. fail-loud 보장은 복구 재료(raw)마저 없는 경우로 남는다."""
     import shutil
 
     run = fixture_run_dir
     assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
-    for d in (run / "frames").iterdir():
-        if d.is_dir():
-            shutil.rmtree(d)                                          # 0 physical frames
-    p = run / "frames" / "frames-manifest.json"
-    m = json.loads(p.read_text())
-    m["rows"] = [{"state": r["state"], "files": [], "ok": True} for r in m["rows"]]
-    p.write_text(json.dumps(m), encoding="utf-8")
 
+    def corrupt():
+        for d in (run / "frames").iterdir():
+            if d.is_dir():
+                shutil.rmtree(d)                                      # 0 physical frames
+        p = run / "frames" / "frames-manifest.json"
+        m = json.loads(p.read_text())
+        m["rows"] = [{"state": r["state"], "files": [], "ok": True} for r in m["rows"]]
+        p.write_text(json.dumps(m), encoding="utf-8")
+
+    # raw 가 있으면: compose 가 자가치유하고 성공한다 (stderr 에 관측 가능)
+    corrupt()
+    healed = run_script("compose_sprite_atlas.py", "--run-dir", str(run))
+    assert healed.returncode == 0, healed.stdout + healed.stderr
+    assert "[heal]" in healed.stderr
+
+    # raw 가 없으면: 어떤 소비자도 손상 세대를 받아들이지 않는다 (fail loud)
+    corrupt()
+    shutil.rmtree(run / "raw")
     for tool, extra in (("compose_sprite_atlas.py", []), ("preview_animation.py", []),
                         ("inspect_sprite_run.py", ["--no-write"])):
         r = run_script(tool, "--run-dir", str(run), *extra)

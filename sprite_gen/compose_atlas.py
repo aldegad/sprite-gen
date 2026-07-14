@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,7 @@ from PIL import Image
 
 from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel
-from sprite_gen.extract import require_frames_manifest
+from sprite_gen.extract import heal_run, require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
 
 
@@ -59,6 +60,13 @@ def _namespace_from_kwargs(**kwargs: object) -> argparse.Namespace:
 def _run(args: argparse.Namespace):
 
     run_dir = args.run_dir.expanduser().resolve()
+    # 소비 전 파생 캐시 자가치유 (실시간 계약): 합성이 굽는 것 = 항상 현재 엔진의
+    # 프레임. heal 은 서브프로세스 추출로 락을 따로 잡으므로 compose 락 획득 전에.
+    heal_report = heal_run(run_dir)
+    for note in heal_report["notes"]:
+        print(f"[heal] {note}", file=sys.stderr)
+    if heal_report["healed"]:
+        print(f"[heal] re-derived stale rows: {', '.join(heal_report['healed'])}", file=sys.stderr)
     acquire_run_dir_lock(run_dir, "compose_sprite_atlas")
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     frames_manifest = require_frames_manifest(run_dir)  # fail loud if absent/corrupt/not-ok

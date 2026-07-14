@@ -141,6 +141,24 @@ def acquire_run_dir_lock(run_dir: Path, owner: str) -> Path:
     return lock_path
 
 
+def release_run_dir_lock(run_dir: Path) -> None:
+    """이 프로세스가 쥔 run-dir 락을 작업 완료 시점에 명시 해제한다.
+
+    atexit 해제만 있으면 장수 프로세스(테스트 러너·MCP 서버·큐레이션 서버)가
+    한 번의 in-process 추출 뒤 락을 영구 보유해, heal_run 의 서브프로세스
+    재추출이 산 pid 락에 막힌다. 락은 세션 리스가 아니라 작업 단위 writer-writer
+    상호배제고, 원자성은 스테이징 통짜 스왑이 보장하므로 작업이 끝나면 놓는 게
+    맞다. atexit 핸들러는 남아 있어도 멱등이다 (unlink 실패 무시 + discard)."""
+    lock_path = (Path(run_dir).resolve() / LOCK_FILENAME).resolve()
+    if lock_path not in _HELD_LOCKS:
+        return
+    try:
+        lock_path.unlink()
+    except OSError:
+        pass
+    _HELD_LOCKS.discard(lock_path)
+
+
 def _rwlock_path(run_dir: Path) -> Path:
     run_dir = Path(run_dir).resolve()
     return run_dir.parent / f".{run_dir.name}{RWLOCK_SUFFIX}"
