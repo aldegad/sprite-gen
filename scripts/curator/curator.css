@@ -402,6 +402,17 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .state-refs .row-controls { margin-left: auto; display: inline-flex; gap: 8px; }
 .row-toggle { padding: 3px 8px; background: var(--panel, transparent); }
 
+/* 검출된 입력 격자 오버레이 (원본 표시 줄 전용) — 추출이 실제로 자른 절단선, 초록 */
+.stage .ingrid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  display: none;
+  z-index: 2;
+}
+
 /* 확대 편집 모달 — 한 프레임 크게, 격자/픽셀퍼펙트 토글하며 조정 */
 #zoom-modal { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; }
 #zoom-modal .zoom-backdrop { position: absolute; inset: 0; background: rgba(15, 18, 24, 0.5); }

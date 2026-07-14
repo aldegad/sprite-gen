@@ -1544,24 +1544,32 @@ def fit_pixel_perfect(logical: Image.Image, cell_width: int, cell_height: int, s
 
 
 def fit_component_to_bbox(component: Image.Image, cell_width: int, cell_height: int,
-                          bbox: tuple[int, int, int, int], scale: int = 1) -> Image.Image:
+                          bbox: tuple[int, int, int, int], scale: int = 1,
+                          ) -> tuple[Image.Image, dict[str, float] | None]:
     """원본 컴포넌트를 픽셀퍼펙트 프레임의 콘텐츠 bbox(×scale) 풋프린트에 앉힌다.
 
     plain/orig 쌍둥이용: 픽셀퍼펙트 결과와 같은 크기·같은 자리에 원본 화질 스프라이트를
     두어, 큐레이터의 픽셀퍼펙트 토글이 크기 변화 없이 픽셀 처리 품질만 비교하게 한다
-    (contain 맞춤 + 하단 정렬 + 가로 중앙 — bbox 종횡비와의 오차는 격자 반올림 수준)."""
+    (contain 맞춤 + 하단 정렬 + 가로 중앙 — bbox 종횡비와의 오차는 격자 반올림 수준).
+
+    두 번째 반환값은 컴포넌트 좌표 → 쌍둥이 좌표 매핑 {crop_x, crop_y, ratio, left, top}
+    (twin = (raw - crop) * ratio + offset) — 검출 격자선을 쌍둥이 위에 겹칠 때 쓴다."""
     target = Image.new("RGBA", (cell_width * scale, cell_height * scale), (0, 0, 0, 0))
     src_bbox = component.getbbox()
     if src_bbox is None:
-        return target
+        return target, None
     src = component.crop(src_bbox)
     x0, y0, x1, y1 = (v * scale for v in bbox)
     box_w, box_h = max(1, x1 - x0), max(1, y1 - y0)
     ratio = min(box_w / src.width, box_h / src.height)
     tw, th = max(1, round(src.width * ratio)), max(1, round(src.height * ratio))
     resized = src.resize((tw, th), Image.Resampling.LANCZOS)
-    target.alpha_composite(resized, (x0 + (box_w - tw) // 2, y1 - th))
-    return target
+    left = x0 + (box_w - tw) // 2
+    top = y1 - th
+    target.alpha_composite(resized, (left, top))
+    mapping = {"crop_x": float(src_bbox[0]), "crop_y": float(src_bbox[1]),
+               "ratio": ratio, "left": float(left), "top": float(top)}
+    return target, mapping
 
 
 def extract_component_images(strip: Image.Image, frame_count: int) -> list[Image.Image] | None:
@@ -2086,7 +2094,8 @@ def _run(args: argparse.Namespace):
     pending: list = []
 
     def finalize_state(state: str, frames: list, frame_count: int, method: str,
-                       plain_frames: list | None = None, orig_frames: list | None = None) -> None:
+                       plain_frames: list | None = None, orig_frames: list | None = None,
+                       input_grids: list | None = None) -> None:
         state_dir = frames_root / state
         state_dir.mkdir(parents=True, exist_ok=True)
         output_paths = []
@@ -2130,6 +2139,9 @@ def _run(args: argparse.Namespace):
             row["plain_files"] = plain_paths
         if orig_paths:
             row["orig_files"] = orig_paths
+        if input_grids is not None and any(g is not None for g in input_grids):
+            # 프레임별 검출 입력 격자(셀 좌표 절단선) — 큐레이터 원본 뷰 오버레이용
+            row["input_grids"] = input_grids
         rows.append(row)
 
     for state in states:
@@ -2236,14 +2248,22 @@ def _run(args: argparse.Namespace):
                 all_warnings.append(f"{state}: {note}")
                 print(f"[pitch-crosscheck] {state}: {note}", file=sys.stderr)
             snapped = []
+            cut_edges: list[tuple[list[int], list[int]] | None] = []
             if min(consensus_x, consensus_y) >= 2.0:
                 # 위상만 프레임별로 (행 안에서 드리프트하는 건 위상이다).
                 for component, (_, frame_phase) in zip(images, grids):
                     snapped.append(
                         grid_snap_downscale(component, (consensus_x, consensus_y), pp_detail_bias, frame_phase)
                     )
+                    # 실제 절단선(grid_snap_downscale 이 쓰는 것과 동일 입력의 _grid_edges) —
+                    # 큐레이터가 원본 쌍둥이 위에 "검출된 입력 격자"로 겹쳐 보여준다.
+                    cut_edges.append((
+                        _grid_edges(component.width, consensus_x, frame_phase[0]),
+                        _grid_edges(component.height, consensus_y, frame_phase[1]),
+                    ))
             else:
                 snapped = list(images)
+                cut_edges = [None] * len(images)
             pitch = round(consensus_x, 2) if abs(consensus_x - consensus_y) < 0.05 else (
                 round(consensus_x, 2),
                 round(consensus_y, 2),
@@ -2255,7 +2275,8 @@ def _run(args: argparse.Namespace):
             # 컴포넌트만 보관한다. (이전: legacy fit 이 가용영역을 채워 pp 결과보다
             # 크게 앉음 → 토글 순간 크기가 튀어 품질 비교가 안 됐다.)
             pending.append({"state": state, "frame_count": frame_count, "method": method,
-                            "pitch": pitch, "frames": registered, "components": images})
+                            "pitch": pitch, "frames": registered, "components": images,
+                            "cut_edges": cut_edges})
             continue
         frames = extract_component_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
         method = "components"
@@ -2294,6 +2315,7 @@ def _run(args: argparse.Namespace):
             # 관측 가능하게 스킵 — 조용한 폴백 없음.
             plain_frames = []
             orig_frames = [] if plain_display_scale > 1 else None
+            input_grids: list[dict | None] = []
             for index, (component, frame) in enumerate(zip(entry["components"], frames)):
                 frame_bbox = frame.getbbox()
                 if frame_bbox is None:
@@ -2303,13 +2325,27 @@ def _run(args: argparse.Namespace):
                     if orig_frames is not None:
                         orig_frames.append(Image.new(
                             "RGBA", (cell_width * plain_display_scale, cell_height * plain_display_scale), (0, 0, 0, 0)))
+                    input_grids.append(None)
                     continue
-                plain_frames.append(fit_component_to_bbox(component, cell_width, cell_height, frame_bbox))
+                plain, mapping = fit_component_to_bbox(component, cell_width, cell_height, frame_bbox)
+                plain_frames.append(plain)
                 if orig_frames is not None:
                     orig_frames.append(fit_component_to_bbox(
-                        component, cell_width, cell_height, frame_bbox, plain_display_scale))
+                        component, cell_width, cell_height, frame_bbox, plain_display_scale)[0])
+                # 검출된 입력 격자(실제 절단선)를 쌍둥이(셀) 좌표로 매핑해 manifest 에 남긴다
+                edges = entry["cut_edges"][index] if index < len(entry["cut_edges"]) else None
+                if edges is not None and mapping is not None:
+                    input_grids.append({
+                        "x": [round(mapping["left"] + (e - mapping["crop_x"]) * mapping["ratio"], 1)
+                              for e in edges[0]],
+                        "y": [round(mapping["top"] + (e - mapping["crop_y"]) * mapping["ratio"], 1)
+                              for e in edges[1]],
+                    })
+                else:
+                    input_grids.append(None)
             finalize_state(entry["state"], frames, entry["frame_count"], entry["method"],
-                           plain_frames=plain_frames, orig_frames=orig_frames)
+                           plain_frames=plain_frames, orig_frames=orig_frames,
+                           input_grids=input_grids)
         all_warnings.append(
             "pixel-perfect: pitch=%s scale=%dx logical<=%dx%d palette=%d"
             % (",".join(str(entry["pitch"]) for entry in pending), pp_scale, logical_width, logical_height, len(palette))
