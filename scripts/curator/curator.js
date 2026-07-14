@@ -71,6 +71,12 @@ const STR = {
     treeMirror: (d, src) => `${d} — runtime mirror of ${src} (not generated)`,
     treePending: "not generated yet",
     treeRawNote: "raw · awaiting extract",
+    treeRawFolder: "generated strip originals",
+    treeFramesFolder: "extracted frames",
+    treeAnchorsFolder: "direction anchors — single-frame crops",
+    treeAtlasNote: "final atlas",
+    treeFrameCount: (n) => `${n} frames`,
+    treeAnchorOrigin: (d) => `idle row · ${d} anchor source`,
     reloadBanner: "run updated — click to reload the view",
     tTreeNode: "click to scroll to this row",
     tMarginNote: "some frames exceed the safe area but fit within the margin zone — informational, not a reroll flag",
@@ -114,6 +120,12 @@ const STR = {
     treeMirror: (d, src) => `${d} — ${src} 런타임 미러 (생성 없음)`,
     treePending: "미생성",
     treeRawNote: "raw 생성됨 · 추출 전",
+    treeRawFolder: "생성 스트립 원본",
+    treeFramesFolder: "추출 프레임",
+    treeAnchorsFolder: "방향 앵커 — 1장 크롭",
+    treeAtlasNote: "최종 아틀라스",
+    treeFrameCount: (n) => `${n}프레임`,
+    treeAnchorOrigin: (d) => `idle 행 · ${d} 앵커 원천`,
     reloadBanner: "런이 갱신됐어 — 클릭해서 새로고침",
     tTreeNode: "클릭하면 해당 줄로 이동",
     tMarginNote: "안전영역은 넘었지만 안전마진 안에 있음 — 정보성 알림, 리롤 대상 아님",
@@ -931,7 +943,6 @@ function renderState(state) {
 // base → 행 2단. 미생성 노드는 점선(진행 현황판 겸용), 클릭 = 해당 줄로 스크롤.
 function treeNode(label, note, thumbUrl, targetState, extra) {
   const rawOnly = thumbUrl && typeof thumbUrl === "object" && thumbUrl.raw;
-  if (rawOnly && !note) note = t("treeRawNote");
   const node = document.createElement("span");
   node.className = "tree-node" + (thumbUrl === false ? " pending" : "") + (rawOnly ? " raw-only" : "") + (extra ? " " + extra : "");
   if (rawOnly) {
@@ -974,64 +985,128 @@ function seedTreeProgress() {
 }
 
 function renderPipelineTree() {
-  const frame0 = (name) => {
+  const frameThumb = (name) => {
     const p = treeProgress.get(name);
-    if (p && p.frames > 0) return `/frames/${encodeURIComponent(name)}/frame-0.png?v=${treeRevision || 0}`;
-    if (p && p.raw) return { raw: `/run/raw/${encodeURIComponent(name)}.png?v=${treeRevision || 0}` };
-    return false; // false = 미생성 표시
+    return p && p.frames > 0 ? `/frames/${encodeURIComponent(name)}/frame-0.png?v=${treeRevision || 0}` : false;
   };
+  const rawThumb = (name) => {
+    const p = treeProgress.get(name);
+    return p && p.raw ? `/run/raw/${encodeURIComponent(name)}.png?v=${treeRevision || 0}` : false;
+  };
+  const frameCount = (name) => {
+    const p = treeProgress.get(name);
+    return p ? p.frames : 0;
+  };
+
   const wrap = document.createElement("section");
   wrap.className = "state pipeline-tree";
-  wrap.innerHTML = `<div class="state-head"><span class="name">${t("treeTitle")}</span></div>`;
+  wrap.innerHTML =
+    `<div class="state-head"><span class="name">${t("treeTitle")}</span>` +
+    `<span class="meta tree-path">${escapeHtml(run.runDir)}</span></div>`;
   const root = document.createElement("div");
   root.className = "tree";
-  // 루트: base
-  root.appendChild(treeNode("base", t("treeBaseNote"), run.baseUrl || false, null, "tree-root"));
-  const branches = document.createElement("ul");
-  const rowChips = (names) => {
+  const top = document.createElement("ul");
+
+  const addTop = (...nodes) => {
+    const el = document.createElement("li");
+    for (const n of nodes) if (n) el.appendChild(n);
+    top.appendChild(el);
+    return el;
+  };
+  const chipList = () => {
     const ul = document.createElement("ul");
     ul.className = "tree-rows";
-    for (const name of names) {
-      const li = document.createElement("li");
-      li.appendChild(treeNode(name, null, frame0(name), name));
-      ul.appendChild(li);
-    }
     return ul;
   };
+  const chipItem = (ul, node) => {
+    const el = document.createElement("li");
+    el.appendChild(node);
+    ul.appendChild(el);
+  };
+  // frames/ 하위 상태 폴더 노드: <state>/ · N프레임 (미생성이면 점선)
+  const stateFolderNode = (name, extraNote, extraCls) => {
+    const n = frameCount(name);
+    const note = [n > 0 ? STR[lang].treeFrameCount(n) : t("treePending"), extraNote].filter(Boolean).join(" · ");
+    return treeNode(`${name}/`, note, frameThumb(name), name, extraCls);
+  };
+
+  // base 파일
+  if (run.baseUrl) addTop(treeNode("base-source", t("treeBaseNote"), run.baseUrl, null, "tree-root"));
+
+  // raw/ — 생성 스트립이 저장되는 폴더
+  const rawLi = addTop(folderNode("raw/", t("treeRawFolder")));
+  const rawUl = chipList();
+  for (const st of run.states) {
+    const thumb = rawThumb(st.name);
+    const note = thumb && frameCount(st.name) === 0 ? t("treeRawNote") : null;
+    chipItem(rawUl, treeNode(`${st.name}.png`, note, thumb ? { raw: thumb } : false, st.name));
+  }
+  rawLi.appendChild(rawUl);
+
+  // frames/ — 추출 프레임 (방향 체인 구조 유지: idle 앵커 원천 아래 그 방향의 행들)
+  const framesLi = addTop(folderNode("frames/", t("treeFramesFolder")));
+  const framesUl = document.createElement("ul");
   if (run.directionGroups && run.directionGroups.length) {
     for (const group of run.directionGroups) {
-      const li = document.createElement("li");
+      const gli = document.createElement("li");
       if (group.mirrorOf) {
-        li.appendChild(treeNode(STR[lang].treeMirror(group.direction, group.mirrorOf), null, undefined, null, "mirror"));
-        branches.appendChild(li);
+        gli.appendChild(treeNode(STR[lang].treeMirror(group.direction, group.mirrorOf), null, undefined, null, "mirror"));
+        framesUl.appendChild(gli);
         continue;
       }
-      const anchorThumb = group.anchor ? frame0(group.anchor) : false;
       if (group.anchor) {
-        li.appendChild(treeNode(group.anchor, t("treeIdleRow"), anchorThumb, group.anchor));
-        const anchorUl = document.createElement("ul");
-        const anchorLi = document.createElement("li");
-        anchorLi.appendChild(treeNode(`${group.direction} ${t("dirAnchorBadge")}`, t("treeAnchorNote"), anchorThumb, group.anchor, "anchor"));
-        anchorLi.appendChild(rowChips(group.states.filter((n) => n !== group.anchor)));
-        anchorUl.appendChild(anchorLi);
-        li.appendChild(anchorUl);
+        gli.appendChild(stateFolderNode(group.anchor, STR[lang].treeAnchorOrigin(group.direction), "anchor"));
+        const rows = chipList();
+        for (const name of group.states.filter((n) => n !== group.anchor)) chipItem(rows, stateFolderNode(name));
+        gli.appendChild(rows);
       } else {
-        li.appendChild(treeNode(group.direction, null, undefined, null));
-        li.appendChild(rowChips(group.states));
+        const rows = chipList();
+        for (const name of group.states) chipItem(rows, stateFolderNode(name));
+        gli.appendChild(rows);
       }
-      branches.appendChild(li);
+      framesUl.appendChild(gli);
     }
-  }
-  if (branches.children.length) {
-    root.appendChild(branches);
   } else {
-    // 방향 계약 없는 런(이펙트 등): base → 행 2단
-    root.appendChild(rowChips(run.states.map((s) => s.name)));
+    const gli = document.createElement("li");
+    const rows = chipList();
+    for (const st of run.states) chipItem(rows, stateFolderNode(st.name));
+    gli.appendChild(rows);
+    framesUl.appendChild(gli);
   }
+  framesLi.appendChild(framesUl);
+
+  // references/anchors/ — 방향 앵커 1장 크롭
+  if (run.anchorFiles && run.anchorFiles.length) {
+    const aLi = addTop(folderNode("references/anchors/", t("treeAnchorsFolder")));
+    const aUl = chipList();
+    for (const a of run.anchorFiles) {
+      chipItem(aUl, treeNode(a.name, t("treeAnchorNote"), `${a.url}?v=${treeRevision || 0}`, null, "anchor"));
+    }
+    aLi.appendChild(aUl);
+  }
+
+  // 최종 아틀라스 파일
+  if (run.hasAtlas) {
+    addTop(treeNode("sprite-sheet-alpha.png", t("treeAtlasNote"), `/run/sprite-sheet-alpha.png?v=${treeRevision || 0}`, null));
+  }
+
+  root.appendChild(top);
   wrap.appendChild(root);
   const existing = document.querySelector(".pipeline-tree");
   if (existing) existing.replaceWith(wrap);
   else document.getElementById("states").appendChild(wrap);
+}
+
+// 폴더 노드 — SVG 폴더 아이콘 + 경로 라벨 (이모지 금지 규칙)
+function folderNode(label, note) {
+  const node = document.createElement("span");
+  node.className = "tree-node folder";
+  node.innerHTML =
+    '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">' +
+    '<path d="M1.5 4A1.5 1.5 0 0 1 3 2.5h2.6a1 1 0 0 1 .8.4l.9 1.1H13A1.5 1.5 0 0 1 14.5 5.5v6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5V4z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
+  node.appendChild(Object.assign(document.createElement("span"), { className: "tn-label", textContent: label }));
+  if (note) node.appendChild(Object.assign(document.createElement("span"), { className: "tn-note", textContent: note }));
+  return node;
 }
 
 // 3초 폴링: 생성/추출 진행을 트리에 실시간 반영. 프레임 세대(runRevision)가 바뀌면
