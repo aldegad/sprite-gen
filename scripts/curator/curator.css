@@ -89,6 +89,44 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 .dir-head { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: var(--muted); margin: 6px 2px -16px; text-transform: uppercase; }
 .dir-head.dir-mirror { font-weight: 500; font-style: italic; margin-bottom: -14px; }
 
+/* 생성 구조 트리 — base → idle 행 → 앵커 → rows 파이프라인 개요 */
+.pipeline-tree .tree { padding: 4px 2px 2px; }
+.pipeline-tree .tree ul { list-style: none; margin: 4px 0 0; padding-left: 26px; border-left: 1px solid var(--line); }
+.pipeline-tree .tree > ul { margin-left: 13px; }
+.pipeline-tree .tree li { position: relative; padding: 5px 0 3px 14px; }
+.pipeline-tree .tree li::before { content: ""; position: absolute; left: 0; top: 18px; width: 12px; height: 1px; background: var(--line); }
+.tree-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2);
+  font-size: 12.5px;
+  vertical-align: middle;
+}
+.tree-node img {
+  height: 30px;
+  width: 30px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  background: repeating-conic-gradient(#ececec 0% 25%, #f8f8f8 0% 50%) 0 0 / 8px 8px;
+  border-radius: 4px;
+}
+.tree-node .thumb-missing { height: 30px; width: 30px; border: 1px dashed var(--line); border-radius: 4px; }
+.tree-node.pending { border-style: dashed; color: var(--muted); }
+.tree-node .tn-label { font-weight: 600; }
+.tree-node .tn-note { color: var(--muted); font-size: 11.5px; }
+.tree-node.clickable { cursor: pointer; }
+.tree-node.clickable:hover { border-color: var(--accent, #0ea5e9); }
+.tree-node.anchor { border-color: var(--accent-dim, rgba(14,165,233,0.4)); }
+.tree-node.anchor .tn-label { color: var(--accent, #0ea5e9); }
+.tree-node.mirror { border-style: dashed; font-style: italic; color: var(--muted); }
+.tree-node.tree-root { background: var(--panel); font-size: 13px; }
+.tree-rows { display: flex; flex-wrap: wrap; gap: 0 4px; }
+.tree-rows li { padding-right: 0; }
+
 .state-body { display: flex; gap: 18px; align-items: flex-start; min-width: 0; }
 .frames {
   display: flex;
