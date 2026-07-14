@@ -1002,7 +1002,7 @@ function renderPipelineTree() {
   wrap.className = "state pipeline-tree";
   wrap.innerHTML =
     `<div class="state-head"><span class="name">${t("treeTitle")}</span>` +
-    `<span class="meta tree-path">${escapeHtml(run.runDir)}</span></div>`;
+    `<span class="meta tree-path" title="${escapeHtml(run.runDir)}">${escapeHtml(run.runDir)}</span></div>`;
   const root = document.createElement("div");
   root.className = "tree";
   const top = document.createElement("ul");
@@ -1506,6 +1506,20 @@ function drawGroundGrid(stage) {
     ctx.lineTo(ox + sx * tw * 3, oy + sy * th * 3);
     ctx.stroke();
   }
+}
+
+// --- 사이드바 접기/펴기 (쿠마피커 도크 스타일, 상태는 localStorage 유지) ------
+const sidebarToggle = document.getElementById("sidebar-toggle");
+function applySidebarCollapsed(collapsed) {
+  document.body.classList.toggle("sidebar-collapsed", collapsed);
+  try { localStorage.setItem("curator-sidebar-collapsed", collapsed ? "1" : ""); } catch { /* private mode */ }
+}
+if (sidebarToggle) {
+  sidebarToggle.addEventListener("click", () =>
+    applySidebarCollapsed(!document.body.classList.contains("sidebar-collapsed")));
+  let saved = "";
+  try { saved = localStorage.getItem("curator-sidebar-collapsed") || ""; } catch { /* private mode */ }
+  applySidebarCollapsed(saved === "1");
 }
 
 const gridToggle = document.getElementById("grid-toggle");

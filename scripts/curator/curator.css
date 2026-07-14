@@ -79,6 +79,41 @@ button.ghost.flip-btn.active:hover { background: var(--accent, #0ea5e9); filter:
 #sidebar:empty { display: none; }
 main { flex: 1; min-width: 0; padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 
+/* 사이드바 접기/펴기 — 폭·패딩·투명도 트랜지션, 토글 탭은 경계선에 붙는다 */
+#sidebar { transition: flex-basis 0.28s ease, width 0.28s ease, padding 0.28s ease, opacity 0.2s ease; }
+body.sidebar-collapsed #sidebar {
+  flex-basis: 0;
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0;
+  overflow: hidden;
+  border-right: none;
+}
+#sidebar-toggle {
+  position: sticky;
+  top: 61px;
+  z-index: 5;
+  flex: none;
+  align-self: flex-start;
+  width: 17px;
+  height: 46px;
+  margin-left: -1px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  background: var(--panel);
+  box-shadow: 1px 1px 4px rgba(0, 0, 0, 0.05);
+  cursor: pointer;
+}
+#sidebar-toggle svg { transition: transform 0.28s ease; color: var(--muted); }
+body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
+#sidebar-toggle:hover svg { color: var(--accent, #0ea5e9); }
+
 .state {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -142,7 +177,20 @@ main { flex: 1; min-width: 0; padding: 18px; display: flex; flex-direction: colu
 .tree-node.folder { border: none; background: transparent; padding: 2px 2px; }
 .tree-node.folder svg { color: var(--muted); flex: none; }
 .tree-node.folder .tn-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
-.pipeline-tree .tree-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; word-break: break-all; }
+/* 런 경로: 한 줄 + 앞쪽 말줄임 — 뒤(폴더명)가 중요하므로 끝을 보여주고 앞을 …로.
+   direction:rtl 트릭; 전체 경로는 hover 툴팁(title). */
+.pipeline-tree .tree-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  cursor: default;
+}
 
 /* 사이드바 안에서는 카드 껍데기를 벗고 세로 밀도 위주로 */
 #sidebar .pipeline-tree { background: transparent; border: none; border-radius: 0; padding: 2px 2px 8px; }
