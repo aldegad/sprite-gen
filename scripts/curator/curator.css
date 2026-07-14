@@ -228,7 +228,26 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 @keyframes pipe-flow {
   to { background-position: 0 27px, 0 0; }
 }
-.tree-block.pipeline li::after { border-color: rgba(37, 99, 235, 0.45); }
+/* 파이프라인 가지는 CSS 곡선 대신 SVG(.branch)가 그린다 — 대시가 곡선을 타고 흐름 */
+.tree-block.pipeline li::after { display: none; }
+.tree-block.pipeline svg.branch {
+  position: absolute;
+  left: -7px;
+  top: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.tree-block.pipeline svg.branch path { fill: none; stroke-linecap: round; }
+.tree-block.pipeline svg.branch .rail { stroke: rgba(37, 99, 235, 0.28); stroke-width: 1; }
+.tree-block.pipeline svg.branch .dash {
+  stroke: rgba(37, 99, 235, 0.75);
+  stroke-width: 1;
+  stroke-dasharray: 5 12;
+  animation: branch-flow 1.45s linear infinite;
+}
+@keyframes branch-flow {
+  to { stroke-dashoffset: -17; }
+}
 /* 화살촉: 가지 밑변(y=19px 라인) 연장선상에서 노드 모서리에 밀착 (li 좌표 기준) */
 .tree-block.pipeline li > .tree-node:first-of-type::before {
   content: "";
@@ -241,6 +260,7 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 }
 @media (prefers-reduced-motion: reduce) {
   .tree-block.pipeline li::before { animation: none; }
+  .tree-block.pipeline svg.branch .dash { animation: none; }
 }
 
 /* 트리에서 이동해 온 대상 패널 하이라이트 — ~1.8초 유지 후 스르륵 페이드아웃 */

@@ -1127,6 +1127,26 @@ function renderPipelineTree() {
   wrap.innerHTML =
     `<div class="state-head"><span class="name">${t("treeTitle")}</span>` +
     `<span class="meta tree-path" title="${escapeHtml(run.runDir)}">${escapeHtml(run.runDir)}</span></div>`;
+  // 파이프라인 가지 곡선: CSS border 는 대시 애니메이션이 못 타므로 SVG 패스로.
+  // rail(정적 옅은 액센트) 위로 dash 가 곡선을 따라 흘러내린다.
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const attachBranch = (li) => {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "branch");
+    svg.setAttribute("viewBox", "0 0 15 19");
+    svg.setAttribute("width", "15");
+    svg.setAttribute("height", "19");
+    const d = "M0.5 0 V11.5 Q0.5 18.5 7.5 18.5 H15";
+    for (const cls of ["rail", "dash"]) {
+      const path = document.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", d);
+      path.setAttribute("class", cls);
+      svg.appendChild(path);
+    }
+    li.insertBefore(svg, li.firstChild);
+  };
+  for (const li of chainUl.querySelectorAll("li")) attachBranch(li);
+
   const root = document.createElement("div");
   root.className = "tree";
   root.appendChild(block(t("treePipeline"), chainUl, "pipeline"));
