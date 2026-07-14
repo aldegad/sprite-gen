@@ -401,6 +401,31 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .state-refs .refs-label { font-size: 12px; opacity: 0.6; }
 .state-refs .row-controls { margin-left: auto; display: inline-flex; gap: 8px; }
 .row-toggle { padding: 3px 8px; background: var(--panel, transparent); }
+
+/* 확대 편집 모달 — 한 프레임 크게, 격자/픽셀퍼펙트 토글하며 조정 */
+#zoom-modal { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; }
+#zoom-modal .zoom-backdrop { position: absolute; inset: 0; background: rgba(15, 18, 24, 0.5); }
+.zoom-card.card {
+  position: relative;
+  z-index: 1;
+  width: auto;
+  max-width: 94vw;
+  max-height: 94vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 12px;
+  background: var(--panel, #fff);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  border-radius: 12px;
+}
+.zoom-head { display: flex; align-items: center; gap: 8px; }
+.zoom-head .zoom-title { font-weight: 600; font-size: 15px; margin-right: 6px; }
+.zoom-head .row-controls { margin-left: auto; display: inline-flex; gap: 8px; }
+.zoom-card .stage { width: 480px; }
+.card-top .ct-right { display: inline-flex; align-items: center; gap: 4px; }
+.card-top .zoom-btn { cursor: zoom-in; }
 .ref-chip { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: inherit;
   border: 1px solid rgba(128,128,128,0.3); border-radius: 6px; padding: 2px 8px 2px 2px; }
 .ref-chip:hover { border-color: rgba(128,128,128,0.6); }
