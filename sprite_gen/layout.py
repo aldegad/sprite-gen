@@ -54,6 +54,17 @@ def raw_rel(request: dict[str, Any], state: str) -> str:
     return _joined("raw", request, state, ".png")
 
 
+def take_raw_rel(request: dict[str, Any], state: str, label: str) -> str:
+    """추가 테이크(같은 상태의 후보/보강 생성 스트립) 원본 경로.
+
+    상태의 primary raw 옆 `.takes/` 폴더가 소유한다 — 예: `raw/down/idle.takes/blink.png`
+    (택소노미) / `raw/wave.takes/alt.png` (flat). 테이크는 request
+    `states.<state>.takes: [{label, frames}]` 로 선언되고, 추출이 primary 뒤에
+    이어붙여 한 행의 프레임 풀을 만든다."""
+    base = raw_rel(request, state)
+    return f"{base[: -len('.png')]}.takes/{label}.png"
+
+
 def frames_dir_rel(request: dict[str, Any], state: str) -> str:
     return _joined("frames", request, state, "")
 

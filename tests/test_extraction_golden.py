@@ -25,6 +25,11 @@ def test_extraction_matches_golden_manifest(fixture_run_dir: Path) -> None:
 
     manifest = json.loads((fixture_run_dir / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))
     manifest.pop("run_dir")
+    # 엔진 소스 해시/기록 플래그는 휘발성 스탬프 — 골든 비교 대상이 아니다
+    manifest.pop("engine_revision", None)
+    manifest.pop("extract_args", None)
+    for _row in manifest.get("rows", []):
+        _row.pop("engine_revision", None)
     assert manifest == EXPECTED
 
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import shutil
@@ -14,7 +15,7 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.layout import frames_dir_rel, raw_rel
+from sprite_gen.layout import frames_dir_rel, raw_rel, take_raw_rel
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, publish_guard, relative_posix
 from sprite_gen.segment import separate_fused_poses
 
@@ -2140,7 +2141,8 @@ def _run(args: argparse.Namespace):
 
     def finalize_state(state: str, frames: list, frame_count: int, method: str,
                        plain_frames: list | None = None, orig_frames: list | None = None,
-                       input_grids: list | None = None) -> None:
+                       input_grids: list | None = None, labels: list | None = None,
+                       takes: list | None = None) -> None:
         rel_dir = frames_dir_rel(request, state)  # e.g. frames/down/idle (taxonomy) | frames/down_idle (legacy)
         state_dir = frames_root / rel_dir.removeprefix("frames/")
         state_dir.mkdir(parents=True, exist_ok=True)
@@ -2180,7 +2182,14 @@ def _run(args: argparse.Namespace):
             "files": output_paths,
             "frame_records": frame_records,
             "ok": not errors,
+            # 파생 캐시 키 — 이 행을 구운 엔진 리비전. heal_run 이 현재 엔진과
+            # 비교해 stale 행을 raw 에서 자동 재유도한다 (self-heal).
+            "engine_revision": engine_revision(),
         }
+        if labels and any(labels):
+            row["labels"] = labels
+        if takes:
+            row["takes"] = takes
         if plain_paths:
             row["plain_files"] = plain_paths
         if orig_paths:
@@ -2190,19 +2199,16 @@ def _run(args: argparse.Namespace):
             row["input_grids"] = input_grids
         rows.append(row)
 
-    for state in states:
-        if state not in request["states"]:
-            raise SystemExit(f"unknown state in request: {state}")
-        raw_path = run_dir / raw_rel(request, state)
+    def _load_strip(state: str, tag: str, rel: str, frame_count: int) -> Image.Image | None:
+        raw_path = run_dir / rel
         if not raw_path.is_file():
-            all_errors.append(f"{state}: missing raw strip {raw_path}")
-            continue
-        frame_count = int(request["states"][state]["frames"])
+            all_errors.append(f"{tag}: missing raw strip {raw_path}")
+            return None
         with Image.open(raw_path) as opened:
             if chroma_mode == "ycbcr":
                 ycc_notes: list[str] = []
                 strip = remove_chroma_background_ycbcr(opened, chroma_key, ycc_notes)
-                all_warnings.extend(f"{state}: {note}" for note in ycc_notes)
+                all_warnings.extend(f"{tag}: {note}" for note in ycc_notes)
             else:
                 strip = remove_chroma_background(
                     opened,
@@ -2213,154 +2219,219 @@ def _run(args: argparse.Namespace):
                     unmix_reach=unmix_reach,
                     spill_max_fraction=spill_max_fraction,
                 )
-        strip = separate_fused_poses(strip, frame_count, fit_config, args.segmentation, state)
-        if pixel_perfect:
-            # 프레임별 픽셀퍼펙트 (2026-07-05 재설계): 포즈 컴포넌트를 먼저
-            # 분리한 뒤 각 프레임마다 피치·위상을 독립 검출해 스냅한다.
-            # 스트립 전역 단일 격자는 프레임 간 위상 드리프트 때문에 일부
-            # 프레임이 항상 미끄러졌다 (알렉스 관찰: "격자가 픽셀에 안 맞음").
-            images = extract_component_images(strip, frame_count)
+        return separate_fused_poses(strip, frame_count, fit_config, args.segmentation, state)
+
+    def _snap_strip(tag: str, strip: Image.Image, frame_count: int) -> dict[str, Any] | None:
+        """한 생성 스트립(primary 또는 take)을 컴포넌트 분리→합의 스냅→캡까지.
+
+        프레임별 픽셀퍼펙트 (2026-07-05 재설계): 포즈 컴포넌트를 먼저 분리한 뒤
+        각 프레임마다 피치·위상을 독립 검출해 스냅한다. 스트립 전역 단일 격자는
+        프레임 간 위상 드리프트 때문에 일부 프레임이 항상 미끄러졌다 (알렉스
+        관찰: "격자가 픽셀에 안 맞음"). 합의 피치는 스트립(=한 번의 생성) 단위다
+        — 테이크마다 생성이 달라 블록 크기가 다를 수 있다.
+        """
+        images = extract_component_images(strip, frame_count)
+        method = "components"
+        if images is None:
+            if not args.allow_slot_fallback:
+                all_errors.append(f"{tag}: could not extract {frame_count} sprite components")
+                return None
+            slot_width = strip.width / frame_count
+            images = [
+                strip.crop((round(i * slot_width), 0, round((i + 1) * slot_width), strip.height))
+                for i in range(frame_count)
+            ]
+            method = "slots-explicit"
+        images = tighten_components(images)
+        # 피치는 스트립 안에서 사실상 상수(모델의 블록 크기)고 드리프트하는 건
+        # 위상이다. 프레임별 검출값의 중앙값을 합의 피치로 쓰고(배수/노이즈
+        # 낚임 방지), 위상만 프레임별로 다시 잡는다.
+        # 피치는 소수이고 축마다 다를 수 있다 — AI 가 그린 블록은 정수 픽셀로 떨어지지
+        # 않고(예: 17.24), 비균등 리스케일된 생성물은 가로/세로 블록 크기가 어긋난다.
+        # 정수로 반올림하면 그 오차가 폭 전체에 누적돼 셀 경계가 블록 한가운데를 지난다.
+        # 측정은 소수·축별로 하고, 격자선은 `_grid_edges` 가 정수로 확정한다.
+        hint = int(fit_config.get("pitch_hint", 0))
+        grids = [detect_pixel_grid(component) for component in images]
+
+        def _consensus(axis: int) -> float:
+            confident = sorted(g[0][axis] for g in grids if g[0][axis] >= 2.0)
+            if confident:
+                # 붕괴한 프레임(참 피치의 약수로 떨어진 값)이 중앙값을 오염시킨다 —
+                # 솔벨 down_carry_run 은 6 프레임 중 절반이 3.00 으로 무너져 합의가 5.00 이 됐다.
+                # 스트립 안에서 참 피치는 거의 같으므로, 최대값의 60% 미만은 붕괴로 보고 버린다.
+                ceiling = confident[-1]
+                trusted = [p for p in confident if p >= ceiling * 0.6]
+                dropped = len(confident) - len(trusted)
+                if dropped:
+                    all_warnings.append(
+                        f"{tag}: dropped {dropped} collapsed per-frame pitch(es) below {ceiling * 0.6:.2f}"
+                    )
+                return trusted[len(trusted) // 2]
+            if hint >= 2:
+                all_warnings.append(
+                    f"{tag}: pitch from fit.pitch_hint={hint} (all per-frame detections inconclusive)"
+                )
+                return float(hint)
+            strip_pitch, _ = detect_pixel_grid(strip)
+            if strip_pitch[axis] >= 2.0:
+                all_warnings.append(
+                    f"{tag}: pitch from whole-strip detection={strip_pitch[axis]:.2f}"
+                )
+            return strip_pitch[axis]
+
+        consensus_x, consensus_y = _consensus(0), _consensus(1)
+        outliers = [
+            f"{i}:{g[0][0]:.2f}"
+            for i, g in enumerate(grids)
+            if g[0][0] >= 2.0 and abs(g[0][0] - consensus_x) > max(2.0, consensus_x * 0.25)
+        ]
+        if outliers:
+            all_warnings.append(
+                f"{tag}: per-frame pitch outliers ({', '.join(outliers)}) snapped at consensus {consensus_x:.2f}"
+            )
+        # 세컨드 오피니언 (perfectpixel unfake 이식): 동일색 런 최빈값으로 축별
+        # 피치를 따로 추정해 합의 피치와 교차검증한다. 경고 전용 — 스냅은 아래에서
+        # 계속 detect_pixel_grid 합의만 쓴다 (자동 교체 금지, No Silent Fallback).
+        runlen_axes = [estimate_pixel_grid_runlen(component) for component in images]
+
+        def _runlen_consensus(axis: int) -> float:
+            confident = sorted(e[axis] for e in runlen_axes if e[axis] >= 2.0)
+            return confident[len(confident) // 2] if confident else 1.0
+
+        for note in crosscheck_pitch_runlen(
+            (consensus_x, consensus_y), (_runlen_consensus(0), _runlen_consensus(1))
+        ):
+            all_warnings.append(f"{tag}: {note}")
+            print(f"[pitch-crosscheck] {tag}: {note}", file=sys.stderr)
+        snapped = []
+        cut_edges: list[tuple[list[int], list[int]] | None] = []
+        if min(consensus_x, consensus_y) >= 2.0:
+            # 위상만 프레임별로 (스트립 안에서 드리프트하는 건 위상이다).
+            for component, (_, frame_phase) in zip(images, grids):
+                snapped.append(
+                    grid_snap_downscale(component, (consensus_x, consensus_y), pp_detail_bias, frame_phase)
+                )
+                # 실제 절단선(grid_snap_downscale 이 쓰는 것과 동일 입력의 _grid_edges) —
+                # 큐레이터가 원본 쌍둥이 위에 "검출된 입력 격자"로 겹쳐 보여준다.
+                cut_edges.append((
+                    _grid_edges(component.width, consensus_x, frame_phase[0]),
+                    _grid_edges(component.height, consensus_y, frame_phase[1]),
+                ))
+        else:
+            snapped = list(images)
+            cut_edges = [None] * len(images)
+        pitch = round(consensus_x, 2) if abs(consensus_x - consensus_y) < 0.05 else (
+            round(consensus_x, 2),
+            round(consensus_y, 2),
+        )
+        # 기본값 = 눌림 없음 (수홍 확정 2026-07-14): 스냅된 네이티브 논리 크기를
+        # 유지한다 — 계약(logical_height)으로의 conform 축소는 칸을 병합해 디테일을
+        # 갈라먹는다. 물리 한계(셀에서 바닥 마진만 지킴)만 캡으로 강제하고, 캡에
+        # 걸리면 관측 가능하게 경고한다(그 줄은 리롤 후보). 계약 크기로의 눌림은
+        # `fit.conform: true` 를 명시한 런에서만 수행한다.
+        if fit_config.get("conform") is True:
+            logical_frames = conform_row_logical(snapped, logical_width, logical_height, pp_detail_bias)
+        else:
+            cap_w = max(1, cell_width // pp_scale)
+            cap_h = max(1, (cell_height - safe_margin_y) // pp_scale)
+            over = [f"{i}:{s.width}x{s.height}" for i, s in enumerate(snapped)
+                    if s.width > cap_w or s.height > cap_h]
+            if over:
+                all_warnings.append(
+                    f"{tag}: native logical exceeds the physical cap "
+                    f"{cap_w}x{cap_h} — capped frames (reroll candidates): {', '.join(over)}")
+            # 안전영역(사방 여백 준수 상한)은 넘었지만 물리캡 이내 = 여백 침범.
+            # 리롤 대상 아님 — 정보성 알림만 (수홍 확정 2026-07-14).
+            safe_w = max(1, (cell_width - safe_margin_x * 2) // pp_scale)
+            safe_h = max(1, (cell_height - safe_margin_y * 2) // pp_scale)
+            soft = [f"{i}:{s.width}x{s.height}" for i, s in enumerate(snapped)
+                    if (s.width > safe_w or s.height > safe_h)
+                    and s.width <= cap_w and s.height <= cap_h]
+            if soft:
+                all_warnings.append(
+                    f"{tag}: frames exceed the safe area {safe_w}x{safe_h} but fit "
+                    f"within the margin zone (informational, no action): {', '.join(soft)}")
+            logical_frames = conform_row_logical(snapped, cap_w, cap_h, pp_detail_bias)
+        return {"method": method, "pitch": pitch, "logical": logical_frames,
+                "components": images, "cut_edges": cut_edges}
+
+    for state in states:
+        if state not in request["states"]:
+            raise SystemExit(f"unknown state in request: {state}")
+        state_cfg = request["states"][state]
+        frame_count = int(state_cfg["frames"])
+        takes_cfg = state_cfg.get("takes") or []
+        if takes_cfg and not pixel_perfect:
+            all_errors.append(f"{state}: takes require fit.pixel_perfect")
+            continue
+        if not pixel_perfect:
+            strip = _load_strip(state, state, raw_rel(request, state), frame_count)
+            if strip is None:
+                continue
+            frames = extract_component_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
             method = "components"
-            if images is None:
+            if frames is None:
                 if not args.allow_slot_fallback:
                     all_errors.append(f"{state}: could not extract {frame_count} sprite components")
                     continue
-                slot_width = strip.width / frame_count
-                images = [
-                    strip.crop((round(i * slot_width), 0, round((i + 1) * slot_width), strip.height))
-                    for i in range(frame_count)
-                ]
+                frames = extract_slot_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
                 method = "slots-explicit"
-            images = tighten_components(images)
-            # 피치는 행 안에서 사실상 상수(모델의 블록 크기)고 드리프트하는 건
-            # 위상이다. 프레임별 검출값의 중앙값을 합의 피치로 쓰고(배수/노이즈
-            # 낚임 방지), 위상만 프레임별로 다시 잡는다.
-            # 피치는 소수다 — AI 가 그린 블록은 정수 픽셀로 떨어지지 않는다(예: 17.24).
-            # 정수로 반올림하면 그 오차가 폭 전체에 누적돼 셀 경계가 블록 한가운데를 지난다.
-            # 측정은 소수로 하고, 격자선은 `_grid_edges` 가 길이를 등분해 정수로 확정한다.
-            # 피치는 소수이고 축마다 다를 수 있다 — AI 가 그린 블록은 정수 픽셀로 떨어지지 않고,
-            # 비균등 리스케일된 생성물은 가로/세로 블록 크기가 어긋난다.
-            # 측정은 소수·축별로 하고, 격자선은 `_grid_edges` 가 정수로 확정한다.
-            hint = int(fit_config.get("pitch_hint", 0))
-            grids = [detect_pixel_grid(component) for component in images]
-
-            def _consensus(axis: int) -> float:
-                confident = sorted(g[0][axis] for g in grids if g[0][axis] >= 2.0)
-                if confident:
-                    # 붕괴한 프레임(참 피치의 약수로 떨어진 값)이 중앙값을 오염시킨다 —
-                    # 솔벨 down_carry_run 은 6 프레임 중 절반이 3.00 으로 무너져 합의가 5.00 이 됐다.
-                    # 행 안에서 참 피치는 거의 같으므로, 최대값의 60% 미만은 붕괴로 보고 버린다.
-                    ceiling = confident[-1]
-                    trusted = [p for p in confident if p >= ceiling * 0.6]
-                    dropped = len(confident) - len(trusted)
-                    if dropped:
-                        all_warnings.append(
-                            f"{state}: dropped {dropped} collapsed per-frame pitch(es) below {ceiling * 0.6:.2f}"
-                        )
-                    return trusted[len(trusted) // 2]
-                if hint >= 2:
-                    all_warnings.append(
-                        f"{state}: pitch from fit.pitch_hint={hint} (all per-frame detections inconclusive)"
-                    )
-                    return float(hint)
-                strip_pitch, _ = detect_pixel_grid(strip)
-                if strip_pitch[axis] >= 2.0:
-                    all_warnings.append(
-                        f"{state}: pitch from whole-strip detection={strip_pitch[axis]:.2f}"
-                    )
-                return strip_pitch[axis]
-
-            consensus_x, consensus_y = _consensus(0), _consensus(1)
-            outliers = [
-                f"{i}:{g[0][0]:.2f}"
-                for i, g in enumerate(grids)
-                if g[0][0] >= 2.0 and abs(g[0][0] - consensus_x) > max(2.0, consensus_x * 0.25)
-            ]
-            if outliers:
-                all_warnings.append(
-                    f"{state}: per-frame pitch outliers ({', '.join(outliers)}) snapped at consensus {consensus_x:.2f}"
-                )
-            # 세컨드 오피니언 (perfectpixel unfake 이식): 동일색 런 최빈값으로 축별
-            # 피치를 따로 추정해 합의 피치와 교차검증한다. 경고 전용 — 스냅은 아래에서
-            # 계속 detect_pixel_grid 합의만 쓴다 (자동 교체 금지, No Silent Fallback).
-            runlen_axes = [estimate_pixel_grid_runlen(component) for component in images]
-
-            def _runlen_consensus(axis: int) -> float:
-                confident = sorted(e[axis] for e in runlen_axes if e[axis] >= 2.0)
-                return confident[len(confident) // 2] if confident else 1.0
-
-            for note in crosscheck_pitch_runlen(
-                (consensus_x, consensus_y), (_runlen_consensus(0), _runlen_consensus(1))
-            ):
-                all_warnings.append(f"{state}: {note}")
-                print(f"[pitch-crosscheck] {state}: {note}", file=sys.stderr)
-            snapped = []
-            cut_edges: list[tuple[list[int], list[int]] | None] = []
-            if min(consensus_x, consensus_y) >= 2.0:
-                # 위상만 프레임별로 (행 안에서 드리프트하는 건 위상이다).
-                for component, (_, frame_phase) in zip(images, grids):
-                    snapped.append(
-                        grid_snap_downscale(component, (consensus_x, consensus_y), pp_detail_bias, frame_phase)
-                    )
-                    # 실제 절단선(grid_snap_downscale 이 쓰는 것과 동일 입력의 _grid_edges) —
-                    # 큐레이터가 원본 쌍둥이 위에 "검출된 입력 격자"로 겹쳐 보여준다.
-                    cut_edges.append((
-                        _grid_edges(component.width, consensus_x, frame_phase[0]),
-                        _grid_edges(component.height, consensus_y, frame_phase[1]),
-                    ))
-            else:
-                snapped = list(images)
-                cut_edges = [None] * len(images)
-            pitch = round(consensus_x, 2) if abs(consensus_x - consensus_y) < 0.05 else (
-                round(consensus_x, 2),
-                round(consensus_y, 2),
-            )
-            # 기본값 = 눌림 없음 (수홍 확정 2026-07-14): 스냅된 네이티브 논리 크기를
-            # 유지한다 — 계약(logical_height)으로의 conform 축소는 칸을 병합해 디테일을
-            # 갈라먹는다. 물리 한계(셀에서 바닥 마진만 지킴)만 캡으로 강제하고, 캡에
-            # 걸리면 관측 가능하게 경고한다(그 줄은 리롤 후보). 계약 크기로의 눌림은
-            # `fit.conform: true` 를 명시한 런에서만 수행한다.
-            if fit_config.get("conform") is True:
-                logical_frames = conform_row_logical(snapped, logical_width, logical_height, pp_detail_bias)
-            else:
-                cap_w = max(1, cell_width // pp_scale)
-                cap_h = max(1, (cell_height - safe_margin_y) // pp_scale)
-                over = [f"{i}:{s.width}x{s.height}" for i, s in enumerate(snapped)
-                        if s.width > cap_w or s.height > cap_h]
-                if over:
-                    all_warnings.append(
-                        f"{state}: native logical exceeds the physical cap "
-                        f"{cap_w}x{cap_h} — capped frames (reroll candidates): {', '.join(over)}")
-                # 안전영역(사방 여백 준수 상한)은 넘었지만 물리캡 이내 = 여백 침범.
-                # 리롤 대상 아님 — 정보성 알림만 (수홍 확정 2026-07-14).
-                safe_w = max(1, (cell_width - safe_margin_x * 2) // pp_scale)
-                safe_h = max(1, (cell_height - safe_margin_y * 2) // pp_scale)
-                soft = [f"{i}:{s.width}x{s.height}" for i, s in enumerate(snapped)
-                        if (s.width > safe_w or s.height > safe_h)
-                        and s.width <= cap_w and s.height <= cap_h]
-                if soft:
-                    all_warnings.append(
-                        f"{state}: frames exceed the safe area {safe_w}x{safe_h} but fit "
-                        f"within the margin zone (informational, no action): {', '.join(soft)}")
-                logical_frames = conform_row_logical(snapped, cap_w, cap_h, pp_detail_bias)
-            registered = register_row_frames(logical_frames)
-            # 전/후 비교 쌍둥이(plain/orig)는 픽셀퍼펙트 프레임의 최종 콘텐츠 bbox 가
-            # 확정된 뒤(아래 pending 루프) 같은 풋프린트에 앉힌다 — 여기서는 원본
-            # 컴포넌트만 보관한다. (이전: legacy fit 이 가용영역을 채워 pp 결과보다
-            # 크게 앉음 → 토글 순간 크기가 튀어 품질 비교가 안 됐다.)
-            pending.append({"state": state, "frame_count": frame_count, "method": method,
-                            "pitch": pitch, "frames": registered, "components": images,
-                            "cut_edges": cut_edges})
+            finalize_state(state, frames, frame_count, method)
             continue
-        frames = extract_component_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
-        method = "components"
-        if frames is None:
-            if not args.allow_slot_fallback:
-                all_errors.append(f"{state}: could not extract {frame_count} sprite components")
-                continue
-            frames = extract_slot_frames(strip, frame_count, cell_width, cell_height, safe_margin_x, safe_margin_y, fit_config)
-            method = "slots-explicit"
-        finalize_state(state, frames, frame_count, method)
+        # 테이크 1급 계약: 한 상태의 프레임 풀 = primary 스트립 + 선언된 테이크들.
+        # 각 스트립은 독립 생성이므로 따로 스냅하고(스트립별 합의 피치), 행 정합·
+        # 팔레트·배치는 행 단위로 함께 한다. 어느 스트립 하나라도 실패하면 행 전체를
+        # 이전 세대로 남긴다 (Atomicity — 부분 풀 게시 금지).
+        specs: list[tuple[str, str, int, str]] | None = [
+            (state, raw_rel(request, state), frame_count, "")]
+        for take in takes_cfg:
+            label = str(take.get("label") or "")
+            if not label or "/" in label or label.startswith("."):
+                all_errors.append(f"{state}: take needs a filesystem-safe label: {take!r}")
+                specs = None
+                break
+            specs.append((f"{state}[{label}]", take_raw_rel(request, state, label),
+                          int(take["frames"]), label))
+        if specs is None:
+            continue
+        parts: list[dict[str, Any]] | None = []
+        for tag, rel, count, label in specs:
+            strip = _load_strip(state, tag, rel, count)
+            part = _snap_strip(tag, strip, count) if strip is not None else None
+            if part is None:
+                parts = None
+                break
+            part.update({"label": label, "count": count, "raw": rel})
+            parts.append(part)
+        if parts is None:
+            continue
+        registered = register_row_frames([f for p in parts for f in p["logical"]])
+        labels = None
+        takes_summary = None
+        if len(parts) > 1:
+            labels = [
+                f"{p['label']}#{i}" if p["label"] else ""
+                for p in parts for i in range(p["count"])
+            ]
+            starts = [0]
+            for p in parts[:-1]:
+                starts.append(starts[-1] + p["count"])
+            takes_summary = [
+                {"label": p["label"] or None, "start": start, "frames": p["count"], "raw": p["raw"]}
+                for p, start in zip(parts, starts)
+            ]
+        # 전/후 비교 쌍둥이(plain/orig)는 픽셀퍼펙트 프레임의 최종 콘텐츠 bbox 가
+        # 확정된 뒤(아래 pending 루프) 같은 풋프린트에 앉힌다 — 여기서는 원본
+        # 컴포넌트만 보관한다. (이전: legacy fit 이 가용영역을 채워 pp 결과보다
+        # 크게 앉음 → 토글 순간 크기가 튀어 품질 비교가 안 됐다.)
+        pending.append({
+            "state": state, "frame_count": len(registered), "method": parts[0]["method"],
+            "pitch": parts[0]["pitch"] if len(parts) == 1 else [p["pitch"] for p in parts],
+            "frames": registered,
+            "components": [c for p in parts for c in p["components"]],
+            "cut_edges": [e for p in parts for e in p["cut_edges"]],
+            "labels": labels, "takes": takes_summary,
+        })
 
     if pixel_perfect and pending:
         # 팔레트는 런 전체(모든 state 의 논리 프레임)에서 한 번 뽑아 공유한다 —
@@ -2419,7 +2490,8 @@ def _run(args: argparse.Namespace):
                     input_grids.append(None)
             finalize_state(entry["state"], frames, entry["frame_count"], entry["method"],
                            plain_frames=plain_frames, orig_frames=orig_frames,
-                           input_grids=input_grids)
+                           input_grids=input_grids, labels=entry.get("labels"),
+                           takes=entry.get("takes"))
         all_warnings.append(
             "pixel-perfect: pitch=%s scale=%dx logical<=%dx%d palette=%d"
             % (",".join(str(entry["pitch"]) for entry in pending), pp_scale, logical_width, logical_height, len(palette))
@@ -2428,6 +2500,10 @@ def _run(args: argparse.Namespace):
     result = {
         "ok": not all_errors,
         "engine": "component-row",
+        "engine_revision": engine_revision(),
+        # 이 생성에 실제로 쓰인 비기본 추출 플래그 — heal_run 재유도가 같은
+        # 조건으로 재현하도록 기록한다 (조건 드리프트 = 조용한 결과 변화 금지).
+        "extract_args": _nondefault_args(args),
         "run_dir": str(run_dir),
         "cell": request["cell"],
         "chroma_key": request["chroma_key"],
@@ -2458,6 +2534,81 @@ def _run(args: argparse.Namespace):
     print(json.dumps({k: v for k, v in result.items() if k != "rows"}, ensure_ascii=False, indent=2))
     return 0 if result["ok"] else 1
 
+
+
+def _nondefault_args(args: argparse.Namespace) -> dict[str, Any]:
+    """파서 기본값과 다른 플래그만 추린다 (run_dir/states 제외) — manifest 기록용."""
+    diff: dict[str, Any] = {}
+    for action in _build_parser()._actions:
+        dest = action.dest
+        if dest in ("help", "run_dir", "states"):
+            continue
+        value = getattr(args, dest, None)
+        if value != action.default:
+            diff[dest] = value
+    return diff
+
+
+_ENGINE_REVISION: str | None = None
+
+
+def engine_revision() -> str:
+    """추출 엔진 리비전 = 엔진 소스 해시. 프레임 파일은 (raw + request + 엔진)의
+    파생 캐시고 이 값이 캐시 키다 — 행 스탬프와 불일치하면 stale."""
+    global _ENGINE_REVISION
+    if _ENGINE_REVISION is None:
+        digest = hashlib.sha256()
+        for source in (Path(__file__), Path(__file__).with_name("layout.py")):
+            digest.update(source.read_bytes())
+        _ENGINE_REVISION = digest.hexdigest()[:12]
+    return _ENGINE_REVISION
+
+
+def heal_run(run_dir: Path | str) -> dict[str, Any]:
+    """파생 프레임 캐시의 자가치유 — 소비자(큐레이션 뷰/합성/내보내기) 진입점이 부른다.
+
+    큐레이션 뷰에는 '재추출' 이라는 개념이 없다 (수홍 확정 2026-07-14): 뷰가
+    보여주는 것은 항상 (raw + request + 현재 엔진 + 큐레이션)의 실시간 결과다.
+    frames/ 는 그 파생 캐시일 뿐이므로, 행의 engine_revision 이 현재 엔진과
+    다르면 raw 에서 조용히 다시 굽는다. raw 가 없는 행은 재료가 없어 재유도할
+    수 없다 — 지우지도 속이지도 않고 그대로 두되 노트로 관측 가능하게 남긴다.
+    재추출은 기존 스테이징+통짜 스왑 경로를 그대로 타므로 실패해도 이전 세대가
+    바이트 그대로 남는다 (Atomicity).
+    """
+    run_dir = Path(run_dir)
+    report: dict[str, Any] = {"healed": [], "kept_stale": [], "notes": []}
+    manifest_path = run_dir / "frames" / "frames-manifest.json"
+    request_path = run_dir / "sprite-request.json"
+    if not manifest_path.is_file() or not request_path.is_file():
+        return report
+    manifest = load_frames_manifest(manifest_path)
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    current = engine_revision()
+    for row in manifest.get("rows", []):
+        state = row.get("state")
+        if state not in request.get("states", {}) or row.get("engine_revision") == current:
+            continue
+        raws = [raw_rel(request, state)] + [
+            take_raw_rel(request, state, str(take.get("label") or ""))
+            for take in (request["states"][state].get("takes") or [])
+        ]
+        if all((run_dir / rel).is_file() for rel in raws):
+            report["healed"].append(state)
+        else:
+            report["kept_stale"].append(state)
+    if report["kept_stale"]:
+        report["notes"].append(
+            "stale rows kept as-is (raw missing, cannot re-derive): "
+            + ", ".join(report["kept_stale"]))
+    if report["healed"]:
+        code = run(run_dir=run_dir, states=",".join(report["healed"]),
+                   **manifest.get("extract_args", {}))
+        if code != 0:
+            report["failed"] = report.pop("healed")
+            report["healed"] = []
+            report["notes"].append(
+                "heal re-extract failed — prior generation kept (see extract errors)")
+    return report
 
 
 def run(**kwargs: object):
