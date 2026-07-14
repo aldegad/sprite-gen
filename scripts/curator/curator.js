@@ -73,6 +73,8 @@ const STR = {
     treeMirror: (d, src) => `${d} — runtime mirror of ${src} (not generated)`,
     treePending: "not generated yet",
     treeRawNote: "raw · awaiting extract",
+    missingPending: "not generated",
+    missingRawWait: "generated · awaiting extract",
     treeRawFolder: "generated strip originals",
     treeFramesFolder: "extracted frames",
     treeAnchorsFolder: "direction anchors — single-frame crops",
@@ -124,6 +126,8 @@ const STR = {
     treeMirror: (d, src) => `${d} — ${src} 런타임 미러 (생성 없음)`,
     treePending: "미생성",
     treeRawNote: "raw 생성됨 · 추출 전",
+    missingPending: "미생성",
+    missingRawWait: "생성됨 · 추출 대기",
     treeRawFolder: "생성 스트립 원본",
     treeFramesFolder: "추출 프레임",
     treeAnchorsFolder: "방향 앵커 — 1장 크롭",
@@ -424,7 +428,10 @@ function buildPayload() {
   return payload;
 }
 
+let lastEditAt = 0;
+
 function scheduleSave() {
+  lastEditAt = Date.now();
   setStatus(t("editing"));
   clearTimeout(saveTimer);
   saveTimer = setTimeout(save, 250);
@@ -1221,6 +1228,14 @@ async function pollTreeProgress() {
       treeProgress = new Map(next.states.map((p) => [p.name, { raw: p.raw, frames: p.frames }]));
       treeRevision = next.runRevision;
       renderPipelineTree();
+      // 우측 상태 패널은 로드 시점 스냅샷이라 새 raw/프레임을 모른다 — 생성을
+      // 지켜보는 중(최근 편집 없음 + 모달 안 열림)이면 통째로 새로고침해 동기화.
+      // 편집 중이면 강제 리로드 대신 배너만 (자동저장이 보존하지만 흐름을 끊지 않게).
+      const editing = Date.now() - lastEditAt < 15000 || document.getElementById("zoom-modal");
+      if (!editing) {
+        location.reload();
+        return;
+      }
     }
     if (next.runRevision !== run.runRevision) showReloadBanner();
   } catch {
@@ -1266,7 +1281,7 @@ function renderCard(state, frame) {
       `<canvas class="snap-canvas"></canvas>` +
       `<div class="rotate-handle" title="${t("tRotate")}"></div>` +
       `<div class="shear-handle" title="${t("tShear")}"></div>`
-    : `<div class="missing-label">missing</div>`;
+    : `<div class="missing-label">${state.rawPresent ? t("missingRawWait") : t("missingPending")}</div>`;
 
   const label = frame.label ? escapeHtml(frame.label) : `#${frame.index}`;
   card.innerHTML =
