@@ -74,6 +74,11 @@ const STR = {
     treePending: "not generated yet",
     treeRawNote: "raw · awaiting extract",
     missingPending: "not generated",
+    archiveChip: (n) => `archive ${n}`,
+    tArchiveChip: "click to open — drop a card here to archive it",
+    tArchiveBtn: "archive (remove even from the candidate pool)",
+    tScaleScrub: "sprite scale — click arrows to step, drag the magnifier left/right",
+    archiveHint: "drag a card out to restore it into the sequence or pool",
     missingRawWait: "generated · awaiting extract",
     treeRawFolder: "generated strip originals",
     treeFramesFolder: "extracted frames",
@@ -127,6 +132,11 @@ const STR = {
     treePending: "미생성",
     treeRawNote: "raw 생성됨 · 추출 전",
     missingPending: "미생성",
+    archiveChip: (n) => `보관함 ${n}`,
+    tArchiveChip: "클릭 = 열기 · 카드를 여기로 끌어오면 보관",
+    tArchiveBtn: "보관함으로 (후보 풀에서도 제외)",
+    tScaleScrub: "스프라이트 크기 — 화살표 클릭 = 단계 조절, 돋보기 좌우 드래그 = 연속 조절",
+    archiveHint: "카드를 끌어내 시퀀스/후보로 복구",
     missingRawWait: "생성됨 · 추출 대기",
     treeRawFolder: "생성 스트립 원본",
     treeFramesFolder: "추출 프레임",
@@ -410,6 +420,8 @@ function buildPayload() {
       order: entry.order.slice(),
       transforms,
     };
+    // 보관함 = 스키마의 deleted (UI 행/굽기 기본값에서 제외 — state_plan SSoT)
+    if (entry.archived && entry.archived.length) states[name].deleted = entry.archived.slice();
     // per-state pixel-perfect (the row's own toggle) — only for rows with a twin
     if (ppTwinStates.has(name)) states[name].pixel_perfect = ppOn(name);
   }
@@ -635,7 +647,8 @@ function commitZones(wrap, stateName) {
   // keep not-yet-extracted (missing) frames in order so their slot survives a
   // reorder — if extraction later fills them in, they aren't silently dropped.
   const state = run.states.find((s) => s.name === stateName);
-  const missingIdx = state ? state.frames.filter((f) => !f.present).map((f) => f.index) : [];
+  const archivedSet = new Set(entries[stateName].archived || []);
+  const missingIdx = state ? state.frames.filter((f) => !f.present && !archivedSet.has(f.index)).map((f) => f.index) : [];
   entries[stateName].sel = new Set(seqIdx);
   entries[stateName].order = [...seqIdx, ...poolIdx, ...missingIdx];
 }
@@ -770,7 +783,7 @@ function wireReorder(handle, card, wrap, stateName) {
       if (ph.parentNode === zone && (ph.nextElementSibling === refNode || refNode === ph)) return;
       flipReorder([seq, pool], () => zone.insertBefore(ph, refNode));
     };
-    const end = () => {
+    const end = (evUp) => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
@@ -779,6 +792,17 @@ function wireReorder(handle, card, wrap, stateName) {
         // card's row (sequence ⇄ pool). This is the ✗ 빼기 / ✓ 넣기 action.
         moveCardToOtherZone(card, stateName);
         return;
+      }
+      // 보관함 칩 위에서 놓으면 보관 (풀에서도 제외)
+      const chip = wrap.querySelector(".archive-chip");
+      if (chip && evUp && typeof evUp.clientX === "number") {
+        const r = chip.getBoundingClientRect();
+        if (evUp.clientX >= r.left && evUp.clientX <= r.right && evUp.clientY >= r.top && evUp.clientY <= r.bottom) {
+          ph.remove();
+          card.remove();
+          archiveFrame(stateName, Number(card.dataset.idx));
+          return;
+        }
       }
       const fromRect = card.getBoundingClientRect();
       card.classList.remove("dragging");
@@ -806,6 +830,81 @@ function wireReorder(handle, card, wrap, stateName) {
     window.addEventListener("pointerup", end);
     window.addEventListener("pointercancel", end);
   });
+}
+
+// 상태 섹션 in-place 재구성 (보관/복구 후) — 위치 보존
+function rebuildState(stateName) {
+  const st = run.states.find((s) => s.name === stateName);
+  const old = document.querySelector(`.state[data-state="${cssEscape(stateName)}"]`);
+  if (!st || !old) return;
+  renderState(st, old); // old 자리에 교체 렌더
+}
+
+function archiveFrame(stateName, idx) {
+  const e = entries[stateName];
+  e.sel.delete(idx);
+  e.order = e.order.filter((i) => i !== idx);
+  if (!e.archived.includes(idx)) e.archived.push(idx);
+  scheduleSave();
+  rebuildState(stateName);
+}
+
+function restoreFrame(stateName, idx, toSequence) {
+  const e = entries[stateName];
+  e.archived = e.archived.filter((i) => i !== idx);
+  if (!e.order.includes(idx)) e.order.push(idx);
+  if (toSequence) e.sel.add(idx);
+  else e.sel.delete(idx);
+  scheduleSave();
+  rebuildState(stateName);
+}
+
+// 확대 스크러버 (‹🔍› 형태, 이모지 아님 — SVG): 화살표 클릭 = 스텝, 돋보기 드래그 = 연속.
+// 맥 터치패드에서 휠-스케일이 불편해 추가 (휠도 계속 동작).
+function makeScaleScrub(stateName, idx) {
+  const wrap = document.createElement("span");
+  wrap.className = "scale-scrub";
+  wrap.title = t("tScaleScrub");
+  wrap.innerHTML =
+    '<button type="button" class="ghost ss-step" data-dir="-1" aria-label="smaller">' +
+    '<svg viewBox="0 0 8 12" width="6" height="9"><path d="M6.5 1 2 6l4.5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
+    '<span class="ss-grab" aria-label="drag to scale">' +
+    '<svg viewBox="0 0 16 16" width="12" height="12"><circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.2 10.2 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>' +
+    '<button type="button" class="ghost ss-step" data-dir="1" aria-label="bigger">' +
+    '<svg viewBox="0 0 8 12" width="6" height="9"><path d="M1.5 1 6 6l-4.5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>';
+  const clamp = (v) => Math.min(SCALE_MAX, Math.max(SCALE_MIN, v));
+  wrap.querySelectorAll(".ss-step").forEach((btn) => {
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    btn.addEventListener("click", () => {
+      const tr = getTransform(stateName, idx);
+      tr.scale = clamp(tr.scale * (btn.dataset.dir === "1" ? 1.05 : 1 / 1.05));
+      applyFrameTransformAll(stateName, idx);
+      scheduleSave();
+    });
+  });
+  const grab = wrap.querySelector(".ss-grab");
+  grab.addEventListener("pointerdown", (ev) => {
+    if (ev.button || !ev.isPrimary) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    grab.setPointerCapture(ev.pointerId);
+    const tr = getTransform(stateName, idx);
+    const startX = ev.clientX;
+    const startScale = tr.scale;
+    const onMove = (e2) => {
+      tr.scale = clamp(startScale * Math.exp((e2.clientX - startX) / 140));
+      applyFrameTransformAll(stateName, idx);
+    };
+    const onUp = () => {
+      grab.releasePointerCapture(ev.pointerId);
+      grab.removeEventListener("pointermove", onMove);
+      grab.removeEventListener("pointerup", onUp);
+      scheduleSave();
+    };
+    grab.addEventListener("pointermove", onMove);
+    grab.addEventListener("pointerup", onUp);
+  });
+  return wrap;
 }
 
 function resetTransform(stateName, idx) {
@@ -846,7 +945,7 @@ function escapeHtml(s) {
     .replace(/'/g, "&#39;");
 }
 
-function renderState(state) {
+function renderState(state, replaceEl) {
   const wrap = document.createElement("section");
   wrap.className = "state";
   wrap.dataset.state = state.name;
@@ -926,16 +1025,22 @@ function renderState(state) {
     if (frame) poolFrames.appendChild(renderCard(state, frame));
   }
 
+  // 보관함: 후보 풀에서도 완전히 뺀 프레임. 접힌 칩 → 클릭하면 팝오버(쇽),
+  // 카드를 칩에 끌어다 놓으면 보관, 팝오버의 미니카드를 끌어내면 복구.
+  zones.appendChild(renderArchive(state));
+
   body.appendChild(zones);
   body.appendChild(renderPreview(state));
   wrap.appendChild(body);
 
-  document.getElementById("states").appendChild(wrap);
+  if (replaceEl) replaceEl.replaceWith(wrap);
+  else document.getElementById("states").appendChild(wrap);
 
   // wire stages + reorder grips after they are in the DOM (need clientWidth)
   for (const frame of state.frames) {
     if (!frame.present) continue;
     const card = wrap.querySelector(`.card[data-idx="${frame.index}"]`);
+    if (!card) continue; // 보관된 프레임은 행에 카드가 없다
     const stage = card.querySelector(".stage");
     wireStage(stage, state.name, frame.index);
     applyCardTransform(stage, state.name, frame.index);
@@ -1124,25 +1229,46 @@ function renderPipelineTree() {
   // ── 파일 블록: 폴더 뼈대 (어디에 저장되는가) ──────────────────────────────
   const fileUl = document.createElement("ul");
   if (run.baseUrl) liWith(fileUl, treeNode("base-source", null, run.baseUrl, "__base__"));
-  const rawLi = liWith(fileUl, folderNode("raw/", t("treeRawFolder")));
-  const rawUl = chipList();
-  for (const st of run.states) {
-    const thumb = rawThumb(st.name);
-    const note = thumb && frameCount(st.name) === 0 ? t("treeRawNote") : null;
-    const rel = (treeProgress.get(st.name) || {}).relRaw;
-    const label = rel ? rel.replace(/^raw\//, "") : `${st.name}.png`;
-    chipItem(rawUl, treeNode(label, note, thumb ? { raw: thumb } : false, st.name));
-  }
-  rawLi.appendChild(rawUl);
-  const framesLi = liWith(fileUl, folderNode("frames/", t("treeFramesFolder")));
-  const framesUl = chipList();
-  for (const st of run.states) {
-    const n = frameCount(st.name);
-    const rel = (treeProgress.get(st.name) || {}).relFrames;
-    const label = rel ? rel.replace(/^frames\//, "") + "/" : `${st.name}/`;
-    chipItem(framesUl, treeNode(label, n > 0 ? STR[lang].treeFrameCount(n) : t("treePending"), frameThumb(st.name), st.name));
-  }
-  framesLi.appendChild(framesUl);
+  // 택소노미 중첩: rel 경로가 <root>/<dir>/<leaf> 면 방향 하위 폴더로 묶는다 (legacy flat 은 그대로)
+  const groupedFolder = (rootLabel, rootNote, relKey, chipFor) => {
+    const rootLi = liWith(fileUl, folderNode(rootLabel, rootNote));
+    const dirs = new Map(); // "" = flat
+    for (const st of run.states) {
+      const rel = (treeProgress.get(st.name) || {})[relKey] || "";
+      const segs = rel.split("/");
+      const dir = segs.length >= 3 ? segs[1] : "";
+      const leaf = segs.length >= 3 ? segs.slice(2).join("/") : segs.slice(1).join("/");
+      if (!dirs.has(dir)) dirs.set(dir, []);
+      dirs.get(dir).push({ state: st, leaf: leaf || st.name });
+    }
+    const host = document.createElement("ul");
+    for (const [dir, items] of dirs) {
+      if (dir) {
+        const dli = document.createElement("li");
+        dli.appendChild(folderNode(`${dir}/`, null));
+        const ul = chipList();
+        for (const it of items) chipItem(ul, chipFor(it));
+        dli.appendChild(ul);
+        host.appendChild(dli);
+      } else {
+        for (const it of items) {
+          const li = document.createElement("li");
+          li.appendChild(chipFor(it));
+          host.appendChild(li);
+        }
+      }
+    }
+    rootLi.appendChild(host);
+  };
+  groupedFolder("raw/", t("treeRawFolder"), "relRaw", (it) => {
+    const thumb = rawThumb(it.state.name);
+    const note = thumb && frameCount(it.state.name) === 0 ? t("treeRawNote") : null;
+    return treeNode(it.leaf, note, thumb ? { raw: thumb } : false, it.state.name);
+  });
+  groupedFolder("frames/", t("treeFramesFolder"), "relFrames", (it) => {
+    const n = frameCount(it.state.name);
+    return treeNode(`${it.leaf}/`, n > 0 ? STR[lang].treeFrameCount(n) : t("treePending"), frameThumb(it.state.name), it.state.name);
+  });
   if (run.anchorFiles && run.anchorFiles.length) {
     const aLi = liWith(fileUl, folderNode("references/anchors/", t("treeAnchorsFolder")));
     const aUl = chipList();
@@ -1270,6 +1396,89 @@ function showReloadBanner() {
   document.body.appendChild(banner);
 }
 
+function renderArchive(state) {
+  const e = entries[state.name];
+  const wrap = document.createElement("div");
+  wrap.className = "archive-wrap";
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "ghost archive-chip";
+  chip.title = t("tArchiveChip");
+  chip.innerHTML =
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+    '<path d="M1.5 3h13v3h-13zM2.5 6v6.5A1 1 0 0 0 3.5 13.5h9a1 1 0 0 0 1-1V6M6 8.5h4" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>' +
+    `<span>${STR[lang].archiveChip(e.archived.length)}</span>`;
+  const pop = document.createElement("div");
+  pop.className = "archive-pop";
+  pop.innerHTML = `<div class="ap-hint">${t("archiveHint")}</div>`;
+  const cards = document.createElement("div");
+  cards.className = "ap-cards";
+  const frameByIdx = new Map(state.frames.map((f) => [f.index, f]));
+  for (const idx of e.archived) {
+    const f = frameByIdx.get(idx);
+    if (!f) continue;
+    const mini = document.createElement("div");
+    mini.className = "ap-card";
+    mini.dataset.idx = idx;
+    mini.innerHTML =
+      (f.present ? `<img src="${escapeHtml(frameUrl(state.name, f))}" alt="" draggable="false" />` : "") +
+      `<span>${f.label ? escapeHtml(f.label) : `#${idx}`}</span>`;
+    wireArchiveRestoreDrag(mini, state.name, idx);
+    cards.appendChild(mini);
+  }
+  pop.appendChild(cards);
+  chip.addEventListener("click", () => {
+    if (e.archived.length === 0) return;
+    pop.classList.toggle("open");
+  });
+  wrap.appendChild(chip);
+  wrap.appendChild(pop);
+  if (e.archived.length === 0) wrap.classList.add("empty");
+  return wrap;
+}
+
+// 팝오버 미니카드를 끌어내 시퀀스/후보 존에 떨어뜨리면 복구
+function wireArchiveRestoreDrag(mini, stateName, idx) {
+  mini.addEventListener("pointerdown", (ev) => {
+    if (ev.button || !ev.isPrimary) return;
+    ev.preventDefault();
+    const startX = ev.clientX;
+    const startY = ev.clientY;
+    let ghost = null;
+    const onMove = (e2) => {
+      if (!ghost) {
+        if (Math.abs(e2.clientX - startX) <= DRAG_THRESHOLD && Math.abs(e2.clientY - startY) <= DRAG_THRESHOLD) return;
+        ghost = mini.cloneNode(true);
+        ghost.classList.add("ap-ghost");
+        document.body.appendChild(ghost);
+      }
+      ghost.style.left = `${e2.clientX + 8}px`;
+      ghost.style.top = `${e2.clientY + 8}px`;
+    };
+    const end = (e2) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      if (!ghost) return; // 클릭만 한 것 — 아무 일 없음
+      ghost.remove();
+      const sectionSel = `.state[data-state="${cssEscape(stateName)}"]`;
+      const seq = document.querySelector(`${sectionSel} .seq-frames`);
+      const pool = document.querySelector(`${sectionSel} .pool-frames`);
+      const over = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return e2.clientX >= r.left && e2.clientX <= r.right && e2.clientY >= r.top && e2.clientY <= r.bottom;
+      };
+      if (over(seq)) restoreFrame(stateName, idx, true);
+      else if (over(pool)) restoreFrame(stateName, idx, false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  });
+}
+
 // 최상단 base 참조 줄 — 아이덴티티 truth 를 생성 결과와 나란히 비교하기 위한
 // 읽기 전용 표시 (선택/변형/굽기와 무관).
 function renderBaseRow() {
@@ -1318,7 +1527,11 @@ function renderCard(state, frame) {
     `<span class="tvals"></span>` +
     `<button type="button" class="ghost flip-btn" title="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
     `<button type="button" class="ghost reset-btn" title="${t("tReset")}">↺</button>` +
-    `</div>`;
+    `<button type="button" class="ghost arch-btn" title="${t("tArchiveBtn")}" aria-label="archive">` +
+    '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">' +
+    '<path d="M1.5 3h13v3h-13zM2.5 6v6.5A1 1 0 0 0 3.5 13.5h9a1 1 0 0 0 1-1V6M6 8.5h4" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>' +
+    `</button></div>`;
 
   // No separate ✗/✓ click handler: the header strip (.card-top) owns the press —
   // move past threshold = drag, clean click = toggle row — via wireReorder, so a
@@ -1348,6 +1561,11 @@ function renderCard(state, frame) {
       zoomBtn.addEventListener("click", () => openZoom(state.name, frame.index));
     }
     card.querySelector(".stage").addEventListener("dblclick", () => openZoom(state.name, frame.index));
+    const archBtn = card.querySelector(".arch-btn");
+    archBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    archBtn.addEventListener("click", () => archiveFrame(state.name, frame.index));
+    const controls = card.querySelector(".card-controls");
+    controls.insertBefore(makeScaleScrub(state.name, frame.index), card.querySelector(".flip-btn"));
   }
   return card;
 }
@@ -1462,6 +1680,7 @@ function startPreview(state) {
   pv.refresh();
 
   function frame(ts) {
+    if (!root.isConnected) return; // 섹션이 교체/제거되면 이 루프는 은퇴
     const play = playList(state.name);
     if (pv.playing && play.length) {
       const interval = 1000 / Math.max(0.1, state.fps * pv.speed);
@@ -1559,6 +1778,7 @@ function openZoom(stateName, idx, keepWidth) {
   modal.querySelector(".zoom-backdrop").addEventListener("click", closeZoom);
   card.querySelector(".reset-btn").addEventListener("click", () => resetTransform(stateName, idx));
   card.querySelector(".flip-btn").addEventListener("click", () => toggleFlipX(stateName, idx));
+  card.querySelector(".card-controls").insertBefore(makeScaleScrub(stateName, idx), card.querySelector(".flip-btn"));
 
   // 뷰 확대: 휠/핀치(ctrl+휠). wireStage 의 휠(스프라이트 스케일)보다 먼저 등록해
   // 가로채고, Shift+휠만 스프라이트 스케일로 통과시킨다.
@@ -1779,29 +1999,32 @@ function seedEntries() {
       }
       return out;
     };
-    const savedSel = c && Array.isArray(c.selected) ? coerce(c.selected, present) : [];
-    const savedOrder = c && Array.isArray(c.order) ? coerce(c.order, allIdx) : [];
+    const archived = c && Array.isArray(c.deleted) ? coerce(c.deleted, allIdx) : [];
+    const archivedSet = new Set(archived);
+    const savedSel = (c && Array.isArray(c.selected) ? coerce(c.selected, present) : []).filter((i) => !archivedSet.has(i));
+    const savedOrder = (c && Array.isArray(c.order) ? coerce(c.order, allIdx) : []).filter((i) => !archivedSet.has(i));
     let order;
     if (savedOrder.length) {
       // restore the exact saved arrangement (incl. pool order); append any
       // newly-extracted frames that weren't in the saved order.
-      const seen = new Set(savedOrder);
+      const seen = new Set([...savedOrder, ...archived]);
       order = [...savedOrder, ...allIdx.filter((i) => !seen.has(i))];
     } else if (savedSel.length) {
       // older sidecar without `order`: selected leads, the rest trail.
       const inSel = new Set(savedSel);
-      order = [...savedSel, ...present.filter((i) => !inSel.has(i)), ...missing];
+      order = [...savedSel, ...present.filter((i) => !inSel.has(i) && !archivedSet.has(i)),
+               ...missing.filter((i) => !archivedSet.has(i))];
     } else {
-      order = allIdx;
+      order = allIdx.filter((i) => !archivedSet.has(i));
     }
-    const sel = savedSel.length ? new Set(savedSel) : new Set(present);
+    const sel = savedSel.length ? new Set(savedSel) : new Set(present.filter((i) => !archivedSet.has(i)));
     const transforms = {};
     if (c && c.transforms) {
       for (const [idx, t] of Object.entries(c.transforms)) {
         transforms[idx] = { ...IDENTITY(), ...t };
       }
     }
-    entries[state.name] = { order, sel, transforms };
+    entries[state.name] = { order, sel, transforms, archived };
   }
 }
 
