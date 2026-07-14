@@ -81,10 +81,6 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 .state-head .meta { color: var(--muted); font-size: 12px; }
 .state-head .action { color: var(--muted); font-size: 12px; font-style: italic; }
 .state-warn { color: var(--danger); font-size: 12px; }
-/* 줄별 픽셀퍼펙트 토글 — 켜짐(픽셀퍼펙트 표시·굽기)일 때 accent 강조 */
-.state-head .pp-state-btn { margin-left: auto; border: 1px solid var(--line); border-radius: 6px; align-self: center; }
-.state-head .pp-state-btn.active { background: var(--accent, #0ea5e9); color: #fff; border-color: transparent; }
-.state-head .pp-state-btn.active:hover { background: var(--accent, #0ea5e9); filter: brightness(1.1); }
 
 .state-body { display: flex; gap: 18px; align-items: flex-start; min-width: 0; }
 .frames {
@@ -378,7 +374,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   image-rendering: pixelated;
 }
 
-/* 픽셀 그리드 오버레이 (헤더 체크박스로 토글) — 셀 픽셀 래스터 시각화 */
+/* 픽셀 그리드 오버레이 (줄별 체크박스 / 상단 전체 토글) — display 는 sizePxGrids 가 소유 */
 .stage .pxgrid {
   position: absolute;
   inset: 0;
@@ -388,11 +384,12 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
     linear-gradient(to right, rgba(220, 40, 40, 0.28) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(40, 110, 220, 0.28) 1px, transparent 1px);
 }
-body.show-pxgrid .stage .pxgrid { display: block; }
 
-/* 상태별 생성 ref 칩 (어떤 재료로 이 줄을 생성했는가) */
+/* 상태별 생성 ref 칩 (어떤 재료로 이 줄을 생성했는가) + 우측 줄별 표시/굽기 컨트롤 */
 .state-refs { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; flex-wrap: wrap; }
 .state-refs .refs-label { font-size: 12px; opacity: 0.6; }
+.state-refs .row-controls { margin-left: auto; display: inline-flex; gap: 8px; }
+.row-toggle { padding: 3px 8px; background: var(--panel, transparent); }
 .ref-chip { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: inherit;
   border: 1px solid rgba(128,128,128,0.3); border-radius: 6px; padding: 2px 8px 2px 2px; }
 .ref-chip:hover { border-color: rgba(128,128,128,0.6); }
