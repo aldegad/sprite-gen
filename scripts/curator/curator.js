@@ -81,6 +81,8 @@ const STR = {
     penTool: "pen", eraserTool: "eraser", undoEdit: "undo", clearEdits: "clear edits",
     editNote: "pixel editing — shown untransformed (source coordinates)",
     archiveHint: "drag a card out to restore it into the sequence or pool",
+    archModalTitle: (st, n) => `archive · ${st} (${n})`,
+    restoreToSeq: "to sequence", restoreToPool: "to pool",
     missingRawWait: "generated · awaiting extract",
     treeRawFolder: "generated strip originals",
     treeFramesFolder: "extracted frames",
@@ -141,6 +143,8 @@ const STR = {
     penTool: "연필", eraserTool: "지우개", undoEdit: "되돌리기", clearEdits: "편집 비우기",
     editNote: "픽셀 편집 중 — 변형 없이 원본 좌표로 표시",
     archiveHint: "카드를 끌어내 시퀀스/후보로 복구",
+    archModalTitle: (st, n) => `보관함 · ${st} (${n})`,
+    restoreToSeq: "시퀀스로", restoreToPool: "후보로",
     missingRawWait: "생성됨 · 추출 대기",
     treeRawFolder: "생성 스트립 원본",
     treeFramesFolder: "추출 프레임",
@@ -1439,36 +1443,66 @@ function renderArchive(state) {
     '<path d="M1.5 3h13v3h-13zM2.5 6v6.5A1 1 0 0 0 3.5 13.5h9a1 1 0 0 0 1-1V6M6 8.5h4" ' +
     'fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>' +
     `<span>${STR[lang].archiveChip(e.archived.length)}</span>`;
-  const pop = document.createElement("div");
-  pop.className = "archive-pop";
-  pop.innerHTML = `<div class="ap-hint">${t("archiveHint")}</div>`;
-  const cards = document.createElement("div");
-  cards.className = "ap-cards";
-  const frameByIdx = new Map(state.frames.map((f) => [f.index, f]));
-  for (const idx of e.archived) {
-    const f = frameByIdx.get(idx);
-    if (!f) continue;
-    const mini = document.createElement("div");
-    mini.className = "ap-card";
-    mini.dataset.idx = idx;
-    mini.innerHTML =
-      (f.present ? `<img src="${escapeHtml(frameUrl(state.name, f))}" alt="" draggable="false" />` : "") +
-      `<span>${f.label ? escapeHtml(f.label) : `#${idx}`}</span>`;
-    wireArchiveRestoreDrag(mini, state.name, idx);
-    cards.appendChild(mini);
-  }
-  pop.appendChild(cards);
   chip.addEventListener("click", () => {
-    if (e.archived.length === 0) return;
-    pop.classList.toggle("open");
+    if (e.archived.length) openArchiveModal(state.name);
   });
   wrap.appendChild(chip);
-  wrap.appendChild(pop);
   if (e.archived.length === 0) wrap.classList.add("empty");
   return wrap;
 }
 
-// 팝오버 미니카드를 끌어내 시퀀스/후보 존에 떨어뜨리면 복구
+// 보관함 풀 모달 — 일반 카드 크기로 크게 보고 버튼으로 복구 (팝오버 대체, UX)
+function openArchiveModal(stateName) {
+  document.getElementById("archive-modal")?.remove();
+  const state = run.states.find((s) => s.name === stateName);
+  const e = entries[stateName];
+  if (!state || !e.archived.length) return;
+  const modal = document.createElement("div");
+  modal.id = "archive-modal";
+  modal.innerHTML =
+    `<div class="zoom-backdrop"></div>` +
+    `<div class="card zoom-card arch-modal-card">` +
+    `<div class="zoom-head"><span class="zoom-title">${STR[lang].archModalTitle(escapeHtml(stateName), e.archived.length)}</span>` +
+    `<button type="button" class="ghost zoom-close">${t("zoomClose")}</button></div>` +
+    `<div class="arch-grid"></div></div>`;
+  const grid = modal.querySelector(".arch-grid");
+  const frameByIdx = new Map(state.frames.map((f) => [f.index, f]));
+  for (const idx of e.archived) {
+    const f = frameByIdx.get(idx);
+    if (!f) continue;
+    const cardEl = document.createElement("div");
+    cardEl.className = "card arch-card";
+    cardEl.style.setProperty("--cell-aspect", run.cell.width / run.cell.height);
+    cardEl.innerHTML =
+      `<div class="card-top"><span class="idx">${f.label ? escapeHtml(f.label) : `#${idx}`}</span></div>` +
+      `<div class="stage">` +
+      (f.present ? `<img src="${escapeHtml(frameUrl(stateName, f))}" class="px-upscale" draggable="false" />` : `<div class="missing-label">${t("missingPending")}</div>`) +
+      `</div>` +
+      `<div class="card-controls">` +
+      `<button type="button" class="ghost ar-seq">${t("restoreToSeq")}</button>` +
+      `<button type="button" class="ghost ar-pool">${t("restoreToPool")}</button>` +
+      `</div>`;
+    const restore = (toSeq) => {
+      restoreFrame(stateName, idx, toSeq);
+      if (entries[stateName].archived.length) openArchiveModal(stateName);
+      else close();
+    };
+    cardEl.querySelector(".ar-seq").addEventListener("click", () => restore(true));
+    cardEl.querySelector(".ar-pool").addEventListener("click", () => restore(false));
+    grid.appendChild(cardEl);
+  }
+  const close = () => {
+    modal.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (ev) => { if (ev.key === "Escape") close(); };
+  modal.querySelector(".zoom-close").addEventListener("click", close);
+  modal.querySelector(".zoom-backdrop").addEventListener("click", close);
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(modal);
+}
+
+// 팝오버 미니카드를 끌어내// 팝오버 미니카드를 끌어내 시퀀스/후보 존에 떨어뜨리면 복구
 function wireArchiveRestoreDrag(mini, stateName, idx) {
   mini.addEventListener("pointerdown", (ev) => {
     if (ev.button || !ev.isPrimary) return;
