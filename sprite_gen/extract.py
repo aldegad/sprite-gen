@@ -2268,7 +2268,22 @@ def _run(args: argparse.Namespace):
                 round(consensus_x, 2),
                 round(consensus_y, 2),
             )
-            logical_frames = conform_row_logical(snapped, logical_width, logical_height, pp_detail_bias)
+            # fit.conform=false: 계약(logical_height) 눌림 없이 스냅된 네이티브 논리
+            # 크기를 유지한다 — 칸 병합(디테일 갈라짐)이 없는 대신 캐릭터 키가
+            # 계약보다 크고 행마다 다를 수 있다. 물리 한계(셀에서 바닥 마진만 지킴)는
+            # 여전히 캡으로 강제하고, 캡에 걸리면 관측 가능하게 경고한다.
+            if fit_config.get("conform", True) is False:
+                cap_w = max(1, cell_width // pp_scale)
+                cap_h = max(1, (cell_height - safe_margin_y) // pp_scale)
+                over = [f"{i}:{s.width}x{s.height}" for i, s in enumerate(snapped)
+                        if s.width > cap_w or s.height > cap_h]
+                if over:
+                    all_warnings.append(
+                        f"{state}: conform=false but native logical exceeds the physical cap "
+                        f"{cap_w}x{cap_h} — capped frames: {', '.join(over)}")
+                logical_frames = conform_row_logical(snapped, cap_w, cap_h, pp_detail_bias)
+            else:
+                logical_frames = conform_row_logical(snapped, logical_width, logical_height, pp_detail_bias)
             registered = register_row_frames(logical_frames)
             # 전/후 비교 쌍둥이(plain/orig)는 픽셀퍼펙트 프레임의 최종 콘텐츠 bbox 가
             # 확정된 뒤(아래 pending 루프) 같은 풋프린트에 앉힌다 — 여기서는 원본
