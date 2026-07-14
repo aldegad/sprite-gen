@@ -1041,10 +1041,10 @@ function renderPipelineTree() {
     return el;
   };
   // 접을 수 있는 블록 (파이프라인 / 파일) — folderNode 의 접힘 상태 공유
-  const block = (label, ul) => {
+  const block = (label, ul, kind) => {
     const div = document.createElement("div");
-    div.className = "tree-block";
-    div.appendChild(folderNode(label, null));
+    div.className = "tree-block" + (kind ? " " + kind : "");
+    div.appendChild(folderNode(label, null, kind === "pipeline" ? "flow" : "folder"));
     div.appendChild(ul);
     if (collapsedFolders.has(label)) div.classList.add("folder-collapsed");
     return div;
@@ -1129,7 +1129,7 @@ function renderPipelineTree() {
     `<span class="meta tree-path" title="${escapeHtml(run.runDir)}">${escapeHtml(run.runDir)}</span></div>`;
   const root = document.createElement("div");
   root.className = "tree";
-  root.appendChild(block(t("treePipeline"), chainUl));
+  root.appendChild(block(t("treePipeline"), chainUl, "pipeline"));
   root.appendChild(block(t("treeFiles"), fileUl));
   wrap.appendChild(root);
   const existing = document.querySelector(".pipeline-tree");
@@ -1141,14 +1141,23 @@ function renderPipelineTree() {
 // 클릭 = 접기/펴기. 트리는 진행 폴링으로 재렌더되므로 접힘 상태를 라벨 키로 유지한다.
 const collapsedFolders = new Set();
 
-function folderNode(label, note) {
+const FOLDER_ICON =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">' +
+  '<path d="M1.5 4A1.5 1.5 0 0 1 3 2.5h2.6a1 1 0 0 1 .8.4l.9 1.1H13A1.5 1.5 0 0 1 14.5 5.5v6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5V4z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
+// 파이프라인(흐름) 아이콘 — 위 노드에서 아래 노드로 흘러 내려가는 모양 (폴더와 구분)
+const FLOW_ICON =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">' +
+  '<circle cx="8" cy="3" r="1.7" fill="none" stroke="currentColor" stroke-width="1.2"/>' +
+  '<path d="M8 4.7v4.1M5.6 8.9 8 11.3l2.4-2.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<circle cx="8" cy="13" r="1.7" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
+
+function folderNode(label, note, icon) {
   const node = document.createElement("span");
   node.className = "tree-node folder clickable";
   node.innerHTML =
     '<svg class="caret" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true">' +
     '<path d="M5 3.5 10.5 8 5 12.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
-    '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">' +
-    '<path d="M1.5 4A1.5 1.5 0 0 1 3 2.5h2.6a1 1 0 0 1 .8.4l.9 1.1H13A1.5 1.5 0 0 1 14.5 5.5v6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5V4z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
+    (icon === "flow" ? FLOW_ICON : FOLDER_ICON);
   node.appendChild(Object.assign(document.createElement("span"), { className: "tn-label", textContent: label }));
   if (note) node.appendChild(Object.assign(document.createElement("span"), { className: "tn-note", textContent: note }));
   node.addEventListener("click", () => {

@@ -187,6 +187,47 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 .tree-block > .tree-node.folder .tn-label { font-family: inherit; font-size: 12.5px; letter-spacing: 0.02em; text-transform: uppercase; }
 .tree-block > ul { margin-top: 2px; }
 
+/* 파이프라인 블록 — 연결선이 파이프처럼 아래로 흐른다 (대시가 흘러내리는 애니메이션) */
+.tree-block.pipeline ul {
+  border-left: none;
+  position: relative;
+}
+.tree-block.pipeline ul::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(to bottom,
+      rgba(37, 99, 235, 0) 0 11px,
+      rgba(37, 99, 235, 0.75) 11px 16px),
+    linear-gradient(var(--line), var(--line));
+  background-size: 1px 27px, 1px 100%;
+  background-repeat: repeat-y, no-repeat;
+  animation: pipe-flow 1.15s linear infinite;
+}
+@keyframes pipe-flow {
+  to { background-position: 0 27px, 0 0; }
+}
+/* 가로 tick 은 액센트 + 노드를 가리키는 화살촉 */
+.tree-block.pipeline .tree li::before,
+.tree-block.pipeline li::before { background: rgba(37, 99, 235, 0.4); }
+.tree-block.pipeline li::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 15px;
+  border: 3px solid transparent;
+  border-left: 4px solid rgba(37, 99, 235, 0.55);
+}
+#sidebar .tree-block.pipeline li::after { left: 7px; }
+@media (prefers-reduced-motion: reduce) {
+  .tree-block.pipeline ul::before { animation: none; }
+}
+
 /* 트리에서 이동해 온 대상 패널 하이라이트 — ~1.8초 유지 후 스르륵 페이드아웃 */
 @keyframes target-flash {
   0% { box-shadow: 0 0 0 2px var(--accent), 0 8px 28px rgba(37, 99, 235, 0.16); }
