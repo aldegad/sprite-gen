@@ -67,10 +67,11 @@ button.ghost.flip-btn.active:hover { background: var(--accent, #0ea5e9); filter:
 #layout { display: flex; align-items: flex-start; min-width: 0; }
 #sidebar {
   position: sticky;
-  top: 49px; /* .topbar 높이 아래 */
+  top: var(--topbar-h, 49px); /* 실측값은 boot 가 --topbar-h 로 주입 */
   flex: 0 0 320px;
   width: 320px;
-  max-height: calc(100vh - 49px);
+  /* 내용 길이와 무관하게 좌측을 전체 높이로 가른다 (쫙 갈라진 스플릿) */
+  height: calc(100vh - var(--topbar-h, 49px));
   overflow-y: auto;
   border-right: 1px solid var(--line);
   background: var(--panel);
@@ -92,7 +93,7 @@ body.sidebar-collapsed #sidebar {
 }
 #sidebar-toggle {
   position: sticky;
-  top: 61px;
+  top: calc(var(--topbar-h, 49px) + 12px);
   z-index: 5;
   flex: none;
   align-self: flex-start;

@@ -1510,6 +1510,17 @@ function drawGroundGrid(stage) {
 
 // --- 사이드바 접기/펴기 (쿠마피커 도크 스타일, 상태는 localStorage 유지) ------
 const sidebarToggle = document.getElementById("sidebar-toggle");
+// topbar 실측 높이 → 사이드바 sticky 오프셋/전체높이 계산에 주입.
+// 라벨/폰트가 늦게 차면서 높이가 변하므로 ResizeObserver 로 추적한다 (일회 측정 금지).
+{
+  const topbar = document.querySelector(".topbar");
+  if (topbar) {
+    const sync = () =>
+      document.documentElement.style.setProperty("--topbar-h", `${topbar.offsetHeight}px`);
+    sync();
+    new ResizeObserver(sync).observe(topbar);
+  }
+}
 function applySidebarCollapsed(collapsed) {
   document.body.classList.toggle("sidebar-collapsed", collapsed);
   try { localStorage.setItem("curator-sidebar-collapsed", collapsed ? "1" : ""); } catch { /* private mode */ }
@@ -1753,6 +1764,8 @@ async function boot() {
   syncPpControls();
   syncGridControls();
   refreshVariantImages();
+  // 힌트바를 우측 본문 컬럼 끝으로 이동 — 좌측 스플릿이 페이지 바닥까지 유지되게
+  document.getElementById("states").appendChild(document.getElementById("hintbar"));
   setStatus(run.curation && Object.keys(run.curation.states || {}).length ? t("loaded") : t("ready"));
 }
 
