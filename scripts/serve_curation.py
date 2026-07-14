@@ -27,11 +27,14 @@ API:
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
+import zipfile
 
 try:
     from PIL import Image
@@ -44,7 +47,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
 from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported_ref_role, load_curation, run_revision
-from extract import load_consistent_frames_manifest
+from extract import heal_run, load_consistent_frames_manifest
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sprite_gen.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel
@@ -378,6 +381,68 @@ def write_curation_atomic(run_dir: Path, payload: dict) -> None:
         raise
 
 
+_heal_lock = threading.Lock()
+
+
+def maybe_heal(run_dir: Path) -> dict | None:
+    """실시간 계약 (수홍 확정 2026-07-14): 뷰에 '재추출' 개념이 없다.
+
+    frames/ 는 (raw + request + 현재 엔진 + 큐레이션)의 파생 캐시다 — 요청이
+    들어올 때마다 행별 engine_revision 을 현재 엔진과 비교해, 다르면 raw 에서
+    조용히 다시 굽는다 (heal_run). 신선하면 해시 비교 몇 ms 로 끝난다.
+    ThreadingHTTPServer 라 락으로 단일 비행을 보장한다 (동시 재추출 금지).
+    실패는 뷰를 죽이지 않고 노트로 관측 가능하게 남긴다 — 이전 세대는
+    스테이징 통짜 스왑 덕에 바이트 그대로다.
+    """
+    with _heal_lock:
+        try:
+            report = heal_run(run_dir)
+        except (Exception, SystemExit) as exc:
+            return {"healed": [], "kept_stale": [], "failed": [],
+                    "notes": [f"heal skipped: {exc}"]}
+    if report["healed"] or report["kept_stale"] or report.get("failed") or report["notes"]:
+        return report
+    return None
+
+
+def _zip_paths(base: Path, paths: list[Path]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in paths:
+            archive.write(path, path.relative_to(base).as_posix())
+    return buffer.getvalue()
+
+
+def build_download(run_dir: Path, kind: str) -> tuple[bytes, str] | dict:
+    """내보내기 버튼 3종 = '지금 보이는 라이브 상태의 다운로드' (수홍 확정 2026-07-14).
+
+    게임/어디에 적용한다는 의미가 아니다 — 현재 (프레임 캐시 + 큐레이션)를
+    합성 스크립트로 계산해 파일로 손에 쥐여준다. 계산 산출물은 런 폴더에도
+    남는다 (런 폴더 = 작업장, 다운로드 = 핸드오프). 실패 시 dict(에러)."""
+    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    character = str(request.get("character", {}).get("id") or run_dir.name)
+    if kind == "atlas":
+        result = run_compose(run_dir)
+        if not result["ok"]:
+            return result
+        files = [run_dir / "sprite-sheet-alpha.png", run_dir / "manifest.json"]
+        files = [f for f in files if f.is_file()]
+        return _zip_paths(run_dir, files), f"{character}-atlas.zip"
+    if kind == "pngs":
+        result = run_export(run_dir)
+        if not result["ok"]:
+            return result
+        out = run_dir / "curated"
+        return _zip_paths(run_dir, sorted(out.rglob("*.png"))), f"{character}-pngs.zip"
+    if kind == "gifs":
+        result = run_export_gif(run_dir)
+        if not result["ok"]:
+            return result
+        out = run_dir / "exports"
+        return _zip_paths(run_dir, sorted(out.glob("*.gif"))), f"{character}-gifs.zip"
+    return {"ok": False, "error": f"unknown download kind: {kind}"}
+
+
 def _run_script(name: str, run_dir: Path) -> dict:
     proc = subprocess.run(
         [sys.executable, str(SCRIPTS_DIR / name), "--run-dir", str(run_dir)],
@@ -476,14 +541,41 @@ class CurationHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/run":
             try:
-                self._send_json(build_run_state(self.run_dir))
+                heal = maybe_heal(self.run_dir)  # 실시간 계약: 스냅샷 전에 캐시 자가치유
+                snapshot = build_run_state(self.run_dir)
+                if heal:
+                    snapshot["heal"] = heal
+                self._send_json(snapshot)
             except (Exception, SystemExit) as exc:  # incl. load_frames_manifest fail-loud; no silent fallback
                 self._send_json({"error": str(exc)}, 500)
+            return
+        if path.startswith("/download/"):
+            kind = path[len("/download/"):]
+            try:
+                maybe_heal(self.run_dir)
+                built = build_download(self.run_dir, kind)
+            except (Exception, SystemExit) as exc:
+                self._send_json({"error": str(exc)}, 500)
+                return
+            if isinstance(built, dict):
+                self._send_json(built, 500)
+                return
+            data, filename = built
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("X-Filename", filename)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
             return
         if path == "/api/progress":
             # 가벼운 생성 진행 스냅샷 (트리 실시간 갱신용 폴링 대상): 상태별 raw 유무 +
             # 추출 프레임 수 + 런 세대. /api/run 전체 스냅샷(프레임 이미지 오픈)보다 훨씬 싸다.
             try:
+                # 페이지가 열린 채 엔진이 바뀌어도 다음 폴에서 자가치유된다 —
+                # 프레임 세대가 바뀌면 runRevision 변화로 클라이언트가 리로드한다.
+                maybe_heal(self.run_dir)
                 with read_guard(self.run_dir):
                     request = json.loads((self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
                     progress = []

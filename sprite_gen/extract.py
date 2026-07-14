@@ -7,7 +7,9 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from statistics import median
@@ -16,7 +18,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen.layout import frames_dir_rel, raw_rel, take_raw_rel
-from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, publish_guard, relative_posix
+from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, publish_guard, relative_posix, release_run_dir_lock
 from sprite_gen.segment import separate_fused_poses
 
 
@@ -2047,6 +2049,15 @@ def _run(args: argparse.Namespace):
 
     run_dir = args.run_dir.expanduser().resolve()
     acquire_run_dir_lock(run_dir, "extract_sprite_row_frames")
+    try:
+        return _run_locked(args, run_dir)
+    finally:
+        # 작업 단위 상호배제 — atexit 까지 쥐고 있으면 장수 프로세스(테스트 러너 등)가
+        # in-process 추출 뒤 heal_run 서브프로세스를 자기 락으로 막는다.
+        release_run_dir_lock(run_dir)
+
+
+def _run_locked(args: argparse.Namespace, run_dir: Path):
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     # 크로마 튜너블의 SSoT 는 request JSON `chroma` — CLI 는 명시 override 만.
     # 실제 적용값은 request 에 되써서 런이 스스로 재현 가능하게 남긴다.
@@ -2601,13 +2612,31 @@ def heal_run(run_dir: Path | str) -> dict[str, Any]:
             "stale rows kept as-is (raw missing, cannot re-derive): "
             + ", ".join(report["kept_stale"]))
     if report["healed"]:
-        code = run(run_dir=run_dir, states=",".join(report["healed"]),
-                   **manifest.get("extract_args", {}))
-        if code != 0:
+        # 서브프로세스로 재추출한다: run-dir 락은 atexit 해제라, 장수 프로세스
+        # (큐레이션 서버)가 인프로세스로 추출하면 락을 영구 보유해 이후의
+        # compose/export 서브프로세스가 전부 죽는다. 자식 프로세스면 락 수명이
+        # 그 실행으로 끝나고, 추출의 SystemExit 도 격리된다.
+        cmd = [sys.executable, "-m", "sprite_gen.extract",
+               "--run-dir", str(run_dir), "--states", ",".join(report["healed"])]
+        for dest, value in (manifest.get("extract_args") or {}).items():
+            flag = "--" + dest.replace("_", "-")
+            if isinstance(value, bool):
+                if value:
+                    cmd.append(flag)
+            else:
+                cmd.extend([flag, str(value)])
+        # 자식은 부모의 sys.path 조작(스크립트 shim 등)을 상속하지 않는다 —
+        # 패키지 루트를 PYTHONPATH 로 명시해 어디서 불러도 -m 이 뜬다.
+        env = dict(os.environ)
+        env["PYTHONPATH"] = (str(Path(__file__).resolve().parents[1])
+                             + os.pathsep + env.get("PYTHONPATH", ""))
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        if proc.returncode != 0:
             report["failed"] = report.pop("healed")
             report["healed"] = []
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
             report["notes"].append(
-                "heal re-extract failed — prior generation kept (see extract errors)")
+                "heal re-extract failed — prior generation kept: " + " | ".join(tail))
     return report
 
 

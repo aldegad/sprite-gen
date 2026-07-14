@@ -36,7 +36,7 @@ function matrixOf(t) {
 // --- i18n (en / ko; initial language from server --lang, toggle reloads) ----
 const STR = {
   en: {
-    title: "curation", compose: "Bake atlas", export: "Export PNGs", exportGif: "Export GIFs",
+    title: "curation", compose: "Download atlas", export: "Download PNGs", exportGif: "Download GIFs",
     groundGrid: "Ground grid", langOther: "한국어",
     ppApply: "Pixel-perfect (all)", baseNote: "identity reference — not baked",
     ppState: "Pixel-perfect",
@@ -48,8 +48,8 @@ const STR = {
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
-    baking: "baking…", composeDone: "atlas baked", composeFail: "bake failed: ",
-    exporting: "exporting…", exportFail: "export failed: ",
+    baking: "computing…", composeDone: "atlas downloaded", composeFail: "download failed: ",
+    exporting: "computing…", exportFail: "download failed: ",
     ready: "ready", loaded: "loaded existing curation", runLoadFail: "failed to load run:",
     tRotate: "rotate", tShear: "shear — horizontal = shx, vertical = shy", tReset: "reset transform", tFlipX: "flip horizontally",
     tReorder: "drag the card header to reorder; a plain click toggles sequence ⇄ pool",
@@ -94,11 +94,11 @@ const STR = {
     tTreeNode: "click to scroll to this row",
     tMarginNote: "some frames exceed the safe area but fit within the margin zone — informational, not a reroll flag",
     hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "hover a frame -> bottom-right magnifier = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
-    exportDone: (n) => `${n} PNGs → curated/`,
-    exportGifDone: (n) => `${n} GIFs → exports/`,
+    exportDone: () => "PNGs downloaded",
+    exportGifDone: () => "GIFs downloaded",
   },
   ko: {
-    title: "큐레이션", compose: "아틀라스 굽기", export: "PNG 내보내기", exportGif: "GIF 내보내기",
+    title: "큐레이션", compose: "아틀라스 다운로드", export: "PNG 다운로드", exportGif: "GIF 다운로드",
     groundGrid: "바닥 그리드", langOther: "EN",
     ppApply: "픽셀퍼펙트 전체", baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
     ppState: "픽셀퍼펙트",
@@ -110,8 +110,8 @@ const STR = {
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
-    baking: "굽는 중…", composeDone: "아틀라스 완료", composeFail: "굽기 실패: ",
-    exporting: "내보내는 중…", exportFail: "내보내기 실패: ",
+    baking: "계산 중…", composeDone: "아틀라스 다운로드 완료", composeFail: "다운로드 실패: ",
+    exporting: "계산 중…", exportFail: "다운로드 실패: ",
     ready: "준비됨", loaded: "기존 큐레이션 로드됨", runLoadFail: "run 로드 실패:",
     tRotate: "회전", tShear: "기울이기 — 가로=shx, 세로=shy", tReset: "보정 초기화", tFlipX: "좌우 반전",
     tReorder: "헤더를 잡고 드래그하면 순서변경, 그냥 클릭하면 시퀀스↔후보",
@@ -156,8 +156,8 @@ const STR = {
     tTreeNode: "클릭하면 해당 줄로 이동",
     tMarginNote: "안전영역은 넘었지만 안전마진 안에 있음 — 정보성 알림, 리롤 대상 아님",
     hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "프레임 호버 → 우하단 돋보기 = 크기", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
-    exportDone: (n) => `PNG ${n}장 → curated/`,
-    exportGifDone: (n) => `GIF ${n}개 → exports/`,
+    exportDone: () => "PNG 다운로드 완료",
+    exportGifDone: () => "GIF 다운로드 완료",
   },
 };
 let lang = "en";
@@ -2118,63 +2118,50 @@ function applyStaticLang() {
   document.getElementById("hintbar").innerHTML = t("hints").map((h) => `<span>${h}</span>`).join("");
 }
 
-// --- compose ---------------------------------------------------------------
+// --- 다운로드 3종 ------------------------------------------------------------
+// 실시간 계약 (수홍 확정 2026-07-14): 버튼은 '게임에 적용'이 아니다 — 지금
+// 보이는 라이브 상태(프레임 캐시 + 큐레이션)를 서버가 그 자리에서 계산해
+// 파일(zip)로 내려주는 다운로드다. 서버는 계산 전에 캐시를 자가치유한다.
 
-document.getElementById("compose").addEventListener("click", async (ev) => {
-  const btn = ev.currentTarget;
-  btn.disabled = true;
+async function downloadArtifact(kind, doneMsg) {
   clearTimeout(saveTimer);
   await save();
   setStatus(t("baking"));
-  try {
-    const res = await fetch("/api/compose", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error((data.stderr || data.error || "compose failed").trim());
-    setStatus(t("composeDone"), "ok");
-  } catch (e) {
-    setStatus(t("composeFail") + e.message, "err");
-  } finally {
-    btn.disabled = false;
+  const res = await fetch(`/download/${kind}`);
+  if (!res.ok) {
+    let msg = "download failed";
+    try {
+      const data = await res.json();
+      msg = (data.stderr || data.error || msg).trim();
+    } catch { /* 비 JSON 에러 응답 — 기본 메시지 유지 */ }
+    throw new Error(msg);
   }
-});
+  const blob = await res.blob();
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = res.headers.get("X-Filename") || `${kind}.zip`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  setStatus(doneMsg, "ok");
+}
 
-document.getElementById("export").addEventListener("click", async (ev) => {
-  const btn = ev.currentTarget;
-  btn.disabled = true;
-  clearTimeout(saveTimer);
-  await save();
-  setStatus(t("exporting"));
-  try {
-    const res = await fetch("/api/export", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error((data.stderr || data.error || "export failed").trim());
-    const out = data.export || {};
-    setStatus(STR[lang].exportDone(out.count || 0), "ok");
-  } catch (e) {
-    setStatus(t("exportFail") + e.message, "err");
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-document.getElementById("export-gif").addEventListener("click", async (ev) => {
-  const btn = ev.currentTarget;
-  btn.disabled = true;
-  clearTimeout(saveTimer);
-  await save();
-  setStatus(t("exporting"));
-  try {
-    const res = await fetch("/api/export-gif", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error((data.stderr || data.error || "gif export failed").trim());
-    const gif = data.gif || {};
-    setStatus(STR[lang].exportGifDone((gif.exports || []).length), "ok");
-  } catch (e) {
-    setStatus(t("exportFail") + e.message, "err");
-  } finally {
-    btn.disabled = false;
-  }
-});
+for (const [id, kind, done] of [
+  ["compose", "atlas", () => t("composeDone")],
+  ["export", "pngs", () => STR[lang].exportDone()],
+  ["export-gif", "gifs", () => STR[lang].exportGifDone()],
+]) {
+  document.getElementById(id).addEventListener("click", async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    try {
+      await downloadArtifact(kind, done());
+    } catch (e) {
+      setStatus(t(id === "compose" ? "composeFail" : "exportFail") + e.message, "err");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
 
 // --- bootstrap -------------------------------------------------------------
 
@@ -2250,6 +2237,15 @@ async function boot() {
   // initial language: ?lang= (set by the toggle) overrides the server --lang
   lang = new URLSearchParams(location.search).get("lang") || run.lang || "en";
   document.documentElement.lang = lang;
+  // 자가치유 보고 (실시간 계약): 서버가 이번 로드에서 stale 프레임을 재계산했으면
+  // 조용히 알려만 준다 — '재추출' 버튼/개념은 없다. raw 가 없어 못 고친 행도 관측.
+  // (표시는 boot 끝의 최종 setStatus 자리에서 — 중간 상태 메시지에 덮이지 않게)
+  const healParts = [];
+  if (run.heal) {
+    if (run.heal.healed && run.heal.healed.length) healParts.push(`엔진 갱신 반영: ${run.heal.healed.join(", ")}`);
+    if (run.heal.kept_stale && run.heal.kept_stale.length) healParts.push(`원본 없음(구엔진 유지): ${run.heal.kept_stale.join(", ")}`);
+    if (run.heal.failed && run.heal.failed.length) healParts.push(`재계산 실패(이전 세대 유지): ${run.heal.failed.join(", ")}`);
+  }
   // pixel-perfect twin state must resolve BEFORE first render (frameUrl reads it):
   // per-state truth = states.<state>.pixel_perfect override > run-wide default > on.
   ppTwinStates = new Set(run.states.filter((s) => s.frames.some((f) => f.plainUrl)).map((s) => s.name));
@@ -2327,7 +2323,11 @@ async function boot() {
   refreshVariantImages();
   // 힌트바를 우측 본문 컬럼 끝으로 이동 — 좌측 스플릿이 페이지 바닥까지 유지되게
   document.getElementById("states").appendChild(document.getElementById("hintbar"));
-  setStatus(run.curation && Object.keys(run.curation.states || {}).length ? t("loaded") : t("ready"));
+  if (healParts.length) {
+    setStatus(healParts.join(" · "), run.heal.failed && run.heal.failed.length ? "err" : "ok");
+  } else {
+    setStatus(run.curation && Object.keys(run.curation.states || {}).length ? t("loaded") : t("ready"));
+  }
 }
 
 boot();
