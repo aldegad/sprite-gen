@@ -728,11 +728,34 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .ap-card img { height: 26px; width: 26px; object-fit: contain; image-rendering: pixelated; }
 .ap-ghost { position: fixed; z-index: 3000; pointer-events: none; opacity: 0.85; }
 .card-controls .arch-btn { color: var(--muted); }
-/* 확대 스크러버 — 클릭 스텝 + 좌우 드래그 (터치패드 친화) */
-.scale-scrub { display: inline-flex; align-items: center; gap: 1px; color: var(--muted); flex: none; }
-.scale-scrub .ss-step { padding: 1px 2px; }
-.scale-scrub .ss-grab { cursor: ew-resize; padding: 1px 2px; display: inline-flex; touch-action: none; }
+/* 확대 스크러버 — 스테이지 내부 우하단, 호버 시 표시. [−][돋보기⁺ 드래그][+] */
+.stage .scale-scrub {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 1px 3px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.stage:hover .scale-scrub { opacity: 1; }
+.scale-scrub .ss-step { padding: 2px 3px; }
+.scale-scrub .ss-grab { cursor: ew-resize; padding: 2px 3px; display: inline-flex; touch-action: none; }
 .scale-scrub .ss-grab:hover, .scale-scrub .ss-step:hover { color: var(--accent, #0ea5e9); }
+
+/* 카드 하단 컨트롤 줄 정리: 크기정보 | 변형값(말줄임) | 버튼 그룹 우측 정렬 */
+.card-controls { display: flex; align-items: center; gap: 4px; }
+.card-controls .psize { flex: none; }
+.card-controls .tvals { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.card-controls .flip-btn, .card-controls .reset-btn, .card-controls .arch-btn { flex: none; }
 .card-controls .arch-btn:hover { color: var(--accent, #0ea5e9); }
 
 /* 확대 편집 모달 — 한 프레임 크게, 격자/픽셀퍼펙트 토글하며 조정 */
