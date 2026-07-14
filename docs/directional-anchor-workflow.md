@@ -2,6 +2,20 @@
 
 > `SKILL.md` 에서 분리한 시나리오 상세. 방향성·45도·locomotion 행 생성 시 이 문서를 따른다. 기본 simple sprite (`idle`/`jump`/`attack`/`wave`) 에는 필요 없다. 내용은 손실 없이 `SKILL.md` 본문에서 그대로 옮겨졌다.
 
+### Prepare 스캐폴딩 (`--directions`, 2026-07-14)
+
+이 워크플로는 이제 문서 절차만이 아니라 **prepare 가 구조로 스캐폴딩**한다 (수홍 확정 — base = down 정면 기본자세, 방향 앵커를 base 에서 뽑고 각 행은 자기 앵커에서 뽑는다):
+
+```bash
+prepare_sprite_run.py ... --directions down,side,up --mirror left=side
+```
+
+- request 에 `directions` 블록(`{set, mirror, anchor_suffix}`)이 기록되고, 모든 state 는 `<direction>_<state>` 네이밍이 강제된다 (아니면 fail-loud).
+- 방향 앵커 상태(`<dir>_idle`)가 요청에 없으면 **합성**된다 — 앵커 없는 방향 행 생성 금지. 앵커 프롬프트는 base 기반 + 방향 잠금(canonical direction anchor 문구), 일반 행 프롬프트는 "accepted direction anchor 에서 identity" 문구가 자동으로 들어간다.
+- `--mirror left=side` 처럼 미러 방향은 **생성을 생략**하는 것이 기본이고(런타임 미러), 그 사실이 계약으로 기록된다. 미러로 부족해 재생성할 때는 반대편 행을 timing/scale 참조로만 부착하고 대상 방향 앵커를 새로 뽑는다 (아래 좌우 게이트).
+- 생성 체인 SSoT 는 `references/generation-plan.json` — 1단계 direction-anchors(base 기반), 2단계 action-rows(앵커 기반), mirrored_directions(생략 계약). 워커는 이 플랜 순서대로 생성한다.
+- 큐레이션 뷰는 `directions` 런을 **방향 그룹**(앵커 줄 맨 앞 + "방향 앵커" 배지 + 미러 방향 스트립)으로 렌더한다.
+
 ### Hatch-Pet Locomotion Pattern
 
 For compact mascot or pet-like locomotion, use the hatch-pet-proven pattern instead of treating `run`/`walk` as a generic humanoid row:

@@ -272,6 +272,26 @@ def _build_run_state_impl(run_dir: Path) -> dict:
             }
         )
 
+    # 방향 계약 런: 뷰가 방향 그룹(앵커 우선)으로 묶고 미러 방향(생성 생략)을 표시한다.
+    directions_cfg = request.get("directions")
+    direction_groups = None
+    if directions_cfg and directions_cfg.get("set"):
+        suffix = directions_cfg.get("anchor_suffix", "idle")
+        direction_groups = []
+        for direction in directions_cfg["set"]:
+            anchor = f"{direction}_{suffix}"
+            members = [s for s in request["states"] if s.startswith(direction + "_")]
+            # 앵커를 그룹 맨 앞으로 (요청 순서 보존, 앵커만 승격)
+            if anchor in members:
+                members = [anchor, *[m for m in members if m != anchor]]
+            direction_groups.append({
+                "direction": direction,
+                "anchor": anchor if anchor in request["states"] else None,
+                "states": members,
+            })
+        for target, source in (directions_cfg.get("mirror") or {}).items():
+            direction_groups.append({"direction": target, "mirrorOf": source, "states": []})
+
     curation = load_curation(run_dir) or empty_curation()
     # 원본 베이스(아이덴티티 truth)가 있으면 큐레이터 최상단에 참조 줄로 노출
     base_url = None
@@ -299,6 +319,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         "pixelPerfect": pixel_perfect if pixel_perfect is not None else ({"source": "auto", "label": "auto", "scale": None} if any(st.get("pixelScale") for st in states) else None),
         "schemaVersion": SCHEMA_VERSION,
         "runRevision": run_revision(run_dir),
+        "directionGroups": direction_groups,
         "states": states,
         "curation": curation,
         "iso": request.get("iso"),

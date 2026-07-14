@@ -117,6 +117,11 @@ python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/prepare_sprite_run.py \
 
 For hatch-pet-style locomotion, add the cell gate explicitly: `--cell-width 192 --cell-height 208`.
 
+방향 있는 캐릭터(휴머노이드 4/8방향)는 방향 계약을 함께 선언한다: `--directions down,side,up --mirror left=side`.
+base = down 정면 기본자세 하나이고, prepare 가 방향 앵커(`<dir>_idle`) 슬롯을 합성하고 생성 체인 SSoT
+(`references/generation-plan.json` — 1단계 앵커는 base 기반, 2단계 행은 자기 방향 앵커 기반, 미러 방향은
+생성 생략 계약)를 기록한다. 상세와 좌우 재생성 규칙: [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md) "Prepare 스캐폴딩".
+
 This writes:
 
 ```text

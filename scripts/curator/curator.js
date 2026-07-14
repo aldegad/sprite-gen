@@ -60,6 +60,10 @@ const STR = {
     tZoomStage: "wheel/pinch = view zoom · drag = move · Shift+wheel = sprite scale",
     zoomClose: "✕", tZoomPrev: "previous frame", tZoomNext: "next frame",
     marginNote: "in margin zone",
+    dirAnchorBadge: "direction anchor",
+    tDirAnchorBadge: "canonical facing anchor for this direction — generated from the base; every other row of this direction derives identity from it",
+    dirGroupLabel: (d) => `direction · ${d}`,
+    dirMirrorLabel: (d, src) => `direction · ${d} — runtime mirror of ${src} (not generated)`,
     tMarginNote: "some frames exceed the safe area but fit within the margin zone — informational, not a reroll flag",
     hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "wheel = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
     exportDone: (n) => `${n} PNGs → curated/`,
@@ -90,6 +94,10 @@ const STR = {
     tZoomStage: "휠/핀치 = 화면 확대 · 드래그 = 이동 · Shift+휠 = 스프라이트 크기",
     zoomClose: "✕", tZoomPrev: "이전 프레임", tZoomNext: "다음 프레임",
     marginNote: "여백 침범",
+    dirAnchorBadge: "방향 앵커",
+    tDirAnchorBadge: "이 방향의 canonical 앵커 — base 에서 생성되고, 이 방향의 다른 모든 행이 여기서 identity 를 가져온다",
+    dirGroupLabel: (d) => `방향 · ${d}`,
+    dirMirrorLabel: (d, src) => `방향 · ${d} — ${src} 런타임 미러 (생성 없음)`,
     tMarginNote: "안전영역은 넘었지만 안전마진 안에 있음 — 정보성 알림, 리롤 대상 아님",
     hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "휠 = 확대/축소", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
     exportDone: (n) => `PNG ${n}장 → curated/`,
@@ -120,6 +128,7 @@ let ppStates = {};             // stateName -> bool (true = pixel-perfect varian
 // its own checkbox, the header checkbox sets all rows at once.
 let gridCapableStates = new Set(); // states with a known/measured snap grid
 let gridStates = {};               // stateName -> bool (overlay shown)
+let anchorStates = new Set();      // direction-anchor states (directionGroups runs)
 
 function ppOn(stateName) {
   return ppStates[stateName] !== false;
@@ -814,7 +823,8 @@ function renderState(state) {
     `<span class="meta">${state.requestFrames} ${t("frames")} · ${state.fps}fps · ${state.loop ? t("loop") : t("nonLoop")} · ${t("cellPx")} ${run.cell.width}x${run.cell.height}px</span>` +
     (state.action ? `<span class="action">${escapeHtml(state.action)}</span>` : "") +
     (state.extractOk ? "" : `<span class="state-warn">${t("extractFail")}</span>`) +
-    (inMarginZone ? `<span class="state-note" title="${t("tMarginNote")}">${t("marginNote")}</span>` : "");
+    (inMarginZone ? `<span class="state-note" title="${t("tMarginNote")}">${t("marginNote")}</span>` : "") +
+    (anchorStates.has(state.name) ? `<span class="anchor-badge" title="${t("tDirAnchorBadge")}">${t("dirAnchorBadge")}</span>` : "");
   wrap.appendChild(head);
 
   // 이 줄을 "무엇으로 생성했는가" — run dir 실재 파일 기준 ref 체인 (앵커/basis/가이드).
@@ -1464,7 +1474,29 @@ async function boot() {
   });
   seedEntries();
   if (run.baseUrl) renderBaseRow();
-  for (const state of run.states) renderState(state);
+  // 방향 계약 런: 방향별 그룹(앵커 우선) + 미러 방향(생성 생략) 스트립으로 렌더.
+  // 계약 없는 런은 기존 flat 순서 그대로.
+  if (run.directionGroups && run.directionGroups.length) {
+    anchorStates = new Set(run.directionGroups.map((g) => g.anchor).filter(Boolean));
+    const byName = new Map(run.states.map((s) => [s.name, s]));
+    const rendered = new Set();
+    for (const group of run.directionGroups) {
+      const headEl = document.createElement("div");
+      headEl.className = "dir-head" + (group.mirrorOf ? " dir-mirror" : "");
+      headEl.textContent = group.mirrorOf
+        ? STR[lang].dirMirrorLabel(group.direction, group.mirrorOf)
+        : STR[lang].dirGroupLabel(group.direction);
+      document.getElementById("states").appendChild(headEl);
+      for (const name of group.states) {
+        const st = byName.get(name);
+        if (st) { renderState(st); rendered.add(name); }
+      }
+    }
+    // 방향 접두사에 안 걸린 잔여 상태는 끝에 그대로 (숨기지 않는다)
+    for (const state of run.states) if (!rendered.has(state.name)) renderState(state);
+  } else {
+    for (const state of run.states) renderState(state);
+  }
   syncPpControls();
   syncGridControls();
   refreshVariantImages();

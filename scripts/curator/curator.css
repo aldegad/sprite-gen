@@ -83,6 +83,11 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 26px; }
 .state-warn { color: var(--danger); font-size: 12px; }
 /* 여백 침범 정보 알림 — 경고가 아니라 순한 안내 톤 (리롤 대상 아님) */
 .state-note { color: var(--muted); font-size: 12px; border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; }
+/* 방향 앵커 배지 — 이 줄이 해당 방향의 identity 원천임을 표시 */
+.anchor-badge { color: var(--accent, #0ea5e9); font-size: 12px; font-weight: 600; border: 1px solid var(--accent-dim, rgba(14,165,233,0.35)); border-radius: 5px; padding: 1px 7px; }
+/* 방향 그룹 구분 헤더 (directions 계약 런) */
+.dir-head { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: var(--muted); margin: 6px 2px -16px; text-transform: uppercase; }
+.dir-head.dir-mirror { font-weight: 500; font-style: italic; margin-bottom: -14px; }
 
 .state-body { display: flex; gap: 18px; align-items: flex-start; min-width: 0; }
 .frames {
