@@ -1219,6 +1219,23 @@ def _pitch_pair(pitch: float | tuple[float, float]) -> tuple[float, float]:
     return float(pitch), float(pitch)
 
 
+def tighten_components(images: list[Image.Image]) -> list[Image.Image]:
+    """픽셀퍼펙트 스냅 전에 컴포넌트를 알파 bbox 로 타이트하게 조인다.
+
+    `_grid_edges` 의 lead-스냅(위상 < 피치의 1/4 이면 0 으로)은 컴포넌트가 bbox 로
+    잘려 블록 경계에서 시작한다는 전제다. `component_group_image` 는 사방 4px
+    패딩을 두르므로, 패딩째 격자를 치면 위상 추정 노이즈가 lead-스냅 문턱 아래로
+    떨어지는 순간 격자 전체가 패딩만큼 위로 밀린다 — 꼬리에 자투리 셀이 생기고,
+    경계에서 쪼개진 바닥 블록 + 문턱 근처 알파(~134) 프린지가 유령 픽셀 한 줄로
+    태어난다 (실사고 2026-07-14: down_idle blink 발밑 1px 돌출, 수홍 발견 —
+    회귀 테스트 test_pixel_snap.py::test_padded_component_no_ghost_bottom_row).
+    """
+    return [
+        component.crop(box) if (box := component.getbbox()) else component
+        for component in images
+    ]
+
+
 def grid_snap_downscale(
     image: Image.Image,
     pitch: float | tuple[float, float],
@@ -2214,6 +2231,7 @@ def _run(args: argparse.Namespace):
                     for i in range(frame_count)
                 ]
                 method = "slots-explicit"
+            images = tighten_components(images)
             # 피치는 행 안에서 사실상 상수(모델의 블록 크기)고 드리프트하는 건
             # 위상이다. 프레임별 검출값의 중앙값을 합의 피치로 쓰고(배수/노이즈
             # 낚임 방지), 위상만 프레임별로 다시 잡는다.
