@@ -1812,14 +1812,20 @@ def load_failure_evidence(path: Path) -> dict:
     return _load_validated(path, "failure evidence", _require_failure_evidence)
 
 
-def _require_generation_consistency(run_dir: Path, manifest: dict, name: str) -> None:
+def _require_generation_consistency(run_dir: Path, manifest: dict, name: str,
+                                    allow_pending_states: bool = False) -> None:
     """Beyond JSON schema, a published generation must AGREE with the physical frame tree and the
     request. Frames and the manifest are published together as one transaction, so a disagreement
     means corruption/staleness: fail loud rather than let a consumer build output from stale,
     partial, or orphan frames (Consistency / No Silent Fallback). Checks:
       - every request state has exactly one row (no missing state, no duplicate row);
       - no physical frame state dir is an orphan the manifest omits;
-      - every row's canonical frames exist on disk."""
+      - every row's canonical frames exist on disk.
+
+    `allow_pending_states` (관찰자 전용 — 큐레이션 뷰): 아직 생성되지 않은 요청 상태
+    (manifest 행도 없고 물리 프레임도 없음)는 '진행 중'으로 허용한다. 부분 추출이
+    정식 흐름(단계별 생성·증분 추출)이 된 뒤 뷰가 미생성 상태 때문에 죽으면 안 된다.
+    소비자(compose/export 등)는 기본값(False)으로 완결 세대를 계속 강제한다."""
     frames_root = run_dir / "frames"
     try:
         request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
@@ -1836,7 +1842,10 @@ def _require_generation_consistency(run_dir: Path, manifest: dict, name: str) ->
     # while serve (request-driven) hides it — a per-consumer divergence.
     missing = sorted(request_states - row_state_set)
     if missing:
-        raise SystemExit(f"corrupt {name} {run_dir}: manifest missing row(s) for request state(s) {missing} — incomplete generation")
+        physical_now = {d.name for d in frames_root.iterdir() if d.is_dir()} if frames_root.is_dir() else set()
+        pending_only = [m for m in missing if m not in physical_now]
+        if not (allow_pending_states and pending_only == missing):
+            raise SystemExit(f"corrupt {name} {run_dir}: manifest missing row(s) for request state(s) {missing} — incomplete generation")
     unknown = sorted(row_state_set - request_states)
     if unknown:
         raise SystemExit(f"corrupt {name} {run_dir}: manifest has row(s) for state(s) {unknown} not in the request (stale/unknown state)")
@@ -1872,11 +1881,13 @@ def _require_generation_consistency(run_dir: Path, manifest: dict, name: str) ->
             raise SystemExit(f"corrupt {name} {run_dir}: row '{state}' row.frames={row['frames']} != {len(files)} files")
 
 
-def load_consistent_frames_manifest(run_dir: Path, name: str = "frames manifest") -> dict:
+def load_consistent_frames_manifest(run_dir: Path, name: str = "frames manifest",
+                                     allow_pending_states: bool = False) -> dict:
     """For readers that TOLERATE an ungenerated run (serve scaffold, inspect from raw): return the
     validated + consistent manifest if present; {} only when the run genuinely has NO generation
     (no manifest AND no physical frame dirs); fail loud if the manifest is corrupt/inconsistent, OR
-    absent while physical frames exist (an orphan/stale generation — not a fresh scaffold)."""
+    absent while physical frames exist (an orphan/stale generation — not a fresh scaffold).
+    `allow_pending_states=True` (뷰 전용) 는 아직 생성 전인 요청 상태의 행 부재를 허용한다."""
     frames_root = run_dir / "frames"
     manifest = load_frames_manifest(frames_root / "frames-manifest.json")
     if not manifest:
@@ -1887,7 +1898,7 @@ def load_consistent_frames_manifest(run_dir: Path, name: str = "frames manifest"
                 f"frames/frames-manifest.json is absent — not a fresh scaffold. Re-extract or remove them."
             )
         return {}
-    _require_generation_consistency(run_dir, manifest, name)
+    _require_generation_consistency(run_dir, manifest, name, allow_pending_states=allow_pending_states)
     return manifest
 
 

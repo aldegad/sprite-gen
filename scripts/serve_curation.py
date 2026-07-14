@@ -190,7 +190,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
     # (legitimate). A present-but-corrupt/inconsistent manifest, or an orphan (frames without a
     # manifest), fails loud (load_consistent_frames_manifest raises) and surfaces as HTTP 500 in
     # do_GET — never a silent empty-rows / stale-frame fallback (No Silent Fallback / Consistency).
-    frames_manifest = load_consistent_frames_manifest(run_dir) or {"rows": []}
+    frames_manifest = load_consistent_frames_manifest(run_dir, allow_pending_states=True) or {"rows": []}
     rows_by_state = {row["state"]: row for row in frames_manifest.get("rows", [])}
 
     cell = request["cell"]

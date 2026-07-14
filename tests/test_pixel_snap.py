@@ -169,3 +169,20 @@ def test_twins_share_pixel_perfect_footprint(tmp_path) -> None:
             ob = orig.getchannel("A").getbbox()
             for a, b in zip(ob, tuple(v * scale for v in pb)):
                 assert abs(a - b) <= 2 * scale, f"frame {index}: orig bbox {ob} vs pixel bbox x{scale}"
+
+
+def test_partial_generation_view_tolerance(tmp_path) -> None:
+    """부분 생성(일부 상태만 추출) 세대: 관찰자(뷰)는 allow_pending_states 로 통과,
+    소비자 기본 게이트는 여전히 fail-loud."""
+    import json as _json
+    import pytest as _pytest
+    from sprite_gen.extract import load_consistent_frames_manifest
+    run_dir = _build_pp_run(tmp_path)
+    request = _json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request["states"]["walk2"] = dict(request["states"]["walk"])  # 아직 raw 없는 두 번째 상태
+    (run_dir / "sprite-request.json").write_text(_json.dumps(request), encoding="utf-8")
+    assert extract_module.run(run_dir=run_dir, states="walk") == 0
+    manifest = load_consistent_frames_manifest(run_dir, allow_pending_states=True)
+    assert [r["state"] for r in manifest["rows"]] == ["walk"]
+    with _pytest.raises(SystemExit, match="incomplete generation"):
+        load_consistent_frames_manifest(run_dir)
