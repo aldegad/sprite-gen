@@ -59,6 +59,8 @@ const STR = {
     tZoomOpen: "inspect large (double-click the image works too)",
     tZoomStage: "wheel/pinch = view zoom · drag = move · Shift+wheel = sprite scale",
     zoomClose: "✕", tZoomPrev: "previous frame", tZoomNext: "next frame",
+    marginNote: "in margin zone",
+    tMarginNote: "some frames exceed the safe area but fit within the margin zone — informational, not a reroll flag",
     hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "wheel = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
     exportDone: (n) => `${n} PNGs → curated/`,
     exportGifDone: (n) => `${n} GIFs → exports/`,
@@ -87,6 +89,8 @@ const STR = {
     tZoomOpen: "크게 보기 (이미지 더블클릭도 됨)",
     tZoomStage: "휠/핀치 = 화면 확대 · 드래그 = 이동 · Shift+휠 = 스프라이트 크기",
     zoomClose: "✕", tZoomPrev: "이전 프레임", tZoomNext: "다음 프레임",
+    marginNote: "여백 침범",
+    tMarginNote: "안전영역은 넘었지만 안전마진 안에 있음 — 정보성 알림, 리롤 대상 아님",
     hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "휠 = 확대/축소", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
     exportDone: (n) => `PNG ${n}장 → curated/`,
     exportGifDone: (n) => `GIF ${n}개 → exports/`,
@@ -798,11 +802,19 @@ function renderState(state) {
 
   const head = document.createElement("div");
   head.className = "state-head";
+  // 여백 침범 알림 (정보성): 안전영역(사방 여백 준수 상한)은 넘었지만 물리캡 이내.
+  // 리롤 대상 아님 — 순한 톤으로만 표시 (수홍 확정 2026-07-14).
+  const safeW = run.cell.width - (run.cell.safeMarginX || 0) * 2;
+  const safeH = run.cell.height - (run.cell.safeMarginY || 0) * 2;
+  const inMarginZone = state.frames.some(
+    (f) => f.present && f.contentSize && (f.contentSize[0] > safeW || f.contentSize[1] > safeH)
+  );
   head.innerHTML =
     `<span class="name">${escapeHtml(state.name)}</span>` +
     `<span class="meta">${state.requestFrames} ${t("frames")} · ${state.fps}fps · ${state.loop ? t("loop") : t("nonLoop")} · ${t("cellPx")} ${run.cell.width}x${run.cell.height}px</span>` +
     (state.action ? `<span class="action">${escapeHtml(state.action)}</span>` : "") +
-    (state.extractOk ? "" : `<span class="state-warn">${t("extractFail")}</span>`);
+    (state.extractOk ? "" : `<span class="state-warn">${t("extractFail")}</span>`) +
+    (inMarginZone ? `<span class="state-note" title="${t("tMarginNote")}">${t("marginNote")}</span>` : "");
   wrap.appendChild(head);
 
   // 이 줄을 "무엇으로 생성했는가" — run dir 실재 파일 기준 ref 체인 (앵커/basis/가이드).
