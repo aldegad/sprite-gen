@@ -56,6 +56,9 @@ const STR = {
     tPlay: "play", tPause: "pause", tPrev: "step back", tNext: "step forward", tSpeed: "playback speed",
     zoneSeq: "Running sequence", zonePool: "Candidate pool — drag a cut up to add it", addToSeq: "✓ add", removeFromSeq: "✗ remove",
     cellPx: "cell", tContentPx: "actual sprite pixels (transparent padding excluded)",
+    tZoomOpen: "inspect large (double-click the image works too)",
+    tZoomStage: "wheel/pinch = view zoom · drag = move · Shift+wheel = sprite scale",
+    zoomClose: "✕", tZoomPrev: "previous frame", tZoomNext: "next frame",
     hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "wheel = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
     exportDone: (n) => `${n} PNGs → curated/`,
     exportGifDone: (n) => `${n} GIFs → exports/`,
@@ -81,6 +84,9 @@ const STR = {
     tPlay: "재생", tPause: "일시정지", tPrev: "이전 프레임", tNext: "다음 프레임", tSpeed: "재생 속도",
     zoneSeq: "달리기 시퀀스", zonePool: "후보 풀 — 마음에 드는 컷을 위로 끌어 추가", addToSeq: "✓ 넣기", removeFromSeq: "✗ 빼기",
     cellPx: "셀", tContentPx: "실제 스프라이트 픽셀 (투명 여백 제외)",
+    tZoomOpen: "크게 보기 (이미지 더블클릭도 됨)",
+    tZoomStage: "휠/핀치 = 화면 확대 · 드래그 = 이동 · Shift+휠 = 스프라이트 크기",
+    zoomClose: "✕", tZoomPrev: "이전 프레임", tZoomNext: "다음 프레임",
     hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "휠 = 확대/축소", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
     exportDone: (n) => `PNG ${n}장 → curated/`,
     exportGifDone: (n) => `GIF ${n}개 → exports/`,
@@ -166,15 +172,16 @@ function sizePxGrids() {
   // 줄 단위 격자: 그 줄의 격자 체크박스가 켜져 있을 때만 그린다. 계약 런은 전 줄
   // 동일 scale, 계약 없는 런은 줄별 자동 측정값(state.pixelScale). 측정 실패한
   // 줄은 오버레이를 숨긴다 — 가짜 격자 금지.
-  // 픽셀퍼펙트를 끈 줄(plain 표시)도 숨긴다 — plain 은 스냅된 격자가 아니다.
+  // 픽셀퍼펙트를 끈 줄(plain 표시) 위에도 그린다 — 타깃 논리 격자를 원본에 겹쳐
+  // 스냅 전/후를 비교하는 용도 (수홍 요청 2026-07-14).
   document.querySelectorAll(".card").forEach((card) => {
     const overlay = card.querySelector(".pxgrid");
     if (!overlay) return;
     const stage = card.querySelector(".stage");
     const st = run.states.find((s) => s.name === card.dataset.state);
-    const plainShown = ppTwinStates.has(card.dataset.state) && !ppOn(card.dataset.state);
-    const wanted = !!gridStates[card.dataset.state] && !plainShown;
-    const step = wanted ? (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null : null;
+    const step = gridStates[card.dataset.state]
+      ? (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null
+      : null;
     if (!step || !stage) { overlay.style.display = "none"; return; }
     overlay.style.display = "block";
     const ds = (stage.clientWidth / run.cell.width) * step;
@@ -218,6 +225,42 @@ function syncGridControls() {
     el.checked = !!gridStates[el.dataset.state];
   });
   syncAggregate(document.getElementById("pxgrid-check"), gridCapableStates, (n) => !!gridStates[n]);
+}
+
+// 줄별 토글 체크박스 공용 팩토리 — refs 줄과 확대 모달이 같은 클래스/핸들러를 쓰므로
+// sync*Controls 가 양쪽 인스턴스를 함께 갱신한다 (per-state truth 하나, 표시 N개).
+function makeStateToggle(cls, stateName, label, title, checked, onChange) {
+  const el = document.createElement("label");
+  el.className = "pp-apply row-toggle";
+  el.title = title;
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.className = cls;
+  input.dataset.state = stateName;
+  input.checked = checked;
+  input.addEventListener("change", (ev) => onChange(ev.target.checked));
+  el.appendChild(input);
+  el.appendChild(Object.assign(document.createElement("span"), { textContent: label }));
+  return el;
+}
+
+function makeGridToggle(stateName) {
+  return makeStateToggle("grid-state-check", stateName, t("pxGrid"), t("tGridState"),
+    !!gridStates[stateName], (checked) => {
+      gridStates[stateName] = checked;
+      syncGridControls();
+      sizePxGrids();
+    });
+}
+
+function makePpToggle(stateName) {
+  return makeStateToggle("pp-state-check", stateName, t("ppState"), t("tPpState"),
+    ppOn(stateName), (checked) => {
+      ppStates[stateName] = checked;
+      syncPpControls();
+      refreshVariantImages();
+      scheduleSave();
+    });
 }
 
 const statusEl = document.getElementById("status");
@@ -354,6 +397,14 @@ function applyCardTransform(stage, stateName, idx) {
   if (flipBtn) flipBtn.classList.toggle("active", !!t.flipX);
 }
 
+// 같은 프레임을 보여주는 모든 스테이지(그리드 카드 + 확대 모달)를 함께 갱신 —
+// 어느 쪽에서 편집해도 두 화면이 실시간 동기화된다.
+function applyFrameTransformAll(stateName, idx) {
+  document
+    .querySelectorAll(`.card[data-state="${cssEscape(stateName)}"][data-idx="${idx}"] .stage`)
+    .forEach((s) => applyCardTransform(s, stateName, idx));
+}
+
 // --- interactions ----------------------------------------------------------
 
 function wireStage(stage, stateName, idx) {
@@ -374,15 +425,17 @@ function wireStage(stage, stateName, idx) {
       if (Math.abs(ddx) > DRAG_THRESHOLD || Math.abs(ddy) > DRAG_THRESHOLD) moved = true;
       t.dx = start.dx + ddx / ds();
       t.dy = start.dy + ddy / ds();
-      applyCardTransform(stage, stateName, idx);
+      applyFrameTransformAll(stateName, idx);
     };
     const onUp = () => {
       stage.releasePointerCapture(ev.pointerId);
       stage.removeEventListener("pointermove", onMove);
       stage.removeEventListener("pointerup", onUp);
       if (!moved) {
-        // a click (not a drag) sends the frame to the other row
-        moveCardToOtherZone(stage.closest(".card"), stateName);
+        // a click (not a drag) sends the frame to the other row.
+        // 확대 모달의 스테이지는 줄(.state) 밖이므로 이동 없음 — 편집 전용.
+        const owner = stage.closest(".card");
+        if (owner && owner.closest(".state")) moveCardToOtherZone(owner, stateName);
       } else {
         scheduleSave();
       }
@@ -399,7 +452,7 @@ function wireStage(stage, stateName, idx) {
       const t = getTransform(stateName, idx);
       const factor = ev.deltaY < 0 ? 1.05 : 1 / 1.05;
       t.scale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, t.scale * factor));
-      applyCardTransform(stage, stateName, idx);
+      applyFrameTransformAll(stateName, idx);
       scheduleSave();
     },
     { passive: false }
@@ -423,7 +476,7 @@ function wireStage(stage, stateName, idx) {
       // screen angle grows clockwise; schema is CCW positive -> subtract.
       const deltaDeg = ((now - startScreen) * 180) / Math.PI;
       t.rotate = origRotate - deltaDeg;
-      applyCardTransform(stage, stateName, idx);
+      applyFrameTransformAll(stateName, idx);
     };
     const onUp = () => {
       handle.releasePointerCapture(ev.pointerId);
@@ -447,7 +500,7 @@ function wireStage(stage, stateName, idx) {
       // full-width drag ≈ 1.0 slope; small moves give fine control
       t.shx = start.shx + (e.clientX - start.x) / stage.clientWidth;
       t.shy = start.shy + (e.clientY - start.y) / stage.clientHeight;
-      applyCardTransform(stage, stateName, idx);
+      applyFrameTransformAll(stateName, idx);
     };
     const onUp = () => {
       shear.releasePointerCapture(ev.pointerId);
@@ -659,9 +712,9 @@ function wireReorder(handle, card, wrap, stateName) {
   });
 }
 
-function resetTransform(stateName, idx, stage) {
+function resetTransform(stateName, idx) {
   entries[stateName].transforms[idx] = IDENTITY();
-  applyCardTransform(stage, stateName, idx);
+  applyFrameTransformAll(stateName, idx);
   scheduleSave();
 }
 
@@ -731,35 +784,8 @@ function renderState(state) {
       : "";
     const controls = document.createElement("span");
     controls.className = "row-controls";
-    const rowToggle = (cls, label, title, checked, onChange) => {
-      const el = document.createElement("label");
-      el.className = "pp-apply row-toggle";
-      el.title = title;
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.className = cls;
-      input.dataset.state = state.name;
-      input.checked = checked;
-      input.addEventListener("change", onChange);
-      el.appendChild(input);
-      el.appendChild(Object.assign(document.createElement("span"), { textContent: label }));
-      return el;
-    };
-    if (showGridToggle) {
-      controls.appendChild(rowToggle("grid-state-check", t("pxGrid"), t("tGridState"), !!gridStates[state.name], (ev) => {
-        gridStates[state.name] = ev.target.checked;
-        syncGridControls();
-        sizePxGrids();
-      }));
-    }
-    if (showPpToggle) {
-      controls.appendChild(rowToggle("pp-state-check", t("ppState"), t("tPpState"), ppOn(state.name), (ev) => {
-        ppStates[state.name] = ev.target.checked;
-        syncPpControls();
-        refreshVariantImages();
-        scheduleSave();
-      }));
-    }
+    if (showGridToggle) controls.appendChild(makeGridToggle(state.name));
+    if (showPpToggle) controls.appendChild(makePpToggle(state.name));
     refs.appendChild(controls);
     wrap.appendChild(refs);
   }
@@ -853,7 +879,10 @@ function renderCard(state, frame) {
     (frame.present ? `<span class="grip" title="${t("tReorder")}" aria-label="reorder">⠿</span>` : "") +
     `<span class="idx" title="frame ${frame.index}">${label}</span>` +
     `</span>` +
+    `<span class="ct-right">` +
+    (frame.present ? `<button type="button" class="ghost zoom-btn" title="${t("tZoomOpen")}">⛶</button>` : "") +
     `<button type="button" class="ghost sel-btn">${t("excluded")}</button>` +
+    `</span>` +
     `</div>` +
     `<div class="stage">${stageInner}</div>` +
     `<div class="card-controls">` +
@@ -878,23 +907,31 @@ function renderCard(state, frame) {
       else imgEl.addEventListener("load", markPx, { once: true });
     }
     card.querySelector(".reset-btn").addEventListener("click", () =>
-      resetTransform(state.name, frame.index, card.querySelector(".stage"))
+      resetTransform(state.name, frame.index)
     );
     card.querySelector(".flip-btn").addEventListener("click", () =>
-      toggleFlipX(state.name, frame.index, card.querySelector(".stage"))
+      toggleFlipX(state.name, frame.index)
     );
+    // 확대 모달 진입: 헤더의 ⛶ 버튼 (pointerdown 전파를 끊어 헤더 드래그/클릭 토글과
+    // 충돌하지 않게) + 스테이지 더블클릭.
+    const zoomBtn = card.querySelector(".zoom-btn");
+    if (zoomBtn) {
+      zoomBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+      zoomBtn.addEventListener("click", () => openZoom(state.name, frame.index));
+    }
+    card.querySelector(".stage").addEventListener("dblclick", () => openZoom(state.name, frame.index));
   }
   return card;
 }
 
 /** Toggle horizontal flip for a single frame (Alex 2026-05-28). */
-function toggleFlipX(stateName, idx, stage) {
+function toggleFlipX(stateName, idx) {
   const entry = entries[stateName];
   if (!entry) return;
   if (!entry.transforms[idx]) entry.transforms[idx] = IDENTITY();
   entry.transforms[idx].flipX = entry.transforms[idx].flipX ? 0 : 1;
-  // applyCardTransform renders the mirror and highlights the flip button.
-  applyCardTransform(stage, stateName, idx);
+  // 모든 스테이지에 거울 반전을 렌더하고 flip 버튼을 강조한다.
+  applyFrameTransformAll(stateName, idx);
   scheduleSave();
 }
 
@@ -1010,6 +1047,110 @@ function startPreview(state) {
   }
   syncPlayBtn();
   requestAnimationFrame(frame);
+}
+
+// --- 확대 편집 모달 — 한 프레임을 크게 띄워 격자/픽셀퍼펙트를 켜가며 조정 -----
+// 같은 entries/transform truth 를 쓰므로 모달 편집이 그리드 카드에 실시간 반영된다.
+// 휠/핀치 = 화면 배율(뷰 확대), 드래그/핸들/Shift+휠 = 기존 스프라이트 편집 그대로.
+let zoomView = null; // { stateName, idx, width }
+
+function closeZoom() {
+  const modal = document.getElementById("zoom-modal");
+  if (modal) modal.remove();
+  zoomView = null;
+  document.removeEventListener("keydown", onZoomKey);
+}
+
+function onZoomKey(ev) {
+  if (ev.key === "Escape") closeZoom();
+  else if (ev.key === "ArrowLeft") stepZoomFrame(-1);
+  else if (ev.key === "ArrowRight") stepZoomFrame(1);
+}
+
+function stepZoomFrame(delta) {
+  if (!zoomView) return;
+  const st = run.states.find((s) => s.name === zoomView.stateName);
+  const present = st.frames.filter((f) => f.present).map((f) => f.index);
+  if (!present.length) return;
+  const pos = present.indexOf(zoomView.idx);
+  openZoom(zoomView.stateName, present[(pos + delta + present.length) % present.length], zoomView.width);
+}
+
+function openZoom(stateName, idx, keepWidth) {
+  closeZoom();
+  const st = run.states.find((s) => s.name === stateName);
+  const frame = st && st.frames.find((f) => f.index === idx);
+  if (!frame || !frame.present) return;
+  const aspect = run.cell.height / run.cell.width;
+  const width = keepWidth
+    || Math.min(Math.floor(window.innerWidth * 0.8), Math.floor((window.innerHeight * 0.72) / aspect));
+  zoomView = { stateName, idx, width };
+
+  const modal = document.createElement("div");
+  modal.id = "zoom-modal";
+  const label = frame.label ? escapeHtml(frame.label) : `#${idx}`;
+  modal.innerHTML =
+    `<div class="zoom-backdrop"></div>` +
+    `<div class="card zoom-card" data-state="${escapeHtml(stateName)}" data-idx="${idx}">` +
+    `<div class="zoom-head">` +
+    `<span class="zoom-title">${escapeHtml(stateName)} · ${label}</span>` +
+    `<span class="row-controls"></span>` +
+    `<button type="button" class="ghost zoom-prev" title="${t("tZoomPrev")}">⏮</button>` +
+    `<button type="button" class="ghost zoom-next" title="${t("tZoomNext")}">⏭</button>` +
+    `<button type="button" class="ghost zoom-close">${t("zoomClose")}</button>` +
+    `</div>` +
+    `<div class="stage" title="${t("tZoomStage")}">` +
+    `<div class="pxgrid"></div>` +
+    `<img src="${escapeHtml(frameUrl(stateName, frame))}" alt="frame ${idx}" draggable="false" class="px-upscale" />` +
+    `<canvas class="snap-canvas"></canvas>` +
+    `<div class="rotate-handle" title="${t("tRotate")}"></div>` +
+    `<div class="shear-handle" title="${t("tShear")}"></div>` +
+    `</div>` +
+    `<div class="card-controls">` +
+    `<span class="psize" title="${t("tContentPx")}">${frame.contentSize ? `${frame.contentSize[0]}x${frame.contentSize[1]}px` : ""}</span>` +
+    `<span class="tvals"></span>` +
+    `<button type="button" class="ghost flip-btn" title="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
+    `<button type="button" class="ghost reset-btn" title="${t("tReset")}">↺</button>` +
+    `</div>` +
+    `</div>`;
+  document.body.appendChild(modal);
+
+  const card = modal.querySelector(".zoom-card");
+  card.style.setProperty("--cell-aspect", run.cell.width / run.cell.height);
+  const stage = card.querySelector(".stage");
+  stage.style.width = `${width}px`;
+
+  // 컨트롤: 줄별 토글과 같은 클래스 → sync*Controls 가 카드/모달을 함께 갱신
+  const controls = card.querySelector(".row-controls");
+  if (gridCapableStates.has(stateName)) controls.appendChild(makeGridToggle(stateName));
+  if (ppTwinStates.has(stateName)) controls.appendChild(makePpToggle(stateName));
+  card.querySelector(".zoom-prev").addEventListener("click", () => stepZoomFrame(-1));
+  card.querySelector(".zoom-next").addEventListener("click", () => stepZoomFrame(1));
+  card.querySelector(".zoom-close").addEventListener("click", closeZoom);
+  modal.querySelector(".zoom-backdrop").addEventListener("click", closeZoom);
+  card.querySelector(".reset-btn").addEventListener("click", () => resetTransform(stateName, idx));
+  card.querySelector(".flip-btn").addEventListener("click", () => toggleFlipX(stateName, idx));
+
+  // 뷰 확대: 휠/핀치(ctrl+휠). wireStage 의 휠(스프라이트 스케일)보다 먼저 등록해
+  // 가로채고, Shift+휠만 스프라이트 스케일로 통과시킨다.
+  stage.addEventListener("wheel", (ev) => {
+    if (ev.shiftKey) return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    const factor = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
+    zoomView.width = Math.min(Math.floor(window.innerWidth * 0.9),
+      Math.max(120, Math.round(zoomView.width * factor)));
+    stage.style.width = `${zoomView.width}px`;
+    applyCardTransform(stage, stateName, idx);
+    sizePxGrids();
+  }, { passive: false });
+
+  wireStage(stage, stateName, idx);
+  applyCardTransform(stage, stateName, idx);
+  syncPpControls();
+  syncGridControls();
+  sizePxGrids();
+  document.addEventListener("keydown", onZoomKey);
 }
 
 // --- iso ground grid overlay -----------------------------------------------
