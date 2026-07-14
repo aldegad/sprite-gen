@@ -2268,22 +2268,23 @@ def _run(args: argparse.Namespace):
                 round(consensus_x, 2),
                 round(consensus_y, 2),
             )
-            # fit.conform=false: 계약(logical_height) 눌림 없이 스냅된 네이티브 논리
-            # 크기를 유지한다 — 칸 병합(디테일 갈라짐)이 없는 대신 캐릭터 키가
-            # 계약보다 크고 행마다 다를 수 있다. 물리 한계(셀에서 바닥 마진만 지킴)는
-            # 여전히 캡으로 강제하고, 캡에 걸리면 관측 가능하게 경고한다.
-            if fit_config.get("conform", True) is False:
+            # 기본값 = 눌림 없음 (수홍 확정 2026-07-14): 스냅된 네이티브 논리 크기를
+            # 유지한다 — 계약(logical_height)으로의 conform 축소는 칸을 병합해 디테일을
+            # 갈라먹는다. 물리 한계(셀에서 바닥 마진만 지킴)만 캡으로 강제하고, 캡에
+            # 걸리면 관측 가능하게 경고한다(그 줄은 리롤 후보). 계약 크기로의 눌림은
+            # `fit.conform: true` 를 명시한 런에서만 수행한다.
+            if fit_config.get("conform") is True:
+                logical_frames = conform_row_logical(snapped, logical_width, logical_height, pp_detail_bias)
+            else:
                 cap_w = max(1, cell_width // pp_scale)
                 cap_h = max(1, (cell_height - safe_margin_y) // pp_scale)
                 over = [f"{i}:{s.width}x{s.height}" for i, s in enumerate(snapped)
                         if s.width > cap_w or s.height > cap_h]
                 if over:
                     all_warnings.append(
-                        f"{state}: conform=false but native logical exceeds the physical cap "
-                        f"{cap_w}x{cap_h} — capped frames: {', '.join(over)}")
+                        f"{state}: native logical exceeds the physical cap "
+                        f"{cap_w}x{cap_h} — capped frames (reroll candidates): {', '.join(over)}")
                 logical_frames = conform_row_logical(snapped, cap_w, cap_h, pp_detail_bias)
-            else:
-                logical_frames = conform_row_logical(snapped, logical_width, logical_height, pp_detail_bias)
             registered = register_row_frames(logical_frames)
             # 전/후 비교 쌍둥이(plain/orig)는 픽셀퍼펙트 프레임의 최종 콘텐츠 bbox 가
             # 확정된 뒤(아래 pending 루프) 같은 풋프린트에 앉힌다 — 여기서는 원본

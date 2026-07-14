@@ -24,7 +24,7 @@ For true pixel-perfect output (game-ready chunky pixel art with intact 1px outli
 "fit": { "pixel_perfect": true, "logical_height": 64, "palette_size": 24, "align_x": "foot-centroid", "align_y": "bottom" }
 ```
 
-`"conform": false` (opt-in) 는 스냅 후 `logical_height` 계약으로의 축소(칸 병합 — 디테일 갈라짐의 원인)를 끈다: 네이티브 논리 크기가 그대로 남는 대신 캐릭터 키가 계약을 넘고 행/프레임마다 달라질 수 있다. 물리 한계(셀 바닥 마진 유지)는 여전히 캡으로 강제되고 캡에 걸린 프레임은 경고로 관측된다. 계약 키와 무눌림을 동시에 원하면 정도(正道)는 네이티브 계약 크기가 나올 때까지 리롤이다.
+**기본값 = 눌림 없음** (수홍 확정 2026-07-14): 스냅된 네이티브 논리 크기를 유지한다 — `logical_height` 계약으로의 conform 축소는 칸을 병합해 디테일(눈·아웃라인)을 갈라먹는다. 물리 한계(셀 바닥 마진 유지, `(cell_h − margin_y)/scale`)만 캡으로 강제되고 캡에 걸린 프레임은 경고로 관측된다(그 줄은 리롤 후보). 계약 크기로의 눌림이 필요하면 `"conform": true` 를 명시한다. 계약 키와 무눌림을 동시에 원하면 정도(正道)는 네이티브 계약 크기가 나올 때까지 리롤이다.
 
 `logical_height` 를 **생략하면 셀 높이와 동일(1:1)** 이 기본이다 — 생성 프롬프트가 "TRUE `<셀>`x`<셀>` pixel grid" 를 명시하는 현행 레시피에서 원본 그리드 해상도를 그대로 따라간다(권장). 더 청키한 저해상 룩을 원할 때만 작은 값을 명시한다: 셀 64 + 로지컬 32 → 2× 청키 픽셀.
 
