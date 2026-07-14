@@ -119,6 +119,45 @@ function frameUrl(stateName, frame) {
   return !ppOn(stateName) && frame.plainUrl ? frame.plainUrl : frame.url;
 }
 
+// fit.pixel_perfect 런에서 픽셀 변형을 표시 중인 줄의 논리 격자 스케일 (아니면 null).
+// 굽기(curation.apply_transform snap_scale)와 같은 조건 — 프리뷰가 굽기를 거울처럼 따른다.
+function snapScaleFor(stateName) {
+  return run.fitPixelPerfect && run.pixelPerfect && run.pixelPerfect.scale && ppOn(stateName)
+    ? run.pixelPerfect.scale
+    : null;
+}
+
+function isIdentityTransform(t) {
+  return !t.rotate && t.scale === 1 && !t.dx && !t.dy && !t.shx && !t.shy && !t.flipX;
+}
+
+// 변형을 셀 캔버스에 NEAREST 로 그리고, 논리 격자(snap px/논리픽셀)로 재양자화한다.
+// curation.apply_transform 의 snap_scale 경로를 캔버스로 미러링 — 드래그/회전 중에도
+// 스프라이트가 셀 고정 격자에 실시간으로 스냅되어 보인다 (격자는 그대로, 그림이 스냅).
+function drawFrameInto(ctx, image, t, cw, ch, snap) {
+  if (snap) ctx.imageSmoothingEnabled = false;
+  const m = matrixOf(t);
+  ctx.save();
+  ctx.translate(cw / 2 + t.dx, ch / 2 + t.dy);
+  ctx.transform(m.m00, m.m10, m.m01, m.m11, 0, 0);
+  ctx.drawImage(image, -cw / 2, -ch / 2, cw, ch);
+  ctx.restore();
+  if (snap && snap > 1) {
+    const lw = Math.max(1, Math.floor(cw / snap));
+    const lh = Math.max(1, Math.floor(ch / snap));
+    const tmp = drawFrameInto._tmp || (drawFrameInto._tmp = document.createElement("canvas"));
+    tmp.width = lw;
+    tmp.height = lh;
+    const tctx = tmp.getContext("2d");
+    tctx.imageSmoothingEnabled = false;
+    tctx.clearRect(0, 0, lw, lh);
+    tctx.drawImage(ctx.canvas, 0, 0, cw, ch, 0, 0, lw, lh);
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tmp, 0, 0, lw, lh, 0, 0, lw * snap, lh * snap);
+  }
+}
+
 // 픽셀퍼펙트 격자 오버레이: 픽셀퍼펙트가 실제로 스냅한 논리 픽셀 간격을 그린다.
 // run.pixelPerfect.scale = 논리 픽셀 1칸이 차지하는 셀 픽셀 수 (extract 의 pp_scale).
 // 예전엔 셀 픽셀마다(scale 무시) 그어서, logical_height < cell 인 런에서 실제 스냅
@@ -148,7 +187,11 @@ function refreshVariantImages() {
     const st = run.states.find((s) => s.name === card.dataset.state);
     const f = st && st.frames[Number(card.dataset.idx)];
     const el = card.querySelector(".stage img");
-    if (f && el) el.src = frameUrl(card.dataset.state, f);
+    if (f && el) {
+      el.src = frameUrl(card.dataset.state, f);
+      // 변형 표시 모드(캔버스 스냅 ↔ CSS)도 pp 상태에 맞게 다시 결정
+      if (f.present) applyCardTransform(card.querySelector(".stage"), card.dataset.state, f.index);
+    }
   });
   sizePxGrids();
 }
@@ -278,9 +321,30 @@ function applyCardTransform(stage, stateName, idx) {
   // dx/dy are stored in cell pixels; CSS needs rendered pixels.
   const ds = stage.clientWidth / run.cell.width;
   const m = matrixOf(t);
-  // CSS matrix(a,b,c,d,e,f): a=m00 b=m10 c=m01 d=m11; translate applied after, about center.
-  el.style.transform =
-    `translate(${t.dx * ds}px, ${t.dy * ds}px) matrix(${m.m00}, ${m.m10}, ${m.m01}, ${m.m11}, 0, 0)`;
+  const snap = snapScaleFor(stateName);
+  const canvas = stage.querySelector(".snap-canvas");
+  if (snap && canvas && !isIdentityTransform(t)) {
+    // 픽셀퍼펙트 줄의 변형은 CSS(서브픽셀, 부드럽게)가 아니라 격자 재양자화로
+    // 미리 본다 — 굽기(snap_scale bake)와 같은 결과. 격자 오버레이는 셀 고정.
+    el.style.transform = "";
+    el.style.visibility = "hidden";
+    canvas.style.display = "block";
+    const render = () => {
+      canvas.width = run.cell.width;
+      canvas.height = run.cell.height;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawFrameInto(ctx, el, getTransform(stateName, idx), canvas.width, canvas.height, snap);
+    };
+    if (el.complete && el.naturalWidth) render();
+    else el.addEventListener("load", render, { once: true });
+  } else {
+    el.style.visibility = "";
+    if (canvas) canvas.style.display = "none";
+    // CSS matrix(a,b,c,d,e,f): a=m00 b=m10 c=m01 d=m11; translate applied after, about center.
+    el.style.transform =
+      `translate(${t.dx * ds}px, ${t.dy * ds}px) matrix(${m.m00}, ${m.m10}, ${m.m01}, ${m.m11}, 0, 0)`;
+  }
   const sh = t.shx || t.shy ? ` sh${(t.shx || 0).toFixed(2)},${(t.shy || 0).toFixed(2)}` : "";
   const flip = t.flipX ? " ↔" : "";
   const card = stage.closest(".card");
@@ -777,6 +841,7 @@ function renderCard(state, frame) {
     ? (run.iso ? `<canvas class="grid-overlay"></canvas>` : "") +
       `<div class="pxgrid"></div>` +
       `<img src="${escapeHtml(frameUrl(state.name, frame))}" alt="frame ${frame.index}" draggable="false" />` +
+      `<canvas class="snap-canvas"></canvas>` +
       `<div class="rotate-handle" title="${t("tRotate")}"></div>` +
       `<div class="shear-handle" title="${t("tShear")}"></div>`
     : `<div class="missing-label">missing</div>`;
@@ -887,12 +952,8 @@ function startPreview(state) {
     const image = f ? img(frameUrl(state.name, f)) : null;
     if (image && image.complete && image.naturalWidth) {
       const tr = getTransform(state.name, idx);
-      const m = matrixOf(tr);
-      ctx.save();
-      ctx.translate(cw / 2 + tr.dx, ch / 2 + tr.dy);
-      ctx.transform(m.m00, m.m10, m.m01, m.m11, 0, 0);
-      ctx.drawImage(image, -cw / 2, -ch / 2, cw, ch);
-      ctx.restore();
+      // 픽셀퍼펙트 줄은 카드와 동일하게 격자 재양자화로 그린다 (프리뷰 = 굽기)
+      drawFrameInto(ctx, image, tr, cw, ch, snapScaleFor(state.name));
     }
     posEl.textContent = `${pv.cursor + 1}/${play.length} · #${idx}`;
   };

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
+from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, pixel_snap_scale, state_plan
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import read_guard
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, gif_report, save_clean_gif
@@ -132,7 +132,8 @@ def _run_dir_mode_guarded(args, run_dir):
                 )
             frame = Image.open(path).convert("RGBA")
             if cell_w and cell_h:
-                frame = apply_transform(frame, transforms.get(index), (cell_w, cell_h))
+                frame = apply_transform(frame, transforms.get(index), (cell_w, cell_h),
+                                        snap_scale=pixel_snap_scale(request) if variant == "pixel" else None)
             images.append(frame)
         if not images:
             continue

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
+from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, pixel_snap_scale, state_plan
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, save_clean_gif
 from sprite_gen.runio import read_guard, relative_posix
@@ -63,13 +63,15 @@ def load_frame(
     transform: dict[str, float] | None = None,
     cell_size: tuple[int, int] | None = None,
     variant: str = "pixel",
+    snap_scale: int | None = None,
 ) -> tuple[Path, Image.Image]:
     path = run_dir / "frames" / state / frame_filename(user_frame - 1, variant)
     if not path.is_file():
         raise SystemExit(f"missing selected frame {user_frame}: {path}")
     image = Image.open(path).convert("RGBA")
     if transform and cell_size:
-        image = apply_transform(image, transform, cell_size)
+        image = apply_transform(image, transform, cell_size,
+                                snap_scale=snap_scale if variant == "pixel" else None)
     return path, image
 
 
@@ -150,7 +152,8 @@ def _run_guarded(args, run_dir):
         user_frames = [index + 1 for index in ordered]
 
     selected = [
-        load_frame(run_dir, args.state, number, transforms.get(number - 1), cell_size, frame_variant(curation, args.state))
+        load_frame(run_dir, args.state, number, transforms.get(number - 1), cell_size,
+                   frame_variant(curation, args.state), pixel_snap_scale(request))
         for number in user_frames
     ]
     frame_paths = [path for path, _image in selected]

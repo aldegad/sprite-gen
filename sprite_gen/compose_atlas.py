@@ -10,7 +10,7 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, state_plan
+from sprite_gen.curation import apply_transform, frame_filename, frame_variant, load_curation, pixel_snap_scale, state_plan
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
 
@@ -77,6 +77,9 @@ def _run(args: argparse.Namespace):
     # (per-row curator toggle > run-wide default). Fail loud when the twin is
     # missing — a plain bake must never silently fall back to pixel.
     variants = {state: frame_variant(curation, state) for state in states}
+    # pixel-variant rows of a fit.pixel_perfect run re-snap curated transforms to the
+    # logical grid (plain rows keep the smooth BICUBIC bake — they are not grid art).
+    snap_scale = pixel_snap_scale(request)
 
     max_frames = max(len(ordered) for ordered, _transforms in plans.values())
     atlas = Image.new("RGBA", (max_frames * cell_width, len(states) * cell_height), (0, 0, 0, 0))
@@ -111,7 +114,8 @@ def _run(args: argparse.Namespace):
             if source.size != cell_size:
                 errors.append(f"{frame_path} is {source.width}x{source.height}; expected {cell_width}x{cell_height}")
             # apply the human curation transform (identity when uncurated)
-            frame = apply_transform(source, transforms.get(frame_index), cell_size)
+            frame = apply_transform(source, transforms.get(frame_index), cell_size,
+                                    snap_scale=snap_scale if variant == "pixel" else None)
             nontransparent = alpha_nonzero_count(frame)
             if nontransparent < args.min_used_pixels:
                 errors.append(f"{state} frame {frame_index} is too sparse ({nontransparent})")
