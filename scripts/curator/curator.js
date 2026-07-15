@@ -52,9 +52,11 @@ const STR = {
     exporting: "computing…", exportFail: "download failed: ",
     ready: "ready", loaded: "loaded existing curation", runLoadFail: "failed to load run:",
     tRotate: "rotate", tShear: "shear — horizontal = shx, vertical = shy", tReset: "reset transform", tFlipX: "flip horizontally",
-    tReorder: "drag the card header to reorder; a plain click toggles sequence ⇄ pool",
+    tReorder: "grab the title to drag — reorder, or move between sequence ⇄ pool. use 넣기/빼기 to toggle without dragging",
     tPlay: "play", tPause: "pause", tPrev: "step back", tNext: "step forward", tSpeed: "playback speed",
-    zoneSeq: "Running sequence", zonePool: "Candidate pool — drag a cut up to add it", addToSeq: "✓ add", removeFromSeq: "✗ remove",
+    zoneSeq: "Running sequence", zonePool: "Candidate pool — drag a cut up to add it", addToSeq: "add", removeFromSeq: "remove",
+    tSelAdd: "add to the running sequence (move up)", tSelRemove: "remove to the candidate pool (move down)",
+    tTitleCopy: "full name — select to copy (drag the title to reorder)",
     cellPx: "cell", tContentPx: "actual sprite pixels (transparent padding excluded)",
     tZoomOpen: "inspect large (double-click the image works too)",
     tZoomStage: "wheel/pinch = view zoom · drag = move · bottom-right magnifier = sprite scale",
@@ -120,9 +122,11 @@ const STR = {
     exporting: "계산 중…", exportFail: "다운로드 실패: ",
     ready: "준비됨", loaded: "기존 큐레이션 로드됨", runLoadFail: "run 로드 실패:",
     tRotate: "회전", tShear: "기울이기 — 가로=shx, 세로=shy", tReset: "보정 초기화", tFlipX: "좌우 반전",
-    tReorder: "헤더를 잡고 드래그하면 순서변경, 그냥 클릭하면 시퀀스↔후보",
+    tReorder: "타이틀을 잡고 드래그 = 순서변경 / 시퀀스↔풀 이동. 드래그 없이 넣고 뺄 땐 넣기·빼기 버튼",
     tPlay: "재생", tPause: "일시정지", tPrev: "이전 프레임", tNext: "다음 프레임", tSpeed: "재생 속도",
-    zoneSeq: "달리기 시퀀스", zonePool: "후보 풀 — 마음에 드는 컷을 위로 끌어 추가", addToSeq: "✓ 넣기", removeFromSeq: "✗ 빼기",
+    zoneSeq: "달리기 시퀀스", zonePool: "후보 풀 — 마음에 드는 컷을 위로 끌어 추가", addToSeq: "넣기", removeFromSeq: "빼기",
+    tSelAdd: "시퀀스에 넣기 (위로 이동)", tSelRemove: "후보 풀로 빼기 (아래로 이동)",
+    tTitleCopy: "풀네임 — 드래그해서 복사 (제목 자체를 잡으면 순서변경)",
     cellPx: "셀", tContentPx: "실제 스프라이트 픽셀 (투명 여백 제외)",
     tZoomOpen: "크게 보기 (이미지 더블클릭도 됨)",
     tZoomStage: "휠/핀치 = 화면 확대 · 드래그 = 이동 · 우하단 돋보기 = 스프라이트 크기",
@@ -167,7 +171,7 @@ const STR = {
       (backup ? `이전 선택은 ${backup} 에 백업돼 있어.` : ""),
     tTreeNode: "클릭하면 해당 줄로 이동",
     tMarginNote: "안전영역은 넘었지만 안전마진 안에 있음 — 정보성 알림, 리롤 대상 아님",
-    hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "프레임 호버 → 우하단 돋보기 = 크기", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
+    hints: ["타이틀 드래그 = 순서변경 / 시퀀스↔풀 이동", "넣기·빼기 버튼으로 토글 (클릭만으론 안 빠짐)", "제목 호버 = 풀네임 복사", "우하단 돋보기 = 크기 · 상단 핸들 = 회전", "복제 = 헤더 ⧉ 버튼", "자동 저장"],
     exportDone: () => "PNG 다운로드 완료",
     exportGifDone: () => "GIF 다운로드 완료",
   },
@@ -177,6 +181,100 @@ function t(key) {
   const v = (STR[lang] && STR[lang][key]) ?? STR.en[key];
   return v;
 }
+
+// --- 공통 툴팁 컴포넌트 (네이티브 title 대체) -------------------------------
+// 단일 팝오버를 body 에 두고 document 위임으로 재사용한다. 대상은 `data-tip`
+// 속성으로 opt-in (title= 대신). `data-tip-copy` 가 있으면 팝오버가 인터랙티브
+// 해져(pointer-events auto + user-select text) 마우스를 팝오버 안으로 옮겨 텍스트를
+// 드래그·복사할 수 있다 — 에이전트 협업 시 프레임 풀네임을 그대로 집어가게 하려는 것.
+// 네이티브 title 은 커스텀과 겹쳐 이중 표시되므로 쓰지 않는다.
+const Tooltip = (() => {
+  let el = null;
+  let copyEl = null;
+  let anchor = null;
+  let hideTimer = 0;
+
+  function ensure() {
+    if (el) return;
+    el = document.createElement("div");
+    el.id = "sg-tip";
+    el.setAttribute("role", "tooltip");
+    document.body.appendChild(el);
+    // 팝오버 자체에 마우스가 들어오면 유지(복사 가능), 나가면 숨김
+    el.addEventListener("pointerenter", () => clearTimeout(hideTimer));
+    el.addEventListener("pointerleave", hide);
+  }
+
+  function position(target) {
+    const r = target.getBoundingClientRect();
+    el.style.maxWidth = Math.min(360, window.innerWidth - 16) + "px";
+    // 먼저 보이게 해 크기 측정, 그 다음 위치 클램프
+    el.style.visibility = "hidden";
+    el.classList.add("open");
+    const tr = el.getBoundingClientRect();
+    let top = r.bottom + 6;
+    if (top + tr.height > window.innerHeight - 6) top = Math.max(6, r.top - tr.height - 6);
+    let left = r.left;
+    if (left + tr.width > window.innerWidth - 6) left = Math.max(6, window.innerWidth - 6 - tr.width);
+    el.style.top = Math.round(top) + "px";
+    el.style.left = Math.round(left) + "px";
+    el.style.visibility = "";
+  }
+
+  function show(target) {
+    const text = target.getAttribute("data-tip");
+    if (!text) return;
+    ensure();
+    clearTimeout(hideTimer);
+    anchor = target;
+    const copyable = target.hasAttribute("data-tip-copy");
+    el.className = copyable ? "open copyable" : "open";
+    if (copyable) {
+      el.innerHTML = "";
+      copyEl = document.createElement("span");
+      copyEl.className = "sg-tip-text";
+      copyEl.textContent = text;
+      el.appendChild(copyEl);
+    } else {
+      el.textContent = text;
+      copyEl = null;
+    }
+    position(target);
+  }
+
+  function hide() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (el) el.classList.remove("open");
+      anchor = null;
+    }, 80);
+  }
+
+  // 위임: 어떤 요소든 data-tip 이 있으면 자동 적용 (공통 컴포넌트)
+  document.addEventListener("pointerover", (e) => {
+    const target = e.target.closest?.("[data-tip]");
+    if (target && target !== anchor) show(target);
+  });
+  document.addEventListener("pointerout", (e) => {
+    const target = e.target.closest?.("[data-tip]");
+    // 팝오버(복사가능)로 이동 중이면 유지 — pointerleave 가 최종 숨김을 담당
+    if (target && target === anchor && !e.relatedTarget?.closest?.("#sg-tip")) hide();
+  });
+  // 드래그/클릭이 시작되면 즉시 숨김 (제목 드래그 = 순서변경과 충돌 방지)
+  document.addEventListener("pointerdown", (e) => {
+    if (!e.target.closest?.("#sg-tip")) { if (el) el.classList.remove("open"); anchor = null; }
+  }, true);
+  window.addEventListener("scroll", () => { if (el) el.classList.remove("open"); anchor = null; }, true);
+
+  return { show, hide };
+})();
+
+// 넣기/빼기 SVG (이모지·유니코드 마크 금지 — 라인 아이콘). 시퀀스=위, 풀=아래라
+// 넣기=위 화살표, 빼기=아래 화살표로 공간적으로 직관화.
+const SEL_ICON = {
+  add: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M8 12.5V4.2M4.6 7.4 8 4l3.4 3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  remove: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M8 3.5v8.3M4.6 8.6 8 12l3.4-3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
 
 let run = null; // /api/run snapshot
 let entries = {}; // { stateName: { order: [idx], sel: Set<idx>, transforms: { idx: {..} } } }
@@ -595,8 +693,13 @@ function applyCardTransform(stage, stateName, idx) {
   const sh = t.shx || t.shy ? ` sh${(t.shx || 0).toFixed(2)},${(t.shy || 0).toFixed(2)}` : "";
   const flip = t.flipX ? " ↔" : "";
   const card = stage.closest(".card");
-  card.querySelector(".tvals").textContent =
-    `r${t.rotate.toFixed(0)}° ×${t.scale.toFixed(2)} ${t.dx >= 0 ? "+" : ""}${t.dx.toFixed(0)},${t.dy >= 0 ? "+" : ""}${t.dy.toFixed(0)}${sh}${flip}`;
+  const tvalsEl = card.querySelector(".tvals");
+  // 항등 변형이면 값 줄을 비운다 (r0° ×1.00 +0,+0 상시 표시 = 잡음). 조정이 있을 때만 노출.
+  if (tvalsEl) {
+    tvalsEl.textContent = isIdentityTransform(t)
+      ? ""
+      : `r${t.rotate.toFixed(0)}° ×${t.scale.toFixed(2)} ${t.dx >= 0 ? "+" : ""}${t.dx.toFixed(0)},${t.dy >= 0 ? "+" : ""}${t.dy.toFixed(0)}${sh}${flip}`;
+  }
   const flipBtn = card.querySelector(".flip-btn");
   if (flipBtn) flipBtn.classList.toggle("active", !!t.flipX);
   // 대응 격자(초록)는 콘텐츠 기준 — 변형이 바뀔 때마다 이 카드 것만 다시 그린다
@@ -638,14 +741,9 @@ function wireStage(stage, stateName, idx) {
       stage.releasePointerCapture(ev.pointerId);
       stage.removeEventListener("pointermove", onMove);
       stage.removeEventListener("pointerup", onUp);
-      if (!moved) {
-        // a click (not a drag) sends the frame to the other row.
-        // 확대 모달의 스테이지는 줄(.state) 밖이므로 이동 없음 — 편집 전용.
-        const owner = stage.closest(".card");
-        if (owner && owner.closest(".state")) moveCardToOtherZone(owner, stateName);
-      } else {
-        scheduleSave();
-      }
+      // 스테이지 클릭은 더 이상 시퀀스⇄풀 토글이 아니다 (수홍 2026-07-15): 실수로
+      // 카드를 눌러 빠지는 걸 막는다. 이동은 넣기/빼기 버튼 또는 드래그로만.
+      if (moved) scheduleSave();
     };
     stage.addEventListener("pointermove", onMove);
     stage.addEventListener("pointerup", onUp);
@@ -810,13 +908,11 @@ function moveCardToOtherZone(card, stateName) {
   scheduleSave();
 }
 
-// The card header (`.card-top`) is the drag handle. A press that moves past
-// DRAG_THRESHOLD lifts the card and reorders/moves it between rows; a press that
-// never moves is a click that toggles the card's row (sequence ⇄ pool), the same
-// affordance as clicking the stage. This is why the ✗/✓ button needs no separate
-// click handler, and why a drag *started on that button* still drags the card
-// instead of instantly excluding the frame (Alex 2026-06-23: grabbing the header,
-// including the ✗ button, must drag — only a clean click toggles).
+// The card header (`.card-top` = the title strip) is the drag handle: grab the
+// title anywhere and move past DRAG_THRESHOLD to reorder within a row or move it
+// between the sequence/pool rows. A press that never moves is a plain click and
+// does NOTHING (수홍 2026-07-15): toggling sequence ⇄ pool is only the 넣기/빼기
+// button or a drop, so a stray click can't silently add/remove a frame.
 function wireReorder(handle, card, wrap, stateName) {
   handle.addEventListener("pointerdown", (ev) => {
     if (ev.button || !ev.isPrimary) return; // primary button + primary pointer only (no multi-touch parallel drag)
@@ -875,9 +971,8 @@ function wireReorder(handle, card, wrap, stateName) {
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
       if (!lifted) {
-        // a press that never crossed the drag threshold is a click: toggle the
-        // card's row (sequence ⇄ pool). This is the ✗ 빼기 / ✓ 넣기 action.
-        moveCardToOtherZone(card, stateName);
+        // 임계값을 넘지 않은 순수 클릭 — 아무 것도 하지 않는다. 시퀀스⇄풀 이동은
+        // 넣기/빼기 버튼(sel-btn)이나 드롭으로만 (수홍 2026-07-15).
         return;
       }
       // 보관함 칩 위에서 놓으면 보관 (풀에서도 제외)
@@ -984,7 +1079,7 @@ function restoreFrame(stateName, idx, toSequence) {
 function makeScaleScrub(stateName, idx) {
   const wrap = document.createElement("span");
   wrap.className = "scale-scrub";
-  wrap.title = t("tScaleScrub");
+  wrap.setAttribute("data-tip", t("tScaleScrub"));
   wrap.innerHTML =
     '<button type="button" class="ghost ss-step" data-dir="-1" aria-label="smaller">' +
     '<svg viewBox="0 0 10 10" width="9" height="9"><path d="M2 5h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>' +
@@ -1045,7 +1140,12 @@ function renderSelectionState(stateName) {
     const inSeq = isSelected(stateName, idx);
     card.classList.toggle("selected", inSeq);
     const btn = card.querySelector(".sel-btn");
-    if (btn) btn.textContent = inSeq ? t("removeFromSeq") : t("addToSeq");
+    if (btn) {
+      // 아이콘(방향) + 라벨. 색상 강조 없이 방향 화살표로 넣기/빼기를 구분.
+      btn.innerHTML = (inSeq ? SEL_ICON.remove : SEL_ICON.add) +
+        `<span>${inSeq ? t("removeFromSeq") : t("addToSeq")}</span>`;
+      btn.setAttribute("data-tip", inSeq ? t("tSelRemove") : t("tSelAdd"));
+    }
   });
   const state = run.states.find((s) => s.name === stateName);
   const countEl = document.querySelector(`.preview[data-state="${cssEscape(stateName)}"] .count`);
@@ -1087,8 +1187,8 @@ function renderState(state, replaceEl) {
     `<span class="meta">${state.requestFrames} ${t("frames")} · ${state.fps}fps · ${state.loop ? t("loop") : t("nonLoop")} · ${t("cellPx")} ${run.cell.width}x${run.cell.height}px</span>` +
     (state.action ? `<span class="action">${escapeHtml(state.action)}</span>` : "") +
     (state.extractOk ? "" : `<span class="state-warn">${t("extractFail")}</span>`) +
-    (inMarginZone ? `<span class="state-note" title="${t("tMarginNote")}">${t("marginNote")}</span>` : "") +
-    (anchorStates.has(state.name) ? `<span class="anchor-badge" title="${t("tDirAnchorBadge")}">${t("dirAnchorBadge")}</span>` : "");
+    (inMarginZone ? `<span class="state-note" data-tip="${t("tMarginNote")}">${t("marginNote")}</span>` : "") +
+    (anchorStates.has(state.name) ? `<span class="anchor-badge" data-tip="${t("tDirAnchorBadge")}">${t("dirAnchorBadge")}</span>` : "");
   wrap.appendChild(head);
 
   // 이 줄을 "무엇으로 생성했는가" — run dir 실재 파일 기준 ref 체인 (앵커/basis/가이드).
@@ -1203,7 +1303,7 @@ function treeNode(label, note, thumbUrl, targetState, extra) {
   node.appendChild(Object.assign(document.createElement("span"), { className: "tn-label", textContent: label }));
   if (note) node.appendChild(Object.assign(document.createElement("span"), { className: "tn-note", textContent: note }));
   if (targetState) {
-    node.title = t("tTreeNode");
+    node.setAttribute("data-tip", t("tTreeNode"));
     node.classList.add("clickable");
     node.addEventListener("click", () => {
       const section = targetState === "__base__"
@@ -1529,7 +1629,7 @@ function renderArchive(state) {
   const chip = document.createElement("button");
   chip.type = "button";
   chip.className = "ghost archive-chip";
-  chip.title = t("tArchiveChip");
+  chip.setAttribute("data-tip", t("tArchiveChip"));
   chip.innerHTML =
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
     '<path d="M1.5 3h13v3h-13zM2.5 6v6.5A1 1 0 0 0 3.5 13.5h9a1 1 0 0 0 1-1V6M6 8.5h4" ' +
@@ -1661,41 +1761,59 @@ function renderCard(state, frame) {
       `<canvas class="ingrid"></canvas>` +
       `<img src="${escapeHtml(frameUrl(state.name, frame))}" alt="frame ${frame.index}" draggable="false" />` +
       `<canvas class="snap-canvas"></canvas>` +
-      `<div class="rotate-handle" title="${t("tRotate")}"></div>` +
-      `<div class="shear-handle" title="${t("tShear")}"></div>`
+      `<div class="rotate-handle" data-tip="${t("tRotate")}"></div>` +
+      `<div class="shear-handle" data-tip="${t("tShear")}"></div>`
     : `<div class="missing-label">${state.rawPresent ? t("missingRawWait") : t("missingPending")}</div>`;
 
   const isClone = frame.clone !== undefined;
-  const label = isClone
-    ? `<span class="clone-badge" title="${t("tCloneBadge")}">⧉ ${escapeHtml(STR[lang].cloneBadge(frame.clone))}</span>`
-    : (frame.label ? escapeHtml(frame.label) : `#${frame.index}`);
+  const shortLabel = isClone ? STR[lang].cloneBadge(frame.clone) : (frame.label ? frame.label : `#${frame.index}`);
+  // 풀네임(복사 대상) — 에이전트가 그대로 집어가도록 런-상대 파일 경로 + 라벨.
+  const relPath = (frame.url || "").replace(/^\/run\//, "");
+  const fullName = isClone ? `#${frame.clone} 복제 · ${relPath}` : [frame.label, relPath].filter(Boolean).join(" · ") || shortLabel;
+  const titleCls = isClone ? "idx clone-badge" : "idx";
+  const title = `<span class="${titleCls}" data-tip="${escapeHtml(fullName)}" data-tip-copy>${escapeHtml(shortLabel)}</span>`;
+  // 아이콘 SVG — 이모지 대신 라인 아이콘 (플랫폼별 렌더 편차·저품질 방지)
+  const dupIcon =
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+    '<rect x="5.5" y="5.5" width="8.2" height="8.2" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+    '<path d="M3.4 10.4H2.9A1 1 0 0 1 1.9 9.4V3A1.1 1.1 0 0 1 3 1.9h6.4a1 1 0 0 1 1 1v0.5" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+  const zoomIcon =
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+    '<circle cx="6.8" cy="6.8" r="4.3" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+    '<path d="M10 10 14 14M5 6.8h3.6M6.8 5v3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+  const archIcon =
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+    '<path d="M1.8 3.2h12.4v3H1.8zM2.9 6.2v6.4A1 1 0 0 0 3.9 13.6h8.2a1 1 0 0 0 1-1V6.2M6.2 8.6h3.6" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>';
+  const psize = frame.present && frame.contentSize
+    ? `<span class="psize" data-tip="${t("tContentPx")}">${frame.contentSize[0]}×${frame.contentSize[1]}</span>` : "";
   card.innerHTML =
-    `<div class="card-top">` +
-    `<span class="ct-left">` +
-    (frame.present ? `<span class="grip" title="${t("tReorder")}" aria-label="reorder">⠿</span>` : "") +
-    `<span class="idx" title="frame ${frame.index}">${label}</span>` +
-    `</span>` +
-    `<span class="ct-right">` +
-    (frame.present ? `<button type="button" class="ghost zoom-btn" title="${t("tZoomOpen")}">⛶</button>` : "") +
-    `<button type="button" class="ghost sel-btn">${t("excluded")}</button>` +
-    `</span>` +
+    // 헤더: 타이틀(드래그 핸들, 호버 시 풀네임 복사) | 복제·확대 아이콘
+    `<div class="card-top"${frame.present ? ` data-tip="${t("tReorder")}"` : ""}>` +
+    `<span class="ct-left">${title}</span>` +
+    (frame.present
+      ? `<span class="ct-right">` +
+        `<button type="button" class="ghost dup-btn" data-tip="${t("tDupBtn")}" aria-label="duplicate">${dupIcon}</button>` +
+        `<button type="button" class="ghost zoom-btn" data-tip="${t("tZoomOpen")}" aria-label="zoom">${zoomIcon}</button>` +
+        `</span>`
+      : "") +
     `</div>` +
     `<div class="stage">${stageInner}</div>` +
-    `<div class="card-controls">` +
-    `<span class="psize" title="${t("tContentPx")}">${frame.present && frame.contentSize ? `${frame.contentSize[0]}x${frame.contentSize[1]}px` : ""}</span>` +
-    `<span class="tvals"></span>` +
-    `<button type="button" class="ghost flip-btn" title="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
-    `<button type="button" class="ghost reset-btn" title="${t("tReset")}">↺</button>` +
-    (frame.present ? `<button type="button" class="ghost dup-btn" title="${t("tDupBtn")}" aria-label="duplicate">⧉</button>` : "") +
-    `<button type="button" class="ghost arch-btn" title="${t("tArchiveBtn")}" aria-label="archive">` +
-    '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">' +
-    '<path d="M1.5 3h13v3h-13zM2.5 6v6.5A1 1 0 0 0 3.5 13.5h9a1 1 0 0 0 1-1V6M6 8.5h4" ' +
-    'fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>' +
-    `</button></div>`;
+    // 푸터 2층: (1) 정보 — 크기·변형값 / (2) 버튼 — 반전·초기화 · 넣기빼기·보관
+    (frame.present
+      ? `<div class="card-info">${psize}<span class="tvals"></span></div>` +
+        `<div class="card-controls">` +
+        `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
+        `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}" aria-label="reset">↺</button>` +
+        `<span class="ctrl-group">` +
+        `<button type="button" class="sel-btn"></button>` +
+        `<button type="button" class="ghost arch-btn" data-tip="${t("tArchiveBtn")}" aria-label="archive">${archIcon}</button>` +
+        `</span>` +
+        `</div>`
+      : "") +
+    "";
 
-  // No separate ✗/✓ click handler: the header strip (.card-top) owns the press —
-  // move past threshold = drag, clean click = toggle row — via wireReorder, so a
-  // click on the button toggles there. A handler here would double-fire the toggle.
   if (frame.present) {
     // 픽셀아트 확대 표시: 프레임 원본보다 크게 그려질 때만 pixelated (다운스케일 회화체는 부드럽게 유지)
     const imgEl = card.querySelector(".stage img");
@@ -1729,6 +1847,11 @@ function renderCard(state, frame) {
     const archBtn = card.querySelector(".arch-btn");
     archBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
     archBtn.addEventListener("click", () => archiveFrame(state.name, frame.index));
+    // 넣기/빼기 = 시퀀스⇄풀 토글의 유일한 버튼 (드래그 외). 푸터에 있어 헤더 드래그와
+    // 무관하지만, 실수 드래그 시작을 막으려 pointerdown 전파를 끊는다.
+    const selBtn = card.querySelector(".sel-btn");
+    selBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    selBtn.addEventListener("click", () => moveCardToOtherZone(card, state.name));
     card.querySelector(".stage").appendChild(makeScaleScrub(state.name, frame.index));
   }
   return card;
@@ -1753,17 +1876,19 @@ function renderPreview(state) {
   const speedOpts = [0.25, 0.5, 1, 2, 4]
     .map((v) => `<option value="${v}"${v === 1 ? " selected" : ""}>×${v}</option>`)
     .join("");
+  // 위치 표시(pv-pos)를 캔버스·프레임수 바로 밑(컨트롤 위)으로 — 재생 컨트롤 아래
+  // 뚝 떨어져 있어 캔버스와 멀고 헷갈렸다 (수홍 2026-07-15, 쿠마피커 pv-pos 지정).
   box.innerHTML =
     `<h4>${t("preview")}</h4>` +
     `<canvas${run.cell.width < 160 ? ' class="px-upscale"' : ""} width="${run.cell.width}" height="${run.cell.height}" style="height:${(160 * aspect).toFixed(0)}px"></canvas>` +
     `<div class="count"></div>` +
+    `<div class="pv-pos"></div>` +
     `<div class="pv-controls">` +
-    `<button type="button" class="ghost pv-prev" title="${t("tPrev")}">⏮</button>` +
-    `<button type="button" class="ghost pv-play" title="${t("tPause")}">⏸</button>` +
-    `<button type="button" class="ghost pv-next" title="${t("tNext")}">⏭</button>` +
-    `<select class="pv-speed" name="speed-${escapeHtml(state.name)}" aria-label="${t("tSpeed")}" title="${t("tSpeed")}">${speedOpts}</select>` +
-    `</div>` +
-    `<div class="pv-pos"></div>`;
+    `<button type="button" class="ghost pv-prev" data-tip="${t("tPrev")}">⏮</button>` +
+    `<button type="button" class="ghost pv-play" data-tip="${t("tPause")}">⏸</button>` +
+    `<button type="button" class="ghost pv-next" data-tip="${t("tNext")}">⏭</button>` +
+    `<select class="pv-speed" name="speed-${escapeHtml(state.name)}" aria-label="${t("tSpeed")}" data-tip="${t("tSpeed")}">${speedOpts}</select>` +
+    `</div>`;
   return box;
 }
 
@@ -1780,7 +1905,7 @@ function startPreview(state) {
 
   const syncPlayBtn = () => {
     playBtn.textContent = pv.playing ? "⏸" : "▶";
-    playBtn.title = pv.playing ? t("tPause") : t("tPlay");
+    playBtn.setAttribute("data-tip", pv.playing ? t("tPause") : t("tPlay"));
   };
 
   // draw the frame at the current cursor; runs every rAF so live transform
@@ -1912,23 +2037,23 @@ function openZoom(stateName, idx, keepWidth) {
     `<div class="zoom-head">` +
     `<span class="zoom-title">${escapeHtml(stateName)} · ${label}</span>` +
     `<span class="row-controls"></span>` +
-    `<button type="button" class="ghost zoom-prev" title="${t("tZoomPrev")}">⏮</button>` +
-    `<button type="button" class="ghost zoom-next" title="${t("tZoomNext")}">⏭</button>` +
+    `<button type="button" class="ghost zoom-prev" data-tip="${t("tZoomPrev")}">⏮</button>` +
+    `<button type="button" class="ghost zoom-next" data-tip="${t("tZoomNext")}">⏭</button>` +
     `<button type="button" class="ghost zoom-close">${t("zoomClose")}</button>` +
     `</div>` +
-    `<div class="stage" title="${t("tZoomStage")}">` +
+    `<div class="stage" data-tip="${t("tZoomStage")}">` +
     `<div class="pxgrid"></div>` +
     `<canvas class="ingrid"></canvas>` +
     `<img src="${escapeHtml(frameUrl(stateName, frame))}" alt="frame ${idx}" draggable="false" class="px-upscale" />` +
     `<canvas class="snap-canvas"></canvas>` +
-    `<div class="rotate-handle" title="${t("tRotate")}"></div>` +
-    `<div class="shear-handle" title="${t("tShear")}"></div>` +
+    `<div class="rotate-handle" data-tip="${t("tRotate")}"></div>` +
+    `<div class="shear-handle" data-tip="${t("tShear")}"></div>` +
     `</div>` +
     `<div class="card-controls">` +
-    `<span class="psize" title="${t("tContentPx")}">${frame.contentSize ? `${frame.contentSize[0]}x${frame.contentSize[1]}px` : ""}</span>` +
+    `<span class="psize" data-tip="${t("tContentPx")}">${frame.contentSize ? `${frame.contentSize[0]}x${frame.contentSize[1]}px` : ""}</span>` +
     `<span class="tvals"></span>` +
-    `<button type="button" class="ghost flip-btn" title="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
-    `<button type="button" class="ghost reset-btn" title="${t("tReset")}">↺</button>` +
+    `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
+    `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}">↺</button>` +
     `</div>` +
     `</div>`;
   document.body.appendChild(modal);
