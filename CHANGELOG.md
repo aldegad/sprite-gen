@@ -5,6 +5,59 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.14 "Sol Atelier" - 큐레이션 뷰 성숙 · 세대 정체성/격리 하드닝 · 행 단위 보존 · 프레임 복제
+
+큐레이션 뷰를 캐릭터 검수의 정식 작업대로 끌어올린 릴리스다. v1.56.13 이후 84개
+커밋을, 하나의 계약(run-contract.md) 아래 실시간 뷰·세대 정체성·격리·픽셀퍼펙트·
+파일 택소노미·테이크·행 단위 큐레이션 보존·프레임 복제로 수렴시켰다. 전체 회귀 테스트
+**221 passed**, 기존 추출 골든 경로는 그대로 유지한다.
+
+- **구조 계약 SSoT (`docs/run-contract.md`)** — 파이프라인 스테이지 I/O·런디렉토리 폴더
+  트리·큐레이션 뷰 표시 계약·`--pngs-dir` 임포트 소스 규칙을 이 문서 하나가 소유하고,
+  SKILL/architecture/curation 이 restate 하지 않고 가리킨다. 뷰는 시작 시 표시요소
+  4종(베이스 참조 줄·생성 재료 칩·픽셀 격자·원본 화질 토글) 충족을 `/api/run` 의
+  `contract` 필드로 자가 보고한다.
+- **실시간 계약** — 뷰에서 '재추출' 개념 제거. `frames/` 는 (raw+request+엔진) 파생
+  캐시이고 행별 `engine_revision` 이 캐시 키다. `/api/run`·`/api/progress`·compose·
+  다운로드가 진입 시 `heal_run` 으로 stale 행을 자동 재유도하고, 엔진이 바뀌면 열려 있는
+  페이지도 다음 폴에서 재계산·리로드된다. 상단 버튼 3종은 '게임 적용'이 아니라
+  **아틀라스/PNG/GIF 다운로드**(`GET /download/{atlas,pngs,gifs}`)로 의미를 명확히 했다.
+- **세대 정체성 + 격리 하드닝** — 런 세대 지문 `run_revision` 으로 stale autosave/사이드카를
+  거부(HTTP 409, No Silent Fallback). `--force` 재임포트와 재추출은 staging 빌드 후
+  `publish_guard` 아래 원자 swap 으로 발행하고(reader/writer isolation), 실패한 추출은
+  부분 프레임을 발행하지 않는다(whole-generation atomicity). manifest↔프레임셋↔request
+  일치 게이트·canonical-JSON 스키마 검증·payload URL 퍼센트 인코딩·XSS 이스케이프를
+  fail-loud 로 강제한다.
+- **파일 택소노미 레이아웃 (taxonomy/v1)** — 방향 있는 캐릭터의 raw/frames 를
+  `raw/<dir>/<pose>.png`·`frames/<dir>/<pose>/` 로 분리해 자세가 늘어도 flat 폴더가
+  비대해지지 않는다. base→방향앵커(1장 크롭)→행→미러 소유권을 파이프라인 구조로
+  스캐폴딩했다.
+- **픽셀퍼펙트 성숙** — 줄별 픽셀퍼펙트 토글 + 상단 전체토글, 쌍둥이(plain/orig) 동일
+  풋프린트 + 변형 격자 스냅 굽기 + 실시간 스냅 프리뷰, pp-off 용 고해상 원본 화질
+  표시본, 원본 뷰의 입력 격자(실제 절단선)·최종 대응 격자 오버레이. `fit.conform=false`
+  (눌림 없는 네이티브 논리 크기)가 기본, conform 은 opt-in. 여백 침범은 정보성 알림(리롤 아님).
+- **파이프라인 뷰 사이드바** — 생성 구조를 파일트리 도크(쿠마피커 스타일)로 재구성,
+  파이프라인/파일 2블록, 흐름 애니메이션 + 엘보 커넥터, 실시간 진행 동기화
+  (`/api/progress` 3초 폴링), 접기/펴기 애니메이션.
+- **큐레이터 편집 도구** — 컬러 팔레트 기반 픽셀 편집(연필/지우개, 사이드카·원본 불변),
+  보관함 풀 모달, 스테이지 우하단 호버 스크러버, 확대 편집 모달(⛶/더블클릭).
+- **테이크 1급 계약** — 같은 상태의 후보/보강 스트립을 `states.<state>.takes` +
+  `raw/<...>.takes/<label>.png` 로 선언, 추출이 primary 뒤에 이어붙이고 소비자는
+  `state_frame_total` 로 행 크기를 센다.
+- **행 단위 큐레이션 보존 (salvage)** — 엔진이 바뀌어 프레임이 재유도돼도 사용자의
+  선택/보관함이 통째로 날아가던 문제를 근본 수정. 행별 `revision`(원료 raw/take 내용
+  기반 세그먼트 지문, 접두 규칙으로 take append 허용)으로 살릴 수 있는 행은 살리고,
+  드롭되는 행은 원문을 `curation.stale-<hash>.json` 으로 먼저 백업 + 뷰 배너로
+  관측(조용한 소실 금지).
+- **프레임 복제** — 사이드카 1급 `clones` {복제idx: 원본idx}. 복제는 자기만의 변형/픽셀
+  편집/순서를 갖는 정식 인스턴스이고 compose/GIF/PNG/cycle 은 `source_frame_index` 로
+  원본 파일을 읽는다(파생 캐시에 파일 안 만듦).
+- **큐레이터 UX 정비** — 카드 클릭으로 시퀀스↔풀 토글되던 실수 유발 동작 제거(넣기/빼기
+  버튼·타이틀 드래그만), ⠿ 그립 삭제·타이틀=드래그핸들, 카드 3단 재배치(헤더·정보층·
+  버튼층), 넣기/빼기 방향 SVG·색강조 제거, 프리뷰 위치표시를 캔버스 밑으로. 네이티브
+  title 을 대체하는 공통 `data-tip` 툴팁 컴포넌트 — 제목 호버 시 프레임 풀네임 팝오버가
+  드래그·복사 가능(에이전트 협업).
+
 ## v1.56.13 "Sol Forge" - PerfectPixel 통합 완료와 실생성 교정 루프 증명
 
 PerfectPixel 이식 작업을 하나의 검증 가능한 릴리스로 닫았다. v1.56.7부터 v1.56.12까지
