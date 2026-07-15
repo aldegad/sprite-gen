@@ -262,44 +262,55 @@ function drawFrameInto(ctx, image, t, cw, ch, snap, edits) {
 // 예전엔 셀 픽셀마다(scale 무시) 그어서, logical_height < cell 인 런에서 실제 스냅
 // 격자보다 촘촘한 거짓 격자를 보여줬다. 픽셀퍼펙트가 아닌 런은 격자 자체가 없다.
 function sizePxGrids() {
-  // 줄 단위 격자: 그 줄의 격자 체크박스가 켜져 있을 때만 그린다.
-  // - 픽셀퍼펙트 표시 줄: 출력 격자(빨/파, 셀 픽셀 눈금) — 결과가 앉은 격자 그 자체.
-  // - 원본(plain) 표시 줄: 최종 대응 격자(초록) — 최종 픽셀 콘텐츠 bbox 를 픽셀 수만큼
-  //   균등 분할해 원본 위에 겹친다. 칸 하나 = 최종 픽셀 하나 (칸 수 = 픽셀 수 보장).
-  //   1차 절단 뒤 48 계약 conform 축소가 칸을 합칠 수 있어 절단선(manifest input_grids)은
-  //   최종 대응이 아니다 — 진단 기록으로만 남긴다 (수홍 발견 2026-07-14).
-  // 측정/계약이 없는 줄은 오버레이를 숨긴다 — 가짜 격자 금지.
-  document.querySelectorAll(".card").forEach((card) => {
-    const overlay = card.querySelector(".pxgrid");
-    const ingrid = card.querySelector(".ingrid");
-    if (!overlay && !ingrid) return;
-    const stage = card.querySelector(".stage");
-    const st = run.states.find((s) => s.name === card.dataset.state);
-    const frame = st && st.frames[Number(card.dataset.idx)];
-    const on = !!gridStates[card.dataset.state];
-    const plainShown = ppTwinStates.has(card.dataset.state) && !ppOn(card.dataset.state);
-    const scale = (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null;
-    const useFinal = on && plainShown && frame && frame.contentBox && scale && stage;
-    if (ingrid) {
-      if (useFinal) {
-        drawFinalGrid(ingrid, stage, frame.contentBox, scale);
-        ingrid.style.display = "block";
-      } else {
-        ingrid.style.display = "none";
-      }
+  document.querySelectorAll(".card").forEach(updateCardGrid);
+}
+
+// 줄 단위 격자: 그 줄의 격자 체크박스가 켜져 있을 때만 그린다.
+// - 픽셀퍼펙트 표시 줄: 출력 격자(빨/파, 셀 픽셀 눈금) — 결과가 앉은 격자 그 자체.
+//   셀에 고정이다: 이동/회전 변형은 스프라이트가 이 고정 래스터에 재양자화되는 것이지
+//   래스터가 따라 움직이는 게 아니다 (수홍 확정 2026-07-14 실시간 스냅 동작).
+// - 원본(plain) 표시 줄: 최종 대응 격자(초록) — 최종 픽셀 콘텐츠 bbox 를 픽셀 수만큼
+//   균등 분할해 원본 위에 겹친다. 칸 하나 = 최종 픽셀 하나 (칸 수 = 픽셀 수 보장).
+//   콘텐츠 기준 격자이므로 이동(dx/dy)·좌우반전은 따라간다 (수홍 지적 2026-07-15).
+//   회전/기울임/배율 변형은 소스↔결과 대응이 더 이상 직사각 격자가 아니라 숨긴다 —
+//   비축정렬 상태로 가짜 격자를 겹치지 않는다 (결과 픽셀은 픽셀퍼펙트 뷰가 보여준다).
+//   1차 절단 뒤 48 계약 conform 축소가 칸을 합칠 수 있어 절단선(manifest input_grids)은
+//   최종 대응이 아니다 — 진단 기록으로만 남긴다 (수홍 발견 2026-07-14).
+// 측정/계약이 없는 줄은 오버레이를 숨긴다 — 가짜 격자 금지.
+function updateCardGrid(card) {
+  const overlay = card.querySelector(".pxgrid");
+  const ingrid = card.querySelector(".ingrid");
+  if (!overlay && !ingrid) return;
+  const stage = card.querySelector(".stage");
+  const st = run.states.find((s) => s.name === card.dataset.state);
+  const frame = st && st.frames[Number(card.dataset.idx)];
+  const on = !!gridStates[card.dataset.state];
+  const plainShown = ppTwinStates.has(card.dataset.state) && !ppOn(card.dataset.state);
+  const scale = (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null;
+  const t = frame ? getTransform(card.dataset.state, frame.index) : null;
+  const axisAligned = !t || (!t.rotate && t.scale === 1 && !t.shx && !t.shy);
+  const useFinal = on && plainShown && frame && frame.contentBox && scale && stage && axisAligned;
+  if (ingrid) {
+    if (useFinal) {
+      drawFinalGrid(ingrid, stage, frame.contentBox, scale, t);
+      ingrid.style.display = "block";
+    } else {
+      ingrid.style.display = "none";
     }
-    const step = on && !useFinal ? scale : null;
-    if (!overlay) return;
-    if (!step || !stage) { overlay.style.display = "none"; return; }
-    overlay.style.display = "block";
-    const ds = (stage.clientWidth / run.cell.width) * step;
-    overlay.style.backgroundSize = `${ds}px ${ds}px`;
-  });
+  }
+  const step = on && !useFinal && !plainShown ? scale : null;
+  if (!overlay) return;
+  if (!step || !stage) { overlay.style.display = "none"; return; }
+  overlay.style.display = "block";
+  const ds = (stage.clientWidth / run.cell.width) * step;
+  overlay.style.backgroundSize = `${ds}px ${ds}px`;
 }
 
 // 최종 대응 격자: 최종 픽셀 콘텐츠 bbox(셀 좌표)를 논리 픽셀 수만큼 균등 분할해
 // 원본 쌍둥이 위에 그린다 — 초록 칸 하나가 결과 픽셀 하나에 정확히 대응한다.
-function drawFinalGrid(canvas, stage, box, scale) {
+// 축정렬 변형(이동 dx/dy, 좌우반전)은 bbox 를 같은 규칙(CSS: 중심 기준 반전 후 이동)으로
+// 옮겨 콘텐츠를 따라간다. 비축정렬 변형은 호출 전에 걸러진다 (updateCardGrid).
+function drawFinalGrid(canvas, stage, box, scale, t) {
   const w = Math.max(1, Math.round(stage.clientWidth));
   const h = Math.max(1, Math.round(stage.clientHeight));
   canvas.width = w;
@@ -312,8 +323,12 @@ function drawFinalGrid(canvas, stage, box, scale) {
   const sy = h / run.cell.height;
   const cellsX = Math.max(1, Math.round((box[2] - box[0]) / scale));
   const cellsY = Math.max(1, Math.round((box[3] - box[1]) / scale));
-  const x0 = box[0] * sx, x1 = box[2] * sx;
-  const y0 = box[1] * sy, y1 = box[3] * sy;
+  let bx0 = box[0], bx1 = box[2];
+  if (t && t.flipX) { const cw = run.cell.width; [bx0, bx1] = [cw - box[2], cw - box[0]]; }
+  const dx = t ? t.dx : 0;
+  const dy = t ? t.dy : 0;
+  const x0 = (bx0 + dx) * sx, x1 = (bx1 + dx) * sx;
+  const y0 = (box[1] + dy) * sy, y1 = (box[3] + dy) * sy;
   for (let k = 0; k <= cellsX; k++) {
     const px = Math.round(x0 + ((x1 - x0) * k) / cellsX) + 0.5;
     ctx.beginPath(); ctx.moveTo(px, y0); ctx.lineTo(px, y1); ctx.stroke();
@@ -546,6 +561,9 @@ function applyCardTransform(stage, stateName, idx) {
     `r${t.rotate.toFixed(0)}° ×${t.scale.toFixed(2)} ${t.dx >= 0 ? "+" : ""}${t.dx.toFixed(0)},${t.dy >= 0 ? "+" : ""}${t.dy.toFixed(0)}${sh}${flip}`;
   const flipBtn = card.querySelector(".flip-btn");
   if (flipBtn) flipBtn.classList.toggle("active", !!t.flipX);
+  // 대응 격자(초록)는 콘텐츠 기준 — 변형이 바뀔 때마다 이 카드 것만 다시 그린다
+  // (이동은 따라오고, 비축정렬이 되면 숨는 판정도 여기서 갱신된다).
+  updateCardGrid(card);
 }
 
 // 같은 프레임을 보여주는 모든 스테이지(그리드 카드 + 확대 모달)를 함께 갱신 —
