@@ -16,7 +16,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, state_pixel_ops, state_plan
+from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, save_clean_gif
@@ -155,7 +155,10 @@ def _run_guarded(args, run_dir):
         user_frames = [index + 1 for index in ordered]
 
     selected = [
-        load_frame(run_dir, rows_by_state[args.state], number, transforms.get(number - 1), cell_size,
+        # 파일은 원본 프레임(복제 인스턴스면 소스)을 읽고, 변형/픽셀편집은 인스턴스 번호로 조회
+        load_frame(run_dir, rows_by_state[args.state],
+                   source_frame_index(curation, args.state, number - 1, default_count) + 1,
+                   transforms.get(number - 1), cell_size,
                    frame_variant(curation, args.state), pixel_snap_scale(request),
                    state_pixel_ops(curation, args.state).get(number - 1))
         for number in user_frames

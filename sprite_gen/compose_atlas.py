@@ -11,7 +11,7 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, state_pixel_ops, state_plan
+from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import heal_run, require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
@@ -115,8 +115,10 @@ def _run(args: argparse.Namespace):
         variant = variants[state]
         frames = []
         for column, frame_index in enumerate(ordered):
-            # 파일 위치의 SSoT 는 manifest row 의 files — 패턴 조립 금지 (택소노미/flat 공용)
-            frame_path = run_dir / row_frame_rel(rows_by_state[state], frame_index, variant)
+            # 파일 위치의 SSoT 는 manifest row 의 files — 패턴 조립 금지 (택소노미/flat 공용).
+            # 복제 인스턴스는 원본 프레임 파일을 읽는다 (변형/픽셀편집은 인스턴스 인덱스 소유).
+            source_index = source_frame_index(curation, state, frame_index, state_frame_total(request, state))
+            frame_path = run_dir / row_frame_rel(rows_by_state[state], source_index, variant)
             if not frame_path.is_file():
                 errors.append(f"missing frame ({variant} variant): {frame_path}")
                 continue

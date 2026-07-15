@@ -329,6 +329,33 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
   cursor: pointer;
 }
 
+/* 큐레이션 무효화 알림 — 프레임 재생성으로 드롭된 행 + 백업 파일 안내 (조용한 소실 금지) */
+#curation-dropped-note {
+  position: sticky;
+  top: 0;
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  font-size: 12.5px;
+  background: rgba(234, 179, 8, 0.12);
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+#curation-dropped-note button { margin-left: auto; }
+
+/* 복제 인스턴스 배지 — 원본 프레임 번호를 항상 노출 */
+.clone-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  opacity: 0.85;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 5px;
+  padding: 0 5px;
+}
+
 .state-body { display: flex; gap: 18px; align-items: flex-start; min-width: 0; }
 .frames {
   display: flex;

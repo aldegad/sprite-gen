@@ -289,6 +289,13 @@ throughout, so a concurrent **writer** cannot preempt (writer Isolation).
 > selections/transforms to new frames, **even when the re-import keeps the same state
 > names** but swaps the candidate images (Consistency — run identity, not just state
 > membership).
+>
+> **Load** 쪽은 행 단위다: `run_revision` 이 어긋나도 각 행의 `revision`(원료 세그먼트
+> 지문, `curation.state_revision`)이 현재의 접두면 그 행 큐레이션은 유지된다 — 같은 raw
+> 를 새 엔진이 재유도(heal)해도 선택이 살아남는다. 드롭되는 행이 생기면 원문이
+> `curation.stale-<hash>.json` 으로 먼저 백업되고 `/api/run` 의
+> `curationDropped`/`curationBackup` 으로 웹뷰 배너에 보고된다 (조용한 소실 금지).
+> 스키마/규칙 상세: [`curation.md`](curation.md).
 
 ## 5. Conformance status
 

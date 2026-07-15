@@ -91,6 +91,12 @@ const STR = {
     treeFrameCount: (n) => `${n} frames`,
     treeAnchorOrigin: (d) => `idle row · ${d} anchor source`,
     reloadBanner: "run updated — click to reload the view",
+    tDupBtn: "duplicate this frame — a new card with its own transform (bakes the same source image)",
+    cloneBadge: (src) => `#${src} copy`,
+    tCloneBadge: "duplicated instance — reads the source frame's image; its transform/pixel edits are its own. The archive button removes the copy entirely.",
+    curationDropped: (states, backup) =>
+      `frames were regenerated — previous curation for ${states.join(", ")} no longer applies and was reset. ` +
+      (backup ? `The old selections are preserved in ${backup}.` : ""),
     tTreeNode: "click to scroll to this row",
     tMarginNote: "some frames exceed the safe area but fit within the margin zone — informational, not a reroll flag",
     hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "hover a frame -> bottom-right magnifier = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
@@ -153,6 +159,12 @@ const STR = {
     treeFrameCount: (n) => `${n}프레임`,
     treeAnchorOrigin: (d) => `idle 행 · ${d} 앵커 원천`,
     reloadBanner: "런이 갱신됐어 — 클릭해서 새로고침",
+    tDupBtn: "이 프레임 복제 — 자기 변형을 따로 갖는 새 카드 (같은 원본 이미지를 굽는다)",
+    cloneBadge: (src) => `#${src} 복제`,
+    tCloneBadge: "복제 인스턴스 — 원본 프레임 이미지를 읽고, 변형/픽셀편집은 이 카드 것. 보관 버튼은 복제를 완전히 제거한다.",
+    curationDropped: (states, backup) =>
+      `프레임이 재생성돼 ${states.join(", ")} 의 이전 큐레이션이 더 이상 맞지 않아 초기화됐어. ` +
+      (backup ? `이전 선택은 ${backup} 에 백업돼 있어.` : ""),
     tTreeNode: "클릭하면 해당 줄로 이동",
     tMarginNote: "안전영역은 넘었지만 안전마진 안에 있음 — 정보성 알림, 리롤 대상 아님",
     hints: ["카드 헤더 드래그 = 순서변경 / 행 이동", "후보→시퀀스 드래그로 추가", "프레임 호버 → 우하단 돋보기 = 크기", "상단 핸들 = 회전", "카드 클릭 = 시퀀스 ⇄ 후보", "자동 저장"],
@@ -202,6 +214,25 @@ function ppOn(stateName) {
 
 function frameUrl(stateName, frame) {
   return !ppOn(stateName) && frame.plainUrl ? frame.plainUrl : frame.url;
+}
+
+// 복제 인스턴스 (entries[state].clones = {복제idx: 원본idx}) 인식 프레임 조회.
+// 복제 카드는 원본의 frame 객체(이미지 URL/크기)를 빌리되 자기 인덱스로 표시된다.
+// 서버/스키마 계약: 파일은 원본을 읽고, 변형/픽셀편집/순서는 복제 인덱스 소유.
+function cloneSrc(stateName, idx) {
+  const e = entries[stateName];
+  const src = e && e.clones ? e.clones[idx] : undefined;
+  return src === undefined ? null : src;
+}
+
+function frameOf(stateName, idx) {
+  const st = run.states.find((s) => s.name === stateName);
+  if (!st) return null;
+  const src = cloneSrc(stateName, idx);
+  const f = st.frames.find((fr) => fr.index === (src === null ? idx : src));
+  if (!f) return null;
+  if (src === null) return f;
+  return { ...f, index: idx, clone: src, label: null };
 }
 
 // fit.pixel_perfect 런에서 픽셀 변형을 표시 중인 줄의 논리 격자 스케일 (아니면 null).
@@ -341,13 +372,14 @@ function drawFinalGrid(canvas, stage, box, scale, t) {
 
 function refreshVariantImages() {
   document.querySelectorAll(".card").forEach((card) => {
-    const st = run.states.find((s) => s.name === card.dataset.state);
-    const f = st && st.frames[Number(card.dataset.idx)];
+    if (!card.dataset.state) return;
+    const idx = Number(card.dataset.idx);
+    const f = frameOf(card.dataset.state, idx); // 복제 인스턴스도 원본 이미지로 해석
     const el = card.querySelector(".stage img");
     if (f && el) {
       el.src = frameUrl(card.dataset.state, f);
       // 변형 표시 모드(캔버스 스냅 ↔ CSS)도 pp 상태에 맞게 다시 결정
-      if (f.present) applyCardTransform(card.querySelector(".stage"), card.dataset.state, f.index);
+      if (f.present) applyCardTransform(card.querySelector(".stage"), card.dataset.state, idx);
     }
   });
   sizePxGrids();
@@ -469,6 +501,12 @@ function buildPayload() {
     };
     // 보관함 = 스키마의 deleted (UI 행/굽기 기본값에서 제외 — state_plan SSoT)
     if (entry.archived && entry.archived.length) states[name].deleted = entry.archived.slice();
+    // 복제 인스턴스 맵 — order 에 남아 있는 복제만 저장 (제거된 복제는 흔적 없이 정리)
+    const liveClones = {};
+    for (const [ci, src] of Object.entries(entry.clones || {})) {
+      if (entry.order.includes(Number(ci))) liveClones[ci] = src;
+    }
+    if (Object.keys(liveClones).length) states[name].clones = liveClones;
     // 픽셀 편집 사이드카 (빈 프레임 엔트리는 정리)
     const px = {};
     for (const [i, ops] of Object.entries(entry.pixels || {})) {
@@ -893,7 +931,40 @@ function archiveFrame(stateName, idx) {
   const e = entries[stateName];
   e.sel.delete(idx);
   e.order = e.order.filter((i) => i !== idx);
-  if (!e.archived.includes(idx)) e.archived.push(idx);
+  if (cloneSrc(stateName, idx) !== null) {
+    // 복제 인스턴스는 보관함에 넣지 않고 완전히 제거한다 — 원본이 살아 있으니
+    // 언제든 다시 복제하면 되고, 보관함에 사본이 쌓이는 건 혼란만 준다.
+    delete e.clones[idx];
+    delete e.transforms[idx];
+    delete e.pixels[idx];
+  } else if (!e.archived.includes(idx)) {
+    e.archived.push(idx);
+  }
+  scheduleSave();
+  rebuildState(stateName);
+}
+
+// 프레임 복제: 원본 카드 바로 뒤에, 같은 존(시퀀스/풀)으로, 현재 변형·픽셀편집을
+// 복사한 새 인스턴스를 만든다. 복제의 복제도 원본 프레임으로 평탄화해 기록한다.
+function duplicateFrame(stateName, idx) {
+  const e = entries[stateName];
+  const st = run.states.find((s) => s.name === stateName);
+  if (!st) return;
+  e.clones = e.clones || {};
+  const used = [
+    ...st.frames.map((f) => f.index),
+    ...Object.keys(e.clones).map(Number),
+    ...e.order,
+    ...e.archived,
+  ];
+  const newIdx = Math.max(-1, ...used) + 1;
+  const src = cloneSrc(stateName, idx) ?? idx;
+  e.clones[newIdx] = src;
+  if (e.transforms[idx]) e.transforms[newIdx] = { ...e.transforms[idx] };
+  if (e.pixels[idx]) e.pixels[newIdx] = JSON.parse(JSON.stringify(e.pixels[idx]));
+  const pos = e.order.indexOf(idx);
+  e.order.splice(pos < 0 ? e.order.length : pos + 1, 0, newIdx);
+  if (e.sel.has(idx)) e.sel.add(newIdx);
   scheduleSave();
   rebuildState(stateName);
 }
@@ -1062,10 +1133,11 @@ function renderState(state, replaceEl) {
   const poolFrames = zones.querySelector(".pool-frames");
 
   const e = entries[state.name];
-  const frameByIdx = new Map(state.frames.map((f) => [f.index, f]));
+  // frameOf 는 복제 인스턴스(order 의 물리 범위 밖 인덱스)도 원본 frame 객체를
+  // 빌려 해석한다 — 카드 하나 = 인스턴스 하나.
   for (const idx of e.order) {
     if (!e.sel.has(idx)) continue;
-    const frame = frameByIdx.get(idx);
+    const frame = frameOf(state.name, idx);
     if (frame) seqFrames.appendChild(renderCard(state, frame));
   }
   // pool = everything not in the sequence. `order` already contains every
@@ -1073,7 +1145,7 @@ function renderState(state, replaceEl) {
   // — do NOT also iterate state.frames here or missing cards render twice.
   for (const idx of e.order) {
     if (e.sel.has(idx)) continue;
-    const frame = frameByIdx.get(idx);
+    const frame = frameOf(state.name, idx);
     if (frame) poolFrames.appendChild(renderCard(state, frame));
   }
 
@@ -1088,14 +1160,16 @@ function renderState(state, replaceEl) {
   if (replaceEl) replaceEl.replaceWith(wrap);
   else document.getElementById("states").appendChild(wrap);
 
-  // wire stages + reorder grips after they are in the DOM (need clientWidth)
-  for (const frame of state.frames) {
-    if (!frame.present) continue;
-    const card = wrap.querySelector(`.card[data-idx="${frame.index}"]`);
+  // wire stages + reorder grips after they are in the DOM (need clientWidth).
+  // order 를 돌아야 복제 인스턴스 카드도 와이어링된다 (물리 프레임 목록엔 없다).
+  for (const idx of e.order) {
+    const frame = frameOf(state.name, idx);
+    if (!frame || !frame.present) continue;
+    const card = wrap.querySelector(`.card[data-idx="${idx}"]`);
     if (!card) continue; // 보관된 프레임은 행에 카드가 없다
     const stage = card.querySelector(".stage");
-    wireStage(stage, state.name, frame.index);
-    applyCardTransform(stage, state.name, frame.index);
+    wireStage(stage, state.name, idx);
+    applyCardTransform(stage, state.name, idx);
     if (run.iso) drawGroundGrid(stage);
     // the whole header strip is the drag handle (grip + label + ✗/✓ button),
     // not just the ⠿ glyph — see wireReorder.
@@ -1591,7 +1665,10 @@ function renderCard(state, frame) {
       `<div class="shear-handle" title="${t("tShear")}"></div>`
     : `<div class="missing-label">${state.rawPresent ? t("missingRawWait") : t("missingPending")}</div>`;
 
-  const label = frame.label ? escapeHtml(frame.label) : `#${frame.index}`;
+  const isClone = frame.clone !== undefined;
+  const label = isClone
+    ? `<span class="clone-badge" title="${t("tCloneBadge")}">⧉ ${escapeHtml(STR[lang].cloneBadge(frame.clone))}</span>`
+    : (frame.label ? escapeHtml(frame.label) : `#${frame.index}`);
   card.innerHTML =
     `<div class="card-top">` +
     `<span class="ct-left">` +
@@ -1609,6 +1686,7 @@ function renderCard(state, frame) {
     `<span class="tvals"></span>` +
     `<button type="button" class="ghost flip-btn" title="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
     `<button type="button" class="ghost reset-btn" title="${t("tReset")}">↺</button>` +
+    (frame.present ? `<button type="button" class="ghost dup-btn" title="${t("tDupBtn")}" aria-label="duplicate">⧉</button>` : "") +
     `<button type="button" class="ghost arch-btn" title="${t("tArchiveBtn")}" aria-label="archive">` +
     '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">' +
     '<path d="M1.5 3h13v3h-13zM2.5 6v6.5A1 1 0 0 0 3.5 13.5h9a1 1 0 0 0 1-1V6M6 8.5h4" ' +
@@ -1643,6 +1721,11 @@ function renderCard(state, frame) {
       zoomBtn.addEventListener("click", () => openZoom(state.name, frame.index));
     }
     card.querySelector(".stage").addEventListener("dblclick", () => openZoom(state.name, frame.index));
+    const dupBtn = card.querySelector(".dup-btn");
+    if (dupBtn) {
+      dupBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+      dupBtn.addEventListener("click", () => duplicateFrame(state.name, frame.index));
+    }
     const archBtn = card.querySelector(".arch-btn");
     archBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
     archBtn.addEventListener("click", () => archiveFrame(state.name, frame.index));
@@ -1712,7 +1795,7 @@ function startPreview(state) {
     pv.cursor = ((pv.cursor % play.length) + play.length) % play.length;
     const idx = play[pv.cursor];
     pv.shown = idx; // remember which frame is on screen (for reanchoring on edits)
-    const f = state.frames[idx];
+    const f = frameOf(state.name, idx); // 복제 인스턴스 → 원본 이미지
     const image = f ? img(frameUrl(state.name, f)) : null;
     if (image && image.complete && image.naturalWidth) {
       const tr = getTransform(state.name, idx);
@@ -1798,8 +1881,12 @@ function onZoomKey(ev) {
 
 function stepZoomFrame(delta) {
   if (!zoomView) return;
-  const st = run.states.find((s) => s.name === zoomView.stateName);
-  const present = st.frames.filter((f) => f.present).map((f) => f.index);
+  // 표시 순서(order)를 따라 넘긴다 — 복제 인스턴스 카드도 순회에 포함
+  const e = entries[zoomView.stateName];
+  const present = e.order.filter((i) => {
+    const f = frameOf(zoomView.stateName, i);
+    return f && f.present;
+  });
   if (!present.length) return;
   const pos = present.indexOf(zoomView.idx);
   openZoom(zoomView.stateName, present[(pos + delta + present.length) % present.length], zoomView.width);
@@ -1807,8 +1894,7 @@ function stepZoomFrame(delta) {
 
 function openZoom(stateName, idx, keepWidth) {
   closeZoom();
-  const st = run.states.find((s) => s.name === stateName);
-  const frame = st && st.frames.find((f) => f.index === idx);
+  const frame = frameOf(stateName, idx); // 복제 인스턴스 → 원본 이미지, 자기 변형
   if (!frame || !frame.present) return;
   const aspect = run.cell.height / run.cell.width;
   const width = keepWidth
@@ -1817,7 +1903,9 @@ function openZoom(stateName, idx, keepWidth) {
 
   const modal = document.createElement("div");
   modal.id = "zoom-modal";
-  const label = frame.label ? escapeHtml(frame.label) : `#${idx}`;
+  const label = frame.clone !== undefined
+    ? `⧉ ${escapeHtml(STR[lang].cloneBadge(frame.clone))}`
+    : (frame.label ? escapeHtml(frame.label) : `#${idx}`);
   modal.innerHTML =
     `<div class="zoom-backdrop"></div>` +
     `<div class="card zoom-card" data-state="${escapeHtml(stateName)}" data-idx="${idx}">` +
@@ -2187,8 +2275,21 @@ function seedEntries() {
   entries = {};
   const curated = (run.curation && run.curation.states) || {};
   for (const state of run.states) {
-    const present = state.frames.filter((f) => f.present).map((f) => f.index);
+    const physPresent = state.frames.filter((f) => f.present).map((f) => f.index);
     const c = curated[state.name];
+    // 복제 인스턴스: {복제idx: 원본idx}. 복제idx 는 물리 범위 밖 정수, 원본은 물리
+    // 프레임이어야 한다 (손상 항목 스킵). 원본이 present 면 복제도 present 취급.
+    const physIdxSet = new Set(state.frames.map((f) => f.index));
+    const clones = {};
+    if (c && c.clones && typeof c.clones === "object") {
+      for (const [k, v] of Object.entries(c.clones)) {
+        const ci = Number(k);
+        const src = Number(v);
+        if (Number.isInteger(ci) && Number.isInteger(src) && !physIdxSet.has(ci) && physIdxSet.has(src)) clones[ci] = src;
+      }
+    }
+    const cloneIdx = Object.keys(clones).map(Number);
+    const present = [...physPresent, ...cloneIdx.filter((ci) => physPresent.includes(clones[ci]))];
     // order = full display arrangement (sequence then pool); sel = which are on.
     // Coerce to integers and de-dupe so a hand-edited / corrupt sidecar (string
     // indices, duplicates) can't produce a duplicated or dropped frame.
@@ -2238,7 +2339,7 @@ function seedEntries() {
         if (Number.isInteger(i) && v && typeof v === "object" && Object.keys(v).length) pixels[i] = { ...v };
       }
     }
-    entries[state.name] = { order, sel, transforms, archived, pixels };
+    entries[state.name] = { order, sel, transforms, archived, pixels, clones };
   }
 }
 
@@ -2339,6 +2440,20 @@ async function boot() {
   syncPpControls();
   syncGridControls();
   refreshVariantImages();
+  // 세대 불일치로 서버가 이번 로드에서 무효화한 행 알림 — 조용한 소실 금지.
+  // 백업 파일명을 함께 보여줘 수동 복원 경로를 남긴다 (load_curation_report 계약).
+  if (run.curationDropped && run.curationDropped.length) {
+    const note = document.createElement("div");
+    note.id = "curation-dropped-note";
+    note.textContent = STR[lang].curationDropped(run.curationDropped, run.curationBackup);
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "ghost";
+    dismiss.textContent = "✕";
+    dismiss.addEventListener("click", () => note.remove());
+    note.appendChild(dismiss);
+    document.body.prepend(note);
+  }
   // 힌트바를 우측 본문 컬럼 끝으로 이동 — 좌측 스플릿이 페이지 바닥까지 유지되게
   document.getElementById("states").appendChild(document.getElementById("hintbar"));
   if (healParts.length) {
