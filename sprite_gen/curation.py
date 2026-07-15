@@ -18,11 +18,11 @@ Schema (`curation.json`):
       "version": 1,
       "kind": "sprite-gen-curation",
       "run_revision": "9f3c1a0b7e2d4c58",    # stamped at write = the frame generation this
-                                              #   curation was made for. If the frames are
-                                              #   later regenerated (re-import/re-extract),
-                                              #   load_curation detects the mismatch and
-                                              #   ignores this sidecar (all-frames default)
-                                              #   so stale edits never apply to new frames.
+                                              #   curation was made for. When it matches the
+                                              #   current run, the whole sidecar applies
+                                              #   (fast path). When it does not, each state
+                                              #   is judged by its own `revision` stamp
+                                              #   below — never silently applied wholesale.
       "pixel_perfect": true,                 # optional run-wide DEFAULT; false -> compose
                                               #   reads the frame-N.plain.png variant (pre-
                                               #   pixel-perfect). absent/true -> the
@@ -31,12 +31,23 @@ Schema (`curation.json`):
                                               #   both variants (fit.pixel_perfect).
       "states": {
         "<state>": {
+          "revision": ["a1b2c3d4e5f6"],      # per-state generation stamp: ordered SOURCE-
+                                              #   material segment digests (state_revision).
+                                              #   Valid while it is a prefix of the current
+                                              #   segments — an engine-upgrade heal of the
+                                              #   same raw keeps it, a raw re-roll drops it.
           "pixel_perfect": false,            # optional per-state override of the run-wide
                                               #   default above (the curator's per-row
                                               #   toggle). absent -> the run-wide value.
           "selected": [0, 1, 2, 3],          # 0-based frame indices, in play order
+                                              #   (may include clone instance indices)
           "deleted": [4],                    # optional 0-based frame indices
                                                #   excluded from UI rows and bake.
+          "clones": {"12": 5},               # optional duplicate instances: new index ->
+                                               #   source frame index. A clone is a full
+                                               #   instance (own transform/pixels/order slot)
+                                               #   that bakes the SOURCE frame's file. Clone
+                                               #   indices live outside 0..frame_count-1.
           "order": [0, 1, 2, 3, 4, 5],        # optional, webview-owned; full display
                                                #   order (sequence then candidate pool).
                                                #   Restores the row arrangement on reload.
@@ -54,10 +65,13 @@ Schema (`curation.json`):
 
 Defaults when absent (explicit, not a silent fallback):
 - no `curation.json`           -> every state uses all extracted frames in order, identity transform.
-- missing/mismatched `run_revision` -> the sidecar is stale (frames regenerated under it, or a
-                                   legacy/manual file that predates stamping) and is ignored (same
-                                   all-frames default), with an observable stderr warning — never
-                                   applied to frames it cannot be verified against.
+- mismatched `run_revision`    -> per-state salvage: each state entry whose `revision` stamp is a
+                                   prefix of the current state_revision segments is KEPT; entries
+                                   without a valid stamp are dropped. Before anything is dropped the
+                                   whole original file is backed up to `curation.stale-<hash>.json`
+                                   (idempotent content-hash name) and the drop is reported on stderr
+                                   and to the webview (load_curation_report) — stale edits are never
+                                   silently applied, and never silently destroyed either.
 - state missing from sidecar   -> same all-frames default for that state.
 - `selected` missing/empty     -> all non-deleted frames in extraction order.
 - `deleted` missing             -> no frames are deleted.
@@ -79,6 +93,8 @@ from pathlib import Path
 from typing import Any
 
 from PIL import Image
+
+from sprite_gen.layout import raw_rel
 
 CURATION_FILENAME = "curation.json"
 SCHEMA_VERSION = 1
@@ -179,32 +195,176 @@ def run_revision(run_dir: Path) -> str:
     return h.hexdigest()[:16]
 
 
-def load_curation(run_dir: Path) -> dict[str, Any] | None:
-    """Return the parsed sidecar, or None when there is no curation.json OR when the stored
-    curation is **stale** — its `run_revision` stamp no longer matches the current frame
-    generation (a re-import/re-extract regenerated the frames under it). A stale sidecar is
-    ignored (the all-frames identity default) rather than silently applied to frames it was
-    not made for; the skip is reported on stderr (observable, not a silent fallback). This is
-    the single gate every consumer (server, compose, export, GIF) passes through."""
-    path = curation_path(run_dir)
-    if not path.is_file():
+# raw/프레임 파일 내용 다이제스트 캐시 — (path, size, mtime_ns) 가 같으면 재해시하지
+# 않는다. state_revision 이 서버 요청마다 불리므로 MB 급 raw 재해시를 피한다.
+_CONTENT_DIGEST_CACHE: dict[tuple[str, int, int], str] = {}
+
+
+def _file_content_digest(path: Path) -> str | None:
+    """파일 내용 sha256 12자리 (mtime/size 키 메모이즈). 없으면 None."""
+    try:
+        st = path.stat()
+    except OSError:
         return None
-    data = json.loads(path.read_text(encoding="utf-8"))
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    cached = _CONTENT_DIGEST_CACHE.get(key)
+    if cached is None:
+        try:
+            cached = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+        except OSError:
+            return None
+        _CONTENT_DIGEST_CACHE[key] = cached
+    return cached
+
+
+def state_revision(run_dir: Path, state: str, request: dict[str, Any] | None = None,
+                   row: dict[str, Any] | None = None) -> list[str] | None:
+    """행(state) 단위 세대 지문 — 순서 있는 원료(source-material) 세그먼트 다이제스트 리스트.
+
+    세그먼트 = 그 행의 프레임 인덱스 공간을 만드는 원료 단위: primary raw, 그리고 선언
+    순서의 take raw (manifest row `takes` 가 SSoT). raw 가 아예 없는 임포트 행은 프레임
+    파일 내용 자체가 원료다. 다이제스트 입력은 원료의 **내용**(sha256)·세그먼트 프레임
+    수·셀/픽셀퍼펙트 기하이고, frames/ 캐시의 mtime 이나 엔진 리비전은 넣지 않는다 —
+    엔진 업그레이드 heal 이 같은 raw 를 재유도해도 지문이 유지돼 큐레이션이 살아남고,
+    raw 리롤·테이크 교체·셀 변경은 지문을 바꾼다.
+
+    유효성 규칙 (load_curation_report): 저장 리스트가 현재 리스트의 접두(prefix)면 유효.
+    테이크가 끝에 추가돼도 기존 프레임 인덱스 공간이 밀리지 않으므로 선택이 유지된다.
+    manifest row 가 없으면 None (검증 불가 — 그 행 큐레이션은 살릴 수 없다)."""
+    try:
+        if request is None:
+            request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if state not in (request.get("states") or {}):
+        return None
+    if row is None:
+        try:
+            manifest = json.loads(
+                (run_dir / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        row = next((r for r in manifest.get("rows", []) if r.get("state") == state), None)
+    if not isinstance(row, dict):
+        return None
+    cell = request.get("cell", {})
+    fit = request.get("fit") or {}
+    basis = (f"{cell.get('width', cell.get('size'))}x{cell.get('height', cell.get('size'))}"
+             f":pp={1 if fit.get('pixel_perfect') else 0}:lh={fit.get('logical_height')}")
+    segments = row.get("takes")
+    if not segments:
+        segments = [{
+            "label": None, "start": 0,
+            "frames": row.get("frames", len(row.get("files") or [])),
+            "raw": raw_rel(request, state),
+        }]
+    digests: list[str] = []
+    for seg in segments:
+        raw_path = run_dir / str(seg.get("raw", ""))
+        content = _file_content_digest(raw_path) if seg.get("raw") else None
+        if content is None:
+            # 임포트 행 (raw 없음): 세그먼트가 낳은 프레임 파일 내용이 곧 원료.
+            start = int(seg.get("start", 0))
+            count = int(seg.get("frames", 0))
+            parts = []
+            for rel in (row.get("files") or [])[start:start + count]:
+                parts.append(_file_content_digest(run_dir / rel) or "missing")
+            content = hashlib.sha256("|".join(parts).encode()).hexdigest()[:12]
+        h = hashlib.sha256(
+            f"{seg.get('label') or ''}:{seg.get('raw') or ''}:{content}"
+            f":{int(seg.get('frames', 0))}:{basis}".encode())
+        digests.append(h.hexdigest()[:12])
+    return digests
+
+
+def backup_stale_curation(run_dir: Path, raw_text: str) -> str:
+    """무효화로 버려질(또는 덮일) 큐레이션 원문을 `curation.stale-<hash>.json` 으로 보존.
+
+    파일명이 내용 해시라 멱등 — 같은 원문은 한 번만 남고, 정상 편집 흐름에서는 절대
+    생기지 않는다. 사람이 나중에 열어 selected/transforms 를 수동 복원할 수 있는
+    관측 가능한 안전망이다 (백업 없는 원자 덮어쓰기 금지)."""
+    digest = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()[:8]
+    name = f"curation.stale-{digest}.json"
+    path = run_dir / name
+    if not path.exists():
+        path.write_text(raw_text, encoding="utf-8")
+    return name
+
+
+def load_curation_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """사이드카 로드 + 세대 검증 보고. Returns (doc|None, report).
+
+    report = {"dropped": [state...], "backup": filename|None}. 규칙:
+    - run_revision 이 현재와 일치 → 문서 전체 유효 (fast path, dropped 없음).
+    - 불일치 → 행 단위 구제: `revision` 스탬프가 현재 state_revision 의 접두인 행만
+      유지, 나머지는 드롭. 드롭이 하나라도 있으면 원문을 먼저 백업하고 stderr 로
+      보고한다. 전 행이 드롭되면 doc 은 None (전량 기본값).
+    스탬프 없는 행(레거시/수동 편집)은 불일치 세대에서 검증 불가 → 드롭 (No Silent
+    Fallback — 증명 없는 선택을 새 프레임에 적용하지 않는다)."""
+    path = curation_path(run_dir)
+    report: dict[str, Any] = {"dropped": [], "backup": None}
+    if not path.is_file():
+        return None, report
+    raw_text = path.read_text(encoding="utf-8")
+    data = json.loads(raw_text)
     if data.get("kind") != "sprite-gen-curation":
         raise SystemExit(f"{path} is not a sprite-gen-curation file")
-    # A curation applies only when its run_revision stamp matches the current frame
-    # generation exactly. A **missing** stamp (a legacy/manual/example sidecar) is treated
-    # as stale too — it carries no proof it was made for these frames, so it is ignored
-    # rather than silently applied to frames it may not belong to (No Silent Fallback).
-    stamped = data.get("run_revision")
-    current = run_revision(run_dir)
-    if stamped != current:
-        reason = ("no run_revision stamp (legacy/manual sidecar — unverifiable against the "
-                  "current frames)" if stamped is None
-                  else f"run_revision {stamped} != current {current} (frames were regenerated under it)")
-        print(f"[curation] ignoring stale {CURATION_FILENAME} ({reason}): {run_dir}", file=sys.stderr)
-        return None
-    return data
+    if data.get("run_revision") == run_revision(run_dir):
+        return data, report
+    try:
+        request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        request = None
+    kept: dict[str, Any] = {}
+    for name, entry in (data.get("states") or {}).items():
+        entry_rev = entry.get("revision") if isinstance(entry, dict) else None
+        current = state_revision(run_dir, name, request=request) if request else None
+        if (isinstance(entry_rev, list) and entry_rev and current
+                and entry_rev == current[:len(entry_rev)]):
+            kept[name] = entry
+        else:
+            report["dropped"].append(name)
+    if not report["dropped"]:
+        # 런 세대 지문은 바뀌었지만 (예: request 메타 편집) 전 행이 개별 검증을 통과.
+        return {**data, "states": kept}, report
+    report["backup"] = backup_stale_curation(run_dir, raw_text)
+    print(f"[curation] frames regenerated under {CURATION_FILENAME}: dropped "
+          f"{', '.join(report['dropped'])} (kept {len(kept)}), backup {report['backup']}: {run_dir}",
+          file=sys.stderr)
+    if not kept:
+        return None, report
+    return {**data, "states": kept}, report
+
+
+def load_curation(run_dir: Path) -> dict[str, Any] | None:
+    """The single gate every consumer (server, compose, export, GIF) passes through.
+    Thin wrapper over load_curation_report — see it for the per-state salvage +
+    backup semantics."""
+    return load_curation_report(run_dir)[0]
+
+
+def stamp_curation(run_dir: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    """쓰기 직전 세대 도장. run_revision(런 전체 fast-path 지문) + 행별 `revision`
+    (state_revision 세그먼트 지문) 을 payload 사본에 찍어 반환한다. `runRevision`
+    (transport echo) 은 제거. 행 스탬프가 계산 불가(행 미생성)면 스탬프를 지운다 —
+    거짓 증명을 남기지 않는다."""
+    payload = {k: v for k, v in payload.items() if k != "runRevision"}
+    payload["run_revision"] = run_revision(run_dir)
+    try:
+        request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        request = None
+    states = payload.get("states")
+    if isinstance(states, dict):
+        for name, entry in states.items():
+            if not isinstance(entry, dict):
+                continue
+            rev = state_revision(run_dir, name, request=request) if request else None
+            if rev:
+                entry["revision"] = rev
+            else:
+                entry.pop("revision", None)
+    return payload
 
 
 def normalize_transform(raw: Any) -> dict[str, float]:
@@ -236,21 +396,53 @@ def is_identity(transform: dict[str, float]) -> bool:
     )
 
 
-def normalize_frame_indices(raw: Any, default_count: int) -> list[int]:
-    """Return unique 0-based frame indices that are valid for this state."""
+def normalize_frame_indices(raw: Any, default_count: int,
+                            extra_valid: set[int] | None = None) -> list[int]:
+    """Return unique 0-based frame indices that are valid for this state.
+    `extra_valid` admits clone instance indices (outside the physical range)."""
     if not isinstance(raw, list):
         return []
     indices: list[int] = []
     seen: set[int] = set()
+    extra = extra_valid or set()
     for value in raw:
         try:
             index = int(value)
         except (TypeError, ValueError):
             continue
-        if 0 <= index < default_count and index not in seen:
+        if (0 <= index < default_count or index in extra) and index not in seen:
             indices.append(index)
             seen.add(index)
     return indices
+
+
+def state_clones(curation: dict[str, Any] | None, state: str, default_count: int) -> dict[int, int]:
+    """행의 복제 인스턴스 맵 {복제 인덱스: 원본 프레임 인덱스}.
+
+    복제 인덱스는 물리 프레임 범위(0..default_count-1) 밖의 정수, 원본은 범위 안이어야
+    한다. 복제는 자기만의 order 슬롯/변형/픽셀편집을 갖는 정식 인스턴스이고, 굽기 때
+    원본 프레임 파일을 읽는다 (frames/ 는 파생 캐시라 복제 파일을 만들지 않는다 —
+    복제 의도는 사이드카가 소유). 손상 항목은 스킵."""
+    entry = ((curation or {}).get("states") or {}).get(state)
+    raw = entry.get("clones") if isinstance(entry, dict) else None
+    clones: dict[int, int] = {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            try:
+                clone_idx, src = int(key), int(value)
+            except (TypeError, ValueError):
+                continue
+            if clone_idx >= default_count and 0 <= src < default_count:
+                clones[clone_idx] = src
+    return clones
+
+
+def source_frame_index(curation: dict[str, Any] | None, state: str,
+                       index: int, default_count: int) -> int:
+    """인스턴스 인덱스 → 실제 프레임 파일 인덱스 (복제면 원본, 아니면 자기 자신).
+    소비자는 파일을 열 때만 이 리졸버를 쓰고, transforms/pixels 는 인스턴스
+    인덱스로 그대로 조회한다 — 복제마다 다른 변형이 가능해야 하므로."""
+    return state_clones(curation, state, default_count).get(index, index)
 
 
 def transform_matrix(t: dict[str, float]) -> tuple[float, float, float, float]:
@@ -329,7 +521,10 @@ def state_plan(
     if not isinstance(entry, dict):
         return default_order, {}
 
-    deleted = set(normalize_frame_indices(entry.get("deleted"), default_count))
+    # 복제 인스턴스 인덱스도 selected/deleted 의 유효 인덱스다 (파일은 원본을 읽음
+    # — source_frame_index). 기본값(선택 없음)은 물리 프레임만: 복제는 명시 선택으로만 굽는다.
+    clone_ids = set(state_clones(curation, state, default_count))
+    deleted = set(normalize_frame_indices(entry.get("deleted"), default_count, clone_ids))
     default_visible = [index for index in default_order if index not in deleted]
     selected = entry.get("selected")
     if isinstance(selected, list) and selected:
@@ -337,7 +532,7 @@ def state_plan(
         # out-of-range, duplicate, or deleted entries instead of crashing.
         ordered = [
             index
-            for index in normalize_frame_indices(selected, default_count)
+            for index in normalize_frame_indices(selected, default_count, clone_ids)
             if index not in deleted
         ]
         if not ordered:

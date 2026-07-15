@@ -14,7 +14,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, state_pixel_ops, state_plan
+from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import read_guard
@@ -125,7 +125,8 @@ def _run_dir_mode_guarded(args, run_dir):
         variant = frame_variant(curation, state)
         images: list[Image.Image] = []
         for index in ordered:
-            path = run_dir / row_frame_rel(rows_by_state[state], index, variant)
+            # 복제 인스턴스는 원본 프레임 파일을 읽는다 (변형/픽셀편집은 인스턴스 인덱스).
+            path = run_dir / row_frame_rel(rows_by_state[state], source_frame_index(curation, state, index, count), variant)
             if not path.is_file():
                 raise SystemExit(
                     f"selected frame {path} is missing — the generation is incomplete or the "

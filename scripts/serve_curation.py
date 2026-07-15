@@ -46,7 +46,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
-from curation import CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported_ref_role, load_curation, run_revision
+from curation import (CURATION_FILENAME, SCHEMA_VERSION, backup_stale_curation, empty_curation,
+                      imported_ref_role, load_curation_report, run_revision, stamp_curation)
 from extract import heal_run, load_consistent_frames_manifest
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -320,7 +321,8 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         for path in sorted(anchors_dir.glob("*.png")):
             anchor_files.append({"name": path.name, "url": _url("run", "references", "anchors", path.name)})
 
-    curation = load_curation(run_dir) or empty_curation()
+    curation, curation_report = load_curation_report(run_dir)
+    curation = curation or empty_curation()
     # 원본 베이스(아이덴티티 truth)가 있으면 큐레이터 최상단에 참조 줄로 노출
     base_url = None
     for candidate in sorted(run_dir.glob("base-source.*")):
@@ -351,6 +353,10 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         "anchorFiles": anchor_files,
         "states": states,
         "curation": curation,
+        # 세대 불일치로 이번 로드에서 무효화(드롭)된 행 + 원문 백업 파일명 — 뷰가
+        # 배너로 알린다 (stderr 만으로는 사용자가 못 본다; 조용한 소실 금지).
+        "curationDropped": curation_report["dropped"],
+        "curationBackup": curation_report["backup"],
         "iso": request.get("iso"),
         "lang": CurationHandler.lang,
         "hasAtlas": (run_dir / "sprite-sheet-alpha.png").is_file(),
@@ -361,14 +367,42 @@ def _build_run_state_impl(run_dir: Path) -> dict:
 
 def write_curation_atomic(run_dir: Path, payload: dict) -> None:
     """Atomically replace curation.json (temp file in the same dir + os.replace). Stamps the
-    sidecar with the current run generation (`run_revision`) so a later re-import/re-extract
-    that regenerates the frames makes this curation detectably stale (load_curation ignores
-    it). `runRevision` is a transport-only echo field and is not stored."""
+    sidecar with the current run generation (`run_revision`) AND per-state `revision`
+    segment fingerprints (stamp_curation), so a later regeneration invalidates only the
+    rows it actually touched. Before replacing, any state entry in the existing file that
+    this write would lose (missing from the payload, or stamped for an incompatible
+    generation) triggers a `curation.stale-<hash>.json` backup of the old file — an
+    autosave can never permanently destroy selections without an observable copy.
+    `runRevision` is a transport-only echo field and is not stored."""
     if payload.get("kind") != "sprite-gen-curation":
         raise ValueError("payload is not a sprite-gen-curation document")
-    payload = {k: v for k, v in payload.items() if k != "runRevision"}
-    payload["run_revision"] = run_revision(run_dir)
+    payload = stamp_curation(run_dir, payload)
     target = run_dir / CURATION_FILENAME
+    if target.is_file():
+        old_text = target.read_text(encoding="utf-8")
+        try:
+            old = json.loads(old_text)
+        except json.JSONDecodeError:
+            old = None
+        if isinstance(old, dict):
+            new_states = payload.get("states") or {}
+            same_generation = old.get("run_revision") == payload.get("run_revision")
+            for name, old_entry in (old.get("states") or {}).items():
+                new_entry = new_states.get(name)
+                if not isinstance(old_entry, dict):
+                    continue
+                if not isinstance(new_entry, dict):
+                    lost = True
+                else:
+                    old_rev, new_rev = old_entry.get("revision"), new_entry.get("revision")
+                    if isinstance(old_rev, list) and isinstance(new_rev, list):
+                        lost = old_rev != new_rev[:len(old_rev)]
+                    else:
+                        # 레거시 스탬프 없는 항목: 같은 런 세대의 정상 편집이면 호환
+                        lost = not same_generation
+                if lost:
+                    backup_stale_curation(run_dir, old_text)
+                    break
     text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     fd, tmp_name = tempfile.mkstemp(dir=str(run_dir), prefix=".curation-", suffix=".tmp")
     try:

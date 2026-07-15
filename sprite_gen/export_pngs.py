@@ -26,7 +26,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, state_pixel_ops, state_plan
+from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image
@@ -92,7 +92,9 @@ def _run(args: argparse.Namespace):
         multi_state = len(states) > 1
         variant = frame_variant(curation, state)
         for index in indices:
-            src_path = run_dir / row_frame_rel(rows_by_state[state], index, variant)
+            # 복제 인스턴스는 원본 프레임 파일을 읽는다 (변형/픽셀편집은 인스턴스 인덱스)
+            src_index = source_frame_index(curation, state, index, default_count)
+            src_path = run_dir / row_frame_rel(rows_by_state[state], src_index, variant)
             if not src_path.is_file():
                 raise SystemExit(
                     f"selected frame {src_path} is missing — the generation is incomplete or the "
