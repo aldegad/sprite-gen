@@ -857,6 +857,8 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .et-color { width: 26px; height: 22px; padding: 0 1px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); cursor: pointer; }
 .et-note { font-size: 11px; }
 .stage.pixel-editing { cursor: crosshair; }
+/* 스포이드 모드 = 색 집기 커서 (copy) 로 구분 */
+.stage.pixel-editing.picking { cursor: copy; }
 .stage.pixel-editing .rotate-handle, .stage.pixel-editing .shear-handle, .stage.pixel-editing .scale-scrub { display: none; }
 
 /* 보관함 풀 모달 — 일반 카드 크기 그리드 + 복구 버튼 */
