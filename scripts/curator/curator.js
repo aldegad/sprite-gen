@@ -80,7 +80,8 @@ const STR = {
     tArchiveChip: "click to open — drop a card here to archive it",
     tArchiveBtn: "archive (remove even from the candidate pool)",
     tScaleScrub: "sprite scale — click arrows to step, drag the magnifier left/right",
-    penTool: "pen", eraserTool: "eraser", undoEdit: "undo", clearEdits: "clear edits",
+    penTool: "pen", eraserTool: "eraser", pickTool: "eyedropper", undoEdit: "undo", clearEdits: "clear edits",
+    tPick: "eyedropper — click a pixel to sample its color, then it switches to the pen so you can paint that exact color",
     editNote: "pixel editing — shown untransformed (source coordinates)",
     archiveHint: "drag a card out to restore it into the sequence or pool",
     archModalTitle: (st, n) => `archive · ${st} (${n})`,
@@ -150,7 +151,8 @@ const STR = {
     tArchiveChip: "클릭 = 열기 · 카드를 여기로 끌어오면 보관",
     tArchiveBtn: "보관함으로 (후보 풀에서도 제외)",
     tScaleScrub: "스프라이트 크기 — 화살표 클릭 = 단계 조절, 돋보기 좌우 드래그 = 연속 조절",
-    penTool: "연필", eraserTool: "지우개", undoEdit: "되돌리기", clearEdits: "편집 비우기",
+    penTool: "연필", eraserTool: "지우개", pickTool: "스포이드", undoEdit: "되돌리기", clearEdits: "편집 비우기",
+    tPick: "스포이드 — 픽셀을 클릭하면 그 색을 집어 연필로 전환, 똑같은 색으로 바로 찍을 수 있어",
     editNote: "픽셀 편집 중 — 변형 없이 원본 좌표로 표시",
     archiveHint: "카드를 끌어내 시퀀스/후보로 복구",
     archModalTitle: (st, n) => `보관함 · ${st} (${n})`,
@@ -2085,6 +2087,9 @@ function openZoom(stateName, idx, keepWidth) {
     `<button type="button" class="ghost et-eraser">` +
     '<svg viewBox="0 0 16 16" width="11" height="11"><path d="M9.5 2.5 2.8 9.2a1 1 0 0 0 0 1.4l2.6 2.6h4.1l4-4a1 1 0 0 0 0-1.4L9.5 2.5zM5.5 13.2 9.9 8.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
     `<span>${t("eraserTool")}</span></button>` +
+    `<button type="button" class="ghost et-pick" data-tip="${t("tPick")}">` +
+    '<svg viewBox="0 0 16 16" width="11" height="11"><path d="M10.6 2a1.9 1.9 0 0 1 2.7 2.7l-1 1 .5.5-1.1 1.1-.5-.5-4.3 4.3-2.4.6.6-2.4 4.3-4.3-.5-.5L10 6.4l-.5-.5 1.1-1.1.5.5 1-1z" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/></svg>' +
+    `<span>${t("pickTool")}</span></button>` +
     `<span class="et-swatches"></span>` +
     `<input type="color" class="et-color" value="#1f2430" title="color" />` +
     `<button type="button" class="ghost et-undo">${t("undoEdit")}</button>` +
@@ -2093,13 +2098,16 @@ function openZoom(stateName, idx, keepWidth) {
   card.insertBefore(toolbar, stage);
   const penBtn = toolbar.querySelector(".et-pen");
   const eraserBtn = toolbar.querySelector(".et-eraser");
+  const pickBtn = toolbar.querySelector(".et-pick");
   const colorInput = toolbar.querySelector(".et-color");
   const swatchBox = toolbar.querySelector(".et-swatches");
   const editNote = toolbar.querySelector(".et-note");
   const syncToolbar = () => {
     penBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "pen");
     eraserBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "eraser");
+    pickBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "pick");
     stage.classList.toggle("pixel-editing", !!pixelEdit);
+    stage.classList.toggle("picking", !!pixelEdit && pixelEdit.tool === "pick");
     editNote.hidden = !pixelEdit;
   };
   const setTool = (tool) => {
@@ -2111,7 +2119,30 @@ function openZoom(stateName, idx, keepWidth) {
   };
   penBtn.addEventListener("click", () => setTool("pen"));
   eraserBtn.addEventListener("click", () => setTool("eraser"));
+  pickBtn.addEventListener("click", () => setTool("pick"));
   colorInput.addEventListener("input", () => { if (pixelEdit) pixelEdit.color = colorInput.value; });
+
+  // 스포이드 표본: 현재 표시 픽셀(베이스 이미지 + 이미 적용한 편집)의 색을 (x,y)에서 읽는다.
+  // 편집(ops)이 우선 — 방금 찍은 색도 다시 집을 수 있게. 투명/지운 픽셀은 null.
+  const sampleColor = (x, y) => {
+    const ops = entries[stateName].pixels[idx];
+    const key = `${x},${y}`;
+    if (ops && key in ops) {
+      const v = ops[key];
+      return typeof v === "string" && v.startsWith("#") ? v.slice(0, 7) : null;
+    }
+    const imgEl = stage.querySelector("img");
+    if (!(imgEl && imgEl.complete && imgEl.naturalWidth)) return null;
+    const tmp = sampleColor._c || (sampleColor._c = document.createElement("canvas"));
+    tmp.width = run.cell.width; tmp.height = run.cell.height;
+    const c2 = tmp.getContext("2d");
+    c2.imageSmoothingEnabled = false;
+    c2.clearRect(0, 0, tmp.width, tmp.height);
+    c2.drawImage(imgEl, 0, 0, tmp.width, tmp.height);
+    const d = c2.getImageData(x, y, 1, 1).data;
+    if (d[3] < 40) return null; // 투명 픽셀은 집을 색이 없다
+    return "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+  };
   toolbar.querySelector(".et-undo").addEventListener("click", () => {
     if (!pixelEdit || !pixelEdit.journal.length) return;
     const j = pixelEdit.journal.pop();
@@ -2177,6 +2208,23 @@ function openZoom(stateName, idx, keepWidth) {
     if (ev.button || !ev.isPrimary) return;
     ev.preventDefault();
     ev.stopImmediatePropagation();
+    const cellX = (e2) => Math.floor(((e2.clientX - stage.getBoundingClientRect().left) / stage.getBoundingClientRect().width) * run.cell.width);
+    const cellY = (e2) => Math.floor(((e2.clientY - stage.getBoundingClientRect().top) / stage.getBoundingClientRect().height) * run.cell.height);
+    // 스포이드: 색만 집고 바로 연필로 전환 (드래그 페인트 아님). 투명 픽셀은 무시.
+    if (pixelEdit.tool === "pick") {
+      const x = cellX(ev), y = cellY(ev);
+      if (x >= 0 && x < run.cell.width && y >= 0 && y < run.cell.height) {
+        const hex = sampleColor(x, y);
+        if (hex) {
+          colorInput.value = hex;
+          pixelEdit.color = hex;
+          pixelEdit.tool = "pen"; // 집은 색으로 즉시 그리게
+          syncToolbar();
+          setStatus(`${t("pickTool")}: ${hex}`, "ok");
+        }
+      }
+      return;
+    }
     try { stage.setPointerCapture(ev.pointerId); } catch { /* 일부 펜/합성 포인터 */ }
     const s = snapScaleFor(stateName) || 1;
     const e = entries[stateName];
