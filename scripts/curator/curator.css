@@ -63,6 +63,30 @@ button.ghost:hover { background: var(--panel-2); }
 button.ghost.flip-btn.active { background: var(--accent, #0ea5e9); color: #fff; }
 button.ghost.flip-btn.active:hover { background: var(--accent, #0ea5e9); filter: brightness(1.1); }
 
+/* 공통 커스텀 툴팁 (data-tip). 네이티브 title 대체 — 위임형 단일 팝오버. */
+#sg-tip {
+  position: fixed;
+  z-index: 4000;
+  max-width: 360px;
+  padding: 6px 9px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--panel, #fff);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  box-shadow: 0 6px 22px rgba(15, 23, 42, 0.16);
+  pointer-events: none; /* 기본 툴팁은 통과 (호버 방해 없음) */
+  opacity: 0;
+  visibility: hidden;
+  word-break: break-word;
+  white-space: pre-line;
+}
+#sg-tip.open { opacity: 1; visibility: visible; }
+/* 복사 가능 툴팁: 마우스를 팝오버 안으로 옮겨 텍스트를 드래그·복사 (에이전트 협업) */
+#sg-tip.copyable { pointer-events: auto; }
+#sg-tip.copyable .sg-tip-text { user-select: text; cursor: text; font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; }
+
 /* 좌측 파일트리 사이드바 + 본문 2단 레이아웃 (쿠마피커 도크 스타일) */
 #layout { display: flex; align-items: flex-start; min-width: 0; }
 #sidebar {
@@ -398,18 +422,26 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
   margin-bottom: 6px;
   font-size: 12px;
   color: var(--muted);
-  /* (Alex 2026-06-23) the whole header is the drag handle: grab anywhere on it
-     (grip, label, the ✗/✓ button) and move past threshold to reorder; a press
-     that does not move toggles sequence ⇄ pool. So cursor=grab on the strip. */
+  /* 헤더(타이틀 줄) 전체가 드래그 핸들 — 타이틀을 잡고 임계값을 넘으면 순서변경/
+     시퀀스↔풀 이동. 그냥 클릭은 아무 것도 안 한다 (수홍 2026-07-15). 우측 아이콘
+     버튼은 pointerdown 전파를 끊어 드래그를 시작하지 않는다. */
   cursor: grab;
-  padding: 2px 2px 2px 0;
+  padding: 1px 1px 1px 2px;
   touch-action: none; /* claim the pointer so the scroll row doesn't steal the drag */
 }
 .card-top:active { cursor: grabbing; }
 .card.dragging .card-top { cursor: grabbing; }
+.card-top .ct-left {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
 .card-top .idx {
   color: var(--text);
   overflow: hidden;
@@ -417,26 +449,14 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
   white-space: nowrap;
   min-width: 0;
 } /* long imported labels truncate instead of breaking the card-top layout */
-.card-top .ct-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.grip {
-  cursor: grab;
+/* 실콘텐츠 픽셀 크기 — 타이틀 옆 인라인 (한 줄 정보). 사이즈 통일 검수용. */
+.card-top .psize {
+  font-size: 10.5px;
   color: var(--muted);
-  /* (Alex 2026-06-23) bigger, easier-to-grab handle with breathing room on the
-     left edge of the card (was 13px / letter-spacing -1px / padding 0 2px and
-     hugged the border). */
-  font-size: 18px;
-  line-height: 1;
-  letter-spacing: 0;
-  padding: 2px 4px;
-  margin-left: 2px;
-  user-select: none;
-  touch-action: none; /* claim the pointer so the scroll row doesn't steal the drag */
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: none;
 }
-.card-top:hover .grip { color: var(--text); }
-.grip:active { cursor: grabbing; }
-/* the ✗/✓ button lives in the drag-handle strip: keep it clickable as a toggle
-   but show the grab affordance so a press-and-move there drags instead. */
-.card-top .sel-btn { cursor: inherit; }
 .card.dragging {
   border-color: var(--accent);
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
@@ -444,7 +464,6 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
   cursor: grabbing;
   transition: none; /* fixed-positioned card must track the cursor 1:1 */
 }
-.card.dragging .grip { cursor: grabbing; }
 /* the gap the lifted card will drop into */
 .card-placeholder {
   flex: 0 0 auto;
@@ -546,15 +565,23 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   font-size: 12px;
 }
 
+/* 푸터 2층: (1) 정보 줄 — 크기·변형값 (봐야 하는 정보) / (2) 버튼 줄 */
+.card-info {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+  min-height: 14px;
+}
+.card-info .psize { font-size: 10.5px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+.card-info .tvals { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .card-controls {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-top: 6px;
+  gap: 4px;
+  margin-top: 4px;
 }
 .tvals { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
-/* 실콘텐츠 픽셀 크기 배지 — 스프라이트 사이즈 통일 검수용 (알렉스 2026-07-04) */
-.psize { font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums; margin-right: auto; white-space: nowrap; }
 
 .preview {
   flex: 0 0 auto;
@@ -754,7 +781,6 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 }
 .ap-card img { height: 26px; width: 26px; object-fit: contain; image-rendering: pixelated; }
 .ap-ghost { position: fixed; z-index: 3000; pointer-events: none; opacity: 0.85; }
-.card-controls .arch-btn { color: var(--muted); }
 /* 확대 스크러버 — 스테이지 내부 우하단, 호버 시 표시. [−][돋보기⁺ 드래그][+] */
 .stage .scale-scrub {
   position: absolute;
@@ -778,12 +804,49 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .scale-scrub .ss-grab { cursor: ew-resize; padding: 2px 3px; display: inline-flex; touch-action: none; }
 .scale-scrub .ss-grab:hover, .scale-scrub .ss-step:hover { color: var(--accent, #0ea5e9); }
 
-/* 카드 하단 컨트롤 줄 정리: 크기정보 | 변형값(말줄임) | 버튼 그룹 우측 정렬 */
-.card-controls { display: flex; align-items: center; gap: 4px; }
-.card-controls .psize { flex: none; }
-.card-controls .tvals { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
-.card-controls .flip-btn, .card-controls .reset-btn, .card-controls .arch-btn { flex: none; }
-.card-controls .arch-btn:hover { color: var(--accent, #0ea5e9); }
+/* 버튼 줄: [반전][초기화] ... [넣기/빼기][보관] (오른쪽 그룹) */
+.card-controls .flip-btn, .card-controls .reset-btn { flex: none; }
+/* 넣기·빼기 + 보관을 한 묶음으로 오른쪽 정렬 (성격이 비슷한 멤버십 액션) */
+.card-controls .ctrl-group { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; flex: none; }
+
+/* 헤더 우측 아이콘 버튼 (복제·확대) — 균일한 라인 아이콘 버튼 */
+.card-top .ct-right { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.card-top .ct-right .ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border-radius: 5px;
+  color: var(--muted);
+  line-height: 0;
+}
+.card-top .ct-right .ghost:hover { color: var(--accent, #0ea5e9); background: rgba(37, 99, 235, 0.08); }
+.card-top .zoom-btn { cursor: zoom-in; }
+
+/* 넣기/빼기 = 시퀀스⇄풀 토글 버튼. 색상 강조 없이 방향 아이콘(위/아래)+라벨로만 구분. */
+.sel-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  padding: 2px 7px 2px 5px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.sel-btn svg { display: block; }
+.sel-btn:hover { border-color: var(--accent, #0ea5e9); color: var(--accent, #0ea5e9); }
+/* 보관 버튼: 그룹 안의 아이콘 전용 */
+.card-controls .arch-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 3px; border-radius: 5px; color: var(--muted); line-height: 0;
+}
+.card-controls .arch-btn:hover { color: var(--accent, #0ea5e9); background: rgba(37, 99, 235, 0.08); }
 
 /* 픽셀 편집 툴바 (확대 모달) */
 .edit-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -797,11 +860,24 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .stage.pixel-editing .rotate-handle, .stage.pixel-editing .shear-handle, .stage.pixel-editing .scale-scrub { display: none; }
 
 /* 보관함 풀 모달 — 일반 카드 크기 그리드 + 복구 버튼 */
-#archive-modal { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; }
+#archive-modal { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 24px; }
 #archive-modal .zoom-backdrop { position: absolute; inset: 0; background: rgba(15, 18, 24, 0.5); }
-.arch-modal-card { position: relative; z-index: 1; }
-.arch-grid { display: flex; flex-wrap: wrap; gap: 12px; max-width: 80vw; }
-.arch-card { width: 168px; }
+/* 카드가 많아도 화면 밖으로 넘치지 않게 — 모달 자체를 뷰포트에 가두고 내부 스크롤.
+   #archive-modal 스코프로 .zoom-card.card 기본값을 확실히 덮는다 (특정성). */
+#archive-modal .arch-modal-card {
+  position: relative;
+  z-index: 1;
+  width: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(92vw, 900px);
+  max-height: 86vh;
+  overflow: hidden;
+}
+#archive-modal .arch-modal-card .zoom-head { flex: none; }
+.arch-grid { display: flex; flex-wrap: wrap; gap: 12px; overflow: auto; padding: 2px; align-content: flex-start; }
+.arch-card { width: 150px; }
 .arch-card .stage { cursor: default; }
 .arch-card .card-controls { justify-content: center; gap: 6px; }
 
@@ -830,8 +906,6 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
    (실사고 2026-07-14: max-height 94vh 에 닿으면 flex-shrink 가 스테이지 높이만 줄여
    스프라이트/격자가 가로로 찌그러졌다.) */
 .zoom-card .stage { width: 480px; flex: 0 0 auto; }
-.card-top .ct-right { display: inline-flex; align-items: center; gap: 4px; }
-.card-top .zoom-btn { cursor: zoom-in; }
 .ref-chip { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: inherit;
   border: 1px solid rgba(128,128,128,0.3); border-radius: 6px; padding: 2px 8px 2px 2px; }
 .ref-chip:hover { border-color: rgba(128,128,128,0.6); }

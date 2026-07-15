@@ -328,16 +328,48 @@ qa_note=<one sentence>
 
 ## Docs Topology
 
-Leaf docs are one link deep from this hub. Read them on these triggers:
+Leaf docs are one link deep from this hub. The tree groups them by the concern
+you are in — walk down the branch that matches your task, don't scan the flat
+list. Each doc owns its tables; SKILL.md and the others point rather than restate.
 
-- [`docs/run-contract.md`](docs/run-contract.md) — the structural contract the scripts enforce: pipeline stage I/O table, the canonical run-dir folder tree, the curation-view display contract (base reference row, generation-material chips, pixel grid, original-quality toggle), and the `--pngs-dir` import source rule. Read when you need the folder/stage/view contract itself. Owns those tables; this SKILL.md and architecture.md point to it rather than restating them.
-- [`docs/architecture.md`](docs/architecture.md) — how the scripts realize this contract: pipeline stages, cell geometry, idle-anchor ownership flow, extraction internals, hatch-pet comparison. Read when you need code-level behavior. Describes the code as-is; if it disagrees with this SKILL.md, this file wins.
-- [`docs/states-and-frames.md`](docs/states-and-frames.md) — choosing states and frame counts: Simple MVP scope (default vs experimental states), the Quick Path request JSON, frame-count guidance (4/5/6/8/9/12).
-- [`docs/pixel-perfect.md`](docs/pixel-perfect.md) — pixel-art targets: `fit` / `pixel_perfect` parameters, stage ownership, style/pixel-density reference rules, plain-twin curator toggle.
-- [`docs/curation.md`](docs/curation.md) — the curation webview, the standalone image-candidate curation path (icons/logos/drafts — not sprites), finished-sheet editing (`unpack_atlas_run.py`), multi-agent launch rules, the `curation.json` schema.
-- [`docs/chroma-alpha.md`](docs/chroma-alpha.md) — chroma key selection branches, `--chroma-key auto` scoring, extraction-side alpha cleanup, slot-fallback policy.
-- [`docs/gen.md`](docs/gen.md) — `sprite-gen gen` provider CLI, verified PNG/report contract, and the thin `image-gen` shuttle boundary.
-- [`docs/sheet-slicing.md`](docs/sheet-slicing.md) — multi-figure variant sheets → per-cell standing cuts (`slice-sheet`): geometry rules, field failure modes, sheet prompting. Read when cutting tachi-e/portrait sheets.
-- [`docs/qa-motion.md`](docs/qa-motion.md) — Motion Continuity verdict criteria in full.
-- [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md) — directional / 45° anchor chains, hatch-pet locomotion patterns, advanced gates.
-- [`docs/locomotion-curation.md`](docs/locomotion-curation.md) — motion phase guide experiments, manual selected cycles, clean GIF export.
+```text
+sprite-gen (this SKILL.md = behavior contract + hub)
+│
+├─ CONTRACT & STRUCTURE ── "what files exist and what each stage promises"
+│   ├─ docs/run-contract.md      # pipeline stage I/O table · canonical run-dir folder tree ·
+│   │                            #   curation-view display contract · run_revision/HTTP-409 ·
+│   │                            #   per-state salvage + stale backup · --pngs-dir import rule
+│   └─ docs/architecture.md      # how scripts realize the contract: stages · cell geometry ·
+│                                #   idle-anchor ownership flow · extraction internals (SKILL wins on conflict)
+│
+├─ REQUEST AUTHORING ── "fill sprite-request.json before generating"
+│   ├─ docs/states-and-frames.md # which states · frame counts (4/5/6/8/9/12) · Quick Path JSON
+│   ├─ docs/pixel-perfect.md     # fit / pixel_perfect params · plain-twin curator toggle · density refs
+│   └─ docs/chroma-alpha.md      # chroma key branch table · --chroma-key auto · alpha cleanup
+│
+├─ GENERATION ── "raw/<state>.png from prompts (the one AI step)"
+│   └─ docs/gen.md               # sprite-gen gen provider CLI · verified PNG/report · image-gen shuttle
+│
+├─ CURATION ── "human/agent picks, edits, and downloads via the webview"
+│   └─ docs/curation.md          # webview · curation.json schema (selected/order/transforms/
+│                                #   deleted/clones/revision) · per-state salvage · frame CLONES ·
+│                                #   standalone image-candidate path · finished-sheet re-edit (unpack)
+│
+├─ SPECIALIZED INPUTS ── "not the plain animation-row path"
+│   ├─ docs/directional-anchor-workflow.md  # directional / 45° anchor chains · hatch-pet locomotion
+│   └─ docs/sheet-slicing.md     # multi-figure variant sheet → per-cell standing cuts (立ち絵, not rows)
+│
+└─ QA ── "verify motion as motion before reporting done"
+    ├─ docs/qa-motion.md         # Motion Continuity verdict criteria (BLOCKING)
+    └─ docs/locomotion-curation.md  # motion-phase guides · manual selected cycles · clean GIF export
+```
+
+Concept taxonomy (which doc owns each term, so agents don't guess):
+
+- `sprite-request.json`, cell, states, takes → run-contract.md §2 · states-and-frames.md
+- `run_revision`, `state_revision`, per-state salvage, `curation.stale-*.json` → curation.py + curation.md
+- `curation.json` fields (`selected`/`order`/`deleted`/`transforms`/`pixels`/`clones`/`pixel_perfect`/`revision`) → curation.md
+- frame **clones** (duplicate instances, `source_frame_index`) → curation.md + compose consumers
+- `frame_layout`, `manifest.json` runtime contract → run-contract.md + this SKILL.md "Runtime Contract"
+- pixel-perfect `fit`, `.plain.png`/`orig/` twins → pixel-perfect.md
+- webview interactions (title-drag reorder, 넣기/빼기 toggle, 2-tier card, custom `data-tip` tooltip) → curator/ (curator.js/css), described in curation.md
