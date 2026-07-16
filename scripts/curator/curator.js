@@ -48,6 +48,8 @@ const STR = {
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
+    rowGif: "GIF", tRowGif: "download this row's current composed sequence as a GIF (live curation state)",
+    rowGifDone: (s) => `${s}.gif downloaded`,
     baking: "computing…", composeDone: "atlas downloaded", composeFail: "download failed: ",
     exporting: "computing…", exportFail: "download failed: ",
     ready: "ready", loaded: "loaded existing curation", runLoadFail: "failed to load run:",
@@ -119,6 +121,8 @@ const STR = {
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
+    rowGif: "GIF", tRowGif: "이 줄의 현재 합성 시퀀스를 GIF 로 다운로드 (라이브 큐레이션 상태 그대로)",
+    rowGifDone: (s) => `${s}.gif 다운로드 완료`,
     baking: "계산 중…", composeDone: "아틀라스 다운로드 완료", composeFail: "다운로드 실패: ",
     exporting: "계산 중…", exportFail: "다운로드 실패: ",
     ready: "준비됨", loaded: "기존 큐레이션 로드됨", runLoadFail: "run 로드 실패:",
@@ -533,6 +537,32 @@ function makeGridToggle(stateName) {
       syncGridControls();
       sizePxGrids();
     });
+}
+
+// 줄 단위 GIF 다운로드 — 이 줄의 현재 시퀀스(선택/순서/변형/픽셀편집)를 서버가
+// 그 자리에서 합성해 GIF 원파일로 내려준다 (실시간 계약: 보는 것 = 받는 것).
+function makeGifButton(stateName) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "gif-btn";
+  btn.title = t("tRowGif");
+  btn.innerHTML =
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+    '<path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+    `<span>${t("rowGif")}</span>`;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      await downloadArtifact(`gif?state=${encodeURIComponent(stateName)}`,
+        STR[lang].rowGifDone(stateName));
+    } catch (e) {
+      setStatus(t("exportFail") + e.message, "err");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  return btn;
 }
 
 function makePpToggle(stateName) {
@@ -1198,7 +1228,8 @@ function renderState(state, replaceEl) {
   const hasRefs = state.refs && state.refs.length;
   const showGridToggle = gridCapableStates.has(state.name);
   const showPpToggle = ppTwinStates.has(state.name);
-  if (hasRefs || showGridToggle || showPpToggle) {
+  const showGifBtn = state.frames && state.frames.some((f) => f.present);
+  if (hasRefs || showGridToggle || showPpToggle || showGifBtn) {
     const refs = document.createElement("div");
     refs.className = "state-refs";
     refs.innerHTML = hasRefs
@@ -1216,6 +1247,7 @@ function renderState(state, replaceEl) {
     controls.className = "row-controls";
     if (showGridToggle) controls.appendChild(makeGridToggle(state.name));
     if (showPpToggle) controls.appendChild(makePpToggle(state.name));
+    if (showGifBtn) controls.appendChild(makeGifButton(state.name));
     refs.appendChild(controls);
     wrap.appendChild(refs);
   }
@@ -2069,6 +2101,7 @@ function openZoom(stateName, idx, keepWidth) {
   const controls = card.querySelector(".row-controls");
   if (gridCapableStates.has(stateName)) controls.appendChild(makeGridToggle(stateName));
   if (ppTwinStates.has(stateName)) controls.appendChild(makePpToggle(stateName));
+  controls.appendChild(makeGifButton(stateName));
   card.querySelector(".zoom-prev").addEventListener("click", () => stepZoomFrame(-1));
   card.querySelector(".zoom-next").addEventListener("click", () => stepZoomFrame(1));
   card.querySelector(".zoom-close").addEventListener("click", closeZoom);

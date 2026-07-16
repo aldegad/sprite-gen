@@ -177,3 +177,11 @@ def test_view_heals_and_downloads_live_state(tmp_path: Path) -> None:
     data, filename = built
     assert filename == "takebot-gifs.zip"
     assert any(n.endswith("walk.gif") for n in zipfile.ZipFile(io.BytesIO(data)).namelist())
+
+    # 줄 단위 단건 GIF — zip 이 아니라 GIF 원파일, 미지 상태는 fail loud
+    built = serve_curation.build_download(run_dir, "gif:walk")
+    assert not isinstance(built, dict), built
+    data, filename = built
+    assert filename == "takebot-walk.gif"
+    assert data[:6] in (b"GIF87a", b"GIF89a")
+    assert isinstance(serve_curation.build_download(run_dir, "gif:nope"), dict)

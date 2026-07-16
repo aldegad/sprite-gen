@@ -44,7 +44,7 @@ import webbrowser
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from curation import (CURATION_FILENAME, SCHEMA_VERSION, backup_stale_curation, empty_curation,
                       imported_ref_role, load_curation_report, run_revision, stamp_curation)
@@ -474,12 +474,22 @@ def build_download(run_dir: Path, kind: str) -> tuple[bytes, str] | dict:
             return result
         out = run_dir / "exports"
         return _zip_paths(run_dir, sorted(out.glob("*.gif"))), f"{character}-gifs.zip"
+    if kind.startswith("gif:"):
+        # 한 줄(state) 단건 — 현재 큐레이션 합성 그대로, zip 없이 GIF 원파일로.
+        state = kind[len("gif:"):]
+        result = run_export_gif(run_dir, state=state)
+        if not result["ok"]:
+            return result
+        gif_path = run_dir / "exports" / f"{state}.gif"
+        if not gif_path.is_file():
+            return {"ok": False, "error": f"gif not produced: {gif_path}"}
+        return gif_path.read_bytes(), f"{character}-{state}.gif"
     return {"ok": False, "error": f"unknown download kind: {kind}"}
 
 
-def _run_script(name: str, run_dir: Path) -> dict:
+def _run_script(name: str, run_dir: Path, *extra: str) -> dict:
     proc = subprocess.run(
-        [sys.executable, str(SCRIPTS_DIR / name), "--run-dir", str(run_dir)],
+        [sys.executable, str(SCRIPTS_DIR / name), "--run-dir", str(run_dir), *extra],
         capture_output=True,
         text=True,
     )
@@ -507,12 +517,14 @@ def run_export(run_dir: Path) -> dict:
     return result
 
 
-def run_export_gif(run_dir: Path) -> dict:
-    """Export one clean transparent GIF per state under <run-dir>/exports/.
+def run_export_gif(run_dir: Path, state: str | None = None) -> dict:
+    """Export clean transparent GIF(s) under <run-dir>/exports/.
 
     Reuses compose_sprite_gif.py --run-dir, which applies the same curation
-    selection/order/transform as the atlas compose (curation.py SSoT)."""
-    result = _run_script("compose_sprite_gif.py", run_dir)
+    selection/order/transform as the atlas compose (curation.py SSoT).
+    `state` limits to one row (`--state`) — the per-row download button path."""
+    extra = ["--state", state] if state else []
+    result = _run_script("compose_sprite_gif.py", run_dir, *extra)
     if result["ok"] and result["stdout"]:
         try:
             result["gif"] = json.loads(result["stdout"])
@@ -585,6 +597,9 @@ class CurationHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/download/"):
             kind = path[len("/download/"):]
+            if kind == "gif":
+                state = (parse_qs(urlparse(self.path).query).get("state") or [""])[0]
+                kind = f"gif:{state}"
             try:
                 maybe_heal(self.run_dir)
                 built = build_download(self.run_dir, kind)
@@ -596,7 +611,8 @@ class CurationHandler(BaseHTTPRequestHandler):
                 return
             data, filename = built
             self.send_response(200)
-            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Type",
+                             "image/gif" if filename.endswith(".gif") else "application/zip")
             self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.send_header("X-Filename", filename)
             self.send_header("Content-Length", str(len(data)))
