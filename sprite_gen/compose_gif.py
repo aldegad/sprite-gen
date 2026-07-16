@@ -111,6 +111,10 @@ def _run_dir_mode_guarded(args, run_dir):
     cell_w = int(cell.get("width") or cell.get("size") or 0)
     cell_h = int(cell.get("height") or cell.get("size") or 0)
     states = request.get("states", {})
+    if getattr(args, "state", None):
+        if args.state not in states:
+            raise SystemExit(f"unknown state '{args.state}' — request states: {', '.join(states)}")
+        states = {args.state: states[args.state]}
     curation = load_curation(run_dir)
     out_root = (args.out_dir.expanduser().resolve() if args.out_dir else run_dir / "exports")
     out_root.mkdir(parents=True, exist_ok=True)
@@ -152,6 +156,18 @@ def _run_dir_mode_guarded(args, run_dir):
             "gif_report": gif_report(out_path),
         })
 
+    if getattr(args, "state", None):
+        # 단건(--state) 내보내기는 전체 manifest 를 한 상태로 갈아치우지 않는다 —
+        # 기존 exports 에서 그 상태 항목만 교체/추가한다 (Consistency).
+        manifest_path = out_root / "gif-manifest.json"
+        prior: list[dict] = []
+        if manifest_path.is_file():
+            try:
+                prior = json.loads(manifest_path.read_text(encoding="utf-8")).get("exports", [])
+            except ValueError:
+                prior = []
+        merged = [e for e in prior if e.get("state") not in {x["state"] for x in exports}]
+        exports = merged + exports
     manifest = {"version": 1, "kind": "sprite-gen-gif-run", "run_dir": str(run_dir), "exports": exports}
     (out_root / "gif-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"ok": True, **manifest}, ensure_ascii=False, indent=2))
@@ -164,6 +180,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frame-dir", type=Path, help="directory containing frame-0.png, frame-1.png, ...")
     parser.add_argument("--frame-order", type=parse_frame_order, help="1-based order, for example 2,1,5,3")
     parser.add_argument("--run-dir", type=Path, help="run dir: export one GIF per state from sprite-request + curation")
+    parser.add_argument("--state", help="run-dir mode: export only this state (default: all states)")
     parser.add_argument("--out-dir", type=Path, help="output dir for --run-dir mode (default <run-dir>/exports)")
     parser.add_argument("--output", type=Path, help="output GIF (required unless --run-dir)")
     parser.add_argument("--delay-ticks", type=int, default=17, help="GIF delay in 1/100 second ticks")

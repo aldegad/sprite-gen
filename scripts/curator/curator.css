@@ -913,3 +913,20 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .ref-chip:hover { border-color: rgba(128,128,128,0.6); }
 .ref-chip img { height: 40px; width: auto; border-radius: 4px; display: block; }
 .ref-chip span { font-size: 11px; opacity: 0.8; }
+
+/* 줄 단위 GIF 다운로드 버튼 — row-controls 안, 체크박스 토글과 같은 높이 */
+.gif-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--fg-dim, #64748b);
+  background: transparent;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.gif-btn:hover { color: var(--fg, #0f172a); border-color: var(--fg-dim, #94a3b8); }
+.gif-btn:disabled { opacity: 0.5; cursor: default; }
+.gif-btn svg { display: block; }
