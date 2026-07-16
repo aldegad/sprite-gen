@@ -953,7 +953,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fit-align-y", choices=["center", "bottom"], default=None, help="vertical frame anchor; bottom pins feet to a shared baseline")
     parser.add_argument("--fit-pixel-perfect", action=argparse.BooleanOptionalAction, default=None, help="true pixel-perfect extraction: pitch detection -> grid snap -> kCentroid -> shared palette -> integer NEAREST (see docs/pixel-perfect.md)")
     parser.add_argument("--fit-logical-height", type=int, default=None, help="pixel-perfect logical grid height; omit for 1:1 with the cell height")
-    parser.add_argument("--fit-palette-size", type=int, default=None, help="pixel-perfect run-wide shared palette size (default 24)")
+    parser.add_argument("--fit-palette-size", type=int, default=None, help="pixel-perfect run-wide shared palette size (default 48)")
     parser.add_argument("--fit-detail-bias", action=argparse.BooleanOptionalAction, default=None, help="pixel-perfect dominant-color voting bias toward near-black detail clusters (default on)")
     parser.add_argument("--fit-outline", type=_outline_config, default=None, metavar="{on,off,STRENGTH}", help="pixel-perfect outline enforcement: on (strength 0.62), off, or an explicit 0..1 strength")
     parser.add_argument("--fit-pitch-hint", type=int, default=None, help="pixel-perfect fallback pixel pitch when per-frame detection is inconclusive")

@@ -21,7 +21,7 @@ Optional `fit` object (opt-in; absent means legacy behavior). For pixel-art targ
 For true pixel-perfect output (game-ready chunky pixel art with intact 1px outlines), use the `pixel_perfect` mode instead of `resample` — it removes ALL non-integer resampling:
 
 ```json
-"fit": { "pixel_perfect": true, "logical_height": 64, "palette_size": 24, "align_x": "foot-centroid", "align_y": "bottom" }
+"fit": { "pixel_perfect": true, "logical_height": 64, "palette_size": 48, "align_x": "foot-centroid", "align_y": "bottom" }
 ```
 
 **기본값 = 눌림 없음** (수홍 확정 2026-07-14): 스냅된 네이티브 논리 크기를 유지한다 — `logical_height` 계약으로의 conform 축소는 칸을 병합해 디테일(눈·아웃라인)을 갈라먹는다. 물리 한계(셀 바닥 마진 유지, `(cell_h − margin_y)/scale`)만 캡으로 강제되고 캡에 걸린 프레임은 경고로 관측된다(그 줄은 리롤 후보). **안전영역(사방 여백 준수 상한)을 넘었지만 물리캡 이내인 여백 침범은 리롤 대상이 아니다** — 정보성 알림만 남는다(manifest warning + 큐레이터 줄 헤더 "여백 침범" 배지, 수홍 확정 2026-07-14). 계약 크기로의 눌림이 필요하면 `"conform": true` 를 명시한다. 계약 키와 무눌림을 동시에 원하면 정도(正道)는 네이티브 계약 크기가 나올 때까지 리롤이다.
