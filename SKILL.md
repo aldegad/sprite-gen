@@ -272,10 +272,20 @@ One worker owns exactly one character folder. The canonical run-dir folder tree 
 
 - `game_input: "sprite-sheet-alpha.png"`
 - `degraded_static_fallback: false`
-- `animation.rows.<state>` with `frames`, `fps`, and `loop`
+- `animation.rows.<state>` with `frames`, `fps`, `durations_ms`, and `loop`
 - `frame_layout.rows.<state>[i]` absolute atlas rectangles
 
 Runtime must sample only the active rectangle. Rendering the whole atlas on one plane, guessing a grid, or showing a raw chroma row is a failed integration.
+
+Frame timing and cell reuse (2026-07-16, Aseprite-JSON 과 동형 패턴):
+
+- `frame_layout.rows.<state>` 는 재생(인스턴스) 순서 그대로이며, 같은 그림으로
+  구워지는 복제 인스턴스는 **같은 rect 가 반복**된다 — 텍스처 칸은 고유 굽기당
+  하나만 쓴다. 소비자는 지금처럼 프레임 인덱스 → rect 샘플링만 하면 된다.
+- `animation.rows.<state>.durations_ms[i]` 가 프레임별 표시 시간의 SSoT 다
+  (현재는 fps 등간격으로 채워짐). 배열이 있으면 fps 대신 이것을 따른다 —
+  루프딜레이/홀드 프레임은 마지막 프레임 복제(rect 재사용, 텍스처 비용 0)나
+  duration 연장으로 표현한다.
 
 Static fallback is allowed only as explicit survival output when generation is blocked. It is not a sprite-gen pass and must not create `sprite-sheet-alpha.png`.
 

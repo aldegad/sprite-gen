@@ -185,3 +185,40 @@ def test_view_heals_and_downloads_live_state(tmp_path: Path) -> None:
     assert filename == "takebot-walk.gif"
     assert data[:6] in (b"GIF87a", b"GIF89a")
     assert isinstance(serve_curation.build_download(run_dir, "gif:nope"), dict)
+
+
+def test_atlas_reuses_cells_for_identical_instances(tmp_path: Path) -> None:
+    """아틀라스 셀 재사용 (수홍 승인 2026-07-16): 같은 (원본, 변형, 픽셀편집)의
+    복제 인스턴스는 칸 하나를 공유한다 — 루프딜레이용 프레임 복제가 텍스처를
+    늘리지 않는다. rect 는 재생 순서대로 반복되고, durations_ms 계약이 실린다."""
+    import sprite_gen.compose_atlas as compose_module
+
+    run_dir = _build_run(tmp_path)
+    assert extract_module.run(run_dir=run_dir) == 0
+    # 프레임 0 을 두 번 복제(인스턴스 2, 3): 하나는 동일 굽기(재사용), 하나는 변형(별도 칸)
+    curation = {
+        "version": 1, "kind": "sprite-gen-curation",
+        "states": {"walk": {
+            "selected": [0, 1, 2, 3],
+            "clones": {"2": 0, "3": 0},
+            "transforms": {"3": {"rotate": 0, "scale": 1, "dx": 3, "dy": 0,
+                                  "shx": 0, "shy": 0, "flipX": 0}},
+        }},
+    }
+    from sprite_gen.curation import stamp_curation
+    stamped = stamp_curation(run_dir, curation)  # 세대 도장 없는 사이드카는 드롭된다 (정상 쓰기 경로)
+    (run_dir / "curation.json").write_text(json.dumps(stamped), encoding="utf-8")
+    assert compose_module.run(run_dir=run_dir, min_used_pixels=100) == 0
+
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    rects = manifest["frame_layout"]["rows"]["walk"]
+    assert len(rects) == 4
+    assert rects[2] == rects[0]          # 동일 굽기 복제 = 같은 칸 재사용
+    assert rects[3] != rects[0]          # 변형이 다르면 별도 칸
+    unique = {(r["x"], r["y"]) for r in rects}
+    assert len(unique) == 3
+    # 아틀라스 폭 = 고유 칸 수 (인스턴스 수 아님)
+    assert manifest["frame_layout"]["sheetWidth"] == 3 * manifest["frame_layout"]["cellWidth"]
+    anim = manifest["animation"]["rows"]["walk"]
+    assert anim["frames"] == 4
+    assert anim["durations_ms"] == [round(1000 / anim["fps"])] * 4
