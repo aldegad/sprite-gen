@@ -526,6 +526,19 @@ def run_compose(run_dir: Path) -> dict:
     return _run_script("compose_sprite_atlas.py", run_dir)
 
 
+def run_interpolate(run_dir: Path, state: str, index_a: int, index_b: int,
+                    t: float, label: str | None) -> dict:
+    """AI in-between (interpolate_frames.py): 테이크 기록 + 전체 배치 재추출.
+
+    부분 추출은 제공하지 않는다 — run-wide 팔레트가 추출 배치 구성에 결합돼 있어
+    (docs/frame-interpolation.md) 단일 행 추출은 그 행만 다른 팔레트로 굽는다."""
+    extra = ["--state", state, "--between", str(index_a), str(index_b),
+             "--t", str(t), "--extract"]
+    if label:
+        extra += ["--label", str(label)]
+    return _run_script("interpolate_frames.py", run_dir, *extra)
+
+
 def run_export(run_dir: Path) -> dict:
     """Export curated frames back to named PNGs under <run-dir>/curated/."""
     result = _run_script("export_curated_pngs.py", run_dir)
@@ -730,6 +743,29 @@ class CurationHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/compose":
                 result = run_compose(self.run_dir)
+                self._send_json(result, 200 if result["ok"] else 500)
+                return
+            if path == "/api/interpolate":
+                payload = self._read_body()
+                state = str(payload.get("state") or "")
+                request = json.loads(
+                    (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+                if state not in request.get("states", {}):
+                    self._send_json({"error": f"unknown state: {state}"}, 400)
+                    return
+                try:
+                    index_a = int(payload["from"])
+                    index_b = int(payload["to"])
+                    t_value = float(payload.get("t", 0.5))
+                except (KeyError, TypeError, ValueError):
+                    self._send_json(
+                        {"error": "body needs integer 'from'/'to' (+ optional float 't')"}, 400)
+                    return
+                if not 0.0 < t_value < 1.0:
+                    self._send_json({"error": f"t must be inside (0, 1): {t_value}"}, 400)
+                    return
+                result = run_interpolate(self.run_dir, state, index_a, index_b,
+                                         t_value, payload.get("label") or None)
                 self._send_json(result, 200 if result["ok"] else 500)
                 return
             if path == "/api/export":

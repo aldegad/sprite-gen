@@ -49,6 +49,11 @@ const STR = {
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
     rowGif: "GIF", tRowGif: "download this row's current composed sequence as a GIF (4x nearest upscale for crisp viewing — pixel data unchanged)",
+    rowTween: "Tween", tRowTween: "AI in-between: interpolate a mid frame between two frames of this row (RIFE) — recorded as a take, then the FULL batch re-extracts (~1-2 min)",
+    tweenFrom: "from", tweenTo: "to", tweenT: "t", tweenGo: "Generate",
+    tweenBusy: "interpolating + re-extracting the full batch… (1-2 min)",
+    tweenDone: (s) => `${s}: in-between added — reloading`,
+    tweenFail: "interpolation failed: ",
     treeAtlas: "final atlas", atlasDoc: "manifest.json (runtime doc)",
     atlasPending: "not composed yet — created when you download the atlas",
     atlasStamp: (d) => `computed ${d}`, tTreeAtlas: "scroll to the final atlas section",
@@ -125,6 +130,11 @@ const STR = {
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
     rowGif: "GIF", tRowGif: "이 줄의 현재 합성 시퀀스를 GIF 로 다운로드 — 선명하게 보이도록 4배 니어리스트로 굽는다 (픽셀 데이터는 그대로)",
+    rowTween: "보간", tRowTween: "AI 중간 프레임: 이 줄의 두 프레임 사이를 RIFE 로 보간해 테이크로 기록 — 이후 전체 배치 재추출 (~1-2분)",
+    tweenFrom: "시작", tweenTo: "끝", tweenT: "t", tweenGo: "생성",
+    tweenBusy: "보간 + 전체 배치 재추출 중… (1~2분)",
+    tweenDone: (s) => `${s}: 중간 프레임 추가됨 — 새로고침합니다`,
+    tweenFail: "보간 실패: ",
     treeAtlas: "최종 아틀라스", atlasDoc: "manifest.json (런타임 문서)",
     atlasPending: "아직 합성 전 — 아틀라스 다운로드를 누르면 계산돼 생성됩니다",
     atlasStamp: (d) => `${d} 계산본`, tTreeAtlas: "최종 아틀라스 섹션으로 스크롤",
@@ -588,6 +598,75 @@ function makePpToggle(stateName) {
       refreshVariantImages();
       scheduleSave();
     });
+}
+
+// AI 중간 프레임(보간) — 이 줄의 두 프레임 사이를 RIFE 로 보간해 테이크로 기록하고
+// 전체 배치를 재추출한다. 부분 추출은 서버가 제공하지 않는다 (팔레트 배치 결합 —
+// docs/frame-interpolation.md). 완료되면 run 세대가 바뀌므로 뷰를 새로고침한다.
+function makeTweenButton(stateName) {
+  const wrap = document.createElement("span");
+  wrap.className = "tween-wrap";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "gif-btn";
+  btn.title = t("tRowTween");
+  btn.innerHTML =
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+    '<path d="M2 8h2.5m7 0H14M8 5.5v5M5.5 8a2.5 2.5 0 115 0 2.5 2.5 0 01-5 0z" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' +
+    `<span>${t("rowTween")}</span>`;
+  const pop = document.createElement("div");
+  pop.className = "tween-pop";
+  pop.hidden = true;
+  const field = (label, value, step, min, max) => {
+    const lab = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "number";
+    input.value = value;
+    input.step = step;
+    input.min = min;
+    if (max !== undefined) input.max = max;
+    lab.append(label, input);
+    pop.appendChild(lab);
+    return input;
+  };
+  const fromInput = field(t("tweenFrom"), 0, 1, 0);
+  const toInput = field(t("tweenTo"), 1, 1, 0);
+  const tInput = field(t("tweenT"), 0.5, 0.05, 0.05, 0.95);
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "gif-btn";
+  go.textContent = t("tweenGo");
+  pop.appendChild(go);
+  btn.addEventListener("click", () => { pop.hidden = !pop.hidden; });
+  go.addEventListener("click", async () => {
+    go.disabled = btn.disabled = true;
+    setStatus(t("tweenBusy"));
+    try {
+      const res = await fetch("/api/interpolate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          state: stateName,
+          from: parseInt(fromInput.value, 10),
+          to: parseInt(toInput.value, 10),
+          t: parseFloat(tInput.value),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || (data.stderr || "").trim().split("\n").pop() || res.status);
+      }
+      setStatus(STR[lang].tweenDone(stateName));
+      setTimeout(() => window.location.reload(), 800);
+    } catch (e) {
+      setStatus(t("tweenFail") + e.message, "err");
+      go.disabled = btn.disabled = false;
+    }
+  });
+  wrap.appendChild(btn);
+  wrap.appendChild(pop);
+  return wrap;
 }
 
 const statusEl = document.getElementById("status");
@@ -1268,6 +1347,7 @@ function renderState(state, replaceEl) {
     if (showGridToggle) controls.appendChild(makeGridToggle(state.name));
     if (showPpToggle) controls.appendChild(makePpToggle(state.name));
     if (showGifBtn) controls.appendChild(makeGifButton(state.name));
+    controls.appendChild(makeTweenButton(state.name));
     refs.appendChild(controls);
     wrap.appendChild(refs);
   }
@@ -2194,6 +2274,7 @@ function openZoom(stateName, idx, keepWidth) {
   if (gridCapableStates.has(stateName)) controls.appendChild(makeGridToggle(stateName));
   if (ppTwinStates.has(stateName)) controls.appendChild(makePpToggle(stateName));
   controls.appendChild(makeGifButton(stateName));
+  controls.appendChild(makeTweenButton(stateName));
   card.querySelector(".zoom-prev").addEventListener("click", () => stepZoomFrame(-1));
   card.querySelector(".zoom-next").addEventListener("click", () => stepZoomFrame(1));
   card.querySelector(".zoom-close").addEventListener("click", closeZoom);

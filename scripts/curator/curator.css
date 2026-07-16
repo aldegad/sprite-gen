@@ -931,6 +931,40 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .gif-btn:disabled { opacity: 0.5; cursor: default; }
 .gif-btn svg { display: block; }
 
+/* AI 중간 프레임(보간) 버튼의 파라미터 팝오버 */
+.tween-wrap { position: relative; display: inline-flex; }
+.tween-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--bg, #ffffff);
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+}
+.tween-pop label {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  font-size: 10px;
+  color: var(--fg-dim, #64748b);
+  white-space: nowrap;
+}
+.tween-pop input {
+  width: 46px;
+  padding: 2px 4px;
+  font-size: 11px;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+
 /* 최종 아틀라스 섹션 — 페이지 맨 아래: 시트(좌) | 런타임 manifest(우) */
 .final-atlas .atlas-split {
   display: flex;

@@ -5,6 +5,23 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.19 "Sol Atelier" - Curator tween button (in-betweens from the GUI)
+
+The interpolation feature surfaces in the curation view (Soohong: "GUI 표시하고").
+Full suite **227 passed**; live e2e through the endpoint regenerated the founder_v7
+blink take byte-identical and re-extracted all 36 rows (HTTP 200).
+
+- **Row-header "Tween" button** — each state row (and the zoom modal) gets a tween
+  button next to GIF; a small popover takes from/to frame indices and t, then
+  `POST /api/interpolate` writes the take and re-extracts the FULL batch (~1-2 min),
+  and the view reloads into the new run generation. Errors surface in the status bar.
+- **`POST /api/interpolate`** — validates state/index/t (400 with reason) and runs
+  `interpolate_frames.py --extract` through the existing script-runner path, so the
+  run-dir single-writer lock and staging/atomic-swap guarantees apply unchanged.
+- Note: the server process needs onnxruntime for the real model (launch with an
+  interpreter that has `sprite-gen[interpolate]` installed); without it the endpoint
+  fails loudly with the install hint.
+
 ## v1.56.18 "Sol Atelier" - AI frame interpolation (RIFE in-betweens as takes)
 
 Frame interpolation as a first-class pipeline feature (Soohong requested 2026-07-17:
