@@ -1,349 +1,434 @@
 # Changelog
 
-> 버전 정책 (2026-07-11 수홍): **1.56.x 고정** — Sol(5.6) 오마주로 마이너 56 을 유지하고 패치만 올린다.
-> v1.57.0/v1.58.0/v1.59.0 으로 나갔던 세 릴리스는 v1.56.7/8/9 로 소급 정정 (커밋 메시지의 옛 라벨은 히스토리 보존).
+> Version policy (2026-07-11, Soohong): pinned to **1.56.x** — the minor stays at 56 as a Sol (5.6) homage; only the patch number increases.
+> The three releases that shipped as v1.57.0/v1.58.0/v1.59.0 were retroactively renumbered to v1.56.7/8/9 (the old labels remain in commit messages for history).
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
-## v1.56.16 "Sol Atelier" - 상태별 GIF 단건 내보내기 · 아틀라스 셀 재사용 · 복제 출처 배지
+## v1.56.16 "Sol Atelier" - Per-state GIF export, atlas cell reuse, clone origin badges
 
-큐레이션 뷰의 내보내기·복제 경험을 다듬은 패치다. 줄(state) 하나만 GIF 로 바로 뽑고,
-프레임 복제가 아틀라스 텍스처를 늘리지 않으며, 복제 카드가 어느 원본에서 왔는지
-한눈에 보인다. 전체 회귀 테스트 **222 passed**.
+A patch polishing the curation view's export and clone experience. A single state row
+can be exported straight to GIF, frame clones no longer grow the atlas texture, and a
+clone card shows at a glance which original it came from. Full regression suite
+**222 passed**.
 
-- **줄 단위 GIF 다운로드** — 각 줄 헤더에 GIF 버튼. 그 줄의 현재 합성 시퀀스(선택/
-  순서/변형/픽셀편집, 복제 인스턴스 포함)를 서버가 그 자리에서 계산해 GIF 원파일로
-  내려준다 (`GET /download/gif?state=<name>`, zip 아님). `compose_sprite_gif` 에
-  `--state` 필터 추가 — 단건 내보내기는 `gif-manifest.json` 의 그 상태 항목만 교체하고
-  다른 상태 기록을 보존한다. 미지 상태는 fail loud. 단건 GIF 는 기본 **4x 니어리스트**
-  로 굽는다 (`--scale`, `?scale=` 조절) — 뷰어 확대 보간 뭉갬 방지, 픽셀 데이터 불변.
-- **아틀라스 셀 재사용 + `durations_ms` 프레임 타이밍 계약** — 같은 (원본 프레임, 변형,
-  픽셀편집)으로 구워지는 복제 인스턴스는 아틀라스 칸 하나를 공유한다.
-  `frame_layout.rows` 의 rect 가 재생 순서대로 반복되고(Aseprite JSON 동형 패턴),
-  프레임 복제/루프딜레이가 텍스처를 늘리지 않는다. 아틀라스 폭 = 행별 고유 굽기 수의
-  최대. `animation.rows.<state>.durations_ms` 가 프레임별 표시 시간 SSoT (현재 fps
-  등간격 — 프레임별 편집 UI 가 생기면 여기만 비등간격으로).
-- **복제 출처 배지 + 최종 아틀라스 섹션** — 복제 카드 배지가 소스의 유니크 표시명
-  (테이크 라벨 우선, 없으면 #인덱스)을 보여주고, 클릭하면 원본 카드로 스크롤+하이라이트.
-  페이지 맨 아래 최종 아틀라스 섹션(시트 | 런타임 `manifest.json` 좌우 분할, 계산 시각
-  표시)이 아틀라스 다운로드 후 자동 갱신된다. ± 스크러버 클릭이 스테이지 확대 모달로
-  새던 이벤트 충돌도 차단.
+- **Per-row GIF download** — a GIF button on each row header. The server computes that
+  row's current composed sequence (selection/order/transforms/pixel edits, clone
+  instances included) on the spot and returns a raw GIF file
+  (`GET /download/gif?state=<name>`, not a zip). `compose_sprite_gif` gains a `--state`
+  filter — a single-state export replaces only that state's entry in `gif-manifest.json`
+  and preserves the other states' records. Unknown states fail loud. Single GIFs bake at
+  **4x nearest-neighbor** by default (`--scale`, `?scale=` to adjust) — prevents viewer
+  upscaling blur; pixel data unchanged.
+- **Atlas cell reuse + `durations_ms` frame-timing contract** — clone instances that
+  bake to the same (source frame, transform, pixel edits) share one atlas cell. Rects in
+  `frame_layout.rows` repeat in playback order (the Aseprite-JSON-isomorphic pattern),
+  so frame clones/loop delays don't grow the texture. Atlas width = the maximum
+  unique-bake count per row. `animation.rows.<state>.durations_ms` is the SSoT for
+  per-frame display time (currently uniform from fps — when a per-frame editing UI
+  lands, only this field goes non-uniform).
+- **Clone origin badge + final atlas section** — a clone card's badge shows its source's
+  unique display name (take label first, else #index); clicking it scrolls to and
+  highlights the original card. A final-atlas section at the bottom of the page
+  (sheet | runtime `manifest.json` split view, with a computed-at timestamp)
+  auto-refreshes after an atlas download. Also blocked the event conflict where
+  ± scrubber clicks leaked into the stage zoom modal.
 
-## v1.56.15 "Sol Atelier" - 스포이드(eyedropper) 색 추출 도구
+## v1.56.15 "Sol Atelier" - Eyedropper color-sampling tool
 
-큐레이터의 확대 편집 모달 픽셀 편집에 **스포이드**를 추가했다. 스프라이트에서 이미
-쓰인 색을 그대로 집어 같은 색으로 찍고 싶다는 요청에 맞춘 도구다.
+Added an **eyedropper** to pixel editing in the curator's zoom-edit modal. Built for
+the request to pick a color already used in the sprite and paint with exactly that
+color.
 
-- 픽셀 편집 툴바에 스포이드 버튼(연필/지우개 옆). 활성화 후 픽셀을 클릭하면 그 지점의
-  **현재 표시색**(베이스 프레임 + 이미 적용한 픽셀 편집을 우선)을 표본해 컬러피커/펜
-  색으로 설정하고, 곧바로 **연필로 전환**해 같은 색을 바로 찍을 수 있다.
-- 투명/지운 픽셀은 집을 색이 없으므로 무시한다. 스포이드 모드는 `copy` 커서로 구분,
-  아이콘 SVG + 공통 `data-tip` 툴팁.
-- 프론트엔드 전용 변경(`curator.js`/`curator.css`) — 엔진/추출 경로 회귀 없음, 브라우저
-  end-to-end 로 표본·전환 확인.
+- Eyedropper button in the pixel-edit toolbar (next to pencil/eraser). Once active,
+  clicking a pixel samples the **currently displayed color** at that point (base frame
+  plus already-applied pixel edits take precedence) into the color picker/pen, then
+  **switches straight to the pencil** so the sampled color can be painted immediately.
+- Transparent/erased pixels are ignored (nothing to sample). Eyedropper mode is
+  distinguished by a `copy` cursor, with an SVG icon and the shared `data-tip` tooltip.
+- Frontend-only change (`curator.js`/`curator.css`) — no engine/extraction-path
+  regression; sampling and pencil hand-off verified end-to-end in the browser.
 
-## v1.56.14 "Sol Atelier" - 큐레이션 뷰 성숙 · 세대 정체성/격리 하드닝 · 행 단위 보존 · 프레임 복제
+## v1.56.14 "Sol Atelier" - Curation view matures, generation identity/isolation hardening, per-row preservation, frame clones
 
-큐레이션 뷰를 캐릭터 검수의 정식 작업대로 끌어올린 릴리스다. v1.56.13 이후 84개
-커밋을, 하나의 계약(run-contract.md) 아래 실시간 뷰·세대 정체성·격리·픽셀퍼펙트·
-파일 택소노미·테이크·행 단위 큐레이션 보존·프레임 복제로 수렴시켰다. 전체 회귀 테스트
-**221 passed**, 기존 추출 골든 경로는 그대로 유지한다.
+The release that turns the curation view into the proper workbench for character
+review. It converges the 84 commits since v1.56.13 under one contract
+(run-contract.md): live view, generation identity, isolation, pixel-perfect, file
+taxonomy, takes, per-row curation preservation, and frame clones. Full regression
+suite **221 passed**; the existing extraction golden path is unchanged.
 
-- **구조 계약 SSoT (`docs/run-contract.md`)** — 파이프라인 스테이지 I/O·런디렉토리 폴더
-  트리·큐레이션 뷰 표시 계약·`--pngs-dir` 임포트 소스 규칙을 이 문서 하나가 소유하고,
-  SKILL/architecture/curation 이 restate 하지 않고 가리킨다. 뷰는 시작 시 표시요소
-  4종(베이스 참조 줄·생성 재료 칩·픽셀 격자·원본 화질 토글) 충족을 `/api/run` 의
-  `contract` 필드로 자가 보고한다.
-- **실시간 계약** — 뷰에서 '재추출' 개념 제거. `frames/` 는 (raw+request+엔진) 파생
-  캐시이고 행별 `engine_revision` 이 캐시 키다. `/api/run`·`/api/progress`·compose·
-  다운로드가 진입 시 `heal_run` 으로 stale 행을 자동 재유도하고, 엔진이 바뀌면 열려 있는
-  페이지도 다음 폴에서 재계산·리로드된다. 상단 버튼 3종은 '게임 적용'이 아니라
-  **아틀라스/PNG/GIF 다운로드**(`GET /download/{atlas,pngs,gifs}`)로 의미를 명확히 했다.
-- **세대 정체성 + 격리 하드닝** — 런 세대 지문 `run_revision` 으로 stale autosave/사이드카를
-  거부(HTTP 409, No Silent Fallback). `--force` 재임포트와 재추출은 staging 빌드 후
-  `publish_guard` 아래 원자 swap 으로 발행하고(reader/writer isolation), 실패한 추출은
-  부분 프레임을 발행하지 않는다(whole-generation atomicity). manifest↔프레임셋↔request
-  일치 게이트·canonical-JSON 스키마 검증·payload URL 퍼센트 인코딩·XSS 이스케이프를
-  fail-loud 로 강제한다.
-- **파일 택소노미 레이아웃 (taxonomy/v1)** — 방향 있는 캐릭터의 raw/frames 를
-  `raw/<dir>/<pose>.png`·`frames/<dir>/<pose>/` 로 분리해 자세가 늘어도 flat 폴더가
-  비대해지지 않는다. base→방향앵커(1장 크롭)→행→미러 소유권을 파이프라인 구조로
-  스캐폴딩했다.
-- **픽셀퍼펙트 성숙** — 줄별 픽셀퍼펙트 토글 + 상단 전체토글, 쌍둥이(plain/orig) 동일
-  풋프린트 + 변형 격자 스냅 굽기 + 실시간 스냅 프리뷰, pp-off 용 고해상 원본 화질
-  표시본, 원본 뷰의 입력 격자(실제 절단선)·최종 대응 격자 오버레이. `fit.conform=false`
-  (눌림 없는 네이티브 논리 크기)가 기본, conform 은 opt-in. 여백 침범은 정보성 알림(리롤 아님).
-- **파이프라인 뷰 사이드바** — 생성 구조를 파일트리 도크(쿠마피커 스타일)로 재구성,
-  파이프라인/파일 2블록, 흐름 애니메이션 + 엘보 커넥터, 실시간 진행 동기화
-  (`/api/progress` 3초 폴링), 접기/펴기 애니메이션.
-- **큐레이터 편집 도구** — 컬러 팔레트 기반 픽셀 편집(연필/지우개, 사이드카·원본 불변),
-  보관함 풀 모달, 스테이지 우하단 호버 스크러버, 확대 편집 모달(⛶/더블클릭).
-- **테이크 1급 계약** — 같은 상태의 후보/보강 스트립을 `states.<state>.takes` +
-  `raw/<...>.takes/<label>.png` 로 선언, 추출이 primary 뒤에 이어붙이고 소비자는
-  `state_frame_total` 로 행 크기를 센다.
-- **행 단위 큐레이션 보존 (salvage)** — 엔진이 바뀌어 프레임이 재유도돼도 사용자의
-  선택/보관함이 통째로 날아가던 문제를 근본 수정. 행별 `revision`(원료 raw/take 내용
-  기반 세그먼트 지문, 접두 규칙으로 take append 허용)으로 살릴 수 있는 행은 살리고,
-  드롭되는 행은 원문을 `curation.stale-<hash>.json` 으로 먼저 백업 + 뷰 배너로
-  관측(조용한 소실 금지).
-- **프레임 복제** — 사이드카 1급 `clones` {복제idx: 원본idx}. 복제는 자기만의 변형/픽셀
-  편집/순서를 갖는 정식 인스턴스이고 compose/GIF/PNG/cycle 은 `source_frame_index` 로
-  원본 파일을 읽는다(파생 캐시에 파일 안 만듦).
-- **큐레이터 UX 정비** — 카드 클릭으로 시퀀스↔풀 토글되던 실수 유발 동작 제거(넣기/빼기
-  버튼·타이틀 드래그만), ⠿ 그립 삭제·타이틀=드래그핸들, 카드 3단 재배치(헤더·정보층·
-  버튼층), 넣기/빼기 방향 SVG·색강조 제거, 프리뷰 위치표시를 캔버스 밑으로. 네이티브
-  title 을 대체하는 공통 `data-tip` 툴팁 컴포넌트 — 제목 호버 시 프레임 풀네임 팝오버가
-  드래그·복사 가능(에이전트 협업).
+- **Structural contract SSoT (`docs/run-contract.md`)** — one document owns the
+  pipeline stage I/O, the run-dir folder tree, the curation-view display contract, and
+  the `--pngs-dir` import-source rules; SKILL/architecture/curation point at it instead
+  of restating it. On startup the view self-reports, via the `contract` field of
+  `/api/run`, that the four display elements (base reference row, generation-material
+  chips, pixel grid, original-quality toggle) are satisfied.
+- **Live contract** — the "re-extract" concept is removed from the view. `frames/` is a
+  derived cache of (raw + request + engine), keyed per row by `engine_revision`.
+  `/api/run`, `/api/progress`, compose, and downloads re-derive stale rows automatically
+  via `heal_run` on entry; when the engine changes, an open page recomputes and reloads
+  on the next poll. The three top buttons now mean **atlas/PNG/GIF download**
+  (`GET /download/{atlas,pngs,gifs}`) rather than "apply to game".
+- **Generation identity + isolation hardening** — the run-generation fingerprint
+  `run_revision` rejects stale autosaves/sidecars (HTTP 409, No Silent Fallback).
+  `--force` re-imports and re-extractions build in staging and publish via atomic swap
+  under `publish_guard` (reader/writer isolation); a failed extraction never publishes
+  partial frames (whole-generation atomicity). The manifest↔frameset↔request
+  consistency gate, canonical-JSON schema validation, payload URL percent-encoding, and
+  XSS escaping are enforced fail-loud.
+- **File taxonomy layout (taxonomy/v1)** — a directional character's raw/frames split
+  into `raw/<dir>/<pose>.png` and `frames/<dir>/<pose>/`, so flat folders no longer
+  bloat as poses grow. The base → directional anchor (single crop) → rows → mirror
+  ownership chain is scaffolded into the pipeline structure.
+- **Pixel-perfect maturation** — per-row pixel-perfect toggles plus a global toggle,
+  twin (plain/orig) equal footprint plus grid-snapped transform baking plus a live snap
+  preview, a high-resolution original-quality display for pp-off, and input-grid
+  (actual cut lines) / final-mapping grid overlays on the original view.
+  `fit.conform=false` (native logical size, no squash) is the default; conform is
+  opt-in. Margin encroachment is an informational notice (not a reroll).
+- **Pipeline-view sidebar** — the generation structure recomposed as a file-tree dock
+  (Kuma-picker style): pipeline/files as two blocks, flow animation with elbow
+  connectors, live progress sync (`/api/progress`, 3-second polling), collapse/expand
+  animation.
+- **Curator editing tools** — color-palette pixel editing (pencil/eraser; sidecar-only,
+  originals untouched), a stash pool modal, a hover scrubber at the stage's bottom
+  right, and a zoom-edit modal (⛶/double-click).
+- **Takes as a first-class contract** — candidate/supplement strips for the same state
+  are declared as `states.<state>.takes` plus `raw/<...>.takes/<label>.png`; extraction
+  appends them after the primary and consumers count row size via `state_frame_total`.
+- **Per-row curation preservation (salvage)** — root fix for user selections/stash
+  being wiped wholesale whenever an engine change re-derived frames. With a per-row
+  `revision` (a segment fingerprint of the source raw/take content; a prefix rule
+  allows take appends), salvageable rows are salvaged; dropped rows are first backed up
+  verbatim to `curation.stale-<hash>.json` and surfaced in a view banner (no silent
+  loss).
+- **Frame clones** — sidecar first-class `clones` {clone idx: source idx}. A clone is a
+  full instance with its own transforms/pixel edits/order, and compose/GIF/PNG/cycle
+  read the source file via `source_frame_index` (no files created in the derived
+  cache).
+- **Curator UX cleanup** — removed the mistake-prone card-click toggle between
+  sequence↔pool (add/remove buttons and title drag only), removed the ⠿ grip (the
+  title is the drag handle), three-tier card layout (header/info/buttons), removed the
+  directional SVGs and color emphasis on add/remove, moved the preview position
+  indicator below the canvas. A shared `data-tip` tooltip component replaces native
+  titles — hovering a title pops the frame's full name, draggable and copyable (agent
+  collaboration).
 
-## v1.56.13 "Sol Forge" - PerfectPixel 통합 완료와 실생성 교정 루프 증명
+## v1.56.13 "Sol Forge" - PerfectPixel integration complete, real-generation correction loop proven
 
-PerfectPixel 이식 작업을 하나의 검증 가능한 릴리스로 닫았다. v1.56.7부터 v1.56.12까지
-추가한 결정론 후처리, 자동 검사/교정, Codex/Grok 생성 계층을 실제 Sol Valley row에
-연결하고, 최대 3패스 계약 안에서 수렴과 best-candidate 보존을 재현했다.
+Closed the PerfectPixel port as one verifiable release. The deterministic
+post-processing, automatic inspection/correction, and Codex/Grok generation layers
+added across v1.56.7 through v1.56.12 are wired to a real Sol Valley row, reproducing
+convergence and best-candidate preservation within the 3-pass contract.
 
-- 실제 Grok `up_idle` 생성-추출-검사-힌트-재생성 루프가 score **91 -> 100**으로
-  2번째 attempt에서 수렴했다. `min_attempts=2`를 명시해 첫 후보가 gate를 넘더라도
-  교정 루프 자체를 검증할 수 있게 했다.
-- best/candidate의 request, raw, manifest SHA-256이 모두 일치해 최고 후보 보존을
-  확인했다. attempt별 원본/격자/pixel-perfect 3장 proof set 자동 검사도 통과했다.
-- 대표 row에서 projection 분리는 4/4 유지, x-centroid sigma는 **0.302 -> 0.108**,
-  YCbCr 오류는 0, run-length 경고는 **3 -> 0**으로 개선됐다.
-- 사용자 문서를 실제 엔진 계약에 맞췄다. projection, alpha-centroid, YCbCr,
-  run-length cross-check, inspect/score/correction-loop, `gen`, image-gen shuttle을
-  README 번역본과 architecture 문서에 반영했다.
-- 전체 회귀 테스트 **128 passed**. 기존 추출 골든 경로는 그대로 유지한다.
+- A real Grok `up_idle` generate-extract-inspect-hint-regenerate loop converged from
+  score **91 -> 100** on the 2nd attempt. `min_attempts=2` was set explicitly so the
+  correction loop itself is exercised even when the first candidate clears the gate.
+- The best/candidate request, raw, and manifest SHA-256 all match, confirming
+  best-candidate preservation. The per-attempt three-image proof set
+  (original/grid/pixel-perfect) auto-inspection also passed.
+- On the representative row, projection separation held at 4/4, x-centroid sigma
+  improved **0.302 -> 0.108**, YCbCr errors stayed at 0, and run-length warnings went
+  **3 -> 0**.
+- User docs were aligned with the actual engine contract: projection, alpha-centroid,
+  YCbCr, run-length cross-check, inspect/score/correction-loop, `gen`, and the
+  image-gen shuttle are reflected in the translated READMEs and the architecture doc.
+- Full regression suite **128 passed**. The existing extraction golden path is
+  unchanged.
 
-## v1.56.12 "Sol Forge" - 생성 SSoT 통합 (`sprite_gen/gen/`, perfectpixel-studio C-gen)
+## v1.56.12 "Sol Forge" - Generation SSoT unified (`sprite_gen/gen/`, perfectpixel-studio C-gen)
 
-생성 계층을 엔진 모듈 하나로 통합했다. 기존 `image-gen` 스킬의 독립 구현
-(codex `image_gen` 세션추출 + 크로마 후처리)을 엔진으로 이식하고, grok Imagine
-어댑터를 추가했다. Gemini/OpenRouter/fal/BytePlus 프로바이더는 넣지 않는다.
+Unified the generation layer into a single engine module. The `image-gen` skill's
+standalone implementation (codex `image_gen` session extraction plus chroma
+post-processing) was ported into the engine, and a grok Imagine adapter was added.
+Gemini/OpenRouter/fal/BytePlus providers are deliberately left out.
 
-- **`sprite_gen/gen/` 신설 + CLI `gen` + `scripts/generate_sprite_image.py`** —
-  프롬프트(+옵션 ref) → 검증된 raw PNG 한 장. `--provider codex|grok`,
-  `--transparent --chroma-key magenta|green`(결정론 투명 계약 이식),
-  `--report`(provider·`elapsed_seconds`·`session_id`·크로마 지표).
-- **codex 어댑터** (`codex_provider.py`) — fresh `codex exec --json` (프롬프트 캐시
-  분리), `thread.started.thread_id`(구버전 `session id:` 텍스트도 지원)로 rollout
-  해석, 인라인 base64를 결정론 디코드(`image_generation_call`/`image_generation_end`
-  둘 다), 모델 보고 경로 불신, 추출 후 세션 jsonl 청소.
-- **grok 어댑터** (`grok_provider.py`) — `grok -p --sandbox workspace --always-approve`
-  로 정확한 경로에 저장 지시 후 PNG magic 검증(`--effort` 미전달 — 미디어 모델 400).
-  `--ref` 는 `image_edit` 경로.
-- **투명 계약 이식** (`chroma.py`) — image-gen `chroma_key_transparent.py` 를 엔진
-  함수로. 투명 픽셀 잔여 RGB 는 fail-loud (No Silent Fallback).
-- `sprite_gen.generate_image` placeholder 는 `sprite_gen.gen` 리다이렉트 shim 으로
-  교체(두 생성 surface 금지 — SSoT). `image-gen` 스킬은 엔진 셔틀로 개편, 구현은
-  DEPRECATED/archive.
-- **실 e2e**: 같은 row 프롬프트를 codex(39.02s)·grok(18.42s) 양쪽 생성, 속도 비교 +
-  side-by-side proof 를 `docs/reports/perfectpixel-c-gen/` 에 보존(grok ~2.1× 빠름).
-- 신규 테스트 `tests/test_gen.py`(추출·chroma·prompt·오케스트레이터 fake provider,
-  네트워크 없음) + package surface 에 `gen` 추가. 문서 `docs/gen.md`. 기존 골든 추출
-  경로 회귀 0.
+- **New `sprite_gen/gen/` + CLI `gen` + `scripts/generate_sprite_image.py`** —
+  prompt (+ optional ref) → one validated raw PNG. `--provider codex|grok`,
+  `--transparent --chroma-key magenta|green` (the deterministic transparency contract,
+  ported), `--report` (provider, `elapsed_seconds`, `session_id`, chroma metrics).
+- **codex adapter** (`codex_provider.py`) — fresh `codex exec --json` (prompt-cache
+  isolation), rollout resolution via `thread.started.thread_id` (legacy `session id:`
+  text also supported), deterministic inline-base64 decode (both
+  `image_generation_call` and `image_generation_end`), distrust of model-reported
+  paths, session jsonl cleanup after extraction.
+- **grok adapter** (`grok_provider.py`) — `grok -p --sandbox workspace
+  --always-approve` instructed to save to an exact path, then PNG magic validation
+  (`--effort` not passed — media models 400 on it). `--ref` takes the `image_edit`
+  path.
+- **Transparency contract ported** (`chroma.py`) — image-gen's
+  `chroma_key_transparent.py` becomes an engine function. Residual RGB on transparent
+  pixels is fail-loud (No Silent Fallback).
+- The `sprite_gen.generate_image` placeholder is replaced by a `sprite_gen.gen`
+  redirect shim (no two generation surfaces — SSoT). The `image-gen` skill is reworked
+  into an engine shuttle; its implementation is DEPRECATED/archived.
+- **Real e2e**: the same row prompt generated on both codex (39.02s) and grok (18.42s);
+  the speed comparison and side-by-side proof are preserved in
+  `docs/reports/perfectpixel-c-gen/` (grok ~2.1x faster).
+- New tests `tests/test_gen.py` (extraction, chroma, prompt, orchestrator fake
+  provider; no network) plus `gen` added to the package surface. Docs: `docs/gen.md`.
+  Zero regression on the existing golden extraction path.
 
-## v1.56.11 "Sol Edge Runner" - 자동 inspect/score/correction loop (perfectpixel-studio B-loop)
+## v1.56.11 "Sol Edge Runner" - Automatic inspect/score/correction loop (perfectpixel-studio B-loop)
 
-perfectpixel-studio `inspect.go` / `score.go` 의 폐루프 구조를 sprite-gen 엔진에
-이식했다. 생성 호출은 아직 C-gen 단계가 소유하므로, 이번 릴리스는 결정론 계측과
-교정 힌트 생성, 그리고 provider 없는 dry-run loop 까지만 닫는다.
+Ported the closed-loop structure of perfectpixel-studio's `inspect.go` / `score.go`
+into the sprite-gen engine. Generation calls still belong to the C-gen stage, so this
+release closes only deterministic measurement, correction-hint generation, and a
+provider-less dry-run loop.
 
-- **`sprite_gen.inspect` + `scripts/inspect_sprite_run.py` + CLI `inspect`** —
-  `sprite-request.json` 기준 expected/found frame count, 64-bin RGB histogram,
-  dHash silhouette similarity, motion presence, centroid σ, 기존
-  `frames-manifest.json` 의 state별 warning/error 를 하나의 report 로 합친다.
-  추출 frames 가 없으면 raw strip 을 읽어 projection 신호로 자연 포즈 수를 측정한다.
-- **`sprite_gen.score` + `scripts/score_sprite_run.py` + CLI `score`** —
-  inspect report 만 입력으로 받아 0-100 score, `candidate_rank`
-  (`found*100-errors*10-warnings`), provider-ready correction hints 를 만든다.
-  중복 힌트는 순서 보존 dedupe.
+- **`sprite_gen.inspect` + `scripts/inspect_sprite_run.py` + CLI `inspect`** — merges
+  into one report: expected/found frame counts against `sprite-request.json`, a 64-bin
+  RGB histogram, dHash silhouette similarity, motion presence, centroid σ, and the
+  per-state warnings/errors from the existing `frames-manifest.json`. With no extracted
+  frames it reads the raw strip and measures the natural pose count from the projection
+  signal.
+- **`sprite_gen.score` + `scripts/score_sprite_run.py` + CLI `score`** — takes only an
+  inspect report and produces a 0-100 score, `candidate_rank`
+  (`found*100-errors*10-warnings`), and provider-ready correction hints. Duplicate
+  hints are deduped order-preserving.
 - **`sprite_gen.correction_loop` + `scripts/run_correction_loop.py` + CLI
-  `correction-loop`** — 최대 3패스 inspect → score → hint 루프. dry-run 은 생성 없이
-  리포트만 남기고, 실제 재생성은 `--provider-command` 가 명시된 경우만 실행한다
-  (없으면 fail-loud). 작은 fixture 테스트에서 best-candidate 보존 경로를 고정.
-- **founder_v7 실데이터 dry-run**:
-  `docs/reports/perfectpixel-b-loop-founder-v7/` 에 `up_idle` A-runlen 경고
-  (collapsed pitch/outlier) → score 91 → pixel-grid correction hint 로그를 보존.
-- 신규 테스트 3개 + package surface 업데이트. 기존 골든 추출 경로는 읽기 전용으로만
-  참조해 기본 extract/compose 동작을 바꾸지 않는다.
+  `correction-loop`** — up to 3 passes of inspect → score → hint. Dry-run leaves
+  reports only, no generation; actual regeneration runs only when a
+  `--provider-command` is given explicitly (fail-loud otherwise). Best-candidate
+  preservation is pinned by a small fixture test.
+- **founder_v7 real-data dry-run**: `docs/reports/perfectpixel-b-loop-founder-v7/`
+  preserves the `up_idle` A-runlen warning (collapsed pitch/outlier) → score 91 →
+  pixel-grid correction-hint log.
+- 3 new tests plus a package surface update. The existing golden extraction path is
+  referenced read-only; default extract/compose behavior is unchanged.
 
-## v1.56.10 "Sol Edge Runner" - 런길이 최빈값 피치 추정기 (perfectpixel-studio 이식, 교차검증 전용)
+## v1.56.10 "Sol Edge Runner" - Run-length-mode pitch estimator (perfectpixel-studio port, cross-check only)
 
-perfectpixel-studio `internal/sprite/pixelize.go`(MIT) 의 unfake(동일색 런 길이
-최빈값으로 실블록 크기 추정)를 이식. `detect_pixel_grid`(경계 히스토그램)는 정수
-씨앗 ±0.75 창 안에서만 소수 피치를 정밀화하므로 씨앗 로터리가 실패하면 조용히
-틀린다 — 실사고: 솔벨 주인공 컴포넌트에서 y 피치가 x 값(29.52)으로 붕괴(실측
-30.56, 참값의 정밀화 점수 0.78 vs 붕괴값 0.07 — 창 밖이라 후보조차 못 됐다).
-런 길이는 경계 히스토그램과 독립인 신호(경계 위치가 아니라 경계 사이 거리)라
-세컨드 오피니언이 된다.
+Ported unfake from perfectpixel-studio's `internal/sprite/pixelize.go` (MIT) —
+estimating the real block size from the mode of same-color run lengths.
+`detect_pixel_grid` (edge histogram) refines the fractional pitch only within a ±0.75
+window around an integer seed, so it fails silently when the seed lottery fails — real
+accident: on the Sol Valley protagonist component, the y pitch collapsed to the x value
+(29.52; measured 30.56; refinement score 0.78 for the true value vs 0.07 for the
+collapsed one — outside the window, it never even became a candidate). Run length is a
+signal independent of the edge histogram (distance between edges, not edge positions),
+so it serves as a second opinion.
 
-- **`estimate_pixel_grid_runlen` 신규 (추정 전용)** — 원본과 달리 축별 분리
-  히스토그램(축 붕괴를 잡으려면 필수), 런 길이 가중 `hist[s]·s`(원본 동일, 짧은 런
-  지배 방지), 최빈값 ±1 창의 가중 무게중심으로 소수화(참 30.56 → 30/31 런 44:56
-  혼합 → 무게중심이 복원). 확신 게이트: 런 수 부족·고조파 패밀리(k·mode±k) 질량
-  절반 미만·32px 미만이면 (1.0, 1.0) 으로 관측 가능하게 포기.
-- **`crosscheck_pitch_runlen` 신규 + 픽셀퍼펙트 합의 직후 훅 (기본 on, 경고 전용)**
-  — 불일치는 report `warnings` + stderr `[pitch-crosscheck]` 로만 표면화. 스냅은
-  계속 `detect_pixel_grid` 합의만 쓴다 (자동 교체 금지, No Silent Fallback — 어느
-  쪽을 쓸지는 사람이/상위 게이트가 판단). runlen 의 오차 모델(AA 가 런 양끝을
-  갉아 픽셀 단위 하향 바이어스)이 규칙 모양을 정한다:
-  - 약수 오검출(runlen ≫ grid, 슬랙 2px): 참 29.5 를 14.73 으로 잡는 모드.
-  - 배수/고조파 오검출(grid ≫ runlen, 슬랙 12%+3px).
-  - 축비(y/x) 불일치 > max(2%, 0.7/피치): 축 붕괴 모드 — 축차 3.5% 는 축별 규칙
-    밑에 숨지만 AA 공통 바이어스가 비율에서 상쇄돼 잡힌다. 0.7/피치 하한은 축별
-    바이어스 편차(서브픽셀)의 소피치 확대를 흡수 — founder_v7 8~15px 대역의 판별
-    불가 드리프트(3~9%)는 침묵, 히어로 스케일(30px) 실붕괴 신호(2.8%)는 발화.
-- **실측 (founder_v7 22 state, 읽기 전용)**: 건강한 20 state 경고 0, 경고는 정확히
-  실고장 2건 — down_carry_run grid (4.00, 4.00) vs runlen (6.91, 7.96) (플랜 기록
-  참값 ~9, 약수 붕괴), side_carry_idle grid x=6.00 vs runlen 10.99.
-- 110 tests OK (신규 10: 정수/소수 축별 정답 · 노이즈/소형 확신-없음 · 정상합의
-  침묵 2종 · 약수 픽스처(20x36@29.5/30.6) · y축 붕괴 픽스처(28x60@29/30.3, 실사고
-  메커니즘 결정론 재현) · 확신 게이트 · 파이프라인 통합: 경고 표면화 + runlen 중화
-  시 프레임 비트 동일 = 스냅 영향 0 고정). 기존 100 테스트 회귀 0.
-- NOTICE 에 MIT 출처 표기 (perfectpixel-studio internal/sprite/pixelize.go).
+- **New `estimate_pixel_grid_runlen` (estimation only)** — unlike the original:
+  per-axis separated histograms (required to catch axis collapse), run-length weighting
+  `hist[s]·s` (same as the original; prevents short-run dominance), and
+  fractionalization via the weighted centroid of the mode ±1 window (true 30.56 → a
+  44:56 mix of 30/31 runs → the centroid recovers it). Confidence gates: too few runs,
+  harmonic-family (k·mode±k) mass under half, or under 32px → gives up observably as
+  (1.0, 1.0).
+- **New `crosscheck_pitch_runlen` + a hook right after the pixel-perfect consensus
+  (default on, warning-only)** — disagreement surfaces only as report `warnings` plus
+  stderr `[pitch-crosscheck]`. Snapping keeps using the `detect_pixel_grid` consensus
+  alone (no auto-replacement, No Silent Fallback — which one to use is for a human or
+  an upper gate to decide). The runlen error model (AA nibbles both ends of runs → a
+  downward per-pixel bias) shapes the rules:
+  - Divisor misdetection (runlen ≫ grid, slack 2px): the mode where true 29.5 is caught
+    as 14.73.
+  - Multiple/harmonic misdetection (grid ≫ runlen, slack 12%+3px).
+  - Axis-ratio (y/x) disagreement > max(2%, 0.7/pitch): the axis-collapse mode — a 3.5%
+    per-axis gap hides under the per-axis rules, but the shared AA bias cancels in the
+    ratio, so it is caught. The 0.7/pitch floor absorbs the small-pitch amplification
+    of per-axis bias deviation (subpixel) — the indeterminate 3-9% drift in
+    founder_v7's 8-15px band stays silent while the hero-scale (30px) real-collapse
+    signal (2.8%) fires.
+- **Measured (founder_v7, 22 states, read-only)**: 0 warnings across the 20 healthy
+  states; warnings land exactly on the 2 real failures — down_carry_run grid
+  (4.00, 4.00) vs runlen (6.91, 7.96) (plan-recorded truth ~9, divisor collapse), and
+  side_carry_idle grid x=6.00 vs runlen 10.99.
+- 110 tests OK (10 new: integer/fractional per-axis ground truth · noise/tiny
+  no-confidence · 2 healthy-consensus silences · divisor fixture (20x36 @ 29.5/30.6) ·
+  y-axis collapse fixture (28x60 @ 29/30.3, deterministic reproduction of the accident
+  mechanism) · confidence gate · pipeline integration: warning surfacing plus
+  bit-identical frames when runlen is neutralized = zero snap impact pinned). Zero
+  regression on the existing 100 tests.
+- MIT attribution added to NOTICE (perfectpixel-studio internal/sprite/pixelize.go).
 
-## v1.56.9 "Sol Edge Runner" - chroma.mode: ycbcr (perfectpixel-studio 이식, 옵트인)
+## v1.56.9 "Sol Edge Runner" - chroma.mode: ycbcr (perfectpixel-studio port, opt-in)
 
-perfectpixel-studio `internal/sprite/chroma.go`(MIT) 의 색차(CbCr) 평면 매팅을 이식.
-현행 RGB 경로는 키와의 RGB 거리로 분류하므로 배경 쉐이딩·그라디언트·JPEG 4:2:0
-크로마 노이즈가 erase 반경(96)을 벗어나면 잔존한다 — 이 경로는 루마를 통째로 무시하고
-CbCr 평면에서만 분리해 명암 변화에 강건하다.
+Ported the chrominance (CbCr) plane matting from perfectpixel-studio's
+`internal/sprite/chroma.go` (MIT). The current RGB path classifies by RGB distance to
+the key, so background shading, gradients, and JPEG 4:2:0 chroma noise survive once
+they leave the erase radius (96) — this path ignores luma entirely and separates in the
+CbCr plane only, robust to lightness changes.
 
-- **`chroma.mode: "ycbcr"` 신규 값 (옵트인, 기본값 "rgb" 불변)** — CLI `--chroma-mode
-  {rgb,ycbcr}` 는 request 를 덮는 명시 override, effective 값은 request 에 되써진다.
-  기본 경로는 비트 동일 (골든 회귀 0).
-- 파이프라인: 배경키 = 코너 패치+얇은 테두리의 **CbCr 히스토그램 최빈값**(평균 금지,
-  그라디언트에 안 밀림; 선언 키 계열이 테두리 샘플 12%+ 면 그 클러스터 우선) →
-  Hermite smoothstep 소프트 매팅(24→72) → **키 방향 성분만 빼는 despill**(직교 색
-  보존) → 테두리 4-연결 flood fill(내부 고립 키계열 픽셀 보존) → 고립 점 제거·핀홀
-  메움 → **자가진단 폴백**: 불투명율 스파이크(피사체 오삭제) 또는 선언키 잔존
-  스파이크(배경 미제거) 시 순수 선언 키로 재매팅, 더 나은 쪽 채택 — 폴백은 추출
-  warnings 로 관측 가능 (No Silent Fallback).
-- **실측 (그린키)**: 열화 소스 합성 픽스처(루마만 낮춘 쉐이딩 그린 밴드 — RGB 거리
-  115 로 erase 반경 밖, unmix 도달 깊이 밖) 그린 틴트 잔존 **1728 → 0**, 밴드 불투명
-  잔존 **1920 → 0**. 반면 founder_v7 클린 플랫키 raw 22 state 합계: fringe(RGB≤150)
-  0→0 · CbCr 잔존 0→0 로 동률, 그린 틴트 엣지 잔존은 rgb 9 vs ycbcr 2779 (0.92 고정
-  스케일 despill 은 현행 exact-solve unmix 와 달리 틴트를 완전히 못 뺌, 피사체 손실
-  아님 — 불투명 커버리지 차 -1~-2.3% 는 엣지 수렴 차이). **결론: 클린 소스는 기본
-  rgb 유지, ycbcr 는 열화 소스(쉐이딩/그라디언트/JPEG) 전용 옵트인** —
-  `docs/chroma-alpha.md` 에 명시.
-- 100 tests OK (신규 7: 쉐이딩 배경 rgb/ycbcr 대비 · 최빈값 키 검출 2분기 · 키방향
-  despill/직교 보존 · flood 내부 보존 · 자가진단 폴백 관측 · CLI e2e · 기본 rgb 고정).
-- NOTICE: MIT 출처 표기.
+- **New `chroma.mode: "ycbcr"` value (opt-in; default "rgb" unchanged)** — CLI
+  `--chroma-mode {rgb,ycbcr}` is an explicit override over the request; the effective
+  value is written back into the request. The default path is bit-identical (0 golden
+  regressions).
+- Pipeline: background key = the **CbCr histogram mode** of corner patches plus a thin
+  border (never the mean — it doesn't get dragged by gradients; if the declared key
+  family makes up 12%+ of border samples, that cluster wins) → Hermite smoothstep soft
+  matting (24→72) → **despill that subtracts only the key-direction component**
+  (orthogonal colors preserved) → border 4-connected flood fill (interior isolated
+  key-family pixels preserved) → isolated-dot removal and pinhole filling →
+  **self-diagnosing fallback**: on an opacity spike (subject over-erased) or a
+  declared-key-residue spike (background not removed), re-matte with the pure declared
+  key and adopt whichever is better — the fallback is observable via extraction
+  warnings (No Silent Fallback).
+- **Measured (green key)**: on a degraded-source synthetic fixture (a shaded green band
+  with only luma lowered — RGB distance 115, outside the erase radius, beyond unmix
+  reach), green tint residue **1728 → 0**, band opacity residue **1920 → 0**. Meanwhile
+  on founder_v7's clean flat-key raws (22 states total): fringe (RGB≤150) 0→0 and CbCr
+  residue 0→0 (tie); green-tint edge residue rgb 9 vs ycbcr 2779 (the 0.92 fixed-scale
+  despill cannot fully remove tint, unlike the current exact-solve unmix; not subject
+  loss — the -1 to -2.3% opacity coverage delta is an edge-convergence difference).
+  **Conclusion: keep rgb as the default for clean sources; ycbcr is an opt-in for
+  degraded sources (shading/gradients/JPEG)** — stated in `docs/chroma-alpha.md`.
+- 100 tests OK (7 new: shaded-background rgb/ycbcr contrast · both branches of
+  mode-based key detection · key-direction despill/orthogonal preservation · flood
+  interior preservation · self-diagnosing fallback observability · CLI e2e ·
+  default-rgb pinning).
+- NOTICE: MIT attribution.
 
-## v1.56.8 "Sol Edge Runner" - segmentation: projection (perfectpixel-studio 이식, 옵트인)
+## v1.56.8 "Sol Edge Runner" - segmentation: projection (perfectpixel-studio port, opt-in)
 
-perfectpixel-studio `internal/sprite/segment.go`(MIT) 의 projection-profile + DP 최적 컷
-프레임 분리를 `sprite_gen/segment.py` 로 이식. connected-components 는 팔·소품이 이웃
-프레임과 닿으면 붙은 포즈를 한 덩어리로 합쳐 추출이 실패한다 — 세로 알파 프로젝션
-P[x]=Σα 의 골(gutter)로 자연 포즈 수를 세고, 골이 사라지면 DP 로 `Σ P[cut] +
-λ·(width−ideal)²` 최소 컷을 찾아 정확히 기대 프레임 수로 분리한다.
+Ported the projection-profile + DP optimal-cut frame separation from
+perfectpixel-studio's `internal/sprite/segment.go` (MIT) into `sprite_gen/segment.py`.
+connected-components merges touching poses into one blob when an arm or prop touches
+the neighboring frame, failing extraction — the vertical alpha projection P[x]=Σα
+counts natural poses by its valleys (gutters), and when the valleys vanish, DP finds
+the minimal cut of `Σ P[cut] + λ·(width−ideal)²` to split into exactly the expected
+frame count.
 
-- **`fit.segmentation: "projection"` 신규 값 (옵트인, 기본값 components 불변)** — CLI
-  `--segmentation {components,projection}` 은 request 를 덮는 명시 override. 활성 시
-  크로마 제거 직후 스트립을 컷 경계에서 갈라 투명 거터를 넣어 재조립하는 pre-pass 라
-  하류 connected-components·위성 병합·pixel-perfect 경로는 무변경으로 그대로 동작한다.
-  분리 실패는 스트립을 건드리지 않고 stderr 로 보고 — 하류가 기존 에러로 관측 가능하게
-  실패한다 (No Silent Fallback).
-- **융착 픽스처 골든** (`tests/fixtures/run-fused/`) — 팔이 닿아 한 덩어리가 된 3포즈
-  스트립: components 는 실패(에러 기록), projection 은 3/3 분리 (골든 매니페스트 고정).
-- **분리된 스트립에는 완전 투명** — 기존 골든 런에 projection 을 켜도 매니페스트가
-  비트 동일함을 테스트로 고정.
-- founder_v7 실측: carry/action 8개 state 회귀 0 (natural 골짜기로 기대 수 그대로).
-  down_carry_walk 프레임을 16/24/32px 겹쳐 재조립한 실제 융착 스트립에서 components 는
-  3→1 덩어리로 붕괴(추출 실패), projection 은 전부 6/6 분리.
-- 93 tests OK (신규 10: 융착 골든·옵트인 부재 실패·CLI 활성/무효화·비트동일·순수함수).
+- **New `fit.segmentation: "projection"` value (opt-in; default components unchanged)**
+  — CLI `--segmentation {components,projection}` is an explicit override over the
+  request. When active it is a pre-pass that splits the strip at cut boundaries right
+  after chroma removal and reassembles it with transparent gutters, so the downstream
+  connected-components, satellite-merging, and pixel-perfect paths run unchanged. A
+  failed separation leaves the strip untouched and reports to stderr — downstream fails
+  observably with the existing errors (No Silent Fallback).
+- **Fused fixture golden** (`tests/fixtures/run-fused/`) — a 3-pose strip fused into
+  one blob by touching arms: components fails (error recorded), projection separates
+  3/3 (golden manifest pinned).
+- **Fully transparent for already-separated strips** — enabling projection on the
+  existing golden runs is pinned by test to produce bit-identical manifests.
+- founder_v7 measured: zero regression across the 8 carry/action states (natural
+  valleys keep the expected counts). On real fused strips rebuilt by overlapping
+  down_carry_walk frames at 16/24/32px, components collapses 3→1 blobs (extraction
+  fails) while projection separates 6/6 in every case.
+- 93 tests OK (10 new: fused golden, opt-in-absent failure, CLI enable/disable,
+  bit-identity, pure functions).
 
-## v1.56.7 "Sol Edge Runner" - align_x: alpha-centroid (perfectpixel-studio 이식, 옵트인)
+## v1.56.7 "Sol Edge Runner" - align_x: alpha-centroid (perfectpixel-studio port, opt-in)
 
-perfectpixel-studio `internal/sprite/extract.go`(MIT) 의 알파 가중 무게중심 정렬을 fit 에 이식.
-bbox 중심은 팔/무기가 뻗은 프레임에서 몸통을 반대로 밀어 재생 시 좌우 지터를 만들고,
-cx=Σ(x·α)/Σα 는 면적이 큰 몸통이 지배해 축이 안정된다 (상류 실측 σ 27.2px→0.2px).
+Ported the alpha-weighted centroid alignment from perfectpixel-studio's
+`internal/sprite/extract.go` (MIT) into fit. A bbox center pushes the torso the other
+way on frames with an extended arm or weapon, creating horizontal jitter in playback;
+cx=Σ(x·α)/Σα is dominated by the large-area torso, so the axis stays stable (upstream
+measured σ 27.2px→0.2px).
 
-- **`fit.align_x: "alpha-centroid"` 신규 값 (옵트인, 기본값 foot-centroid 불변)** —
-  소프트 매팅 프린지(α ≤ 10)를 무게에서 제외하는 알파 가중 무게중심을 셀 중앙에 정렬.
-  `fit_to_cell` / `fit_pixel_perfect` / `row_placement` 세 경로 모두 지원, 출처 주석 표기.
-- **픽셀퍼펙트 행 경로에서는 프레임별 배치** — 기존 모드들은 행 union 공동 left 하나를
-  전 프레임에 쓰므로 `register_row_frames` 의 정합 잔차가 align_x 선택과 무관하게 그대로
-  지터로 남는다(실측: bbox-center 와 foot-centroid 의 σ 가 동일). alpha-centroid 만
-  프레임마다 무게중심을 셀 중앙에 앉힌다(논리 격자 스냅으로 flip 대칭 보존). 점프 아크는
-  기존 `ground_frames: false` 가 담당(상류 baseline 오프셋과 동일 역할).
-- **`scripts/measure_align_sigma.py`** — align_x 변형별 프레임 무게중심 X 의 σ 를 리포트
-  (원본 run 은 읽기 전용, 스크래치 복사 후 재추출). founder_v7 실측: down_run σ
-  0.53px→0.17px (−68%), down_walk 은 0.03px 로 이미 포화(동일).
-- 83 tests OK (신규 5: 프린지 불감·옵트인 보증·per-frame 지터 상쇄·격자 스냅/클램프).
+- **New `fit.align_x: "alpha-centroid"` value (opt-in; default foot-centroid
+  unchanged)** — aligns to cell center the alpha-weighted centroid that excludes
+  soft-matting fringe (α ≤ 10) from the weights. All three paths are supported —
+  `fit_to_cell` / `fit_pixel_perfect` / `row_placement` — with source attribution
+  comments.
+- **Per-frame placement in the pixel-perfect row path** — the existing modes use one
+  shared row-union left for all frames, so the registration residual of
+  `register_row_frames` stays as jitter regardless of the align_x choice (measured:
+  bbox-center and foot-centroid have identical σ). Only alpha-centroid seats each
+  frame's centroid at cell center (the logical grid snap preserves flip symmetry). Jump
+  arcs remain the job of the existing `ground_frames: false` (same role as the
+  upstream baseline offset).
+- **`scripts/measure_align_sigma.py`** — reports the σ of per-frame centroid X for
+  each align_x variant (the source run is read-only; it is copied to scratch and
+  re-extracted). founder_v7 measured: down_run σ 0.53px→0.17px (−68%); down_walk was
+  already saturated at 0.03px (unchanged).
+- 83 tests OK (5 new: fringe insensitivity, opt-in guarantee, per-frame jitter
+  cancellation, grid snap/clamp).
 
-## v1.56.6 "Sol Edge Runner" - 붕괴 프레임이 행 합의 피치를 오염시키던 문제 + span 중복 합산
+## v1.56.6 "Sol Edge Runner" - Collapsed frames no longer poison the row consensus pitch + span double-counting
 
-솔벨 `down_carry_run` 6 프레임 중 3개가 피치 3.00 으로 무너졌고(참값 8.56), 중앙값 합의가
-**5.00** 으로 오염돼 행 전체가 잘못 스냅됐다. v1.56.5 의 축 불일치 가드는 두 축이 **함께**
-무너지면(3.00/3.00) 잡지 못한다.
+In Sol Valley's `down_carry_run`, 3 of 6 frames collapsed to pitch 3.00 (true value
+8.56), poisoning the median consensus to **5.00** and mis-snapping the whole row.
+v1.56.5's axis-mismatch guard cannot catch it when both axes collapse **together**
+(3.00/3.00).
 
-- **행 합의 피치에서 붕괴 프레임을 버린다**: 행 안에서 참 피치는 거의 같으므로, 프레임별 검출값
-  중 최대값의 60% 미만은 붕괴로 보고 제외한 뒤 중앙값을 낸다. 몇 개를 버렸는지 warning 으로
-  남긴다(조용히 고치지 않는다). 실측: 합의 5.00 → 8.56 복구.
-- **`_axis_refine` 의 span 이 bins 를 넘을 수 있었다** — 순환 윈도우가 같은 bin 을 두 번 세어
-  `frac > 1.0` 이 되고, 작은 피치일수록 점수가 부풀었다. `span = min(bins, ...)` 로 클램프.
+- **Collapsed frames are dropped from the row consensus pitch**: within a row the true
+  pitch is nearly constant, so per-frame detections under 60% of the maximum are
+  treated as collapsed and excluded before taking the median. How many were dropped is
+  left as a warning (no silent fixing). Measured: consensus 5.00 → 8.56 recovered.
+- **`_axis_refine`'s span could exceed bins** — the circular window counted the same
+  bin twice, making `frac > 1.0` and inflating scores for small pitches. Clamped with
+  `span = min(bins, ...)`.
 - 78 tests OK.
 
-## v1.56.5 "Sol Edge Runner" - 축 불일치 가드: 한 축이 약수로 무너지면 신뢰 축을 쓴다
+## v1.56.5 "Sol Edge Runner" - Axis-mismatch guard: when one axis collapses to a divisor, use the trusted axis
 
-솔벨 `down_carry_walk` 행에서 한 프레임의 축별 피치가 **가로 9 / 세로 3** 으로 나왔다 (참값 9,
-독립 측정 = 엣지 간격 최빈). 스냅 결과가 가로로 짓눌려 부서졌다. 팔을 머리 위로 든 포즈는 세로로
-균일한 막대가 화면을 채워 **세로 엣지가 고갈**되고, 그 축에서 참 피치의 약수(3 = 9/3)가 이긴다.
+On Sol Valley's `down_carry_walk` row, one frame's per-axis pitch came out
+**9 horizontal / 3 vertical** (true value 9; independent measurement = edge-spacing
+mode). The snap result was crushed horizontally. An arms-overhead pose fills the frame
+with vertically uniform bars, **starving vertical edges**, and on that axis a divisor
+of the true pitch (3 = 9/3) wins.
 
-- **가드**: 축별 피치가 1.5배 넘게 벌어지면 엣지 총량이 많은 축의 피치를 양쪽에 쓴다. 비균등
-  리스케일로 생기는 실제 축 차이는 2% 수준이므로(솔벨 chibi 베이스 30.38 / 30.92), 3배 격차는
-  물리적으로 불가능하고 한 축의 검출 실패다.
-- 약수 후보(`s/2`, `s/3`)는 그대로 둔다 — 실측상 정수 씨앗이 참 피치의 2·3·5배 배음을 자주 집는다
-  (같은 행에서 씨앗 19 / 28 / 29 / 48, 참값 9). 약수를 빼면 배음을 못 내려온다.
-- **재현 한계**: 사고 당시의 raw 는 폐기되어 그 프레임을 재현하지 못했다. 합성(무작위 도트 +
-  가우시안 블러)으로는 붕괴가 나오지 않는다 — p=3 의 점수 상한은 0.25, p=9 는 0.75 다. 그래서
-  이 릴리스는 **원인을 좁힌 것이 아니라 관측된 실패 패턴을 막는 가드**다. 축 불일치라는 관측
-  가능한 신호에만 반응하므로 정상 그림에는 영향이 없다.
-- 회귀 테스트 2개: 세로 엣지를 고갈시킨 합성 프레임, 작은 블록(9px) 왕복. 78 tests OK.
+- **The guard**: if the per-axis pitches diverge by more than 1.5x, the pitch of the
+  axis with more total edges is used for both. Real axis differences from non-uniform
+  rescaling are around 2% (Sol Valley chibi base 30.38 / 30.92), so a 3x gap is
+  physically impossible — it is a detection failure on one axis.
+- Divisor candidates (`s/2`, `s/3`) stay — in practice the integer seed often grabs
+  2x/3x/5x harmonics of the true pitch (seeds 19 / 28 / 29 / 48 in the same row, true
+  value 9). Removing divisors would strand the search on the harmonic.
+- **Reproduction limits**: the raw from the accident was discarded, so that frame could
+  not be reproduced. Synthetic input (random dots + gaussian blur) does not produce the
+  collapse — p=3's score ceiling is 0.25 while p=9's is 0.75. So this release is **a
+  guard against the observed failure pattern, not a root-cause isolation**. It reacts
+  only to the observable axis-mismatch signal, so healthy images are unaffected.
+- 2 regression tests: a synthetic frame with starved vertical edges, and a small-block
+  (9px) round trip. 78 tests OK.
 
-## v1.56.4 "Sol Edge Runner" - 피치를 축별로 잰다 (가로/세로 블록 크기가 다를 수 있다)
+## v1.56.4 "Sol Edge Runner" - Measure pitch per axis (horizontal/vertical block sizes can differ)
 
-`detect_pixel_grid` 가 한 피치를 두 축에 강제했다. 비균등 비율로 리스케일된 생성물은 가로 블록과
-세로 블록의 크기가 어긋난다 — 솔벨 주인공 chibi 베이스는 가로 30.38px / 세로 30.92px 다.
-한 피치(30.92)를 두 축에 쓰면 세로는 맞고 **가로만 통째로 미끄러진다**: 실제 블록 경계가 격자선
-위에 얹힌 비율 가로 11.7% / 세로 92.6%. 그 결과 스냅한 얼굴이 부서졌다.
+`detect_pixel_grid` forced one pitch onto both axes. Output rescaled at non-uniform
+ratios has mismatched horizontal and vertical block sizes — the Sol Valley protagonist
+chibi base is 30.38px horizontal / 30.92px vertical. Using one pitch (30.92) on both
+axes gets the vertical right while **the horizontal slides wholesale**: the fraction of
+real block boundaries sitting on grid lines was 11.7% horizontal / 92.6% vertical. The
+snapped face shattered as a result.
 
-- `detect_pixel_grid` 반환형이 `((pitch_x, pitch_y), (phase_x, phase_y))` 로 바뀐다.
-- `grid_snap_downscale(pitch=...)` 는 스칼라와 (가로, 세로) 쌍을 모두 받는다 (기존 호출 호환).
-- 씨앗은 **축별 씨앗 + 두 축 합산 씨앗** 을 모두 후보로 둔다. 축별만 쓰면 한 축의 정수 검출이
-  노이즈에 흔들려 약수로 빠지고(참 17.24 -> 씨앗 9), 합산만 쓰면 축마다 블록이 다른 그림에서
-  한 축의 참값이 ±0.75 정밀화 창 밖에 놓인다. 둘 다 두면 두 실패가 모두 막힌다.
-- 정수 스코어러를 `_axis_int_score` / `_axis_int_seed` 로 분리해 `detect_pixel_pitch` 와 공유한다.
-- **측정 (솔벨 chibi 베이스)**: 가로 정렬률 11.7% -> 75.7%. 세로 92.6% 유지.
-- **회귀 테스트**: 가로 24 / 세로 30 으로 비균등 업스케일한 도트에서 축별 피치를 각각 잡고,
-  스냅하면 원본 논리 도트가 픽셀 단위로 복원된다. v1.56.3 은 이 테스트에서 실패한다.
+- `detect_pixel_grid` now returns `((pitch_x, pitch_y), (phase_x, phase_y))`.
+- `grid_snap_downscale(pitch=...)` accepts both a scalar and an (x, y) pair (existing
+  calls stay compatible).
+- Seeds include **both per-axis seeds and the two-axis combined seed**. Per-axis alone
+  lets one axis's integer detection wobble into a divisor on noise (true 17.24 -> seed
+  9); combined alone puts one axis's true value outside the ±0.75 refinement window on
+  images whose blocks differ per axis. Keeping both blocks both failures.
+- The integer scorer is split into `_axis_int_score` / `_axis_int_seed`, shared with
+  `detect_pixel_pitch`.
+- **Measured (Sol Valley chibi base)**: horizontal alignment 11.7% -> 75.7%; vertical
+  stays at 92.6%.
+- **Regression test**: on dots upscaled non-uniformly at 24 horizontal / 30 vertical,
+  the per-axis pitches are each detected and snapping restores the original logical
+  dots pixel-exactly. v1.56.3 fails this test.
 - 76 tests OK.
 
-## v1.56.3 "Sol Edge Runner" - hotfix: 등분 격자가 bbox 자투리에 늘어나던 회귀
+## v1.56.3 "Sol Edge Runner" - hotfix: even-division grid stretched over bbox remainder
 
-v1.56.2 가 넣은 `_grid_edges` 의 "length 를 셀 개수로 등분" 이 스프라이트 bbox 가 블록의
-정수배가 아닐 때 격자를 늘렸다. 솔벨 주인공 chibi 베이스에서 발견 — bbox 849px = 27.46 블록
-(AA 프린지), 27 등분하면 셀 폭 31.44px 로 참 블록 30.92px 와 칸마다 0.52px 어긋나고 오른쪽
-끝에서 반 블록이 밀려 스냅 결과의 얼굴이 부서졌다(눈 하나 소실, 아웃라인 파편화).
+v1.56.2's "divide the length evenly by cell count" in `_grid_edges` stretched the grid
+whenever the sprite bbox is not an integer multiple of the block. Found on the Sol
+Valley protagonist chibi base — bbox 849px = 27.46 blocks (AA fringe); dividing by 27
+gives 31.44px cells, off by 0.52px per cell from the true 30.92px block, drifting half
+a block by the right edge — and the snapped face shattered (one eye lost, outline
+fragmented).
 
-- **등분은 body 가 피치의 정수배에 가까울 때만**(잔차 <= 블록의 1/4) 쓴다. 이때는 피치 측정의
-  미세오차(16.00 을 15.96 으로 재는 것)를 흡수해 격자가 딱 떨어진다.
-- 정수배가 아니면 격자선을 `lead + i*pitch` 로 직접 놓고 남는 자투리는 **마지막 셀 하나가 흡수**한다.
-  어느 쪽이든 피치를 누적 덧셈하지 않아 부동소수 오차는 쌓이지 않는다.
-- **회귀 테스트**: bbox 오른쪽에 블록의 정수배가 아닌 자투리(1/7/14/20px)를 붙여도 마지막 셀을
-  뺀 모든 셀 폭이 참 피치 ±1px 여야 한다. v1.56.2 는 이 테스트에서 실패한다.
-- 기존 소수 배율 왕복 테스트 전부 유지. 74 tests OK.
+- **Even division is used only when the body is close to an integer multiple of the
+  pitch** (residual <= 1/4 block). In that case it absorbs small pitch-measurement
+  error (measuring 16.00 as 15.96) so the grid lands exactly.
+- Otherwise grid lines are placed directly at `lead + i*pitch` and the leftover
+  remainder is **absorbed by the last cell alone**. Either way the pitch is never
+  accumulated by repeated addition, so floating-point error does not build up.
+- **Regression test**: with non-integer remainders (1/7/14/20px) appended to the right
+  of the bbox, every cell width except the last must be within ±1px of the true pitch.
+  v1.56.2 fails this test.
+- All existing fractional-scale round-trip tests kept. 74 tests OK.
 
 ## v1.56.2 "Sol Edge Runner" - pixel-grid detection: fractional pitch, phase, divisor collapse
 
 Patch release in the Sol Edge Runner line. Three real bugs in `detect_pixel_pitch` / grid snapping, all found while rebuilding the Sol Valley protagonist base and all pinned by synthetic ground-truth tests (`tests/test_pitch_ground_truth.py`).
 
-- **참 피치가 자기 약수에게 졌다.** 창 폭이 `w = 1 if p >= 8 else 0` 이라, 창이 열린 참 피치(p>=8)는 우연 기대치가 3/p 로 부풀고 창이 닫힌 약수(p<8)는 1/p 만 물었다. 엣지가 격자에 100% 얹혀도 p=4(0.75) 가 p=8(0.625) 을 이겨서 k=8,10,12,14 가 정확히 k/2 로 붕괴했다. 창 폭을 모든 p 에 동일하게 고정하고 잉여류를 집합으로 세어(중복 합산 제거) 정수 검출 정확도 7/11 -> 11/11.
-- **피치를 소수로 잰다.** AI 가 그린 도트는 블록 폭이 정수로 떨어지지 않는다 (솔벨 주인공 base = 17.22px). 정수로 반올림하면 칸마다 오차가 쌓여 23칸 뒤에는 5.5px, 블록의 1/3 이 밀린다 — 셀 경계가 블록 한가운데를 지나 작은 디테일이 평균에 먹혔다. 새 `detect_pixel_grid()` 가 (소수 피치, 소수 위상) 을 내고, `_grid_edges()` 는 피치를 누적하는 대신 길이를 셀 개수로 등분한다: **측정은 소수, 결과는 항상 정수 격자.** 씨앗의 약수(2,3)도 후보로 재서 참 16.5 에서 배음 33 을 집던 문제를 막고, 정밀 탐색은 씨앗값 자체를 포함하며(예전엔 15.99/16.01 만 봐서 정확히 정수인 격자를 놓쳤다), 위상은 창의 기하 중심이 아니라 창 안 엣지의 가중 무게중심으로 잡는다(중심이면 완전 정렬 격자에서 반창만큼 밀렸다).
-- **큐레이션뷰 격자가 가짜였다.** 오버레이가 셀 픽셀마다 선을 그었지만 픽셀퍼펙트는 논리 픽셀 단위로 스냅한다 (`pp_scale = cell_height // logical_height`). founder_v4 는 64 셀에 logical 30 -> 실제 격자보다 정확히 2배 촘촘한 선을 보여줬다. 서버가 `pixelPerfect{logicalHeight, scale}` 를 payload 에 싣고 큐레이터가 그 간격으로 긋는다. 픽셀퍼펙트가 아닌 런은 스냅 격자가 없으므로 토글을 감춘다.
-- **측정 결과** (솔벨 주인공 base, 실제 블록 경계가 격자선 위에 얹힌 비율): 가로 30% -> 58%, 세로 5% -> 55%. 평균 오차 가로 2.10px -> 1.74px, 세로 5.04px -> 1.59px.
-- **회귀 테스트**: 소수 배율(12.0/14.35/16.0/16.2/17.24/20.0/23.7) 왕복 — 늘렸다 줄이면 원본 논리 도트가 돌아온다. 크기 복원 3/8 -> 8/8, 픽셀 완전복원 3/8 -> 6/8. (16.5 처럼 정확히 반픽셀 배율은 블록 경계가 화면 픽셀 한가운데에 걸려 잔차가 남는 원리적 한계.) 기존 62 테스트 전부 통과 — 정수 격자로 뽑은 기존 에셋은 출력이 바뀌지 않으므로 재추출 불필요.
+- **The true pitch lost to its own divisor.** The window width was `w = 1 if p >= 8 else 0`, so true pitches with an open window (p>=8) had their chance expectation inflated to 3/p while closed-window divisors (p<8) only carried 1/p. Even with edges 100% on the grid, p=4 (0.75) beat p=8 (0.625), so k=8,10,12,14 collapsed to exactly k/2. The window width is now identical for every p and residue classes are counted as sets (no double-counting): integer detection accuracy 7/11 -> 11/11.
+- **Pitch is measured fractionally.** AI-drawn pixel art does not have integer block widths (Sol Valley protagonist base = 17.22px). Rounding to an integer accumulates error per cell — 5.5px after 23 cells, a third of a block — so cell boundaries crossed block centers and small details were averaged away. The new `detect_pixel_grid()` produces a (fractional pitch, fractional phase) pair, and `_grid_edges()` divides the length evenly by cell count instead of accumulating the pitch: **fractional measurement, always-integer output grid.** Divisors (2,3) of the seed are also scored, stopping the harmonic 33 being picked at true 16.5; the refinement search includes the seed value itself (previously it only looked at 15.99/16.01 and missed exactly-integer grids); and phase comes from the weighted centroid of the edges inside the window, not the window's geometric center (which sat half a window off on perfectly aligned grids).
+- **The curation-view grid was fake.** The overlay drew a line per cell pixel, but pixel-perfect snaps in logical-pixel units (`pp_scale = cell_height // logical_height`). founder_v4 had 64px cells at logical 30 -> lines shown exactly 2x denser than the real grid. The server now ships `pixelPerfect{logicalHeight, scale}` in the payload and the curator draws at that spacing. Runs that are not pixel-perfect have no snap grid, so the toggle is hidden.
+- **Measured results** (Sol Valley protagonist base; fraction of real block boundaries sitting on grid lines): horizontal 30% -> 58%, vertical 5% -> 55%. Mean error horizontal 2.10px -> 1.74px, vertical 5.04px -> 1.59px.
+- **Regression tests**: fractional-scale (12.0/14.35/16.0/16.2/17.24/20.0/23.7) round trips — upscale then snap restores the original logical dots. Size recovery 3/8 -> 8/8, exact pixel restoration 3/8 -> 6/8. (Exact half-pixel scales like 16.5 put block boundaries in the middle of screen pixels, a principled residual limit.) All existing 62 tests pass — assets produced with integer grids have unchanged output, so no re-extraction is needed.
 
 ## v1.56.1 "Sol Edge Runner" - slice-sheet: variant grid sheets to per-cell standing cuts
 
