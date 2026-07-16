@@ -232,3 +232,82 @@ def test_padded_component_no_ghost_bottom_row() -> None:
     fixed = extract_module.grid_snap_downscale(tight, (pitch, pitch), True, noisy_phase)
     bbox = fixed.getbbox()
     assert bbox[3] - bbox[1] == blocks_h, f"ghost row survived: {fixed.size} bbox={bbox}"
+
+
+def test_fringe_does_not_inflate_grid() -> None:
+    """실사고 2026-07-17 회귀 (founder_v7 pp 부스러기/디테일 뭉개짐, 수홍 발견).
+
+    크로마 제거가 남긴 sub-128 AA 프린지가 any-alpha `getbbox()` 크롭에 포함되면
+    격자 원점이 프린지 폭만큼 밀리고 `_grid_edges` 셀 개수 반올림이 한 칸 는다 —
+    모든 셀이 참 블록을 빗겨 샘플링해 색이 섞이고, 실루엣 밖 부스러기 열이 응고한다.
+    tighten_components 는 solid alpha bbox(α>=128) 로 조여 프린지를 격자 계산
+    밖으로 밀어낸다 (grid_snap_downscale/binarize_alpha 와 동일 불투명 기준).
+    """
+    pitch = 12
+    blocks_w, blocks_h = 12, 10
+    lut = [(200, 60, 60), (60, 200, 60), (60, 60, 200), (220, 160, 40),
+           (240, 230, 210), (90, 50, 20), (20, 20, 20), (120, 160, 220)]
+
+    def block_color(bx: int, by: int) -> tuple[int, int, int]:
+        return lut[(bx * 7 + by * 3) % len(lut)]
+
+    solid_w, solid_h = blocks_w * pitch, blocks_h * pitch
+    fringe_left, fringe_top = 7, 5
+    comp = Image.new("RGBA", (fringe_left + solid_w, fringe_top + solid_h), (0, 0, 0, 0))
+    for y in range(solid_h):
+        for x in range(solid_w):
+            comp.putpixel((fringe_left + x, fringe_top + y), block_color(x // pitch, y // pitch) + (255,))
+    for y in range(comp.height):  # 남는 자리 전부 문턱 미만(α=90) 프린지
+        for x in range(comp.width):
+            if comp.getpixel((x, y))[3] == 0:
+                comp.putpixel((x, y), (30, 30, 30, 90))
+
+    def snap(image: Image.Image) -> Image.Image:
+        grid, phase = extract_module.detect_pixel_grid(image)
+        return extract_module.grid_snap_downscale(image, grid, True, phase)
+
+    def exact(out: Image.Image) -> bool:
+        return out.size == (blocks_w, blocks_h) and all(
+            out.getpixel((bx, by))[:3] == block_color(bx, by)
+            for by in range(blocks_h) for bx in range(blocks_w))
+
+    # 버그 경로 재현: any-alpha bbox 크롭(프린지 포함)은 격자가 부푼다 (테스트가 무는지 자기검증)
+    buggy = snap(comp.crop(comp.getbbox()))
+    assert not exact(buggy), f"buggy path unexpectedly clean: {buggy.size}"
+
+    tight = extract_module.tighten_components([comp])[0]
+    assert tight.size == (solid_w, solid_h), f"tighten kept fringe: {tight.size}"
+    fixed = snap(tight)
+    assert exact(fixed), f"solid-bbox snap not exact: {fixed.size}"
+
+
+def test_shared_palette_preserves_rare_saturated_color() -> None:
+    """실사고 2026-07-17 회귀 (founder_v7 금색 머리끈·목걸이 실종, 수홍 발견).
+
+    run-wide 팔레트 기본 24 는 다상태 배치에서 희소 포인트 컬러를 굶겼다 —
+    population median-cut 이 큰 색군들을 쫓느라 0.2% 금색 클러스터를 이웃 박스에
+    흡수한다 (실측: founder 36상태 배치 24색에서 금색 최근접 ΔRGB 59, 48색 5.5).
+    기본 48 상향의 회귀 가드: 뚜렷한 색군 30개 + 희소 금색에서 기본 크기가
+    금색을 보존해야 한다.
+    """
+    frame = Image.new("RGBA", (128, 75), (0, 0, 0, 0))
+    clusters = [((k * 53) % 200, (k * 97) % 200, (k * 151) % 200) for k in range(30)]
+    i = 0
+    for y in range(75):
+        for x in range(128):
+            c = clusters[min(29, (y // 15) * 6 + (x // 22))]
+            j = (i * 31) % 17 - 8
+            frame.putpixel((x, y), tuple(max(0, min(255, v + j)) for v in c) + (255,))
+            i += 1
+    gold = (240, 158, 45)
+    for y in range(4):
+        for x in range(4):
+            frame.putpixel((x, y), gold + (255,))
+
+    def nearest(palette: list, c: tuple) -> float:
+        return min(((e[0] - c[0]) ** 2 + (e[1] - c[1]) ** 2 + (e[2] - c[2]) ** 2) ** 0.5 for e in palette)
+
+    starved = extract_module.build_shared_palette([frame], 24)
+    assert nearest(starved, gold) > 30, "starvation setup lost its bite — recalibrate the fixture"
+    healthy = extract_module.build_shared_palette([frame], 48)
+    assert nearest(healthy, gold) <= 8, f"default-size palette still starves gold: {nearest(healthy, gold):.1f}"

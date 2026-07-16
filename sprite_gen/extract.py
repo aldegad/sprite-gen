@@ -1222,8 +1222,20 @@ def _pitch_pair(pitch: float | tuple[float, float]) -> tuple[float, float]:
     return float(pitch), float(pitch)
 
 
+def solid_alpha_bbox(image: Image.Image, threshold: int = 128) -> tuple[int, int, int, int] | None:
+    """α>=threshold 픽셀만의 bbox — AA 프린지(반투명 가장자리)를 제외한 실 콘텐츠 범위.
+
+    픽셀퍼펙트 경로의 불투명 판정(α>=128: `grid_snap_downscale`/`binarize_alpha`/
+    `apply_palette`)과 같은 기준이어야 한다. any-alpha `getbbox()` 로 격자를 치면
+    프린지가 bbox 를 부풀려 `_grid_edges` 의 셀 개수 반올림이 한 칸 늘고, 내용이
+    프린지뿐인 가장자리 셀이 50% 규칙을 통과해 실루엣 밖 부스러기 픽셀로 굳는다
+    (실사고 2026-07-17: founder_v7 150 프레임 중 141 프레임 폭 +1~4px, 수홍 발견 —
+    회귀 테스트 test_pixel_snap.py::test_fringe_does_not_inflate_grid)."""
+    return image.convert("RGBA").split()[3].point(lambda a: 255 if a >= threshold else 0).getbbox()
+
+
 def tighten_components(images: list[Image.Image]) -> list[Image.Image]:
-    """픽셀퍼펙트 스냅 전에 컴포넌트를 알파 bbox 로 타이트하게 조인다.
+    """픽셀퍼펙트 스냅 전에 컴포넌트를 실 콘텐츠(solid alpha) bbox 로 타이트하게 조인다.
 
     `_grid_edges` 의 lead-스냅(위상 < 피치의 1/4 이면 0 으로)은 컴포넌트가 bbox 로
     잘려 블록 경계에서 시작한다는 전제다. `component_group_image` 는 사방 4px
@@ -1232,9 +1244,12 @@ def tighten_components(images: list[Image.Image]) -> list[Image.Image]:
     경계에서 쪼개진 바닥 블록 + 문턱 근처 알파(~134) 프린지가 유령 픽셀 한 줄로
     태어난다 (실사고 2026-07-14: down_idle blink 발밑 1px 돌출, 수홍 발견 —
     회귀 테스트 test_pixel_snap.py::test_padded_component_no_ghost_bottom_row).
-    """
+    크롭 기준은 `solid_alpha_bbox` — any-alpha bbox 는 프린지째 격자를 쳐서 같은
+    유령 픽셀을 사방 가장자리에 만든다 (해당 docstring 참조). 전부 프린지인
+    퇴화 컴포넌트만 any-alpha bbox 로 폴백한다 (어차피 binarize 에서 빈 프레임)."""
     return [
-        component.crop(box) if (box := component.getbbox()) else component
+        component.crop(box)
+        if (box := (solid_alpha_bbox(component) or component.getbbox())) else component
         for component in images
     ]
 
@@ -1292,7 +1307,9 @@ def binarize_alpha(image: Image.Image) -> Image.Image:
 
 def pixel_snap_logical(image: Image.Image, pitch: int, logical_width: int, logical_height: int, detail_bias: bool = True) -> Image.Image:
     sprite = image
-    bbox = sprite.getbbox()
+    # 격자 크롭은 solid bbox 기준 — any-alpha 는 프린지가 셀 개수를 부풀린다
+    # (`solid_alpha_bbox` docstring 의 부스러기 메커니즘과 동일).
+    bbox = solid_alpha_bbox(sprite) or sprite.getbbox()
     if bbox is not None:
         sprite = sprite.crop(bbox)
     if pitch >= 2:
@@ -2147,7 +2164,12 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         pp_scale = max(1, usable_height // max(1, logical_height))
     logical_width = max(1, cell_width // pp_scale)
     pp_detail_bias = bool(fit_config.get("detail_bias", True))
-    palette_size = int(fit_config.get("palette_size", 24))
+    # 기본 48 (24 에서 상향, 2026-07-17): run-wide 팔레트는 배치의 모든 행이 나눠 쓴다.
+    # 24 는 다상태 배치(솔벨 founder 36상태×150프레임)에서 희소 포인트 컬러를 굶겼다 —
+    # population median-cut 이 금색(머리끈·목걸이) 클러스터를 갈색 박스에 흡수해
+    # 디테일이 통째로 사라졌다 (실측: 24색 배치 팔레트에서 금색 최근접 ΔRGB 59,
+    # 48색이면 5.5). 레트로 감축이 필요한 런은 request `fit.palette_size` 로 명시한다.
+    palette_size = int(fit_config.get("palette_size", 48))
     # 원본 화질 표시 쌍둥이(orig/)의 배율: 같은 legacy fit 을 S×셀에 앉혀 확대 흐림을
     # 없앤다. 4배(상한 1024px)로 캡. 셀이 이미 커서 S<=1 이면 굽지 않는다(.plain 로 충분).
     plain_display_scale = max(1, min(4, 1024 // max(1, cell_width, cell_height)))
