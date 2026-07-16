@@ -144,6 +144,11 @@ def _run_dir_mode_guarded(args, run_dir):
             images.append(frame)
         if not images:
             continue
+        scale = max(1, int(getattr(args, "scale", 1) or 1))
+        if scale > 1:
+            # 니어리스트 정수배 — 픽셀 데이터는 그대로, 뷰어가 확대 보간으로 뭉개는 것만 막는다
+            images = [im.resize((im.width * scale, im.height * scale), Image.Resampling.NEAREST)
+                      for im in images]
         out_path = out_root / f"{state}.gif"
         duration_ms = max(1, round(1000.0 / fps))
         save_clean_gif(images, out_path, duration_ms=duration_ms, loop=args.loop_count, alpha_threshold=args.alpha_threshold)
@@ -181,6 +186,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frame-order", type=parse_frame_order, help="1-based order, for example 2,1,5,3")
     parser.add_argument("--run-dir", type=Path, help="run dir: export one GIF per state from sprite-request + curation")
     parser.add_argument("--state", help="run-dir mode: export only this state (default: all states)")
+    parser.add_argument("--scale", type=int, default=1,
+                        help="integer NEAREST upscale baked into the GIF (review/share crispness; "
+                        "the pixel data is unchanged, viewers just stop blurring the upscale)")
     parser.add_argument("--out-dir", type=Path, help="output dir for --run-dir mode (default <run-dir>/exports)")
     parser.add_argument("--output", type=Path, help="output GIF (required unless --run-dir)")
     parser.add_argument("--delay-ticks", type=int, default=17, help="GIF delay in 1/100 second ticks")

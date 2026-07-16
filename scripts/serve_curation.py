@@ -360,8 +360,25 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         "iso": request.get("iso"),
         "lang": CurationHandler.lang,
         "hasAtlas": (run_dir / "sprite-sheet-alpha.png").is_file(),
+        # 최종 산출물 섹션 (뷰 맨 아래, 아틀라스+manifest 좌우) — 파일이 실재할 때만.
+        # 아틀라스는 다운로드/합성 시점 산출물이라 mtime 을 실어 시점을 표시한다.
+        "atlas": _atlas_info(run_dir),
         "fitPixelPerfect": bool((request.get("fit") or {}).get("pixel_perfect")),
         "contract": contract,
+    }
+
+
+def _atlas_info(run_dir: Path) -> dict | None:
+    """최종 아틀라스 + 런타임 manifest 존재/시점 정보 (뷰 하단 섹션용)."""
+    atlas_path = run_dir / "sprite-sheet-alpha.png"
+    if not atlas_path.is_file():
+        return None
+    mtime = int(atlas_path.stat().st_mtime)
+    manifest_path = run_dir / "manifest.json"
+    return {
+        "url": _url("run", "sprite-sheet-alpha.png") + f"?v={mtime}",
+        "mtime": mtime,
+        "manifestUrl": (_url("run", "manifest.json") + f"?v={mtime}") if manifest_path.is_file() else None,
     }
 
 
@@ -476,8 +493,11 @@ def build_download(run_dir: Path, kind: str) -> tuple[bytes, str] | dict:
         return _zip_paths(run_dir, sorted(out.glob("*.gif"))), f"{character}-gifs.zip"
     if kind.startswith("gif:"):
         # 한 줄(state) 단건 — 현재 큐레이션 합성 그대로, zip 없이 GIF 원파일로.
-        state = kind[len("gif:"):]
-        result = run_export_gif(run_dir, state=state)
+        # 검수/공유용이라 4x 니어리스트를 기본으로 굽는다 (뷰어 확대 보간 뭉갬 방지;
+        # 픽셀 데이터는 그대로). ?scale=1 로 원배율. 게임은 아틀라스를 쓰므로 무관.
+        state, _, scale_part = kind[len("gif:"):].partition(":")
+        scale = max(1, min(8, int(scale_part or 4)))
+        result = run_export_gif(run_dir, state=state, scale=scale)
         if not result["ok"]:
             return result
         gif_path = run_dir / "exports" / f"{state}.gif"
@@ -517,13 +537,13 @@ def run_export(run_dir: Path) -> dict:
     return result
 
 
-def run_export_gif(run_dir: Path, state: str | None = None) -> dict:
+def run_export_gif(run_dir: Path, state: str | None = None, scale: int = 1) -> dict:
     """Export clean transparent GIF(s) under <run-dir>/exports/.
 
     Reuses compose_sprite_gif.py --run-dir, which applies the same curation
     selection/order/transform as the atlas compose (curation.py SSoT).
     `state` limits to one row (`--state`) — the per-row download button path."""
-    extra = ["--state", state] if state else []
+    extra = (["--state", state] if state else []) + (["--scale", str(scale)] if scale > 1 else [])
     result = _run_script("compose_sprite_gif.py", run_dir, *extra)
     if result["ok"] and result["stdout"]:
         try:
@@ -598,8 +618,10 @@ class CurationHandler(BaseHTTPRequestHandler):
         if path.startswith("/download/"):
             kind = path[len("/download/"):]
             if kind == "gif":
-                state = (parse_qs(urlparse(self.path).query).get("state") or [""])[0]
-                kind = f"gif:{state}"
+                query = parse_qs(urlparse(self.path).query)
+                state = (query.get("state") or [""])[0]
+                scale = (query.get("scale") or ["4"])[0]
+                kind = f"gif:{state}:{scale}"
             try:
                 maybe_heal(self.run_dir)
                 built = build_download(self.run_dir, kind)
