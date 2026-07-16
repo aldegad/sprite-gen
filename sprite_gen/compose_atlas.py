@@ -91,8 +91,22 @@ def _run(args: argparse.Namespace):
     # logical grid (plain rows keep the smooth BICUBIC bake — they are not grid art).
     snap_scale = pixel_snap_scale(request)
 
-    max_frames = max(len(ordered) for ordered, _transforms in plans.values())
-    atlas = Image.new("RGBA", (max_frames * cell_width, len(states) * cell_height), (0, 0, 0, 0))
+    # 아틀라스 셀 재사용 (수홍 승인 2026-07-16): 같은 (원본 프레임, 변형, 픽셀편집)으로
+    # 구워지는 인스턴스는 칸 하나를 공유한다 — 프레임 복제·루프딜레이가 텍스처를
+    # 늘리지 않는다. frame_layout.rows 의 rect 목록은 인스턴스(재생) 순서 그대로이고
+    # 재사용 시 같은 rect 가 반복된다 (Aseprite JSON 과 동형 패턴 — 소비자는 지금처럼
+    # 프레임 인덱스 → rect 샘플링만 하면 된다).
+    def _instance_key(state: str, frame_index: int) -> tuple:
+        source_index = source_frame_index(curation, state, frame_index, state_frame_total(request, state))
+        transform_key = json.dumps(plans[state][1].get(frame_index), sort_keys=True)
+        ops_key = json.dumps(state_pixel_ops(curation, state).get(frame_index), sort_keys=True)
+        return (source_index, transform_key, ops_key)
+
+    columns = max(
+        max(1, len({_instance_key(state, i) for i in plans[state][0]}))
+        for state in states
+    )
+    atlas = Image.new("RGBA", (columns * cell_width, len(states) * cell_height), (0, 0, 0, 0))
     frame_layout: dict[str, Any] = {
         "sheetWidth": atlas.width,
         "sheetHeight": atlas.height,
@@ -103,7 +117,7 @@ def _run(args: argparse.Namespace):
     animation: dict[str, Any] = {
         "cellWidth": cell_width,
         "cellHeight": cell_height,
-        "columns": max_frames,
+        "columns": columns,
         "rows": {},
     }
     errors: list[str] = []
@@ -114,7 +128,14 @@ def _run(args: argparse.Namespace):
         ordered, transforms = plans[state]
         variant = variants[state]
         frames = []
-        for column, frame_index in enumerate(ordered):
+        baked: dict[tuple, dict[str, Any]] = {}  # instance key -> shared rect
+        for frame_index in ordered:
+            key = _instance_key(state, frame_index)
+            reused = baked.get(key)
+            if reused is not None:
+                frames.append(reused)
+                cells.append({"state": state, "frame": frame_index, "reuses": True, **reused})
+                continue
             # 파일 위치의 SSoT 는 manifest row 의 files — 패턴 조립 금지 (택소노미/flat 공용).
             # 복제 인스턴스는 원본 프레임 파일을 읽는다 (변형/픽셀편집은 인스턴스 인덱스 소유).
             source_index = source_frame_index(curation, state, frame_index, state_frame_total(request, state))
@@ -132,18 +153,24 @@ def _run(args: argparse.Namespace):
             nontransparent = alpha_nonzero_count(frame)
             if nontransparent < args.min_used_pixels:
                 errors.append(f"{state} frame {frame_index} is too sparse ({nontransparent})")
-            left = column * cell_width
+            left = len(baked) * cell_width
             top = row_index * cell_height
             atlas.alpha_composite(frame, (left, top))
             rect = {"x": left, "y": top, "w": cell_width, "h": cell_height}
+            baked[key] = rect
             frames.append(rect)
             cells.append({"state": state, "frame": frame_index, "nontransparent_pixels": nontransparent, **rect})
 
         frame_layout["rows"][state] = frames
+        # durations_ms: 프레임별 표시 시간 계약 (지금은 fps 등간격 — 프레임별 편집
+        # UI 가 생기면 여기만 비등간격으로 채워진다). 소비자는 이 배열이 있으면
+        # fps 대신 이것을 따른다.
+        duration_ms = max(1, round(1000.0 / (float(entry.get("fps", 6)) or 6.0)))
         animation["rows"][state] = {
             "row": row_index,
             "frames": len(ordered),
             "fps": int(entry.get("fps", 6)),
+            "durations_ms": [duration_ms] * len(ordered),
             "loop": bool(entry.get("loop", True)),
             "frame_variant": variant,
         }

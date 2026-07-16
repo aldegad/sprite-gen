@@ -1123,6 +1123,11 @@ function makeScaleScrub(stateName, idx) {
     '<button type="button" class="ghost ss-step" data-dir="1" aria-label="bigger">' +
     '<svg viewBox="0 0 10 10" width="9" height="9"><path d="M2 5h6M5 2v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
   const clamp = (v) => Math.min(SCALE_MAX, Math.max(SCALE_MIN, v));
+  // ± 연타가 스테이지 더블클릭(확대 모달 열기)으로 새지 않게 스크러버 안의
+  // 포인터/클릭 계열 이벤트는 전부 여기서 끊는다 (수홍 지적 2026-07-16).
+  for (const type of ["pointerdown", "click", "dblclick"]) {
+    wrap.addEventListener(type, (ev) => ev.stopPropagation());
+  }
   wrap.querySelectorAll(".ss-step").forEach((btn) => {
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
     btn.addEventListener("click", () => {
