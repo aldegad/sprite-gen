@@ -930,3 +930,60 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .gif-btn:hover { color: var(--fg, #0f172a); border-color: var(--fg-dim, #94a3b8); }
 .gif-btn:disabled { opacity: 0.5; cursor: default; }
 .gif-btn svg { display: block; }
+
+/* 최종 아틀라스 섹션 — 페이지 맨 아래: 시트(좌) | 런타임 manifest(우) */
+.final-atlas .atlas-split {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 10px;
+}
+.final-atlas .atlas-sheet {
+  flex: 0 1 52%;
+  min-width: 0;
+  display: block;
+  background:
+    repeating-conic-gradient(rgba(148, 163, 184, 0.18) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 8px;
+  padding: 8px;
+}
+.final-atlas .atlas-sheet img {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+}
+.final-atlas .atlas-doc {
+  flex: 1 1 48%;
+  min-width: 0;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.final-atlas .atlas-doc-head {
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: var(--fg-dim, #64748b);
+  border-bottom: 1px solid var(--line, #e2e8f0);
+  background: var(--bg-soft, #f8fafc);
+}
+.final-atlas .atlas-doc-json {
+  margin: 0;
+  padding: 10px;
+  max-height: 420px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre;
+}
+.final-atlas .atlas-pending {
+  margin-top: 10px;
+  padding: 18px;
+  border: 1px dashed var(--line, #cbd5e1);
+  border-radius: 8px;
+  color: var(--fg-dim, #64748b);
+  font-size: 12.5px;
+}
+.tree-node.atlas-node img { image-rendering: pixelated; }

@@ -48,7 +48,10 @@ const STR = {
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
-    rowGif: "GIF", tRowGif: "download this row's current composed sequence as a GIF (live curation state)",
+    rowGif: "GIF", tRowGif: "download this row's current composed sequence as a GIF (4x nearest upscale for crisp viewing — pixel data unchanged)",
+    treeAtlas: "final atlas", atlasDoc: "manifest.json (runtime doc)",
+    atlasPending: "not composed yet — created when you download the atlas",
+    atlasStamp: (d) => `computed ${d}`, tTreeAtlas: "scroll to the final atlas section",
     rowGifDone: (s) => `${s}.gif downloaded`,
     baking: "computing…", composeDone: "atlas downloaded", composeFail: "download failed: ",
     exporting: "computing…", exportFail: "download failed: ",
@@ -97,7 +100,7 @@ const STR = {
     treeAnchorOrigin: (d) => `idle row · ${d} anchor source`,
     reloadBanner: "run updated — click to reload the view",
     tDupBtn: "duplicate this frame — a new card with its own transform (bakes the same source image)",
-    cloneBadge: (src) => `#${src} copy`,
+    cloneBadge: (name) => `${name} copy`,
     tCloneBadge: "duplicated instance — reads the source frame's image; its transform/pixel edits are its own. The archive button removes the copy entirely.",
     curationDropped: (states, backup) =>
       `frames were regenerated — previous curation for ${states.join(", ")} no longer applies and was reset. ` +
@@ -121,7 +124,10 @@ const STR = {
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
-    rowGif: "GIF", tRowGif: "이 줄의 현재 합성 시퀀스를 GIF 로 다운로드 (라이브 큐레이션 상태 그대로)",
+    rowGif: "GIF", tRowGif: "이 줄의 현재 합성 시퀀스를 GIF 로 다운로드 — 선명하게 보이도록 4배 니어리스트로 굽는다 (픽셀 데이터는 그대로)",
+    treeAtlas: "최종 아틀라스", atlasDoc: "manifest.json (런타임 문서)",
+    atlasPending: "아직 합성 전 — 아틀라스 다운로드를 누르면 계산돼 생성됩니다",
+    atlasStamp: (d) => `${d} 계산본`, tTreeAtlas: "최종 아틀라스 섹션으로 스크롤",
     rowGifDone: (s) => `${s}.gif 다운로드 완료`,
     baking: "계산 중…", composeDone: "아틀라스 다운로드 완료", composeFail: "다운로드 실패: ",
     exporting: "계산 중…", exportFail: "다운로드 실패: ",
@@ -170,7 +176,7 @@ const STR = {
     treeAnchorOrigin: (d) => `idle 행 · ${d} 앵커 원천`,
     reloadBanner: "런이 갱신됐어 — 클릭해서 새로고침",
     tDupBtn: "이 프레임 복제 — 자기 변형을 따로 갖는 새 카드 (같은 원본 이미지를 굽는다)",
-    cloneBadge: (src) => `#${src} 복제`,
+    cloneBadge: (name) => `${name} 복제`,
     tCloneBadge: "복제 인스턴스 — 원본 프레임 이미지를 읽고, 변형/픽셀편집은 이 카드 것. 보관 버튼은 복제를 완전히 제거한다.",
     curationDropped: (states, backup) =>
       `프레임이 재생성돼 ${states.join(", ")} 의 이전 큐레이션이 더 이상 맞지 않아 초기화됐어. ` +
@@ -323,6 +329,15 @@ function frameUrl(stateName, frame) {
 // 복제 인스턴스 (entries[state].clones = {복제idx: 원본idx}) 인식 프레임 조회.
 // 복제 카드는 원본의 frame 객체(이미지 URL/크기)를 빌리되 자기 인덱스로 표시된다.
 // 서버/스키마 계약: 파일은 원본을 읽고, 변형/픽셀편집/순서는 복제 인덱스 소유.
+// 프레임의 유니크 표시명: 테이크 라벨(blink#2) 우선, 없으면 #인덱스.
+// 라벨은 원본(primary) 프레임에선 비어 있어 유니크하지 않지만, 인덱스는 줄 안에서
+// 항상 유니크하므로 이 조합이 카드 표시명의 SSoT 다 (복제 배지도 이걸 가리킨다).
+function frameDisplayName(stateName, idx) {
+  const st = run.states.find((s) => s.name === stateName);
+  const f = st && st.frames.find((x) => x.index === idx && x.clone === undefined);
+  return f && f.label ? f.label : `#${idx}`;
+}
+
 function cloneSrc(stateName, idx) {
   const e = entries[stateName];
   const src = e && e.clones ? e.clones[idx] : undefined;
@@ -1347,13 +1362,65 @@ function treeNode(label, note, thumbUrl, targetState, extra) {
     node.addEventListener("click", () => {
       const section = targetState === "__base__"
         ? document.querySelector(".base-row")
-        : document.querySelector(`.state[data-state="${cssEscape(targetState)}"]`);
+        : targetState === "__atlas__"
+          ? document.getElementById("final-atlas")
+          : document.querySelector(`.state[data-state="${cssEscape(targetState)}"]`);
       if (!section) return;
       section.scrollIntoView({ behavior: "smooth", block: "start" });
       flashSection(section);
     });
   }
   return node;
+}
+
+// --- 최종 아틀라스 섹션 (페이지 맨 아래): 아틀라스 시트 | manifest.json 좌우 ------
+// 아틀라스는 다운로드/합성 시점의 산출물이라 계산 시각을 함께 표시한다 — 큐레이션을
+// 더 만졌으면 다음 다운로드가 다시 계산한다 (버튼 = 라이브 상태의 다운로드 계약).
+async function renderFinalAtlas(info) {
+  let section = document.getElementById("final-atlas");
+  if (!section) {
+    section = document.createElement("div");
+    section.id = "final-atlas";
+    section.className = "state final-atlas";
+    document.getElementById("states").appendChild(section);
+  }
+  if (!info) {
+    section.innerHTML =
+      `<div class="state-head"><span class="name">${t("treeAtlas")}</span></div>` +
+      `<div class="atlas-pending">${t("atlasPending")}</div>`;
+    return;
+  }
+  const stamp = STR[lang].atlasStamp(new Date(info.mtime * 1000).toLocaleString());
+  let docHtml = "";
+  if (info.manifestUrl) {
+    try {
+      const res = await fetch(info.manifestUrl);
+      const doc = await res.json();
+      docHtml = `<pre class="atlas-doc-json">${escapeHtml(JSON.stringify(doc, null, 2))}</pre>`;
+    } catch {
+      docHtml = `<pre class="atlas-doc-json">manifest.json 읽기 실패</pre>`;
+    }
+  }
+  section.innerHTML =
+    `<div class="state-head"><span class="name">${t("treeAtlas")}</span>` +
+    `<span class="meta">sprite-sheet-alpha.png · ${escapeHtml(stamp)}</span></div>` +
+    `<div class="atlas-split">` +
+    `<a class="atlas-sheet" href="${escapeHtml(info.url)}" target="_blank">` +
+    `<img src="${escapeHtml(info.url)}" alt="final atlas" /></a>` +
+    (docHtml
+      ? `<div class="atlas-doc"><div class="atlas-doc-head">${t("atlasDoc")}</div>${docHtml}</div>`
+      : "") +
+    `</div>`;
+}
+
+// 다운로드가 아틀라스/manifest 를 다시 계산했을 수 있으니 섹션을 최신 파일로 갱신
+async function refreshFinalAtlas() {
+  const now = Math.floor(Date.now() / 1000);
+  renderFinalAtlas({
+    url: `/run/sprite-sheet-alpha.png?v=${now}`,
+    mtime: now,
+    manifestUrl: `/run/manifest.json?v=${now}`,
+  });
 }
 
 // 이동한 대상 패널 하이라이트: 스크롤이 끝난 뒤 따닥 두 번 깜빡이고 사라진다.
@@ -1490,6 +1557,9 @@ function renderPipelineTree() {
     const holder = liWith(chainHost);
     holder.appendChild(rows);
   }
+  // 체인의 종착지 = 최종 아틀라스 (클릭 → 맨 아래 섹션으로 스크롤)
+  liWith(chainUl, treeNode(t("treeAtlas"), run.atlas ? null : t("treePending"),
+    run.atlas ? run.atlas.url : false, "__atlas__", "atlas-node"));
 
   // ── 파일 블록: 폴더 뼈대 (어디에 저장되는가) ──────────────────────────────
   const fileUl = document.createElement("ul");
@@ -1805,10 +1875,11 @@ function renderCard(state, frame) {
     : `<div class="missing-label">${state.rawPresent ? t("missingRawWait") : t("missingPending")}</div>`;
 
   const isClone = frame.clone !== undefined;
-  const shortLabel = isClone ? STR[lang].cloneBadge(frame.clone) : (frame.label ? frame.label : `#${frame.index}`);
+  const srcName = isClone ? frameDisplayName(state.name, frame.clone) : null;
+  const shortLabel = isClone ? STR[lang].cloneBadge(srcName) : (frame.label ? frame.label : `#${frame.index}`);
   // 풀네임(복사 대상) — 에이전트가 그대로 집어가도록 런-상대 파일 경로 + 라벨.
   const relPath = (frame.url || "").replace(/^\/run\//, "");
-  const fullName = isClone ? `#${frame.clone} 복제 · ${relPath}` : [frame.label, relPath].filter(Boolean).join(" · ") || shortLabel;
+  const fullName = isClone ? `${srcName} 복제 · ${relPath}` : [frame.label, relPath].filter(Boolean).join(" · ") || shortLabel;
   const titleCls = isClone ? "idx clone-badge" : "idx";
   const title = `<span class="${titleCls}" data-tip="${escapeHtml(fullName)}" data-tip-copy>${escapeHtml(shortLabel)}</span>`;
   // 아이콘 SVG — 이모지 대신 라인 아이콘 (플랫폼별 렌더 편차·저품질 방지)
@@ -1882,6 +1953,22 @@ function renderCard(state, frame) {
     if (dupBtn) {
       dupBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
       dupBtn.addEventListener("click", () => duplicateFrame(state.name, frame.index));
+    }
+    const cloneBadge = card.querySelector(".clone-badge");
+    if (cloneBadge && frame.clone !== undefined) {
+      // 복제 배지 클릭 = 원본 카드로 이동 + 반짝 — "어떤 프레임의 복제인지" 시각 연결
+      cloneBadge.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+      cloneBadge.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const srcCard = document.querySelector(
+          `#states .card[data-state="${cssEscape(state.name)}"][data-idx="${frame.clone}"]`);
+        if (!srcCard) return;
+        srcCard.scrollIntoView({ behavior: "smooth", block: "center" });
+        srcCard.classList.remove("flash-target");
+        void srcCard.offsetWidth;
+        srcCard.classList.add("flash-target");
+        srcCard.addEventListener("animationend", () => srcCard.classList.remove("flash-target"), { once: true });
+      });
     }
     const archBtn = card.querySelector(".arch-btn");
     archBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
@@ -2459,6 +2546,7 @@ async function downloadArtifact(kind, doneMsg) {
   link.download = res.headers.get("X-Filename") || `${kind}.zip`;
   link.click();
   URL.revokeObjectURL(link.href);
+  if (kind === "atlas") await refreshFinalAtlas();  // 방금 재계산된 시트/문서 반영
   setStatus(doneMsg, "ok");
 }
 
@@ -2665,6 +2753,7 @@ async function boot() {
     note.appendChild(dismiss);
     document.body.prepend(note);
   }
+  await renderFinalAtlas(run.atlas);
   // 힌트바를 우측 본문 컬럼 끝으로 이동 — 좌측 스플릿이 페이지 바닥까지 유지되게
   document.getElementById("states").appendChild(document.getElementById("hintbar"));
   if (healParts.length) {
