@@ -5,6 +5,36 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.17 "Sol Atelier" - Pixel-perfect fringe crop fix, palette default 48
+
+Two pixel-perfect quality defects found by Soohong while curating founder_v7 at zoom
+(2026-07-17): stray edge pixels / smeared detail after the pixel-perfect toggle. Root
+causes measured on the real run, both fixed with regression tests. Full suite
+**225 passed** (one pre-existing local-env version-metadata failure healed by editable
+reinstall).
+
+- **Solid-alpha grid crop** (`solid_alpha_bbox`) — `tighten_components` and
+  `pixel_snap_logical` now crop components to the α>=128 bbox before pitch/phase
+  detection and grid snap, matching the opacity rule used by `grid_snap_downscale` /
+  `binarize_alpha` / `apply_palette`. The any-alpha `getbbox()` crop let sub-128
+  chroma-matte AA fringe shift the grid origin and inflate `_grid_edges` cell-count
+  rounding by one — every cell sampled off the true block (color mixing), and
+  fringe-only edge cells solidified into debris pixels outside the silhouette
+  (founder_v7: bbox +1~4px on most frames). Degenerate all-fringe components fall back
+  to the any-alpha bbox. Regression: `test_pixel_snap.py::test_fringe_does_not_inflate_grid`.
+- **Run-wide palette default 24 → 48** — the shared median-cut palette is split across
+  every row in one extraction batch; 24 starved rare point colors in multi-state
+  batches. Measured on founder_v7's 36-state batch: nearest palette entry to the gold
+  hair-tie/medallion color was ΔRGB 59 at 24 (detail absorbed into brown) vs 5.5 at 48.
+  Retro-constrained runs opt back down via request `fit.palette_size`. Regression:
+  `test_pixel_snap.py::test_shared_palette_preserves_rare_saturated_color`.
+- **Known limitation (observed, not yet fixed)** — the shared palette is built from the
+  states present in the current extraction batch, so a partial re-extract (single-row
+  heal after a reroll) shades colors from a different palette than a full-batch run:
+  same inputs, batch-composition-dependent output (idempotency gap). Full-batch heals
+  are consistent; the planned fix is a run-level palette derived from all raws with its
+  own cache key.
+
 ## v1.56.16 "Sol Atelier" - Per-state GIF export, atlas cell reuse, clone origin badges
 
 A patch polishing the curation view's export and clone experience. A single state row
