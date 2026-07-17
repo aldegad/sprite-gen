@@ -5,6 +5,28 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.25 "Sol Atelier" - Full base parity (transforms bake into the file), Aseprite-style palette dock
+
+Soohong: "다 똑같이" — the base now has every frame control, and transforms are a
+real base concept: they bake into the file on save.
+
+- **Base transforms** — drag-translate, rotate/shear handles, flip, reset, and the
+  scale scrub all work on the base (same wiring as frames; only GIF and prev/next
+  remain frame-only). "Save to base" sends the pending transform with the pixel ops;
+  the server bakes edits→transform in the frame-bake order using the same
+  `curation.apply_transform` math (logical dx/dy converted through the detected
+  pitch; result re-composited onto the chroma background). Verified: dx=+2 logical
+  moved the content exactly 59 raw px (2×29.52 pitch). Transform-only saves are
+  allowed (ops may be empty).
+- **Pixel-perfect / grid toggles on the base** — `snapScaleFor("__base__") = 1`
+  activates the same quantized-transform preview and the pixel-grid overlay
+  (`updateCardGrid` parameterized by `cellDims`).
+- **Aseprite-style palette dock** — the toolbar swatch strip is replaced by a
+  vertical dock left of the stage: every color currently used (deduped, frequency
+  order, sampled from the composite so fresh edits appear) with the free color
+  picker underneath; the active color is outlined. Palette refreshes after every
+  committed stroke/undo/redo/marquee move.
+
 ## v1.56.24 "Sol Atelier" - Base editing IS the zoom modal (one component)
 
 Soohong rejected the parallel base-editor implementation ("use the same component")
