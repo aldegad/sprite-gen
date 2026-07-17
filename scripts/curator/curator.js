@@ -72,7 +72,6 @@ const STR = {
     tZoomOpen: "inspect large (double-click the image works too)",
     tZoomStage: "wheel/pinch = view zoom · drag = move · bottom-right magnifier = sprite scale",
     zoomClose: "✕", tZoomPrev: "previous frame", tZoomNext: "next frame",
-    marginNote: "in margin zone",
     dirAnchorBadge: "direction anchor",
     tDirAnchorBadge: "canonical facing anchor for this direction — generated from the base; every other row of this direction derives identity from it",
     dirGroupLabel: (d) => `direction · ${d}`,
@@ -111,7 +110,6 @@ const STR = {
       `frames were regenerated — previous curation for ${states.join(", ")} no longer applies and was reset. ` +
       (backup ? `The old selections are preserved in ${backup}.` : ""),
     tTreeNode: "click to scroll to this row",
-    tMarginNote: "some frames exceed the safe area but fit within the margin zone — informational, not a reroll flag",
     hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "hover a frame -> bottom-right magnifier = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
     exportDone: () => "PNGs downloaded",
     exportGifDone: () => "GIFs downloaded",
@@ -153,7 +151,6 @@ const STR = {
     tZoomOpen: "크게 보기 (이미지 더블클릭도 됨)",
     tZoomStage: "휠/핀치 = 화면 확대 · 드래그 = 이동 · 우하단 돋보기 = 스프라이트 크기",
     zoomClose: "✕", tZoomPrev: "이전 프레임", tZoomNext: "다음 프레임",
-    marginNote: "여백 침범",
     dirAnchorBadge: "방향 앵커",
     tDirAnchorBadge: "이 방향의 canonical 앵커 — base 에서 생성되고, 이 방향의 다른 모든 행이 여기서 identity 를 가져온다",
     dirGroupLabel: (d) => `방향 · ${d}`,
@@ -192,7 +189,6 @@ const STR = {
       `프레임이 재생성돼 ${states.join(", ")} 의 이전 큐레이션이 더 이상 맞지 않아 초기화됐어. ` +
       (backup ? `이전 선택은 ${backup} 에 백업돼 있어.` : ""),
     tTreeNode: "클릭하면 해당 줄로 이동",
-    tMarginNote: "안전영역은 넘었지만 안전마진 안에 있음 — 정보성 알림, 리롤 대상 아님",
     hints: ["타이틀 드래그 = 순서변경 / 시퀀스↔풀 이동", "넣기·빼기 버튼으로 토글 (클릭만으론 안 빠짐)", "제목 호버 = 풀네임 복사", "우하단 돋보기 = 크기 · 상단 핸들 = 회전", "복제 = 헤더 ⧉ 버튼", "자동 저장"],
     exportDone: () => "PNG 다운로드 완료",
     exportGifDone: () => "GIF 다운로드 완료",
@@ -1411,19 +1407,11 @@ function renderState(state, replaceEl) {
 
   const head = document.createElement("div");
   head.className = "state-head";
-  // 여백 침범 알림 (정보성): 안전영역(사방 여백 준수 상한)은 넘었지만 물리캡 이내.
-  // 리롤 대상 아님 — 순한 톤으로만 표시 (수홍 확정 2026-07-14).
-  const safeW = run.cell.width - (run.cell.safeMarginX || 0) * 2;
-  const safeH = run.cell.height - (run.cell.safeMarginY || 0) * 2;
-  const inMarginZone = state.frames.some(
-    (f) => f.present && f.contentSize && (f.contentSize[0] > safeW || f.contentSize[1] > safeH)
-  );
   head.innerHTML =
     `<span class="name">${escapeHtml(state.name)}</span>` +
     `<span class="meta">${state.requestFrames} ${t("frames")} · ${state.fps}fps · ${state.loop ? t("loop") : t("nonLoop")} · ${t("cellPx")} ${run.cell.width}x${run.cell.height}px</span>` +
     (state.action ? `<span class="action">${escapeHtml(state.action)}</span>` : "") +
     (state.extractOk ? "" : `<span class="state-warn">${t("extractFail")}</span>`) +
-    (inMarginZone ? `<span class="state-note" data-tip="${t("tMarginNote")}">${t("marginNote")}</span>` : "") +
     (anchorStates.has(state.name) ? `<span class="anchor-badge" data-tip="${t("tDirAnchorBadge")}">${t("dirAnchorBadge")}</span>` : "");
   wrap.appendChild(head);
 
