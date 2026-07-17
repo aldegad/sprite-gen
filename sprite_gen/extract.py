@@ -2590,17 +2590,26 @@ def _nondefault_args(args: argparse.Namespace) -> dict[str, Any]:
 
 
 _ENGINE_REVISION: str | None = None
+_ENGINE_REVISION_KEY: tuple | None = None
 
 
 def engine_revision() -> str:
     """추출 엔진 리비전 = 엔진 소스 해시. 프레임 파일은 (raw + request + 엔진)의
-    파생 캐시고 이 값이 캐시 키다 — 행 스탬프와 불일치하면 stale."""
-    global _ENGINE_REVISION
-    if _ENGINE_REVISION is None:
+    파생 캐시고 이 값이 캐시 키다 — 행 스탬프와 불일치하면 stale.
+
+    캐시 키 = 소스 파일 mtime. 프로세스-수명 캐시는 장수 프로세스(큐레이션 서버)가
+    엔진 갱신 후에도 옛 리비전을 들고 있게 만들어, 새 리비전으로 스탬프하는
+    서브프로세스 힐과 서로를 stale 로 보는 **힐 무한 루프**를 만들었다
+    (실사고 2026-07-17: 3초 폴링마다 전체 36행 재추출 재점화 — 뷰 빈 화면, 수홍 발견)."""
+    global _ENGINE_REVISION, _ENGINE_REVISION_KEY
+    sources = (Path(__file__), Path(__file__).with_name("layout.py"))
+    key = tuple(source.stat().st_mtime_ns for source in sources)
+    if _ENGINE_REVISION is None or _ENGINE_REVISION_KEY != key:
         digest = hashlib.sha256()
-        for source in (Path(__file__), Path(__file__).with_name("layout.py")):
+        for source in sources:
             digest.update(source.read_bytes())
         _ENGINE_REVISION = digest.hexdigest()[:12]
+        _ENGINE_REVISION_KEY = key
     return _ENGINE_REVISION
 
 
