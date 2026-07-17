@@ -1037,3 +1037,19 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   background: transparent;
   color: inherit;
 }
+
+/* 저장 실패 배너 — 상태줄과 달리 무시할 수 없게 상단 고정 (죽은 탭 편집 유실 방지) */
+.save-lost-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5000;
+  padding: 10px 18px;
+  background: #fef2f2;
+  color: var(--danger, #dc2626);
+  border-bottom: 1px solid #fecaca;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}

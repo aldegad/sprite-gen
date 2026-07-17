@@ -48,6 +48,7 @@ const STR = {
     frames: "frames", loop: "loop", nonLoop: "non-loop", preview: "Preview",
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
+    saveLostBanner: "EDITS ARE NOT SAVING — the server may have restarted. Reload this page (your unsaved edits will be lost, but new edits will save again).",
     rowGif: "GIF", tRowGif: "download this row's current composed sequence as a GIF (4x nearest upscale for crisp viewing — pixel data unchanged)",
     rowTween: "Tween", tRowTween: "AI in-between: generate a mid frame between two frames of this row (codex/grok image gen on the server machine's CLI auth) — recorded as a take, then the FULL batch re-extracts. Click cards to pick the pair.",
     tweenFrom: "from", tweenTo: "to", tweenT: "t", tweenGo: "Generate",
@@ -129,6 +130,7 @@ const STR = {
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
+    saveLostBanner: "편집이 저장되지 않고 있습니다 — 서버가 재기동됐을 수 있어요. 이 페이지를 새로고침하세요 (미저장 편집은 유실되지만, 이후 편집은 다시 저장됩니다).",
     rowGif: "GIF", tRowGif: "이 줄의 현재 합성 시퀀스를 GIF 로 다운로드 — 선명하게 보이도록 4배 니어리스트로 굽는다 (픽셀 데이터는 그대로)",
     rowTween: "보간", tRowTween: "AI 중간 프레임: 이 줄의 두 프레임 사이를 생성형(codex/grok — 서버 머신의 CLI 인증 사용)으로 그려 테이크로 기록 — 이후 전체 배치 재추출. 카드를 클릭해 쌍을 고르세요.",
     tweenFrom: "시작", tweenTo: "끝", tweenT: "t", tweenGo: "생성",
@@ -832,9 +834,30 @@ async function save() {
     });
     if (!res.ok) throw new Error((await res.json()).error || res.statusText);
     setStatus(t("saved"), "ok");
+    hideSaveLostBanner();
   } catch (e) {
     setStatus(t("saveFail") + e.message, "err");
+    // 작은 상태줄만으론 그림 그리는 중에 못 본다 (실사고 2026-07-17: 서버 재기동으로
+    // 죽은 탭에서 픽셀 편집이 조용히 유실, 수홍 발견). 저장이 실패하면 무시할 수
+    // 없는 배너로 알린다 — 편집은 계속 가능하되 "지금 저장 안 되고 있음" 이 보인다.
+    showSaveLostBanner(e.message);
   }
+}
+
+let saveLostBanner = null;
+
+function showSaveLostBanner(detail) {
+  if (!saveLostBanner) {
+    saveLostBanner = document.createElement("div");
+    saveLostBanner.className = "save-lost-banner";
+    document.body.appendChild(saveLostBanner);
+  }
+  saveLostBanner.textContent = `${t("saveLostBanner")} (${detail})`;
+  saveLostBanner.hidden = false;
+}
+
+function hideSaveLostBanner() {
+  if (saveLostBanner) saveLostBanner.hidden = true;
 }
 
 // --- transform application -------------------------------------------------
