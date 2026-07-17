@@ -893,6 +893,36 @@ class CurationHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "applied": applied, "space": space,
                                  "backup": backup.name})
                 return
+            if path == "/api/breathe":
+                # 결정론 호흡 테이크 생성 (breathe_frames.py) + 전체 배치 재추출.
+                # split 은 큐레이터의 가슴선 드래그 값 (콘텐츠 높이 비율).
+                payload = self._read_body()
+                state = str(payload.get("state") or "")
+                request = json.loads(
+                    (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+                if state not in request.get("states", {}):
+                    self._send_json({"error": f"unknown state: {state}"}, 400)
+                    return
+                try:
+                    frame = int(payload.get("frame", 0))
+                    split = float(payload.get("split", 0.55))
+                    amplitude = int(payload.get("amplitude", 1))
+                except (TypeError, ValueError):
+                    self._send_json({"error": "frame:int, split:float, amplitude:int required"}, 400)
+                    return
+                if not 0.05 < split < 0.95:
+                    self._send_json({"error": f"split must be inside (0.05, 0.95): {split}"}, 400)
+                    return
+                if not 1 <= amplitude <= 4:
+                    self._send_json({"error": f"amplitude must be 1..4: {amplitude}"}, 400)
+                    return
+                extra = ["--state", state, "--frame", str(frame), "--split", str(split),
+                         "--amplitude", str(amplitude), "--extract"]
+                if payload.get("twoBand"):
+                    extra.insert(-1, "--two-band")
+                result = _run_script("breathe_frames.py", self.run_dir, *extra)
+                self._send_json(result, 200 if result["ok"] else 500)
+                return
             if path == "/api/interpolate":
                 payload = self._read_body()
                 state = str(payload.get("state") or "")
