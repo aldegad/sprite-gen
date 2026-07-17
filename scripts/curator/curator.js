@@ -1318,8 +1318,14 @@ function commitZones(wrap, stateName) {
   const state = run.states.find((s) => s.name === stateName);
   const archivedSet = new Set(entries[stateName].archived || []);
   const missingIdx = state ? state.frames.filter((f) => !f.present && !archivedSet.has(f.index)).map((f) => f.index) : [];
+  // 카드 없이 존재하는 프레임(예: 토글 OFF 로 풀에서 숨긴 호흡 위상)도 order 에
+  // 보존한다 — DOM 은 표시의 부분집합이지 인스턴스 진실이 아니다.
+  const seen = new Set([...seqIdx, ...poolIdx]);
+  const hiddenIdx = state
+    ? state.frames.filter((f) => f.present && !seen.has(f.index) && !archivedSet.has(f.index)).map((f) => f.index)
+    : [];
   entries[stateName].sel = new Set(seqIdx);
-  entries[stateName].order = [...seqIdx, ...poolIdx, ...missingIdx];
+  entries[stateName].order = [...seqIdx, ...poolIdx, ...hiddenIdx, ...missingIdx];
 }
 
 // the present card the dragged card should be inserted *before*, by pointer x
@@ -1731,7 +1737,13 @@ function renderState(state, replaceEl) {
   for (const idx of e.order) {
     if (e.sel.has(idx)) continue;
     const frame = frameOf(state.name, idx);
-    if (frame) poolFrames.appendChild(renderCard(state, frame));
+    if (!frame) continue;
+    // 호흡 위상 프레임은 큐레이션 후보가 아니라 파생 사이클 재료다 (수홍 지적
+    // 2026-07-17 "토글할 때 후보 풀이 달라진다") — 토글 OFF 상태에선 풀에
+    // 노출하지 않는다. 토글 체크박스가 유일한 표면이고, 풀 구성은 호흡
+    // on/off 와 무관하게 불변이다.
+    if ((frame.label || "").startsWith("breathe")) continue;
+    poolFrames.appendChild(renderCard(state, frame));
   }
 
   // 보관함: 후보 풀에서도 완전히 뺀 프레임. 접힌 칩 → 클릭하면 팝오버(쇽),
