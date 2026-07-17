@@ -93,7 +93,6 @@ const STR = {
     tScaleScrub: "sprite scale — click arrows to step, drag the magnifier left/right",
     penTool: "pen", eraserTool: "eraser", pickTool: "eyedropper", undoEdit: "undo", clearEdits: "clear edits",
     tPick: "eyedropper — click a pixel to sample its color, then it switches to the pen so you can paint that exact color",
-    editNote: "pixel editing — shown untransformed (source coordinates)",
     archiveHint: "drag a card out to restore it into the sequence or pool",
     archModalTitle: (st, n) => `archive · ${st} (${n})`,
     restoreToSeq: "to sequence", restoreToPool: "to pool",
@@ -175,7 +174,6 @@ const STR = {
     tScaleScrub: "스프라이트 크기 — 화살표 클릭 = 단계 조절, 돋보기 좌우 드래그 = 연속 조절",
     penTool: "연필", eraserTool: "지우개", pickTool: "스포이드", undoEdit: "되돌리기", clearEdits: "편집 비우기",
     tPick: "스포이드 — 픽셀을 클릭하면 그 색을 집어 연필로 전환, 똑같은 색으로 바로 찍을 수 있어",
-    editNote: "픽셀 편집 중 — 변형 없이 원본 좌표로 표시",
     archiveHint: "카드를 끌어내 시퀀스/후보로 복구",
     archModalTitle: (st, n) => `보관함 · ${st} (${n})`,
     restoreToSeq: "시퀀스로", restoreToPool: "후보로",
@@ -2384,22 +2382,19 @@ function openZoom(stateName, idx, keepWidth) {
     `<span class="et-swatches"></span>` +
     `<input type="color" class="et-color" value="#1f2430" title="color" />` +
     `<button type="button" class="ghost et-undo">${t("undoEdit")}</button>` +
-    `<button type="button" class="ghost et-clear">${t("clearEdits")}</button>` +
-    `<span class="et-note muted" hidden>${t("editNote")}</span>`;
+    `<button type="button" class="ghost et-clear">${t("clearEdits")}</button>`;
   card.insertBefore(toolbar, stage);
   const penBtn = toolbar.querySelector(".et-pen");
   const eraserBtn = toolbar.querySelector(".et-eraser");
   const pickBtn = toolbar.querySelector(".et-pick");
   const colorInput = toolbar.querySelector(".et-color");
   const swatchBox = toolbar.querySelector(".et-swatches");
-  const editNote = toolbar.querySelector(".et-note");
   const syncToolbar = () => {
     penBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "pen");
     eraserBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "eraser");
     pickBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "pick");
     stage.classList.toggle("pixel-editing", !!pixelEdit);
     stage.classList.toggle("picking", !!pixelEdit && pixelEdit.tool === "pick");
-    editNote.hidden = !pixelEdit;
   };
   const setTool = (tool) => {
     if (pixelEdit && pixelEdit.tool === tool) pixelEdit = null; // 같은 툴 재클릭 = 끔
