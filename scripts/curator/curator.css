@@ -1053,3 +1053,16 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   font-weight: 600;
   text-align: center;
 }
+
+/* 보간 생성 중 스피너 — Generate 버튼 안에서 돈다 */
+.tween-spin {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  vertical-align: -2px;
+  border: 2px solid var(--accent-dim, #dbe5fb);
+  border-top-color: var(--accent, #2563eb);
+  border-radius: 50%;
+  animation: sg-spin 0.8s linear infinite;
+}
+@keyframes sg-spin { to { transform: rotate(360deg); } }
