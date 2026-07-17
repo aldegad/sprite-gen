@@ -90,7 +90,9 @@ const STR = {
     tArchiveChip: "click to open — drop a card here to archive it",
     tArchiveBtn: "archive (remove even from the candidate pool)",
     tScaleScrub: "sprite scale — click arrows to step, drag the magnifier left/right",
-    penTool: "pen", eraserTool: "eraser", pickTool: "eyedropper", undoEdit: "undo", clearEdits: "clear edits",
+    penTool: "pen", eraserTool: "eraser", pickTool: "eyedropper", undoEdit: "undo", redoEdit: "redo", clearEdits: "clear edits",
+    selectTool: "select", tSelectTool: "marquee: drag to select an area (dashed box) - drag inside to MOVE it, Alt+drag to DUPLICATE, Esc to deselect",
+    tUndoKeys: "undo (Cmd/Ctrl+Z)", tRedoKeys: "redo (Cmd/Ctrl+Shift+Z)",
     baseEditBtn: "edit", tBaseEdit: "pixel-edit the base image itself — saves into base-source (original backed up once as .orig); affects FUTURE generation, not already-extracted frames",
     baseEditSave: "save to base", baseEditFail: "base save failed: ",
     baseEditSaved: (n) => `base updated (${n}px) — affects future generation`,
@@ -172,7 +174,9 @@ const STR = {
     tArchiveChip: "클릭 = 열기 · 카드를 여기로 끌어오면 보관",
     tArchiveBtn: "보관함으로 (후보 풀에서도 제외)",
     tScaleScrub: "스프라이트 크기 — 화살표 클릭 = 단계 조절, 돋보기 좌우 드래그 = 연속 조절",
-    penTool: "연필", eraserTool: "지우개", pickTool: "스포이드", undoEdit: "되돌리기", clearEdits: "편집 비우기",
+    penTool: "연필", eraserTool: "지우개", pickTool: "스포이드", undoEdit: "되돌리기", redoEdit: "재실행", clearEdits: "편집 비우기",
+    selectTool: "선택", tSelectTool: "영역 선택: 드래그로 점선 박스를 만들고 — 안쪽을 드래그하면 이동, Alt+드래그는 복제, Esc 는 선택 해제",
+    tUndoKeys: "되돌리기 (Cmd/Ctrl+Z)", tRedoKeys: "재실행 (Cmd/Ctrl+Shift+Z)",
     baseEditBtn: "편집", tBaseEdit: "베이스 이미지 자체를 픽셀 편집 — base-source 파일에 저장 (원본은 .orig 로 1회 백업). 이미 뽑힌 프레임은 안 변하고 이후 생성에 반영됩니다",
     baseEditSave: "베이스에 저장", baseEditFail: "베이스 저장 실패: ",
     baseEditSaved: (n) => `베이스 갱신됨 (${n}px) — 이후 생성에 반영`,
@@ -2094,12 +2098,17 @@ async function openBaseEditor() {
     `<button type="button" class="ghost be-pen active">${t("penTool")}</button>` +
     `<button type="button" class="ghost be-eraser">${t("eraserTool")}</button>` +
     `<button type="button" class="ghost be-pick">${t("pickTool")}</button>` +
+    `<button type="button" class="ghost be-select" data-tip="${t("tSelectTool")}">${t("selectTool")}</button>` +
     `<input type="color" class="be-color" value="#1f2430" />` +
-    `<button type="button" class="ghost be-undo">${t("undoEdit")}</button>` +
+    `<button type="button" class="ghost be-undo" data-tip="${t("tUndoKeys")}">${t("undoEdit")}</button>` +
+    `<button type="button" class="ghost be-redo" data-tip="${t("tRedoKeys")}">${t("redoEdit")}</button>` +
     `<button type="button" class="be-save">${t("baseEditSave")}</button>` +
     `<button type="button" class="ghost be-close">✕</button>` +
     `</span></div>` +
-    `<div class="be-stage"><canvas class="be-canvas" width="${W * S}" height="${H * S}"></canvas></div>` +
+    `<div class="be-stage"><div class="be-wrap">` +
+    `<canvas class="be-canvas" width="${W * S}" height="${H * S}"></canvas>` +
+    `<div class="marquee" hidden></div>` +
+    `</div></div>` +
     `</div>`;
   document.body.appendChild(modal);
 
@@ -2117,12 +2126,24 @@ async function openBaseEditor() {
 
   let tool = "pen";
   const ops = {};           // "x,y" -> "#hex" | null (서버 계약)
-  const journal = [];       // 액션 단위 undo: [[key, prevOpValue|undefined], ...]
+  const journal = [];       // 액션 단위 undo: {sets: [{key, had, prev, value}]}
+  const redoStack = [];
+  let sel = null;           // 마키 선택 {x0,y0,x1,y1} (raw px, 격자 정렬)
+  const selBox = modal.querySelector(".marquee");
   const colorInput = modal.querySelector(".be-color");
-  const buttons = { pen: modal.querySelector(".be-pen"), eraser: modal.querySelector(".be-eraser"), pick: modal.querySelector(".be-pick") };
+  const buttons = { pen: modal.querySelector(".be-pen"), eraser: modal.querySelector(".be-eraser"), pick: modal.querySelector(".be-pick"), select: modal.querySelector(".be-select") };
+  const syncSelBox = () => {
+    selBox.hidden = !sel;
+    if (!sel) return;
+    selBox.style.left = `${sel.x0 * S}px`;
+    selBox.style.top = `${sel.y0 * S}px`;
+    selBox.style.width = `${(sel.x1 - sel.x0) * S}px`;
+    selBox.style.height = `${(sel.y1 - sel.y0) * S}px`;
+  };
   const syncTools = () => {
     for (const [name, el] of Object.entries(buttons)) el.classList.toggle("active", tool === name);
     canvas.style.cursor = tool === "pick" ? "copy" : "crosshair";
+    if (tool !== "select") { sel = null; syncSelBox(); }
   };
   for (const name of Object.keys(buttons)) buttons[name].addEventListener("click", () => { tool = name; syncTools(); });
   syncTools();
@@ -2156,6 +2177,15 @@ async function openBaseEditor() {
     return [sx[0], sy[0], sx[1], sy[1]];
   };
 
+  // 스트로크(드래그 1회) 단위 액션 — 프레임 편집기와 같은 undo/redo 계약
+  let stroke = null;
+  const stagePixel = (x, y, value) => {
+    const key = `${x},${y}`;
+    if (Object.prototype.hasOwnProperty.call(ops, key) && ops[key] === value) return false;
+    stroke.push({ key, had: Object.prototype.hasOwnProperty.call(ops, key), prev: ops[key], value });
+    ops[key] = value;
+    return true;
+  };
   const paint = (px, py) => {
     if (!(px >= 0 && px < W && py >= 0 && py < H)) return;
     if (tool === "pick") {
@@ -2167,17 +2197,13 @@ async function openBaseEditor() {
     const value = tool === "eraser" ? null : colorInput.value;
     const cell = cellOf(px, py) || [px, py, px + 1, py + 1];
     const [x0, y0, x1, y1] = cell;
-    const action = [];
+    let changed = false;
     for (let y = y0; y < Math.min(y1, H); y++) {
       for (let x = x0; x < Math.min(x1, W); x++) {
-        const key = `${x},${y}`;
-        if (ops[key] === value) continue;
-        action.push([key, Object.prototype.hasOwnProperty.call(ops, key) ? ops[key] : undefined]);
-        ops[key] = value;
+        if (stagePixel(x, y, value)) changed = true;
       }
     }
-    if (!action.length) return;
-    journal.push(action);
+    if (!changed) return;
     ctx.fillStyle = value || chromaCss;
     ctx.fillRect(x0 * S, y0 * S, (x1 - x0) * S, (y1 - y0) * S);
     drawGrid();
@@ -2186,10 +2212,6 @@ async function openBaseEditor() {
     const r = canvas.getBoundingClientRect();
     return [Math.floor((ev.clientX - r.left) / (r.width / W)), Math.floor((ev.clientY - r.top) / (r.height / H))];
   };
-  let down = false;
-  canvas.addEventListener("pointerdown", (ev) => { down = true; canvas.setPointerCapture(ev.pointerId); paint(...pos(ev)); });
-  canvas.addEventListener("pointermove", (ev) => { if (down) paint(...pos(ev)); });
-  canvas.addEventListener("pointerup", () => { down = false; });
 
   const redraw = () => {
     ctx.clearRect(0, 0, W * S, H * S);
@@ -2200,19 +2222,145 @@ async function openBaseEditor() {
       ctx.fillRect(x * S, y * S, S, S);
     }
     drawGrid();
+    syncSelBox();
   };
-  modal.querySelector(".be-undo").addEventListener("click", () => {
-    const action = journal.pop();
-    if (!action) return;
-    for (const [key, prev] of action) {
-      if (prev === undefined) delete ops[key];
-      else ops[key] = prev;
+
+  // 마키: 선택 사각형을 격자 블록 경계로 정렬 (미검출 시 raw px)
+  const alignRect = (ax, ay, bx, by) => {
+    const lo = (edges, v) => { let r = edges[0]; for (const e of edges) { if (e <= v) r = e; else break; } return r; };
+    const hi = (edges, v) => { for (const e of edges) if (e > v) return e; return edges[edges.length - 1]; };
+    let x0 = Math.min(ax, bx), y0 = Math.min(ay, by), x1 = Math.max(ax, bx) + 1, y1 = Math.max(ay, by) + 1;
+    if (grid) {
+      x0 = lo(grid.xEdges, Math.max(x0, grid.xEdges[0]));
+      y0 = lo(grid.yEdges, Math.max(y0, grid.yEdges[0]));
+      x1 = hi(grid.xEdges, Math.min(x1 - 1, grid.xEdges[grid.xEdges.length - 1] - 1));
+      y1 = hi(grid.yEdges, Math.min(y1 - 1, grid.yEdges[grid.yEdges.length - 1] - 1));
     }
+    return { x0: Math.max(0, x0), y0: Math.max(0, y0), x1: Math.min(W, x1), y1: Math.min(H, y1) };
+  };
+  const captureSel = (rect) => {
+    // 현재 보이는 픽셀(원본+편집) 중 크로마가 아닌 것만 — 이동 대상 = 실 내용
+    const comp = document.createElement("canvas");
+    comp.width = W; comp.height = H;
+    const cc = comp.getContext("2d");
+    cc.drawImage(img, 0, 0);
+    for (const [key, value] of Object.entries(ops)) {
+      const [x, y] = key.split(",").map(Number);
+      cc.fillStyle = value || chromaCss;
+      cc.fillRect(x, y, 1, 1);
+    }
+    const data = cc.getImageData(rect.x0, rect.y0, rect.x1 - rect.x0, rect.y1 - rect.y0).data;
+    const w = rect.x1 - rect.x0;
+    const pixels = [];
+    for (let i = 0; i < data.length; i += 4) {
+      const dist = Math.abs(data[i] - corner[0]) + Math.abs(data[i + 1] - corner[1]) + Math.abs(data[i + 2] - corner[2]);
+      if (dist <= 60) continue; // 크로마 배경은 옮길 내용이 아니다
+      pixels.push({
+        dx: (i / 4) % w,
+        dy: Math.floor((i / 4) / w),
+        hex: "#" + [data[i], data[i + 1], data[i + 2]].map((v) => v.toString(16).padStart(2, "0")).join(""),
+      });
+    }
+    return pixels;
+  };
+  const commitSelMove = (from, pixels, ddx, ddy, duplicate) => {
+    if (!pixels.length || (ddx === 0 && ddy === 0)) return;
+    stroke = [];
+    if (!duplicate) for (const p of pixels) stagePixel(from.x0 + p.dx, from.y0 + p.dy, null);
+    for (const p of pixels) {
+      const x = from.x0 + p.dx + ddx;
+      const y = from.y0 + p.dy + ddy;
+      if (x >= 0 && x < W && y >= 0 && y < H) stagePixel(x, y, p.hex);
+    }
+    if (stroke.length) { journal.push({ sets: stroke }); redoStack.length = 0; }
+    stroke = null;
     redraw();
+  };
+
+  canvas.addEventListener("pointerdown", (ev) => {
+    canvas.setPointerCapture(ev.pointerId);
+    const [sx, sy] = pos(ev);
+    if (tool === "select") {
+      const inside = sel && sx >= sel.x0 && sx < sel.x1 && sy >= sel.y0 && sy < sel.y1;
+      if (inside) {
+        const from = { ...sel };
+        const grab = captureSel(from);
+        let delta = [0, 0];
+        const step = grid ? Math.max(1, Math.round((grid.pitch[0] + grid.pitch[1]) / 2)) : 1;
+        const onMove = (e2) => {
+          const [mx, my] = pos(e2);
+          delta = [Math.round((mx - sx) / step) * step, Math.round((my - sy) / step) * step];
+          sel = { x0: from.x0 + delta[0], y0: from.y0 + delta[1], x1: from.x1 + delta[0], y1: from.y1 + delta[1] };
+          syncSelBox();
+        };
+        const onUp = (e2) => {
+          canvas.removeEventListener("pointermove", onMove);
+          canvas.removeEventListener("pointerup", onUp);
+          commitSelMove(from, grab, delta[0], delta[1], e2.altKey);
+        };
+        canvas.addEventListener("pointermove", onMove);
+        canvas.addEventListener("pointerup", onUp);
+      } else {
+        sel = alignRect(sx, sy, sx, sy);
+        syncSelBox();
+        const onMove = (e2) => { const [mx, my] = pos(e2); sel = alignRect(sx, sy, mx, my); syncSelBox(); };
+        const onUp = () => {
+          canvas.removeEventListener("pointermove", onMove);
+          canvas.removeEventListener("pointerup", onUp);
+        };
+        canvas.addEventListener("pointermove", onMove);
+        canvas.addEventListener("pointerup", onUp);
+      }
+      return;
+    }
+    stroke = [];
+    paint(sx, sy);
+    const onMove = (e2) => paint(...pos(e2));
+    const onUp = () => {
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      if (stroke && stroke.length) { journal.push({ sets: stroke }); redoStack.length = 0; }
+      stroke = null;
+    };
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerup", onUp);
   });
-  modal.querySelector(".be-close").addEventListener("click", () => modal.remove());
+
+  const undo = () => {
+    const j = journal.pop();
+    if (!j) return;
+    for (let i = j.sets.length - 1; i >= 0; i--) {
+      const s = j.sets[i];
+      if (s.had) ops[s.key] = s.prev;
+      else delete ops[s.key];
+    }
+    redoStack.push(j);
+    redraw();
+  };
+  const redo = () => {
+    const j = redoStack.pop();
+    if (!j) return;
+    for (const s of j.sets) ops[s.key] = s.value;
+    journal.push(j);
+    redraw();
+  };
+  modal._undoRedo = { undo, redo }; // Cmd/Ctrl+Z 전역 라우팅용
+  modal.querySelector(".be-undo").addEventListener("click", undo);
+  modal.querySelector(".be-redo").addEventListener("click", redo);
+  const onBaseKey = (ev) => {
+    if (ev.key !== "Escape") return;
+    ev.stopImmediatePropagation();
+    if (sel) { sel = null; syncSelBox(); }
+    else closeModal();
+  };
+  const closeModal = () => {
+    document.removeEventListener("keydown", onBaseKey, true);
+    modal.remove();
+  };
+  document.addEventListener("keydown", onBaseKey, true);
+  modal.querySelector(".be-close").addEventListener("click", closeModal);
   modal.querySelector(".be-save").addEventListener("click", async () => {
-    if (!Object.keys(ops).length) { modal.remove(); return; }
+    if (!Object.keys(ops).length) { closeModal(); return; }
     try {
       const res = await fetch("/api/base-edit", {
         method: "POST",
@@ -2222,7 +2370,7 @@ async function openBaseEditor() {
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
       setStatus(STR[lang].baseEditSaved(data.applied), "ok");
-      modal.remove();
+      closeModal();
       // 베이스 참조 줄 이미지 갱신 (캐시 우회)
       const baseImg = document.querySelector(".base-row .base-stage img");
       if (baseImg) baseImg.src = run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "v=" + Date.now();
@@ -2504,11 +2652,36 @@ function closeZoom() {
   document.removeEventListener("keydown", onZoomKey);
 }
 
+function clearMarquee() {
+  if (pixelEdit) pixelEdit.sel = null;
+  document.querySelectorAll(".marquee").forEach((m) => { m.hidden = true; });
+}
+
 function onZoomKey(ev) {
-  if (ev.key === "Escape") closeZoom();
+  if (ev.key === "Escape") {
+    if (pixelEdit && pixelEdit.sel) { clearMarquee(); return; } // 선택 해제가 우선
+    closeZoom();
+  }
   else if (ev.key === "ArrowLeft") stepZoomFrame(-1);
   else if (ev.key === "ArrowRight") stepZoomFrame(1);
 }
+
+// 실행취소/재실행 단축키 — Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z (수홍 지시 2026-07-17).
+// 활성 편집 컨텍스트로 라우팅: 베이스 에디터 모달이 열려 있으면 그쪽, 아니면
+// 줌 모달의 픽셀 편집 세션. 입력 필드에선 브라우저 기본 동작 유지.
+document.addEventListener("keydown", (ev) => {
+  if (ev.key.toLowerCase() !== "z" || !(ev.metaKey || ev.ctrlKey)) return;
+  if (ev.target && ev.target.closest && ev.target.closest("input, textarea, select")) return;
+  const baseEditor = document.getElementById("base-editor");
+  const target = baseEditor
+    ? baseEditor._undoRedo
+    : (pixelEdit && pixelEdit.undoFn ? { undo: pixelEdit.undoFn, redo: pixelEdit.redoFn } : null);
+  if (!target) return;
+  ev.preventDefault();
+  ev.stopImmediatePropagation();
+  if (ev.shiftKey) { if (target.redo) target.redo(); }
+  else if (target.undo) target.undo();
+}, true);
 
 function stepZoomFrame(delta) {
   if (!zoomView) return;
@@ -2596,33 +2769,58 @@ function openZoom(stateName, idx, keepWidth) {
     `<button type="button" class="ghost et-pick" data-tip="${t("tPick")}">` +
     '<svg viewBox="0 0 16 16" width="11" height="11"><path d="M10.6 2a1.9 1.9 0 0 1 2.7 2.7l-1 1 .5.5-1.1 1.1-.5-.5-4.3 4.3-2.4.6.6-2.4 4.3-4.3-.5-.5L10 6.4l-.5-.5 1.1-1.1.5.5 1-1z" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/></svg>' +
     `<span>${t("pickTool")}</span></button>` +
+    `<button type="button" class="ghost et-select" data-tip="${t("tSelectTool")}">` +
+    '<svg viewBox="0 0 16 16" width="11" height="11"><rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.4 1.7"/></svg>' +
+    `<span>${t("selectTool")}</span></button>` +
     `<span class="et-swatches"></span>` +
     `<input type="color" class="et-color" value="#1f2430" title="color" />` +
-    `<button type="button" class="ghost et-undo">${t("undoEdit")}</button>` +
+    `<button type="button" class="ghost et-undo" data-tip="${t("tUndoKeys")}">${t("undoEdit")}</button>` +
+    `<button type="button" class="ghost et-redo" data-tip="${t("tRedoKeys")}">${t("redoEdit")}</button>` +
     `<button type="button" class="ghost et-clear">${t("clearEdits")}</button>`;
   card.insertBefore(toolbar, stage);
   const penBtn = toolbar.querySelector(".et-pen");
   const eraserBtn = toolbar.querySelector(".et-eraser");
   const pickBtn = toolbar.querySelector(".et-pick");
+  const selectBtn = toolbar.querySelector(".et-select");
   const colorInput = toolbar.querySelector(".et-color");
   const swatchBox = toolbar.querySelector(".et-swatches");
+  const selBox = document.createElement("div");
+  selBox.className = "marquee";
+  selBox.hidden = true;
+  stage.appendChild(selBox);
+  const syncMarqueeBox = () => {
+    const sel = pixelEdit && pixelEdit.sel;
+    selBox.hidden = !sel;
+    if (!sel) return;
+    selBox.style.left = `${(sel.x0 / run.cell.width) * 100}%`;
+    selBox.style.top = `${(sel.y0 / run.cell.height) * 100}%`;
+    selBox.style.width = `${((sel.x1 - sel.x0) / run.cell.width) * 100}%`;
+    selBox.style.height = `${((sel.y1 - sel.y0) / run.cell.height) * 100}%`;
+  };
   const syncToolbar = () => {
     penBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "pen");
     eraserBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "eraser");
     pickBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "pick");
+    selectBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "select");
     stage.classList.toggle("pixel-editing", !!pixelEdit);
     stage.classList.toggle("picking", !!pixelEdit && pixelEdit.tool === "pick");
+    stage.classList.toggle("selecting", !!pixelEdit && pixelEdit.tool === "select");
+    syncMarqueeBox();
   };
   const setTool = (tool) => {
     if (pixelEdit && pixelEdit.tool === tool) pixelEdit = null; // 같은 툴 재클릭 = 끔
     else pixelEdit = { state: stateName, idx, tool, color: colorInput.value,
-                       journal: (pixelEdit && pixelEdit.journal) || [] };
+                       journal: (pixelEdit && pixelEdit.journal) || [],
+                       redo: (pixelEdit && pixelEdit.redo) || [],
+                       sel: tool === "select" ? (pixelEdit && pixelEdit.sel) || null : null,
+                       undoFn: () => undoPixel(), redoFn: () => redoPixel() };
     syncToolbar();
     applyFrameTransformAll(stateName, idx); // 편집 모드 = identity 표시 전환
   };
   penBtn.addEventListener("click", () => setTool("pen"));
   eraserBtn.addEventListener("click", () => setTool("eraser"));
   pickBtn.addEventListener("click", () => setTool("pick"));
+  selectBtn.addEventListener("click", () => setTool("select"));
   colorInput.addEventListener("input", () => { if (pixelEdit) pixelEdit.color = colorInput.value; });
 
   // 스포이드 표본: 현재 표시 픽셀(베이스 이미지 + 이미 적용한 편집)의 색을 (x,y)에서 읽는다.
@@ -2646,24 +2844,45 @@ function openZoom(stateName, idx, keepWidth) {
     if (d[3] < 40) return null; // 투명 픽셀은 집을 색이 없다
     return "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
   };
-  toolbar.querySelector(".et-undo").addEventListener("click", () => {
+  // 저널은 스트로크(액션) 단위 {sets: [{key, had, prev, value}]} — undo 는 통째로
+  // 되돌리고 redo 스택에 쌓는다. 새 액션이 생기면 redo 는 비운다 (표준 편집기 계약).
+  const undoPixel = () => {
     if (!pixelEdit || !pixelEdit.journal.length) return;
     const j = pixelEdit.journal.pop();
     const e = entries[stateName];
-    if (j.full) e.pixels[idx] = j.full;
-    else {
-      const ops = e.pixels[idx] || (e.pixels[idx] = {});
-      if (j.had) ops[j.key] = j.prev;
-      else delete ops[j.key];
+    const ops = e.pixels[idx] || (e.pixels[idx] = {});
+    if (j.full) { j.after = { ...(e.pixels[idx] || {}) }; e.pixels[idx] = j.full; }
+    else if (j.sets) {
+      for (let i = j.sets.length - 1; i >= 0; i--) {
+        const s = j.sets[i];
+        if (s.had) ops[s.key] = s.prev;
+        else delete ops[s.key];
+      }
     }
+    pixelEdit.redo.push(j);
     applyFrameTransformAll(stateName, idx);
     scheduleSave();
-  });
+  };
+  const redoPixel = () => {
+    if (!pixelEdit || !pixelEdit.redo.length) return;
+    const j = pixelEdit.redo.pop();
+    const e = entries[stateName];
+    if (j.full) e.pixels[idx] = j.after || {};
+    else if (j.sets) {
+      const ops = e.pixels[idx] || (e.pixels[idx] = {});
+      for (const s of j.sets) ops[s.key] = s.value;
+    }
+    pixelEdit.journal.push(j);
+    applyFrameTransformAll(stateName, idx);
+    scheduleSave();
+  };
+  toolbar.querySelector(".et-undo").addEventListener("click", undoPixel);
+  toolbar.querySelector(".et-redo").addEventListener("click", redoPixel);
   toolbar.querySelector(".et-clear").addEventListener("click", () => {
     const e = entries[stateName];
     const ops = e.pixels[idx];
     if (!ops || !Object.keys(ops).length) return;
-    if (pixelEdit) pixelEdit.journal.push({ full: { ...ops } });
+    if (pixelEdit) { pixelEdit.journal.push({ full: { ...ops } }); pixelEdit.redo.length = 0; }
     e.pixels[idx] = {};
     applyFrameTransformAll(stateName, idx);
     scheduleSave();
@@ -2705,6 +2924,64 @@ function openZoom(stateName, idx, keepWidth) {
   };
   buildPalette();
 
+  // 마키(영역 선택) 헬퍼 — 캡처는 "현재 보이는 픽셀"(원본 + 편집 합성) 기준
+  const compositeCell = () => {
+    const c = document.createElement("canvas");
+    c.width = run.cell.width;
+    c.height = run.cell.height;
+    const cx = c.getContext("2d");
+    cx.imageSmoothingEnabled = false;
+    const imgEl = stage.querySelector("img");
+    if (imgEl && imgEl.complete && imgEl.naturalWidth) cx.drawImage(imgEl, 0, 0, c.width, c.height);
+    const ops0 = entries[stateName].pixels[idx] || {};
+    for (const [key, val] of Object.entries(ops0)) {
+      const [x, y] = key.split(",").map(Number);
+      if (val) { cx.fillStyle = val; cx.fillRect(x, y, 1, 1); }
+      else cx.clearRect(x, y, 1, 1);
+    }
+    return cx;
+  };
+  const captureRegion = (sel) => {
+    const cx = compositeCell();
+    const data = cx.getImageData(sel.x0, sel.y0, sel.x1 - sel.x0, sel.y1 - sel.y0).data;
+    const pixels = [];
+    const w = sel.x1 - sel.x0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 40) continue; // 투명은 옮길 내용 없음
+      pixels.push({
+        dx: (i / 4) % w,
+        dy: Math.floor((i / 4) / w),
+        hex: "#" + [data[i], data[i + 1], data[i + 2]].map((v) => v.toString(16).padStart(2, "0")).join(""),
+      });
+    }
+    return pixels;
+  };
+  const commitRegionMove = (fromSel, pixels, ddx, ddy, duplicate) => {
+    if (!pixels.length || (ddx === 0 && ddy === 0)) return;
+    const staged = new Map(); // key -> value (이동: 원본 지움 먼저, 목적지 색이 덮음)
+    if (!duplicate) {
+      for (const p of pixels) staged.set(`${fromSel.x0 + p.dx},${fromSel.y0 + p.dy}`, null);
+    }
+    for (const p of pixels) {
+      const x = fromSel.x0 + p.dx + ddx;
+      const y = fromSel.y0 + p.dy + ddy;
+      if (x >= 0 && x < run.cell.width && y >= 0 && y < run.cell.height) staged.set(`${x},${y}`, p.hex);
+    }
+    const e = entries[stateName];
+    const ops = e.pixels[idx] || (e.pixels[idx] = {});
+    const sets = [];
+    for (const [key, value] of staged) {
+      if (key in ops && ops[key] === value) continue;
+      sets.push({ key, had: key in ops, prev: ops[key], value });
+      ops[key] = value;
+    }
+    if (!sets.length) return;
+    pixelEdit.journal.push({ sets });
+    pixelEdit.redo.length = 0;
+    applyFrameTransformAll(stateName, idx);
+    scheduleSave();
+  };
+
   // 페인트: 편집 툴 활성 시 스테이지 드래그는 그리기 (다른 핸들러보다 먼저 등록해 가로챔)
   stage.addEventListener("pointerdown", (ev) => {
     if (!pixelEdit || pixelEdit.state !== stateName || pixelEdit.idx !== idx) return;
@@ -2730,9 +3007,62 @@ function openZoom(stateName, idx, keepWidth) {
     }
     try { stage.setPointerCapture(ev.pointerId); } catch { /* 일부 펜/합성 포인터 */ }
     const s = snapScaleFor(stateName) || 1;
+    const finish = (onMove, onUp) => {
+      try { stage.releasePointerCapture(ev.pointerId); } catch { /* no-op */ }
+      stage.removeEventListener("pointermove", onMove);
+      stage.removeEventListener("pointerup", onUp);
+    };
+
+    // ── 선택(마키): 점선 드래그로 영역 선택 → 안쪽 드래그 = 이동, Alt+드래그 = 복제 ──
+    if (pixelEdit.tool === "select") {
+      const sx = cellX(ev), sy = cellY(ev);
+      const sel = pixelEdit.sel;
+      const inside = sel && sx >= sel.x0 && sx < sel.x1 && sy >= sel.y0 && sy < sel.y1;
+      if (inside) {
+        const grab = captureRegion(sel);
+        const from = { ...sel };
+        let delta = [0, 0];
+        const onMove = (e2) => {
+          const step = s;
+          delta = [
+            Math.round((cellX(e2) - sx) / step) * step,
+            Math.round((cellY(e2) - sy) / step) * step,
+          ];
+          pixelEdit.sel = { x0: from.x0 + delta[0], y0: from.y0 + delta[1],
+                            x1: from.x1 + delta[0], y1: from.y1 + delta[1] };
+          syncMarqueeBox();
+        };
+        const onUp = (e2) => {
+          finish(onMove, onUp);
+          commitRegionMove(from, grab, delta[0], delta[1], e2.altKey);
+          syncMarqueeBox();
+        };
+        stage.addEventListener("pointermove", onMove);
+        stage.addEventListener("pointerup", onUp);
+      } else {
+        const norm = (ax, ay, bx, by) => {
+          const clampX = (v) => Math.max(0, Math.min(run.cell.width, v));
+          const clampY = (v) => Math.max(0, Math.min(run.cell.height, v));
+          const x0 = Math.floor(Math.min(ax, bx) / s) * s;
+          const y0 = Math.floor(Math.min(ay, by) / s) * s;
+          const x1 = Math.ceil((Math.max(ax, bx) + 1) / s) * s;
+          const y1 = Math.ceil((Math.max(ay, by) + 1) / s) * s;
+          return { x0: clampX(x0), y0: clampY(y0), x1: clampX(x1), y1: clampY(y1) };
+        };
+        pixelEdit.sel = norm(sx, sy, sx, sy);
+        syncMarqueeBox();
+        const onMove = (e2) => { pixelEdit.sel = norm(sx, sy, cellX(e2), cellY(e2)); syncMarqueeBox(); };
+        const onUp = () => finish(onMove, onUp);
+        stage.addEventListener("pointermove", onMove);
+        stage.addEventListener("pointerup", onUp);
+      }
+      return;
+    }
+
     const e = entries[stateName];
     if (!e.pixels[idx]) e.pixels[idx] = {};
     const ops = e.pixels[idx];
+    const stroke = []; // 스트로크(드래그 1회) 단위 액션 — undo/redo 가 통째로 다룬다
     const paint = (e2) => {
       const r = stage.getBoundingClientRect();
       const x = Math.floor(((e2.clientX - r.left) / r.width) * run.cell.width);
@@ -2746,7 +3076,7 @@ function openZoom(stateName, idx, keepWidth) {
         for (let dx = 0; dx < s; dx++) {
           const key = `${bx + dx},${by + dy}`;
           if (ops[key] === value && key in ops) continue;
-          pixelEdit.journal.push({ key, had: key in ops, prev: ops[key] });
+          stroke.push({ key, had: key in ops, prev: ops[key], value });
           ops[key] = value;
           changed = true;
         }
@@ -2756,9 +3086,11 @@ function openZoom(stateName, idx, keepWidth) {
     paint(ev);
     const onMove = (e2) => paint(e2);
     const onUp = () => {
-      try { stage.releasePointerCapture(ev.pointerId); } catch { /* no-op */ }
-      stage.removeEventListener("pointermove", onMove);
-      stage.removeEventListener("pointerup", onUp);
+      finish(onMove, onUp);
+      if (stroke.length) {
+        pixelEdit.journal.push({ sets: stroke });
+        pixelEdit.redo.length = 0;
+      }
       scheduleSave();
     };
     stage.addEventListener("pointermove", onMove);
