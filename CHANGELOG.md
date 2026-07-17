@@ -5,6 +5,22 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.20 "Sol Atelier" - Tween popover on demand + frame-pair pick mode
+
+Two UX fixes on the tween button (Soohong 2026-07-17): the parameter popover no
+longer sits permanently open, and the interpolation pair is picked by clicking
+frame cards instead of typing indices.
+
+- **Popover visibility bug** — `.tween-pop { display: flex }` overrode the `hidden`
+  attribute's UA `display: none`, so the popover was always visible. Fixed with
+  `.tween-pop[hidden] { display: none !important; }`; the popover now opens on the
+  tween button click only, and opening one row's popover closes any other.
+- **Pick mode** — while a row's popover is open, that row's frame cards become
+  pickable (crosshair cursor): clicking a card selects it as the interpolation pair
+  (blue border + ring, max 2, third pick replaces the oldest, click again to unpick),
+  filling from/to automatically. The row's normal sequence-selection blue border is
+  suppressed during pick mode so only the picked pair reads blue.
+
 ## v1.56.19 "Sol Atelier" - Curator tween button (in-betweens from the GUI)
 
 The interpolation feature surfaces in the curation view (Soohong: "GUI 표시하고").
