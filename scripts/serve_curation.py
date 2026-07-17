@@ -527,13 +527,15 @@ def run_compose(run_dir: Path) -> dict:
 
 
 def run_interpolate(run_dir: Path, state: str, index_a: int, index_b: int,
-                    t: float, label: str | None) -> dict:
+                    t: float, label: str | None, provider: str = "codex") -> dict:
     """AI in-between (interpolate_frames.py): 테이크 기록 + 전체 배치 재추출.
 
-    부분 추출은 제공하지 않는다 — run-wide 팔레트가 추출 배치 구성에 결합돼 있어
-    (docs/frame-interpolation.md) 단일 행 추출은 그 행만 다른 팔레트로 굽는다."""
+    생성은 서버 머신의 provider CLI(codex/grok, 머신 로컬 OAuth)가 수행한다 —
+    브라우저에는 자격증명이 지나가지 않는다. 부분 추출은 제공하지 않는다 —
+    run-wide 팔레트가 추출 배치 구성에 결합돼 있어 (docs/frame-interpolation.md)
+    단일 행 추출은 그 행만 다른 팔레트로 굽는다."""
     extra = ["--state", state, "--between", str(index_a), str(index_b),
-             "--t", str(t), "--extract"]
+             "--provider", provider, "--t", str(t), "--extract"]
     if label:
         extra += ["--label", str(label)]
     return _run_script("interpolate_frames.py", run_dir, *extra)
@@ -773,8 +775,12 @@ class CurationHandler(BaseHTTPRequestHandler):
                 if not 0.0 < t_value < 1.0:
                     self._send_json({"error": f"t must be inside (0, 1): {t_value}"}, 400)
                     return
+                provider = str(payload.get("provider") or "codex")
+                if provider not in ("codex", "grok"):
+                    self._send_json({"error": f"unknown provider: {provider}"}, 400)
+                    return
                 result = run_interpolate(self.run_dir, state, index_a, index_b,
-                                         t_value, payload.get("label") or None)
+                                         t_value, payload.get("label") or None, provider)
                 self._send_json(result, 200 if result["ok"] else 500)
                 return
             if path == "/api/export":

@@ -5,6 +5,28 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.21 "Sol Atelier" - Generative in-betweens (codex/grok), RIFE retired
+
+The interpolation backend switches from flow-based VFI to the engine's own
+generation layer (Soohong decided 2026-07-17 after a live 3-way comparison on the
+founder down_action arm swing — sheet `tween-3way-compare.png` in the solvell tray):
+codex drew the mid-pose in clean discrete pixels with identity intact, grok drifted
+off-model, RIFE cross-faded into blur. Full suite passes; plumbing tests updated.
+
+- **`--provider codex|grok`** (default codex) on `interpolate_frames.py` and
+  `POST /api/interpolate`; the curator popover gains a GPT/Grok select. The two
+  aligned frames attach as generation refs and `tween_prompt` composes the prompt
+  deterministically from request truth (character description, chroma, t).
+- **RIFE removed** — no ONNX model download, no onnxruntime dependency (the
+  `[interpolate]` extra is gone). Unknown providers are rejected loudly.
+- **Auth contract documented** — generation always runs on the server machine's
+  provider CLI (machine-local OAuth); the browser never carries credentials, which
+  is why the GUI button works without any browser-side auth. Prereqs + failure modes
+  in `docs/frame-interpolation.md`.
+- `/api/run` during a post-tween full re-extraction now reports busy (503,
+  "re-extraction in progress") instead of a manifest-consistency error the view
+  showed as corruption.
+
 ## v1.56.20 "Sol Atelier" - Tween popover on demand + frame-pair pick mode
 
 Two UX fixes on the tween button (Soohong 2026-07-17): the parameter popover no

@@ -49,7 +49,7 @@ const STR = {
     excluded: "✗ exclude", selected: "✓ selected", extractFail: "⚠ extraction incomplete",
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
     rowGif: "GIF", tRowGif: "download this row's current composed sequence as a GIF (4x nearest upscale for crisp viewing — pixel data unchanged)",
-    rowTween: "Tween", tRowTween: "AI in-between: interpolate a mid frame between two frames of this row (RIFE) — recorded as a take, then the FULL batch re-extracts (~1-2 min)",
+    rowTween: "Tween", tRowTween: "AI in-between: generate a mid frame between two frames of this row (codex/grok image gen on the server machine's CLI auth) — recorded as a take, then the FULL batch re-extracts. Click cards to pick the pair.",
     tweenFrom: "from", tweenTo: "to", tweenT: "t", tweenGo: "Generate",
     tweenBusy: "interpolating + re-extracting the full batch… (1-2 min)",
     tweenDone: (s) => `${s}: in-between added — reloading`,
@@ -130,7 +130,7 @@ const STR = {
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
     rowGif: "GIF", tRowGif: "이 줄의 현재 합성 시퀀스를 GIF 로 다운로드 — 선명하게 보이도록 4배 니어리스트로 굽는다 (픽셀 데이터는 그대로)",
-    rowTween: "보간", tRowTween: "AI 중간 프레임: 이 줄의 두 프레임 사이를 RIFE 로 보간해 테이크로 기록 — 이후 전체 배치 재추출 (~1-2분)",
+    rowTween: "보간", tRowTween: "AI 중간 프레임: 이 줄의 두 프레임 사이를 생성형(codex/grok — 서버 머신의 CLI 인증 사용)으로 그려 테이크로 기록 — 이후 전체 배치 재추출. 카드를 클릭해 쌍을 고르세요.",
     tweenFrom: "시작", tweenTo: "끝", tweenT: "t", tweenGo: "생성",
     tweenBusy: "보간 + 전체 배치 재추출 중… (1~2분)",
     tweenDone: (s) => `${s}: 중간 프레임 추가됨 — 새로고침합니다`,
@@ -673,6 +673,14 @@ function makeTweenButton(stateName) {
   const fromInput = field(t("tweenFrom"), 0, 1, 0);
   const toInput = field(t("tweenTo"), 1, 1, 0);
   const tInput = field(t("tweenT"), 0.5, 0.05, 0.05, 0.95);
+  const providerSel = document.createElement("select");
+  for (const name of ["codex", "grok"]) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name === "codex" ? "GPT" : "Grok";
+    providerSel.appendChild(opt);
+  }
+  pop.appendChild(providerSel);
   const go = document.createElement("button");
   go.type = "button";
   go.className = "gif-btn";
@@ -701,6 +709,7 @@ function makeTweenButton(stateName) {
           from: parseInt(fromInput.value, 10),
           to: parseInt(toInput.value, 10),
           t: parseFloat(tInput.value),
+          provider: providerSel.value,
         }),
       });
       const data = await res.json();
