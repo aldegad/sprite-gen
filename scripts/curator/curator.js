@@ -910,7 +910,8 @@ function applyCardTransform(stage, stateName, idx) {
   const edits = getPixelOps(stateName, idx);
   const editingThis = pixelEdit && pixelEdit.state === stateName && pixelEdit.idx === idx
     && stage.closest("#zoom-modal");
-  if (canvas && (edits || editingThis || (snap && !isIdentityTransform(t)))) {
+  const basePp = stateName === BASE_STATE && ppOn(stateName); // 베이스 pp ON = 논리 양자화 뷰
+  if (canvas && (edits || editingThis || basePp || (snap && !isIdentityTransform(t)))) {
     el.style.transform = "";
     el.style.visibility = "hidden";
     canvas.style.display = "block";
@@ -920,7 +921,7 @@ function applyCardTransform(stage, stateName, idx) {
     //   동일하게 미리 본다. 재양자화 특성상 이동이 격자 단위로 스냅된다 (의도).
     // - 소스 표시 (plain 뷰의 편집 프레임 / 편집 세션): identity 로 한 번 그리고,
     //   이동은 img 와 똑같은 CSS 변형으로 — 편집 없는 프레임과 거동이 같아진다.
-    const quantize = !!snap && !editingThis;
+    const quantize = (!!snap || basePp) && !editingThis;
     const render = () => {
       canvas.width = cw;
       canvas.height = ch;
@@ -2099,6 +2100,8 @@ async function openBaseEditor() {
   baseView = {
     cols: grid.xEdges.length - 1,
     rows: grid.yEdges.length - 1,
+    xEdges: grid.xEdges,
+    yEdges: grid.yEdges,
     url: run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "edit=" + Date.now(),
   };
   if (!entries[BASE_STATE]) {
@@ -2730,13 +2733,46 @@ function openZoom(stateName, idx, keepWidth) {
       return;
     }
     // 합성(원본+편집) 기준 — 방금 찍은 색도 팔레트에 나타난다. 같은 색 1개, 빈도순.
-    const cx = compositeCell();
-    const data = cx.getImageData(0, 0, cellW, cellH).data;
     const counts = new Map();
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] < 200) continue;
-      const hex = "#" + [data[i], data[i + 1], data[i + 2]].map((v) => v.toString(16).padStart(2, "0")).join("");
-      counts.set(hex, (counts.get(hex) || 0) + 1);
+    if (isBase && baseView && baseView.xEdges) {
+      // 베이스: 검출 격자 블록의 "중심"을 raw 해상도에서 샘플 — NEAREST 축소는
+      // AA/크로마 노이즈가 수백 유사색으로 쪼개져 팔레트를 초록으로 덮었다
+      // (실사고 2026-07-17 수홍: 캐릭터 색이 하나도 안 보임). 크로마 계열은 제외.
+      const probe = document.createElement("canvas");
+      probe.width = imgEl.naturalWidth;
+      probe.height = imgEl.naturalHeight;
+      const pc = probe.getContext("2d");
+      pc.drawImage(imgEl, 0, 0);
+      const corner = pc.getImageData(0, 0, 1, 1).data;
+      const raw = pc.getImageData(0, 0, probe.width, probe.height).data;
+      const ops0 = getPixelOps(stateName, idx) || {};
+      const xe = baseView.xEdges, ye = baseView.yEdges;
+      for (let j = 0; j < ye.length - 1; j++) {
+        for (let i = 0; i < xe.length - 1; i++) {
+          const opv = ops0[`${i},${j}`];
+          let hex = null;
+          if (opv !== undefined) {
+            if (opv) hex = opv; // 편집색; null(지우개=크로마)은 제외
+          } else {
+            const cxp = Math.floor((xe[i] + xe[i + 1]) / 2);
+            const cyp = Math.floor((ye[j] + ye[j + 1]) / 2);
+            const k = (cyp * probe.width + cxp) * 4;
+            const dist = Math.abs(raw[k] - corner[0]) + Math.abs(raw[k + 1] - corner[1]) + Math.abs(raw[k + 2] - corner[2]);
+            if (raw[k + 3] >= 200 && dist > 60) {
+              hex = "#" + [raw[k], raw[k + 1], raw[k + 2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+            }
+          }
+          if (hex) counts.set(hex, (counts.get(hex) || 0) + 1);
+        }
+      }
+    } else {
+      const cx = compositeCell();
+      const data = cx.getImageData(0, 0, cellW, cellH).data;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i + 3] < 200) continue;
+        const hex = "#" + [data[i], data[i + 1], data[i + 2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+        counts.set(hex, (counts.get(hex) || 0) + 1);
+      }
     }
     swatchBox.innerHTML = "";
     for (const [hex] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {

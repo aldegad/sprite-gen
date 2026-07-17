@@ -690,6 +690,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .stage .pxgrid {
   position: absolute;
   inset: 0;
+  z-index: 2; /* snap-canvas(z1) 위 — 픽셀퍼펙트 뷰에서도 격자가 보여야 한다 */
   pointer-events: none;
   display: none;
   background-image:
@@ -725,6 +726,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .stage .ingrid {
   position: absolute;
   inset: 0;
+  z-index: 2;
   width: 100%;
   height: 100%;
   pointer-events: none;
@@ -1104,8 +1106,8 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   max-height: 72vh;
 }
 .palette-swatches {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, 18px); /* 두 줄(2열) — 수홍 지시 2026-07-17 */
   gap: 3px;
   overflow-y: auto;
   min-height: 0;
