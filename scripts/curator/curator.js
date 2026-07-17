@@ -50,6 +50,10 @@ const STR = {
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
     saveLostBanner: "EDITS ARE NOT SAVING — the server may have restarted. Reload this page (your unsaved edits will be lost, but new edits will save again).",
     rowGif: "GIF", tRowGif: "download this row's current composed sequence as a GIF (4x nearest upscale for crisp viewing — pixel data unchanged)",
+    rowBreathe: "Breathe", tRowBreathe: "deterministic idle breathing: opens the zoom view with a draggable chest line + live breathing preview — Generate bakes an exhale take (integer row-shift, zero AI) and re-extracts the full batch",
+    breatheGo: "Generate", breatheAmp: "amp", breatheBusy: "baking breathe take + re-extracting the full batch…",
+    breatheHint: "drag the line — everything above it sinks 1px on exhale",
+    breatheDone: (s) => `${s}: breathe take added — reloading`, breatheFail: "breathe failed: ",
     rowTween: "Tween", tRowTween: "AI in-between: generate a mid frame between two frames of this row (codex/grok image gen on the server machine's CLI auth) — recorded as a take, then the FULL batch re-extracts. Click cards to pick the pair.",
     tweenFrom: "from", tweenTo: "to", tweenT: "t", tweenGo: "Generate",
     tweenBusy: "interpolating + re-extracting the full batch… (1-2 min)",
@@ -135,6 +139,10 @@ const STR = {
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
     saveLostBanner: "편집이 저장되지 않고 있습니다 — 서버가 재기동됐을 수 있어요. 이 페이지를 새로고침하세요 (미저장 편집은 유실되지만, 이후 편집은 다시 저장됩니다).",
     rowGif: "GIF", tRowGif: "이 줄의 현재 합성 시퀀스를 GIF 로 다운로드 — 선명하게 보이도록 4배 니어리스트로 굽는다 (픽셀 데이터는 그대로)",
+    rowBreathe: "호흡", tRowBreathe: "결정론 숨쉬기: 줌 뷰가 열리고 드래그 가능한 가슴선 + 실시간 호흡 미리보기 — 생성을 누르면 exhale 테이크(정수 행 시프트, AI 0%)를 굽고 전체 배치 재추출",
+    breatheGo: "생성", breatheAmp: "진폭", breatheBusy: "호흡 테이크 굽는 중 + 전체 배치 재추출…",
+    breatheHint: "선을 드래그 — 선 위가 날숨에 1px 가라앉습니다",
+    breatheDone: (s) => `${s}: 호흡 테이크 추가됨 — 새로고침합니다`, breatheFail: "호흡 생성 실패: ",
     rowTween: "보간", tRowTween: "AI 중간 프레임: 이 줄의 두 프레임 사이를 생성형(codex/grok — 서버 머신의 CLI 인증 사용)으로 그려 테이크로 기록 — 이후 전체 배치 재추출. 카드를 클릭해 쌍을 고르세요.",
     tweenFrom: "시작", tweenTo: "끝", tweenT: "t", tweenGo: "생성",
     tweenBusy: "보간 + 전체 배치 재추출 중… (1~2분)",
@@ -670,6 +678,22 @@ document.addEventListener("click", (ev) => {
   if (a) tweenOpen.fromInput.value = a.idx;
   if (b) tweenOpen.toInput.value = b.idx;
 }, true);
+
+let pendingBreathe = false; // 호흡 버튼 → 줌 모달 오픈 시 호흡 모드 진입 플래그
+
+function makeBreatheButton(stateName) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "gif-btn";
+  btn.title = t("tRowBreathe");
+  btn.innerHTML =
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+    '<path d="M2 11c2.5 0 2.5-3 5-3s2.5 3 5 3 2-2 2-2" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.4" stroke-linecap="round"/></svg>' +
+    `<span>${t("rowBreathe")}</span>`;
+  btn.addEventListener("click", () => { pendingBreathe = true; openZoom(stateName, 0); });
+  return btn;
+}
 
 function makeTweenButton(stateName) {
   const wrap = document.createElement("span");
@@ -1470,6 +1494,7 @@ function renderState(state, replaceEl) {
     if (showPpToggle) controls.appendChild(makePpToggle(state.name));
     if (showGifBtn) controls.appendChild(makeGifButton(state.name));
     controls.appendChild(makeTweenButton(state.name));
+    controls.appendChild(makeBreatheButton(state.name));
     refs.appendChild(controls);
     wrap.appendChild(refs);
   }
@@ -2422,6 +2447,7 @@ function startPreview(state) {
 let zoomView = null; // { stateName, idx, width }
 
 function closeZoom() {
+  if (zoomView && zoomView.cleanupBreathe) zoomView.cleanupBreathe();
   pixelEdit = null;
   const modal = document.getElementById("zoom-modal");
   if (modal) modal.remove();
@@ -3030,6 +3056,122 @@ function openZoom(stateName, idx, keepWidth) {
     applyCardTransform(stage, stateName, idx);
     sizePxGrids();
   }, { passive: false });
+
+  // ── 호흡 모드 (수홍 제안 2026-07-17): 드래그 가슴선 + 라이브 호흡 미리보기 ──
+  // 기본 가슴선 = 실루엣 휴리스틱(상반신 최광폭 행 = 어깨의 바로 아래) — AI 불필요,
+  // SD/8등신 모두 자동 적응. 선을 끌면 미리보기가 실시간으로 숨쉰다.
+  if (!isBase && pendingBreathe) {
+    pendingBreathe = false;
+    const bm = { amplitude: 1, phase: 0, split: 0.55 };
+    const cx0 = compositeCell();
+    const bdata = cx0.getImageData(0, 0, cellW, cellH).data;
+    let btop = cellH, bbot = 0;
+    const widths = new Array(cellH).fill(0);
+    for (let y = 0; y < cellH; y++) {
+      let w = 0;
+      for (let x = 0; x < cellW; x++) if (bdata[(y * cellW + x) * 4 + 3] >= 40) w++;
+      widths[y] = w;
+      if (w) { btop = Math.min(btop, y); bbot = Math.max(bbot, y + 1); }
+    }
+    const bh = Math.max(1, bbot - btop);
+    let shoulderY = btop + Math.floor(bh * 0.3);
+    let bestW = 0;
+    for (let y = btop; y < btop + Math.floor(bh * 0.55); y++) {
+      if (widths[y] > bestW) { bestW = widths[y]; shoulderY = y; }
+    }
+    bm.split = Math.min(0.75, Math.max(0.3, (shoulderY + Math.floor(bh * 0.1) - btop) / bh));
+
+    const line = document.createElement("div");
+    line.className = "breathe-line";
+    line.setAttribute("data-tip", t("breatheHint"));
+    stage.appendChild(line);
+    const syncLine = () => {
+      line.style.top = `${((btop + bm.split * bh) / cellH) * 100}%`;
+    };
+    syncLine();
+    line.addEventListener("pointerdown", (ev) => {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      line.setPointerCapture(ev.pointerId);
+      const onMove = (e2) => {
+        const r = stage.getBoundingClientRect();
+        const yCell = ((e2.clientY - r.top) / r.height) * cellH;
+        bm.split = Math.min(0.9, Math.max(0.1, (yCell - btop) / bh));
+        syncLine();
+      };
+      const onUp = () => {
+        line.removeEventListener("pointermove", onMove);
+        line.removeEventListener("pointerup", onUp);
+      };
+      line.addEventListener("pointermove", onMove);
+      line.addEventListener("pointerup", onUp);
+    });
+
+    const bcanvas = stage.querySelector(".snap-canvas");
+    const bImg = stage.querySelector("img");
+    const renderPhase = () => {
+      const srcEl = editSourceFor(stateName, bImg);
+      if (!srcEl || !bcanvas) return;
+      bImg.style.visibility = "hidden";
+      bcanvas.style.display = "block";
+      bcanvas.width = cellW;
+      bcanvas.height = cellH;
+      const bctx = bcanvas.getContext("2d");
+      bctx.imageSmoothingEnabled = false;
+      bctx.clearRect(0, 0, cellW, cellH);
+      drawFrameInto(bctx, srcEl, IDENTITY(), cellW, cellH, snapScaleFor(stateName),
+        getPixelOps(stateName, idx));
+      if (bm.phase) { // exhale 미리보기: breathe_frames.shift_above 와 같은 행 시프트
+        const splitY = Math.round(btop + bm.split * bh);
+        const region = bctx.getImageData(0, btop, cellW, Math.max(1, splitY - btop));
+        bctx.clearRect(0, btop, cellW, splitY - btop);
+        bctx.putImageData(region, 0, btop + bm.amplitude);
+      }
+    };
+    bm.timer = setInterval(() => { bm.phase = 1 - bm.phase; renderPhase(); }, 500);
+    renderPhase();
+
+    const bar = document.createElement("div");
+    bar.className = "breathe-bar";
+    const ampSel = document.createElement("select");
+    for (const v of [1, 2]) {
+      const o = document.createElement("option");
+      o.value = String(v);
+      o.textContent = `${t("breatheAmp")} ${v}px`;
+      ampSel.appendChild(o);
+    }
+    ampSel.addEventListener("change", () => { bm.amplitude = parseInt(ampSel.value, 10) || 1; });
+    const goBtn = document.createElement("button");
+    goBtn.textContent = t("breatheGo");
+    goBtn.addEventListener("click", async () => {
+      goBtn.disabled = true;
+      goBtn.innerHTML = '<span class="tween-spin" aria-label="generating"></span>';
+      setStatus(t("breatheBusy"));
+      try {
+        const res = await fetch("/api/breathe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state: stateName, frame: idx,
+                                 split: Math.round(bm.split * 100) / 100,
+                                 amplitude: bm.amplitude }),
+        });
+        const dataR = await res.json();
+        if (!res.ok || !dataR.ok) {
+          throw new Error(dataR.error || (dataR.stderr || "").trim().split("\n").pop() || res.status);
+        }
+        setStatus(STR[lang].breatheDone(stateName));
+        setTimeout(() => window.location.reload(), 800);
+      } catch (e) {
+        setStatus(t("breatheFail") + e.message, "err");
+        goBtn.textContent = t("breatheGo");
+        goBtn.disabled = false;
+      }
+    });
+    bar.appendChild(ampSel);
+    bar.appendChild(goBtn);
+    toolbar.appendChild(bar);
+    zoomView.cleanupBreathe = () => clearInterval(bm.timer);
+  }
 
   wireStage(stage, stateName, idx); // 베이스도 변형 동일 — 저장 시 파일에 굽는다 (수홍 지시)
   applyCardTransform(stage, stateName, idx);
