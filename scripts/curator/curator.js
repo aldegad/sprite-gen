@@ -2097,12 +2097,16 @@ function renderCard(state, frame) {
   const psize = frame.present && frame.contentSize
     ? `<span class="psize" data-tip="${t("tContentPx")}">${frame.contentSize[0]}×${frame.contentSize[1]}</span>` : "";
   card.innerHTML =
-    // 헤더: 타이틀(드래그 핸들, 호버 시 풀네임 복사) | 복제·확대 아이콘
+    // 헤더: 복제 | 타이틀(드래그 핸들, 호버 시 풀네임 복사) | 확대 —
+    // 복제를 좌측으로 분리 (수홍 지시 2026-07-17: 확대 옆에 붙어 있어 오클릭).
     `<div class="card-top"${frame.present ? ` data-tip="${t("tReorder")}"` : ""}>` +
-    `<span class="ct-left">${title}</span>` +
+    `<span class="ct-left">` +
+    (frame.present
+      ? `<button type="button" class="ghost dup-btn" data-tip="${t("tDupBtn")}" aria-label="duplicate">${dupIcon}</button>`
+      : "") +
+    `${title}</span>` +
     (frame.present
       ? `<span class="ct-right">` +
-        `<button type="button" class="ghost dup-btn" data-tip="${t("tDupBtn")}" aria-label="duplicate">${dupIcon}</button>` +
         `<button type="button" class="ghost zoom-btn" data-tip="${t("tZoomOpen")}" aria-label="zoom">${zoomIcon}</button>` +
         `</span>`
       : "") +
