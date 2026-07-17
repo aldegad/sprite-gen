@@ -626,7 +626,16 @@ class CurationHandler(BaseHTTPRequestHandler):
                     snapshot["heal"] = heal
                 self._send_json(snapshot)
             except (Exception, SystemExit) as exc:  # incl. load_frames_manifest fail-loud; no silent fallback
-                self._send_json({"error": str(exc)}, 500)
+                # 재추출이 돌고 있으면 request(새 테이크 선언)와 manifest(이전 세대)가
+                # 일시적으로 어긋난다 — corrupt 가 아니라 in-flight 다. 락 보유 중엔
+                # 그렇게 말해준다 (실사고 2026-07-17: 보간 직후 로드가 'corrupt frames
+                # manifest' 로 보여 사용자가 파손으로 오인).
+                if (self.run_dir / ".sprite-gen.lock").exists():
+                    self._send_json({"error": "re-extraction in progress — "
+                                     "the run is being re-derived; reload when it finishes",
+                                     "busy": True}, 503)
+                else:
+                    self._send_json({"error": str(exc)}, 500)
             return
         if path.startswith("/download/"):
             kind = path[len("/download/"):]
