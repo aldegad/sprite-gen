@@ -381,11 +381,36 @@ function isIdentityTransform(t) {
 // 스프라이트가 셀 고정 격자에 실시간으로 스냅되어 보인다 (격자는 그대로, 그림이 스냅).
 function drawFrameInto(ctx, image, t, cw, ch, snap, edits) {
   if (snap) ctx.imageSmoothingEnabled = false;
+  // 사이드카 픽셀 편집은 변형 이전(소스) 공간이다 — 굽기(apply_pixel_edits →
+  // apply_transform, compose_atlas.py)와 같은 순서로 편집을 먼저 소스에 합성한 뒤
+  // 함께 변형한다. (실사고 2026-07-17: 변형 후에 고정 좌표로 덧그려서, 캐릭터를
+  // 옮기면 편집 픽셀만 제자리에 남았다 — 수홍 발견.)
+  let source = image;
+  if (edits) {
+    const src = drawFrameInto._src || (drawFrameInto._src = document.createElement("canvas"));
+    src.width = cw;
+    src.height = ch;
+    const sctx = src.getContext("2d");
+    sctx.imageSmoothingEnabled = false;
+    sctx.clearRect(0, 0, cw, ch);
+    sctx.drawImage(image, 0, 0, cw, ch);
+    for (const [key, val] of Object.entries(edits)) {
+      const [x, y] = key.split(",").map(Number);
+      if (!(x >= 0 && x < cw && y >= 0 && y < ch)) continue;
+      if (val) {
+        sctx.fillStyle = val;
+        sctx.fillRect(x, y, 1, 1);
+      } else {
+        sctx.clearRect(x, y, 1, 1);
+      }
+    }
+    source = src;
+  }
   const m = matrixOf(t);
   ctx.save();
   ctx.translate(cw / 2 + t.dx, ch / 2 + t.dy);
   ctx.transform(m.m00, m.m10, m.m01, m.m11, 0, 0);
-  ctx.drawImage(image, -cw / 2, -ch / 2, cw, ch);
+  ctx.drawImage(source, -cw / 2, -ch / 2, cw, ch);
   ctx.restore();
   if (snap && snap > 1) {
     const lw = Math.max(1, Math.floor(cw / snap));
@@ -400,20 +425,6 @@ function drawFrameInto(ctx, image, t, cw, ch, snap, edits) {
     ctx.clearRect(0, 0, cw, ch);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(tmp, 0, 0, lw, lh, 0, 0, lw * snap, lh * snap);
-  }
-  // 사이드카 픽셀 편집 합성 — 굽기(apply_pixel_edits)와 동일 좌표 공간(셀 픽셀).
-  // 변형 이전 공간의 편집이므로, 변형이 있는 프레임은 편집 모드에서 identity 로 표시된다.
-  if (edits) {
-    for (const [key, val] of Object.entries(edits)) {
-      const [x, y] = key.split(",").map(Number);
-      if (!(x >= 0 && x < cw && y >= 0 && y < ch)) continue;
-      if (val) {
-        ctx.fillStyle = val;
-        ctx.fillRect(x, y, 1, 1);
-      } else {
-        ctx.clearRect(x, y, 1, 1);
-      }
-    }
   }
 }
 
@@ -876,25 +887,36 @@ function applyCardTransform(stage, stateName, idx) {
   const editingThis = pixelEdit && pixelEdit.state === stateName && pixelEdit.idx === idx
     && stage.closest("#zoom-modal");
   if (canvas && (edits || editingThis || (snap && !isIdentityTransform(t)))) {
-    // 픽셀퍼펙트 줄의 변형은 CSS(서브픽셀, 부드럽게)가 아니라 격자 재양자화로
-    // 미리 본다 — 굽기(snap_scale bake)와 같은 결과. 격자 오버레이는 셀 고정.
     el.style.transform = "";
     el.style.visibility = "hidden";
     canvas.style.display = "block";
+    // 두 캔버스 모드 (실사고 2026-07-17: 편집 유무에 따라 이동 거동이 갈라져
+    // 한쪽만 지글거렸다 — 수홍 발견):
+    // - 양자화 미리보기 (픽셀퍼펙트 뷰 + 변형): 변형을 격자 재양자화로 굽기와
+    //   동일하게 미리 본다. 재양자화 특성상 이동이 격자 단위로 스냅된다 (의도).
+    // - 소스 표시 (plain 뷰의 편집 프레임 / 편집 세션): identity 로 한 번 그리고,
+    //   이동은 img 와 똑같은 CSS 변형으로 — 편집 없는 프레임과 거동이 같아진다.
+    const quantize = !!snap && !editingThis;
     const render = () => {
       canvas.width = run.cell.width;
       canvas.height = run.cell.height;
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      // 편집 세션 중에는 변형 없이 원본 좌표로 (편집 = 변형 이전 공간)
-      const tt = editingThis ? IDENTITY() : getTransform(stateName, idx);
-      drawFrameInto(ctx, el, tt, canvas.width, canvas.height, snap, getPixelOps(stateName, idx));
+      const tt = quantize ? getTransform(stateName, idx) : IDENTITY();
+      drawFrameInto(ctx, el, tt, canvas.width, canvas.height, snap,
+        getPixelOps(stateName, idx));
     };
+    canvas.style.transform = (quantize || editingThis)
+      ? ""
+      : `translate(${t.dx * ds}px, ${t.dy * ds}px) matrix(${m.m00}, ${m.m10}, ${m.m01}, ${m.m11}, 0, 0)`;
     if (el.complete && el.naturalWidth) render();
     else el.addEventListener("load", render, { once: true });
   } else {
     el.style.visibility = "";
-    if (canvas) canvas.style.display = "none";
+    if (canvas) {
+      canvas.style.display = "none";
+      canvas.style.transform = "";
+    }
     // CSS matrix(a,b,c,d,e,f): a=m00 b=m10 c=m01 d=m11; translate applied after, about center.
     el.style.transform =
       `translate(${t.dx * ds}px, ${t.dy * ds}px) matrix(${m.m00}, ${m.m10}, ${m.m01}, ${m.m11}, 0, 0)`;
