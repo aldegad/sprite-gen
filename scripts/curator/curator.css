@@ -1072,3 +1072,38 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   animation: sg-spin 0.8s linear infinite;
 }
 @keyframes sg-spin { to { transform: rotate(360deg); } }
+
+/* 베이스 픽셀 에디터 모달 */
+#base-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+}
+#base-editor .be-card {
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(15, 23, 42, 0.25);
+  max-width: 92vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#base-editor .be-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line, #e2e8f0);
+}
+#base-editor .be-tools { display: inline-flex; align-items: center; gap: 6px; }
+#base-editor .be-tools .ghost.active { background: var(--accent, #2563eb); color: #fff; }
+#base-editor .be-color { width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: transparent; }
+#base-editor .be-stage { overflow: auto; padding: 14px; background: repeating-conic-gradient(var(--checker-a, #e9ebef) 0% 25%, var(--checker-b, #f4f5f7) 0% 50%) 0 0 / 16px 16px; }
+#base-editor .be-canvas { display: block; image-rendering: pixelated; }

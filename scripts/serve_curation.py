@@ -756,6 +756,55 @@ class CurationHandler(BaseHTTPRequestHandler):
                 result = run_compose(self.run_dir)
                 self._send_json(result, 200 if result["ok"] else 500)
                 return
+            if path == "/api/base-edit":
+                # 베이스(base-source) 픽셀 편집 — 프레임과 달리 사이드카가 아니라
+                # 파일 자체에 굽는다: 베이스는 생성 identity truth 입력이라, 편집이
+                # 이후 생성(앵커 재파생·행 리롤)에 반영되려면 파일이 바뀌어야 한다
+                # (수홍 지시 2026-07-17 '베이스를 다르게 해서 뽑고 싶다').
+                # 원본은 최초 1회 <base>.orig 로 백업 (관측 가능, 덮어쓰지 않음).
+                payload = self._read_body()
+                ops = payload.get("ops")
+                if not isinstance(ops, dict) or not ops:
+                    self._send_json({"error": 'body needs non-empty ops {"x,y": "#rrggbb"|null}'}, 400)
+                    return
+                base_path = None
+                for candidate in sorted(self.run_dir.glob("base-source.*")):
+                    if candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+                        base_path = candidate
+                        break
+                if base_path is None:
+                    self._send_json({"error": "no base-source image in this run"}, 404)
+                    return
+                request = json.loads(
+                    (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+                chroma = tuple(request.get("chroma_key", {}).get("rgb") or (255, 0, 255))
+                from PIL import Image as _Image
+                backup = base_path.with_name(base_path.name + ".orig")
+                if not backup.exists():
+                    import shutil as _shutil
+                    _shutil.copyfile(base_path, backup)
+                with _Image.open(base_path) as opened:
+                    image = opened.convert("RGBA")
+                applied = 0
+                for key, value in ops.items():
+                    try:
+                        x, y = (int(v) for v in str(key).split(","))
+                    except ValueError:
+                        continue
+                    if not (0 <= x < image.width and 0 <= y < image.height):
+                        continue
+                    if value:
+                        hexv = str(value).lstrip("#")
+                        if len(hexv) != 6:
+                            continue
+                        rgb = tuple(int(hexv[i:i + 2], 16) for i in (0, 2, 4))
+                        image.putpixel((x, y), rgb + (255,))
+                    else:
+                        image.putpixel((x, y), chroma + (255,))  # 지우개 = 크로마 배경 복원
+                    applied += 1
+                image.save(base_path)
+                self._send_json({"ok": True, "applied": applied, "backup": backup.name})
+                return
             if path == "/api/interpolate":
                 payload = self._read_body()
                 state = str(payload.get("state") or "")
