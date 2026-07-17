@@ -5,6 +5,29 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.28 "Sol Atelier" - Breathe as a row checkbox + multi-line phase cascade
+
+Soohong's UX call (2026-07-17): breathing is a property you toggle per row, not a
+wizard — and the chest line generalizes to multiple lines ("숨쉬기 선을 나누는거지").
+
+- **Multi-line cascade** — `breathe_frames.py --split` now takes 1–3 comma-separated
+  lines. K lines → K exhale phases: the band above the lowest line sinks first,
+  upper bands join one beat later (the two-band head-lag generalized; `--two-band`
+  remains as sugar). Take records `breathe: {splits, amplitude, frame}` so the
+  editor restores saved parameters on reopen.
+- **Row checkbox** — the curation row's Breathe control is now a checkbox: check
+  puts the breath cycle into the play sequence (first check bakes a take with
+  silhouette-heuristic defaults), uncheck removes it from the sequence while
+  keeping the take (re-check is instant, no re-bake). Clicking the label opens
+  the focus editor.
+- **Generate button removed** — the focus editor applies on close (Esc cancels):
+  line/amplitude changes re-bake + re-extract, cadence-only changes rebuild the
+  sequence instantly with no server round-trip. New cadence control ("hold Nf")
+  sets how long the exhaled pose holds; the live preview plays the exact
+  injection sequence at the row's real fps.
+- `/api/breathe` accepts `splits: [float]` (1–3, ascending); single `split` kept
+  for compatibility. `/api/run` states now expose `takes` declarations.
+
 ## v1.56.27 "Sol Atelier" - Deterministic breathing frames (integer row-shift squash)
 
 After generative approaches (RIFE, codex/grok image gen, grok video) all failed the
