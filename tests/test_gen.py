@@ -169,3 +169,111 @@ def test_generate_image_empty_prompt_fails_loud(tmp_path: Path) -> None:
 def test_unknown_provider_fails_loud(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         gen._make_provider("gemini", keep_session=False)
+
+
+# ── Default-provider policy (수홍 2026-07-17): default = codex, observable grok
+# fallback when codex is unavailable, SPRITE_GEN_DEFAULT_PROVIDER override. ──────
+
+def test_resolve_default_provider_hard_default_is_codex(monkeypatch) -> None:
+    monkeypatch.delenv(gen.DEFAULT_PROVIDER_ENV, raising=False)
+    monkeypatch.setattr(gen, "_codex_available", lambda: (True, ""))
+    assert gen.resolve_default_provider() == ("codex", None)
+
+
+def test_resolve_default_provider_env_override(monkeypatch) -> None:
+    monkeypatch.setenv(gen.DEFAULT_PROVIDER_ENV, "grok")
+    # codex probe must not even run when the env pins a non-codex default.
+    monkeypatch.setattr(gen, "_codex_available", lambda: pytest.fail("probe should not run"))
+    assert gen.resolve_default_provider() == ("grok", None)
+
+
+def test_resolve_default_provider_invalid_env_fails_loud(monkeypatch) -> None:
+    monkeypatch.setenv(gen.DEFAULT_PROVIDER_ENV, "gemini")
+    with pytest.raises(SystemExit):
+        gen.resolve_default_provider()
+
+
+def test_resolve_default_provider_codex_unavailable_falls_back_observably(monkeypatch) -> None:
+    monkeypatch.delenv(gen.DEFAULT_PROVIDER_ENV, raising=False)
+    monkeypatch.setattr(gen, "_codex_available", lambda: (False, "codex not logged in (test)"))
+    provider, fallback = gen.resolve_default_provider()
+    assert provider == "grok"
+    assert fallback == {
+        "from": "codex",
+        "to": "grok",
+        "reason": "codex not logged in (test)",
+        "default_source": "hard-default",
+    }
+
+
+def test_resolve_default_provider_env_codex_still_falls_back(monkeypatch) -> None:
+    # An env that pins codex still gets the availability fallback (default_source=env).
+    monkeypatch.setenv(gen.DEFAULT_PROVIDER_ENV, "codex")
+    monkeypatch.setattr(gen, "_codex_available", lambda: (False, "codex CLI not found on PATH"))
+    provider, fallback = gen.resolve_default_provider()
+    assert provider == "grok"
+    assert fallback["default_source"] == gen.DEFAULT_PROVIDER_ENV
+
+
+def _install_recording_provider(monkeypatch):
+    """Monkeypatch _make_provider to record the requested name and emit a PNG."""
+    requested: list[str] = []
+
+    def fake_make(name, *, keep_session):
+        requested.append(name)
+
+        class _P:
+            def generate(self, request: GenRequest, workdir: Path):
+                Image.new("RGBA", (8, 8), (255, 0, 255, 255)).save(request.raw)
+                return gen_base.ProviderRun(provider=name, elapsed_seconds=0.1, model=request.model)
+
+        return _P()
+
+    monkeypatch.setattr(gen, "_make_provider", fake_make)
+    return requested
+
+
+def test_run_explicit_provider_is_honored_without_fallback(tmp_path: Path, monkeypatch) -> None:
+    requested = _install_recording_provider(monkeypatch)
+    # Even with codex "down", an EXPLICIT --provider is never overridden.
+    monkeypatch.setattr(gen, "_codex_available", lambda: (False, "should be irrelevant"))
+    report = tmp_path / "r.json"
+    rc = gen.run(provider="grok", prompt="x", out=tmp_path / "o.png", report=report)
+    assert rc == 0
+    assert requested == ["grok"]
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["provider"] == "grok"
+    assert payload["provider_resolved_from"] == "explicit"
+    assert "provider_fallback" not in payload
+
+
+def test_run_default_uses_codex_when_available(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv(gen.DEFAULT_PROVIDER_ENV, raising=False)
+    requested = _install_recording_provider(monkeypatch)
+    monkeypatch.setattr(gen, "_codex_available", lambda: (True, ""))
+    report = tmp_path / "r.json"
+    rc = gen.run(prompt="x", out=tmp_path / "o.png", report=report)
+    assert rc == 0
+    assert requested == ["codex"]
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["provider"] == "codex"
+    assert payload["provider_resolved_from"] == "hard-default"
+    assert "provider_fallback" not in payload
+
+
+def test_run_default_falls_back_to_grok_and_reports_it(tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.delenv(gen.DEFAULT_PROVIDER_ENV, raising=False)
+    requested = _install_recording_provider(monkeypatch)
+    monkeypatch.setattr(gen, "_codex_available", lambda: (False, "codex not logged in (test)"))
+    report = tmp_path / "r.json"
+    rc = gen.run(prompt="x", out=tmp_path / "o.png", report=report)
+    assert rc == 0
+    assert requested == ["grok"]  # actually generated with grok
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["provider"] == "grok"
+    assert payload["provider_resolved_from"] == "fallback-from-codex"
+    assert payload["provider_fallback"]["from"] == "codex"
+    assert payload["provider_fallback"]["to"] == "grok"
+    assert "codex not logged in" in payload["provider_fallback"]["reason"]
+    # And the fallback is loud on stderr (No Silent Fallback).
+    assert "falling back to 'grok'" in capsys.readouterr().err

@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -31,6 +34,17 @@ from .grok_provider import GrokProvider
 
 PROVIDERS = ("codex", "grok")
 
+# Default-provider policy (수홍 확정 2026-07-17): the default backend is codex
+# (GPT `image_gen`). If codex is unavailable in the environment (CLI missing or
+# not logged in) the default resolution falls back to grok — but OBSERVABLY, never
+# silently (No Silent Fallback): the chosen provider and the fallback reason are
+# reported. A user can change the default with SPRITE_GEN_DEFAULT_PROVIDER. An
+# EXPLICIT `--provider` is always honored exactly (no availability fallback) — an
+# explicitly named provider that is down fails loud at generation time.
+DEFAULT_PROVIDER_ENV = "SPRITE_GEN_DEFAULT_PROVIDER"
+HARD_DEFAULT_PROVIDER = "codex"
+_CODEX_PROBE_TIMEOUT_SECONDS = 15
+
 
 def _make_provider(name: str, *, keep_session: bool):
     if name == "codex":
@@ -38,6 +52,65 @@ def _make_provider(name: str, *, keep_session: bool):
     if name == "grok":
         return GrokProvider()
     raise SystemExit(f"gen: unknown provider {name!r}; expected one of {', '.join(PROVIDERS)}")
+
+
+def _codex_available() -> tuple[bool, str]:
+    """Is codex usable here? Returns (ok, reason_if_not).
+
+    Two checks, cheapest first: the `codex` CLI on PATH, then `codex login status`
+    (exit 0 = logged in). Any probe error/timeout counts as unavailable with a
+    stated reason — never a silent pass. Monkeypatchable in tests.
+    """
+    if shutil.which("codex") is None:
+        return False, "codex CLI not found on PATH"
+    try:
+        completed = subprocess.run(
+            ["codex", "login", "status"],
+            capture_output=True,
+            text=True,
+            timeout=_CODEX_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"codex login-status probe failed: {exc}"
+    if completed.returncode != 0:
+        tail = (completed.stdout or completed.stderr or "").strip().splitlines()[-3:]
+        detail = f": {' '.join(tail)}" if tail else ""
+        return False, f"codex not logged in (codex login status exit {completed.returncode}{detail})"
+    return True, ""
+
+
+def resolve_default_provider() -> tuple[str, dict[str, str] | None]:
+    """Resolve the provider to use when `--provider` is not given.
+
+    Precedence: SPRITE_GEN_DEFAULT_PROVIDER env > hard default (codex). When the
+    resolved default is codex but codex is unavailable, fall back to grok and return
+    fallback metadata (from/to/reason/default_source) so the switch is observable.
+    Returns (provider, fallback_or_None).
+    """
+    configured = os.environ.get(DEFAULT_PROVIDER_ENV, "").strip()
+    if configured:
+        if configured not in PROVIDERS:
+            raise SystemExit(
+                f"gen: {DEFAULT_PROVIDER_ENV}={configured!r} is not a known provider; "
+                f"expected one of {', '.join(PROVIDERS)}"
+            )
+        default, source = configured, DEFAULT_PROVIDER_ENV
+    else:
+        default, source = HARD_DEFAULT_PROVIDER, "hard-default"
+
+    # The availability-driven fallback is codex -> grok only (the mandated default).
+    # A grok default that is down fails loud at generation time rather than silently
+    # reverse-falling-back to codex.
+    if default == "codex":
+        ok, reason = _codex_available()
+        if not ok:
+            return "grok", {
+                "from": "codex",
+                "to": "grok",
+                "reason": reason,
+                "default_source": source,
+            }
+    return default, None
 
 
 def generate_image(
@@ -110,8 +183,28 @@ def _run(args: argparse.Namespace) -> int:
     prompt = args.prompt
     if args.prompt_file:
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8")
+    # Explicit --provider is honored verbatim; only the unspecified case resolves the
+    # default (env > codex) with an observable codex->grok availability fallback.
+    provider = args.provider
+    fallback: dict[str, str] | None = None
+    if provider is not None:
+        resolved_from = "explicit"
+    else:
+        provider, fallback = resolve_default_provider()
+        if fallback:
+            resolved_from = f"fallback-from-{fallback['from']}"
+            print(
+                f"sprite-gen gen: default provider '{fallback['from']}' unavailable "
+                f"({fallback['reason']}) — falling back to '{fallback['to']}'. "
+                f"Set {DEFAULT_PROVIDER_ENV} or pass --provider to control this.",
+                file=sys.stderr,
+            )
+        elif os.environ.get(DEFAULT_PROVIDER_ENV, "").strip():
+            resolved_from = DEFAULT_PROVIDER_ENV
+        else:
+            resolved_from = "hard-default"
     result = generate_image(
-        args.provider,
+        provider,
         prompt or "",
         args.out,
         refs=args.ref,
@@ -124,6 +217,13 @@ def _run(args: argparse.Namespace) -> int:
         workdir=args.workdir,
     )
     payload = result.to_dict()
+    # `provider` in the payload is always the backend that actually generated the
+    # image; `provider_resolved_from` records HOW it was chosen and
+    # `provider_fallback` records a default->fallback switch when one happened
+    # (No Silent Fallback — the report names which provider was used and why).
+    payload["provider_resolved_from"] = resolved_from
+    if fallback:
+        payload["provider_fallback"] = fallback
     if args.report:
         report_path = Path(args.report).expanduser().resolve()
         atomic_write_text(report_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
@@ -139,7 +239,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--provider", required=True, choices=PROVIDERS)
+    parser.add_argument(
+        "--provider",
+        choices=PROVIDERS,
+        default=None,
+        help=(
+            f"generation backend; default resolves via {DEFAULT_PROVIDER_ENV} env "
+            "then codex, with an observable grok fallback if codex is unavailable"
+        ),
+    )
     parser.add_argument("--prompt")
     parser.add_argument("--prompt-file", type=Path)
     parser.add_argument("--out", required=True, type=Path)
