@@ -2067,6 +2067,9 @@ function renderBaseRow() {
 }
 
 // ── 베이스 픽셀 에디터 — base-source 파일 자체를 굽는다 (수홍 지시 2026-07-17:
+// [통합 부채] 편집 상호작용(툴/저널/마키)이 줌 모달과 중복 구현돼 있다 — 수홍 지시
+// (2026-07-17 "베이스 편집 에디터를 똑같은 거 쓰라"): 공용 픽셀 편집 코어로 합쳐
+// 유지보수를 한 곳으로 모을 것. 다음 작업 단위에서 createPixelTools 로 추출 예정.
 // '베이스를 다르게 해서 뽑고 싶다'). 프레임 편집(사이드카)과 달리 저장 시 서버가
 // 파일에 반영하고 원본은 최초 1회 .orig 로 백업된다. 이미 뽑힌 프레임은 raw 파생이라
 // 안 변한다 — 바뀐 베이스는 이후 생성(앵커 재파생·행 리롤)에 반영된다.
@@ -2116,6 +2119,17 @@ async function openBaseEditor() {
   const ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(img, 0, 0, W * S, H * S);
+  // 휠 = 보기 확대/축소 (프레임 줌 모달과 동일 감각). 렌더 해상도는 그대로,
+  // CSS 폭만 바꾼다 — 마키/좌표는 boundingRect 비율로 계산되어 자동 추종.
+  let viewScale = 1;
+  const beStage = modal.querySelector(".be-stage");
+  beStage.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    viewScale = Math.max(0.2, Math.min(8, viewScale * (ev.deltaY < 0 ? 1.12 : 1 / 1.12)));
+    canvas.style.width = `${Math.round(W * S * viewScale)}px`;
+    canvas.style.height = "auto";
+    syncSelBox();
+  }, { passive: false });
   // 지우개 표시색 = 이미지 모서리(크로마 배경) 픽셀 — 서버도 지우개를 크로마로 굽는다
   const probe = document.createElement("canvas");
   probe.width = W; probe.height = H;
@@ -2135,10 +2149,12 @@ async function openBaseEditor() {
   const syncSelBox = () => {
     selBox.hidden = !sel;
     if (!sel) return;
-    selBox.style.left = `${sel.x0 * S}px`;
-    selBox.style.top = `${sel.y0 * S}px`;
-    selBox.style.width = `${(sel.x1 - sel.x0) * S}px`;
-    selBox.style.height = `${(sel.y1 - sel.y0) * S}px`;
+    const r = canvas.getBoundingClientRect();
+    const kx = r.width / W, ky = r.height / H;
+    selBox.style.left = `${sel.x0 * kx}px`;
+    selBox.style.top = `${sel.y0 * ky}px`;
+    selBox.style.width = `${(sel.x1 - sel.x0) * kx}px`;
+    selBox.style.height = `${(sel.y1 - sel.y0) * ky}px`;
   };
   const syncTools = () => {
     for (const [name, el] of Object.entries(buttons)) el.classList.toggle("active", tool === name);
