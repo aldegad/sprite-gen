@@ -84,6 +84,44 @@ _PITCH_CACHE: dict = {}
 _BASE_GRID_CACHE: dict = {}  # (base path, mtime_ns) -> /api/base-grid 응답 (검출은 수 초짜리)
 
 
+def _find_base_path(run_dir: Path):
+    for candidate in sorted(run_dir.glob("base-source.*")):
+        if candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+            return candidate
+    return None
+
+
+def _base_grid_response(run_dir: Path, base_path: Path) -> dict:
+    """베이스 검출 격자 응답 (mtime 키 캐시). GET /api/base-grid 와 base-edit 의
+    논리→raw 확장이 같은 절단선을 쓴다 (SSoT — 클라와 서버가 다른 격자를 보면 안 됨)."""
+    cache_key = (str(base_path), base_path.stat().st_mtime_ns)
+    cached = _BASE_GRID_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    chroma = tuple(request.get("chroma_key", {}).get("rgb") or (255, 0, 255))
+    from extract import (_grid_edges, detect_pixel_grid,
+                         remove_chroma_background_ycbcr, solid_alpha_bbox)
+    with Image.open(base_path) as opened:
+        cleaned = remove_chroma_background_ycbcr(opened.convert("RGBA"), chroma)
+    box = solid_alpha_bbox(cleaned) or cleaned.getbbox()
+    if not box:
+        result = {"grid": None, "note": "base has no content to detect a grid on"}
+    else:
+        tight = cleaned.crop(box)
+        (pitch_x, pitch_y), (phase_x, phase_y) = detect_pixel_grid(tight)
+        if min(pitch_x, pitch_y) < 2.0:
+            result = {"grid": None, "note": "no confident pixel grid detected"}
+        else:
+            x_edges = [box[0] + e for e in _grid_edges(tight.width, pitch_x, phase_x)]
+            y_edges = [box[1] + e for e in _grid_edges(tight.height, pitch_y, phase_y)]
+            result = {"grid": {"xEdges": x_edges, "yEdges": y_edges,
+                               "pitch": [round(pitch_x, 2), round(pitch_y, 2)]}}
+    _BASE_GRID_CACHE.clear()  # 베이스는 런당 1개 — 이전 세대 항목만 치움
+    _BASE_GRID_CACHE[cache_key] = result
+    return result
+
+
 def _axis_pitch(edge_mass, length):
     total = sum(edge_mass)
     if total <= 0 or length < 8:
@@ -641,49 +679,14 @@ class CurationHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": str(exc)}, 500)
             return
         if path == "/api/base-grid":
-            # 베이스의 검출 픽셀 격자 — 편집기가 row 들과 같은 "논리 픽셀(블록) 단위
-            # 클릭" 을 제공하기 위한 절단선 (수홍 지시 2026-07-17). 추출과 동일 체인:
-            # 크로마 제거 → solid bbox 조임 → detect_pixel_grid → _grid_edges,
-            # 좌표는 bbox 오프셋을 되붙여 전체 이미지 기준으로 반환.
-            # 검출은 순수 파이썬 픽셀 루프라 큰 베이스에서 수 초 걸린다 — 파일
-            # mtime 키로 캐시한다 (실사고 2026-07-17: 편집 버튼이 한참 있다 열림).
+            # 베이스의 검출 픽셀 격자 — 편집기(줌 모달)의 논리 해상도와 base-edit 의
+            # 논리→raw 확장이 같은 절단선을 쓴다 (_base_grid_response, mtime 캐시).
             try:
-                base_path = None
-                for candidate in sorted(self.run_dir.glob("base-source.*")):
-                    if candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
-                        base_path = candidate
-                        break
+                base_path = _find_base_path(self.run_dir)
                 if base_path is None:
                     self._send_json({"error": "no base-source image in this run"}, 404)
                     return
-                cache_key = (str(base_path), base_path.stat().st_mtime_ns)
-                cached = _BASE_GRID_CACHE.get(cache_key)
-                if cached is not None:
-                    self._send_json(cached)
-                    return
-                request = json.loads(
-                    (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
-                chroma = tuple(request.get("chroma_key", {}).get("rgb") or (255, 0, 255))
-                from extract import (_grid_edges, detect_pixel_grid,
-                                     remove_chroma_background_ycbcr, solid_alpha_bbox)
-                with Image.open(base_path) as opened:
-                    cleaned = remove_chroma_background_ycbcr(opened.convert("RGBA"), chroma)
-                box = solid_alpha_bbox(cleaned) or cleaned.getbbox()
-                if not box:
-                    self._send_json({"error": "base has no content to detect a grid on"}, 422)
-                    return
-                tight = cleaned.crop(box)
-                (pitch_x, pitch_y), (phase_x, phase_y) = detect_pixel_grid(tight)
-                if min(pitch_x, pitch_y) < 2.0:
-                    result = {"grid": None, "note": "no confident pixel grid detected"}
-                else:
-                    x_edges = [box[0] + e for e in _grid_edges(tight.width, pitch_x, phase_x)]
-                    y_edges = [box[1] + e for e in _grid_edges(tight.height, pitch_y, phase_y)]
-                    result = {"grid": {"xEdges": x_edges, "yEdges": y_edges,
-                                       "pitch": [round(pitch_x, 2), round(pitch_y, 2)]}}
-                _BASE_GRID_CACHE.clear()  # 베이스는 런당 1개 — 이전 세대 항목만 치움
-                _BASE_GRID_CACHE[cache_key] = result
-                self._send_json(result)
+                self._send_json(_base_grid_response(self.run_dir, base_path))
             except (Exception, SystemExit) as exc:
                 self._send_json({"error": str(exc)}, 500)
             return
@@ -815,23 +818,30 @@ class CurationHandler(BaseHTTPRequestHandler):
                 if not isinstance(ops, dict) or not ops:
                     self._send_json({"error": 'body needs non-empty ops {"x,y": "#rrggbb"|null}'}, 400)
                     return
-                base_path = None
-                for candidate in sorted(self.run_dir.glob("base-source.*")):
-                    if candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
-                        base_path = candidate
-                        break
+                base_path = _find_base_path(self.run_dir)
                 if base_path is None:
                     self._send_json({"error": "no base-source image in this run"}, 404)
+                    return
+                space = str(payload.get("space") or "raw")
+                grid = None
+                if space == "logical":
+                    # 논리 셀 좌표 (줌 모달 편집 공간) — 검출 격자로 raw 블록에 확장.
+                    # 격자 SSoT = _base_grid_response (클라 표시와 동일 절단선).
+                    grid = _base_grid_response(self.run_dir, base_path).get("grid")
+                    if not grid:
+                        self._send_json({"error": "logical ops need a detected base grid"}, 422)
+                        return
+                elif space != "raw":
+                    self._send_json({"error": f"unknown ops space: {space}"}, 400)
                     return
                 request = json.loads(
                     (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
                 chroma = tuple(request.get("chroma_key", {}).get("rgb") or (255, 0, 255))
-                from PIL import Image as _Image
                 backup = base_path.with_name(base_path.name + ".orig")
                 if not backup.exists():
                     import shutil as _shutil
                     _shutil.copyfile(base_path, backup)
-                with _Image.open(base_path) as opened:
+                with Image.open(base_path) as opened:
                     image = opened.convert("RGBA")
                 applied = 0
                 for key, value in ops.items():
@@ -839,19 +849,31 @@ class CurationHandler(BaseHTTPRequestHandler):
                         x, y = (int(v) for v in str(key).split(","))
                     except ValueError:
                         continue
-                    if not (0 <= x < image.width and 0 <= y < image.height):
-                        continue
+                    fill: tuple
                     if value:
                         hexv = str(value).lstrip("#")
                         if len(hexv) != 6:
                             continue
-                        rgb = tuple(int(hexv[i:i + 2], 16) for i in (0, 2, 4))
-                        image.putpixel((x, y), rgb + (255,))
+                        fill = tuple(int(hexv[i:i + 2], 16) for i in (0, 2, 4)) + (255,)
                     else:
-                        image.putpixel((x, y), chroma + (255,))  # 지우개 = 크로마 배경 복원
-                    applied += 1
+                        fill = chroma + (255,)  # 지우개 = 크로마 배경 복원
+                    if grid is not None:
+                        xe, ye = grid["xEdges"], grid["yEdges"]
+                        if not (0 <= x < len(xe) - 1 and 0 <= y < len(ye) - 1):
+                            continue
+                        for ry in range(ye[y], ye[y + 1]):
+                            for rx in range(xe[x], xe[x + 1]):
+                                if 0 <= rx < image.width and 0 <= ry < image.height:
+                                    image.putpixel((rx, ry), fill)
+                        applied += 1
+                    else:
+                        if not (0 <= x < image.width and 0 <= y < image.height):
+                            continue
+                        image.putpixel((x, y), fill)
+                        applied += 1
                 image.save(base_path)
-                self._send_json({"ok": True, "applied": applied, "backup": backup.name})
+                self._send_json({"ok": True, "applied": applied, "space": space,
+                                 "backup": backup.name})
                 return
             if path == "/api/interpolate":
                 payload = self._read_body()

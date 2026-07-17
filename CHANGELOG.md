@@ -5,6 +5,30 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.24 "Sol Atelier" - Base editing IS the zoom modal (one component)
+
+Soohong rejected the parallel base-editor implementation ("use the same component")
+— and the feature gap that had already opened (no zoom/pan in the bespoke modal)
+proved the point. The bespoke modal is deleted; the base now opens in the zoom
+modal itself.
+
+- **Virtual state `__base__`** — `openBaseEditor` builds a logical view from the
+  detected base grid (e.g. 28×48 logical pixels) and calls `openZoom`. Tools,
+  stroke journal, undo/redo shortcuts, marquee move/duplicate, palette swatches,
+  eyedropper, wheel zoom, and Space/middle-drag panning are the SAME code as frame
+  editing. `cellDims(state)` parameterizes the modal's logical space.
+- **Explicit bake** — base edits accumulate as logical ops (never in curation.json;
+  `buildPayload` excludes the virtual state) and a "save to base" button POSTs
+  `space:"logical"` to `/api/base-edit`; the server expands logical cells to raw
+  blocks using the SAME grid the client displays (`_base_grid_response` SSoT,
+  verified: one logical cell → exactly its 930-px raw block). Autosave shows an
+  "editing base — press save" notice instead of a misleading "saved".
+- Frame-only chrome (prev/next, pp/grid/GIF toggles, transform handles/flip/reset)
+  is guarded off for the base; sprite-transform dragging is disabled (the base has
+  no transform concept — it IS the file).
+- Tool buttons are icon-only SVGs shared via `TOOL_ICONS` (both contexts identical);
+  view panning (`wirePan`) is shared too.
+
 ## v1.56.23 "Sol Atelier" - Base pixel editor with grid snap, curator session hardening
 
 A day of live curation with Soohong drove ten fixes/features straight from real
