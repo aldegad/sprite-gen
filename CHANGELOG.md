@@ -5,6 +5,30 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.31 "Sol Default" - gen default provider = codex, observable grok fallback, SPRITE_GEN_DEFAULT_PROVIDER
+
+Soohong's directive (2026-07-17, 솔밸리 스레드): the `gen` default backend is codex
+(GPT `image_gen`). grok had drifted into being the de-facto default as the "faster
+backend"; codex is now the confirmed default.
+
+- **`--provider` is optional** on `sprite-gen gen` (was `required=True`). When omitted,
+  the backend resolves by precedence: `SPRITE_GEN_DEFAULT_PROVIDER` env (`codex`|`grok`,
+  unknown value fails loud) → **codex** hard default.
+- **Observable codex→grok fallback** — if the resolved default is codex but codex is
+  unavailable (`codex` CLI missing on PATH, or `codex login status` reports not-logged-in),
+  the resolution falls back to grok and says so: a stderr notice plus `provider_fallback`
+  (`from`/`to`/`reason`/`default_source`) in the report JSON. Never silent (No Silent
+  Fallback). A grok default has no reverse fallback — a down grok fails loud.
+- **Explicit `--provider` is honored verbatim** — the availability fallback never overrides
+  an explicitly named provider; a down explicit provider fails loud at generation time,
+  preserving operator intent.
+- **Report observability** — every generation now records `provider` (the backend that
+  actually ran), `provider_resolved_from` (`explicit` / `SPRITE_GEN_DEFAULT_PROVIDER` /
+  `hard-default` / `fallback-from-codex`), and `provider_fallback` when a fallback occurred.
+- Resolver lives in `sprite_gen/gen/__init__.py` (`resolve_default_provider`,
+  `_codex_available`); docs updated in `docs/gen.md` (§Default provider selection), `SKILL.md`,
+  and the thin-shuttle `image-gen` skill. Covered by 8 new offline tests in `tests/test_gen.py`.
+
 ## v1.56.30 "Sol Atelier" - Breathe editor: Apply button, adjustment undo/redo, load-race fix
 
 Soohong's report (2026-07-17): dragging the chest line "didn't apply", and asked

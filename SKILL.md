@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.56.30
+version: 1.56.31
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick."
 license: Apache-2.0
 depends_on:
@@ -150,7 +150,7 @@ python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/generate_sprite_image.py \
   --ref <run>/base-source.<ext> --ref <run>/references/layout-guides/<state>.png
 ```
 
-Use `prompts/<state>.txt` as the prompt; save the selected image as `raw/<state>.png`. `--provider grok` is the faster backend; codex adheres tighter to negative constraints. Keep the request chroma key on the background (extraction removes it). Reference attachment rules:
+Use `prompts/<state>.txt` as the prompt; save the selected image as `raw/<state>.png`. `--provider` is optional — the default is **codex** (`SPRITE_GEN_DEFAULT_PROVIDER` env overrides it; an observable grok fallback kicks in only if codex is unavailable). Pass `--provider grok` explicitly for the faster backend; codex adheres tighter to negative constraints. Default policy: [`docs/gen.md`](docs/gen.md#default-provider-selection). Keep the request chroma key on the background (extraction removes it). Reference attachment rules:
 
 Generation providers are engine backends, not Studio workers. Selecting `grok`
 launches a headless `grok -p` agent process owned by `GrokProvider`; it does not

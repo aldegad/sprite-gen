@@ -12,6 +12,31 @@ Providers (Gemini/OpenRouter/fal/BytePlus are intentionally **not** included):
 | `codex` | codex `image_gen` | ChatGPT OAuth | inline base64 in the session rollout jsonl, decoded deterministically |
 | `grok` | grok Imagine `image_gen` / `image_edit` | xAI OAuth | file grok is told to write, verified by PNG magic |
 
+## Default provider selection
+
+`--provider` is **optional**. When omitted, the backend is resolved by a fixed
+precedence (수홍 확정 2026-07-17):
+
+1. **`SPRITE_GEN_DEFAULT_PROVIDER`** env var (`codex` or `grok`) — the user override.
+   An unknown value fails loud.
+2. **`codex`** — the hard default (GPT `image_gen`).
+
+If the resolved default is `codex` but codex is unavailable here (CLI not on PATH,
+or `codex login status` reports not-logged-in), the resolution **falls back to
+`grok` — observably, never silently**: a stderr notice is printed and the report
+JSON records `provider_fallback` (`from`/`to`/`reason`/`default_source`). The
+grok default (`SPRITE_GEN_DEFAULT_PROVIDER=grok`) has no reverse fallback — a down
+grok fails loud at generation time.
+
+An **explicit `--provider`** is always honored verbatim — it is never overridden by
+the availability fallback. An explicitly named provider that is down fails loud
+(the provider adapter raises), preserving the operator's stated intent.
+
+Every generation reports which backend actually ran: `provider` (the real
+backend), `provider_resolved_from` (`explicit` / `SPRITE_GEN_DEFAULT_PROVIDER` /
+`hard-default` / `fallback-from-codex`), and `provider_fallback` when a fallback
+happened.
+
 ## Provider and visible-worker topology
 
 Provider selection and Studio worker selection are orthogonal:
@@ -33,7 +58,8 @@ it is not a second visible-worker topology.
 ## CLI
 
 ```bash
-sprite-gen gen --provider codex|grok \
+sprite-gen gen \
+  [--provider codex|grok] # optional; default = SPRITE_GEN_DEFAULT_PROVIDER env → codex (observable grok fallback if codex is down)
   --prompt "…"            # or --prompt-file PROMPT.txt
   --out DEST.png \
   [--ref REF.png ...]     # repeatable; grok routes refs through image_edit
@@ -54,7 +80,9 @@ Backward-compatible wrapper: `python3 scripts/generate_sprite_image.py …` (sam
   transparent pixel that still carries non-zero RGB **fails loudly** (No Silent Fallback).
 - The pre-chroma raw is preserved next to the destination as `<out>.raw.png` for audit.
 - `--report` writes a `sprite-gen-image-report` JSON: provider, prompt, out/raw paths,
-  `raw_bytes`, `elapsed_seconds`, `session_id` (codex), and the chroma stats.
+  `raw_bytes`, `elapsed_seconds`, `session_id` (codex), the chroma stats, and the
+  provider-resolution fields (`provider_resolved_from`, and `provider_fallback` when a
+  codex→grok default fallback occurred).
 
 ## How each provider works
 
