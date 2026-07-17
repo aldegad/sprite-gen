@@ -5,6 +5,26 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.29 "Sol Atelier" - Curator front-end split into a domain taxonomy
+
+Soohong's call (2026-07-17, with /alex-core-invariants): curator.js had grown to
+3,841 lines with section banners that no longer matched their contents (SRP and
+Consistency violations — the breathe-toggle bugs both traced back to missing
+domain boundaries).
+
+- **`scripts/curator/src/*.js`** — 19 domain files (util, i18n, tooltip, store,
+  status, persistence, display, transforms, zones, row-controls, tween, breathe,
+  cards, zoom-editor, base-editor, pipeline-tree, atlas, chrome, boot) replacing
+  the single curator.js. Behavior-preserving: classic scripts share the global
+  lexical environment, so no ES-module/import rewrite was needed; load order is
+  owned solely by index.html's script tags (boot.js last).
+- Every top-level symbol was mapped explicitly (fail-loud on unmapped/duplicate)
+  and original relative order is preserved within each file. Stale section
+  banners dropped in favor of per-file headers.
+- Verified: node --check on all files, full pytest suite, and a playwright
+  behavioral smoke (render, pp toggle, zoom editor, base editor, breathe
+  toggle round-trip, autosave, sidebar/lang) with zero console/page errors.
+
 ## v1.56.28 "Sol Atelier" - Breathe as a row checkbox + multi-line phase cascade
 
 Soohong's UX call (2026-07-17): breathing is a property you toggle per row, not a
