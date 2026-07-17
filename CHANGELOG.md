@@ -5,6 +5,35 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.23 "Sol Atelier" - Base pixel editor with grid snap, curator session hardening
+
+A day of live curation with Soohong drove ten fixes/features straight from real
+usage. Full suite passes.
+
+- **Base pixel editor** — an edit button on the base reference row opens a dedicated
+  modal (pen/eraser/eyedropper/undo). Saving bakes into `base-source` itself
+  (`POST /api/base-edit`; original backed up once as `.orig`; eraser restores the
+  chroma background) because the base is generation identity truth — edits affect
+  FUTURE generation, never already-extracted frames.
+- **Grid-snapped base editing** — `GET /api/base-grid` runs the extraction detection
+  chain (chroma removal → solid bbox → detect_pixel_grid → cut lines) and the editor
+  paints whole logical blocks with a grid overlay, matching the rows' pixel-perfect
+  feel; raw-pixel fallback (observable) when no confident grid.
+- **Pixel-edit display = bake order** — edits composite in source space before the
+  transform (same as apply_pixel_edits → apply_transform), so moving a frame now
+  carries its edits; plain-view movement behavior unified (smooth CSS for all frames;
+  re-quantized preview only on the pixel-perfect view, by design).
+- **Generative tween scale normalization** — the mid frame's content height is
+  rescaled to the reference pair's mean before the take is written (a codex tween had
+  come out 14% larger than its siblings).
+- **Heal-loop fix** — `engine_revision` cache is keyed by source mtimes; a
+  long-running server no longer ping-pongs full re-extractions with fresh
+  subprocesses after an engine update.
+- Curator UX: tween button is row-header-only (removed from the zoom modal), inline
+  spinner on Generate, save-failure banner (dead-tab edits can't be lost silently),
+  final-atlas JSON pane pinned to the sheet's measured height, duplicate button moved
+  to the card header's left, margin-zone badge and pixel-edit toolbar note removed.
+
 ## v1.56.22 "Sol Atelier" - fit.conform fully removed (loud rejection)
 
 Soohong's 2026-07-14 decision was "no forced squash to logical_height" — but the
