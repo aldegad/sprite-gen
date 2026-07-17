@@ -81,6 +81,7 @@ CONTENT_TYPES = {
 # 축별 브루트포스(경계 질량 ≥80% 인 최대 간격). 측정 실패한 줄은 격자를 그리지 않는다
 # (가짜 격자 금지). 결과는 (경로, mtime) 키로 캐시.
 _PITCH_CACHE: dict = {}
+_BASE_GRID_CACHE: dict = {}  # (base path, mtime_ns) -> /api/base-grid 응답 (검출은 수 초짜리)
 
 
 def _axis_pitch(edge_mass, length):
@@ -644,6 +645,8 @@ class CurationHandler(BaseHTTPRequestHandler):
             # 클릭" 을 제공하기 위한 절단선 (수홍 지시 2026-07-17). 추출과 동일 체인:
             # 크로마 제거 → solid bbox 조임 → detect_pixel_grid → _grid_edges,
             # 좌표는 bbox 오프셋을 되붙여 전체 이미지 기준으로 반환.
+            # 검출은 순수 파이썬 픽셀 루프라 큰 베이스에서 수 초 걸린다 — 파일
+            # mtime 키로 캐시한다 (실사고 2026-07-17: 편집 버튼이 한참 있다 열림).
             try:
                 base_path = None
                 for candidate in sorted(self.run_dir.glob("base-source.*")):
@@ -652,6 +655,11 @@ class CurationHandler(BaseHTTPRequestHandler):
                         break
                 if base_path is None:
                     self._send_json({"error": "no base-source image in this run"}, 404)
+                    return
+                cache_key = (str(base_path), base_path.stat().st_mtime_ns)
+                cached = _BASE_GRID_CACHE.get(cache_key)
+                if cached is not None:
+                    self._send_json(cached)
                     return
                 request = json.loads(
                     (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
@@ -667,12 +675,15 @@ class CurationHandler(BaseHTTPRequestHandler):
                 tight = cleaned.crop(box)
                 (pitch_x, pitch_y), (phase_x, phase_y) = detect_pixel_grid(tight)
                 if min(pitch_x, pitch_y) < 2.0:
-                    self._send_json({"grid": None, "note": "no confident pixel grid detected"})
-                    return
-                x_edges = [box[0] + e for e in _grid_edges(tight.width, pitch_x, phase_x)]
-                y_edges = [box[1] + e for e in _grid_edges(tight.height, pitch_y, phase_y)]
-                self._send_json({"grid": {"xEdges": x_edges, "yEdges": y_edges,
-                                          "pitch": [round(pitch_x, 2), round(pitch_y, 2)]}})
+                    result = {"grid": None, "note": "no confident pixel grid detected"}
+                else:
+                    x_edges = [box[0] + e for e in _grid_edges(tight.width, pitch_x, phase_x)]
+                    y_edges = [box[1] + e for e in _grid_edges(tight.height, pitch_y, phase_y)]
+                    result = {"grid": {"xEdges": x_edges, "yEdges": y_edges,
+                                       "pitch": [round(pitch_x, 2), round(pitch_y, 2)]}}
+                _BASE_GRID_CACHE.clear()  # 베이스는 런당 1개 — 이전 세대 항목만 치움
+                _BASE_GRID_CACHE[cache_key] = result
+                self._send_json(result)
             except (Exception, SystemExit) as exc:
                 self._send_json({"error": str(exc)}, 500)
             return
