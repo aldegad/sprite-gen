@@ -2360,34 +2360,38 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
             round(consensus_x, 2),
             round(consensus_y, 2),
         )
-        # 기본값 = 눌림 없음 (수홍 확정 2026-07-14): 스냅된 네이티브 논리 크기를
-        # 유지한다 — 계약(logical_height)으로의 conform 축소는 칸을 병합해 디테일을
-        # 갈라먹는다. 물리 한계(셀에서 바닥 마진만 지킴)만 캡으로 강제하고, 캡에
-        # 걸리면 관측 가능하게 경고한다(그 줄은 리롤 후보). 계약 크기로의 눌림은
-        # `fit.conform: true` 를 명시한 런에서만 수행한다.
-        if fit_config.get("conform") is True:
-            logical_frames = conform_row_logical(snapped, logical_width, logical_height, pp_detail_bias)
-        else:
-            cap_w = max(1, cell_width // pp_scale)
-            cap_h = max(1, (cell_height - safe_margin_y) // pp_scale)
-            over = [f"{i}:{s.width}x{s.height}" for i, s in enumerate(snapped)
-                    if s.width > cap_w or s.height > cap_h]
-            if over:
-                all_warnings.append(
-                    f"{tag}: native logical exceeds the physical cap "
-                    f"{cap_w}x{cap_h} — capped frames (reroll candidates): {', '.join(over)}")
-            # 안전영역(사방 여백 준수 상한)은 넘었지만 물리캡 이내 = 여백 침범.
-            # 리롤 대상 아님 — 정보성 알림만 (수홍 확정 2026-07-14).
-            safe_w = max(1, (cell_width - safe_margin_x * 2) // pp_scale)
-            safe_h = max(1, (cell_height - safe_margin_y * 2) // pp_scale)
-            soft = [f"{i}:{s.width}x{s.height}" for i, s in enumerate(snapped)
-                    if (s.width > safe_w or s.height > safe_h)
-                    and s.width <= cap_w and s.height <= cap_h]
-            if soft:
-                all_warnings.append(
-                    f"{tag}: frames exceed the safe area {safe_w}x{safe_h} but fit "
-                    f"within the margin zone (informational, no action): {', '.join(soft)}")
-            logical_frames = conform_row_logical(snapped, cap_w, cap_h, pp_detail_bias)
+        # 눌림 없음 — 스냅된 네이티브 논리 크기를 유지한다 (수홍 확정 2026-07-14,
+        # 옵트인 잔재까지 완전 제거 2026-07-17): 계약(logical_height)으로의 conform
+        # 축소는 칸을 병합해 디테일을 갈라먹는다. 과거의 `fit.conform: true` 옵트인은
+        # 제거된 결정이 플래그 하나로 되살아나는 회귀 경로였다 (실사고 2026-07-17:
+        # 높이 통일 시도가 이 플래그로 재발) — 선언되어 있으면 요란하게 거부한다.
+        # 물리 한계(셀에서 바닥 마진만 지킴)만 캡으로 강제하고, 캡에 걸리면 관측
+        # 가능하게 경고한다.
+        if fit_config.get("conform") is not None:
+            raise SystemExit(
+                "fit.conform was removed (Soohong 2026-07-14/17): native logical size is "
+                "the only behavior — squashing to logical_height merges cells and eats "
+                "detail. Remove the key from sprite-request.json.")
+        cap_w = max(1, cell_width // pp_scale)
+        cap_h = max(1, (cell_height - safe_margin_y) // pp_scale)
+        over = [f"{i}:{s.width}x{s.height}" for i, s in enumerate(snapped)
+                if s.width > cap_w or s.height > cap_h]
+        if over:
+            all_warnings.append(
+                f"{tag}: native logical exceeds the physical cap "
+                f"{cap_w}x{cap_h} — capped frames (reroll candidates): {', '.join(over)}")
+        # 안전영역(사방 여백 준수 상한)은 넘었지만 물리캡 이내 = 여백 침범.
+        # 리롤 대상 아님 — 정보성 알림만 (수홍 확정 2026-07-14).
+        safe_w = max(1, (cell_width - safe_margin_x * 2) // pp_scale)
+        safe_h = max(1, (cell_height - safe_margin_y * 2) // pp_scale)
+        soft = [f"{i}:{s.width}x{s.height}" for i, s in enumerate(snapped)
+                if (s.width > safe_w or s.height > safe_h)
+                and s.width <= cap_w and s.height <= cap_h]
+        if soft:
+            all_warnings.append(
+                f"{tag}: frames exceed the safe area {safe_w}x{safe_h} but fit "
+                f"within the margin zone (informational, no action): {', '.join(soft)}")
+        logical_frames = conform_row_logical(snapped, cap_w, cap_h, pp_detail_bias)
         return {"method": method, "pitch": pitch, "logical": logical_frames,
                 "components": images, "cut_edges": cut_edges}
 
