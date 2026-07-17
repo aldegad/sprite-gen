@@ -91,3 +91,48 @@ def test_unknown_provider_rejected(tmp_path: Path) -> None:
     from sprite_gen.interpolate import gen_interpolator
     with pytest.raises(SystemExit, match="unknown interpolation provider"):
         gen_interpolator("rife")
+
+
+def test_tween_scale_normalized_to_reference_pair(tmp_path: Path) -> None:
+    """실사고 2026-07-17 회귀 (tween 32×58 — 형제 28×48 보다 14% 커짐, 수홍 발견).
+
+    생성형 백엔드는 피사체 크기를 보장하지 않는다 — 중간 프레임의 콘텐츠 높이를
+    참조 쌍 평균에 맞춰 리스케일해 테이크로 기록해야 한다."""
+    from sprite_gen.interpolate import normalize_tween_scale, _chroma_content_bbox
+    chroma = MAGENTA
+
+    def frame_with_figure(height: int) -> Image.Image:
+        im = Image.new("RGB", (160, 200), chroma)
+        for y in range(200 - height, 200 - 4):
+            for x in (70, 90):
+                for dx in range(12):
+                    im.putpixel((x + dx, y), (90, 60, 30))
+        return im
+
+    img0 = frame_with_figure(120)
+    img1 = frame_with_figure(124)
+    oversized = frame_with_figure(170)  # 모델이 피사체를 크게 그린 경우
+    fixed = normalize_tween_scale(oversized, img0, img1, chroma)
+    assert fixed.size == img0.size
+    box = _chroma_content_bbox(fixed, chroma)
+    got_h = box[3] - box[1]
+    assert abs(got_h - 118) <= 2, f"normalized content height {got_h}, expected ~118 (mean of 116/120)"
+
+
+def test_interpolate_normalizes_stub_output(tmp_path: Path) -> None:
+    """interpolate_between 경로에서도 정규화가 걸린다 — 스텁이 큰 출력을 내도 테이크는 참조 스케일."""
+    from sprite_gen.interpolate import _chroma_content_bbox
+    run = _build_run(tmp_path)
+
+    def oversized_stub(img0: Image.Image, img1: Image.Image, t: float, prompt: str) -> Image.Image:
+        big = img0.convert("RGB").resize((img0.width * 2, img0.height * 2), Image.Resampling.NEAREST)
+        return big
+
+    target = interpolate_between(run, "wave", 0, 1, t=0.5, label="mid", interpolator=oversized_stub)
+    took = Image.open(target)
+    strip = Image.open(run / "raw" / "wave.png").convert("RGBA")
+    img0, _ = aligned_pair_on_chroma(strip, 2, 0, 1, MAGENTA)
+    assert took.size == img0.size
+    ref_h = (lambda b: b[3] - b[1])(_chroma_content_bbox(img0, MAGENTA))
+    mid_h = (lambda b: b[3] - b[1])(_chroma_content_bbox(took, MAGENTA))
+    assert abs(mid_h - ref_h) <= 2, f"take content height {mid_h} vs reference {ref_h}"
