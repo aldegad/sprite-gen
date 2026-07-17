@@ -573,7 +573,7 @@ def apply_transform(
     re-quantized to the fixed logical grid (cell-anchored, `snap_scale` px per
     logical px), so a curated move/scale/rotate cannot smear the pixel grid —
     the sprite lands back on the same grid the extraction snapped to. The webview
-    mirrors this quantization live while editing (curator.js drawSnapped).
+    mirrors this quantization live while editing (curator src/display.js drawFrameInto).
     """
     transform = normalize_transform(transform) if transform else dict(IDENTITY)
     if is_identity(transform) and frame.size == cell_size:
