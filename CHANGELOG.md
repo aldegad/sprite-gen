@@ -5,6 +5,28 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.26 "Sol Atelier" - Base logical image from the TRUE detected grid
+
+Soohong's diagnosis was exact: the base view was drawing a uniform "N equal cells"
+grid over an image whose real blocks are non-uniform (74px origin offset,
+fractional 29/30px pitch) — so the pixel-perfect grid and the quantized view
+drifted off the art ("격자 개수를 정하고 격자를 치는 것 같다").
+
+- **Logical image built once from the detected cut lines** — opening the base
+  editor samples each detected block's CENTER from the raw and builds a true
+  logical PNG (e.g. 28×48). That image is the single edit source
+  (`editSourceFor`): display quantization, painting coordinates, marquee capture,
+  eyedropper, palette sampling, and the grid overlay all live in this uniform
+  logical space, so they align exactly — the same geometry the server uses to
+  expand ops back to raw blocks.
+- **pp toggle = logical/raw twin** — the raw image now rides the frames' plain-twin
+  mechanism (`frameOf(__base__).plainUrl`): pp ON shows the logical pixelization,
+  pp OFF shows the original raw; the uniform grid hides on the raw view (it would
+  not align there, same rule as frames).
+- Marquee capture on the base excludes chroma-background pixels (moving a region
+  drags the content, not the green backdrop); palette merge (tol 24) and chroma
+  exclusion unchanged.
+
 ## v1.56.25 "Sol Atelier" - Full base parity (transforms bake into the file), Aseprite-style palette dock
 
 Soohong: "다 똑같이" — the base now has every frame control, and transforms are a

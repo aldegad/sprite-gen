@@ -365,8 +365,8 @@ function cloneSrc(stateName, idx) {
 function frameOf(stateName, idx) {
   if (stateName === BASE_STATE) {
     if (!baseView) return null;
-    return { index: 0, present: true, url: baseView.url, plainUrl: null, label: "base",
-             contentSize: [baseView.cols, baseView.rows] };
+    return { index: 0, present: true, url: baseView.url, plainUrl: baseView.rawUrl,
+             label: "base", contentSize: [baseView.cols, baseView.rows] };
   }
   const st = run.states.find((s) => s.name === stateName);
   if (!st) return null;
@@ -472,7 +472,7 @@ function updateCardGrid(card) {
   const st = run.states.find((s) => s.name === cardState);
   const frame = isBaseCard ? frameOf(BASE_STATE, 0) : (st && st.frames[Number(card.dataset.idx)]);
   const on = !!gridStates[cardState];
-  const plainShown = ppTwinStates.has(cardState) && !ppOn(cardState);
+  const plainShown = (isBaseCard || ppTwinStates.has(cardState)) && !ppOn(cardState);
   const scale = isBaseCard ? 1
     : ((st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null);
   const t = frame ? getTransform(card.dataset.state, frame.index) : null;
@@ -928,7 +928,7 @@ function applyCardTransform(stage, stateName, idx) {
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const tt = quantize ? getTransform(stateName, idx) : IDENTITY();
-      drawFrameInto(ctx, el, tt, canvas.width, canvas.height, snap,
+      drawFrameInto(ctx, editSourceFor(stateName, el), tt, canvas.width, canvas.height, snap,
         getPixelOps(stateName, idx));
     };
     canvas.style.transform = (quantize || editingThis)
@@ -2097,13 +2097,46 @@ async function openBaseEditor() {
     setStatus(t("baseEditFail") + "no confident pixel grid on the base", "err");
     return;
   }
-  baseView = {
-    cols: grid.xEdges.length - 1,
-    rows: grid.yEdges.length - 1,
-    xEdges: grid.xEdges,
-    yEdges: grid.yEdges,
-    url: run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "edit=" + Date.now(),
-  };
+  const rawUrl = run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "edit=" + Date.now();
+  // 진짜 격자 기반 논리 이미지 (수홍 지적 2026-07-17: 균일 등분 격자는 이미지와
+  // 어긋난다): 검출 절단선(xEdges/yEdges)의 블록 "중심"을 raw 에서 샘플해 논리
+  // 해상도 PNG 를 만든다. 이후 모달의 표시·편집·격자·팔레트는 전부 이 균일 논리
+  // 공간이라 프레임과 동일하게 정확히 떨어진다. raw 는 pp OFF 의 원본 뷰(plain
+  // twin 자리)로 쓴다. 저장(논리 ops→raw 확장)은 서버가 같은 절단선으로 한다.
+  const rawImg = new Image();
+  rawImg.src = rawUrl;
+  await new Promise((ok, err) => { rawImg.onload = ok; rawImg.onerror = err; });
+  const cols = grid.xEdges.length - 1;
+  const rows = grid.yEdges.length - 1;
+  const probe = document.createElement("canvas");
+  probe.width = rawImg.naturalWidth;
+  probe.height = rawImg.naturalHeight;
+  const pc = probe.getContext("2d");
+  pc.drawImage(rawImg, 0, 0);
+  const raw = pc.getImageData(0, 0, probe.width, probe.height).data;
+  const logical = document.createElement("canvas");
+  logical.width = cols;
+  logical.height = rows;
+  const lc = logical.getContext("2d");
+  const out = lc.createImageData(cols, rows);
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const cx = Math.floor((grid.xEdges[i] + grid.xEdges[i + 1]) / 2);
+      const cy = Math.floor((grid.yEdges[j] + grid.yEdges[j + 1]) / 2);
+      const s = (cy * probe.width + cx) * 4;
+      const d = (j * cols + i) * 4;
+      out.data[d] = raw[s];
+      out.data[d + 1] = raw[s + 1];
+      out.data[d + 2] = raw[s + 2];
+      out.data[d + 3] = 255;
+    }
+  }
+  lc.putImageData(out, 0, 0);
+  baseView = { cols, rows, xEdges: grid.xEdges, yEdges: grid.yEdges,
+               url: logical.toDataURL("image/png"), rawUrl };
+  baseLogicalImg = new Image();
+  baseLogicalImg.src = baseView.url;
+  await new Promise((ok) => { baseLogicalImg.onload = ok; });
   if (!entries[BASE_STATE]) {
     entries[BASE_STATE] = { pixels: {}, transforms: {}, order: [0], sel: new Set([0]),
                             clones: {}, archived: [] };
@@ -2388,7 +2421,14 @@ function closeZoom() {
 // (예: 28×48) — 프레임과 동일한 조작감. 저장은 사이드카가 아니라 명시 버튼으로
 // /api/base-edit (space:"logical") 에 굽고, 서버가 논리→raw 블록 확장을 맡는다.
 const BASE_STATE = "__base__";
-let baseView = null; // {cols, rows, url} — 베이스 논리 격자 치수 + 표시 URL
+let baseView = null; // {cols, rows, xEdges, yEdges, url(논리 PNG), rawUrl} — 베이스 뷰 상태
+let baseLogicalImg = null; // 논리 이미지 엘리먼트 — 편집/합성/샘플의 단일 소스
+
+// 편집·합성 소스: 베이스는 항상 논리 이미지 (pp OFF 로 raw 를 "보고" 있어도
+// 편집 공간은 논리 격자 — 균일 좌표가 이미지와 어긋나는 문제의 원천 차단).
+function editSourceFor(stateName, imgEl) {
+  return stateName === BASE_STATE && baseLogicalImg ? baseLogicalImg : imgEl;
+}
 
 function cellDims(stateName) {
   if (stateName === BASE_STATE && baseView) return [baseView.cols, baseView.rows];
@@ -2668,7 +2708,7 @@ function openZoom(stateName, idx, keepWidth) {
       const v = ops[key];
       return typeof v === "string" && v.startsWith("#") ? v.slice(0, 7) : null;
     }
-    const imgEl = stage.querySelector("img");
+    const imgEl = editSourceFor(stateName, stage.querySelector("img"));
     if (!(imgEl && imgEl.complete && imgEl.naturalWidth)) return null;
     const tmp = sampleColor._c || (sampleColor._c = document.createElement("canvas"));
     tmp.width = cellW; tmp.height = cellH;
@@ -2727,58 +2767,14 @@ function openZoom(stateName, idx, keepWidth) {
   });
   // 프레임 고유색 팔레트 (빈도순 상위 12)
   const buildPalette = () => {
-    const imgEl = stage.querySelector("img");
+    const imgEl = editSourceFor(stateName, stage.querySelector("img"));
     if (!(imgEl && imgEl.complete && imgEl.naturalWidth)) {
       if (imgEl) imgEl.addEventListener("load", buildPalette, { once: true });
       return;
     }
     // 합성(원본+편집) 기준 — 방금 찍은 색도 팔레트에 나타난다. 같은 색 1개, 빈도순.
     const counts = new Map();
-    if (isBase && baseView && baseView.xEdges) {
-      // 베이스: 검출 격자 블록의 "중심"을 raw 해상도에서 샘플 — NEAREST 축소는
-      // AA/크로마 노이즈가 수백 유사색으로 쪼개져 팔레트를 초록으로 덮었다
-      // (실사고 2026-07-17 수홍: 캐릭터 색이 하나도 안 보임). 크로마 계열은 제외.
-      const probe = document.createElement("canvas");
-      probe.width = imgEl.naturalWidth;
-      probe.height = imgEl.naturalHeight;
-      const pc = probe.getContext("2d");
-      pc.drawImage(imgEl, 0, 0);
-      const corner = pc.getImageData(0, 0, 1, 1).data;
-      const raw = pc.getImageData(0, 0, probe.width, probe.height).data;
-      const ops0 = getPixelOps(stateName, idx) || {};
-      const xe = baseView.xEdges, ye = baseView.yEdges;
-      for (let j = 0; j < ye.length - 1; j++) {
-        for (let i = 0; i < xe.length - 1; i++) {
-          const opv = ops0[`${i},${j}`];
-          let hex = null;
-          if (opv !== undefined) {
-            if (opv) hex = opv; // 편집색; null(지우개=크로마)은 제외
-          } else {
-            const cxp = Math.floor((xe[i] + xe[i + 1]) / 2);
-            const cyp = Math.floor((ye[j] + ye[j + 1]) / 2);
-            const k = (cyp * probe.width + cxp) * 4;
-            const dist = Math.abs(raw[k] - corner[0]) + Math.abs(raw[k + 1] - corner[1]) + Math.abs(raw[k + 2] - corner[2]);
-            if (raw[k + 3] >= 200 && dist > 60) {
-              hex = "#" + [raw[k], raw[k + 1], raw[k + 2]].map((v) => v.toString(16).padStart(2, "0")).join("");
-            }
-          }
-          if (hex) counts.set(hex, (counts.get(hex) || 0) + 1);
-        }
-      }
-      // 근접색 병합 — raw AI 아트의 미세 변종(0,0,0 vs 1,1,1)을 대표색 1개로.
-      // tol 24(맨해튼) 실측: 426색 → 18색 진짜 팔레트 (피부 2종 등 실제 셰이드는 유지).
-      const reps = [];
-      for (const [hex, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
-        const r = parseInt(hex.slice(1, 3), 16);
-        const g = parseInt(hex.slice(3, 5), 16);
-        const b2 = parseInt(hex.slice(5, 7), 16);
-        const hit = reps.find((q) => Math.abs(q.r - r) + Math.abs(q.g - g) + Math.abs(q.b - b2) <= 24);
-        if (hit) hit.n += n;
-        else reps.push({ hex, r, g, b: b2, n });
-      }
-      counts.clear();
-      for (const q of reps) counts.set(q.hex, q.n);
-    } else {
+    {
       const cx = compositeCell();
       const data = cx.getImageData(0, 0, cellW, cellH).data;
       for (let i = 0; i < data.length; i += 4) {
@@ -2786,6 +2782,27 @@ function openZoom(stateName, idx, keepWidth) {
         const hex = "#" + [data[i], data[i + 1], data[i + 2]].map((v) => v.toString(16).padStart(2, "0")).join("");
         counts.set(hex, (counts.get(hex) || 0) + 1);
       }
+    }
+    if (isBase) {
+      // 근접색 병합 — raw 유래 미세 변종(0,0,0 vs 1,1,1)을 대표색 1개로 (tol 24 실측:
+      // 426→18색). 크로마 배경색은 제외 (지우개가 그 역할).
+      const cornerHex = (() => {
+        const cx2 = compositeCell();
+        const d = cx2.getImageData(0, 0, 1, 1).data;
+        return [d[0], d[1], d[2]];
+      })();
+      const reps = [];
+      for (const [hex, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b2 = parseInt(hex.slice(5, 7), 16);
+        if (Math.abs(r - cornerHex[0]) + Math.abs(g - cornerHex[1]) + Math.abs(b2 - cornerHex[2]) <= 60) continue;
+        const hit = reps.find((q) => Math.abs(q.r - r) + Math.abs(q.g - g) + Math.abs(q.b - b2) <= 24);
+        if (hit) hit.n += n;
+        else reps.push({ hex, r, g, b: b2, n });
+      }
+      counts.clear();
+      for (const q of reps) counts.set(q.hex, q.n);
     }
     swatchBox.innerHTML = "";
     for (const [hex] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
@@ -2813,7 +2830,7 @@ function openZoom(stateName, idx, keepWidth) {
     c.height = cellH;
     const cx = c.getContext("2d");
     cx.imageSmoothingEnabled = false;
-    const imgEl = stage.querySelector("img");
+    const imgEl = editSourceFor(stateName, stage.querySelector("img"));
     if (imgEl && imgEl.complete && imgEl.naturalWidth) cx.drawImage(imgEl, 0, 0, c.width, c.height);
     const ops0 = entries[stateName].pixels[idx] || {};
     for (const [key, val] of Object.entries(ops0)) {
@@ -2825,11 +2842,17 @@ function openZoom(stateName, idx, keepWidth) {
   };
   const captureRegion = (sel) => {
     const cx = compositeCell();
+    let chromaRef = null;
+    if (isBase) {
+      const d0 = cx.getImageData(0, 0, 1, 1).data; // 베이스 배경(크로마)은 내용이 아니다
+      chromaRef = [d0[0], d0[1], d0[2]];
+    }
     const data = cx.getImageData(sel.x0, sel.y0, sel.x1 - sel.x0, sel.y1 - sel.y0).data;
     const pixels = [];
     const w = sel.x1 - sel.x0;
     for (let i = 0; i < data.length; i += 4) {
       if (data[i + 3] < 40) continue; // 투명은 옮길 내용 없음
+      if (chromaRef && Math.abs(data[i] - chromaRef[0]) + Math.abs(data[i + 1] - chromaRef[1]) + Math.abs(data[i + 2] - chromaRef[2]) <= 60) continue;
       pixels.push({
         dx: (i / 4) % w,
         dy: Math.floor((i / 4) / w),
