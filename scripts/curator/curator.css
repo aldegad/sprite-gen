@@ -976,7 +976,9 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .final-atlas .atlas-split {
   display: flex;
   gap: 14px;
-  align-items: flex-start;
+  /* 두 컬럼 등고(stretch) — JSON 패널이 아틀라스 시트 높이를 그대로 따른다
+     (수홍 지시 2026-07-17: 아틀라스는 긴데 JSON 만 420px 박스로 잘려 어색). */
+  align-items: stretch;
   margin-top: 10px;
 }
 .final-atlas .atlas-sheet {
@@ -998,6 +1000,8 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .final-atlas .atlas-doc {
   flex: 1 1 48%;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--line, #e2e8f0);
   border-radius: 8px;
   overflow: hidden;
@@ -1012,7 +1016,8 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .final-atlas .atlas-doc-json {
   margin: 0;
   padding: 10px;
-  max-height: 420px;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
