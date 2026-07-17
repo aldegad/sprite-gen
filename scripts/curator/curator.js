@@ -2765,6 +2765,19 @@ function openZoom(stateName, idx, keepWidth) {
           if (hex) counts.set(hex, (counts.get(hex) || 0) + 1);
         }
       }
+      // 근접색 병합 — raw AI 아트의 미세 변종(0,0,0 vs 1,1,1)을 대표색 1개로.
+      // tol 24(맨해튼) 실측: 426색 → 18색 진짜 팔레트 (피부 2종 등 실제 셰이드는 유지).
+      const reps = [];
+      for (const [hex, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b2 = parseInt(hex.slice(5, 7), 16);
+        const hit = reps.find((q) => Math.abs(q.r - r) + Math.abs(q.g - g) + Math.abs(q.b - b2) <= 24);
+        if (hit) hit.n += n;
+        else reps.push({ hex, r, g, b: b2, n });
+      }
+      counts.clear();
+      for (const q of reps) counts.set(q.hex, q.n);
     } else {
       const cx = compositeCell();
       const data = cx.getImageData(0, 0, cellW, cellH).data;
