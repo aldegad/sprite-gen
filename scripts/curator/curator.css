@@ -1137,3 +1137,15 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 }
 .breathe-bar { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
 .breathe-bar select { padding: 2px 4px; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; }
+
+/* 호흡 포커스 모드 — 가슴선·진폭·생성만 남기고 편집 크롬 전부 숨김 */
+.zoom-card.breathe-focus .edit-toolbar > :not(.breathe-bar) { display: none; }
+.zoom-card.breathe-focus .breathe-bar { margin-left: 0; }
+.zoom-card.breathe-focus .palette-dock,
+.zoom-card.breathe-focus .row-controls,
+.zoom-card.breathe-focus .card-controls,
+.zoom-card.breathe-focus .rotate-handle,
+.zoom-card.breathe-focus .shear-handle,
+.zoom-card.breathe-focus .zoom-prev,
+.zoom-card.breathe-focus .zoom-next,
+.zoom-card.breathe-focus .scale-scrub { display: none !important; }

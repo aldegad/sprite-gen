@@ -3062,6 +3062,15 @@ function openZoom(stateName, idx, keepWidth) {
   // SD/8등신 모두 자동 적응. 선을 끌면 미리보기가 실시간으로 숨쉰다.
   if (!isBase && pendingBreathe) {
     pendingBreathe = false;
+    // 포커스 모드 (수홍 2026-07-17): 호흡 조정에 필요한 것만 남긴다 — 가슴선 +
+    // 진폭 + 생성. 다른 편집 도구/팔레트/변형은 숨기고 스테이지 입력도 차단.
+    card.classList.add("breathe-focus");
+    stage.addEventListener("pointerdown", (ev) => {
+      if (!ev.target.closest(".breathe-line")) {
+        ev.stopImmediatePropagation();
+        ev.preventDefault();
+      }
+    }, true);
     const bm = { amplitude: 1, phase: 0, split: 0.55 };
     const cx0 = compositeCell();
     const bdata = cx0.getImageData(0, 0, cellW, cellH).data;
