@@ -86,8 +86,11 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key.toLowerCase() !== "z" || !(ev.metaKey || ev.ctrlKey)) return;
   if (ev.target && ev.target.closest && ev.target.closest("input, textarea, select")) return;
   // 베이스도 줌 모달(pixelEdit)로 통일 — 별도 에디터 분기는 폐기됨 (v1.56.24)
-  const target = pixelEdit && pixelEdit.undoFn
-    ? { undo: pixelEdit.undoFn, redo: pixelEdit.redoFn } : null;
+  // 호흡 포커스 모드가 열려 있으면 선/진폭/주기 조정 히스토리가 우선이다 (수홍 2026-07-17)
+  const target = zoomView && zoomView.breatheUndo
+    ? { undo: zoomView.breatheUndo, redo: zoomView.breatheRedo }
+    : (pixelEdit && pixelEdit.undoFn
+      ? { undo: pixelEdit.undoFn, redo: pixelEdit.redoFn } : null);
   if (!target) return;
   ev.preventDefault();
   ev.stopImmediatePropagation();
@@ -622,18 +625,44 @@ function openZoom(stateName, idx, keepWidth) {
     const st0 = run.states.find((s) => s.name === stateName);
     const savedTake = st0 && (st0.takes || []).find((tk) => (tk.label || "") === "breathe");
     const saved = savedTake && savedTake.breathe;
-    const cx0 = compositeCell();
-    const sil = silhouetteStats(cx0.getImageData(0, 0, cellW, cellH).data, cellW, cellH);
-    const btop = sil.top;
-    const bh = sil.h;
+    // 실루엣 지오메트리는 이미지 로드 후에만 유효 — 로드 전 compositeCell() 은 빈
+    // 캔버스라 btop=cellH·bh=1 로 붕괴해 선이 바닥에 붙고 드래그가 죽는다
+    // (실사고 2026-07-17 수홍 "선 움직여도 적용이 안 되어서" — 로드 레이스).
+    // initSilhouette 가 성공할 때까지 재시도하고, 성공 시 지오메트리를 확정한다.
+    let btop = 0;
+    let bh = 1;
     // 저장된 테이크 파라미터가 있으면 복원, 없으면 실루엣 휴리스틱 가슴선 1개
     const bm = {
       amplitude: saved && saved.amplitude ? saved.amplitude : 1,
       splits: saved && Array.isArray(saved.splits) && saved.splits.length
         ? saved.splits.slice(0, 3).map(Number).sort((a, b) => a - b)
-        : [sil.split],
+        : [0.55], // 자리표시 — initSilhouette 성공 시 휴리스틱으로 대체
+      splitsFromSaved: !!(saved && Array.isArray(saved.splits) && saved.splits.length),
+      geomReady: false,
       cadence: breatheCadenceOf(stateName) || 3,
       phase: 0, touched: false, cadTouched: false, cancelled: false,
+      applying: false, hist: [], histPos: -1,
+    };
+    // 조정 히스토리 (수홍 요청 2026-07-17 "컨트롤제트로 이전 다음"): 선/진폭/주기의
+    // 확정 시점(드래그 놓기·셀렉트 변경·선 추가/제거)마다 스냅샷.
+    const snapshotBm = () => ({ splits: [...bm.splits], amplitude: bm.amplitude, cadence: bm.cadence });
+    const pushHist = () => {
+      bm.hist = bm.hist.slice(0, bm.histPos + 1);
+      bm.hist.push(snapshotBm());
+      bm.histPos = bm.hist.length - 1;
+    };
+    const restoreHist = (pos) => {
+      if (pos < 0 || pos >= bm.hist.length || pos === bm.histPos) return;
+      bm.histPos = pos;
+      const s = bm.hist[pos];
+      bm.splits = [...s.splits];
+      bm.amplitude = s.amplitude;
+      bm.cadence = s.cadence;
+      bm.touched = true;
+      bm.cadTouched = true;
+      syncBreatheControls();
+      syncLines();
+      renderPhase();
     };
 
     // 분할선들 (수홍 확정 2026-07-17 "숨쉬기 선을 나누는거지"): 선이 K개면 exhale 이
@@ -643,6 +672,7 @@ function openZoom(stateName, idx, keepWidth) {
       ln.addEventListener("pointerdown", (ev) => {
         ev.preventDefault();
         ev.stopImmediatePropagation();
+        if (!bm.geomReady) return; // 이미지 로드 전엔 기준 좌표가 없다
         ln.setPointerCapture(ev.pointerId);
         const li = lineEls.indexOf(ln);
         const onMove = (e2) => {
@@ -657,6 +687,7 @@ function openZoom(stateName, idx, keepWidth) {
           ln.removeEventListener("pointerup", onUp);
           bm.splits.sort((a, b) => a - b); // 선 순서 불변식: 위→아래 오름차순
           syncLines();
+          pushHist();
         };
         ln.addEventListener("pointermove", onMove);
         ln.addEventListener("pointerup", onUp);
@@ -676,7 +707,6 @@ function openZoom(stateName, idx, keepWidth) {
         lineEls[i].style.top = `${((btop + s * bh) / cellH) * 100}%`;
       });
     };
-    syncLines();
 
     const bcanvas = stage.querySelector(".snap-canvas");
     const bImg = stage.querySelector("img");
@@ -733,6 +763,35 @@ function openZoom(stateName, idx, keepWidth) {
     }, stepMs);
     renderPhase();
 
+    // 지오메트리 초기화: 합성이 비어 있으면(이미지 미로드) 로드 이벤트 + 폴링으로
+    // 재시도한다. 성공 시 btop/bh 확정 + (저장값 없으면) 휴리스틱 가슴선 재계산.
+    const initSilhouette = () => {
+      if (bm.geomReady) return true;
+      const cx0 = compositeCell();
+      const sil = silhouetteStats(cx0.getImageData(0, 0, cellW, cellH).data, cellW, cellH);
+      if (sil.top >= cellH) return false; // 불투명 픽셀 0 — 아직 빈 합성
+      btop = sil.top;
+      bh = sil.h;
+      if (!bm.splitsFromSaved && !bm.touched) {
+        bm.splits = [sil.split];
+        if (bm.histPos === 0) bm.hist[0] = snapshotBm(); // 히스토리 바닥도 갱신
+      }
+      bm.geomReady = true;
+      syncLines();
+      renderPhase();
+      return true;
+    };
+    syncLines(); // 자리표시 위치라도 선을 즉시 보여준다
+    if (!initSilhouette()) {
+      let geomTries = 0;
+      const retryGeom = () => {
+        if (bm.cancelled || !document.body.contains(stage)) return;
+        if (!initSilhouette() && ++geomTries < 50) setTimeout(retryGeom, 120);
+      };
+      if (bImg) bImg.addEventListener("load", () => initSilhouette(), { once: true });
+      setTimeout(retryGeom, 120);
+    }
+
     const bar = document.createElement("div");
     bar.className = "breathe-bar";
     const mkSel = (values, current, fmt, onchange) => {
@@ -759,6 +818,7 @@ function openZoom(stateName, idx, keepWidth) {
       bm.splits.sort((a, b) => a - b);
       bm.touched = true;
       syncLines();
+      pushHist();
     });
     const delBtn = document.createElement("button");
     delBtn.type = "button";
@@ -768,36 +828,70 @@ function openZoom(stateName, idx, keepWidth) {
       bm.splits.shift(); // 맨 위 선부터 제거 — 최하단(기본 가슴선)은 항상 유지
       bm.touched = true;
       syncLines();
+      pushHist();
     });
     lineBtns.appendChild(addBtn);
     lineBtns.appendChild(delBtn);
     bar.appendChild(lineBtns);
-    bar.appendChild(mkSel([1, 2], bm.amplitude,
+    const ampSel = mkSel([1, 2], bm.amplitude,
       (v) => `${t("breatheAmp")} ${v}px`,
-      (v) => { bm.amplitude = v || 1; bm.touched = true; }));
-    bar.appendChild(mkSel([2, 3, 4, 6], bm.cadence,
+      (v) => { bm.amplitude = v || 1; bm.touched = true; pushHist(); });
+    const cadSel = mkSel([2, 3, 4, 6], bm.cadence,
       (v) => STR[lang].breatheCad(v),
-      (v) => { bm.cadence = v || 3; bm.cadTouched = true; }));
-    toolbar.appendChild(bar);
-
-    // 닫으면 적용 (생성 버튼 폐기): 선/진폭이 바뀌었거나 테이크가 없으면 굽는다
-    // (리로드 후 applyPendingBreatheInject 가 사이클 투입). 주기만 바뀌었거나
-    // 아직 미투입이면 서버 없이 즉시 시퀀스 반영. Esc = 취소 (아무것도 안 함).
-    zoomView.breatheCancel = () => { bm.cancelled = true; };
-    zoomView.applyBreathe = () => {
-      if (bm.cancelled) return;
+      (v) => { bm.cadence = v || 3; bm.cadTouched = true; pushHist(); });
+    bar.appendChild(ampSel);
+    bar.appendChild(cadSel);
+    // 실행취소/재실행이 셀렉트 표시값도 되돌리게 (restoreHist → syncBreatheControls)
+    function syncBreatheControls() {
+      ampSel.value = String(bm.amplitude);
+      cadSel.value = String(bm.cadence);
+    }
+    // 적용 버튼 (수홍 요청 2026-07-17 "적용버튼좀"): 닫기를 기다리지 않고 그 자리에서
+    // 굽는다 — 베이크 + 전체 재추출은 오래 걸리므로 버튼 스피너로 진행을 보인다.
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.className = "breathe-apply";
+    applyBtn.textContent = t("breatheApply");
+    const doApply = (btn) => {
+      if (bm.applying) return;
       if (bm.touched || !savedTake) {
+        bm.applying = true;
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<span class="tween-spin" aria-label="applying"></span>';
+        }
         bakeBreatheTake(stateName, bm.splits, bm.amplitude, idx, bm.cadence)
-          .catch((e) => setStatus(t("breatheFail") + e.message, "err"));
+          .catch((e) => {
+            setStatus(t("breatheFail") + e.message, "err");
+            bm.applying = false;
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = t("breatheApply");
+            }
+          });
         return;
       }
       if (bm.cadTouched || !breatheActive(stateName)) {
         injectBreathe(stateName, bm.cadence);
         scheduleSave();
         rebuildState(stateName);
+        bm.cadTouched = false;
         setStatus(STR[lang].breatheOn(stateName));
       }
     };
+    applyBtn.addEventListener("click", () => doApply(applyBtn));
+    bar.appendChild(applyBtn);
+    toolbar.appendChild(bar);
+
+    // 닫기 = 미적용분 자동 적용(안전망), 적용 버튼 = 즉시 적용, Esc = 취소.
+    zoomView.breatheCancel = () => { bm.cancelled = true; };
+    zoomView.applyBreathe = () => {
+      if (bm.cancelled) return;
+      doApply(null);
+    };
+    zoomView.breatheUndo = () => restoreHist(bm.histPos - 1);
+    zoomView.breatheRedo = () => restoreHist(bm.histPos + 1);
+    pushHist(); // 초기 상태가 히스토리 바닥 — 첫 Cmd+Z 가 여기로 돌아온다
     zoomView.cleanupBreathe = () => clearInterval(bm.timer);
   }
 

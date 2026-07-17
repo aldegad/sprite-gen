@@ -5,6 +5,26 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.30 "Sol Atelier" - Breathe editor: Apply button, adjustment undo/redo, load-race fix
+
+Soohong's report (2026-07-17): dragging the chest line "didn't apply", and asked
+for an explicit Apply button plus Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z over adjustments.
+
+- **Root cause found** — opening the breathe editor before the stage image
+  finished loading made `compositeCell()` return an empty canvas, collapsing the
+  silhouette geometry to `btop=cellH, bh=1`: the line pinned to the stage bottom
+  and drags clamped dead. Geometry now initializes only once the composite has
+  opaque pixels (image load event + bounded retry), drags are ignored until
+  ready, and the heuristic chest line recomputes on late load.
+- **Apply button** — bakes immediately with an in-button spinner instead of
+  waiting for modal close (closing still applies as a safety net, Esc cancels);
+  a failed bake re-enables the button and reports the error.
+- **Adjustment history** — every committed change (line drop, amplitude, cadence,
+  add/remove line) snapshots; Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z walk back/forward,
+  taking precedence over pixel-edit undo while the breathe editor is open.
+- Verified under forced 400ms image-load delay: line settles on the heuristic,
+  drag/undo/redo exact, Apply posts the dragged splits, stubbed failure recovers.
+
 ## v1.56.29 "Sol Atelier" - Curator front-end split into a domain taxonomy
 
 Soohong's call (2026-07-17, with /alex-core-invariants): curator.js had grown to
