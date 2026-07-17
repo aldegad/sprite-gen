@@ -2071,15 +2071,25 @@ async function openBaseEditor() {
   const img = new Image();
   img.src = run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "edit=" + Date.now();
   await new Promise((ok, err) => { img.onload = ok; img.onerror = err; });
+  // 검출 격자 — row 들과 같은 논리 픽셀(블록) 단위 클릭 (수홍 지시 2026-07-17).
+  // 격자가 검출되면 연필/지우개가 블록 전체를 채운다. 미검출이면 raw 픽셀 단위 폴백
+  // (관측 가능: 헤더에 격자 여부 표시).
+  let grid = null;
+  try {
+    grid = (await (await fetch("/api/base-grid")).json()).grid || null;
+  } catch { grid = null; }
   const W = img.naturalWidth;
   const H = img.naturalHeight;
   const S = Math.max(1, Math.floor(Math.min((window.innerWidth * 0.7) / W, (window.innerHeight * 0.72) / H)));
 
   const modal = document.createElement("div");
   modal.id = "base-editor";
+  const gridNote = grid
+    ? ` · ${(grid.xEdges.length - 1)}×${(grid.yEdges.length - 1)}px (블록 ${grid.pitch[0]}×${grid.pitch[1]})`
+    : " · raw";
   modal.innerHTML =
     `<div class="be-card">` +
-    `<div class="be-head"><strong>base · ${W}×${H}</strong>` +
+    `<div class="be-head"><strong>base · ${W}×${H}${gridNote}</strong>` +
     `<span class="be-tools">` +
     `<button type="button" class="ghost be-pen active">${t("penTool")}</button>` +
     `<button type="button" class="ghost be-eraser">${t("eraserTool")}</button>` +
@@ -2107,7 +2117,7 @@ async function openBaseEditor() {
 
   let tool = "pen";
   const ops = {};           // "x,y" -> "#hex" | null (서버 계약)
-  const journal = [];       // [key, prevOpValue|undefined] — 세션 undo
+  const journal = [];       // 액션 단위 undo: [[key, prevOpValue|undefined], ...]
   const colorInput = modal.querySelector(".be-color");
   const buttons = { pen: modal.querySelector(".be-pen"), eraser: modal.querySelector(".be-eraser"), pick: modal.querySelector(".be-pick") };
   const syncTools = () => {
@@ -2117,6 +2127,35 @@ async function openBaseEditor() {
   for (const name of Object.keys(buttons)) buttons[name].addEventListener("click", () => { tool = name; syncTools(); });
   syncTools();
 
+  // 격자 오버레이 — row 뷰의 픽셀 격자와 같은 은은한 선
+  const drawGrid = () => {
+    if (!grid) return;
+    ctx.save();
+    ctx.strokeStyle = "rgba(37, 99, 235, 0.28)";
+    ctx.lineWidth = 1;
+    for (const e of grid.xEdges) {
+      ctx.beginPath(); ctx.moveTo(e * S + 0.5, grid.yEdges[0] * S); ctx.lineTo(e * S + 0.5, grid.yEdges[grid.yEdges.length - 1] * S); ctx.stroke();
+    }
+    for (const e of grid.yEdges) {
+      ctx.beginPath(); ctx.moveTo(grid.xEdges[0] * S, e * S + 0.5); ctx.lineTo(grid.xEdges[grid.xEdges.length - 1] * S, e * S + 0.5); ctx.stroke();
+    }
+    ctx.restore();
+  };
+  drawGrid();
+
+  // 클릭 지점이 속한 격자 블록의 raw 픽셀 범위 — 격자 미검출이면 1px
+  const cellOf = (px, py) => {
+    if (!grid) return [px, py, px + 1, py + 1];
+    const seg = (edges, v) => {
+      for (let i = 0; i < edges.length - 1; i++) if (v >= edges[i] && v < edges[i + 1]) return [edges[i], edges[i + 1]];
+      return null;
+    };
+    const sx = seg(grid.xEdges, px);
+    const sy = seg(grid.yEdges, py);
+    if (!sx || !sy) return null; // 격자 바깥(크로마 여백)은 raw 1px 로
+    return [sx[0], sy[0], sx[1], sy[1]];
+  };
+
   const paint = (px, py) => {
     if (!(px >= 0 && px < W && py >= 0 && py < H)) return;
     if (tool === "pick") {
@@ -2125,13 +2164,23 @@ async function openBaseEditor() {
       tool = "pen"; syncTools();
       return;
     }
-    const key = `${px},${py}`;
     const value = tool === "eraser" ? null : colorInput.value;
-    if (ops[key] === value) return;
-    journal.push([key, Object.prototype.hasOwnProperty.call(ops, key) ? ops[key] : undefined]);
-    ops[key] = value;
+    const cell = cellOf(px, py) || [px, py, px + 1, py + 1];
+    const [x0, y0, x1, y1] = cell;
+    const action = [];
+    for (let y = y0; y < Math.min(y1, H); y++) {
+      for (let x = x0; x < Math.min(x1, W); x++) {
+        const key = `${x},${y}`;
+        if (ops[key] === value) continue;
+        action.push([key, Object.prototype.hasOwnProperty.call(ops, key) ? ops[key] : undefined]);
+        ops[key] = value;
+      }
+    }
+    if (!action.length) return;
+    journal.push(action);
     ctx.fillStyle = value || chromaCss;
-    ctx.fillRect(px * S, py * S, S, S);
+    ctx.fillRect(x0 * S, y0 * S, (x1 - x0) * S, (y1 - y0) * S);
+    drawGrid();
   };
   const pos = (ev) => {
     const r = canvas.getBoundingClientRect();
@@ -2143,19 +2192,22 @@ async function openBaseEditor() {
   canvas.addEventListener("pointerup", () => { down = false; });
 
   const redraw = () => {
+    ctx.clearRect(0, 0, W * S, H * S);
     ctx.drawImage(img, 0, 0, W * S, H * S);
     for (const [key, value] of Object.entries(ops)) {
       const [x, y] = key.split(",").map(Number);
       ctx.fillStyle = value || chromaCss;
       ctx.fillRect(x * S, y * S, S, S);
     }
+    drawGrid();
   };
   modal.querySelector(".be-undo").addEventListener("click", () => {
-    const last = journal.pop();
-    if (!last) return;
-    const [key, prev] = last;
-    if (prev === undefined) delete ops[key];
-    else ops[key] = prev;
+    const action = journal.pop();
+    if (!action) return;
+    for (const [key, prev] of action) {
+      if (prev === undefined) delete ops[key];
+      else ops[key] = prev;
+    }
     redraw();
   });
   modal.querySelector(".be-close").addEventListener("click", () => modal.remove());
@@ -2522,7 +2574,7 @@ function openZoom(stateName, idx, keepWidth) {
   if (gridCapableStates.has(stateName)) controls.appendChild(makeGridToggle(stateName));
   if (ppTwinStates.has(stateName)) controls.appendChild(makePpToggle(stateName));
   controls.appendChild(makeGifButton(stateName));
-  controls.appendChild(makeTweenButton(stateName));
+  // 보간 버튼은 줄 헤더 전용 — 확대뷰에선 카드 픽이 불가능해 쓸 수 없다 (수홍 2026-07-17).
   card.querySelector(".zoom-prev").addEventListener("click", () => stepZoomFrame(-1));
   card.querySelector(".zoom-next").addEventListener("click", () => stepZoomFrame(1));
   card.querySelector(".zoom-close").addEventListener("click", closeZoom);

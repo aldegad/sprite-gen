@@ -639,6 +639,43 @@ class CurationHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_json({"error": str(exc)}, 500)
             return
+        if path == "/api/base-grid":
+            # 베이스의 검출 픽셀 격자 — 편집기가 row 들과 같은 "논리 픽셀(블록) 단위
+            # 클릭" 을 제공하기 위한 절단선 (수홍 지시 2026-07-17). 추출과 동일 체인:
+            # 크로마 제거 → solid bbox 조임 → detect_pixel_grid → _grid_edges,
+            # 좌표는 bbox 오프셋을 되붙여 전체 이미지 기준으로 반환.
+            try:
+                base_path = None
+                for candidate in sorted(self.run_dir.glob("base-source.*")):
+                    if candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+                        base_path = candidate
+                        break
+                if base_path is None:
+                    self._send_json({"error": "no base-source image in this run"}, 404)
+                    return
+                request = json.loads(
+                    (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+                chroma = tuple(request.get("chroma_key", {}).get("rgb") or (255, 0, 255))
+                from extract import (_grid_edges, detect_pixel_grid,
+                                     remove_chroma_background_ycbcr, solid_alpha_bbox)
+                with Image.open(base_path) as opened:
+                    cleaned = remove_chroma_background_ycbcr(opened.convert("RGBA"), chroma)
+                box = solid_alpha_bbox(cleaned) or cleaned.getbbox()
+                if not box:
+                    self._send_json({"error": "base has no content to detect a grid on"}, 422)
+                    return
+                tight = cleaned.crop(box)
+                (pitch_x, pitch_y), (phase_x, phase_y) = detect_pixel_grid(tight)
+                if min(pitch_x, pitch_y) < 2.0:
+                    self._send_json({"grid": None, "note": "no confident pixel grid detected"})
+                    return
+                x_edges = [box[0] + e for e in _grid_edges(tight.width, pitch_x, phase_x)]
+                y_edges = [box[1] + e for e in _grid_edges(tight.height, pitch_y, phase_y)]
+                self._send_json({"grid": {"xEdges": x_edges, "yEdges": y_edges,
+                                          "pitch": [round(pitch_x, 2), round(pitch_y, 2)]}})
+            except (Exception, SystemExit) as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
         if path.startswith("/download/"):
             kind = path[len("/download/"):]
             if kind == "gif":
