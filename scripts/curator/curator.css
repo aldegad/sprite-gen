@@ -1086,3 +1086,31 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 @keyframes sg-ants { to { border-color: rgba(37, 99, 235, 0.35); } }
 .stage.selecting { cursor: crosshair; }
 
+
+/* 팔레트 도크 — Aseprite 식 세로 팔레트 (수홍 지시 2026-07-17):
+   위 = 현재 쓰인 색 전부(같은 색 1개, 빈도순), 아래 = 자유 색상 피커 */
+.stage-row { display: flex; align-items: flex-start; gap: 8px; }
+.stage-row .stage { flex: 1 1 auto; }
+.palette-dock {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding: 6px;
+  border: 1px solid var(--line, #e4e7ec);
+  border-radius: 8px;
+  background: var(--panel-2, #f1f3f6);
+  max-height: 72vh;
+}
+.palette-swatches {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 1px;
+}
+.palette-swatches .swatch { flex: none; }
+.palette-swatches .swatch.current { outline: 2px solid var(--accent, #2563eb); outline-offset: 1px; }
+.palette-dock .et-color { width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: transparent; flex: none; }

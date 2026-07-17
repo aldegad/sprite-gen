@@ -815,8 +815,11 @@ class CurationHandler(BaseHTTPRequestHandler):
                 # 원본은 최초 1회 <base>.orig 로 백업 (관측 가능, 덮어쓰지 않음).
                 payload = self._read_body()
                 ops = payload.get("ops")
-                if not isinstance(ops, dict) or not ops:
-                    self._send_json({"error": 'body needs non-empty ops {"x,y": "#rrggbb"|null}'}, 400)
+                transform_req = payload.get("transform")
+                if not isinstance(ops, dict):
+                    ops = {}
+                if not ops and not transform_req:
+                    self._send_json({"error": 'body needs ops {"x,y": "#rrggbb"|null} and/or transform'}, 400)
                     return
                 base_path = _find_base_path(self.run_dir)
                 if base_path is None:
@@ -871,6 +874,21 @@ class CurationHandler(BaseHTTPRequestHandler):
                             continue
                         image.putpixel((x, y), fill)
                         applied += 1
+                if transform_req:
+                    # 변형 굽기 — 프레임 bake 와 같은 순서(픽셀 편집 → 변형), 같은 수학
+                    # (curation.apply_transform SSoT). dx/dy 는 논리 px → 검출 피치로
+                    # raw 환산. 변형 결과의 바깥은 크로마 배경으로 재합성 (베이스 계약).
+                    from curation import apply_transform as _apply_transform
+                    from curation import normalize_transform as _normalize_transform
+                    tnorm = dict(_normalize_transform(transform_req))
+                    if grid is not None:
+                        tnorm["dx"] = tnorm.get("dx", 0.0) * grid["pitch"][0]
+                        tnorm["dy"] = tnorm.get("dy", 0.0) * grid["pitch"][1]
+                    moved = _apply_transform(image, tnorm, (image.width, image.height))
+                    canvas = Image.new("RGBA", (image.width, image.height), chroma + (255,))
+                    canvas.alpha_composite(moved)
+                    image = canvas
+                    applied += 1
                 image.save(base_path)
                 self._send_json({"ok": True, "applied": applied, "space": space,
                                  "backup": backup.name})

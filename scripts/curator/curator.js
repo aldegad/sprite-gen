@@ -380,6 +380,7 @@ function frameOf(stateName, idx) {
 // fit.pixel_perfect 런에서 픽셀 변형을 표시 중인 줄의 논리 격자 스케일 (아니면 null).
 // 굽기(curation.apply_transform snap_scale)와 같은 조건 — 프리뷰가 굽기를 거울처럼 따른다.
 function snapScaleFor(stateName) {
+  if (stateName === BASE_STATE) return 1; // 베이스 논리 공간 = 캔버스 1:1
   return run.fitPixelPerfect && run.pixelPerfect && run.pixelPerfect.scale && ppOn(stateName)
     ? run.pixelPerfect.scale
     : null;
@@ -466,11 +467,14 @@ function updateCardGrid(card) {
   const ingrid = card.querySelector(".ingrid");
   if (!overlay && !ingrid) return;
   const stage = card.querySelector(".stage");
-  const st = run.states.find((s) => s.name === card.dataset.state);
-  const frame = st && st.frames[Number(card.dataset.idx)];
-  const on = !!gridStates[card.dataset.state];
-  const plainShown = ppTwinStates.has(card.dataset.state) && !ppOn(card.dataset.state);
-  const scale = (st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null;
+  const cardState = card.dataset.state;
+  const isBaseCard = cardState === BASE_STATE;
+  const st = run.states.find((s) => s.name === cardState);
+  const frame = isBaseCard ? frameOf(BASE_STATE, 0) : (st && st.frames[Number(card.dataset.idx)]);
+  const on = !!gridStates[cardState];
+  const plainShown = ppTwinStates.has(cardState) && !ppOn(cardState);
+  const scale = isBaseCard ? 1
+    : ((st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null);
   const t = frame ? getTransform(card.dataset.state, frame.index) : null;
   const axisAligned = !t || (!t.rotate && t.scale === 1 && !t.shx && !t.shy);
   const useFinal = on && plainShown && frame && frame.contentBox && scale && stage && axisAligned;
@@ -486,7 +490,7 @@ function updateCardGrid(card) {
   if (!overlay) return;
   if (!step || !stage) { overlay.style.display = "none"; return; }
   overlay.style.display = "block";
-  const ds = (stage.clientWidth / run.cell.width) * step;
+  const ds = (stage.clientWidth / cellDims(cardState)[0]) * step;
   overlay.style.backgroundSize = `${ds}px ${ds}px`;
 }
 
@@ -2508,16 +2512,14 @@ function openZoom(stateName, idx, keepWidth) {
     `<canvas class="ingrid"></canvas>` +
     `<img src="${escapeHtml(frameUrl(stateName, frame))}" alt="frame ${idx}" draggable="false" class="px-upscale" />` +
     `<canvas class="snap-canvas"></canvas>` +
-    (isBase ? "" :
-      `<div class="rotate-handle" data-tip="${t("tRotate")}"></div>` +
-      `<div class="shear-handle" data-tip="${t("tShear")}"></div>`) +
+    `<div class="rotate-handle" data-tip="${t("tRotate")}"></div>` +
+    `<div class="shear-handle" data-tip="${t("tShear")}"></div>` +
     `</div>` +
     `<div class="card-controls">` +
     `<span class="psize" data-tip="${t("tContentPx")}">${frame.contentSize ? `${frame.contentSize[0]}x${frame.contentSize[1]}px` : ""}</span>` +
     `<span class="tvals"></span>` +
-    (isBase ? "" :
-      `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
-      `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}">↺</button>`) +
+    `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
+    `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}">↺</button>` +
     `</div>` +
     `</div>`;
   document.body.appendChild(modal);
@@ -2529,17 +2531,19 @@ function openZoom(stateName, idx, keepWidth) {
 
   // 컨트롤: 줄별 토글과 같은 클래스 → sync*Controls 가 카드/모달을 함께 갱신
   const controls = card.querySelector(".row-controls");
+  // 완전 동일 계약 (수홍 지시 2026-07-17 "다 똑같이"): 픽셀퍼펙트·격자·변형은
+  // 베이스에도 전부. 프레임 전용은 GIF/이전·다음(다중 프레임 개념)뿐.
+  if (isBase || gridCapableStates.has(stateName)) controls.appendChild(makeGridToggle(stateName));
+  if (isBase || ppTwinStates.has(stateName)) controls.appendChild(makePpToggle(stateName));
   if (!isBase) {
-    if (gridCapableStates.has(stateName)) controls.appendChild(makeGridToggle(stateName));
-    if (ppTwinStates.has(stateName)) controls.appendChild(makePpToggle(stateName));
     controls.appendChild(makeGifButton(stateName));
     // 보간 버튼은 줄 헤더 전용 — 확대뷰에선 카드 픽이 불가능해 쓸 수 없다 (수홍 2026-07-17).
     card.querySelector(".zoom-prev").addEventListener("click", () => stepZoomFrame(-1));
     card.querySelector(".zoom-next").addEventListener("click", () => stepZoomFrame(1));
-    card.querySelector(".reset-btn").addEventListener("click", () => resetTransform(stateName, idx));
-    card.querySelector(".flip-btn").addEventListener("click", () => toggleFlipX(stateName, idx));
-    stage.appendChild(makeScaleScrub(stateName, idx));
   }
+  card.querySelector(".reset-btn").addEventListener("click", () => resetTransform(stateName, idx));
+  card.querySelector(".flip-btn").addEventListener("click", () => toggleFlipX(stateName, idx));
+  stage.appendChild(makeScaleScrub(stateName, idx));
   card.querySelector(".zoom-close").addEventListener("click", closeZoom);
   modal.querySelector(".zoom-backdrop").addEventListener("click", closeZoom);
   wirePan(stage, card); // Space+드래그/휠버튼 드래그 = 뷰 패닝 (프레임·베이스 공통)
@@ -2553,8 +2557,6 @@ function openZoom(stateName, idx, keepWidth) {
     `<button type="button" class="ghost et-eraser" data-tip="${t("eraserTool")}">${TOOL_ICONS.eraser}</button>` +
     `<button type="button" class="ghost et-pick" data-tip="${t("tPick")}">${TOOL_ICONS.pick}</button>` +
     `<button type="button" class="ghost et-select" data-tip="${t("tSelectTool")}">${TOOL_ICONS.select}</button>` +
-    `<span class="et-swatches"></span>` +
-    `<input type="color" class="et-color" value="#1f2430" title="color" />` +
     `<button type="button" class="ghost et-undo" data-tip="${t("tUndoKeys")}">${t("undoEdit")}</button>` +
     `<button type="button" class="ghost et-redo" data-tip="${t("tRedoKeys")}">${t("redoEdit")}</button>` +
     `<button type="button" class="ghost et-clear">${t("clearEdits")}</button>`;
@@ -2567,17 +2569,20 @@ function openZoom(stateName, idx, keepWidth) {
     saveBtn.textContent = t("baseEditSave");
     saveBtn.addEventListener("click", async () => {
       const ops = (entries[BASE_STATE].pixels && entries[BASE_STATE].pixels[0]) || {};
-      if (!Object.keys(ops).length) { closeZoom(); return; }
+      const tr = entries[BASE_STATE].transforms[0];
+      const trDirty = tr && (tr.rotate || tr.scale !== 1 || tr.dx || tr.dy || tr.shx || tr.shy || tr.flipX);
+      if (!Object.keys(ops).length && !trDirty) { closeZoom(); return; }
       saveBtn.disabled = true;
       try {
         const res = await fetch("/api/base-edit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ops, space: "logical" }),
+          body: JSON.stringify({ ops, space: "logical", transform: trDirty ? tr : null }),
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || res.status);
         entries[BASE_STATE].pixels = {};
+        entries[BASE_STATE].transforms = {}; // 변형은 파일에 구워졌다 — 표시 변형 초기화
         pixelEdit = null;
         setStatus(STR[lang].baseEditSaved(data.applied), "ok");
         closeZoom();
@@ -2594,8 +2599,24 @@ function openZoom(stateName, idx, keepWidth) {
   const eraserBtn = toolbar.querySelector(".et-eraser");
   const pickBtn = toolbar.querySelector(".et-pick");
   const selectBtn = toolbar.querySelector(".et-select");
-  const colorInput = toolbar.querySelector(".et-color");
-  const swatchBox = toolbar.querySelector(".et-swatches");
+  // ── 팔레트 도크 (Aseprite 식, 수홍 지시 2026-07-17): 스테이지 왼쪽 세로 팔레트 —
+  // 위 = 현재 쓰인 색 전부 (같은 색 1개, 빈도순), 아래 = 자유 색상 피커.
+  const stageRow = document.createElement("div");
+  stageRow.className = "stage-row";
+  stage.parentNode.insertBefore(stageRow, stage);
+  const dock = document.createElement("div");
+  dock.className = "palette-dock";
+  const swatchBox = document.createElement("div");
+  swatchBox.className = "palette-swatches";
+  const colorInput = document.createElement("input");
+  colorInput.type = "color";
+  colorInput.value = "#1f2430";
+  colorInput.title = "color";
+  colorInput.className = "et-color";
+  dock.appendChild(swatchBox);
+  dock.appendChild(colorInput);
+  stageRow.appendChild(dock);
+  stageRow.appendChild(stage);
   const selBox = document.createElement("div");
   selBox.className = "marquee";
   selBox.hidden = true;
@@ -2674,6 +2695,7 @@ function openZoom(stateName, idx, keepWidth) {
     pixelEdit.redo.push(j);
     applyFrameTransformAll(stateName, idx);
     scheduleSave();
+    buildPalette();
   };
   const redoPixel = () => {
     if (!pixelEdit || !pixelEdit.redo.length) return;
@@ -2687,6 +2709,7 @@ function openZoom(stateName, idx, keepWidth) {
     pixelEdit.journal.push(j);
     applyFrameTransformAll(stateName, idx);
     scheduleSave();
+    buildPalette();
   };
   toolbar.querySelector(".et-undo").addEventListener("click", undoPixel);
   toolbar.querySelector(".et-redo").addEventListener("click", redoPixel);
@@ -2702,17 +2725,13 @@ function openZoom(stateName, idx, keepWidth) {
   // 프레임 고유색 팔레트 (빈도순 상위 12)
   const buildPalette = () => {
     const imgEl = stage.querySelector("img");
-    if (!(imgEl.complete && imgEl.naturalWidth)) {
-      imgEl.addEventListener("load", buildPalette, { once: true });
+    if (!(imgEl && imgEl.complete && imgEl.naturalWidth)) {
+      if (imgEl) imgEl.addEventListener("load", buildPalette, { once: true });
       return;
     }
-    const tmp = document.createElement("canvas");
-    tmp.width = cellW;
-    tmp.height = cellH;
-    const c2 = tmp.getContext("2d");
-    c2.imageSmoothingEnabled = false;
-    c2.drawImage(imgEl, 0, 0, tmp.width, tmp.height);
-    const data = c2.getImageData(0, 0, tmp.width, tmp.height).data;
+    // 합성(원본+편집) 기준 — 방금 찍은 색도 팔레트에 나타난다. 같은 색 1개, 빈도순.
+    const cx = compositeCell();
+    const data = cx.getImageData(0, 0, cellW, cellH).data;
     const counts = new Map();
     for (let i = 0; i < data.length; i += 4) {
       if (data[i + 3] < 200) continue;
@@ -2720,21 +2739,23 @@ function openZoom(stateName, idx, keepWidth) {
       counts.set(hex, (counts.get(hex) || 0) + 1);
     }
     swatchBox.innerHTML = "";
-    for (const [hex] of [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) {
+    for (const [hex] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "swatch";
       b.style.background = hex;
-      b.title = hex;
+      b.setAttribute("data-tip", hex);
+      b.classList.toggle("current", hex === colorInput.value);
       b.addEventListener("click", () => {
         colorInput.value = hex;
+        swatchBox.querySelectorAll(".swatch.current").forEach((s) => s.classList.remove("current"));
+        b.classList.add("current");
         if (pixelEdit) { pixelEdit.color = hex; if (pixelEdit.tool !== "pen") setTool("pen"); }
         else setTool("pen"), (pixelEdit.color = hex);
       });
       swatchBox.appendChild(b);
     }
   };
-  buildPalette();
 
   // 마키(영역 선택) 헬퍼 — 캡처는 "현재 보이는 픽셀"(원본 + 편집 합성) 기준
   const compositeCell = () => {
@@ -2792,7 +2813,10 @@ function openZoom(stateName, idx, keepWidth) {
     pixelEdit.redo.length = 0;
     applyFrameTransformAll(stateName, idx);
     scheduleSave();
+    buildPalette();
   };
+
+  buildPalette();
 
   // 페인트: 편집 툴 활성 시 스테이지 드래그는 그리기 (다른 핸들러보다 먼저 등록해 가로챔)
   stage.addEventListener("pointerdown", (ev) => {
@@ -2902,6 +2926,7 @@ function openZoom(stateName, idx, keepWidth) {
       if (stroke.length) {
         pixelEdit.journal.push({ sets: stroke });
         pixelEdit.redo.length = 0;
+        buildPalette();
       }
       scheduleSave();
     };
@@ -2922,7 +2947,7 @@ function openZoom(stateName, idx, keepWidth) {
     sizePxGrids();
   }, { passive: false });
 
-  if (!isBase) wireStage(stage, stateName, idx); // 베이스: 변형(이동/회전) 개념 없음 — 파일 편집만
+  wireStage(stage, stateName, idx); // 베이스도 변형 동일 — 저장 시 파일에 굽는다 (수홍 지시)
   applyCardTransform(stage, stateName, idx);
   syncPpControls();
   syncGridControls();
