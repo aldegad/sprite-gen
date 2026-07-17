@@ -159,3 +159,26 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
 - [`architecture.md`](architecture.md) — 큐레이션 사이드카가 파이프라인에서 소비되는 위치
 - [`locomotion-curation.md`](locomotion-curation.md) — 수동 selected-cycle, 클린 GIF export
 - [`pixel-perfect.md`](pixel-perfect.md) — 전/후 쌍둥이 토글과 `pixel_perfect` 굽기 결정
+
+
+## Base editing (same component as frames)
+
+The base reference row's edit button opens the **same zoom modal** used for frame
+editing (Soohong 2026-07-17: no parallel editor). What differs is only the target:
+
+- The edit space is a **logical image built from the detected base grid** — each
+  detected block's center pixel sampled from the raw (`/api/base-grid` cut lines).
+  Display quantization, painting, marquee, eyedropper, palette, and the grid
+  overlay all live in this uniform logical space; a uniform grid over the raw
+  would drift (non-uniform fractional pitch + origin offset), so the raw view
+  (pixel-perfect toggle OFF) shows no uniform grid — same rule as frames' plain view.
+- Edits/transforms accumulate client-side and bake into `base-source` only via the
+  explicit **save-to-base** button (`POST /api/base-edit`, `space: "logical"`;
+  pixel ops expand to raw blocks and the transform bakes after edits with
+  `curation.apply_transform` math, re-composited onto the chroma background).
+  The original is backed up once as `.orig`. Nothing about the base ever enters
+  `curation.json` (the `__base__` virtual state is excluded from the payload).
+- Base edits affect FUTURE generation (anchors/rerolls) — already-extracted frames
+  derive from raw strips and do not change.
+- The palette dock merges near-identical raw shades (Manhattan tol 24) and excludes
+  the chroma background; frames show their exact quantized colors unmerged.
