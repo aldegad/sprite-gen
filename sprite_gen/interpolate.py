@@ -131,6 +131,49 @@ def aligned_pair_on_chroma(
     return outputs[0], outputs[1]
 
 
+def _chroma_content_bbox(image: Image.Image, chroma_rgb: tuple[int, int, int],
+                         tolerance: int = 60) -> tuple[int, int, int, int] | None:
+    """크로마 단색 배경 위 피사체의 bbox — 크로마와 충분히 다른 픽셀만 콘텐츠로 센다."""
+    rgb = image.convert("RGB")
+    pixels = rgb.load()
+    mask = Image.new("L", rgb.size, 0)
+    out = mask.load()
+    cr, cg, cb = chroma_rgb
+    for y in range(rgb.height):
+        for x in range(rgb.width):
+            r, g, b = pixels[x, y]
+            if abs(r - cr) + abs(g - cg) + abs(b - cb) > tolerance:
+                out[x, y] = 255
+    return mask.getbbox()
+
+
+def normalize_tween_scale(mid: Image.Image, img0: Image.Image, img1: Image.Image,
+                          chroma_rgb: tuple[int, int, int]) -> Image.Image:
+    """생성된 중간 프레임을 참조 쌍의 스케일에 맞춘다 (raw 단계 전처리, 결정론).
+
+    RIFE 시절엔 입출력 캔버스가 같아 스케일이 보장됐지만, 생성형은 모델이 피사체를
+    다른 크기로 그릴 수 있다 (실사고 2026-07-17: tween 이 32×58 로 나와 형제 28×48
+    보다 14% 커짐 — 재생 시 프레임에서 캐릭터가 튐, 수홍 발견). 참조 두 장의 콘텐츠
+    높이 평균을 목표로 중간 프레임의 콘텐츠 높이를 리스케일하고, 참조와 같은 크로마
+    캔버스에 바닥 정렬로 다시 앉힌다. 이후의 픽셀퍼펙트 추출이 격자를 다시 굽는다."""
+    ref_boxes = [_chroma_content_bbox(im, chroma_rgb) for im in (img0, img1)]
+    mid_box = _chroma_content_bbox(mid, chroma_rgb)
+    if not all(ref_boxes) or not mid_box:
+        raise SystemExit("tween scale normalization failed: could not find content on the chroma background")
+    target_h = sum(b[3] - b[1] for b in ref_boxes) / 2.0
+    mid_h = mid_box[3] - mid_box[1]
+    factor = target_h / mid_h
+    content = mid.convert("RGB").crop(mid_box)
+    scaled = content.resize((max(1, round(content.width * factor)),
+                             max(1, round(content.height * factor))),
+                            Image.Resampling.LANCZOS)
+    canvas = Image.new("RGB", img0.size, chroma_rgb)
+    left = (canvas.width - scaled.width) // 2
+    top = canvas.height - scaled.height - (img0.height - ref_boxes[0][3])  # 참조와 같은 바닥선
+    canvas.paste(scaled, (left, max(0, top)))
+    return canvas
+
+
 def write_take(run_dir: Path, request: dict[str, Any], state: str, label: str,
                image: Image.Image) -> Path:
     """중간 프레임을 테이크 raw 로 기록하고 request 의 takes 선언을 갱신한다 (멱등)."""
@@ -172,6 +215,7 @@ def interpolate_between(run_dir: Path | str, state: str, index_a: int, index_b: 
     img0, img1 = aligned_pair_on_chroma(strip, frame_count, index_a, index_b, chroma_rgb)
     run = interpolator or gen_interpolator(provider)
     mid = run(img0, img1, t, tween_prompt(request, t))
+    mid = normalize_tween_scale(mid, img0, img1, chroma_rgb)
     label = label or f"tween_{index_a}_{index_b}_t{t:g}".replace(".", "p")
     if "/" in label or label.startswith("."):
         raise SystemExit(f"take label must be filesystem-safe: {label!r}")
