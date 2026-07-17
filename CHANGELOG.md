@@ -5,6 +5,24 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.27 "Sol Atelier" - Deterministic breathing frames (integer row-shift squash)
+
+After generative approaches (RIFE, codex/grok image gen, grok video) all failed the
+"100% identity + 1px controlled delta" requirement of idle breathing, Soohong asked
+for a mathematical solution — this is the pixel-art classic, now a pipeline feature.
+
+- **`breathe_frames.py`** — generates exhale frame(s) from one extracted frame by
+  integer row shifts: everything above the chest line (`--split`, content-height
+  fraction) drops 1px while the feet stay planted; the seam row compresses (squash).
+  `--two-band` adds a lagged pair: shoulders/chest drop first (neck stretches one
+  row), the head follows next frame. Integer row moves are closed under the pixel
+  grid — palette, outlines, and the grid cannot degrade by construction. Zero AI.
+- **Takes contract** — output is a chroma-composited take strip upscaled ×8 NEAREST
+  (`TAKE_SCALE`) so extraction's pitch detection locks onto the integer scale and
+  round-trips losslessly (a 1px-pitch strip was mis-detected at 5.96 and shredded).
+- Regression: `tests/test_breathe.py` (feet-fixed/compression invariants, two-band
+  lag, strip scale roundtrip).
+
 ## v1.56.26 "Sol Atelier" - Base logical image from the TRUE detected grid
 
 Soohong's diagnosis was exact: the base view was drawing a uniform "N equal cells"
