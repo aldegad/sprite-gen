@@ -1137,6 +1137,13 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 }
 .breathe-bar { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
 .breathe-bar select { padding: 2px 4px; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; }
+.breathe-linectl { display: inline-flex; gap: 2px; }
+.breathe-linectl button { padding: 2px 6px; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.breathe-linectl button:hover { border-color: var(--accent); color: var(--accent); }
+/* 줄 헤더 호흡 토글: 체크박스 = 시퀀스 투입 on/off, 라벨 클릭 = 에디터 열기 */
+.breathe-toggle { display: inline-flex; align-items: center; gap: 4px; }
+.breathe-toggle .breathe-open { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+.breathe-toggle .breathe-open:hover { color: var(--accent); }
 
 /* 호흡 포커스 모드 — 가슴선·진폭·생성만 남기고 편집 크롬 전부 숨김 */
 .zoom-card.breathe-focus .edit-toolbar > :not(.breathe-bar) { display: none; }

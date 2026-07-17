@@ -330,6 +330,8 @@ def _build_run_state_impl(run_dir: Path) -> dict:
                 "requestFrames": frame_count,
                 "extractOk": bool(row.get("ok", bool(files))),
                 "frames": frames,
+                # 테이크 선언 (호흡 에디터가 저장된 선/진폭을 복원하는 데 쓴다)
+                "takes": entry.get("takes") or [],
             }
         )
 
@@ -905,21 +907,26 @@ class CurationHandler(BaseHTTPRequestHandler):
                     return
                 try:
                     frame = int(payload.get("frame", 0))
-                    split = float(payload.get("split", 0.55))
+                    raw_splits = payload.get("splits")
+                    if raw_splits is None:  # 구 클라이언트 호환: 단일 split
+                        raw_splits = [payload.get("split", 0.55)]
+                    splits = sorted(float(s) for s in raw_splits)
                     amplitude = int(payload.get("amplitude", 1))
                 except (TypeError, ValueError):
-                    self._send_json({"error": "frame:int, split:float, amplitude:int required"}, 400)
+                    self._send_json({"error": "frame:int, splits:[float], amplitude:int required"}, 400)
                     return
-                if not 0.05 < split < 0.95:
-                    self._send_json({"error": f"split must be inside (0.05, 0.95): {split}"}, 400)
+                if not 1 <= len(splits) <= 3 or len(set(splits)) != len(splits):
+                    self._send_json({"error": f"splits must be 1..3 distinct lines: {splits}"}, 400)
+                    return
+                if any(not 0.05 < s < 0.95 for s in splits):
+                    self._send_json({"error": f"splits must be inside (0.05, 0.95): {splits}"}, 400)
                     return
                 if not 1 <= amplitude <= 4:
                     self._send_json({"error": f"amplitude must be 1..4: {amplitude}"}, 400)
                     return
-                extra = ["--state", state, "--frame", str(frame), "--split", str(split),
+                extra = ["--state", state, "--frame", str(frame),
+                         "--split", ",".join(f"{s:g}" for s in splits),
                          "--amplitude", str(amplitude), "--extract"]
-                if payload.get("twoBand"):
-                    extra.insert(-1, "--two-band")
                 result = _run_script("breathe_frames.py", self.run_dir, *extra)
                 self._send_json(result, 200 if result["ok"] else 500)
                 return

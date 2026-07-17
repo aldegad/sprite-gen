@@ -50,10 +50,16 @@ const STR = {
     editing: "editing…", saved: "saved", saveFail: "save failed: ",
     saveLostBanner: "EDITS ARE NOT SAVING — the server may have restarted. Reload this page (your unsaved edits will be lost, but new edits will save again).",
     rowGif: "GIF", tRowGif: "download this row's current composed sequence as a GIF (4x nearest upscale for crisp viewing — pixel data unchanged)",
-    rowBreathe: "Breathe", tRowBreathe: "deterministic idle breathing: opens the zoom view with a draggable chest line + live breathing preview — Generate bakes an exhale take (integer row-shift, zero AI) and re-extracts the full batch",
-    breatheGo: "Generate", breatheAmp: "amp", breatheBusy: "baking breathe take + re-extracting the full batch…",
-    breatheHint: "drag the line — everything above it sinks 1px on exhale",
-    breatheDone: (s) => `${s}: breathe take added — reloading`, breatheFail: "breathe failed: ",
+    rowBreathe: "Breathe", tRowBreathe: "deterministic idle breathing (integer row-shift, zero AI) — check: put the breath cycle into the sequence (first check bakes a take with defaults); uncheck: take it out (the take is kept, re-check is instant). Click the label to tune lines / amplitude / cadence.",
+    tRowBreatheEdit: "open the breathing editor — split lines / amplitude / cadence; closing applies, Esc cancels",
+    breatheAmp: "amp", breatheCad: (n) => `hold ${n}f`,
+    breatheLineAdd: "+line", breatheLineDel: "−line",
+    tBreatheLines: "split lines (1–3): with more lines the lower bands sink first and upper bands follow one beat later",
+    breatheBusy: "baking breathe take + re-extracting the full batch…",
+    breatheHint: "drag the lines — the lowest band sinks first, upper bands follow a beat later. Closing applies, Esc cancels.",
+    breatheDone: (s) => `${s}: breathe take baked — reloading`, breatheFail: "breathe failed: ",
+    breatheOn: (s) => `${s}: breathing added to the sequence`,
+    breatheOff: (s) => `${s}: breathing removed from the sequence (take kept — re-check to restore)`,
     rowTween: "Tween", tRowTween: "AI in-between: generate a mid frame between two frames of this row (codex/grok image gen on the server machine's CLI auth) — recorded as a take, then the FULL batch re-extracts. Click cards to pick the pair.",
     tweenFrom: "from", tweenTo: "to", tweenT: "t", tweenGo: "Generate",
     tweenBusy: "interpolating + re-extracting the full batch… (1-2 min)",
@@ -139,10 +145,16 @@ const STR = {
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
     saveLostBanner: "편집이 저장되지 않고 있습니다 — 서버가 재기동됐을 수 있어요. 이 페이지를 새로고침하세요 (미저장 편집은 유실되지만, 이후 편집은 다시 저장됩니다).",
     rowGif: "GIF", tRowGif: "이 줄의 현재 합성 시퀀스를 GIF 로 다운로드 — 선명하게 보이도록 4배 니어리스트로 굽는다 (픽셀 데이터는 그대로)",
-    rowBreathe: "호흡", tRowBreathe: "결정론 숨쉬기: 줌 뷰가 열리고 드래그 가능한 가슴선 + 실시간 호흡 미리보기 — 생성을 누르면 exhale 테이크(정수 행 시프트, AI 0%)를 굽고 전체 배치 재추출",
-    breatheGo: "생성", breatheAmp: "진폭", breatheBusy: "호흡 테이크 굽는 중 + 전체 배치 재추출…",
-    breatheHint: "선을 드래그 — 선 위가 날숨에 1px 가라앉습니다",
-    breatheDone: (s) => `${s}: 호흡 테이크 추가됨 — 새로고침합니다`, breatheFail: "호흡 생성 실패: ",
+    rowBreathe: "호흡", tRowBreathe: "결정론 숨쉬기 (정수 행 시프트, AI 0%) — 체크: 호흡 사이클을 시퀀스에 투입 (첫 체크는 기본값으로 테이크를 굽습니다), 해제: 시퀀스에서 제거 (테이크는 보존, 재체크 즉시). 라벨을 클릭하면 선·진폭·주기를 조정합니다.",
+    tRowBreatheEdit: "호흡 편집기 열기 — 분할선 / 진폭 / 주기. 닫으면 적용, Esc 취소",
+    breatheAmp: "진폭", breatheCad: (n) => `유지 ${n}프레임`,
+    breatheLineAdd: "+선", breatheLineDel: "−선",
+    tBreatheLines: "분할선 (1~3개): 선이 많을수록 아래 밴드부터 가라앉고 위 밴드가 반 박자 늦게 따라옵니다 (드르륵)",
+    breatheBusy: "호흡 테이크 굽는 중 + 전체 배치 재추출…",
+    breatheHint: "선을 드래그 — 맨 아래 밴드부터 가라앉고 위가 반 박자 늦게 따라옵니다. 닫으면 적용, Esc 취소.",
+    breatheDone: (s) => `${s}: 호흡 테이크 구움 — 새로고침합니다`, breatheFail: "호흡 생성 실패: ",
+    breatheOn: (s) => `${s}: 호흡을 시퀀스에 투입했습니다`,
+    breatheOff: (s) => `${s}: 호흡을 시퀀스에서 뺐습니다 (테이크 보존 — 재체크로 복원)`,
     rowTween: "보간", tRowTween: "AI 중간 프레임: 이 줄의 두 프레임 사이를 생성형(codex/grok — 서버 머신의 CLI 인증 사용)으로 그려 테이크로 기록 — 이후 전체 배치 재추출. 카드를 클릭해 쌍을 고르세요.",
     tweenFrom: "시작", tweenTo: "끝", tweenT: "t", tweenGo: "생성",
     tweenBusy: "보간 + 전체 배치 재추출 중… (1~2분)",
@@ -679,20 +691,212 @@ document.addEventListener("click", (ev) => {
   if (b) tweenOpen.toInput.value = b.idx;
 }, true);
 
-let pendingBreathe = false; // 호흡 버튼 → 줌 모달 오픈 시 호흡 모드 진입 플래그
+let pendingBreathe = false; // 호흡 라벨 → 줌 모달 오픈 시 호흡 모드 진입 플래그
 
-function makeBreatheButton(stateName) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "gif-btn";
-  btn.title = t("tRowBreathe");
-  btn.innerHTML =
+// ── 호흡 = 줄 체크박스 토글 (수홍 확정 2026-07-17 "목록쪽에서 저 버튼에 체크박스") ──
+// 체크 ON = 호흡 사이클이 시퀀스에 들어있는 상태. 테이크가 없으면 첫 체크가
+// 기본값(실루엣 휴리스틱 선 1개, 진폭 1px)으로 굽고, 있으면 즉시 재투입한다.
+// 체크 OFF = 시퀀스에서만 제거 — 테이크는 보존 (재체크 즉시 복원).
+
+// 이 줄의 호흡 위상 프레임 인덱스들 (오름차순 = P1..PK 캐스케이드 순서)
+function breathePhaseIdxs(stateName) {
+  const st = run.states.find((s) => s.name === stateName);
+  if (!st) return [];
+  return st.frames
+    .filter((f) => (f.label || "").startsWith("breathe") && f.present)
+    .map((f) => f.index);
+}
+
+function breatheActive(stateName) {
+  const e = entries[stateName];
+  const bset = new Set(breathePhaseIdxs(stateName));
+  if (!e || !bset.size) return false;
+  for (const i of e.sel) {
+    const src = cloneSrc(stateName, i);
+    if (bset.has(src === null ? i : src)) return true;
+  }
+  return false;
+}
+
+// 현재 시퀀스에서 최하강 위상(PK)의 유지 길이 — 에디터 주기 select 초기값 복원용
+function breatheCadenceOf(stateName) {
+  const phases = breathePhaseIdxs(stateName);
+  const e = entries[stateName];
+  if (!phases.length || !e) return 0;
+  const last = phases[phases.length - 1];
+  let n = 0;
+  for (const i of e.sel) {
+    const src = cloneSrc(stateName, i);
+    if ((src === null ? i : src) === last) n++;
+  }
+  return n;
+}
+
+// 호흡 프레임을 시퀀스에서 제거: 복제 인스턴스는 통째로 삭제, 원본 위상은 풀로 강등
+function removeBreathe(stateName) {
+  const e = entries[stateName];
+  const bset = new Set(breathePhaseIdxs(stateName));
+  if (!e || !bset.size) return;
+  for (const [ci, src] of Object.entries(e.clones || {})) {
+    if (!bset.has(src)) continue;
+    const idx = Number(ci);
+    e.sel.delete(idx);
+    e.order = e.order.filter((i) => i !== idx);
+    delete e.clones[idx];
+    delete e.transforms[idx];
+    delete e.pixels[idx];
+  }
+  for (const i of bset) e.sel.delete(i);
+}
+
+// 호흡 사이클 투입 — 시퀀스 끝에 [P1..PK(들숨 캐스케이드), PK×(주기-1)(유지),
+// PK-1..P1(날숨 캐스케이드)]. 반복 등장은 복제 인스턴스로 (인덱스는 시퀀스에 1회).
+function injectBreathe(stateName, cadence) {
+  const e = entries[stateName];
+  const st = run.states.find((s) => s.name === stateName);
+  const phases = breathePhaseIdxs(stateName);
+  if (!e || !st || !phases.length) return false;
+  removeBreathe(stateName);
+  e.clones = e.clones || {};
+  const seq = e.order.filter((i) => e.sel.has(i));
+  const tail = [];
+  const usedOnce = new Set();
+  const instance = (idx) => {
+    if (!usedOnce.has(idx)) { usedOnce.add(idx); return idx; }
+    const used = [...st.frames.map((f) => f.index), ...Object.keys(e.clones).map(Number),
+                  ...e.order, ...e.archived, ...tail];
+    const newIdx = Math.max(-1, ...used) + 1;
+    e.clones[newIdx] = idx;
+    return newIdx;
+  };
+  for (const p of phases) tail.push(instance(p));
+  const deepest = phases[phases.length - 1];
+  for (let k = 1; k < Math.max(1, cadence); k++) tail.push(instance(deepest));
+  for (let k = phases.length - 2; k >= 0; k--) tail.push(instance(phases[k]));
+  const rest = e.order.filter((i) => !e.sel.has(i) && !tail.includes(i));
+  e.order = [...seq, ...tail, ...rest];
+  for (const i of tail) e.sel.add(i);
+  return true;
+}
+
+// 실루엣 휴리스틱 (에디터 기본 가슴선과 같은 식): 상반신 최광폭 행 = 어깨 바로 아래
+function silhouetteStats(data, W, H) {
+  let top = H, bot = 0;
+  const widths = new Array(H).fill(0);
+  for (let y = 0; y < H; y++) {
+    let w = 0;
+    for (let x = 0; x < W; x++) if (data[(y * W + x) * 4 + 3] >= 40) w++;
+    widths[y] = w;
+    if (w) { top = Math.min(top, y); bot = Math.max(bot, y + 1); }
+  }
+  const h = Math.max(1, bot - top);
+  let shoulderY = top + Math.floor(h * 0.3);
+  let best = 0;
+  for (let y = top; y < top + Math.floor(h * 0.55); y++) {
+    if (widths[y] > best) { best = widths[y]; shoulderY = y; }
+  }
+  const split = Math.min(0.75, Math.max(0.3, (shoulderY + Math.floor(h * 0.1) - top) / h));
+  return { top, h, split };
+}
+
+// 리로드 후 사이클 투입 예약 (테이크 굽기 → 재추출 → 리로드 → 여기서 시퀀스 반영)
+const BREATHE_PENDING_KEY = "sg-breathe-inject";
+
+function applyPendingBreatheInject() {
+  let pend = null;
+  try { pend = JSON.parse(localStorage.getItem(BREATHE_PENDING_KEY) || "null"); } catch { /* 무시 */ }
+  if (!pend || pend.character !== run.characterId) return;
+  localStorage.removeItem(BREATHE_PENDING_KEY);
+  if (!injectBreathe(pend.state, pend.cadence || 3)) return;
+  scheduleSave();
+  rebuildState(pend.state);
+  setStatus(STR[lang].breatheOn(pend.state));
+}
+
+async function bakeBreatheTake(stateName, splits, amplitude, frameIdx, cadence) {
+  setStatus(t("breatheBusy"));
+  const res = await fetch("/api/breathe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state: stateName, frame: frameIdx,
+                           splits: splits.map((s) => Math.round(s * 100) / 100),
+                           amplitude }),
+  });
+  const dataR = await res.json();
+  if (!res.ok || !dataR.ok) {
+    throw new Error(dataR.error || (dataR.stderr || "").trim().split("\n").pop() || res.status);
+  }
+  localStorage.setItem(BREATHE_PENDING_KEY, JSON.stringify(
+    { character: run.characterId, state: stateName, cadence }));
+  setStatus(STR[lang].breatheDone(stateName));
+  setTimeout(() => window.location.reload(), 800);
+}
+
+function makeBreatheToggle(stateName) {
+  const wrap = document.createElement("span");
+  wrap.className = "pp-apply row-toggle breathe-toggle";
+  wrap.title = t("tRowBreathe");
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = breatheActive(stateName);
+  input.addEventListener("change", async () => {
+    if (!input.checked) {
+      removeBreathe(stateName);
+      scheduleSave();
+      rebuildState(stateName);
+      setStatus(STR[lang].breatheOff(stateName));
+      return;
+    }
+    if (breathePhaseIdxs(stateName).length) {
+      injectBreathe(stateName, 3);
+      scheduleSave();
+      rebuildState(stateName);
+      setStatus(STR[lang].breatheOn(stateName));
+      return;
+    }
+    // 테이크가 아직 없다 → 기본값으로 굽는다 (실루엣 휴리스틱 선 1개, 진폭 1px)
+    input.disabled = true;
+    try {
+      const st = run.states.find((s) => s.name === stateName);
+      const first = st && st.frames.find((f) => f.present);
+      if (!first) throw new Error("no extracted frame");
+      const img = new Image();
+      img.src = first.url;
+      await img.decode();
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const cx = c.getContext("2d");
+      cx.drawImage(img, 0, 0);
+      const sil = silhouetteStats(cx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+      await bakeBreatheTake(stateName, [sil.split], 1, first.index, 3);
+    } catch (e) {
+      setStatus(t("breatheFail") + e.message, "err");
+      input.checked = false;
+      input.disabled = false;
+    }
+  });
+  const lbl = document.createElement("span");
+  lbl.className = "breathe-open";
+  lbl.title = t("tRowBreatheEdit");
+  lbl.innerHTML =
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
     '<path d="M2 11c2.5 0 2.5-3 5-3s2.5 3 5 3 2-2 2-2" fill="none" stroke="currentColor" ' +
     'stroke-width="1.4" stroke-linecap="round"/></svg>' +
     `<span>${t("rowBreathe")}</span>`;
-  btn.addEventListener("click", () => { pendingBreathe = true; openZoom(stateName, 0); });
-  return btn;
+  lbl.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    const st = run.states.find((s) => s.name === stateName);
+    const take = st && (st.takes || []).find((tk) => (tk.label || "") === "breathe");
+    const srcIdx = take && take.breathe && Number.isInteger(take.breathe.frame)
+      ? take.breathe.frame
+      : ((st && st.frames.find((f) => f.present)) || { index: 0 }).index;
+    pendingBreathe = true;
+    openZoom(stateName, srcIdx);
+  });
+  wrap.appendChild(input);
+  wrap.appendChild(lbl);
+  return wrap;
 }
 
 function makeTweenButton(stateName) {
@@ -1494,7 +1698,7 @@ function renderState(state, replaceEl) {
     if (showPpToggle) controls.appendChild(makePpToggle(state.name));
     if (showGifBtn) controls.appendChild(makeGifButton(state.name));
     controls.appendChild(makeTweenButton(state.name));
-    controls.appendChild(makeBreatheButton(state.name));
+    controls.appendChild(makeBreatheToggle(state.name));
     refs.appendChild(controls);
     wrap.appendChild(refs);
   }
@@ -2448,11 +2652,14 @@ let zoomView = null; // { stateName, idx, width }
 
 function closeZoom() {
   if (zoomView && zoomView.cleanupBreathe) zoomView.cleanupBreathe();
+  const applyBreathe = zoomView && zoomView.applyBreathe;
   pixelEdit = null;
   const modal = document.getElementById("zoom-modal");
   if (modal) modal.remove();
   zoomView = null;
   document.removeEventListener("keydown", onZoomKey);
+  // 호흡 에디터는 닫힘 = 적용 (생성 버튼 없음). 비동기 — 상태줄이 진행을 보고한다.
+  if (applyBreathe) applyBreathe();
 }
 
 // ── 베이스 = 줌 모달과 같은 컴포넌트 (수홍 지시 2026-07-17 "같은 컴포넌트를 쓰라") ──
@@ -2526,6 +2733,7 @@ function clearMarquee() {
 function onZoomKey(ev) {
   if (ev.key === "Escape") {
     if (pixelEdit && pixelEdit.sel) { clearMarquee(); return; } // 선택 해제가 우선
+    if (zoomView && zoomView.breatheCancel) zoomView.breatheCancel(); // Esc = 호흡 적용 취소
     closeZoom();
   }
   else if (ev.key === "ArrowLeft") stepZoomFrame(-1);
@@ -2550,6 +2758,7 @@ document.addEventListener("keydown", (ev) => {
 
 function stepZoomFrame(delta) {
   if (!zoomView || zoomView.stateName === BASE_STATE) return; // 베이스 = 단일 뷰
+  if (zoomView.applyBreathe) return; // 호흡 포커스 모드: 프레임 이동 없음 (적용 오발 방지)
   // 표시 순서(order)를 따라 넘긴다 — 복제 인스턴스 카드도 순회에 포함
   const e = entries[zoomView.stateName];
   const present = e.order.filter((i) => {
@@ -3062,8 +3271,8 @@ function openZoom(stateName, idx, keepWidth) {
   // SD/8등신 모두 자동 적응. 선을 끌면 미리보기가 실시간으로 숨쉰다.
   if (!isBase && pendingBreathe) {
     pendingBreathe = false;
-    // 포커스 모드 (수홍 2026-07-17): 호흡 조정에 필요한 것만 남긴다 — 가슴선 +
-    // 진폭 + 생성. 다른 편집 도구/팔레트/변형은 숨기고 스테이지 입력도 차단.
+    // 포커스 모드 (수홍 2026-07-17): 호흡 조정에 필요한 것만 남긴다 — 분할선(1~3개) +
+    // 진폭 + 주기. 생성 버튼은 없다 — 닫으면 적용, Esc 취소 (수홍 지시 "생성 버튼 삭제").
     card.classList.add("breathe-focus");
     stage.addEventListener("pointerdown", (ev) => {
       if (!ev.target.closest(".breathe-line")) {
@@ -3071,53 +3280,69 @@ function openZoom(stateName, idx, keepWidth) {
         ev.preventDefault();
       }
     }, true);
-    const bm = { amplitude: 1, phase: 0, split: 0.55 };
+    const st0 = run.states.find((s) => s.name === stateName);
+    const savedTake = st0 && (st0.takes || []).find((tk) => (tk.label || "") === "breathe");
+    const saved = savedTake && savedTake.breathe;
     const cx0 = compositeCell();
-    const bdata = cx0.getImageData(0, 0, cellW, cellH).data;
-    let btop = cellH, bbot = 0;
-    const widths = new Array(cellH).fill(0);
-    for (let y = 0; y < cellH; y++) {
-      let w = 0;
-      for (let x = 0; x < cellW; x++) if (bdata[(y * cellW + x) * 4 + 3] >= 40) w++;
-      widths[y] = w;
-      if (w) { btop = Math.min(btop, y); bbot = Math.max(bbot, y + 1); }
-    }
-    const bh = Math.max(1, bbot - btop);
-    let shoulderY = btop + Math.floor(bh * 0.3);
-    let bestW = 0;
-    for (let y = btop; y < btop + Math.floor(bh * 0.55); y++) {
-      if (widths[y] > bestW) { bestW = widths[y]; shoulderY = y; }
-    }
-    bm.split = Math.min(0.75, Math.max(0.3, (shoulderY + Math.floor(bh * 0.1) - btop) / bh));
-
-    const line = document.createElement("div");
-    line.className = "breathe-line";
-    line.setAttribute("data-tip", t("breatheHint"));
-    stage.appendChild(line);
-    const syncLine = () => {
-      line.style.top = `${((btop + bm.split * bh) / cellH) * 100}%`;
+    const sil = silhouetteStats(cx0.getImageData(0, 0, cellW, cellH).data, cellW, cellH);
+    const btop = sil.top;
+    const bh = sil.h;
+    // 저장된 테이크 파라미터가 있으면 복원, 없으면 실루엣 휴리스틱 가슴선 1개
+    const bm = {
+      amplitude: saved && saved.amplitude ? saved.amplitude : 1,
+      splits: saved && Array.isArray(saved.splits) && saved.splits.length
+        ? saved.splits.slice(0, 3).map(Number).sort((a, b) => a - b)
+        : [sil.split],
+      cadence: breatheCadenceOf(stateName) || 3,
+      phase: 0, touched: false, cadTouched: false, cancelled: false,
     };
-    syncLine();
-    line.addEventListener("pointerdown", (ev) => {
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
-      line.setPointerCapture(ev.pointerId);
-      const onMove = (e2) => {
-        const r = stage.getBoundingClientRect();
-        const yCell = ((e2.clientY - r.top) / r.height) * cellH;
-        bm.split = Math.min(0.9, Math.max(0.1, (yCell - btop) / bh));
-        syncLine();
-      };
-      const onUp = () => {
-        line.removeEventListener("pointermove", onMove);
-        line.removeEventListener("pointerup", onUp);
-      };
-      line.addEventListener("pointermove", onMove);
-      line.addEventListener("pointerup", onUp);
-    });
+
+    // 분할선들 (수홍 확정 2026-07-17 "숨쉬기 선을 나누는거지"): 선이 K개면 exhale 이
+    // K위상 캐스케이드 — 아래 밴드부터 가라앉고 위 밴드가 반 박자 늦게 따라온다.
+    const lineEls = [];
+    function wireLine(ln) {
+      ln.addEventListener("pointerdown", (ev) => {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        ln.setPointerCapture(ev.pointerId);
+        const li = lineEls.indexOf(ln);
+        const onMove = (e2) => {
+          const r = stage.getBoundingClientRect();
+          const yCell = ((e2.clientY - r.top) / r.height) * cellH;
+          bm.splits[li] = Math.min(0.9, Math.max(0.1, (yCell - btop) / bh));
+          bm.touched = true;
+          syncLines();
+        };
+        const onUp = () => {
+          ln.removeEventListener("pointermove", onMove);
+          ln.removeEventListener("pointerup", onUp);
+          bm.splits.sort((a, b) => a - b); // 선 순서 불변식: 위→아래 오름차순
+          syncLines();
+        };
+        ln.addEventListener("pointermove", onMove);
+        ln.addEventListener("pointerup", onUp);
+      });
+    }
+    const syncLines = () => {
+      while (lineEls.length > bm.splits.length) lineEls.pop().remove();
+      while (lineEls.length < bm.splits.length) {
+        const ln = document.createElement("div");
+        ln.className = "breathe-line";
+        ln.setAttribute("data-tip", t("breatheHint"));
+        wireLine(ln);
+        stage.appendChild(ln);
+        lineEls.push(ln);
+      }
+      bm.splits.forEach((s, i) => {
+        lineEls[i].style.top = `${((btop + s * bh) / cellH) * 100}%`;
+      });
+    };
+    syncLines();
 
     const bcanvas = stage.querySelector(".snap-canvas");
     const bImg = stage.querySelector("img");
+    // 위상 미리보기 — breathe_frames 와 같은 수학: p<K = 밴드만 시프트 + 경계 행
+    // 스트레치(shift_band), p=K = 최하단 선 위 전체 시프트(shift_above)
     const renderPhase = () => {
       const srcEl = editSourceFor(stateName, bImg);
       if (!srcEl || !bcanvas) return;
@@ -3130,55 +3355,110 @@ function openZoom(stateName, idx, keepWidth) {
       bctx.clearRect(0, 0, cellW, cellH);
       drawFrameInto(bctx, srcEl, IDENTITY(), cellW, cellH, snapScaleFor(stateName),
         getPixelOps(stateName, idx));
-      if (bm.phase) { // exhale 미리보기: breathe_frames.shift_above 와 같은 행 시프트
-        const splitY = Math.round(btop + bm.split * bh);
-        const region = bctx.getImageData(0, btop, cellW, Math.max(1, splitY - btop));
-        bctx.clearRect(0, btop, cellW, splitY - btop);
-        bctx.putImageData(region, 0, btop + bm.amplitude);
+      const K = bm.splits.length;
+      const p = Math.min(bm.phase, K);
+      if (!p) return;
+      const ys = bm.splits.map((s) => Math.round(btop + s * bh));
+      const yBottom = Math.max(btop + 1, ys[K - 1]);
+      const off = document.createElement("canvas");
+      off.width = cellW;
+      off.height = cellH;
+      const octx = off.getContext("2d");
+      octx.imageSmoothingEnabled = false;
+      octx.drawImage(bcanvas, 0, 0);
+      if (p === K) {
+        bctx.clearRect(0, btop, cellW, yBottom - btop);
+        bctx.drawImage(off, 0, btop, cellW, yBottom - btop,
+          0, btop + bm.amplitude, cellW, yBottom - btop);
+      } else {
+        const yTop = ys[K - 1 - p];
+        bctx.drawImage(off, 0, yTop, cellW, yBottom - yTop,
+          0, yTop + bm.amplitude, cellW, yBottom - yTop);
+        bctx.drawImage(off, 0, yTop, cellW, 1, 0, yTop, cellW, bm.amplitude);
       }
     };
-    bm.timer = setInterval(() => { bm.phase = 1 - bm.phase; renderPhase(); }, 500);
+    // 미리보기 사이클 = 실제 투입 시퀀스와 동형: [기준×주기, P1..PK, PK×(주기-1), PK-1..P1]
+    // 재생 속도 = 이 줄의 실제 fps (게임에서 보일 그대로)
+    let ptick = 0;
+    const stepMs = Math.max(140, Math.round(1000 / ((st0 && st0.fps) || 6)));
+    bm.timer = setInterval(() => {
+      const K = bm.splits.length;
+      const seq = [];
+      for (let i = 0; i < bm.cadence; i++) seq.push(0);
+      for (let p = 1; p <= K; p++) seq.push(p);
+      for (let i = 1; i < bm.cadence; i++) seq.push(K);
+      for (let p = K - 1; p >= 1; p--) seq.push(p);
+      ptick = (ptick + 1) % seq.length;
+      bm.phase = seq[ptick];
+      renderPhase();
+    }, stepMs);
     renderPhase();
 
     const bar = document.createElement("div");
     bar.className = "breathe-bar";
-    const ampSel = document.createElement("select");
-    for (const v of [1, 2]) {
-      const o = document.createElement("option");
-      o.value = String(v);
-      o.textContent = `${t("breatheAmp")} ${v}px`;
-      ampSel.appendChild(o);
-    }
-    ampSel.addEventListener("change", () => { bm.amplitude = parseInt(ampSel.value, 10) || 1; });
-    const goBtn = document.createElement("button");
-    goBtn.textContent = t("breatheGo");
-    goBtn.addEventListener("click", async () => {
-      goBtn.disabled = true;
-      goBtn.innerHTML = '<span class="tween-spin" aria-label="generating"></span>';
-      setStatus(t("breatheBusy"));
-      try {
-        const res = await fetch("/api/breathe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ state: stateName, frame: idx,
-                                 split: Math.round(bm.split * 100) / 100,
-                                 amplitude: bm.amplitude }),
-        });
-        const dataR = await res.json();
-        if (!res.ok || !dataR.ok) {
-          throw new Error(dataR.error || (dataR.stderr || "").trim().split("\n").pop() || res.status);
-        }
-        setStatus(STR[lang].breatheDone(stateName));
-        setTimeout(() => window.location.reload(), 800);
-      } catch (e) {
-        setStatus(t("breatheFail") + e.message, "err");
-        goBtn.textContent = t("breatheGo");
-        goBtn.disabled = false;
+    const mkSel = (values, current, fmt, onchange) => {
+      const sel = document.createElement("select");
+      for (const v of values) {
+        const o = document.createElement("option");
+        o.value = String(v);
+        o.textContent = fmt(v);
+        if (v === current) o.selected = true;
+        sel.appendChild(o);
       }
+      sel.addEventListener("change", () => onchange(parseInt(sel.value, 10)));
+      return sel;
+    };
+    const lineBtns = document.createElement("span");
+    lineBtns.className = "breathe-linectl";
+    lineBtns.title = t("tBreatheLines");
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.textContent = t("breatheLineAdd");
+    addBtn.addEventListener("click", () => {
+      if (bm.splits.length >= 3) return;
+      bm.splits.unshift(Math.max(0.1, bm.splits[0] - 0.18)); // 새 선은 최상단 위로
+      bm.splits.sort((a, b) => a - b);
+      bm.touched = true;
+      syncLines();
     });
-    bar.appendChild(ampSel);
-    bar.appendChild(goBtn);
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.textContent = t("breatheLineDel");
+    delBtn.addEventListener("click", () => {
+      if (bm.splits.length <= 1) return;
+      bm.splits.shift(); // 맨 위 선부터 제거 — 최하단(기본 가슴선)은 항상 유지
+      bm.touched = true;
+      syncLines();
+    });
+    lineBtns.appendChild(addBtn);
+    lineBtns.appendChild(delBtn);
+    bar.appendChild(lineBtns);
+    bar.appendChild(mkSel([1, 2], bm.amplitude,
+      (v) => `${t("breatheAmp")} ${v}px`,
+      (v) => { bm.amplitude = v || 1; bm.touched = true; }));
+    bar.appendChild(mkSel([2, 3, 4, 6], bm.cadence,
+      (v) => STR[lang].breatheCad(v),
+      (v) => { bm.cadence = v || 3; bm.cadTouched = true; }));
     toolbar.appendChild(bar);
+
+    // 닫으면 적용 (생성 버튼 폐기): 선/진폭이 바뀌었거나 테이크가 없으면 굽는다
+    // (리로드 후 applyPendingBreatheInject 가 사이클 투입). 주기만 바뀌었거나
+    // 아직 미투입이면 서버 없이 즉시 시퀀스 반영. Esc = 취소 (아무것도 안 함).
+    zoomView.breatheCancel = () => { bm.cancelled = true; };
+    zoomView.applyBreathe = () => {
+      if (bm.cancelled) return;
+      if (bm.touched || !savedTake) {
+        bakeBreatheTake(stateName, bm.splits, bm.amplitude, idx, bm.cadence)
+          .catch((e) => setStatus(t("breatheFail") + e.message, "err"));
+        return;
+      }
+      if (bm.cadTouched || !breatheActive(stateName)) {
+        injectBreathe(stateName, bm.cadence);
+        scheduleSave();
+        rebuildState(stateName);
+        setStatus(STR[lang].breatheOn(stateName));
+      }
+    };
     zoomView.cleanupBreathe = () => clearInterval(bm.timer);
   }
 
@@ -3521,6 +3801,7 @@ async function boot() {
   syncPpControls();
   syncGridControls();
   refreshVariantImages();
+  applyPendingBreatheInject(); // 호흡 테이크 굽기 리로드 후 사이클 자동 투입
   // 세대 불일치로 서버가 이번 로드에서 무효화한 행 알림 — 조용한 소실 금지.
   // 백업 파일명을 함께 보여줘 수동 복원 경로를 남긴다 (load_curation_report 계약).
   if (run.curationDropped && run.curationDropped.length) {
