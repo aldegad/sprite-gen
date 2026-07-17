@@ -2081,7 +2081,20 @@ function renderBaseRow() {
     `<span class="muted">${t("baseNote")}</span>` +
     `<button type="button" class="ghost base-edit-btn" data-tip="${t("tBaseEdit")}">✎ ${t("baseEditBtn")}</button></div>` +
     `<div class="base-stage"><img src="${escapeHtml(run.baseUrl)}" alt="base source" draggable="false" /></div>`;
-  wrap.querySelector(".base-edit-btn").addEventListener("click", openBaseEditor);
+  const editBtn = wrap.querySelector(".base-edit-btn");
+  editBtn.addEventListener("click", async () => {
+    // 격자 검출(첫 회 수 초) + 논리 이미지 빌드 동안 버튼 스피너 — 멈춘 것처럼 보이지 않게
+    if (editBtn.disabled) return;
+    editBtn.disabled = true;
+    const label = editBtn.innerHTML;
+    editBtn.innerHTML = '<span class="tween-spin" aria-label="loading"></span>';
+    try {
+      await openBaseEditor();
+    } finally {
+      editBtn.innerHTML = label;
+      editBtn.disabled = false;
+    }
+  });
   document.getElementById("states").appendChild(wrap);
 }
 
