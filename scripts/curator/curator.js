@@ -701,6 +701,8 @@ function makeTweenButton(stateName) {
   });
   go.addEventListener("click", async () => {
     go.disabled = btn.disabled = true;
+    const goLabel = go.textContent;
+    go.innerHTML = '<span class="tween-spin" aria-label="generating"></span>';
     setStatus(t("tweenBusy"));
     try {
       const res = await fetch("/api/interpolate", {
@@ -722,6 +724,7 @@ function makeTweenButton(stateName) {
       setTimeout(() => window.location.reload(), 800);
     } catch (e) {
       setStatus(t("tweenFail") + e.message, "err");
+      go.textContent = goLabel;
       go.disabled = btn.disabled = false;
     }
   });
