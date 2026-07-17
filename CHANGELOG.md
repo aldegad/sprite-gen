@@ -5,6 +5,18 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.22 "Sol Atelier" - fit.conform fully removed (loud rejection)
+
+Soohong's 2026-07-14 decision was "no forced squash to logical_height" — but the
+opt-in `fit.conform: true` flag survived in code, and on 2026-07-17 a
+height-normalization attempt regressed straight through it. A removed decision must
+not be revivable by one leftover flag: the option is now deleted, and a request that
+still declares `conform` aborts loudly with the decision reference. The physical cap
+(cell minus bottom margin) and the informational safe-area notice are unchanged —
+`logical_height` remains a generation target / warning baseline, never an enforcement
+mechanism. Regression: `test_pixel_snap.py::test_conform_flag_rejected` (the old
+`test_conform_true_squeezes_to_contract` guarded the removed behavior and is gone).
+
 ## v1.56.21 "Sol Atelier" - Generative in-betweens (codex/grok), RIFE retired
 
 The interpolation backend switches from flow-based VFI to the engine's own

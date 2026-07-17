@@ -80,18 +80,6 @@ def test_default_keeps_native_logical_size(tmp_path) -> None:
     assert extract_module.run(run_dir=run_dir) == 0
     height = _walk_frame0_height(run_dir)
     assert height > 30, f"native size squeezed by default: {height}"
-
-
-def test_conform_true_squeezes_to_contract(tmp_path) -> None:
-    """Explicit fit.conform=true restores the legacy contract squeeze (36 -> <=30).
-    min_used_pixels lowered: the squeezed 30px fixture sprite is legitimately small."""
-    run_dir = _build_pp_run(tmp_path)
-    _conform_request(run_dir, conform=True)
-    assert extract_module.run(run_dir=run_dir, min_used_pixels=200) == 0
-    height = _walk_frame0_height(run_dir)
-    assert height <= 30, f"conform=true did not squeeze: {height}"
-
-
 def test_pixel_snap_scale_resolution() -> None:
     assert pixel_snap_scale({"cell": {"size": 64}}) is None  # no fit
     assert pixel_snap_scale({"cell": {"size": 64}, "fit": {"resample": "kcentroid"}}) is None
@@ -311,3 +299,17 @@ def test_shared_palette_preserves_rare_saturated_color() -> None:
     assert nearest(starved, gold) > 30, "starvation setup lost its bite — recalibrate the fixture"
     healthy = extract_module.build_shared_palette([frame], 48)
     assert nearest(healthy, gold) <= 8, f"default-size palette still starves gold: {nearest(healthy, gold):.1f}"
+
+
+def test_conform_flag_rejected(tmp_path) -> None:
+    """수홍 확정 2026-07-14/17 회귀: fit.conform 은 제거됐다 — 선언되어 있으면 요란한 거부.
+
+    옵트인 잔재는 제거된 결정(강제 눌림 금지)이 플래그 하나로 되살아나는 회귀
+    경로였다 (실사고 2026-07-17: 높이 통일 시도가 이 플래그로 재발)."""
+    import pytest as _pytest
+    run_dir = _build_pp_run(tmp_path)
+    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request["fit"]["conform"] = True
+    (run_dir / "sprite-request.json").write_text(json.dumps(request), encoding="utf-8")
+    with _pytest.raises(SystemExit, match="fit.conform was removed"):
+        extract_module.run(run_dir=run_dir)
