@@ -91,6 +91,9 @@ const STR = {
     tArchiveBtn: "archive (remove even from the candidate pool)",
     tScaleScrub: "sprite scale — click arrows to step, drag the magnifier left/right",
     penTool: "pen", eraserTool: "eraser", pickTool: "eyedropper", undoEdit: "undo", clearEdits: "clear edits",
+    baseEditBtn: "edit", tBaseEdit: "pixel-edit the base image itself — saves into base-source (original backed up once as .orig); affects FUTURE generation, not already-extracted frames",
+    baseEditSave: "save to base", baseEditFail: "base save failed: ",
+    baseEditSaved: (n) => `base updated (${n}px) — affects future generation`,
     tPick: "eyedropper — click a pixel to sample its color, then it switches to the pen so you can paint that exact color",
     archiveHint: "drag a card out to restore it into the sequence or pool",
     archModalTitle: (st, n) => `archive · ${st} (${n})`,
@@ -170,6 +173,9 @@ const STR = {
     tArchiveBtn: "보관함으로 (후보 풀에서도 제외)",
     tScaleScrub: "스프라이트 크기 — 화살표 클릭 = 단계 조절, 돋보기 좌우 드래그 = 연속 조절",
     penTool: "연필", eraserTool: "지우개", pickTool: "스포이드", undoEdit: "되돌리기", clearEdits: "편집 비우기",
+    baseEditBtn: "편집", tBaseEdit: "베이스 이미지 자체를 픽셀 편집 — base-source 파일에 저장 (원본은 .orig 로 1회 백업). 이미 뽑힌 프레임은 안 변하고 이후 생성에 반영됩니다",
+    baseEditSave: "베이스에 저장", baseEditFail: "베이스 저장 실패: ",
+    baseEditSaved: (n) => `베이스 갱신됨 (${n}px) — 이후 생성에 반영`,
     tPick: "스포이드 — 픽셀을 클릭하면 그 색을 집어 연필로 전환, 똑같은 색으로 바로 찍을 수 있어",
     archiveHint: "카드를 끌어내 시퀀스/후보로 복구",
     archModalTitle: (st, n) => `보관함 · ${st} (${n})`,
@@ -2049,9 +2055,129 @@ function renderBaseRow() {
   wrap.className = "state base-row";
   wrap.innerHTML =
     `<div class="state-head"><h3>base</h3>` +
-    `<span class="muted">${t("baseNote")}</span></div>` +
+    `<span class="muted">${t("baseNote")}</span>` +
+    `<button type="button" class="ghost base-edit-btn" data-tip="${t("tBaseEdit")}">✎ ${t("baseEditBtn")}</button></div>` +
     `<div class="base-stage"><img src="${escapeHtml(run.baseUrl)}" alt="base source" draggable="false" /></div>`;
+  wrap.querySelector(".base-edit-btn").addEventListener("click", openBaseEditor);
   document.getElementById("states").appendChild(wrap);
+}
+
+// ── 베이스 픽셀 에디터 — base-source 파일 자체를 굽는다 (수홍 지시 2026-07-17:
+// '베이스를 다르게 해서 뽑고 싶다'). 프레임 편집(사이드카)과 달리 저장 시 서버가
+// 파일에 반영하고 원본은 최초 1회 .orig 로 백업된다. 이미 뽑힌 프레임은 raw 파생이라
+// 안 변한다 — 바뀐 베이스는 이후 생성(앵커 재파생·행 리롤)에 반영된다.
+async function openBaseEditor() {
+  if (document.getElementById("base-editor")) return;
+  const img = new Image();
+  img.src = run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "edit=" + Date.now();
+  await new Promise((ok, err) => { img.onload = ok; img.onerror = err; });
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+  const S = Math.max(1, Math.floor(Math.min((window.innerWidth * 0.7) / W, (window.innerHeight * 0.72) / H)));
+
+  const modal = document.createElement("div");
+  modal.id = "base-editor";
+  modal.innerHTML =
+    `<div class="be-card">` +
+    `<div class="be-head"><strong>base · ${W}×${H}</strong>` +
+    `<span class="be-tools">` +
+    `<button type="button" class="ghost be-pen active">${t("penTool")}</button>` +
+    `<button type="button" class="ghost be-eraser">${t("eraserTool")}</button>` +
+    `<button type="button" class="ghost be-pick">${t("pickTool")}</button>` +
+    `<input type="color" class="be-color" value="#1f2430" />` +
+    `<button type="button" class="ghost be-undo">${t("undoEdit")}</button>` +
+    `<button type="button" class="be-save">${t("baseEditSave")}</button>` +
+    `<button type="button" class="ghost be-close">✕</button>` +
+    `</span></div>` +
+    `<div class="be-stage"><canvas class="be-canvas" width="${W * S}" height="${H * S}"></canvas></div>` +
+    `</div>`;
+  document.body.appendChild(modal);
+
+  const canvas = modal.querySelector(".be-canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0, W * S, H * S);
+  // 지우개 표시색 = 이미지 모서리(크로마 배경) 픽셀 — 서버도 지우개를 크로마로 굽는다
+  const probe = document.createElement("canvas");
+  probe.width = W; probe.height = H;
+  const pctx = probe.getContext("2d");
+  pctx.drawImage(img, 0, 0);
+  const corner = pctx.getImageData(0, 0, 1, 1).data;
+  const chromaCss = `rgb(${corner[0]},${corner[1]},${corner[2]})`;
+
+  let tool = "pen";
+  const ops = {};           // "x,y" -> "#hex" | null (서버 계약)
+  const journal = [];       // [key, prevOpValue|undefined] — 세션 undo
+  const colorInput = modal.querySelector(".be-color");
+  const buttons = { pen: modal.querySelector(".be-pen"), eraser: modal.querySelector(".be-eraser"), pick: modal.querySelector(".be-pick") };
+  const syncTools = () => {
+    for (const [name, el] of Object.entries(buttons)) el.classList.toggle("active", tool === name);
+    canvas.style.cursor = tool === "pick" ? "copy" : "crosshair";
+  };
+  for (const name of Object.keys(buttons)) buttons[name].addEventListener("click", () => { tool = name; syncTools(); });
+  syncTools();
+
+  const paint = (px, py) => {
+    if (!(px >= 0 && px < W && py >= 0 && py < H)) return;
+    if (tool === "pick") {
+      const d = pctx.getImageData(px, py, 1, 1).data;
+      colorInput.value = "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+      tool = "pen"; syncTools();
+      return;
+    }
+    const key = `${px},${py}`;
+    const value = tool === "eraser" ? null : colorInput.value;
+    if (ops[key] === value) return;
+    journal.push([key, Object.prototype.hasOwnProperty.call(ops, key) ? ops[key] : undefined]);
+    ops[key] = value;
+    ctx.fillStyle = value || chromaCss;
+    ctx.fillRect(px * S, py * S, S, S);
+  };
+  const pos = (ev) => {
+    const r = canvas.getBoundingClientRect();
+    return [Math.floor((ev.clientX - r.left) / (r.width / W)), Math.floor((ev.clientY - r.top) / (r.height / H))];
+  };
+  let down = false;
+  canvas.addEventListener("pointerdown", (ev) => { down = true; canvas.setPointerCapture(ev.pointerId); paint(...pos(ev)); });
+  canvas.addEventListener("pointermove", (ev) => { if (down) paint(...pos(ev)); });
+  canvas.addEventListener("pointerup", () => { down = false; });
+
+  const redraw = () => {
+    ctx.drawImage(img, 0, 0, W * S, H * S);
+    for (const [key, value] of Object.entries(ops)) {
+      const [x, y] = key.split(",").map(Number);
+      ctx.fillStyle = value || chromaCss;
+      ctx.fillRect(x * S, y * S, S, S);
+    }
+  };
+  modal.querySelector(".be-undo").addEventListener("click", () => {
+    const last = journal.pop();
+    if (!last) return;
+    const [key, prev] = last;
+    if (prev === undefined) delete ops[key];
+    else ops[key] = prev;
+    redraw();
+  });
+  modal.querySelector(".be-close").addEventListener("click", () => modal.remove());
+  modal.querySelector(".be-save").addEventListener("click", async () => {
+    if (!Object.keys(ops).length) { modal.remove(); return; }
+    try {
+      const res = await fetch("/api/base-edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ops }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+      setStatus(STR[lang].baseEditSaved(data.applied), "ok");
+      modal.remove();
+      // 베이스 참조 줄 이미지 갱신 (캐시 우회)
+      const baseImg = document.querySelector(".base-row .base-stage img");
+      if (baseImg) baseImg.src = run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "v=" + Date.now();
+    } catch (e) {
+      setStatus(t("baseEditFail") + e.message, "err");
+    }
+  });
 }
 
 function renderCard(state, frame) {
