@@ -933,6 +933,13 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 
 /* AI 중간 프레임(보간) 버튼의 파라미터 팝오버 */
 .tween-wrap { position: relative; display: inline-flex; }
+.tween-pop[hidden] { display: none !important; } /* display:flex 가 hidden 속성을 이기지 못하게 */
+.tween-picking .card { cursor: crosshair; }
+.tween-picking .card.selected { border-color: var(--line); } /* 픽 모드에선 기존 선택 파랑 억제 */
+.tween-picking .card.tween-picked {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
 .tween-pop {
   position: absolute;
   top: calc(100% + 4px);

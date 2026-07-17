@@ -603,6 +603,46 @@ function makePpToggle(stateName) {
 // AI 중간 프레임(보간) — 이 줄의 두 프레임 사이를 RIFE 로 보간해 테이크로 기록하고
 // 전체 배치를 재추출한다. 부분 추출은 서버가 제공하지 않는다 (팔레트 배치 결합 —
 // docs/frame-interpolation.md). 완료되면 run 세대가 바뀌므로 뷰를 새로고침한다.
+//
+// 픽 모드: 팝오버가 열려 있는 동안 그 줄의 카드 클릭 = 보간 쌍 선택 (파란 테두리,
+// 최대 2개 FIFO — 세 번째 클릭이 가장 오래된 픽을 대체). 기존 선택(.selected)의
+// 파란 테두리는 픽 모드 동안 그 줄에서 억제해 픽만 파랗게 보인다.
+let tweenOpen = null; // {stateName, pop, btn, picks, fromInput, toInput, section}
+
+function closeTweenPick() {
+  if (!tweenOpen) return;
+  tweenOpen.pop.hidden = true;
+  if (tweenOpen.section) {
+    tweenOpen.section.classList.remove("tween-picking");
+    tweenOpen.section.querySelectorAll(".card.tween-picked")
+      .forEach((el) => el.classList.remove("tween-picked"));
+  }
+  tweenOpen = null;
+}
+
+document.addEventListener("click", (ev) => {
+  if (!tweenOpen) return;
+  const card = ev.target.closest(".card");
+  if (!card || card.dataset.state !== tweenOpen.stateName) return;
+  if (ev.target.closest(".tween-pop")) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const idx = Number(card.dataset.idx);
+  const at = tweenOpen.picks.findIndex((p) => p.idx === idx);
+  if (at >= 0) {
+    tweenOpen.picks.splice(at, 1)[0].card.classList.remove("tween-picked");
+  } else {
+    tweenOpen.picks.push({ idx, card });
+    card.classList.add("tween-picked");
+    if (tweenOpen.picks.length > 2) {
+      tweenOpen.picks.shift().card.classList.remove("tween-picked");
+    }
+  }
+  const [a, b] = tweenOpen.picks;
+  if (a) tweenOpen.fromInput.value = a.idx;
+  if (b) tweenOpen.toInput.value = b.idx;
+}, true);
+
 function makeTweenButton(stateName) {
   const wrap = document.createElement("span");
   wrap.className = "tween-wrap";
@@ -638,7 +678,17 @@ function makeTweenButton(stateName) {
   go.className = "gif-btn";
   go.textContent = t("tweenGo");
   pop.appendChild(go);
-  btn.addEventListener("click", () => { pop.hidden = !pop.hidden; });
+  btn.addEventListener("click", () => {
+    if (tweenOpen && tweenOpen.pop === pop) {
+      closeTweenPick();
+      return;
+    }
+    closeTweenPick();
+    pop.hidden = false;
+    const section = document.querySelector(`.state[data-state="${CSS.escape(stateName)}"]`);
+    if (section) section.classList.add("tween-picking");
+    tweenOpen = { stateName, pop, btn, picks: [], fromInput, toInput, section };
+  });
   go.addEventListener("click", async () => {
     go.disabled = btn.disabled = true;
     setStatus(t("tweenBusy"));
