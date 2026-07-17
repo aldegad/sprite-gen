@@ -95,6 +95,7 @@ const STR = {
     tUndoKeys: "undo (Cmd/Ctrl+Z)", tRedoKeys: "redo (Cmd/Ctrl+Shift+Z)",
     baseEditBtn: "edit", tBaseEdit: "pixel-edit the base image itself — saves into base-source (original backed up once as .orig); affects FUTURE generation, not already-extracted frames",
     baseEditSave: "save to base", baseEditFail: "base save failed: ",
+    baseUnsaved: "editing base — press 'save to base' to bake into the file",
     baseEditSaved: (n) => `base updated (${n}px) — affects future generation`,
     tPick: "eyedropper — click a pixel to sample its color, then it switches to the pen so you can paint that exact color",
     archiveHint: "drag a card out to restore it into the sequence or pool",
@@ -179,6 +180,7 @@ const STR = {
     tUndoKeys: "되돌리기 (Cmd/Ctrl+Z)", tRedoKeys: "재실행 (Cmd/Ctrl+Shift+Z)",
     baseEditBtn: "편집", tBaseEdit: "베이스 이미지 자체를 픽셀 편집 — base-source 파일에 저장 (원본은 .orig 로 1회 백업). 이미 뽑힌 프레임은 안 변하고 이후 생성에 반영됩니다",
     baseEditSave: "베이스에 저장", baseEditFail: "베이스 저장 실패: ",
+    baseUnsaved: "베이스 편집 중 — '베이스에 저장' 을 눌러야 파일에 반영됩니다",
     baseEditSaved: (n) => `베이스 갱신됨 (${n}px) — 이후 생성에 반영`,
     tPick: "스포이드 — 픽셀을 클릭하면 그 색을 집어 연필로 전환, 똑같은 색으로 바로 찍을 수 있어",
     archiveHint: "카드를 끌어내 시퀀스/후보로 복구",
@@ -361,6 +363,11 @@ function cloneSrc(stateName, idx) {
 }
 
 function frameOf(stateName, idx) {
+  if (stateName === BASE_STATE) {
+    if (!baseView) return null;
+    return { index: 0, present: true, url: baseView.url, plainUrl: null, label: "base",
+             contentSize: [baseView.cols, baseView.rows] };
+  }
   const st = run.states.find((s) => s.name === stateName);
   if (!st) return null;
   const src = cloneSrc(stateName, idx);
@@ -386,7 +393,7 @@ function isIdentityTransform(t) {
 // curation.apply_transform 의 snap_scale 경로를 캔버스로 미러링 — 드래그/회전 중에도
 // 스프라이트가 셀 고정 격자에 실시간으로 스냅되어 보인다 (격자는 그대로, 그림이 스냅).
 function drawFrameInto(ctx, image, t, cw, ch, snap, edits) {
-  if (snap) ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = false; // 항상 NEAREST — 베이스(raw→논리) 표시도 픽셀 유지
   // 사이드카 픽셀 편집은 변형 이전(소스) 공간이다 — 굽기(apply_pixel_edits →
   // apply_transform, compose_atlas.py)와 같은 순서로 편집을 먼저 소스에 합성한 뒤
   // 함께 변형한다. (실사고 2026-07-17: 변형 후에 고정 좌표로 덧그려서, 캐릭터를
@@ -790,6 +797,7 @@ function playList(stateName) {
 function buildPayload() {
   const states = {};
   for (const [name, entry] of Object.entries(entries)) {
+    if (name === BASE_STATE) continue; // 가상 상태 — 큐레이션 사이드카에 절대 저장 금지
     const transforms = {};
     for (const [idx, t] of Object.entries(entry.transforms)) {
       if (t.rotate || t.scale !== 1 || t.dx || t.dy || t.shx || t.shy || t.flipX) transforms[idx] = t;
@@ -837,6 +845,11 @@ function buildPayload() {
 let lastEditAt = 0;
 
 function scheduleSave() {
+  if (zoomView && zoomView.stateName === BASE_STATE) {
+    // 베이스 편집은 파일 굽기 대상 — "저장됨" 오해 방지, 명시 버튼으로만 반영
+    setStatus(t("baseUnsaved"));
+    return;
+  }
   lastEditAt = Date.now();
   setStatus(t("editing"));
   clearTimeout(saveTimer);
@@ -884,8 +897,9 @@ function applyCardTransform(stage, stateName, idx) {
   const t = getTransform(stateName, idx);
   const el = stage.querySelector("img");
   if (!el) return;
+  const [cw, ch] = cellDims(stateName); // 베이스(가상 상태)는 검출 격자 논리 치수
   // dx/dy are stored in cell pixels; CSS needs rendered pixels.
-  const ds = stage.clientWidth / run.cell.width;
+  const ds = stage.clientWidth / cw;
   const m = matrixOf(t);
   const snap = snapScaleFor(stateName);
   const canvas = stage.querySelector(".snap-canvas");
@@ -904,8 +918,8 @@ function applyCardTransform(stage, stateName, idx) {
     //   이동은 img 와 똑같은 CSS 변형으로 — 편집 없는 프레임과 거동이 같아진다.
     const quantize = !!snap && !editingThis;
     const render = () => {
-      canvas.width = run.cell.width;
-      canvas.height = run.cell.height;
+      canvas.width = cw;
+      canvas.height = ch;
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const tt = quantize ? getTransform(stateName, idx) : IDENTITY();
@@ -2066,334 +2080,28 @@ function renderBaseRow() {
   document.getElementById("states").appendChild(wrap);
 }
 
-// ── 베이스 픽셀 에디터 — base-source 파일 자체를 굽는다 (수홍 지시 2026-07-17:
-// [통합 부채] 편집 상호작용(툴/저널/마키)이 줌 모달과 중복 구현돼 있다 — 수홍 지시
-// (2026-07-17 "베이스 편집 에디터를 똑같은 거 쓰라"): 공용 픽셀 편집 코어로 합쳐
-// 유지보수를 한 곳으로 모을 것. 다음 작업 단위에서 createPixelTools 로 추출 예정.
-// '베이스를 다르게 해서 뽑고 싶다'). 프레임 편집(사이드카)과 달리 저장 시 서버가
-// 파일에 반영하고 원본은 최초 1회 .orig 로 백업된다. 이미 뽑힌 프레임은 raw 파생이라
-// 안 변한다 — 바뀐 베이스는 이후 생성(앵커 재파생·행 리롤)에 반영된다.
+// ── 베이스 편집 = 줌 모달과 같은 컴포넌트 (수홍 지시 2026-07-17 "같은 컴포넌트를
+// 쓰라" — 별도 모달 구현은 폐기). 검출 격자의 논리 해상도로 가상 상태 "__base__" 를
+// 만들어 openZoom 으로 연다. 도구/단축키/마키/줌/팬 전부 프레임 편집과 단일 코드.
 async function openBaseEditor() {
-  if (document.getElementById("base-editor")) return;
-  const img = new Image();
-  img.src = run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "edit=" + Date.now();
-  await new Promise((ok, err) => { img.onload = ok; img.onerror = err; });
-  // 검출 격자 — row 들과 같은 논리 픽셀(블록) 단위 클릭 (수홍 지시 2026-07-17).
-  // 격자가 검출되면 연필/지우개가 블록 전체를 채운다. 미검출이면 raw 픽셀 단위 폴백
-  // (관측 가능: 헤더에 격자 여부 표시).
   let grid = null;
   try {
     grid = (await (await fetch("/api/base-grid")).json()).grid || null;
   } catch { grid = null; }
-  const W = img.naturalWidth;
-  const H = img.naturalHeight;
-  const S = Math.max(1, Math.floor(Math.min((window.innerWidth * 0.7) / W, (window.innerHeight * 0.72) / H)));
-
-  const modal = document.createElement("div");
-  modal.id = "base-editor";
-  const gridNote = grid
-    ? ` · ${(grid.xEdges.length - 1)}×${(grid.yEdges.length - 1)}px (블록 ${grid.pitch[0]}×${grid.pitch[1]})`
-    : " · raw";
-  modal.innerHTML =
-    `<div class="be-card">` +
-    `<div class="be-head"><strong>base · ${W}×${H}${gridNote}</strong>` +
-    `<span class="be-tools">` +
-    `<button type="button" class="ghost be-pen active">${t("penTool")}</button>` +
-    `<button type="button" class="ghost be-eraser">${t("eraserTool")}</button>` +
-    `<button type="button" class="ghost be-pick">${t("pickTool")}</button>` +
-    `<button type="button" class="ghost be-select" data-tip="${t("tSelectTool")}">${t("selectTool")}</button>` +
-    `<input type="color" class="be-color" value="#1f2430" />` +
-    `<button type="button" class="ghost be-undo" data-tip="${t("tUndoKeys")}">${t("undoEdit")}</button>` +
-    `<button type="button" class="ghost be-redo" data-tip="${t("tRedoKeys")}">${t("redoEdit")}</button>` +
-    `<button type="button" class="be-save">${t("baseEditSave")}</button>` +
-    `<button type="button" class="ghost be-close">✕</button>` +
-    `</span></div>` +
-    `<div class="be-stage"><div class="be-wrap">` +
-    `<canvas class="be-canvas" width="${W * S}" height="${H * S}"></canvas>` +
-    `<div class="marquee" hidden></div>` +
-    `</div></div>` +
-    `</div>`;
-  document.body.appendChild(modal);
-
-  const canvas = modal.querySelector(".be-canvas");
-  const ctx = canvas.getContext("2d");
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, 0, 0, W * S, H * S);
-  // 휠 = 보기 확대/축소 (프레임 줌 모달과 동일 감각). 렌더 해상도는 그대로,
-  // CSS 폭만 바꾼다 — 마키/좌표는 boundingRect 비율로 계산되어 자동 추종.
-  let viewScale = 1;
-  const beStage = modal.querySelector(".be-stage");
-  beStage.addEventListener("wheel", (ev) => {
-    ev.preventDefault();
-    viewScale = Math.max(0.2, Math.min(8, viewScale * (ev.deltaY < 0 ? 1.12 : 1 / 1.12)));
-    canvas.style.width = `${Math.round(W * S * viewScale)}px`;
-    canvas.style.height = "auto";
-    syncSelBox();
-  }, { passive: false });
-  // 지우개 표시색 = 이미지 모서리(크로마 배경) 픽셀 — 서버도 지우개를 크로마로 굽는다
-  const probe = document.createElement("canvas");
-  probe.width = W; probe.height = H;
-  const pctx = probe.getContext("2d");
-  pctx.drawImage(img, 0, 0);
-  const corner = pctx.getImageData(0, 0, 1, 1).data;
-  const chromaCss = `rgb(${corner[0]},${corner[1]},${corner[2]})`;
-
-  let tool = "pen";
-  const ops = {};           // "x,y" -> "#hex" | null (서버 계약)
-  const journal = [];       // 액션 단위 undo: {sets: [{key, had, prev, value}]}
-  const redoStack = [];
-  let sel = null;           // 마키 선택 {x0,y0,x1,y1} (raw px, 격자 정렬)
-  const selBox = modal.querySelector(".marquee");
-  const colorInput = modal.querySelector(".be-color");
-  const buttons = { pen: modal.querySelector(".be-pen"), eraser: modal.querySelector(".be-eraser"), pick: modal.querySelector(".be-pick"), select: modal.querySelector(".be-select") };
-  const syncSelBox = () => {
-    selBox.hidden = !sel;
-    if (!sel) return;
-    const r = canvas.getBoundingClientRect();
-    const kx = r.width / W, ky = r.height / H;
-    selBox.style.left = `${sel.x0 * kx}px`;
-    selBox.style.top = `${sel.y0 * ky}px`;
-    selBox.style.width = `${(sel.x1 - sel.x0) * kx}px`;
-    selBox.style.height = `${(sel.y1 - sel.y0) * ky}px`;
+  if (!grid) {
+    setStatus(t("baseEditFail") + "no confident pixel grid on the base", "err");
+    return;
+  }
+  baseView = {
+    cols: grid.xEdges.length - 1,
+    rows: grid.yEdges.length - 1,
+    url: run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "edit=" + Date.now(),
   };
-  const syncTools = () => {
-    for (const [name, el] of Object.entries(buttons)) el.classList.toggle("active", tool === name);
-    canvas.style.cursor = tool === "pick" ? "copy" : "crosshair";
-    if (tool !== "select") { sel = null; syncSelBox(); }
-  };
-  for (const name of Object.keys(buttons)) buttons[name].addEventListener("click", () => { tool = name; syncTools(); });
-  syncTools();
-
-  // 격자 오버레이 — row 뷰의 픽셀 격자와 같은 은은한 선
-  const drawGrid = () => {
-    if (!grid) return;
-    ctx.save();
-    ctx.strokeStyle = "rgba(37, 99, 235, 0.28)";
-    ctx.lineWidth = 1;
-    for (const e of grid.xEdges) {
-      ctx.beginPath(); ctx.moveTo(e * S + 0.5, grid.yEdges[0] * S); ctx.lineTo(e * S + 0.5, grid.yEdges[grid.yEdges.length - 1] * S); ctx.stroke();
-    }
-    for (const e of grid.yEdges) {
-      ctx.beginPath(); ctx.moveTo(grid.xEdges[0] * S, e * S + 0.5); ctx.lineTo(grid.xEdges[grid.xEdges.length - 1] * S, e * S + 0.5); ctx.stroke();
-    }
-    ctx.restore();
-  };
-  drawGrid();
-
-  // 클릭 지점이 속한 격자 블록의 raw 픽셀 범위 — 격자 미검출이면 1px
-  const cellOf = (px, py) => {
-    if (!grid) return [px, py, px + 1, py + 1];
-    const seg = (edges, v) => {
-      for (let i = 0; i < edges.length - 1; i++) if (v >= edges[i] && v < edges[i + 1]) return [edges[i], edges[i + 1]];
-      return null;
-    };
-    const sx = seg(grid.xEdges, px);
-    const sy = seg(grid.yEdges, py);
-    if (!sx || !sy) return null; // 격자 바깥(크로마 여백)은 raw 1px 로
-    return [sx[0], sy[0], sx[1], sy[1]];
-  };
-
-  // 스트로크(드래그 1회) 단위 액션 — 프레임 편집기와 같은 undo/redo 계약
-  let stroke = null;
-  const stagePixel = (x, y, value) => {
-    const key = `${x},${y}`;
-    if (Object.prototype.hasOwnProperty.call(ops, key) && ops[key] === value) return false;
-    stroke.push({ key, had: Object.prototype.hasOwnProperty.call(ops, key), prev: ops[key], value });
-    ops[key] = value;
-    return true;
-  };
-  const paint = (px, py) => {
-    if (!(px >= 0 && px < W && py >= 0 && py < H)) return;
-    if (tool === "pick") {
-      const d = pctx.getImageData(px, py, 1, 1).data;
-      colorInput.value = "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
-      tool = "pen"; syncTools();
-      return;
-    }
-    const value = tool === "eraser" ? null : colorInput.value;
-    const cell = cellOf(px, py) || [px, py, px + 1, py + 1];
-    const [x0, y0, x1, y1] = cell;
-    let changed = false;
-    for (let y = y0; y < Math.min(y1, H); y++) {
-      for (let x = x0; x < Math.min(x1, W); x++) {
-        if (stagePixel(x, y, value)) changed = true;
-      }
-    }
-    if (!changed) return;
-    ctx.fillStyle = value || chromaCss;
-    ctx.fillRect(x0 * S, y0 * S, (x1 - x0) * S, (y1 - y0) * S);
-    drawGrid();
-  };
-  const pos = (ev) => {
-    const r = canvas.getBoundingClientRect();
-    return [Math.floor((ev.clientX - r.left) / (r.width / W)), Math.floor((ev.clientY - r.top) / (r.height / H))];
-  };
-
-  const redraw = () => {
-    ctx.clearRect(0, 0, W * S, H * S);
-    ctx.drawImage(img, 0, 0, W * S, H * S);
-    for (const [key, value] of Object.entries(ops)) {
-      const [x, y] = key.split(",").map(Number);
-      ctx.fillStyle = value || chromaCss;
-      ctx.fillRect(x * S, y * S, S, S);
-    }
-    drawGrid();
-    syncSelBox();
-  };
-
-  // 마키: 선택 사각형을 격자 블록 경계로 정렬 (미검출 시 raw px)
-  const alignRect = (ax, ay, bx, by) => {
-    const lo = (edges, v) => { let r = edges[0]; for (const e of edges) { if (e <= v) r = e; else break; } return r; };
-    const hi = (edges, v) => { for (const e of edges) if (e > v) return e; return edges[edges.length - 1]; };
-    let x0 = Math.min(ax, bx), y0 = Math.min(ay, by), x1 = Math.max(ax, bx) + 1, y1 = Math.max(ay, by) + 1;
-    if (grid) {
-      x0 = lo(grid.xEdges, Math.max(x0, grid.xEdges[0]));
-      y0 = lo(grid.yEdges, Math.max(y0, grid.yEdges[0]));
-      x1 = hi(grid.xEdges, Math.min(x1 - 1, grid.xEdges[grid.xEdges.length - 1] - 1));
-      y1 = hi(grid.yEdges, Math.min(y1 - 1, grid.yEdges[grid.yEdges.length - 1] - 1));
-    }
-    return { x0: Math.max(0, x0), y0: Math.max(0, y0), x1: Math.min(W, x1), y1: Math.min(H, y1) };
-  };
-  const captureSel = (rect) => {
-    // 현재 보이는 픽셀(원본+편집) 중 크로마가 아닌 것만 — 이동 대상 = 실 내용
-    const comp = document.createElement("canvas");
-    comp.width = W; comp.height = H;
-    const cc = comp.getContext("2d");
-    cc.drawImage(img, 0, 0);
-    for (const [key, value] of Object.entries(ops)) {
-      const [x, y] = key.split(",").map(Number);
-      cc.fillStyle = value || chromaCss;
-      cc.fillRect(x, y, 1, 1);
-    }
-    const data = cc.getImageData(rect.x0, rect.y0, rect.x1 - rect.x0, rect.y1 - rect.y0).data;
-    const w = rect.x1 - rect.x0;
-    const pixels = [];
-    for (let i = 0; i < data.length; i += 4) {
-      const dist = Math.abs(data[i] - corner[0]) + Math.abs(data[i + 1] - corner[1]) + Math.abs(data[i + 2] - corner[2]);
-      if (dist <= 60) continue; // 크로마 배경은 옮길 내용이 아니다
-      pixels.push({
-        dx: (i / 4) % w,
-        dy: Math.floor((i / 4) / w),
-        hex: "#" + [data[i], data[i + 1], data[i + 2]].map((v) => v.toString(16).padStart(2, "0")).join(""),
-      });
-    }
-    return pixels;
-  };
-  const commitSelMove = (from, pixels, ddx, ddy, duplicate) => {
-    if (!pixels.length || (ddx === 0 && ddy === 0)) return;
-    stroke = [];
-    if (!duplicate) for (const p of pixels) stagePixel(from.x0 + p.dx, from.y0 + p.dy, null);
-    for (const p of pixels) {
-      const x = from.x0 + p.dx + ddx;
-      const y = from.y0 + p.dy + ddy;
-      if (x >= 0 && x < W && y >= 0 && y < H) stagePixel(x, y, p.hex);
-    }
-    if (stroke.length) { journal.push({ sets: stroke }); redoStack.length = 0; }
-    stroke = null;
-    redraw();
-  };
-
-  canvas.addEventListener("pointerdown", (ev) => {
-    canvas.setPointerCapture(ev.pointerId);
-    const [sx, sy] = pos(ev);
-    if (tool === "select") {
-      const inside = sel && sx >= sel.x0 && sx < sel.x1 && sy >= sel.y0 && sy < sel.y1;
-      if (inside) {
-        const from = { ...sel };
-        const grab = captureSel(from);
-        let delta = [0, 0];
-        const step = grid ? Math.max(1, Math.round((grid.pitch[0] + grid.pitch[1]) / 2)) : 1;
-        const onMove = (e2) => {
-          const [mx, my] = pos(e2);
-          delta = [Math.round((mx - sx) / step) * step, Math.round((my - sy) / step) * step];
-          sel = { x0: from.x0 + delta[0], y0: from.y0 + delta[1], x1: from.x1 + delta[0], y1: from.y1 + delta[1] };
-          syncSelBox();
-        };
-        const onUp = (e2) => {
-          canvas.removeEventListener("pointermove", onMove);
-          canvas.removeEventListener("pointerup", onUp);
-          commitSelMove(from, grab, delta[0], delta[1], e2.altKey);
-        };
-        canvas.addEventListener("pointermove", onMove);
-        canvas.addEventListener("pointerup", onUp);
-      } else {
-        sel = alignRect(sx, sy, sx, sy);
-        syncSelBox();
-        const onMove = (e2) => { const [mx, my] = pos(e2); sel = alignRect(sx, sy, mx, my); syncSelBox(); };
-        const onUp = () => {
-          canvas.removeEventListener("pointermove", onMove);
-          canvas.removeEventListener("pointerup", onUp);
-        };
-        canvas.addEventListener("pointermove", onMove);
-        canvas.addEventListener("pointerup", onUp);
-      }
-      return;
-    }
-    stroke = [];
-    paint(sx, sy);
-    const onMove = (e2) => paint(...pos(e2));
-    const onUp = () => {
-      canvas.removeEventListener("pointermove", onMove);
-      canvas.removeEventListener("pointerup", onUp);
-      if (stroke && stroke.length) { journal.push({ sets: stroke }); redoStack.length = 0; }
-      stroke = null;
-    };
-    canvas.addEventListener("pointermove", onMove);
-    canvas.addEventListener("pointerup", onUp);
-  });
-
-  const undo = () => {
-    const j = journal.pop();
-    if (!j) return;
-    for (let i = j.sets.length - 1; i >= 0; i--) {
-      const s = j.sets[i];
-      if (s.had) ops[s.key] = s.prev;
-      else delete ops[s.key];
-    }
-    redoStack.push(j);
-    redraw();
-  };
-  const redo = () => {
-    const j = redoStack.pop();
-    if (!j) return;
-    for (const s of j.sets) ops[s.key] = s.value;
-    journal.push(j);
-    redraw();
-  };
-  modal._undoRedo = { undo, redo }; // Cmd/Ctrl+Z 전역 라우팅용
-  modal.querySelector(".be-undo").addEventListener("click", undo);
-  modal.querySelector(".be-redo").addEventListener("click", redo);
-  const onBaseKey = (ev) => {
-    if (ev.key !== "Escape") return;
-    ev.stopImmediatePropagation();
-    if (sel) { sel = null; syncSelBox(); }
-    else closeModal();
-  };
-  const closeModal = () => {
-    document.removeEventListener("keydown", onBaseKey, true);
-    modal.remove();
-  };
-  document.addEventListener("keydown", onBaseKey, true);
-  modal.querySelector(".be-close").addEventListener("click", closeModal);
-  modal.querySelector(".be-save").addEventListener("click", async () => {
-    if (!Object.keys(ops).length) { closeModal(); return; }
-    try {
-      const res = await fetch("/api/base-edit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ops }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || res.status);
-      setStatus(STR[lang].baseEditSaved(data.applied), "ok");
-      closeModal();
-      // 베이스 참조 줄 이미지 갱신 (캐시 우회)
-      const baseImg = document.querySelector(".base-row .base-stage img");
-      if (baseImg) baseImg.src = run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "v=" + Date.now();
-    } catch (e) {
-      setStatus(t("baseEditFail") + e.message, "err");
-    }
-  });
+  if (!entries[BASE_STATE]) {
+    entries[BASE_STATE] = { pixels: {}, transforms: {}, order: [0], sel: new Set([0]),
+                            clones: {}, archived: [] };
+  }
+  openZoom(BASE_STATE, 0);
 }
 
 function renderCard(state, frame) {
@@ -2668,6 +2376,62 @@ function closeZoom() {
   document.removeEventListener("keydown", onZoomKey);
 }
 
+// ── 베이스 = 줌 모달과 같은 컴포넌트 (수홍 지시 2026-07-17 "같은 컴포넌트를 쓰라") ──
+// 가상 상태 "__base__" 로 줌 모달을 연다. 편집 공간 = 검출 격자의 논리 해상도
+// (예: 28×48) — 프레임과 동일한 조작감. 저장은 사이드카가 아니라 명시 버튼으로
+// /api/base-edit (space:"logical") 에 굽고, 서버가 논리→raw 블록 확장을 맡는다.
+const BASE_STATE = "__base__";
+let baseView = null; // {cols, rows, url} — 베이스 논리 격자 치수 + 표시 URL
+
+function cellDims(stateName) {
+  if (stateName === BASE_STATE && baseView) return [baseView.cols, baseView.rows];
+  return [run.cell.width, run.cell.height];
+}
+
+// ── 공용 툴 아이콘 (SVG 라인 아이콘 — 이모지 금지, 양 편집기 공용) ──
+const TOOL_ICONS = {
+  pen: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="m2 14 .8-3.2L11 2.6l2.4 2.4L5.2 13.2 2 14z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+  eraser: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M9.5 2.5 2.8 9.2a1 1 0 0 0 0 1.4l2.6 2.6h4.1l4-4a1 1 0 0 0 0-1.4L9.5 2.5zM5.5 13.2 9.9 8.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+  pick: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M10.6 2a1.9 1.9 0 0 1 2.7 2.7l-1 1 .5.5-1.1 1.1-.5-.5-4.3 4.3-2.4.6.6-2.4 4.3-4.3-.5-.5L10 6.4l-.5-.5 1.1-1.1.5.5 1-1z" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/></svg>',
+  select: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.4 1.7"/></svg>',
+};
+
+// ── 뷰 패닝 — Space+드래그 / 휠버튼(중클릭) 드래그로 화면을 끈다 (수홍 지시
+// 2026-07-17: 스프라이트 이동과 별개인 캔버스 시야 이동). 스크롤 컨테이너를
+// 당기는 방식이라 페인트/마키보다 먼저(capture) 가로챈다.
+let panSpaceHeld = false;
+document.addEventListener("keydown", (ev) => {
+  if (ev.code !== "Space") return;
+  if (!(document.getElementById("base-editor") || document.getElementById("zoom-modal"))) return;
+  if (ev.target && ev.target.closest && ev.target.closest("input, textarea, select, button")) return;
+  panSpaceHeld = true;
+  ev.preventDefault();
+});
+document.addEventListener("keyup", (ev) => { if (ev.code === "Space") panSpaceHeld = false; });
+
+function wirePan(surface, container) {
+  surface.addEventListener("pointerdown", (ev) => {
+    if (!(ev.button === 1 || (ev.button === 0 && panSpaceHeld))) return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    const sx = ev.clientX, sy = ev.clientY;
+    const sl = container.scrollLeft, st = container.scrollTop;
+    const prevCursor = surface.style.cursor;
+    surface.style.cursor = "grabbing";
+    const onMove = (e2) => {
+      container.scrollLeft = sl - (e2.clientX - sx);
+      container.scrollTop = st - (e2.clientY - sy);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      surface.style.cursor = prevCursor;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, true);
+}
+
 function clearMarquee() {
   if (pixelEdit) pixelEdit.sel = null;
   document.querySelectorAll(".marquee").forEach((m) => { m.hidden = true; });
@@ -2716,7 +2480,9 @@ function openZoom(stateName, idx, keepWidth) {
   closeZoom();
   const frame = frameOf(stateName, idx); // 복제 인스턴스 → 원본 이미지, 자기 변형
   if (!frame || !frame.present) return;
-  const aspect = run.cell.height / run.cell.width;
+  const isBase = stateName === BASE_STATE; // 베이스도 같은 컴포넌트로 연다 (수홍 지시 2026-07-17)
+  const [cellW, cellH] = cellDims(stateName);
+  const aspect = cellH / cellW;
   const width = keepWidth
     || Math.min(Math.floor(window.innerWidth * 0.8), Math.floor((window.innerHeight * 0.72) / aspect));
   zoomView = { stateName, idx, width };
@@ -2730,10 +2496,11 @@ function openZoom(stateName, idx, keepWidth) {
     `<div class="zoom-backdrop"></div>` +
     `<div class="card zoom-card" data-state="${escapeHtml(stateName)}" data-idx="${idx}">` +
     `<div class="zoom-head">` +
-    `<span class="zoom-title">${escapeHtml(stateName)} · ${label}</span>` +
+    `<span class="zoom-title">${escapeHtml(isBase ? "base" : stateName)}${isBase ? ` · ${cellW}×${cellH}` : ` · ${label}`}</span>` +
     `<span class="row-controls"></span>` +
-    `<button type="button" class="ghost zoom-prev" data-tip="${t("tZoomPrev")}">⏮</button>` +
-    `<button type="button" class="ghost zoom-next" data-tip="${t("tZoomNext")}">⏭</button>` +
+    (isBase ? "" :
+      `<button type="button" class="ghost zoom-prev" data-tip="${t("tZoomPrev")}">⏮</button>` +
+      `<button type="button" class="ghost zoom-next" data-tip="${t("tZoomNext")}">⏭</button>`) +
     `<button type="button" class="ghost zoom-close">${t("zoomClose")}</button>` +
     `</div>` +
     `<div class="stage" data-tip="${t("tZoomStage")}">` +
@@ -2741,59 +2508,88 @@ function openZoom(stateName, idx, keepWidth) {
     `<canvas class="ingrid"></canvas>` +
     `<img src="${escapeHtml(frameUrl(stateName, frame))}" alt="frame ${idx}" draggable="false" class="px-upscale" />` +
     `<canvas class="snap-canvas"></canvas>` +
-    `<div class="rotate-handle" data-tip="${t("tRotate")}"></div>` +
-    `<div class="shear-handle" data-tip="${t("tShear")}"></div>` +
+    (isBase ? "" :
+      `<div class="rotate-handle" data-tip="${t("tRotate")}"></div>` +
+      `<div class="shear-handle" data-tip="${t("tShear")}"></div>`) +
     `</div>` +
     `<div class="card-controls">` +
     `<span class="psize" data-tip="${t("tContentPx")}">${frame.contentSize ? `${frame.contentSize[0]}x${frame.contentSize[1]}px` : ""}</span>` +
     `<span class="tvals"></span>` +
-    `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
-    `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}">↺</button>` +
+    (isBase ? "" :
+      `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
+      `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}">↺</button>`) +
     `</div>` +
     `</div>`;
   document.body.appendChild(modal);
 
   const card = modal.querySelector(".zoom-card");
-  card.style.setProperty("--cell-aspect", run.cell.width / run.cell.height);
+  card.style.setProperty("--cell-aspect", cellW / cellH);
   const stage = card.querySelector(".stage");
   stage.style.width = `${width}px`;
 
   // 컨트롤: 줄별 토글과 같은 클래스 → sync*Controls 가 카드/모달을 함께 갱신
   const controls = card.querySelector(".row-controls");
-  if (gridCapableStates.has(stateName)) controls.appendChild(makeGridToggle(stateName));
-  if (ppTwinStates.has(stateName)) controls.appendChild(makePpToggle(stateName));
-  controls.appendChild(makeGifButton(stateName));
-  // 보간 버튼은 줄 헤더 전용 — 확대뷰에선 카드 픽이 불가능해 쓸 수 없다 (수홍 2026-07-17).
-  card.querySelector(".zoom-prev").addEventListener("click", () => stepZoomFrame(-1));
-  card.querySelector(".zoom-next").addEventListener("click", () => stepZoomFrame(1));
+  if (!isBase) {
+    if (gridCapableStates.has(stateName)) controls.appendChild(makeGridToggle(stateName));
+    if (ppTwinStates.has(stateName)) controls.appendChild(makePpToggle(stateName));
+    controls.appendChild(makeGifButton(stateName));
+    // 보간 버튼은 줄 헤더 전용 — 확대뷰에선 카드 픽이 불가능해 쓸 수 없다 (수홍 2026-07-17).
+    card.querySelector(".zoom-prev").addEventListener("click", () => stepZoomFrame(-1));
+    card.querySelector(".zoom-next").addEventListener("click", () => stepZoomFrame(1));
+    card.querySelector(".reset-btn").addEventListener("click", () => resetTransform(stateName, idx));
+    card.querySelector(".flip-btn").addEventListener("click", () => toggleFlipX(stateName, idx));
+    stage.appendChild(makeScaleScrub(stateName, idx));
+  }
   card.querySelector(".zoom-close").addEventListener("click", closeZoom);
   modal.querySelector(".zoom-backdrop").addEventListener("click", closeZoom);
-  card.querySelector(".reset-btn").addEventListener("click", () => resetTransform(stateName, idx));
-  card.querySelector(".flip-btn").addEventListener("click", () => toggleFlipX(stateName, idx));
-  stage.appendChild(makeScaleScrub(stateName, idx));
+  wirePan(stage, card); // Space+드래그/휠버튼 드래그 = 뷰 패닝 (프레임·베이스 공통)
 
   // ── 픽셀 편집 툴바: 연필/지우개 + 프레임 팔레트 + 컬러피커 + 되돌리기/비우기 ──
   const toolbar = document.createElement("div");
   toolbar.className = "edit-toolbar";
   toolbar.innerHTML =
-    `<button type="button" class="ghost et-pen">` +
-    '<svg viewBox="0 0 16 16" width="11" height="11"><path d="m2 14 .8-3.2L11 2.6l2.4 2.4L5.2 13.2 2 14z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
-    `<span>${t("penTool")}</span></button>` +
-    `<button type="button" class="ghost et-eraser">` +
-    '<svg viewBox="0 0 16 16" width="11" height="11"><path d="M9.5 2.5 2.8 9.2a1 1 0 0 0 0 1.4l2.6 2.6h4.1l4-4a1 1 0 0 0 0-1.4L9.5 2.5zM5.5 13.2 9.9 8.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
-    `<span>${t("eraserTool")}</span></button>` +
-    `<button type="button" class="ghost et-pick" data-tip="${t("tPick")}">` +
-    '<svg viewBox="0 0 16 16" width="11" height="11"><path d="M10.6 2a1.9 1.9 0 0 1 2.7 2.7l-1 1 .5.5-1.1 1.1-.5-.5-4.3 4.3-2.4.6.6-2.4 4.3-4.3-.5-.5L10 6.4l-.5-.5 1.1-1.1.5.5 1-1z" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/></svg>' +
-    `<span>${t("pickTool")}</span></button>` +
-    `<button type="button" class="ghost et-select" data-tip="${t("tSelectTool")}">` +
-    '<svg viewBox="0 0 16 16" width="11" height="11"><rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.4 1.7"/></svg>' +
-    `<span>${t("selectTool")}</span></button>` +
+    `<button type="button" class="ghost et-pen" data-tip="${t("penTool")}">` +
+    `${TOOL_ICONS.pen}</button>` +
+    `<button type="button" class="ghost et-eraser" data-tip="${t("eraserTool")}">${TOOL_ICONS.eraser}</button>` +
+    `<button type="button" class="ghost et-pick" data-tip="${t("tPick")}">${TOOL_ICONS.pick}</button>` +
+    `<button type="button" class="ghost et-select" data-tip="${t("tSelectTool")}">${TOOL_ICONS.select}</button>` +
     `<span class="et-swatches"></span>` +
     `<input type="color" class="et-color" value="#1f2430" title="color" />` +
     `<button type="button" class="ghost et-undo" data-tip="${t("tUndoKeys")}">${t("undoEdit")}</button>` +
     `<button type="button" class="ghost et-redo" data-tip="${t("tRedoKeys")}">${t("redoEdit")}</button>` +
     `<button type="button" class="ghost et-clear">${t("clearEdits")}</button>`;
   card.insertBefore(toolbar, stage);
+  if (isBase) {
+    // 베이스는 사이드카가 아니라 파일에 굽는다 — 명시 저장 (원본 .orig 1회 백업)
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "et-basesave";
+    saveBtn.setAttribute("data-tip", t("tBaseEdit"));
+    saveBtn.textContent = t("baseEditSave");
+    saveBtn.addEventListener("click", async () => {
+      const ops = (entries[BASE_STATE].pixels && entries[BASE_STATE].pixels[0]) || {};
+      if (!Object.keys(ops).length) { closeZoom(); return; }
+      saveBtn.disabled = true;
+      try {
+        const res = await fetch("/api/base-edit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ops, space: "logical" }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+        entries[BASE_STATE].pixels = {};
+        pixelEdit = null;
+        setStatus(STR[lang].baseEditSaved(data.applied), "ok");
+        closeZoom();
+        const baseImg = document.querySelector(".base-row .base-stage img");
+        if (baseImg) baseImg.src = run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "v=" + Date.now();
+      } catch (e) {
+        setStatus(t("baseEditFail") + e.message, "err");
+        saveBtn.disabled = false;
+      }
+    });
+    toolbar.appendChild(saveBtn);
+  }
   const penBtn = toolbar.querySelector(".et-pen");
   const eraserBtn = toolbar.querySelector(".et-eraser");
   const pickBtn = toolbar.querySelector(".et-pick");
@@ -2808,10 +2604,10 @@ function openZoom(stateName, idx, keepWidth) {
     const sel = pixelEdit && pixelEdit.sel;
     selBox.hidden = !sel;
     if (!sel) return;
-    selBox.style.left = `${(sel.x0 / run.cell.width) * 100}%`;
-    selBox.style.top = `${(sel.y0 / run.cell.height) * 100}%`;
-    selBox.style.width = `${((sel.x1 - sel.x0) / run.cell.width) * 100}%`;
-    selBox.style.height = `${((sel.y1 - sel.y0) / run.cell.height) * 100}%`;
+    selBox.style.left = `${(sel.x0 / cellW) * 100}%`;
+    selBox.style.top = `${(sel.y0 / cellH) * 100}%`;
+    selBox.style.width = `${((sel.x1 - sel.x0) / cellW) * 100}%`;
+    selBox.style.height = `${((sel.y1 - sel.y0) / cellH) * 100}%`;
   };
   const syncToolbar = () => {
     penBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "pen");
@@ -2851,7 +2647,7 @@ function openZoom(stateName, idx, keepWidth) {
     const imgEl = stage.querySelector("img");
     if (!(imgEl && imgEl.complete && imgEl.naturalWidth)) return null;
     const tmp = sampleColor._c || (sampleColor._c = document.createElement("canvas"));
-    tmp.width = run.cell.width; tmp.height = run.cell.height;
+    tmp.width = cellW; tmp.height = cellH;
     const c2 = tmp.getContext("2d");
     c2.imageSmoothingEnabled = false;
     c2.clearRect(0, 0, tmp.width, tmp.height);
@@ -2911,8 +2707,8 @@ function openZoom(stateName, idx, keepWidth) {
       return;
     }
     const tmp = document.createElement("canvas");
-    tmp.width = run.cell.width;
-    tmp.height = run.cell.height;
+    tmp.width = cellW;
+    tmp.height = cellH;
     const c2 = tmp.getContext("2d");
     c2.imageSmoothingEnabled = false;
     c2.drawImage(imgEl, 0, 0, tmp.width, tmp.height);
@@ -2943,8 +2739,8 @@ function openZoom(stateName, idx, keepWidth) {
   // 마키(영역 선택) 헬퍼 — 캡처는 "현재 보이는 픽셀"(원본 + 편집 합성) 기준
   const compositeCell = () => {
     const c = document.createElement("canvas");
-    c.width = run.cell.width;
-    c.height = run.cell.height;
+    c.width = cellW;
+    c.height = cellH;
     const cx = c.getContext("2d");
     cx.imageSmoothingEnabled = false;
     const imgEl = stage.querySelector("img");
@@ -2981,7 +2777,7 @@ function openZoom(stateName, idx, keepWidth) {
     for (const p of pixels) {
       const x = fromSel.x0 + p.dx + ddx;
       const y = fromSel.y0 + p.dy + ddy;
-      if (x >= 0 && x < run.cell.width && y >= 0 && y < run.cell.height) staged.set(`${x},${y}`, p.hex);
+      if (x >= 0 && x < cellW && y >= 0 && y < cellH) staged.set(`${x},${y}`, p.hex);
     }
     const e = entries[stateName];
     const ops = e.pixels[idx] || (e.pixels[idx] = {});
@@ -3004,12 +2800,12 @@ function openZoom(stateName, idx, keepWidth) {
     if (ev.button || !ev.isPrimary) return;
     ev.preventDefault();
     ev.stopImmediatePropagation();
-    const cellX = (e2) => Math.floor(((e2.clientX - stage.getBoundingClientRect().left) / stage.getBoundingClientRect().width) * run.cell.width);
-    const cellY = (e2) => Math.floor(((e2.clientY - stage.getBoundingClientRect().top) / stage.getBoundingClientRect().height) * run.cell.height);
+    const cellX = (e2) => Math.floor(((e2.clientX - stage.getBoundingClientRect().left) / stage.getBoundingClientRect().width) * cellW);
+    const cellY = (e2) => Math.floor(((e2.clientY - stage.getBoundingClientRect().top) / stage.getBoundingClientRect().height) * cellH);
     // 스포이드: 색만 집고 바로 연필로 전환 (드래그 페인트 아님). 투명 픽셀은 무시.
     if (pixelEdit.tool === "pick") {
       const x = cellX(ev), y = cellY(ev);
-      if (x >= 0 && x < run.cell.width && y >= 0 && y < run.cell.height) {
+      if (x >= 0 && x < cellW && y >= 0 && y < cellH) {
         const hex = sampleColor(x, y);
         if (hex) {
           colorInput.value = hex;
@@ -3057,8 +2853,8 @@ function openZoom(stateName, idx, keepWidth) {
         stage.addEventListener("pointerup", onUp);
       } else {
         const norm = (ax, ay, bx, by) => {
-          const clampX = (v) => Math.max(0, Math.min(run.cell.width, v));
-          const clampY = (v) => Math.max(0, Math.min(run.cell.height, v));
+          const clampX = (v) => Math.max(0, Math.min(cellW, v));
+          const clampY = (v) => Math.max(0, Math.min(cellH, v));
           const x0 = Math.floor(Math.min(ax, bx) / s) * s;
           const y0 = Math.floor(Math.min(ay, by) / s) * s;
           const x1 = Math.ceil((Math.max(ax, bx) + 1) / s) * s;
@@ -3081,9 +2877,9 @@ function openZoom(stateName, idx, keepWidth) {
     const stroke = []; // 스트로크(드래그 1회) 단위 액션 — undo/redo 가 통째로 다룬다
     const paint = (e2) => {
       const r = stage.getBoundingClientRect();
-      const x = Math.floor(((e2.clientX - r.left) / r.width) * run.cell.width);
-      const y = Math.floor(((e2.clientY - r.top) / r.height) * run.cell.height);
-      if (!(x >= 0 && x < run.cell.width && y >= 0 && y < run.cell.height)) return;
+      const x = Math.floor(((e2.clientX - r.left) / r.width) * cellW);
+      const y = Math.floor(((e2.clientY - r.top) / r.height) * cellH);
+      if (!(x >= 0 && x < cellW && y >= 0 && y < cellH)) return;
       const bx = Math.floor(x / s) * s;
       const by = Math.floor(y / s) * s;
       const value = pixelEdit.tool === "eraser" ? null : pixelEdit.color;
@@ -3126,7 +2922,7 @@ function openZoom(stateName, idx, keepWidth) {
     sizePxGrids();
   }, { passive: false });
 
-  wireStage(stage, stateName, idx);
+  if (!isBase) wireStage(stage, stateName, idx); // 베이스: 변형(이동/회전) 개념 없음 — 파일 편집만
   applyCardTransform(stage, stateName, idx);
   syncPpControls();
   syncGridControls();
