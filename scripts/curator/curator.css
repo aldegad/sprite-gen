@@ -437,7 +437,7 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 .card.dragging .card-top { cursor: grabbing; }
 .card-top .ct-left {
   display: flex;
-  align-items: baseline;
+  align-items: center; /* 좌측 복제 버튼(svg)과 타이틀 수직 정렬 */
   gap: 6px;
   min-width: 0;
   flex: 1;
