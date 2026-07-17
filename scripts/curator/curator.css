@@ -1107,3 +1107,17 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 #base-editor .be-color { width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: transparent; }
 #base-editor .be-stage { overflow: auto; padding: 14px; background: repeating-conic-gradient(var(--checker-a, #e9ebef) 0% 25%, var(--checker-b, #f4f5f7) 0% 50%) 0 0 / 16px 16px; }
 #base-editor .be-canvas { display: block; image-rendering: pixelated; }
+
+/* 마키(영역 선택) — 점선 박스, 개미행렬 애니메이션 */
+.marquee {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  border: 1px dashed var(--accent, #2563eb);
+  background: rgba(37, 99, 235, 0.07);
+  animation: sg-ants 0.6s linear infinite;
+}
+@keyframes sg-ants { to { border-color: rgba(37, 99, 235, 0.35); } }
+.stage.selecting { cursor: crosshair; }
+
+#base-editor .be-wrap { position: relative; display: inline-block; }
