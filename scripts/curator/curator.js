@@ -2449,7 +2449,7 @@ const TOOL_ICONS = {
 let panSpaceHeld = false;
 document.addEventListener("keydown", (ev) => {
   if (ev.code !== "Space") return;
-  if (!(document.getElementById("base-editor") || document.getElementById("zoom-modal"))) return;
+  if (!document.getElementById("zoom-modal")) return;
   if (ev.target && ev.target.closest && ev.target.closest("input, textarea, select, button")) return;
   panSpaceHeld = true;
   ev.preventDefault();
@@ -2499,10 +2499,9 @@ function onZoomKey(ev) {
 document.addEventListener("keydown", (ev) => {
   if (ev.key.toLowerCase() !== "z" || !(ev.metaKey || ev.ctrlKey)) return;
   if (ev.target && ev.target.closest && ev.target.closest("input, textarea, select")) return;
-  const baseEditor = document.getElementById("base-editor");
-  const target = baseEditor
-    ? baseEditor._undoRedo
-    : (pixelEdit && pixelEdit.undoFn ? { undo: pixelEdit.undoFn, redo: pixelEdit.redoFn } : null);
+  // 베이스도 줌 모달(pixelEdit)로 통일 — 별도 에디터 분기는 폐기됨 (v1.56.24)
+  const target = pixelEdit && pixelEdit.undoFn
+    ? { undo: pixelEdit.undoFn, redo: pixelEdit.redoFn } : null;
   if (!target) return;
   ev.preventDefault();
   ev.stopImmediatePropagation();
@@ -2511,7 +2510,7 @@ document.addEventListener("keydown", (ev) => {
 }, true);
 
 function stepZoomFrame(delta) {
-  if (!zoomView) return;
+  if (!zoomView || zoomView.stateName === BASE_STATE) return; // 베이스 = 단일 뷰
   // 표시 순서(order)를 따라 넘긴다 — 복제 인스턴스 카드도 순회에 포함
   const e = entries[zoomView.stateName];
   const present = e.order.filter((i) => {
