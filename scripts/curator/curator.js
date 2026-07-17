@@ -1584,6 +1584,31 @@ async function renderFinalAtlas(info) {
       ? `<div class="atlas-doc"><div class="atlas-doc-head">${t("atlasDoc")}</div>${docHtml}</div>`
       : "") +
     `</div>`;
+  syncAtlasDocHeight();
+}
+
+// JSON 패널 높이 = 아틀라스 시트 높이 (수홍 지시 2026-07-17: 기준은 아틀라스 —
+// stretch 는 JSON 이 길면 반대로 JSON 이 기준이 돼 버린다). 이미지 로드 후 실측으로
+// 고정하고, 창 리사이즈 때 다시 잰다. JSON 이 더 길면 패널 안에서 스크롤.
+function syncAtlasDocHeight() {
+  const section = document.getElementById("final-atlas");
+  if (!section) return;
+  const sheetImg = section.querySelector(".atlas-sheet img");
+  const doc = section.querySelector(".atlas-doc");
+  if (!sheetImg || !doc) return;
+  const apply = () => {
+    const h = section.querySelector(".atlas-sheet").offsetHeight;
+    if (h > 0) doc.style.height = h + "px";
+  };
+  if (sheetImg.complete && sheetImg.naturalWidth) apply();
+  else sheetImg.addEventListener("load", apply, { once: true });
+  if (!syncAtlasDocHeight._wired) {
+    syncAtlasDocHeight._wired = true;
+    window.addEventListener("resize", () => {
+      clearTimeout(syncAtlasDocHeight._t);
+      syncAtlasDocHeight._t = setTimeout(syncAtlasDocHeight, 120);
+    });
+  }
 }
 
 // 다운로드가 아틀라스/manifest 를 다시 계산했을 수 있으니 섹션을 최신 파일로 갱신
