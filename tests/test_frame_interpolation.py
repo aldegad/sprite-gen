@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """AI 프레임 보간(sprite_gen.interpolate) 배관 회귀.
 
-실 RIFE 추론은 CI 에서 돌리지 않는다 — interpolator 주입 시그니처로 배관만 검증:
-정합 캔버스 계약(/32 패딩·동일 크기·크로마 배경), 테이크 raw 기록, request 갱신
-멱등성, 인덱스/라벨 검증의 요란한 실패.
+실 생성(provider CLI)은 CI 에서 돌리지 않는다 — interpolator 주입 시그니처로
+배관만 검증: 정합 캔버스 계약(/32 패딩·동일 크기·크로마 배경), 테이크 raw 기록,
+request 갱신 멱등성, 프롬프트 조립, 인덱스/라벨/프로바이더 검증의 요란한 실패.
 """
 
 import json
@@ -45,8 +45,9 @@ def _build_run(tmp_path: Path) -> Path:
     return run
 
 
-def _blend_stub(img0: Image.Image, img1: Image.Image, t: float) -> Image.Image:
+def _blend_stub(img0: Image.Image, img1: Image.Image, t: float, prompt: str) -> Image.Image:
     assert img0.size == img1.size
+    assert "IN-BETWEEN" in prompt and "#FF00FF" in prompt  # 프롬프트 조립 검증
     return Image.blend(img0.convert("RGB"), img1.convert("RGB"), t)
 
 
@@ -84,3 +85,9 @@ def test_interpolate_rejects_bad_inputs(tmp_path: Path) -> None:
         interpolate_between(run, "wave", 0, 1, t=1.5, interpolator=_blend_stub)
     with pytest.raises(SystemExit, match="filesystem-safe"):
         interpolate_between(run, "wave", 0, 1, label="a/b", interpolator=_blend_stub)
+
+
+def test_unknown_provider_rejected(tmp_path: Path) -> None:
+    from sprite_gen.interpolate import gen_interpolator
+    with pytest.raises(SystemExit, match="unknown interpolation provider"):
+        gen_interpolator("rife")

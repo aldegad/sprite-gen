@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.56.20
+version: 1.56.21
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick."
 license: Apache-2.0
 depends_on:
@@ -85,7 +85,7 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 
 - `prepare_sprite_run.py` — write `sprite-request.json`, per-state layout guides, prompts, and empty `raw/` + `frames/` from request truth.
 - `extract_sprite_row_frames.py` — read `raw/<state>.png` strips: chroma removal → connected components → transparent frame cells + `frames/frames-manifest.json`.
-- `interpolate_frames.py` — AI in-between: RIFE 4.9 로 한 상태의 두 프레임 사이 중간 프레임을 만들어 **테이크**로 기록 (raw 단계 AI — 최종 프레임은 여전히 결정론 추출이 굽는다). 눈깜빡임 반감은 프레임 등. 상세: [`docs/frame-interpolation.md`](docs/frame-interpolation.md).
+- `interpolate_frames.py` — AI in-between: 두 프레임을 ref 로 물려 **생성형**(codex 기본/grok)으로 중간 프레임을 그려 **테이크**로 기록 (raw 단계 AI — 최종 프레임은 여전히 결정론 추출이 굽는다). 서버 머신의 provider CLI OAuth 를 쓰므로 GUI 버튼도 동작 — 인증 전제와 실측 근거(RIFE 파기): [`docs/frame-interpolation.md`](docs/frame-interpolation.md).
 - `compose_sprite_atlas.py` — compose `sprite-sheet-alpha.png` + runtime `manifest.json.frame_layout`.
 - `preview_animation.py` — QA previews from extracted frames: contact sheets + state GIFs under `qa/`.
 - `compose_selected_cycle.py` — record a human-selected frame subset as a selected-cycle manifest + QA GIF/contact sheet (reads `curation.json` by default; `--frames` overrides).
@@ -361,7 +361,7 @@ sprite-gen (this SKILL.md = behavior contract + hub)
 │
 ├─ GENERATION ── "raw/<state>.png from prompts (the one AI step)"
 │   ├─ docs/gen.md               # sprite-gen gen provider CLI · verified PNG/report · image-gen shuttle
-│   └─ docs/frame-interpolation.md  # RIFE in-between → take raw (raw-stage AI, deterministic bake)
+│   └─ docs/frame-interpolation.md  # generative in-between (codex/grok) → take raw · auth prereqs · RIFE retire rationale
 │
 ├─ CURATION ── "human/agent picks, edits, and downloads via the webview"
 │   └─ docs/curation.md          # webview · curation.json schema (selected/order/transforms/

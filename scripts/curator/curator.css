@@ -1028,3 +1028,12 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   font-size: 12.5px;
 }
 .tree-node.atlas-node img { image-rendering: pixelated; }
+
+.tween-pop select {
+  padding: 2px 4px;
+  font-size: 11px;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
