@@ -30,6 +30,7 @@ import argparse
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -852,15 +853,48 @@ class CurationHandler(BaseHTTPRequestHandler):
                 except (ValueError, OSError) as exc:
                     self._send_json({"error": f"bad frame data: {exc}"}, 400)
                     return
-                import tempfile
+                # 포맷 선택 (수홍 2026-07-19 "webm/mp4 로도"): gif=save_clean_gif,
+                # webm=VP9 알파 보존, mp4=x264 (알파 불가 — 화이트 배경 합성).
+                fmt = str(payload.get("format", "gif")).lower()
+                if fmt not in ("gif", "webm", "mp4"):
+                    self._send_json({"error": "format: gif|webm|mp4"}, 400)
+                    return
+                if fmt != "gif" and shutil.which("ffmpeg") is None:
+                    self._send_json({"error": "ffmpeg not found on server machine (webm/mp4 assembly requires it)"}, 500)
+                    return
                 with tempfile.TemporaryDirectory() as td:
-                    out = Path(td) / "compare.gif"
-                    save_clean_gif(images, out, duration_ms=duration_ms)
+                    out = Path(td) / f"compare.{fmt}"
+                    if fmt == "gif":
+                        save_clean_gif(images, out, duration_ms=duration_ms)
+                    else:
+                        even = lambda v: (v + 1) // 2 * 2  # noqa: E731 — 코덱 짝수 치수 요구
+                        for index, im in enumerate(images):
+                            if fmt == "mp4":
+                                frame = Image.new("RGB", (even(im.width), even(im.height)), (255, 255, 255))
+                                frame.paste(im, (0, 0), im)
+                            elif im.width % 2 or im.height % 2:
+                                frame = Image.new("RGBA", (even(im.width), even(im.height)), (0, 0, 0, 0))
+                                frame.paste(im, (0, 0))
+                            else:
+                                frame = im
+                            frame.save(Path(td) / f"f{index:04d}.png")
+                        fps = max(1, round(1000 / duration_ms))
+                        args = ["ffmpeg", "-y", "-framerate", str(fps), "-i", str(Path(td) / "f%04d.png")]
+                        if fmt == "webm":
+                            args += ["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0", "-crf", "28", "-auto-alt-ref", "0"]
+                        else:
+                            args += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18"]
+                        args.append(str(out))
+                        proc = subprocess.run(args, capture_output=True, text=True)
+                        if proc.returncode != 0 or not out.exists():
+                            self._send_json({"error": f"ffmpeg failed: {proc.stderr[-300:]}"}, 500)
+                            return
                     data = out.read_bytes()
+                content_type = {"gif": "image/gif", "webm": "video/webm", "mp4": "video/mp4"}[fmt]
                 self.send_response(200)
-                self.send_header("Content-Type", "image/gif")
-                self.send_header("X-Filename", "compare.gif")
-                self.send_header("Content-Disposition", 'attachment; filename="compare.gif"')
+                self.send_header("Content-Type", content_type)
+                self.send_header("X-Filename", f"compare.{fmt}")
+                self.send_header("Content-Disposition", f'attachment; filename="compare.{fmt}"')
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
