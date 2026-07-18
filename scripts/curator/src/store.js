@@ -30,10 +30,25 @@ let anchorStates = new Set();      // direction-anchor states (directionGroups r
 
 let pixelEdit = null; // 모달 편집 세션: {state, idx, tool: 'pen'|'eraser', color, journal: []}
 
+// 편집 truth 인덱스 (수홍 확정 2026-07-18): 링크된 복제의 편집 SSoT 는 원본
+// 프레임 하나다 — 복제는 재생 슬롯일 뿐. '링크 끊기' 한 복제(unlinked)만 자기
+// 편집을 소유한다. 모든 편집 읽기/쓰기는 이 리졸버를 거친다.
+function editIndex(stateName, idx) {
+  const e = entries[stateName];
+  const src = e && e.clones ? e.clones[idx] : undefined;
+  if (src === undefined) return idx;
+  return e.unlinked && e.unlinked.has(idx) ? idx : src;
+}
+
+function isLinkedClone(stateName, idx) {
+  const e = entries[stateName];
+  return !!(e && e.clones && e.clones[idx] !== undefined && !(e.unlinked && e.unlinked.has(idx)));
+}
+
 function getPixelOps(stateName, idx) {
   const e = entries[stateName];
   if (!e || !e.pixels) return null;
-  const ops = e.pixels[idx];
+  const ops = e.pixels[editIndex(stateName, idx)];
   return ops && Object.keys(ops).length ? ops : null;
 }
 
@@ -102,8 +117,9 @@ function img(url) {
 
 function getTransform(stateName, idx) {
   const t = entries[stateName].transforms;
-  if (!t[idx]) t[idx] = IDENTITY();
-  return t[idx];
+  const key = editIndex(stateName, idx); // 링크 복제 = 원본 truth 공유 (쓰기도 이 객체로)
+  if (!t[key]) t[key] = IDENTITY();
+  return t[key];
 }
 
 // selected := the frame is in the sequence row (top). Moving a card between the
@@ -209,7 +225,21 @@ function seedEntries() {
         if (Number.isInteger(i) && v && typeof v === "object" && Object.keys(v).length) pixels[i] = { ...v };
       }
     }
-    entries[state.name] = { order, sel, transforms, archived, pixels, clones,
+    const unlinked = new Set();
+    if (c && Array.isArray(c.unlinked)) {
+      for (const raw of c.unlinked) {
+        const ci = Number(raw);
+        if (clones[ci] !== undefined) unlinked.add(ci);
+      }
+    }
+    // 레거시 자가판정: 링크 개념 도입(2026-07-18) 이전에 복제에 직접 넣은 변형/픽셀
+    // 편집은 독립 의도였다 — 자동 unlinked 로 보존 (조용한 편집 소실 금지)
+    for (const ci of Object.keys(clones).map(Number)) {
+      if (unlinked.has(ci)) continue;
+      const hasOwn = (c && c.transforms && c.transforms[ci]) || (c && c.pixels && c.pixels[ci] && Object.keys(c.pixels[ci]).length);
+      if (hasOwn) unlinked.add(ci);
+    }
+    entries[state.name] = { order, sel, transforms, archived, pixels, clones, unlinked,
       // 호흡 후처리 레이어 (사이드카 breathe — curation.state_breathe 와 같은 형태)
       breathe: c && c.breathe && Array.isArray(c.breathe.splits) && c.breathe.splits.length
         ? { splits: c.breathe.splits.map(Number).sort((a, b) => a - b).slice(0, 3),

@@ -225,6 +225,7 @@ function archiveFrame(stateName, idx) {
     delete e.clones[idx];
     delete e.transforms[idx];
     delete e.pixels[idx];
+    if (e.unlinked) e.unlinked.delete(idx);
   } else if (!e.archived.includes(idx)) {
     e.archived.push(idx);
   }
@@ -248,8 +249,8 @@ function duplicateFrame(stateName, idx) {
   const newIdx = Math.max(-1, ...used) + 1;
   const src = cloneSrc(stateName, idx) ?? idx;
   e.clones[newIdx] = src;
-  if (e.transforms[idx]) e.transforms[newIdx] = { ...e.transforms[idx] };
-  if (e.pixels[idx]) e.pixels[newIdx] = JSON.parse(JSON.stringify(e.pixels[idx]));
+  // 링크 기본 (수홍 확정 2026-07-18): 복제는 원본 편집 truth 를 공유한다 —
+  // 변형/픽셀을 복사하지 않는다. 독립은 '링크 끊기' 로만.
   const pos = e.order.indexOf(idx);
   e.order.splice(pos < 0 ? e.order.length : pos + 1, 0, newIdx);
   if (e.sel.has(idx)) e.sel.add(newIdx);

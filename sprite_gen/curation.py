@@ -44,10 +44,17 @@ Schema (`curation.json`):
           "deleted": [4],                    # optional 0-based frame indices
                                                #   excluded from UI rows and bake.
           "clones": {"12": 5},               # optional duplicate instances: new index ->
-                                               #   source frame index. A clone is a full
-                                               #   instance (own transform/pixels/order slot)
-                                               #   that bakes the SOURCE frame's file. Clone
+                                               #   source frame index. LINKED by default
+                                               #   (Soohong 2026-07-18): a linked clone
+                                               #   shares the SOURCE frame's transform and
+                                               #   pixel edits (one edit truth — clones are
+                                               #   play slots of the same frame). Clone
                                                #   indices live outside 0..frame_count-1.
+          "unlinked": [12],                    # optional clone indices explicitly detached
+                                               #   ("링크 끊기"): they own their transforms/
+                                               #   pixels independently (pre-2026-07-18
+                                               #   clones with own edits are treated as
+                                               #   unlinked by the webview on load).
           "order": [0, 1, 2, 3, 4, 5],        # optional, webview-owned; full display
                                                #   order (sequence then candidate pool).
                                                #   Restores the row arrangement on reload.
@@ -158,6 +165,32 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
         return None
     return {"splits": splits, "amplitude": amplitude, "breaths": breaths,
             "subpixel": bool(raw.get("subpixel"))}
+
+
+def edit_index(curation: dict[str, Any] | None, state: str, index: int) -> int:
+    """인스턴스의 편집(변형/픽셀) truth 인덱스 — 링크된 복제는 원본을 가리킨다.
+
+    복제는 기본 링크 (수홍 확정 2026-07-18): 같은 프레임의 재생 슬롯이므로 편집
+    SSoT 는 원본 하나다. `unlinked` 에 명시된 복제만 자기 편집을 소유한다.
+    베이크(compose/GIF/export)와 웹뷰가 같은 규칙을 쓴다 (드리프트 금지)."""
+    if not curation:
+        return index
+    entry = curation.get("states", {}).get(state)
+    if not isinstance(entry, dict):
+        return index
+    clones = entry.get("clones")
+    if not isinstance(clones, dict):
+        return index
+    src = clones.get(str(index), clones.get(index))
+    if src is None:
+        return index
+    unlinked = entry.get("unlinked")
+    if isinstance(unlinked, list) and index in {int(u) for u in unlinked if str(u).lstrip("-").isdigit()}:
+        return index
+    try:
+        return int(src)
+    except (TypeError, ValueError):
+        return index
 
 
 def frame_variant(curation: dict[str, Any] | None, state: str | None = None) -> str:

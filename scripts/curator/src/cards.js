@@ -186,6 +186,11 @@ function renderCard(state, frame) {
     (frame.present
       ? `<div class="card-info">${psize}<span class="tvals"></span></div>` +
         `<div class="card-controls">` +
+        (isClone && isLinkedClone(state.name, frame.index)
+          ? `<button type="button" class="ghost unlink-btn" data-tip="${t("tUnlink")}" aria-label="unlink">` +
+            '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+            '<path d="M6.5 9.5 3.8 12.2a2.2 2.2 0 0 0 3.1 3.1l2.7-2.7M9.5 6.5l2.7-2.7a2.2 2.2 0 0 0-3.1-3.1L6.4 3.4M2.5 2.5l2 2M13.5 13.5l-2-2" transform="translate(0,-1)" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>'
+          : "") +
         `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
         `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}" aria-label="reset">↺</button>` +
         `<span class="ctrl-group">` +
@@ -207,6 +212,19 @@ function renderCard(state, frame) {
       if (imgEl.complete) markPx();
       else imgEl.addEventListener("load", markPx, { once: true });
     }
+    const unlinkBtn = card.querySelector(".unlink-btn");
+    if (unlinkBtn) unlinkBtn.addEventListener("click", () => {
+      // 링크 끊기: 현재 원본 편집을 복사해 독립 프레임으로 (이후 편집은 각자)
+      const e2 = entries[state.name];
+      const srcIdx = e2.clones[frame.index];
+      if (e2.transforms[srcIdx]) e2.transforms[frame.index] = { ...e2.transforms[srcIdx] };
+      if (e2.pixels[srcIdx]) e2.pixels[frame.index] = JSON.parse(JSON.stringify(e2.pixels[srcIdx]));
+      e2.unlinked = e2.unlinked || new Set();
+      e2.unlinked.add(frame.index);
+      scheduleSave();
+      rebuildState(state.name);
+      setStatus(STR[lang].unlinked(frameDisplayName(state.name, srcIdx)));
+    });
     card.querySelector(".reset-btn").addEventListener("click", () =>
       resetTransform(state.name, frame.index)
     );
