@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.56.61
+version: 1.56.62
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick."
 license: Apache-2.0
 depends_on:
@@ -85,7 +85,7 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 
 - `prepare_sprite_run.py` — write `sprite-request.json`, per-state layout guides, prompts, and empty `raw/` + `frames/` from request truth.
 - `extract_sprite_row_frames.py` — read `raw/<state>.png` strips: chroma removal → connected components → transparent frame cells + `frames/frames-manifest.json`.
-- **에이전트 주도 호흡** (사용자가 "숨쉬기 적용해서 뽑아줘" 라고만 해도 됨): 호흡은 사이드카 필드라 뷰 없이도 켤 수 있다 — (1) split 기본값 사슬 (수홍 확정 2026-07-19 "벨트 있으면 딱 그 위, 허리에"): ⓪ 같은 런에서 사람이 이미 튜닝한 다른 행의 split 상속 → ① **허리선**: 콘텐츠 45~80% 구간의 벨트 액센트(고채도 warm 색) 밴드 최상단, 없으면 행간 색분포 급변점 → ② 가슴 폴백: 상반신(상위 55%) 최광폭 행 = 어깨, split = (어깨y + 높이×0.1 − top)/높이 (모두 0.3~0.75 클램프; 코드 SSoT = curator `breathe.js` `waistSplitFrom`/`defaultBreatheConfig`), (2) `curation.json` 의 `states.<state>.breathe = {"splits": [s], "amplitude": 1, "breaths": 1, "subpixel": false}` 기록 (열린 브라우저 탭이 있으면 두-작성자 충돌 주의 — 탭을 새로고침시킬 것), (3) `compose_sprite_gif.py`/`compose_sprite_atlas.py` 가 자동으로 굽는다. 검증: gif-manifest 의 `breathe.phases`.
+- **에이전트 주도 호흡** (사용자가 "숨쉬기 적용해서 뽑아줘" 라고만 해도 됨): 호흡은 사이드카 필드라 뷰 없이도 켤 수 있다 — (1) split 기본값 사슬 (수홍 확정 2026-07-19 "벨트 있으면 딱 그 위, 허리에"): ⓪ 같은 런에서 사람이 이미 튜닝한 다른 행의 split 상속 → ① **허리선**: 콘텐츠 45~80% 구간의 벨트 액센트(고채도 warm 색) 밴드 최상단, 없으면 행간 색분포 급변점 → ② 가슴 폴백: 상반신(상위 55%) 최광폭 행 = 어깨, split = (어깨y + 높이×0.1 − top)/높이 (모두 0.3~0.75 클램프; 코드 SSoT = curator `breathe.js` `waistSplitFrom`/`defaultBreatheConfig`), (2) `curation.json` 의 `states.<state>.breathe = {"splits": [s], "amplitude": 1, "breaths": 1, "subpixel": false}` 기록 (에이전트 직접 쓰기는 `load_curation`→`stamp_curation` 도장 경로 필수, 열린 탭은 새로고침 안내 — 함정 상세: [`docs/troubleshooting.md`](docs/troubleshooting.md)), (3) `compose_sprite_gif.py`/`compose_sprite_atlas.py` 가 자동으로 굽는다. 검증: gif-manifest 의 `breathe.phases`.
 - **정지 자세(sit/lie/carry_idle 등) 행 레시피** — 정지 1컷 + 링크 복제 10 @ 4fps + 허리선 호흡(breaths 3) + 눈 보이는 방향만 시퀀스 끝 깜빡임. 실측 도출 근거·자동 적용 절차: [`docs/static-pose-recipe.md`](docs/static-pose-recipe.md) (수홍 확정 2026-07-19).
 - 호흡(idle breathing)은 **후처리 레이어**다 (수홍 확정 2026-07-18) — 스크립트가 아니라 curation.json 사이드카 `states.<state>.breathe = {splits, amplitude, breaths, subpixel}` 로 선언하고, compose/GIF 가 재생 시퀀스 위에 결정론(정수 행 시프트, `sprite_gen/breathe.py`)으로 굽는다. 깜빡임 프레임도 그대로 숨쉰다 (프레임 선택과 직교). 큐레이션 뷰: 줄 헤더 호흡 체크박스(즉시 on/off) + 라벨 클릭 편집기(실재생 위 선 1~3개 드래그·진폭·루프당 호흡 횟수·서브픽셀 — 즉시 반영, Esc 복원, 최종 굽기 필름스트립). 루프 길이는 시퀀스 그대로 불변 — breaths 는 요청 횟수 그대로 적용(fit_breathe_pattern v2: 나머지 프레임은 사이클 쉼에 배분; 물리 클램프 시에만 배지 표시). 재추출/굽기 대기 없음. `subpixel` = 위상 전이에 50% 블렌드 중간 프레임 (sub-pixel animation).
 - `interpolate_frames.py` — AI in-between: 두 프레임을 ref 로 물려 **생성형**(codex 기본/grok)으로 중간 프레임을 그려 **테이크**로 기록 (raw 단계 AI — 최종 프레임은 여전히 결정론 추출이 굽는다). 서버 머신의 provider CLI OAuth 를 쓰므로 GUI 버튼도 동작 — 인증 전제와 실측 근거(RIFE 파기): [`docs/frame-interpolation.md`](docs/frame-interpolation.md).
@@ -160,11 +160,11 @@ run-dir 쓰기는 `runio.py` 락이 지키므로 생성(각자 다른 `raw/<stat
 안전하게 병렬화된다. 이 규칙은 지침이다 — 오케스트레이션 스크립트를 짤 때
 `ThreadPoolExecutor(max_workers=4)` 급으로 반영하라.
 
-Generation providers are engine backends, not Studio workers. Selecting `grok`
-launches a headless `grok -p` agent process owned by `GrokProvider`; it does not
-require or route through a separate user-facing skill/task. A visible worker is
-created independently with `kuma spawn`. The canonical topology and command chain live in
-[`docs/gen.md`](docs/gen.md#provider-and-visible-worker-topology).
+Generation providers are **engine backends**, not user-facing agents. Selecting
+`grok` launches a headless `grok -p` process owned by `GrokProvider`; it does not
+require or route through a separate user-facing skill/task. Spawning a visible
+worker/agent is the caller's orchestrator concern — out of this engine's scope.
+Command chain: [`docs/gen.md`](docs/gen.md#provider-topology).
 
 - Simple/default states (before direction-anchor mode exists): attach exactly two references — `base-source.<ext>` (canonical identity) + `references/layout-guides/<state>.png` (layout only).
 - Direction-anchor mode: do **not** attach `base-source.<ext>` to action rows. Attach the accepted target-direction idle anchor (**a single-pose single image — never a multi-frame idle row**; **anchor truth = the CURATED export** — when the anchor has curation, bake `export-pngs` and attach `curated/<dir>_idle/frame-0.png`, raw crop only as no-curation fallback) + the state layout guide; for a paired row also attach the basis row as timing/scale/motion reference only. Chain details: [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md).
@@ -384,9 +384,13 @@ sprite-gen (this SKILL.md = behavior contract + hub)
 │   ├─ docs/directional-anchor-workflow.md  # directional / 45° anchor chains · hatch-pet locomotion
 │   └─ docs/sheet-slicing.md     # multi-figure variant sheet → per-cell standing cuts (立ち絵, not rows)
 │
-└─ QA ── "verify motion as motion before reporting done"
-    ├─ docs/qa-motion.md         # Motion Continuity verdict criteria (BLOCKING)
-    └─ docs/locomotion-curation.md  # motion-phase guides · manual selected cycles · clean GIF export
+├─ QA ── "verify motion as motion before reporting done"
+│   ├─ docs/qa-motion.md         # Motion Continuity verdict criteria (BLOCKING)
+│   └─ docs/locomotion-curation.md  # motion-phase guides · manual selected cycles · clean GIF export
+│
+└─ TROUBLESHOOTING ── "조용히 이상할 때 먼저 볼 표"
+    └─ docs/troubleshooting.md   # 사이드카 스테일 가드/도장 경로 · 두-작성자 충돌 ·
+                                 #   provider 무출력 행(env 위생) · 세로 스트립 전멸 · ffmpeg 500
 ```
 
 Concept taxonomy (which doc owns each term, so agents don't guess):

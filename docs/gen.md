@@ -39,7 +39,7 @@ happened.
 
 ## Provider and visible-worker topology
 
-Provider selection and Studio worker selection are orthogonal:
+Provider selection and user-facing worker/agent creation are orthogonal:
 
 | Layer | Canonical path | Responsibility |
 |---|---|---|
@@ -47,7 +47,7 @@ Provider selection and Studio worker selection are orthogonal:
 | Provider adapter | `GrokProvider` | Build the prompt, choose Imagine `image_gen` or `image_edit`, and verify the requested PNG. |
 | Headless provider process | `grok -p --sandbox workspace --always-approve` | Execute the xAI-authenticated Imagine tool call. |
 | Image model tool | Imagine `image_gen` / `image_edit` | Generate a new image, or edit from references. |
-| Visible Studio worker | `kuma spawn` | Create the visible worker surface that may invoke the generation request; it does not select or replace the provider. |
+| Visible worker/agent | (caller's orchestrator) | Creating a user-facing worker surface that may invoke the generation request is the orchestrator's own concern; it does not select or replace the provider. |
 
 Therefore the direct Grok chain is `generate_sprite_image.py --provider grok`
 → `GrokProvider` → `grok -p --always-approve` → Imagine

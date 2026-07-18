@@ -5,6 +5,20 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.62 "Sol Atelier" - Orchestrator-neutral skill + troubleshooting doc
+
+- **De-coupled the skill from any specific orchestrator** (Soohong's audit
+  request): removed kuma-studio references from SKILL.md / gen.md /
+  qa-motion.md / curation.md - providers are engine backends; spawning a
+  visible worker/agent is the caller's orchestrator concern, out of engine
+  scope. (perfectpixel-studio mentions are an unrelated upstream project.)
+- **New docs/troubleshooting.md** (added to the Docs Topology tree):
+  sidecar stale-guard + stamp path (load_curation -> stamp_curation) for
+  agent writes, two-writer open-tab conflict, provider-CLI silent hang
+  (child env hygiene, generic framing), vertical-strip generation wiping a
+  row's extraction, ffmpeg requirement for WebM/MP4 export. SKILL.md keeps
+  topology; pitfalls live in the leaf doc.
+
 ## v1.56.61 "Sol Atelier" - Child engines spawn with a clean env (nested-agent hang fixed)
 
 - **Root-caused the "codex exec silent hang"** (recurring since 2026-07-17,
