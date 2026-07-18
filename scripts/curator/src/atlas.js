@@ -41,10 +41,14 @@ async function renderFinalAtlas(info) {
       : "") +
     `</div>`;
   const bakeBtn = section.querySelector(".atlas-bake-btn");
+  // 스테일 관측성 (수홍 2026-07-19 "아틀라스가 내가 편집한 게 아닌"): 시트는
+  // 마지막 굽기 시점의 산출물이다 — 그 뒤 편집이 있으면 버튼에 배지로 알린다.
+  if (typeof lastEditAt !== "undefined" && lastEditAt > info.mtime * 1000) markAtlasStale();
   if (bakeBtn) bakeBtn.addEventListener("click", async () => {
     bakeBtn.disabled = true;
     bakeBtn.textContent = t("atlasBaking");
     try {
+      await flushSave(); // 서버는 디스크 truth 를 굽는다 — 대기 중 편집 저장부터
       const res = await fetch("/api/compose", { method: "POST" });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
@@ -84,6 +88,15 @@ function syncAtlasDocHeight() {
 }
 
 // 다운로드가 아틀라스/manifest 를 다시 계산했을 수 있으니 섹션을 최신 파일로 갱신
+// 편집 직후 호출 (scheduleSave) — "편집 이후 안 구움" 을 버튼 배지로 보이게 한다.
+function markAtlasStale() {
+  const btn = document.querySelector(".atlas-bake-btn");
+  if (btn && !btn.disabled && !btn.classList.contains("stale")) {
+    btn.classList.add("stale");
+    btn.textContent = `${t("atlasBake")} · ${t("atlasStale")}`;
+  }
+}
+
 async function refreshFinalAtlas() {
   const now = Math.floor(Date.now() / 1000);
   renderFinalAtlas({

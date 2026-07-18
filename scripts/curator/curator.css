@@ -1229,3 +1229,9 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 /* 복제 링크 상태 버튼 — 배지 옆 (하단 컨트롤 줄 과밀로 잘리던 문제 해소, 수홍 2026-07-18) */
 .link-state-btn { padding: 1px 4px; flex: none; }
 .link-state-btn svg { display: block; }
+
+/* 아틀라스 스테일 배지 — 편집 이후 아직 굽지 않음 (관측 가능한 스테일 상태) */
+.atlas-bake-btn.stale {
+  border-color: #c9862a;
+  color: #c9862a;
+}

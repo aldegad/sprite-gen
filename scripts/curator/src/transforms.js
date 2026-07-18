@@ -24,9 +24,12 @@ function applyCardTransform(stage, stateName, idx) {
     // 한쪽만 지글거렸다 — 수홍 발견):
     // - 양자화 미리보기 (픽셀퍼펙트 뷰 + 변형): 변형을 격자 재양자화로 굽기와
     //   동일하게 미리 본다. 재양자화 특성상 이동이 격자 단위로 스냅된다 (의도).
-    // - 소스 표시 (plain 뷰의 편집 프레임 / 편집 세션): identity 로 한 번 그리고,
+    // - 소스 표시 (plain 뷰의 편집 프레임): identity 로 한 번 그리고,
     //   이동은 img 와 똑같은 CSS 변형으로 — 편집 없는 프레임과 거동이 같아진다.
-    const quantize = (!!snap || basePp) && !editingThis;
+    // 편집 세션도 같은 두 모드를 그대로 쓴다 (WYSIWYG, 수홍 지시 2026-07-19:
+    // 지우개/스포이드를 눌러도 스케일 조정해 둔 모습 그대로 보면서 편집).
+    // 입력 좌표는 줌 에디터가 소스 공간으로 역변환한다 — 저장 공간은 불변.
+    const quantize = (!!snap || basePp);
     const render = () => {
       canvas.width = cw;
       canvas.height = ch;
@@ -36,7 +39,7 @@ function applyCardTransform(stage, stateName, idx) {
       drawFrameInto(ctx, editSourceFor(stateName, el), tt, canvas.width, canvas.height, snap,
         getPixelOps(stateName, idx));
     };
-    canvas.style.transform = (quantize || editingThis)
+    canvas.style.transform = quantize
       ? ""
       : `translate(${t.dx * ds}px, ${t.dy * ds}px) matrix(${m.m00}, ${m.m10}, ${m.m01}, ${m.m11}, 0, 0)`;
     if (el.complete && el.naturalWidth) render();
