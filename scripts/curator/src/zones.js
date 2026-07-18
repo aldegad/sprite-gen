@@ -317,7 +317,7 @@ function openArchiveModal(stateName) {
   modal.id = "archive-modal";
   modal.innerHTML =
     `<div class="zoom-backdrop"></div>` +
-    `<div class="card zoom-card arch-modal-card">` +
+    `<div class="card arch-modal-card">` +
     `<div class="zoom-head"><span class="zoom-title">${STR[lang].archModalTitle(escapeHtml(stateName), e.archived.length)}</span>` +
     `<button type="button" class="ghost zoom-close">${t("zoomClose")}</button></div>` +
     `<div class="arch-grid"></div></div>`;
