@@ -49,7 +49,7 @@ python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \
   --run-dir <target>/assets/generated/sprites/<character-id>
 ```
 
-This launches a standalone local webview (no Studio dependency — usable from Claude Code Desktop, the Codex app, or any host with the skill installed). It shows every state's frames side by side so you can compare them in parallel. Two rows per state: a **sequence** row (the selected play order, saved to `curation.json.selected`, baked left-to-right by compose) and a **candidate pool** row below it (unselected frames, e.g. an extra generated take). A per-frame transform (drag the stage = move, bottom-right magnifier = scale, top handle = rotate, side handle = shear) corrects an off angle/position. A live preview animates the selected frames at the state fps, with play/pause, frame stepping, and a 0.25×–4× speed control.
+This launches a standalone local webview (no orchestrator dependency — usable from Claude Code Desktop, the Codex app, or any host with the skill installed). It shows every state's frames side by side so you can compare them in parallel. Two rows per state: a **sequence** row (the selected play order, saved to `curation.json.selected`, baked left-to-right by compose) and a **candidate pool** row below it (unselected frames, e.g. an extra generated take). A per-frame transform (drag the stage = move, bottom-right magnifier = scale, top handle = rotate, side handle = shear) corrects an off angle/position. A live preview animates the selected frames at the state fps, with play/pause, frame stepping, and a 0.25×–4× speed control.
 
 **Card interaction model** (수홍 2026-07-15 — a stray click must never add/remove a frame):
 
