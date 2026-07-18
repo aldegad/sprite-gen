@@ -61,6 +61,7 @@ async function renderFinalAtlas(info) {
     }
   });
   syncAtlasDocHeight();
+  ensureAtlasObserver(); // 레이지 굽기 — 섹션 가시성 감시
 }
 
 // JSON 패널 높이 = 아틀라스 시트 높이 (수홍 지시 2026-07-17: 기준은 아틀라스 —
@@ -88,21 +89,44 @@ function syncAtlasDocHeight() {
 }
 
 // 다운로드가 아틀라스/manifest 를 다시 계산했을 수 있으니 섹션을 최신 파일로 갱신
-// ── 자동 굽기 (수홍 2026-07-19 "아틀라스 실시간 반영"): 사이드카 저장이 디스크에
-// 앉을 때마다 디바운스로 compose 를 재실행해 섹션을 갱신한다. compose 실측 ~80ms 라
-// 실시간으로 돌려도 부담 없음. 굽는 중 새 편집이 오면 끝나고 한 번 더 (코얼레싱).
+// ── 레이지 자동 굽기 (수홍 2026-07-19 "실시간 반영, 단 느린 컴퓨터 렉 걱정"):
+// 편집은 dirty 만 표시하고, 아틀라스 섹션이 **화면에 보일 때만** 디바운스 굽기를
+// 돌린다 — 안 보는 동안엔 비용 0, 스크롤로 내려오는 순간 최신으로 한 번에 반영.
+// 디바운스는 직전 compose 실측 소요시간의 3배(최소 0.8s)로 자동 조절 — 느린
+// 머신일수록 덜 자주 굽는다. 굽는 중 새 편집은 끝나고 한 번 더 (코얼레싱).
 // 수동 "지금 상태로 굽기" 버튼은 즉시 실행용으로 유지.
 let autoBakeTimer = null;
 let autoBakeRunning = false;
 let autoBakeDirty = false;
+let atlasDirty = false;
+let atlasVisible = false;
+let atlasObserver = null;
+let lastBakeMs = 100;
+function noteAtlasEdit() {
+  atlasDirty = true;
+  if (atlasVisible) scheduleAutoBake();
+}
+function ensureAtlasObserver() {
+  const section = document.getElementById("final-atlas");
+  if (!section || atlasObserver) return;
+  atlasObserver = new IntersectionObserver((ents) => {
+    atlasVisible = ents.some((e) => e.isIntersecting);
+    if (atlasVisible && atlasDirty) scheduleAutoBake();
+  });
+  atlasObserver.observe(section);
+}
 async function autoBakeAtlas() {
   if (autoBakeRunning) { autoBakeDirty = true; return; }
   autoBakeRunning = true;
   try {
+    const t0 = performance.now();
     const res = await fetch("/api/compose", { method: "POST" });
+    lastBakeMs = performance.now() - t0;
     const data = await res.json().catch(() => ({}));
-    if (res.ok && data.ok) await refreshFinalAtlas();
-    else autoBakeDirty = true; // 서버 바쁨(503)/일시 실패 — 다음 스케줄에 재시도
+    if (res.ok && data.ok) {
+      atlasDirty = false;
+      await refreshFinalAtlas();
+    } else autoBakeDirty = true; // 서버 바쁨(503)/일시 실패 — 다음 스케줄에 재시도
   } catch {
     autoBakeDirty = true;
   }
@@ -111,7 +135,7 @@ async function autoBakeAtlas() {
 }
 function scheduleAutoBake() {
   clearTimeout(autoBakeTimer);
-  autoBakeTimer = setTimeout(autoBakeAtlas, 800);
+  autoBakeTimer = setTimeout(autoBakeAtlas, Math.max(800, lastBakeMs * 3));
 }
 
 // 편집 직후 호출 (scheduleSave) — "편집 이후 안 구움" 을 버튼 배지로 보이게 한다.

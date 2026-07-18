@@ -5,6 +5,16 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.55 "Sol Atelier" - Lazy atlas bake (zero cost while off-screen)
+
+- Live atlas re-bake is now LAZY: edits only mark the atlas dirty; the
+  actual compose runs when the atlas section is visible in the viewport
+  (IntersectionObserver) - zero background cost on slower machines while
+  drawing. Scrolling the atlas into view triggers one up-to-date bake.
+  The debounce also adapts to the machine: 3x the last measured compose
+  time (min 0.8 s). Verified: edit with atlas off-screen -> 0 compose
+  calls; scroll into view -> exactly one bake, badge clears.
+
 ## v1.56.54 "Sol Atelier" - Atlas updates live
 
 - **The atlas section now re-bakes automatically** ~1s after edits stop:
