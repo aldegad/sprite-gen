@@ -79,10 +79,12 @@ function clearMarquee() {
 // 툴 단축키 (포토샵 표준, 수홍 지시 2026-07-18): B/P=펜, E=지우개, I=스포이드, M=선택(마키).
 // 열려 있는 편집 툴바(줌/베이스 모달)에만 적용 — 입력 필드 포커스 중엔 무시.
 // 같은 툴 키 재입력 = 툴 끔 (버튼 재클릭과 동일 거동).
-const TOOL_SHORTCUTS = { b: ".et-pen", p: ".et-pen", e: ".et-eraser", i: ".et-pick", m: ".et-select" };
+// ev.code (물리 키) 기준 — 한글 IME/타 레이아웃에서도 동작 (ev.key 는 한글 모드에서
+// "ㅠ" 같은 조합 문자가 와 매칭이 죽는다 — 실사고 2026-07-19 수홍).
+const TOOL_SHORTCUTS = { KeyB: ".et-pen", KeyP: ".et-pen", KeyE: ".et-eraser", KeyI: ".et-pick", KeyM: ".et-select" };
 document.addEventListener("keydown", (ev) => {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-  const sel = TOOL_SHORTCUTS[(ev.key || "").toLowerCase()];
+  const sel = TOOL_SHORTCUTS[ev.code];
   if (!sel) return;
   const a = document.activeElement;
   if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable)) return;
@@ -105,7 +107,8 @@ function onZoomKey(ev) {
 // 활성 편집 컨텍스트로 라우팅: 베이스 에디터 모달이 열려 있으면 그쪽, 아니면
 // 줌 모달의 픽셀 편집 세션. 입력 필드에선 브라우저 기본 동작 유지.
 document.addEventListener("keydown", (ev) => {
-  if (ev.key.toLowerCase() !== "z" || !(ev.metaKey || ev.ctrlKey)) return;
+  // ev.code 기준 — 한글 IME 에서도 Cmd/Ctrl+Z 동작 (key 는 "ㅋ" 이 온다)
+  if (ev.code !== "KeyZ" || !(ev.metaKey || ev.ctrlKey)) return;
   if (ev.target && ev.target.closest && ev.target.closest("input, textarea, select")) return;
   // 베이스도 줌 모달(pixelEdit)로 통일 — 별도 에디터 분기는 폐기됨 (v1.56.24)
   // 호흡 포커스 모드가 열려 있으면 선/진폭/주기 조정 히스토리가 우선이다 (수홍 2026-07-17)
