@@ -880,10 +880,14 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   max-width: min(92vw, 900px);
   max-height: 86vh;
   overflow: hidden;
+  padding: 14px 16px 12px;
+  background: var(--panel, #fff);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  border-radius: 12px;
 }
 #archive-modal .arch-modal-card .zoom-head { flex: none; }
 .arch-grid { display: flex; flex-wrap: wrap; gap: 12px; overflow: auto; padding: 2px; align-content: flex-start; }
-.arch-card { width: 150px; }
+.arch-card { width: 168px; } /* row 카드와 동일 규격 — 프레임 그리드 (수홍 2026-07-18) */
 .arch-card .stage { cursor: default; }
 .arch-card .card-controls { justify-content: center; gap: 6px; }
 
