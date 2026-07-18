@@ -2,6 +2,58 @@
 // curator/display.js — 프레임 그리기 + 픽셀퍼펙트/격자 표시 변형 동기화
 // 로드 순서 SSoT = index.html (classic script 전역 어휘 공유; 빌드 스텝 없음)
 
+// ── 프레임 공간 변환 SSoT (수홍 지시 2026-07-19 "코드 좀 체계적으로") ──
+// 소스↔표시 좌표 수학과 "화면에 보이는 색" 샘플링은 여기 한 곳만 소유한다.
+// 다른 파일은 이 함수들을 쓰기만 한다 — 툴별 복붙 좌표 수학 금지.
+// 순변환: T(p) = M(p−c) + c + d  (drawFrameInto 의 렌더 수학과 동일)
+
+function frameFwdXY(stateName, idx, x, y) {
+  const [cw, ch] = cellDims(stateName);
+  const tr = getTransform(stateName, idx);
+  const m = matrixOf(tr);
+  return [m.m00 * (x - cw / 2) + m.m01 * (y - ch / 2) + cw / 2 + tr.dx,
+          m.m10 * (x - cw / 2) + m.m11 * (y - ch / 2) + ch / 2 + tr.dy];
+}
+
+function frameInvXY(stateName, idx, x, y) {
+  const [cw, ch] = cellDims(stateName);
+  const tr = getTransform(stateName, idx);
+  const m = matrixOf(tr);
+  const det = m.m00 * m.m11 - m.m01 * m.m10 || 1;
+  const ux = x - cw / 2 - tr.dx;
+  const uy = y - ch / 2 - tr.dy;
+  return [(m.m11 * ux - m.m01 * uy) / det + cw / 2,
+          (-m.m10 * ux + m.m00 * uy) / det + ch / 2];
+}
+
+// 포인터 이벤트 → 소스(저장) 공간 좌표. 표시가 어떤 모드든 저장은 항상 소스 공간.
+function pointerSrcXY(stage, stateName, idx, e2) {
+  const [cw, ch] = cellDims(stateName);
+  const r = stage.getBoundingClientRect();
+  const dx0 = ((e2.clientX - r.left) / r.width) * cw;
+  const dy0 = ((e2.clientY - r.top) / r.height) * ch;
+  return frameInvXY(stateName, idx, dx0, dy0);
+}
+
+// 스포이드 진실 = "화면에 보이는 그 색". 표시 파이프라인이 양자화 캔버스든
+// (비트맵 = 표시 공간) CSS 변형 캔버스든 (비트맵 = 소스 공간), 실제 렌더된
+// 비트맵에서 집는다 — 소스 픽셀을 따로 재계산하면 픽셀퍼펙트 재양자화와
+// 어긋난 색이 잡힌다 (실사고 2026-07-19 수홍 "스포이드가 다른 색을 잡음").
+function sampleDisplayedColor(stage, stateName, idx, e2) {
+  const canvas = stage.querySelector(".snap-canvas");
+  if (!(canvas && canvas.style.display === "block" && canvas.width)) return null;
+  const r = stage.getBoundingClientRect();
+  let x = ((e2.clientX - r.left) / r.width) * canvas.width;
+  let y = ((e2.clientY - r.top) / r.height) * canvas.height;
+  if (canvas.style.transform) [x, y] = frameInvXY(stateName, idx, x, y);
+  x = Math.floor(x);
+  y = Math.floor(y);
+  if (!(x >= 0 && x < canvas.width && y >= 0 && y < canvas.height)) return null;
+  const d = canvas.getContext("2d").getImageData(x, y, 1, 1).data;
+  if (d[3] < 40) return null; // 투명 픽셀은 집을 색이 없다
+  return "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
 // 변형을 셀 캔버스에 NEAREST 로 그리고, 논리 격자(snap px/논리픽셀)로 재양자화한다.
 // curation.apply_transform 의 snap_scale 경로를 캔버스로 미러링 — 드래그/회전 중에도
 // 스프라이트가 셀 고정 격자에 실시간으로 스냅되어 보인다 (격자는 그대로, 그림이 스냅).
