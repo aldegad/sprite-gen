@@ -5,6 +5,13 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.52 "Sol Atelier" - Shortcuts work in Korean IME / any keyboard layout
+
+- Tool hotkeys (B/P/E/I/M) and Cmd/Ctrl+Z now match on the PHYSICAL key
+  (event.code) instead of the produced character (event.key), so they work
+  with the Korean IME active ("ㅠ" for B etc.) and on non-QWERTY layouts.
+  Verified with simulated IME key events: all four tools switch.
+
 ## v1.56.51 "Sol Atelier" - Pointer hits exactly the pixel under the cursor
 
 - **Fix: clicks could land one pixel off** on quantized (pixel-perfect)

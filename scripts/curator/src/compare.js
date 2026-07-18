@@ -352,7 +352,7 @@ function openCompare() {
 
   const onKey = (ev) => {
     if (ev.key === "Escape") { close(); return; }
-    if (ev.key.toLowerCase() === "z" && (ev.metaKey || ev.ctrlKey)) {
+    if (ev.code === "KeyZ" && (ev.metaKey || ev.ctrlKey)) { // code 기준 — 한글 IME 무관
       ev.preventDefault();
       ev.stopImmediatePropagation(); // 픽셀 편집 전역 라우터보다 비교 모달이 우선
       restoreHist(ev.shiftKey ? hist.pos + 1 : hist.pos - 1);
