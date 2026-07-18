@@ -19,7 +19,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .base import GenRequest, ProviderRun, verify_png
+from .base import GenRequest, ProviderRun, provider_subprocess_env, verify_png
 
 
 def _build_prompt(request: GenRequest) -> str:
@@ -74,7 +74,11 @@ class GrokProvider:
             cmd += ["-m", request.model]
 
         started = time.monotonic()
-        completed = subprocess.run(cmd, capture_output=True, text=True)
+        # env: parent minus Kuma session-identity vars — same reason as codex
+        # (base.provider_subprocess_env). grok hooks are off today, but a headless
+        # generation subprocess must never carry the parent worker's endpoint
+        # identity regardless of the engine's current hook config.
+        completed = subprocess.run(cmd, capture_output=True, text=True, env=provider_subprocess_env())
         elapsed = time.monotonic() - started
         if completed.returncode != 0:
             tail = (completed.stderr or "").strip().splitlines()[-20:]

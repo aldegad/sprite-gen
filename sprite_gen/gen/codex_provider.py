@@ -26,7 +26,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .base import GenRequest, ProviderRun, verify_png
+from .base import GenRequest, ProviderRun, provider_subprocess_env, verify_png
 
 # codex carries the inline base64 on a version-specific record. Both are
 # first-class canonical records (not a fallback) — read whichever the running
@@ -132,7 +132,13 @@ class CodexProvider:
 
         prompt = _build_prompt(request.prompt)
         started = time.monotonic()
-        completed = subprocess.run(cmd, input=prompt, capture_output=True, text=True)
+        # env: parent minus Kuma session-identity vars — a headless generation
+        # `codex exec` must not inherit the spawning worker's endpoint identity,
+        # or codex's own Kuma hooks broadcast this prompt to that worker's Discord
+        # channel (see base.provider_subprocess_env).
+        completed = subprocess.run(
+            cmd, input=prompt, capture_output=True, text=True, env=provider_subprocess_env()
+        )
         elapsed = time.monotonic() - started
         stdout = completed.stdout or ""
         if completed.returncode != 0:
