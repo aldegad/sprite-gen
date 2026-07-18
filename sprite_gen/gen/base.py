@@ -17,42 +17,30 @@ from typing import Any, Protocol
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
-# Kuma injects these session-identity env vars into a native worker's PTY
-# (kuma-studio runtime-native-backend.mjs). They name WHICH endpoint a live
-# worker session is, and Kuma's engine hooks (kuma-turn-signal / activity-emit /
-# artifact-emit) key on KUMA_RUNTIME_ENDPOINT_ID to report that session's turns,
-# prompts, and artifacts back to the studio — and onward to the worker's
-# connected Discord channel.
-#
-# A generation subprocess we spawn here (`codex exec`, `grok`) is NOT that
-# worker's interactive session. But a child inherits the parent's environment,
-# so without scrubbing it would carry the parent worker's endpoint identity: the
-# child engine's own Kuma hooks then attribute THIS generation's full prompt and
-# tool calls to the parent worker's endpoint, broadcasting them to that worker's
-# Discord channel (observed live 2026-07-18: codex generation prompts leaked to a
-# solvell thread). Dropping these makes the child correctly a non-kuma session —
-# exactly the hooks' own documented contract ("no endpoint id = nothing to
-# report"), not a special case. See kuma-studio scripts/hooks/kuma-turn-signal.sh.
-_KUMA_SESSION_IDENTITY_ENV = (
-    "KUMA_RUNTIME_ENDPOINT_ID",
-    "KUMA_NATIVE_ENDPOINT_ID",
-    "KUMA_INITIATOR_SURFACE",
-    "KUMA_DISPATCH_INITIATOR_SURFACE",
-    "KUMA_DISPATCH_RUNTIME_ADAPTER",
-)
+# ── 자식 엔진 env 위생 (일반 원칙, SoC) ──────────────────────────────
+# 스폰된 생성 엔진(codex exec / grok)은 독립 프로세스다 — 부모(이 스크립트를
+# 부른 에이전트/오케스트레이터 세션)의 세션 신분 env 를 상속하면 안 된다.
+# 상속 시 실사고 2건: (1) 자식의 프롬프트가 부모 신분으로 오귀속돼 부모의
+# 대화 채널로 방송됨(2026-07-18), (2) 부모 오케스트레이터의 훅이 자식을
+# 멤버로 착각해 턴 종료를 무한 차단 — 무출력 행(2026-07-19, 수홍 확정
+# "서브에이전트의 서브에이전트" 버그). 근본 수리는 해당 오케스트레이터
+# 소유(훅이 신분 없는 세션을 no-op 해야 함)지만, 엔진은 어떤 오케스트레이터
+# 아래서든 자식을 깨끗하게 스폰할 책임이 있다. 알려진 세션 env 접두어 가족만
+# 지운다 — PATH 등 일반 env 는 그대로.
+_ORCHESTRATOR_SESSION_ENV_PREFIXES = ("KUMA_",)
 
 
 def provider_subprocess_env() -> dict[str, str]:
     """Environment for a headless generation subprocess.
 
-    The parent environment minus Kuma's session-identity vars, so a spawned
-    engine (`codex exec`, `grok`) never impersonates the spawning worker's
-    endpoint to the Kuma hook layer. SSoT for every provider's `subprocess.run`
-    env — providers must not spawn with the inherited env directly.
+    The parent environment minus known orchestrator session env families, so a
+    spawned engine (`codex exec`, `grok`) is a clean standalone process — it
+    neither impersonates the spawning agent nor gets strangled by the
+    orchestrator's hooks. SSoT for every provider's `subprocess.run` env —
+    providers must not spawn with the inherited env directly.
     """
-    env = dict(os.environ)
-    for key in _KUMA_SESSION_IDENTITY_ENV:
-        env.pop(key, None)
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(_ORCHESTRATOR_SESSION_ENV_PREFIXES)}
     return env
 
 

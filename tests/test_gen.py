@@ -45,21 +45,22 @@ def test_verify_png_accepts_real_png_and_rejects_junk(tmp_path: Path) -> None:
         gen_base.verify_png(tmp_path / "missing.png")
 
 
-def test_provider_subprocess_env_scrubs_kuma_session_identity(monkeypatch) -> None:
-    # A headless generation subprocess must not inherit the spawning worker's
-    # Kuma endpoint identity — else the engine's own Kuma hooks broadcast this
-    # generation's prompt to the worker's Discord channel (leak 2026-07-18).
-    for key in gen_base._KUMA_SESSION_IDENTITY_ENV:
-        monkeypatch.setenv(key, "ep:should-not-inherit")
-    monkeypatch.setenv("KUMA_STUDIO_PORT", "4312")  # non-identity var is kept
+def test_provider_subprocess_env_scrubs_orchestrator_session_env(monkeypatch) -> None:
+    # 자식 생성 엔진은 부모 오케스트레이터의 세션 신분 env 를 상속하면 안 된다 —
+    # 상속 시 프롬프트 오귀속(2026-07-18 실사고) 또는 훅이 자식의 턴 종료를
+    # 무한 차단(2026-07-19 실사고, "서브에이전트의 서브에이전트" 행)한다.
+    monkeypatch.setenv("KUMA_RUNTIME_ENDPOINT_ID", "ep:should-not-inherit")
+    monkeypatch.setenv("KUMA_MEMBER_ID", "lumi")
+    monkeypatch.setenv("KUMA_PROJECT_ID", "solvell")
+    monkeypatch.setenv("KUMA_PLAN_EXIT_GATE", "1")
+    monkeypatch.setenv("KUMA_STUDIO_PORT", "4312")
     monkeypatch.setenv("PATH", "/usr/bin")
 
     env = gen_base.provider_subprocess_env()
 
-    for key in gen_base._KUMA_SESSION_IDENTITY_ENV:
-        assert key not in env, f"{key} must be scrubbed from a generation subprocess env"
-    assert env.get("KUMA_STUDIO_PORT") == "4312"  # only identity vars are dropped
-    assert env.get("PATH") == "/usr/bin"
+    assert not [key for key in env if key.startswith("KUMA_")], \
+        "every KUMA_* var must be scrubbed from a generation subprocess env"
+    assert env.get("PATH") == "/usr/bin"  # 일반 env 는 유지
 
 
 def test_provider_run_uses_scrubbed_env(tmp_path: Path, monkeypatch) -> None:

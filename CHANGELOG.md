@@ -5,6 +5,24 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.61 "Sol Atelier" - Child engines spawn with a clean env (nested-agent hang fixed)
+
+- **Root-caused the "codex exec silent hang"** (recurring since 2026-07-17,
+  Soohong's long-reported nested-subagent bug): a spawned `codex exec`
+  inherited the parent orchestrator's member/project session env, so the
+  orchestrator's own turn-close hooks mistook the child for a member with an
+  open plan and blocked its turn end forever. Isolation probes: inherited
+  env = 60 s+ hang; orchestrator env family removed = 5 s PONG.
+- **Engine-generic fix (SoC)**: `provider_subprocess_env` now strips known
+  orchestrator session env prefix families entirely - a child generation
+  engine is a clean standalone process under ANY orchestrator. The root
+  hook-side fix is filed with the orchestrator's owners. Verified: codex
+  image gen restored (52 s), regression test updated to the full-scrub
+  contract.
+- Curator: bake errors now say "bake failed" (not "download failed"), and a
+  persistently failing auto-bake reports once and waits for the next edit
+  instead of hammering the server in a retry loop.
+
 ## v1.56.60 "Sol Atelier" - Save popovers: closed by default, unified everywhere
 
 - **Fix: the compare Save popover rendered permanently open** - the menu's

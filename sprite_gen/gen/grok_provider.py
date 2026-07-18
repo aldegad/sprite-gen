@@ -74,7 +74,7 @@ class GrokProvider:
             cmd += ["-m", request.model]
 
         started = time.monotonic()
-        # env: parent minus Kuma session-identity vars — same reason as codex
+        # env: parent minus orchestrator session env — same reason as codex
         # (base.provider_subprocess_env). grok hooks are off today, but a headless
         # generation subprocess must never carry the parent worker's endpoint
         # identity regardless of the engine's current hook config.
