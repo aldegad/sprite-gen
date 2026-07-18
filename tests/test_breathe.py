@@ -36,7 +36,7 @@ def test_two_band_lag_keeps_height_then_compresses() -> None:
 
 
 def test_fit_pattern_loop_length_invariant() -> None:
-    """루프-맞춤 (수홍 확정): 패턴 길이 = 시퀀스 길이, 호흡이 딱 떨어진다."""
+    """루프-맞춤: 패턴 길이 = 시퀀스 길이 (루프 불변)."""
     cfg = {"splits": [0.55], "amplitude": 1, "breaths": 1}
     assert fit_breathe_pattern(6, cfg) == [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
     cfg2 = {"splits": [0.55], "amplitude": 1, "breaths": 2}
@@ -48,17 +48,22 @@ def test_fit_pattern_two_lines_cascade() -> None:
     assert fit_breathe_pattern(6, cfg) == [0.0, 0.0, 1.0, 2.0, 2.0, 1.0]
 
 
-def test_fit_pattern_nondivisor_self_corrects() -> None:
-    """나눠떨어지지 않는 횟수는 가장 가까운 약수로 보정 (관측 가능 — 패턴이 진실)."""
+def test_fit_pattern_exact_requested_count_v2() -> None:
+    """v2 (수홍 정정): 요청 횟수 그대로 — 등분 안 되면 나머지를 앞 사이클 쉼에 배분."""
     cfg = {"splits": [0.55], "amplitude": 1, "breaths": 2}
-    pattern = fit_breathe_pattern(5, cfg)   # 5 % 2 != 0 → 1회로
+    pattern = fit_breathe_pattern(5, cfg)   # 사이클 [3,2]
     assert len(pattern) == 5
-    assert pattern == [0.0, 0.0, 1.0, 1.0, 1.0]
+    assert pattern == [0.0, 1.0, 1.0, 0.0, 1.0]
+    cfg3 = {"splits": [0.62], "amplitude": 1, "breaths": 3}
+    p11 = fit_breathe_pattern(11, cfg3)     # 사이클 [4,4,3] — 정확히 3회 하강
+    assert len(p11) == 11
+    downs = sum(1 for i, v in enumerate(p11) if v > 0 and p11[i - 1] == 0)
+    assert downs == 3
 
 
 def test_fit_pattern_too_short_is_all_zero() -> None:
     cfg = {"splits": [0.3, 0.55], "amplitude": 1, "breaths": 1}
-    assert fit_breathe_pattern(2, cfg) == [0.0, 0.0]  # L < 2K — 호흡 없음 (관측)
+    assert fit_breathe_pattern(2, cfg) == [0.0, 0.0]  # 사이클 최소 2K 미만 — 호흡 없음 (관측)
 
 
 def test_fit_pattern_subpixel_preserves_length() -> None:

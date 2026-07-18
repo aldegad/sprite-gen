@@ -93,25 +93,32 @@ def breathe_frames(frame: Image.Image, split: float = 0.55, two_band: bool = Fal
 
 
 def fit_breathe_pattern(seq_len: int, cfg: dict) -> list[float]:
-    """시퀀스 길이에 딱 떨어지는 호흡 위상 시퀀스 (길이 == seq_len).
+    """시퀀스 길이에 딱 맞는 호흡 위상 시퀀스 (길이 == seq_len, 루프 불변).
 
-    서브주기 L = seq_len / breaths' 안에서 [기준 유지, 1..K 하강, 최심 유지,
-    K-1..1 복귀] 를 배분한다. K=선 개수. 시퀀스가 너무 짧으면 전부 0 (호흡 없음)."""
+    v2 (수홍 정정 2026-07-18): **요청한 횟수를 그대로 적용한다** — 등분 제약 폐기.
+    사이클 길이가 나눠떨어지지 않으면 나머지 프레임을 앞쪽 사이클들의 쉼에 1개씩
+    배분한다 (사이클 길이 [4,4,3] 식). GUI 숫자 = 실제 호흡 횟수 (Consistency).
+    유일한 보정: 시퀀스가 물리적으로 못 담는 횟수(사이클당 최소 2K 프레임)만
+    가능한 최대 횟수로 클램프 — 이 경우만 편집기 배지가 표시한다."""
     k = len(cfg["splits"])
     if seq_len <= 0:
         return []
     want = max(1, int(cfg.get("breaths", 1)))
-    fit = next((c for c in range(min(want, seq_len), 0, -1)
-                if seq_len % c == 0 and seq_len // c >= 2 * k), 0)
-    if fit == 0:
-        return [0.0] * seq_len
-    length = seq_len // fit
+    min_cycle = max(2, 2 * k)  # 하강 K + 복귀 K-1 + 쉼 최소 1
+    fit = min(want, seq_len // min_cycle)
+    if fit < 1:
+        return [0.0] * seq_len  # 시퀀스가 너무 짧음 — 호흡 없음 (관측: 전부 0)
+    base_len = seq_len // fit
+    remainder = seq_len - base_len * fit
     down = [float(p) for p in range(1, k + 1)]
     up = [float(p) for p in range(k - 1, 0, -1)]
-    free = length - len(down) - len(up)
-    deep = free // 2
-    rest = free - deep
-    pattern = [0.0] * rest + down + [float(k)] * deep + up
+    pattern: list[float] = []
+    for i in range(fit):
+        length = base_len + (1 if i < remainder else 0)
+        free = length - len(down) - len(up)
+        deep = free // 2
+        rest = free - deep
+        pattern += [0.0] * rest + down + [float(k)] * deep + up
     if cfg.get("subpixel"):
         out = list(pattern)
         n = len(pattern)
@@ -125,7 +132,16 @@ def fit_breathe_pattern(seq_len: int, cfg: dict) -> list[float]:
             if run >= 2:  # 길이 보존: 런의 첫 슬롯을 중간 위상으로 치환
                 out[i] = (prev + pattern[i]) / 2.0
         pattern = out
-    return pattern * fit
+    return pattern
+
+
+def fitted_breath_count(seq_len: int, cfg: dict) -> int:
+    """실제 적용되는 호흡 횟수 — v2 에선 물리 클램프 경우에만 요청과 달라진다."""
+    k = len(cfg["splits"])
+    if seq_len <= 0:
+        return 0
+    want = max(1, int(cfg.get("breaths", 1)))
+    return min(want, seq_len // max(2, 2 * k))
 
 
 def _seam_rows(top: int, ys: list[int], amplitude: int, height: int) -> list[tuple[int, int]]:

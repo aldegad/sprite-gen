@@ -15,27 +15,30 @@ function stateBreathe(stateName) {
   return e && e.breathe ? e.breathe : null;
 }
 
-// 서버 fit_breathe_pattern 미러 — 루프-맞춤 (수홍 확정 2026-07-18 2차):
-// 루프 길이 = 시퀀스 그대로, 호흡이 그 안에서 breaths 회 딱 떨어진다.
-// breaths 가 안 나눠지면 나눠지는 가장 가까운(작은) 횟수로 자가 보정.
+// 서버 fit_breathe_pattern v2 미러 (수홍 정정 2026-07-18): 요청 횟수 그대로 —
+// 등분 제약 없음. 사이클 길이가 안 나눠떨어지면 나머지를 앞 사이클 쉼에 배분.
+// 유일한 보정 = 물리 클램프 (사이클당 최소 2K 프레임).
 function breathePattern(cfg, seqLen) {
   const k = cfg.splits.length;
   if (!seqLen || seqLen <= 0) return [];
   const want = Math.max(1, cfg.breaths || 1);
-  let fit = 0;
-  for (let c = Math.min(want, seqLen); c >= 1; c--) {
-    if (seqLen % c === 0 && seqLen / c >= 2 * k) { fit = c; break; }
-  }
-  if (!fit) return new Array(seqLen).fill(0);
-  const length = seqLen / fit;
+  const minCycle = Math.max(2, 2 * k);
+  const fit = Math.min(want, Math.floor(seqLen / minCycle));
+  if (fit < 1) return new Array(seqLen).fill(0);
+  const baseLen = Math.floor(seqLen / fit);
+  const remainder = seqLen - baseLen * fit;
   const down = [];
-  for (let p = 1; p <= k; p++) down.push(p);
+  for (let ph = 1; ph <= k; ph++) down.push(ph);
   const up = [];
-  for (let p = k - 1; p >= 1; p--) up.push(p);
-  const free = length - down.length - up.length;
-  const deep = Math.floor(free / 2);
-  const rest = free - deep;
-  let pattern = [...new Array(rest).fill(0), ...down, ...new Array(deep).fill(k), ...up];
+  for (let ph = k - 1; ph >= 1; ph--) up.push(ph);
+  let pattern = [];
+  for (let i = 0; i < fit; i++) {
+    const length = baseLen + (i < remainder ? 1 : 0);
+    const free = length - down.length - up.length;
+    const deep = Math.floor(free / 2);
+    const rest = free - deep;
+    pattern = pattern.concat(new Array(rest).fill(0), down, new Array(deep).fill(k), up);
+  }
   if (cfg.subpixel) {
     const out = [...pattern];
     const n = pattern.length;
@@ -48,19 +51,14 @@ function breathePattern(cfg, seqLen) {
     }
     pattern = out;
   }
-  const full = [];
-  for (let c = 0; c < fit; c++) full.push(...pattern);
-  return full;
+  return pattern;
 }
 
-// 실제 반영되는 호흡 횟수 (fit_breathe_pattern 과 동일한 약수 보정)
+// 실제 적용 호흡 횟수 — v2 에선 물리 클램프(사이클당 최소 2K 프레임) 경우에만 요청과 달라진다
 function breatheFitCount(cfg, seqLen) {
   if (!seqLen || seqLen <= 0) return 0;
   const want = Math.max(1, cfg.breaths || 1);
-  for (let c = Math.min(want, seqLen); c >= 1; c--) {
-    if (seqLen % c === 0 && seqLen / c >= 2 * cfg.splits.length) return c;
-  }
-  return 0;
+  return Math.min(want, Math.floor(seqLen / Math.max(2, 2 * cfg.splits.length)));
 }
 
 // 서버 phase_frame 미러 — base 캔버스에 위상 하나를 적용한 새 캔버스를 돌려준다.

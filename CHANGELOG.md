@@ -5,6 +5,24 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.43 "Sol Atelier" - Breathe audit: exact breath count + canonical preview
+
+Soohong's calm-refactor request (2026-07-18, /alex-core-invariants). Two real
+Consistency violations found and removed:
+
+- **Requested breath count applies EXACTLY (fit v2)** — the divide-the-loop
+  constraint was self-imposed and wrong: cycles may differ by one frame
+  (remainder distributed into the rest phase), so "3 breaths in an 11-frame
+  loop" now breathes exactly 3 times (cycles 4/4/3). GUI == bake, server ==
+  client (parity-tested). The only remaining correction is the physical clamp
+  (a cycle needs at least 2K frames) — badge shows only then.
+- **Breathe preview always composites CANONICAL frames** — with pixel-perfect
+  OFF the preview drew the orig display twin, whose footprint differs per
+  frame, so the sinking seam wandered between rows and the guide line looked
+  like "two flickering lines". The preview is a bake preview; it now always
+  reads the canonical pixels (editor + row preview).
+- Legacy divisor fit-count removed everywhere; tests updated to v2 semantics.
+
 ## v1.56.42 "Sol Atelier" - Anchor compare canvas, relink, bake-truth breathe line
 
 Soohong's batch (2026-07-18 evening):

@@ -705,7 +705,10 @@ function openZoom(stateName, idx, keepWidth) {
       const frameIdx = play.length ? play[cursor] : idx;
       const phase = pattern[cursor] || 0;
       const f = frameOf(stateName, frameIdx);
-      const image = f ? img(frameUrl(stateName, f)) : null;
+      // 호흡 프리뷰 = 굽기 결과 미리보기 — 항상 캐노니컬 프레임(f.url)으로 그린다.
+      // 표시 변형(원본 쌍둥이)은 풋프린트가 달라 이음새가 프레임마다 다른 줄에 생겨
+      // 선이 두 개처럼 흔들렸다 (실사고 2026-07-18 수홍).
+      const image = f ? img(f.url) : null;
       bImg.style.visibility = "hidden";
       bcanvas.style.display = "block";
       bcanvas.width = cellW;
