@@ -778,6 +778,8 @@ function openZoom(stateName, idx, keepWidth) {
       }
       bm.cfg.splits.forEach((s, i) => {
         lineEls[i].style.top = `${((btop + s * bh) / cellH) * 100}%`;
+        // 지오메트리 확정 전엔 숨김 — 임시 위치로 보였다 점프하지 않는다
+        lineEls[i].style.visibility = bm.geomReady ? "" : "hidden";
       });
     };
 
@@ -863,25 +865,14 @@ function openZoom(stateName, idx, keepWidth) {
         bm.geomReady = true;
         syncLines();
         renderTick();
-        commit();
+        commit(); // 에디터 오픈 = 레이어 활성 (Esc 로 이전 상태 복원 가능)
         rebuildStrip();
         return true;
       }
-      const cx0 = compositeCell();
-      const sil = silhouetteStats(cx0.getImageData(0, 0, cellW, cellH).data, cellW, cellH);
-      if (sil.top >= cellH) return false; // 불투명 픽셀 0 — 아직 빈 합성
-      btop = sil.top;
-      bh = sil.h;
-      if (!e0.breathe && !beforeCfg && bm.histPos <= 0) {
-        bm.cfg.splits = [Math.round(sil.split * 100) / 100]; // 휴리스틱 가슴선
-        if (bm.histPos === 0) bm.hist[0] = clone(bm.cfg);
-      }
-      bm.geomReady = true;
-      syncLines();
-      renderTick();
-      commit(); // 에디터 오픈 = 레이어 활성 (Esc 로 이전 상태 복원 가능)
-      rebuildStrip();
-      return true;
+      // 캐노니컬 이미지 미로드 = 아직 못 잰다 — 재시도 경로가 처리한다.
+      // (폴백 금지: 표시용 쌍둥이(compositeCell)는 변형 미적용 + 풋프린트가 달라
+      //  선이 엉뚱한 위치에 놓였다 — 실사고 2026-07-19 수홍 "어떨 때는 이상한 위치".)
+      return false;
     };
     // 최종 굽기 필름스트립 (수홍 요청 2026-07-18 "최종 프레임들을 나열해서"):
     // 시퀀스×호흡주기 LCM 전개를 그대로 보여준다 — GIF/아틀라스에 구워질 순서.
@@ -1065,6 +1056,9 @@ function openZoom(stateName, idx, keepWidth) {
         if (!initSilhouette() && ++geomTries < 50) setTimeout(retryGeom, 120);
       };
       if (bImg) bImg.addEventListener("load", () => initSilhouette(), { once: true });
+      const fr0 = frameOf(stateName, idx);
+      const canon0 = fr0 ? img(fr0.url) : null; // 지오메트리 truth 는 캐노니컬 — 그 로드가 진짜 신호
+      if (canon0 && !canon0.complete) canon0.addEventListener("load", () => initSilhouette(), { once: true });
       setTimeout(retryGeom, 120);
     }
 

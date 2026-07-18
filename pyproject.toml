@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 name = "sprite-gen"
 # Release discipline: keep this package metadata version synchronized with
 # SKILL.md's `version:` field in the same release commit.
-version = "1.56.47"
+version = "1.56.48"
 description = "Component-row pipeline for clean 2D game sprites and animation atlases"
 readme = "README.md"
 license = "Apache-2.0"

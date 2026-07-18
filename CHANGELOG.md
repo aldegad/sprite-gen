@@ -5,6 +5,18 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.48 "Sol Atelier" - Breathe line lands correctly on cold load
+
+- **Fix: breathe split lines sometimes appeared at the wrong position** when
+  opening the editor before the canonical frame image finished loading. A
+  silent fallback measured geometry from the untransformed display twin
+  (different footprint, no transforms) and marked it final, so the wrong
+  position stuck. The fallback is removed - geometry has one truth (the
+  post-transform canonical composite, same as bake); until it can be
+  measured the lines stay hidden and a retry + canonical-image load listener
+  finishes the job. Verified warm and cold (700 ms throttled images): both
+  land on the identical row.
+
 ## v1.56.47 "Sol Atelier" - Marquee ergonomics, tool hotkeys, auto landmarks
 
 - **Marquee move-while-drawing** - hold Space (or Cmd/Ctrl) while dragging a
