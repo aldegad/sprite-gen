@@ -214,7 +214,9 @@ function renderPipelineTree() {
     aLi.appendChild(aUl);
   }
   if (run.hasAtlas) {
-    liWith(fileUl, treeNode("sprite-sheet-alpha.png", t("treeAtlasNote"), `/run/sprite-sheet-alpha.png?v=${treeRevision || 0}`, null));
+    // 파일 트리의 아틀라스 노드도 클릭 = 최종 아틀라스 섹션 스크롤 (수홍 2026-07-18 —
+    // 파이프라인 트리의 아틀라스 노드와 같은 목적지; "__atlas__" 라우팅 공유)
+    liWith(fileUl, treeNode("sprite-sheet-alpha.png", t("treeAtlasNote"), `/run/sprite-sheet-alpha.png?v=${treeRevision || 0}`, "__atlas__"));
   }
 
   const wrap = document.createElement("section");
