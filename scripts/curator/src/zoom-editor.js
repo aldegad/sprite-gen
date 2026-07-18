@@ -740,13 +740,33 @@ function openZoom(stateName, idx, keepWidth) {
 
     const initSilhouette = () => {
       if (bm.geomReady) return true;
-      // 지오메트리 truth = 캐노니컬 프레임 contentBox (굽기가 쓰는 그 좌표계).
-      // 표시 변형(원본 쌍둥이)은 실루엣이 달라 선이 "최종선이 아닌" 곳에 그려졌다
-      // (실사고 2026-07-18 수홍). contentBox 는 /api/run 이 즉시 주므로 레이스도 없다.
+      // 지오메트리 truth = 굽기와 같은 합성 결과의 bbox — 캐노니컬 픽셀 + 변형 +
+      // 픽셀 편집을 적용한 뒤 잰다 (실사고 2026-07-18 수홍: 캐릭터를 축소하니
+      // 선이 축소 전 위치를 기준으로 잡힘 — 굽기는 변형 후 bbox 를 쓴다).
       const fr = frameOf(stateName, idx);
-      if (fr && fr.contentBox) {
-        btop = fr.contentBox[1];
-        bh = Math.max(1, fr.contentBox[3] - fr.contentBox[1]);
+      const canonImg = fr ? img(fr.url) : null;
+      if (canonImg && canonImg.complete && canonImg.naturalWidth) {
+        const cvs = document.createElement("canvas");
+        cvs.width = cellW;
+        cvs.height = cellH;
+        const cctx = cvs.getContext("2d");
+        cctx.imageSmoothingEnabled = false;
+        drawFrameInto(cctx, canonImg, getTransform(stateName, idx), cellW, cellH,
+          snapScaleFor(stateName), getPixelOps(stateName, idx));
+        const dd = cctx.getImageData(0, 0, cellW, cellH).data;
+        let ttop = cellH, tbot = 0;
+        for (let y = 0; y < cellH; y++) {
+          for (let x = 0; x < cellW; x++) {
+            if (dd[(y * cellW + x) * 4 + 3] >= 40) {
+              if (y < ttop) ttop = y;
+              if (y + 1 > tbot) tbot = y + 1;
+              break;
+            }
+          }
+        }
+        if (tbot <= ttop) return false; // 아직 빈 합성 — 재시도 경로가 처리
+        btop = ttop;
+        bh = Math.max(1, tbot - ttop);
         if (!e0.breathe && !beforeCfg && bm.histPos <= 0) {
           const cxh = compositeCell();
           const silh = silhouetteStats(cxh.getImageData(0, 0, cellW, cellH).data, cellW, cellH);
