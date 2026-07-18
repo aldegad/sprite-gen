@@ -260,6 +260,7 @@ function t(key) {
 
 function applyStaticLang() {
   document.getElementById("t-title").textContent = t("title");
+  document.getElementById("dl-main").textContent = `${t("cmpDl")} ▾`;
   document.getElementById("compose").textContent = t("compose");
   document.getElementById("export").textContent = t("export");
   document.getElementById("export-gif").textContent = t("exportGif");
