@@ -45,6 +45,70 @@ def test_verify_png_accepts_real_png_and_rejects_junk(tmp_path: Path) -> None:
         gen_base.verify_png(tmp_path / "missing.png")
 
 
+def test_provider_subprocess_env_scrubs_kuma_session_identity(monkeypatch) -> None:
+    # A headless generation subprocess must not inherit the spawning worker's
+    # Kuma endpoint identity — else the engine's own Kuma hooks broadcast this
+    # generation's prompt to the worker's Discord channel (leak 2026-07-18).
+    for key in gen_base._KUMA_SESSION_IDENTITY_ENV:
+        monkeypatch.setenv(key, "ep:should-not-inherit")
+    monkeypatch.setenv("KUMA_STUDIO_PORT", "4312")  # non-identity var is kept
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    env = gen_base.provider_subprocess_env()
+
+    for key in gen_base._KUMA_SESSION_IDENTITY_ENV:
+        assert key not in env, f"{key} must be scrubbed from a generation subprocess env"
+    assert env.get("KUMA_STUDIO_PORT") == "4312"  # only identity vars are dropped
+    assert env.get("PATH") == "/usr/bin"
+
+
+def test_provider_run_uses_scrubbed_env(tmp_path: Path, monkeypatch) -> None:
+    # Both providers must route their subprocess.run through the scrubbed env.
+    import sprite_gen.gen.grok_provider as grok_provider
+
+    seen: dict[str, dict | None] = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = '{"type":"thread.started","thread_id":"aaaa-bbbb"}\n'
+        stderr = ""
+
+    def _fake_codex_run(cmd, **kwargs):
+        seen["codex"] = kwargs.get("env")
+        return _Completed()
+
+    # Short-circuit codex's post-run rollout parsing — we only assert the env.
+    monkeypatch.setattr(codex_provider.subprocess, "run", _fake_codex_run)
+    monkeypatch.setattr(codex_provider, "_resolve_rollout", lambda sid: tmp_path / "x.jsonl")
+    b64 = base64.b64encode(_png_bytes()).decode()
+    monkeypatch.setattr(codex_provider, "_collect_inline_results", lambda rollout: [b64])
+    monkeypatch.setenv("KUMA_RUNTIME_ENDPOINT_ID", "ep:leaky")
+    codex_provider.CodexProvider().generate(
+        GenRequest(prompt="a mushroom", raw=tmp_path / "raw.png"), tmp_path
+    )
+    assert seen["codex"] is not None
+    assert "KUMA_RUNTIME_ENDPOINT_ID" not in seen["codex"]
+
+    grok_raw = tmp_path / "grok_raw.png"
+
+    def _fake_grok_run(cmd, **kwargs):
+        seen["grok"] = kwargs.get("env")
+        # grok's truth is the PNG on disk — write one so verify_png passes.
+        Image.new("RGBA", (8, 8), (255, 0, 255, 255)).save(grok_raw)
+        class _C:
+            returncode = 0
+            stdout = str(grok_raw)
+            stderr = ""
+        return _C()
+
+    monkeypatch.setattr(grok_provider.subprocess, "run", _fake_grok_run)
+    grok_provider.GrokProvider().generate(
+        GenRequest(prompt="a mushroom", raw=grok_raw), tmp_path
+    )
+    assert seen["grok"] is not None
+    assert "KUMA_RUNTIME_ENDPOINT_ID" not in seen["grok"]
+
+
 def test_codex_inline_extraction_reads_both_record_types(tmp_path: Path) -> None:
     b64 = base64.b64encode(_png_bytes()).decode()
     rollout = tmp_path / "rollout-test.jsonl"

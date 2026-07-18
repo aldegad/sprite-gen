@@ -10,11 +10,50 @@ path or a "done" string (No Silent Fallback).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+# Kuma injects these session-identity env vars into a native worker's PTY
+# (kuma-studio runtime-native-backend.mjs). They name WHICH endpoint a live
+# worker session is, and Kuma's engine hooks (kuma-turn-signal / activity-emit /
+# artifact-emit) key on KUMA_RUNTIME_ENDPOINT_ID to report that session's turns,
+# prompts, and artifacts back to the studio — and onward to the worker's
+# connected Discord channel.
+#
+# A generation subprocess we spawn here (`codex exec`, `grok`) is NOT that
+# worker's interactive session. But a child inherits the parent's environment,
+# so without scrubbing it would carry the parent worker's endpoint identity: the
+# child engine's own Kuma hooks then attribute THIS generation's full prompt and
+# tool calls to the parent worker's endpoint, broadcasting them to that worker's
+# Discord channel (observed live 2026-07-18: codex generation prompts leaked to a
+# solvell thread). Dropping these makes the child correctly a non-kuma session —
+# exactly the hooks' own documented contract ("no endpoint id = nothing to
+# report"), not a special case. See kuma-studio scripts/hooks/kuma-turn-signal.sh.
+_KUMA_SESSION_IDENTITY_ENV = (
+    "KUMA_RUNTIME_ENDPOINT_ID",
+    "KUMA_NATIVE_ENDPOINT_ID",
+    "KUMA_INITIATOR_SURFACE",
+    "KUMA_DISPATCH_INITIATOR_SURFACE",
+    "KUMA_DISPATCH_RUNTIME_ADAPTER",
+)
+
+
+def provider_subprocess_env() -> dict[str, str]:
+    """Environment for a headless generation subprocess.
+
+    The parent environment minus Kuma's session-identity vars, so a spawned
+    engine (`codex exec`, `grok`) never impersonates the spawning worker's
+    endpoint to the Kuma hook layer. SSoT for every provider's `subprocess.run`
+    env — providers must not spawn with the inherited env directly.
+    """
+    env = dict(os.environ)
+    for key in _KUMA_SESSION_IDENTITY_ENV:
+        env.pop(key, None)
+    return env
 
 
 def verify_png(path: Path) -> int:
