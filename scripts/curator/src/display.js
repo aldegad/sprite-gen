@@ -92,7 +92,7 @@ function updateCardGrid(card) {
   const useFinal = on && plainShown && frame && frame.contentBox && scale && stage && axisAligned;
   if (ingrid) {
     if (useFinal) {
-      drawFinalGrid(ingrid, stage, frame.contentBox, scale, t);
+      drawFinalGrid(ingrid, stage, frame.contentBox, scale, t, frame.inputGrid || null);
       ingrid.style.display = "block";
     } else {
       ingrid.style.display = "none";
@@ -110,7 +110,7 @@ function updateCardGrid(card) {
 // 원본 쌍둥이 위에 그린다 — 초록 칸 하나가 결과 픽셀 하나에 정확히 대응한다.
 // 축정렬 변형(이동 dx/dy, 좌우반전)은 bbox 를 같은 규칙(CSS: 중심 기준 반전 후 이동)으로
 // 옮겨 콘텐츠를 따라간다. 비축정렬 변형은 호출 전에 걸러진다 (updateCardGrid).
-function drawFinalGrid(canvas, stage, box, scale, t) {
+function drawFinalGrid(canvas, stage, box, scale, t, inputGrid) {
   const w = Math.max(1, Math.round(stage.clientWidth));
   const h = Math.max(1, Math.round(stage.clientHeight));
   canvas.width = w;
@@ -121,12 +121,33 @@ function drawFinalGrid(canvas, stage, box, scale, t) {
   ctx.lineWidth = 1;
   const sx = w / run.cell.width;
   const sy = h / run.cell.height;
+  const dx = t ? t.dx : 0;
+  const dy = t ? t.dy : 0;
+  const cw = run.cell.width;
+  // 추출이 검출한 실제 절단선(input_grids, 쌍둥이 셀 좌표)이 있으면 그것을 그린다 —
+  // 균등 분할은 끝점만 맞고 중간이 어긋난다 (수홍 발견 2026-07-18 down_lie:
+  // "머리끝발끝은 맞는데 중간 픽셀이 하나도 안 맞아"). conform 축소 폐지(v1.56.22)로
+  // 1차 절단선이 곧 최종 대응이 됐다. 없는 프레임(구세대 캐시·테이크)만 균등 근사.
+  if (inputGrid && Array.isArray(inputGrid.x) && Array.isArray(inputGrid.y) && inputGrid.x.length > 1 && inputGrid.y.length > 1) {
+    const xs = t && t.flipX ? inputGrid.x.map((e) => cw - e).reverse() : inputGrid.x;
+    const yTop = (inputGrid.y[0] + dy) * sy;
+    const yBot = (inputGrid.y[inputGrid.y.length - 1] + dy) * sy;
+    const xLeft = (xs[0] + dx) * sx;
+    const xRight = (xs[xs.length - 1] + dx) * sx;
+    for (const e of xs) {
+      const px = Math.round((e + dx) * sx) + 0.5;
+      ctx.beginPath(); ctx.moveTo(px, yTop); ctx.lineTo(px, yBot); ctx.stroke();
+    }
+    for (const e of inputGrid.y) {
+      const py = Math.round((e + dy) * sy) + 0.5;
+      ctx.beginPath(); ctx.moveTo(xLeft, py); ctx.lineTo(xRight, py); ctx.stroke();
+    }
+    return;
+  }
   const cellsX = Math.max(1, Math.round((box[2] - box[0]) / scale));
   const cellsY = Math.max(1, Math.round((box[3] - box[1]) / scale));
   let bx0 = box[0], bx1 = box[2];
-  if (t && t.flipX) { const cw = run.cell.width; [bx0, bx1] = [cw - box[2], cw - box[0]]; }
-  const dx = t ? t.dx : 0;
-  const dy = t ? t.dy : 0;
+  if (t && t.flipX) { [bx0, bx1] = [cw - box[2], cw - box[0]]; }
   const x0 = (bx0 + dx) * sx, x1 = (bx1 + dx) * sx;
   const y0 = (box[1] + dy) * sy, y1 = (box[3] + dy) * sy;
   for (let k = 0; k <= cellsX; k++) {

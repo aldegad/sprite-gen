@@ -290,6 +290,11 @@ def _build_run_state_impl(run_dir: Path) -> dict:
                 frame["plainUrl"] = _url(*plain_rel.split("/"))
             if index < len(labels):
                 frame["label"] = labels[index]
+            # 추출이 검출한 실제 절단선 (쌍둥이 셀 좌표) — 원본 화질 뷰의 최종 대응
+            # 격자가 균등 분할 대신 이 선을 그린다 (중간 드리프트 제거)
+            row_grids = row.get("input_grids") or []
+            if index < len(row_grids) and row_grids[index]:
+                frame["inputGrid"] = row_grids[index]
             if present and Image is not None:
                 # 실제 스프라이트 픽셀 크기(투명 패딩 제외 알파 bbox) — 사이즈 통일 검수용
                 try:
