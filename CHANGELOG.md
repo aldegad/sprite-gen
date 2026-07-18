@@ -5,6 +5,14 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.53 "Sol Atelier" - Compare guide controls: hide / show / clear all
+
+- Compare canvas gained guide-line controls: a hide/show toggle (lines are
+  kept, just hidden; state persists per character) and a clear-all button
+  (undoable with Cmd/Ctrl+Z). Adding a new guide while hidden auto-shows
+  them. Verified: toggle, clear, undo-restore (5 lines), and hidden state
+  surviving close/reopen.
+
 ## v1.56.52 "Sol Atelier" - Shortcuts work in Korean IME / any keyboard layout
 
 - Tool hotkeys (B/P/E/I/M) and Cmd/Ctrl+Z now match on the PHYSICAL key
