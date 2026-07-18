@@ -1206,8 +1206,23 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 #compare-modal .cmp-stage { position: relative; align-self: center; background-color: var(--checker-a); background-image: linear-gradient(45deg, var(--checker-b) 25%, transparent 25%), linear-gradient(-45deg, var(--checker-b) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--checker-b) 75%), linear-gradient(-45deg, transparent 75%, var(--checker-b) 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; border-radius: 6px; }
 #compare-modal .cmp-canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
 #compare-modal .cmp-guides { position: absolute; inset: 0; pointer-events: none; }
-#compare-modal .cmp-guide { position: absolute; left: 0; right: 0; border-top: 2px dashed rgba(220, 38, 38, 0.85); pointer-events: auto; cursor: ns-resize; }
-#compare-modal .cmp-guide span { position: absolute; right: 4px; top: -18px; font-size: 10.5px; color: #dc2626; background: rgba(255,255,255,0.85); padding: 0 4px; border-radius: 3px; }
+#compare-modal .cmp-body { display: flex; gap: 10px; min-height: 0; }
+#compare-modal .cmp-list { flex: 0 0 190px; max-height: 64vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+#compare-modal .cmp-item { display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 3px 5px; border-radius: 6px; cursor: pointer; }
+#compare-modal .cmp-item:hover { background: var(--panel-2); }
+#compare-modal .cmp-item img { width: 26px; height: 26px; object-fit: contain; image-rendering: pixelated; }
+#compare-modal .cmp-scroll { overflow: auto; max-height: 64vh; flex: 1; }
+/* 가이드: 0px 선은 못 잡는다 — 9px 히트영역 안에 선을 그린다 (수홍 "안 움직여") */
+#compare-modal .cmp-guide { position: absolute; pointer-events: auto; }
+#compare-modal .cmp-guide.gh { left: 0; right: 0; height: 9px; margin-top: -4px; cursor: ns-resize; }
+#compare-modal .cmp-guide.gh::before { content: ""; position: absolute; left: 0; right: 0; top: 4px; border-top: 2px dashed rgba(220, 38, 38, 0.85); }
+#compare-modal .cmp-guide.gv { top: 0; bottom: 0; width: 9px; margin-left: -4px; cursor: ew-resize; }
+#compare-modal .cmp-guide.gv::before { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; border-left: 2px dashed rgba(220, 38, 38, 0.85); }
+#compare-modal .cmp-guide.focused.gh::before { border-top-style: solid; border-top-width: 3px; }
+#compare-modal .cmp-guide.focused.gv::before { border-left-style: solid; border-left-width: 3px; }
+#compare-modal .cmp-guide.gh span { position: absolute; right: 4px; top: -14px; font-size: 10.5px; color: #dc2626; background: rgba(255,255,255,0.85); padding: 0 4px; border-radius: 3px; }
+#compare-modal .cmp-guide.gv span { position: absolute; left: 8px; top: 4px; font-size: 10.5px; color: #dc2626; background: rgba(255,255,255,0.85); padding: 0 4px; border-radius: 3px; }
+#compare-modal .cmp-zoom-label { font-size: 12px; color: var(--muted); min-width: 30px; }
 #compare-modal .cmp-legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
 #compare-modal .cmp-key .cmp-name { font-weight: 600; color: var(--text); }
 
