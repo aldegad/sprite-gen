@@ -917,6 +917,33 @@ class CurationHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "applied": applied, "space": space,
                                  "backup": backup.name})
                 return
+            if path == "/api/state-fps":
+                # 줄 전체 재생 속도 = state fps (SSoT = sprite-request.json).
+                # 프레임별 지속시간은 프레임 복제가 담당 (수홍 확정 2026-07-18 —
+                # per-frame duration 이중 진실 금지). fps 는 재생 메타데이터라
+                # 추출/프레임 캐시와 무관하다.
+                payload = self._read_body()
+                state = str(payload.get("state") or "")
+                try:
+                    fps = int(payload.get("fps"))
+                except (TypeError, ValueError):
+                    self._send_json({"error": "fps:int required"}, 400)
+                    return
+                if not 1 <= fps <= 30:
+                    self._send_json({"error": f"fps must be 1..30: {fps}"}, 400)
+                    return
+                with publish_guard(self.run_dir):
+                    request_path = self.run_dir / "sprite-request.json"
+                    request = json.loads(request_path.read_text(encoding="utf-8"))
+                    if state not in request.get("states", {}):
+                        self._send_json({"error": f"unknown state: {state}"}, 400)
+                        return
+                    request["states"][state]["fps"] = fps
+                    from runio import atomic_write_text
+                    atomic_write_text(request_path,
+                                      json.dumps(request, ensure_ascii=False, indent=2) + "\n")
+                self._send_json({"ok": True, "state": state, "fps": fps})
+                return
             if path == "/api/interpolate":
                 payload = self._read_body()
                 state = str(payload.get("state") or "")

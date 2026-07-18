@@ -15,7 +15,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from sprite_gen.breathe import bake_breathe_sequence
-from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_durations, state_pixel_ops, state_plan
+from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import read_guard
@@ -157,16 +157,8 @@ def _run_dir_mode_guarded(args, run_dir):
             images = [im.resize((im.width * scale, im.height * scale), Image.Resampling.NEAREST)
                       for im in images]
         out_path = out_root / f"{state}.gif"
-        base_ms = max(1, round(1000.0 / fps))
-        mults = state_durations(curation, state)
-        # 루프-맞춤 굽기라 baked 길이 == ordered 길이 — 위치 1:1 로 배수 적용
-        frame_durations = [max(10, round(base_ms * mults.get(index, 1.0))) for index in ordered]
-        if len(frame_durations) != len(images):
-            frame_durations = [base_ms] * len(images)  # 방어: 길이 불일치 시 등간격 (관측 불필요 — 현재 계약상 불가)
-        uniform = len(set(frame_durations)) == 1
-        save_clean_gif(images, out_path,
-                       duration_ms=frame_durations[0] if uniform else frame_durations,
-                       loop=args.loop_count, alpha_threshold=args.alpha_threshold)
+        duration_ms = max(1, round(1000.0 / fps))
+        save_clean_gif(images, out_path, duration_ms=duration_ms, loop=args.loop_count, alpha_threshold=args.alpha_threshold)
         export_entry = {
             "state": state,
             "output": str(out_path),

@@ -65,12 +65,6 @@ Schema (`curation.json`):
                                                #   colors on moving seams only. Compose/GIF
                                                #   bake deterministically; frames on disk
                                                #   never change, no re-extraction.
-          "durations": {"3": 2},               # optional per-frame play-speed multiplier
-                                               #   (instance index -> x0.25..x8 of the state
-                                               #   base 1000/fps ms — Aseprite-style per-frame
-                                               #   duration). Bakes into manifest
-                                               #   animation.rows.<state>.durations_ms and
-                                               #   per-frame GIF delays. absent -> x1.
           "transforms": {                      # keyed by 0-based frame index (string)
             "0": {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0}
           },
@@ -164,26 +158,6 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
         return None
     return {"splits": splits, "amplitude": amplitude, "breaths": breaths,
             "subpixel": bool(raw.get("subpixel"))}
-
-
-def state_durations(curation: dict[str, Any] | None, state: str) -> dict[int, float]:
-    """프레임별 재생속도 배수 (instance idx -> x0.25..x8, 기본 x1은 미기록)."""
-    if not curation:
-        return {}
-    entry = curation.get("states", {}).get(state)
-    raw = entry.get("durations") if isinstance(entry, dict) else None
-    if not isinstance(raw, dict):
-        return {}
-    out: dict[int, float] = {}
-    for key, value in raw.items():
-        try:
-            idx = int(key)
-            mult = float(value)
-        except (TypeError, ValueError):
-            continue
-        if 0.25 <= mult <= 8 and mult != 1:
-            out[idx] = mult
-    return out
 
 
 def frame_variant(curation: dict[str, Any] | None, state: str | None = None) -> str:

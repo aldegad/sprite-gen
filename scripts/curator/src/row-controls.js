@@ -63,3 +63,51 @@ function makePpToggle(stateName) {
       scheduleSave();
     });
 }
+
+
+// 줄 전체 재생 속도 (fps) 스텝퍼 — SSoT 는 sprite-request.json (서버가 원자 수정).
+// 프레임별 지속시간은 프레임 복제(아틀라스 셀 공유 = 부하 0)가 담당한다 (수홍 확정
+// 2026-07-18 — per-frame duration 방식 폐기). 변경은 프리뷰/호흡 편집기에 즉시 반영.
+function makeFpsStepper(stateName) {
+  const st = run.states.find((s) => s.name === stateName);
+  const wrap = document.createElement("span");
+  wrap.className = "fps-stepper";
+  wrap.title = t("tFpsStepper");
+  const minus = document.createElement("button");
+  minus.type = "button";
+  minus.textContent = "−";
+  const label = document.createElement("span");
+  label.className = "fps-value";
+  label.textContent = `${(st && st.fps) || 6}fps`;
+  const plus = document.createElement("button");
+  plus.type = "button";
+  plus.textContent = "+";
+  const apply = async (next) => {
+    const clamped = Math.max(1, Math.min(30, next));
+    if (!st || clamped === st.fps) return;
+    minus.disabled = plus.disabled = true;
+    try {
+      const res = await fetch("/api/state-fps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state: stateName, fps: clamped }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+      st.fps = clamped; // 모델 즉시 반영 — 프리뷰/에디터 틱이 이 값을 읽는다
+      label.textContent = `${clamped}fps`;
+      const meta = document.querySelector(`.state[data-state="${cssEscape(stateName)}"] .state-head .meta`);
+      if (meta) meta.textContent = meta.textContent.replace(/\d+fps/, `${clamped}fps`);
+      setStatus(STR[lang].fpsSet(stateName, clamped));
+    } catch (e) {
+      setStatus(t("fpsFail") + e.message, "err");
+    }
+    minus.disabled = plus.disabled = false;
+  };
+  minus.addEventListener("click", () => apply(((st && st.fps) || 6) - 1));
+  plus.addEventListener("click", () => apply(((st && st.fps) || 6) + 1));
+  wrap.appendChild(minus);
+  wrap.appendChild(label);
+  wrap.appendChild(plus);
+  return wrap;
+}

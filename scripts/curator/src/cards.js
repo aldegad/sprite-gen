@@ -46,6 +46,7 @@ function renderState(state, replaceEl) {
       : "";
     const controls = document.createElement("span");
     controls.className = "row-controls";
+    controls.appendChild(makeFpsStepper(state.name));
     if (showGridToggle) controls.appendChild(makeGridToggle(state.name));
     if (showPpToggle) controls.appendChild(makePpToggle(state.name));
     if (showGifBtn) controls.appendChild(makeGifButton(state.name));
@@ -142,7 +143,6 @@ function renderCard(state, frame) {
     : `<div class="missing-label">${state.rawPresent ? t("missingRawWait") : t("missingPending")}</div>`;
 
   const isClone = frame.clone !== undefined;
-  const durMult = (entries[state.name].durations || {})[frame.index] || 1;
   const srcName = isClone ? frameDisplayName(state.name, frame.clone) : null;
   const shortLabel = isClone ? STR[lang].cloneBadge(srcName) : (frame.label ? frame.label : `#${frame.index}`);
   // 풀네임(복사 대상) — 에이전트가 그대로 집어가도록 런-상대 파일 경로 + 라벨.
@@ -186,7 +186,6 @@ function renderCard(state, frame) {
     (frame.present
       ? `<div class="card-info">${psize}<span class="tvals"></span></div>` +
         `<div class="card-controls">` +
-        `<button type="button" class="ghost dur-chip" data-tip="${t("tDurChip")}" aria-label="frame-duration">×${durMult}</button>` +
         `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
         `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}" aria-label="reset">↺</button>` +
         `<span class="ctrl-group">` +
@@ -208,19 +207,6 @@ function renderCard(state, frame) {
       if (imgEl.complete) markPx();
       else imgEl.addEventListener("load", markPx, { once: true });
     }
-    const durChip = card.querySelector(".dur-chip");
-    if (durChip) durChip.addEventListener("click", () => {
-      // 배속 순환: x1 → x2 → x3 → x4 → x0.5 (Aseprite 식 프레임별 duration)
-      const cycle = [1, 2, 3, 4, 0.5];
-      const e2 = entries[state.name];
-      const cur = (e2.durations || {})[frame.index] || 1;
-      const next = cycle[(cycle.indexOf(cur) + 1) % cycle.length];
-      e2.durations = e2.durations || {};
-      if (next === 1) delete e2.durations[frame.index];
-      else e2.durations[frame.index] = next;
-      durChip.textContent = `×${next}`;
-      scheduleSave();
-    });
     card.querySelector(".reset-btn").addEventListener("click", () =>
       resetTransform(state.name, frame.index)
     );
@@ -390,9 +376,7 @@ function startPreview(state) {
     if (!root.isConnected) return; // 섹션이 교체/제거되면 이 루프는 은퇴
     const play = playList(state.name);
     if (pv.playing && play.length) {
-      // 프레임별 재생속도: 현재 프레임의 배수만큼 더 머문다 (배속 pv.speed 와 곱)
-      const durMult2 = (entries[state.name].durations || {})[play[pv.cursor]] || 1;
-      const interval = (1000 / Math.max(0.1, state.fps * pv.speed)) * durMult2;
+      const interval = 1000 / Math.max(0.1, state.fps * pv.speed);
       if (ts - last >= interval) {
         last = ts;
         pv.cursor = (pv.cursor + 1) % play.length;

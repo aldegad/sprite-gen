@@ -48,20 +48,15 @@ def save_clean_gif(
     frames: Iterable[Image.Image],
     output_path: Path,
     *,
-    duration_ms: int | list[int],
+    duration_ms: int,
     loop: int = 0,
     alpha_threshold: int = 8,
 ) -> None:
     """Save RGBA frames as a clean transparent GIF.
 
-    `duration_ms` 는 정수(전 프레임 동일) 또는 프레임별 리스트 (per-frame duration —
-    Aseprite/GIF 표준 방식, 수홍 요청 2026-07-18 프레임별 재생속도).
     `loop=0` means infinite loop in GIF/Pillow terminology.
     """
-    if isinstance(duration_ms, list):
-        if not duration_ms or any(int(d) <= 0 for d in duration_ms):
-            raise ValueError("per-frame duration_ms must all be positive")
-    elif duration_ms <= 0:
+    if duration_ms <= 0:
         raise ValueError("duration_ms must be positive")
     prepared = [_prepare_transparent_frame(frame, alpha_threshold) for frame in frames]
     if not prepared:
