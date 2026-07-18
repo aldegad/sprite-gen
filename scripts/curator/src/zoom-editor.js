@@ -627,6 +627,7 @@ function openZoom(stateName, idx, keepWidth) {
       if (bm.cancelled) return;
       e0.breathe = clone(bm.cfg);
       scheduleSave();
+      if (typeof scheduleStrip === "function") scheduleStrip();
     };
     const pushHist = () => {
       bm.hist = bm.hist.slice(0, bm.histPos + 1);
@@ -737,18 +738,67 @@ function openZoom(stateName, idx, keepWidth) {
       syncLines();
       renderTick();
       commit(); // 에디터 오픈 = 레이어 활성 (Esc 로 이전 상태 복원 가능)
+      rebuildStrip();
       return true;
     };
-    syncLines();
-    if (!initSilhouette()) {
-      let geomTries = 0;
-      const retryGeom = () => {
-        if (bm.cancelled || !document.body.contains(stage)) return;
-        if (!initSilhouette() && ++geomTries < 50) setTimeout(retryGeom, 120);
-      };
-      if (bImg) bImg.addEventListener("load", () => initSilhouette(), { once: true });
-      setTimeout(retryGeom, 120);
-    }
+    // 최종 굽기 필름스트립 (수홍 요청 2026-07-18 "최종 프레임들을 나열해서"):
+    // 시퀀스×호흡주기 LCM 전개를 그대로 보여준다 — GIF/아틀라스에 구워질 순서.
+    const strip = document.createElement("div");
+    strip.className = "breathe-strip";
+    // 스테이지 플렉스 행(.stage-row) 밖, 그 아래에 — 행 안에 넣으면 스테이지가 눌린다
+    (stage.closest(".stage-row") || stage).insertAdjacentElement("afterend", strip);
+    let stripTimer = null;
+    const rebuildStrip = () => {
+      const play = playList(stateName);
+      const pattern = breathePattern(bm.cfg);
+      strip.innerHTML = "";
+      if (!play.length) return;
+      const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+      const lcm = (play.length * pattern.length) / gcd(play.length, pattern.length);
+      const total = Math.min(60, lcm);
+      const cap = document.createElement("div");
+      cap.className = "bs-caption";
+      cap.textContent = STR[lang].breatheStrip(play.length, pattern.length, lcm, total);
+      strip.appendChild(cap);
+      const rowEl = document.createElement("div");
+      rowEl.className = "bs-frames";
+      for (let i = 0; i < total; i++) {
+        const frameIdx = play[i % play.length];
+        const phase = pattern[i % pattern.length];
+        const f = frameOf(stateName, frameIdx);
+        const image = f ? img(frameUrl(stateName, f)) : null;
+        const cellEl = document.createElement("div");
+        cellEl.className = "bs-cell";
+        const cv = document.createElement("canvas");
+        cv.width = cellW;
+        cv.height = cellH;
+        cv.className = "px-upscale";
+        const cctx = cv.getContext("2d");
+        cctx.imageSmoothingEnabled = false;
+        if (image && image.complete && image.naturalWidth) {
+          const b = document.createElement("canvas");
+          b.width = cellW;
+          b.height = cellH;
+          const bx = b.getContext("2d");
+          bx.imageSmoothingEnabled = false;
+          drawFrameInto(bx, image, getTransform(stateName, frameIdx), cellW, cellH,
+            snapScaleFor(stateName), getPixelOps(stateName, frameIdx));
+          cctx.drawImage(breatheComposite(b, bm.cfg, phase), 0, 0);
+        }
+        cellEl.appendChild(cv);
+        const capEl = document.createElement("span");
+        capEl.className = "bs-cap";
+        const phaseTxt = Number.isInteger(phase) ? String(phase) : phase.toFixed(1);
+        capEl.textContent = `${frameDisplayName(stateName, frameIdx)} · P${phaseTxt}`;
+        cellEl.appendChild(capEl);
+        rowEl.appendChild(cellEl);
+      }
+      strip.appendChild(rowEl);
+    };
+    const scheduleStrip = () => {
+      clearTimeout(stripTimer);
+      stripTimer = setTimeout(rebuildStrip, 220);
+    };
 
     const bar = document.createElement("div");
     bar.className = "breathe-bar";
@@ -821,6 +871,18 @@ function openZoom(stateName, idx, keepWidth) {
     }
 
     // Esc = 취소 (열기 전 설정으로 복원 — 없었으면 레이어 해제)
+    // 지오메트리 초기화는 스트립/컨트롤 선언 뒤에 — commit→scheduleStrip TDZ 방지
+    syncLines();
+    if (!initSilhouette()) {
+      let geomTries = 0;
+      const retryGeom = () => {
+        if (bm.cancelled || !document.body.contains(stage)) return;
+        if (!initSilhouette() && ++geomTries < 50) setTimeout(retryGeom, 120);
+      };
+      if (bImg) bImg.addEventListener("load", () => initSilhouette(), { once: true });
+      setTimeout(retryGeom, 120);
+    }
+
     zoomView.breatheCancel = () => {
       bm.cancelled = true;
       e0.breathe = beforeCfg;
@@ -832,6 +894,7 @@ function openZoom(stateName, idx, keepWidth) {
     pushHist(); // 히스토리 바닥 = 오픈 시점 설정
     zoomView.cleanupBreathe = () => {
       clearInterval(bm.timer);
+      clearTimeout(stripTimer);
       if (!bm.cancelled) rebuildState(stateName); // 줄 미리보기·토글 상태 동기화
     };
   }

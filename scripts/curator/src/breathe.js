@@ -52,12 +52,42 @@ function breatheComposite(base, cfg, phase) {
   }
   const lo = Math.floor(phase);
   if (phase > lo) {
+    // 서브픽셀 (수홍 정정 2026-07-18): 중간색은 움직이는 경계 밴드(정수리 + 각
+    // 분할선 이음새)에만 — 전체 블렌드는 몸통 안 가로 경계까지 잔상을 만든다.
     const a = breatheComposite(base, cfg, lo);
     const b = breatheComposite(base, cfg, Math.min(lo + 1, cfg.splits.length));
     ctx.drawImage(a, 0, 0);
-    ctx.globalAlpha = 0.5;
-    ctx.drawImage(b, 0, 0);
-    ctx.globalAlpha = 1;
+    const bd = base.getContext("2d").getImageData(0, 0, w, h).data;
+    let bTop = h, bBot = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (bd[(y * w + x) * 4 + 3] >= 40) {
+          if (y < bTop) bTop = y;
+          if (y + 1 > bBot) bBot = y + 1;
+          break;
+        }
+      }
+    }
+    if (bBot > bTop) {
+      const amp = Math.max(1, cfg.amplitude || 1);
+      const seams = [bTop, ...cfg.splits.map((s) => bTop + Math.floor((bBot - bTop) * s))];
+      const mixed = document.createElement("canvas");
+      mixed.width = w;
+      mixed.height = h;
+      const mctx = mixed.getContext("2d");
+      mctx.imageSmoothingEnabled = false;
+      mctx.drawImage(a, 0, 0);
+      mctx.globalAlpha = 0.5;
+      mctx.drawImage(b, 0, 0);
+      mctx.globalAlpha = 1;
+      for (const y of seams) {
+        const r0 = Math.max(0, y - 1);
+        const r1 = Math.min(h, y + amp + 1);
+        if (r1 <= r0) continue;
+        ctx.clearRect(0, r0, w, r1 - r0); // 교체 (합성 아님) — 서버 paste 와 동형
+        ctx.drawImage(mixed, 0, r0, w, r1 - r0, 0, r0, w, r1 - r0);
+      }
+    }
     return out;
   }
   const data = base.getContext("2d").getImageData(0, 0, w, h).data;
