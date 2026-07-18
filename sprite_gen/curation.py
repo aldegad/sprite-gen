@@ -55,15 +55,16 @@ Schema (`curation.json`):
           "breathe": {                         # optional idle-breathing POST-PROCESS LAYER
             "splits": [0.55],                  #   (Soohong 2026-07-18: breathing is a
             "amplitude": 1,                    #   modulation ORTHOGONAL to frame selection —
-            "hold": 3,                         #   a blink frame can breathe too). 1-3 split
+            "breaths": 1,                      #   a blink frame can breathe too). 1-3 split
             "subpixel": false                  #   lines (content-height fractions, asc);
           },                                   #   K lines = K-phase cascade. amplitude px,
-                                               #   hold = frames the rest/exhaled poses hold,
-                                               #   subpixel = insert blended half-phase
-                                               #   frames (sub-pixel animation). Compose/GIF
-                                               #   bake it deterministically over the played
-                                               #   sequence (LCM loop); frames on disk never
-                                               #   change and no re-extraction is involved.
+                                               #   breaths = breath count PER LOOP — the loop
+                                               #   length never changes (fit_breathe_pattern
+                                               #   divides the played sequence exactly).
+                                               #   subpixel = palette-snapped intermediate
+                                               #   colors on moving seams only. Compose/GIF
+                                               #   bake deterministically; frames on disk
+                                               #   never change, no re-extraction.
           "transforms": {                      # keyed by 0-based frame index (string)
             "0": {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0}
           },
@@ -152,10 +153,10 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
         return None
     try:
         amplitude = max(1, min(4, int(raw.get("amplitude", 1))))
-        hold = max(1, min(8, int(raw.get("hold", 3))))
+        breaths = max(1, min(8, int(raw.get("breaths", 1))))
     except (TypeError, ValueError):
         return None
-    return {"splits": splits, "amplitude": amplitude, "hold": hold,
+    return {"splits": splits, "amplitude": amplitude, "breaths": breaths,
             "subpixel": bool(raw.get("subpixel"))}
 
 

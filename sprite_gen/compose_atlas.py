@@ -11,7 +11,7 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.breathe import BAKE_CAP, breathe_pattern, phase_frame
+from sprite_gen.breathe import fit_breathe_pattern, phase_frame
 from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import heal_run, require_frames_manifest
@@ -103,22 +103,16 @@ def _run(args: argparse.Namespace):
         ops_key = json.dumps(state_pixel_ops(curation, state).get(frame_index), sort_keys=True)
         return (source_index, transform_key, ops_key, phase)
 
-    # 호흡 후처리 레이어 (사이드카, 수홍 2026-07-18): 재생 위치 = (프레임, 위상).
-    # LCM 전개는 rect 목록(재생 순서)만 늘린다 — 텍스처 칸은 유니크 (프레임×위상)
-    # 조합만 굽는다 (셀 재사용 계약 그대로).
-    from math import gcd
-
+    # 호흡 후처리 레이어 (사이드카, 수홍 확정 2026-07-18 루프-맞춤): 재생 위치 =
+    # (프레임, 위상), 길이 = 기존 시퀀스 그대로 (루프 불변 — fit_breathe_pattern 이
+    # breaths 회를 시퀀스에 딱 떨어지게 배분). 텍스처 칸은 유니크 (프레임×위상)만.
     def _positions(state: str) -> list[tuple[int, float]]:
         ordered = plans[state][0]
         cfg = state_breathe(curation, state)
         if not cfg or not ordered:
             return [(i, 0.0) for i in ordered]
-        pattern = breathe_pattern(cfg)
-        n, m = len(ordered), len(pattern)
-        total = n * m // gcd(n, m)
-        if total > BAKE_CAP:
-            total = max(n, (BAKE_CAP // n) * n)
-        return [(ordered[i % n], pattern[i % m]) for i in range(total)]
+        pattern = fit_breathe_pattern(len(ordered), cfg)
+        return [(ordered[i], pattern[i]) for i in range(len(ordered))]
 
     positions_by_state = {state: _positions(state) for state in states}
     breathe_by_state = {state: state_breathe(curation, state) for state in states}

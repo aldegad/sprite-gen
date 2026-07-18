@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.56.34
+version: 1.56.35
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick."
 license: Apache-2.0
 depends_on:
@@ -85,7 +85,7 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 
 - `prepare_sprite_run.py` — write `sprite-request.json`, per-state layout guides, prompts, and empty `raw/` + `frames/` from request truth.
 - `extract_sprite_row_frames.py` — read `raw/<state>.png` strips: chroma removal → connected components → transparent frame cells + `frames/frames-manifest.json`.
-- 호흡(idle breathing)은 **후처리 레이어**다 (수홍 확정 2026-07-18) — 스크립트가 아니라 curation.json 사이드카 `states.<state>.breathe = {splits, amplitude, hold, subpixel}` 로 선언하고, compose/GIF 가 재생 시퀀스 위에 결정론(정수 행 시프트, `sprite_gen/breathe.py`)으로 굽는다. 깜빡임 프레임도 그대로 숨쉰다 (프레임 선택과 직교). 큐레이션 뷰: 줄 헤더 호흡 체크박스(즉시 on/off) + 라벨 클릭 편집기(실재생 위 선 1~3개 드래그·진폭·유지·서브픽셀 — 즉시 반영, Esc 복원). 재추출/굽기 대기 없음. `subpixel` = 위상 전이에 50% 블렌드 중간 프레임 (sub-pixel animation).
+- 호흡(idle breathing)은 **후처리 레이어**다 (수홍 확정 2026-07-18) — 스크립트가 아니라 curation.json 사이드카 `states.<state>.breathe = {splits, amplitude, breaths, subpixel}` 로 선언하고, compose/GIF 가 재생 시퀀스 위에 결정론(정수 행 시프트, `sprite_gen/breathe.py`)으로 굽는다. 깜빡임 프레임도 그대로 숨쉰다 (프레임 선택과 직교). 큐레이션 뷰: 줄 헤더 호흡 체크박스(즉시 on/off) + 라벨 클릭 편집기(실재생 위 선 1~3개 드래그·진폭·루프당 호흡 횟수·서브픽셀 — 즉시 반영, Esc 복원, 최종 굽기 필름스트립). 루프 길이는 시퀀스 그대로 불변 — breaths 가 루프에 딱 떨어지게 배분(fit_breathe_pattern). 재추출/굽기 대기 없음. `subpixel` = 위상 전이에 50% 블렌드 중간 프레임 (sub-pixel animation).
 - `interpolate_frames.py` — AI in-between: 두 프레임을 ref 로 물려 **생성형**(codex 기본/grok)으로 중간 프레임을 그려 **테이크**로 기록 (raw 단계 AI — 최종 프레임은 여전히 결정론 추출이 굽는다). 서버 머신의 provider CLI OAuth 를 쓰므로 GUI 버튼도 동작 — 인증 전제와 실측 근거(RIFE 파기): [`docs/frame-interpolation.md`](docs/frame-interpolation.md).
 - `compose_sprite_atlas.py` — compose `sprite-sheet-alpha.png` + runtime `manifest.json.frame_layout`.
 - `preview_animation.py` — QA previews from extracted frames: contact sheets + state GIFs under `qa/`.
