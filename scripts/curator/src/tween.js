@@ -105,6 +105,7 @@ function makeTweenButton(stateName) {
     go.innerHTML = '<span class="tween-spin" aria-label="generating"></span>';
     setStatus(t("tweenBusy"));
     try {
+      startOpProgressWatch(); // 생성 후 전체 재추출 — 진행도 퍼센트 표시
       const res = await fetch("/api/interpolate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -123,6 +124,7 @@ function makeTweenButton(stateName) {
       setStatus(STR[lang].tweenDone(stateName));
       setTimeout(() => window.location.reload(), 800);
     } catch (e) {
+      stopOpProgressWatch();
       setStatus(t("tweenFail") + e.message, "err");
       go.textContent = goLabel;
       go.disabled = btn.disabled = false;

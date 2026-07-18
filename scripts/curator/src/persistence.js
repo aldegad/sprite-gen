@@ -36,6 +36,8 @@ function buildPayload() {
     if (Object.keys(px).length) states[name].pixels = px;
     // per-state pixel-perfect (the row's own toggle) — only for rows with a twin
     if (ppTwinStates.has(name)) states[name].pixel_perfect = ppOn(name);
+    // 호흡 후처리 레이어 (수홍 2026-07-18) — 켠 상태만 기록 (없음 = off)
+    if (entry.breathe) states[name].breathe = entry.breathe;
   }
   const payload = { version: run.schemaVersion || 1, kind: "sprite-gen-curation", states };
   // echo the run generation this view was loaded with; the server rejects the autosave

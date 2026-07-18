@@ -11,7 +11,8 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_pixel_ops, state_plan
+from sprite_gen.breathe import BAKE_CAP, breathe_pattern, phase_frame
+from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import heal_run, require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
@@ -96,14 +97,34 @@ def _run(args: argparse.Namespace):
     # 늘리지 않는다. frame_layout.rows 의 rect 목록은 인스턴스(재생) 순서 그대로이고
     # 재사용 시 같은 rect 가 반복된다 (Aseprite JSON 과 동형 패턴 — 소비자는 지금처럼
     # 프레임 인덱스 → rect 샘플링만 하면 된다).
-    def _instance_key(state: str, frame_index: int) -> tuple:
+    def _instance_key(state: str, frame_index: int, phase: float = 0.0) -> tuple:
         source_index = source_frame_index(curation, state, frame_index, state_frame_total(request, state))
         transform_key = json.dumps(plans[state][1].get(frame_index), sort_keys=True)
         ops_key = json.dumps(state_pixel_ops(curation, state).get(frame_index), sort_keys=True)
-        return (source_index, transform_key, ops_key)
+        return (source_index, transform_key, ops_key, phase)
+
+    # 호흡 후처리 레이어 (사이드카, 수홍 2026-07-18): 재생 위치 = (프레임, 위상).
+    # LCM 전개는 rect 목록(재생 순서)만 늘린다 — 텍스처 칸은 유니크 (프레임×위상)
+    # 조합만 굽는다 (셀 재사용 계약 그대로).
+    from math import gcd
+
+    def _positions(state: str) -> list[tuple[int, float]]:
+        ordered = plans[state][0]
+        cfg = state_breathe(curation, state)
+        if not cfg or not ordered:
+            return [(i, 0.0) for i in ordered]
+        pattern = breathe_pattern(cfg)
+        n, m = len(ordered), len(pattern)
+        total = n * m // gcd(n, m)
+        if total > BAKE_CAP:
+            total = max(n, (BAKE_CAP // n) * n)
+        return [(ordered[i % n], pattern[i % m]) for i in range(total)]
+
+    positions_by_state = {state: _positions(state) for state in states}
+    breathe_by_state = {state: state_breathe(curation, state) for state in states}
 
     columns = max(
-        max(1, len({_instance_key(state, i) for i in plans[state][0]}))
+        max(1, len({_instance_key(state, i, ph) for i, ph in positions_by_state[state]}))
         for state in states
     )
     atlas = Image.new("RGBA", (columns * cell_width, len(states) * cell_height), (0, 0, 0, 0))
@@ -126,11 +147,13 @@ def _run(args: argparse.Namespace):
     for row_index, state in enumerate(states):
         entry = request["states"][state]
         ordered, transforms = plans[state]
+        positions = positions_by_state[state]
+        breathe_cfg = breathe_by_state[state]
         variant = variants[state]
         frames = []
         baked: dict[tuple, dict[str, Any]] = {}  # instance key -> shared rect
-        for frame_index in ordered:
-            key = _instance_key(state, frame_index)
+        for frame_index, breathe_phase in positions:
+            key = _instance_key(state, frame_index, breathe_phase)
             reused = baked.get(key)
             if reused is not None:
                 frames.append(reused)
@@ -150,6 +173,9 @@ def _run(args: argparse.Namespace):
             # apply the human curation transform (identity when uncurated)
             frame = apply_transform(source, transforms.get(frame_index), cell_size,
                                     snap_scale=snap_scale if variant == "pixel" else None)
+            if breathe_cfg and breathe_phase:
+                # 호흡 위상은 최종 셀 픽셀 위 결정론 행 시프트 — 팔레트·격자 불변
+                frame = phase_frame(frame, breathe_cfg, breathe_phase)
             nontransparent = alpha_nonzero_count(frame)
             if nontransparent < args.min_used_pixels:
                 errors.append(f"{state} frame {frame_index} is too sparse ({nontransparent})")
@@ -168,9 +194,9 @@ def _run(args: argparse.Namespace):
         duration_ms = max(1, round(1000.0 / (float(entry.get("fps", 6)) or 6.0)))
         animation["rows"][state] = {
             "row": row_index,
-            "frames": len(ordered),
+            "frames": len(positions),
             "fps": int(entry.get("fps", 6)),
-            "durations_ms": [duration_ms] * len(ordered),
+            "durations_ms": [duration_ms] * len(positions),
             "loop": bool(entry.get("loop", True)),
             "frame_variant": variant,
         }

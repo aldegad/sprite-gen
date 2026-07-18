@@ -1142,8 +1142,14 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .breathe-linectl { display: inline-flex; gap: 2px; }
 .breathe-linectl button { padding: 2px 6px; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .breathe-linectl button:hover { border-color: var(--accent); color: var(--accent); }
-.breathe-apply { padding: 2px 10px; font-size: 11px; border: 1px solid var(--accent, #2563eb); border-radius: 4px; background: var(--accent, #2563eb); color: #fff; cursor: pointer; }
-.breathe-apply:disabled { opacity: 0.7; cursor: default; }
+.breathe-subpixel { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; }
+.breathe-subpixel input { margin: 0; }
+/* 파이프라인 진행 바 — 상단 고정 얇은 바 (표시 전용) */
+#op-progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 5000; background: transparent; pointer-events: none; }
+#op-progress[hidden] { display: none; }
+.op-progress-fill { height: 100%; width: 0; background: var(--accent, #2563eb); transition: width 0.4s ease; }
+.op-progress-fill.indeterminate { animation: op-indet 1.2s linear infinite; width: 40% !important; }
+@keyframes op-indet { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
 /* 줄 헤더 호흡 토글: 체크박스 = 시퀀스 투입 on/off, 라벨 클릭 = 에디터 열기 */
 .breathe-toggle { display: inline-flex; align-items: center; gap: 4px; }
 .breathe-toggle .breathe-open { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }

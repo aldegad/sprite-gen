@@ -6,7 +6,16 @@ async function boot() {
   try {
     const res = await fetch("/api/run");
     run = await res.json();
-    if (run.error) throw new Error(run.error);
+    if (run.error) {
+      if (run.busy) {
+        // 재추출 진행 중 — 진행도 퍼센트를 보여주다가 끝나면 자동 재시도
+        document.getElementById("states").innerHTML =
+          `<div class="fatal">${t("runLoadFail")}\n${run.error}</div>`;
+        startOpProgressWatch(() => window.location.reload());
+        return;
+      }
+      throw new Error(run.error);
+    }
   } catch (e) {
     document.getElementById("states").innerHTML =
       `<div class="fatal">${t("runLoadFail")}\n${e.message}</div>`;
@@ -99,7 +108,15 @@ async function boot() {
   syncPpControls();
   syncGridControls();
   refreshVariantImages();
-  applyPendingBreatheInject(); // 호흡 테이크 굽기 리로드 후 사이클 자동 투입
+  // 레거시 테이크 방식 호흡의 자가 이전 (시퀀스 위상 프레임 → 사이드카 레이어)
+  {
+    const migrated = run.states.filter((s) => migrateLegacyBreathe(s.name));
+    if (migrated.length) {
+      for (const s of migrated) rebuildState(s.name);
+      scheduleSave();
+      setStatus(`호흡 레이어로 자동 이전: ${migrated.map((s) => s.name).join(", ")}`);
+    }
+  }
   // 세대 불일치로 서버가 이번 로드에서 무효화한 행 알림 — 조용한 소실 금지.
   // 백업 파일명을 함께 보여줘 수동 복원 경로를 남긴다 (load_curation_report 계약).
   if (run.curationDropped && run.curationDropped.length) {

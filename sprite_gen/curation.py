@@ -52,6 +52,18 @@ Schema (`curation.json`):
                                                #   order (sequence then candidate pool).
                                                #   Restores the row arrangement on reload.
                                                #   Consumers key off `selected`; ignored here.
+          "breathe": {                         # optional idle-breathing POST-PROCESS LAYER
+            "splits": [0.55],                  #   (Soohong 2026-07-18: breathing is a
+            "amplitude": 1,                    #   modulation ORTHOGONAL to frame selection —
+            "hold": 3,                         #   a blink frame can breathe too). 1-3 split
+            "subpixel": false                  #   lines (content-height fractions, asc);
+          },                                   #   K lines = K-phase cascade. amplitude px,
+                                               #   hold = frames the rest/exhaled poses hold,
+                                               #   subpixel = insert blended half-phase
+                                               #   frames (sub-pixel animation). Compose/GIF
+                                               #   bake it deterministically over the played
+                                               #   sequence (LCM loop); frames on disk never
+                                               #   change and no re-extraction is involved.
           "transforms": {                      # keyed by 0-based frame index (string)
             "0": {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0}
           },
@@ -117,6 +129,34 @@ def imported_ref_role(filename: str) -> str | None:
 
 def curation_path(run_dir: Path) -> Path:
     return run_dir / CURATION_FILENAME
+
+
+def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any] | None:
+    """상태의 호흡 후처리 레이어 설정 (없으면 None) — 정규화·클램프 포함.
+
+    호흡은 프레임 선택(깜빡임 등)과 직교하는 변조 레이어다 (수홍 확정 2026-07-18).
+    반환: {"splits": [asc floats], "amplitude": int, "hold": int, "subpixel": bool}
+    compose/GIF 가 재생 시퀀스 위에 결정론으로 굽는다 — 디스크 프레임 불변."""
+    if not curation:
+        return None
+    entry = curation.get("states", {}).get(state)
+    raw = entry.get("breathe") if isinstance(entry, dict) else None
+    if not isinstance(raw, dict):
+        return None
+    try:
+        splits = sorted({round(float(s), 4) for s in (raw.get("splits") or [])})
+    except (TypeError, ValueError):
+        return None
+    splits = [s for s in splits if 0.02 < s < 0.98][:3]
+    if not splits:
+        return None
+    try:
+        amplitude = max(1, min(4, int(raw.get("amplitude", 1))))
+        hold = max(1, min(8, int(raw.get("hold", 3))))
+    except (TypeError, ValueError):
+        return None
+    return {"splits": splits, "amplitude": amplitude, "hold": hold,
+            "subpixel": bool(raw.get("subpixel"))}
 
 
 def frame_variant(curation: dict[str, Any] | None, state: str | None = None) -> str:

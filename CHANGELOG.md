@@ -29,6 +29,36 @@ backend"; codex is now the confirmed default.
   `_codex_available`); docs updated in `docs/gen.md` (§Default provider selection), `SKILL.md`,
   and the thin-shuttle `image-gen` skill. Covered by 8 new offline tests in `tests/test_gen.py`.
 
+## v1.56.31 "Sol Atelier" - Breathing is a post-process LAYER + pipeline progress %
+
+Soohong's architectural call (2026-07-18): breathing is a modulation ORTHOGONAL
+to frame selection — a blink frame breathes too. The take-based flow (bake an
+exhale take, re-extract the full 36-state batch, minutes of waiting, palette
+drift on finalized rows) is gone.
+
+- **Sidecar layer** — `curation.json` `states.<state>.breathe = {splits(1-3),
+  amplitude, hold, subpixel}` (`curation.state_breathe` normalizes). Toggling
+  and tuning are instant client edits; frames on disk never change and no
+  re-extraction is involved.
+- **Deterministic bake** — compose/GIF expand the played sequence to
+  LCM(sequence, phase pattern) so blink and breath interlock and re-align every
+  loop (`breathe.bake_breathe_sequence`; ffprobe-verified 40-frame GIF for a
+  5-frame sequence × 8-phase two-line cascade). The atlas bakes only UNIQUE
+  (frame × phase) cells — the LCM expansion lengthens the rect list, not the
+  texture. `--extract`-based `/api/breathe` route and `breathe_frames.py` CLI
+  removed (no legacy shadow path).
+- **Sub-pixel option** — inserts 50%-blend half-phase frames at transitions
+  (the pixel-art "sub-pixel animation" technique: intermediate edge colors
+  read as half-pixel motion).
+- **Editor** — the focus mode now plays the REAL sequence (blinks included)
+  with the layer applied live; lines/amplitude/hold/sub-pixel apply instantly
+  (debounced autosave), Cmd/Ctrl+Z history, Esc restores the prior setting.
+  Legacy take-injected sequences self-migrate to the layer on load.
+- **Pipeline progress** — extraction writes fine-grained per-state × per-pass
+  progress (`.sprite-gen.progress.json`); `/api/op-progress` + busy-503 expose
+  it; the curator shows a top progress bar + percent status during tween bakes
+  and busy loads, and auto-reloads when the run is ready.
+
 ## v1.56.30 "Sol Atelier" - Breathe editor: Apply button, adjustment undo/redo, load-race fix
 
 Soohong's report (2026-07-17): dragging the chest line "didn't apply", and asked

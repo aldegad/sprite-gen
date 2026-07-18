@@ -14,7 +14,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_pixel_ops, state_plan
+from sprite_gen.breathe import bake_breathe_sequence
+from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import read_guard
@@ -144,6 +145,12 @@ def _run_dir_mode_guarded(args, run_dir):
             images.append(frame)
         if not images:
             continue
+        # 호흡 후처리 레이어 (사이드카) — 재생 시퀀스 위에 결정론으로 굽는다.
+        # 깜빡임 프레임도 같은 위상 변조를 받는다 (직교 레이어, 수홍 2026-07-18).
+        breathe_cfg = state_breathe(curation, state)
+        baked_phases: list[float] | None = None
+        if breathe_cfg:
+            images, baked_phases = bake_breathe_sequence(images, breathe_cfg)
         scale = max(1, int(getattr(args, "scale", 1) or 1))
         if scale > 1:
             # 니어리스트 정수배 — 픽셀 데이터는 그대로, 뷰어가 확대 보간으로 뭉개는 것만 막는다
@@ -152,14 +159,17 @@ def _run_dir_mode_guarded(args, run_dir):
         out_path = out_root / f"{state}.gif"
         duration_ms = max(1, round(1000.0 / fps))
         save_clean_gif(images, out_path, duration_ms=duration_ms, loop=args.loop_count, alpha_threshold=args.alpha_threshold)
-        exports.append({
+        export_entry = {
             "state": state,
             "output": str(out_path),
             "frames": len(images),
             "fps": fps,
             "loop": bool(spec.get("loop", True)),
             "gif_report": gif_report(out_path),
-        })
+        }
+        if baked_phases is not None:
+            export_entry["breathe"] = {"config": breathe_cfg, "phases": baked_phases}
+        exports.append(export_entry)
 
     if getattr(args, "state", None):
         # 단건(--state) 내보내기는 전체 manifest 를 한 상태로 갈아치우지 않는다 —
