@@ -29,7 +29,25 @@ function openCompare() {
     offsets: {},               // state -> {dx, dy} (자유 배치, 논리 px)
   };
   if (!state.include.size) state.include.add(all[0].state);
+  // 조작 히스토리 (Cmd/Ctrl+Z ↔ Cmd/Ctrl+Shift+Z): 가이드 추가/이동/삭제, 스프라이트 이동, 정렬 리셋
+  const hist = { list: [], pos: -1 };
+  const snapshot = () => JSON.parse(JSON.stringify({ guides: state.guides, offsets: state.offsets, focus: state.focus }));
+  const pushHist = () => {
+    hist.list = hist.list.slice(0, hist.pos + 1);
+    hist.list.push(snapshot());
+    hist.pos = hist.list.length - 1;
+  };
+  const restoreHist = (pos) => {
+    if (pos < 0 || pos >= hist.list.length || pos === hist.pos) return;
+    hist.pos = pos;
+    const s = JSON.parse(JSON.stringify(hist.list[pos]));
+    state.guides = s.guides;
+    state.offsets = s.offsets;
+    state.focus = s.focus;
+    render();
+  };
 
+  const anim = { playing: false, cursors: {}, last: {} };
   const modal = document.createElement("div");
   modal.id = "compare-modal";
   modal.innerHTML =
@@ -40,6 +58,7 @@ function openCompare() {
     `<label class="pp-apply"><input type="radio" name="cmp-mode" value="h" checked /><span>${t("cmpH")}</span></label>` +
     `<label class="pp-apply"><input type="radio" name="cmp-mode" value="v" /><span>${t("cmpV")}</span></label>` +
     `<label class="pp-apply"><input type="radio" name="cmp-mode" value="overlay" /><span>${t("cmpOverlay")}</span></label>` +
+    `<button type="button" class="ghost cmp-play" data-tip="${t("tCmpPlay")}">▶</button>` +
     `<span class="cmp-zoom-label">×8</span>` +
     `</span>` +
     `<button type="button" class="ghost zoom-close">${t("zoomClose")}</button></div>` +
@@ -148,10 +167,37 @@ function openCompare() {
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     cells.forEach((c, i) => {
-      const im = imgs.get(c.tg.state);
-      if (!(im && im.complete && im.naturalWidth)) return;
       ctx.globalAlpha = state.mode === "overlay" && i > 0 ? 0.45 : 1;
       const [x0, y0] = c.box;
+      if (anim.playing) {
+        // 재생: 현재 인스턴스를 캐노니컬+편집+호흡 레이어로 합성해 셀 원점 정렬로 그린다
+        const name = c.tg.state;
+        const play = playList(name);
+        if (play.length) {
+          const cur = (anim.cursors[name] || 0) % play.length;
+          const idx = play[cur];
+          const f = frameOf(name, idx);
+          const image = f ? img(f.url) : null;
+          if (image && image.complete && image.naturalWidth) {
+            const base = document.createElement("canvas");
+            base.width = run.cell.width;
+            base.height = run.cell.height;
+            const bx = base.getContext("2d");
+            bx.imageSmoothingEnabled = false;
+            drawFrameInto(bx, image, getTransform(name, idx), base.width, base.height,
+              snapScaleFor(name), getPixelOps(name, idx));
+            const bcfg = stateBreathe(name);
+            const out = bcfg
+              ? breatheComposite(base, bcfg, breathePattern(bcfg, play.length)[cur] || 0)
+              : base;
+            ctx.drawImage(out, 0, 0, base.width, base.height,
+              (c.dx - x0) * z, (c.dy - y0) * z, base.width * z, base.height * z);
+            return;
+          }
+        }
+      }
+      const im = imgs.get(c.tg.state);
+      if (!(im && im.complete && im.naturalWidth)) return;
       ctx.drawImage(im, x0, y0, c.w, c.h, c.dx * z, c.dy * z, c.w * z, c.h * z);
     });
     ctx.globalAlpha = 1;
@@ -194,7 +240,8 @@ function openCompare() {
         const onUp = () => {
           ln.removeEventListener("pointermove", onMove);
           ln.removeEventListener("pointerup", onUp);
-          if (!moved) render(); // 포커스 표시 갱신
+          if (moved) pushHist();
+          else render(); // 포커스 표시 갱신
         };
         ln.addEventListener("pointermove", onMove);
         ln.addEventListener("pointerup", onUp);
@@ -230,6 +277,7 @@ function openCompare() {
       const onUp = () => {
         canvas.removeEventListener("pointermove", onMove);
         canvas.removeEventListener("pointerup", onUp);
+        if (moved) pushHist();
       };
       canvas.addEventListener("pointermove", onMove);
       canvas.addEventListener("pointerup", onUp);
@@ -239,6 +287,7 @@ function openCompare() {
     state.guides.push(ev.shiftKey ? { axis: "v", pos: lx } : { axis: "h", pos: ly });
     state.focus = state.guides.length - 1;
     render();
+    pushHist();
   });
 
   // 휠 = 배율
@@ -250,21 +299,59 @@ function openCompare() {
 
   const onKey = (ev) => {
     if (ev.key === "Escape") { close(); return; }
+    if (ev.key.toLowerCase() === "z" && (ev.metaKey || ev.ctrlKey)) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation(); // 픽셀 편집 전역 라우터보다 비교 모달이 우선
+      restoreHist(ev.shiftKey ? hist.pos + 1 : hist.pos - 1);
+      return;
+    }
     if ((ev.key === "Delete" || ev.key === "Backspace") && state.focus >= 0 && state.focus < state.guides.length) {
       ev.preventDefault();
       state.guides.splice(state.focus, 1);
       state.focus = -1;
       render();
+      pushHist();
     }
   };
   const close = () => {
     modal.remove();
-    document.removeEventListener("keydown", onKey);
+    document.removeEventListener("keydown", onKey, true);
   };
   modal.querySelectorAll('input[name="cmp-mode"]').forEach((el) =>
-    el.addEventListener("change", () => { state.mode = el.value; render(); }));
+    el.addEventListener("change", () => {
+      state.mode = el.value;
+      state.offsets = {}; // 정렬 버튼 = 디폴트 배치로 리셋 (수홍 2026-07-18)
+      render();
+      pushHist();
+    }));
   modal.querySelector(".zoom-close").addEventListener("click", close);
   modal.querySelector(".zoom-backdrop").addEventListener("click", close);
-  document.addEventListener("keydown", onKey);
+  const playBtn = modal.querySelector(".cmp-play");
+  const animFrame = (ts) => {
+    if (!document.body.contains(modal)) return;
+    if (anim.playing) {
+      let dirty = false;
+      for (const name of state.include) {
+        const st = run.states.find((s) => s.name === name);
+        const fps = (st && st.fps) || 6;
+        if (!anim.last[name]) anim.last[name] = ts;
+        if (ts - anim.last[name] >= 1000 / Math.max(0.1, fps)) {
+          anim.last[name] = ts;
+          anim.cursors[name] = (anim.cursors[name] || 0) + 1;
+          dirty = true;
+        }
+      }
+      if (dirty) render();
+    }
+    requestAnimationFrame(animFrame);
+  };
+  playBtn.addEventListener("click", () => {
+    anim.playing = !anim.playing;
+    playBtn.textContent = anim.playing ? "⏸" : "▶";
+    render();
+  });
+  requestAnimationFrame(animFrame);
+  document.addEventListener("keydown", onKey, true); // capture — 전역 undo 라우터보다 먼저
   render();
+  pushHist(); // 히스토리 바닥 = 초기 배치
 }
