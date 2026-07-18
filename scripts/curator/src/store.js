@@ -239,7 +239,14 @@ function seedEntries() {
       const hasOwn = (c && c.transforms && c.transforms[ci]) || (c && c.pixels && c.pixels[ci] && Object.keys(c.pixels[ci]).length);
       if (hasOwn) unlinked.add(ci);
     }
-    entries[state.name] = { order, sel, transforms, archived, pixels, clones, unlinked,
+    const names = {};
+    if (c && c.names && typeof c.names === "object") {
+      for (const [k, v] of Object.entries(c.names)) {
+        const i = Number(k);
+        if (Number.isInteger(i) && typeof v === "string" && v.trim()) names[i] = v.trim().slice(0, 24);
+      }
+    }
+    entries[state.name] = { order, sel, transforms, archived, pixels, clones, unlinked, names,
       // 호흡 후처리 레이어 (사이드카 breathe — curation.state_breathe 와 같은 형태)
       breathe: c && c.breathe && Array.isArray(c.breathe.splits) && c.breathe.splits.length
         ? { splits: c.breathe.splits.map(Number).sort((a, b) => a - b).slice(0, 3),

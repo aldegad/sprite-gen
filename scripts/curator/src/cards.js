@@ -144,10 +144,11 @@ function renderCard(state, frame) {
 
   const isClone = frame.clone !== undefined;
   const srcName = isClone ? frameDisplayName(state.name, frame.clone) : null;
-  const shortLabel = isClone ? STR[lang].cloneBadge(srcName) : (frame.label ? frame.label : `#${frame.index}`);
+  const customName = (entries[state.name].names || {})[frame.index];
+  const shortLabel = customName || (isClone ? STR[lang].cloneBadge(srcName) : (frame.label ? frame.label : `#${frame.index}`));
   // 풀네임(복사 대상) — 에이전트가 그대로 집어가도록 런-상대 파일 경로 + 라벨.
   const relPath = (frame.url || "").replace(/^\/run\//, "");
-  const fullName = isClone ? `${srcName} 복제 · ${relPath}` : [frame.label, relPath].filter(Boolean).join(" · ") || shortLabel;
+  const fullName = (customName ? `${customName} · ` : "") + (isClone ? `${srcName} 복제 · ${relPath}` : [frame.label, relPath].filter(Boolean).join(" · ") || shortLabel) + " · " + t("tRenameHint");
   const titleCls = isClone ? "idx clone-badge" : "idx";
   const linkBtn = !isClone ? "" : (isLinkedClone(state.name, frame.index)
     ? `<button type="button" class="ghost link-state-btn unlink-btn" data-tip="${t("tUnlink")}" aria-label="unlink">` +
@@ -214,6 +215,21 @@ function renderCard(state, frame) {
       if (imgEl.complete) markPx();
       else imgEl.addEventListener("load", markPx, { once: true });
     }
+    const idxEl = card.querySelector(".card-top .idx");
+    if (idxEl) idxEl.addEventListener("dblclick", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const e2 = entries[state.name];
+      const cur = (e2.names || {})[frame.index] || "";
+      const next = window.prompt(t("renamePrompt"), cur);
+      if (next === null) return;
+      e2.names = e2.names || {};
+      const trimmed = next.trim().slice(0, 24);
+      if (trimmed) e2.names[frame.index] = trimmed;
+      else delete e2.names[frame.index];
+      scheduleSave();
+      rebuildState(state.name);
+    });
     const relinkBtn = card.querySelector(".relink-btn");
     if (relinkBtn) relinkBtn.addEventListener("click", () => {
       // 재링크: 자기 편집을 버리고 원본 truth 재채택 (명시적 사용자 액션)
