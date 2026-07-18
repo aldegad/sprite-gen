@@ -27,11 +27,22 @@ function frameInvXY(stateName, idx, x, y) {
 }
 
 // 포인터 이벤트 → 소스(저장) 공간 좌표. 표시가 어떤 모드든 저장은 항상 소스 공간.
+// 양자화 표시(비트맵 = 표시 공간)에선 포인터 원좌표가 아니라 커서가 가리키는
+// "표시된 픽셀(블록)"의 샘플 중심을 역변환한다 — 래스터라이즈가 색을 집어온 바로
+// 그 소스 픽셀이 편집 대상이 된다. 원좌표를 그대로 역변환하면 소수 스케일/이동
+// (예: scale 0.907, dy 1.53)에서 블록 경계마다 이웃 소스 픽셀로 샌다
+// (실사고 2026-07-19 수홍 "포인터랑 위치가 완벽하게 안 맞는데").
 function pointerSrcXY(stage, stateName, idx, e2) {
   const [cw, ch] = cellDims(stateName);
   const r = stage.getBoundingClientRect();
-  const dx0 = ((e2.clientX - r.left) / r.width) * cw;
-  const dy0 = ((e2.clientY - r.top) / r.height) * ch;
+  let dx0 = ((e2.clientX - r.left) / r.width) * cw;
+  let dy0 = ((e2.clientY - r.top) / r.height) * ch;
+  const canvas = stage.querySelector(".snap-canvas");
+  if (canvas && canvas.style.display === "block" && !canvas.style.transform) {
+    const s = snapScaleFor(stateName) || 1;
+    dx0 = (Math.floor(dx0 / s) + 0.5) * s;
+    dy0 = (Math.floor(dy0 / s) + 0.5) * s;
+  }
   return frameInvXY(stateName, idx, dx0, dy0);
 }
 
