@@ -229,6 +229,8 @@ Every run starts with `sprite-request.json`. It owns the numeric recipe used by 
 
 `256` is a default variable, not a hidden constant. Change it through the request, then regenerate guides, prompts, extraction, and atlas from the same request.
 
+When `safe_margin` is omitted, the default is **proportional**: 9.4% of the cell dimension per axis, floored (256 → 24px, 128 → 12px, rect 192×208 → 18/19px). An explicit request/CLI value is absolute and wins as-is.
+
 **테이크(takes)** — 같은 상태의 후보/보강 스트립은 수동 병합이 아니라 request 로 선언한다:
 `"states": { "down_idle": { "frames": 4, ..., "takes": [{ "label": "blink", "frames": 4 }] } }`
 + `raw/<...>.takes/<label>.png`. 추출이 primary 뒤에 이어붙여 한 행의 프레임 풀을 만들고

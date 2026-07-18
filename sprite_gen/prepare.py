@@ -23,6 +23,11 @@ from PIL import Image, ImageDraw
 from sprite_gen.layout import TAXONOMY, guide_rel, prompt_rel, raw_rel
 
 
+# Default safe margin is proportional to the cell dimension (floored), not a fixed
+# pixel count — 9.4% keeps the same relative reserve at every cell size
+# (256 -> 24px, 128 -> 12px). An explicit request/CLI value stays absolute.
+DEFAULT_SAFE_MARGIN_RATIO = 0.094
+
 DEFAULT_STATES: dict[str, dict[str, Any]] = {
     "idle": {"frames": 4, "fps": 4, "loop": True, "action": "subtle breathing and blinking"},
     "attack": {
@@ -510,11 +515,13 @@ def normalize_states(raw: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     return normalized
 
 
-def normalize_cell(raw_cell: dict[str, Any], size: int, safe_margin: int) -> dict[str, Any]:
+def normalize_cell(raw_cell: dict[str, Any], size: int, safe_margin: int | None) -> dict[str, Any]:
     width = int(raw_cell.get("width", raw_cell.get("cell_width", raw_cell.get("size", size))))
     height = int(raw_cell.get("height", raw_cell.get("cell_height", raw_cell.get("size", size))))
-    margin_x = int(raw_cell.get("safe_margin_x", raw_cell.get("safe_margin", safe_margin)))
-    margin_y = int(raw_cell.get("safe_margin_y", raw_cell.get("safe_margin", safe_margin)))
+    raw_margin_x = raw_cell.get("safe_margin_x", raw_cell.get("safe_margin", safe_margin))
+    raw_margin_y = raw_cell.get("safe_margin_y", raw_cell.get("safe_margin", safe_margin))
+    margin_x = int(width * DEFAULT_SAFE_MARGIN_RATIO) if raw_margin_x is None else int(raw_margin_x)
+    margin_y = int(height * DEFAULT_SAFE_MARGIN_RATIO) if raw_margin_y is None else int(raw_margin_y)
     if width <= 0 or height <= 0:
         raise SystemExit("cell width and height must be positive")
     if margin_x < 0 or margin_y < 0 or margin_x * 2 >= width or margin_y * 2 >= height:
@@ -946,7 +953,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cell-size", type=int, default=256)
     parser.add_argument("--cell-width", type=int)
     parser.add_argument("--cell-height", type=int)
-    parser.add_argument("--safe-margin", type=int, default=24)
+    parser.add_argument("--safe-margin", type=int, default=None, help="absolute px override; default is 9.4%% of the cell dimension, floored")
     parser.add_argument("--chroma-key", default="auto", help="auto or #RRGGBB")
     parser.add_argument("--fit-resample", choices=["lanczos", "nearest", "kcentroid"], default=None, help="frame downscale filter; nearest keeps pixel-art edges crisp, kcentroid keeps 1px outlines readable")
     parser.add_argument("--fit-align-x", choices=["bbox-center", "centroid", "foot-centroid", "alpha-centroid"], default=None, help="horizontal frame anchor; centroid stabilizes body position across variable-width poses, foot-centroid anchors on the bottom-20%% alpha (legs), alpha-centroid is the perfectpixel-studio per-frame alpha-weighted centroid (fringe-insensitive, per-frame in the pixel-perfect row path)")

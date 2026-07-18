@@ -57,7 +57,7 @@ def _add_prepare(p: argparse.ArgumentParser) -> None:
     p.add_argument("--cell-size", type=int, default=256)
     p.add_argument("--cell-width", type=int)
     p.add_argument("--cell-height", type=int)
-    p.add_argument("--safe-margin", type=int, default=24)
+    p.add_argument("--safe-margin", type=int, default=None, help="absolute px override; default is 9.4%% of the cell dimension, floored")
     p.add_argument("--chroma-key", default="auto", help="auto or #RRGGBB")
     p.add_argument("--fit-resample", choices=["lanczos", "nearest", "kcentroid"], default=None)
     p.add_argument("--fit-align-x", choices=["bbox-center", "centroid", "foot-centroid", "alpha-centroid"], default=None)
