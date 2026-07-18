@@ -48,6 +48,12 @@ async function boot() {
   gridCapableStates = new Set(run.states.filter((s) => s.pixelScale || contractScale).map((s) => s.name));
   gridStates = {};
   applyStaticLang();
+  const cmpBtn = document.getElementById("compare-open");
+  if (cmpBtn) {
+    cmpBtn.textContent = t("cmpOpen");
+    cmpBtn.title = t("tCmpOpen");
+    cmpBtn.addEventListener("click", openCompare);
+  }
   document.getElementById("character").textContent = `${run.characterId} · ${run.cell.width}×${run.cell.height}`;
   if (run.iso) gridToggle.hidden = false;
   if (ppAvailable) {

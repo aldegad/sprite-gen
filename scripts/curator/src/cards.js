@@ -186,6 +186,11 @@ function renderCard(state, frame) {
     (frame.present
       ? `<div class="card-info">${psize}<span class="tvals"></span></div>` +
         `<div class="card-controls">` +
+        (isClone && !isLinkedClone(state.name, frame.index)
+          ? `<button type="button" class="ghost relink-btn" data-tip="${t("tRelink")}" aria-label="relink">` +
+            '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+            '<path d="M6.8 9.2 4 12a2.3 2.3 0 0 0 3.2 3.2l2.8-2.8M9.2 6.8 12 4a2.3 2.3 0 0 1 3.2 3.2l-2.8 2.8M6.2 9.8l3.6-3.6" transform="translate(-1.5,-1.5)" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>'
+          : "") +
         (isClone && isLinkedClone(state.name, frame.index)
           ? `<button type="button" class="ghost unlink-btn" data-tip="${t("tUnlink")}" aria-label="unlink">` +
             '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
@@ -212,6 +217,17 @@ function renderCard(state, frame) {
       if (imgEl.complete) markPx();
       else imgEl.addEventListener("load", markPx, { once: true });
     }
+    const relinkBtn = card.querySelector(".relink-btn");
+    if (relinkBtn) relinkBtn.addEventListener("click", () => {
+      // 재링크: 자기 편집을 버리고 원본 truth 재채택 (명시적 사용자 액션)
+      const e2 = entries[state.name];
+      delete e2.transforms[frame.index];
+      delete e2.pixels[frame.index];
+      if (e2.unlinked) e2.unlinked.delete(frame.index);
+      scheduleSave();
+      rebuildState(state.name);
+      setStatus(STR[lang].relinked(frameDisplayName(state.name, e2.clones[frame.index])));
+    });
     const unlinkBtn = card.querySelector(".unlink-btn");
     if (unlinkBtn) unlinkBtn.addEventListener("click", () => {
       // 링크 끊기: 현재 원본 편집을 복사해 독립 프레임으로 (이후 편집은 각자)
