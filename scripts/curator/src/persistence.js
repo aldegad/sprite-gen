@@ -31,6 +31,12 @@ function buildPayload() {
     // 링크 끊은 복제 (독립 편집 소유) — 살아있는 복제만
     const liveUnlinked = [...(entry.unlinked || [])].filter((ci) => liveClones[ci] !== undefined);
     if (liveUnlinked.length) states[name].unlinked = liveUnlinked;
+    // 인스턴스 이름 (표시용 별명 — 예: "깜빡임") — 살아있는 인스턴스만
+    const liveNames = {};
+    for (const [i, nm] of Object.entries(entry.names || {})) {
+      if (entry.order.includes(Number(i)) && nm) liveNames[i] = nm;
+    }
+    if (Object.keys(liveNames).length) states[name].names = liveNames;
     // 픽셀 편집 사이드카 (빈 프레임 엔트리는 정리)
     const px = {};
     for (const [i, ops] of Object.entries(entry.pixels || {})) {
