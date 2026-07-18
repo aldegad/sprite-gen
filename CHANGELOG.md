@@ -5,6 +5,25 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.47 "Sol Atelier" - Marquee ergonomics, tool hotkeys, auto landmarks
+
+- **Marquee move-while-drawing** - hold Space (or Cmd/Ctrl) while dragging a
+  selection to move the whole rectangle, release to resume resizing
+  (Photoshop-standard). View panning still owns Space when no marquee drag is
+  active.
+- **Live pixels during region move** - dragging a selected region now shows
+  the actual pixels following the marquee (full composite preview: source
+  emptied, destination painted), not just the dashed box.
+- **Tool hotkeys** - B/P pen, E eraser, I eyedropper, M marquee (Photoshop
+  standard), shown in tooltips; same-key toggles the tool off like a re-click.
+- **Compare "landmarks" button** - auto-detects body reference lines (head
+  top, chin via the top skin band, cape start / hem via blue rows, belt via
+  the gold buckle inside the cape span, feet) from palette signals of the
+  first visible sprite and adds them as horizontal guides; undetectable
+  signals are silently skipped, duplicates deduped.
+- **No more scroll jump on unlink/relink/archive** - rebuilding a state row
+  preserves the page scroll, row horizontal scroll, and section height.
+
 ## v1.56.46 "Sol Atelier" - Sticky pen color, persistent compare setup, compare GIF
 
 - **Pen color persists** — the eyedropper/palette/manual color survives frame

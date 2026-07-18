@@ -212,7 +212,26 @@ function rebuildState(stateName) {
   const st = run.states.find((s) => s.name === stateName);
   const old = document.querySelector(`.state[data-state="${cssEscape(stateName)}"]`);
   if (!st || !old) return;
+  // 스크롤 보존: 섹션 통째 교체가 페이지/행 가로 스크롤을 튀게 하면 안 된다 —
+  // 이전 높이를 잠깐 고정해(이미지 로드 전 수축 방지) 페이지 위치를 지키고,
+  // 가로 스크롤된 자식은 클래스 기준으로 위치를 복원한다.
+  const pageY = document.scrollingElement ? document.scrollingElement.scrollTop : window.scrollY;
+  const hScrolls = [...old.querySelectorAll("*")]
+    .filter((el) => el.scrollLeft > 0 && typeof el.className === "string" && el.className.trim())
+    .map((el) => ({ sel: "." + el.className.trim().split(/\s+/).join("."), left: el.scrollLeft }));
+  const oldH = old.getBoundingClientRect().height;
   renderState(st, old); // old 자리에 교체 렌더
+  const nu = document.querySelector(`.state[data-state="${cssEscape(stateName)}"]`);
+  if (nu) {
+    nu.style.minHeight = `${oldH}px`;
+    setTimeout(() => { nu.style.minHeight = ""; }, 600);
+    for (const rec of hScrolls) {
+      const el = nu.querySelector(rec.sel);
+      if (el) el.scrollLeft = rec.left;
+    }
+  }
+  if (document.scrollingElement) document.scrollingElement.scrollTop = pageY;
+  else window.scrollTo(window.scrollX, pageY);
 }
 
 function archiveFrame(stateName, idx) {
