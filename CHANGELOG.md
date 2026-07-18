@@ -5,6 +5,16 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.60 "Sol Atelier" - Save popovers: closed by default, unified everywhere
+
+- **Fix: the compare Save popover rendered permanently open** - the menu's
+  author CSS (display:flex) overrode the `hidden` attribute; `[hidden]`
+  now wins. Menus open on click only, close on outside click.
+- **Top-bar downloads unified into the same pattern**: the three buttons
+  (Download atlas / PNGs / GIFs) moved into one "Save" button with the
+  same popover look and behavior as the compare canvas - IDs and handlers
+  unchanged, only the chrome moved.
+
 ## v1.56.59 "Sol Atelier" - Compare export formats + codified gen concurrency
 
 - **Compare canvas: one Save button with a format popover** - GIF /

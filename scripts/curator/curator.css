@@ -1236,9 +1236,10 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   color: #c9862a;
 }
 
-/* 비교 저장 팝오버 */
-.cmp-dl-wrap { position: relative; display: inline-block; }
-.cmp-dl-menu {
+/* 저장 팝오버 (비교/상단 공용) */
+.cmp-dl-wrap, .dl-wrap { position: relative; display: inline-block; }
+.cmp-dl-menu[hidden], .dl-menu[hidden] { display: none; } /* hidden 이 display:flex 를 이겨야 한다 */
+.cmp-dl-menu, .dl-menu {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
@@ -1252,7 +1253,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   border-radius: 8px;
   box-shadow: 0 6px 20px rgba(20, 22, 30, 0.12);
 }
-.cmp-dl-menu button {
+.cmp-dl-menu button, .dl-menu button {
   border: 0;
   background: none;
   text-align: left;
@@ -1262,4 +1263,4 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   cursor: pointer;
   white-space: nowrap;
 }
-.cmp-dl-menu button:hover { background: #f0f1f5; }
+.cmp-dl-menu button:hover, .dl-menu button:hover { background: #f0f1f5; }

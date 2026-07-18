@@ -43,3 +43,17 @@ langToggle.addEventListener("click", () => {
   u.searchParams.set("lang", next);
   location.href = u.toString();
 });
+
+// 상단 저장 팝오버 (수홍 2026-07-19 "다운로드 버튼 하나로 통일"): 아틀라스/PNG/GIF
+// 버튼은 ID·핸들러 그대로 메뉴 안으로 — 토글만 여기서 배선한다.
+(() => {
+  const btn = document.getElementById("dl-main");
+  const menu = document.getElementById("dl-main-menu");
+  if (!btn || !menu) return;
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    menu.hidden = !menu.hidden;
+  });
+  menu.addEventListener("click", () => { menu.hidden = true; }); // 항목 실행 후 닫힘
+  document.addEventListener("click", () => { menu.hidden = true; });
+})();
