@@ -5,6 +5,23 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.44 "Sol Atelier" - Compare canvas v2 + nameable instances
+
+Soohong's compare-canvas feedback batch (2026-07-18):
+
+- **Compare v2** — alignment modes are now horizontal (shared ground) /
+  vertical (shared center) / overlay, as DEFAULT arrangements on top of which
+  every sprite can be grabbed and dragged freely (session offsets). A left
+  panel lists every state's finished frame with toggles (scales to many).
+  Guides: empty click = horizontal line, Shift+click = vertical, click
+  focuses, drag moves (the old 0px-tall line had no hit area — now a 9px
+  grab zone), Delete/Backspace removes the focused line. Zoom moved to the
+  wheel with an inline ×N label.
+- **Nameable instances** — double-click a card badge to name it (sidecar
+  `names`); the rebuilt eyes-only blink instance is named "깜빡임" so it no
+  longer reads as an anonymous "#0 복제".
+- Zero-breath clamp badge now explains itself ("숨쉴 자리 없음" + how to fix).
+
 ## v1.56.43 "Sol Atelier" - Breathe audit: exact breath count + canonical preview
 
 Soohong's calm-refactor request (2026-07-18, /alex-core-invariants). Two real
