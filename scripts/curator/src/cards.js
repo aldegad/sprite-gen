@@ -346,6 +346,7 @@ function startPreview(state) {
       const tr = getTransform(state.name, idx);
       const bcfg = stateBreathe(state.name);
       if (bcfg) {
+        // 호흡 합성은 캐노니컬 픽셀 기준 (표시 변형은 풋프린트 상이 — 이음새 흔들림)
         // 호흡 후처리 레이어 (수홍 2026-07-18): 프레임 선택과 직교하는 변조 —
         // 재생 틱 기준 위상을 프레임 위에 얹는다 (깜빡임 프레임도 그대로 숨쉰다).
         const base = document.createElement("canvas");
@@ -353,7 +354,9 @@ function startPreview(state) {
         base.height = ch;
         const baseCtx = base.getContext("2d");
         baseCtx.imageSmoothingEnabled = false;
-        drawFrameInto(baseCtx, image, tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
+        const canonical = f && f.url ? img(f.url) : image;
+        drawFrameInto(baseCtx, (canonical && canonical.complete && canonical.naturalWidth) ? canonical : image,
+          tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
         const pattern = breathePattern(bcfg, play.length);
         ctx.drawImage(breatheComposite(base, bcfg, pattern[pv.cursor] || 0), 0, 0);
       } else {
