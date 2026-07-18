@@ -5,6 +5,19 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.46 "Sol Atelier" - Sticky pen color, persistent compare setup, compare GIF
+
+- **Pen color persists** — the eyedropper/palette/manual color survives frame
+  navigation, modal reopen, and page reload (localStorage) — pick an ear color
+  on one frame, paint it on the next.
+- **Compare setup persists per character** — guides, free-drag offsets, mode,
+  included sprites, and zoom are saved on every commit point and restored on
+  reopen/reload ("보면서 작업" 유지).
+- Plus the v1.56.45+ batch shipped in the same session: compare GIF export
+  (deterministic virtual-time sampling → /api/compare-gif), atlas bake-now
+  button fix, smooth guide drag (no DOM rebuild mid-drag), frozen playback
+  layout.
+
 ## v1.56.45 "Sol Atelier" - Compare canvas: undo/redo, alignment reset, playback
 
 - Cmd/Ctrl+Z ↔ Cmd/Ctrl+Shift+Z over every compare action (guide add/move/

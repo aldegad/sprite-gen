@@ -20,15 +20,31 @@ function openCompare() {
     setStatus(t("cmpNone"), "err");
     return;
   }
+  // 비교 상태는 캐릭터별로 영속 (수홍 2026-07-18: 선 그어놓고 보면서 작업 —
+  // 닫거나 새로고침해도 유지). truth = localStorage sg-compare:<characterId>.
+  const persistKey = `sg-compare:${run.characterId || "run"}`;
+  let savedCmp = null;
+  try { savedCmp = JSON.parse(localStorage.getItem(persistKey) || "null"); } catch { /* 무시 */ }
   const state = {
-    mode: "h",                 // 'h' | 'v' | 'overlay'
-    zoom: 8,
-    guides: [],                // {axis: 'h'|'v', pos}  (논리 px, 캔버스 좌표)
+    mode: (savedCmp && savedCmp.mode) || "h",
+    zoom: (savedCmp && savedCmp.zoom) || 8,
+    guides: (savedCmp && Array.isArray(savedCmp.guides)) ? savedCmp.guides : [],
     focus: -1,
-    include: new Set(all.filter((tg) => /_idle$/.test(tg.state)).map((tg) => tg.state)),
-    offsets: {},               // state -> {dx, dy} (자유 배치, 논리 px)
+    include: new Set(
+      savedCmp && Array.isArray(savedCmp.include) && savedCmp.include.length
+        ? savedCmp.include.filter((n) => all.some((tg) => tg.state === n))
+        : all.filter((tg) => /_idle$/.test(tg.state)).map((tg) => tg.state)),
+    offsets: (savedCmp && savedCmp.offsets) || {},
   };
   if (!state.include.size) state.include.add(all[0].state);
+  const persistCompare = () => {
+    try {
+      localStorage.setItem(persistKey, JSON.stringify({
+        mode: state.mode, zoom: state.zoom, guides: state.guides,
+        include: [...state.include], offsets: state.offsets,
+      }));
+    } catch { /* 무시 */ }
+  };
   // 조작 히스토리 (Cmd/Ctrl+Z ↔ Cmd/Ctrl+Shift+Z): 가이드 추가/이동/삭제, 스프라이트 이동, 정렬 리셋
   const hist = { list: [], pos: -1 };
   const snapshot = () => JSON.parse(JSON.stringify({ guides: state.guides, offsets: state.offsets, focus: state.focus }));
@@ -36,6 +52,7 @@ function openCompare() {
     hist.list = hist.list.slice(0, hist.pos + 1);
     hist.list.push(snapshot());
     hist.pos = hist.list.length - 1;
+    persistCompare();
   };
   const restoreHist = (pos) => {
     if (pos < 0 || pos >= hist.list.length || pos === hist.pos) return;
@@ -45,6 +62,7 @@ function openCompare() {
     state.offsets = s.offsets;
     state.focus = s.focus;
     render();
+    persistCompare();
   };
 
   const anim = { playing: false, cursors: {}, last: {} };
@@ -144,6 +162,7 @@ function openCompare() {
         if (cb.checked) state.include.add(tg.state);
         else state.include.delete(tg.state);
         render();
+        persistCompare();
       });
       const thumb = document.createElement("img");
       thumb.src = tg.frame.url;
@@ -327,6 +346,7 @@ function openCompare() {
     ev.preventDefault();
     state.zoom = Math.max(2, Math.min(16, state.zoom + (ev.deltaY < 0 ? 1 : -1)));
     render();
+    persistCompare();
   }, { passive: false });
 
   const onKey = (ev) => {
@@ -411,6 +431,8 @@ function openCompare() {
     gifBtn.textContent = "GIF";
   });
 
+  const modeInput = modal.querySelector(`input[name="cmp-mode"][value="${state.mode}"]`);
+  if (modeInput) modeInput.checked = true;
   const playBtn = modal.querySelector(".cmp-play");
   const animFrame = (ts) => {
     if (!document.body.contains(modal)) return;
