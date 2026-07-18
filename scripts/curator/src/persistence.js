@@ -95,8 +95,8 @@ async function save() {
     if (!res.ok) throw new Error((await res.json()).error || res.statusText);
     setStatus(t("saved"), "ok");
     hideSaveLostBanner();
-    // 디스크 truth 가 갱신된 뒤에만 — 아틀라스 자동 굽기 (실시간 반영)
-    if (typeof scheduleAutoBake === "function") scheduleAutoBake();
+    // 디스크 truth 갱신 후 — 레이지 아틀라스 자동 굽기 (보일 때만 실제 굽기)
+    if (typeof noteAtlasEdit === "function") noteAtlasEdit();
   } catch (e) {
     setStatus(t("saveFail") + e.message, "err");
     // 작은 상태줄만으론 그림 그리는 중에 못 본다 (실사고 2026-07-17: 서버 재기동으로
