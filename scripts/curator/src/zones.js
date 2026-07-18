@@ -283,7 +283,7 @@ function renderSelectionState(stateName) {
   });
   const state = run.states.find((s) => s.name === stateName);
   const countEl = document.querySelector(`.preview[data-state="${cssEscape(stateName)}"] .count`);
-  if (countEl) countEl.textContent = `${entries[stateName].sel.size}/${state.requestFrames} ${t("frames")}`;
+  if (countEl) countEl.textContent = STR[lang].seqCount(entries[stateName].sel.size, state.requestFrames);
 }
 
 function renderArchive(state) {

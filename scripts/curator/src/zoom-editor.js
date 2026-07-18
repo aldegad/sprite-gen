@@ -721,19 +721,17 @@ function openZoom(stateName, idx, keepWidth) {
         snapScaleFor(stateName), getPixelOps(stateName, frameIdx));
       bctx.drawImage(breatheComposite(base, bm.cfg, phase), 0, 0);
     };
-    // 재생 타이밍 = 줄 프리뷰와 동일 계약: 줄 배속(pv.speed) × 프레임별 배수(durations)
-    // (수홍 2026-07-18 "배속 해둔 거 확대해서도 배속으로")
-    const stepMs = Math.round(1000 / ((st0 && st0.fps) || 6));
+    // 재생 타이밍 = 줄 프리뷰와 동일 계약: 현재 fps × 줄 배속(pv.speed)
+    // (수홍 2026-07-18 "배속 해둔 거 확대해서도 배속으로"; fps 는 줄 스텝퍼로 실시간 변경)
     const tickLoop = () => {
       bm.tick += 1;
       renderTick();
-      const play = playList(stateName);
+      const live = run.states.find((s) => s.name === stateName);
+      const fps = (live && live.fps) || 6;
       const speed = (previews[stateName] && previews[stateName].speed) || 1;
-      const cursor = play.length ? bm.tick % play.length : 0;
-      const mult = play.length ? ((e0.durations || {})[play[cursor]] || 1) : 1;
-      bm.timer = setTimeout(tickLoop, Math.max(40, (stepMs / Math.max(0.1, speed)) * mult));
+      bm.timer = setTimeout(tickLoop, Math.max(40, 1000 / Math.max(0.1, fps * speed)));
     };
-    bm.timer = setTimeout(tickLoop, stepMs);
+    tickLoop();
 
     const initSilhouette = () => {
       if (bm.geomReady) return true;

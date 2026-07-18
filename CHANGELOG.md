@@ -5,6 +5,24 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.37 "Sol Atelier" - Whole-row fps stepper; per-frame durations withdrawn
+
+Soohong's correction (2026-07-18): per-frame hold time is already owned by
+frame duplication (atlas cells are shared, so clones cost nothing) — a
+per-frame duration field was a second truth for the same thing. Withdrawn one
+release after shipping; whole-row time is the one knob that remains.
+
+- **Per-frame durations removed** — sidecar `durations`, the ×1 card chip,
+  per-frame GIF delays, and non-uniform manifest `durations_ms` are gone.
+  `durations_ms` is uniform again (consumers unaffected).
+- **Row fps stepper** — each row header gets `− Nfps +` writing straight to
+  the fps SSoT (`sprite-request.json`, atomic under the publish guard).
+  Preview and the breathe editor read the live value per tick, so speed
+  changes apply mid-play; the breathe editor also honors the row preview's
+  speed multiplier.
+- **Counter relabeled** — "10/8 프레임" → "재생 10컷 · 원본 8장" (play
+  instances vs source drawings; clones reuse the same art).
+
 ## v1.56.36 "Sol Atelier" - Per-frame durations, breath stepper, editor speed sync
 
 Soohong's asks (2026-07-18): row-preview speed should carry into the editor,
