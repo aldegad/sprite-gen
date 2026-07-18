@@ -1120,6 +1120,80 @@ def crosscheck_pitch_runlen(
     return notes
 
 
+
+def _grid_uniformity(component: Image.Image, pitch: tuple[float, float],
+                     phase: tuple[float, float]) -> float:
+    """격자 가설의 셀 내부 색 분산 (낮을수록 진짜 격자). 불투명 픽셀만, 셀 크기 가중."""
+    xs = _grid_edges(component.width, pitch[0], phase[0])
+    ys = _grid_edges(component.height, pitch[1], phase[1])
+    px = component.load()
+    total_dev = 0.0
+    total_n = 0
+    for yi in range(len(ys) - 1):
+        for xi in range(len(xs) - 1):
+            acc = []
+            for y in range(ys[yi], min(ys[yi + 1], component.height)):
+                for x in range(xs[xi], min(xs[xi + 1], component.width)):
+                    q = px[x, y]
+                    if q[3] >= 128:
+                        acc.append(q[:3])
+            n = len(acc)
+            if n < 2:
+                continue
+            mean = [sum(c[k] for c in acc) / n for k in range(3)]
+            dev = sum(sum(abs(c[k] - mean[k]) for k in range(3)) for c in acc) / n
+            total_dev += dev * n
+            total_n += n
+    return (total_dev / total_n) if total_n else 1e9
+
+
+def _best_phase(component: Image.Image, pitch: tuple[float, float]) -> tuple[float, float]:
+    """주어진 피치에서 셀 균일도가 최선인 위상 (축별 8단계 탐색 — 결정론)."""
+    best = (0.0, 0.0)
+    best_score = None
+    steps = 8
+    for i in range(steps):
+        for j in range(steps):
+            phase = (pitch[0] * i / steps, pitch[1] * j / steps)
+            score = _grid_uniformity(component, pitch, phase)
+            if best_score is None or score < best_score:
+                best_score = score
+                best = phase
+    return best
+
+
+def arbitrate_pitch(images: list, detect_pitch: tuple[float, float],
+                    detect_phases: list, runlen_pitch: tuple[float, float],
+                    tag: str, warnings_out: list) -> tuple[tuple[float, float], list, str]:
+    """detect 합의와 runlen 세컨드 오피니언이 크게 다를 때 실측 채점으로 승자 채택.
+
+    하모닉 오검출 (실사고 2026-07-18 side_idle: detect 가 참 피치 9.5 의 하모닉
+    6.5 를 잡아 45×83 과분할 → 물리캡 강제 리사이즈 = 이중 리샘플 찌그러짐) 방어.
+    자동 폴백이 아니라 두 가설을 셀 균일도로 결정론 채점해 채택하고, 결과를
+    경고로 관측 가능하게 남긴다.
+
+    반환: (채택 피치, 프레임별 위상, 채택 근거 라벨)."""
+    dx, dy = detect_pitch
+    rx, ry = runlen_pitch
+    if rx < 2.0 or ry < 2.0:
+        return detect_pitch, detect_phases, "detect"
+    if abs(dx - rx) <= max(1.0, dx * 0.15) and abs(dy - ry) <= max(1.0, dy * 0.15):
+        return detect_pitch, detect_phases, "detect"
+    # 채택은 하지 않는다 (실사고 2026-07-18: 균일도 지표는 세밀 격자에 자명하게
+    # 유리한 편향이 있어 up_idle 을 잘못 뒤집었다). 관측 로그만 남긴다 — 큰 불일치의
+    # 실제 의미는 대개 '생성 해상도가 셀 계약보다 세밀' (해법 = 굵기 강제 리롤).
+    sample = images[0]
+    detect_score = _grid_uniformity(sample, detect_pitch, detect_phases[0])
+    runlen_phase0 = _best_phase(sample, runlen_pitch)
+    runlen_score = _grid_uniformity(sample, runlen_pitch, runlen_phase0)
+    warnings_out.append(
+        f"{tag}: pitch disagreement — detect {dx:.2f}x{dy:.2f} (uniformity {detect_score:.1f}) "
+        f"vs runlen {rx:.2f}x{ry:.2f} ({runlen_score:.1f}); detect kept. "
+        f"large gap usually means the raw was drawn finer than the cell contract — reroll with a "
+        f"block-count hint")
+    return detect_pitch, detect_phases, "detect"
+
+
 def _grid_edges(length: int, pitch: float, offset: float) -> list[int]:
     """소수 피치를 정수 픽셀 경계로 확정한다.
 
@@ -1461,6 +1535,36 @@ def place_row_frame(frame: Image.Image, cell_width: int, cell_height: int, scale
     return target
 
 
+
+PALETTE_LOCK = "palette.lock.json"
+
+
+def load_pinned_palette(run_dir: Path) -> list | None:
+    """런에 고정된 공유 팔레트 (없으면 None). 팔레트 피닝 (수홍 확정 2026-07-18):
+    공유 팔레트가 추출 배치 구성에 따라 재계산되며 확정 행 픽셀을 흔들던 드리프트
+    (실사고 2026-07-17 down_idle, 3회)를 원천 차단한다 — 배치가 어떻게 바뀌어도
+    팔레트는 이 파일 하나가 진실이다. 재산출은 `--repalette` 명시 시에만."""
+    path = run_dir / PALETTE_LOCK
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        colors = [tuple(int(v) for v in c) for c in data["colors"]]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise SystemExit(f"corrupt {PALETTE_LOCK}: {exc} — fix or delete it explicitly")
+    if not colors:
+        raise SystemExit(f"{PALETTE_LOCK} has no colors — fix or delete it explicitly")
+    return colors
+
+
+def write_pinned_palette(run_dir: Path, palette: list, source: str) -> None:
+    atomic_write_text(run_dir / PALETTE_LOCK, json.dumps({
+        "kind": "sprite-gen-palette-lock",
+        "source": source,
+        "colors": [list(c) for c in palette],
+    }, ensure_ascii=False, indent=2) + "\n")
+
+
 def build_shared_palette(frames: list, size: int) -> list:
     colors: list = []
     for frame in frames:
@@ -1755,6 +1859,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "default components)",
     )
     parser.add_argument("--allow-slot-fallback", action="store_true")
+    parser.add_argument("--repalette", action="store_true",
+                        help="고정 팔레트(palette.lock.json)를 무시하고 재산출·재고정")
     parser.add_argument("--min-used-pixels", type=int, default=400)
     parser.add_argument("--edge-margin", type=int, default=2)
     parser.add_argument("--edge-pixel-threshold", type=int, default=24)
@@ -2339,11 +2445,17 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         ):
             all_warnings.append(f"{tag}: {note}")
             print(f"[pitch-crosscheck] {tag}: {note}", file=sys.stderr)
+        # 피치 중재 (하모닉 오검출 방어): 세컨드 오피니언과 크게 어긋나면 셀 균일도
+        # 실측으로 승자 채택 — 채택 결과는 경고로 관측된다 (arbitrate_pitch docstring).
+        frame_phases = [frame_phase for (_, frame_phase) in grids]
+        (consensus_x, consensus_y), frame_phases, _pitch_src = arbitrate_pitch(
+            images, (consensus_x, consensus_y), frame_phases,
+            (_runlen_consensus(0), _runlen_consensus(1)), tag, all_warnings)
         snapped = []
         cut_edges: list[tuple[list[int], list[int]] | None] = []
         if min(consensus_x, consensus_y) >= 2.0:
             # 위상만 프레임별로 (스트립 안에서 드리프트하는 건 위상이다).
-            for component, (_, frame_phase) in zip(images, grids):
+            for component, frame_phase in zip(images, frame_phases):
                 snapped.append(
                     grid_snap_downscale(component, (consensus_x, consensus_y), pp_detail_bias, frame_phase)
                 )
@@ -2480,7 +2592,15 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
     if pixel_perfect and pending:
         # 팔레트는 런 전체(모든 state 의 논리 프레임)에서 한 번 뽑아 공유한다 —
         # 프레임/행 간 색 흔들림(플리커) 제거 + 아이덴티티 색 고정.
-        palette = build_shared_palette([f for entry in pending for f in entry["frames"]], palette_size)
+        pinned = None if getattr(args, "repalette", False) else load_pinned_palette(run_dir)
+        if pinned is not None:
+            palette = pinned
+            all_warnings.append(f"palette: pinned ({len(palette)} colors, {PALETTE_LOCK})")
+        else:
+            palette = build_shared_palette([f for entry in pending for f in entry["frames"]], palette_size)
+            write_pinned_palette(run_dir, palette,
+                                 f"batch:{','.join(entry['state'] for entry in pending)}")
+            all_warnings.append(f"palette: rebuilt+pinned ({len(palette)} colors → {PALETTE_LOCK})")
         total_steps = progress_step + len(pending)  # 스킵된 행 반영 재산정
         outline_cfg = fit_config.get("outline", True)
         for entry in pending:
@@ -2641,9 +2761,25 @@ def heal_run(run_dir: Path | str) -> dict[str, Any]:
     manifest = load_frames_manifest(manifest_path)
     request = json.loads(request_path.read_text(encoding="utf-8"))
     current = engine_revision()
+    # 확정 행 동결 (수홍 확정 2026-07-18): curation states.<state>.frozen == true 인
+    # 행은 사용자가 승인·편집을 끝낸 확정본 — 엔진이 바뀌어도 자가치유가 절대
+    # 재유도하지 않는다 (실사고: 서버 가동 중 엔진 편집 → heal 이 확정 down_idle 을
+    # 재양자화해 드리프트). 해제는 사용자가 frozen 을 끄는 것뿐 — 관측 노트로 남긴다.
+    frozen: set[str] = set()
+    curation_path = run_dir / "curation.json"
+    if curation_path.is_file():
+        try:
+            cur_states = json.loads(curation_path.read_text(encoding="utf-8")).get("states", {})
+            frozen = {s for s, e in cur_states.items() if isinstance(e, dict) and e.get("frozen")}
+        except ValueError:
+            pass  # 손상 사이드카는 로드 경로가 별도로 보고한다
+    frozen_kept = []
     for row in manifest.get("rows", []):
         state = row.get("state")
         if state not in request.get("states", {}) or row.get("engine_revision") == current:
+            continue
+        if state in frozen:
+            frozen_kept.append(state)
             continue
         raws = [raw_rel(request, state)] + [
             take_raw_rel(request, state, str(take.get("label") or ""))
@@ -2653,6 +2789,9 @@ def heal_run(run_dir: Path | str) -> dict[str, Any]:
             report["healed"].append(state)
         else:
             report["kept_stale"].append(state)
+    if frozen_kept:
+        report["frozen"] = frozen_kept
+        report["notes"].append("frozen rows kept (user-approved, heal skipped): " + ", ".join(frozen_kept))
     if report["kept_stale"]:
         report["notes"].append(
             "stale rows kept as-is (raw missing, cannot re-derive): "
