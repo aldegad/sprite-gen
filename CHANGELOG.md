@@ -5,6 +5,19 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.57 "Sol Atelier" - Waist-line breathe default (belt rule + inheritance)
+
+- Default breathe split now lands on the WAIST, not the head/chest
+  (Soohong 2026-07-19: "if there is a belt, right above it"). Chain:
+  (0) inherit the split a human already tuned on a sibling row in the same
+  run (variations inherit the approved waist line), (1) top of the belt
+  accent band (high-sat warm colors in the 45-80%% content band) - measured
+  0.2 px from the hand-placed line, (2) row-to-row color-histogram
+  change-point (1-3 px), (3) legacy chest heuristic as last resort.
+  Applied to both the row toggle default and the zoom breathe editor;
+  codified in the SKILL agent-driven breathe recipe. Verified: belt rule
+  reproduces 0.625 vs hand 0.62; sibling inheritance returns the tuned 0.62.
+
 ## v1.56.56 "Sol Atelier" - Anchor ref truth = curated export (codified)
 
 - The direction-anchor contract now states explicitly: the anchor image
