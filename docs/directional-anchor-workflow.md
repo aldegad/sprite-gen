@@ -98,6 +98,16 @@ in one image.
    anchor; the row itself stays a motion/timing artifact, never an anchor.
    (수홍 확정 2026-07-12 — solvell founder 5-anchor 사고에서 도출.)
 
+   **The anchor image is the CURATED export, not the raw generation.**
+   When the anchor frame has curation (pixel edits, scale/move transforms),
+   bake it first — `sprite-gen export-pngs --state <dir>_idle` →
+   `curated/<dir>_idle/frame-0.png` — and attach THAT as the anchor ref
+   (upscale ×8 NEAREST for legibility is fine; pixel data unchanged).
+   The raw crop is only a fallback when no curation exists. Rationale: the
+   accepted identity is what the human approved on screen; generating
+   variations from the un-edited raw leaks the pre-approval look into every
+   downstream row. (수홍 확정 2026-07-19.)
+
 3. **State anchor gate** — for each requested non-locomotion state and
    direction, create one representative state anchor before generating the
    multi-frame row. For example, `working-front-right-anchor` can show the

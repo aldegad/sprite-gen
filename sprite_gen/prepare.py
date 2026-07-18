@@ -651,7 +651,13 @@ def build_generation_plan(request: dict[str, Any]) -> dict[str, Any] | None:
             "role": "action-row",
             "direction": state_direction(state, directions),
             "refs": [
-                f"<accepted single-pose crop of {raw_rel(request, anchors[state_direction(state, directions)])}>",
+                # 앵커 ref 진실 = 사람이 승인한 최종 모습. 큐레이션(픽셀 편집·변형)이
+                # 있으면 curated export 가 그 진실이고, raw 크롭은 큐레이션이 없을 때의
+                # 폴백일 뿐이다 (수홍 확정 2026-07-19 — 편집 반영 안 된 raw 앵커로
+                # 바리에이션을 치면 승인 전 모습이 identity 로 번진다).
+                "<accepted anchor single-pose — prefer the curated export "
+                f"(export-pngs -> curated/{anchors[state_direction(state, directions)]}/frame-0.png, edits+transforms baked); "
+                f"only when no curation exists, crop of {raw_rel(request, anchors[state_direction(state, directions)])}>",
                 guide_rel(request, state),
             ],
         }

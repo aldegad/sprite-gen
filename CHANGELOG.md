@@ -5,6 +5,17 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.56 "Sol Atelier" - Anchor ref truth = curated export (codified)
+
+- The direction-anchor contract now states explicitly: the anchor image
+  attached to action-row generation is the CURATED export
+  (export-pngs -> curated/<dir>_idle/frame-0.png, pixel edits + transforms
+  baked), with the raw crop only as a no-curation fallback. Previously the
+  generation plan's ref placeholder pointed at the raw crop, which - if
+  followed literally - would generate variations from the un-edited,
+  pre-approval anchor. Codified in SKILL.md, directional-anchor-workflow.md,
+  and the generation-plan ref text (Soohong 2026-07-19).
+
 ## v1.56.55 "Sol Atelier" - Lazy atlas bake (zero cost while off-screen)
 
 - Live atlas re-bake is now LAZY: edits only mark the atlas dirty; the
