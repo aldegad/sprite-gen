@@ -71,9 +71,19 @@ function applyCardTransform(stage, stateName, idx) {
 // 같은 프레임을 보여주는 모든 스테이지(그리드 카드 + 확대 모달)를 함께 갱신 —
 // 어느 쪽에서 편집해도 두 화면이 실시간 동기화된다.
 function applyFrameTransformAll(stateName, idx) {
-  document
-    .querySelectorAll(`.card[data-state="${cssEscape(stateName)}"][data-idx="${idx}"] .stage`)
-    .forEach((s) => applyCardTransform(s, stateName, idx));
+  // 링크 동기화 (수홍 2026-07-18): 편집 truth 를 공유하는 모든 인스턴스 카드
+  // (원본 + 링크된 복제들)를 같이 다시 그린다 — truth 는 하나, 표시는 전부.
+  const truth = editIndex(stateName, idx);
+  const e = entries[stateName];
+  const targets = new Set([truth]);
+  for (const i of e.order) {
+    if (editIndex(stateName, i) === truth) targets.add(i);
+  }
+  for (const i of targets) {
+    document
+      .querySelectorAll(`.card[data-state="${cssEscape(stateName)}"][data-idx="${i}"] .stage`)
+      .forEach((s) => applyCardTransform(s, stateName, i));
+  }
 }
 
 function wireStage(stage, stateName, idx) {
