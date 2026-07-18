@@ -5,6 +5,18 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.51 "Sol Atelier" - Pointer hits exactly the pixel under the cursor
+
+- **Fix: clicks could land one pixel off** on quantized (pixel-perfect)
+  displays with fractional transforms (e.g. scale 0.907, dy 1.53). The raw
+  pointer position was inverse-transformed directly, which leaks into the
+  neighboring source pixel near block boundaries. pointerSrcXY now
+  inverse-transforms the SAMPLE CENTER of the displayed block under the
+  cursor - the same center rule the rasterizer used to pick that block's
+  color - so the edited source pixel is exactly the one being displayed.
+  Verified 5/5 including worst-case clicks at 8%% / 92%% into a block:
+  the clicked block itself changes color, never a neighbor.
+
 ## v1.56.50 "Sol Atelier" - Frame-space SSoT; eyedropper picks the color you see
 
 - **Fix: eyedropper picked a different color** on pixel-perfect rows with
