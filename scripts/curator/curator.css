@@ -38,7 +38,7 @@ body {
 }
 .title { font-size: 15px; }
 .muted { color: var(--muted); margin-left: 8px; font-weight: normal; }
-.actions { display: flex; align-items: center; gap: 12px; }
+.actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; }
 .status { color: var(--muted); font-size: 12px; min-width: 80px; text-align: right; }
 .status.ok { color: #16a34a; }
 .status.err { color: var(--danger); }
@@ -703,7 +703,9 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 /* 상태별 생성 ref 칩 (어떤 재료로 이 줄을 생성했는가) + 우측 줄별 표시/굽기 컨트롤 */
 .state-refs { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; flex-wrap: wrap; }
 .state-refs .refs-label { font-size: 12px; opacity: 0.6; }
-.state-refs .row-controls { margin-left: auto; display: inline-flex; gap: 8px; }
+.state-refs .row-controls { margin-left: auto; display: inline-flex; gap: 8px;
+  /* 컨트롤이 많아도 카드 밖으로 안 나가게 — 오른쪽 정렬 유지한 채 줄바꿈 (수홍 2026-07-18) */
+  flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; min-width: 0; }
 .row-toggle { padding: 3px 8px; background: var(--panel, transparent); }
 
 /* 하단 힌트바 — 힌트 span 이 구분자 없이 붙지 않게 (실사고 2026-07-14 픽) */
