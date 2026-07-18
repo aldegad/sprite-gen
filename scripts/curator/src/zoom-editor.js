@@ -6,6 +6,16 @@
 // 휠/핀치 = 화면 배율(뷰 확대), 드래그/핸들/Shift+휠 = 기존 스프라이트 편집 그대로.
 let zoomView = null; // { stateName, idx, width }
 
+// 마지막 사용 펜 색 — 프레임/모달을 넘어가도 유지 (수홍 2026-07-18 "스포이드로
+// 찍은 색으로 다음 프레임에 찍고 싶다"). 리로드에도 남게 localStorage 백업.
+let lastPenColor = null;
+try { lastPenColor = localStorage.getItem("sg-pen-color"); } catch { /* 무시 */ }
+function rememberPenColor(hex) {
+  if (!hex) return;
+  lastPenColor = hex;
+  try { localStorage.setItem("sg-pen-color", hex); } catch { /* 무시 */ }
+}
+
 function closeZoom() {
   if (zoomView && zoomView.cleanupBreathe) zoomView.cleanupBreathe();
   pixelEdit = null;
@@ -241,7 +251,7 @@ function openZoom(stateName, idx, keepWidth) {
   swatchBox.className = "palette-swatches";
   const colorInput = document.createElement("input");
   colorInput.type = "color";
-  colorInput.value = "#1f2430";
+  colorInput.value = lastPenColor || "#1f2430"; // 마지막 사용 색 승계
   colorInput.title = "color";
   colorInput.className = "et-color";
   dock.appendChild(swatchBox);
@@ -285,7 +295,10 @@ function openZoom(stateName, idx, keepWidth) {
   eraserBtn.addEventListener("click", () => setTool("eraser"));
   pickBtn.addEventListener("click", () => setTool("pick"));
   selectBtn.addEventListener("click", () => setTool("select"));
-  colorInput.addEventListener("input", () => { if (pixelEdit) pixelEdit.color = colorInput.value; });
+  colorInput.addEventListener("input", () => {
+    rememberPenColor(colorInput.value);
+    if (pixelEdit) pixelEdit.color = colorInput.value;
+  });
 
   // 스포이드 표본: 현재 표시 픽셀(베이스 이미지 + 이미 적용한 편집)의 색을 (x,y)에서 읽는다.
   // 편집(ops)이 우선 — 방금 찍은 색도 다시 집을 수 있게. 투명/지운 픽셀은 null.
@@ -402,6 +415,7 @@ function openZoom(stateName, idx, keepWidth) {
       b.classList.toggle("current", hex === colorInput.value);
       b.addEventListener("click", () => {
         colorInput.value = hex;
+        rememberPenColor(hex);
         swatchBox.querySelectorAll(".swatch.current").forEach((s) => s.classList.remove("current"));
         b.classList.add("current");
         if (pixelEdit) { pixelEdit.color = hex; if (pixelEdit.tool !== "pen") setTool("pen"); }
@@ -493,6 +507,7 @@ function openZoom(stateName, idx, keepWidth) {
         const hex = sampleColor(x, y);
         if (hex) {
           colorInput.value = hex;
+          rememberPenColor(hex);
           pixelEdit.color = hex;
           pixelEdit.tool = "pen"; // 집은 색으로 즉시 그리게
           syncToolbar();
