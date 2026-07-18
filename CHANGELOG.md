@@ -5,6 +5,21 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.50 "Sol Atelier" - Frame-space SSoT; eyedropper picks the color you see
+
+- **Fix: eyedropper picked a different color** on pixel-perfect rows with
+  transforms - it re-derived the source pixel while the screen shows the
+  re-quantized bitmap. The eyedropper now samples the actual rendered bitmap
+  ("the color you see is the color you get"), covering both display modes
+  (quantized canvas = display space, CSS-transformed canvas = source space).
+- **Structural: coordinate math is now owned in one place** (display.js):
+  frameFwdXY / frameInvXY / pointerSrcXY / sampleDisplayedColor. The pen,
+  eraser, eyedropper, marquee box, and move preview all consume these
+  helpers - no more per-tool copies of the transform math, which is what
+  kept breaking one tool every time scale/pixel-perfect behavior changed.
+  Verified: 4/4 screen-color == picked-color under pp+scale, pen inverse
+  mapping regression green.
+
 ## v1.56.49 "Sol Atelier" - WYSIWYG editing under transforms, atlas staleness
 
 - **Editing no longer snaps the view back to identity.** Picking the eraser /

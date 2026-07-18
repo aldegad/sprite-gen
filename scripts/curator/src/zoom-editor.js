@@ -282,13 +282,8 @@ function openZoom(stateName, idx, keepWidth) {
     selBox.hidden = !sel;
     if (!sel) return;
     // sel 은 소스 공간 — 표시가 변형(WYSIWYG)이라 점선도 순변환해서 그린다
-    // (회전/기울임은 축정렬 bbox 근사).
-    const tr = getTransform(stateName, idx);
-    const m = matrixOf(tr);
-    const fwd = (x, y) => [
-      m.m00 * (x - cellW / 2) + m.m01 * (y - cellH / 2) + cellW / 2 + tr.dx,
-      m.m10 * (x - cellW / 2) + m.m11 * (y - cellH / 2) + cellH / 2 + tr.dy,
-    ];
+    // (회전/기울임은 축정렬 bbox 근사; 공간 수학 SSoT = display.js frameFwdXY).
+    const fwd = (x, y) => frameFwdXY(stateName, idx, x, y);
     const cs = [fwd(sel.x0, sel.y0), fwd(sel.x1, sel.y0), fwd(sel.x0, sel.y1), fwd(sel.x1, sel.y1)];
     const x0 = Math.min(...cs.map((p) => p[0]));
     const x1 = Math.max(...cs.map((p) => p[0]));
@@ -328,27 +323,7 @@ function openZoom(stateName, idx, keepWidth) {
     if (pixelEdit) pixelEdit.color = colorInput.value;
   });
 
-  // 스포이드 표본: 현재 표시 픽셀(베이스 이미지 + 이미 적용한 편집)의 색을 (x,y)에서 읽는다.
-  // 편집(ops)이 우선 — 방금 찍은 색도 다시 집을 수 있게. 투명/지운 픽셀은 null.
-  const sampleColor = (x, y) => {
-    const ops = entries[stateName].pixels[idx];
-    const key = `${x},${y}`;
-    if (ops && key in ops) {
-      const v = ops[key];
-      return typeof v === "string" && v.startsWith("#") ? v.slice(0, 7) : null;
-    }
-    const imgEl = editSourceFor(stateName, stage.querySelector("img"));
-    if (!(imgEl && imgEl.complete && imgEl.naturalWidth)) return null;
-    const tmp = sampleColor._c || (sampleColor._c = document.createElement("canvas"));
-    tmp.width = cellW; tmp.height = cellH;
-    const c2 = tmp.getContext("2d");
-    c2.imageSmoothingEnabled = false;
-    c2.clearRect(0, 0, tmp.width, tmp.height);
-    c2.drawImage(imgEl, 0, 0, tmp.width, tmp.height);
-    const d = c2.getImageData(x, y, 1, 1).data;
-    if (d[3] < 40) return null; // 투명 픽셀은 집을 색이 없다
-    return "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
-  };
+  // 스포이드 = display.js sampleDisplayedColor ("화면에 보이는 그 색" SSoT).
   // 저널은 스트로크(액션) 단위 {sets: [{key, had, prev, value}]} — undo 는 통째로
   // 되돌리고 redo 스택에 쌓는다. 새 액션이 생기면 redo 는 비운다 (표준 편집기 계약).
   const undoPixel = () => {
@@ -526,35 +501,20 @@ function openZoom(stateName, idx, keepWidth) {
     if (ev.button || !ev.isPrimary) return;
     ev.preventDefault();
     ev.stopImmediatePropagation();
-    // 표시는 변형(WYSIWYG) 그대로, 저장은 소스 공간 — 포인터를 역변환해 잇는다.
-    // 순변환 T(p) = M(p−c)+c+d (display.js drawFrameInto 와 동일 수학)의 역.
-    const srcXY = (e2) => {
-      const r = stage.getBoundingClientRect();
-      const dx0 = ((e2.clientX - r.left) / r.width) * cellW;
-      const dy0 = ((e2.clientY - r.top) / r.height) * cellH;
-      const tr = getTransform(stateName, idx);
-      const m = matrixOf(tr);
-      const det = m.m00 * m.m11 - m.m01 * m.m10 || 1;
-      const ux = dx0 - cellW / 2 - tr.dx;
-      const uy = dy0 - cellH / 2 - tr.dy;
-      return [(m.m11 * ux - m.m01 * uy) / det + cellW / 2,
-              (-m.m10 * ux + m.m00 * uy) / det + cellH / 2];
-    };
-    const cellX = (e2) => Math.floor(srcXY(e2)[0]);
-    const cellY = (e2) => Math.floor(srcXY(e2)[1]);
+    // 표시는 변형(WYSIWYG) 그대로, 저장은 소스 공간 — 공간 수학 SSoT 는 display.js.
+    const cellX = (e2) => Math.floor(pointerSrcXY(stage, stateName, idx, e2)[0]);
+    const cellY = (e2) => Math.floor(pointerSrcXY(stage, stateName, idx, e2)[1]);
     // 스포이드: 색만 집고 바로 연필로 전환 (드래그 페인트 아님). 투명 픽셀은 무시.
+    // 집는 색 = 화면에 보이는 그 색 (표시 비트맵 샘플, display.js SSoT).
     if (pixelEdit.tool === "pick") {
-      const x = cellX(ev), y = cellY(ev);
-      if (x >= 0 && x < cellW && y >= 0 && y < cellH) {
-        const hex = sampleColor(x, y);
-        if (hex) {
-          colorInput.value = hex;
-          rememberPenColor(hex);
-          pixelEdit.color = hex;
-          pixelEdit.tool = "pen"; // 집은 색으로 즉시 그리게
-          syncToolbar();
-          setStatus(`${t("pickTool")}: ${hex}`, "ok");
-        }
+      const hex = sampleDisplayedColor(stage, stateName, idx, ev);
+      if (hex) {
+        colorInput.value = hex;
+        rememberPenColor(hex);
+        pixelEdit.color = hex;
+        pixelEdit.tool = "pen"; // 집은 색으로 즉시 그리게
+        syncToolbar();
+        setStatus(`${t("pickTool")}: ${hex}`, "ok");
       }
       return;
     }
