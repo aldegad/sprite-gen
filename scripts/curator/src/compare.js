@@ -84,6 +84,52 @@ function openCompare() {
     imgs.set(tg.state, im);
   }
 
+  // 큐레이션 완성 상태 합성 (수홍 2026-07-18: 편집·조정된 모습이 비교본):
+  // 시퀀스의 cursor 번째 인스턴스를 캐노니컬+변형+픽셀편집+호흡 위상으로 굽는다.
+  const compositeFor = (name, cursor) => {
+    const play = playList(name);
+    const st = run.states.find((s) => s.name === name);
+    let idx;
+    let phase = 0;
+    if (play.length) {
+      const cur = ((cursor % play.length) + play.length) % play.length;
+      idx = play[cur];
+      const bcfg = stateBreathe(name);
+      if (bcfg) phase = breathePattern(bcfg, play.length)[cur] || 0;
+    } else {
+      const f0 = st && st.frames.find((fr) => fr.present);
+      if (!f0) return null;
+      idx = f0.index;
+    }
+    const f = frameOf(name, idx);
+    const image = f ? img(f.url) : null;
+    if (!(image && image.complete && image.naturalWidth)) return null;
+    const base = document.createElement("canvas");
+    base.width = run.cell.width;
+    base.height = run.cell.height;
+    const bx = base.getContext("2d");
+    bx.imageSmoothingEnabled = false;
+    drawFrameInto(bx, image, getTransform(name, idx), base.width, base.height,
+      snapScaleFor(name), getPixelOps(name, idx));
+    const bcfg = stateBreathe(name);
+    const out = phase && bcfg ? breatheComposite(base, bcfg, phase) : base;
+    // 콘텐츠 bbox (합성 결과 기준 — 변형으로 옮겨진 위치 반영)
+    const d = out.getContext("2d").getImageData(0, 0, out.width, out.height).data;
+    let x0 = out.width, y0 = out.height, x1 = 0, y1 = 0;
+    for (let y = 0; y < out.height; y++) {
+      for (let x = 0; x < out.width; x++) {
+        if (d[(y * out.width + x) * 4 + 3] >= 40) {
+          if (x < x0) x0 = x;
+          if (y < y0) y0 = y;
+          if (x + 1 > x1) x1 = x + 1;
+          if (y + 1 > y1) y1 = y + 1;
+        }
+      }
+    }
+    if (x1 <= x0 || y1 <= y0) return null;
+    return { canvas: out, box: [x0, y0, x1, y1] };
+  };
+
   // 좌측 목록 (토글)
   const buildList = () => {
     listEl.innerHTML = "";
@@ -111,10 +157,14 @@ function openCompare() {
   // 배치 계산: 디폴트 정렬 + 사용자 오프셋
   const layout = () => {
     const z = state.zoom;
-    const cells = all.filter((tg) => state.include.has(tg.state)).map((tg) => {
-      const [x0, y0, x1, y1] = tg.frame.contentBox;
-      return { tg, box: tg.frame.contentBox, w: x1 - x0, h: y1 - y0 };
-    });
+    const cells = [];
+    for (const tg of all) {
+      if (!state.include.has(tg.state)) continue;
+      const comp = compositeFor(tg.state, anim.playing ? (anim.cursors[tg.state] || 0) : 0);
+      if (!comp) continue;
+      const [x0, y0, x1, y1] = comp.box;
+      cells.push({ tg, comp, box: comp.box, w: x1 - x0, h: y1 - y0 });
+    }
     const gap = 6;
     const pad = 12;
     const maxW = Math.max(1, ...cells.map((c) => c.w));
@@ -169,36 +219,7 @@ function openCompare() {
     cells.forEach((c, i) => {
       ctx.globalAlpha = state.mode === "overlay" && i > 0 ? 0.45 : 1;
       const [x0, y0] = c.box;
-      if (anim.playing) {
-        // 재생: 현재 인스턴스를 캐노니컬+편집+호흡 레이어로 합성해 셀 원점 정렬로 그린다
-        const name = c.tg.state;
-        const play = playList(name);
-        if (play.length) {
-          const cur = (anim.cursors[name] || 0) % play.length;
-          const idx = play[cur];
-          const f = frameOf(name, idx);
-          const image = f ? img(f.url) : null;
-          if (image && image.complete && image.naturalWidth) {
-            const base = document.createElement("canvas");
-            base.width = run.cell.width;
-            base.height = run.cell.height;
-            const bx = base.getContext("2d");
-            bx.imageSmoothingEnabled = false;
-            drawFrameInto(bx, image, getTransform(name, idx), base.width, base.height,
-              snapScaleFor(name), getPixelOps(name, idx));
-            const bcfg = stateBreathe(name);
-            const out = bcfg
-              ? breatheComposite(base, bcfg, breathePattern(bcfg, play.length)[cur] || 0)
-              : base;
-            ctx.drawImage(out, 0, 0, base.width, base.height,
-              (c.dx - x0) * z, (c.dy - y0) * z, base.width * z, base.height * z);
-            return;
-          }
-        }
-      }
-      const im = imgs.get(c.tg.state);
-      if (!(im && im.complete && im.naturalWidth)) return;
-      ctx.drawImage(im, x0, y0, c.w, c.h, c.dx * z, c.dy * z, c.w * z, c.h * z);
+      ctx.drawImage(c.comp.canvas, x0, y0, c.w, c.h, c.dx * z, c.dy * z, c.w * z, c.h * z);
     });
     ctx.globalAlpha = 1;
     // 디폴트 정렬 기준선 (희미하게): 수평 = 바닥, 수직 = 가로 중심
