@@ -852,9 +852,18 @@ function openZoom(stateName, idx, keepWidth) {
         btop = ttop;
         bh = Math.max(1, tbot - ttop);
         if (!e0.breathe && !beforeCfg && bm.histPos <= 0) {
+          // 기본 split 사슬 = defaultBreatheConfig 와 동일: 형제 행 상속 → 허리 → 가슴
+          const sib = run.states
+            .map((s) => s.name !== stateName && entries[s.name] && entries[s.name].breathe)
+            .find((b) => b && Array.isArray(b.splits) && b.splits.length);
           const cxh = compositeCell();
-          const silh = silhouetteStats(cxh.getImageData(0, 0, cellW, cellH).data, cellW, cellH);
-          if (silh.top < cellH) bm.cfg.splits = [Math.round(silh.split * 100) / 100];
+          const dd2 = cxh.getImageData(0, 0, cellW, cellH).data;
+          const silh = silhouetteStats(dd2, cellW, cellH);
+          if (sib) bm.cfg.splits = [sib.splits[0]];
+          else if (silh.top < cellH) {
+            const waist = waistSplitFrom(dd2, cellW, cellH);
+            bm.cfg.splits = [Math.round((waist !== null ? waist : silh.split) * 100) / 100];
+          }
           if (bm.histPos === 0) bm.hist[0] = clone(bm.cfg);
         }
         bm.geomReady = true;

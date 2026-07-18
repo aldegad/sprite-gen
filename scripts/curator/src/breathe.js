@@ -185,8 +185,59 @@ function silhouetteStats(data, W, H) {
   return { top, h, split };
 }
 
-// 첫 활성화 기본값: 첫 프레임 이미지에서 휴리스틱 가슴선 1개
+// 허리선 검출 (수홍 확정 2026-07-19 "벨트 있으면 딱 그 위, 허리에 걸리게"):
+// 상체만 숨쉬고 하체(치마/다리)는 고정되는 이상적 분할선 = 벨트 바로 위.
+// ① 벨트 액센트 밴드(콘텐츠 45~80% 구간의 고채도 warm 색 행) 최상단 → 실측 0.2px 일치
+// ② 행간 색분포 급변점(히스토그램 L1, 같은 구간) → 실측 1~3px
+// 실패 시 null — 호출자가 가슴 휴리스틱(silhouetteStats)으로 폴백.
+function waistSplitFrom(data, W, H) {
+  let top = H, bot = 0;
+  const warm = new Array(H).fill(0);
+  const hist = [];
+  for (let y = 0; y < H; y++) {
+    const c = new Map();
+    let n = 0;
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      if (data[i + 3] < 40) continue;
+      n++;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      if (r > 200 && g > 140 && b < 110 && r > b + 100) warm[y]++;
+      const k = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
+      c.set(k, (c.get(k) || 0) + 1);
+    }
+    hist.push({ c, n });
+    if (n) { if (y < top) top = y; bot = y + 1; }
+  }
+  const h = bot - top;
+  if (h < 8) return null;
+  const y0 = top + Math.floor(h * 0.45);
+  const y1 = top + Math.floor(h * 0.8);
+  const clamp = (y) => Math.min(0.75, Math.max(0.3, (y - top) / h));
+  for (let y = y0; y < y1; y++) if (warm[y] >= 1) return clamp(y); // ① 벨트 위
+  let best = 0.35, besty = null; // 급변점 최소 문턱 — 밋밋한 행에서 오검출 방지
+  for (let y = y0; y < y1; y++) {
+    const a = hist[y - 1], b2 = hist[y];
+    if (!a.n || !b2.n) continue;
+    let d = 0;
+    const keys = new Set([...a.c.keys(), ...b2.c.keys()]);
+    for (const k of keys) d += Math.abs((a.c.get(k) || 0) / a.n - (b2.c.get(k) || 0) / b2.n);
+    if (d > best) { best = d; besty = y; }
+  }
+  return besty === null ? null : clamp(besty); // ② 급변점
+}
+
+// 첫 활성화 기본값 사슬 (수홍 확정 2026-07-19): ⓪ 같은 런에서 사람이 이미 튜닝한
+// 다른 행의 split 상속(사람 판단 > 휴리스틱 — 바리에이션 행들이 허리선을 물려받는다)
+// → ① / ② waistSplitFrom → ③ 가슴 휴리스틱.
 async function defaultBreatheConfig(stateName) {
+  const sibling = run.states
+    .map((s) => s.name !== stateName && entries[s.name] && entries[s.name].breathe)
+    .find((b) => b && Array.isArray(b.splits) && b.splits.length);
+  if (sibling) {
+    return { splits: [sibling.splits[0]], amplitude: sibling.amplitude || 1,
+             breaths: sibling.breaths || 1, subpixel: false };
+  }
   const st = run.states.find((s) => s.name === stateName);
   const first = st && st.frames.find((f) => f.present);
   if (!first) throw new Error("no extracted frame");
@@ -198,8 +249,10 @@ async function defaultBreatheConfig(stateName) {
   c.height = image.naturalHeight;
   const cx = c.getContext("2d");
   cx.drawImage(image, 0, 0);
-  const sil = silhouetteStats(cx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
-  return { splits: [Math.round(sil.split * 100) / 100], amplitude: 1, breaths: 1, subpixel: false };
+  const data = cx.getImageData(0, 0, c.width, c.height).data;
+  const waist = waistSplitFrom(data, c.width, c.height);
+  const split = waist !== null ? waist : silhouetteStats(data, c.width, c.height).split;
+  return { splits: [Math.round(split * 100) / 100], amplitude: 1, breaths: 1, subpixel: false };
 }
 
 // 레거시 자가 이전 (self-heal): 구 테이크 방식이 시퀀스에 끼워둔 breathe 위상
