@@ -5,6 +5,25 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.41 "Sol Atelier" - Boundary-snapped sampling (organic grid truth)
+
+Soohong's diagnosis chain closed (2026-07-18): the regular-lattice assumption
+was the last root cause — AI-drawn blocks drift locally, so uniform cuts bleed
+boundary slivers into neighbor cells (the ghost pixel under the eye; same root
+as the old 1px-under-the-feet bug).
+
+- **refine_edges_to_boundaries** — the uniform consensus cut lines snap to the
+  local color-boundary mass maximum (±pitch/3 window, monotonic + min-cell-2px
+  invariants, deterministic; flat regions keep the regular position).
+  `snap_by_edges` samples exactly those cuts, and the SAME edges are recorded
+  as `input_grids` — the green overlay now IS the sampling truth by
+  construction (record count == final pixel count).
+- Verified on the rerolled side_idle: eye is a clean solid block (no ghost),
+  26×48 with the recorded grid exactly 26×48; up_idle's native 53-height is
+  preserved untouched (no height conform — the physical cell cap exists only
+  to prevent canvas overflow and did not trigger).
+- Full suite green (250).
+
 ## v1.56.40 "Sol Atelier" - Duplicates are LINKED by default (one edit truth)
 
 Soohong's model (2026-07-18): a duplicate is a play slot of the same frame, so

@@ -1328,6 +1328,88 @@ def tighten_components(images: list[Image.Image]) -> list[Image.Image]:
     ]
 
 
+
+def _boundary_mass(image: Image.Image) -> tuple[list[int], list[int]]:
+    """축별 색/알파 경계 질량 프로파일 — 절단선 스냅의 증거."""
+    px = image.load()
+    w, h = image.size
+    col = [0] * max(1, w)
+    row = [0] * max(1, h)
+    for y in range(h):
+        for x in range(w - 1):
+            a, b = px[x, y], px[x + 1, y]
+            if (a[3] >= 128) != (b[3] >= 128) or (
+                a[3] >= 128 and b[3] >= 128
+                and abs(a[0]-b[0]) + abs(a[1]-b[1]) + abs(a[2]-b[2]) > 48
+            ):
+                col[x + 1] += 1
+    for x in range(w):
+        for y in range(h - 1):
+            a, b = px[x, y], px[x, y + 1]
+            if (a[3] >= 128) != (b[3] >= 128) or (
+                a[3] >= 128 and b[3] >= 128
+                and abs(a[0]-b[0]) + abs(a[1]-b[1]) + abs(a[2]-b[2]) > 48
+            ):
+                row[y + 1] += 1
+    return col, row
+
+
+def refine_edges_to_boundaries(component: Image.Image, x_edges: list[int], y_edges: list[int],
+                               pitch: tuple[float, float]) -> tuple[list[int], list[int]]:
+    """등간격 절단선을 실제 블록 경계로 스냅 (수홍 확정 2026-07-18).
+
+    AI 블록은 국소적으로 흔들려서 등간격 자름은 경계 조각을 옆 칸으로 흘린다
+    (실사고: 눈 아래 유령 픽셀, 발밑 1픽셀 — 같은 뿌리). 각 내부 절단선을
+    ±pitch/3 창 안의 색경계 질량 최대 위치로 옮긴다. 질량이 무의미하면(평탄 영역)
+    등간격 위치 유지. 단조 증가·최소 칸폭 2px 불변식 강제 — 결정론."""
+    col, row = _boundary_mass(component)
+
+    def snap(edges: list[int], mass: list[int], pitch_axis: float, limit: int) -> list[int]:
+        if len(edges) < 3:
+            return edges
+        out = list(edges)
+        window = max(1, int(pitch_axis / 3))
+        for i in range(1, len(out) - 1):
+            e = edges[i]
+            lo = max(out[i - 1] + 2, e - window)
+            hi = min(edges[i + 1] - 2, e + window, limit - 1)
+            if hi < lo:
+                continue
+            best = max(range(lo, hi + 1), key=lambda pos: (mass[pos] if pos < len(mass) else 0))
+            if (mass[best] if best < len(mass) else 0) > 0:
+                out[i] = best
+        # 단조/최소폭 재확인 (스냅 순서상 위반 불가지만 방어적 단정)
+        for i in range(1, len(out)):
+            if out[i] <= out[i - 1]:
+                return list(edges)  # 위반 시 통째로 등간격 유지 (관측 불필요 — 발생 불가 경로)
+        return out
+
+    return (snap(x_edges, col, pitch[0], component.width),
+            snap(y_edges, row, pitch[1], component.height))
+
+
+def snap_by_edges(image: Image.Image, x_edges: list[int], y_edges: list[int],
+                  detail_bias: bool = False) -> Image.Image:
+    """명시 절단선으로 블록 샘플링 (grid_snap_downscale 의 코어 — 비등간격 지원)."""
+    source = image.convert("RGBA")
+    pixels = source.load()
+    output = Image.new("RGBA", (len(x_edges) - 1, len(y_edges) - 1), (0, 0, 0, 0))
+    out = output.load()
+    for oy in range(len(y_edges) - 1):
+        for ox in range(len(x_edges) - 1):
+            block = [
+                pixels[x, y]
+                for y in range(y_edges[oy], y_edges[oy + 1])
+                for x in range(x_edges[ox], x_edges[ox + 1])
+            ]
+            opaque = [p for p in block if p[3] >= 128]
+            if len(opaque) * 2 < len(block):
+                continue
+            color = _dominant_block_color(opaque, detail_bias)
+            out[ox, oy] = (color[0], color[1], color[2], 255)
+    return output
+
+
 def grid_snap_downscale(
     image: Image.Image,
     pitch: float | tuple[float, float],
@@ -2454,17 +2536,15 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         snapped = []
         cut_edges: list[tuple[list[int], list[int]] | None] = []
         if min(consensus_x, consensus_y) >= 2.0:
-            # 위상만 프레임별로 (스트립 안에서 드리프트하는 건 위상이다).
+            # 위상만 프레임별로 (스트립 안에서 드리프트하는 건 위상이다). 등간격 선을
+            # 실제 블록 경계에 스냅한 뒤 그 선으로 샘플링한다 — 기록(cut_edges)도
+            # 같은 선이라 표시 격자 = 샘플링 진실 (수홍 확정 2026-07-18).
             for component, frame_phase in zip(images, frame_phases):
-                snapped.append(
-                    grid_snap_downscale(component, (consensus_x, consensus_y), pp_detail_bias, frame_phase)
-                )
-                # 실제 절단선(grid_snap_downscale 이 쓰는 것과 동일 입력의 _grid_edges) —
-                # 큐레이터가 원본 쌍둥이 위에 "검출된 입력 격자"로 겹쳐 보여준다.
-                cut_edges.append((
-                    _grid_edges(component.width, consensus_x, frame_phase[0]),
-                    _grid_edges(component.height, consensus_y, frame_phase[1]),
-                ))
+                xs = _grid_edges(component.width, consensus_x, frame_phase[0])
+                ys = _grid_edges(component.height, consensus_y, frame_phase[1])
+                xs, ys = refine_edges_to_boundaries(component, xs, ys, (consensus_x, consensus_y))
+                snapped.append(snap_by_edges(component, xs, ys, pp_detail_bias))
+                cut_edges.append((xs, ys))
         else:
             snapped = list(images)
             cut_edges = [None] * len(images)
