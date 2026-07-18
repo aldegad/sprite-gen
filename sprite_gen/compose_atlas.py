@@ -12,7 +12,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen.breathe import fit_breathe_pattern, phase_frame
-from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
+from sprite_gen.curation import apply_pixel_edits, apply_transform, edit_index, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import heal_run, require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
@@ -99,8 +99,9 @@ def _run(args: argparse.Namespace):
     # 프레임 인덱스 → rect 샘플링만 하면 된다).
     def _instance_key(state: str, frame_index: int, phase: float = 0.0) -> tuple:
         source_index = source_frame_index(curation, state, frame_index, state_frame_total(request, state))
-        transform_key = json.dumps(plans[state][1].get(frame_index), sort_keys=True)
-        ops_key = json.dumps(state_pixel_ops(curation, state).get(frame_index), sort_keys=True)
+        edit_idx = edit_index(curation, state, frame_index)  # 링크 복제 = 원본 편집 truth (셀 공유)
+        transform_key = json.dumps(plans[state][1].get(edit_idx), sort_keys=True)
+        ops_key = json.dumps(state_pixel_ops(curation, state).get(edit_idx), sort_keys=True)
         return (source_index, transform_key, ops_key, phase)
 
     # 호흡 후처리 레이어 (사이드카, 수홍 확정 2026-07-18 루프-맞춤): 재생 위치 =
@@ -160,12 +161,13 @@ def _run(args: argparse.Namespace):
             if not frame_path.is_file():
                 errors.append(f"missing frame ({variant} variant): {frame_path}")
                 continue
+            edit_idx = edit_index(curation, state, frame_index)
             with Image.open(frame_path) as opened:
-                source = apply_pixel_edits(opened.convert("RGBA"), state_pixel_ops(curation, state).get(frame_index))
+                source = apply_pixel_edits(opened.convert("RGBA"), state_pixel_ops(curation, state).get(edit_idx))
             if source.size != cell_size:
                 errors.append(f"{frame_path} is {source.width}x{source.height}; expected {cell_width}x{cell_height}")
             # apply the human curation transform (identity when uncurated)
-            frame = apply_transform(source, transforms.get(frame_index), cell_size,
+            frame = apply_transform(source, transforms.get(edit_idx), cell_size,
                                     snap_scale=snap_scale if variant == "pixel" else None)
             if breathe_cfg and breathe_phase:
                 # 호흡 위상은 최종 셀 픽셀 위 결정론 행 시프트 — 팔레트·격자 불변

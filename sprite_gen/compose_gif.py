@@ -15,7 +15,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from sprite_gen.breathe import bake_breathe_sequence
-from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
+from sprite_gen.curation import apply_pixel_edits, apply_transform, edit_index, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.runio import read_guard
@@ -138,9 +138,10 @@ def _run_dir_mode_guarded(args, run_dir):
                     f"'{variant}' variant was not baked (re-extract before composing); "
                     f"skipping it would silently produce a shorter GIF."
                 )
-            frame = apply_pixel_edits(Image.open(path).convert("RGBA"), state_pixel_ops(curation, state).get(index))
+            edit_idx = edit_index(curation, state, index)  # 링크 복제 = 원본 편집 truth
+            frame = apply_pixel_edits(Image.open(path).convert("RGBA"), state_pixel_ops(curation, state).get(edit_idx))
             if cell_w and cell_h:
-                frame = apply_transform(frame, transforms.get(index), (cell_w, cell_h),
+                frame = apply_transform(frame, transforms.get(edit_idx), (cell_w, cell_h),
                                         snap_scale=pixel_snap_scale(request) if variant == "pixel" else None)
             images.append(frame)
         if not images:

@@ -230,7 +230,7 @@ function makeScaleScrub(stateName, idx) {
 }
 
 function resetTransform(stateName, idx) {
-  entries[stateName].transforms[idx] = IDENTITY();
+  entries[stateName].transforms[editIndex(stateName, idx)] = IDENTITY();
   applyFrameTransformAll(stateName, idx);
   scheduleSave();
 }
@@ -238,8 +238,9 @@ function resetTransform(stateName, idx) {
 function toggleFlipX(stateName, idx) {
   const entry = entries[stateName];
   if (!entry) return;
-  if (!entry.transforms[idx]) entry.transforms[idx] = IDENTITY();
-  entry.transforms[idx].flipX = entry.transforms[idx].flipX ? 0 : 1;
+  const key = editIndex(stateName, idx);
+  if (!entry.transforms[key]) entry.transforms[key] = IDENTITY();
+  entry.transforms[key].flipX = entry.transforms[key].flipX ? 0 : 1;
   // 모든 스테이지에 거울 반전을 렌더하고 flip 버튼을 강조한다.
   applyFrameTransformAll(stateName, idx);
   scheduleSave();

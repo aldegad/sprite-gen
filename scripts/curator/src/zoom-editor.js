@@ -114,6 +114,8 @@ function openZoom(stateName, idx, keepWidth) {
   const frame = frameOf(stateName, idx); // 복제 인스턴스 → 원본 이미지, 자기 변형
   if (!frame || !frame.present) return;
   const isBase = stateName === BASE_STATE; // 베이스도 같은 컴포넌트로 연다 (수홍 지시 2026-07-17)
+  // 링크된 복제는 원본 프레임의 편집 세션을 연다 (편집 truth = 원본 하나, 수홍 2026-07-18)
+  if (!isBase) idx = editIndex(stateName, idx);
   const [cellW, cellH] = cellDims(stateName);
   const aspect = cellH / cellW;
   const width = keepWidth

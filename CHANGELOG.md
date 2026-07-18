@@ -5,6 +5,23 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.40 "Sol Atelier" - Duplicates are LINKED by default (one edit truth)
+
+Soohong's model (2026-07-18): a duplicate is a play slot of the same frame, so
+its edits must sync with the source by default — independence is an explicit
+"unlink" action.
+
+- **Linked clones** — transform + pixel-edit truth for a linked clone IS the
+  source frame's entry (`edit_index` resolver, shared by the webview and every
+  bake path: atlas, GIF, PNG export). Editing the source updates all linked
+  duplicates live; opening a linked duplicate in the zoom editor opens the
+  source's session. Atlas dedup improves: linked clones always share the
+  source's cell.
+- **Unlink** — a chain-break button on linked duplicate cards copies the
+  current edits and detaches (`unlinked` sidecar list); further edits are
+  separate. Pre-existing clones that already carried their own edits are
+  auto-treated as unlinked on load (no silent edit loss).
+
 ## v1.56.39 "Sol Atelier" - Palette lock + frozen rows (approved-art protection)
 
 The drift saga ends (Soohong 2026-07-18, "A가 정석"): a live curation server
