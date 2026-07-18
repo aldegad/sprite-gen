@@ -5,6 +5,32 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.34 "Sol Atelier" - Seam-band sub-pixel + final-bake filmstrip
+
+> commit 7f5cdfb (message says v1.56.32 — renumbered, see v1.56.33 note).
+
+Soohong's corrections (2026-07-18): sub-pixel intermediate colors belong ONLY on
+the moving seams, and the loop math needs to be visible.
+
+- **Seam-band sub-pixel** — the half-phase frame no longer blends the whole
+  sprite (which ghosted every horizontal boundary — eyes, scarf). Intermediate
+  colors are confined to the moving seams: the content top edge and each split
+  line (rows y-1 .. y+amplitude). Regression: a fake "eye" boundary inside the
+  body shows zero ghosting outside the bands.
+- **breathe_pattern wrap fix** — the loop-wrap transition was inserted twice
+  (start and end); now the i=0 prev=last case owns it, matching the client
+  mirror exactly ([0.5, 0, 0, 0.5, 1, 1] for hold 2).
+- **Final-bake filmstrip** — the breathe editor lists the exact frames the
+  atlas/GIF will bake: sequence × breath cycle expanded to the LCM loop,
+  per-position thumbnails labeled `frame · Pphase` + loop-length caption,
+  live-rebuilt on every adjustment. Placed below the stage (outside the flex
+  row — inserting it inside collapsed the stage).
+
+## v1.56.32 "Sol Default" - scrub Kuma session-identity env from generation subprocesses
+
+> commit bbc01f1 (entry added retroactively by a sibling session during version
+> reconciliation — see that commit for details).
+
 ## v1.56.31 "Sol Default" - gen default provider = codex, observable grok fallback, SPRITE_GEN_DEFAULT_PROVIDER
 
 Soohong's directive (2026-07-17, 솔밸리 스레드): the `gen` default backend is codex
@@ -29,7 +55,10 @@ backend"; codex is now the confirmed default.
   `_codex_available`); docs updated in `docs/gen.md` (§Default provider selection), `SKILL.md`,
   and the thin-shuttle `image-gen` skill. Covered by 8 new offline tests in `tests/test_gen.py`.
 
-## v1.56.31 "Sol Atelier" - Breathing is a post-process LAYER + pipeline progress %
+## v1.56.33 "Sol Atelier" - Breathing is a post-process LAYER + pipeline progress %
+
+> commit be1baff (message says v1.56.31 — renumbered: a parallel session shipped
+> v1.56.31/32 "Sol Default" first; the changelog is the version SSoT).
 
 Soohong's architectural call (2026-07-18): breathing is a modulation ORTHOGONAL
 to frame selection — a blink frame breathes too. The take-based flow (bake an
