@@ -5,6 +5,19 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.58 "Sol Atelier" - Static-pose recipe codified from human curation data
+
+- New docs/static-pose-recipe.md, derived from Soohong's hand-curated
+  founder 3-direction idles ("they are all still idles - sitting, lying,
+  carrying; nothing runs"): still frame + 10 linked clones @ 4 fps (~2.75 s
+  loop), waist-line breathe (sibling-inherited split, 3 breaths/loop),
+  blink only where eyes are visible (front: unlinked clone + hand-pixeled
+  closed eyes at sequence end; side: one; back: none), edits only on the
+  still source. Applies to sit / sit_chair / lie / carry_idle rows;
+  locomotion and action rows are out of scope. Blink pixels stay human -
+  no auto-transplant (eye positions differ per pose). SKILL points to the
+  doc; agents apply the defaults post-extraction and report "blink pending".
+
 ## v1.56.57 "Sol Atelier" - Waist-line breathe default (belt rule + inheritance)
 
 - Default breathe split now lands on the WAIST, not the head/chest
