@@ -31,7 +31,8 @@ async function renderFinalAtlas(info) {
   }
   section.innerHTML =
     `<div class="state-head"><span class="name">${t("treeAtlas")}</span>` +
-    `<span class="meta">sprite-sheet-alpha.png · ${escapeHtml(stamp)}</span></div>` +
+    `<span class="meta">sprite-sheet-alpha.png · ${escapeHtml(stamp)}</span>` +
+    `<button type="button" class="ghost atlas-bake-btn" data-tip="${t("tAtlasBake")}">${t("atlasBake")}</button></div>` +
     `<div class="atlas-split">` +
     `<a class="atlas-sheet" href="${escapeHtml(info.url)}" target="_blank">` +
     `<img src="${escapeHtml(info.url)}" alt="final atlas" /></a>` +
@@ -39,6 +40,22 @@ async function renderFinalAtlas(info) {
       ? `<div class="atlas-doc"><div class="atlas-doc-head">${t("atlasDoc")}</div>${docHtml}</div>`
       : "") +
     `</div>`;
+  const bakeBtn = section.querySelector(".atlas-bake-btn");
+  if (bakeBtn) bakeBtn.addEventListener("click", async () => {
+    bakeBtn.disabled = true;
+    bakeBtn.textContent = t("atlasBaking");
+    try {
+      const res = await fetch("/api/compose", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+      await refreshFinalAtlas();
+      setStatus(t("atlasBaked"), "ok");
+    } catch (e) {
+      setStatus(t("composeFail") + e.message, "err");
+      bakeBtn.disabled = false;
+      bakeBtn.textContent = t("atlasBake");
+    }
+  });
   syncAtlasDocHeight();
 }
 
