@@ -29,6 +29,7 @@ function openCompare() {
     mode: (savedCmp && savedCmp.mode) || "h",
     zoom: (savedCmp && savedCmp.zoom) || 8,
     guides: (savedCmp && Array.isArray(savedCmp.guides)) ? savedCmp.guides : [],
+    guidesShow: !savedCmp || savedCmp.guidesShow !== false, // 선 보이기/감추기 (영속)
     focus: -1,
     include: new Set(
       savedCmp && Array.isArray(savedCmp.include) && savedCmp.include.length
@@ -41,7 +42,7 @@ function openCompare() {
     try {
       localStorage.setItem(persistKey, JSON.stringify({
         mode: state.mode, zoom: state.zoom, guides: state.guides,
-        include: [...state.include], offsets: state.offsets,
+        guidesShow: state.guidesShow, include: [...state.include], offsets: state.offsets,
       }));
     } catch { /* 무시 */ }
   };
@@ -79,6 +80,8 @@ function openCompare() {
     `<button type="button" class="ghost cmp-play" data-tip="${t("tCmpPlay")}">▶</button>` +
     `<button type="button" class="ghost cmp-gif" data-tip="${t("tCmpGif")}">GIF</button>` +
     `<button type="button" class="ghost cmp-marks" data-tip="${t("tCmpMarks")}">${t("cmpMarks")}</button>` +
+    `<button type="button" class="ghost cmp-guides-toggle" data-tip="${t("tCmpGuidesToggle")}"></button>` +
+    `<button type="button" class="ghost cmp-guides-clear" data-tip="${t("tCmpGuidesClear")}">${t("cmpGuidesClear")}</button>` +
     `<span class="cmp-zoom-label">×8</span>` +
     `</span>` +
     `<button type="button" class="ghost zoom-close">${t("zoomClose")}</button></div>` +
@@ -263,6 +266,9 @@ function openCompare() {
     guidesEl.innerHTML = "";
     guidesEl.style.width = `${canvas.width}px`;
     guidesEl.style.height = `${canvas.height}px`;
+    guidesEl.style.display = state.guidesShow ? "" : "none";
+    const tgBtn = modal.querySelector(".cmp-guides-toggle");
+    if (tgBtn) tgBtn.textContent = state.guidesShow ? t("cmpGuidesHide") : t("cmpGuidesShow");
     state.guides.forEach((g, gi) => {
       const ln = document.createElement("div");
       ln.className = `cmp-guide ${g.axis === "h" ? "gh" : "gv"}${gi === state.focus ? " focused" : ""}`;
@@ -335,7 +341,8 @@ function openCompare() {
       canvas.addEventListener("pointerup", onUp);
       return;
     }
-    // 빈 곳: 가이드 추가 + 포커스
+    // 빈 곳: 가이드 추가 + 포커스 (감춰져 있으면 자동으로 보이기)
+    state.guidesShow = true;
     state.guides.push(ev.shiftKey ? { axis: "v", pos: lx } : { axis: "h", pos: ly });
     state.focus = state.guides.length - 1;
     render();
@@ -430,6 +437,19 @@ function openCompare() {
     }
     if (added) { render(); pushHist(); }
     setStatus(STR[lang].cmpMarksDone(added), "ok");
+  });
+  modal.querySelector(".cmp-guides-toggle").addEventListener("click", () => {
+    state.guidesShow = !state.guidesShow;
+    render();
+    persistCompare();
+  });
+  modal.querySelector(".cmp-guides-clear").addEventListener("click", () => {
+    if (!state.guides.length) return;
+    state.guides = [];
+    state.focus = -1;
+    state.guidesShow = true; // 다음에 긋는 선이 바로 보이게
+    render();
+    pushHist(); // Cmd/Ctrl+Z 로 전부 지우기 되돌리기 가능
   });
   // 비교 GIF: 가상 시간으로 사이클을 결정론 샘플 → 서버가 GIF 조립 (수홍 2026-07-18)
   const gifBtn = modal.querySelector(".cmp-gif");
