@@ -5,6 +5,28 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.42 "Sol Atelier" - Anchor compare canvas, relink, bake-truth breathe line
+
+Soohong's batch (2026-07-18 evening):
+
+- **Anchor compare canvas** — a Compare button opens a canvas with every
+  direction idle anchor feet-aligned on a shared ground line: side-by-side or
+  overlay (onion-skin) modes, per-sprite head-top lines, click-to-add
+  draggable red guides with height-from-ground labels, zoom, size legend.
+  Height differences between directions are now visible at a glance.
+- **Breathe line = bake truth** — the editor geometry now comes from the
+  canonical frame's contentBox (what the bake actually uses), not the
+  displayed variant's silhouette; with pixel-perfect OFF the line used to sit
+  on the orig twin's different footprint ("최종선이 아니야"). No load race
+  either (contentBox is served instantly).
+- **Relink** — independent duplicates get a relink button (discard own edits,
+  follow the source again); down_idle's 8 legacy clones were auto-relinked
+  losslessly (each own edit proven a subset of the source's).
+- **Effective breath count badge** — when the requested count doesn't divide
+  the loop (e.g. 3 into an 11-frame loop), the stepper shows "→ 적용 1회"
+  inline; GUI and bake can no longer drift apart silently.
+- Linked-instance live repaint (ceacac4) rounds out duplicate sync.
+
 ## v1.56.41 "Sol Atelier" - Boundary-snapped sampling (organic grid truth)
 
 Soohong's diagnosis chain closed (2026-07-18): the regular-lattice assumption

@@ -737,6 +737,26 @@ function openZoom(stateName, idx, keepWidth) {
 
     const initSilhouette = () => {
       if (bm.geomReady) return true;
+      // 지오메트리 truth = 캐노니컬 프레임 contentBox (굽기가 쓰는 그 좌표계).
+      // 표시 변형(원본 쌍둥이)은 실루엣이 달라 선이 "최종선이 아닌" 곳에 그려졌다
+      // (실사고 2026-07-18 수홍). contentBox 는 /api/run 이 즉시 주므로 레이스도 없다.
+      const fr = frameOf(stateName, idx);
+      if (fr && fr.contentBox) {
+        btop = fr.contentBox[1];
+        bh = Math.max(1, fr.contentBox[3] - fr.contentBox[1]);
+        if (!e0.breathe && !beforeCfg && bm.histPos <= 0) {
+          const cxh = compositeCell();
+          const silh = silhouetteStats(cxh.getImageData(0, 0, cellW, cellH).data, cellW, cellH);
+          if (silh.top < cellH) bm.cfg.splits = [Math.round(silh.split * 100) / 100];
+          if (bm.histPos === 0) bm.hist[0] = clone(bm.cfg);
+        }
+        bm.geomReady = true;
+        syncLines();
+        renderTick();
+        commit();
+        rebuildStrip();
+        return true;
+      }
       const cx0 = compositeCell();
       const sil = silhouetteStats(cx0.getImageData(0, 0, cellW, cellH).data, cellW, cellH);
       if (sil.top >= cellH) return false; // 불투명 픽셀 0 — 아직 빈 합성
@@ -880,14 +900,26 @@ function openZoom(stateName, idx, keepWidth) {
       breathInput.value = String(clamped);
       commit();
       pushHist();
+      syncFitBadge();
     };
     minusBtn.addEventListener("click", () => setBreaths((bm.cfg.breaths || 1) - 1));
     plusBtn.addEventListener("click", () => setBreaths((bm.cfg.breaths || 1) + 1));
     breathInput.addEventListener("change", () => setBreaths(breathInput.value));
+    const fitBadge = document.createElement("span");
+    fitBadge.className = "breathe-fit-badge";
+    const syncFitBadge = () => {
+      const seqLen = playList(stateName).length || 1;
+      const fitted = breatheFitCount(bm.cfg, seqLen);
+      const want = bm.cfg.breaths || 1;
+      // 요청 횟수가 루프에 안 나눠떨어지면 실제 적용 횟수를 그 자리에서 보여준다
+      fitBadge.textContent = fitted === want ? "" : STR[lang].breatheFitted(fitted);
+      fitBadge.title = fitted === want ? "" : STR[lang].tBreatheFitted(seqLen);
+    };
     breathWrap.appendChild(breathLabel);
     breathWrap.appendChild(minusBtn);
     breathWrap.appendChild(breathInput);
     breathWrap.appendChild(plusBtn);
+    breathWrap.appendChild(fitBadge);
     bar.appendChild(ampSel);
     bar.appendChild(breathWrap);
     const subWrap = document.createElement("label");
@@ -905,10 +937,12 @@ function openZoom(stateName, idx, keepWidth) {
     subWrap.appendChild(Object.assign(document.createElement("span"), { textContent: t("breatheSub") }));
     bar.appendChild(subWrap);
     toolbar.appendChild(bar);
+    syncFitBadge();
     function syncBreatheControls() {
       ampSel.value = String(bm.cfg.amplitude);
       breathInput.value = String(bm.cfg.breaths || 1);
       subCheck.checked = !!bm.cfg.subpixel;
+      syncFitBadge();
     }
 
     // Esc = 취소 (열기 전 설정으로 복원 — 없었으면 레이어 해제)
