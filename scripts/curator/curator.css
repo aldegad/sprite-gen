@@ -1210,3 +1210,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 #compare-modal .cmp-guide span { position: absolute; right: 4px; top: -18px; font-size: 10.5px; color: #dc2626; background: rgba(255,255,255,0.85); padding: 0 4px; border-radius: 3px; }
 #compare-modal .cmp-legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
 #compare-modal .cmp-key .cmp-name { font-weight: 600; color: var(--text); }
+
+/* 복제 링크 상태 버튼 — 배지 옆 (하단 컨트롤 줄 과밀로 잘리던 문제 해소, 수홍 2026-07-18) */
+.link-state-btn { padding: 1px 4px; flex: none; }
+.link-state-btn svg { display: block; }

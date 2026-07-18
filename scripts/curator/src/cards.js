@@ -149,7 +149,14 @@ function renderCard(state, frame) {
   const relPath = (frame.url || "").replace(/^\/run\//, "");
   const fullName = isClone ? `${srcName} 복제 · ${relPath}` : [frame.label, relPath].filter(Boolean).join(" · ") || shortLabel;
   const titleCls = isClone ? "idx clone-badge" : "idx";
-  const title = `<span class="${titleCls}" data-tip="${escapeHtml(fullName)}" data-tip-copy>${escapeHtml(shortLabel)}</span>`;
+  const linkBtn = !isClone ? "" : (isLinkedClone(state.name, frame.index)
+    ? `<button type="button" class="ghost link-state-btn unlink-btn" data-tip="${t("tUnlink")}" aria-label="unlink">` +
+      '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">' +
+      '<path d="M6.5 9.5 3.8 12.2a2.2 2.2 0 0 0 3.1 3.1l2.7-2.7M9.5 6.5l2.7-2.7a2.2 2.2 0 0 0-3.1-3.1L6.4 3.4M2.5 2.5l2 2M13.5 13.5l-2-2" transform="translate(0,-1)" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>'
+    : `<button type="button" class="ghost link-state-btn relink-btn" data-tip="${t("tRelink")}" aria-label="relink">` +
+      '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">' +
+      '<path d="M6.8 9.2 4 12a2.3 2.3 0 0 0 3.2 3.2l2.8-2.8M9.2 6.8 12 4a2.3 2.3 0 0 1 3.2 3.2l-2.8 2.8M6.2 9.8l3.6-3.6" transform="translate(-1.5,-1.5)" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>');
+  const title = `<span class="${titleCls}" data-tip="${escapeHtml(fullName)}" data-tip-copy>${escapeHtml(shortLabel)}</span>${linkBtn}`;
   // 아이콘 SVG — 이모지 대신 라인 아이콘 (플랫폼별 렌더 편차·저품질 방지)
   const dupIcon =
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
@@ -186,16 +193,6 @@ function renderCard(state, frame) {
     (frame.present
       ? `<div class="card-info">${psize}<span class="tvals"></span></div>` +
         `<div class="card-controls">` +
-        (isClone && !isLinkedClone(state.name, frame.index)
-          ? `<button type="button" class="ghost relink-btn" data-tip="${t("tRelink")}" aria-label="relink">` +
-            '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
-            '<path d="M6.8 9.2 4 12a2.3 2.3 0 0 0 3.2 3.2l2.8-2.8M9.2 6.8 12 4a2.3 2.3 0 0 1 3.2 3.2l-2.8 2.8M6.2 9.8l3.6-3.6" transform="translate(-1.5,-1.5)" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>'
-          : "") +
-        (isClone && isLinkedClone(state.name, frame.index)
-          ? `<button type="button" class="ghost unlink-btn" data-tip="${t("tUnlink")}" aria-label="unlink">` +
-            '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
-            '<path d="M6.5 9.5 3.8 12.2a2.2 2.2 0 0 0 3.1 3.1l2.7-2.7M9.5 6.5l2.7-2.7a2.2 2.2 0 0 0-3.1-3.1L6.4 3.4M2.5 2.5l2 2M13.5 13.5l-2-2" transform="translate(0,-1)" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>'
-          : "") +
         `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
         `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}" aria-label="reset">↺</button>` +
         `<span class="ctrl-group">` +
