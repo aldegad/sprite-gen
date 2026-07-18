@@ -288,7 +288,7 @@ function startPreview(state) {
   const ch = run.cell.height;
   const playBtn = root.querySelector(".pv-play");
   const posEl = root.querySelector(".pv-pos");
-  const pv = (previews[state.name] = { playing: true, speed: 1, cursor: 0, shown: -1 });
+  const pv = (previews[state.name] = { playing: true, speed: 1, cursor: 0, shown: -1, tick: 0 });
   let last = 0;
 
   const syncPlayBtn = () => {
@@ -312,8 +312,22 @@ function startPreview(state) {
     const image = f ? img(frameUrl(state.name, f)) : null;
     if (image && image.complete && image.naturalWidth) {
       const tr = getTransform(state.name, idx);
-      // 픽셀퍼펙트 줄은 카드와 동일하게 격자 재양자화로 그린다 (프리뷰 = 굽기)
-      drawFrameInto(ctx, image, tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
+      const bcfg = stateBreathe(state.name);
+      if (bcfg) {
+        // 호흡 후처리 레이어 (수홍 2026-07-18): 프레임 선택과 직교하는 변조 —
+        // 재생 틱 기준 위상을 프레임 위에 얹는다 (깜빡임 프레임도 그대로 숨쉰다).
+        const base = document.createElement("canvas");
+        base.width = cw;
+        base.height = ch;
+        const baseCtx = base.getContext("2d");
+        baseCtx.imageSmoothingEnabled = false;
+        drawFrameInto(baseCtx, image, tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
+        const pattern = breathePattern(bcfg);
+        ctx.drawImage(breatheComposite(base, bcfg, pattern[pv.tick % pattern.length]), 0, 0);
+      } else {
+        // 픽셀퍼펙트 줄은 카드와 동일하게 격자 재양자화로 그린다 (프리뷰 = 굽기)
+        drawFrameInto(ctx, image, tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
+      }
     }
     posEl.textContent = `${pv.cursor + 1}/${play.length} · #${idx}`;
   };
@@ -323,6 +337,7 @@ function startPreview(state) {
     syncPlayBtn();
     const play = playList(state.name);
     if (play.length) pv.cursor = (pv.cursor + delta + play.length) % play.length;
+    pv.tick += 1;
     draw();
   };
   root.querySelector(".pv-prev").addEventListener("click", () => step(-1));
@@ -364,6 +379,7 @@ function startPreview(state) {
       if (ts - last >= interval) {
         last = ts;
         pv.cursor = (pv.cursor + 1) % play.length;
+        pv.tick += 1; // 호흡 위상 진행 (프레임 주기와 독립 — LCM 으로 재정합)
       }
     }
     draw();

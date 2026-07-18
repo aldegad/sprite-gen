@@ -8,14 +8,11 @@ let zoomView = null; // { stateName, idx, width }
 
 function closeZoom() {
   if (zoomView && zoomView.cleanupBreathe) zoomView.cleanupBreathe();
-  const applyBreathe = zoomView && zoomView.applyBreathe;
   pixelEdit = null;
   const modal = document.getElementById("zoom-modal");
   if (modal) modal.remove();
   zoomView = null;
   document.removeEventListener("keydown", onZoomKey);
-  // 호흡 에디터는 닫힘 = 적용 (생성 버튼 없음). 비동기 — 상태줄이 진행을 보고한다.
-  if (applyBreathe) applyBreathe();
 }
 
 // ── 공용 툴 아이콘 (SVG 라인 아이콘 — 이모지 금지, 양 편집기 공용) ──
@@ -100,7 +97,7 @@ document.addEventListener("keydown", (ev) => {
 
 function stepZoomFrame(delta) {
   if (!zoomView || zoomView.stateName === BASE_STATE) return; // 베이스 = 단일 뷰
-  if (zoomView.applyBreathe) return; // 호흡 포커스 모드: 프레임 이동 없음 (적용 오발 방지)
+  if (zoomView.breatheMode) return; // 호흡 포커스 모드: 프레임 이동 없음
   // 표시 순서(order)를 따라 넘긴다 — 복제 인스턴스 카드도 순회에 포함
   const e = entries[zoomView.stateName];
   const present = e.order.filter((i) => {
@@ -608,14 +605,13 @@ function openZoom(stateName, idx, keepWidth) {
     sizePxGrids();
   }, { passive: false });
 
-  // ── 호흡 모드 (수홍 제안 2026-07-17): 드래그 가슴선 + 라이브 호흡 미리보기 ──
-  // 기본 가슴선 = 실루엣 휴리스틱(상반신 최광폭 행 = 어깨의 바로 아래) — AI 불필요,
-  // SD/8등신 모두 자동 적응. 선을 끌면 미리보기가 실시간으로 숨쉰다.
+  // ── 호흡 모드 (레이어, 수홍 확정 2026-07-18): 실제 시퀀스가 재생되는 위에
+  // 분할선·진폭·주기·서브픽셀을 조정하면 즉시 truth(사이드카)에 반영된다.
+  // 깜빡임 프레임도 그대로 숨쉰다 (직교 레이어). 굽기/재추출/적용 대기 없음.
   if (!isBase && pendingBreathe) {
     pendingBreathe = false;
-    // 포커스 모드 (수홍 2026-07-17): 호흡 조정에 필요한 것만 남긴다 — 분할선(1~3개) +
-    // 진폭 + 주기. 생성 버튼은 없다 — 닫으면 적용, Esc 취소 (수홍 지시 "생성 버튼 삭제").
     card.classList.add("breathe-focus");
+    zoomView.breatheMode = true;
     stage.addEventListener("pointerdown", (ev) => {
       if (!ev.target.closest(".breathe-line")) {
         ev.stopImmediatePropagation();
@@ -623,70 +619,57 @@ function openZoom(stateName, idx, keepWidth) {
       }
     }, true);
     const st0 = run.states.find((s) => s.name === stateName);
-    const savedTake = st0 && (st0.takes || []).find((tk) => (tk.label || "") === "breathe");
-    const saved = savedTake && savedTake.breathe;
-    // 실루엣 지오메트리는 이미지 로드 후에만 유효 — 로드 전 compositeCell() 은 빈
-    // 캔버스라 btop=cellH·bh=1 로 붕괴해 선이 바닥에 붙고 드래그가 죽는다
-    // (실사고 2026-07-17 수홍 "선 움직여도 적용이 안 되어서" — 로드 레이스).
-    // initSilhouette 가 성공할 때까지 재시도하고, 성공 시 지오메트리를 확정한다.
-    let btop = 0;
-    let bh = 1;
-    // 저장된 테이크 파라미터가 있으면 복원, 없으면 실루엣 휴리스틱 가슴선 1개
-    const bm = {
-      amplitude: saved && saved.amplitude ? saved.amplitude : 1,
-      splits: saved && Array.isArray(saved.splits) && saved.splits.length
-        ? saved.splits.slice(0, 3).map(Number).sort((a, b) => a - b)
-        : [0.55], // 자리표시 — initSilhouette 성공 시 휴리스틱으로 대체
-      splitsFromSaved: !!(saved && Array.isArray(saved.splits) && saved.splits.length),
-      geomReady: false,
-      cadence: breatheCadenceOf(stateName) || 3,
-      phase: 0, touched: false, cadTouched: false, cancelled: false,
-      applying: false, hist: [], histPos: -1,
+    const e0 = entries[stateName];
+    const beforeCfg = e0.breathe ? JSON.parse(JSON.stringify(e0.breathe)) : null; // Esc 복원
+    const bm = { cfg: null, geomReady: false, hist: [], histPos: -1, cancelled: false, tick: 0 };
+    const clone = (o) => JSON.parse(JSON.stringify(o));
+    const commit = () => { // 조정 = 즉시 truth 반영 + 디바운스 저장 (수홍: 적용 대기 금지)
+      if (bm.cancelled) return;
+      e0.breathe = clone(bm.cfg);
+      scheduleSave();
     };
-    // 조정 히스토리 (수홍 요청 2026-07-17 "컨트롤제트로 이전 다음"): 선/진폭/주기의
-    // 확정 시점(드래그 놓기·셀렉트 변경·선 추가/제거)마다 스냅샷.
-    const snapshotBm = () => ({ splits: [...bm.splits], amplitude: bm.amplitude, cadence: bm.cadence });
     const pushHist = () => {
       bm.hist = bm.hist.slice(0, bm.histPos + 1);
-      bm.hist.push(snapshotBm());
+      bm.hist.push(clone(bm.cfg));
       bm.histPos = bm.hist.length - 1;
     };
     const restoreHist = (pos) => {
       if (pos < 0 || pos >= bm.hist.length || pos === bm.histPos) return;
       bm.histPos = pos;
-      const s = bm.hist[pos];
-      bm.splits = [...s.splits];
-      bm.amplitude = s.amplitude;
-      bm.cadence = s.cadence;
-      bm.touched = true;
-      bm.cadTouched = true;
+      bm.cfg = clone(bm.hist[pos]);
       syncBreatheControls();
       syncLines();
-      renderPhase();
+      commit();
     };
+    bm.cfg = e0.breathe ? clone(e0.breathe) : { splits: [0.55], amplitude: 1, hold: 3, subpixel: false };
 
-    // 분할선들 (수홍 확정 2026-07-17 "숨쉬기 선을 나누는거지"): 선이 K개면 exhale 이
-    // K위상 캐스케이드 — 아래 밴드부터 가라앉고 위 밴드가 반 박자 늦게 따라온다.
+    // 실루엣 지오메트리 (선 표시 기준): 이미지 로드 전 빈 합성이면 재시도
+    // (실사고 2026-07-17 로드 레이스 — 선이 바닥에 붙고 드래그 죽음)
+    let btop = 0;
+    let bh = 1;
+
+    // 분할선들 — 드래그 = 즉시 반영, 놓으면 히스토리 스냅샷
     const lineEls = [];
     function wireLine(ln) {
       ln.addEventListener("pointerdown", (ev) => {
         ev.preventDefault();
         ev.stopImmediatePropagation();
-        if (!bm.geomReady) return; // 이미지 로드 전엔 기준 좌표가 없다
+        if (!bm.geomReady) return;
         ln.setPointerCapture(ev.pointerId);
         const li = lineEls.indexOf(ln);
         const onMove = (e2) => {
           const r = stage.getBoundingClientRect();
           const yCell = ((e2.clientY - r.top) / r.height) * cellH;
-          bm.splits[li] = Math.min(0.9, Math.max(0.1, (yCell - btop) / bh));
-          bm.touched = true;
+          bm.cfg.splits[li] = Math.min(0.9, Math.max(0.1, Math.round(((yCell - btop) / bh) * 100) / 100));
           syncLines();
+          commit();
         };
         const onUp = () => {
           ln.removeEventListener("pointermove", onMove);
           ln.removeEventListener("pointerup", onUp);
-          bm.splits.sort((a, b) => a - b); // 선 순서 불변식: 위→아래 오름차순
+          bm.cfg.splits.sort((a, b) => a - b); // 선 순서 불변식: 위→아래 오름차순
           syncLines();
+          commit();
           pushHist();
         };
         ln.addEventListener("pointermove", onMove);
@@ -694,8 +677,8 @@ function openZoom(stateName, idx, keepWidth) {
       });
     }
     const syncLines = () => {
-      while (lineEls.length > bm.splits.length) lineEls.pop().remove();
-      while (lineEls.length < bm.splits.length) {
+      while (lineEls.length > bm.cfg.splits.length) lineEls.pop().remove();
+      while (lineEls.length < bm.cfg.splits.length) {
         const ln = document.createElement("div");
         ln.className = "breathe-line";
         ln.setAttribute("data-tip", t("breatheHint"));
@@ -703,18 +686,22 @@ function openZoom(stateName, idx, keepWidth) {
         stage.appendChild(ln);
         lineEls.push(ln);
       }
-      bm.splits.forEach((s, i) => {
+      bm.cfg.splits.forEach((s, i) => {
         lineEls[i].style.top = `${((btop + s * bh) / cellH) * 100}%`;
       });
     };
 
+    // 시퀀스 재생 미리보기 — 실제 재생 순서(playList: 깜빡임 포함) 위에 위상을 얹는다.
     const bcanvas = stage.querySelector(".snap-canvas");
     const bImg = stage.querySelector("img");
-    // 위상 미리보기 — breathe_frames 와 같은 수학: p<K = 밴드만 시프트 + 경계 행
-    // 스트레치(shift_band), p=K = 최하단 선 위 전체 시프트(shift_above)
-    const renderPhase = () => {
-      const srcEl = editSourceFor(stateName, bImg);
-      if (!srcEl || !bcanvas) return;
+    const renderTick = () => {
+      if (!bcanvas) return;
+      const play = playList(stateName);
+      const pattern = breathePattern(bm.cfg);
+      const frameIdx = play.length ? play[bm.tick % play.length] : idx;
+      const phase = pattern[bm.tick % pattern.length];
+      const f = frameOf(stateName, frameIdx);
+      const image = f ? img(frameUrl(stateName, f)) : null;
       bImg.style.visibility = "hidden";
       bcanvas.style.display = "block";
       bcanvas.width = cellW;
@@ -722,49 +709,19 @@ function openZoom(stateName, idx, keepWidth) {
       const bctx = bcanvas.getContext("2d");
       bctx.imageSmoothingEnabled = false;
       bctx.clearRect(0, 0, cellW, cellH);
-      drawFrameInto(bctx, srcEl, IDENTITY(), cellW, cellH, snapScaleFor(stateName),
-        getPixelOps(stateName, idx));
-      const K = bm.splits.length;
-      const p = Math.min(bm.phase, K);
-      if (!p) return;
-      const ys = bm.splits.map((s) => Math.round(btop + s * bh));
-      const yBottom = Math.max(btop + 1, ys[K - 1]);
-      const off = document.createElement("canvas");
-      off.width = cellW;
-      off.height = cellH;
-      const octx = off.getContext("2d");
-      octx.imageSmoothingEnabled = false;
-      octx.drawImage(bcanvas, 0, 0);
-      if (p === K) {
-        bctx.clearRect(0, btop, cellW, yBottom - btop);
-        bctx.drawImage(off, 0, btop, cellW, yBottom - btop,
-          0, btop + bm.amplitude, cellW, yBottom - btop);
-      } else {
-        const yTop = ys[K - 1 - p];
-        bctx.drawImage(off, 0, yTop, cellW, yBottom - yTop,
-          0, yTop + bm.amplitude, cellW, yBottom - yTop);
-        bctx.drawImage(off, 0, yTop, cellW, 1, 0, yTop, cellW, bm.amplitude);
-      }
+      if (!(image && image.complete && image.naturalWidth)) return;
+      const base = document.createElement("canvas");
+      base.width = cellW;
+      base.height = cellH;
+      const baseCtx = base.getContext("2d");
+      baseCtx.imageSmoothingEnabled = false;
+      drawFrameInto(baseCtx, image, getTransform(stateName, frameIdx), cellW, cellH,
+        snapScaleFor(stateName), getPixelOps(stateName, frameIdx));
+      bctx.drawImage(breatheComposite(base, bm.cfg, phase), 0, 0);
     };
-    // 미리보기 사이클 = 실제 투입 시퀀스와 동형: [기준×주기, P1..PK, PK×(주기-1), PK-1..P1]
-    // 재생 속도 = 이 줄의 실제 fps (게임에서 보일 그대로)
-    let ptick = 0;
     const stepMs = Math.max(140, Math.round(1000 / ((st0 && st0.fps) || 6)));
-    bm.timer = setInterval(() => {
-      const K = bm.splits.length;
-      const seq = [];
-      for (let i = 0; i < bm.cadence; i++) seq.push(0);
-      for (let p = 1; p <= K; p++) seq.push(p);
-      for (let i = 1; i < bm.cadence; i++) seq.push(K);
-      for (let p = K - 1; p >= 1; p--) seq.push(p);
-      ptick = (ptick + 1) % seq.length;
-      bm.phase = seq[ptick];
-      renderPhase();
-    }, stepMs);
-    renderPhase();
+    bm.timer = setInterval(() => { bm.tick += 1; renderTick(); }, stepMs);
 
-    // 지오메트리 초기화: 합성이 비어 있으면(이미지 미로드) 로드 이벤트 + 폴링으로
-    // 재시도한다. 성공 시 btop/bh 확정 + (저장값 없으면) 휴리스틱 가슴선 재계산.
     const initSilhouette = () => {
       if (bm.geomReady) return true;
       const cx0 = compositeCell();
@@ -772,16 +729,17 @@ function openZoom(stateName, idx, keepWidth) {
       if (sil.top >= cellH) return false; // 불투명 픽셀 0 — 아직 빈 합성
       btop = sil.top;
       bh = sil.h;
-      if (!bm.splitsFromSaved && !bm.touched) {
-        bm.splits = [sil.split];
-        if (bm.histPos === 0) bm.hist[0] = snapshotBm(); // 히스토리 바닥도 갱신
+      if (!e0.breathe && !beforeCfg && bm.histPos <= 0) {
+        bm.cfg.splits = [Math.round(sil.split * 100) / 100]; // 휴리스틱 가슴선
+        if (bm.histPos === 0) bm.hist[0] = clone(bm.cfg);
       }
       bm.geomReady = true;
       syncLines();
-      renderPhase();
+      renderTick();
+      commit(); // 에디터 오픈 = 레이어 활성 (Esc 로 이전 상태 복원 가능)
       return true;
     };
-    syncLines(); // 자리표시 위치라도 선을 즉시 보여준다
+    syncLines();
     if (!initSilhouette()) {
       let geomTries = 0;
       const retryGeom = () => {
@@ -813,86 +771,69 @@ function openZoom(stateName, idx, keepWidth) {
     addBtn.type = "button";
     addBtn.textContent = t("breatheLineAdd");
     addBtn.addEventListener("click", () => {
-      if (bm.splits.length >= 3) return;
-      bm.splits.unshift(Math.max(0.1, bm.splits[0] - 0.18)); // 새 선은 최상단 위로
-      bm.splits.sort((a, b) => a - b);
-      bm.touched = true;
+      if (bm.cfg.splits.length >= 3) return;
+      bm.cfg.splits.unshift(Math.max(0.1, bm.cfg.splits[0] - 0.18)); // 새 선은 최상단 위로
+      bm.cfg.splits.sort((a, b) => a - b);
       syncLines();
+      commit();
       pushHist();
     });
     const delBtn = document.createElement("button");
     delBtn.type = "button";
     delBtn.textContent = t("breatheLineDel");
     delBtn.addEventListener("click", () => {
-      if (bm.splits.length <= 1) return;
-      bm.splits.shift(); // 맨 위 선부터 제거 — 최하단(기본 가슴선)은 항상 유지
-      bm.touched = true;
+      if (bm.cfg.splits.length <= 1) return;
+      bm.cfg.splits.shift(); // 맨 위 선부터 제거 — 최하단(기본 가슴선) 유지
       syncLines();
+      commit();
       pushHist();
     });
     lineBtns.appendChild(addBtn);
     lineBtns.appendChild(delBtn);
     bar.appendChild(lineBtns);
-    const ampSel = mkSel([1, 2], bm.amplitude,
+    const ampSel = mkSel([1, 2], bm.cfg.amplitude,
       (v) => `${t("breatheAmp")} ${v}px`,
-      (v) => { bm.amplitude = v || 1; bm.touched = true; pushHist(); });
-    const cadSel = mkSel([2, 3, 4, 6], bm.cadence,
+      (v) => { bm.cfg.amplitude = v || 1; commit(); pushHist(); });
+    const holdSel = mkSel([2, 3, 4, 6], bm.cfg.hold,
       (v) => STR[lang].breatheCad(v),
-      (v) => { bm.cadence = v || 3; bm.cadTouched = true; pushHist(); });
+      (v) => { bm.cfg.hold = v || 3; commit(); pushHist(); });
     bar.appendChild(ampSel);
-    bar.appendChild(cadSel);
-    // 실행취소/재실행이 셀렉트 표시값도 되돌리게 (restoreHist → syncBreatheControls)
-    function syncBreatheControls() {
-      ampSel.value = String(bm.amplitude);
-      cadSel.value = String(bm.cadence);
-    }
-    // 적용 버튼 (수홍 요청 2026-07-17 "적용버튼좀"): 닫기를 기다리지 않고 그 자리에서
-    // 굽는다 — 베이크 + 전체 재추출은 오래 걸리므로 버튼 스피너로 진행을 보인다.
-    const applyBtn = document.createElement("button");
-    applyBtn.type = "button";
-    applyBtn.className = "breathe-apply";
-    applyBtn.textContent = t("breatheApply");
-    const doApply = (btn) => {
-      if (bm.applying) return;
-      if (bm.touched || !savedTake) {
-        bm.applying = true;
-        if (btn) {
-          btn.disabled = true;
-          btn.innerHTML = '<span class="tween-spin" aria-label="applying"></span>';
-        }
-        bakeBreatheTake(stateName, bm.splits, bm.amplitude, idx, bm.cadence)
-          .catch((e) => {
-            setStatus(t("breatheFail") + e.message, "err");
-            bm.applying = false;
-            if (btn) {
-              btn.disabled = false;
-              btn.textContent = t("breatheApply");
-            }
-          });
-        return;
-      }
-      if (bm.cadTouched || !breatheActive(stateName)) {
-        injectBreathe(stateName, bm.cadence);
-        scheduleSave();
-        rebuildState(stateName);
-        bm.cadTouched = false;
-        setStatus(STR[lang].breatheOn(stateName));
-      }
-    };
-    applyBtn.addEventListener("click", () => doApply(applyBtn));
-    bar.appendChild(applyBtn);
+    bar.appendChild(holdSel);
+    const subWrap = document.createElement("label");
+    subWrap.className = "breathe-subpixel";
+    subWrap.title = t("tBreatheSub");
+    const subCheck = document.createElement("input");
+    subCheck.type = "checkbox";
+    subCheck.checked = !!bm.cfg.subpixel;
+    subCheck.addEventListener("change", () => {
+      bm.cfg.subpixel = subCheck.checked;
+      commit();
+      pushHist();
+    });
+    subWrap.appendChild(subCheck);
+    subWrap.appendChild(Object.assign(document.createElement("span"), { textContent: t("breatheSub") }));
+    bar.appendChild(subWrap);
     toolbar.appendChild(bar);
+    function syncBreatheControls() {
+      ampSel.value = String(bm.cfg.amplitude);
+      holdSel.value = String(bm.cfg.hold);
+      subCheck.checked = !!bm.cfg.subpixel;
+    }
 
-    // 닫기 = 미적용분 자동 적용(안전망), 적용 버튼 = 즉시 적용, Esc = 취소.
-    zoomView.breatheCancel = () => { bm.cancelled = true; };
-    zoomView.applyBreathe = () => {
-      if (bm.cancelled) return;
-      doApply(null);
+    // Esc = 취소 (열기 전 설정으로 복원 — 없었으면 레이어 해제)
+    zoomView.breatheCancel = () => {
+      bm.cancelled = true;
+      e0.breathe = beforeCfg;
+      scheduleSave();
+      rebuildState(stateName);
     };
     zoomView.breatheUndo = () => restoreHist(bm.histPos - 1);
     zoomView.breatheRedo = () => restoreHist(bm.histPos + 1);
-    pushHist(); // 초기 상태가 히스토리 바닥 — 첫 Cmd+Z 가 여기로 돌아온다
-    zoomView.cleanupBreathe = () => clearInterval(bm.timer);
+    pushHist(); // 히스토리 바닥 = 오픈 시점 설정
+    zoomView.cleanupBreathe = () => {
+      clearInterval(bm.timer);
+      if (!bm.cancelled) rebuildState(stateName); // 줄 미리보기·토글 상태 동기화
+    };
   }
 
   wireStage(stage, stateName, idx); // 베이스도 변형 동일 — 저장 시 파일에 굽는다 (수홍 지시)

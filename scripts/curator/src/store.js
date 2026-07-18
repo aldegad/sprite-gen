@@ -209,6 +209,13 @@ function seedEntries() {
         if (Number.isInteger(i) && v && typeof v === "object" && Object.keys(v).length) pixels[i] = { ...v };
       }
     }
-    entries[state.name] = { order, sel, transforms, archived, pixels, clones };
+    entries[state.name] = { order, sel, transforms, archived, pixels, clones,
+      // 호흡 후처리 레이어 (사이드카 breathe — curation.state_breathe 와 같은 형태)
+      breathe: c && c.breathe && Array.isArray(c.breathe.splits) && c.breathe.splits.length
+        ? { splits: c.breathe.splits.map(Number).sort((a, b) => a - b).slice(0, 3),
+            amplitude: Math.max(1, Math.min(4, Number(c.breathe.amplitude) || 1)),
+            hold: Math.max(1, Math.min(8, Number(c.breathe.hold) || 3)),
+            subpixel: !!c.breathe.subpixel }
+        : null };
   }
 }

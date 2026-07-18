@@ -2395,7 +2395,11 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         return {"method": method, "pitch": pitch, "logical": logical_frames,
                 "components": images, "cut_edges": cut_edges}
 
+    total_steps = len(states) * 2  # 1패스(컴포넌트/스냅) + 2패스(팔레트/배치)
+    progress_step = 0
     for state in states:
+        _write_progress(run_dir, "extract", progress_step, total_steps, state, "components")
+        progress_step += 1
         if state not in request["states"]:
             raise SystemExit(f"unknown state in request: {state}")
         state_cfg = request["states"][state]
@@ -2477,8 +2481,11 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         # 팔레트는 런 전체(모든 state 의 논리 프레임)에서 한 번 뽑아 공유한다 —
         # 프레임/행 간 색 흔들림(플리커) 제거 + 아이덴티티 색 고정.
         palette = build_shared_palette([f for entry in pending for f in entry["frames"]], palette_size)
+        total_steps = progress_step + len(pending)  # 스킵된 행 반영 재산정
         outline_cfg = fit_config.get("outline", True)
         for entry in pending:
+            _write_progress(run_dir, "extract", progress_step, total_steps, entry["state"], "pixel-perfect")
+            progress_step += 1
             quantized = [apply_palette(frame, palette) for frame in entry["frames"]]
             if outline_cfg:
                 strength = 0.62 if outline_cfg is True else float(outline_cfg)
@@ -2552,6 +2559,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         "warnings": all_warnings,
     }
     all_state_names = set(request["states"])
+    _clear_progress(run_dir)
     if result["ok"]:
         # Whole-generation atomicity: canonical frames/ only ever holds a COMPLETE generation.
         # Swap in the staging generation AND resolve this attempt's target states in the failure
@@ -2676,6 +2684,31 @@ def heal_run(run_dir: Path | str) -> dict[str, Any]:
             report["notes"].append(
                 "heal re-extract failed — prior generation kept: " + " | ".join(tail))
     return report
+
+
+
+PROGRESS_REL = ".sprite-gen.progress.json"
+
+
+def _write_progress(run_dir: Path, op: str, done: int, total: int, label: str, phase: str) -> None:
+    """오래 걸리는 파이프라인의 잘게 쪼갠 진행도 (수홍 요청 2026-07-18 "잘게잘게").
+
+    한 파일 SSoT — 큐레이터가 폴링해 퍼센트로 표시한다. 완료 시 삭제 (아래
+    _clear_progress). 기록 실패는 파이프라인을 막지 않는다 (진행도는 관측용)."""
+    import time as _time
+    try:
+        atomic_write_text(run_dir / PROGRESS_REL, json.dumps({
+            "op": op, "done": done, "total": total, "label": label,
+            "phase": phase, "ts": _time.time()}, ensure_ascii=False))
+    except OSError:
+        pass
+
+
+def _clear_progress(run_dir: Path) -> None:
+    try:
+        (run_dir / PROGRESS_REL).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def run(**kwargs: object):

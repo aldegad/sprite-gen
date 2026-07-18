@@ -222,6 +222,15 @@ def _state_refs(run_dir, state, request):
     return refs
 
 
+
+def _read_op_progress(run_dir: Path) -> dict | None:
+    """엔진이 기록한 진행 파일 (.sprite-gen.progress.json) — 없으면 None."""
+    try:
+        return json.loads((run_dir / ".sprite-gen.progress.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def build_run_state(run_dir: Path) -> dict:
     """Assemble the run snapshot the SPA needs. Read under the run dir's shared read_guard
     so a concurrent `--force` re-import (which holds the exclusive publish_guard for its
@@ -681,9 +690,17 @@ class CurationHandler(BaseHTTPRequestHandler):
                 if (self.run_dir / ".sprite-gen.lock").exists():
                     self._send_json({"error": "re-extraction in progress — "
                                      "the run is being re-derived; reload when it finishes",
-                                     "busy": True}, 503)
+                                     "busy": True, "progress": _read_op_progress(self.run_dir)}, 503)
                 else:
                     self._send_json({"error": str(exc)}, 500)
+            return
+        if path == "/api/op-progress":
+            # 오래 걸리는 파이프라인(추출 등)의 잘게 쪼갠 진행도 — 큐레이터가 폴링해
+            # 퍼센트 표시 (수홍 요청 2026-07-18). busy=락 보유 여부, progress=엔진 기록.
+            self._send_json({
+                "busy": (self.run_dir / ".sprite-gen.lock").exists(),
+                "progress": _read_op_progress(self.run_dir),
+            })
             return
         if path == "/api/base-grid":
             # 베이스의 검출 픽셀 격자 — 편집기(줌 모달)의 논리 해상도와 base-edit 의
@@ -899,41 +916,6 @@ class CurationHandler(BaseHTTPRequestHandler):
                 image.save(base_path)
                 self._send_json({"ok": True, "applied": applied, "space": space,
                                  "backup": backup.name})
-                return
-            if path == "/api/breathe":
-                # 결정론 호흡 테이크 생성 (breathe_frames.py) + 전체 배치 재추출.
-                # split 은 큐레이터의 가슴선 드래그 값 (콘텐츠 높이 비율).
-                payload = self._read_body()
-                state = str(payload.get("state") or "")
-                request = json.loads(
-                    (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
-                if state not in request.get("states", {}):
-                    self._send_json({"error": f"unknown state: {state}"}, 400)
-                    return
-                try:
-                    frame = int(payload.get("frame", 0))
-                    raw_splits = payload.get("splits")
-                    if raw_splits is None:  # 구 클라이언트 호환: 단일 split
-                        raw_splits = [payload.get("split", 0.55)]
-                    splits = sorted(float(s) for s in raw_splits)
-                    amplitude = int(payload.get("amplitude", 1))
-                except (TypeError, ValueError):
-                    self._send_json({"error": "frame:int, splits:[float], amplitude:int required"}, 400)
-                    return
-                if not 1 <= len(splits) <= 3 or len(set(splits)) != len(splits):
-                    self._send_json({"error": f"splits must be 1..3 distinct lines: {splits}"}, 400)
-                    return
-                if any(not 0.05 < s < 0.95 for s in splits):
-                    self._send_json({"error": f"splits must be inside (0.05, 0.95): {splits}"}, 400)
-                    return
-                if not 1 <= amplitude <= 4:
-                    self._send_json({"error": f"amplitude must be 1..4: {amplitude}"}, 400)
-                    return
-                extra = ["--state", state, "--frame", str(frame),
-                         "--split", ",".join(f"{s:g}" for s in splits),
-                         "--amplitude", str(amplitude), "--extract"]
-                result = _run_script("breathe_frames.py", self.run_dir, *extra)
-                self._send_json(result, 200 if result["ok"] else 500)
                 return
             if path == "/api/interpolate":
                 payload = self._read_body()

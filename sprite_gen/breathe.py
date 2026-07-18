@@ -1,39 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""결정론 호흡(idle breathing) 프레임 생성 — 정수 행 시프트 스쿼시.
+"""결정론 호흡(idle breathing) — 후처리 레이어 수학 (정수 행 시프트 스쿼시).
 
-생성형이 원리적으로 못 하는 문제(정체성 100% + 1px 통제 변화)의 수학적 해법
-(수홍 확정 2026-07-17): 가슴선 위 행들을 날숨에 1px 내리고 발은 고정한다.
+호흡은 프레임 선택(깜빡임)과 직교하는 변조 레이어다 (수홍 확정 2026-07-18).
+설정은 curation.json 사이드카 `states.<state>.breathe` (curation.state_breathe 가
+정규화 SSoT), 굽기는 compose/GIF 가 재생 시퀀스 위에 이 모듈의 수학으로 한다.
 정수 픽셀 행 이동은 픽셀 격자에 닫혀 있어 팔레트·아웃라인·격자가 절대 안 깨진다.
-스타듀류 손그림 아이들의 프레임 델타와 동형.
+서브픽셀 옵션 = 위상 전이에 50% 블렌드 중간 프레임 (sub-pixel animation —
+경계 픽셀 중간색으로 반 픽셀 이동감). AI 개입 0.
 
-선(분할선)은 1~3개 — 선이 K개면 exhale 이 K위상 캐스케이드가 된다 (수홍 확정
-2026-07-17 "숨쉬기 선을 나누는거지"): 맨 아래 선 위 밴드부터 내려가고 위 밴드가
-반 박자씩 지연 합류한다 (드르륵). 위상 p (1..K):
-- p < K: 아래에서 p번째 밴드 묶음만 다운 (`shift_band`, 경계 행 스트레치로 메움)
-- p = K: 최하단 선 위 전체 다운 (`shift_above`)
-K=1 이 기존 single, K=2 가 기존 `--two-band`(머리 반 박자 지연)와 동형.
-
-산출은 도크트린대로 **테이크**(`raw/<state>.takes/<label>.png`, 크로마 합성 스트립)로
-기록되고 논리 프레임은 결정론 추출이 굽는다. AI 개입 0.
-
-사용:
-    python3 scripts/breathe_frames.py --run-dir <run> --state down_idle \
-        [--frame 0] [--split 0.55 | --split 0.32,0.55] \
-        [--two-band [--head-split 0.32]] \
-        [--amplitude 1] [--label breathe] [--extract]
+(구 테이크 방식 — exhale 프레임을 raw 테이크로 굽고 전체 재추출 — 은 v1.56.31
+에서 폐기: 깜빡임×호흡 조합 불가 + 적용마다 수 분 + 팔레트 드리프트 유발.)
 """
 
 from __future__ import annotations
 
-import argparse
-import json
-from pathlib import Path
-from typing import Any
-
 from PIL import Image
 
-from .interpolate import write_take
-from .layout import row_frame_rel
 
 
 def _content_top_bottom(frame: Image.Image) -> tuple[int, int]:
@@ -97,108 +79,83 @@ def breathe_frames(frame: Image.Image, split: float = 0.55, two_band: bool = Fal
     return frames
 
 
-TAKE_SCALE = 8  # 테이크 raw 업스케일 배율 — 추출 피치 검출이 8 을 정확히 잡고
-                # 논리로 되돌아오는 무손실 왕복 (논리 1px 스트립은 검출이 헛피치를 잡음)
+# ── 후처리 레이어 (수홍 확정 2026-07-18): 호흡은 프레임이 아니라 변조다 ──
+# 사이드카 curation.json 의 states.<state>.breathe = {splits, amplitude, hold, subpixel}
+# 를 compose/GIF 가 재생 시퀀스 위에 굽는다. 깜빡임 프레임도 그대로 숨쉰다 (직교).
+# subpixel = 위상 전이 사이에 두 위상의 50% 블렌드 프레임 삽입 — 도트 기법
+# "서브픽셀 애니메이션" (경계 픽셀 중간색으로 반 픽셀 이동감).
 
 
-def compose_take_strip(frames: list[Image.Image], cell: dict[str, Any],
-                       chroma_rgb: tuple[int, int, int]) -> Image.Image:
-    """프레임들을 크로마 배경 raw 스트립으로 — 추출이 컴포넌트로 다시 분리한다.
+def breathe_pattern(cfg: dict) -> list[float]:
+    """호흡 위상 시퀀스 1주기. 0=기준, 1..K=하강 캐스케이드, .5 스텝=서브픽셀 블렌드.
 
-    논리 해상도 프레임을 ×TAKE_SCALE NEAREST 업스케일해 넣는다: 추출의 피치 검출이
-    정수 배율을 그대로 잡아 원본 논리 픽셀로 무손실 복귀한다 (실사고 2026-07-17:
-    1px 스트립은 5.96 같은 헛피치로 잘려 28픽셀 조각이 됐다)."""
-    cw = int(cell.get("width") or cell.get("size"))
-    ch = int(cell.get("height") or cell.get("size"))
-    s = TAKE_SCALE
-    strip = Image.new("RGBA", (cw * s * len(frames), ch * s), chroma_rgb + (255,))
-    for index, frame in enumerate(frames):
-        cellf = frame if frame.size == (cw, ch) else frame.resize((cw, ch), Image.Resampling.NEAREST)
-        strip.alpha_composite(
-            cellf.resize((cw * s, ch * s), Image.Resampling.NEAREST), (index * cw * s, 0))
-    return strip
-
-
-def generate(run_dir: Path | str, state: str, frame_index: int = 0, split: float = 0.55,
-             two_band: bool = False, head_split: float = 0.32, amplitude: int = 1,
-             label: str | None = None, splits: list[float] | None = None) -> Path:
-    """상태의 추출 프레임에서 호흡 테이크를 만들어 기록한다. 반환 = 테이크 raw 경로."""
-    run_dir = Path(run_dir)
-    request_path = run_dir / "sprite-request.json"
-    if not request_path.is_file():
-        raise SystemExit(f"not a sprite-gen run dir (no sprite-request.json): {run_dir}")
-    request = json.loads(request_path.read_text(encoding="utf-8"))
-    if state not in request.get("states", {}):
-        raise SystemExit(f"unknown state: {state}")
-    manifest_path = run_dir / "frames" / "frames-manifest.json"
-    if not manifest_path.is_file():
-        raise SystemExit("breathe: extract the run first (no frames manifest)")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    row = next((r for r in manifest.get("rows", []) if r.get("state") == state), None)
-    if row is None:
-        raise SystemExit(f"breathe: state '{state}' not in frames manifest")
-    frame_rel = row_frame_rel(row, frame_index)
-    with Image.open(run_dir / frame_rel) as opened:
-        frame = opened.convert("RGBA")
-    if splits is None:
-        splits = [head_split, split] if two_band else [split]
-    splits = sorted(float(s) for s in splits)
-    frames = breathe_frames(frame, splits=splits, amplitude=amplitude)
-    chroma_rgb = tuple(request["chroma_key"]["rgb"])
-    strip = compose_take_strip(frames, request["cell"], chroma_rgb)
-    label = label or "breathe"
-    if "/" in label or label.startswith("."):
-        raise SystemExit(f"take label must be filesystem-safe: {label!r}")
-    target = write_take(run_dir, request, state, label, strip)
-    # write_take 는 frames=1 로 기록 — 스트립 프레임 수 + 파라미터(에디터 재오픈 시
-    # 선/진폭 복원용) 갱신
-    request = json.loads(request_path.read_text(encoding="utf-8"))
-    for take in request["states"][state]["takes"]:
-        if take.get("label") == label:
-            take["frames"] = len(frames)
-            take["breathe"] = {"splits": splits, "amplitude": amplitude,
-                               "frame": frame_index}
-    request_path.write_text(json.dumps(request, ensure_ascii=False, indent=2) + "\n",
-                            encoding="utf-8")
-    print(f"[breathe] take written: {target.relative_to(run_dir)} "
-          f"({len(frames)} phase(s), splits={splits}, amp={amplitude})")
-    return target
+    [0×hold, (전이), 1..K, K×(hold-1), (전이), K-1..1] — K=선 개수, hold=유지 프레임."""
+    k = len(cfg["splits"])
+    hold = int(cfg.get("hold", 3))
+    base: list[float] = [0.0] * hold
+    down = [float(p) for p in range(1, k + 1)]
+    deep = [float(k)] * (hold - 1)
+    up = [float(p) for p in range(k - 1, 0, -1)]
+    pattern = base + down + deep + up
+    if not cfg.get("subpixel"):
+        return pattern
+    out: list[float] = []
+    for i, phase in enumerate(pattern):
+        prev = pattern[i - 1]
+        if prev != phase:
+            out.append((prev + phase) / 2.0)  # 전이 경계에 중간 위상
+        out.append(phase)
+    if pattern[-1] != pattern[0]:  # 루프 랩 전이
+        out.append((pattern[-1] + pattern[0]) / 2.0)
+    return out
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--run-dir", required=True)
-    parser.add_argument("--state", required=True)
-    parser.add_argument("--frame", type=int, default=0, help="소스 프레임 인덱스 (기본 0)")
-    parser.add_argument("--split", default="0.55",
-                        help="분할선 (콘텐츠 높이 비율, 콤마 구분 1~3개 — 예: 0.32,0.55)")
-    parser.add_argument("--two-band", action="store_true",
-                        help="머리 지연 2프레임 모드 (= --split <head>,<chest> 설탕)")
-    parser.add_argument("--head-split", type=float, default=0.32, help="머리/어깨 경계 (two-band)")
-    parser.add_argument("--amplitude", type=int, default=1, help="시프트 픽셀 수 (기본 1)")
-    parser.add_argument("--label", default=None, help="테이크 라벨 (기본 breathe / breathe2)")
-    parser.add_argument("--extract", action="store_true", help="기록 후 전체 배치 재추출")
-    return parser
+def phase_frame(frame: Image.Image, cfg: dict, phase: float) -> Image.Image:
+    """프레임에 호흡 위상 하나를 적용 — breathe_frames 와 같은 수학 (콘텐츠 bbox 기준).
+
+    정수 위상 p: p<K 는 밴드 시프트(shift_band), p=K 는 전체 시프트(shift_above).
+    반정수 위상: 인접 두 정수 위상의 50% 블렌드 (서브픽셀)."""
+    if phase <= 0:
+        return frame
+    lo = int(phase)
+    if phase != lo:
+        a = phase_frame(frame, cfg, float(lo))
+        b = phase_frame(frame, cfg, float(min(lo + 1, len(cfg["splits"]))))
+        return Image.blend(a, b, 0.5)
+    splits = cfg["splits"]
+    amplitude = int(cfg.get("amplitude", 1))
+    k = len(splits)
+    p = min(lo, k)
+    box = frame.split()[3].getbbox()
+    if not box:
+        return frame
+    top, bottom = box[1], box[3]
+    ys = [top + int((bottom - top) * s) for s in splits]
+    if p == k:
+        return shift_above(frame, max(top + 1, ys[-1]), amplitude)
+    return shift_band(frame, ys[k - 1 - p], max(top + 1, ys[-1]), amplitude)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
-    try:
-        splits = [float(s) for s in str(args.split).split(",") if s.strip()]
-    except ValueError:
-        raise SystemExit(f"breathe: --split must be comma-separated floats: {args.split!r}")
-    if args.two_band:
-        splits = [args.head_split, *splits]
-    generate(args.run_dir, args.state, frame_index=args.frame, splits=splits,
-             amplitude=args.amplitude, label=args.label)
-    if args.extract:
-        from . import extract as extract_module
-        code = extract_module.run(run_dir=Path(args.run_dir))
-        if code != 0:
-            return code
-        print("[breathe] full-batch re-extraction done")
-    return 0
+def _lcm(a: int, b: int) -> int:
+    from math import gcd
+    return a * b // gcd(a, b)
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+BAKE_CAP = 240  # 루프 정합(LCM)이 폭주하지 않게 — 초과 시 시퀀스 길이 배수로 관측 가능하게 컷
+
+
+def bake_breathe_sequence(images: list[Image.Image], cfg: dict) -> tuple[list[Image.Image], list[float]]:
+    """재생 시퀀스에 호흡 레이어를 굽는다 → (프레임들, 적용 위상들).
+
+    출력 길이 = LCM(시퀀스, 위상 패턴) — 깜빡임과 호흡이 서로 다른 주기로
+    맞물려도 한 루프 안에서 정확히 재정합한다. 초과 시 BAKE_CAP 이하의
+    시퀀스-길이 배수로 자른다 (관측: 반환 위상 목록으로 검증 가능)."""
+    if not images:
+        return images, []
+    pattern = breathe_pattern(cfg)
+    n, m = len(images), len(pattern)
+    total = _lcm(n, m)
+    if total > BAKE_CAP:
+        total = max(n, (BAKE_CAP // n) * n)
+    phases = [pattern[i % m] for i in range(total)]
+    return [phase_frame(images[i % n], cfg, phases[i]) for i in range(total)], phases
