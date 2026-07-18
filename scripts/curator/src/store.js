@@ -214,7 +214,7 @@ function seedEntries() {
       breathe: c && c.breathe && Array.isArray(c.breathe.splits) && c.breathe.splits.length
         ? { splits: c.breathe.splits.map(Number).sort((a, b) => a - b).slice(0, 3),
             amplitude: Math.max(1, Math.min(4, Number(c.breathe.amplitude) || 1)),
-            hold: Math.max(1, Math.min(8, Number(c.breathe.hold) || 3)),
+            breaths: Math.max(1, Math.min(8, Number(c.breathe.breaths) || 1)),
             subpixel: !!c.breathe.subpixel }
         : null };
   }

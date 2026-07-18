@@ -5,6 +5,28 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.35 "Sol Atelier" - Loop-fit breathing + craft-rule sub-pixel + grid drift fix
+
+Soohong's calls (2026-07-18): the loop must stay the base sequence, sub-pixel
+must look hand-made, and the down_lie grid never lined up.
+
+- **Loop-fit breathing** — `breaths` (per-loop count) replaces `hold`; the loop
+  length NEVER changes. `fit_breathe_pattern` divides the played sequence into
+  exact sub-periods (rest / cascade down / deep hold / cascade up), self-
+  correcting a non-divisor count to the nearest divisor (observable in the
+  filmstrip caption). No more LCM expansion: GIF/atlas frame counts stay equal
+  to the sequence. Editor offers only divisor-valid counts.
+- **Craft-rule sub-pixel** — the intermediate frame now follows the pixel-art
+  hand technique (no formal literature exists; the rules are the algorithm):
+  intermediate colors are snapped to the sprite's own palette (ramp tones, no
+  muddy averages), silhouette/transparency edges stay whole-pixel (no semi-
+  alpha ever baked), and only the moving seam bands change. Length-preserving:
+  sub-pixel replaces a run's first slot instead of inserting frames.
+- **Correspondence-grid drift fix** — detected cut lines are normalized to the
+  final content box (endpoints anchored, detected proportions kept) before
+  drawing; the ~3% mapping-ratio drift squeezed 28 columns into 27.2px so only
+  the endpoints matched (down_lie report).
+
 ## v1.56.34 "Sol Atelier" - Seam-band sub-pixel + final-bake filmstrip
 
 > commit 7f5cdfb (message says v1.56.32 — renumbered, see v1.56.33 note).

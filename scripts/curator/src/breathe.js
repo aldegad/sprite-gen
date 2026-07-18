@@ -15,24 +15,52 @@ function stateBreathe(stateName) {
   return e && e.breathe ? e.breathe : null;
 }
 
-// 서버 breathe_pattern 미러 — 1주기 위상 시퀀스 [0×hold, 1..K, K×(hold-1), K-1..1]
-// (+subpixel 이면 전이 경계에 반정수 블렌드 위상 삽입)
-function breathePattern(cfg) {
+// 서버 fit_breathe_pattern 미러 — 루프-맞춤 (수홍 확정 2026-07-18 2차):
+// 루프 길이 = 시퀀스 그대로, 호흡이 그 안에서 breaths 회 딱 떨어진다.
+// breaths 가 안 나눠지면 나눠지는 가장 가까운(작은) 횟수로 자가 보정.
+function breathePattern(cfg, seqLen) {
   const k = cfg.splits.length;
-  const hold = Math.max(1, cfg.hold || 3);
-  const pattern = [];
-  for (let i = 0; i < hold; i++) pattern.push(0);
-  for (let p = 1; p <= k; p++) pattern.push(p);
-  for (let i = 1; i < hold; i++) pattern.push(k);
-  for (let p = k - 1; p >= 1; p--) pattern.push(p);
-  if (!cfg.subpixel) return pattern;
-  const out = [];
-  for (let i = 0; i < pattern.length; i++) {
-    const prev = pattern[(i - 1 + pattern.length) % pattern.length];
-    if (prev !== pattern[i]) out.push((prev + pattern[i]) / 2);
-    out.push(pattern[i]);
+  if (!seqLen || seqLen <= 0) return [];
+  const want = Math.max(1, cfg.breaths || 1);
+  let fit = 0;
+  for (let c = Math.min(want, seqLen); c >= 1; c--) {
+    if (seqLen % c === 0 && seqLen / c >= 2 * k) { fit = c; break; }
   }
-  return out;
+  if (!fit) return new Array(seqLen).fill(0);
+  const length = seqLen / fit;
+  const down = [];
+  for (let p = 1; p <= k; p++) down.push(p);
+  const up = [];
+  for (let p = k - 1; p >= 1; p--) up.push(p);
+  const free = length - down.length - up.length;
+  const deep = Math.floor(free / 2);
+  const rest = free - deep;
+  let pattern = [...new Array(rest).fill(0), ...down, ...new Array(deep).fill(k), ...up];
+  if (cfg.subpixel) {
+    const out = [...pattern];
+    const n = pattern.length;
+    for (let i = 0; i < n; i++) {
+      const prev = pattern[(i - 1 + n) % n];
+      if (pattern[i] === prev) continue;
+      let run = 1;
+      while (run < n && pattern[(i + run) % n] === pattern[i]) run += 1;
+      if (run >= 2) out[i] = (prev + pattern[i]) / 2; // 길이 보존: 런 첫 슬롯 치환
+    }
+    pattern = out;
+  }
+  const full = [];
+  for (let c = 0; c < fit; c++) full.push(...pattern);
+  return full;
+}
+
+// 실제 반영되는 호흡 횟수 (fit_breathe_pattern 과 동일한 약수 보정)
+function breatheFitCount(cfg, seqLen) {
+  if (!seqLen || seqLen <= 0) return 0;
+  const want = Math.max(1, cfg.breaths || 1);
+  for (let c = Math.min(want, seqLen); c >= 1; c--) {
+    if (seqLen % c === 0 && seqLen / c >= 2 * cfg.splits.length) return c;
+  }
+  return 0;
 }
 
 // 서버 phase_frame 미러 — base 캔버스에 위상 하나를 적용한 새 캔버스를 돌려준다.
@@ -52,42 +80,62 @@ function breatheComposite(base, cfg, phase) {
   }
   const lo = Math.floor(phase);
   if (phase > lo) {
-    // 서브픽셀 (수홍 정정 2026-07-18): 중간색은 움직이는 경계 밴드(정수리 + 각
-    // 분할선 이음새)에만 — 전체 블렌드는 몸통 안 가로 경계까지 잔상을 만든다.
+    // 서브픽셀 = 도트 장인 규칙의 알고리즘화 (수홍 2026-07-18, 서버 phase_frame 미러):
+    // 중간색은 프레임 팔레트에 있는 색으로만(램프 톤 스냅), 실루엣/투명 경계는
+    // 통픽셀 유지(반투명 금지), 움직이는 이음새 밴드에만.
     const a = breatheComposite(base, cfg, lo);
     const b = breatheComposite(base, cfg, Math.min(lo + 1, cfg.splits.length));
     ctx.drawImage(a, 0, 0);
-    const bd = base.getContext("2d").getImageData(0, 0, w, h).data;
+    const ad = a.getContext("2d").getImageData(0, 0, w, h);
+    const bd2 = b.getContext("2d").getImageData(0, 0, w, h).data;
+    const src = ad.data;
     let bTop = h, bBot = 0;
+    const baseData = base.getContext("2d").getImageData(0, 0, w, h).data;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        if (bd[(y * w + x) * 4 + 3] >= 40) {
+        if (baseData[(y * w + x) * 4 + 3] >= 40) {
           if (y < bTop) bTop = y;
           if (y + 1 > bBot) bBot = y + 1;
           break;
         }
       }
     }
-    if (bBot > bTop) {
-      const amp = Math.max(1, cfg.amplitude || 1);
-      const seams = [bTop, ...cfg.splits.map((s) => bTop + Math.floor((bBot - bTop) * s))];
-      const mixed = document.createElement("canvas");
-      mixed.width = w;
-      mixed.height = h;
-      const mctx = mixed.getContext("2d");
-      mctx.imageSmoothingEnabled = false;
-      mctx.drawImage(a, 0, 0);
-      mctx.globalAlpha = 0.5;
-      mctx.drawImage(b, 0, 0);
-      mctx.globalAlpha = 1;
-      for (const y of seams) {
-        const r0 = Math.max(0, y - 1);
-        const r1 = Math.min(h, y + amp + 1);
-        if (r1 <= r0) continue;
-        ctx.clearRect(0, r0, w, r1 - r0); // 교체 (합성 아님) — 서버 paste 와 동형
-        ctx.drawImage(mixed, 0, r0, w, r1 - r0, 0, r0, w, r1 - r0);
+    if (bBot <= bTop) return out;
+    const palette = [];
+    const seen = new Set();
+    for (let i = 0; i < src.length; i += 4) {
+      if (src[i + 3] >= 128) {
+        const key = (src[i] << 16) | (src[i + 1] << 8) | src[i + 2];
+        if (!seen.has(key)) { seen.add(key); palette.push([src[i], src[i + 1], src[i + 2]]); }
       }
     }
+    if (!palette.length) return out;
+    const amp = Math.max(1, cfg.amplitude || 1);
+    const seams = [bTop, ...cfg.splits.map((s) => bTop + Math.floor((bBot - bTop) * s))];
+    const outData = ctx.getImageData(0, 0, w, h);
+    const od = outData.data;
+    for (const sy of seams) {
+      const r0 = Math.max(0, sy - 1);
+      const r1 = Math.min(h, sy + amp + 1);
+      for (let y = r0; y < r1; y++) {
+        for (let x = 0; x < w; x++) {
+          const k4 = (y * w + x) * 4;
+          if (src[k4 + 3] < 128 || bd2[k4 + 3] < 128) continue; // 실루엣 통픽셀
+          if (src[k4] === bd2[k4] && src[k4 + 1] === bd2[k4 + 1] && src[k4 + 2] === bd2[k4 + 2]) continue;
+          const mr = (src[k4] + bd2[k4]) >> 1;
+          const mg = (src[k4 + 1] + bd2[k4 + 1]) >> 1;
+          const mb = (src[k4 + 2] + bd2[k4 + 2]) >> 1;
+          let best = palette[0];
+          let bestD = Infinity;
+          for (const c of palette) {
+            const d = (c[0] - mr) ** 2 + (c[1] - mg) ** 2 + (c[2] - mb) ** 2;
+            if (d < bestD) { bestD = d; best = c; }
+          }
+          od[k4] = best[0]; od[k4 + 1] = best[1]; od[k4 + 2] = best[2]; od[k4 + 3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(outData, 0, 0);
     return out;
   }
   const data = base.getContext("2d").getImageData(0, 0, w, h).data;
@@ -153,7 +201,7 @@ async function defaultBreatheConfig(stateName) {
   const cx = c.getContext("2d");
   cx.drawImage(image, 0, 0);
   const sil = silhouetteStats(cx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
-  return { splits: [Math.round(sil.split * 100) / 100], amplitude: 1, hold: 3, subpixel: false };
+  return { splits: [Math.round(sil.split * 100) / 100], amplitude: 1, breaths: 1, subpixel: false };
 }
 
 // 레거시 자가 이전 (self-heal): 구 테이크 방식이 시퀀스에 끼워둔 breathe 위상
@@ -183,8 +231,8 @@ function migrateLegacyBreathe(stateName) {
   const take = (st.takes || []).find((tk) => (tk.label || "") === "breathe");
   const saved = take && take.breathe;
   e.breathe = saved && Array.isArray(saved.splits) && saved.splits.length
-    ? { splits: saved.splits.map(Number), amplitude: saved.amplitude || 1, hold: 3, subpixel: false }
-    : { splits: [0.55], amplitude: 1, hold: 3, subpixel: false };
+    ? { splits: saved.splits.map(Number), amplitude: saved.amplitude || 1, breaths: 1, subpixel: false }
+    : { splits: [0.55], amplitude: 1, breaths: 1, subpixel: false };
   return true;
 }
 

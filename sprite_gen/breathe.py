@@ -80,32 +80,52 @@ def breathe_frames(frame: Image.Image, split: float = 0.55, two_band: bool = Fal
 
 
 # ── 후처리 레이어 (수홍 확정 2026-07-18): 호흡은 프레임이 아니라 변조다 ──
-# 사이드카 curation.json 의 states.<state>.breathe = {splits, amplitude, hold, subpixel}
+# 사이드카 curation.json 의 states.<state>.breathe = {splits, amplitude, breaths, subpixel}
 # 를 compose/GIF 가 재생 시퀀스 위에 굽는다. 깜빡임 프레임도 그대로 숨쉰다 (직교).
-# subpixel = 위상 전이 사이에 두 위상의 50% 블렌드 프레임 삽입 — 도트 기법
-# "서브픽셀 애니메이션" (경계 픽셀 중간색으로 반 픽셀 이동감).
+#
+# 루프-맞춤 (수홍 확정 2026-07-18 2차): 루프 길이는 항상 기존 시퀀스 그대로 유지하고,
+# 호흡이 그 루프 안에서 breaths 회 "딱 떨어지게" 일어난다 — LCM 전개 없음.
+# breaths 가 시퀀스를 나누지 못하면 나눠지는 가장 가까운(작은) 횟수로 자가 보정한다
+# (관측: 반환 위상 목록·에디터 필름스트립에 그대로 보인다).
+#
+# subpixel = 위상 런의 첫 프레임을 이전 위상과의 50% 블렌드로 치환 (길이 보존) —
+# 도트 기법 "서브픽셀 애니메이션" (움직이는 이음새 행에만 중간색, _seam_rows).
 
 
-def breathe_pattern(cfg: dict) -> list[float]:
-    """호흡 위상 시퀀스 1주기. 0=기준, 1..K=하강 캐스케이드, .5 스텝=서브픽셀 블렌드.
+def fit_breathe_pattern(seq_len: int, cfg: dict) -> list[float]:
+    """시퀀스 길이에 딱 떨어지는 호흡 위상 시퀀스 (길이 == seq_len).
 
-    [0×hold, (전이), 1..K, K×(hold-1), (전이), K-1..1] — K=선 개수, hold=유지 프레임."""
+    서브주기 L = seq_len / breaths' 안에서 [기준 유지, 1..K 하강, 최심 유지,
+    K-1..1 복귀] 를 배분한다. K=선 개수. 시퀀스가 너무 짧으면 전부 0 (호흡 없음)."""
     k = len(cfg["splits"])
-    hold = int(cfg.get("hold", 3))
-    base: list[float] = [0.0] * hold
+    if seq_len <= 0:
+        return []
+    want = max(1, int(cfg.get("breaths", 1)))
+    fit = next((c for c in range(min(want, seq_len), 0, -1)
+                if seq_len % c == 0 and seq_len // c >= 2 * k), 0)
+    if fit == 0:
+        return [0.0] * seq_len
+    length = seq_len // fit
     down = [float(p) for p in range(1, k + 1)]
-    deep = [float(k)] * (hold - 1)
     up = [float(p) for p in range(k - 1, 0, -1)]
-    pattern = base + down + deep + up
-    if not cfg.get("subpixel"):
-        return pattern
-    out: list[float] = []
-    for i, phase in enumerate(pattern):
-        prev = pattern[i - 1]  # i=0 은 pattern[-1] — 루프 랩 전이를 여기서 담당
-        if prev != phase:
-            out.append((prev + phase) / 2.0)  # 전이 경계에 중간 위상
-        out.append(phase)
-    return out
+    free = length - len(down) - len(up)
+    deep = free // 2
+    rest = free - deep
+    pattern = [0.0] * rest + down + [float(k)] * deep + up
+    if cfg.get("subpixel"):
+        out = list(pattern)
+        n = len(pattern)
+        for i in range(n):
+            prev = pattern[i - 1]
+            if pattern[i] == prev:
+                continue
+            run = 1
+            while run < n and pattern[(i + run) % n] == pattern[i]:
+                run += 1
+            if run >= 2:  # 길이 보존: 런의 첫 슬롯을 중간 위상으로 치환
+                out[i] = (prev + pattern[i]) / 2.0
+        pattern = out
+    return pattern * fit
 
 
 def _seam_rows(top: int, ys: list[int], amplitude: int, height: int) -> list[tuple[int, int]]:
@@ -122,12 +142,31 @@ def _seam_rows(top: int, ys: list[int], amplitude: int, height: int) -> list[tup
     return bands
 
 
+def _frame_palette(frame: Image.Image) -> list[tuple[int, int, int]]:
+    """프레임의 불투명 픽셀 고유 RGB — 서브픽셀 중간색은 이 안에서만 고른다."""
+    colors = set()
+    px = frame.load()
+    for y in range(frame.height):
+        for x in range(frame.width):
+            p = px[x, y]
+            if p[3] >= 128:
+                colors.add(p[:3])
+    return list(colors)
+
+
+def _nearest(color: tuple[int, int, int], palette: list[tuple[int, int, int]]) -> tuple[int, int, int]:
+    return min(palette, key=lambda c: (c[0] - color[0]) ** 2 + (c[1] - color[1]) ** 2 + (c[2] - color[2]) ** 2)
+
+
 def phase_frame(frame: Image.Image, cfg: dict, phase: float) -> Image.Image:
     """프레임에 호흡 위상 하나를 적용 — breathe_frames 와 같은 수학 (콘텐츠 bbox 기준).
 
     정수 위상 p: p<K 는 밴드 시프트(shift_band), p=K 는 전체 시프트(shift_above).
-    반정수 위상(서브픽셀): 아래 위상 프레임을 기준으로, 움직이는 경계 밴드
-    (_seam_rows)에서만 두 위상의 50% 블렌드 중간색을 얹는다."""
+    반정수 위상(서브픽셀): 도트 장인 규칙의 알고리즘화 (수홍 확정 2026-07-18 —
+    정식 논문이 없는 craft 영역이라 규칙을 코드로 옮겼다):
+    (1) 중간색은 스프라이트에 이미 있는 색으로만 (팔레트 스냅 — 램프 중간 톤),
+    (2) 실루엣/투명 경계는 통픽셀 유지 (반투명 생성 금지 — 커버리지 경계 제외),
+    (3) 움직이는 이음새 밴드(_seam_rows) 안에서만."""
     if phase <= 0:
         return frame
     lo = int(phase)
@@ -139,10 +178,21 @@ def phase_frame(frame: Image.Image, cfg: dict, phase: float) -> Image.Image:
             return a
         top, bottom = box[1], box[3]
         ys = [top + int((bottom - top) * s) for s in cfg["splits"]]
-        full = Image.blend(a, b, 0.5)
         out = a.copy()
+        apx, bpx, opx = a.load(), b.load(), out.load()
+        palette = _frame_palette(a)
+        if not palette:
+            return a
         for r0, r1 in _seam_rows(top, ys, int(cfg.get("amplitude", 1)), frame.height):
-            out.paste(full.crop((0, r0, frame.width, r1)), (0, r0))
+            for y in range(r0, r1):
+                for x in range(frame.width):
+                    pa, pb = apx[x, y], bpx[x, y]
+                    if pa[3] < 128 or pb[3] < 128:
+                        continue  # 실루엣 경계 통픽셀 (반투명 생성 금지)
+                    if pa[:3] == pb[:3]:
+                        continue
+                    mid = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2, (pa[2] + pb[2]) // 2)
+                    opx[x, y] = (*_nearest(mid, palette), 255)
         return out
     splits = cfg["splits"]
     amplitude = int(cfg.get("amplitude", 1))
@@ -158,26 +208,12 @@ def phase_frame(frame: Image.Image, cfg: dict, phase: float) -> Image.Image:
     return shift_band(frame, ys[k - 1 - p], max(top + 1, ys[-1]), amplitude)
 
 
-def _lcm(a: int, b: int) -> int:
-    from math import gcd
-    return a * b // gcd(a, b)
-
-
-BAKE_CAP = 240  # 루프 정합(LCM)이 폭주하지 않게 — 초과 시 시퀀스 길이 배수로 관측 가능하게 컷
-
-
 def bake_breathe_sequence(images: list[Image.Image], cfg: dict) -> tuple[list[Image.Image], list[float]]:
     """재생 시퀀스에 호흡 레이어를 굽는다 → (프레임들, 적용 위상들).
 
-    출력 길이 = LCM(시퀀스, 위상 패턴) — 깜빡임과 호흡이 서로 다른 주기로
-    맞물려도 한 루프 안에서 정확히 재정합한다. 초과 시 BAKE_CAP 이하의
-    시퀀스-길이 배수로 자른다 (관측: 반환 위상 목록으로 검증 가능)."""
+    출력 길이 = 입력 길이 (루프 불변 — 수홍 확정: 루프는 기존 프레임 그대로,
+    호흡이 그 안에서 breaths 회 딱 떨어진다)."""
     if not images:
         return images, []
-    pattern = breathe_pattern(cfg)
-    n, m = len(images), len(pattern)
-    total = _lcm(n, m)
-    if total > BAKE_CAP:
-        total = max(n, (BAKE_CAP // n) * n)
-    phases = [pattern[i % m] for i in range(total)]
-    return [phase_frame(images[i % n], cfg, phases[i]) for i in range(total)], phases
+    phases = fit_breathe_pattern(len(images), cfg)
+    return [phase_frame(images[i], cfg, phases[i]) for i in range(len(images))], phases

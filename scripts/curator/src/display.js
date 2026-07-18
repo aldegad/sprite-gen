@@ -129,6 +129,16 @@ function drawFinalGrid(canvas, stage, box, scale, t, inputGrid) {
   // "머리끝발끝은 맞는데 중간 픽셀이 하나도 안 맞아"). conform 축소 폐지(v1.56.22)로
   // 1차 절단선이 곧 최종 대응이 됐다. 없는 프레임(구세대 캐시·테이크)만 균등 근사.
   if (inputGrid && Array.isArray(inputGrid.x) && Array.isArray(inputGrid.y) && inputGrid.x.length > 1 && inputGrid.y.length > 1) {
+    // 검출 절단선의 매핑 비율 오차가 중간에서 누적된다 (실사고 2026-07-18 down_lie:
+    // 28칸이 27.2px 로 눌려 끝만 맞고 중간 전부 어긋남) — 끝점을 최종 콘텐츠
+    // 박스에 앵커하고 검출 비례만 유지하도록 정규화한다.
+    const norm = (edges, lo, hi) => {
+      const e0 = edges[0];
+      const e1 = edges[edges.length - 1];
+      if (e1 - e0 <= 0) return edges;
+      return edges.map((e) => lo + ((e - e0) * (hi - lo)) / (e1 - e0));
+    };
+    inputGrid = { x: norm(inputGrid.x, box[0], box[2]), y: norm(inputGrid.y, box[1], box[3]) };
     const xs = t && t.flipX ? inputGrid.x.map((e) => cw - e).reverse() : inputGrid.x;
     const yTop = (inputGrid.y[0] + dy) * sy;
     const yBot = (inputGrid.y[inputGrid.y.length - 1] + dy) * sy;

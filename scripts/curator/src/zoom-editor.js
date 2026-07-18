@@ -642,7 +642,7 @@ function openZoom(stateName, idx, keepWidth) {
       syncLines();
       commit();
     };
-    bm.cfg = e0.breathe ? clone(e0.breathe) : { splits: [0.55], amplitude: 1, hold: 3, subpixel: false };
+    bm.cfg = e0.breathe ? clone(e0.breathe) : { splits: [0.55], amplitude: 1, breaths: 1, subpixel: false };
 
     // 실루엣 지오메트리 (선 표시 기준): 이미지 로드 전 빈 합성이면 재시도
     // (실사고 2026-07-17 로드 레이스 — 선이 바닥에 붙고 드래그 죽음)
@@ -698,9 +698,10 @@ function openZoom(stateName, idx, keepWidth) {
     const renderTick = () => {
       if (!bcanvas) return;
       const play = playList(stateName);
-      const pattern = breathePattern(bm.cfg);
-      const frameIdx = play.length ? play[bm.tick % play.length] : idx;
-      const phase = pattern[bm.tick % pattern.length];
+      const pattern = breathePattern(bm.cfg, play.length || 1);
+      const cursor = play.length ? bm.tick % play.length : 0;
+      const frameIdx = play.length ? play[cursor] : idx;
+      const phase = pattern[cursor] || 0;
       const f = frameOf(stateName, frameIdx);
       const image = f ? img(frameUrl(stateName, f)) : null;
       bImg.style.visibility = "hidden";
@@ -750,21 +751,20 @@ function openZoom(stateName, idx, keepWidth) {
     let stripTimer = null;
     const rebuildStrip = () => {
       const play = playList(stateName);
-      const pattern = breathePattern(bm.cfg);
+      const pattern = breathePattern(bm.cfg, play.length);
       strip.innerHTML = "";
       if (!play.length) return;
-      const gcd = (a, b) => (b ? gcd(b, a % b) : a);
-      const lcm = (play.length * pattern.length) / gcd(play.length, pattern.length);
-      const total = Math.min(60, lcm);
+      const total = play.length; // 루프 불변 — 시퀀스 그대로 (수홍 확정)
+      const actualBreaths = breatheFitCount(bm.cfg, play.length);
       const cap = document.createElement("div");
       cap.className = "bs-caption";
-      cap.textContent = STR[lang].breatheStrip(play.length, pattern.length, lcm, total);
+      cap.textContent = STR[lang].breatheStrip(play.length, actualBreaths, bm.cfg.breaths || 1);
       strip.appendChild(cap);
       const rowEl = document.createElement("div");
       rowEl.className = "bs-frames";
       for (let i = 0; i < total; i++) {
-        const frameIdx = play[i % play.length];
-        const phase = pattern[i % pattern.length];
+        const frameIdx = play[i];
+        const phase = pattern[i] || 0;
         const f = frameOf(stateName, frameIdx);
         const image = f ? img(frameUrl(stateName, f)) : null;
         const cellEl = document.createElement("div");
@@ -844,11 +844,17 @@ function openZoom(stateName, idx, keepWidth) {
     const ampSel = mkSel([1, 2], bm.cfg.amplitude,
       (v) => `${t("breatheAmp")} ${v}px`,
       (v) => { bm.cfg.amplitude = v || 1; commit(); pushHist(); });
-    const holdSel = mkSel([2, 3, 4, 6], bm.cfg.hold,
-      (v) => STR[lang].breatheCad(v),
-      (v) => { bm.cfg.hold = v || 3; commit(); pushHist(); });
+    const seqLen0 = playList(stateName).length || 1;
+    const breathOptions = [];
+    for (let c = 1; c <= seqLen0; c++) {
+      if (seqLen0 % c === 0 && seqLen0 / c >= 2 * bm.cfg.splits.length) breathOptions.push(c);
+    }
+    if (!breathOptions.length) breathOptions.push(1);
+    const breathSel = mkSel(breathOptions, bm.cfg.breaths || 1,
+      (v) => STR[lang].breatheCount(v),
+      (v) => { bm.cfg.breaths = v || 1; commit(); pushHist(); });
     bar.appendChild(ampSel);
-    bar.appendChild(holdSel);
+    bar.appendChild(breathSel);
     const subWrap = document.createElement("label");
     subWrap.className = "breathe-subpixel";
     subWrap.title = t("tBreatheSub");
@@ -866,7 +872,7 @@ function openZoom(stateName, idx, keepWidth) {
     toolbar.appendChild(bar);
     function syncBreatheControls() {
       ampSel.value = String(bm.cfg.amplitude);
-      holdSel.value = String(bm.cfg.hold);
+      breathSel.value = String(bm.cfg.breaths || 1);
       subCheck.checked = !!bm.cfg.subpixel;
     }
 
