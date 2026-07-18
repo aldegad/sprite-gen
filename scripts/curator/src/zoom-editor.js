@@ -281,10 +281,23 @@ function openZoom(stateName, idx, keepWidth) {
     const sel = pixelEdit && pixelEdit.sel;
     selBox.hidden = !sel;
     if (!sel) return;
-    selBox.style.left = `${(sel.x0 / cellW) * 100}%`;
-    selBox.style.top = `${(sel.y0 / cellH) * 100}%`;
-    selBox.style.width = `${((sel.x1 - sel.x0) / cellW) * 100}%`;
-    selBox.style.height = `${((sel.y1 - sel.y0) / cellH) * 100}%`;
+    // sel 은 소스 공간 — 표시가 변형(WYSIWYG)이라 점선도 순변환해서 그린다
+    // (회전/기울임은 축정렬 bbox 근사).
+    const tr = getTransform(stateName, idx);
+    const m = matrixOf(tr);
+    const fwd = (x, y) => [
+      m.m00 * (x - cellW / 2) + m.m01 * (y - cellH / 2) + cellW / 2 + tr.dx,
+      m.m10 * (x - cellW / 2) + m.m11 * (y - cellH / 2) + cellH / 2 + tr.dy,
+    ];
+    const cs = [fwd(sel.x0, sel.y0), fwd(sel.x1, sel.y0), fwd(sel.x0, sel.y1), fwd(sel.x1, sel.y1)];
+    const x0 = Math.min(...cs.map((p) => p[0]));
+    const x1 = Math.max(...cs.map((p) => p[0]));
+    const y0 = Math.min(...cs.map((p) => p[1]));
+    const y1 = Math.max(...cs.map((p) => p[1]));
+    selBox.style.left = `${(x0 / cellW) * 100}%`;
+    selBox.style.top = `${(y0 / cellH) * 100}%`;
+    selBox.style.width = `${((x1 - x0) / cellW) * 100}%`;
+    selBox.style.height = `${((y1 - y0) / cellH) * 100}%`;
   };
   const syncToolbar = () => {
     penBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "pen");
@@ -304,7 +317,7 @@ function openZoom(stateName, idx, keepWidth) {
                        sel: tool === "select" ? (pixelEdit && pixelEdit.sel) || null : null,
                        undoFn: () => undoPixel(), redoFn: () => redoPixel() };
     syncToolbar();
-    applyFrameTransformAll(stateName, idx); // 편집 모드 = identity 표시 전환
+    applyFrameTransformAll(stateName, idx); // 편집 모드도 변형 유지(WYSIWYG) — 재표시만
   };
   penBtn.addEventListener("click", () => setTool("pen"));
   eraserBtn.addEventListener("click", () => setTool("eraser"));
@@ -513,8 +526,22 @@ function openZoom(stateName, idx, keepWidth) {
     if (ev.button || !ev.isPrimary) return;
     ev.preventDefault();
     ev.stopImmediatePropagation();
-    const cellX = (e2) => Math.floor(((e2.clientX - stage.getBoundingClientRect().left) / stage.getBoundingClientRect().width) * cellW);
-    const cellY = (e2) => Math.floor(((e2.clientY - stage.getBoundingClientRect().top) / stage.getBoundingClientRect().height) * cellH);
+    // 표시는 변형(WYSIWYG) 그대로, 저장은 소스 공간 — 포인터를 역변환해 잇는다.
+    // 순변환 T(p) = M(p−c)+c+d (display.js drawFrameInto 와 동일 수학)의 역.
+    const srcXY = (e2) => {
+      const r = stage.getBoundingClientRect();
+      const dx0 = ((e2.clientX - r.left) / r.width) * cellW;
+      const dy0 = ((e2.clientY - r.top) / r.height) * cellH;
+      const tr = getTransform(stateName, idx);
+      const m = matrixOf(tr);
+      const det = m.m00 * m.m11 - m.m01 * m.m10 || 1;
+      const ux = dx0 - cellW / 2 - tr.dx;
+      const uy = dy0 - cellH / 2 - tr.dy;
+      return [(m.m11 * ux - m.m01 * uy) / det + cellW / 2,
+              (-m.m10 * ux + m.m00 * uy) / det + cellH / 2];
+    };
+    const cellX = (e2) => Math.floor(srcXY(e2)[0]);
+    const cellY = (e2) => Math.floor(srcXY(e2)[1]);
     // 스포이드: 색만 집고 바로 연필로 전환 (드래그 페인트 아님). 투명 픽셀은 무시.
     if (pixelEdit.tool === "pick") {
       const x = cellX(ev), y = cellY(ev);
@@ -562,23 +589,29 @@ function openZoom(stateName, idx, keepWidth) {
         Object.assign(prev.style, { position: "absolute", inset: "0", width: "100%",
                                     height: "100%", imageRendering: "pixelated", pointerEvents: "none" });
         const hidden = [stage.querySelector("img"), stage.querySelector(".snap-canvas")].filter(Boolean);
+        const work = document.createElement("canvas");
+        work.width = cellW; work.height = cellH;
         const drawPreview = (ddx, ddy, dup) => {
-          const pcx = prev.getContext("2d");
-          pcx.imageSmoothingEnabled = false;
-          pcx.clearRect(0, 0, cellW, cellH);
-          pcx.drawImage(fullC, 0, 0);
+          // 소스 공간에서 이동을 합성한 뒤, 표시 변형을 통과시켜 그린다 (WYSIWYG 일치)
+          const wctx = work.getContext("2d");
+          wctx.imageSmoothingEnabled = false;
+          wctx.clearRect(0, 0, cellW, cellH);
+          wctx.drawImage(fullC, 0, 0);
           if (!dup) for (const p of grab) {
             const x = from.x0 + p.dx, y = from.y0 + p.dy;
-            if (chromaFill) { pcx.fillStyle = chromaFill; pcx.fillRect(x, y, 1, 1); }
-            else pcx.clearRect(x, y, 1, 1);
+            if (chromaFill) { wctx.fillStyle = chromaFill; wctx.fillRect(x, y, 1, 1); }
+            else wctx.clearRect(x, y, 1, 1);
           }
           for (const p of grab) {
             const x = from.x0 + p.dx + ddx, y = from.y0 + p.dy + ddy;
             if (x >= 0 && x < cellW && y >= 0 && y < cellH) {
-              pcx.fillStyle = p.hex;
-              pcx.fillRect(x, y, 1, 1);
+              wctx.fillStyle = p.hex;
+              wctx.fillRect(x, y, 1, 1);
             }
           }
+          const pcx = prev.getContext("2d");
+          pcx.clearRect(0, 0, cellW, cellH);
+          drawFrameInto(pcx, work, getTransform(stateName, idx), cellW, cellH, snapScaleFor(stateName));
         };
         hidden.forEach((el2) => { el2.style.visibility = "hidden"; });
         stage.insertBefore(prev, selBox);
@@ -648,9 +681,8 @@ function openZoom(stateName, idx, keepWidth) {
     const ops = e.pixels[idx];
     const stroke = []; // 스트로크(드래그 1회) 단위 액션 — undo/redo 가 통째로 다룬다
     const paint = (e2) => {
-      const r = stage.getBoundingClientRect();
-      const x = Math.floor(((e2.clientX - r.left) / r.width) * cellW);
-      const y = Math.floor(((e2.clientY - r.top) / r.height) * cellH);
+      const x = cellX(e2);
+      const y = cellY(e2);
       if (!(x >= 0 && x < cellW && y >= 0 && y < cellH)) return;
       const bx = Math.floor(x / s) * s;
       const by = Math.floor(y / s) * s;

@@ -5,6 +5,21 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.49 "Sol Atelier" - WYSIWYG editing under transforms, atlas staleness
+
+- **Editing no longer snaps the view back to identity.** Picking the eraser /
+  eyedropper / pen / marquee on a scaled or moved frame keeps the transformed
+  look on screen; pointer input is inverse-transformed into source space, so
+  the storage contract (edits live pre-transform, bake order edits->transform)
+  is unchanged. The marquee dashed box and the live region-move preview are
+  drawn through the same display transform.
+- **Atlas staleness is now observable.** The atlas section shows the last
+  bake; if you edit after that, the "bake now" button grows an
+  "edits not baked yet" badge. Bake-now also flushes the debounced sidecar
+  save first, so the server never bakes a state missing the last 250 ms of
+  edits. Bake fidelity verified pixel-level: scale transforms (53->48 px),
+  12/12 pixel ops, clone-inclusive 11-frame sequences all land in the sheet.
+
 ## v1.56.48 "Sol Atelier" - Breathe line lands correctly on cold load
 
 - **Fix: breathe split lines sometimes appeared at the wrong position** when

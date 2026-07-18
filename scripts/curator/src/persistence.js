@@ -73,8 +73,16 @@ function scheduleSave() {
   }
   lastEditAt = Date.now();
   setStatus(t("editing"));
+  if (typeof markAtlasStale === "function") markAtlasStale(); // 아틀라스 스테일 배지
   clearTimeout(saveTimer);
   saveTimer = setTimeout(save, 250);
+}
+
+// 대기 중인 디바운스 저장을 즉시 밀어낸다 — 서버가 디스크의 curation.json 을 읽는
+// 작업(아틀라스 굽기, GIF, export) 직전에 호출해 "마지막 250ms 편집 누락" 레이스 제거.
+async function flushSave() {
+  clearTimeout(saveTimer);
+  await save();
 }
 
 async function save() {
