@@ -5,6 +5,18 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.59 "Sol Atelier" - Compare export formats + codified gen concurrency
+
+- **Compare canvas: one Save button with a format popover** - GIF /
+  WebM (VP9, alpha preserved - decode-verified) / MP4 (x264, white
+  background, even-dim padded). Same deterministic virtual-time sampling;
+  the server assembles via ffmpeg (observable error when ffmpeg missing).
+- **Generation concurrency codified**: multi-row batches run up to 4
+  concurrent `sprite-gen gen` calls (codex measured safe at 4; grok 4,
+  up to 6 observed). Serial one-by-one is an anti-pattern - this was
+  unwritten worker practice that got lost when sprite-gen stopped
+  routing through image-gen; now it is skill text.
+
 ## v1.56.58 "Sol Atelier" - Static-pose recipe codified from human curation data
 
 - New docs/static-pose-recipe.md, derived from Soohong's hand-curated

@@ -1235,3 +1235,31 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   border-color: #c9862a;
   color: #c9862a;
 }
+
+/* 비교 저장 팝오버 */
+.cmp-dl-wrap { position: relative; display: inline-block; }
+.cmp-dl-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 132px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #d7d7dc;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(20, 22, 30, 0.12);
+}
+.cmp-dl-menu button {
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cmp-dl-menu button:hover { background: #f0f1f5; }

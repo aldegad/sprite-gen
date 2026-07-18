@@ -78,7 +78,12 @@ function openCompare() {
     `<label class="pp-apply"><input type="radio" name="cmp-mode" value="v" /><span>${t("cmpV")}</span></label>` +
     `<label class="pp-apply"><input type="radio" name="cmp-mode" value="overlay" /><span>${t("cmpOverlay")}</span></label>` +
     `<button type="button" class="ghost cmp-play" data-tip="${t("tCmpPlay")}">▶</button>` +
-    `<button type="button" class="ghost cmp-gif" data-tip="${t("tCmpGif")}">GIF</button>` +
+    `<span class="cmp-dl-wrap"><button type="button" class="ghost cmp-dl" data-tip="${t("tCmpDl")}">${t("cmpDl")} ▾</button>` +
+    `<div class="cmp-dl-menu" hidden>` +
+    `<button type="button" data-fmt="gif">GIF</button>` +
+    `<button type="button" data-fmt="webm">WebM · ${t("cmpDlAlpha")}</button>` +
+    `<button type="button" data-fmt="mp4">MP4 · ${t("cmpDlWhite")}</button>` +
+    `</div></span>` +
     `<button type="button" class="ghost cmp-marks" data-tip="${t("tCmpMarks")}">${t("cmpMarks")}</button>` +
     `<button type="button" class="ghost cmp-guides-toggle" data-tip="${t("tCmpGuidesToggle")}"></button>` +
     `<button type="button" class="ghost cmp-guides-clear" data-tip="${t("tCmpGuidesClear")}">${t("cmpGuidesClear")}</button>` +
@@ -451,11 +456,18 @@ function openCompare() {
     render();
     pushHist(); // Cmd/Ctrl+Z 로 전부 지우기 되돌리기 가능
   });
-  // 비교 GIF: 가상 시간으로 사이클을 결정론 샘플 → 서버가 GIF 조립 (수홍 2026-07-18)
-  const gifBtn = modal.querySelector(".cmp-gif");
-  gifBtn.addEventListener("click", async () => {
-    gifBtn.disabled = true;
-    gifBtn.textContent = "…";
+  // 비교 내보내기 (수홍 2026-07-19 "다운로드 버튼 하나 + 팝오버"): 가상 시간
+  // 결정론 샘플 → 서버 조립. GIF / WebM(VP9 알파) / MP4(x264 화이트 배경).
+  const dlBtn = modal.querySelector(".cmp-dl");
+  const dlMenu = modal.querySelector(".cmp-dl-menu");
+  dlBtn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    dlMenu.hidden = !dlMenu.hidden;
+  });
+  document.addEventListener("click", () => { dlMenu.hidden = true; });
+  const downloadCompare = async (fmt) => {
+    dlBtn.disabled = true;
+    dlBtn.textContent = "…";
     const wasPlaying = anim.playing;
     try {
       const included = [...state.include];
@@ -483,7 +495,7 @@ function openCompare() {
       const res = await fetch("/api/compare-gif", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ frames, duration_ms: step }),
+        body: JSON.stringify({ frames, duration_ms: step, format: fmt }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -492,17 +504,23 @@ function openCompare() {
       const blob = await res.blob();
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = res.headers.get("X-Filename") || "compare.gif";
+      link.download = res.headers.get("X-Filename") || `compare.${fmt}`;
       link.click();
       URL.revokeObjectURL(link.href);
-      setStatus(t("cmpGifDone"), "ok");
+      setStatus(STR[lang].cmpDlDone(fmt.toUpperCase()), "ok");
     } catch (e) {
       anim.playing = wasPlaying;
       setStatus(t("cmpGifFail") + e.message, "err");
     }
-    gifBtn.disabled = false;
-    gifBtn.textContent = "GIF";
-  });
+    dlBtn.disabled = false;
+    dlBtn.textContent = `${t("cmpDl")} ▾`;
+  };
+  dlMenu.querySelectorAll("button[data-fmt]").forEach((b) =>
+    b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      dlMenu.hidden = true;
+      downloadCompare(b.dataset.fmt);
+    }));
 
   const modeInput = modal.querySelector(`input[name="cmp-mode"][value="${state.mode}"]`);
   if (modeInput) modeInput.checked = true;
