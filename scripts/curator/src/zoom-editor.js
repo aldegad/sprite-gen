@@ -76,6 +76,21 @@ function clearMarquee() {
   document.querySelectorAll(".marquee").forEach((m) => { m.hidden = true; });
 }
 
+// 툴 단축키 (포토샵 표준, 수홍 지시 2026-07-18): B/P=펜, E=지우개, I=스포이드, M=선택(마키).
+// 열려 있는 편집 툴바(줌/베이스 모달)에만 적용 — 입력 필드 포커스 중엔 무시.
+// 같은 툴 키 재입력 = 툴 끔 (버튼 재클릭과 동일 거동).
+const TOOL_SHORTCUTS = { b: ".et-pen", p: ".et-pen", e: ".et-eraser", i: ".et-pick", m: ".et-select" };
+document.addEventListener("keydown", (ev) => {
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const sel = TOOL_SHORTCUTS[(ev.key || "").toLowerCase()];
+  if (!sel) return;
+  const a = document.activeElement;
+  if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable)) return;
+  const bars = [...document.querySelectorAll(".edit-toolbar")].filter((el) => el.offsetParent !== null);
+  const btn = bars.length ? bars[bars.length - 1].querySelector(sel) : null;
+  if (btn) { ev.preventDefault(); btn.click(); }
+});
+
 function onZoomKey(ev) {
   if (ev.key === "Escape") {
     if (pixelEdit && pixelEdit.sel) { clearMarquee(); return; } // 선택 해제가 우선
@@ -193,11 +208,11 @@ function openZoom(stateName, idx, keepWidth) {
   const toolbar = document.createElement("div");
   toolbar.className = "edit-toolbar";
   toolbar.innerHTML =
-    `<button type="button" class="ghost et-pen" data-tip="${t("penTool")}">` +
+    `<button type="button" class="ghost et-pen" data-tip="${t("penTool")} (B)">` +
     `${TOOL_ICONS.pen}</button>` +
-    `<button type="button" class="ghost et-eraser" data-tip="${t("eraserTool")}">${TOOL_ICONS.eraser}</button>` +
-    `<button type="button" class="ghost et-pick" data-tip="${t("tPick")}">${TOOL_ICONS.pick}</button>` +
-    `<button type="button" class="ghost et-select" data-tip="${t("tSelectTool")}">${TOOL_ICONS.select}</button>` +
+    `<button type="button" class="ghost et-eraser" data-tip="${t("eraserTool")} (E)">${TOOL_ICONS.eraser}</button>` +
+    `<button type="button" class="ghost et-pick" data-tip="${t("tPick")} (I)">${TOOL_ICONS.pick}</button>` +
+    `<button type="button" class="ghost et-select" data-tip="${t("tSelectTool")} (M)">${TOOL_ICONS.select}</button>` +
     `<button type="button" class="ghost et-undo" data-tip="${t("tUndoKeys")}">${t("undoEdit")}</button>` +
     `<button type="button" class="ghost et-redo" data-tip="${t("tRedoKeys")}">${t("redoEdit")}</button>` +
     `<button type="button" class="ghost et-clear">${t("clearEdits")}</button>`;
@@ -533,6 +548,41 @@ function openZoom(stateName, idx, keepWidth) {
         const grab = captureRegion(sel);
         const from = { ...sel };
         let delta = [0, 0];
+        // 라이브 프리뷰: 드래그 중에도 픽셀이 점선과 함께 실제로 따라온다.
+        // 밑층(img/snap-canvas)을 잠깐 숨기고 전체 합성본을 프리뷰 캔버스에 직접 그린다 —
+        // 원본 자리는 비우고(이동) 목적지에 그대로 칠해 드롭 결과와 동일하게 보인다.
+        const fullC = compositeCell().canvas;
+        let chromaFill = null;
+        if (isBase) {
+          const d0 = fullC.getContext("2d").getImageData(0, 0, 1, 1).data;
+          chromaFill = `rgb(${d0[0]},${d0[1]},${d0[2]})`;
+        }
+        const prev = document.createElement("canvas");
+        prev.width = cellW; prev.height = cellH;
+        Object.assign(prev.style, { position: "absolute", inset: "0", width: "100%",
+                                    height: "100%", imageRendering: "pixelated", pointerEvents: "none" });
+        const hidden = [stage.querySelector("img"), stage.querySelector(".snap-canvas")].filter(Boolean);
+        const drawPreview = (ddx, ddy, dup) => {
+          const pcx = prev.getContext("2d");
+          pcx.imageSmoothingEnabled = false;
+          pcx.clearRect(0, 0, cellW, cellH);
+          pcx.drawImage(fullC, 0, 0);
+          if (!dup) for (const p of grab) {
+            const x = from.x0 + p.dx, y = from.y0 + p.dy;
+            if (chromaFill) { pcx.fillStyle = chromaFill; pcx.fillRect(x, y, 1, 1); }
+            else pcx.clearRect(x, y, 1, 1);
+          }
+          for (const p of grab) {
+            const x = from.x0 + p.dx + ddx, y = from.y0 + p.dy + ddy;
+            if (x >= 0 && x < cellW && y >= 0 && y < cellH) {
+              pcx.fillStyle = p.hex;
+              pcx.fillRect(x, y, 1, 1);
+            }
+          }
+        };
+        hidden.forEach((el2) => { el2.style.visibility = "hidden"; });
+        stage.insertBefore(prev, selBox);
+        drawPreview(0, 0, ev.altKey);
         const onMove = (e2) => {
           const step = s;
           delta = [
@@ -542,9 +592,12 @@ function openZoom(stateName, idx, keepWidth) {
           pixelEdit.sel = { x0: from.x0 + delta[0], y0: from.y0 + delta[1],
                             x1: from.x1 + delta[0], y1: from.y1 + delta[1] };
           syncMarqueeBox();
+          drawPreview(delta[0], delta[1], e2.altKey);
         };
         const onUp = (e2) => {
           finish(onMove, onUp);
+          prev.remove();
+          hidden.forEach((el2) => { el2.style.visibility = ""; });
           commitRegionMove(from, grab, delta[0], delta[1], e2.altKey);
           syncMarqueeBox();
         };
@@ -560,10 +613,30 @@ function openZoom(stateName, idx, keepWidth) {
           const y1 = Math.ceil((Math.max(ay, by) + 1) / s) * s;
           return { x0: clampX(x0), y0: clampY(y0), x1: clampX(x1), y1: clampY(y1) };
         };
-        pixelEdit.sel = norm(sx, sy, sx, sy);
+        // Space(또는 Cmd/Ctrl) 홀드 중엔 앵커가 커서와 함께 움직여 영역 전체가 이동한다
+        // (포토샵 마키 표준). 떼면 그 자리에서 다시 크기 조절로 복귀.
+        let ax = sx, ay = sy;
+        let lx = sx, ly = sy;
+        let spaceHeld = false;
+        const onKey = (ke) => {
+          if (ke.code === "Space") { spaceHeld = ke.type === "keydown"; ke.preventDefault(); }
+        };
+        window.addEventListener("keydown", onKey, true);
+        window.addEventListener("keyup", onKey, true);
+        pixelEdit.sel = norm(ax, ay, sx, sy);
         syncMarqueeBox();
-        const onMove = (e2) => { pixelEdit.sel = norm(sx, sy, cellX(e2), cellY(e2)); syncMarqueeBox(); };
-        const onUp = () => finish(onMove, onUp);
+        const onMove = (e2) => {
+          const cx2 = cellX(e2), cy2 = cellY(e2);
+          if (spaceHeld || e2.metaKey || e2.ctrlKey) { ax += cx2 - lx; ay += cy2 - ly; }
+          lx = cx2; ly = cy2;
+          pixelEdit.sel = norm(ax, ay, cx2, cy2);
+          syncMarqueeBox();
+        };
+        const onUp = () => {
+          window.removeEventListener("keydown", onKey, true);
+          window.removeEventListener("keyup", onKey, true);
+          finish(onMove, onUp);
+        };
         stage.addEventListener("pointermove", onMove);
         stage.addEventListener("pointerup", onUp);
       }
@@ -635,7 +708,6 @@ function openZoom(stateName, idx, keepWidth) {
         ev.preventDefault();
       }
     }, true);
-    const st0 = run.states.find((s) => s.name === stateName);
     const e0 = entries[stateName];
     const beforeCfg = e0.breathe ? JSON.parse(JSON.stringify(e0.breathe)) : null; // Esc 복원
     const bm = { cfg: null, geomReady: false, hist: [], histPos: -1, cancelled: false, tick: 0 };

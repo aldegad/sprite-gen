@@ -78,6 +78,7 @@ function openCompare() {
     `<label class="pp-apply"><input type="radio" name="cmp-mode" value="overlay" /><span>${t("cmpOverlay")}</span></label>` +
     `<button type="button" class="ghost cmp-play" data-tip="${t("tCmpPlay")}">▶</button>` +
     `<button type="button" class="ghost cmp-gif" data-tip="${t("tCmpGif")}">GIF</button>` +
+    `<button type="button" class="ghost cmp-marks" data-tip="${t("tCmpMarks")}">${t("cmpMarks")}</button>` +
     `<span class="cmp-zoom-label">×8</span>` +
     `</span>` +
     `<button type="button" class="ghost zoom-close">${t("zoomClose")}</button></div>` +
@@ -378,6 +379,58 @@ function openCompare() {
     }));
   modal.querySelector(".zoom-close").addEventListener("click", close);
   modal.querySelector(".zoom-backdrop").addEventListener("click", close);
+  // ── 자동 랜드마크 (수홍 2026-07-18): 팔레트 신호로 신체 기준선을 감지해 가로
+  // 가이드로 추가. 첫 번째 켜진 스프라이트의 정지 합성본에서 행별 색 구성으로
+  // 정수리·턱선(위쪽 피부 밴드 끝)·망토 시작(파랑 첫 행)·벨트(파랑 구간 내
+  // 금색 버클 중심)·치맛단(파랑 끝)·발끝을 뽑는다. 뒷면처럼 신호가 없는
+  // 랜드마크는 조용히 생략 (감지 안 된 선을 지어내지 않는다).
+  const detectLandmarkRows = (cell) => {
+    const cv = cell.still.canvas;
+    const [x0, y0, x1, y1] = cell.still.box;
+    const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+    const rows = [];
+    for (let y = y0; y < y1; y++) {
+      const c = { skin: 0, blue: 0, gold: 0 };
+      for (let x = x0; x < x1; x++) {
+        const i = (y * cv.width + x) * 4;
+        if (d[i + 3] < 40) continue;
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        if (b > r + 20 && b > g + 20) c.blue++;
+        else if (r > 200 && g > 150 && b < 110 && r > b + 100) c.gold++;
+        else if (r > 195 && g > 155 && b > 120 && r - b > 30) c.skin++;
+      }
+      rows.push(c);
+    }
+    const marks = new Set([y0, y1]); // 정수리 · 발끝(바닥)
+    const skinIdx = rows.map((c, i) => (c.skin >= 2 ? i : -1)).filter((i) => i >= 0);
+    if (skinIdx.length) {
+      let chin = skinIdx[0];
+      for (const i of skinIdx.slice(1)) { if (i - chin <= 2) chin = i; else break; }
+      marks.add(y0 + chin + 1);
+    }
+    const blueIdx = rows.map((c, i) => (c.blue >= 2 ? i : -1)).filter((i) => i >= 0);
+    if (blueIdx.length) {
+      marks.add(y0 + blueIdx[0]);
+      marks.add(y0 + blueIdx[blueIdx.length - 1] + 1);
+      const belt = rows.map((c, i) => (c.gold >= 1 && i > blueIdx[0] ? i : -1)).filter((i) => i >= 0);
+      if (belt.length) marks.add(y0 + Math.round((belt[0] + belt[belt.length - 1]) / 2));
+    }
+    return [...marks].sort((a, b) => a - b);
+  };
+  modal.querySelector(".cmp-marks").addEventListener("click", () => {
+    const { cells } = layout();
+    if (!cells.length) { setStatus(t("cmpMarksNone"), "err"); return; }
+    const cell = cells[0];
+    const marksY = detectLandmarkRows(cell).map((y) => cell.dy + (y - cell.still.box[1]));
+    let added = 0;
+    for (const pos of marksY) {
+      if (state.guides.some((g) => g.axis === "h" && Math.abs(g.pos - pos) < 0.5)) continue;
+      state.guides.push({ axis: "h", pos });
+      added++;
+    }
+    if (added) { render(); pushHist(); }
+    setStatus(STR[lang].cmpMarksDone(added), "ok");
+  });
   // 비교 GIF: 가상 시간으로 사이클을 결정론 샘플 → 서버가 GIF 조립 (수홍 2026-07-18)
   const gifBtn = modal.querySelector(".cmp-gif");
   gifBtn.addEventListener("click", async () => {
