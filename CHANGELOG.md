@@ -5,6 +5,16 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.54 "Sol Atelier" - Atlas updates live
+
+- **The atlas section now re-bakes automatically** ~1s after edits stop:
+  every successful sidecar save schedules a debounced /api/compose (measured
+  ~80 ms) and refreshes the sheet + manifest, coalescing if edits arrive
+  mid-bake. The "edits not baked yet" badge becomes a transient indicator
+  that clears itself when the fresh sheet lands. The manual bake-now button
+  stays for instant re-bake. Verified: edit -> stamp advances + badge
+  clears; undo -> re-bakes back.
+
 ## v1.56.53 "Sol Atelier" - Compare guide controls: hide / show / clear all
 
 - Compare canvas gained guide-line controls: a hide/show toggle (lines are

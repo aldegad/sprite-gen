@@ -88,7 +88,34 @@ function syncAtlasDocHeight() {
 }
 
 // 다운로드가 아틀라스/manifest 를 다시 계산했을 수 있으니 섹션을 최신 파일로 갱신
+// ── 자동 굽기 (수홍 2026-07-19 "아틀라스 실시간 반영"): 사이드카 저장이 디스크에
+// 앉을 때마다 디바운스로 compose 를 재실행해 섹션을 갱신한다. compose 실측 ~80ms 라
+// 실시간으로 돌려도 부담 없음. 굽는 중 새 편집이 오면 끝나고 한 번 더 (코얼레싱).
+// 수동 "지금 상태로 굽기" 버튼은 즉시 실행용으로 유지.
+let autoBakeTimer = null;
+let autoBakeRunning = false;
+let autoBakeDirty = false;
+async function autoBakeAtlas() {
+  if (autoBakeRunning) { autoBakeDirty = true; return; }
+  autoBakeRunning = true;
+  try {
+    const res = await fetch("/api/compose", { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) await refreshFinalAtlas();
+    else autoBakeDirty = true; // 서버 바쁨(503)/일시 실패 — 다음 스케줄에 재시도
+  } catch {
+    autoBakeDirty = true;
+  }
+  autoBakeRunning = false;
+  if (autoBakeDirty) { autoBakeDirty = false; scheduleAutoBake(); }
+}
+function scheduleAutoBake() {
+  clearTimeout(autoBakeTimer);
+  autoBakeTimer = setTimeout(autoBakeAtlas, 800);
+}
+
 // 편집 직후 호출 (scheduleSave) — "편집 이후 안 구움" 을 버튼 배지로 보이게 한다.
+// (자동 굽기가 곧 갱신하므로 배지는 굽기 완료까지의 과도 상태 표시가 된다.)
 function markAtlasStale() {
   const btn = document.querySelector(".atlas-bake-btn");
   if (btn && !btn.disabled && !btn.classList.contains("stale")) {
