@@ -210,6 +210,18 @@ function seedEntries() {
       }
     }
     entries[state.name] = { order, sel, transforms, archived, pixels, clones,
+      // 프레임별 재생속도 배수 (Aseprite 식 per-frame duration — x1 은 미기록)
+      durations: (() => {
+        const out = {};
+        if (c && c.durations && typeof c.durations === "object") {
+          for (const [k, v] of Object.entries(c.durations)) {
+            const i = Number(k);
+            const m = Number(v);
+            if (Number.isInteger(i) && m >= 0.25 && m <= 8 && m !== 1) out[i] = m;
+          }
+        }
+        return out;
+      })(),
       // 호흡 후처리 레이어 (사이드카 breathe — curation.state_breathe 와 같은 형태)
       breathe: c && c.breathe && Array.isArray(c.breathe.splits) && c.breathe.splits.length
         ? { splits: c.breathe.splits.map(Number).sort((a, b) => a - b).slice(0, 3),

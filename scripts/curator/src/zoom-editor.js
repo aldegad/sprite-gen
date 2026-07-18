@@ -721,8 +721,19 @@ function openZoom(stateName, idx, keepWidth) {
         snapScaleFor(stateName), getPixelOps(stateName, frameIdx));
       bctx.drawImage(breatheComposite(base, bm.cfg, phase), 0, 0);
     };
-    const stepMs = Math.max(140, Math.round(1000 / ((st0 && st0.fps) || 6)));
-    bm.timer = setInterval(() => { bm.tick += 1; renderTick(); }, stepMs);
+    // 재생 타이밍 = 줄 프리뷰와 동일 계약: 줄 배속(pv.speed) × 프레임별 배수(durations)
+    // (수홍 2026-07-18 "배속 해둔 거 확대해서도 배속으로")
+    const stepMs = Math.round(1000 / ((st0 && st0.fps) || 6));
+    const tickLoop = () => {
+      bm.tick += 1;
+      renderTick();
+      const play = playList(stateName);
+      const speed = (previews[stateName] && previews[stateName].speed) || 1;
+      const cursor = play.length ? bm.tick % play.length : 0;
+      const mult = play.length ? ((e0.durations || {})[play[cursor]] || 1) : 1;
+      bm.timer = setTimeout(tickLoop, Math.max(40, (stepMs / Math.max(0.1, speed)) * mult));
+    };
+    bm.timer = setTimeout(tickLoop, stepMs);
 
     const initSilhouette = () => {
       if (bm.geomReady) return true;
@@ -844,17 +855,41 @@ function openZoom(stateName, idx, keepWidth) {
     const ampSel = mkSel([1, 2], bm.cfg.amplitude,
       (v) => `${t("breatheAmp")} ${v}px`,
       (v) => { bm.cfg.amplitude = v || 1; commit(); pushHist(); });
-    const seqLen0 = playList(stateName).length || 1;
-    const breathOptions = [];
-    for (let c = 1; c <= seqLen0; c++) {
-      if (seqLen0 % c === 0 && seqLen0 / c >= 2 * bm.cfg.splits.length) breathOptions.push(c);
-    }
-    if (!breathOptions.length) breathOptions.push(1);
-    const breathSel = mkSel(breathOptions, bm.cfg.breaths || 1,
-      (v) => STR[lang].breatheCount(v),
-      (v) => { bm.cfg.breaths = v || 1; commit(); pushHist(); });
+    // 호흡 횟수: 숫자 입력 + −/+ 스텝퍼 (수홍 2026-07-18 — 약수 셀렉트 대신 자유 입력;
+    // 나눠떨어지지 않으면 fit_breathe_pattern 이 보정하고 스트립 캡션이 알려준다)
+    const breathWrap = document.createElement("span");
+    breathWrap.className = "breathe-count";
+    breathWrap.title = STR[lang].tBreatheCount;
+    const breathLabel = document.createElement("span");
+    breathLabel.textContent = t("breatheCountLabel");
+    const minusBtn = document.createElement("button");
+    minusBtn.type = "button";
+    minusBtn.textContent = "−";
+    const breathInput = document.createElement("input");
+    breathInput.type = "number";
+    breathInput.min = "1";
+    breathInput.step = "1";
+    breathInput.value = String(bm.cfg.breaths || 1);
+    const plusBtn = document.createElement("button");
+    plusBtn.type = "button";
+    plusBtn.textContent = "+";
+    const setBreaths = (v) => {
+      const seqLen = playList(stateName).length || 1;
+      const clamped = Math.max(1, Math.min(Math.max(1, seqLen), Math.round(Number(v)) || 1));
+      bm.cfg.breaths = clamped;
+      breathInput.value = String(clamped);
+      commit();
+      pushHist();
+    };
+    minusBtn.addEventListener("click", () => setBreaths((bm.cfg.breaths || 1) - 1));
+    plusBtn.addEventListener("click", () => setBreaths((bm.cfg.breaths || 1) + 1));
+    breathInput.addEventListener("change", () => setBreaths(breathInput.value));
+    breathWrap.appendChild(breathLabel);
+    breathWrap.appendChild(minusBtn);
+    breathWrap.appendChild(breathInput);
+    breathWrap.appendChild(plusBtn);
     bar.appendChild(ampSel);
-    bar.appendChild(breathSel);
+    bar.appendChild(breathWrap);
     const subWrap = document.createElement("label");
     subWrap.className = "breathe-subpixel";
     subWrap.title = t("tBreatheSub");
@@ -872,7 +907,7 @@ function openZoom(stateName, idx, keepWidth) {
     toolbar.appendChild(bar);
     function syncBreatheControls() {
       ampSel.value = String(bm.cfg.amplitude);
-      breathSel.value = String(bm.cfg.breaths || 1);
+      breathInput.value = String(bm.cfg.breaths || 1);
       subCheck.checked = !!bm.cfg.subpixel;
     }
 
@@ -899,7 +934,7 @@ function openZoom(stateName, idx, keepWidth) {
     zoomView.breatheRedo = () => restoreHist(bm.histPos + 1);
     pushHist(); // 히스토리 바닥 = 오픈 시점 설정
     zoomView.cleanupBreathe = () => {
-      clearInterval(bm.timer);
+      clearTimeout(bm.timer);
       clearTimeout(stripTimer);
       if (!bm.cancelled) rebuildState(stateName); // 줄 미리보기·토글 상태 동기화
     };

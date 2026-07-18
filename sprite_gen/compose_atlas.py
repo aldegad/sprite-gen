@@ -12,7 +12,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen.breathe import fit_breathe_pattern, phase_frame
-from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
+from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_durations, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import heal_run, require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
@@ -186,11 +186,13 @@ def _run(args: argparse.Namespace):
         # UI 가 생기면 여기만 비등간격으로 채워진다). 소비자는 이 배열이 있으면
         # fps 대신 이것을 따른다.
         duration_ms = max(1, round(1000.0 / (float(entry.get("fps", 6)) or 6.0)))
+        mults = state_durations(curation, state)
         animation["rows"][state] = {
             "row": row_index,
             "frames": len(positions),
             "fps": int(entry.get("fps", 6)),
-            "durations_ms": [duration_ms] * len(positions),
+            # 프레임별 재생속도 (수홍 2026-07-18): 소비자는 fps 대신 이 배열을 따른다
+            "durations_ms": [max(1, round(duration_ms * mults.get(fi, 1.0))) for fi, _ph in positions],
             "loop": bool(entry.get("loop", True)),
             "frame_variant": variant,
         }

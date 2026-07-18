@@ -1148,6 +1148,12 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .breathe-linectl button:hover { border-color: var(--accent); color: var(--accent); }
 .breathe-subpixel { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; }
 .breathe-subpixel input { margin: 0; }
+.breathe-subpixel { color: var(--muted); } /* 실험 기능 — 낮은 시각 우선순위 */
+.dur-chip { min-width: 30px; font-variant-numeric: tabular-nums; }
+.breathe-count { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); }
+.breathe-count input { width: 44px; padding: 2px 4px; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; text-align: center; }
+.breathe-count button { padding: 2px 7px; font-size: 12px; border: 1px solid var(--line); border-radius: 4px; background: transparent; cursor: pointer; }
+.breathe-count button:hover { border-color: var(--accent); color: var(--accent); }
 /* 최종 굽기 필름스트립 — 시퀀스×호흡주기 LCM 전개를 그대로 나열 */
 .breathe-strip { margin-top: 8px; }
 .breathe-strip .bs-caption { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }

@@ -5,6 +5,28 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.36 "Sol Atelier" - Per-frame durations, breath stepper, editor speed sync
+
+Soohong's asks (2026-07-18): row-preview speed should carry into the editor,
+per-frame play speed ("how is this usually done?" — the industry answer is
+per-frame durations, as in Aseprite/GIF/Godot SpriteFrames), free breath-count
+input, and sub-pixel flagged experimental.
+
+- **Per-frame durations** — each sequence card gets a ×1 chip; clicking cycles
+  ×1 → ×2 → ×3 → ×4 → ×0.5. Stored in the sidecar (`durations`, multiplier of
+  the state's 1000/fps base), baked into per-frame GIF delays and manifest
+  `animation.rows.<state>.durations_ms` (the consumer contract that always
+  said "consumers follow this array over fps"). Preview and breathe editor
+  honor it live.
+- **Editor speed sync** — the breathe editor plays at the row preview's speed
+  multiplier × the current frame's duration (was fixed state fps).
+- **Breath count stepper** — free number input with −/+ instead of a divisor
+  select; non-divisors are fitted and the strip caption says so.
+- **Sub-pixel marked experimental** — label + tooltip verdict ("still smears,
+  keep off"), muted styling. Kept for iteration.
+- Archive-note: the final-atlas tree node scroll already worked and is
+  e2e-covered now (scrolls into view + flash).
+
 ## v1.56.35 "Sol Atelier" - Loop-fit breathing + craft-rule sub-pixel + grid drift fix
 
 Soohong's calls (2026-07-18): the loop must stay the base sequence, sub-pixel
