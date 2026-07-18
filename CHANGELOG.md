@@ -5,6 +5,16 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.45 "Sol Atelier" - Compare canvas: undo/redo, alignment reset, playback
+
+- Cmd/Ctrl+Z ↔ Cmd/Ctrl+Shift+Z over every compare action (guide add/move/
+  delete, sprite drag, alignment reset) — capture-phase so the pixel-editor
+  router stays out of the modal.
+- Alignment buttons (horizontal/vertical/overlay) now RESET free-drag offsets
+  back to the default arrangement.
+- Play/stop button animates every included sprite with its own sequence, fps,
+  transforms, pixel edits, and breathing layer — full bake parity.
+
 ## v1.56.44 "Sol Atelier" - Compare canvas v2 + nameable instances
 
 Soohong's compare-canvas feedback batch (2026-07-18):
