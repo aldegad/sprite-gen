@@ -1703,7 +1703,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--states", default="all")
-    parser.add_argument("--key-threshold", type=float, default=96.0)
+    parser.add_argument("--key-threshold", type=float, default=80.0)
     parser.add_argument("--fringe-key-threshold", type=float, default=180.0)
     parser.add_argument("--fringe-delta", type=float, default=18.0)
     parser.add_argument(

@@ -77,7 +77,7 @@ def _add_prepare(p: argparse.ArgumentParser) -> None:
 def _add_extract(p: argparse.ArgumentParser) -> None:
     p.add_argument("--run-dir", required=True, type=Path)
     p.add_argument("--states", default="all")
-    p.add_argument("--key-threshold", type=float, default=96.0)
+    p.add_argument("--key-threshold", type=float, default=80.0)
     p.add_argument("--fringe-key-threshold", type=float, default=180.0)
     p.add_argument("--fringe-delta", type=float, default=18.0)
     p.add_argument("--fringe-unmix-reach", type=int, default=None)
@@ -178,7 +178,7 @@ def _add_inspect(p: argparse.ArgumentParser) -> None:
     p.add_argument("--histogram-min", type=float, default=inspect.DEFAULT_HISTOGRAM_MIN)
     p.add_argument("--dhash-min", type=float, default=inspect.DEFAULT_DHASH_MIN)
     p.add_argument("--motion-min", type=float, default=inspect.DEFAULT_MOTION_MIN)
-    p.add_argument("--key-threshold", type=float, default=96.0)
+    p.add_argument("--key-threshold", type=float, default=80.0)
     p.add_argument("--fringe-key-threshold", type=float, default=180.0)
     p.add_argument("--fringe-delta", type=float, default=18.0)
     p.add_argument("--fringe-unmix-reach", type=int, default=None)

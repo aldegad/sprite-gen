@@ -33,7 +33,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--histogram-min", type=float, default=DEFAULT_HISTOGRAM_MIN)
     parser.add_argument("--dhash-min", type=float, default=DEFAULT_DHASH_MIN)
     parser.add_argument("--motion-min", type=float, default=DEFAULT_MOTION_MIN)
-    parser.add_argument("--key-threshold", type=float, default=96.0)
+    parser.add_argument("--key-threshold", type=float, default=80.0)
     parser.add_argument("--fringe-key-threshold", type=float, default=180.0)
     parser.add_argument("--fringe-delta", type=float, default=18.0)
     parser.add_argument("--fringe-unmix-reach", type=int, default=None)
