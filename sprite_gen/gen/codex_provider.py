@@ -132,8 +132,8 @@ class CodexProvider:
 
         prompt = _build_prompt(request.prompt)
         started = time.monotonic()
-        # env: parent minus Kuma session-identity vars — a headless generation
-        # `codex exec` must not inherit the spawning worker's endpoint identity,
+        # env: parent minus orchestrator session env — a headless generation
+        # `codex exec` must not inherit the spawning agent's session identity,
         # or codex's own Kuma hooks broadcast this prompt to that worker's Discord
         # channel (see base.provider_subprocess_env).
         completed = subprocess.run(

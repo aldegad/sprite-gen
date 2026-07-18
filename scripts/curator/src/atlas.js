@@ -55,7 +55,7 @@ async function renderFinalAtlas(info) {
       await refreshFinalAtlas();
       setStatus(t("atlasBaked"), "ok");
     } catch (e) {
-      setStatus(t("composeFail") + e.message, "err");
+      setStatus(t("atlasBakeFail") + e.message, "err");
       bakeBtn.disabled = false;
       bakeBtn.textContent = t("atlasBake");
     }
@@ -118,6 +118,7 @@ function ensureAtlasObserver() {
 async function autoBakeAtlas() {
   if (autoBakeRunning) { autoBakeDirty = true; return; }
   autoBakeRunning = true;
+  let failed = null;
   try {
     const t0 = performance.now();
     const res = await fetch("/api/compose", { method: "POST" });
@@ -126,12 +127,17 @@ async function autoBakeAtlas() {
     if (res.ok && data.ok) {
       atlasDirty = false;
       await refreshFinalAtlas();
-    } else autoBakeDirty = true; // 서버 바쁨(503)/일시 실패 — 다음 스케줄에 재시도
-  } catch {
-    autoBakeDirty = true;
+    } else if (res.status === 503) autoBakeDirty = true; // 서버 바쁨 — 재시도
+    else failed = data.error || String(res.status);
+  } catch (e) {
+    failed = e.message;
   }
   autoBakeRunning = false;
-  if (autoBakeDirty) { autoBakeDirty = false; scheduleAutoBake(); }
+  // 지속 실패(500 등)는 재시도 루프를 돌리지 않는다 — 한 번 보고하고 배지 유지,
+  // 다음 편집(저장)이 오면 다시 시도 (실사고 2026-07-19: 추출 미완 상태에서
+  // 500 을 0.8s 간격으로 무한 재타격).
+  if (failed) setStatus(t("atlasBakeFail") + failed, "err");
+  else if (autoBakeDirty) { autoBakeDirty = false; scheduleAutoBake(); }
 }
 function scheduleAutoBake() {
   clearTimeout(autoBakeTimer);
