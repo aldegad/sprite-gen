@@ -827,6 +827,44 @@ class CurationHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_json({"ok": True})
                 return
+            if path == "/api/compare-gif":
+                # 비교 캔버스 캡처 프레임들(PNG dataURL) → 투명 GIF 조립.
+                # 프레임 합성은 클라이언트(큐레이션 상태 합성 경로)가 이미 끝냈다 —
+                # 여기선 조립만 한다 (결정론: 가상 시간 샘플).
+                payload = self._read_body()
+                raw_frames = payload.get("frames")
+                try:
+                    duration_ms = max(20, int(payload.get("duration_ms", 100)))
+                except (TypeError, ValueError):
+                    duration_ms = 100
+                if not isinstance(raw_frames, list) or not raw_frames or len(raw_frames) > 200:
+                    self._send_json({"error": "frames: 1..200 data URLs required"}, 400)
+                    return
+                import base64
+                from sprite_gen.gif_utils import save_clean_gif
+                images = []
+                try:
+                    for entry in raw_frames:
+                        head, _, b64 = str(entry).partition(",")
+                        if "image/png" not in head:
+                            raise ValueError("expected image/png data URLs")
+                        images.append(Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGBA"))
+                except (ValueError, OSError) as exc:
+                    self._send_json({"error": f"bad frame data: {exc}"}, 400)
+                    return
+                import tempfile
+                with tempfile.TemporaryDirectory() as td:
+                    out = Path(td) / "compare.gif"
+                    save_clean_gif(images, out, duration_ms=duration_ms)
+                    data = out.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/gif")
+                self.send_header("X-Filename", "compare.gif")
+                self.send_header("Content-Disposition", 'attachment; filename="compare.gif"')
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if path == "/api/compose":
                 result = run_compose(self.run_dir)
                 self._send_json(result, 200 if result["ok"] else 500)

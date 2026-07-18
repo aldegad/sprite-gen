@@ -59,6 +59,7 @@ function openCompare() {
     `<label class="pp-apply"><input type="radio" name="cmp-mode" value="v" /><span>${t("cmpV")}</span></label>` +
     `<label class="pp-apply"><input type="radio" name="cmp-mode" value="overlay" /><span>${t("cmpOverlay")}</span></label>` +
     `<button type="button" class="ghost cmp-play" data-tip="${t("tCmpPlay")}">▶</button>` +
+    `<button type="button" class="ghost cmp-gif" data-tip="${t("tCmpGif")}">GIF</button>` +
     `<span class="cmp-zoom-label">×8</span>` +
     `</span>` +
     `<button type="button" class="ghost zoom-close">${t("zoomClose")}</button></div>` +
@@ -160,10 +161,13 @@ function openCompare() {
     const cells = [];
     for (const tg of all) {
       if (!state.include.has(tg.state)) continue;
-      const comp = compositeFor(tg.state, anim.playing ? (anim.cursors[tg.state] || 0) : 0);
-      if (!comp) continue;
-      const [x0, y0, x1, y1] = comp.box;
-      cells.push({ tg, comp, box: comp.box, w: x1 - x0, h: y1 - y0 });
+      // 배치(슬롯)는 항상 정지 상태(cursor 0) 기준 — 재생 중 높이가 숨쉬어도
+      // 캔버스 크기/슬롯이 흔들리지 않는다 (수홍 2026-07-18). 그리기는 현재 프레임.
+      const still = compositeFor(tg.state, 0);
+      if (!still) continue;
+      const comp = anim.playing ? (compositeFor(tg.state, anim.cursors[tg.state] || 0) || still) : still;
+      const [x0, y0, x1, y1] = still.box;
+      cells.push({ tg, comp, still, box: still.box, w: x1 - x0, h: y1 - y0 });
     }
     const gap = 6;
     const pad = 12;
@@ -219,7 +223,10 @@ function openCompare() {
     cells.forEach((c, i) => {
       ctx.globalAlpha = state.mode === "overlay" && i > 0 ? 0.45 : 1;
       const [x0, y0] = c.box;
-      ctx.drawImage(c.comp.canvas, x0, y0, c.w, c.h, c.dx * z, c.dy * z, c.w * z, c.h * z);
+      // 셀 원점 정렬: 정지 슬롯 좌표계에 현재 프레임 전체 셀을 얹는다 —
+      // 호흡/모션은 슬롯 안에서만 움직이고 캔버스는 고정된다.
+      ctx.drawImage(c.comp.canvas, 0, 0, c.comp.canvas.width, c.comp.canvas.height,
+        (c.dx - x0) * z, (c.dy - y0) * z, c.comp.canvas.width * z, c.comp.canvas.height * z);
     });
     ctx.globalAlpha = 1;
     // 디폴트 정렬 기준선 (희미하게): 수평 = 바닥, 수직 = 가로 중심
@@ -256,13 +263,17 @@ function openCompare() {
           g.pos = g.axis === "h"
             ? Math.max(0, Math.min(H, (e2.clientY - r.top) / z))
             : Math.max(0, Math.min(W, (e2.clientX - r.left) / z));
-          render();
+          // 드래그 중 render() 금지 — 가이드 DOM 재구축이 잡고 있는 요소를 파괴해
+          // 드래그가 끊긴다 (수홍 "잘 안 움직여"). 제자리 갱신만.
+          if (g.axis === "h") ln.style.top = `${g.pos * z}px`;
+          else ln.style.left = `${g.pos * z}px`;
+          tag.textContent = `${Math.round(g.pos)}px`;
         };
         const onUp = () => {
           ln.removeEventListener("pointermove", onMove);
           ln.removeEventListener("pointerup", onUp);
+          render(); // 드롭 후 전체 동기화 (라벨/포커스)
           if (moved) pushHist();
-          else render(); // 포커스 표시 갱신
         };
         ln.addEventListener("pointermove", onMove);
         ln.addEventListener("pointerup", onUp);
@@ -347,6 +358,59 @@ function openCompare() {
     }));
   modal.querySelector(".zoom-close").addEventListener("click", close);
   modal.querySelector(".zoom-backdrop").addEventListener("click", close);
+  // 비교 GIF: 가상 시간으로 사이클을 결정론 샘플 → 서버가 GIF 조립 (수홍 2026-07-18)
+  const gifBtn = modal.querySelector(".cmp-gif");
+  gifBtn.addEventListener("click", async () => {
+    gifBtn.disabled = true;
+    gifBtn.textContent = "…";
+    const wasPlaying = anim.playing;
+    try {
+      const included = [...state.include];
+      const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+      const cycles = included.map((name) => {
+        const st = run.states.find((s) => s.name === name);
+        const len = playList(name).length || 1;
+        return Math.max(100, Math.round(len * 1000 / Math.max(1, (st && st.fps) || 6)));
+      });
+      let total = cycles.reduce((a, b) => (a * b) / gcd(a, b), 100);
+      if (!isFinite(total) || total > 8000) total = Math.max(...cycles); // 관측 가능 컷
+      const step = 100;
+      const frames = [];
+      anim.playing = true; // 재생 합성 경로 사용
+      for (let ts = 0; ts < total; ts += step) {
+        for (const name of included) {
+          const st = run.states.find((s) => s.name === name);
+          anim.cursors[name] = Math.floor(ts * ((st && st.fps) || 6) / 1000);
+        }
+        render();
+        frames.push(canvas.toDataURL("image/png"));
+      }
+      anim.playing = wasPlaying;
+      render();
+      const res = await fetch("/api/compare-gif", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ frames, duration_ms: step }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || res.status);
+      }
+      const blob = await res.blob();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = res.headers.get("X-Filename") || "compare.gif";
+      link.click();
+      URL.revokeObjectURL(link.href);
+      setStatus(t("cmpGifDone"), "ok");
+    } catch (e) {
+      anim.playing = wasPlaying;
+      setStatus(t("cmpGifFail") + e.message, "err");
+    }
+    gifBtn.disabled = false;
+    gifBtn.textContent = "GIF";
+  });
+
   const playBtn = modal.querySelector(".cmp-play");
   const animFrame = (ts) => {
     if (!document.body.contains(modal)) return;
