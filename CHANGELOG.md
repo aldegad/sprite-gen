@@ -5,6 +5,17 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.38 "Sol Atelier" - Correspondence-grid trust gate (harmonic mis-detection)
+
+side_idle report (Soohong 2026-07-18): the green grid was wildly off — the
+recorded detection grid had 45 columns while extraction itself finalized the
+art at 31 (a half-pitch harmonic mis-detection; the raw pitch 9.5 → 31 columns
+checks out, so no forced squeezing was involved). Recorded cut lines are now
+trusted ONLY when their cell count matches the final pixel count (±1);
+otherwise the overlay falls back to the uniform grid whose cell count equals
+the final pixels by construction. Recording-side harmonic detection is left as
+an engine investigation item.
+
 ## v1.56.37 "Sol Atelier" - Whole-row fps stepper; per-frame durations withdrawn
 
 Soohong's correction (2026-07-18): per-frame hold time is already owned by
