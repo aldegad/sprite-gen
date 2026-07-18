@@ -187,6 +187,12 @@ def edit_index(curation: dict[str, Any] | None, state: str, index: int) -> int:
     unlinked = entry.get("unlinked")
     if isinstance(unlinked, list) and index in {int(u) for u in unlinked if str(u).lstrip("-").isdigit()}:
         return index
+    # 레거시 자가판정 (웹뷰와 동일 규칙): 링크 개념(2026-07-18) 이전 사이드카가 복제
+    # 인덱스에 직접 넣어둔 변형/픽셀 편집은 독립 의도다 — 조용한 편집 소실 금지.
+    own_transform = (entry.get("transforms") or {}).get(str(index))
+    own_pixels = (entry.get("pixels") or {}).get(str(index))
+    if own_transform or (own_pixels and len(own_pixels)):
+        return index
     try:
         return int(src)
     except (TypeError, ValueError):
