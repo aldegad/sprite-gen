@@ -101,27 +101,49 @@ def breathe_pattern(cfg: dict) -> list[float]:
         return pattern
     out: list[float] = []
     for i, phase in enumerate(pattern):
-        prev = pattern[i - 1]
+        prev = pattern[i - 1]  # i=0 은 pattern[-1] — 루프 랩 전이를 여기서 담당
         if prev != phase:
             out.append((prev + phase) / 2.0)  # 전이 경계에 중간 위상
         out.append(phase)
-    if pattern[-1] != pattern[0]:  # 루프 랩 전이
-        out.append((pattern[-1] + pattern[0]) / 2.0)
     return out
+
+
+def _seam_rows(top: int, ys: list[int], amplitude: int, height: int) -> list[tuple[int, int]]:
+    """서브픽셀 중간색을 허용하는 행 밴드 — 움직이는 경계(정수리 + 각 분할선 이음새)만.
+
+    수홍 정정 2026-07-18: 전체 프레임 블렌드는 몸통 안 가로 경계(눈·스카프)까지
+    잔상을 만든다 — 중간색은 호흡선 부분에만 딱 붙어야 한다."""
+    bands = []
+    for y in [top, *ys]:
+        r0 = max(0, y - 1)
+        r1 = min(height, y + amplitude + 1)
+        if r1 > r0:
+            bands.append((r0, r1))
+    return bands
 
 
 def phase_frame(frame: Image.Image, cfg: dict, phase: float) -> Image.Image:
     """프레임에 호흡 위상 하나를 적용 — breathe_frames 와 같은 수학 (콘텐츠 bbox 기준).
 
     정수 위상 p: p<K 는 밴드 시프트(shift_band), p=K 는 전체 시프트(shift_above).
-    반정수 위상: 인접 두 정수 위상의 50% 블렌드 (서브픽셀)."""
+    반정수 위상(서브픽셀): 아래 위상 프레임을 기준으로, 움직이는 경계 밴드
+    (_seam_rows)에서만 두 위상의 50% 블렌드 중간색을 얹는다."""
     if phase <= 0:
         return frame
     lo = int(phase)
     if phase != lo:
         a = phase_frame(frame, cfg, float(lo))
         b = phase_frame(frame, cfg, float(min(lo + 1, len(cfg["splits"]))))
-        return Image.blend(a, b, 0.5)
+        box = frame.split()[3].getbbox()
+        if not box:
+            return a
+        top, bottom = box[1], box[3]
+        ys = [top + int((bottom - top) * s) for s in cfg["splits"]]
+        full = Image.blend(a, b, 0.5)
+        out = a.copy()
+        for r0, r1 in _seam_rows(top, ys, int(cfg.get("amplitude", 1)), frame.height):
+            out.paste(full.crop((0, r0, frame.width, r1)), (0, r0))
+        return out
     splits = cfg["splits"]
     amplitude = int(cfg.get("amplitude", 1))
     k = len(splits)

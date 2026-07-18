@@ -3,8 +3,8 @@
 
 from PIL import Image
 
-from sprite_gen.breathe import (BAKE_CAP, bake_breathe_sequence, breathe_frames,
-                                breathe_pattern, phase_frame)
+from sprite_gen.breathe import (BAKE_CAP, _seam_rows, bake_breathe_sequence,
+                                breathe_frames, breathe_pattern, phase_frame)
 
 
 def _figure() -> Image.Image:
@@ -48,11 +48,9 @@ def test_pattern_two_lines_cascade() -> None:
 
 def test_pattern_subpixel_inserts_half_phases() -> None:
     cfg = {"splits": [0.55], "amplitude": 1, "hold": 2, "subpixel": True}
-    pattern = breathe_pattern(cfg)
-    assert 0.5 in pattern, "전이 경계에 반정수 블렌드 위상"
-    # 모든 전이(0→1, 1→0 랩 포함)에 중간 위상이 있다
-    ints = [p for p in pattern if p in (0.0, 1.0)]
-    assert ints == [0.0, 0.0, 1.0, 1.0]
+    # 모든 전이(1→0 루프 랩 포함)에 중간 위상 정확히 1개 — 랩 전이는 시퀀스
+    # 맨 앞(prev=마지막)에서 담당한다 (중복 삽입 회귀 방지, 클라 미러와 동형)
+    assert breathe_pattern(cfg) == [0.5, 0.0, 0.0, 0.5, 1.0, 1.0]
 
 
 def test_phase_frame_matches_breathe_frames() -> None:
@@ -89,3 +87,23 @@ def test_bake_sequence_blink_breathes_too() -> None:
     # 패턴 [0,1] × 시퀀스 [a,blink] → LCM 2: [a@0, blink@1]
     assert phases == [0.0, 1.0]
     assert _bbox(baked[1])[1] == _bbox(blink)[1] + 1, "깜빡임 프레임이 날숨 위상으로 하강"
+
+
+def test_subpixel_blend_limited_to_seam_bands() -> None:
+    """서브픽셀 중간색은 움직이는 경계(정수리+호흡선)에만 — 몸통 안 가로 경계
+    (눈 등)에 잔상 금지 (수홍 정정 2026-07-18)."""
+    im = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    for y in range(10, 58):
+        for x in range(20, 44):
+            im.putpixel((x, y), (200, 50, 50, 255) if 20 <= y <= 24 else (90, 60, 30, 255))
+    cfg = {"splits": [0.55], "amplitude": 1, "hold": 2, "subpixel": True}
+    base = phase_frame(im, cfg, 0.0)
+    half = phase_frame(im, cfg, 0.5)
+    band_rows = set()
+    for r0, r1 in _seam_rows(10, [10 + int(48 * 0.55)], 1, 64):
+        band_rows.update(range(r0, r1))
+    for y in range(64):
+        if y in band_rows:
+            continue
+        for x in range(64):
+            assert base.getpixel((x, y)) == half.getpixel((x, y)), f"잔상 at ({x},{y})"
