@@ -5,6 +5,35 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.39 "Sol Atelier" - Palette lock + frozen rows (approved-art protection)
+
+The drift saga ends (Soohong 2026-07-18, "A가 정석"): a live curation server
+self-heals stale rows whenever the engine source changes, and the shared
+palette used to be rebuilt from whatever batch happened to be extracting —
+together they re-quantized the user's approved down_idle three separate times.
+
+- **Palette lock** — the shared palette is pinned to `palette.lock.json` at
+  the run root. First extraction writes it; every later extraction (including
+  heals and partial `--states` runs) reuses it regardless of batch
+  composition. `--repalette` explicitly rebuilds+repins. Founder's pin was
+  seeded from the approved anchor's actual colors.
+- **Frozen rows** — `curation.json` `states.<state>.frozen: true` marks a row
+  as user-approved: self-heal never re-derives it (observable "frozen rows
+  kept" note), no matter how the engine changes. Unfreezing is an explicit
+  user edit. Verified live: engine-revision change + heal trigger left
+  down_idle byte-identical (8/8 hashes).
+- **Pitch arbitration (log-only)** — when the runlen second opinion disagrees
+  hard with the detect consensus, both hypotheses are scored (cell-uniformity)
+  and logged. Adoption was tried and withdrawn the same day: the metric is
+  biased toward finer grids and flipped up_idle the wrong way. The warning now
+  says what the gap usually means: the raw was drawn finer than the cell
+  contract — reroll with a block-count hint.
+- Byte-exact reconstruction of the pre-drift generation was attempted from
+  archived raws (extraction proven deterministic: same input → same output
+  twice), but the target generation itself sat on an unreproducible heal
+  history; a baked-edits visual A/B showed the two generations perceptually
+  identical, so the current one was frozen as canonical.
+
 ## v1.56.38 "Sol Atelier" - Correspondence-grid trust gate (harmonic mis-detection)
 
 side_idle report (Soohong 2026-07-18): the green grid was wildly off — the
