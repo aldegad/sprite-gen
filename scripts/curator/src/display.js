@@ -128,6 +128,16 @@ function drawFinalGrid(canvas, stage, box, scale, t, inputGrid) {
   // 균등 분할은 끝점만 맞고 중간이 어긋난다 (수홍 발견 2026-07-18 down_lie:
   // "머리끝발끝은 맞는데 중간 픽셀이 하나도 안 맞아"). conform 축소 폐지(v1.56.22)로
   // 1차 절단선이 곧 최종 대응이 됐다. 없는 프레임(구세대 캐시·테이크)만 균등 근사.
+  // 기록 격자 신뢰 게이트 (실사고 2026-07-18 side_idle: 최종 31칸인데 기록은 45칸 —
+  // 반피치 하모닉 오검출): 칸수가 최종 픽셀 수와 ±1 이상 어긋나면 그 기록은 버린다.
+  // 균등 격자는 "칸 수 = 최종 픽셀 수" 를 보장한다 (가짜 격자 금지).
+  if (inputGrid && Array.isArray(inputGrid.x) && Array.isArray(inputGrid.y)) {
+    const expCols = Math.max(1, Math.round((box[2] - box[0]) / scale));
+    const expRows = Math.max(1, Math.round((box[3] - box[1]) / scale));
+    if (Math.abs((inputGrid.x.length - 1) - expCols) > 1 || Math.abs((inputGrid.y.length - 1) - expRows) > 1) {
+      inputGrid = null;
+    }
+  }
   if (inputGrid && Array.isArray(inputGrid.x) && Array.isArray(inputGrid.y) && inputGrid.x.length > 1 && inputGrid.y.length > 1) {
     // 검출 절단선의 매핑 비율 오차가 중간에서 누적된다 (실사고 2026-07-18 down_lie:
     // 28칸이 27.2px 로 눌려 끝만 맞고 중간 전부 어긋남) — 끝점을 최종 콘텐츠
