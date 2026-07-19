@@ -5,6 +5,18 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.70 "Sol Atelier" - Hard generation timeout + one observable retry
+
+- Engine: provider subprocesses (`codex exec`, `grok -p`) now run under a hard
+  timeout - `SPRITE_GEN_GEN_TIMEOUT_SECONDS`, default 300s (~2.3x the observed
+  max healthy roll of 129s). Field incident 2026-07-19: one codex call in a
+  15-row batch hung silently for 1h38m and blocked the whole batch; 14
+  identical same-env calls succeeded, so this is a sporadic provider-side
+  stream stall, not an orchestrator/env conflict (that class was already
+  fixed in v1.56.61). On expiry the child is killed and `GenTimeoutError`
+  raises loud; `generate_image` retries the call ONCE with a stderr notice,
+  then fails loud. Verified live: 5s bound -> fire -> retry -> loud fail.
+
 ## v1.56.69 "Sol Atelier" - Anchor truth = curated SEQUENCE HEAD, not index 0 + take-record isolation
 
 - Engine fix (root cause of "the side anchor is not my edited image", Soohong

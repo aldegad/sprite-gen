@@ -26,7 +26,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .base import GenRequest, ProviderRun, provider_subprocess_env, verify_png
+from .base import GEN_TIMEOUT_SECONDS, GenRequest, GenTimeoutError, ProviderRun, provider_subprocess_env, verify_png
 
 # codex carries the inline base64 on a version-specific record. Both are
 # first-class canonical records (not a fallback) — read whichever the running
@@ -136,9 +136,15 @@ class CodexProvider:
         # `codex exec` must not inherit the spawning agent's session identity,
         # or codex's own Kuma hooks broadcast this prompt to that worker's Discord
         # channel (see base.provider_subprocess_env).
-        completed = subprocess.run(
-            cmd, input=prompt, capture_output=True, text=True, env=provider_subprocess_env()
-        )
+        try:
+            completed = subprocess.run(
+                cmd, input=prompt, capture_output=True, text=True, env=provider_subprocess_env(),
+                timeout=GEN_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            raise GenTimeoutError(
+                f"codex-gen: no completion within {GEN_TIMEOUT_SECONDS}s — "
+                "provider stream stalled; child killed (gen-timeout)")
         elapsed = time.monotonic() - started
         stdout = completed.stdout or ""
         if completed.returncode != 0:

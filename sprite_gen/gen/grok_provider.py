@@ -19,7 +19,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .base import GenRequest, ProviderRun, provider_subprocess_env, verify_png
+from .base import GEN_TIMEOUT_SECONDS, GenRequest, GenTimeoutError, ProviderRun, provider_subprocess_env, verify_png
 
 
 def _build_prompt(request: GenRequest) -> str:
@@ -78,7 +78,13 @@ class GrokProvider:
         # (base.provider_subprocess_env). grok hooks are off today, but a headless
         # generation subprocess must never carry the parent worker's endpoint
         # identity regardless of the engine's current hook config.
-        completed = subprocess.run(cmd, capture_output=True, text=True, env=provider_subprocess_env())
+        try:
+            completed = subprocess.run(cmd, capture_output=True, text=True,
+                                       env=provider_subprocess_env(), timeout=GEN_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            raise GenTimeoutError(
+                f"grok-gen: no completion within {GEN_TIMEOUT_SECONDS}s — "
+                "provider stream stalled; child killed (gen-timeout)")
         elapsed = time.monotonic() - started
         if completed.returncode != 0:
             tail = (completed.stderr or "").strip().splitlines()[-20:]
