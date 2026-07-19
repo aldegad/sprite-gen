@@ -5,6 +5,17 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.63 "Sol Atelier" - Engine-owned sidecar fields survive client saves
+
+- Fix: a curation save from the webview silently DROPPED per-state fields it
+  does not know about - the agent/engine-set `frozen` row marker vanished on
+  the next client autosave, dissolving the heal-protection contract
+  (found by darami's integrity audit on the founder run). The server now
+  carries over an engine-owned whitelist (`frozen`) from the existing file
+  when the client payload's row omits it; an explicit client value still
+  wins. Unit-verified: carry-over, explicit-false respected, new rows
+  unaffected.
+
 ## v1.56.62 "Sol Atelier" - Orchestrator-neutral skill + troubleshooting doc
 
 - **De-coupled the skill from any specific orchestrator** (Soohong's audit

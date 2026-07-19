@@ -821,6 +821,26 @@ class CurationHandler(BaseHTTPRequestHandler):
                     # silent overwrite). runRevision is a content fingerprint of the frames.
                     stale = payload.get("runRevision") != run_revision(self.run_dir)
                     if not stale:
+                        # 엔진-소유 사이드카 필드 보존: 클라이언트 payload 는 자기가 아는
+                        # 필드만 싣는다 — 에이전트/엔진이 심어둔 행 필드(frozen 등)가
+                        # 클라 저장에 조용히 드랍되면 보호 계약이 사라진다 (실사고
+                        # 2026-07-19: founder frozen 마커 소실, darami 무결성 감사 발견).
+                        # 계약: 기존 파일에 있고 payload 의 그 행에 없는 화이트리스트
+                        # 필드는 이월한다.
+                        engine_owned = ("frozen",)
+                        try:
+                            existing = json.loads((self.run_dir / CURATION_FILENAME).read_text(encoding="utf-8"))
+                        except (OSError, json.JSONDecodeError):
+                            existing = {}
+                        for state_name, prev_entry in (existing.get("states") or {}).items():
+                            if not isinstance(prev_entry, dict):
+                                continue
+                            slot = (payload.get("states") or {}).get(state_name)
+                            if not isinstance(slot, dict):
+                                continue
+                            for field in engine_owned:
+                                if field in prev_entry and field not in slot:
+                                    slot[field] = prev_entry[field]
                         write_curation_atomic(self.run_dir, payload)
                 if stale:
                     self._send_json({"error": "curation is from a different run generation "
