@@ -72,6 +72,16 @@ All edits are **non-destructive**: they are saved to `curation.json` in the run 
 
 This step is optional. When there is no `curation.json`, every state uses all extracted frames in order with identity transform — an explicit default, not a silent fallback.
 
+### 생성 트리거 관용구 (SSoT = `src/gen-trigger.js`)
+
+서버에서 생성이 도는 모든 버튼(보간 `tween.js`, 리롤 `row-controls.js`, 이후 추가되는 것)은
+한 가지 표면 계약만 쓴다 — **클릭 = 파라미터 팝오버(`.gen-pop`) 토글 → 공용 모델
+select(GPT=codex / Grok=grok, `makeProviderSelect`) → 생성 버튼 → `runServerGeneration`**
+(스피너 → 진행도 워치 → POST → 에러 언랩 → 성공 시 뷰 새로고침). 모델 표기·실행 시퀀스의
+유일한 소유자는 `gen-trigger.js` 다. 트리거마다 다른 제스처(Alt클릭 모델 선택 등)를 만들지
+않는다 (수홍 2026-07-19 통일 확정 — 실사고: 보간=팝오버 select, 리롤=Alt클릭으로 갈라져
+있었다). 줄 단위 다운로드(저장 팝오버)는 생성이 아니므로 별도 파일 `row-export.js` 소유.
+
 ## Editing a finished sprite sheet (no `frames/` source)
 
 When only the combined sheet survives (a deployed asset whose run dir is gone), rebuild a curator-ready run dir with the inverse step before curating:

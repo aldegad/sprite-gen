@@ -26,7 +26,7 @@ document.addEventListener("click", (ev) => {
   if (!tweenOpen) return;
   const card = ev.target.closest(".card");
   if (!card || card.dataset.state !== tweenOpen.stateName) return;
-  if (ev.target.closest(".tween-pop")) return;
+  if (ev.target.closest(".gen-pop")) return;
   ev.preventDefault();
   ev.stopPropagation();
   const idx = Number(card.dataset.idx);
@@ -47,7 +47,7 @@ document.addEventListener("click", (ev) => {
 
 function makeTweenButton(stateName) {
   const wrap = document.createElement("span");
-  wrap.className = "tween-wrap";
+  wrap.className = "gen-wrap";
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "gif-btn";
@@ -58,7 +58,7 @@ function makeTweenButton(stateName) {
     'stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' +
     `<span>${t("rowTween")}</span>`;
   const pop = document.createElement("div");
-  pop.className = "tween-pop";
+  pop.className = "gen-pop";
   pop.hidden = true;
   const field = (label, value, step, min, max) => {
     const lab = document.createElement("label");
@@ -75,18 +75,12 @@ function makeTweenButton(stateName) {
   const fromInput = field(t("tweenFrom"), 0, 1, 0);
   const toInput = field(t("tweenTo"), 1, 1, 0);
   const tInput = field(t("tweenT"), 0.5, 0.05, 0.05, 0.95);
-  const providerSel = document.createElement("select");
-  for (const name of ["codex", "grok"]) {
-    const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = name === "codex" ? "GPT" : "Grok";
-    providerSel.appendChild(opt);
-  }
+  const providerSel = makeProviderSelect(); // 모델 선택/실행 관용구 SSoT = gen-trigger.js
   pop.appendChild(providerSel);
   const go = document.createElement("button");
   go.type = "button";
   go.className = "gif-btn";
-  go.textContent = t("tweenGo");
+  go.textContent = t("genGo");
   pop.appendChild(go);
   btn.addEventListener("click", () => {
     if (tweenOpen && tweenOpen.pop === pop) {
@@ -99,37 +93,21 @@ function makeTweenButton(stateName) {
     if (section) section.classList.add("tween-picking");
     tweenOpen = { stateName, pop, btn, picks: [], fromInput, toInput, section };
   });
-  go.addEventListener("click", async () => {
-    go.disabled = btn.disabled = true;
-    const goLabel = go.textContent;
-    go.innerHTML = '<span class="tween-spin" aria-label="generating"></span>';
-    setStatus(t("tweenBusy"));
-    try {
-      startOpProgressWatch(); // 생성 후 전체 재추출 — 진행도 퍼센트 표시
-      const res = await fetch("/api/interpolate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          state: stateName,
-          from: parseInt(fromInput.value, 10),
-          to: parseInt(toInput.value, 10),
-          t: parseFloat(tInput.value),
-          provider: providerSel.value,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || (data.stderr || "").trim().split("\n").pop() || res.status);
-      }
-      setStatus(STR[lang].tweenDone(stateName));
-      setTimeout(() => window.location.reload(), 800);
-    } catch (e) {
-      stopOpProgressWatch();
-      setStatus(t("tweenFail") + e.message, "err");
-      go.textContent = goLabel;
-      go.disabled = btn.disabled = false;
-    }
-  });
+  go.addEventListener("click", () => runServerGeneration({
+    url: "/api/interpolate",
+    body: {
+      state: stateName,
+      from: parseInt(fromInput.value, 10),
+      to: parseInt(toInput.value, 10),
+      t: parseFloat(tInput.value),
+      provider: providerSel.value,
+    },
+    goBtn: go,
+    buttons: [btn],
+    busyMsg: t("tweenBusy"),
+    doneMsg: STR[lang].tweenDone(stateName),
+    failPrefix: t("tweenFail"),
+  }));
   wrap.appendChild(btn);
   wrap.appendChild(pop);
   return wrap;
