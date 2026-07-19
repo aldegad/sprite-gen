@@ -1236,9 +1236,11 @@ body.pan-space #compare-modal .cmp-canvas,
 #compare-modal .cmp-stage.pan-tool .cmp-canvas { cursor: grab; }
 .et-hand.active, .cmp-hand.active { background: #e8ecf4; color: #2563eb; border-color: #2563eb; }
 
-/* 줄 저장 팝오버 — 공용 .dl-wrap/.dl-menu 재사용, 줄 헤더 안 인라인 배치 */
-.row-dl-wrap { display: inline-flex; }
-.row-dl-wrap .dl-menu { right: auto; left: 0; }
+/* 줄 저장 팝오버 — 공용 .dl-wrap/.dl-menu 재사용, 줄 헤더 안 인라인 배치.
+   .dl-wrap 의 inline-block(뒤쪽 규칙)을 이기도록 2클래스 지정 — 버튼이 형제 컨트롤
+   높이(stretch)에 맞는다 (수홍 2026-07-19 "저장버튼 높이가 안 맞네"). */
+.dl-wrap.row-dl-wrap { display: inline-flex; align-items: stretch; }
+.row-dl-wrap .dl-menu { right: 0; left: auto; } /* 맨 우측 배치라 메뉴는 오른끝 정렬 */
 
 /* 확대뷰 호흡 토글 — 끄면 조정 컨트롤이 쉰다 (무호흡 재생 확인용) */
 .breathe-enable { margin-right: 2px; }

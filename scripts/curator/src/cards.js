@@ -49,10 +49,11 @@ function renderState(state, replaceEl) {
     controls.appendChild(makeFpsStepper(state.name));
     if (showGridToggle) controls.appendChild(makeGridToggle(state.name));
     if (showPpToggle) controls.appendChild(makePpToggle(state.name));
-    if (showGifBtn) controls.appendChild(makeGifButton(state.name));
     controls.appendChild(makeTweenButton(state.name));
     controls.appendChild(makeRerollButton(state.name));
     controls.appendChild(makeBreatheToggle(state.name));
+    // 저장은 맨 우측 (수홍 2026-07-19)
+    if (showGifBtn) controls.appendChild(makeGifButton(state.name));
     refs.appendChild(controls);
     wrap.appendChild(refs);
   }

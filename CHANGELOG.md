@@ -5,6 +5,16 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.66 "Sol Atelier" - Row Save button: matched height + far-right placement
+
+- Curator fix: the row Save popover button rendered 19px inside its 25px wrap -
+  the later shared `.dl-wrap { display: inline-block }` rule overrode the
+  wrap's flex display, so the button never stretched to its siblings
+  (measured, Soohong report). `.dl-wrap.row-dl-wrap` (two-class) now wins
+  with `inline-flex; align-items: stretch`.
+- Curator: Save moved to the far right of the row controls (Soohong
+  2026-07-19); its popover right-aligns accordingly.
+
 ## v1.56.65 "Sol Atelier" - Row reroll button (candidate takes) + selection flip as a tool action
 
 - Curator + server: every row header gained a **Reroll** button - one press
