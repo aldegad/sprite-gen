@@ -5,6 +5,11 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.71 "Sol Atelier" - Gen timeout default 180s
+
+- `SPRITE_GEN_GEN_TIMEOUT_SECONDS` default 300 -> 180 (Soohong 2026-07-19
+  "180초로"; observed max healthy roll 129s, retry covers the tail).
+
 ## v1.56.70 "Sol Atelier" - Hard generation timeout + one observable retry
 
 - Engine: provider subprocesses (`codex exec`, `grok -p`) now run under a hard

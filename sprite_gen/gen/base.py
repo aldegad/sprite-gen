@@ -33,8 +33,8 @@ _ORCHESTRATOR_SESSION_ENV_PREFIXES = ("KUMA_",)
 # 생성 서브프로세스 하드 타임아웃 — provider 스트림이 드물게 무출력으로 매달린다
 # (실사고 2026-07-19: 15행 배치 중 1행의 codex exec 이 1시간 38분 무출력 — 같은 env
 # 로 14행이 성공했으니 세션/훅 충돌이 아니라 provider 측 산발 스톨. 킬 외엔 답이
-# 없으므로 바운드가 유일한 방어). 기본 300초 = 실측 정상 최장(129초)의 ~2.3배.
-GEN_TIMEOUT_SECONDS = int(os.environ.get("SPRITE_GEN_GEN_TIMEOUT_SECONDS", "300"))
+# 없으므로 바운드가 유일한 방어). 기본 180초 (수홍 확정 2026-07-19; 실측 정상 최장 129초).
+GEN_TIMEOUT_SECONDS = int(os.environ.get("SPRITE_GEN_GEN_TIMEOUT_SECONDS", "180"))
 
 
 class GenTimeoutError(SystemExit):
