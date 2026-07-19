@@ -5,6 +5,31 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.64 "Sol Atelier" - Hand-tool pan everywhere + compare checker fix + row Save popover + breathe on/off in the zoom player
+
+- Curator: view panning is now available in BOTH the compare canvas and the
+  zoom editor - hold-Space (temporary hand, Photoshop contract: pan wins over
+  a focused button; typing fields still respected) or the new hand tool
+  button (toggle, `H`). Middle-click drag keeps working. Modals blur the
+  opener button on open so Space engages immediately (Soohong request
+  2026-07-19).
+- Curator fix: with many rows enabled the compare checkerboard stopped at the
+  viewport edge - `.cmp-stage` was a block child so it could not grow past
+  the scroll container (`align-self:center` was inert there). The scroll
+  container is now flex and the stage uses `margin:auto; flex:none`, so the
+  checker wraps the full canvas and centered-overflow stays reachable.
+- Curator: the per-row GIF button is now the shared Save popover -
+  GIF (server bake, unchanged path) / WebM alpha / MP4 white-bg, the video
+  formats sampled client-side from the row's composed loop (canonical +
+  transform + pixel ops + breathe, 4x nearest) and assembled by
+  `/api/compare-gif` exactly like the compare download.
+- Curator: the breathe zoom player gained a breathe on/off toggle sharing the
+  row-checkbox truth. Opening the editor on a breathe-off row no longer
+  force-enables the layer - the sequence plays WITHOUT breathing (the only
+  zoomed playback view, so it must show the plain loop too); toggling off
+  inside nulls the sidecar and idles the tuning controls. Undo history now
+  tracks the enabled bit. Playwright-verified 22/22 against a scratch run.
+
 ## v1.56.63 "Sol Atelier" - Engine-owned sidecar fields survive client saves
 
 - Fix: a curation save from the webview silently DROPPED per-state fields it

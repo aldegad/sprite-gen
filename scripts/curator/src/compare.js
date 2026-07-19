@@ -78,6 +78,7 @@ function openCompare() {
     `<label class="pp-apply"><input type="radio" name="cmp-mode" value="v" /><span>${t("cmpV")}</span></label>` +
     `<label class="pp-apply"><input type="radio" name="cmp-mode" value="overlay" /><span>${t("cmpOverlay")}</span></label>` +
     `<button type="button" class="ghost cmp-play" data-tip="${t("tCmpPlay")}">▶</button>` +
+    `<button type="button" class="ghost cmp-hand" data-tip="${t("tHandTool")} (H)">${TOOL_ICONS.hand}</button>` +
     `<span class="cmp-dl-wrap"><button type="button" class="ghost cmp-dl" data-tip="${t("tCmpDl")}">${t("cmpDl")} ▾</button>` +
     `<div class="cmp-dl-menu" hidden>` +
     `<button type="button" data-fmt="gif">GIF</button>` +
@@ -98,6 +99,8 @@ function openCompare() {
     `<div class="cmp-legend"></div>` +
     `</div>`;
   document.body.appendChild(modal);
+  // 오프너 버튼에 남은 포커스 해제 — Space 홀드 팬이 버튼 가드에 걸리지 않게
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   const canvas = modal.querySelector(".cmp-canvas");
   const guidesEl = modal.querySelector(".cmp-guides");
   const listEl = modal.querySelector(".cmp-list");
@@ -354,6 +357,19 @@ function openCompare() {
     pushHist();
   });
 
+  // 손 툴(토글) + Space 홀드 = 캔버스 팬 — 스크롤 컨테이너를 끈다 (수홍 2026-07-19).
+  // wirePan 은 capture 라 스프라이트 드래그/가이드 추가보다 먼저 가로챈다.
+  let panTool = false;
+  const stageEl = modal.querySelector(".cmp-stage");
+  const scrollEl = modal.querySelector(".cmp-scroll");
+  const handBtn = modal.querySelector(".cmp-hand");
+  handBtn.addEventListener("click", () => {
+    panTool = !panTool;
+    handBtn.classList.toggle("active", panTool);
+    stageEl.classList.toggle("pan-tool", panTool);
+  });
+  wirePan(stageEl, scrollEl, () => panTool);
+
   // 휠 = 배율
   modal.querySelector(".cmp-stage").addEventListener("wheel", (ev) => {
     ev.preventDefault();
@@ -364,6 +380,14 @@ function openCompare() {
 
   const onKey = (ev) => {
     if (ev.key === "Escape") { close(); return; }
+    if (ev.code === "KeyH" && !(ev.metaKey || ev.ctrlKey || ev.altKey)) {
+      const a = document.activeElement;
+      if (!(a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable))) {
+        ev.preventDefault();
+        handBtn.click();
+        return;
+      }
+    }
     if (ev.code === "KeyZ" && (ev.metaKey || ev.ctrlKey)) { // code 기준 — 한글 IME 무관
       ev.preventDefault();
       ev.stopImmediatePropagation(); // 픽셀 편집 전역 라우터보다 비교 모달이 우선

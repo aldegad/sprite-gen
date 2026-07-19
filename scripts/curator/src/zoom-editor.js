@@ -31,26 +31,36 @@ const TOOL_ICONS = {
   eraser: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M9.5 2.5 2.8 9.2a1 1 0 0 0 0 1.4l2.6 2.6h4.1l4-4a1 1 0 0 0 0-1.4L9.5 2.5zM5.5 13.2 9.9 8.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
   pick: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M10.6 2a1.9 1.9 0 0 1 2.7 2.7l-1 1 .5.5-1.1 1.1-.5-.5-4.3 4.3-2.4.6.6-2.4 4.3-4.3-.5-.5L10 6.4l-.5-.5 1.1-1.1.5.5 1-1z" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/></svg>',
   select: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.4 1.7"/></svg>',
+  hand: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M5.3 8V3.8a.95.95 0 0 1 1.9 0V7m0-3.9v-.6a.95.95 0 0 1 1.9 0V7m0-3.3a.95.95 0 0 1 1.9 0V7.8m0-2.3a.95.95 0 0 1 1.9 0v3.7c0 2.9-1.8 4.7-4.5 4.7-2.1 0-3.1-.9-4.2-2.5L3 9.9c-.5-.8-.3-1.6.4-2 .6-.4 1.3-.2 1.7.4z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/></svg>',
 };
 
-// ── 뷰 패닝 — Space+드래그 / 휠버튼(중클릭) 드래그로 화면을 끈다 (수홍 지시
-// 2026-07-17: 스프라이트 이동과 별개인 캔버스 시야 이동). 스크롤 컨테이너를
+// ── 뷰 패닝 — Space+드래그 / 휠버튼(중클릭) 드래그 / 손 툴로 화면을 끈다 (수홍 지시
+// 2026-07-17: 스프라이트 이동과 별개인 캔버스 시야 이동. 2026-07-19: 비교뷰에도 +
+// 손 툴 버튼 — Space 는 홀드형(누르는 동안만), 버튼은 토글형). 스크롤 컨테이너를
 // 당기는 방식이라 페인트/마키보다 먼저(capture) 가로챈다.
 let panSpaceHeld = false;
 
 document.addEventListener("keydown", (ev) => {
   if (ev.code !== "Space") return;
-  if (!document.getElementById("zoom-modal")) return;
-  if (ev.target && ev.target.closest && ev.target.closest("input, textarea, select, button")) return;
+  if (!document.getElementById("zoom-modal") && !document.getElementById("compare-modal")) return;
+  // 버튼은 가드에서 제외 — 마지막 클릭한 버튼에 포커스가 남아도 Space=팬이 이긴다
+  // (포토샵 계약; 버튼 재발동 사고도 같이 막힘). 타이핑 필드만 존중.
+  if (ev.target && ev.target.closest && ev.target.closest("input, textarea, select")) return;
   panSpaceHeld = true;
+  document.body.classList.add("pan-space");
   ev.preventDefault();
 });
 
-document.addEventListener("keyup", (ev) => { if (ev.code === "Space") panSpaceHeld = false; });
+document.addEventListener("keyup", (ev) => {
+  if (ev.code !== "Space") return;
+  panSpaceHeld = false;
+  document.body.classList.remove("pan-space");
+});
 
-function wirePan(surface, container) {
+function wirePan(surface, container, isToolActive) {
   surface.addEventListener("pointerdown", (ev) => {
-    if (!(ev.button === 1 || (ev.button === 0 && panSpaceHeld))) return;
+    const toolOn = isToolActive && isToolActive();
+    if (!(ev.button === 1 || (ev.button === 0 && (panSpaceHeld || toolOn)))) return;
     ev.preventDefault();
     ev.stopImmediatePropagation();
     const sx = ev.clientX, sy = ev.clientY;
@@ -81,7 +91,7 @@ function clearMarquee() {
 // 같은 툴 키 재입력 = 툴 끔 (버튼 재클릭과 동일 거동).
 // ev.code (물리 키) 기준 — 한글 IME/타 레이아웃에서도 동작 (ev.key 는 한글 모드에서
 // "ㅠ" 같은 조합 문자가 와 매칭이 죽는다 — 실사고 2026-07-19 수홍).
-const TOOL_SHORTCUTS = { KeyB: ".et-pen", KeyP: ".et-pen", KeyE: ".et-eraser", KeyI: ".et-pick", KeyM: ".et-select" };
+const TOOL_SHORTCUTS = { KeyB: ".et-pen", KeyP: ".et-pen", KeyE: ".et-eraser", KeyI: ".et-pick", KeyM: ".et-select", KeyH: ".et-hand" };
 document.addEventListener("keydown", (ev) => {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
   const sel = TOOL_SHORTCUTS[ev.code];
@@ -182,6 +192,8 @@ function openZoom(stateName, idx, keepWidth) {
     `</div>` +
     `</div>`;
   document.body.appendChild(modal);
+  // 오프너(줄 라벨/버튼)에 남은 포커스 해제 — Space 홀드 팬이 버튼 가드에 걸리지 않게
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 
   const card = modal.querySelector(".zoom-card");
   card.style.setProperty("--cell-aspect", cellW / cellH);
@@ -205,7 +217,9 @@ function openZoom(stateName, idx, keepWidth) {
   stage.appendChild(makeScaleScrub(stateName, idx));
   card.querySelector(".zoom-close").addEventListener("click", closeZoom);
   modal.querySelector(".zoom-backdrop").addEventListener("click", closeZoom);
-  wirePan(stage, card); // Space+드래그/휠버튼 드래그 = 뷰 패닝 (프레임·베이스 공통)
+  // Space 홀드/휠버튼 드래그 + 손 툴(토글) = 뷰 패닝 (프레임·베이스 공통)
+  let panTool = false;
+  wirePan(stage, card, () => panTool);
 
   // ── 픽셀 편집 툴바: 연필/지우개 + 프레임 팔레트 + 컬러피커 + 되돌리기/비우기 ──
   const toolbar = document.createElement("div");
@@ -216,6 +230,7 @@ function openZoom(stateName, idx, keepWidth) {
     `<button type="button" class="ghost et-eraser" data-tip="${t("eraserTool")} (E)">${TOOL_ICONS.eraser}</button>` +
     `<button type="button" class="ghost et-pick" data-tip="${t("tPick")} (I)">${TOOL_ICONS.pick}</button>` +
     `<button type="button" class="ghost et-select" data-tip="${t("tSelectTool")} (M)">${TOOL_ICONS.select}</button>` +
+    `<button type="button" class="ghost et-hand" data-tip="${t("tHandTool")} (H)">${TOOL_ICONS.hand}</button>` +
     `<button type="button" class="ghost et-undo" data-tip="${t("tUndoKeys")}">${t("undoEdit")}</button>` +
     `<button type="button" class="ghost et-redo" data-tip="${t("tRedoKeys")}">${t("redoEdit")}</button>` +
     `<button type="button" class="ghost et-clear">${t("clearEdits")}</button>`;
@@ -258,6 +273,12 @@ function openZoom(stateName, idx, keepWidth) {
   const eraserBtn = toolbar.querySelector(".et-eraser");
   const pickBtn = toolbar.querySelector(".et-pick");
   const selectBtn = toolbar.querySelector(".et-select");
+  const handBtn = toolbar.querySelector(".et-hand");
+  handBtn.addEventListener("click", () => {
+    panTool = !panTool;
+    handBtn.classList.toggle("active", panTool);
+    stage.classList.toggle("pan-tool", panTool);
+  });
   // ── 팔레트 도크 (Aseprite 식, 수홍 지시 2026-07-17): 스테이지 왼쪽 세로 팔레트 —
   // 위 = 현재 쓰인 색 전부 (같은 색 1개, 빈도순), 아래 = 자유 색상 피커.
   const stageRow = document.createElement("div");
@@ -705,23 +726,28 @@ function openZoom(stateName, idx, keepWidth) {
     }, true);
     const e0 = entries[stateName];
     const beforeCfg = e0.breathe ? JSON.parse(JSON.stringify(e0.breathe)) : null; // Esc 복원
-    const bm = { cfg: null, geomReady: false, hist: [], histPos: -1, cancelled: false, tick: 0 };
+    // enabled = 호흡 레이어 on/off (수홍 2026-07-19: 이 뷰가 유일한 확대 재생 뷰라
+    // 꺼진 상태로 열거나 여기서 꺼도 무호흡 애니메이션이 그대로 재생돼야 한다).
+    // 열 때 줄 체크박스 truth 를 승계 — 꺼진 행을 열어도 강제로 켜지 않는다.
+    const bm = { cfg: null, enabled: !!e0.breathe, geomReady: false, hist: [], histPos: -1, cancelled: false, tick: 0 };
     const clone = (o) => JSON.parse(JSON.stringify(o));
     const commit = () => { // 조정 = 즉시 truth 반영 + 디바운스 저장 (수홍: 적용 대기 금지)
       if (bm.cancelled) return;
-      e0.breathe = clone(bm.cfg);
+      e0.breathe = bm.enabled ? clone(bm.cfg) : null;
       scheduleSave();
       if (typeof scheduleStrip === "function") scheduleStrip();
     };
     const pushHist = () => {
       bm.hist = bm.hist.slice(0, bm.histPos + 1);
-      bm.hist.push(clone(bm.cfg));
+      bm.hist.push({ enabled: bm.enabled, cfg: clone(bm.cfg) });
       bm.histPos = bm.hist.length - 1;
     };
     const restoreHist = (pos) => {
       if (pos < 0 || pos >= bm.hist.length || pos === bm.histPos) return;
       bm.histPos = pos;
-      bm.cfg = clone(bm.hist[pos]);
+      const h = bm.hist[pos];
+      bm.cfg = clone(h.cfg);
+      bm.enabled = h.enabled !== false;
       syncBreatheControls();
       syncLines();
       commit();
@@ -773,8 +799,8 @@ function openZoom(stateName, idx, keepWidth) {
       }
       bm.cfg.splits.forEach((s, i) => {
         lineEls[i].style.top = `${((btop + s * bh) / cellH) * 100}%`;
-        // 지오메트리 확정 전엔 숨김 — 임시 위치로 보였다 점프하지 않는다
-        lineEls[i].style.visibility = bm.geomReady ? "" : "hidden";
+        // 지오메트리 확정 전(임시 위치 점프 방지)과 호흡 꺼짐 상태에선 숨김
+        lineEls[i].style.visibility = bm.geomReady && bm.enabled ? "" : "hidden";
       });
     };
 
@@ -787,7 +813,7 @@ function openZoom(stateName, idx, keepWidth) {
       const pattern = breathePattern(bm.cfg, play.length || 1);
       const cursor = play.length ? bm.tick % play.length : 0;
       const frameIdx = play.length ? play[cursor] : idx;
-      const phase = pattern[cursor] || 0;
+      const phase = bm.enabled ? (pattern[cursor] || 0) : 0; // off = 무호흡 재생
       const f = frameOf(stateName, frameIdx);
       // 호흡 프리뷰 = 굽기 결과 미리보기 — 항상 캐노니컬 프레임(f.url)으로 그린다.
       // 표시 변형(원본 쌍둥이)은 풋프린트가 달라 이음새가 프레임마다 다른 줄에 생겨
@@ -864,12 +890,12 @@ function openZoom(stateName, idx, keepWidth) {
             const waist = waistSplitFrom(dd2, cellW, cellH);
             bm.cfg.splits = [Math.round((waist !== null ? waist : silh.split) * 100) / 100];
           }
-          if (bm.histPos === 0) bm.hist[0] = clone(bm.cfg);
+          if (bm.histPos === 0) bm.hist[0] = { enabled: bm.enabled, cfg: clone(bm.cfg) };
         }
         bm.geomReady = true;
         syncLines();
         renderTick();
-        commit(); // 에디터 오픈 = 레이어 활성 (Esc 로 이전 상태 복원 가능)
+        commit(); // 오픈 = truth 동기화 — enabled 승계, 꺼진 행을 강제로 켜지 않는다 (Esc 복원 가능)
         rebuildStrip();
         return true;
       }
@@ -887,14 +913,16 @@ function openZoom(stateName, idx, keepWidth) {
     let stripTimer = null;
     const rebuildStrip = () => {
       const play = playList(stateName);
-      const pattern = breathePattern(bm.cfg, play.length);
+      const pattern = bm.enabled ? breathePattern(bm.cfg, play.length) : new Array(play.length).fill(0);
       strip.innerHTML = "";
       if (!play.length) return;
       const total = play.length; // 루프 불변 — 시퀀스 그대로 (수홍 확정)
       const actualBreaths = breatheFitCount(bm.cfg, play.length);
       const cap = document.createElement("div");
       cap.className = "bs-caption";
-      cap.textContent = STR[lang].breatheStrip(play.length, actualBreaths, bm.cfg.breaths || 1);
+      cap.textContent = bm.enabled
+        ? STR[lang].breatheStrip(play.length, actualBreaths, bm.cfg.breaths || 1)
+        : STR[lang].breatheStripOff(play.length);
       strip.appendChild(cap);
       const rowEl = document.createElement("div");
       rowEl.className = "bs-frames";
@@ -938,6 +966,25 @@ function openZoom(stateName, idx, keepWidth) {
 
     const bar = document.createElement("div");
     bar.className = "breathe-bar";
+    // 호흡 on/off 토글 — 줄 헤더 체크박스와 같은 truth (수홍 2026-07-19: 확대 재생
+    // 뷰에서도 끄고 켤 수 있게 — 끄면 선/조정 컨트롤이 쉬고 무호흡 재생만 남는다)
+    const onWrap = document.createElement("label");
+    onWrap.className = "pp-apply breathe-enable";
+    onWrap.title = t("tRowBreathe");
+    const onCheck = document.createElement("input");
+    onCheck.type = "checkbox";
+    onCheck.checked = bm.enabled;
+    onCheck.addEventListener("change", () => {
+      bm.enabled = onCheck.checked;
+      syncBreatheControls();
+      syncLines();
+      commit();
+      pushHist();
+      setStatus(bm.enabled ? STR[lang].breatheOn(stateName) : STR[lang].breatheOff(stateName));
+    });
+    onWrap.appendChild(onCheck);
+    onWrap.appendChild(Object.assign(document.createElement("span"), { textContent: t("rowBreathe") }));
+    bar.appendChild(onWrap);
     const mkSel = (values, current, fmt, onchange) => {
       const sel = document.createElement("select");
       for (const v of values) {
@@ -1042,13 +1089,16 @@ function openZoom(stateName, idx, keepWidth) {
     subWrap.appendChild(Object.assign(document.createElement("span"), { textContent: t("breatheSub") }));
     bar.appendChild(subWrap);
     toolbar.appendChild(bar);
-    syncFitBadge();
     function syncBreatheControls() {
+      onCheck.checked = bm.enabled;
+      const off = !bm.enabled;
+      for (const el of [addBtn, delBtn, ampSel, minusBtn, breathInput, plusBtn, subCheck]) el.disabled = off;
       ampSel.value = String(bm.cfg.amplitude);
       breathInput.value = String(bm.cfg.breaths || 1);
       subCheck.checked = !!bm.cfg.subpixel;
       syncFitBadge();
     }
+    syncBreatheControls();
 
     // Esc = 취소 (열기 전 설정으로 복원 — 없었으면 레이어 해제)
     // 지오메트리 초기화는 스트립/컨트롤 선언 뒤에 — commit→scheduleStrip TDZ 방지

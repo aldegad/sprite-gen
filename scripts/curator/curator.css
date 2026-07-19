@@ -1203,7 +1203,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 #compare-modal .cmp-controls { margin-left: auto; display: inline-flex; gap: 8px; align-items: center; }
 #compare-modal .cmp-zoom { padding: 2px 4px; font-size: 12px; border: 1px solid var(--line); border-radius: 4px; }
 #compare-modal .cmp-hint { font-size: 11.5px; color: var(--muted); }
-#compare-modal .cmp-stage { position: relative; align-self: center; background-color: var(--checker-a); background-image: linear-gradient(45deg, var(--checker-b) 25%, transparent 25%), linear-gradient(-45deg, var(--checker-b) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--checker-b) 75%), linear-gradient(-45deg, transparent 75%, var(--checker-b) 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; border-radius: 6px; }
+#compare-modal .cmp-stage { position: relative; margin: auto; flex: none; background-color: var(--checker-a); background-image: linear-gradient(45deg, var(--checker-b) 25%, transparent 25%), linear-gradient(-45deg, var(--checker-b) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--checker-b) 75%), linear-gradient(-45deg, transparent 75%, var(--checker-b) 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; border-radius: 6px; }
 #compare-modal .cmp-canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
 #compare-modal .cmp-guides { position: absolute; inset: 0; pointer-events: none; }
 #compare-modal .cmp-body { display: flex; gap: 10px; min-height: 0; }
@@ -1211,7 +1211,10 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 #compare-modal .cmp-item { display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 3px 5px; border-radius: 6px; cursor: pointer; }
 #compare-modal .cmp-item:hover { background: var(--panel-2); }
 #compare-modal .cmp-item img { width: 26px; height: 26px; object-fit: contain; image-rendering: pixelated; }
-#compare-modal .cmp-scroll { overflow: auto; max-height: 64vh; flex: 1; }
+/* flex + margin:auto = 작으면 중앙, 넘치면 auto 마진이 0 으로 접혀 전체 스크롤 도달.
+   (구 align-self:center 는 block 컨테이너라 무효 — 스테이지가 뷰포트 폭에 갇혀
+   캔버스가 넓어지면 체커보드 격자가 끊겼다, 수홍 2026-07-19) */
+#compare-modal .cmp-scroll { overflow: auto; max-height: 64vh; flex: 1; display: flex; }
 /* 가이드: 0px 선은 못 잡는다 — 9px 히트영역 안에 선을 그린다 (수홍 "안 움직여") */
 #compare-modal .cmp-guide { position: absolute; pointer-events: auto; }
 #compare-modal .cmp-guide.gh { left: 0; right: 0; height: 9px; margin-top: -4px; cursor: ns-resize; }
@@ -1225,6 +1228,23 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 #compare-modal .cmp-zoom-label { font-size: 12px; color: var(--muted); min-width: 30px; }
 #compare-modal .cmp-legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
 #compare-modal .cmp-key .cmp-name { font-weight: 600; color: var(--text); }
+
+/* 손(팬) 툴 — Space 홀드(임시) / 버튼 토글: 잡기 커서로 팬 가능 상태를 알린다 */
+body.pan-space #zoom-modal .stage,
+body.pan-space #compare-modal .cmp-stage,
+body.pan-space #compare-modal .cmp-canvas,
+#zoom-modal .stage.pan-tool,
+#compare-modal .cmp-stage.pan-tool,
+#compare-modal .cmp-stage.pan-tool .cmp-canvas { cursor: grab; }
+.et-hand.active, .cmp-hand.active { background: #e8ecf4; color: #2563eb; border-color: #2563eb; }
+
+/* 줄 저장 팝오버 — 공용 .dl-wrap/.dl-menu 재사용, 줄 헤더 안 인라인 배치 */
+.row-dl-wrap { display: inline-flex; }
+.row-dl-wrap .dl-menu { right: auto; left: 0; }
+
+/* 확대뷰 호흡 토글 — 끄면 조정 컨트롤이 쉰다 (무호흡 재생 확인용) */
+.breathe-enable { margin-right: 2px; }
+.breathe-bar select:disabled, .breathe-bar input:disabled, .breathe-bar button:disabled { opacity: 0.45; cursor: default; }
 
 /* 복제 링크 상태 버튼 — 배지 옆 (하단 컨트롤 줄 과밀로 잘리던 문제 해소, 수홍 2026-07-18) */
 .link-state-btn { padding: 1px 4px; flex: none; }
