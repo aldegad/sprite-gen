@@ -213,7 +213,16 @@ function openZoom(stateName, idx, keepWidth) {
     card.querySelector(".zoom-next").addEventListener("click", () => stepZoomFrame(1));
   }
   card.querySelector(".reset-btn").addEventListener("click", () => resetTransform(stateName, idx));
-  card.querySelector(".flip-btn").addEventListener("click", () => toggleFlipX(stateName, idx));
+  // 좌우반전 = 도구 조작 (연필/지우개/마키 이동과 같은 취급, 수홍 2026-07-19):
+  // 활성/비활성 상태가 아니라 누를 때마다 반전. 마키 선택이 있으면 그 영역 픽셀만
+  // 반전(픽셀 저널 스트로크 — Cmd+Z 로 되돌림), 없으면 프레임 전체(변형 flipX).
+  card.querySelector(".flip-btn").addEventListener("click", () => {
+    if (pixelEdit && pixelEdit.sel && pixelEdit.state === stateName && pixelEdit.idx === idx) {
+      flipSelectionX();
+      return;
+    }
+    toggleFlipX(stateName, idx);
+  });
   stage.appendChild(makeScaleScrub(stateName, idx));
   card.querySelector(".zoom-close").addEventListener("click", closeZoom);
   modal.querySelector(".zoom-backdrop").addEventListener("click", closeZoom);
@@ -516,6 +525,42 @@ function openZoom(stateName, idx, keepWidth) {
     scheduleSave();
     buildPalette();
   };
+
+  // 마키 영역 좌우반전 — 현재 보이는 픽셀(합성)을 영역 안에서 거울로 뒤집어 픽셀
+  // 저널 스트로크로 기록한다 (수홍 2026-07-19 "영역선택하고 좌우반전하면 거기만 툭툭").
+  // 달라지는 픽셀만 ops 로 남기므로 다시 누르면 정확히 원복되고 Cmd+Z 도 스트로크
+  // 단위로 먹는다. 투명은 null(지움) — 베이스의 크로마 배경은 균일색이라 자연 무변.
+  function flipSelectionX() {
+    const sel = pixelEdit && pixelEdit.sel;
+    if (!sel || sel.x1 <= sel.x0 || sel.y1 <= sel.y0) return;
+    const cx = compositeCell();
+    const w = sel.x1 - sel.x0;
+    const h = sel.y1 - sel.y0;
+    const data = cx.getImageData(sel.x0, sel.y0, w, h).data;
+    const hexAt = (i) => "#" + [data[i], data[i + 1], data[i + 2]]
+      .map((v) => v.toString(16).padStart(2, "0")).join("");
+    const e = entries[stateName];
+    const ops = e.pixels[idx] || (e.pixels[idx] = {});
+    const sets = [];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const cur = (y * w + x) * 4;
+        const mir = (y * w + (w - 1 - x)) * 4;
+        const curVal = data[cur + 3] >= 128 ? hexAt(cur) : null;
+        const mirVal = data[mir + 3] >= 128 ? hexAt(mir) : null;
+        if (curVal === mirVal) continue; // 화면 무변 — op 잡음 남기지 않는다
+        const key = `${sel.x0 + x},${sel.y0 + y}`;
+        sets.push({ key, had: key in ops, prev: ops[key], value: mirVal });
+        ops[key] = mirVal;
+      }
+    }
+    if (!sets.length) return;
+    pixelEdit.journal.push({ sets });
+    pixelEdit.redo.length = 0;
+    applyFrameTransformAll(stateName, idx);
+    scheduleSave();
+    buildPalette();
+  }
 
   buildPalette();
 

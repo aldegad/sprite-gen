@@ -5,6 +5,26 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.65 "Sol Atelier" - Row reroll button (candidate takes) + selection flip as a tool action
+
+- Curator + server: every row header gained a **Reroll** button - one press
+  generates the row once more on the server (codex; Alt+click grok) and
+  APPENDS it to the candidate pool as a `rerollN` take, never touching the
+  primary raw (Soohong 2026-07-19 "리롤버튼 눌러서 후보군에 추가"). New
+  `sprite_gen/reroll.py` (+ `scripts/reroll_state_row.py`, `/api/reroll`)
+  mirrors the interpolate contract: identity ref resolution follows the
+  directional-anchor chain (run x8 anchor ref → curated export → extracted
+  canonical; base-source for idle/simple runs), take recorded in the request,
+  full-batch re-extract (no partial extraction - shared palette). Pre-gen
+  guard fails loud BEFORE spending generation on non-pixel-perfect runs
+  (observed: extract rejects takes there only after the roll was paid for).
+- Curator: horizontal flip is now a **tool action, not a toggle** (Soohong
+  2026-07-19 "연필/지우개랑 같은 취급") - the active-state accent is gone;
+  each press just flips. With a marquee selection the flip applies to ONLY
+  that region's pixels as a journal stroke (Cmd/Ctrl+Z per press, press
+  again to flip back); without one it flips the whole frame (transform).
+  Playwright-verified 8/8 (+ 22/22 regression of the v1.56.64 suite).
+
 ## v1.56.64 "Sol Atelier" - Hand-tool pan everywhere + compare checker fix + row Save popover + breathe on/off in the zoom player
 
 - Curator: view panning is now available in BOTH the compare canvas and the

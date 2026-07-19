@@ -59,9 +59,7 @@ button {
 button:hover { background: var(--panel-2); border-color: #d3d8e0; }
 button.ghost { background: transparent; padding: 3px 8px; font-size: 12px; box-shadow: none; }
 button.ghost:hover { background: var(--panel-2); }
-/* (Alex 2026-05-28) flipX 활성 표시 — accent 색으로 강조. */
-button.ghost.flip-btn.active { background: var(--accent, #0ea5e9); color: #fff; }
-button.ghost.flip-btn.active:hover { background: var(--accent, #0ea5e9); filter: brightness(1.1); }
+/* flip 버튼은 도구형(누를 때마다 반전) — 활성 강조 폐기 (수홍 2026-07-19, 구 Alex 2026-05-28 토글 강조 제거) */
 
 /* 공통 커스텀 툴팁 (data-tip). 네이티브 title 대체 — 위임형 단일 팝오버. */
 #sg-tip {

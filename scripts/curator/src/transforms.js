@@ -64,8 +64,8 @@ function applyCardTransform(stage, stateName, idx) {
       ? ""
       : `r${t.rotate.toFixed(0)}° ×${t.scale.toFixed(2)} ${t.dx >= 0 ? "+" : ""}${t.dx.toFixed(0)},${t.dy >= 0 ? "+" : ""}${t.dy.toFixed(0)}${sh}${flip}`;
   }
-  const flipBtn = card.querySelector(".flip-btn");
-  if (flipBtn) flipBtn.classList.toggle("active", !!t.flipX);
+  // flip 버튼은 도구(누를 때마다 반전)다 — 활성/비활성 상태 강조 없음 (수홍 2026-07-19).
+  // 반전 상태 자체는 tvals 의 ↔ 로만 표시한다.
   // 대응 격자(초록)는 콘텐츠 기준 — 변형이 바뀔 때마다 이 카드 것만 다시 그린다
   // (이동은 따라오고, 비축정렬이 되면 숨는 판정도 여기서 갱신된다).
   updateCardGrid(card);

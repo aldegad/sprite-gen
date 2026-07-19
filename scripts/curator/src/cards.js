@@ -51,6 +51,7 @@ function renderState(state, replaceEl) {
     if (showPpToggle) controls.appendChild(makePpToggle(state.name));
     if (showGifBtn) controls.appendChild(makeGifButton(state.name));
     controls.appendChild(makeTweenButton(state.name));
+    controls.appendChild(makeRerollButton(state.name));
     controls.appendChild(makeBreatheToggle(state.name));
     refs.appendChild(controls);
     wrap.appendChild(refs);
