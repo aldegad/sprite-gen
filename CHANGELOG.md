@@ -5,6 +5,23 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.67 "Sol Atelier" - Anchor ref = curated truth, rebaked per generation; honest anchor chip
+
+- Engine: reroll's identity ref is no longer a static snapshot lookup - before
+  every generation it REBAKES the target-direction idle anchor from the
+  curated truth (single-state export to a temp dir -> alpha-bbox crop -> x8
+  nearest) and overwrites `references/anchors/<dir>-idle-x8.png` in place
+  (self-heal cache). A stale snapshot silently inherits pre-edit identity/
+  dimensions into every generated row (Soohong 2026-07-19 report). Trap
+  fixed en route: single-state export writes UNPREFIXED frame-N.png, so
+  reading the run's curated/ dir picked up an older prefixed file - the
+  bake now lands in a temp dir and is read unambiguously.
+- Curator server: the row's "anchor" ref chip pointed at `raw/<dir>/idle.png`
+  - the pre-extraction, pre-curation generation strip - so it looked like
+  user edits were ignored (they were not: the actually-attached x8 refs
+  measured pixel-identical to the curated bake, 3/3 directions). The chip
+  now shows the x8 snapshot when present, raw only as fallback.
+
 ## v1.56.66 "Sol Atelier" - Row Save button: matched height + far-right placement
 
 - Curator fix: the row Save popover button rendered 19px inside its 25px wrap -
