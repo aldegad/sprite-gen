@@ -597,6 +597,16 @@ def run_interpolate(run_dir: Path, state: str, index_a: int, index_b: int,
     return _run_script("interpolate_frames.py", run_dir, *extra)
 
 
+def run_reroll(run_dir: Path, state: str, provider: str = "codex") -> dict:
+    """행 리롤 (reroll_state_row.py): 새 테이크 생성 + 전체 배치 재추출.
+
+    primary 를 덮지 않는다 — 후보군 병기(테이크)가 계약이다 (수홍 2026-07-19
+    "리롤버튼 눌러서 후보군에 추가"). 생성은 interpolate 와 같이 서버 머신의
+    provider CLI 가 수행하고, 부분 추출 없이 전체 배치를 재추출한다."""
+    return _run_script("reroll_state_row.py", run_dir,
+                       "--state", state, "--provider", provider, "--extract")
+
+
 def run_export(run_dir: Path) -> dict:
     """Export curated frames back to named PNGs under <run-dir>/curated/."""
     result = _run_script("export_curated_pngs.py", run_dir)
@@ -1061,6 +1071,21 @@ class CurationHandler(BaseHTTPRequestHandler):
                     return
                 result = run_interpolate(self.run_dir, state, index_a, index_b,
                                          t_value, payload.get("label") or None, provider)
+                self._send_json(result, 200 if result["ok"] else 500)
+                return
+            if path == "/api/reroll":
+                payload = self._read_body()
+                state = str(payload.get("state") or "")
+                request = json.loads(
+                    (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+                if state not in request.get("states", {}):
+                    self._send_json({"error": f"unknown state: {state}"}, 400)
+                    return
+                provider = str(payload.get("provider") or "codex")
+                if provider not in ("codex", "grok"):
+                    self._send_json({"error": f"unknown provider: {provider}"}, 400)
+                    return
+                result = run_reroll(self.run_dir, state, provider)
                 self._send_json(result, 200 if result["ok"] else 500)
                 return
             if path == "/api/export":
