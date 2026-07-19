@@ -196,10 +196,20 @@ def _state_refs(run_dir, state, request):
             direction = d
             break
     if direction is not None:
+        # 앵커 칩 = 실제 생성에 첨부되는 재료 우선 (수홍 2026-07-19 "다운앵커가 왜
+        # 내가 편집해둔 아틀라스가 아니야"): raw idle 스트립은 편집 전 원시 생성물이라
+        # 칩으로 보여주면 사용자 편집이 안 들어간 것처럼 오독된다. 리롤/재생성이 매번
+        # curated 진실에서 다시 굽는 x8 스냅샷(references/anchors/)이 실재하면 그걸
+        # 보여주고, 없을 때만 raw 로 폴백한다 (관례 유도 — 실재 파일만 노출 원칙 유지).
+        snapshot = run_dir / "references" / "anchors" / f"{direction}-idle-x8.png"
         anchor_rel = raw_rel(request, f"{direction}_idle")
         anchor = run_dir / anchor_rel
-        if state != f"{direction}_idle" and anchor.is_file():
-            refs.append({"role": "anchor", "name": anchor.name, "url": _url("run", *anchor_rel.split("/"))})
+        if state != f"{direction}_idle":
+            if snapshot.is_file():
+                refs.append({"role": "anchor", "name": snapshot.name,
+                             "url": _url("run", "references", "anchors", snapshot.name)})
+            elif anchor.is_file():
+                refs.append({"role": "anchor", "name": anchor.name, "url": _url("run", *anchor_rel.split("/"))})
         base = state[len(direction) + 1:] if state.startswith(direction + "_") else None
         if base and direction != "down":
             basis_rel = raw_rel(request, f"down_{base}")

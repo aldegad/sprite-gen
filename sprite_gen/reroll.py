@@ -50,22 +50,56 @@ def _find_base_source(run_dir: Path) -> Path | None:
     return None
 
 
+def refresh_anchor_ref(run_dir: Path, direction: str, scale: int = 8) -> Path:
+    """앵커 ref 를 curated 진실에서 방금 구워 스냅샷을 갱신한다 (self-heal 캐시).
+
+    `references/anchors/<dir>-idle-x8.png` 는 파생 캐시일 뿐이다 — 정적 스냅샷을
+    그대로 쓰면 사용자가 뷰에서 앵커를 더 편집한 순간 소리 없이 낡고, 이후 생성
+    행 전부가 옛 정체성/치수를 물려받는다 (실사고 2026-07-19 수홍 "다운앵커가 왜
+    내가 편집해둔 아틀라스가 아니야"). 그래서 생성 직전마다 curated export 를
+    다시 굽고(export_pngs — 변형·픽셀편집 포함 굽기 게이트) 콘텐츠 crop ×N
+    니어리스트로 스냅샷 자리를 덮어쓴다 — 뷰의 ref 칩에도 최신본이 보인다."""
+    import tempfile
+
+    from . import export_pngs
+
+    anchor_state = f"{direction}_idle"
+    # 단건 export 는 out_dir 에 무접두 frame-N.png 를 쓴다 — 런의 curated/ 를 건드리지
+    # 않고 임시 폴더로 받아 읽는다 (경로 모호성 제거: 함정 2026-07-19, 접두/무접두 혼재).
+    with tempfile.TemporaryDirectory(prefix="sprite-gen-anchor-") as tmp:
+        tmp_dir = Path(tmp)
+        code = export_pngs.run(run_dir=run_dir, state=anchor_state, out_dir=tmp_dir)
+        if code not in (None, 0):
+            raise SystemExit(f"reroll: curated export failed for {anchor_state} (exit {code})")
+        src = tmp_dir / "frame-0.png"
+        if not src.is_file():
+            raise SystemExit(f"reroll: curated export missing for {anchor_state}: {src}")
+        return _bake_anchor_snapshot(run_dir, direction, src, scale)
+
+
+def _bake_anchor_snapshot(run_dir: Path, direction: str, src: Path, scale: int) -> Path:
+    from PIL import Image
+    img = Image.open(src).convert("RGBA")
+    box = img.split()[3].point(lambda a: 255 if a >= 40 else 0).getbbox()
+    if box is None:
+        raise SystemExit(f"reroll: curated export for {direction}_idle is empty")
+    content = img.crop(box)
+    upscaled = content.resize((content.width * scale, content.height * scale),
+                              Image.Resampling.NEAREST)
+    out = run_dir / "references" / "anchors" / f"{direction}-idle-x{scale}.png"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    upscaled.save(out)
+    print(f"[reroll] anchor ref refreshed from curated truth: {out.relative_to(run_dir)} "
+          f"({content.width}x{content.height} content)")
+    return out
+
+
 def resolve_identity_ref(run_dir: Path, request: dict[str, Any], state: str) -> Path:
-    """행 정체성 ref — 방향 액션 행은 대상 방향 idle 앵커, 그 외는 base-source."""
+    """행 정체성 ref — 방향 액션 행은 대상 방향 idle 앵커(매번 curated 재베이크),
+    그 외(idle 앵커 행 자체 / 단순 런)는 base-source."""
     direction, pose = split_state(request, state)
     if direction is not None and pose != "idle":
-        candidates = [
-            run_dir / "references" / "anchors" / f"{direction}-idle-x8.png",
-            run_dir / "curated" / f"{direction}_idle" / "frame-0.png",
-            run_dir / "curated" / f"{direction}_idle-frame-0.png",
-            run_dir / "frames" / direction / "idle" / "frame-0.png",
-        ]
-        for c in candidates:
-            if c.is_file():
-                return c
-        raise SystemExit(
-            f"reroll: no identity anchor found for direction {direction!r} "
-            f"(looked for anchors/x8, curated export, extracted canonical)")
+        return refresh_anchor_ref(run_dir, direction)
     base = _find_base_source(run_dir)
     if base is None:
         raise SystemExit(f"reroll: no base-source image in run dir: {run_dir}")
