@@ -28,7 +28,7 @@ from typing import Any
 from sprite_gen.runio import atomic_write_text
 
 from . import chroma as chroma_mod
-from .base import GenRequest, GenResult, verify_png
+from .base import GenRequest, GenResult, verify_png, GenTimeoutError
 from .codex_provider import CodexProvider
 from .grok_provider import GrokProvider
 
@@ -145,7 +145,13 @@ def generate_image(
 
     try:
         request = GenRequest(prompt=prompt, raw=raw, refs=refs, model=model, aspect_ratio=aspect_ratio)
-        run = backend.generate(request, workdir)
+        # 타임아웃 1회 관측 가능 재시도 — 산발 provider 스톨은 같은 호출 재시도로
+        # 대부분 통과한다 (실사고 2026-07-19). 두 번째도 스톨이면 fail loud.
+        try:
+            run = backend.generate(request, workdir)
+        except GenTimeoutError as exc:
+            print(f"[gen] {exc} — retrying once", file=sys.stderr)
+            run = backend.generate(request, workdir)
         raw_bytes = verify_png(raw)
 
         chroma_stats: dict[str, Any] | None = None
