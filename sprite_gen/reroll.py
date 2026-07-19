@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from .gen import PROVIDERS, generate_image
-from .layout import guide_rel, prompt_rel, split_state, take_raw_rel
+from .layout import guide_rel, prompt_rel, split_state, state_frame_total, take_raw_rel
 
 
 def next_reroll_label(request: dict[str, Any], state: str) -> str:
@@ -50,36 +50,63 @@ def _find_base_source(run_dir: Path) -> Path | None:
     return None
 
 
-def refresh_anchor_ref(run_dir: Path, direction: str, scale: int = 8) -> Path:
+def _bake_curated_sequence_head(run_dir: Path, request: dict[str, Any], state: str):
+    """상태의 **큐레이션 시퀀스 첫 인스턴스**를 뷰에 보이는 그대로 굽는다 (RGBA 셀 캔버스).
+
+    앵커 진실 = 시퀀스 첫 프레임이다 — index 0 이 아니다. 사용자가 프레임을
+    삭제/재정렬했으면 index 0 은 기각분일 수 있다 (실사고 2026-07-19 수홍: side_idle
+    은 0·1·2 삭제 + 시퀀스가 3부터라, export 의 무조건 frame-0(=index 0) 베이크가
+    **삭제된 미편집 프레임**을 앵커로 만들었다 — down/up 은 우연히 order[0]=0 이라
+    멀쩡해 보여 방향별로 갈라졌다). export_pngs 와 같은 프리미티브(클론 해소·변형·
+    픽셀편집·pp 변형)를 그대로 태우되 대상 인덱스만 ordered[0] 으로 고정한다."""
+    from PIL import Image
+
+    from .curation import (apply_pixel_edits, apply_transform, edit_index, frame_variant,
+                           load_curation, pixel_snap_scale, source_frame_index,
+                           state_pixel_ops, state_plan)
+    from .extract import require_frames_manifest
+    from .layout import row_frame_rel
+
+    cell = request["cell"]
+    cell_size = (int(cell.get("width", cell.get("size", 0))),
+                 int(cell.get("height", cell.get("size", 0))))
+    curation = load_curation(run_dir)
+    manifest = require_frames_manifest(run_dir)
+    row = next((r for r in manifest.get("rows", []) if r.get("state") == state), None)
+    if row is None:
+        raise SystemExit(f"reroll: no extracted row for {state}")
+    default_count = state_frame_total(request, state)
+    ordered, transforms = state_plan(curation, state, default_count)
+    if not ordered:
+        raise SystemExit(f"reroll: {state} has an empty curated sequence")
+    index = ordered[0]
+    src_index = source_frame_index(curation, state, index, default_count)
+    variant = frame_variant(curation, state)
+    src_path = run_dir / row_frame_rel(row, src_index, variant)
+    if not src_path.is_file():
+        raise SystemExit(f"reroll: frame missing for {state} sequence head: {src_path}")
+    edit_idx = edit_index(curation, state, index)
+    with Image.open(src_path) as opened:
+        return apply_transform(
+            apply_pixel_edits(opened.convert("RGBA"),
+                              state_pixel_ops(curation, state).get(edit_idx)),
+            transforms.get(edit_idx), cell_size,
+            snap_scale=pixel_snap_scale(request) if variant == "pixel" else None)
+
+
+def refresh_anchor_ref(run_dir: Path, request: dict[str, Any], direction: str,
+                       scale: int = 8) -> Path:
     """앵커 ref 를 curated 진실에서 방금 구워 스냅샷을 갱신한다 (self-heal 캐시).
 
     `references/anchors/<dir>-idle-x8.png` 는 파생 캐시일 뿐이다 — 정적 스냅샷을
     그대로 쓰면 사용자가 뷰에서 앵커를 더 편집한 순간 소리 없이 낡고, 이후 생성
     행 전부가 옛 정체성/치수를 물려받는다 (실사고 2026-07-19 수홍 "다운앵커가 왜
-    내가 편집해둔 아틀라스가 아니야"). 그래서 생성 직전마다 curated export 를
-    다시 굽고(export_pngs — 변형·픽셀편집 포함 굽기 게이트) 콘텐츠 crop ×N
-    니어리스트로 스냅샷 자리를 덮어쓴다 — 뷰의 ref 칩에도 최신본이 보인다."""
-    import tempfile
-
-    from . import export_pngs
-
-    anchor_state = f"{direction}_idle"
-    # 단건 export 는 out_dir 에 무접두 frame-N.png 를 쓴다 — 런의 curated/ 를 건드리지
-    # 않고 임시 폴더로 받아 읽는다 (경로 모호성 제거: 함정 2026-07-19, 접두/무접두 혼재).
-    with tempfile.TemporaryDirectory(prefix="sprite-gen-anchor-") as tmp:
-        tmp_dir = Path(tmp)
-        code = export_pngs.run(run_dir=run_dir, state=anchor_state, out_dir=tmp_dir)
-        if code not in (None, 0):
-            raise SystemExit(f"reroll: curated export failed for {anchor_state} (exit {code})")
-        src = tmp_dir / "frame-0.png"
-        if not src.is_file():
-            raise SystemExit(f"reroll: curated export missing for {anchor_state}: {src}")
-        return _bake_anchor_snapshot(run_dir, direction, src, scale)
-
-
-def _bake_anchor_snapshot(run_dir: Path, direction: str, src: Path, scale: int) -> Path:
+    내가 편집해둔 아틀라스가 아니야"). 그래서 생성 직전마다 시퀀스 첫 인스턴스를
+    다시 굽고 콘텐츠 crop ×N 니어리스트로 스냅샷 자리를 덮어쓴다 — 뷰의 ref 칩에도
+    최신본이 보인다."""
     from PIL import Image
-    img = Image.open(src).convert("RGBA")
+
+    img = _bake_curated_sequence_head(run_dir, request, f"{direction}_idle")
     box = img.split()[3].point(lambda a: 255 if a >= 40 else 0).getbbox()
     if box is None:
         raise SystemExit(f"reroll: curated export for {direction}_idle is empty")
@@ -99,24 +126,32 @@ def resolve_identity_ref(run_dir: Path, request: dict[str, Any], state: str) -> 
     그 외(idle 앵커 행 자체 / 단순 런)는 base-source."""
     direction, pose = split_state(request, state)
     if direction is not None and pose != "idle":
-        return refresh_anchor_ref(run_dir, direction)
+        return refresh_anchor_ref(run_dir, request, direction)
     base = _find_base_source(run_dir)
     if base is None:
         raise SystemExit(f"reroll: no base-source image in run dir: {run_dir}")
     return base
 
 
-def record_take(run_dir: Path, request: dict[str, Any], state: str, label: str,
-                frames: int) -> None:
-    """request 의 takes 선언 갱신 (멱등) — write_take(interpolate)와 같은 기록 계약."""
-    takes = request["states"][state].setdefault("takes", [])
-    entry = next((t for t in takes if t.get("label") == label), None)
-    if entry is None:
-        takes.append({"label": label, "frames": frames})
-    else:
-        entry["frames"] = frames
-    (run_dir / "sprite-request.json").write_text(
-        json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+def record_take(run_dir: Path, state: str, label: str, frames: int) -> None:
+    """request 의 takes 선언 갱신 (멱등) — write_take(interpolate)와 같은 기록 계약.
+
+    Isolation: 생성이 수 분 걸리므로 시작 시점에 읽은 request 로 쓰면 그 사이의
+    다른 변경(다른 행 리롤·fps 수정)을 덮어쓴다 (lost update). publish_guard
+    배타락 안에서 **fresh 재독 → 갱신 → 원자 쓰기** 로만 기록한다."""
+    from .runio import publish_guard
+
+    request_path = run_dir / "sprite-request.json"
+    with publish_guard(run_dir):
+        fresh = json.loads(request_path.read_text(encoding="utf-8"))
+        takes = fresh["states"][state].setdefault("takes", [])
+        entry = next((t for t in takes if t.get("label") == label), None)
+        if entry is None:
+            takes.append({"label": label, "frames": frames})
+        else:
+            entry["frames"] = frames
+        request_path.write_text(
+            json.dumps(fresh, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def reroll_state(run_dir: Path | str, state: str, provider: str = "codex",
@@ -149,7 +184,7 @@ def reroll_state(run_dir: Path | str, state: str, provider: str = "codex",
     target.parent.mkdir(parents=True, exist_ok=True)
     generate_image(provider, prompt_path.read_text(encoding="utf-8"), target, refs=refs)
     frames = int(request["states"][state]["frames"])
-    record_take(run_dir, request, state, label, frames)
+    record_take(run_dir, state, label, frames)
     print(f"[reroll] take written: {target.relative_to(run_dir)} "
           f"(state={state}, frames={frames}, provider={provider})")
     return target

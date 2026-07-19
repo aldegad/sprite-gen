@@ -176,19 +176,28 @@ def normalize_tween_scale(mid: Image.Image, img0: Image.Image, img1: Image.Image
 
 def write_take(run_dir: Path, request: dict[str, Any], state: str, label: str,
                image: Image.Image) -> Path:
-    """중간 프레임을 테이크 raw 로 기록하고 request 의 takes 선언을 갱신한다 (멱등)."""
+    """중간 프레임을 테이크 raw 로 기록하고 request 의 takes 선언을 갱신한다 (멱등).
+
+    Isolation (2026-07-19): 생성 동안 다른 쓰기(다른 행 리롤/fps 수정)가 있었을 수
+    있으므로, 시작 시점 request 객체가 아니라 publish_guard 안에서 fresh 재독으로만
+    takes 를 갱신한다 — lost update 방지 (reroll.record_take 와 같은 계약)."""
+    from .runio import publish_guard
+
     rel = take_raw_rel(request, state, label)
     target = run_dir / rel
     target.parent.mkdir(parents=True, exist_ok=True)
     image.save(target)
-    takes = request["states"][state].setdefault("takes", [])
-    entry = next((t for t in takes if t.get("label") == label), None)
-    if entry is None:
-        takes.append({"label": label, "frames": 1})
-    else:
-        entry["frames"] = 1
-    (run_dir / "sprite-request.json").write_text(
-        json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    request_path = run_dir / "sprite-request.json"
+    with publish_guard(run_dir):
+        fresh = json.loads(request_path.read_text(encoding="utf-8"))
+        takes = fresh["states"][state].setdefault("takes", [])
+        entry = next((t for t in takes if t.get("label") == label), None)
+        if entry is None:
+            takes.append({"label": label, "frames": 1})
+        else:
+            entry["frames"] = 1
+        request_path.write_text(
+            json.dumps(fresh, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return target
 
 

@@ -5,6 +5,27 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.69 "Sol Atelier" - Anchor truth = curated SEQUENCE HEAD, not index 0 + take-record isolation
+
+- Engine fix (root cause of "the side anchor is not my edited image", Soohong
+  2026-07-19): the anchor bake read export's unconditional `frame-0` = raw
+  INDEX 0. When the user deleted/reordered frames, index 0 can be a REJECTED
+  frame - side_idle's sequence started at index 3 (0/1/2 deleted, the real
+  pixel edits live on 3), so the side anchor ref baked an unedited discard
+  while down/up happened to look right (their order[0]=0). The per-direction
+  split was the tell. `_bake_curated_sequence_head` now bakes `ordered[0]`
+  through the same primitives the view uses (clone resolution, transform,
+  pixel ops, pp variant) - verified on the founder run: all 148 side_idle
+  edit pixels present in the rebaked ref; down/up unchanged.
+- Consequence handled at call site: the 11 side_* rows generated overnight
+  against the wrong anchor get corrected-anchor candidates appended as
+  takes (non-destructive; user picks in the view).
+- Isolation fix: take recording (`reroll.record_take`, `interpolate.write_take`)
+  was read-modify-write on `sprite-request.json` with a request object loaded
+  BEFORE a minutes-long generation - concurrent rerolls/fps edits were lost
+  updates. Both now re-read fresh inside `publish_guard` (exclusive rwlock)
+  and write atomically.
+
 ## v1.56.68 "Sol Atelier" - One generation-trigger idiom (invariant refactor)
 
 - Curator taxonomy refactor (Soohong 2026-07-19 "보간은 팝오버 모델선택, 리롤은
