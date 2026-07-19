@@ -940,15 +940,15 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .gif-btn svg { display: block; }
 
 /* AI 중간 프레임(보간) 버튼의 파라미터 팝오버 */
-.tween-wrap { position: relative; display: inline-flex; }
-.tween-pop[hidden] { display: none !important; } /* display:flex 가 hidden 속성을 이기지 못하게 */
+.gen-wrap { position: relative; display: inline-flex; }
+.gen-pop[hidden] { display: none !important; } /* display:flex 가 hidden 속성을 이기지 못하게 */
 .tween-picking .card { cursor: crosshair; }
 .tween-picking .card.selected { border-color: var(--line); } /* 픽 모드에선 기존 선택 파랑 억제 */
 .tween-picking .card.tween-picked {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-dim);
 }
-.tween-pop {
+.gen-pop {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
@@ -962,7 +962,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   border-radius: 6px;
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
 }
-.tween-pop label {
+.gen-pop label {
   display: inline-flex;
   gap: 3px;
   align-items: center;
@@ -970,7 +970,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   color: var(--fg-dim, #64748b);
   white-space: nowrap;
 }
-.tween-pop input {
+.gen-pop input {
   width: 46px;
   padding: 2px 4px;
   font-size: 11px;
@@ -1043,7 +1043,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 }
 .tree-node.atlas-node img { image-rendering: pixelated; }
 
-.tween-pop select {
+.gen-pop select {
   padding: 2px 4px;
   font-size: 11px;
   border: 1px solid var(--line, #e2e8f0);
@@ -1069,7 +1069,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 }
 
 /* 보간 생성 중 스피너 — Generate 버튼 안에서 돈다 */
-.tween-spin {
+.gen-spin {
   display: inline-block;
   width: 12px;
   height: 12px;

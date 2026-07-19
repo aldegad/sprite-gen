@@ -5,6 +5,25 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.68 "Sol Atelier" - One generation-trigger idiom (invariant refactor)
+
+- Curator taxonomy refactor (Soohong 2026-07-19 "보간은 팝오버 모델선택, 리롤은
+  Alt클릭 - 다 지멋대로"; reviewed against the eight invariants): every
+  server-side generation button now rides ONE surface contract, owned by new
+  `src/gen-trigger.js` - click = `.gen-pop` parameter popover, shared
+  provider select (GPT=codex / Grok=grok, `makeProviderSelect` is the only
+  owner of that mapping), Generate = `runServerGeneration` (spinner ->
+  progress watch -> POST -> error unwrap -> reload). Tween and Reroll both
+  consume it; Reroll's Alt-click gesture is gone. The duplicated inline
+  fetch/spinner/reload sequences (Consistency + SRP violations) are deleted.
+- File split: row export (Save popover + `downloadRowVideo`) moved out of
+  `row-controls.js` into `src/row-export.js` - display controls and export
+  are separate concerns. Shared idiom CSS renamed `.tween-pop/.tween-spin/
+  .tween-wrap` -> `.gen-pop/.gen-spin/.gen-wrap` (no per-feature classes for
+  a shared idiom); `tweenGo` i18n key -> `genGo`. Idiom contract documented
+  in docs/curation.md. Playwright-verified: both popovers open with the
+  identical provider select, zero page errors.
+
 ## v1.56.67 "Sol Atelier" - Anchor ref = curated truth, rebaked per generation; honest anchor chip
 
 - Engine: reroll's identity ref is no longer a static snapshot lookup - before

@@ -18,7 +18,7 @@ function renderBaseRow() {
     if (editBtn.disabled) return;
     editBtn.disabled = true;
     const label = editBtn.innerHTML;
-    editBtn.innerHTML = '<span class="tween-spin" aria-label="loading"></span>';
+    editBtn.innerHTML = '<span class="gen-spin" aria-label="loading"></span>';
     try {
       await openBaseEditor();
     } finally {
