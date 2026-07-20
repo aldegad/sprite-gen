@@ -591,7 +591,7 @@ def _run_heal(run_dir: Path) -> None:
         _heal_state["thread"] = None
 
 
-def maybe_heal(run_dir: Path) -> tuple[bool, dict | None]:
+def maybe_heal(run_dir: Path) -> bool:
     """실시간 계약 (수홍 확정 2026-07-14): 뷰에 '재추출' 개념이 없다.
 
     frames/ 는 (raw + request + 현재 엔진 + 큐레이션)의 파생 캐시다 — 요청이
@@ -606,7 +606,7 @@ def maybe_heal(run_dir: Path) -> tuple[bool, dict | None]:
     단일 비행은 스레드 슬롯이 보장하고(동시 재추출 금지), heal 리포트는 유실
     없이 다음 성공 스냅샷에 1회 첨부된다. 실패는 뷰를 죽이지 않고 노트로 남는다.
 
-    반환: busy (bool). 리포트는 여기서 소비하지 않는다 — 소비자는
+    반환: busy 여부 (bool 단일 계약). 리포트는 여기서 소비하지 않는다 — 소비자는
     take_heal_report() 하나뿐이다 (/api/run 성공 스냅샷 경로). /api/progress
     폴링이나 다운로드가 heal 완료 직후 먼저 도착하면 리포트를 먹어버려 다음
     /api/run 첨부가 유실되던 경쟁을 막는다 (validator kongkongi 재현,
