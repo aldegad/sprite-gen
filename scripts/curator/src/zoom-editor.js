@@ -34,52 +34,8 @@ const TOOL_ICONS = {
   hand: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M5.3 8V3.8a.95.95 0 0 1 1.9 0V7m0-3.9v-.6a.95.95 0 0 1 1.9 0V7m0-3.3a.95.95 0 0 1 1.9 0V7.8m0-2.3a.95.95 0 0 1 1.9 0v3.7c0 2.9-1.8 4.7-4.5 4.7-2.1 0-3.1-.9-4.2-2.5L3 9.9c-.5-.8-.3-1.6.4-2 .6-.4 1.3-.2 1.7.4z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/></svg>',
 };
 
-// ── 뷰 패닝 — Space+드래그 / 휠버튼(중클릭) 드래그 / 손 툴로 화면을 끈다 (수홍 지시
-// 2026-07-17: 스프라이트 이동과 별개인 캔버스 시야 이동. 2026-07-19: 비교뷰에도 +
-// 손 툴 버튼 — Space 는 홀드형(누르는 동안만), 버튼은 토글형). 스크롤 컨테이너를
-// 당기는 방식이라 페인트/마키보다 먼저(capture) 가로챈다.
-let panSpaceHeld = false;
-
-document.addEventListener("keydown", (ev) => {
-  if (ev.code !== "Space") return;
-  if (!document.getElementById("zoom-modal") && !document.getElementById("compare-modal")) return;
-  // 버튼은 가드에서 제외 — 마지막 클릭한 버튼에 포커스가 남아도 Space=팬이 이긴다
-  // (포토샵 계약; 버튼 재발동 사고도 같이 막힘). 타이핑 필드만 존중.
-  if (ev.target && ev.target.closest && ev.target.closest("input, textarea, select")) return;
-  panSpaceHeld = true;
-  document.body.classList.add("pan-space");
-  ev.preventDefault();
-});
-
-document.addEventListener("keyup", (ev) => {
-  if (ev.code !== "Space") return;
-  panSpaceHeld = false;
-  document.body.classList.remove("pan-space");
-});
-
-function wirePan(surface, container, isToolActive) {
-  surface.addEventListener("pointerdown", (ev) => {
-    const toolOn = isToolActive && isToolActive();
-    if (!(ev.button === 1 || (ev.button === 0 && (panSpaceHeld || toolOn)))) return;
-    ev.preventDefault();
-    ev.stopImmediatePropagation();
-    const sx = ev.clientX, sy = ev.clientY;
-    const sl = container.scrollLeft, st = container.scrollTop;
-    const prevCursor = surface.style.cursor;
-    surface.style.cursor = "grabbing";
-    const onMove = (e2) => {
-      container.scrollLeft = sl - (e2.clientX - sx);
-      container.scrollTop = st - (e2.clientY - sy);
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      surface.style.cursor = prevCursor;
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  }, true);
-}
+// 뷰 패닝/커서 앵커 줌/돋보기 위젯 = view-nav.js 공용 (wirePan, keepViewAnchor,
+// centerView, makeViewNavWidget — 확대편집·호흡 포커스·비교뷰 세 디테일뷰 공유).
 
 function clearMarquee() {
   if (pixelEdit) pixelEdit.sel = null;
@@ -226,9 +182,9 @@ function openZoom(stateName, idx, keepWidth) {
   stage.appendChild(makeScaleScrub(stateName, idx));
   card.querySelector(".zoom-close").addEventListener("click", closeZoom);
   modal.querySelector(".zoom-backdrop").addEventListener("click", closeZoom);
-  // Space 홀드/휠버튼 드래그 + 손 툴(토글) = 뷰 패닝 (프레임·베이스 공통)
+  // Space 홀드/휠버튼 드래그 + 손 툴(토글) = 뷰 패닝 (프레임·베이스 공통) —
+  // 팬/줌 배선은 뷰포트 구성 뒤에 (아래 stage-viewport 블록).
   let panTool = false;
-  wirePan(stage, card, () => panTool);
 
   // ── 픽셀 편집 툴바: 연필/지우개 + 프레임 팔레트 + 컬러피커 + 되돌리기/비우기 ──
   const toolbar = document.createElement("div");
@@ -282,12 +238,6 @@ function openZoom(stateName, idx, keepWidth) {
   const eraserBtn = toolbar.querySelector(".et-eraser");
   const pickBtn = toolbar.querySelector(".et-pick");
   const selectBtn = toolbar.querySelector(".et-select");
-  const handBtn = toolbar.querySelector(".et-hand");
-  handBtn.addEventListener("click", () => {
-    panTool = !panTool;
-    handBtn.classList.toggle("active", panTool);
-    stage.classList.toggle("pan-tool", panTool);
-  });
   // ── 팔레트 도크 (Aseprite 식, 수홍 지시 2026-07-17): 스테이지 왼쪽 세로 팔레트 —
   // 위 = 현재 쓰인 색 전부 (같은 색 1개, 빈도순), 아래 = 자유 색상 피커.
   const stageRow = document.createElement("div");
@@ -305,7 +255,74 @@ function openZoom(stateName, idx, keepWidth) {
   dock.appendChild(swatchBox);
   dock.appendChild(colorInput);
   stageRow.appendChild(dock);
-  stageRow.appendChild(stage);
+
+  // ── 3계층 뷰 (수홍 지시 2026-07-20): 모달(고정 최대) ⊃ 뷰포트(화면 배율·팬) ⊃
+  // 스테이지(캐릭터). 스테이지 사방에 큰 패딩을 둬 어느 구석이든 화면 중앙으로
+  // 끌어올 수 있다 (자유 팬). 스크롤 좌표계라 기존 %-오버레이/포인터 수학 무변.
+  const viewwrap = document.createElement("div");
+  viewwrap.className = "stage-viewwrap";
+  const viewport = document.createElement("div");
+  viewport.className = "stage-viewport";
+  const pad = document.createElement("div");
+  pad.className = "stage-pad";
+  pad.appendChild(stage);
+  viewport.appendChild(pad);
+  viewwrap.appendChild(viewport);
+  stageRow.appendChild(viewwrap);
+
+  // 화면 배율: 최소 120px, 최대 셀폭×64 (기존 0.9×창폭 캡 폐지 — 수홍 "확대 더 되게")
+  const VIEW_MIN_W = 120;
+  const viewMaxW = Math.max(8000, cellW * 64);
+  const syncViewLabels = () => {
+    const pct = `${Math.round((zoomView.width / cellW) * 100)}%`;
+    modal.querySelectorAll(".view-nav .vn-label").forEach((el) => { el.textContent = pct; });
+  };
+  const setViewWidth = (w, anchorX, anchorY) => {
+    w = Math.round(Math.min(viewMaxW, Math.max(VIEW_MIN_W, w)));
+    if (!zoomView || w === zoomView.width) return;
+    keepViewAnchor(viewport, stage, anchorX, anchorY, () => {
+      zoomView.width = w;
+      stage.style.width = `${w}px`;
+      applyCardTransform(stage, stateName, idx);
+      sizePxGrids();
+    });
+    syncViewLabels();
+  };
+  const fitViewWidth = () => {
+    const vr = viewport.getBoundingClientRect();
+    return Math.max(VIEW_MIN_W, Math.min(Math.floor(vr.width - 48), Math.floor((vr.height - 48) / aspect)));
+  };
+  const viewHandlers = {
+    zoomOut: () => setViewWidth(zoomView.width / 1.25),
+    zoomIn: () => setViewWidth(zoomView.width * 1.25),
+    fit: () => { setViewWidth(fitViewWidth()); centerView(viewport, stage); },
+  };
+  // 돋보기 위젯 ×2 (수홍 지시 2026-07-20): 툴바 + 뷰포트 우하단 코너
+  toolbar.appendChild(makeViewNavWidget(viewHandlers));
+  viewwrap.appendChild(makeViewNavWidget(viewHandlers, { corner: true }));
+  // 뷰 확대: 휠/핀치 — 커서 아래 지점이 고정되는 앵커 줌. 뷰포트 레벨이라
+  // 스테이지 밖 여백 위에서도 동작한다.
+  viewport.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    const factor = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
+    setViewWidth(zoomView.width * factor, ev.clientX, ev.clientY);
+  }, { passive: false });
+  wirePan(viewport, viewport, () => panTool);
+  // 오픈 = 뷰포트에 맞춤 + 중앙 정렬 (프레임 넘김은 배율 유지 — keepWidth)
+  if (!keepWidth) {
+    zoomView.width = fitViewWidth();
+    stage.style.width = `${zoomView.width}px`;
+  }
+  centerView(viewport, stage);
+  syncViewLabels();
+
+  const handBtn = toolbar.querySelector(".et-hand");
+  handBtn.addEventListener("click", () => {
+    panTool = !panTool;
+    handBtn.classList.toggle("active", panTool);
+    viewport.classList.toggle("pan-tool", panTool);
+  });
   const selBox = document.createElement("div");
   selBox.className = "marquee";
   selBox.hidden = true;
@@ -743,18 +760,7 @@ function openZoom(stateName, idx, keepWidth) {
     stage.addEventListener("pointerup", onUp);
   });
 
-  // 뷰 확대: 휠/핀치(ctrl+휠). wireStage 의 휠(스프라이트 스케일)보다 먼저 등록해
-  // 가로채고, Shift+휠만 스프라이트 스케일로 통과시킨다.
-  stage.addEventListener("wheel", (ev) => {
-    ev.preventDefault();
-    ev.stopImmediatePropagation();
-    const factor = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
-    zoomView.width = Math.min(Math.floor(window.innerWidth * 0.9),
-      Math.max(120, Math.round(zoomView.width * factor)));
-    stage.style.width = `${zoomView.width}px`;
-    applyCardTransform(stage, stateName, idx);
-    sizePxGrids();
-  }, { passive: false });
+  // 뷰 확대 휠 = 뷰포트 레벨 앵커 줌 (위 stage-viewport 블록이 소유)
 
   // ── 호흡 모드 (레이어, 수홍 확정 2026-07-18): 실제 시퀀스가 재생되는 위에
   // 분할선·진폭·주기·서브픽셀을 조정하면 즉시 truth(사이드카)에 반영된다.
