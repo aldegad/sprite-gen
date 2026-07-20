@@ -575,25 +575,52 @@ def write_curation_atomic(run_dir: Path, payload: dict) -> None:
 _heal_lock = threading.Lock()
 
 
-def maybe_heal(run_dir: Path) -> dict | None:
+_HEAL_GRACE_SECONDS = 1.5  # 신선 케이스(해시 비교 ms)는 이 안에 끝난다 — 그 이상이면 장기 heal
+_heal_state: dict = {"thread": None, "pending_report": None}
+
+
+def _run_heal(run_dir: Path) -> None:
+    try:
+        report = heal_run(run_dir)
+    except (Exception, SystemExit) as exc:
+        report = {"healed": [], "kept_stale": [], "failed": [],
+                  "notes": [f"heal skipped: {exc}"]}
+    with _heal_lock:
+        if report["healed"] or report["kept_stale"] or report.get("failed") or report["notes"]:
+            _heal_state["pending_report"] = report
+        _heal_state["thread"] = None
+
+
+def maybe_heal(run_dir: Path) -> tuple[bool, dict | None]:
     """실시간 계약 (수홍 확정 2026-07-14): 뷰에 '재추출' 개념이 없다.
 
     frames/ 는 (raw + request + 현재 엔진 + 큐레이션)의 파생 캐시다 — 요청이
     들어올 때마다 행별 engine_revision 을 현재 엔진과 비교해, 다르면 raw 에서
-    조용히 다시 굽는다 (heal_run). 신선하면 해시 비교 몇 ms 로 끝난다.
-    ThreadingHTTPServer 라 락으로 단일 비행을 보장한다 (동시 재추출 금지).
-    실패는 뷰를 죽이지 않고 노트로 관측 가능하게 남긴다 — 이전 세대는
-    스테이징 통짜 스왑 덕에 바이트 그대로다.
+    다시 굽는다 (heal_run). 신선하면 해시 비교 몇 ms 로 끝난다.
+
+    장기 heal 을 요청 핸들러 안에서 동기로 돌리면 첫 탭이 진행률 UI 없이 빈
+    화면으로 수십 분 멈춘다 (실사고 2026-07-20, plan long-op-loading-ux — 엔진
+    갱신 후 첫 로드). 그래서 heal 은 백그라운드 스레드로 발사하고 그레이스만
+    동기 대기한다: 그 안에 끝나면(신선/소규모) 기존과 동일한 동기 경로, 넘으면
+    (busy=True, None) 을 반환해 /api/run 이 즉시 진행률 포함 busy 로 응답한다.
+    단일 비행은 스레드 슬롯이 보장하고(동시 재추출 금지), heal 리포트는 유실
+    없이 다음 성공 스냅샷에 1회 첨부된다. 실패는 뷰를 죽이지 않고 노트로 남는다.
+
+    반환: (busy, report) — busy=True 면 report 는 None.
     """
     with _heal_lock:
-        try:
-            report = heal_run(run_dir)
-        except (Exception, SystemExit) as exc:
-            return {"healed": [], "kept_stale": [], "failed": [],
-                    "notes": [f"heal skipped: {exc}"]}
-    if report["healed"] or report["kept_stale"] or report.get("failed") or report["notes"]:
-        return report
-    return None
+        thread = _heal_state["thread"]
+        if thread is None or not thread.is_alive():
+            thread = threading.Thread(target=_run_heal, args=(run_dir,), daemon=True)
+            _heal_state["thread"] = thread
+            thread.start()
+    thread.join(timeout=_HEAL_GRACE_SECONDS)
+    if thread.is_alive():
+        return True, None
+    with _heal_lock:
+        report = _heal_state["pending_report"]
+        _heal_state["pending_report"] = None
+    return False, report
 
 
 def _zip_paths(base: Path, paths: list[Path]) -> bytes:
@@ -772,7 +799,16 @@ class CurationHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/run":
             try:
-                heal = maybe_heal(self.run_dir)  # 실시간 계약: 스냅샷 전에 캐시 자가치유
+                busy, heal = maybe_heal(self.run_dir)  # 실시간 계약: 스냅샷 전에 캐시 자가치유
+                if busy:
+                    # 장기 heal 진행 중 — 첫 탭부터 진행률 로딩 UI 가 뜨도록 즉답
+                    self._send_json({
+                        "error": "re-extraction in progress — frames are being "
+                                 "re-derived for the current engine; the view opens "
+                                 "automatically when it finishes",
+                        "busy": True, "lang": CurationHandler.lang,
+                        "progress": _read_op_progress(self.run_dir)}, 503)
+                    return
                 snapshot = build_run_state(self.run_dir)
                 if heal:
                     snapshot["heal"] = heal
@@ -817,7 +853,14 @@ class CurationHandler(BaseHTTPRequestHandler):
                 scale = (query.get("scale") or ["4"])[0]
                 kind = f"gif:{state}:{scale}"
             try:
-                maybe_heal(self.run_dir)
+                busy, _heal_report = maybe_heal(self.run_dir)
+                if busy:
+                    self._send_json({
+                        "error": "re-extraction in progress — retry the download "
+                                 "when it finishes",
+                        "busy": True,
+                        "progress": _read_op_progress(self.run_dir)}, 503)
+                    return
                 built = build_download(self.run_dir, kind)
             except (Exception, SystemExit) as exc:
                 self._send_json({"error": str(exc)}, 500)
@@ -841,7 +884,12 @@ class CurationHandler(BaseHTTPRequestHandler):
             try:
                 # 페이지가 열린 채 엔진이 바뀌어도 다음 폴에서 자가치유된다 —
                 # 프레임 세대가 바뀌면 runRevision 변화로 클라이언트가 리로드한다.
-                maybe_heal(self.run_dir)
+                busy, _heal_report = maybe_heal(self.run_dir)
+                if busy:
+                    # heal 이 publish 락을 쥔 동안 read_guard 에서 행 걸리지 않게 즉답
+                    self._send_json({"busy": True,
+                                     "progress": _read_op_progress(self.run_dir)}, 503)
+                    return
                 with read_guard(self.run_dir):
                     request = json.loads((self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
                     progress = []

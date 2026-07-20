@@ -5,6 +5,25 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.77 "Sol First Paint" - Long-op loading UX: heal off the request path
+
+- **Background heal + grace join** (Soohong 2026-07-20, plan `sprite-gen/long-op-loading-ux`):
+  the first `/api/run` after an engine update used to run the full-run heal
+  synchronously inside the request handler — the first tab hung on a blank page
+  for the whole re-derivation (tens of minutes on a 33-state run; the progress UI
+  only ever reached second tabs). `maybe_heal` now fires heal on a background
+  thread and joins for a 1.5s grace: fresh/small runs keep the exact synchronous
+  path, long heals return an immediate busy response (with progress + lang) so the
+  very first tab paints a loading UI at t=0. The heal report attaches losslessly
+  to the next successful snapshot. `/api/progress` and downloads got the same
+  busy fast-path instead of blocking on the publish lock.
+- **Proper loading panel** (curator): busy no longer renders a fatal error box —
+  a centered panel with a live progress bar, percent, current row/phase and a
+  "local CPU re-derivation, no model calls; opens automatically" note (ko/en),
+  fed by the existing `/api/op-progress` poll; auto-reload on completion kept.
+- Contract tests `tests/test_heal_async.py`: busy-within-grace bound, report
+  no-loss, fresh-path regression, observable heal failure.
+
 ## v1.56.76 "Sol Cutout" - Matte background remover for imported images
 
 - **`cutout` command** (Soohong 2026-07-20, plan `sprite-gen/cutout-command`):
