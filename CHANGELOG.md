@@ -5,6 +5,26 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.76 "Sol Cutout" - Matte background remover for imported images
+
+- **`cutout` command** (Soohong 2026-07-20, plan `sprite-gen/cutout-command`):
+  a matte-based background remover for **imported** images (hand-drawn icons,
+  downloaded sprites, screenshots) that arrive *with* an opaque uniform
+  background. Pipeline output never needs this — it is already keyed off its own
+  magenta/green background — so `cutout` is the import/post-edit utility, sibling
+  to `unpack-atlas`/`export-pngs`/`slice-sheet`.
+- Algorithm: estimate the background colour from the bright corners → corner
+  flood-fill marks the connected background **by position** (so bright highlights
+  *inside* the object — glass, white petals — are preserved instead of holed by a
+  colour-only key) → within `band` px of the border, a continuous alpha from the
+  colour distance plus decontamination `F=(P-(1-a)*B)/a` removes the background
+  spill → soft `erode` shaves the last bright bevel rim without a hard stair edge.
+- Deterministic (no RNG); same input + params always yields the same output.
+  Defaults `--strength 45 --band 6 --erode 1` converged on a 4-icon ivory-bg
+  reference set. `--white-check` writes cyan/magenta/yellow verification
+  composites so any leftover fringe shows loudly. Inherits the `chroma.py` No
+  Silent Fallback contract: leftover non-zero RGB under transparency raises.
+
 ## v1.56.75 "Sol True Grid" - Per-frame pixel grid + on-demand pixel-perfect preview
 
 - **Per-frame pitch is the primary truth** (Soohong 2026-07-20, plan
