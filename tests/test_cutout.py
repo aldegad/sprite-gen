@@ -14,10 +14,12 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from sprite_gen.cutout import cutout, estimate_background
+from sprite_gen.cutout import cutout, estimate_background, _detect_key_kind
 
 IVORY = (248, 247, 242)
 GREEN = (86, 133, 39)
+MAGENTA = (255, 0, 255)
+KEY_GREEN = (0, 255, 0)
 
 
 def _make_icon(with_interior_white: bool = False) -> Image.Image:
@@ -100,3 +102,65 @@ def test_missing_background_raises(tmp_path: Path) -> None:
 def test_estimate_background_from_corners(tmp_path: Path) -> None:
     img = _make_icon()
     assert estimate_background(img) == IVORY
+
+
+# --- key-colour routing (imported images already on a magenta/green key) ------
+
+
+def _make_key_icon(bg: tuple[int, int, int], obj: tuple[int, int, int]) -> Image.Image:
+    img = Image.new("RGBA", (128, 128), bg + (255,))
+    px = img.load()
+    for y in range(32, 96):
+        for x in range(32, 96):
+            px[x, y] = obj + (255,)
+    return img
+
+
+def test_detect_key_kind_classifies_routes() -> None:
+    assert _detect_key_kind(MAGENTA) == "magenta"
+    assert _detect_key_kind(KEY_GREEN) == "green"
+    assert _detect_key_kind(IVORY) == "white"
+    assert _detect_key_kind((240, 240, 240)) == "white"  # low-saturation → matte
+
+
+def test_magenta_background_routes_to_extract(tmp_path: Path) -> None:
+    src = tmp_path / "m.png"
+    _make_key_icon(MAGENTA, (90, 140, 60)).save(src)  # green object, no magenta in it
+    out = tmp_path / "m_cutout.png"
+    stats = cutout(src, out, key="auto")
+    assert stats["route"] == "extract:magenta"
+    px = Image.open(out).convert("RGBA").load()
+    assert px[0, 0][3] == 0  # magenta background gone
+    assert px[64, 64][3] == 255  # object intact, no hole
+
+
+def test_green_background_routes_to_extract(tmp_path: Path) -> None:
+    src = tmp_path / "g.png"
+    _make_key_icon(KEY_GREEN, (200, 80, 160)).save(src)  # magenta-ish object, no key green in it
+    out = tmp_path / "g_cutout.png"
+    stats = cutout(src, out, key="auto")
+    assert stats["route"] == "extract:green"
+    px = Image.open(out).convert("RGBA").load()
+    assert px[0, 0][3] == 0
+    assert px[64, 64][3] == 255
+
+
+def test_white_background_stays_on_matte(tmp_path: Path) -> None:
+    src = tmp_path / "w.png"
+    _make_icon().save(src)
+    stats = cutout(src, tmp_path / "w_cutout.png", key="auto")
+    assert stats["route"] == "matte"
+
+
+def test_explicit_key_overrides_detection(tmp_path: Path) -> None:
+    src = tmp_path / "m.png"
+    _make_key_icon(MAGENTA, (90, 140, 60)).save(src)
+    stats = cutout(src, tmp_path / "m_cutout.png", key="magenta")
+    assert stats["route"] == "extract:magenta"
+
+
+def test_unknown_key_raises(tmp_path: Path) -> None:
+    src = tmp_path / "icon.png"
+    _make_icon().save(src)
+    with pytest.raises(SystemExit):
+        cutout(src, tmp_path / "o.png", key="blue")
