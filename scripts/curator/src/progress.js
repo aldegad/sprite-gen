@@ -63,14 +63,37 @@ function startOpProgressWatch(onIdle) {
       return;
     }
     const p = data.progress;
+    const live = document.getElementById("op-loading-live");
+    const panelFill = document.querySelector(".op-loading-fill");
     if (p && p.total) {
       const pct = Math.min(99, Math.round((p.done / p.total) * 100));
       setStatus(STR[lang].opProgress(p, pct));
       setTopProgress(pct);
+      if (live) live.textContent = STR[lang].opProgress(p, pct);
+      if (panelFill) {
+        panelFill.classList.remove("indeterminate");
+        panelFill.style.width = `${Math.max(2, pct)}%`;
+      }
     } else {
       setTopProgress(null);
+      if (live) live.textContent = t("healWaiting");
+      if (panelFill) panelFill.classList.add("indeterminate");
     }
   };
   opPollTimer = setInterval(tick, 800);
   tick();
+}
+
+// 장기 heal/추출 중 첫 로드용 정식 로딩 패널 — fatal 에러 박스가 아니라
+// 진행 바·퍼센트·현재 행·안내 문구를 보여준다 (plan long-op-loading-ux:
+// 엔진 갱신 후 첫 탭이 빈 화면으로 수십 분 멈추던 실사고의 클라 반쪽).
+function renderLoadingPanel() {
+  const host = document.getElementById("states");
+  host.innerHTML =
+    '<div class="op-loading">' +
+    `<div class="op-loading-title">${t("healTitle")}</div>` +
+    '<div class="op-loading-bar"><div class="op-loading-fill indeterminate" style="width:100%"></div></div>' +
+    `<div id="op-loading-live" class="op-loading-live">${t("healWaiting")}</div>` +
+    `<div class="op-loading-note">${t("healNote")}</div>` +
+    "</div>";
 }
