@@ -8,9 +8,11 @@ async function boot() {
     run = await res.json();
     if (run.error) {
       if (run.busy) {
-        // 재추출 진행 중 — 진행도 퍼센트를 보여주다가 끝나면 자동 재시도
-        document.getElementById("states").innerHTML =
-          `<div class="fatal">${t("runLoadFail")}\n${run.error}</div>`;
+        // 재추출 진행 중 — 정식 로딩 패널(진행 바·현재 행)을 띄우고 끝나면 자동 재시도.
+        // busy 응답에는 run.lang 이 실려 온다 (첫 탭도 서버 --lang 로 렌더).
+        lang = new URLSearchParams(location.search).get("lang") || run.lang || lang || "en";
+        document.documentElement.lang = lang;
+        renderLoadingPanel();
         startOpProgressWatch(() => window.location.reload());
         return;
       }

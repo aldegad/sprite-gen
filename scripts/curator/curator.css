@@ -1342,3 +1342,36 @@ body.pan-space #compare-modal .cmp-canvas,
   border-radius: 6px;
   padding: 2px 8px;
 }
+
+/* 장기 heal/추출 첫 로드 로딩 패널 (plan long-op-loading-ux) */
+.op-loading {
+  max-width: 460px;
+  margin: 18vh auto 0;
+  padding: 28px 32px;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 12px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.op-loading-title { font-size: 15px; font-weight: 600; }
+.op-loading-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line, #e2e8f0);
+  overflow: hidden;
+}
+.op-loading-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent, #3b82f6);
+  transition: width 0.4s ease;
+}
+.op-loading-fill.indeterminate { animation: op-loading-slide 1.4s ease-in-out infinite; }
+@keyframes op-loading-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.op-loading-live { font-size: 13px; color: var(--fg-dim, #64748b); min-height: 1.2em; }
+.op-loading-note { font-size: 12px; color: var(--fg-dim, #94a3b8); }
