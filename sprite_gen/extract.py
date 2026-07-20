@@ -2504,15 +2504,6 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
             return strip_pitch[axis]
 
         consensus_x, consensus_y = _consensus(0), _consensus(1)
-        outliers = [
-            f"{i}:{g[0][0]:.2f}"
-            for i, g in enumerate(grids)
-            if g[0][0] >= 2.0 and abs(g[0][0] - consensus_x) > max(2.0, consensus_x * 0.25)
-        ]
-        if outliers:
-            all_warnings.append(
-                f"{tag}: per-frame pitch outliers ({', '.join(outliers)}) snapped at consensus {consensus_x:.2f}"
-            )
         # 세컨드 오피니언 (perfectpixel unfake 이식): 동일색 런 최빈값으로 축별
         # 피치를 따로 추정해 합의 피치와 교차검증한다. 경고 전용 — 스냅은 아래에서
         # 계속 detect_pixel_grid 합의만 쓴다 (자동 교체 금지, No Silent Fallback).
@@ -2533,25 +2524,49 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         (consensus_x, consensus_y), frame_phases, _pitch_src = arbitrate_pitch(
             images, (consensus_x, consensus_y), frame_phases,
             (_runlen_consensus(0), _runlen_consensus(1)), tag, all_warnings)
+        # 프레임 자체 검출 격자가 1순위 진실이다 (수홍 2026-07-20, plan
+        # sprite-gen/per-frame-pixel-grid): 합의 피치를 프레임에 강제하면 측정차
+        # (0.5px/셀 수준)가 폭 전체에 누적돼 경계가 블록 중앙을 지난다 (실사고
+        # founder_v7 down_jump frame-0: 합의 13.00 vs 자체 12.50 → 눈이 반쪽).
+        # 합의는 자체 검출이 실패한 프레임의 fallback 전용이고, 적용 사실은
+        # 프레임별 경고로 관측된다. 자체 검출이 합의와 크게 어긋나도 덮어쓰지
+        # 않는다 — 경고만 남긴다 (No Silent Fallback). 기록(cut_edges)은 실제
+        # 샘플링한 그 선이라 표시 격자 = 샘플링 진실 (수홍 확정 2026-07-18) 유지.
         snapped = []
         cut_edges: list[tuple[list[int], list[int]] | None] = []
-        if min(consensus_x, consensus_y) >= 2.0:
-            # 위상만 프레임별로 (스트립 안에서 드리프트하는 건 위상이다). 등간격 선을
-            # 실제 블록 경계에 스냅한 뒤 그 선으로 샘플링한다 — 기록(cut_edges)도
-            # 같은 선이라 표시 격자 = 샘플링 진실 (수홍 확정 2026-07-18).
-            for component, frame_phase in zip(images, frame_phases):
-                xs = _grid_edges(component.width, consensus_x, frame_phase[0])
-                ys = _grid_edges(component.height, consensus_y, frame_phase[1])
-                xs, ys = refine_edges_to_boundaries(component, xs, ys, (consensus_x, consensus_y))
-                snapped.append(snap_by_edges(component, xs, ys, pp_detail_bias))
-                cut_edges.append((xs, ys))
-        else:
-            snapped = list(images)
-            cut_edges = [None] * len(images)
-        pitch = round(consensus_x, 2) if abs(consensus_x - consensus_y) < 0.05 else (
-            round(consensus_x, 2),
-            round(consensus_y, 2),
-        )
+        used_pitches: list[tuple[float, float]] = []
+        for index, (component, ((own_x, own_y), _own_phase)) in enumerate(zip(images, grids)):
+            if min(own_x, own_y) >= 2.0:
+                use_x, use_y = own_x, own_y
+                if min(consensus_x, consensus_y) >= 2.0 and (
+                    abs(own_x - consensus_x) > max(2.0, consensus_x * 0.25)
+                    or abs(own_y - consensus_y) > max(2.0, consensus_y * 0.25)
+                ):
+                    all_warnings.append(
+                        f"{tag}: frame {index} own pitch {own_x:.2f}x{own_y:.2f} deviates from "
+                        f"strip consensus {consensus_x:.2f}x{consensus_y:.2f} — kept own (no override)")
+            elif min(consensus_x, consensus_y) >= 2.0:
+                use_x, use_y = consensus_x, consensus_y
+                all_warnings.append(
+                    f"{tag}: frame {index} pitch detection inconclusive — consensus fallback "
+                    f"{consensus_x:.2f}x{consensus_y:.2f}")
+            else:
+                snapped.append(component)
+                cut_edges.append(None)
+                used_pitches.append((1.0, 1.0))
+                continue
+            frame_phase = frame_phases[index]
+            xs = _grid_edges(component.width, use_x, frame_phase[0])
+            ys = _grid_edges(component.height, use_y, frame_phase[1])
+            xs, ys = refine_edges_to_boundaries(component, xs, ys, (use_x, use_y))
+            snapped.append(snap_by_edges(component, xs, ys, pp_detail_bias))
+            cut_edges.append((xs, ys))
+            used_pitches.append((use_x, use_y))
+        rounded = [(round(px_, 2), round(py_, 2)) for (px_, py_) in used_pitches]
+        def _pitch_repr(pair: tuple[float, float]):
+            return pair[0] if abs(pair[0] - pair[1]) < 0.05 else pair
+        pitch = (_pitch_repr(rounded[0]) if len(set(rounded)) == 1
+                 else [_pitch_repr(pair) for pair in rounded])
         # 눌림 없음 — 스냅된 네이티브 논리 크기를 유지한다 (수홍 확정 2026-07-14,
         # 옵트인 잔재까지 완전 제거 2026-07-17): 계약(logical_height)으로의 conform
         # 축소는 칸을 병합해 디테일을 갈라먹는다. 과거의 `fit.conform: true` 옵트인은

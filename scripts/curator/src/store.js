@@ -18,6 +18,10 @@ let ppAvailable = false;       // any state has a plain (pre-pixel-perfect) twin
 
 let ppTwinStates = new Set();  // states that actually saved a twin
 
+// 트윈 없는 줄의 온디맨드 스냅 프리뷰 (서버 .pixel-preview 캐시) — 임포트 세트나
+// 비 pp 런에서도 픽셀퍼펙트 토글이 동작한다 (표시 전용, 굽기/저장과 무관).
+let ppPreviewStates = new Set();
+
 let ppStates = {};             // stateName -> bool (true = pixel-perfect variant)
 
 // Same per-state + toggle-all shape as pixel-perfect: each grid-capable row has
@@ -57,7 +61,9 @@ function ppOn(stateName) {
 }
 
 function frameUrl(stateName, frame) {
-  return !ppOn(stateName) && frame.plainUrl ? frame.plainUrl : frame.url;
+  if (frame.plainUrl) return !ppOn(stateName) ? frame.plainUrl : frame.url;
+  // 트윈 없는 프레임: pp ON = 온디맨드 스냅 프리뷰 (없으면 원본 그대로)
+  return ppOn(stateName) && frame.pixelPreviewUrl ? frame.pixelPreviewUrl : frame.url;
 }
 
 // 복제 인스턴스 (entries[state].clones = {복제idx: 원본idx}) 인식 프레임 조회.
