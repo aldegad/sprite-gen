@@ -5,6 +5,30 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.75 "Sol True Grid" - Per-frame pixel grid + on-demand pixel-perfect preview
+
+- **Per-frame pitch is the primary truth** (Soohong 2026-07-20, plan
+  `sprite-gen/per-frame-pixel-grid`): each frame is snapped with its own detected
+  fractional pitch/phase. Forcing the strip consensus onto a frame accumulated the
+  measurement gap (0.5px/cell) across the width and cut through block centers —
+  founder_v7 down_jump frame-0 (consensus 13.00 vs own 12.50) halved the eyes.
+  The consensus (collapse-filtered median) survives only as the fallback for frames
+  whose own detection is inconclusive (per-frame warning on apply); a deviating
+  frame is warned, never overridden. The "snapped at consensus" outlier override
+  is removed. `pitch` in reports is now per-frame when frames differ.
+- **Palette post-only invariant test** (`tests/test_palette_post_only.py`): a pinned
+  garish 2-color palette must leave cut lines (`input_grids`), sizes, bboxes, and
+  alpha byte-identical — palette (incl. the lock) can never touch the grid.
+- **Curator: on-demand pixel-perfect preview for twin-less runs** (imported PNG sets,
+  non-pp runs): `serve_curation` caches per-frame own-grid snaps under
+  `.pixel-preview/` (mtime-keyed, 24-per-request budget reported as
+  `pixelPreviewDeferred`) and the pixel-perfect toggle now appears for those rows
+  (`ppPreviewStates`, display-only, default off). No confident grid → no preview
+  (no fake grids).
+- Version drift healed: pyproject 1.56.74 vs SKILL.md 1.56.71 → both 1.56.75.
+  (CHANGELOG entries for v1.56.72–74 curator releases were not written by their
+  author sessions; left to the owning session.)
+
 ## v1.56.71 "Sol Atelier" - Gen timeout default 180s
 
 - `SPRITE_GEN_GEN_TIMEOUT_SECONDS` default 300 -> 180 (Soohong 2026-07-19

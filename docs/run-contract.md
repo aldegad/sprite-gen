@@ -73,7 +73,8 @@ not restate it elsewhere; point here.
   prompts/<direction>/<pose>.txt
   # ── 테이크 (takes 1급 계약, 2026-07-15) ── request `states.<s>.takes: [{label, frames}]`
   # 가 선언하면 추출이 primary 스트립 뒤에 각 테이크 스트립을 이어붙여 한 행의 프레임
-  # 풀을 만든다 (스트립별 합의 피치로 따로 스냅, 행 정합·팔레트·배치는 함께).
+  # 풀을 만든다 (스트립별로 따로 스냅 — 프레임 자체 검출 격자 1순위, 스트립 합의는
+  # 검출 실패 프레임 fallback 전용. 행 정합·팔레트·배치는 함께).
   # manifest row 에 labels("blink#0"…)/takes(start·frames·raw)가 남고, 소비자가 행
   # 크기를 request 에서 셀 때는 layout.state_frame_total(primary+takes 합)을 쓴다.
   # 어느 스트립 하나라도 실패하면 행 전체가 이전 세대로 남는다 (부분 풀 게시 금지).
