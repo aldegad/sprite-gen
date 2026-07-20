@@ -78,11 +78,13 @@ document.addEventListener("keydown", (ev) => {
   if (ev.target && ev.target.closest && ev.target.closest("input, textarea, select")) return;
   // 베이스도 줌 모달(pixelEdit)로 통일 — 별도 에디터 분기는 폐기됨 (v1.56.24)
   // 호흡 포커스 모드가 열려 있으면 선/진폭/주기 조정 히스토리가 우선이다 (수홍 2026-07-17)
+  // 셋째 폴백 = 변형 히스토리 (수홍 2026-07-20 "캐릭터 이동한 담에 Cmd+Z 안 먹혀"):
+  // 픽셀 툴이 꺼져 있으면 이동/회전/스케일/플립 제스처를 되돌린다 — 모달·그리드 공통.
   const target = zoomView && zoomView.breatheUndo
     ? { undo: zoomView.breatheUndo, redo: zoomView.breatheRedo }
     : (pixelEdit && pixelEdit.undoFn
-      ? { undo: pixelEdit.undoFn, redo: pixelEdit.redoFn } : null);
-  if (!target) return;
+      ? { undo: pixelEdit.undoFn, redo: pixelEdit.redoFn }
+      : { undo: undoTransform, redo: redoTransform });
   ev.preventDefault();
   ev.stopImmediatePropagation();
   if (ev.shiftKey) { if (target.redo) target.redo(); }
