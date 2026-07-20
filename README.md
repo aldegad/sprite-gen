@@ -164,16 +164,22 @@ image that arrived *with* an opaque uniform background (a hand-drawn icon, a
 downloaded sprite, a screenshot) is turned into a clean transparent PNG.
 
 ```bash
-# uniform white / ivory / solid background -> transparent RGBA
+# routes on the corner colour: white/ivory -> matte, magenta/green -> extract engine
 python3 -m sprite_gen.cli cutout icon.png --white-check
 ```
 
-It estimates the background colour from the corners, flood-fills the connected
-background by position (so bright highlights *inside* the object are preserved,
-not punched into holes), then feathers the border with a decontaminated soft
-alpha. `--white-check` writes cyan/magenta/yellow composites so any leftover
-fringe shows loudly. Tune with `--strength` (bevel removal), `--band` (edge
-depth), and `--erode`. Not for complex/non-uniform backgrounds.
+It reads the corner background colour and routes (`--key auto|white|magenta|green`):
+
+- **white / ivory / solid** → position matte. A corner flood-fill keeps the
+  connected background only (bright highlights *inside* the object survive, not
+  holed), then a decontaminated soft alpha feathers the border. Tune with
+  `--strength` (bevel removal), `--band` (edge depth), `--erode`.
+- **magenta / green key** → the project's verified `extract` chroma engine is
+  reused as-is. Key colours never appear in objects, so its colour-only cut is
+  safe there — exactly where a white matte's flood-fill guard is *not* needed.
+
+`--white-check` writes cyan/magenta/yellow composites so any leftover fringe
+shows loudly. For uniform backgrounds; not for complex/non-uniform ones.
 
 The full agent-facing workflow and contracts live in [`SKILL.md`](SKILL.md).
 

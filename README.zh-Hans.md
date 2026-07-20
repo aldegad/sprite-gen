@@ -20,11 +20,11 @@
 
 ---
 
-向图像模型请求一张“sprite sheet”，你知道会得到什么：每一帧脸都在变的角色、无法抠掉的背景、互相重叠并偏离网格的姿势，以及游戏引擎根本无法实际使用的 PNG。可爱的演示，没用的素材。
+让图像模型生成一张“sprite sheet”，你很清楚会得到什么：每一帧脸都在变的角色、无法抠掉的背景、相互重叠且偏离网格的姿势，以及游戏引擎实际上无法消费的 PNG。演示很可爱，素材却没法用。
 
-`sprite-gen` 是一个 Codex/Claude skill，用来弥合这个差距。给它**一张基础图像**和一组动作列表 —— 它会逐行驱动生成，锁定角色身份，把色键背景剥离成真正的 alpha，提取每个姿势为干净的透明帧，并烘焙出运行时图集，且带有机器可读的 `manifest.json.frame_layout`。上面的每个精灵都是这样制作的。
+`sprite-gen` 是一个 Codex/Claude skill，用来补上这个缺口。给它**一张基础图片**和一组动作列表 — 它会逐行驱动生成，锁定角色身份，把色键背景剥离成真正的 alpha，提取每个姿势为干净透明帧，并烘焙出运行时图集，附带机器可读的 `manifest.json.frame_layout`。上面的每个精灵都是这样制作的。
 
-而对于生成永远做不准的最后 10%，这里还有一个**策展 webview**：并排比较帧，拒绝坏帧，非破坏性地微调旋转/缩放/位置，实时观看循环 —— 然后烘焙。流水线负责苦活；你保留审美判断。
+而对于生成永远搞不准的最后 10%，这里还有一个**精选 webview**：并排比较帧、拒绝坏帧、以非破坏方式微调旋转/缩放/位置、实时观看循环 — 然后烘焙。流水线负责苦活；你保留审美判断。
 
 ```text
 sprite-request.json → layout guides + prompts → sprite-gen gen state rows
@@ -46,57 +46,57 @@ flowchart LR
 
 ## 你实际会得到什么
 
-- **透明精灵图集**（`sprite-sheet-alpha.png`）—— 真正的 alpha，没有残留色键边缘，并已在白色背景上验证。
-- **运行时 manifest**（`manifest.json.frame_layout`）—— 绝对帧矩形、每个状态的 fps 和循环标记。你的引擎采样矩形；它永远不需要猜网格。
-- **可观看的 QA** —— 每个状态的 GIF 和 contact sheet，因此在交付任何内容前，动作会按动作本身来评判。
-- **诚实的标签** —— 简短可读的动作（idle、jump、attack、wave）是稳定路径；循环移动（walk/run）除非动作 QA 真正通过，否则会标记为实验性。不会暗中夸大承诺。
+- **透明精灵图集**（`sprite-sheet-alpha.png`）— 真正的 alpha，没有残留色键边缘，并已针对白色背景验证。
+- **运行时 manifest**（`manifest.json.frame_layout`）— 绝对帧矩形、每个状态的 fps 和循环标记。你的引擎采样矩形；它永远不需要猜网格。
+- **可观看的 QA** — 每个状态的 GIF 和接触表，因此在发货前就以运动本身来判断运动。
+- **诚实的标签** — 简短可读的动作（idle、jump、attack、wave）是稳定路径；循环移动（walk/run）会标记为实验性，除非运动 QA 确实通过。不会悄悄过度承诺。
 
-## 色键 alpha 质量
+## Chroma alpha 质量
 
-提取器让色键清理保持确定性：soft-alpha unmix 会保留抗锯齿的发丝和细轮廓，而不是在能求解覆盖率之前就把它们剥掉。
+提取器保持色键清理的确定性：soft-alpha unmix 会保留抗锯齿的发丝和细轮廓，而不是在覆盖率求解之前就把它们剥掉。
 
 <p align="center">
   <img src="docs/assets/chroma-fullbody-illustration-magenta.png" width="640" alt="full-body chroma comparison: illustration on magenta key" /><br />
-  <em>插画，洋红色键：源图、v1.12.0 peel、v1.13.0 soft-alpha unmix。</em>
+  <em>插画，洋红色键：source、v1.12.0 peel、v1.13.0 soft-alpha unmix。</em>
 </p>
 
 <p align="center">
   <img src="docs/assets/chroma-fullbody-illustration-green.png" width="640" alt="full-body chroma comparison: illustration on green key" /><br />
-  <em>插画，绿色键：源图、v1.12.0 peel、v1.13.0 soft-alpha unmix。</em>
+  <em>插画，绿色键：source、v1.12.0 peel、v1.13.0 soft-alpha unmix。</em>
 </p>
 
 <p align="center">
   <img src="docs/assets/chroma-fullbody-pixelart-magenta.png" width="640" alt="full-body chroma comparison: pixel art on magenta key" /><br />
-  <em>像素画，洋红色键：源图、v1.12.0 peel、v1.13.0 binarized output。</em>
+  <em>像素画，洋红色键：source、v1.12.0 peel、v1.13.0 binarized output。</em>
 </p>
 
 <p align="center">
   <img src="docs/assets/chroma-fullbody-pixelart-green.png" width="640" alt="full-body chroma comparison: pixel art on green key" /><br />
-  <em>像素画，绿色键：源图、v1.12.0 peel、v1.13.0 binarized output。</em>
+  <em>像素画，绿色键：source、v1.12.0 peel、v1.13.0 binarized output。</em>
 </p>
 
-下面的特写裁切展示了全身对比背后的边缘细节。
+下面的近景裁剪展示了全身对比背后的边缘细节。
 
 ![chroma peel 前后对比 — 插画发丝](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![chroma peel 前后对比 — 像素画轮廓](docs/assets/chroma-peel-pixelart-before-after.png)
 
-## 策展 webview
+## 精选 webview
 
-生成能带你完成 90%。webview 是由人把它推进到*可交付*的地方 —— 独立运行，无需 Studio 或框架依赖，在安装了该 skill 的任何地方都能运行（Claude Code Desktop、Codex app、普通终端）。
+生成可以帮你完成 90%。webview 是人类把它推进到*可发货*的地方 — 独立运行，不依赖 Studio 或框架，在安装了该 skill 的任何地方都能运行（Claude Code Desktop、Codex app、普通终端）。
 
-![策展 webview — 角色](docs/assets/demo-character.gif)
+![curation webview — characters](docs/assets/demo-character.gif)
 
-- **每个状态两行：** 上方是**播放序列**，下方是**候选池**（例如第二次或第三次生成结果）。拖动帧的 ⠿ 把手来重新排序序列，或从候选池中拉一个片段上来 —— 用多次生成中最好的帧重建一个干净的奔跑循环。排列会被保存，所以重新打开时会恢复。
-- **每帧非破坏性变换**：拖动 = 移动，滚轮 = 缩放，顶部把手 = 旋转，左下 = 剪切，另有水平翻转开关用于左右反转输出。编辑保存在 `curation.json` sidecar 中 —— 源 PNG 永远不会被重写，compose 步骤会确定性地烘焙结果。预览和烘焙共享同一个仿射矩阵，所以你对齐的就是最终得到的。
-- **实时预览**会按状态 fps 播放序列，并带有播放/暂停、逐帧步进以及 0.25×–4× 速度控制。
-- 不只适用于精灵：用 `unpack_atlas_run.py --pngs-dir` 指向任意图像候选文件夹（图标、logo、生成草稿），它就能作为通用的优胜选择视图使用。
+- **每个状态两行：** 上方是**播放序列**，下方是**候选池**（例如第二次或第三次生成结果）。拖动某帧的 ⠿ 手柄来重排序列，或从候选池中拉取一个切图 — 从多次生成的最佳帧里重建一个干净的跑步循环。排列会被保存，因此重新打开时会恢复。
+- **每帧非破坏性变换**：拖动 = 移动，滚轮 = 缩放，顶部手柄 = 旋转，左下 = 剪切，另有水平翻转开关用于左右反转输出。编辑保存在 `curation.json` sidecar 中 — 源 PNG 永远不会被重写，compose 步骤会以确定性方式烘焙结果。预览和烘焙共享同一个仿射矩阵，所以你对齐的结果就是最终得到的结果。
+- **实时预览** 会以该状态的 fps 播放序列，支持播放/暂停、逐帧步进，以及 0.25×–4× 速度控制。
+- 不只适用于精灵：用 `unpack_atlas_run.py --pngs-dir` 指向任意图像候选文件夹（图标、logo、生成草稿），即可把它当作通用的“挑赢家”视图。
 
 ### 等距地面网格
 
-对于等距集合，webview 会叠加地板网格（来自 `meta.json` tile/anchor），这样你就能用剪切把手将家具吸附到菱形轴线上。
+对于等距素材集，webview 会叠加地面网格（来自 `meta.json` tile/anchor），这样你就可以通过剪切手柄把家具吸附到菱形轴线上。
 
-![策展 webview — 等距家具](docs/assets/demo-furniture.gif)
+![curation webview — isometric furniture](docs/assets/demo-furniture.gif)
 
 <img src="docs/assets/curator-iso.png" width="520" alt="isometric ground grid overlay" />
 
@@ -112,7 +112,7 @@ python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # or ko
 
 `sprite-gen` 支持 CPython 3.10+。CI 在 GitHub-hosted runners 上运行最低支持版本（3.10）和最新覆盖版本（3.14）。
 
-快速开始需要一个可用 `venv`/`ensurepip` 的 Python 安装。如果本地发行版在包安装前执行 `python3 -m venv` 失败，请使用任意受支持版本的标准 CPython 构建，然后重新运行相同命令。
+快速开始需要一个可正常使用 `venv`/`ensurepip` 的 Python 安装。如果本地发行版在安装包之前运行 `python3 -m venv` 就失败，请使用任意受支持版本的标准 CPython 构建，并重新运行相同命令。
 
 ## 快速开始
 
@@ -140,9 +140,9 @@ python3 scripts/serve_curation.py --run-dir <run-dir>
 python3 scripts/compose_sprite_atlas.py --run-dir <run-dir>
 ```
 
-### 编辑已完成的 sheet
+### 编辑已完成的图集
 
-当只剩合并后的 sheet 时，重建一个可用于 curator 的 run dir，然后策展并导出：
+当只剩下合成后的图集时，重建一个 curator-ready run dir，然后精选并导出：
 
 ```bash
 # rebuild frames: explicit --grid, --manifest rectangles, or alpha auto-detect (default)
@@ -154,45 +154,54 @@ python3 scripts/unpack_atlas_run.py --pngs-dir furniture/        # import a loos
 python3 scripts/export_curated_pngs.py --run-dir <run-dir>
 ```
 
-输出默认会写入输入旁边一个易于找到的 `<source>-curator` 文件夹。
+输出默认会写到输入旁边一个容易找到的 `<source>-curator` 文件夹。
 
-### 从导入图像中切掉背景
+### 从导入图片中切掉背景
 
-生成的精灵会在流水线内部从自己的洋红/绿色背景中抠出，
-所以它们永远不需要这个。`cutout` 是导入/后期编辑工具：一张
-带有不透明纯色背景的图像（手绘图标、
+生成的精灵会在流水线内部从自身的洋红/绿色背景中抠出，
+因此它们永远不需要这个。`cutout` 是导入/后期编辑工具：一张
+带有不透明均匀背景的图片（手绘图标、
 下载的精灵、截图）会被转换成干净的透明 PNG。
 
 ```bash
-# uniform white / ivory / solid background -> transparent RGBA
+# routes on the corner colour: white/ivory -> matte, magenta/green -> extract engine
 python3 -m sprite_gen.cli cutout icon.png --white-check
 ```
 
-它会从角落估算背景颜色，按位置对连通背景进行 flood-fill（因此物体*内部*的明亮高光会被保留，
-不会被打成空洞），然后用去污染的 soft alpha 羽化边界。`--white-check` 会写出青色/洋红/黄色合成图，让任何残留边缘都清晰暴露。可用 `--strength`（斜边移除）、`--band`（边缘深度）和 `--erode` 调整。不适用于复杂/非均匀背景。
+它会读取角落背景颜色并路由（`--key auto|white|magenta|green`）：
+
+- **white / ivory / solid** → position matte。角落 flood-fill 只保留
+  连通背景（物体*内部*的明亮高光会保留，不会被挖洞），然后去污染的 soft alpha
+  羽化边缘。可用 `--strength`（斜边移除）、`--band`（边缘深度）、`--erode` 调整。
+- **magenta / green key** → 复用项目已验证的 `extract` chroma engine。
+  key colours 永远不会出现在物体中，所以它的纯颜色切除在那里是
+  安全的 — 正好也是 white matte 的 flood-fill guard *不*需要的地方。
+
+`--white-check` 会写出青色/洋红/黄色合成图，让任何残留边缘都明显暴露。
+适用于均匀背景；不适用于复杂/非均匀背景。
 
 完整的面向 agent 的工作流和契约位于 [`SKILL.md`](SKILL.md)。
 
 ## 安装
 
-在 Codex skill installer 工作流中，将此仓库安装为 root skill：
+从 Codex skill installer 工作流中，将此仓库安装为 root skill：
 
 ```bash
 python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
   --repo aldegad/sprite-gen --path .
 ```
 
-### 图像生成所有权
+### 图像生成归属
 
-由 provider 支持的生成是该引擎（`sprite_gen.gen`）的一部分，
-支持的 provider 为 `codex` 和 `grok`。通用 `image-gen` skill
-只是通往同一命令的轻量转发，因此不需要第二套 provider
-实现。有关 CLI 和验证契约，请参见 [`docs/gen.md`](docs/gen.md)。
+Provider-backed generation 是该引擎（`sprite_gen.gen`）的一部分，
+支持的 providers 为 `codex` 和 `grok`。通用 `image-gen` skill
+只是到同一命令的一层薄 shuttle，因此不需要第二套 provider
+实现。CLI 和验证契约见 [`docs/gen.md`](docs/gen.md)。
 
-## 署名
+## 归属说明
 
-component-row 工作流受 Apache-2.0 授权的 `hatch-pet` skill 启发，但目标是通用游戏精灵图集，并且不包含任何 pet 包或 pet 视觉资产。
+component-row 工作流受 Apache-2.0 许可的 `hatch-pet` skill 启发，但目标是通用游戏精灵图集，不包含任何 pet packages 或 pet visual assets。
 
-## 许可证
+## License
 
 Apache-2.0
