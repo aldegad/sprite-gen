@@ -5,6 +5,17 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.80 "Sol Retry Brake" - Stop deterministic heal retry loops
+
+- A failed engine-update heal no longer restarts the same full extraction on every
+  curator poll. The failure is keyed by engine plus request, curation, manifest,
+  and raw inputs; unchanged inputs keep the previous complete frame generation
+  visible and surface the failed rows instead of looping from ~80% back to 0%.
+- Existing `extract-failure.json` evidence applies across curator server restarts,
+  while an engine or source-input change permits a fresh attempt. Regression tests
+  cover both the in-process polling loop and restart continuity (founder_v7 incident,
+  Soohong 2026-07-21).
+
 ## v1.56.79 "Sol Router" - cutout routes white vs key-colour backgrounds
 
 - **`cutout` becomes the unified imported-image entry point** (Soohong

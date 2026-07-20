@@ -576,18 +576,76 @@ _heal_lock = threading.Lock()
 
 
 _HEAL_GRACE_SECONDS = 1.5  # 신선 케이스(해시 비교 ms)는 이 안에 끝난다 — 그 이상이면 장기 heal
-_heal_state: dict = {"thread": None, "pending_report": None}
+_heal_state: dict = {"thread": None, "pending_report": None, "failed_attempt": None}
 
 
-def _run_heal(run_dir: Path) -> None:
+def _heal_attempt_key(run_dir: Path) -> tuple:
+    """재시도 여부를 가르는 엔진+입력 스냅샷.
+
+    결정론적으로 실패한 heal 을 같은 입력으로 계속 재실행하면 진행률이 끝에서
+    0%로 돌아가는 무한 루프가 된다. 엔진이나 실제 재료가 바뀐 경우에만 새
+    시도로 보도록 request/curation/manifest 와 raw 파일 stat 을 묶는다.
+    """
+    from extract import engine_revision
+
+    paths = [run_dir / "sprite-request.json", run_dir / "curation.json",
+             run_dir / "frames" / "frames-manifest.json"]
+    raw_dir = run_dir / "raw"
+    if raw_dir.is_dir():
+        paths.extend(path for path in raw_dir.rglob("*") if path.is_file())
+    fingerprints = []
+    for path in sorted(paths, key=lambda item: item.as_posix()):
+        try:
+            stat = path.stat()
+            fingerprints.append((path.relative_to(run_dir).as_posix(),
+                                 stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            fingerprints.append((path.relative_to(run_dir).as_posix(), None, None))
+    return engine_revision(), tuple(fingerprints)
+
+
+def _durable_failed_heal_report(run_dir: Path, attempt_key: tuple) -> dict | None:
+    """현재 입력으로 이미 실패한 extract 증거가 있으면 재실행하지 않는다.
+
+    extract-failure.json 은 실패한 원자적 배포가 남기는 canonical evidence 다.
+    실패 파일이 모든 입력보다 새롭고 엔진 리비전도 같으면 서버 재기동 뒤에도
+    같은 실패를 다시 태우지 않고 이전 세대를 열어 준다.
+    """
+    failure_path = run_dir / "extract-failure.json"
+    try:
+        failure_stat = failure_path.stat()
+        failure = json.loads(failure_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if failure.get("ok") is not False or failure.get("engine_revision") != attempt_key[0]:
+        return None
+    input_mtimes = [entry[1] for entry in attempt_key[1] if entry[1] is not None]
+    if input_mtimes and failure_stat.st_mtime_ns < max(input_mtimes):
+        return None
+    failed = sorted({str(row.get("state")) for row in failure.get("rows", [])
+                     if row.get("state") and row.get("ok") is False})
+    if not failed:
+        failed = sorted({str(error).split(":", 1)[0] for error in failure.get("errors", [])
+                         if ":" in str(error)})
+    return {"healed": [], "kept_stale": [], "failed": failed,
+            "notes": ["same engine/input already failed validation; previous frames kept"]}
+
+
+def _run_heal(run_dir: Path, attempt_key: tuple) -> None:
+    attempt_failed = False
     try:
         report = heal_run(run_dir)
     except (Exception, SystemExit) as exc:
+        attempt_failed = True
         report = {"healed": [], "kept_stale": [], "failed": [],
                   "notes": [f"heal skipped: {exc}"]}
     with _heal_lock:
         if report["healed"] or report["kept_stale"] or report.get("failed") or report["notes"]:
             _heal_state["pending_report"] = report
+        if report.get("failed") or attempt_failed:
+            _heal_state["failed_attempt"] = attempt_key
+        elif _heal_state["failed_attempt"] == attempt_key:
+            _heal_state["failed_attempt"] = None
         _heal_state["thread"] = None
 
 
@@ -612,10 +670,19 @@ def maybe_heal(run_dir: Path) -> bool:
     /api/run 첨부가 유실되던 경쟁을 막는다 (validator kongkongi 재현,
     2026-07-20 — 단일 소비자 원칙).
     """
+    attempt_key = _heal_attempt_key(run_dir)
     with _heal_lock:
         thread = _heal_state["thread"]
         if thread is None or not thread.is_alive():
-            thread = threading.Thread(target=_run_heal, args=(run_dir,), daemon=True)
+            if _heal_state["failed_attempt"] == attempt_key:
+                return False
+            prior_failure = _durable_failed_heal_report(run_dir, attempt_key)
+            if prior_failure is not None:
+                _heal_state["failed_attempt"] = attempt_key
+                if _heal_state["pending_report"] is None:
+                    _heal_state["pending_report"] = prior_failure
+                return False
+            thread = threading.Thread(target=_run_heal, args=(run_dir, attempt_key), daemon=True)
             _heal_state["thread"] = thread
             thread.start()
     thread.join(timeout=_HEAL_GRACE_SECONDS)
