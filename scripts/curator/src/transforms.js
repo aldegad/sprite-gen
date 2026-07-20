@@ -186,8 +186,10 @@ function wireStage(stage, stateName, idx) {
 // grip lives in `.card-top`, outside `.stage`, so it never collides with the
 // stage's move/scale/rotate/shear drags.
 
-// 확대 스크러버 (‹🔍› 형태, 이모지 아님 — SVG): 화살표 클릭 = 스텝, 돋보기 드래그 = 연속.
-// 맥 터치패드에서 휠-스케일이 불편해 추가 (휠도 계속 동작).
+// 스프라이트 크기 스크러버 (‹⤢› 형태, 이모지 아님 — SVG): 화살표 클릭 = 스텝,
+// 가운데 아이콘 드래그 = 연속. 맥 터치패드에서 휠-스케일이 불편해 추가.
+// 아이콘 = 대각 리사이즈 — 돋보기는 "화면 배율"(view-nav.js) 전용 어휘라 여기 금지
+// (수홍 지시 2026-07-20: 돋보기로 하니까 확대축소 보기로 오해).
 function makeScaleScrub(stateName, idx) {
   const wrap = document.createElement("span");
   wrap.className = "scale-scrub";
@@ -197,9 +199,8 @@ function makeScaleScrub(stateName, idx) {
     '<svg viewBox="0 0 10 10" width="9" height="9"><path d="M2 5h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>' +
     '<span class="ss-grab" aria-label="drag to scale">' +
     '<svg viewBox="0 0 16 16" width="13" height="13">' +
-    '<circle cx="7" cy="7" r="4.4" fill="none" stroke="currentColor" stroke-width="1.4"/>' +
-    '<path d="M7 5.2v3.6M5.2 7h3.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>' +
-    '<path d="M10.4 10.4 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>' +
+    '<path d="M9.8 3h3.2v3.2M6.2 13H3v-3.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<path d="M12.6 3.4 9.4 6.6M3.4 12.6l3.2-3.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span>' +
     '<button type="button" class="ghost ss-step" data-dir="1" aria-label="bigger">' +
     '<svg viewBox="0 0 10 10" width="9" height="9"><path d="M2 5h6M5 2v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
   const clamp = (v) => Math.min(SCALE_MAX, Math.max(SCALE_MIN, v));

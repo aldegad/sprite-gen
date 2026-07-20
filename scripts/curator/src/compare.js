@@ -94,7 +94,9 @@ function openCompare() {
     `<div class="cmp-hint">${t("cmpHint")}</div>` +
     `<div class="cmp-body">` +
     `<div class="cmp-list"></div>` +
-    `<div class="cmp-scroll"><div class="cmp-stage"><canvas class="cmp-canvas"></canvas><div class="cmp-guides"></div></div></div>` +
+    `<div class="cmp-viewwrap"><div class="cmp-scroll"><div class="stage-pad">` +
+    `<div class="cmp-stage"><canvas class="cmp-canvas"></canvas><div class="cmp-guides"></div></div>` +
+    `</div></div></div>` +
     `</div>` +
     `<div class="cmp-legend"></div>` +
     `</div>`;
@@ -244,6 +246,13 @@ function openCompare() {
   const render = () => {
     const { cells, W, H, z, pad } = layout();
     zoomLabel.textContent = `×${state.zoom}`;
+    modal.querySelectorAll(".view-nav .vn-label").forEach((el) => { el.textContent = `×${state.zoom}`; });
+    // 첫 유효 렌더에서 한 번 중앙 정렬 — 사방 패딩 뷰포트는 auto-margin 센터링이
+    // 없어 스크롤을 직접 놓아야 한다 (이미지 로드 후 콘텐츠가 커진 시점 기준).
+    if (!state._centered && cells.length) {
+      state._centered = true;
+      requestAnimationFrame(() => centerView(scrollEl, stageEl));
+    }
     canvas.width = W * z;
     canvas.height = H * z;
     canvas.style.width = `${W * z}px`;
@@ -359,23 +368,49 @@ function openCompare() {
 
   // 손 툴(토글) + Space 홀드 = 캔버스 팬 — 스크롤 컨테이너를 끈다 (수홍 2026-07-19).
   // wirePan 은 capture 라 스프라이트 드래그/가이드 추가보다 먼저 가로챈다.
+  // 2026-07-20 수홍: 3계층 계약 통일 — 뷰포트(.cmp-scroll) + 사방 패딩(자유 팬) +
+  // 커서 앵커 줌 + 돋보기 위젯. 공용 배선 = view-nav.js.
   let panTool = false;
   const stageEl = modal.querySelector(".cmp-stage");
   const scrollEl = modal.querySelector(".cmp-scroll");
+  const viewwrapEl = modal.querySelector(".cmp-viewwrap");
   const handBtn = modal.querySelector(".cmp-hand");
   handBtn.addEventListener("click", () => {
     panTool = !panTool;
     handBtn.classList.toggle("active", panTool);
-    stageEl.classList.toggle("pan-tool", panTool);
+    scrollEl.classList.toggle("pan-tool", panTool);
   });
-  wirePan(stageEl, scrollEl, () => panTool);
+  wirePan(scrollEl, scrollEl, () => panTool);
 
-  // 휠 = 배율
-  modal.querySelector(".cmp-stage").addEventListener("wheel", (ev) => {
-    ev.preventDefault();
-    state.zoom = Math.max(2, Math.min(16, state.zoom + (ev.deltaY < 0 ? 1 : -1)));
-    render();
+  // 배율: 휠(커서 앵커) + 돋보기 −/+/맞춤. 상한은 캔버스 물리 한계로 동적 클램프
+  // (W·H 는 콘텐츠 공간이라 줌과 무관 — canvas 픽셀 치수 = W×z 가 한계 대상).
+  const zoomMax = () => {
+    const { W, H } = layout();
+    return Math.max(2, Math.min(48, Math.floor(14000 / Math.max(1, W, H))));
+  };
+  const setZoom = (z, anchorX, anchorY) => {
+    z = Math.max(1, Math.min(zoomMax(), Math.round(z)));
+    if (z === state.zoom) return;
+    keepViewAnchor(scrollEl, stageEl, anchorX, anchorY, () => {
+      state.zoom = z;
+      render();
+    });
     persistCompare();
+  };
+  const fitZoom = () => {
+    const { W, H } = layout();
+    const vr = scrollEl.getBoundingClientRect();
+    setZoom(Math.floor(Math.min((vr.width - 40) / Math.max(1, W), (vr.height - 40) / Math.max(1, H))));
+    centerView(scrollEl, stageEl);
+  };
+  viewwrapEl.appendChild(makeViewNavWidget({
+    zoomOut: () => setZoom(state.zoom - 1),
+    zoomIn: () => setZoom(state.zoom + 1),
+    fit: fitZoom,
+  }, { corner: true }));
+  scrollEl.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    setZoom(state.zoom + (ev.deltaY < 0 ? 1 : -1), ev.clientX, ev.clientY);
   }, { passive: false });
 
   const onKey = (ev) => {
