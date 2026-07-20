@@ -163,6 +163,10 @@ pipeline, so they never need this. `cutout` is the import/post-edit utility: an
 image that arrived *with* an opaque uniform background (a hand-drawn icon, a
 downloaded sprite, a screenshot) is turned into a clean transparent PNG.
 
+<p align="center">
+  <img src="docs/assets/cutout-demo.png" width="720" alt="cutout: a white-background game icon turned into a clean transparent PNG, glass highlights preserved" />
+</p>
+
 ```bash
 # routes on the corner colour: white/ivory -> matte, magenta/green -> extract engine
 python3 -m sprite_gen.cli cutout icon.png --white-check
