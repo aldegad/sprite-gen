@@ -62,6 +62,14 @@ async function boot() {
   }
   document.getElementById("character").textContent = `${run.characterId} · ${run.cell.width}×${run.cell.height}`;
   if (run.iso) gridToggle.hidden = false;
+  // 온디맨드 프리뷰 예산에 밀린 수 — 서버가 pixelPreviewDeferred 로 보고한다.
+  // JSON 에만 두면 사용자에겐 조용한 캡이라 헤더에 그대로 보여준다 (No Silent Fallback).
+  const ppDeferredEl = document.getElementById("pp-deferred");
+  if (ppDeferredEl) {
+    const deferred = run.pixelPreviewDeferred || 0;
+    ppDeferredEl.hidden = deferred === 0;
+    if (deferred > 0) ppDeferredEl.textContent = STR[lang].ppDeferred(deferred);
+  }
   if (ppAvailable) {
     const ppWrap = document.getElementById("pp-wrap");
     const ppCheck = document.getElementById("pp-apply");
