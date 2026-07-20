@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.56.75
+version: 1.56.76
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick."
 license: Apache-2.0
 depends_on:
@@ -102,6 +102,7 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 - `serve_curation.py` — standalone curation webview for one run dir (works from Claude Code Desktop, the Codex app, or any host with the skill).
 - `unpack_atlas_run.py` — inverse of compose: rebuild a curator-ready run dir from a finished sheet (`--grid` > `--manifest` > auto-detect) or import a PNG folder (`--pngs-dir`, with sibling `meta.json` labels/iso grid).
 - `export_curated_pngs.py` — export curated frames back to named PNGs with the transform baked in, into `<run-dir>/curated/`; the deliverable for imported still sets.
+- `cutout.py` (`sprite-gen cutout`) — matte background remover for **imported** images (not pipeline output, which is already keyed): estimate the corner background colour → flood-fill the connected background by position (interior bright highlights preserved, not holed) → decontaminated soft-alpha border + soft erode. `--white-check` writes cyan/magenta/yellow verification composites. For uniform white/ivory/solid backgrounds only; No Silent Fallback (leftover non-zero RGB under transparency raises).
 - `slice_sheet_cells.py` — slice a multi-figure grid sheet (same character, N expressions/variants in one image) into per-cell standing cuts: v1.13 chroma alpha + centroid cell assignment + merged-figure split/in-cell re-label + neighbour-debris drop + per-cell height normalization + shared feet baseline. For dialogue cut-in portraits (立ち絵), not animation rows. Detail: [`docs/sheet-slicing.md`](docs/sheet-slicing.md).
 - `check_visible_magenta.py` — optional screenshot QA guard for visible chroma-key leakage.
 

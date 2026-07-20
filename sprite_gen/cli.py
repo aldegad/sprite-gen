@@ -12,6 +12,7 @@ from sprite_gen import (
     compose_cycle,
     compose_gif,
     correction_loop,
+    cutout,
     export_pngs,
     extract,
     gen,
@@ -197,6 +198,10 @@ def _add_gen(p: argparse.ArgumentParser) -> None:
     gen.add_arguments(p)
 
 
+def _add_cutout(p: argparse.ArgumentParser) -> None:
+    cutout.add_arguments(p)
+
+
 def _add_correction_loop(p: argparse.ArgumentParser) -> None:
     p.add_argument("--run-dir", required=True, type=Path)
     p.add_argument("--states", default="all")
@@ -238,6 +243,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Generate one image via a provider (codex image_gen / grok Imagine) into a verified PNG.",
         _add_gen,
         gen.run,
+    ),
+    "cutout": (
+        "Cut a uniform (white/ivory/solid) background off an imported image into a clean transparent PNG.",
+        _add_cutout,
+        cutout.run,
     ),
     "inspect": ("Inspect sprite rows for frame-count, identity, and motion defects.", _add_inspect, inspect.run),
     "score": ("Score a sprite inspect report and emit correction hints.", _add_score, score.run),

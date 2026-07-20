@@ -156,6 +156,25 @@ python3 scripts/export_curated_pngs.py --run-dir <run-dir>
 
 Output defaults to a findable `<source>-curator` folder next to the input.
 
+### Cutting a background off an imported image
+
+Generated sprites are keyed off their own magenta/green background inside the
+pipeline, so they never need this. `cutout` is the import/post-edit utility: an
+image that arrived *with* an opaque uniform background (a hand-drawn icon, a
+downloaded sprite, a screenshot) is turned into a clean transparent PNG.
+
+```bash
+# uniform white / ivory / solid background -> transparent RGBA
+python3 -m sprite_gen.cli cutout icon.png --white-check
+```
+
+It estimates the background colour from the corners, flood-fills the connected
+background by position (so bright highlights *inside* the object are preserved,
+not punched into holes), then feathers the border with a decontaminated soft
+alpha. `--white-check` writes cyan/magenta/yellow composites so any leftover
+fringe shows loudly. Tune with `--strength` (bevel removal), `--band` (edge
+depth), and `--erode`. Not for complex/non-uniform backgrounds.
+
 The full agent-facing workflow and contracts live in [`SKILL.md`](SKILL.md).
 
 ## Install
