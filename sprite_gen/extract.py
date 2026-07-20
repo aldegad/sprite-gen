@@ -15,7 +15,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 from sprite_gen.layout import frames_dir_rel, raw_rel, take_raw_rel
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, publish_guard, relative_posix, release_run_dir_lock
@@ -390,17 +390,24 @@ def _flood_clear_background_ycc(out: Image.Image, source: Image.Image, key_cb: f
     if width < 3 or height < 3:
         return
     src_pixels = source.load()
-    out_pixels = out.load()
     visited = bytearray(width * height)
     stack: list[int] = []
+    # floodable(rgb) 는 픽셀값의 순수 함수 (키·톨은 고정) — 색값으로 메모이즈하면
+    # 지배적인 단색 배경의 float 판정(rgb→ycc, hypot)을 색당 한 번만 돈다. 판정
+    # 결과가 동일하므로 방문 집합·클리어 결과가 **바이트 동일**하다.
+    flood_cache: dict[tuple[int, int, int], bool] = {}
 
     def push(x: int, y: int) -> None:
         position = y * width + x
         if visited[position]:
             return
-        red, green, blue = src_pixels[x, y][:3]
-        _, cb, cr = rgb_to_ycc(red, green, blue)
-        if math.hypot(cb - key_cb, cr - key_cr) <= _YCC_FLOOD_TOL:
+        rgb = src_pixels[x, y][:3]
+        ok = flood_cache.get(rgb)
+        if ok is None:
+            _, cb, cr = rgb_to_ycc(rgb[0], rgb[1], rgb[2])
+            ok = math.hypot(cb - key_cb, cr - key_cr) <= _YCC_FLOOD_TOL
+            flood_cache[rgb] = ok
+        if ok:
             visited[position] = 1
             stack.append(position)
 
@@ -410,11 +417,12 @@ def _flood_clear_background_ycc(out: Image.Image, source: Image.Image, key_cb: f
     for y in range(height):
         push(0, y)
         push(width - 1, y)
+    # 클리어 대상 = 방문 집합과 정확히 동일 (모든 방문 픽셀이 정확히 한 번 pop 되어
+    # 알파 0 이 된다). 그래서 루프에서 픽셀별로 지우지 않고 방문 집합만 확정한 뒤
+    # 마지막에 PIL 마스크로 한 번에 지운다 — RGB 불변, ~90만 PixelAccess 왕복 제거.
     while stack:
         position = stack.pop()
         x, y = position % width, position // width
-        red, green, blue, _ = out_pixels[x, y]
-        out_pixels[x, y] = (red, green, blue, 0)
         if x > 0:
             push(x - 1, y)
         if x < width - 1:
@@ -423,6 +431,13 @@ def _flood_clear_background_ycc(out: Image.Image, source: Image.Image, key_cb: f
             push(x, y - 1)
         if y < height - 1:
             push(x, y + 1)
+    # 방문 집합을 마스크로 알파만 0 으로 (RGB 불변). 원본의 픽셀별 클리어와 동일 결과.
+    # visited 는 0/1 → 하드 마스크로 쓰려면 0/255 로 (paste 마스크는 알파 블렌드).
+    clear_mask = Image.frombuffer("L", (width, height), bytes(visited), "raw", "L", 0, 1)
+    clear_mask = clear_mask.point(lambda v: 255 if v else 0)
+    alpha = out.getchannel("A")
+    alpha.paste(0, mask=clear_mask)
+    out.putalpha(alpha)
 
 
 def _matte_ycc(source: Image.Image, key: tuple[int, int, int]) -> tuple[Image.Image, float]:
@@ -434,32 +449,47 @@ def _matte_ycc(source: Image.Image, key: tuple[int, int, int]) -> tuple[Image.Im
     """
     width, height = source.size
     out = Image.new("RGBA", source.size, (0, 0, 0, 0))
-    src_pixels = source.load()
-    out_pixels = out.load()
     _, key_cb, key_cr = rgb_to_ycc(*key)
     key_vb, key_vr = key_cb - 128.0, key_cr - 128.0
     key_len = math.hypot(key_vb, key_vr)
-    for y in range(height):
-        for x in range(width):
-            red, green, blue, alpha = src_pixels[x, y]
-            if alpha == 0:
-                continue
+    # 핫스팟 (상태당 추출의 ~1/3, 1280×720 전 픽셀). 매트 출력은 픽셀값 (r,g,b) 의
+    # 순수 함수(키는 고정) — 크로마 배경 스프라이트는 고유색이 적어 색값으로
+    # 메모이즈하면 같은 float 연산을 색당 한 번만 돈다. 산술은 **바이트 동일**.
+    # 캐시값: (despill 후 r, g, b, coverage). coverage<=0 이면 원본과 같이 건너뛴다.
+    cache: dict[tuple[int, int, int], tuple[int, int, int, float]] = {}
+    out_data = [(0, 0, 0, 0)] * (width * height)
+    src = list(source.getdata())
+    for i, px in enumerate(src):
+        alpha = px[3]
+        if alpha == 0:
+            continue
+        rgb = (px[0], px[1], px[2])
+        hit = cache.get(rgb)
+        if hit is None:
+            red, green, blue = rgb
             luma, cb, cr = rgb_to_ycc(red, green, blue)
             dist = math.hypot(cb - key_cb, cr - key_cr)
             coverage = smoothstep(_YCC_CHROMA_IN, _YCC_CHROMA_OUT, dist)
             if coverage <= 0:
-                continue
-            if key_len > 1 and dist < _YCC_DESPILL_BAND:
-                # Despill: subtract only the key-direction chroma component —
-                # colors orthogonal to the key keep their saturation.
-                pixel_vb, pixel_vr = cb - 128.0, cr - 128.0
-                proj = (pixel_vb * key_vb + pixel_vr * key_vr) / key_len
-                if proj > 0:
-                    weight = smoothstep(0.0, 1.0, (_YCC_DESPILL_BAND - dist) / _YCC_DESPILL_BAND) * _YCC_DESPILL_SCALE
-                    cb = 128.0 + (pixel_vb - key_vb / key_len * proj * weight)
-                    cr = 128.0 + (pixel_vr - key_vr / key_len * proj * weight)
-                    red, green, blue = ycc_to_rgb(luma, cb, cr)
-            out_pixels[x, y] = (red, green, blue, int(alpha * coverage))
+                hit = (0, 0, 0, coverage)
+            else:
+                if key_len > 1 and dist < _YCC_DESPILL_BAND:
+                    # Despill: subtract only the key-direction chroma component —
+                    # colors orthogonal to the key keep their saturation.
+                    pixel_vb, pixel_vr = cb - 128.0, cr - 128.0
+                    proj = (pixel_vb * key_vb + pixel_vr * key_vr) / key_len
+                    if proj > 0:
+                        weight = smoothstep(0.0, 1.0, (_YCC_DESPILL_BAND - dist) / _YCC_DESPILL_BAND) * _YCC_DESPILL_SCALE
+                        cb = 128.0 + (pixel_vb - key_vb / key_len * proj * weight)
+                        cr = 128.0 + (pixel_vr - key_vr / key_len * proj * weight)
+                        red, green, blue = ycc_to_rgb(luma, cb, cr)
+                hit = (red, green, blue, coverage)
+            cache[rgb] = hit
+        cov = hit[3]
+        if cov <= 0:
+            continue
+        out_data[i] = (hit[0], hit[1], hit[2], int(alpha * cov))
+    out.putdata(out_data)
     _flood_clear_background_ycc(out, source, key_cb, key_cr)
     opaque = sum(out.getchannel("A").histogram()[_YCC_ALPHA_EMPTY + 1 :])
     frac = opaque / (width * height) if width and height else 0.0
@@ -497,28 +527,29 @@ def _cleanup_alpha_ycc(image: Image.Image) -> None:
     width, height = image.size
     if width < 3 or height < 3:
         return
-    before = image.getchannel("A").tobytes()
-    pixels = image.load()
-
-    def opaque(x: int, y: int) -> int:
-        if x < 0 or y < 0 or x >= width or y >= height:
-            return 0
-        return 1 if before[y * width + x] > _YCC_ALPHA_EMPTY else 0
-
-    for y in range(height):
-        for x in range(width):
-            neighbors = (
-                opaque(x - 1, y) + opaque(x + 1, y) + opaque(x, y - 1) + opaque(x, y + 1)
-                + opaque(x - 1, y - 1) + opaque(x + 1, y - 1)
-                + opaque(x - 1, y + 1) + opaque(x + 1, y + 1)
-            )
-            if before[y * width + x] > _YCC_ALPHA_EMPTY:
-                if neighbors == 0:
-                    red, green, blue, _ = pixels[x, y]
-                    pixels[x, y] = (red, green, blue, 0)
-            elif neighbors >= 7:
-                red, green, blue, _ = pixels[x, y]
-                pixels[x, y] = (red, green, blue, 255)
+    # PIL 네이티브 스텐실 — 8이웃 불투명 카운트를 시프트-합으로 벡터화한다 (핫스팟:
+    # 상태당 추출의 ~17%, 1280×720 전체 순회). 정수 논리(임계 비교·이웃 카운트)라
+    # 픽셀 루프와 **바이트 동일**하며, numpy 없이 pillow 만으로 된다.
+    alpha = image.getchannel("A")
+    # op: 불투명 마스크 (0/1) — before 스냅샷과 같은 기준 (> EMPTY).
+    op = alpha.point(lambda a: 1 if a > _YCC_ALPHA_EMPTY else 0)
+    # 1px zero-pad 후 8방향 크롭으로 이웃을 꺼내 합산 (경계 밖 = 0, 정수 덧셈은 순서 무관).
+    padded = Image.new("L", (width + 2, height + 2), 0)
+    padded.paste(op, (1, 1))
+    neighbors = None
+    for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1),
+                   (-1, -1), (1, -1), (-1, 1), (1, 1)):
+        shifted = padded.crop((1 + dx, 1 + dy, 1 + dx + width, 1 + dy + height))
+        neighbors = shifted if neighbors is None else ImageChops.add(neighbors, shifted)
+    # combined = op*16 + neighbors (둘 다 작아 24 이하) → 단일 LUT 로 두 마스크 분리.
+    combined = ImageChops.add(op.point(lambda v: v * 16), neighbors)
+    clear_mask = combined.point(lambda v: 255 if (v >> 4) == 1 and (v & 15) == 0 else 0)
+    fill_mask = combined.point(lambda v: 255 if (v >> 4) == 0 and (v & 15) >= 7 else 0)
+    # 원본은 알파만 바꾼다 (RGB 불변) — 스냅샷에서 시작해 두 disjoint 마스크만 덮어쓴다.
+    new_alpha = alpha.copy()
+    new_alpha.paste(0, mask=clear_mask)
+    new_alpha.paste(255, mask=fill_mask)
+    image.putalpha(new_alpha)
 
 
 def remove_chroma_background_ycbcr(
@@ -1122,25 +1153,64 @@ def crosscheck_pitch_runlen(
 
 
 def _grid_uniformity(component: Image.Image, pitch: tuple[float, float],
-                     phase: tuple[float, float]) -> float:
-    """격자 가설의 셀 내부 색 분산 (낮을수록 진짜 격자). 불투명 픽셀만, 셀 크기 가중."""
-    xs = _grid_edges(component.width, pitch[0], phase[0])
-    ys = _grid_edges(component.height, pitch[1], phase[1])
-    px = component.load()
+                     phase: tuple[float, float],
+                     flat: list | None = None,
+                     width: int | None = None, height: int | None = None) -> float:
+    """격자 가설의 셀 내부 색 분산 (낮을수록 진짜 격자). 불투명 픽셀만, 셀 크기 가중.
+
+    핫스팟 (실측: 상태당 추출의 ~절반이 여기 — `_best_phase` 가 8×8 위상을 훑는다).
+    산술은 원본과 **바이트 동일**하게 유지한다 (같은 순서의 순차 float 덧셈·같은
+    정수합·같은 나눗셈). 최적화는 순전히 호출 오버헤드 제거다: (1) 프레임 픽셀을
+    행 우선 flat 리스트로 한 번만 실어 `_best_phase` 의 64회 호출이 재로딩하지 않게
+    하고, (2) `sum()`/제너레이터 대신 명시 누적 루프로 같은 순서의 덧셈을 돌린다.
+    """
+    w = component.width if width is None else width
+    h = component.height if height is None else height
+    if flat is None:
+        flat = list(component.getdata())
+    xs = _grid_edges(w, pitch[0], phase[0])
+    ys = _grid_edges(h, pitch[1], phase[1])
+    return _grid_score_edges(flat, w, h, xs, ys)
+
+
+def _grid_score_edges(flat: list, w: int, h: int,
+                      xs: list[int], ys: list[int]) -> float:
+    """`_grid_uniformity` 의 채점 코어 — 격자 경계가 이미 정해진 뒤의 순수 계산.
+
+    `_best_phase` 가 이 코어를 (xs, ys) 로 메모이즈한다: 8단계 위상 스캔은 `_grid_edges`
+    의 정수 스냅 때문에 서로 다른 위상이 **같은 정수 경계**로 자주 붕괴한다 (offset 이
+    피치의 1/4 미만이면 lead=0 등). 같은 경계 → 같은 계산 → 같은 값이므로 캐시는
+    바이트 동일하며, 64회 픽셀 순회가 고유 경계 수만큼으로 줄어든다.
+    """
     total_dev = 0.0
     total_n = 0
     for yi in range(len(ys) - 1):
+        y_lo, y_hi = ys[yi], min(ys[yi + 1], h)
         for xi in range(len(xs) - 1):
+            x_lo, x_hi = xs[xi], min(xs[xi + 1], w)
+            # 평균 패스 — 정수 채널합은 순서 무관·정확(CPython sum 정수 경로와 값 동일).
             acc = []
-            for y in range(ys[yi], min(ys[yi + 1], component.height)):
-                for x in range(xs[xi], min(xs[xi + 1], component.width)):
-                    q = px[x, y]
+            append = acc.append
+            s0 = s1 = s2 = 0
+            for y in range(y_lo, y_hi):
+                base = y * w
+                for x in range(x_lo, x_hi):
+                    q = flat[base + x]
                     if q[3] >= 128:
-                        acc.append(q[:3])
+                        r, g, b = q[0], q[1], q[2]
+                        append((r, g, b))
+                        s0 += r
+                        s1 += g
+                        s2 += b
             n = len(acc)
             if n < 2:
                 continue
-            mean = [sum(c[k] for c in acc) / n for k in range(3)]
+            # `mean = [sum(c[k])/n for k]` 와 값 동일 (같은 정수합 / 같은 n).
+            mean = [s0 / n, s1 / n, s2 / n]
+            # 편차는 원본과 **바이트 동일**해야 한다: CPython 3.12+ 의 sum() 은 float 에
+            # 대해 보정합(Neumaier)을 쓰므로 순진한 += 루프와 마지막 ULP 가 갈린다.
+            # 따라서 float 축약은 원본 제너레이터 표현을 글자 그대로 유지한다 (속도
+            # 이득은 flat 로드 hoist + 위상 메모이즈에서 이미 확보).
             dev = sum(sum(abs(c[k] - mean[k]) for k in range(3)) for c in acc) / n
             total_dev += dev * n
             total_n += n
@@ -1152,10 +1222,21 @@ def _best_phase(component: Image.Image, pitch: tuple[float, float]) -> tuple[flo
     best = (0.0, 0.0)
     best_score = None
     steps = 8
+    # 프레임 픽셀을 한 번만 실어 모든 위상이 공유한다 (재로딩 제거).
+    flat = list(component.getdata())
+    w, h = component.width, component.height
+    # (xs, ys) 정수 경계로 채점을 메모이즈 — 위상 스캔은 같은 경계로 자주 붕괴한다.
+    cache: dict[tuple, float] = {}
     for i in range(steps):
         for j in range(steps):
             phase = (pitch[0] * i / steps, pitch[1] * j / steps)
-            score = _grid_uniformity(component, pitch, phase)
+            xs = tuple(_grid_edges(w, pitch[0], phase[0]))
+            ys = tuple(_grid_edges(h, pitch[1], phase[1]))
+            key = (xs, ys)
+            score = cache.get(key)
+            if score is None:
+                score = _grid_score_edges(flat, w, h, xs, ys)
+                cache[key] = score
             if best_score is None or score < best_score:
                 best_score = score
                 best = phase
@@ -1263,15 +1344,26 @@ def _dominant_block_color(opaque: list, detail_bias: bool = False) -> tuple[int,
     hi = max(opaque, key=luma)
     centroids = [lo[:3], hi[:3]]
     assign = [0] * len(opaque)
+    # 정수 산술만 (제곱거리·정수합//count) — 순서 무관이라 명시 누적으로 바꿔도
+    # 원본과 값 동일하다. 제너레이터/`sum()` 호출 오버헤드만 제거.
     for _ in range(3):
+        c00, c01, c02 = centroids[0]
+        c10, c11, c12 = centroids[1]
         for i, p in enumerate(opaque):
-            d0 = sum((p[c] - centroids[0][c]) ** 2 for c in range(3))
-            d1 = sum((p[c] - centroids[1][c]) ** 2 for c in range(3))
+            p0, p1, p2 = p[0], p[1], p[2]
+            d0 = (p0 - c00) ** 2 + (p1 - c01) ** 2 + (p2 - c02) ** 2
+            d1 = (p0 - c10) ** 2 + (p1 - c11) ** 2 + (p2 - c12) ** 2
             assign[i] = 0 if d0 <= d1 else 1
         for cluster in (0, 1):
-            members = [p for i, p in enumerate(opaque) if assign[i] == cluster]
-            if members:
-                centroids[cluster] = tuple(sum(p[c] for p in members) // len(members) for c in range(3))
+            s0 = s1 = s2 = cnt = 0
+            for i, p in enumerate(opaque):
+                if assign[i] == cluster:
+                    s0 += p[0]
+                    s1 += p[1]
+                    s2 += p[2]
+                    cnt += 1
+            if cnt:
+                centroids[cluster] = (s0 // cnt, s1 // cnt, s2 // cnt)
     dominant = 0 if assign.count(0) >= assign.count(1) else 1
     if detail_bias:
         # 눈/아웃라인 같은 어두운 소수 디테일 보존: 두 클러스터의 명도차가 크고
