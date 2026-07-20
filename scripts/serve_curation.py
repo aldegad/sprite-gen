@@ -606,7 +606,11 @@ def maybe_heal(run_dir: Path) -> tuple[bool, dict | None]:
     단일 비행은 스레드 슬롯이 보장하고(동시 재추출 금지), heal 리포트는 유실
     없이 다음 성공 스냅샷에 1회 첨부된다. 실패는 뷰를 죽이지 않고 노트로 남는다.
 
-    반환: (busy, report) — busy=True 면 report 는 None.
+    반환: busy (bool). 리포트는 여기서 소비하지 않는다 — 소비자는
+    take_heal_report() 하나뿐이다 (/api/run 성공 스냅샷 경로). /api/progress
+    폴링이나 다운로드가 heal 완료 직후 먼저 도착하면 리포트를 먹어버려 다음
+    /api/run 첨부가 유실되던 경쟁을 막는다 (validator kongkongi 재현,
+    2026-07-20 — 단일 소비자 원칙).
     """
     with _heal_lock:
         thread = _heal_state["thread"]
@@ -615,12 +619,16 @@ def maybe_heal(run_dir: Path) -> tuple[bool, dict | None]:
             _heal_state["thread"] = thread
             thread.start()
     thread.join(timeout=_HEAL_GRACE_SECONDS)
-    if thread.is_alive():
-        return True, None
+    return thread.is_alive()
+
+
+def take_heal_report() -> dict | None:
+    """pending heal 리포트의 유일한 소비자 — /api/run 이 스냅샷을 성공적으로
+    만든 뒤에만 호출한다 (스냅샷 실패 시 리포트는 남아 다음 성공에 붙는다)."""
     with _heal_lock:
         report = _heal_state["pending_report"]
         _heal_state["pending_report"] = None
-    return False, report
+    return report
 
 
 def _zip_paths(base: Path, paths: list[Path]) -> bytes:
@@ -799,7 +807,7 @@ class CurationHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/run":
             try:
-                busy, heal = maybe_heal(self.run_dir)  # 실시간 계약: 스냅샷 전에 캐시 자가치유
+                busy = maybe_heal(self.run_dir)  # 실시간 계약: 스냅샷 전에 캐시 자가치유
                 if busy:
                     # 장기 heal 진행 중 — 첫 탭부터 진행률 로딩 UI 가 뜨도록 즉답
                     self._send_json({
@@ -810,6 +818,7 @@ class CurationHandler(BaseHTTPRequestHandler):
                         "progress": _read_op_progress(self.run_dir)}, 503)
                     return
                 snapshot = build_run_state(self.run_dir)
+                heal = take_heal_report()  # 스냅샷 성공 뒤에만 소비 (단일 소비자)
                 if heal:
                     snapshot["heal"] = heal
                 self._send_json(snapshot)
@@ -853,7 +862,7 @@ class CurationHandler(BaseHTTPRequestHandler):
                 scale = (query.get("scale") or ["4"])[0]
                 kind = f"gif:{state}:{scale}"
             try:
-                busy, _heal_report = maybe_heal(self.run_dir)
+                busy = maybe_heal(self.run_dir)  # 리포트 미소비 — 소비자는 /api/run 만
                 if busy:
                     self._send_json({
                         "error": "re-extraction in progress — retry the download "
@@ -884,7 +893,7 @@ class CurationHandler(BaseHTTPRequestHandler):
             try:
                 # 페이지가 열린 채 엔진이 바뀌어도 다음 폴에서 자가치유된다 —
                 # 프레임 세대가 바뀌면 runRevision 변화로 클라이언트가 리로드한다.
-                busy, _heal_report = maybe_heal(self.run_dir)
+                busy = maybe_heal(self.run_dir)  # 리포트 미소비 — 소비자는 /api/run 만
                 if busy:
                     # heal 이 publish 락을 쥔 동안 read_guard 에서 행 걸리지 않게 즉답
                     self._send_json({"busy": True,

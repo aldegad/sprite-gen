@@ -161,10 +161,12 @@ def test_view_heals_and_downloads_live_state(tmp_path: Path) -> None:
     _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
     import serve_curation
 
-    busy, heal = serve_curation.maybe_heal(run_dir)
+    busy = serve_curation.maybe_heal(run_dir)
     assert busy is False  # 소규모 heal 은 그레이스 안에 끝나 동기 경로 유지
+    heal = serve_curation.take_heal_report()  # 단일 소비자 (/api/run 역할)
     assert heal is not None and heal["healed"] == ["walk"]
-    assert serve_curation.maybe_heal(run_dir) == (False, None)  # 신선하면 no-op
+    assert serve_curation.maybe_heal(run_dir) is False  # 신선하면 no-op
+    assert serve_curation.take_heal_report() is None
 
     built = serve_curation.build_download(run_dir, "atlas")
     assert not isinstance(built, dict), built

@@ -5,6 +5,17 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.78 "Sol Single Reader" - Heal report single-consumer fix
+
+- **Heal report race fix** (validator kongkongi reject repro): `maybe_heal` used to
+  pop the pending heal report on every completed call — the already-open curator's
+  3s `/api/progress` tree poll (or a download) arriving right after a long heal
+  finished would consume the report, so the next `/api/run` snapshot silently lost
+  it. `maybe_heal` now returns busy only and never consumes; the single consumer is
+  `take_heal_report()`, called only after a successful `/api/run` snapshot build
+  (a failed build leaves the report for the next success). Regression guard:
+  `test_progress_poll_never_steals_the_heal_report`.
+
 ## v1.56.77 "Sol First Paint" - Long-op loading UX: heal off the request path
 
 - **Background heal + grace join** (Soohong 2026-07-20, plan `sprite-gen/long-op-loading-ux`):
