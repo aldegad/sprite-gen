@@ -27,12 +27,14 @@ import serve_curation  # noqa: E402
 def _reset_heal_state():
     serve_curation._heal_state["thread"] = None
     serve_curation._heal_state["pending_report"] = None
+    serve_curation._heal_state["failed_attempt"] = None
     yield
     thread = serve_curation._heal_state["thread"]
     if thread is not None:
         thread.join(timeout=10)
     serve_curation._heal_state["thread"] = None
     serve_curation._heal_state["pending_report"] = None
+    serve_curation._heal_state["failed_attempt"] = None
 
 
 def _walk_report(run_dir):
@@ -116,3 +118,44 @@ def test_heal_failure_is_observable_not_fatal(tmp_path: Path, monkeypatch) -> No
     report = serve_curation.take_heal_report()
     assert report is not None
     assert any("heal skipped" in note for note in report["notes"])
+    assert serve_curation.maybe_heal(tmp_path) is False
+
+
+def test_failed_heal_is_not_retried_until_inputs_change(tmp_path: Path, monkeypatch) -> None:
+    """결정론적 검증 실패를 폴링마다 재실행해 80%→0%가 반복되면 안 된다."""
+    request = tmp_path / "sprite-request.json"
+    request.write_text("{}\n", encoding="utf-8")
+    calls = []
+
+    def failed_heal(run_dir):
+        calls.append(run_dir)
+        return {"healed": [], "kept_stale": [], "failed": ["walk"],
+                "notes": ["validation failed"]}
+
+    monkeypatch.setattr(serve_curation, "heal_run", failed_heal)
+    assert serve_curation.maybe_heal(tmp_path) is False
+    assert len(calls) == 1
+    assert serve_curation.maybe_heal(tmp_path) is False
+    assert serve_curation.maybe_heal(tmp_path) is False
+    assert len(calls) == 1
+
+    request.write_text('{"changed": true}\n', encoding="utf-8")
+    assert serve_curation.maybe_heal(tmp_path) is False
+    assert len(calls) == 2
+
+
+def test_existing_failure_suppresses_retry_after_server_restart(tmp_path: Path, monkeypatch) -> None:
+    """extract-failure 증거는 프로세스 재기동 뒤에도 같은 시도를 막는다."""
+    request = tmp_path / "sprite-request.json"
+    request.write_text("{}\n", encoding="utf-8")
+    revision = serve_curation._heal_attempt_key(tmp_path)[0]
+    (tmp_path / "extract-failure.json").write_text(
+        '{"ok": false, "engine_revision": "' + revision
+        + '", "rows": [{"state": "walk", "ok": false}]}\n', encoding="utf-8")
+    called = []
+    monkeypatch.setattr(serve_curation, "heal_run", lambda run_dir: called.append(run_dir))
+
+    assert serve_curation.maybe_heal(tmp_path) is False
+    assert called == []
+    report = serve_curation.take_heal_report()
+    assert report is not None and report["failed"] == ["walk"]
