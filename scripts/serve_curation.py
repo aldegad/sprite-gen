@@ -242,6 +242,54 @@ def _read_op_progress(run_dir: Path) -> dict | None:
         return None
 
 
+_PIXEL_PREVIEW_DIR = ".pixel-preview"
+_PIXEL_PREVIEW_BUDGET = 24  # /api/run 한 번당 신규 검출·스냅 상한 (초과분은 deferred 로 보고)
+
+
+def _pixel_preview_meta(run_dir: Path, rel: str, budget: dict) -> dict:
+    """트윈(.plain/orig) 없는 프레임의 온디맨드 픽셀퍼펙트 프리뷰 (mtime 캐시).
+
+    임포트 세트·비 pp 런에서도 뷰의 픽셀퍼펙트 토글이 동작해야 한다 (수홍
+    2026-07-20, plan sprite-gen/per-frame-pixel-grid). 스냅은 파이프라인과 같은
+    프레임별 자체 검출 격자 정책이다. 검출 실패(이미 논리 해상도 픽셀아트 포함)는
+    프리뷰 없음으로 남긴다 — 가짜 격자 금지. 검출은 프레임당 수 초라 요청당
+    예산(_PIXEL_PREVIEW_BUDGET)으로 캡하고, 밀린 수는 스냅샷에 보고한다
+    (조용한 캡 금지 — 리로드가 이어서 계산한다)."""
+    src = run_dir / rel
+    try:
+        mtime = src.stat().st_mtime_ns
+    except OSError:
+        return {}
+    out_dir = run_dir / _PIXEL_PREVIEW_DIR
+    stem = rel.replace("/", "__")
+    meta_path = out_dir / (stem + ".json")
+    if meta_path.is_file():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if meta.get("mtime") == mtime:
+                return meta
+        except ValueError:
+            pass
+    if budget["left"] <= 0:
+        return {"deferred": True}
+    budget["left"] -= 1
+    from extract import binarize_alpha, detect_pixel_grid, grid_snap_downscale
+    with Image.open(src) as opened:
+        image = opened.convert("RGBA")
+    (pitch_x, pitch_y), (phase_x, phase_y) = detect_pixel_grid(image)
+    out_dir.mkdir(exist_ok=True)
+    if min(pitch_x, pitch_y) < 2.0:
+        meta = {"mtime": mtime, "pitch": None, "note": "no confident pixel grid"}
+    else:
+        snapped = binarize_alpha(grid_snap_downscale(
+            image, (pitch_x, pitch_y), detail_bias=True, phase=(phase_x, phase_y)))
+        snapped.save(out_dir / stem)
+        meta = {"mtime": mtime, "pitch": [round(pitch_x, 2), round(pitch_y, 2)],
+                "file": stem, "size": [snapped.width, snapped.height]}
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False) + "\n", encoding="utf-8")
+    return meta
+
+
 def build_run_state(run_dir: Path) -> dict:
     """Assemble the run snapshot the SPA needs. Read under the run dir's shared read_guard
     so a concurrent `--force` re-import (which holds the exclusive publish_guard for its
@@ -280,6 +328,8 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         pixel_perfect = {"logicalHeight": logical_height, "scale": scale, "source": "request", "label": f"{logical_height}px"}
 
     states = []
+    # 온디맨드 픽셀 프리뷰 계산 예산 (요청당) — 초과분은 deferred 로 세서 보고한다
+    preview_budget = {"left": _PIXEL_PREVIEW_BUDGET, "deferred": 0}
     for state, entry in request["states"].items():
         row = rows_by_state.get(state, {})
         files = row.get("files", [])
@@ -308,6 +358,15 @@ def _build_run_state_impl(run_dir: Path) -> dict:
                 frame["plainUrl"] = _url(*orig_rel.split("/"))
             elif (run_dir / plain_rel).is_file():
                 frame["plainUrl"] = _url(*plain_rel.split("/"))
+            elif present and Image is not None:
+                # 트윈 없는 프레임(임포트 세트·비 pp 런): 온디맨드 픽셀퍼펙트
+                # 프리뷰를 붙여 토글이 어디서나 동작하게 한다 (_pixel_preview_meta).
+                preview = _pixel_preview_meta(run_dir, rel, preview_budget)
+                if preview.get("file"):
+                    frame["pixelPreviewUrl"] = _url("run", _PIXEL_PREVIEW_DIR, preview["file"])
+                    frame["pixelPreviewPitch"] = preview["pitch"]
+                elif preview.get("deferred"):
+                    preview_budget["deferred"] += 1
             if index < len(labels):
                 frame["label"] = labels[index]
             # 추출이 검출한 실제 절단선 (쌍둥이 셀 좌표) — 원본 화질 뷰의 최종 대응
@@ -430,6 +489,8 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         # 아틀라스는 다운로드/합성 시점 산출물이라 mtime 을 실어 시점을 표시한다.
         "atlas": _atlas_info(run_dir),
         "fitPixelPerfect": bool((request.get("fit") or {}).get("pixel_perfect")),
+        # 예산에 밀려 아직 못 만든 온디맨드 픽셀 프리뷰 수 — 0 이 아니면 리로드가 이어서 계산
+        "pixelPreviewDeferred": preview_budget["deferred"],
         "contract": contract,
     }
 

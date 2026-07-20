@@ -28,7 +28,7 @@ function renderState(state, replaceEl) {
   // 같은 줄 우측 = 줄별 표시/굽기 컨트롤(픽셀 격자 · 픽셀퍼펙트 체크박스) — 이미지 바로 위.
   const hasRefs = state.refs && state.refs.length;
   const showGridToggle = gridCapableStates.has(state.name);
-  const showPpToggle = ppTwinStates.has(state.name);
+  const showPpToggle = ppTwinStates.has(state.name) || ppPreviewStates.has(state.name);
   const showGifBtn = state.frames && state.frames.some((f) => f.present);
   if (hasRefs || showGridToggle || showPpToggle || showGifBtn) {
     const refs = document.createElement("div");
