@@ -1,22 +1,30 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Matte-based background cutout for externally authored (imported) images.
+"""Background cutout for externally authored (imported) images — the unified
+post-edit entry point.
 
 The generation pipeline already renders onto a solid magenta/green key and keys
-it out (`gen/chroma.py`), so its own output never needs this. `cutout` is the
-post-edit / import utility: an image that arrived *with* an opaque uniform
-background (a hand-drawn icon, a downloaded sprite, a messenger screenshot) is
-turned into a clean transparent RGBA here.
+it out (`gen/chroma.py` / `extract.py`), so its own output never needs this.
+`cutout` is the import/post-edit utility: an image that arrived *with* an opaque
+uniform background (a hand-drawn icon, a downloaded sprite, a messenger
+screenshot) is turned into a clean transparent RGBA here.
 
-Pipeline (deterministic — same input + params always yields the same output):
+It routes on the corner background colour:
 
-1. estimate the background colour from the bright corner pixels,
-2. corner flood-fill to mark the connected background by **position** — an
-   object's own bright highlights (glass, white petals) are not connected to the
-   border, so they are preserved (a plain colour key would punch holes in them),
-3. within `band` px of the border, assign a continuous alpha from the colour
-   distance to the background, and decontaminate the residual background spill
-   with the alpha-composite inverse `F = (P - (1-a)*B) / a`,
-4. soft `erode` to shave the last bright bevel rim without a hard stair edge.
+- **white / ivory / bright achromatic** → position-based matte (this module).
+  A colour-only key would punch holes in the object's own bright highlights, so
+  a corner flood-fill marks the *connected* background by position; the border
+  gets a decontaminated soft alpha (`F = (P - (1-a)*B) / a`) + soft erode.
+- **magenta / green key colour** → the project's verified chroma engine
+  `extract.remove_chroma_background` is reused as-is (no reimplementation, no
+  drift). Key colours are absent from real objects, so that engine's colour-only
+  cut is safe there — the exact case a white matte's position guard is *not*
+  needed. Empirically (2026-07-20) feeding an ivory key to the extract engine
+  holes out bench stone / lamp glass; the two routes are deliberate.
+
+Sibling note: `unmix_key_blend`/`_matte_ycc` in `extract.py` and the matte
+despill here are the same "despill + soft edge" idea in two colour spaces
+(extract = CbCr chroma projection for saturated keys; here = RGB unmix for
+achromatic backgrounds). Keep them coherent when either edge path changes.
 
 No Silent Fallback: a transparent pixel that still carries non-zero RGB raises
 loudly (same contract as `gen/chroma.py`).
@@ -30,13 +38,24 @@ from typing import Any
 
 from PIL import Image
 
-# Defaults converged on a 4-icon reference set (tree/bench/flower/lamp, ivory bg).
+# Matte defaults converged on a 4-icon reference set (tree/bench/flower/lamp, ivory bg).
 STRENGTH_DEFAULT = 45  # LO: colour distance at/below which a border pixel is fully background
 HI_OFFSET = 60  # HI = STRENGTH + HI_OFFSET: distance at/above which a pixel is fully opaque
 BAND_DEFAULT = 6  # only pixels within this many px of the border get alpha/decontam; deeper interior is preserved verbatim
 ERODE_DEFAULT = 1.0  # soft-erode radius (fractional part shaves the last ring to partial alpha)
 CHROMA_TOLERANCE = 26  # flood-fill background membership: max per-channel diff from the estimated bg colour
 CORNER_MIN_BRIGHT = 225  # a corner pixel must be at least this bright (min channel) to seed the bg colour estimate
+
+# Key colours reused from the generation contract (chroma.py KEYS). The extract
+# engine keys these out; cutout only detects them and routes.
+KEY_TARGETS: dict[str, tuple[int, int, int]] = {
+    "magenta": (255, 0, 255),
+    "green": (0, 255, 0),
+}
+# extract.remove_chroma_background params — the extract CLI defaults (SSoT: extract.py argparse).
+_EXTRACT_KEY_THRESHOLD = 96.0
+_EXTRACT_FRINGE_THRESHOLD = 180.0
+_EXTRACT_FRINGE_DELTA = 18.0
 
 # 3-primary verification backgrounds — white fringe/spill shows loudest on these.
 WHITE_CHECK_COLORS: dict[str, tuple[int, int, int]] = {
@@ -69,6 +88,40 @@ def estimate_background(image: Image.Image) -> tuple[int, int, int]:
         sum(s[1] for s in samples) // n,
         sum(s[2] for s in samples) // n,
     )
+
+
+def _corner_average(image: Image.Image) -> tuple[int, int, int]:
+    """Raw average of the non-transparent corner pixels — no brightness filter.
+
+    Used for route detection so a saturated key colour (magenta/green, which the
+    bright-only `estimate_background` skips) is still seen.
+    """
+    width, height = image.size
+    px = image.load()
+    samples = [
+        px[x, y][:3]
+        for x, y in ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1))
+        if px[x, y][3] > 0
+    ]
+    if not samples:
+        return (248, 247, 242)
+    n = len(samples)
+    return tuple(sum(s[i] for s in samples) // n for i in range(3))  # type: ignore[return-value]
+
+
+def _detect_key_kind(color: tuple[int, int, int]) -> str:
+    """Classify a corner background colour into a route: magenta | green | white.
+
+    Saturated magenta/green keys route to the extract engine; everything else
+    (bright achromatic ivory/white, or any low-saturation background) routes to
+    the position-based matte.
+    """
+    r, g, b = color
+    if r >= 128 and b >= 128 and g <= 100 and (r - g) >= 60 and (b - g) >= 60:
+        return "magenta"
+    if g >= 128 and r <= 100 and b <= 100 and (g - r) >= 60 and (g - b) >= 60:
+        return "green"
+    return "white"
 
 
 def _background_mask(px: Any, width: int, height: int, bg: tuple[int, int, int], tol: int) -> bytearray:
@@ -154,27 +207,19 @@ def _clamp(value: int) -> int:
     return 0 if value < 0 else 255 if value > 255 else value
 
 
-def cutout(
+def _matte_route(
+    image: Image.Image,
     input_path: Path,
-    out_path: Path,
-    *,
-    strength: int = STRENGTH_DEFAULT,
-    band: int = BAND_DEFAULT,
-    erode: float = ERODE_DEFAULT,
-    tolerance: int = CHROMA_TOLERANCE,
-    white_check_dir: Path | None = None,
-) -> dict[str, Any]:
-    """Cut a uniform-background image to a clean transparent RGBA PNG.
-
-    Returns a stats dict. Raises SystemExit if any transparent pixel keeps non-zero
-    RGB (No Silent Fallback) or if the background could not be located.
-    """
-    image = Image.open(input_path).convert("RGBA")
+    strength: int,
+    band: int,
+    erode: float,
+    tolerance: int,
+) -> tuple[Image.Image, dict[str, Any]]:
+    """White/achromatic background → position flood-fill + decontaminated soft alpha."""
     width, height = image.size
     src = image.load()
     bg = estimate_background(image)
     mask = _background_mask(src, width, height, bg, tolerance)
-
     if not any(mask):
         raise SystemExit(
             f"cutout: no background located from corners in {input_path} "
@@ -213,6 +258,57 @@ def cutout(
                 dst[x, y] = (r, g, b, 255)
 
     _soft_erode(result, erode)
+    return result, {
+        "route": "matte",
+        "background": list(bg),
+        "strength": strength,
+        "band": band,
+        "erode": erode,
+        "keyed_pixels": keyed,
+        "decontaminated_pixels": decontaminated,
+    }
+
+
+def _extract_route(image: Image.Image, kind: str) -> tuple[Image.Image, dict[str, Any]]:
+    """Magenta/green key background → reuse the verified `extract` chroma engine (no drift)."""
+    from sprite_gen.extract import remove_chroma_background
+
+    target = KEY_TARGETS[kind]
+    result = remove_chroma_background(
+        image, target, _EXTRACT_KEY_THRESHOLD, _EXTRACT_FRINGE_THRESHOLD, _EXTRACT_FRINGE_DELTA
+    )
+    return result.convert("RGBA"), {"route": f"extract:{kind}", "chroma_key": list(target)}
+
+
+def cutout(
+    input_path: Path,
+    out_path: Path,
+    *,
+    key: str = "auto",
+    strength: int = STRENGTH_DEFAULT,
+    band: int = BAND_DEFAULT,
+    erode: float = ERODE_DEFAULT,
+    tolerance: int = CHROMA_TOLERANCE,
+    white_check_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Cut a uniform-background imported image to a clean transparent RGBA PNG.
+
+    `key`: "auto" (detect from corners) | "white" (matte) | "magenta" | "green"
+    (reuse the extract chroma engine). Returns a stats dict. Raises SystemExit if
+    the key is unknown, the background cannot be located, or any transparent pixel
+    keeps non-zero RGB (No Silent Fallback).
+    """
+    if key not in ("auto", "white", "magenta", "green"):
+        raise SystemExit(f"cutout: unknown key {key!r}; expected one of auto|white|magenta|green")
+
+    image = Image.open(input_path).convert("RGBA")
+    width, height = image.size
+
+    route = _detect_key_kind(_corner_average(image)) if key == "auto" else key
+    if route in ("magenta", "green"):
+        result, route_stats = _extract_route(image, route)
+    else:
+        result, route_stats = _matte_route(image, input_path, strength, band, erode, tolerance)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     result.save(out_path)
@@ -237,12 +333,8 @@ def cutout(
         "out": str(out_path),
         "mode": "RGBA",
         "size": f"{width}x{height}",
-        "background": bg,
-        "strength": strength,
-        "band": band,
-        "erode": erode,
-        "keyed_pixels": keyed,
-        "decontaminated_pixels": decontaminated,
+        "key": key,
+        **route_stats,
         "alpha_zero_pct": round(alpha_zero / total * 100, 2) if total else 0.0,
     }
 
@@ -262,21 +354,27 @@ def cutout(
 
 
 def add_arguments(p: Any) -> None:
-    p.add_argument("input", type=Path, help="image with a uniform (white/ivory/solid) background")
+    p.add_argument("input", type=Path, help="imported image with a uniform (white/ivory or magenta/green key) background")
     p.add_argument("--out", type=Path, help="output PNG (default: <input>_cutout.png)")
+    p.add_argument(
+        "--key",
+        choices=["auto", "white", "magenta", "green"],
+        default="auto",
+        help="background type; auto detects from corners (white→matte, magenta/green→extract engine)",
+    )
     p.add_argument(
         "--strength",
         type=int,
         default=STRENGTH_DEFAULT,
-        help=f"LO: bg colour-distance cutoff; higher removes brighter bevel (default {STRENGTH_DEFAULT})",
+        help=f"matte LO: bg colour-distance cutoff; higher removes brighter bevel (default {STRENGTH_DEFAULT})",
     )
-    p.add_argument("--band", type=int, default=BAND_DEFAULT, help=f"edge processing depth in px (default {BAND_DEFAULT})")
-    p.add_argument("--erode", type=float, default=ERODE_DEFAULT, help=f"soft erode radius in px (default {ERODE_DEFAULT})")
+    p.add_argument("--band", type=int, default=BAND_DEFAULT, help=f"matte edge processing depth in px (default {BAND_DEFAULT})")
+    p.add_argument("--erode", type=float, default=ERODE_DEFAULT, help=f"matte soft erode radius in px (default {ERODE_DEFAULT})")
     p.add_argument(
         "--tolerance",
         type=int,
         default=CHROMA_TOLERANCE,
-        help=f"flood-fill bg membership tolerance (default {CHROMA_TOLERANCE})",
+        help=f"matte flood-fill bg membership tolerance (default {CHROMA_TOLERANCE})",
     )
     p.add_argument(
         "--white-check",
@@ -294,6 +392,7 @@ def run(**kwargs: object) -> int:
     stats = cutout(
         input_path,
         out_path,
+        key=str(kwargs.get("key", "auto")),  # type: ignore[arg-type]
         strength=int(kwargs.get("strength", STRENGTH_DEFAULT)),  # type: ignore[arg-type]
         band=int(kwargs.get("band", BAND_DEFAULT)),  # type: ignore[arg-type]
         erode=float(kwargs.get("erode", ERODE_DEFAULT)),  # type: ignore[arg-type]
