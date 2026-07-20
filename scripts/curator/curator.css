@@ -911,7 +911,9 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   border-radius: 12px;
 }
 .zoom-head { display: flex; align-items: center; gap: 8px; }
-.zoom-head .zoom-title { font-weight: 600; font-size: 15px; margin-right: 6px; }
+/* 타이틀 = 복붙 대상 (수홍 2026-07-20: 프레임 이름을 블록 지정해 복사) — .card 의
+   user-select:none 상속을 풀어준다. 줌/비교/아카이브 모달 공통. */
+.zoom-head .zoom-title { font-weight: 600; font-size: 15px; margin-right: 6px; user-select: text; cursor: text; }
 .zoom-head .row-controls { margin-left: auto; display: inline-flex; gap: 8px; }
 /* flex 컨테이너(column)가 높이를 눌러 aspect-ratio 를 깨지 않게 — 확대는 뷰포트
    스크롤로 수용. (실사고 2026-07-14: flex-shrink 가 스테이지 높이만 줄여
