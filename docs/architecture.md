@@ -219,10 +219,15 @@ the code realizes it. The path is unfake.js/pixeldetector-style and contains
 1. **Pitch detection** — `detect_pixel_pitch()` scores each candidate pitch by
    edge-to-gridline alignment (the fraction of color boundaries landing within
    ±w of grid lines, minus the chance expectation `(2w+1)/p`) and takes the
-   argmax. Detection runs **per frame**; the **median** across frames becomes
-   the consensus pitch (multiple-of-pitch traps are avoided, outlier frames are
-   warned). If detection confidence is too low, `fit.pitch_hint` (usually the
-   base image's detected pitch) is used. `estimate_pixel_grid_runlen()` then
+   argmax. Detection runs **per frame** and **each frame is snapped with its
+   own detected pitch** (Soohong 2026-07-20, plan `sprite-gen/per-frame-pixel-grid`:
+   forcing a strip-wide pitch onto a frame accumulates the measurement gap
+   across the width and cuts through block centers). The **median** across
+   confident frames (collapse-filtered) is kept only as the fallback for frames
+   whose own detection is inconclusive — applying it emits a per-frame warning,
+   and a frame whose own pitch deviates from the consensus is warned, never
+   overridden. If every frame fails, `fit.pitch_hint` (usually the base
+   image's detected pitch) is used. `estimate_pixel_grid_runlen()` then
    derives an independent modal run-length estimate; `crosscheck_pitch_runlen()`
    records divisor/harmonic or axis-ratio disagreement as observable warnings.
    The run-length estimate is a crosscheck only and never silently replaces the
