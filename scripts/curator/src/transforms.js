@@ -89,6 +89,44 @@ function applyFrameTransformAll(stateName, idx) {
   }
 }
 
+// ── 변형 조작 히스토리 (수홍 2026-07-20 "커맨드제트 안 먹혀, 캐릭터 이동한 담에"):
+// 제스처(드래그 1회·클릭 1회) 단위 before/after 스냅샷. 이동/회전/시어/스케일/
+// 플립/리셋 전부 — 그리드 카드와 확대 모달 공통 (변형 truth 가 하나이므로 하나의
+// 전역 스택). Cmd+Z 라우팅 우선순위는 zoom-editor.js 소유: 호흡 > 픽셀 편집 > 변형.
+const transformHist = { list: [], pos: -1 };
+
+function tfSnapshot(stateName, idx) {
+  return { state: stateName, idx, tr: { ...getTransform(stateName, idx) } };
+}
+
+function pushTransformHist(before) {
+  const after = tfSnapshot(before.state, before.idx);
+  if (JSON.stringify(before.tr) === JSON.stringify(after.tr)) return; // 무변 제스처 = 잡음 금지
+  transformHist.list = transformHist.list.slice(0, transformHist.pos + 1);
+  transformHist.list.push({ before, after });
+  transformHist.pos = transformHist.list.length - 1;
+}
+
+function applyTfSnapshot(s) {
+  entries[s.state].transforms[editIndex(s.state, s.idx)] = { ...s.tr };
+  applyFrameTransformAll(s.state, s.idx);
+  scheduleSave();
+}
+
+function undoTransform() {
+  if (transformHist.pos < 0) return false;
+  applyTfSnapshot(transformHist.list[transformHist.pos].before);
+  transformHist.pos -= 1;
+  return true;
+}
+
+function redoTransform() {
+  if (transformHist.pos + 1 >= transformHist.list.length) return false;
+  transformHist.pos += 1;
+  applyTfSnapshot(transformHist.list[transformHist.pos].after);
+  return true;
+}
+
 function wireStage(stage, stateName, idx) {
   const ds = () => stage.clientWidth / run.cell.width;
 
@@ -97,6 +135,7 @@ function wireStage(stage, stateName, idx) {
     if (ev.target.classList.contains("rotate-handle")) return;
     ev.preventDefault();
     stage.setPointerCapture(ev.pointerId);
+    const before = tfSnapshot(stateName, idx);
     const t = getTransform(stateName, idx);
     const start = { x: ev.clientX, y: ev.clientY, dx: t.dx, dy: t.dy };
     let moved = false;
@@ -115,7 +154,10 @@ function wireStage(stage, stateName, idx) {
       stage.removeEventListener("pointerup", onUp);
       // 스테이지 클릭은 더 이상 시퀀스⇄풀 토글이 아니다 (수홍 2026-07-15): 실수로
       // 카드를 눌러 빠지는 걸 막는다. 이동은 넣기/빼기 버튼 또는 드래그로만.
-      if (moved) scheduleSave();
+      if (moved) {
+        pushTransformHist(before);
+        scheduleSave();
+      }
     };
     stage.addEventListener("pointermove", onMove);
     stage.addEventListener("pointerup", onUp);
@@ -129,6 +171,7 @@ function wireStage(stage, stateName, idx) {
     ev.preventDefault();
     ev.stopPropagation();
     handle.setPointerCapture(ev.pointerId);
+    const before = tfSnapshot(stateName, idx);
     const rect = stage.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
@@ -147,6 +190,7 @@ function wireStage(stage, stateName, idx) {
       handle.releasePointerCapture(ev.pointerId);
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onUp);
+      pushTransformHist(before);
       scheduleSave();
     };
     handle.addEventListener("pointermove", onMove);
@@ -159,6 +203,7 @@ function wireStage(stage, stateName, idx) {
     ev.preventDefault();
     ev.stopPropagation();
     shear.setPointerCapture(ev.pointerId);
+    const before = tfSnapshot(stateName, idx);
     const t = getTransform(stateName, idx);
     const start = { x: ev.clientX, y: ev.clientY, shx: t.shx || 0, shy: t.shy || 0 };
     const onMove = (e) => {
@@ -171,6 +216,7 @@ function wireStage(stage, stateName, idx) {
       shear.releasePointerCapture(ev.pointerId);
       shear.removeEventListener("pointermove", onMove);
       shear.removeEventListener("pointerup", onUp);
+      pushTransformHist(before);
       scheduleSave();
     };
     shear.addEventListener("pointermove", onMove);
@@ -212,9 +258,11 @@ function makeScaleScrub(stateName, idx) {
   wrap.querySelectorAll(".ss-step").forEach((btn) => {
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
     btn.addEventListener("click", () => {
+      const before = tfSnapshot(stateName, idx);
       const tr = getTransform(stateName, idx);
       tr.scale = clamp(tr.scale * (btn.dataset.dir === "1" ? 1.05 : 1 / 1.05));
       applyFrameTransformAll(stateName, idx);
+      pushTransformHist(before);
       scheduleSave();
     });
   });
@@ -224,6 +272,7 @@ function makeScaleScrub(stateName, idx) {
     ev.preventDefault();
     ev.stopPropagation();
     grab.setPointerCapture(ev.pointerId);
+    const before = tfSnapshot(stateName, idx);
     const tr = getTransform(stateName, idx);
     const startX = ev.clientX;
     const startScale = tr.scale;
@@ -235,6 +284,7 @@ function makeScaleScrub(stateName, idx) {
       grab.releasePointerCapture(ev.pointerId);
       grab.removeEventListener("pointermove", onMove);
       grab.removeEventListener("pointerup", onUp);
+      pushTransformHist(before);
       scheduleSave();
     };
     grab.addEventListener("pointermove", onMove);
@@ -244,18 +294,22 @@ function makeScaleScrub(stateName, idx) {
 }
 
 function resetTransform(stateName, idx) {
+  const before = tfSnapshot(stateName, idx);
   entries[stateName].transforms[editIndex(stateName, idx)] = IDENTITY();
   applyFrameTransformAll(stateName, idx);
+  pushTransformHist(before);
   scheduleSave();
 }
 
 function toggleFlipX(stateName, idx) {
   const entry = entries[stateName];
   if (!entry) return;
+  const before = tfSnapshot(stateName, idx);
   const key = editIndex(stateName, idx);
   if (!entry.transforms[key]) entry.transforms[key] = IDENTITY();
   entry.transforms[key].flipX = entry.transforms[key].flipX ? 0 : 1;
   // 모든 스테이지에 거울 반전을 렌더하고 flip 버튼을 강조한다.
   applyFrameTransformAll(stateName, idx);
+  pushTransformHist(before);
   scheduleSave();
 }

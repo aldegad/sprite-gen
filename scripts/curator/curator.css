@@ -476,7 +476,9 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
   aspect-ratio: var(--cell-aspect, 1);
   border-radius: 5px;
   overflow: hidden;
-  cursor: grab;
+  /* 스프라이트 드래그 = 이동(move) 커서 — 손(grab)은 뷰 팬 전용 어휘 (수홍 2026-07-20:
+     캐릭터 이동이 손 모양이라 직관적이지 않다). 팬 상태(pan-space/pan-tool)가 grab 으로 덮는다. */
+  cursor: move;
   background-color: var(--checker-a);
   background-image:
     linear-gradient(45deg, var(--checker-b) 25%, transparent 25%),
