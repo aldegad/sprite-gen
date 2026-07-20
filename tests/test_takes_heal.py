@@ -12,6 +12,7 @@ import json
 import random
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 import sprite_gen.extract as extract_module
@@ -144,7 +145,7 @@ def test_heal_keeps_stale_row_without_raw(tmp_path: Path) -> None:
     assert (run_dir / "frames" / "walk" / "frame-0.png").read_bytes() == frame_bytes
 
 
-def test_view_heals_and_downloads_live_state(tmp_path: Path) -> None:
+def test_view_heals_and_downloads_live_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """뷰/다운로드 계약: 스냅샷 요청이 stale 캐시를 자가치유하고, 버튼 3종은
     현재 라이브 상태를 계산해 zip 으로 내려준다 (게임 적용 의미 없음)."""
     import sys as _sys
@@ -161,6 +162,10 @@ def test_view_heals_and_downloads_live_state(tmp_path: Path) -> None:
     _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
     import serve_curation
 
+    # 결정론: 그레이스를 넉넉히 주입해 느린 CI 러너(관측: Python 3.10)에서도 소규모
+    # heal 이 동기 경로로 완료됨을 안정 검증한다. 프로덕션 그레이스(1.5s)는 무변 —
+    # 벽시계 1.5s 에 의존하던 flaky 실패 제거 (다람이 2026-07-21, heal 로직 무변).
+    monkeypatch.setattr(serve_curation, "_HEAL_GRACE_SECONDS", 60.0)
     busy = serve_curation.maybe_heal(run_dir)
     assert busy is False  # 소규모 heal 은 그레이스 안에 끝나 동기 경로 유지
     heal = serve_curation.take_heal_report()  # 단일 소비자 (/api/run 역할)
