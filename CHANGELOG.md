@@ -5,6 +5,25 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.79 "Sol Router" - cutout routes white vs key-colour backgrounds
+
+- **`cutout` becomes the unified imported-image entry point** (Soohong
+  2026-07-20, plan `sprite-gen/cutout-keycolor-routing`): it now reads the corner
+  background colour and routes (`--key auto|white|magenta|green`).
+- **white / ivory** → the existing position matte (corner flood-fill + decontam),
+  unchanged.
+- **magenta / green key** → reuse the verified `extract.remove_chroma_background`
+  engine **as-is**, no reimplementation. Empirically feeding an ivory key to that
+  engine holes out bench stone / lamp glass (it keys by colour distance with no
+  position guard); conversely key colours never appear in objects, so it is the
+  right tool there and the white matte's flood-fill guard is what white
+  backgrounds need instead. The two routes are deliberate, not a drift —
+  `cutout.py` ↔ `extract.py` carry a cross-reference note (same despill idea, two
+  colour spaces).
+- `cutout.py` imports `extract` lazily on the key-colour path only; the white
+  path pulls in nothing extra. No Silent Fallback contract preserved on both
+  routes.
+
 ## v1.56.78 "Sol Single Reader" - Heal report single-consumer fix
 
 - **Heal report race fix** (validator kongkongi reject repro): `maybe_heal` used to

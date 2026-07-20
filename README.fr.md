@@ -20,23 +20,23 @@
 
 ---
 
-Demandez à un modèle d’image une « feuille de sprites » et vous savez ce que vous obtenez : un personnage dont le visage change à chaque frame, un arrière-plan impossible à détourer, des poses qui se chevauchent et dérivent hors de la grille, et un PNG que votre moteur de jeu ne peut pas réellement consommer. Démo mignonne, ressource inutile.
+Demandez à un modèle d’image une "sprite sheet" et vous savez ce que vous obtenez : un personnage dont le visage change à chaque frame, un arrière-plan impossible à détourer par couleur clé, des poses qui se chevauchent et dérivent hors de la grille, et un PNG que votre moteur de jeu ne peut pas réellement consommer. Démo mignonne, ressource inutilisable.
 
-`sprite-gen` est une compétence Codex/Claude qui comble cet écart. Donnez-lui **une image de base** et une liste d’actions — elle pilote la génération ligne par ligne, verrouille l’identité du personnage, retire l’arrière-plan chroma en véritable alpha, extrait chaque pose comme une frame transparente propre, et produit un atlas d’exécution **avec un `manifest.json.frame_layout` lisible par machine**. Tous les sprites ci-dessus ont été créés ainsi.
+`sprite-gen` est une compétence Codex/Claude qui comble cet écart. Donnez-lui **une image de base** et une liste d’actions — elle pilote la génération rangée par rangée, verrouille l’identité du personnage, remplace l’arrière-plan chroma par une vraie alpha, extrait chaque pose sous forme de frame transparente propre, et produit un atlas runtime **avec un `manifest.json.frame_layout` lisible par machine**. Tous les sprites ci-dessus ont été créés de cette façon.
 
-Et pour les derniers 10 % que la génération ne réussit jamais tout à fait, il existe une **webview de curation** : comparez les frames côte à côte, rejetez celles qui sont cassées, ajustez rotation/échelle/position de façon non destructive, regardez la boucle en direct — puis produisez l’atlas. Le pipeline fait le travail ; vous gardez le goût.
+Et pour les derniers 10 % que la génération ne réussit jamais correctement, il y a une **webview de curation** : comparez les frames côte à côte, rejetez celles qui sont cassées, ajustez rotation/échelle/position de façon non destructive, regardez la boucle en direct — puis bakez. Le pipeline fait le travail ; vous gardez le goût.
 
 ```text
-sprite-request.json → guides de mise en page + prompts → sprite-gen gen lignes d’états
-→ alpha chroma → composants connectés → frames transparentes
+sprite-request.json → guides de mise en page + prompts → sprite-gen gen state rows
+→ chroma alpha → composants connexes → frames transparentes
 → sprite-sheet-alpha.png + manifest.json.frame_layout
 ```
 
 ```mermaid
 flowchart LR
     REQ["sprite-request.json<br/>(SSoT numérique)"] --> GUIDES["guides de mise en page<br/>+ prompts"]
-    GUIDES --> GEN["sprite-gen gen<br/>bandes de lignes d’états"]
-    GEN --> EXTRACT["alpha chroma →<br/>composants connectés"]
+    GUIDES --> GEN["sprite-gen gen<br/>bandes de rangées d’états"]
+    GEN --> EXTRACT["chroma alpha →<br/>composants connexes"]
     EXTRACT --> FRAMES["frames transparentes"]
     FRAMES --> ATLAS["sprite-sheet-alpha.png<br/>+ manifest.json.frame_layout"]
     FRAMES -. "webview de curation (optionnelle)" .-> ATLAS
@@ -46,63 +46,63 @@ flowchart LR
 
 ## Ce que vous obtenez réellement
 
-- **Un atlas de sprites transparent** (`sprite-sheet-alpha.png`) — véritable alpha, aucun résidu de frange chroma, vérifié sur arrière-plans blancs.
-- **Un manifeste d’exécution** (`manifest.json.frame_layout`) — rectangles de frames absolus, fps par état et indicateurs de boucle. Votre moteur échantillonne des rectangles ; il ne devine jamais une grille.
-- **Une QA que vous pouvez regarder** — GIFs par état et planches contact, pour juger le mouvement comme mouvement avant toute livraison.
-- **Des libellés honnêtes** — les actions courtes et lisibles (idle, jump, attack, wave) sont le chemin stable ; la locomotion cyclique (walk/run) est marquée expérimentale sauf si la QA du mouvement passe réellement. Pas de promesses silencieuses exagérées.
+- **Un atlas de sprites transparent** (`sprite-sheet-alpha.png`) — vraie alpha, aucun résidu de frange chroma, vérifié sur fonds blancs.
+- **Un manifeste runtime** (`manifest.json.frame_layout`) — rectangles de frames absolus, fps par état et indicateurs de boucle. Votre moteur échantillonne des rectangles ; il ne devine jamais une grille.
+- **Une QA que vous pouvez regarder** — GIFs par état et planches contact, pour que le mouvement soit jugé comme mouvement avant toute livraison.
+- **Des libellés honnêtes** — les actions courtes et lisibles (idle, jump, attack, wave) sont le chemin stable ; la locomotion cyclique (walk/run) est marquée expérimentale sauf si la QA du mouvement réussit réellement. Pas de promesses excessives silencieuses.
 
 ## Qualité de l’alpha chroma
 
-L’extracteur garde le nettoyage chroma déterministe : le démélange en alpha doux préserve les mèches de cheveux anticrénelées et les contours fins au lieu de les arracher avant que la couverture puisse être résolue.
+L’extracteur garde le nettoyage chroma déterministe : le démixage soft-alpha préserve les mèches de cheveux anticrénelées et les contours fins au lieu de les décoller avant que la couverture puisse être résolue.
 
 <p align="center">
-  <img src="docs/assets/chroma-fullbody-illustration-magenta.png" width="640" alt="comparaison chroma corps entier : illustration sur clé magenta" /><br />
-  <em>Illustration, clé magenta : source, suppression v1.12.0, démélange alpha doux v1.13.0.</em>
+  <img src="docs/assets/chroma-fullbody-illustration-magenta.png" width="640" alt="full-body chroma comparison: illustration on magenta key" /><br />
+  <em>Illustration, clé magenta : source, peel v1.12.0, démixage soft-alpha v1.13.0.</em>
 </p>
 
 <p align="center">
-  <img src="docs/assets/chroma-fullbody-illustration-green.png" width="640" alt="comparaison chroma corps entier : illustration sur clé verte" /><br />
-  <em>Illustration, clé verte : source, suppression v1.12.0, démélange alpha doux v1.13.0.</em>
+  <img src="docs/assets/chroma-fullbody-illustration-green.png" width="640" alt="full-body chroma comparison: illustration on green key" /><br />
+  <em>Illustration, clé verte : source, peel v1.12.0, démixage soft-alpha v1.13.0.</em>
 </p>
 
 <p align="center">
-  <img src="docs/assets/chroma-fullbody-pixelart-magenta.png" width="640" alt="comparaison chroma corps entier : pixel art sur clé magenta" /><br />
-  <em>Pixel art, clé magenta : source, suppression v1.12.0, sortie binarisée v1.13.0.</em>
+  <img src="docs/assets/chroma-fullbody-pixelart-magenta.png" width="640" alt="full-body chroma comparison: pixel art on magenta key" /><br />
+  <em>Pixel art, clé magenta : source, peel v1.12.0, sortie binarisée v1.13.0.</em>
 </p>
 
 <p align="center">
-  <img src="docs/assets/chroma-fullbody-pixelart-green.png" width="640" alt="comparaison chroma corps entier : pixel art sur clé verte" /><br />
-  <em>Pixel art, clé verte : source, suppression v1.12.0, sortie binarisée v1.13.0.</em>
+  <img src="docs/assets/chroma-fullbody-pixelart-green.png" width="640" alt="full-body chroma comparison: pixel art on green key" /><br />
+  <em>Pixel art, clé verte : source, peel v1.12.0, sortie binarisée v1.13.0.</em>
 </p>
 
-Les recadrages rapprochés ci-dessous montrent le détail des bords derrière les comparaisons corps entier.
+Les recadrages rapprochés ci-dessous montrent le détail des bords derrière les comparaisons en pied.
 
-![suppression chroma avant et après — mèche de cheveux illustrée](docs/assets/chroma-peel-illustration-before-after.png)
+![chroma peel avant et après — mèche de cheveux illustrée](docs/assets/chroma-peel-illustration-before-after.png)
 
-![suppression chroma avant et après — contour pixel-art](docs/assets/chroma-peel-pixelart-before-after.png)
+![chroma peel avant et après — contour pixel-art](docs/assets/chroma-peel-pixelart-before-after.png)
 
 ## Webview de curation
 
-La génération vous mène à 90 %. La webview est l’endroit où un humain l’amène jusqu’à *livré* — autonome, sans dépendance à Studio ni à un framework, fonctionne partout où la compétence est installée (Claude Code Desktop, l’application Codex, un terminal simple).
+La génération vous amène à 90 %. La webview est l’endroit où un humain l’amène jusqu’à *livré* — autonome, sans dépendance à Studio ni à un framework, elle fonctionne partout où la compétence est installée (Claude Code Desktop, l’application Codex, un terminal simple).
 
 ![webview de curation — personnages](docs/assets/demo-character.gif)
 
-- **Deux lignes par état :** la **séquence de lecture** en haut et un **pool de candidats** en dessous (par ex. une deuxième ou troisième génération). Faites glisser la poignée ⠿ d’une frame pour réordonner la séquence, ou remontez une découpe depuis le pool — reconstruisez une boucle de course propre à partir des meilleures frames de plusieurs essais. L’agencement est enregistré, donc la réouverture le restaure.
-- **Transformation non destructive** par frame : glisser = déplacer, molette = redimensionner, poignée supérieure = pivoter, bas gauche = cisaillement, plus un interrupteur de retournement horizontal pour une sortie inversée gauche-droite. Les modifications vivent dans un fichier compagnon `curation.json` — les PNG sources ne sont jamais réécrits, et l’étape de composition produit le résultat de façon déterministe. L’aperçu et la production partagent une seule matrice affine, donc ce que vous alignez est ce que vous obtenez.
-- **L’aperçu en direct** anime la séquence au fps de l’état, avec lecture/pause, progression frame par frame, et contrôle de vitesse 0.25×–4×.
-- Pas seulement pour les sprites : pointez-le vers n’importe quel dossier de candidats image (icônes, logos, brouillons générés) avec `unpack_atlas_run.py --pngs-dir` et utilisez-le comme vue générale pour choisir le gagnant.
+- **Deux rangées par état :** la **séquence de lecture** en haut et un **pool de candidats** en dessous (par exemple une deuxième ou troisième génération). Faites glisser la poignée ⠿ d’une frame pour réordonner la séquence, ou remontez une découpe depuis le pool — reconstruisez une boucle de course propre à partir des meilleures frames de plusieurs prises. L’agencement est sauvegardé, donc la réouverture le restaure.
+- **Transformation non destructive** par frame : glisser = déplacer, molette = échelle, poignée supérieure = rotation, bas-gauche = cisaillement, plus un interrupteur de retournement horizontal pour une sortie inversée gauche-droite. Les modifications vivent dans un sidecar `curation.json` — les PNG sources ne sont jamais réécrits, et l’étape de composition bake le résultat de façon déterministe. L’aperçu et le bake partagent une seule matrice affine, donc ce que vous alignez est ce que vous obtenez.
+- **Aperçu en direct** qui anime la séquence aux fps de l’état, avec lecture/pause, avance frame par frame, et contrôle de vitesse 0.25×–4×.
+- Pas seulement pour les sprites : pointez-la vers n’importe quel dossier de candidats image (icônes, logos, brouillons générés) avec `unpack_atlas_run.py --pngs-dir` et utilisez-la comme vue générale pour choisir le gagnant.
 
 ### Grille de sol isométrique
 
-Pour les ensembles isométriques, la webview superpose la grille de sol (depuis les tile/anchor de `meta.json`) afin que vous puissiez accrocher le mobilier aux axes du losange avec la poignée de cisaillement.
+Pour les ensembles isométriques, la webview superpose la grille de sol (depuis `meta.json` tile/anchor) afin que vous puissiez aligner les meubles sur les axes du losange avec la poignée de cisaillement.
 
 ![webview de curation — mobilier isométrique](docs/assets/demo-furniture.gif)
 
-<img src="docs/assets/curator-iso.png" width="520" alt="superposition de grille de sol isométrique" />
+<img src="docs/assets/curator-iso.png" width="520" alt="isometric ground grid overlay" />
 
 ### Langues
 
-La webview est fournie avec l’anglais et le coréen. Passez `--lang en|ko` au lancement, ou utilisez l’interrupteur intégré à l’application :
+La webview est livrée avec l’anglais et le coréen. Passez `--lang en|ko` au lancement, ou utilisez le sélecteur intégré :
 
 ```bash
 python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # ou ko
@@ -112,68 +112,76 @@ python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # ou ko
 
 `sprite-gen` prend en charge CPython 3.10+. La CI exécute la version minimale prise en charge (3.10) et la dernière version couverte (3.14) sur des runners hébergés par GitHub.
 
-Le démarrage rapide nécessite une installation Python avec `venv`/`ensurepip` fonctionnels. Si `python3 -m venv` échoue avant l’installation des paquets dans une distribution locale, utilisez un build CPython standard pour n’importe quelle version prise en charge et relancez les mêmes commandes.
+Le quickstart nécessite une installation Python avec `venv`/`ensurepip` fonctionnels. Si `python3 -m venv` échoue avant l’installation des paquets dans une distribution locale, utilisez un build CPython standard pour n’importe quelle version prise en charge et relancez les mêmes commandes.
 
-## Démarrage rapide
+## Quickstart
 
 ```bash
-# 0. installer les dépendances (Pillow) dans un virtualenv frais
+# 0. install dependencies (Pillow) into a fresh virtualenv
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
-# 1. préparer une exécution depuis une image de base
+# 1. prepare a run from a base image
 python3 scripts/prepare_sprite_run.py --out-dir <run-dir> --character-id <id> --base-image base.png
 
-# 2. générer une image de ligne par état avec le CLI provider possédé par le moteur
+# 2. generate one row image per state with the engine-owned provider CLI
 python3 scripts/generate_sprite_image.py --provider codex \
   --prompt-file <run-dir>/prompts/<state>.txt \
   --out <run-dir>/raw/<state>.png \
   --ref <run-dir>/base-source.png \
   --ref <run-dir>/references/layout-guides/<state>.png
-# 3. extraire les frames
+# 3. extract frames
 python3 scripts/extract_sprite_row_frames.py --run-dir <run-dir>
 
-# 4. (optionnel) curer les frames dans la webview
+# 4. (optional) curate frames in the webview
 python3 scripts/serve_curation.py --run-dir <run-dir>
 
-# 5. produire l’atlas d’exécution
+# 5. bake the runtime atlas
 python3 scripts/compose_sprite_atlas.py --run-dir <run-dir>
 ```
 
 ### Modifier une feuille terminée
 
-Quand seule la feuille combinée subsiste, reconstruisez un dossier d’exécution prêt pour le curateur, puis curez et exportez :
+Quand seule la feuille combinée subsiste, reconstruisez un dossier de run prêt pour le curator, puis curez et exportez :
 
 ```bash
-# reconstruire les frames : --grid explicite, rectangles --manifest, ou auto-détection alpha (par défaut)
-python3 scripts/unpack_atlas_run.py --atlas sheet.png            # auto-détection
-python3 scripts/unpack_atlas_run.py --manifest manifest.json     # rectangles exacts
-python3 scripts/unpack_atlas_run.py --pngs-dir furniture/        # importer un ensemble de PNG libres
+# rebuild frames: explicit --grid, --manifest rectangles, or alpha auto-detect (default)
+python3 scripts/unpack_atlas_run.py --atlas sheet.png            # auto-detect
+python3 scripts/unpack_atlas_run.py --manifest manifest.json     # exact rectangles
+python3 scripts/unpack_atlas_run.py --pngs-dir furniture/        # import a loose PNG set
 
-# après la curation, produire les corrections vers des PNG nommés
+# after curating, bake corrections back to named PNGs
 python3 scripts/export_curated_pngs.py --run-dir <run-dir>
 ```
 
-La sortie est par défaut un dossier trouvable `<source>-curator` à côté de l’entrée.
+La sortie va par défaut dans un dossier facile à trouver `<source>-curator` à côté de l’entrée.
 
 ### Découper l’arrière-plan d’une image importée
 
-Les sprites générés sont détourés depuis leur propre arrière-plan magenta/vert dans le
-pipeline, donc ils n’ont jamais besoin de ceci. `cutout` est l’utilitaire d’import/post-édition : une
-image arrivée *avec* un arrière-plan uniforme opaque (une icône dessinée à la main, un
-sprite téléchargé, une capture d’écran) est transformée en PNG transparent propre.
+Les sprites générés sont détourés sur leur propre arrière-plan magenta/vert dans le
+pipeline, donc ils n’ont jamais besoin de cela. `cutout` est l’utilitaire
+d’import/post-édition : une image arrivée *avec* un arrière-plan uniforme opaque
+(une icône dessinée à la main, un sprite téléchargé, une capture d’écran) est
+transformée en PNG transparent propre.
 
 ```bash
-# arrière-plan blanc / ivoire / uni -> RGBA transparent
+# routes on the corner colour: white/ivory -> matte, magenta/green -> extract engine
 python3 -m sprite_gen.cli cutout icon.png --white-check
 ```
 
-Il estime la couleur d’arrière-plan depuis les coins, remplit par propagation l’arrière-plan connecté
-par position (ainsi les reflets clairs *à l’intérieur* de l’objet sont préservés,
-pas perforés en trous), puis adoucit la bordure avec un alpha doux décontaminé.
-`--white-check` écrit des composites cyan/magenta/jaune afin que toute frange résiduelle
-apparaisse clairement. Ajustez avec `--strength` (suppression de biseau), `--band` (profondeur
-de bord), et `--erode`. Pas destiné aux arrière-plans complexes/non uniformes.
+Il lit la couleur d’arrière-plan dans les coins et route (`--key auto|white|magenta|green`) :
+
+- **blanc / ivoire / uni** → matte de position. Un flood-fill depuis les coins garde uniquement l’arrière-plan
+  connecté (les reflets lumineux *à l’intérieur* de l’objet survivent, sans
+  trous), puis une alpha douce décontaminée adoucit la bordure. Ajustez avec
+  `--strength` (suppression du biseau), `--band` (profondeur de bord), `--erode`.
+- **clé magenta / verte** → le moteur chroma `extract` vérifié du projet est
+  réutilisé tel quel. Les couleurs clés n’apparaissent jamais dans les objets,
+  donc sa découpe uniquement par couleur est sûre ici — exactement là où la
+  garde flood-fill d’une matte blanche n’est *pas* nécessaire.
+
+`--white-check` écrit des composites cyan/magenta/jaune pour que toute frange restante
+se voie nettement. Pour les arrière-plans uniformes ; pas pour les arrière-plans complexes/non uniformes.
 
 Le workflow et les contrats destinés aux agents vivent dans [`SKILL.md`](SKILL.md).
 
@@ -188,15 +196,15 @@ python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-githu
 
 ### Propriété de la génération d’images
 
-La génération adossée à un provider fait partie de ce moteur (`sprite_gen.gen`), avec
+La génération adossée à des providers fait partie de ce moteur (`sprite_gen.gen`), avec
 `codex` et `grok` comme providers pris en charge. La compétence générale `image-gen` n’est
-qu’une navette fine vers la même commande, donc elle n’a pas besoin d’une deuxième
-implémentation de provider. Consultez [`docs/gen.md`](docs/gen.md) pour le CLI et le contrat
+qu’une navette fine vers la même commande, elle n’a donc pas besoin d’une deuxième
+implémentation de provider. Voir [`docs/gen.md`](docs/gen.md) pour la CLI et le contrat
 de vérification.
 
 ## Attribution
 
-Le workflow par lignes de composants est inspiré de la compétence `hatch-pet` sous licence Apache-2.0, mais cible des atlas de sprites de jeu génériques et n’inclut aucun paquet ni ressource visuelle de familier.
+Le workflow par rangées de composants est inspiré de la compétence `hatch-pet` sous licence Apache-2.0, mais cible des atlas de sprites de jeu génériques et n’inclut aucun package d’animal de compagnie ni ressource visuelle d’animal de compagnie.
 
 ## Licence
 
