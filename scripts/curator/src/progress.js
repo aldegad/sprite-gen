@@ -94,6 +94,5 @@ function renderLoadingPanel() {
     `<div class="op-loading-title">${t("healTitle")}</div>` +
     '<div class="op-loading-bar"><div class="op-loading-fill indeterminate" style="width:100%"></div></div>' +
     `<div id="op-loading-live" class="op-loading-live">${t("healWaiting")}</div>` +
-    `<div class="op-loading-note">${t("healNote")}</div>` +
     "</div>";
 }
