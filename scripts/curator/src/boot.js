@@ -36,12 +36,18 @@ async function boot() {
   // pixel-perfect twin state must resolve BEFORE first render (frameUrl reads it):
   // per-state truth = states.<state>.pixel_perfect override > run-wide default > on.
   ppTwinStates = new Set(run.states.filter((s) => s.frames.some((f) => f.plainUrl)).map((s) => s.name));
-  ppAvailable = ppTwinStates.size > 0;
+  // 트윈 없는 줄이라도 서버 온디맨드 스냅 프리뷰가 있으면 토글을 켠다 (표시 전용)
+  ppPreviewStates = new Set(run.states
+    .filter((s) => !ppTwinStates.has(s.name) && s.frames.some((f) => f.pixelPreviewUrl))
+    .map((s) => s.name));
+  ppAvailable = ppTwinStates.size > 0 || ppPreviewStates.size > 0;
   const ppDefault = !(run.curation && run.curation.pixel_perfect === false);
   ppStates = {};
   for (const s of run.states) {
     const c = run.curation && run.curation.states && run.curation.states[s.name];
-    ppStates[s.name] = c && typeof c.pixel_perfect === "boolean" ? c.pixel_perfect : ppDefault;
+    // 프리뷰 줄 기본 OFF (원본 먼저 — 스냅은 사용자가 눌러서 본다). 트윈 줄은 기존 기본.
+    const fallback = ppPreviewStates.has(s.name) ? false : ppDefault;
+    ppStates[s.name] = c && typeof c.pixel_perfect === "boolean" ? c.pixel_perfect : fallback;
   }
   // 격자 오버레이 가능 줄(계약 scale 또는 줄별 측정 피치) — 표시 전용, 저장 안 함, 기본 off
   const contractScale = run.pixelPerfect && run.pixelPerfect.scale;
@@ -65,6 +71,7 @@ async function boot() {
     ppCheck.addEventListener("change", () => {
       const on = ppCheck.checked;
       for (const n of ppTwinStates) ppStates[n] = on;
+      for (const n of ppPreviewStates) ppStates[n] = on;
       syncPpControls();
       refreshVariantImages();
       scheduleSave();

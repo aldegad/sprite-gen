@@ -272,7 +272,8 @@ function syncPpControls() {
   document.querySelectorAll(".pp-state-check").forEach((el) => {
     el.checked = ppOn(el.dataset.state);
   });
-  syncAggregate(document.getElementById("pp-apply"), ppTwinStates, ppOn);
+  syncAggregate(document.getElementById("pp-apply"),
+    new Set([...ppTwinStates, ...ppPreviewStates]), ppOn);
 }
 
 function syncGridControls() {
