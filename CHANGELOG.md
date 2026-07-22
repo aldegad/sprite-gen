@@ -5,6 +5,24 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.81 "Sol Family Guard" - pitch-family outlier guard + per-state heal isolation
+
+- **Per-frame pitch keeps its own truth only inside the strip consensus "pitch
+  family" (ratio 1.1, `PITCH_FAMILY_RATIO`)** — harmonic/collapsed misdetections
+  (×2/×3, ÷2/÷3) snap at consensus with a per-frame warning (`resolve_frame_pitch`).
+  Root cause of the founder_v7 heal wipe-out (Soohong 2026-07-22): up_run frame-2
+  detected 3.00×3.00 vs consensus 7.00×8.86 → native 87×162 → `conform_row_logical`
+  applied that frame's cap scale to the whole row → every other frame shrank ×0.36
+  and failed the sparse gate. In-family deviations (≤10%) still keep own pitch —
+  the down_jump half-eye fix (plan `per-frame-pixel-grid`) is preserved; measured
+  real same-strip variation is 0.4–2%.
+- **`heal_run` isolates re-extraction per state** — one subprocess per stale row,
+  so a failing row no longer drags every other row into "재계산 실패" (the incident
+  reported 33 failed when only 6 actually failed validation). Passing rows swap in;
+  failing rows keep the prior generation byte-for-byte, and `extract-failure.json`'s
+  per-state merge semantics keep durable retry-brake evidence intact across the
+  per-state calls. (plan `sprite-gen/pitch-outlier-guard-heal-isolation`)
+
 ## v1.56.80 "Sol Retry Brake" - Stop deterministic heal retry loops
 
 - A failed engine-update heal no longer restarts the same full extraction on every

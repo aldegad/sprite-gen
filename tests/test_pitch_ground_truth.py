@@ -190,3 +190,46 @@ def test_synthetic_axis_collapse_is_repaired():
     (px, py), _ = detect_pixel_grid(upscaled)
     assert abs(px - py) < 1.0, f"{px:.2f} vs {py:.2f}"
     assert px > 5.0 and py > 5.0, "collapsed to a divisor"
+
+
+# --- 피치 패밀리 가드 (resolve_frame_pitch) -------------------------------
+#
+# per-frame own 피치는 합의 '패밀리'(비율 1.1) 이내에서만 진실이다. 하모닉/붕괴
+# 오검출을 own 으로 믿으면 한 프레임의 거대 native 가 conform_row_logical 의
+# 행 일관 배율을 끌어내려 행 전체가 붕괴한다 (실사고 founder_v7 up_run,
+# 2026-07-22 — resolve_frame_pitch docstring).
+
+def _resolve(own, consensus):
+    from sprite_gen.extract import resolve_frame_pitch
+    return resolve_frame_pitch(own, consensus)
+
+
+def test_in_family_deviation_keeps_own_pitch():
+    # down_jump frame-0 실사고 (합의 13.00 vs 자체 12.50, 4%): own 이 진실
+    use, outlier = _resolve((12.5, 12.5), (13.0, 13.0))
+    assert use == (12.5, 12.5) and not outlier
+
+
+def test_collapsed_divisor_falls_back_to_consensus():
+    # up_run frame-2 실사고: own 3.00x3.00 은 참 피치의 붕괴 약수
+    use, outlier = _resolve((3.0, 3.0), (7.0, 8.86))
+    assert use == (7.0, 8.86) and outlier
+
+
+def test_harmonic_multiple_falls_back_to_consensus():
+    # up_run frame-0 실사고: own 9.00x8.70 — x 축이 패밀리 밖 (9/7 = 1.29)
+    use, outlier = _resolve((9.0, 8.7), (7.0, 8.86))
+    assert use == (7.0, 8.86) and outlier
+
+
+def test_single_axis_drift_beyond_family_falls_back():
+    # up_run frame-3 실사고: own y 8.00 vs 합의 8.86 (10.7%) — native 캡 초과로
+    # 행 전체 5% 축소를 유발했다. 한 축만 밖이어도 폴백한다.
+    use, outlier = _resolve((7.0, 8.0), (7.0, 8.86))
+    assert use == (7.0, 8.86) and outlier
+
+
+def test_inconclusive_consensus_keeps_own_pitch():
+    # 합의가 무근거(<2.0)면 own 이 유일한 측정이다 — 가드는 발동하지 않는다
+    use, outlier = _resolve((9.0, 9.0), (1.0, 1.0))
+    assert use == (9.0, 9.0) and not outlier

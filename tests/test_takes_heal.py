@@ -230,3 +230,39 @@ def test_atlas_reuses_cells_for_identical_instances(tmp_path: Path) -> None:
     anim = manifest["animation"]["rows"]["walk"]
     assert anim["frames"] == 4
     assert anim["durations_ms"] == [round(1000 / anim["fps"])] * 4
+
+
+def test_heal_isolates_failures_per_state(tmp_path: Path) -> None:
+    """상태별 격리 (2026-07-22): 한 행의 재추출 실패가 다른 행의 스왑을 막지도,
+    failed 보고에 연좌시키지도 않는다 (실사고 founder_v7 — 6행 실패가 33행
+    전체를 "재계산 실패"로 묶었다)."""
+    run_dir = _build_run(tmp_path)
+    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request["states"]["jump"] = {"frames": 2, "fps": 8, "loop": False, "action": "isolation fixture"}
+    (run_dir / "sprite-request.json").write_text(
+        json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _strip(2, seed=23).save(run_dir / "raw" / "jump.png")
+    assert extract_module.run(run_dir=run_dir) == 0
+
+    manifest_path = run_dir / "frames" / "frames-manifest.json"
+    manifest = _manifest(run_dir)
+    for row in manifest["rows"]:
+        row["engine_revision"] = "0" * 12
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    jump_bytes = (run_dir / "frames" / "jump" / "frame-0.png").read_bytes()
+    # jump 재료를 컴포넌트 없는 전면 크로마로 바꿔 재추출이 실패하게 만든다
+    Image.new("RGB", (400, 160), MAGENTA).save(run_dir / "raw" / "jump.png")
+
+    report = extract_module.heal_run(run_dir)
+    assert report["healed"] == ["walk"]
+    assert report["failed"] == ["jump"]
+    assert any("jump" in note for note in report["notes"])
+    rows = {row["state"]: row for row in _manifest(run_dir)["rows"]}
+    # 통과 행은 새 엔진으로 스왑, 실패 행은 이전 세대 바이트 그대로
+    assert rows["walk"]["engine_revision"] == extract_module.engine_revision()
+    assert rows["jump"]["engine_revision"] == "0" * 12
+    assert (run_dir / "frames" / "jump" / "frame-0.png").read_bytes() == jump_bytes
+    # durable evidence 는 실패 상태를 상태 단위로 유지한다 (재시도 차단 소재)
+    evidence = json.loads((run_dir / "extract-failure.json").read_text(encoding="utf-8"))
+    assert evidence["ok"] is False
+    assert any(str(error).startswith("jump:") for error in evidence["errors"])

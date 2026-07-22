@@ -1275,6 +1275,38 @@ def arbitrate_pitch(images: list, detect_pitch: tuple[float, float],
     return detect_pitch, detect_phases, "detect"
 
 
+PITCH_FAMILY_RATIO = 1.1
+
+
+def resolve_frame_pitch(own: tuple[float, float], consensus: tuple[float, float]) -> tuple[tuple[float, float], bool]:
+    """프레임 자체 검출 피치의 채택 판정 — 합의 '피치 패밀리' 밖이면 오검출 가드.
+
+    같은 스트립(한 번의 생성) 안에서 참 피치의 프레임 간 편차는 측정 노이즈
+    수준(수 %)이다 — down_jump frame-0 실사고(합의 13.00 vs 자체 12.50, 4%)는
+    own 이 진실이었고 합의 강제가 눈을 반쪽 냈다 (plan per-frame-pixel-grid).
+    반면 하모닉/붕괴 오검출은 ×2/×3(또는 ÷2/÷3) 급으로 벗어난다 — up_run
+    frame-2 실사고(합의 7.00x8.86 vs 자체 3.00x3.00, 2026-07-22)는 native
+    87x162 를 만들었고, 행 일관 축소(conform_row_logical)가 그 캡 배율을 행
+    전체에 적용해 나머지 프레임을 0.36배 콩알로 붕괴시켰다. 두 실사고 사이
+    어디에도 참값이 없는 10%(비율 1.1)를 경계로 가른다 — 같은 스트립의 실제
+    프레임 간 편차는 실측 0.4~2%, 눈반쪽 실사고도 4%였고, 10% 이탈(up_run
+    frame-3 own y 8.00 vs 합의 8.86)조차 native 캡 초과로 행 전체 5% 축소를
+    유발했다. 이내 = own 채택(측정 진실, 합의 강제 누적오차 없음), 밖 = 합의
+    채택. 폴백은 호출부가
+    프레임별 경고로 관측 가능하게 남긴다 (No Silent Fallback).
+
+    반환: (채택 피치, 패밀리-밖 outlier 여부)."""
+    own_x, own_y = own
+    consensus_x, consensus_y = consensus
+    if min(consensus_x, consensus_y) < 2.0:
+        return own, False
+    ratio = max(own_x / consensus_x, consensus_x / own_x,
+                own_y / consensus_y, consensus_y / own_y)
+    if ratio > PITCH_FAMILY_RATIO:
+        return consensus, True
+    return own, False
+
+
 def _grid_edges(length: int, pitch: float, offset: float) -> list[int]:
     """소수 피치를 정수 픽셀 경계로 확정한다.
 
@@ -2622,23 +2654,26 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         # sprite-gen/per-frame-pixel-grid): 합의 피치를 프레임에 강제하면 측정차
         # (0.5px/셀 수준)가 폭 전체에 누적돼 경계가 블록 중앙을 지난다 (실사고
         # founder_v7 down_jump frame-0: 합의 13.00 vs 자체 12.50 → 눈이 반쪽).
-        # 합의는 자체 검출이 실패한 프레임의 fallback 전용이고, 적용 사실은
-        # 프레임별 경고로 관측된다. 자체 검출이 합의와 크게 어긋나도 덮어쓰지
-        # 않는다 — 경고만 남긴다 (No Silent Fallback). 기록(cut_edges)은 실제
-        # 샘플링한 그 선이라 표시 격자 = 샘플링 진실 (수홍 확정 2026-07-18) 유지.
+        # 단 own 채택은 합의 '피치 패밀리'(비율 1.1) 이내에서만이다 — 하모닉/붕괴
+        # 오검출(×2/×3·÷2/÷3)까지 믿으면 한 프레임의 거대 native 가
+        # conform_row_logical 의 행 일관 배율을 끌어내려 행 전체가 붕괴한다
+        # (실사고 founder_v7 up_run frame-2, 2026-07-22 — 판정 근거는
+        # resolve_frame_pitch docstring). 패밀리 밖 = 합의로 스냅하고 프레임별
+        # 경고로 관측한다 (No Silent Fallback). 합의는 자체 검출이 실패한
+        # 프레임의 fallback 이기도 하다. 기록(cut_edges)은 실제 샘플링한 그
+        # 선이라 표시 격자 = 샘플링 진실 (수홍 확정 2026-07-18) 유지.
         snapped = []
         cut_edges: list[tuple[list[int], list[int]] | None] = []
         used_pitches: list[tuple[float, float]] = []
         for index, (component, ((own_x, own_y), _own_phase)) in enumerate(zip(images, grids)):
             if min(own_x, own_y) >= 2.0:
-                use_x, use_y = own_x, own_y
-                if min(consensus_x, consensus_y) >= 2.0 and (
-                    abs(own_x - consensus_x) > max(2.0, consensus_x * 0.25)
-                    or abs(own_y - consensus_y) > max(2.0, consensus_y * 0.25)
-                ):
+                (use_x, use_y), outlier = resolve_frame_pitch(
+                    (own_x, own_y), (consensus_x, consensus_y))
+                if outlier:
                     all_warnings.append(
-                        f"{tag}: frame {index} own pitch {own_x:.2f}x{own_y:.2f} deviates from "
-                        f"strip consensus {consensus_x:.2f}x{consensus_y:.2f} — kept own (no override)")
+                        f"{tag}: frame {index} own pitch {own_x:.2f}x{own_y:.2f} is outside the "
+                        f"consensus pitch family {consensus_x:.2f}x{consensus_y:.2f} — "
+                        f"harmonic/collapsed misdetection; snapped at consensus")
             elif min(consensus_x, consensus_y) >= 2.0:
                 use_x, use_y = consensus_x, consensus_y
                 all_warnings.append(
@@ -2938,8 +2973,9 @@ def heal_run(run_dir: Path | str) -> dict[str, Any]:
     frames/ 는 그 파생 캐시일 뿐이므로, 행의 engine_revision 이 현재 엔진과
     다르면 raw 에서 조용히 다시 굽는다. raw 가 없는 행은 재료가 없어 재유도할
     수 없다 — 지우지도 속이지도 않고 그대로 두되 노트로 관측 가능하게 남긴다.
-    재추출은 기존 스테이징+통짜 스왑 경로를 그대로 타므로 실패해도 이전 세대가
-    바이트 그대로 남는다 (Atomicity).
+    재추출은 상태별 독립 서브프로세스로 격리해 돌린다 — 한 행의 검증 실패가
+    다른 행의 스왑을 막지 않고(부분 실패의 전체 연좌 금지, 2026-07-22), 실패한
+    행은 스테이징+스왑 경로가 이전 세대를 바이트 그대로 남긴다 (Atomicity).
     """
     run_dir = Path(run_dir)
     report: dict[str, Any] = {"healed": [], "kept_stale": [], "notes": []}
@@ -2990,27 +3026,45 @@ def heal_run(run_dir: Path | str) -> dict[str, Any]:
         # (큐레이션 서버)가 인프로세스로 추출하면 락을 영구 보유해 이후의
         # compose/export 서브프로세스가 전부 죽는다. 자식 프로세스면 락 수명이
         # 그 실행으로 끝나고, 추출의 SystemExit 도 격리된다.
-        cmd = [sys.executable, "-m", "sprite_gen.extract",
-               "--run-dir", str(run_dir), "--states", ",".join(report["healed"])]
+        #
+        # 상태별 격리 (2026-07-22): 전체를 한 서브프로세스로 돌리고 exit code
+        # 하나로 판정하면 부분 실패가 전체 실패로 연좌된다 (실사고 founder_v7
+        # heal — 검증 실패 6행이 33행 전체를 "재계산 실패"로 묶고 통과 가능한
+        # 27행까지 이전 세대에 남겼다). 상태마다 독립 실행하면 통과 행은 그대로
+        # 스왑되고(추출 커밋은 원래 상태 단위 병합) 실패 행만 failed 로 남는다.
+        # extract-failure.json 병합/해소는 _commit_generation 이 상태 단위로
+        # 처리하므로 durable 재시도 차단 evidence 도 호출 횟수와 무관하게
+        # 미해결 상태 전체를 유지한다.
+        extract_flags: list[str] = []
         for dest, value in (manifest.get("extract_args") or {}).items():
             flag = "--" + dest.replace("_", "-")
             if isinstance(value, bool):
                 if value:
-                    cmd.append(flag)
+                    extract_flags.append(flag)
             else:
-                cmd.extend([flag, str(value)])
+                extract_flags.extend([flag, str(value)])
         # 자식은 부모의 sys.path 조작(스크립트 shim 등)을 상속하지 않는다 —
         # 패키지 루트를 PYTHONPATH 로 명시해 어디서 불러도 -m 이 뜬다.
         env = dict(os.environ)
         env["PYTHONPATH"] = (str(Path(__file__).resolve().parents[1])
                              + os.pathsep + env.get("PYTHONPATH", ""))
-        proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
-        if proc.returncode != 0:
-            report["failed"] = report.pop("healed")
-            report["healed"] = []
-            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
-            report["notes"].append(
-                "heal re-extract failed — prior generation kept: " + " | ".join(tail))
+        candidates = report["healed"]
+        report["healed"] = []
+        report["failed"] = []
+        for state in candidates:
+            cmd = [sys.executable, "-m", "sprite_gen.extract",
+                   "--run-dir", str(run_dir), "--states", state, *extract_flags]
+            proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+            if proc.returncode == 0:
+                report["healed"].append(state)
+            else:
+                report["failed"].append(state)
+                tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
+                report["notes"].append(
+                    f"heal re-extract failed for {state} — prior generation kept: "
+                    + " | ".join(tail))
+        if not report["failed"]:
+            del report["failed"]
     return report
 
 
