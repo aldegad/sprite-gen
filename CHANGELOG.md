@@ -5,6 +5,15 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.83 "Sol True Cuts" - the green grid is the sampling truth again
+
+- Reverts the v1.56.82 display policy after Soohong clarified the intent
+  (2026-07-23): the overlay's job is to show WHERE the extractor actually cut
+  the source - the per-frame non-uniform cut lines are the information, not a
+  rendering artifact. The card overlay draws recorded `input_grids` (endpoint-
+  anchored) again, with the count trust gate intact. v1.56.82 shipped for ~1h
+  and is superseded.
+
 ## v1.56.82 "Sol Even Grid" - grid overlay draws the final-pixel uniform grid
 
 - The curator's pixel-grid overlay now always draws the content box divided
