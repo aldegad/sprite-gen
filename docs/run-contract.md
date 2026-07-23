@@ -125,8 +125,13 @@ Rules the display depends on:
   state (`states.<state>.pixel_perfect:false`, or the run-wide `pixel_perfect:false`
   default — resolver: `curation.frame_variant(curation, state)`) — the
   atlas slot is cell-sized, so this twin must be too. **`frames/<state>/orig/frame-N.png`**
-  is the *hi-res* (S×cell, capped) pre-fit twin the view displays when the user turns
-  pixel-perfect off, so "off = original" is crisp instead of an upscaled cell blur. The
+  is the *hi-res* (S×cell) pre-fit twin the view displays when the user turns
+  pixel-perfect off, so "off = original" is crisp instead of an upscaled cell blur.
+  S is **per-row native**: the ceil of the largest component-crop / final-content-bbox
+  ratio across the row's frames (bounded by `2048 // cell`), so the twin resample is a
+  mild upscale — never a downscale. The old fixed ×4 cap squeezed high-pitch raws
+  (founder_v8 down rows, ~14px pitch) ~3.5× and the "original" view stopped being the
+  original (Soohong, 2026-07-23). The
   view prefers `orig/`, falling back to `.plain.png` when no hi-res twin exists. Both
   twins are fitted into the pixel-perfect frame's content bbox (same footprint), so the
   toggle compares pixel treatment at identical size and a plain bake keeps the same

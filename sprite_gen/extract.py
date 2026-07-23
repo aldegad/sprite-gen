@@ -2482,9 +2482,32 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
     # 디테일이 통째로 사라졌다 (실측: 24색 배치 팔레트에서 금색 최근접 ΔRGB 59,
     # 48색이면 5.5). 레트로 감축이 필요한 런은 request `fit.palette_size` 로 명시한다.
     palette_size = int(fit_config.get("palette_size", 48))
-    # 원본 화질 표시 쌍둥이(orig/)의 배율: 같은 legacy fit 을 S×셀에 앉혀 확대 흐림을
-    # 없앤다. 4배(상한 1024px)로 캡. 셀이 이미 커서 S<=1 이면 굽지 않는다(.plain 로 충분).
-    plain_display_scale = max(1, min(4, 1024 // max(1, cell_width, cell_height)))
+    # 원본 화질 표시 쌍둥이(orig/)의 배율 상한: 배율 자체는 행별 네이티브 비율로
+    # 정한다 (_orig_display_scale). 고정 ×4 캡은 raw 피치가 4px 를 넘는 런에서
+    # 다운스케일 열화를 만들어 "원본" 뷰가 원본이 아니게 됐다 (founder_v8 down
+    # 피치 ~19px → 4.8× 축소 뭉갬, 수홍 발견 2026-07-23). 상한은 파일/메모리
+    # 바운드일 뿐 화질 정책이 아니다.
+    plain_display_cap = max(1, 2048 // max(1, cell_width, cell_height))
+
+    def _orig_display_scale(components: list, frames: list) -> int:
+        """행별 orig 트윈 배율 = 네이티브 비율의 ceil (다운스케일 금지, cap 바운드).
+
+        ratio = 컴포넌트 crop 크기 / 최종 콘텐츠 bbox 크기 (축별 max). S ≥ ratio 면
+        fit_component_to_bbox 의 리샘플이 경미한 업스케일이 돼 raw 블록이 뭉개지지
+        않는다. 트윈 = 셀×S 정사각이라는 셀 좌표 계약은 그대로다."""
+        ratio = 0.0
+        for component, frame in zip(components, frames):
+            frame_bbox = frame.getbbox()
+            comp_bbox = component.getbbox()
+            if frame_bbox is None or comp_bbox is None:
+                continue
+            ratio = max(
+                ratio,
+                (comp_bbox[2] - comp_bbox[0]) / max(1, frame_bbox[2] - frame_bbox[0]),
+                (comp_bbox[3] - comp_bbox[1]) / max(1, frame_bbox[3] - frame_bbox[1]),
+            )
+        return min(plain_display_cap, max(1, math.ceil(ratio)))
+
     pending: list = []
 
     def finalize_state(state: str, frames: list, frame_count: int, method: str,
@@ -2850,7 +2873,8 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
             # 원본 컴포넌트를 앉힌다 (plain=셀 크기 굽기용, orig=S×셀 표시용). 빈 프레임은
             # 관측 가능하게 스킵 — 조용한 폴백 없음.
             plain_frames = []
-            orig_frames = [] if plain_display_scale > 1 else None
+            orig_scale = _orig_display_scale(entry["components"], frames)
+            orig_frames = [] if orig_scale > 1 else None
             input_grids: list[dict | None] = []
             for index, (component, frame) in enumerate(zip(entry["components"], frames)):
                 frame_bbox = frame.getbbox()
@@ -2860,14 +2884,14 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
                     plain_frames.append(Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0)))
                     if orig_frames is not None:
                         orig_frames.append(Image.new(
-                            "RGBA", (cell_width * plain_display_scale, cell_height * plain_display_scale), (0, 0, 0, 0)))
+                            "RGBA", (cell_width * orig_scale, cell_height * orig_scale), (0, 0, 0, 0)))
                     input_grids.append(None)
                     continue
                 plain, mapping = fit_component_to_bbox(component, cell_width, cell_height, frame_bbox)
                 plain_frames.append(plain)
                 if orig_frames is not None:
                     orig_frames.append(fit_component_to_bbox(
-                        component, cell_width, cell_height, frame_bbox, plain_display_scale)[0])
+                        component, cell_width, cell_height, frame_bbox, orig_scale)[0])
                 # 검출된 입력 격자(실제 절단선)를 쌍둥이(셀) 좌표로 매핑해 manifest 에 남긴다
                 edges = entry["cut_edges"][index] if index < len(entry["cut_edges"]) else None
                 if edges is not None and mapping is not None:
