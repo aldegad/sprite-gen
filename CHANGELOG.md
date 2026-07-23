@@ -5,6 +5,22 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.84 "Sol Native Twin" - the original twin is the original again
+
+- The hi-res `orig/` display twin is now baked at a **per-row native scale**:
+  S = ceil(max component-crop / final-content-bbox ratio over the row's frames),
+  bounded by `2048 // cell` (was a fixed x4 cap). On high-pitch raws (founder_v8
+  down rows, ~14px blocks) the old cap downscaled ~3.5x with LANCZOS, so the
+  curator's "original" view showed a mushy derivative instead of the generated
+  raw - Soohong caught it comparing the modal against the actual codex output
+  (2026-07-23). The twin resample is now a mild upscale, never a downscale; the
+  cell-coordinate contract (twin = S x cell square, `input_grids` mapping,
+  curator JS) is unchanged. Cell-sized `.plain.png` bake twins are untouched.
+- Verified on a founder_v8 clone heal: 11 rows re-derived, final frames
+  byte-identical, curation (selections, pixel edits, frozen rows) fully
+  preserved (`state_revision` excludes the engine hash by design), new twin
+  block pitch 14px matches the raw (autocorr 0.765 at lag 14).
+
 ## v1.56.83 "Sol True Cuts" - the green grid is the sampling truth again
 
 - Reverts the v1.56.82 display policy after Soohong clarified the intent
