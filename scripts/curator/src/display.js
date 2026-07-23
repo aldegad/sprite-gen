@@ -155,7 +155,7 @@ function updateCardGrid(card) {
   const useFinal = on && plainShown && frame && frame.contentBox && scale && stage && axisAligned;
   if (ingrid) {
     if (useFinal) {
-      drawFinalGrid(ingrid, stage, frame.contentBox, scale, t, frame.inputGrid || null);
+      drawFinalGrid(ingrid, stage, frame.contentBox, scale, t);
       ingrid.style.display = "block";
     } else {
       ingrid.style.display = "none";
@@ -173,7 +173,7 @@ function updateCardGrid(card) {
 // 원본 쌍둥이 위에 그린다 — 초록 칸 하나가 결과 픽셀 하나에 정확히 대응한다.
 // 축정렬 변형(이동 dx/dy, 좌우반전)은 bbox 를 같은 규칙(CSS: 중심 기준 반전 후 이동)으로
 // 옮겨 콘텐츠를 따라간다. 비축정렬 변형은 호출 전에 걸러진다 (updateCardGrid).
-function drawFinalGrid(canvas, stage, box, scale, t, inputGrid) {
+function drawFinalGrid(canvas, stage, box, scale, t) {
   const w = Math.max(1, Math.round(stage.clientWidth));
   const h = Math.max(1, Math.round(stage.clientHeight));
   canvas.width = w;
@@ -187,46 +187,13 @@ function drawFinalGrid(canvas, stage, box, scale, t, inputGrid) {
   const dx = t ? t.dx : 0;
   const dy = t ? t.dy : 0;
   const cw = run.cell.width;
-  // 추출이 검출한 실제 절단선(input_grids, 쌍둥이 셀 좌표)이 있으면 그것을 그린다 —
-  // 균등 분할은 끝점만 맞고 중간이 어긋난다 (수홍 발견 2026-07-18 down_lie:
-  // "머리끝발끝은 맞는데 중간 픽셀이 하나도 안 맞아"). conform 축소 폐지(v1.56.22)로
-  // 1차 절단선이 곧 최종 대응이 됐다. 없는 프레임(구세대 캐시·테이크)만 균등 근사.
-  // 기록 격자 신뢰 게이트 (실사고 2026-07-18 side_idle: 최종 31칸인데 기록은 45칸 —
-  // 반피치 하모닉 오검출): 칸수가 최종 픽셀 수와 ±1 이상 어긋나면 그 기록은 버린다.
-  // 균등 격자는 "칸 수 = 최종 픽셀 수" 를 보장한다 (가짜 격자 금지).
-  if (inputGrid && Array.isArray(inputGrid.x) && Array.isArray(inputGrid.y)) {
-    const expCols = Math.max(1, Math.round((box[2] - box[0]) / scale));
-    const expRows = Math.max(1, Math.round((box[3] - box[1]) / scale));
-    if (Math.abs((inputGrid.x.length - 1) - expCols) > 1 || Math.abs((inputGrid.y.length - 1) - expRows) > 1) {
-      inputGrid = null;
-    }
-  }
-  if (inputGrid && Array.isArray(inputGrid.x) && Array.isArray(inputGrid.y) && inputGrid.x.length > 1 && inputGrid.y.length > 1) {
-    // 검출 절단선의 매핑 비율 오차가 중간에서 누적된다 (실사고 2026-07-18 down_lie:
-    // 28칸이 27.2px 로 눌려 끝만 맞고 중간 전부 어긋남) — 끝점을 최종 콘텐츠
-    // 박스에 앵커하고 검출 비례만 유지하도록 정규화한다.
-    const norm = (edges, lo, hi) => {
-      const e0 = edges[0];
-      const e1 = edges[edges.length - 1];
-      if (e1 - e0 <= 0) return edges;
-      return edges.map((e) => lo + ((e - e0) * (hi - lo)) / (e1 - e0));
-    };
-    inputGrid = { x: norm(inputGrid.x, box[0], box[2]), y: norm(inputGrid.y, box[1], box[3]) };
-    const xs = t && t.flipX ? inputGrid.x.map((e) => cw - e).reverse() : inputGrid.x;
-    const yTop = (inputGrid.y[0] + dy) * sy;
-    const yBot = (inputGrid.y[inputGrid.y.length - 1] + dy) * sy;
-    const xLeft = (xs[0] + dx) * sx;
-    const xRight = (xs[xs.length - 1] + dx) * sx;
-    for (const e of xs) {
-      const px = Math.round((e + dx) * sx) + 0.5;
-      ctx.beginPath(); ctx.moveTo(px, yTop); ctx.lineTo(px, yBot); ctx.stroke();
-    }
-    for (const e of inputGrid.y) {
-      const py = Math.round((e + dy) * sy) + 0.5;
-      ctx.beginPath(); ctx.moveTo(xLeft, py); ctx.lineTo(xRight, py); ctx.stroke();
-    }
-    return;
-  }
+  // 표시 격자 = 최종 픽셀 균등 대응 (수홍 지시 2026-07-23): per-frame 엔진
+  // (v1.56.75+)부터 기록 절단선(input_grids)이 프레임별 비균일(간격 0.5~1.5)이라
+  // 트윈 위에 그대로 그리면 격자가 삐뚤게 보인다 — 트윈은 균일 리사이즈 콘텐츠고
+  // 사용자가 픽셀퍼펙트 토글로 대조하는 상대는 균일한 최종 픽셀이므로, 오버레이는
+  // 콘텐츠 박스를 논리 픽셀 수로 균등 분할해 그린다 (초록 칸 = 결과 픽셀, 끝점·칸수
+  // 일치 보장). 샘플링 절단선 기록 자체는 manifest input_grids 에 그대로 남는다
+  // (표시 정책 변경일 뿐 기록 삭제 아님 — 진실 소유는 추출기).
   const cellsX = Math.max(1, Math.round((box[2] - box[0]) / scale));
   const cellsY = Math.max(1, Math.round((box[3] - box[1]) / scale));
   let bx0 = box[0], bx1 = box[2];
