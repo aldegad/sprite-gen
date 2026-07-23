@@ -5,6 +5,16 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.82 "Sol Even Grid" - grid overlay draws the final-pixel uniform grid
+
+- The curator's pixel-grid overlay now always draws the content box divided
+  evenly by the logical pixel count (green cell = one final pixel, endpoints and
+  counts guaranteed). Since the per-frame engine (v1.56.75+), recorded sampling
+  cuts (`input_grids`) are per-frame non-uniform (spacing 0.5-1.5 on founder_v8
+  down rows), and drawing them over the uniformly-resized plain twin rendered a
+  visibly crooked mesh (Soohong 2026-07-23). Display policy only - the sampling
+  cuts stay recorded in the manifest; extraction still owns that truth.
+
 ## v1.56.81 "Sol Family Guard" - pitch-family outlier guard + per-state heal isolation
 
 - **Per-frame pitch keeps its own truth only inside the strip consensus "pitch
