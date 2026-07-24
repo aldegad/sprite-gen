@@ -183,7 +183,11 @@ function syncPixelScaling(root) {
 function superSampleFor(source, cellWidth) {
   const natural = source && (source.naturalWidth || source.width);
   if (!natural || !cellWidth) return 1;
-  return Math.max(1, Math.min(16, Math.round(natural / cellWidth)));
+  // 상한은 배율이 아니라 **캔버스 픽셀 바운드**다 (엔진 트윈 캡 2048//cell 과 동형).
+  // 고정 ×16 은 논리셀이 작은 베이스(cols≈28, raw≈958)에서 448px 로 눌러
+  // NEAREST 데시메이션을 만들었다 — 배율 상한을 셀에 비례시키면 그 병이 없다.
+  const cap = Math.max(1, Math.floor(2048 / cellWidth));
+  return Math.max(1, Math.min(cap, Math.round(natural / cellWidth)));
 }
 
 // 원본 기하: <img> 는 naturalWidth, <canvas> 는 그리기 버퍼 width.

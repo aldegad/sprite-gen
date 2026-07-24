@@ -346,6 +346,10 @@ def _build_run_state_impl(run_dir: Path) -> dict:
                     rel_m = row_files_m[fr["index"]] if fr["index"] < len(row_files_m) else f"{state_frames_rel}/frame-{fr['index']}.png"
                     state_scale = detect_pixel_pitch(run_dir / rel_m)
                     break
+        if state_scale is None:
+            # 미추출 줄(present 프레임 0)도 계약을 지킨다: pixelScale ≥1, never null
+            # (콩콩이 N2). 그릴 스테이지가 없어 표시엔 관성 없지만 계약-코드 정합.
+            state_scale = 1
         states.append(
             {
                 "name": state,

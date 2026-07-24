@@ -45,6 +45,31 @@ def test_stage_display_is_the_canvas_renderer_only():
     )
 
 
+def test_base_pp_off_is_the_raw_source_view():
+    """베이스 pp OFF = 소스 모드로 raw 를 그린다 — 항등 선처리 금지.
+
+    실사고 (콩콩이 기각 2026-07-24, kongkongi-20260724-154426): `snapScaleFor` 가
+    BASE 분기를 `ppOn` 검사보다 먼저 둬서 베이스가 항상 양자화 모드가 됐고, img
+    표시 분기는 이미 삭제돼 raw 가 표시면에 도달할 경로가 없었다 — 퍼펙 체크박스가
+    아무것도 안 바꾸는 "거짓말하는 컨트롤"이 됐다.
+    """
+    store = SRC["store.js"]
+    m = re.search(r"function snapScaleFor\(.*?\n\}", store, re.S)
+    assert m, "snapScaleFor 를 찾지 못했다"
+    body = m.group(0)
+    pp_at = body.index("!ppOn(stateName)")
+    base_at = body.index("BASE_STATE")
+    assert pp_at < base_at, (
+        "snapScaleFor 에서 BASE 분기가 ppOn 검사보다 앞이다 — 베이스 pp OFF 의 "
+        "원본(raw) 뷰가 죽는다"
+    )
+    # 소스 모드의 표시 소스는 el(frameUrl 이 고른 파일)이어야 raw 가 화면에 닿는다
+    tr = SRC["transforms.js"]
+    assert re.search(r"quantize \? editSourceFor\(stateName, el\) : el", tr), (
+        "소스 모드가 편집 소스(논리)로 표시한다 — 베이스 raw 뷰가 다시 사라진다"
+    )
+
+
 def test_quantize_grid_is_the_displayed_grid():
     """퍼펙 양자화 격자 = 격자 오버레이가 그리는 측정값 — 격자 진실은 하나다."""
     store = SRC["store.js"]
