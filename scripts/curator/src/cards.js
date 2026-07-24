@@ -124,6 +124,11 @@ function renderState(state, replaceEl) {
   }
   renderSelectionState(state.name);
   startPreview(state);
+  // 새로 만든 표시면은 판정을 받아야 한다. load 위임 훅은 <img> 전용이라
+  // 여기서 만든 캔버스(미리보기·스냅)를 못 덮고, rebuildState 경로 11곳
+  // (보관·복구·복제·삭제·호흡 적용·줌 닫기…)이 전부 이 함수를 지난다.
+  // 빠뜨리면 리사이즈가 올 때까지 뭉갠 채로 남는다 (콩콩이 R2, 2026-07-24).
+  syncPixelScaling(wrap);
 }
 
 function renderCard(state, frame) {

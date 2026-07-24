@@ -5,6 +5,31 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.88 "Sol Measured Right" - the disease had moved to the new surface
+
+- Validator reject on v1.56.87, both findings correct. **R1**: raising the
+  `snap-canvas` buffer to source resolution invalidated the very premise its
+  exclusion rested on ("drawn at display resolution, so not a target"), but the
+  exclusion and its unconditional `image-rendering: pixelated` were left in
+  place - so the disease this plan set out to remove simply moved onto the new
+  display surface (896 buffer decimated to 152, ~2.9% of pixels surviving) on
+  exactly the frame Soohong had pointed at. The v1.56.87 evidence missed it
+  because it measured **buffer resolution** while the goal is **display
+  sampling**; the regression missed it because `snap-canvas` sat in the test's
+  exemption list. **R2**: canvases created by `renderState` were never judged -
+  the delegated load hook is image-only - so every rebuild path rendered
+  unjudged until a window resize retroactively fixed it.
+- `snap-canvas` is now a first-class target and its CSS reacts to `.px-upscale`
+  like everything else; the only remaining exemption is `cmp-canvas`, where the
+  buffer really is the display size. `renderState` judges the surfaces it
+  creates, and `applyCardTransform` judges the canvas where its buffer size is
+  actually decided (that code is deferred to image load, so an outer sweep would
+  otherwise read the 300px canvas default).
+- Verified by measuring the right quantity this time - buffer vs shown width and
+  computed `image-rendering`, across boot / rebuild / resize: 147 surfaces, 0
+  mismatches in all three (65 downscaled -> none nearest, 82 upscaled -> all
+  nearest). Both new regressions are mutation-checked.
+
 ## v1.56.87 "Sol Real Surface" - the canvas that was actually on screen
 
 - Soohong opened the DOM and pointed at the real culprit: on a frame with pixel
