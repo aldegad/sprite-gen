@@ -352,7 +352,7 @@ function openArchiveModal(stateName) {
     cardEl.innerHTML =
       `<div class="card-top"><span class="idx">${f.label ? escapeHtml(f.label) : `#${idx}`}</span></div>` +
       `<div class="stage">` +
-      (f.present ? `<img src="${escapeHtml(frameUrl(stateName, f))}" class="px-upscale" draggable="false" />` : `<div class="missing-label">${t("missingPending")}</div>`) +
+      (f.present ? `<img src="${escapeHtml(frameUrl(stateName, f))}" draggable="false" />` : `<div class="missing-label">${t("missingPending")}</div>`) +
       `</div>` +
       `<div class="card-controls">` +
       `<button type="button" class="ghost ar-seq">${t("restoreToSeq")}</button>` +

@@ -5,6 +5,31 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.85 "Sol One Answer" - the original view finally shows the original
+
+- The curator decided "render this image with nearest sampling?" in **six**
+  different places, and one of them - a blanket `.stage img { image-rendering:
+  pixelated }` - silently overrode the only correct one (`clientWidth >
+  naturalWidth` in cards.js), making it dead code. So the hi-res `orig/` twin was
+  nearest-decimated when drawn small: at 896px natural in a ~150px card only
+  **2.1% of pixels survived** (hard alpha jumps 346 vs 117 with interpolation),
+  which read on screen as a quantized, broken sprite. Soohong called this out
+  three times ("this is absolutely not the original") and was right every time -
+  the files were faithful, the display was not. v1.56.84 made it worse, not
+  better: a more faithful (larger) twin means more pixels thrown away.
+- The decision now has a single owner: `display.js applyPixelScaling` toggles
+  `.px-upscale` from live geometry (shown vs natural), and CSS reacts only to
+  that class. It is re-evaluated on every geometry change (`sizePxGrids`, window
+  resize) instead of being granted once at load, so an image that crosses from
+  upscale to downscale flips correctly. The unconditional grants (zoom modal,
+  archive zone, breathe strip) and the `cell.width < 160` guess are gone.
+  Internal render surfaces drawn at display resolution (`snap-canvas`,
+  `cmp-canvas`) keep their own rules and are documented as out of scope.
+- Verified in a real browser: 82 card images, 0 decision mismatches - `orig/`
+  twins downscaled render `auto`, pixel-perfect frames upscaled render
+  `pixelated`. Regression pins the contract and is mutation-checked (reviving
+  the blanket rule turns exactly the 2 relevant tests red).
+
 ## v1.56.84 "Sol Native Twin" - the original twin is the original again
 
 - The hi-res `orig/` display twin is now baked at a **per-row native scale**:
