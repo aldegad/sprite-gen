@@ -207,13 +207,11 @@ function renderCard(state, frame) {
     "";
 
   if (frame.present) {
-    // 픽셀아트 확대 표시: 프레임 원본보다 크게 그려질 때만 pixelated (다운스케일 회화체는 부드럽게 유지)
+    // 표시 샘플링 판정은 display.js `applyPixelScaling` 이 소유한다 — 여기선
+    // 로드 시점에 한 번 깨워만 준다 (이후 재평가는 sizePxGrids/resize 가 돈다).
     const imgEl = card.querySelector(".stage img");
     if (imgEl) {
-      const markPx = () =>
-        requestAnimationFrame(() => {
-          if (imgEl.naturalWidth && imgEl.clientWidth > imgEl.naturalWidth) imgEl.classList.add("px-upscale");
-        });
+      const markPx = () => requestAnimationFrame(() => applyPixelScaling(imgEl));
       if (imgEl.complete) markPx();
       else imgEl.addEventListener("load", markPx, { once: true });
     }
@@ -318,7 +316,7 @@ function renderPreview(state) {
   // 뚝 떨어져 있어 캔버스와 멀고 헷갈렸다 (수홍 2026-07-15, 쿠마피커 pv-pos 지정).
   box.innerHTML =
     `<h4>${t("preview")}</h4>` +
-    `<canvas${run.cell.width < 160 ? ' class="px-upscale"' : ""} width="${run.cell.width}" height="${run.cell.height}" style="height:${(160 * aspect).toFixed(0)}px"></canvas>` +
+    `<canvas width="${run.cell.width}" height="${run.cell.height}" style="height:${(160 * aspect).toFixed(0)}px"></canvas>` +
     `<div class="count"></div>` +
     `<div class="pv-pos"></div>` +
     `<div class="pv-controls">` +
