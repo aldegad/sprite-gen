@@ -157,6 +157,14 @@ async function boot() {
   await renderFinalAtlas(run.atlas);
   // 힌트바를 우측 본문 컬럼 끝으로 이동 — 좌측 스플릿이 페이지 바닥까지 유지되게
   document.getElementById("states").appendChild(document.getElementById("hintbar"));
+  // 표시 샘플링 판정은 기하가 바뀔 때마다 다시 답해야 한다 (창 크기·패널 폭이
+  // 바뀌면 같은 이미지가 확대에서 축소로 넘어간다) — sizePxGrids 가 그 갱신 지점.
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(sizePxGrids, 120);
+  });
+  syncPixelScaling();
   if (healParts.length) {
     setStatus(healParts.join(" · "), run.heal.failed && run.heal.failed.length ? "err" : "ok");
   } else {

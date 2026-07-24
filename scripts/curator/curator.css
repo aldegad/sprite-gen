@@ -210,7 +210,6 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
   height: 30px;
   width: 30px;
   object-fit: contain;
-  image-rendering: pixelated;
   background: repeating-conic-gradient(#ececec 0% 25%, #f8f8f8 0% 50%) 0 0 / 8px 8px;
   border-radius: 4px;
 }
@@ -499,9 +498,9 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
   pointer-events: none;
   z-index: 1;
 }
-/* 원본 픽셀보다 확대 표시될 때만 붙는 클래스 — 픽셀아트 계단을 그대로 보여준다 */
-.stage img.px-upscale,
-.preview canvas.px-upscale { image-rendering: pixelated; }
+/* 원본 픽셀보다 확대 표시될 때만 붙는 클래스 — 픽셀아트 계단을 그대로 보여준다.
+   부여 주체는 display.js `applyPixelScaling` 하나뿐이다 (표시 기하로 판정·재평가). */
+.px-upscale { image-rendering: pixelated; }
 /* 변형 편집 중 실시간 격자 스냅 프리뷰 캔버스 (픽셀퍼펙트 줄 전용, applyCardTransform 소유) */
 .stage .snap-canvas {
   position: absolute;
@@ -674,19 +673,16 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .base-row .base-stage img {
   max-width: 100%;
   max-height: 240px;
-  image-rendering: pixelated;
   border: 1px solid var(--line, #3a3a3a);
   border-radius: 8px;
   background:
     repeating-conic-gradient(#e8e8e8 0% 25%, #f7f7f7 0% 50%) 0 0 / 16px 16px;
 }
 
-/* 패시브 픽셀 렌더링 — 확대 표시에서 안티앨리어싱으로 뭉개지지 않게 항상 nearest */
-.stage img,
-.preview canvas,
-.base-row .base-stage img {
-  image-rendering: pixelated;
-}
+/* nearest 샘플링 여부는 CSS 가 무조건 정하지 않는다 — 표시 기하로 판정하는
+   display.js `applyPixelScaling` 이 단일 소유자이고 `.px-upscale` 로만 부여된다.
+   (여기 있던 무조건 `.stage img` 규칙이 그 판정을 덮어써 고해상 원본 트윈을
+   축소 표시에서 nearest 데시메이션시켰다 — 수홍 2026-07-24) */
 
 /* 픽셀 그리드 오버레이 (줄별 체크박스 / 상단 전체 토글) — display 는 sizePxGrids 가 소유 */
 .stage .pxgrid {
@@ -785,7 +781,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   cursor: grab;
   user-select: none;
 }
-.ap-card img { height: 26px; width: 26px; object-fit: contain; image-rendering: pixelated; }
+.ap-card img { height: 26px; width: 26px; object-fit: contain; }
 .ap-ghost { position: fixed; z-index: 3000; pointer-events: none; opacity: 0.85; }
 /* 확대 스크러버 — 스테이지 내부 우하단, 호버 시 표시. [−][돋보기⁺ 드래그][+] */
 .stage .scale-scrub {
@@ -1048,7 +1044,6 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   display: block;
   width: 100%;
   height: auto;
-  image-rendering: pixelated;
 }
 .final-atlas .atlas-doc {
   flex: 1 1 48%;
@@ -1085,7 +1080,6 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   color: var(--fg-dim, #64748b);
   font-size: 12.5px;
 }
-.tree-node.atlas-node img { image-rendering: pixelated; }
 
 .gen-pop select {
   padding: 2px 4px;
@@ -1209,7 +1203,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .breathe-strip .bs-caption { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
 .breathe-strip .bs-frames { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; }
 .breathe-strip .bs-cell { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.breathe-strip .bs-cell canvas { width: 56px; height: 56px; image-rendering: pixelated; border: 1px solid var(--line); border-radius: 4px; background: repeating-conic-gradient(#ececec 0% 25%, #f8f8f8 0% 50%) 0 0 / 8px 8px; }
+.breathe-strip .bs-cell canvas { width: 56px; height: 56px; border: 1px solid var(--line); border-radius: 4px; background: repeating-conic-gradient(#ececec 0% 25%, #f8f8f8 0% 50%) 0 0 / 8px 8px; }
 .breathe-strip .bs-cap { font-size: 9.5px; color: var(--muted); white-space: nowrap; }
 /* 파이프라인 진행 바 — 상단 고정 얇은 바 (표시 전용) */
 #op-progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 5000; background: transparent; pointer-events: none; }
@@ -1254,7 +1248,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 #compare-modal .cmp-viewwrap { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
 #compare-modal .cmp-item { display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 3px 5px; border-radius: 6px; cursor: pointer; }
 #compare-modal .cmp-item:hover { background: var(--panel-2); }
-#compare-modal .cmp-item img { width: 26px; height: 26px; object-fit: contain; image-rendering: pixelated; }
+#compare-modal .cmp-item img { width: 26px; height: 26px; object-fit: contain; }
 /* 뷰포트: stage-pad 의 사방 패딩으로 자유 팬 — 중앙 정렬은 오픈 시 스크롤로 놓는다
    (compare.js render 의 1회 centerView). */
 #compare-modal .cmp-scroll { overflow: auto; flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2, #f8fafc); }
