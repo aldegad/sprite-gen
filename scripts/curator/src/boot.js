@@ -164,6 +164,7 @@ async function boot() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(sizePxGrids, 120);
   });
+  installPixelScalingLoadHook();
   syncPixelScaling();
   if (healParts.length) {
     setStatus(healParts.join(" · "), run.heal.failed && run.heal.failed.length ? "err" : "ok");
