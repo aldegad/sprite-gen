@@ -1331,13 +1331,6 @@ body.pan-space #compare-modal .cmp-canvas,
 .cmp-dl-menu button:hover, .dl-menu button:hover { background: #f0f1f5; }
 
 /* 온디맨드 픽셀 프리뷰 대기 배지 — 예산에 밀린 수를 헤더에 그대로 보여준다 (조용한 캡 금지) */
-.pp-deferred {
-  font-size: 12px;
-  color: var(--fg-dim, #64748b);
-  border: 1px dashed var(--line, #3a3a3a);
-  border-radius: 6px;
-  padding: 2px 8px;
-}
 
 /* 장기 heal/추출 첫 로드 로딩 패널 (plan long-op-loading-ux) */
 .op-loading {

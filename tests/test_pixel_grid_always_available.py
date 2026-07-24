@@ -84,19 +84,23 @@ def test_server_never_reports_grid_as_absent():
 
 
 def test_grid_controls_are_not_gated_in_the_client():
-    """클라 어디에서도 '격자를 아는 줄' 로 컨트롤을 거르지 않는다."""
+    """클라에 '격자 가능 줄' 게이팅 메커니즘 자체가 없다.
+
+    콩콩이 R3 교훈: 존재-정규식은 옆에 게이트를 새로 얹으면 통과한다(5줄 mutant 실증).
+    그래서 특정 줄 모양이 아니라 **knob 의 부재**를 고정한다 — gridCapableStates 집합과
+    pxWrap 재숨김이 코드에 없으면 그 mutant 가 뒤집을 스위치 자체가 없다.
+    (클라 런타임 행동 핀은 pytest 밖 — 실브라우저 감사로 보완, plan Verification)
+    """
+    for name, text in SRC.items():
+        assert "gridCapableStates" not in text, f"{name}: 게이팅 집합 knob 부활"
     boot = SRC["boot.js"]
-    assert re.search(r"gridCapableStates\s*=\s*new Set\(run\.states\.map\(", boot), (
-        "gridCapableStates 가 filter 로 되돌아갔다 — 일부 줄이 격자를 잃는다"
-    )
-    assert re.search(r"pxWrap\.hidden\s*=\s*false", boot), (
-        "격자 전체 토글이 조건부로 숨겨진다"
+    assert re.search(r"pxWrap\.hidden\s*=\s*false", boot), "격자 전체 토글 상시 노출이 사라졌다"
+    assert not re.search(r"pxWrap\.hidden\s*=\s*(?!\s*false\b)", boot), (
+        "pxWrap.hidden 에 false 외 값을 넣는 코드 — 재숨김 경로"
     )
     assert re.search(r"const showGridToggle\s*=\s*true", SRC["cards.js"]), (
         "줄별 격자 토글이 조건부로 숨겨진다"
     )
-    assert not re.search(r"gridCapableStates\.has\([^)]*\)\s*\)\s*controls\.appendChild\(makeGridToggle",
-                         SRC["zoom-editor.js"]), "줌 모달 격자 토글이 조건부로 숨겨진다"
 
 
 def test_grid_spacing_never_resolves_to_null():

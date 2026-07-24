@@ -12,57 +12,42 @@ function applyCardTransform(stage, stateName, idx) {
   const m = matrixOf(t);
   const snap = snapScaleFor(stateName);
   const canvas = stage.querySelector(".snap-canvas");
-  const edits = getPixelOps(stateName, idx);
-  const editingThis = pixelEdit && pixelEdit.state === stateName && pixelEdit.idx === idx
-    && stage.closest("#zoom-modal");
   const basePp = stateName === BASE_STATE && ppOn(stateName); // 베이스 pp ON = 논리 양자화 뷰
-  if (canvas && (edits || editingThis || basePp || (snap && !isIdentityTransform(t)))) {
-    el.style.transform = "";
-    el.style.visibility = "hidden";
-    canvas.style.display = "block";
-    // 두 캔버스 모드 (실사고 2026-07-17: 편집 유무에 따라 이동 거동이 갈라져
-    // 한쪽만 지글거렸다 — 수홍 발견):
-    // - 양자화 미리보기 (픽셀퍼펙트 뷰 + 변형): 변형을 격자 재양자화로 굽기와
-    //   동일하게 미리 본다. 재양자화 특성상 이동이 격자 단위로 스냅된다 (의도).
-    // - 소스 표시 (plain 뷰의 편집 프레임): identity 로 한 번 그리고,
-    //   이동은 img 와 똑같은 CSS 변형으로 — 편집 없는 프레임과 거동이 같아진다.
-    // 편집 세션도 같은 두 모드를 그대로 쓴다 (WYSIWYG, 수홍 지시 2026-07-19:
-    // 지우개/스포이드를 눌러도 스케일 조정해 둔 모습 그대로 보면서 편집).
-    // 입력 좌표는 줌 에디터가 소스 공간으로 역변환한다 — 저장 공간은 불변.
-    const quantize = (!!snap || basePp);
-    const render = () => {
-      // 소스 표시 모드에서는 소스 해상도로 그린다 — 셀 크기 캔버스에 고해상 원본
-      // 트윈을 그리면 64px 로 파괴된다 (수홍 2026-07-24 "이따위로 나온다고").
-      // 양자화 모드는 결과 격자를 보여주는 게 목적이라 셀 크기 그대로다.
-      const source = editSourceFor(stateName, el);
-      const ss = quantize ? 1 : superSampleFor(source, cw);
-      canvas.width = cw * ss;
-      canvas.height = ch * ss;
-      const ctx = canvas.getContext("2d");
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const tt = quantize ? getTransform(stateName, idx) : IDENTITY();
-      drawFrameInto(ctx, source, tt, cw, ch, snap, getPixelOps(stateName, idx), ss);
-      // 버퍼 해상도가 **여기서** 정해진다 (ss 에 따라 64 또는 소스 해상도).
-      // 이 함수는 이미지 로드까지 지연될 수 있어서, 바깥의 판정 스윕이 먼저 돌면
-      // 아직 canvas 기본값(300)을 보고 엉뚱하게 답한다 — 사실을 만든 자리에서
-      // 소비자를 갱신한다 (콩콩이 R1 수리 중 재발견, 2026-07-24).
-      applyPixelScaling(canvas);
-    };
-    canvas.style.transform = quantize
-      ? ""
-      : `translate(${t.dx * ds}px, ${t.dy * ds}px) matrix(${m.m00}, ${m.m10}, ${m.m01}, ${m.m11}, 0, 0)`;
-    if (el.complete && el.naturalWidth) render();
-    else el.addEventListener("load", render, { once: true });
-  } else {
-    el.style.visibility = "";
-    if (canvas) {
-      canvas.style.display = "none";
-      canvas.style.transform = "";
-    }
-    // CSS matrix(a,b,c,d,e,f): a=m00 b=m10 c=m01 d=m11; translate applied after, about center.
-    el.style.transform =
-      `translate(${t.dx * ds}px, ${t.dy * ds}px) matrix(${m.m00}, ${m.m10}, ${m.m01}, ${m.m11}, 0, 0)`;
-  }
+  if (!canvas) return; // 프레임 없는 스테이지(missing 라벨)는 그릴 것이 없다
+  // ── 표시면은 캔버스 하나다 (수홍 2026-07-24 "구현체가 몇 종류라 노이즈"). ──
+  // img 는 숨김 로더(natural size·load 이벤트·편집 소스)일 뿐 절대 표시면이 아니다.
+  // 예전엔 편집/변형/양자화 프레임만 캔버스로, 나머지는 img 로 갈라 그렸고 —
+  // 그 fork 의 한쪽만 보다가 표시 결함 5건(v1.56.85~89)이 전부 태어났다.
+  el.style.transform = "";
+  el.style.visibility = "hidden";
+  canvas.style.display = "block";
+  // 한 렌더러의 두 모드 (fork 아님 — drawFrameInto 하나가 렌더한다):
+  // - 양자화 (pp 뷰: 계약 scale 또는 측정 k): 변형을 격자 재양자화로 굽기와 동일하게
+  //   미리 본다. 이동이 격자 단위로 스냅된다 (의도). 격자 오버레이와 같은 k — 격자 기준 퍼펙.
+  // - 소스 (plain 뷰): 소스 해상도(ss)로 identity 렌더 + 이동은 CSS 변형.
+  // 편집 세션도 같은 두 모드를 그대로 쓴다 (WYSIWYG, 수홍 2026-07-19).
+  const quantize = (!!snap || basePp);
+  const render = () => {
+    // 소스 모드는 소스 해상도로 그린다 — 셀 크기 캔버스에 고해상 원본 트윈을
+    // 그리면 64px 로 파괴된다 (수홍 2026-07-24). 양자화 모드는 결과 격자가
+    // 목적이라 셀 크기 그대로다.
+    const source = editSourceFor(stateName, el);
+    const ss = quantize ? 1 : superSampleFor(source, cw);
+    canvas.width = cw * ss;
+    canvas.height = ch * ss;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const tt = quantize ? getTransform(stateName, idx) : IDENTITY();
+    drawFrameInto(ctx, source, tt, cw, ch, snap, getPixelOps(stateName, idx), ss);
+    // 버퍼 해상도가 여기서 정해진다 — 사실을 만든 자리에서 소비자(판정)를 갱신한다
+    // (콩콩이 R1, 2026-07-24: 바깥 스윕만 두면 canvas 기본값 300 을 보고 답한다).
+    applyPixelScaling(canvas);
+  };
+  canvas.style.transform = quantize
+    ? ""
+    : `translate(${t.dx * ds}px, ${t.dy * ds}px) matrix(${m.m00}, ${m.m10}, ${m.m01}, ${m.m11}, 0, 0)`;
+  if (el.complete && el.naturalWidth) render();
+  else el.addEventListener("load", render, { once: true });
   const sh = t.shx || t.shy ? ` sh${(t.shx || 0).toFixed(2)},${(t.shy || 0).toFixed(2)}` : "";
   const flip = t.flipX ? " ↔" : "";
   const card = stage.closest(".card");
