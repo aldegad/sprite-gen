@@ -51,9 +51,11 @@ async function boot() {
     const fallback = ppPreviewStates.has(s.name) ? false : ppDefault;
     ppStates[s.name] = c && typeof c.pixel_perfect === "boolean" ? c.pixel_perfect : fallback;
   }
-  // 격자 오버레이 가능 줄(계약 scale 또는 줄별 측정 피치) — 표시 전용, 저장 안 함, 기본 off
-  const contractScale = run.pixelPerfect && run.pixelPerfect.scale;
-  gridCapableStates = new Set(run.states.filter((s) => s.pixelScale || contractScale).map((s) => s.name));
+  // 격자 오버레이는 **모든 줄**이 가진다 — 표시 전용, 저장 안 함, 기본 off.
+  // 격자 scale 은 서버가 실패할 수 없는 정확 판정으로 재고(줄별 실측 > 계약 > 항등 1),
+  // "격자를 모른다"는 상태가 없으므로 컨트롤을 숨길 근거도 없다 (수홍 2026-07-24:
+  // 조건부 숨김은 버그다 — 1:1 픽셀아트가 통째로 격자 없는 줄로 접혔다).
+  gridCapableStates = new Set(run.states.map((s) => s.name));
   gridStates = {};
   applyStaticLang();
   const cmpBtn = document.getElementById("compare-open");
@@ -88,10 +90,10 @@ async function boot() {
     });
   }
   // 픽셀 격자 전체 토글 — 표시 전용 오버레이 (굽기와 무관), 줄별 체크박스와 같은 truth.
-  // 격자를 알 수 있는 줄이 하나도 없으면 감춘다 (가짜 격자를 보여주지 않는다).
+  // 항상 보인다: 격자는 스크립트가 결정론으로 재는 것이라 "모름"이 없다.
   const pxWrap = document.getElementById("pxgrid-wrap");
   const pxCheck = document.getElementById("pxgrid-check");
-  pxWrap.hidden = gridCapableStates.size === 0;
+  pxWrap.hidden = false;
   pxCheck.addEventListener("change", () => {
     const on = pxCheck.checked;
     for (const n of gridCapableStates) gridStates[n] = on;

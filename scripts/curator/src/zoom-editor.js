@@ -162,7 +162,7 @@ function openZoom(stateName, idx, keepWidth) {
   const controls = card.querySelector(".row-controls");
   // 완전 동일 계약 (수홍 지시 2026-07-17 "다 똑같이"): 픽셀퍼펙트·격자·변형은
   // 베이스에도 전부. 프레임 전용은 GIF/이전·다음(다중 프레임 개념)뿐.
-  if (isBase || gridCapableStates.has(stateName)) controls.appendChild(makeGridToggle(stateName));
+  controls.appendChild(makeGridToggle(stateName)); // 격자는 언제나 — 베이스·프레임 공통
   if (isBase || ppTwinStates.has(stateName)) controls.appendChild(makePpToggle(stateName));
   if (!isBase) {
     controls.appendChild(makeGifButton(stateName));
