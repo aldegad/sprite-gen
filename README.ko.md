@@ -1,13 +1,3 @@
-<p align="center">
-  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy idle" />
-  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy running" />
-  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy success" />
-  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy talking" />
-  <img src="docs/assets/howl-idle.gif" width="110" alt="howl idle" />
-  <img src="docs/assets/howl-running.gif" width="110" alt="howl running" />
-  <img src="docs/assets/howl-success.gif" width="110" alt="howl success" />
-</p>
-
 <h1 align="center">sprite-gen</h1>
 
 <p align="center"><b>그림 하나를 넣으면. 게임에서 바로 쓸 수 있는 스프라이트 아틀라스가 나옵니다.</b></p>
@@ -22,7 +12,7 @@
 
 이미지 모델에 "sprite sheet"를 요청하면 어떤 결과가 나오는지 압니다. 프레임마다 얼굴이 바뀌는 캐릭터, 키아웃되지 않는 배경, 서로 겹치고 그리드 밖으로 밀려나는 포즈, 그리고 실제 게임 엔진이 제대로 먹지 못하는 PNG. 귀여운 데모지만, 에셋으로는 쓸모없습니다.
 
-`sprite-gen`은 그 간극을 메우는 Codex/Claude skill입니다. **베이스 이미지 하나**와 액션 목록을 주면, 행 단위로 생성을 진행하고, 캐릭터 정체성을 고정하고, 크로마 배경을 진짜 알파로 제거하고, 각 포즈를 깨끗한 투명 프레임으로 추출한 뒤, **기계가 읽을 수 있는 `manifest.json.frame_layout`**이 포함된 런타임 아틀라스를 굽습니다. 위의 모든 스프라이트는 이 방식으로 만들었습니다.
+`sprite-gen`은 그 간극을 메우는 Codex/Claude skill입니다. **베이스 이미지 하나**와 액션 목록을 주면, 행 단위로 생성을 진행하고, 캐릭터 정체성을 고정하고, 크로마 배경을 진짜 알파로 제거하고, 각 포즈를 깨끗한 투명 프레임으로 추출한 뒤, **기계가 읽을 수 있는 `manifest.json.frame_layout`**이 포함된 런타임 아틀라스를 굽습니다.
 
 그리고 생성이 끝내 맞추지 못하는 마지막 10%를 위해 **큐레이션 웹뷰**가 있습니다. 프레임을 나란히 비교하고, 망가진 것을 버리고, 회전/스케일/위치를 비파괴적으로 미세 조정하고, 루프를 실시간으로 확인한 뒤 굽습니다. 파이프라인이 노동을 맡고, 당신은 취향을 지킵니다.
 
@@ -80,6 +70,20 @@ flowchart LR
 ![chroma peel before and after — illustrated hair strand](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![chroma peel before and after — pixel-art outline](docs/assets/chroma-peel-pixelart-before-after.png)
+
+## 픽셀 격자 복원
+
+AI 가 만든 "픽셀아트" 는 픽셀아트가 아닙니다. 블록이 흔들리고 가장자리에 앤티앨리어싱이 남으며 격자가 한 행 안에서도 밀립니다. 그래서 등간격으로 자르면 한 블록이 옆 칸으로 번집니다. 추출기는 격자를 가정하지 않고 측정합니다. 프레임별 피치 검출, 배음 오검출을 눌러버리는 행 단위 합의, 실제 색경계로 스냅되는 절단선, 그리고 측정된 피치에 비례하는 최소 칸폭 덕분에 인접한 절단선 둘이 같은 밴드로 겹쳐 붙는 일이 없습니다.
+
+같은 원본 스트립, 같은 고정 팔레트. 변수는 엔진뿐입니다.
+
+손으로 고른 한 프레임이 아니라 프로젝트 하나를 통째로 검증했습니다. 실제 게임의 pixel_perfect 런 94개를 각자의 원본 스트립에서 전부 다시 유도해 출하본과 픽셀 단위로 비교했습니다.
+
+<p align="center">
+  <img src="docs/assets/engine-compare.png" width="720" alt="같은 원본에 대한 구엔진과 신엔진 대조" />
+</p>
+
+정본 프레임 26,690,432px 중 실루엣이 움직인 것은 1.41% 입니다. 승인한 형태는 그대로 남고, 달라지는 것은 외곽선과 명암이 놓이는 자리입니다. 격자가 결정하는 바로 그 부분이죠.
 
 ## 큐레이션 웹뷰
 

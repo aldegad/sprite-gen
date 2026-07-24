@@ -1,13 +1,3 @@
-<p align="center">
-  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy idle" />
-  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy running" />
-  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy success" />
-  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy talking" />
-  <img src="docs/assets/howl-idle.gif" width="110" alt="howl idle" />
-  <img src="docs/assets/howl-running.gif" width="110" alt="howl running" />
-  <img src="docs/assets/howl-success.gif" width="110" alt="howl success" />
-</p>
-
 <h1 align="center">sprite-gen</h1>
 
 <p align="center"><b>One drawing in. A game-ready sprite atlas out.</b></p>
@@ -22,7 +12,7 @@
 
 Ask an image model for a "sprite sheet" and you know what you get: a character whose face changes every frame, a background that won't key out, poses that overlap and drift off-grid, and a PNG your game engine can't actually consume. Cute demo, useless asset.
 
-`sprite-gen` is a Codex/Claude skill that closes that gap. Give it **one base image** and a list of actions — it drives the generation row by row, locks the character's identity, strips the chroma background to real alpha, extracts each pose as a clean transparent frame, and bakes a runtime atlas **with a machine-readable `manifest.json.frame_layout`**. Every sprite above was made this way.
+`sprite-gen` is a Codex/Claude skill that closes that gap. Give it **one base image** and a list of actions — it drives the generation row by row, locks the character's identity, strips the chroma background to real alpha, extracts each pose as a clean transparent frame, and bakes a runtime atlas **with a machine-readable `manifest.json.frame_layout`**.
 
 And for the last 10% that generation never gets right, there's a **curation webview**: compare frames side by side, reject the broken ones, nudge rotation/scale/position non-destructively, watch the loop live — then bake. The pipeline does the labor; you keep the taste.
 
@@ -80,6 +70,20 @@ The close-up crops below show the edge detail behind the full-body comparisons.
 ![chroma peel before and after — illustrated hair strand](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![chroma peel before and after — pixel-art outline](docs/assets/chroma-peel-pixelart-before-after.png)
+
+## Pixel lattice recovery
+
+AI-generated "pixel art" is not pixel art. The blocks wobble, the edges carry antialiasing, and the lattice drifts within a single row, so cutting on an even grid smears one block into the next. The extractor measures the real lattice instead of assuming one: per-frame pitch detection, a row-wide consensus that outvotes harmonic misdetections, cuts snapped to actual colour boundaries, and a minimum cell width proportional to the measured pitch so two neighbouring cuts can never collapse onto the same band.
+
+Same source strip, same pinned palette. The engine is the only variable.
+
+It was verified on a whole project rather than a hand-picked frame: all 94 pixel-perfect runs of a live game were re-derived from their own source strips and compared pixel by pixel against what shipped.
+
+<p align="center">
+  <img src="docs/assets/engine-compare.png" width="720" alt="old engine versus new engine on the same sources" />
+</p>
+
+Across 26,690,432 canonical pixels the silhouette moved by 1.41%. The shape you approved stays the shape you get; what changes is where outlines and shading land, which is exactly what the lattice decides.
 
 ## Curation webview
 

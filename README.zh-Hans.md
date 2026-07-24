@@ -1,13 +1,3 @@
-<p align="center">
-  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy idle" />
-  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy running" />
-  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy success" />
-  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy talking" />
-  <img src="docs/assets/howl-idle.gif" width="110" alt="howl idle" />
-  <img src="docs/assets/howl-running.gif" width="110" alt="howl running" />
-  <img src="docs/assets/howl-success.gif" width="110" alt="howl success" />
-</p>
-
 <h1 align="center">sprite-gen</h1>
 
 <p align="center"><b>输入一张图。输出可直接用于游戏的精灵图集。</b></p>
@@ -22,7 +12,7 @@
 
 向图像模型请求一张“sprite sheet”，你知道会得到什么：每一帧脸都在变的角色，抠不掉的背景，互相重叠并偏离网格的姿势，以及游戏引擎实际上无法消费的 PNG。可爱的演示，没用的素材。
 
-`sprite-gen` 是一个 Codex/Claude skill，用来补上这道鸿沟。给它**一张基础图像**和一组动作列表，它会逐行驱动生成，锁定角色身份，把色键背景剥离为真实 alpha，将每个姿势提取为干净的透明帧，并烘焙出运行时图集，附带机器可读的 `manifest.json.frame_layout`。上面的每个精灵都是这样制作的。
+`sprite-gen` 是一个 Codex/Claude skill，用来补上这道鸿沟。给它**一张基础图像**和一组动作列表，它会逐行驱动生成，锁定角色身份，把色键背景剥离为真实 alpha，将每个姿势提取为干净的透明帧，并烘焙出运行时图集，附带机器可读的 `manifest.json.frame_layout`。
 
 而对于生成永远差一点的最后 10%，这里有一个**策展 webview**：并排比较帧，拒绝坏掉的帧，以非破坏方式微调旋转/缩放/位置，实时观看循环，然后烘焙。流水线负责苦活；你保留判断品味。
 
@@ -80,6 +70,20 @@ flowchart LR
 ![chroma peel 前后对比 —— 插画发丝](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![chroma peel 前后对比 —— 像素画轮廓](docs/assets/chroma-peel-pixelart-before-after.png)
+
+## 像素格点还原
+
+AI 生成的“像素画”并不是像素画。方块会抖动，边缘残留抗锯齿，格点甚至在同一行内也会漂移，因此按等距切割会把一个方块糊到相邻格里。提取器不假设格点，而是测量它：逐帧节距检测、压过倍频误检的整行共识、吸附到真实颜色边界的切割线，以及与实测节距成比例的最小格宽，使相邻两条切割线绝不会塌缩到同一条带上。
+
+同一份源图条，同一份固定调色板。唯一的变量是引擎。
+
+验证对象是整个项目，而不是精挑细选的一帧：一款在跑的游戏中全部 94 个 pixel_perfect run 都从各自的源图条重新导出，并与已出货的帧逐像素比对。
+
+<p align="center">
+  <img src="docs/assets/engine-compare.png" width="720" alt="同一批源图上的旧引擎与新引擎对比" />
+</p>
+
+在 26,690,432 个正本像素中，轮廓的变动为 1.41%。你确认过的形状仍然是你拿到的形状；改变的是描边与明暗落在哪里，而那正是格点决定的部分。
 
 ## 策展 webview
 

@@ -1,13 +1,3 @@
-<p align="center">
-  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy idle" />
-  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy running" />
-  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy success" />
-  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy talking" />
-  <img src="docs/assets/howl-idle.gif" width="110" alt="howl idle" />
-  <img src="docs/assets/howl-running.gif" width="110" alt="howl running" />
-  <img src="docs/assets/howl-success.gif" width="110" alt="howl success" />
-</p>
-
 <h1 align="center">sprite-gen</h1>
 
 <p align="center"><b>1枚の絵を入力。ゲーム対応のスプライトアトラスを出力。</b></p>
@@ -22,7 +12,7 @@
 
 画像モデルに「スプライトシート」を頼むと、何が出てくるかはわかっています。フレームごとに顔が変わるキャラクター、キーアウトできない背景、重なり合ってグリッドからずれるポーズ、そしてゲームエンジンが実際には消費できないPNG。かわいいデモ、使えないアセット。
 
-`sprite-gen` は、そのギャップを埋める Codex/Claude スキルです。**1枚のベース画像**とアクション一覧を渡すと、行ごとに生成を進め、キャラクターの同一性を固定し、クロマ背景を本物のアルファに剥がし、各ポーズをきれいな透過フレームとして抽出し、**機械可読な `manifest.json.frame_layout`** 付きのランタイムアトラスを焼き込みます。上のスプライトはすべてこの方法で作られました。
+`sprite-gen` は、そのギャップを埋める Codex/Claude スキルです。**1枚のベース画像**とアクション一覧を渡すと、行ごとに生成を進め、キャラクターの同一性を固定し、クロマ背景を本物のアルファに剥がし、各ポーズをきれいな透過フレームとして抽出し、**機械可読な `manifest.json.frame_layout`** 付きのランタイムアトラスを焼き込みます。
 
 そして生成がどうしても外す最後の10%には、**キュレーション webview** があります。フレームを横並びで比較し、壊れたものを却下し、回転/スケール/位置を非破壊で微調整し、ループをライブで確認してから焼き込みます。パイプラインが労力を引き受け、あなたはセンスを保ちます。
 
@@ -80,6 +70,20 @@ flowchart LR
 ![chroma peel before and after — illustrated hair strand](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![chroma peel before and after — pixel-art outline](docs/assets/chroma-peel-pixelart-before-after.png)
+
+## ピクセル格子の復元
+
+AI が生成した「ピクセルアート」はピクセルアートではありません。ブロックは揺れ、輪郭にはアンチエイリアスが残り、格子は 1 行の中でもずれていきます。等間隔で切ると、あるブロックが隣のセルへにじみ出します。抽出器は格子を仮定せず測定します。フレームごとのピッチ検出、倍音の誤検出を押し切る行単位の合意、実際の色境界へスナップする切断線、そして測定されたピッチに比例する最小セル幅により、隣り合う切断線が同じ帯に重なって潰れることはありません。
+
+同じソースストリップ、同じ固定パレット。変数はエンジンだけです。
+
+選び抜いた 1 フレームではなく、プロジェクト 1 本まるごとで検証しました。実際のゲームの pixel_perfect ラン 94 本をそれぞれのソースストリップから再導出し、出荷中のフレームとピクセル単位で比較しています。
+
+<p align="center">
+  <img src="docs/assets/engine-compare.png" width="720" alt="同じソースに対する旧エンジンと新エンジンの比較" />
+</p>
+
+正本フレーム 26,690,432px のうち、シルエットが動いたのは 1.41% です。承認した形はそのまま残り、変わるのは輪郭と陰影が落ちる位置、つまり格子が決めるまさにその部分です。
 
 ## キュレーション webview
 
