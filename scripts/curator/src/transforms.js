@@ -31,13 +31,17 @@ function applyCardTransform(stage, stateName, idx) {
     // 입력 좌표는 줌 에디터가 소스 공간으로 역변환한다 — 저장 공간은 불변.
     const quantize = (!!snap || basePp);
     const render = () => {
-      canvas.width = cw;
-      canvas.height = ch;
+      // 소스 표시 모드에서는 소스 해상도로 그린다 — 셀 크기 캔버스에 고해상 원본
+      // 트윈을 그리면 64px 로 파괴된다 (수홍 2026-07-24 "이따위로 나온다고").
+      // 양자화 모드는 결과 격자를 보여주는 게 목적이라 셀 크기 그대로다.
+      const source = editSourceFor(stateName, el);
+      const ss = quantize ? 1 : superSampleFor(source, cw);
+      canvas.width = cw * ss;
+      canvas.height = ch * ss;
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const tt = quantize ? getTransform(stateName, idx) : IDENTITY();
-      drawFrameInto(ctx, editSourceFor(stateName, el), tt, canvas.width, canvas.height, snap,
-        getPixelOps(stateName, idx));
+      drawFrameInto(ctx, source, tt, cw, ch, snap, getPixelOps(stateName, idx), ss);
     };
     canvas.style.transform = quantize
       ? ""

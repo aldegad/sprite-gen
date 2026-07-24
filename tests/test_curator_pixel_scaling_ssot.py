@@ -104,3 +104,32 @@ def test_decision_is_re_evaluated_when_the_image_source_changes():
     assert re.search(
         r"refreshVariantImages\(\)\s*\{.*?applyPixelScaling\(el\)", display, re.S
     ), "src 스왑 경로가 판정을 다시 받지 않는다"
+
+
+def test_source_display_canvas_renders_at_source_resolution():
+    """실제 표시면이 캔버스일 때도 원본 해상도를 지킨다.
+
+    실사고 (수홍 2026-07-24, DOM 을 직접 열어 지목): 픽셀 편집이 있는 프레임은
+    `<img>` 가 `visibility: hidden` 이 되고 `snap-canvas` 가 실제 표시면이 되는데,
+    그 캔버스가 **항상 셀 크기(64×64)** 라서 896px 원본 트윈이 64픽셀로 파괴됐다.
+    표시 계약을 이미지에만 걸면 이 경로가 통째로 빠져나간다.
+
+    양자화 모드(픽셀퍼펙트 결과 미리보기)는 셀 크기가 목적이므로 ss=1 이며,
+    두 모드는 배타적이다.
+    """
+    tr = SRC["transforms.js"]
+    display = SRC["display.js"]
+    assert "superSampleFor" in display, "소스 해상도 배율 계산자가 없다"
+    assert re.search(r"const ss = quantize \? 1 : superSampleFor\(", tr), (
+        "소스 표시 모드에서 캔버스가 소스 해상도로 올라가지 않는다"
+    )
+    assert re.search(r"canvas\.width = cw \* ss", tr) and re.search(r"canvas\.height = ch \* ss", tr), (
+        "캔버스가 셀 크기에 고정돼 있다 — 고해상 원본이 파괴된다"
+    )
+    # 좌표 계약: 저장·입력은 셀 공간, ss 는 렌더 해상도만 올린다
+    assert re.search(r"sctx\.fillRect\(x \* ss, y \* ss, ss, ss\)", display), (
+        "픽셀 편집이 슈퍼샘플 공간으로 매핑되지 않는다"
+    )
+    assert re.search(r"const ss = canvas\.width / cw", display), (
+        "스포이드가 슈퍼샘플 배율을 반영하지 않는다 — 다른 픽셀을 집는다"
+    )
