@@ -207,14 +207,9 @@ function renderCard(state, frame) {
     "";
 
   if (frame.present) {
-    // 표시 샘플링 판정은 display.js `applyPixelScaling` 이 소유한다 — 여기선
-    // 로드 시점에 한 번 깨워만 준다 (이후 재평가는 sizePxGrids/resize 가 돈다).
-    const imgEl = card.querySelector(".stage img");
-    if (imgEl) {
-      const markPx = () => requestAnimationFrame(() => applyPixelScaling(imgEl));
-      if (imgEl.complete) markPx();
-      else imgEl.addEventListener("load", markPx, { once: true });
-    }
+    // 표시 샘플링 판정은 display.js 가 소유한다 — 로드는 위임 훅
+    // (installPixelScalingLoadHook), 기하 변화는 sizePxGrids/resize 가 재평가한다.
+    // 여기서 따로 부르지 않는다 (판정 재확산 금지).
     const idxEl = card.querySelector(".card-top .idx");
     if (idxEl) idxEl.addEventListener("dblclick", (ev) => {
       ev.preventDefault();

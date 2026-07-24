@@ -161,11 +161,27 @@ function syncPixelScaling(root) {
 
 // 원본 기하: <img> 는 naturalWidth, <canvas> 는 그리기 버퍼 width.
 // 표시 기하는 clientWidth (레이아웃 후 실제 CSS 픽셀).
+//
+// **원본 기하는 src 가 바뀌면 같이 바뀐다** — 픽셀퍼펙트 토글은 레이아웃을 안 건드리고
+// 이미지 소스만 64px 출력 ↔ 700~900px 원본 트윈으로 갈아끼운다. 그래서 판정 재평가는
+// 레이아웃 이벤트만으로 부족하고 **이미지 로드**에도 걸려야 한다 — 안 그러면 확대용
+// nearest 가 축소된 원본 위에 stale 로 남아, 토글을 끄면 원본이 2% 표본으로
+// 데시메이션돼 보인다 (수홍 2026-07-24 "달리기 시퀀스... 절대 원본 아님").
 function applyPixelScaling(el) {
   const natural = el.tagName === "CANVAS" ? el.width : el.naturalWidth;
   const shown = el.clientWidth;
-  if (!natural || !shown) return; // 아직 로드/레이아웃 전 — load 훅이 다시 부른다
+  if (!natural || !shown) return; // 아직 로드/레이아웃 전 — load 위임 훅과 sizePxGrids 가 다시 부른다
   el.classList.toggle("px-upscale", shown > natural);
+}
+
+// 재평가 트리거 ③ — 이미지 로드 (최초 렌더 + 모든 src 교체를 한 훅으로 덮는다).
+// load 는 버블링하지 않아 capture 로 받는다. 호출부마다 손으로 부르면 판정이 다시
+// 흩어지므로(이 플랜이 없앤 바로 그 병) 위임 훅 하나로 둔다.
+function installPixelScalingLoadHook() {
+  document.addEventListener("load", (ev) => {
+    const el = ev.target;
+    if (el instanceof HTMLImageElement && el.matches(PIXEL_SCALE_TARGETS)) applyPixelScaling(el);
+  }, true);
 }
 
 // 줄 단위 격자: 그 줄의 격자 체크박스가 켜져 있을 때만 그린다.
@@ -294,6 +310,9 @@ function refreshVariantImages() {
     const el = card.querySelector(".stage img");
     if (f && el) {
       el.src = frameUrl(card.dataset.state, f);
+      // src 가 바뀌면 원본 기하가 바뀐다. 새 이미지 로드는 위임 훅이 받지만,
+      // 같은 src 재대입(캐시·pp 무변)은 load 가 안 뜨므로 여기서 한 번 더 답한다.
+      applyPixelScaling(el);
       // 변형 표시 모드(캔버스 스냅 ↔ CSS)도 pp 상태에 맞게 다시 결정
       if (f.present) applyCardTransform(card.querySelector(".stage"), card.dataset.state, idx);
     }
