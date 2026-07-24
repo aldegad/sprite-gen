@@ -5,6 +5,30 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.92 "Sol Raw Base Back" - the base's original view survives unification
+
+- Validator reject on v1.56.91, correct again: unifying onto the single canvas
+  surface killed the base row's pixel-perfect-OFF view. `snapScaleFor` handled
+  BASE before checking `ppOn`, so the base was always in quantize mode, and with
+  the img display branch gone the raw source (which `frameUrl` still loaded)
+  had no path to the screen - the pp checkbox became a control that changed
+  nothing, the very class this plan set out to remove.
+- Fixed in the shape the validator verified: `ppOn` is checked before every
+  branch (base pp OFF -> source mode), source mode displays `el` (the file
+  `frameUrl` chose - raw for base-off) while `editSourceFor` stays the edit-
+  coordinate contract for quantize mode only, and `superSampleFor`'s cap is a
+  canvas pixel bound (2048/cell, same shape as the engine twin cap) instead of
+  a fixed x16 that decimated a 958px raw to 448 on the base's small logical
+  cell. The dead `basePp` flag is gone (quantize == !!snap).
+- Verified on the exact user path: base edit -> zoom -> uncheck pp now renders
+  a 952x1632 canvas (raw at ss=34, `auto` sampling) vs 28x48 `pixelated` when
+  ON. Regression pins the ppOn-before-BASE ordering and the source-mode display
+  source; reversing the order turns exactly that test red. Suite 302 passed.
+- Validator side notes fixed too: un-extracted rows now report `pixelScale: 1`
+  (contract: >=1, never null), the orphaned `.pp-deferred` CSS comment is gone,
+  and `curation.md` now distinguishes pipeline bakes (sidecar-only, unaffected)
+  from webview row exports (WYSIWYG, toggle-affected).
+
 ## v1.56.91 "Sol One Renderer" - one pipeline, one display surface, one grid
 
 - Soohong called the structure itself: the zoom view had no pixel-perfect
