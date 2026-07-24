@@ -364,14 +364,15 @@ function syncPpControls() {
     el.checked = ppOn(el.dataset.state);
   });
   syncAggregate(document.getElementById("pp-apply"),
-    new Set([...ppTwinStates, ...ppPreviewStates]), ppOn);
+    new Set(run.states.map((s) => s.name)), ppOn);
 }
 
 function syncGridControls() {
   document.querySelectorAll(".grid-state-check").forEach((el) => {
     el.checked = !!gridStates[el.dataset.state];
   });
-  syncAggregate(document.getElementById("pxgrid-check"), gridCapableStates, (n) => !!gridStates[n]);
+  syncAggregate(document.getElementById("pxgrid-check"),
+    new Set(run.states.map((s) => s.name)), (n) => !!gridStates[n]);
 }
 
 function drawGroundGrid(stage) {

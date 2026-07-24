@@ -14,19 +14,12 @@ const previews = {}; // stateName -> { playing, speed, cursor } preview transpor
 // Per-STATE toggles: each row with a twin gets its own on/off (what that row
 // displays AND bakes, persisted as curation.json states.<state>.pixel_perfect).
 // The header checkbox is a toggle-ALL over the same per-state truth.
-let ppAvailable = false;       // any state has a plain (pre-pixel-perfect) twin
-
 let ppTwinStates = new Set();  // states that actually saved a twin
-
-// 트윈 없는 줄의 온디맨드 스냅 프리뷰 (서버 .pixel-preview 캐시) — 임포트 세트나
-// 비 pp 런에서도 픽셀퍼펙트 토글이 동작한다 (표시 전용, 굽기/저장과 무관).
-let ppPreviewStates = new Set();
 
 let ppStates = {};             // stateName -> bool (true = pixel-perfect variant)
 
 // Same per-state + toggle-all shape as pixel-perfect: each grid-capable row has
 // its own checkbox, the header checkbox sets all rows at once.
-let gridCapableStates = new Set(); // 전 상태 (격자는 항상 정의됨) — 일괄 토글 대상 집합
 
 let gridStates = {};               // stateName -> bool (overlay shown)
 
@@ -60,10 +53,14 @@ function ppOn(stateName) {
   return ppStates[stateName] !== false;
 }
 
+// 소스 선택은 엔진이 구운 파일 사이에서만 갈린다 (트윈 = 추출이 만든 진실).
+// 트윈 없는 프레임의 퍼펙은 파일 변형이 아니라 표시 렌더러의 양자화 모드다
+// (snapScaleFor 의 측정 k) — 구 서버 추정 스냅 프리뷰 레거시는
+// 표시 격자와 다른 검출기로 스냅해 "격자 기준 퍼펙" 을 깨뜨려서 폐기했다
+// (수홍 2026-07-24, plan curator-single-display-pipeline).
 function frameUrl(stateName, frame) {
   if (frame.plainUrl) return !ppOn(stateName) ? frame.plainUrl : frame.url;
-  // 트윈 없는 프레임: pp ON = 온디맨드 스냅 프리뷰 (없으면 원본 그대로)
-  return ppOn(stateName) && frame.pixelPreviewUrl ? frame.pixelPreviewUrl : frame.url;
+  return frame.url;
 }
 
 // 복제 인스턴스 (entries[state].clones = {복제idx: 원본idx}) 인식 프레임 조회.
@@ -99,13 +96,18 @@ function frameOf(stateName, idx) {
   return { ...f, index: idx, clone: src, label: null };
 }
 
-// fit.pixel_perfect 런에서 픽셀 변형을 표시 중인 줄의 논리 격자 스케일 (아니면 null).
-// 굽기(curation.apply_transform snap_scale)와 같은 조건 — 프리뷰가 굽기를 거울처럼 따른다.
+// 퍼펙 표시 중인 줄의 양자화 격자 스케일 (퍼펙 OFF 면 null). 격자 진실은 하나다:
+// - pp 런: 계약 scale — 굽기(curation.pixel_snap_scale)와 거울. 프리뷰가 굽기를 따른다.
+// - 그 외(임포트 등): **측정 k(`st.pixelScale`)** — 격자 오버레이가 그리는 바로 그 값.
+//   격자가 쳐지면 그 격자 기준으로 퍼펙이 된다 (수홍 2026-07-24). k=1 은 항등.
+//   이건 표시 렌즈다 — 임포트 런 굽기는 양자화가 없으므로 사이드카에 저장하지
+//   않는다 (persistence 의 트윈-줄 한정 저장이 그 계약이다).
 function snapScaleFor(stateName) {
   if (stateName === BASE_STATE) return 1; // 베이스 논리 공간 = 캔버스 1:1
-  return run.fitPixelPerfect && run.pixelPerfect && run.pixelPerfect.scale && ppOn(stateName)
-    ? run.pixelPerfect.scale
-    : null;
+  if (!ppOn(stateName)) return null;
+  if (run.fitPixelPerfect && run.pixelPerfect && run.pixelPerfect.scale) return run.pixelPerfect.scale;
+  const st = run.states.find((s) => s.name === stateName);
+  return (st && st.pixelScale) || 1;
 }
 
 function isIdentityTransform(t) {

@@ -43,7 +43,9 @@ function buildPayload() {
       if (ops && Object.keys(ops).length) px[i] = ops;
     }
     if (Object.keys(px).length) states[name].pixels = px;
-    // per-state pixel-perfect (the row's own toggle) — only for rows with a twin
+    // per-state pixel-perfect — **트윈 줄만 저장** (계약): 트윈 없는 줄의 퍼펙은
+    // 표시 렌즈(측정 k 양자화)라 사이드카에 적으면 굽기 리졸버가 존재하지 않는
+    // .plain 변형을 요구하게 된다. 격자 토글과 같은 표시-전용 상태다.
     if (ppTwinStates.has(name)) states[name].pixel_perfect = ppOn(name);
     // 호흡 후처리 레이어 (수홍 2026-07-18) — 켠 상태만 기록 (없음 = off)
     if (entry.breathe) states[name].breathe = entry.breathe;
@@ -56,7 +58,7 @@ function buildPayload() {
   // run-wide default field: written only when every twin row agrees (uniform),
   // so a consumer without per-state awareness still bakes the right variant.
   // Mixed rows -> omitted; the per-state values above are the truth.
-  if (ppAvailable) {
+  if (ppTwinStates.size) {
     const vals = [...ppTwinStates].map((n) => ppOn(n));
     if (vals.every((v) => v === vals[0])) payload.pixel_perfect = vals[0];
   }

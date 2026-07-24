@@ -163,7 +163,7 @@ function openZoom(stateName, idx, keepWidth) {
   // 완전 동일 계약 (수홍 지시 2026-07-17 "다 똑같이"): 픽셀퍼펙트·격자·변형은
   // 베이스에도 전부. 프레임 전용은 GIF/이전·다음(다중 프레임 개념)뿐.
   controls.appendChild(makeGridToggle(stateName)); // 격자는 언제나 — 베이스·프레임 공통
-  if (isBase || ppTwinStates.has(stateName)) controls.appendChild(makePpToggle(stateName));
+  controls.appendChild(makePpToggle(stateName)); // 퍼펙은 언제나 — 줄 컨트롤과 같은 계약
   if (!isBase) {
     controls.appendChild(makeGifButton(stateName));
     // 보간 버튼은 줄 헤더 전용 — 확대뷰에선 카드 픽이 불가능해 쓸 수 없다 (수홍 2026-07-17).
