@@ -3,8 +3,9 @@
 
 from PIL import Image
 
-from sprite_gen.breathe import (_seam_rows, bake_breathe_sequence, breathe_frames,
-                                fit_breathe_pattern, phase_frame)
+from sprite_gen.breathe import (SMOOTH_CYCLE_FRAMES, _seam_rows, bake_breathe_sequence,
+                                breathe_frames, breathe_reads_smoothly, fit_breathe_pattern,
+                                fitted_breath_count, phase_frame, recommended_breathe_frames)
 
 
 def _figure() -> Image.Image:
@@ -113,3 +114,35 @@ def test_subpixel_craft_rules() -> None:
             assert ph[3] in (0, 255), f"반투명 생성 at ({x},{y})"
             if ph[3] == 255:
                 assert ph[:3] in base_colors, f"팔레트 밖 색 at ({x},{y}): {ph}"
+
+
+# --- 부드러움 프레임 게이트 (수홍 2026-07-24, 에이전트 레시피 전용) ---
+
+def test_recommended_frames_scales_with_breaths() -> None:
+    # k=1 단일 분할선: 호흡당 SMOOTH_CYCLE_FRAMES 프레임 확보
+    assert recommended_breathe_frames({"splits": [0.6], "breaths": 1}) == SMOOTH_CYCLE_FRAMES
+    assert recommended_breathe_frames({"splits": [0.6], "breaths": 3}) == 3 * SMOOTH_CYCLE_FRAMES
+    # 기본 정지자세 레시피(breaths 3) = 18컷
+    assert recommended_breathe_frames({"splits": [0.6], "breaths": 3}) == 18
+
+
+def test_recommended_frames_respects_physical_min_for_multi_split() -> None:
+    # 2K 물리 최소가 부드러움 임계보다 크면 그걸 쓴다 (per_cycle 이 작을 때)
+    got = recommended_breathe_frames({"splits": [0.3, 0.6], "breaths": 2}, per_cycle=3)
+    assert got == 2 * max(3, 2 * 2)  # 2*4 = 8
+
+
+def test_old_short_recipe_reads_as_jitter_gate() -> None:
+    # 옛 레시피(11컷 × breaths 3)는 게이트 미달 = 진동으로 판정
+    cfg = {"splits": [0.61], "breaths": 3}
+    assert breathe_reads_smoothly(11, cfg) is False
+    # 게이트가 권고한 프레임수는 통과
+    assert breathe_reads_smoothly(recommended_breathe_frames(cfg), cfg) is True
+
+
+def test_smooth_gate_does_not_clamp_breaths() -> None:
+    # 게이트는 관측/권고일 뿐 fit_breathe_pattern 의 호흡 횟수를 바꾸지 않는다
+    cfg = {"splits": [0.61], "amplitude": 1, "breaths": 3, "subpixel": False}
+    before = fitted_breath_count(18, cfg)
+    _ = recommended_breathe_frames(cfg)
+    assert fitted_breath_count(18, cfg) == before == 3  # 여전히 3회, 손대지 않음
