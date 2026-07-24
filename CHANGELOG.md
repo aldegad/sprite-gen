@@ -5,6 +5,24 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.86 "Sol Follows The Source" - the toggle now re-judges the sampling
+
+- v1.56.85 unified the "nearest or not" decision but only re-evaluated it on
+  layout events. The pixel-perfect row toggle changes **neither layout nor
+  element** - it swaps the image source (64px output <-> 700-900px original
+  twin), so the class computed for the old source stayed. Turning pixel-perfect
+  OFF on a row therefore showed the original twin still carrying upscale-nearest,
+  decimated to ~2% of its pixels. Soohong caught it on the running sequence
+  ("that is absolutely not the original") - the third correct catch in a row.
+- The decision now also re-runs on image load, via a single delegated capture
+  listener (load does not bubble) instead of per-call-site hooks, so every src
+  swap anywhere re-judges without re-scattering the decision. The variant-swap
+  path calls it once directly too, because re-assigning an identical cached src
+  fires no load event. Verified as a toggle round-trip in a real browser:
+  64px/pixelated -> 704px/auto -> 64px/pixelated, correct at every step.
+- Regression pins the load hook, its capture mode, and the swap-path call;
+  removing the hook turns exactly that test red.
+
 ## v1.56.85 "Sol One Answer" - the original view finally shows the original
 
 - The curator decided "render this image with nearest sampling?" in **six**
