@@ -5,6 +5,35 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.91 "Sol One Renderer" - one pipeline, one display surface, one grid
+
+- Soohong called the structure itself: the zoom view had no pixel-perfect
+  button, pixel-perfect did not snap by the drawn grid, and the stage carried
+  two display surfaces (img/canvas) - "one pipeline implemented several ways,
+  and the noise is where the bugs live." He was right on all three, and the
+  validator's R1 on v1.56.90 was the same disease: the legacy server preview
+  still snapped by the misdetecting periodicity estimator (4.99 on 1:1 art),
+  so one row could show per-frame mixed truths.
+- The stage now has ONE display implementation: `drawFrameInto` on the
+  snap-canvas, always - the img element is a hidden loader (natural size, load
+  events, edit source), never a display branch. Pixel-perfect quantization uses
+  THE displayed grid: contract scale on pp runs (bake mirror), measured
+  `pixelScale` k elsewhere - grid-based pixel-perfect, k=1 is identity. The pp
+  toggle exists on every row and in the zoom modal (gate removed; row and zoom
+  had even disagreed about the gate). Twin-less pp stays a display lens and is
+  never persisted (persisting would demand a nonexistent `.plain` at bake).
+- Legacy deleted outright: `_pixel_preview_meta`, the `.pixel-preview` cache,
+  `pixelPreviewUrl`/`pixelPreviewDeferred`, `ppPreviewStates`, `ppAvailable`,
+  `gridCapableStates` - gating knobs removed rather than opened, so the
+  validator's 5-line restoration mutant has nothing left to flip (R3), and
+  `run-contract.md`'s canonical table/schema now state the new contract (R2).
+- Verified in a real browser on both run types: 97 stages all render through
+  the canvas surface (0 visible imgs, 0 sampling misjudgments), zoom modal has
+  grid+pp everywhere, twin rows round-trip 64/pixelated <-> 704/auto, and the
+  k=1 lens is a verified no-op. Suite 301 passed; three contract mutations
+  (img branch revival / gate restoration / measured-k removal) each turn
+  exactly their guard red.
+
 ## v1.56.90 "Sol Grid Always" - the pixel grid stops hiding itself
 
 - The pixel-grid controls vanished entirely on 1:1 pixel-art (every imported
