@@ -5,6 +5,29 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.89 "Sol Same Disease Third Address" - the contract stops naming call sites
+
+- Validator reject on v1.56.88, both findings correct. **R3 (a regression this
+  plan introduced)**: dropping the unconditional `.snap-canvas` CSS left the
+  breathe-mode zoom unjudged - `renderTick` sets `bcanvas.width = cellW` and
+  never asked - so a 64px frame was interpolated up to 758px (screen colors 114
+  -> 10,526, a 92x bleed) where it used to be crisp. Same signature as R2 (a
+  window resize retroactively fixed it), different call site. **R4**: the marquee
+  live preview granted `imageRendering: 'pixelated'` inline and unconditionally -
+  harmless in this run, invisible to a `grep image-rendering`, and a second place
+  for the decision to live.
+- Both call sites now judge where they set the buffer, and the marquee preview
+  drops its inline grant. More importantly the regression stops naming call
+  sites: every `<canvas>.width` assignment in the curator is enumerated and must
+  be classified (`display` / `offscreen` / `rect` / `not-canvas`), and every
+  `display` site must judge. An unclassified new site fails the suite, so a
+  fourth address for this disease cannot be opened silently. A companion test
+  bans inline `imageRendering` grants, which CSS-only scans structurally miss.
+- Verified in a real browser including the path that was broken: breathe-mode
+  zoom now reads buffer 64 -> shown 852 -> `pixelated`, and the full surface
+  sweep stays at 147 surfaces / 0 mismatches. Both new regressions are
+  mutation-checked against exactly the R3 and R4 defects.
+
 ## v1.56.88 "Sol Measured Right" - the disease had moved to the new surface
 
 - Validator reject on v1.56.87, both findings correct. **R1**: raising the
