@@ -1,13 +1,3 @@
-<p align="center">
-  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy idle" />
-  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy running" />
-  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy success" />
-  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy talking" />
-  <img src="docs/assets/howl-idle.gif" width="110" alt="howl idle" />
-  <img src="docs/assets/howl-running.gif" width="110" alt="howl running" />
-  <img src="docs/assets/howl-success.gif" width="110" alt="howl success" />
-</p>
-
 <h1 align="center">sprite-gen</h1>
 
 <p align="center"><b>Un dessin en entrée. Un atlas de sprites prêt pour le jeu en sortie.</b></p>
@@ -22,7 +12,7 @@
 
 Demandez à un modèle d'image une « sprite sheet » et vous savez ce que vous obtenez : un personnage dont le visage change à chaque frame, un arrière-plan impossible à détourer par couleur clé, des poses qui se chevauchent et dérivent hors de la grille, et un PNG que votre moteur de jeu ne peut pas vraiment consommer. Démo mignonne, ressource inutilisable.
 
-`sprite-gen` est une skill Codex/Claude qui comble cet écart. Donnez-lui **une image de base** et une liste d'actions — elle pilote la génération ligne par ligne, verrouille l'identité du personnage, supprime l'arrière-plan chroma en véritable alpha, extrait chaque pose sous forme de frame transparente propre, et produit un atlas runtime **avec un `manifest.json.frame_layout` lisible par machine**. Chaque sprite ci-dessus a été créé ainsi.
+`sprite-gen` est une skill Codex/Claude qui comble cet écart. Donnez-lui **une image de base** et une liste d'actions — elle pilote la génération ligne par ligne, verrouille l'identité du personnage, supprime l'arrière-plan chroma en véritable alpha, extrait chaque pose sous forme de frame transparente propre, et produit un atlas runtime **avec un `manifest.json.frame_layout` lisible par machine**.
 
 Et pour les 10 % finaux que la génération ne réussit jamais parfaitement, il existe une **webview de curation** : comparez les frames côte à côte, rejetez celles qui sont cassées, ajustez rotation/échelle/position de façon non destructive, observez la boucle en direct — puis bakez. Le pipeline fait le travail ; vous gardez le goût.
 
@@ -80,6 +70,20 @@ Les recadrages rapprochés ci-dessous montrent le détail des bords derrière le
 ![chroma peel avant et après — mèche de cheveux illustrée](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![chroma peel avant et après — contour pixel-art](docs/assets/chroma-peel-pixelart-before-after.png)
+
+## Restitution de la trame de pixels
+
+Le « pixel art » généré par IA n'est pas du pixel art. Les blocs vacillent, les bords traînent de l'anticrénelage et la trame dérive au sein d'une même rangée : découper sur une grille régulière étale donc un bloc sur le suivant. L'extracteur mesure la trame réelle au lieu de la supposer : détection du pas image par image, consensus de rangée qui l'emporte sur les fausses détections harmoniques, coupes alignées sur les vraies frontières de couleur, et largeur de cellule minimale proportionnelle au pas mesuré, de sorte que deux coupes voisines ne peuvent jamais s'effondrer sur la même bande.
+
+Même bande source, même palette figée. Le moteur est la seule variable.
+
+La vérification a porté sur un projet entier et non sur une image triée sur le volet : les 94 runs pixel_perfect d'un jeu en production ont été redérivés depuis leurs propres bandes sources puis comparés pixel par pixel à ce qui était livré.
+
+<p align="center">
+  <img src="docs/assets/engine-compare.png" width="720" alt="ancien moteur face au nouveau sur les mêmes sources" />
+</p>
+
+Sur 26 690 432 pixels canoniques, la silhouette n'a bougé que de 1,41 %. La forme que vous avez validée reste celle que vous obtenez ; ce qui change, c'est l'endroit où tombent les contours et les ombrages, c'est-à-dire précisément ce que la trame décide.
 
 ## Webview de curation
 

@@ -1,9 +1,123 @@
 # Changelog
 
-> Version policy (2026-07-11, Soohong): pinned to **1.56.x** — the minor stays at 56 as a Sol (5.6) homage; only the patch number increases.
-> The three releases that shipped as v1.57.0/v1.58.0/v1.59.0 were retroactively renumbered to v1.56.7/8/9 (the old labels remain in commit messages for history).
+> Version policy (2026-07-24, Soohong): the **1.56.x pin is lifted**. The minor was frozen at 56 as a Sol (5.6) homage; that project wound down, so the minor moves again starting at **v1.57.0** and release names drop the `Sol` prefix.
+> Historical note (2026-07-11): while pinned, the three releases originally labelled v1.57.0/v1.58.0/v1.59.0 were retroactively renumbered to v1.56.7/8/9 (the old labels remain in commit messages). No `v1.57.0` tag was ever published, so this release reuses the number cleanly.
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
+
+## v1.57.0 "First Pixel Breath" - the first tagged release since v1.56.16: the sprites breathe, and the pixel lattice is measured rather than assumed
+
+The last published tag was **v1.56.16 "Sol Atelier" (2026-07-16)**. Seventy-three
+CHANGELOG entries landed after it without ever being cut as a release, so v1.57.0 is a
+milestone that carries all of them. Everything the breathing layer is, and everything that
+makes the pixel-perfect path actually recover a true lattice, ships publicly for the first
+time here. The `1.56.x` pin is lifted with this release (see the version policy above).
+
+### Sprites that breathe (new since the last tag)
+
+- Breathing is a **post-process layer**, not a generation trick. It is declared in the
+  `curation.json` sidecar (`states.<state>.breathe = {splits, amplitude, breaths, subpixel}`)
+  and baked deterministically by integer row shifts over whatever playback sequence exists,
+  so blink frames breathe too and frame selection stays orthogonal (v1.56.27, v1.56.33).
+- Loop length never changes: `fit_breathe_pattern` v2 applies the requested breath count
+  exactly and distributes the remainder into cycle rests, badging only when a physical clamp
+  is unavoidable (v1.56.35, v1.56.43).
+- The default split is the **waist line** - the belt accent band inside the 45-80% content
+  span, with a chest fallback and inheritance from a row a human already tuned (v1.56.57).
+- Sub-pixel phase blending for half-step transitions (v1.56.34), and an editor that drags
+  the split lines over live playback with undo/redo, a canonical preview, and a final-bake
+  filmstrip (v1.56.28, v1.56.30, v1.56.36, v1.56.48, v1.56.64).
+- Static poses (sit / lie / carry_idle) get a codified recipe: one still, ten linked clones
+  at 4fps, waist breathing at 3 breaths, and a blink only where eyes face camera (v1.56.58).
+
+### The pixel lattice is measured, not assumed
+
+- Cuts are snapped to real colour boundaries instead of an even lattice, because AI blocks
+  wobble locally and even-interval cuts bleed one block into the next (v1.56.41).
+- A correspondence-grid trust gate rejects harmonic misdetection, and a **pitch-family
+  guard** resolves each frame's own pitch against the row consensus rather than letting one
+  bad frame set the row (v1.56.38, v1.56.81).
+- **Palette lock** pins the run's shared palette to a file so batch composition can never
+  re-quantize approved rows, and `frozen: true` rows are skipped by self-heal entirely
+  (v1.56.39).
+- **New in this release - the sliver guard.** Minimum cell width is now proportional to the
+  measured pitch, `max(2, round(0.6 * pitch))`, instead of an absolute 2px. The absolute
+  floor let two neighbouring cuts collapse toward each other on high-pitch material, so two
+  output rows double-sampled nearly the same source band. One mechanism, two shipped
+  defects: a stretched jaw and a stray pixel under the eye in the same row.
+- The original-view twin is rendered at the row's native resolution instead of a fixed x4
+  cap, so "original" in the curator is actually the original (v1.56.84), and the green
+  overlay draws the real sampling cuts, non-uniformity included (v1.56.83).
+
+### Proven on a whole project, not a hand-picked frame
+
+- All 94 `pixel_perfect` runs of a live game were re-derived from their own raw strips and
+  compared pixel by pixel with the shipped frames, on copies only - no run directory was
+  mutated. Across **26,690,432 canonical pixels the silhouette moved 1.41%** (376,795px);
+  colour placement accounts for the rest. The approved shape survives an engine upgrade.
+- The sliver guard's own footprint was isolated by baking the same runs twice from one
+  source tree with the guard reverted and the palette pinned on both sides, leaving minimum
+  cell width as the only variable: **1 of 94 runs changed** (5,955px, silhouette delta 0).
+  The guard engages only where the pitch is large (~13px); low-pitch material is identical.
+- The first attempt at that isolation reported zero and was a false negative: `heal_run`
+  re-extracts each row in its own `python -m sprite_gen.extract` subprocess with PYTHONPATH
+  bound to its own tree, so an in-process monkeypatch never reached the worker. The number
+  above comes from the reverted-tree method.
+- Measurement hazard recorded: 78 of the 94 runs predate palette pinning and carry no
+  `palette.lock.json`, so any future heal rebuilds the shared palette run-wide and shifts
+  every colour slightly. Pinning the shipped colour set before re-deriving cuts the reported
+  delta from 15.4% to 8.7% of all pixels; that gap is the palette rebuild, not the engine.
+
+### The curation webview became an editor
+
+- A real pixel editor on the base and on every frame: grid snap, marquee, tool hotkeys,
+  sticky pen colour, eyedropper that samples the colour you actually see, an Aseprite-style
+  palette dock, and hand-tool pan everywhere (v1.56.15, v1.56.23-26, v1.56.46-47, v1.56.51).
+- Frame-space SSoT: editing stays WYSIWYG under transforms, and the pointer hits exactly the
+  pixel under the cursor (v1.56.49, v1.56.50).
+- Compare canvas v2 with nameable instances, alignment reset, undo/redo, playback, guide
+  controls, and compare GIF/format export (v1.56.42, v1.56.44-46, v1.56.53, v1.56.59).
+- Duplicates are **linked** by default so one edit is one truth (v1.56.40), the atlas updates
+  live but bakes lazily while off-screen (v1.56.54, v1.56.55), and shortcuts work under the
+  Korean IME and any keyboard layout (v1.56.52).
+- Row-level actions: Save popover, reroll into candidate takes, selection flip as a tool
+  action (v1.56.65, v1.56.66), and engine-owned sidecar fields survive client saves
+  (v1.56.63).
+
+### Display pipeline unified onto one surface
+
+- The stage carried two display surfaces (img and canvas) and six scattered
+  `image-rendering` decisions, so one row could show two different truths. There is now a
+  single canvas surface and a single owner of the sampling decision, re-judged at render
+  time and on image load rather than at toggle time (v1.56.85-89, v1.56.91).
+- The pixel grid stopped hiding itself: identity pitch (k=1, true 1:1 art) was being read as
+  "detection failed" through seven gates. Pitch is now measured exactly - the largest k for
+  which the image consists only of uniform k x k blocks - which cannot fail (v1.56.90).
+- The base row keeps its pixel-perfect-OFF raw view under the unified surface (v1.56.92).
+
+### Generation, import, and reliability
+
+- Generation is engine-owned: `sprite_gen/gen/`, `--provider codex` by default with an
+  observable grok fallback, `SPRITE_GEN_DEFAULT_PROVIDER`, four-way concurrency codified,
+  hard timeout with one observable retry, and child engines spawned with a clean env so
+  nested agents cannot hang (v1.56.12-13, v1.56.31-32, v1.56.59, v1.56.61, v1.56.70-71).
+- In-betweens are generative (codex/grok) recorded as takes; RIFE was retired after
+  measurement, and the tween flow is available from the GUI (v1.56.18-21).
+- Anchor truth is the **curated** export - the curated sequence head, rebaked per generation,
+  with an honest anchor chip in the UI (v1.56.56, v1.56.67, v1.56.69).
+- `sprite-gen cutout` removes backgrounds from imported images, routing on the corner colour:
+  white/ivory to a position matte, magenta/green through the verified extract engine
+  (v1.56.76, v1.56.79).
+- Heal moved off the request path with a first-paint loading UX, gained a single-consumer
+  report contract, per-state isolation so one bad row cannot strand the rest, and a brake on
+  deterministic retry loops (v1.56.77, v1.56.78, v1.56.80, v1.56.81).
+- `fit.conform` was removed with a loud rejection rather than a silent fallback (v1.56.22).
+
+### Docs
+
+- README (all six languages) gains a "Pixel lattice recovery" section with the old/new
+  comparison sheet from the full-project sweep: `docs/assets/engine-compare.png`.
+- The header animation strip was removed; it will be replaced with a breathing capture.
 
 ## v1.56.92 "Sol Raw Base Back" - the base's original view survives unification
 

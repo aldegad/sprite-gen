@@ -1,13 +1,3 @@
-<p align="center">
-  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy idle" />
-  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy running" />
-  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy success" />
-  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy talking" />
-  <img src="docs/assets/howl-idle.gif" width="110" alt="howl idle" />
-  <img src="docs/assets/howl-running.gif" width="110" alt="howl running" />
-  <img src="docs/assets/howl-success.gif" width="110" alt="howl success" />
-</p>
-
 <h1 align="center">sprite-gen</h1>
 
 <p align="center"><b>Entra un dibujo. Sale un atlas de sprites listo para juegos.</b></p>
@@ -22,7 +12,7 @@
 
 Pídele a un modelo de imagen una "hoja de sprites" y ya sabes lo que obtendrás: un personaje cuyo rostro cambia en cada fotograma, un fondo que no se puede eliminar por clave, poses que se superponen y se desplazan fuera de la cuadrícula, y un PNG que tu motor de juego en realidad no puede consumir. Demo bonita, asset inútil.
 
-`sprite-gen` es una skill de Codex/Claude que cierra esa brecha. Dale **una imagen base** y una lista de acciones: impulsa la generación fila por fila, bloquea la identidad del personaje, elimina el fondo croma hasta alfa real, extrae cada pose como un fotograma transparente limpio y hornea un atlas de runtime **con un `manifest.json.frame_layout` legible por máquina**. Todos los sprites de arriba se hicieron así.
+`sprite-gen` es una skill de Codex/Claude que cierra esa brecha. Dale **una imagen base** y una lista de acciones: impulsa la generación fila por fila, bloquea la identidad del personaje, elimina el fondo croma hasta alfa real, extrae cada pose como un fotograma transparente limpio y hornea un atlas de runtime **con un `manifest.json.frame_layout` legible por máquina**.
 
 Y para ese último 10% que la generación nunca acierta, hay una **webview de curación**: compara fotogramas lado a lado, rechaza los rotos, ajusta rotación/escala/posición de forma no destructiva, mira el bucle en vivo y luego hornea. El pipeline hace el trabajo; tú conservas el criterio.
 
@@ -80,6 +70,20 @@ Los recortes de primer plano de abajo muestran el detalle de borde detrás de la
 ![chroma peel antes y después — mechón de pelo ilustrado](docs/assets/chroma-peel-illustration-before-after.png)
 
 ![chroma peel antes y después — contorno de pixel art](docs/assets/chroma-peel-pixelart-before-after.png)
+
+## Recuperación de la retícula de píxeles
+
+El "pixel art" generado por IA no es pixel art. Los bloques oscilan, los bordes arrastran antialiasing y la retícula se desplaza incluso dentro de una misma fila, así que cortar con una cuadrícula uniforme mancha un bloque sobre el siguiente. El extractor mide la retícula real en lugar de suponerla: detección de paso por fotograma, un consenso de fila que impone su criterio sobre las detecciones armónicas erróneas, cortes ajustados a los bordes de color reales y un ancho mínimo de celda proporcional al paso medido, de modo que dos cortes vecinos nunca pueden colapsar sobre la misma banda.
+
+La misma tira de origen, la misma paleta fijada. El motor es la única variable.
+
+Se verificó sobre un proyecto entero y no sobre un fotograma escogido a mano: las 94 ejecuciones pixel_perfect de un juego real se volvieron a derivar desde sus propias tiras de origen y se compararon píxel a píxel con lo que ya estaba publicado.
+
+<p align="center">
+  <img src="docs/assets/engine-compare.png" width="720" alt="motor antiguo frente a motor nuevo sobre las mismas fuentes" />
+</p>
+
+Sobre 26.690.432 píxeles canónicos, la silueta se movió un 1,41%. La forma que aprobaste sigue siendo la forma que recibes; lo que cambia es dónde caen los contornos y el sombreado, que es justamente lo que decide la retícula.
 
 ## Webview de curación
 
