@@ -38,24 +38,20 @@ async function boot() {
   // pixel-perfect twin state must resolve BEFORE first render (frameUrl reads it):
   // per-state truth = states.<state>.pixel_perfect override > run-wide default > on.
   ppTwinStates = new Set(run.states.filter((s) => s.frames.some((f) => f.plainUrl)).map((s) => s.name));
-  // 트윈 없는 줄이라도 서버 온디맨드 스냅 프리뷰가 있으면 토글을 켠다 (표시 전용)
-  ppPreviewStates = new Set(run.states
-    .filter((s) => !ppTwinStates.has(s.name) && s.frames.some((f) => f.pixelPreviewUrl))
-    .map((s) => s.name));
-  ppAvailable = ppTwinStates.size > 0 || ppPreviewStates.size > 0;
+  // 퍼펙 토글은 **모든 줄**이 가진다 — 트윈 줄은 소스 전환(canonical↔orig), 트윈 없는
+  // 줄은 측정 k 양자화 렌즈(snapScaleFor). "가능한 줄" 게이팅은 격자 게이팅과 같은
+  // 병이었다 (수홍 2026-07-24: 확대화면에 퍼펙 버튼이 없다 — 조건 분기 = 버그).
   const ppDefault = !(run.curation && run.curation.pixel_perfect === false);
   ppStates = {};
   for (const s of run.states) {
     const c = run.curation && run.curation.states && run.curation.states[s.name];
-    // 프리뷰 줄 기본 OFF (원본 먼저 — 스냅은 사용자가 눌러서 본다). 트윈 줄은 기존 기본.
-    const fallback = ppPreviewStates.has(s.name) ? false : ppDefault;
+    // 트윈 없는 줄 기본 OFF (원본 먼저 — 양자화 렌즈는 사용자가 눌러서 본다).
+    const fallback = ppTwinStates.has(s.name) ? ppDefault : false;
     ppStates[s.name] = c && typeof c.pixel_perfect === "boolean" ? c.pixel_perfect : fallback;
   }
-  // 격자 오버레이는 **모든 줄**이 가진다 — 표시 전용, 저장 안 함, 기본 off.
-  // 격자 scale 은 서버가 실패할 수 없는 정확 판정으로 재고(줄별 실측 > 계약 > 항등 1),
-  // "격자를 모른다"는 상태가 없으므로 컨트롤을 숨길 근거도 없다 (수홍 2026-07-24:
-  // 조건부 숨김은 버그다 — 1:1 픽셀아트가 통째로 격자 없는 줄로 접혔다).
-  gridCapableStates = new Set(run.states.map((s) => s.name));
+  // 격자 오버레이는 모든 줄이 가진다 — "격자 가능 줄" 이라는 집합 자체를 두지 않는다.
+  // 집합이 존재하면 언젠가 필터가 다시 붙는다 (콩콩이 R3 실증: 5줄 mutant 로 병 복원).
+  // 스위치가 없으면 되살릴 knob 도 없다.
   gridStates = {};
   applyStaticLang();
   const cmpBtn = document.getElementById("compare-open");
@@ -66,24 +62,15 @@ async function boot() {
   }
   document.getElementById("character").textContent = `${run.characterId} · ${run.cell.width}×${run.cell.height}`;
   if (run.iso) gridToggle.hidden = false;
-  // 온디맨드 프리뷰 예산에 밀린 수 — 서버가 pixelPreviewDeferred 로 보고한다.
-  // JSON 에만 두면 사용자에겐 조용한 캡이라 헤더에 그대로 보여준다 (No Silent Fallback).
-  const ppDeferredEl = document.getElementById("pp-deferred");
-  if (ppDeferredEl) {
-    const deferred = run.pixelPreviewDeferred || 0;
-    ppDeferredEl.hidden = deferred === 0;
-    if (deferred > 0) ppDeferredEl.textContent = STR[lang].ppDeferred(deferred);
-  }
-  if (ppAvailable) {
+  {
+    // 퍼펙 전체 토글 — 항상 보인다 (조건 게이트 = 컨트롤 숨김 버그 클래스).
+    // 줄들이 섞이면(일부 on/off) indeterminate 로 표시한다 (syncPpControls).
     const ppWrap = document.getElementById("pp-wrap");
     const ppCheck = document.getElementById("pp-apply");
     ppWrap.hidden = false;
-    // 전체 토글: 클릭 = 쌍둥이 있는 모든 줄을 새 값으로 일괄 설정. 줄들이 섞여
-    // 있으면(일부 on/일부 off) indeterminate 로 표시한다 (syncPpControls).
     ppCheck.addEventListener("change", () => {
       const on = ppCheck.checked;
-      for (const n of ppTwinStates) ppStates[n] = on;
-      for (const n of ppPreviewStates) ppStates[n] = on;
+      for (const s of run.states) ppStates[s.name] = on;
       syncPpControls();
       refreshVariantImages();
       scheduleSave();
@@ -96,7 +83,7 @@ async function boot() {
   pxWrap.hidden = false;
   pxCheck.addEventListener("change", () => {
     const on = pxCheck.checked;
-    for (const n of gridCapableStates) gridStates[n] = on;
+    for (const s of run.states) gridStates[s.name] = on;
     syncGridControls();
     sizePxGrids();
   });
