@@ -1485,7 +1485,16 @@ def refine_edges_to_boundaries(component: Image.Image, x_edges: list[int], y_edg
     AI 블록은 국소적으로 흔들려서 등간격 자름은 경계 조각을 옆 칸으로 흘린다
     (실사고: 눈 아래 유령 픽셀, 발밑 1픽셀 — 같은 뿌리). 각 내부 절단선을
     ±pitch/3 창 안의 색경계 질량 최대 위치로 옮긴다. 질량이 무의미하면(평탄 영역)
-    등간격 위치 유지. 단조 증가·최소 칸폭 2px 불변식 강제 — 결정론."""
+    등간격 위치 유지. 단조 증가·최소 칸폭 불변식 강제 — 결정론.
+
+    **슬리버 가드 (수홍 2026-07-24, plan backbone-sliver-guard)**: 최소 칸폭은
+    절대 2px 가 아니라 **피치 비례(≥0.6×pitch)** 다. 절대 2px 는 피치 ~13px 소재에서
+    0.15셀짜리 슬리버 쌍(0.4/1.6)을 허용했고, ~5px 간격의 경계 쌍이 인접 절단선
+    둘을 서로 향해 당기면 출력 두 행이 소스의 거의 같은 밴드를 이중 샘플링했다 —
+    v8 down_jump 실사고 두 건이 이 한 기전이다: f2 턱 늘어남(턱 라인 세로 복제),
+    f0 눈물점(50/50 걸침 셀의 지배색 플립). 스냅은 창(±pitch/3) 안에서 계속 경계를
+    따르되, 이웃과 0.6×pitch 미만으로는 절대 붙지 못한다 — 전역 격자(머리끈
+    일관성)는 그대로다."""
     col, row = _boundary_mass(component)
 
     def snap(edges: list[int], mass: list[int], pitch_axis: float, limit: int) -> list[int]:
@@ -1493,10 +1502,11 @@ def refine_edges_to_boundaries(component: Image.Image, x_edges: list[int], y_edg
             return edges
         out = list(edges)
         window = max(1, int(pitch_axis / 3))
+        min_gap = max(2, int(round(pitch_axis * 0.6)))
         for i in range(1, len(out) - 1):
             e = edges[i]
-            lo = max(out[i - 1] + 2, e - window)
-            hi = min(edges[i + 1] - 2, e + window, limit - 1)
+            lo = max(out[i - 1] + min_gap, e - window)
+            hi = min(edges[i + 1] - min_gap, e + window, limit - 1)
             if hi < lo:
                 continue
             best = max(range(lo, hi + 1), key=lambda pos: (mass[pos] if pos < len(mass) else 0))
