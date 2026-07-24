@@ -54,11 +54,15 @@ function sampleDisplayedColor(stage, stateName, idx, e2) {
   const canvas = stage.querySelector(".snap-canvas");
   if (!(canvas && canvas.style.display === "block" && canvas.width)) return null;
   const r = stage.getBoundingClientRect();
-  let x = ((e2.clientX - r.left) / r.width) * canvas.width;
-  let y = ((e2.clientY - r.top) / r.height) * canvas.height;
+  // 좌표는 셀 공간에서 다룬다 — frameInvXY 가 셀 공간 계약이라 슈퍼샘플 배율(ss)을
+  // 섞으면 역변환이 어긋난다. 비트맵 인덱싱 직전에만 ss 를 곱한다.
+  const [cw, ch] = cellDims(stateName);
+  const ss = canvas.width / cw;
+  let x = ((e2.clientX - r.left) / r.width) * cw;
+  let y = ((e2.clientY - r.top) / r.height) * ch;
   if (canvas.style.transform) [x, y] = frameInvXY(stateName, idx, x, y);
-  x = Math.floor(x);
-  y = Math.floor(y);
+  x = Math.floor(x * ss);
+  y = Math.floor(y * ss);
   if (!(x >= 0 && x < canvas.width && y >= 0 && y < canvas.height)) return null;
   const d = canvas.getContext("2d").getImageData(x, y, 1, 1).data;
   if (d[3] < 40) return null; // 투명 픽셀은 집을 색이 없다
@@ -68,7 +72,12 @@ function sampleDisplayedColor(stage, stateName, idx, e2) {
 // 변형을 셀 캔버스에 NEAREST 로 그리고, 논리 격자(snap px/논리픽셀)로 재양자화한다.
 // curation.apply_transform 의 snap_scale 경로를 캔버스로 미러링 — 드래그/회전 중에도
 // 스프라이트가 셀 고정 격자에 실시간으로 스냅되어 보인다 (격자는 그대로, 그림이 스냅).
-function drawFrameInto(ctx, image, t, cw, ch, snap, edits) {
+// `ss` = 슈퍼샘플 배율 (기본 1). 저장·입력 좌표는 **항상 셀 공간**(cw×ch)이고 ss 는
+// 렌더 해상도만 올린다 — 소스 표시 모드에서 고해상 원본 트윈(700~900px)을 셀 크기
+// 캔버스에 그리면 64px 로 파괴되기 때문이다 (수홍 2026-07-24 발견: img 는 숨겨지고
+// 64×64 snap-canvas 가 실제 표시면이었다). 양자화 모드(snap)는 결과 격자를 보여주는
+// 것이 목적이라 ss=1 이며, 이 둘은 배타적이다(quantize 이면 ss 를 올리지 않는다).
+function drawFrameInto(ctx, image, t, cw, ch, snap, edits, ss = 1) {
   ctx.imageSmoothingEnabled = false; // 항상 NEAREST — 베이스(raw→논리) 표시도 픽셀 유지
   // 사이드카 픽셀 편집은 변형 이전(소스) 공간이다 — 굽기(apply_pixel_edits →
   // apply_transform, compose_atlas.py)와 같은 순서로 편집을 먼저 소스에 합성한 뒤
@@ -77,29 +86,30 @@ function drawFrameInto(ctx, image, t, cw, ch, snap, edits) {
   let source = image;
   if (edits) {
     const src = drawFrameInto._src || (drawFrameInto._src = document.createElement("canvas"));
-    src.width = cw;
-    src.height = ch;
+    src.width = cw * ss;
+    src.height = ch * ss;
     const sctx = src.getContext("2d");
     sctx.imageSmoothingEnabled = false;
-    sctx.clearRect(0, 0, cw, ch);
-    sctx.drawImage(image, 0, 0, cw, ch);
+    sctx.clearRect(0, 0, src.width, src.height);
+    sctx.drawImage(image, 0, 0, src.width, src.height);
+    // 편집 좌표는 셀 공간 — 렌더 해상도에서는 한 칸이 ss×ss 블록이다.
     for (const [key, val] of Object.entries(edits)) {
       const [x, y] = key.split(",").map(Number);
       if (!(x >= 0 && x < cw && y >= 0 && y < ch)) continue;
       if (val) {
         sctx.fillStyle = val;
-        sctx.fillRect(x, y, 1, 1);
+        sctx.fillRect(x * ss, y * ss, ss, ss);
       } else {
-        sctx.clearRect(x, y, 1, 1);
+        sctx.clearRect(x * ss, y * ss, ss, ss);
       }
     }
     source = src;
   }
   const m = matrixOf(t);
   ctx.save();
-  ctx.translate(cw / 2 + t.dx, ch / 2 + t.dy);
+  ctx.translate((cw / 2 + t.dx) * ss, (ch / 2 + t.dy) * ss);
   ctx.transform(m.m00, m.m10, m.m01, m.m11, 0, 0);
-  ctx.drawImage(source, -cw / 2, -ch / 2, cw, ch);
+  ctx.drawImage(source, (-cw / 2) * ss, (-ch / 2) * ss, cw * ss, ch * ss);
   ctx.restore();
   if (snap && snap > 1) {
     const lw = Math.max(1, Math.floor(cw / snap));
@@ -157,6 +167,14 @@ const PIXEL_SCALE_TARGETS = [
 
 function syncPixelScaling(root) {
   (root || document).querySelectorAll(PIXEL_SCALE_TARGETS).forEach(applyPixelScaling);
+}
+
+// 소스 표시 캔버스의 렌더 배율 — 소스가 셀보다 크면 그만큼 올려 원본 해상도를 보존한다.
+// 상한 16 은 메모리 바운드일 뿐 화질 정책이 아니다 (64셀 × 16 = 1024px).
+function superSampleFor(source, cellWidth) {
+  const natural = source && (source.naturalWidth || source.width);
+  if (!natural || !cellWidth) return 1;
+  return Math.max(1, Math.min(16, Math.round(natural / cellWidth)));
 }
 
 // 원본 기하: <img> 는 naturalWidth, <canvas> 는 그리기 버퍼 width.

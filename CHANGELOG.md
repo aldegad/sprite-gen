@@ -5,6 +5,29 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.87 "Sol Real Surface" - the canvas that was actually on screen
+
+- Soohong opened the DOM and pointed at the real culprit: on a frame with pixel
+  edits the `<img>` carrying the original twin is `visibility: hidden` and a
+  `snap-canvas` is the actual display surface - and that canvas was **always
+  sized at the cell (64x64)**. So an 896px original twin was redrawn into 64
+  pixels and blown back up. Two releases of display work had been aimed at the
+  `<img>`, which this path bypasses entirely. (The trigger was self-inflicted:
+  the eye-pixel edit on `down_jump` #0 is exactly what routes that frame through
+  the canvas path.)
+- `drawFrameInto` takes a supersample factor and the source-display mode sizes
+  the canvas to the source resolution (`superSampleFor`, capped at 16x for
+  memory). Stored and pointer coordinates stay in cell space - only the render
+  resolution scales - so pixel edits (`fillRect(x*ss, y*ss, ss, ss)`) and the
+  eyedropper (which now converts to cell space before `frameInvXY` and applies
+  `ss` only at bitmap indexing) keep their contracts. Quantize mode (the
+  pixel-perfect result preview) stays at cell size by design; the two modes are
+  mutually exclusive.
+- Verified in a real browser: the `down_jump` original-twin card now renders a
+  896x896 canvas instead of 64x64, while pixel-perfect rows stay 64x64.
+  Regression pins the canvas sizing, the edit mapping and the eyedropper scaling;
+  reverting the canvas to cell size turns exactly that test red.
+
 ## v1.56.86 "Sol Follows The Source" - the toggle now re-judges the sampling
 
 - v1.56.85 unified the "nearest or not" decision but only re-evaluated it on
