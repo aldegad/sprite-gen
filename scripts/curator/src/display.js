@@ -123,6 +123,49 @@ function drawFrameInto(ctx, image, t, cw, ch, snap, edits) {
 // 격자보다 촘촘한 거짓 격자를 보여줬다. 픽셀퍼펙트가 아닌 런은 격자 자체가 없다.
 function sizePxGrids() {
   document.querySelectorAll(".card").forEach(updateCardGrid);
+  syncPixelScaling();
+}
+
+// ── 표시 샘플링 판정 SSoT (수홍 2026-07-24: "절대 원본 아님") ──
+// "이 이미지를 nearest 로 그릴 것인가" 는 하나의 사실로만 답한다:
+// **표시 크기가 원본 크기보다 큰가.** 확대면 nearest(픽셀아트 블록 보존),
+// 축소면 브라우저 기본 보간(전 픽셀 기여).
+//
+// 예전엔 이 판정이 여섯 군데로 흩어져 서로 다르게 답했고, 그중 무조건 규칙
+// (`.stage img { image-rendering: pixelated }`)이 나머지를 전부 덮어써서
+// 조건 판정이 죽은 코드가 돼 있었다. 그 결과 고해상 orig 트윈(896px)이
+// 카드(~130px)에서 nearest 데시메이션을 겪어 전체 픽셀의 2.1% 만 표본으로
+// 남았고(경계 하드점프 346 vs 보간 117), 화면이 "양자화된 형태"로 보였다.
+// 트윈 해상도 수리(v1.56.84)가 증상을 키운 것도 같은 뿌리다 — 파일이 커질수록
+// 버리는 픽셀이 늘어난다.
+//
+// 기하가 바뀌면(zoom·resize·패널 토글) 답도 바뀌므로 1회성 부여가 아니라
+// 기하 갱신 지점(sizePxGrids)에서 매번 재평가하고, 조건이 깨지면 해제한다.
+// 대상 = 사용자가 "그림" 으로 보는 표시면. 내부 렌더 서피스(snap-canvas·pxgrid·
+// ingrid·cmp-canvas)는 표시 해상도로 직접 그려지므로 여기 대상이 아니다 —
+// 그쪽 nearest 는 "무엇을 그리는가" 의 일부라 각자 규칙을 유지한다.
+const PIXEL_SCALE_TARGETS = [
+  ".stage img",                        // 프레임 카드 · 줌 모달 · 아카이브 카드
+  ".base-row .base-stage img",         // 베이스 아이덴티티
+  ".preview canvas",                   // 줄 재생 미리보기
+  ".breathe-strip .bs-cell canvas",    // 호흡 필름스트립
+  ".tree-node img",                    // 파이프라인 트리 썸네일
+  ".ap-card img",                      // 후보 풀 썸네일
+  "#compare-modal .cmp-item img",      // 비교 모달 썸네일
+  ".final-atlas .atlas-sheet img",     // 최종 아틀라스 시트
+].join(", ");
+
+function syncPixelScaling(root) {
+  (root || document).querySelectorAll(PIXEL_SCALE_TARGETS).forEach(applyPixelScaling);
+}
+
+// 원본 기하: <img> 는 naturalWidth, <canvas> 는 그리기 버퍼 width.
+// 표시 기하는 clientWidth (레이아웃 후 실제 CSS 픽셀).
+function applyPixelScaling(el) {
+  const natural = el.tagName === "CANVAS" ? el.width : el.naturalWidth;
+  const shown = el.clientWidth;
+  if (!natural || !shown) return; // 아직 로드/레이아웃 전 — load 훅이 다시 부른다
+  el.classList.toggle("px-upscale", shown > natural);
 }
 
 // 줄 단위 격자: 그 줄의 격자 체크박스가 켜져 있을 때만 그린다.

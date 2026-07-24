@@ -137,7 +137,7 @@ function openZoom(stateName, idx, keepWidth) {
     `<div class="stage" data-tip="${t("tZoomStage")}">` +
     `<div class="pxgrid"></div>` +
     `<canvas class="ingrid"></canvas>` +
-    `<img src="${escapeHtml(frameUrl(stateName, frame))}" alt="frame ${idx}" draggable="false" class="px-upscale" />` +
+    `<img src="${escapeHtml(frameUrl(stateName, frame))}" alt="frame ${idx}" draggable="false" />` +
     `<canvas class="snap-canvas"></canvas>` +
     `<div class="rotate-handle" data-tip="${t("tRotate")}"></div>` +
     `<div class="shear-handle" data-tip="${t("tShear")}"></div>` +
@@ -989,7 +989,6 @@ function openZoom(stateName, idx, keepWidth) {
         const cv = document.createElement("canvas");
         cv.width = cellW;
         cv.height = cellH;
-        cv.className = "px-upscale";
         const cctx = cv.getContext("2d");
         cctx.imageSmoothingEnabled = false;
         if (image && image.complete && image.naturalWidth) {
@@ -1011,6 +1010,7 @@ function openZoom(stateName, idx, keepWidth) {
         rowEl.appendChild(cellEl);
       }
       strip.appendChild(rowEl);
+      syncPixelScaling(strip); // 표시 샘플링 판정 = display.js 단일 소유자
     };
     const scheduleStrip = () => {
       clearTimeout(stripTimer);
