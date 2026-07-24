@@ -42,6 +42,11 @@ function applyCardTransform(stage, stateName, idx) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const tt = quantize ? getTransform(stateName, idx) : IDENTITY();
       drawFrameInto(ctx, source, tt, cw, ch, snap, getPixelOps(stateName, idx), ss);
+      // 버퍼 해상도가 **여기서** 정해진다 (ss 에 따라 64 또는 소스 해상도).
+      // 이 함수는 이미지 로드까지 지연될 수 있어서, 바깥의 판정 스윕이 먼저 돌면
+      // 아직 canvas 기본값(300)을 보고 엉뚱하게 답한다 — 사실을 만든 자리에서
+      // 소비자를 갱신한다 (콩콩이 R1 수리 중 재발견, 2026-07-24).
+      applyPixelScaling(canvas);
     };
     canvas.style.transform = quantize
       ? ""

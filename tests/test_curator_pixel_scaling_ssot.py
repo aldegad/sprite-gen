@@ -20,8 +20,12 @@ CURATOR = Path(__file__).resolve().parent.parent / "scripts" / "curator"
 CSS = (CURATOR / "curator.css").read_text(encoding="utf-8")
 SRC = {p.name: p.read_text(encoding="utf-8") for p in (CURATOR / "src").glob("*.js")}
 
-# 표시 해상도로 직접 그려지는 내부 서피스 — 판정 대상이 아니다.
-INTERNAL_SURFACES = ("snap-canvas", "cmp-canvas")
+# 판정 면제는 **버퍼 해상도 = 표시 해상도** 인 서피스뿐이다 (JS 가 표시 크기에 맞춰
+# 직접 래스터를 그리는 경우). `snap-canvas` 는 한때 여기 있었지만 소스 표시 모드가
+# 소스 해상도로 그리게 되면서 전제가 깨졌고, 면제가 남아 있는 동안 이 계약이 그
+# 표시면을 통째로 놓쳤다 (콩콩이 R1, 2026-07-24). 화이트리스트를 넓히기 전에
+# "이 서피스는 버퍼와 표시가 정말 같은가" 를 먼저 실측하라.
+INTERNAL_SURFACES = ("cmp-canvas",)
 
 
 def _rule_selectors_with_pixelated() -> list[str]:
@@ -104,6 +108,37 @@ def test_decision_is_re_evaluated_when_the_image_source_changes():
     assert re.search(
         r"refreshVariantImages\(\)\s*\{.*?applyPixelScaling\(el\)", display, re.S
     ), "src 스왑 경로가 판정을 다시 받지 않는다"
+
+
+def test_every_display_surface_is_under_the_decision():
+    """표시면 목록에 캔버스 표시면이 빠지면 계약이 그 경로를 통째로 놓친다.
+
+    실사고 (콩콩이 R1, 2026-07-24): 소스 표시 캔버스의 **버퍼**를 소스 해상도로
+    올려놓고 `PIXEL_SCALE_TARGETS` 에서는 제외해 둬서, 896 버퍼가 152 표시로
+    nearest 데시메이션(2.9% 생존)됐다. 버퍼 해상도를 올린 것과 표시 샘플링을
+    지킨 것은 다른 일이다 — 목표한 양(표시 샘플링)을 재야 한다.
+    """
+    display = SRC["display.js"]
+    assert '".stage canvas.snap-canvas"' in display, (
+        "실제 표시면인 snap-canvas 가 판정 대상에서 빠졌다"
+    )
+
+
+def test_new_display_surfaces_get_judged_when_rendered():
+    """표시면을 새로 만드는 렌더 함수는 판정을 호출한다.
+
+    실사고 (콩콩이 R2, 2026-07-24): `renderState` 가 만든 미리보기 캔버스는
+    load 위임 훅(<img> 전용)이 못 덮어서, 리사이즈가 올 때까지 뭉갠 채로 남았다.
+    리사이즈가 소급 복구한다는 것이 "판정식은 맞고 부르는 지점이 빠졌다" 는 증거였다.
+    """
+    assert re.search(
+        r"function renderState\(.*?\n\}", SRC["cards.js"], re.S
+    ), "renderState 를 찾지 못했다"
+    body = re.search(r"function renderState\(.*?\n\}", SRC["cards.js"], re.S).group(0)
+    assert "syncPixelScaling(wrap)" in body, (
+        "renderState 가 새로 만든 표시면에 판정을 호출하지 않는다 — "
+        "rebuildState 경로 전체가 판정 없이 렌더된다"
+    )
 
 
 def test_source_display_canvas_renders_at_source_resolution():

@@ -510,7 +510,9 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
   z-index: 1;
   display: none;
   pointer-events: none;
-  image-rendering: pixelated;
+  /* nearest 여부는 여기서 정하지 않는다 — 이 캔버스도 버퍼≠표시 해상도라
+     display.js `applyPixelScaling` 이 판정하고 `.px-upscale` 로만 부여된다.
+     (무조건 규칙이 남아 소스 해상도 버퍼를 축소 표시에서 데시메이션했다 — 콩콩이 R1) */
 }
 .grid-overlay {
   position: absolute;
