@@ -1,6 +1,6 @@
 # Changelog
 
-> Version policy (2026-07-24, Soohong): the **1.56.x pin is lifted**. The minor was frozen at 56 as a Sol (5.6) homage; that project wound down, so the minor moves again starting at **v1.57.0** and release names drop the codename prefix.
+> Version policy (2026-07-24, Soohong): the **1.56.x pin is lifted**. The minor was frozen at 56 as a versioning convention; that scheme was retired, so the minor moves again starting at **v1.57.0** and release names drop the codename prefix.
 > Historical note (2026-07-11): while pinned, the three releases originally labelled v1.57.0/v1.58.0/v1.59.0 were retroactively renumbered to v1.56.7/8/9 (the old labels remain in commit messages). No `v1.57.0` tag was ever published, so this release reuses the number cleanly.
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
@@ -119,7 +119,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   comparison sheet from a full-project sweep.
 - The header animation strip was removed; it will be replaced with a breathing capture.
 
-## v1.56.92 "Sol Raw Base Back" - the base's original view survives unification
+## v1.56.92 "Raw Base Back" - the base's original view survives unification
 
 - Validator reject on v1.56.91, correct again: unifying onto the single canvas
   surface killed the base row's pixel-perfect-OFF view. `snapScaleFor` handled
@@ -143,7 +143,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   and `curation.md` now distinguishes pipeline bakes (sidecar-only, unaffected)
   from webview row exports (WYSIWYG, toggle-affected).
 
-## v1.56.91 "Sol One Renderer" - one pipeline, one display surface, one grid
+## v1.56.91 "One Renderer" - one pipeline, one display surface, one grid
 
 - Soohong called the structure itself: the zoom view had no pixel-perfect
   button, pixel-perfect did not snap by the drawn grid, and the stage carried
@@ -172,7 +172,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   (img branch revival / gate restoration / measured-k removal) each turn
   exactly their guard red.
 
-## v1.56.90 "Sol Grid Always" - the pixel grid stops hiding itself
+## v1.56.90 "Grid Always" - the pixel grid stops hiding itself
 
 - The pixel-grid controls vanished entirely on 1:1 pixel-art (every imported
   run). Root cause was a single conflation: pitch measurement folded "measured
@@ -201,7 +201,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   Mutation-checked - restoring the `< 2` discard or the `gridCapableStates`
   filter turns exactly the matching tests red.
 
-## v1.56.89 "Sol Same Disease Third Address" - the contract stops naming call sites
+## v1.56.89 "Same Disease Third Address" - the contract stops naming call sites
 
 - Validator reject on v1.56.88, both findings correct. **R3 (a regression this
   plan introduced)**: dropping the unconditional `.snap-canvas` CSS left the
@@ -224,7 +224,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   sweep stays at 147 surfaces / 0 mismatches. Both new regressions are
   mutation-checked against exactly the R3 and R4 defects.
 
-## v1.56.88 "Sol Measured Right" - the disease had moved to the new surface
+## v1.56.88 "Measured Right" - the disease had moved to the new surface
 
 - Validator reject on v1.56.87, both findings correct. **R1**: raising the
   `snap-canvas` buffer to source resolution invalidated the very premise its
@@ -249,7 +249,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   mismatches in all three (65 downscaled -> none nearest, 82 upscaled -> all
   nearest). Both new regressions are mutation-checked.
 
-## v1.56.87 "Sol Real Surface" - the canvas that was actually on screen
+## v1.56.87 "Real Surface" - the canvas that was actually on screen
 
 - Soohong opened the DOM and pointed at the real culprit: on a frame with pixel
   edits the `<img>` carrying the original twin is `visibility: hidden` and a
@@ -272,7 +272,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   Regression pins the canvas sizing, the edit mapping and the eyedropper scaling;
   reverting the canvas to cell size turns exactly that test red.
 
-## v1.56.86 "Sol Follows The Source" - the toggle now re-judges the sampling
+## v1.56.86 "Follows The Source" - the toggle now re-judges the sampling
 
 - v1.56.85 unified the "nearest or not" decision but only re-evaluated it on
   layout events. The pixel-perfect row toggle changes **neither layout nor
@@ -290,7 +290,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
 - Regression pins the load hook, its capture mode, and the swap-path call;
   removing the hook turns exactly that test red.
 
-## v1.56.85 "Sol One Answer" - the original view finally shows the original
+## v1.56.85 "One Answer" - the original view finally shows the original
 
 - The curator decided "render this image with nearest sampling?" in **six**
   different places, and one of them - a blanket `.stage img { image-rendering:
@@ -315,7 +315,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   `pixelated`. Regression pins the contract and is mutation-checked (reviving
   the blanket rule turns exactly the 2 relevant tests red).
 
-## v1.56.84 "Sol Native Twin" - the original twin is the original again
+## v1.56.84 "Native Twin" - the original twin is the original again
 
 - The hi-res `orig/` display twin is now baked at a **per-row native scale**:
   S = ceil(max component-crop / final-content-bbox ratio over the row's frames),
@@ -331,7 +331,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   preserved (`state_revision` excludes the engine hash by design), new twin
   block pitch 14px matches the raw (autocorr 0.765 at lag 14).
 
-## v1.56.83 "Sol True Cuts" - the green grid is the sampling truth again
+## v1.56.83 "True Cuts" - the green grid is the sampling truth again
 
 - Reverts the v1.56.82 display policy after Soohong clarified the intent
   (2026-07-23): the overlay's job is to show WHERE the extractor actually cut
@@ -340,7 +340,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   anchored) again, with the count trust gate intact. v1.56.82 shipped for ~1h
   and is superseded.
 
-## v1.56.82 "Sol Even Grid" - grid overlay draws the final-pixel uniform grid
+## v1.56.82 "Even Grid" - grid overlay draws the final-pixel uniform grid
 
 - The curator's pixel-grid overlay now always draws the content box divided
   evenly by the logical pixel count (green cell = one final pixel, endpoints and
@@ -350,7 +350,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   visibly crooked mesh (Soohong 2026-07-23). Display policy only - the sampling
   cuts stay recorded in the manifest; extraction still owns that truth.
 
-## v1.56.81 "Sol Family Guard" - pitch-family outlier guard + per-state heal isolation
+## v1.56.81 "Family Guard" - pitch-family outlier guard + per-state heal isolation
 
 - **Per-frame pitch keeps its own truth only inside the strip consensus "pitch
   family" (ratio 1.1, `PITCH_FAMILY_RATIO`)** — harmonic/collapsed misdetections
@@ -368,7 +368,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   per-state merge semantics keep durable retry-brake evidence intact across the
   per-state calls. (plan `sprite-gen/pitch-outlier-guard-heal-isolation`)
 
-## v1.56.80 "Sol Retry Brake" - Stop deterministic heal retry loops
+## v1.56.80 "Retry Brake" - Stop deterministic heal retry loops
 
 - A failed engine-update heal no longer restarts the same full extraction on every
   curator poll. The failure is keyed by engine plus request, curation, manifest,
@@ -379,7 +379,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   cover both the in-process polling loop and restart continuity (hero_v7 incident,
   Soohong 2026-07-21).
 
-## v1.56.79 "Sol Router" - cutout routes white vs key-colour backgrounds
+## v1.56.79 "Router" - cutout routes white vs key-colour backgrounds
 
 - **`cutout` becomes the unified imported-image entry point** (Soohong
   2026-07-20, plan `sprite-gen/cutout-keycolor-routing`): it now reads the corner
@@ -398,7 +398,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   path pulls in nothing extra. No Silent Fallback contract preserved on both
   routes.
 
-## v1.56.78 "Sol Single Reader" - Heal report single-consumer fix
+## v1.56.78 "Single Reader" - Heal report single-consumer fix
 
 - **Heal report race fix** (validator kongkongi reject repro): `maybe_heal` used to
   pop the pending heal report on every completed call — the already-open curator's
@@ -409,7 +409,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   (a failed build leaves the report for the next success). Regression guard:
   `test_progress_poll_never_steals_the_heal_report`.
 
-## v1.56.77 "Sol First Paint" - Long-op loading UX: heal off the request path
+## v1.56.77 "First Paint" - Long-op loading UX: heal off the request path
 
 - **Background heal + grace join** (Soohong 2026-07-20, plan `sprite-gen/long-op-loading-ux`):
   the first `/api/run` after an engine update used to run the full-run heal
@@ -428,7 +428,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
 - Contract tests `tests/test_heal_async.py`: busy-within-grace bound, report
   no-loss, fresh-path regression, observable heal failure.
 
-## v1.56.76 "Sol Cutout" - Matte background remover for imported images
+## v1.56.76 "Cutout" - Matte background remover for imported images
 
 - **`cutout` command** (Soohong 2026-07-20, plan `sprite-gen/cutout-command`):
   a matte-based background remover for **imported** images (hand-drawn icons,
@@ -448,7 +448,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
   composites so any leftover fringe shows loudly. Inherits the `chroma.py` No
   Silent Fallback contract: leftover non-zero RGB under transparency raises.
 
-## v1.56.75 "Sol True Grid" - Per-frame pixel grid + on-demand pixel-perfect preview
+## v1.56.75 "True Grid" - Per-frame pixel grid + on-demand pixel-perfect preview
 
 - **Per-frame pitch is the primary truth** (Soohong 2026-07-20, plan
   `sprite-gen/per-frame-pixel-grid`): each frame is snapped with its own detected
@@ -1050,12 +1050,12 @@ the moving seams, and the loop math needs to be visible.
   live-rebuilt on every adjustment. Placed below the stage (outside the flex
   row — inserting it inside collapsed the stage).
 
-## v1.56.32 "Sol Default" - scrub Kuma session-identity env from generation subprocesses
+## v1.56.32 "Default" - scrub Kuma session-identity env from generation subprocesses
 
 > commit bbc01f1 (entry added retroactively by a sibling session during version
 > reconciliation — see that commit for details).
 
-## v1.56.31 "Sol Default" - gen default provider = codex, observable grok fallback, SPRITE_GEN_DEFAULT_PROVIDER
+## v1.56.31 "Default" - gen default provider = codex, observable grok fallback, SPRITE_GEN_DEFAULT_PROVIDER
 
 Soohong's directive (2026-07-17, 제품 스레드): the `gen` default backend is codex
 (GPT `image_gen`). grok had drifted into being the de-facto default as the "faster
@@ -1082,7 +1082,7 @@ backend"; codex is now the confirmed default.
 ## v1.56.33 "Atelier" - Breathing is a post-process LAYER + pipeline progress %
 
 > commit be1baff (message says v1.56.31 — renumbered: a parallel session shipped
-> v1.56.31/32 "Sol Default" first; the changelog is the version SSoT).
+> v1.56.31/32 "Default" first; the changelog is the version SSoT).
 
 Soohong's architectural call (2026-07-18): breathing is a modulation ORTHOGONAL
 to frame selection — a blink frame breathes too. The take-based flow (bake an
@@ -1526,7 +1526,7 @@ suite **221 passed**; the existing extraction golden path is unchanged.
 
 Closed the PerfectPixel port as one verifiable release. The deterministic
 post-processing, automatic inspection/correction, and Codex/Grok generation layers
-added across v1.56.7 through v1.56.12 are wired to a real a game row, reproducing
+added across v1.56.7 through v1.56.12 are wired to a real a production row, reproducing
 convergence and best-candidate preservation within the 3-pass contract.
 
 - A real Grok `up_idle` generate-extract-inspect-hint-regenerate loop converged from
@@ -1840,7 +1840,7 @@ Patch release in the Edge Runner line. Three real bugs in `detect_pixel_pitch` /
 
 ## v1.56.1 "Edge Runner" - slice-sheet: variant grid sheets to per-cell standing cuts
 
-Patch release in the Edge Runner line. Adds the `slice-sheet` tool, distilled from the a game dialogue cut-in overhaul (2026-07-09): one generated image holding a COLSxROWS grid of the same character's expressions becomes per-cell 512x768 RGBA cuts with a shared feet baseline and normalized body height.
+Patch release in the Edge Runner line. Adds the `slice-sheet` tool, distilled from the a dialogue cut-in overhaul (2026-07-09): one generated image holding a COLSxROWS grid of the same character's expressions becomes per-cell 512x768 RGBA cuts with a shared feet baseline and normalized body height.
 
 - **New module `sprite_gen.slice_sheet`** + wrapper `scripts/slice_sheet_cells.py` + CLI subcommand `sprite_gen.cli slice-sheet`. Alpha truth stays `remove_chroma_background` (v1.13 4-pass); the module owns only cell geometry.
 - **Geometry rules encode the field failures**: centroid component-to-cell assignment (grid cropping imported neighbour fragments), merged-figure split with in-cell re-label (a kunai-fused neighbour's hair shipped as a floating clothes fragment without it), border-touching debris drop at `--debris-fraction` 0.30 (in-cell effects like hearts survive), per-cell height normalization (a sheet shipped rows at visibly different body sizes under sheet-wide max scaling), feet pinned to `--baseline-y`, fail-loud empty cells.
@@ -1911,7 +1911,7 @@ Docs-only. A fresh installer could not resolve the `kuma:image-gen` dependency f
 
 Fixes the third way extraction destroyed real subject colors, and hardens the skill contract that a prior worker shortcut violated.
 
-- **The fringe tint-gate no longer erases key-tinted subject material.** `remove_chroma_background` cut every pixel with `distance <= 180` and `key_tint_score >= 18` *anywhere in the image*, so hot pink (~129 from magenta) and purple (~153) subjects fell inside the band and were bleached wholesale — real accidents: `sample_item_a` (hot-pink seed packet rendered three times as a white flower) and `sample_item_b` (purple star bloom turned white), both on a magenta key, 2026-07-07. Fringe is boundary antialiasing by definition, so the cut is now limited to pixels spatially adjacent to the keyed-out background, peeled at most `--fringe-reach` layers (default 2). Measured on the accident raws: 98.7% / 98.9% of the key-tinted subject pixels survive (previously 0%), while a green-subject control (`sample_plant_leaf`) removes the exact same 2,582 fringe pixels as before — no quality regression.
+- **The fringe tint-gate no longer erases key-tinted subject material.** `remove_chroma_background` cut every pixel with `distance <= 180` and `key_tint_score >= 18` *anywhere in the image*, so hot pink (~129 from magenta) and purple (~153) subjects fell inside the band and were bleached wholesale — real accidents: a hot-pink subject (a saturated pink packet rendered three times as a white blob) and a purple subject (a purple bloom turned white), both on a magenta key, 2026-07-07. Fringe is boundary antialiasing by definition, so the cut is now limited to pixels spatially adjacent to the keyed-out background, peeled at most `--fringe-reach` layers (default 2). Measured on the accident raws: 98.7% / 98.9% of the key-tinted subject pixels survive (previously 0%), while a green-subject control removes the exact same 2,582 fringe pixels as before — no quality regression.
 - **Regression tests** in `tests/test_chroma_extraction.py`: boundary fringe still removed, isolated fringe-band colors treated as subject, hot-pink/purple interiors survive, and 1/8-size NEAREST copies of both accident raws (`tests/fixtures/accident/`) must keep >= 90% of their fringe-band subject pixels.
 - **SKILL.md leads with a BLOCKING gate**: AI touches raw generation only; the final asset must go through the deterministic extraction transform — a plain `PIL.resize()` downscale shortcut is a failed result (the shortcut a worker actually took on 2026-07-07, degrading edges). Chroma key selection by subject color (pink/purple → green, green plants → magenta) is part of the gate; the branch-table SSoT lives in image-gen's SKILL.md top gate.
 - **History moved out of the SKILL.md body** (per skill-hook-authoring): dated redesign narratives now live here. For the record — the pixel-pitch detector replaced a run-length-mode approach that antialiased 2px runs dominated; per-frame phase snapping replaced a strip-global grid that always let some frames slide (inter-frame phase drift); the `logical_height` default changed from half the usable height (which mushed a protagonist to ~logical 30) to cell-height 1:1 (2026-07-05); the style-contract prose ("compact chibi / chunky / thick outline") that kept polluting a slim base was removed in favor of reference-image style SSoT; a 64px-locked anchor re-input erased eyes while the raw anchor preserved them (double-degradation proof, 2026-07-05).

@@ -15,8 +15,7 @@ colors:
    extraction erase radius and would be deleted.
 3. The old fringe cut erased every pixel inside the fringe color band *anywhere
    in the image* — hot pink (~129 from magenta) and purple (~153) subjects fell
-   in the band and were bleached wholesale (sample_item_a /
-   sample_item_b, 2026-07-07). Soft-alpha unmix now treats boundary
+   in the band and were bleached wholesale. Soft-alpha unmix now treats boundary
    antialiasing as coverage while deeper interior subject pixels survive.
 """
 
@@ -55,10 +54,12 @@ LEGACY_PEEL_DEPTH = 2
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 MOE_FIXTURES = FIXTURES / "moe"
 
-# Real accident colors: dominant subject pixels the old position-blind fringe
-# cut erased (raws, magenta key). Both sit inside the fringe band.
-HOT_PINK = (250, 77, 150)  # sample_item_a petals, ~129 from magenta
-PURPLE = (213, 112, 246)  # sample_item_b petals, ~153 from magenta
+# Subject colors that sit inside the magenta key's fringe trap band — the
+# position-blind fringe cut used to erase them wholesale. Both are ~129/~153
+# from magenta, i.e. close enough to the key to be trapped, far enough to be
+# real subject material.
+HOT_PINK = (250, 77, 150)  # ~129 from magenta
+PURPLE = (213, 112, 246)  # ~153 from magenta
 
 
 def _key(pixel: tuple[int, int, int], chroma_key=MAGENTA):
@@ -268,10 +269,20 @@ def test_key_tinted_subject_interior_survives() -> None:
             assert out[offset, offset] == (*subject, 255), f"{subject} interior erased at {offset}"
 
 
-def _subject_band_survival(path: Path) -> float:
+def _trap_band_subject(subject: tuple[int, int, int], size: int = 100, margin: int = 6) -> Image.Image:
+    """A magenta-keyed canvas with a solid subject block whose color sits inside
+    the key's fringe trap band. Generated deterministically so the fringe-survival
+    guard needs no sample art shipped alongside the tests."""
+    canvas = Image.new("RGBA", (size + 2 * margin, size + 2 * margin), (*MAGENTA, 255))
+    pixels = canvas.load()
+    for y in range(margin, margin + size):
+        for x in range(margin, margin + size):
+            pixels[x, y] = (*subject, 255)
+    return canvas
+
+
+def _subject_band_survival(image: Image.Image) -> float:
     """Survival ratio of fringe-band subject pixels after cleanup."""
-    with Image.open(path) as opened:
-        image = opened.convert("RGBA")
     source = image.load()
     band = []
     for y in range(image.height):
@@ -280,31 +291,30 @@ def _subject_band_survival(path: Path) -> float:
             distance = extract.color_distance(color, MAGENTA)
             if KEY_THRESHOLD < distance <= FRINGE_THRESHOLD and extract.key_tint_score(color, MAGENTA) >= FRINGE_DELTA:
                 band.append((x, y))
-    assert band, f"{path.name} has no fringe-band pixels; fixture is wrong"
+    assert band, "generated subject has no fringe-band pixels; generator is wrong"
     out = _clean(image).load()
     survived = sum(1 for x, y in band if out[x, y][3] != 0)
     return survived / len(band)
 
 
-def test_accident_raws_keep_pink_and_purple_material() -> None:
-    # 1/8-size NEAREST copies of the real accident raws (magenta key):
-    # a hot-pink seed packet and a purple star bloom. The old cut erased 100%
-    # of their fringe-band subject pixels; boundary-limited despill must keep
-    # nearly all of them (only genuine key-blend edge pixels may go).
-    for name in ("sample_item_a.png", "sample_item_b.png"):
-        ratio = _subject_band_survival(FIXTURES / "accident" / name)
-        assert ratio >= 0.90, f"{name}: only {ratio:.1%} of key-tinted subject pixels survived"
+def test_key_tinted_subject_material_survives() -> None:
+    # Hot-pink and purple subjects sit inside the magenta key's fringe trap. The
+    # old position-blind cut erased ~100% of them; boundary-limited despill must
+    # keep nearly all — only genuine key-blend edge pixels (the outer despill
+    # layers of the block) may go.
+    for subject in (HOT_PINK, PURPLE):
+        ratio = _subject_band_survival(_trap_band_subject(subject))
+        assert ratio >= 0.90, f"{subject}: only {ratio:.1%} of key-tinted subject pixels survived"
 
 
-def test_accident_raws_do_not_regress_opaque_subject_pixels() -> None:
-    baselines = {
-        "sample_item_b.png": 4254,
-        "sample_item_a.png": 4501,
-    }
-    for name, minimum in baselines.items():
-        out = _clean(Image.open(FIXTURES / "accident" / name).convert("RGBA"))
+def test_key_tinted_subject_opaque_pixels_do_not_regress() -> None:
+    # A 100x100 in-band subject block is ~10k opaque pixels; interior is
+    # untouchable and only the outer despill layers may go, so the vast majority
+    # must remain opaque after cleanup.
+    for subject in (HOT_PINK, PURPLE):
+        out = _clean(_trap_band_subject(subject))
         opaque = out.getchannel("A").histogram()[255]
-        assert opaque >= minimum, f"{name}: opaque subject pixels regressed to {opaque}"
+        assert opaque >= 9000, f"{subject}: opaque subject pixels regressed to {opaque}"
 
 
 # A small, cyan-leaning teal feature: ~55 from the cyan key, so cyan would erase

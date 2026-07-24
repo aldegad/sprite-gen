@@ -23,7 +23,7 @@ trapped-spill despill). This module owns only cell geometry:
   (per-cell normalization — generators routinely draw rows at different
   sizes) and its feet rest on ``baseline_y`` of the output canvas.
 
-Field lessons baked in here (a game cut-in overhaul, 2026-07-09):
+Field lessons baked in here (a cut-in overhaul, 2026-07-09):
 sheet-wide max-height scaling preserves the generator's size jitter, grid
 cropping without component logic imports neighbour fragments, and skipping
 the in-cell re-label leaves a neighbour's hair fused to the figure.

@@ -51,7 +51,7 @@ python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/slice_sheet_cells.py \
 ## Geometry rules (and the field failures they encode)
 
 Each rule below exists because the naive version shipped a visible defect
-during the a game cut-in overhaul (2026-07-09):
+during the a cut-in overhaul (2026-07-09):
 
 1. **Component-to-cell assignment by centroid, not grid cropping.** Grid
    cropping slices a figure's own cape/broom at the cell border and imports
