@@ -124,20 +124,105 @@ def test_every_display_surface_is_under_the_decision():
     )
 
 
-def test_new_display_surfaces_get_judged_when_rendered():
-    """표시면을 새로 만드는 렌더 함수는 판정을 호출한다.
+# ── 캔버스 버퍼 사이징 지점의 분류표 (계약) ──
+# 같은 병이 호출부를 옮겨다니며 세 번 재발했다 (R2 renderState → R3 renderTick).
+# 호출부 이름으로 테스트를 쓰면 네 번째 이사 자리가 남으므로, **버퍼 크기를 정하는
+# 모든 지점**을 열거하고 각각을 분류하게 강제한다. 미분류 지점은 실패한다 —
+# 새 캔버스를 만드는 사람이 "이건 사용자가 보는 표시면인가" 를 반드시 답하게.
+#
+#   display  = DOM 에 붙어 사용자가 본다. 버퍼≠표시일 수 있으므로 판정 필수.
+#   offscreen= 합성용 작업 캔버스. 화면에 안 붙으므로 판정 무의미.
+#   rect     = 표시 영역 실측으로 버퍼를 잡는다(버퍼=표시). nearest 가 무연산.
+#   not-canvas = 캔버스가 아닌 객체의 width 속성.
+CANVAS_BUFFER_SITES = {
+    ("cards.js", "base"): "offscreen",
+    ("row-export.js", "base"): "offscreen",
+    ("row-export.js", "out"): "offscreen",
+    ("display.js", "src"): "offscreen",
+    ("display.js", "tmp"): "offscreen",
+    ("display.js", "canvas"): "rect",          # 격자 오버레이 — stage 실측 크기
+    ("base-editor.js", "probe"): "offscreen",
+    ("base-editor.js", "logical"): "offscreen",
+    ("transforms.js", "canvas"): "display",    # snap-canvas (소스/양자화 모드)
+    ("zoom-editor.js", "zoomView"): "not-canvas",
+    ("zoom-editor.js", "c"): "offscreen",
+    ("zoom-editor.js", "work"): "offscreen",
+    ("zoom-editor.js", "base"): "offscreen",
+    ("zoom-editor.js", "cvs"): "offscreen",
+    ("zoom-editor.js", "b"): "offscreen",
+    ("zoom-editor.js", "prev"): "display",     # 마키 라이브 프리뷰
+    ("zoom-editor.js", "bcanvas"): "display",  # 호흡 모드 줌 재생면
+    ("zoom-editor.js", "cv"): "display",       # 호흡 필름스트립 셀
+    ("compare.js", "base"): "offscreen",
+    ("compare.js", "canvas"): "rect",          # cmp-canvas — 버퍼=표시
+    ("breathe.js", "out"): "offscreen",
+    ("breathe.js", "c"): "offscreen",
+}
 
-    실사고 (콩콩이 R2, 2026-07-24): `renderState` 가 만든 미리보기 캔버스는
-    load 위임 훅(<img> 전용)이 못 덮어서, 리사이즈가 올 때까지 뭉갠 채로 남았다.
-    리사이즈가 소급 복구한다는 것이 "판정식은 맞고 부르는 지점이 빠졌다" 는 증거였다.
+_JUDGE = re.compile(r"(applyPixelScaling|syncPixelScaling)\s*\(")
+
+
+def _buffer_sites():
+    """`<var>.width = ...` 버퍼 대입 지점 (CSS `.style.width` 제외)."""
+    for name, text in SRC.items():
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            m = re.search(r"(?<!\.style)\b(\w+)\.width\s*=", line)
+            if m and ".style.width" not in line:
+                yield name, m.group(1), i, lines
+
+
+def test_every_canvas_buffer_site_is_classified():
+    """새 버퍼 사이징 지점이 생기면 분류를 강제한다 — 조용히 계약 밖에 놓이지 않게."""
+    unknown = sorted({(f, v) for f, v, _, _ in _buffer_sites()} - set(CANVAS_BUFFER_SITES))
+    assert not unknown, (
+        f"분류되지 않은 캔버스 버퍼 사이징 지점: {unknown}. "
+        "사용자가 보는 표시면이면 'display'(판정 필수), 합성용이면 'offscreen', "
+        "표시 실측으로 잡으면 'rect' 로 CANVAS_BUFFER_SITES 에 등록하라."
+    )
+
+
+def test_display_canvases_are_judged_where_their_buffer_is_set():
+    """표시 대상 캔버스의 버퍼를 정하는 지점은 판정을 부른다.
+
+    실사고 2건, 같은 병이 호출부만 바꿔 재발 (2026-07-24):
+    - R2: `renderState` 가 만든 캔버스가 판정을 못 받아 리사이즈 전까지 뭉갬.
+    - R3: `renderTick`(호흡 모드 줌)이 버퍼만 바꾸고 판정을 안 불러 64→758 보간
+          (화면 고유색 114 → 10,526, 92배 번짐).
+    둘 다 "리사이즈하면 소급 복구" 라는 같은 서명이었다 — 판정식은 맞고 부르는
+    지점이 빠진 것. 그래서 계약을 호출부 이름이 아니라 **버퍼를 정하는 자리**로 쓴다.
     """
-    assert re.search(
-        r"function renderState\(.*?\n\}", SRC["cards.js"], re.S
-    ), "renderState 를 찾지 못했다"
-    body = re.search(r"function renderState\(.*?\n\}", SRC["cards.js"], re.S).group(0)
-    assert "syncPixelScaling(wrap)" in body, (
-        "renderState 가 새로 만든 표시면에 판정을 호출하지 않는다 — "
-        "rebuildState 경로 전체가 판정 없이 렌더된다"
+    # 창 40줄 = "같은 렌더 블록" 의 근사치다 (현행 실측 거리 10·23·32줄 — 부착이
+    # 그리기 뒤에 오는 경로가 있어 바로 다음 줄을 강제할 수 없다). 잡으려는 실패는
+    # "판정이 아예 없음" 이고 그건 블록 전체에 없으므로 이 창으로 충분하다.
+    # 진짜 이빨은 위의 분류표다 — 새 표시면은 등록 없이는 통과 못 한다.
+    missing = []
+    for name, var, idx, lines in _buffer_sites():
+        if CANVAS_BUFFER_SITES.get((name, var)) != "display":
+            continue
+        window = "\n".join(lines[idx: idx + 40])
+        if not _JUDGE.search(window):
+            missing.append(f"{name}:{idx + 1} ({var})")
+    assert not missing, (
+        f"표시 대상 캔버스의 버퍼를 바꾸고 판정을 안 부르는 지점: {missing}. "
+        "버퍼 크기는 기하이므로 바꾼 자리에서 applyPixelScaling 을 불러라."
+    )
+
+
+def test_no_inline_unconditional_pixelated_grant():
+    """인라인 `imageRendering` 무조건 부여 금지 — CSS grep 에 안 잡혀 계약 밖에 숨는다.
+
+    실사고 (콩콩이 R4, 2026-07-24): 마키 프리뷰가 camelCase 인라인으로 무조건
+    부여하고 있었는데, CSS 규칙 본문과 `px-upscale` 문자열만 훑는 테스트가
+    구조적으로 못 봤다.
+    """
+    offenders = []
+    for name, text in SRC.items():
+        for i, line in enumerate(text.splitlines()):
+            if "imageRendering" in line and "pixelated" in line:
+                offenders.append(f"{name}:{i + 1}")
+    assert not offenders, (
+        f"인라인 무조건 nearest 부여: {offenders}. 판정 소유자(.px-upscale)에게 맡겨라."
     )
 
 

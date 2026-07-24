@@ -635,7 +635,9 @@ function openZoom(stateName, idx, keepWidth) {
         const prev = document.createElement("canvas");
         prev.width = cellW; prev.height = cellH;
         Object.assign(prev.style, { position: "absolute", inset: "0", width: "100%",
-                                    height: "100%", imageRendering: "pixelated", pointerEvents: "none" });
+                                    height: "100%", pointerEvents: "none" });
+        // nearest 여부는 인라인으로 박지 않는다 — 판정 소유자에게 맡긴다 (부착 직후 호출).
+        // (인라인 무조건 부여는 grep image-rendering 에도 안 잡혀 계약 밖에 숨는다)
         const hidden = [stage.querySelector("img"), stage.querySelector(".snap-canvas")].filter(Boolean);
         const work = document.createElement("canvas");
         work.width = cellW; work.height = cellH;
@@ -663,6 +665,7 @@ function openZoom(stateName, idx, keepWidth) {
         };
         hidden.forEach((el2) => { el2.style.visibility = "hidden"; });
         stage.insertBefore(prev, selBox);
+        applyPixelScaling(prev); // 부착 후에야 표시폭이 정해진다
         drawPreview(0, 0, ev.altKey);
         const onMove = (e2) => {
           const step = s;
@@ -876,6 +879,7 @@ function openZoom(stateName, idx, keepWidth) {
       bcanvas.style.display = "block";
       bcanvas.width = cellW;
       bcanvas.height = cellH;
+      applyPixelScaling(bcanvas); // 버퍼를 정한 자리에서 판정 — 계약: display.js 상단
       const bctx = bcanvas.getContext("2d");
       bctx.imageSmoothingEnabled = false;
       bctx.clearRect(0, 0, cellW, cellH);
