@@ -154,9 +154,9 @@ whole point is that the experience does not vary by who launched it.
 |---|---|---|---|
 | **Base reference row** | `base-source.*` exists | `baseUrl` (null if absent) | Top row, pure image — no preview/select UI. Identity truth, always visible. |
 | **Generation-material chips** | the state has resolvable material | `states[].refs[]` — each `{role, name, url}` | Per-state header shows *what generated this row*. `role ∈ {anchor, basis, guide}`, labelled `방향 앵커` / `basis row` / `레이아웃 가이드` (i18n key `ref_<role>`). Only run-dir files that actually exist appear. |
-| **Pixel grid** | grid is known or measurable | `states[].pixelScale` + `pixelPerfect{label,scale}` + `states[].frames[].contentBox` | **Per-state** checkbox on each grid-capable row's refs strip (right side, above the frames); the top checkbox is a **toggle-all** (indeterminate when mixed). Display only, never persisted. On the pixel-perfect view: the output raster (request scale on `fit.pixel_perfect` runs, per-row measured pitch labelled `auto` on import runs). On the original (plain) view: the **final correspondence grid** — the final pixel content box divided into exactly the final logical pixel count, drawn green and bounded to the sprite, so one green cell = one result pixel. (The stage-1 cut lattice recorded in `frames-manifest input_grids` is NOT this grid — the post-cut conform shrink can merge cells — and stays diagnostic-only.) A row where nothing is known draws **no grid** — no fake grid. |
+| **Pixel grid** | **always** — the measurement cannot fail | `states[].pixelScale` (≥1, never null) + `pixelPerfect{label,scale}` + `states[].frames[].contentBox` | **Per-state** checkbox on every row's refs strip; the top checkbox is a **toggle-all** (indeterminate when mixed). Display only, never persisted. `pixelScale` is an exact test (largest k where the frame is only uniform k×k blocks; k=1 is trivially true — identity), so "unknown grid" does not exist and nothing gates on it. On the pixel-perfect view: the output raster (request scale on `fit.pixel_perfect` runs, measured k labelled `auto` otherwise). On the original (plain) view: the **final correspondence grid** — green, one cell = one result pixel. (The stage-1 cut lattice in `frames-manifest input_grids` stays diagnostic-only.) An identity grid (k=1) is a true grid, not a missing one — density is a property of the fact, not a reason to hide the control. |
 | **Direction groups** | request has a `directions` block | `directionGroups[]` — `{direction, anchor, states}` + mirror entries `{direction, mirrorOf}` | States render grouped per direction with the direction anchor first (badge `방향 앵커`); mirrored directions render as an informational strip (`<src> 런타임 미러 — 생성 없음`), never as silently missing rows. Runs without the block keep the flat request order. |
-| **Original-quality toggle** | any frame has a pre-fit twin | `states[].frames[].plainUrl` + `fitPixelPerfect` | **Per-state** checkbox on each twin-bearing row's refs strip (right side, above the frames; on = canonical pixel-perfect `frame-N.png`; off = `plainUrl` — the hi-res `orig/frame-N.png` when present, else the cell-sized `.plain.png`; off also hides that row's pixel grid). The top-right checkbox is a **toggle-all** over the same per-state truth (indeterminate when rows are mixed). Absent twins hide both the row checkbox and the top one. |
+| **Original-quality toggle** | **always** — every row has the control | `states[].frames[].plainUrl` + `fitPixelPerfect` | **Per-state** checkbox on every row's refs strip + zoom modal (same contract, no per-surface gating). Twin rows: on = canonical `frame-N.png`, off = `plainUrl` (hi-res `orig/` else `.plain.png`) — a **source** switch, persisted per state. Twin-less rows: on = the display renderer re-quantizes by the measured grid `pixelScale` (the same k the grid overlay draws — grid-based pixel-perfect; k=1 is identity), a **display lens**, never persisted (persisting would make the bake resolver demand a `.plain` variant that does not exist). The top-right checkbox is a toggle-all (indeterminate when mixed). |
 
 `GET /api/run` payload — the display-relevant subset below (the full snapshot,
 including non-display fields like `states[].action`, is assembled by
@@ -169,7 +169,7 @@ including non-display fields like `states[].action`, is assembled by
   "baseUrl": "/run/base-source.png",        // base reference row; null when no base-source.*
   "cell": { "width": 256, "height": 256 },
   "pixelPerfect": { "logicalHeight": 48, "scale": 5, "source": "request", "label": "48px" },
-                                            // or { "source": "auto", "label": "auto", "scale": null }; null when no grid anywhere
+                                            // or { "source": "auto", "label": "auto", "scale": <min measured k, ≥1> } — never null
   "fitPixelPerfect": true,                   // request opted into the deterministic pixel-perfect path
   "runRevision": "9f3c1a0b7e2d4c58",         // frame-content fingerprint of this generation; POST /api/curation echoes it (stale ⇒ 409)
   "hasAtlas": true,
@@ -179,7 +179,7 @@ including non-display fields like `states[].action`, is assembled by
   "states": [
     {
       "name": "down_walk",
-      "pixelScale": 5,                       // request scale, or auto-measured pitch, or null (no grid)
+      "pixelScale": 5,                       // request scale, or exact measured k — always ≥1, never null (k=1 = identity)
       "refs": [                              // generation-material chips
         { "role": "anchor", "name": "down_idle.png", "url": "/run/raw/down_idle.png" },
         { "role": "guide",  "name": "down_walk.png", "url": "/run/references/layout-guides/down_walk.png" }

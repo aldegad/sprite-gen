@@ -240,67 +240,6 @@ def _read_op_progress(run_dir: Path) -> dict | None:
         return None
 
 
-_PIXEL_PREVIEW_DIR = ".pixel-preview"
-_PIXEL_PREVIEW_BUDGET = 24  # /api/run 한 번당 신규 검출·스냅 상한 (초과분은 deferred 로 보고)
-
-
-def _pixel_preview_meta(run_dir: Path, rel: str, budget: dict) -> dict:
-    """트윈(.plain/orig) 없는 프레임의 온디맨드 픽셀퍼펙트 프리뷰 (파생 캐시).
-
-    임포트 세트·비 pp 런에서도 뷰의 픽셀퍼펙트 토글이 동작해야 한다 (수홍
-    2026-07-20, plan sprite-gen/per-frame-pixel-grid). 스냅은 파이프라인과 같은
-    프레임별 자체 검출 격자 정책이다. 검출 실패(이미 논리 해상도 픽셀아트 포함)는
-    프리뷰 없음으로 남긴다 — 가짜 격자 금지. 검출은 프레임당 수 초라 요청당
-    예산(_PIXEL_PREVIEW_BUDGET)으로 캡하고, 밀린 수는 스냅샷에 보고한다
-    (조용한 캡 금지 — 리로드가 이어서 계산한다).
-
-    파생 캐시 계약: 키 = (source mtime, engine_revision) — 스냅 알고리즘이
-    바뀌면 stale 프리뷰가 자동 무효화된다. PNG 유실 시 meta 를 캐시 히트로 치지
-    않는다 (self-heal, 원칙 1). 쓰기는 전부 atomic replace (runio) — 스레딩
-    서버의 동시 계산은 결정론 출력의 last-write-wins 로 수렴한다 (중복 계산은
-    허용하되 torn file 은 없음, 원칙 4/8)."""
-    src = run_dir / rel
-    try:
-        mtime = src.stat().st_mtime_ns
-    except OSError:
-        return {}
-    from extract import engine_revision
-    engine = engine_revision()
-    out_dir = run_dir / _PIXEL_PREVIEW_DIR
-    stem = rel.replace("/", "__")
-    meta_path = out_dir / (stem + ".json")
-    if meta_path.is_file():
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            if (meta.get("mtime") == mtime and meta.get("engine") == engine and (
-                    not meta.get("file") or (out_dir / meta["file"]).is_file())):
-                return meta
-        except ValueError:
-            pass
-    if budget["left"] <= 0:
-        return {"deferred": True}
-    budget["left"] -= 1
-    from extract import binarize_alpha, detect_pixel_grid, grid_snap_downscale
-    from runio import atomic_save_image, atomic_write_text
-    with Image.open(src) as opened:
-        image = opened.convert("RGBA")
-    (pitch_x, pitch_y), (phase_x, phase_y) = detect_pixel_grid(image)
-    out_dir.mkdir(exist_ok=True)
-    if min(pitch_x, pitch_y) < 2.0:
-        meta = {"mtime": mtime, "engine": engine, "pitch": None,
-                "note": "no confident pixel grid"}
-    else:
-        snapped = binarize_alpha(grid_snap_downscale(
-            image, (pitch_x, pitch_y), detail_bias=True, phase=(phase_x, phase_y)))
-        atomic_save_image(snapped, out_dir / stem)
-        meta = {"mtime": mtime, "engine": engine,
-                "pitch": [round(pitch_x, 2), round(pitch_y, 2)],
-                "file": stem, "size": [snapped.width, snapped.height]}
-    # meta 는 PNG 다음에 쓴다 — meta 가 보이면 PNG 는 반드시 있다 (쓰기 순서 불변식)
-    atomic_write_text(meta_path, json.dumps(meta, ensure_ascii=False) + "\n")
-    return meta
-
-
 def build_run_state(run_dir: Path) -> dict:
     """Assemble the run snapshot the SPA needs. Read under the run dir's shared read_guard
     so a concurrent `--force` re-import (which holds the exclusive publish_guard for its
@@ -340,7 +279,6 @@ def _build_run_state_impl(run_dir: Path) -> dict:
 
     states = []
     # 온디맨드 픽셀 프리뷰 계산 예산 (요청당) — 초과분은 deferred 로 세서 보고한다
-    preview_budget = {"left": _PIXEL_PREVIEW_BUDGET, "deferred": 0}
     for state, entry in request["states"].items():
         row = rows_by_state.get(state, {})
         files = row.get("files", [])
@@ -369,15 +307,10 @@ def _build_run_state_impl(run_dir: Path) -> dict:
                 frame["plainUrl"] = _url(*orig_rel.split("/"))
             elif (run_dir / plain_rel).is_file():
                 frame["plainUrl"] = _url(*plain_rel.split("/"))
-            elif present and Image is not None:
-                # 트윈 없는 프레임(임포트 세트·비 pp 런): 온디맨드 픽셀퍼펙트
-                # 프리뷰를 붙여 토글이 어디서나 동작하게 한다 (_pixel_preview_meta).
-                preview = _pixel_preview_meta(run_dir, rel, preview_budget)
-                if preview.get("file"):
-                    frame["pixelPreviewUrl"] = _url("run", _PIXEL_PREVIEW_DIR, preview["file"])
-                    frame["pixelPreviewPitch"] = preview["pitch"]
-                elif preview.get("deferred"):
-                    preview_budget["deferred"] += 1
+            # 트윈 없는 프레임의 퍼펙은 클라 렌더러가 측정 k(pixelScale)로 양자화한다
+            # — 서버 추정 스냅 프리뷰 레거시는 표시 격자와 다른 검출기(엔진 주기성,
+            # 1:1 에 4.99)로 스냅해 같은 줄의 프레임마다 다른 진실을 만들었다
+            # (콩콩이 R1 기각, plan curator-single-display-pipeline 에서 삭제).
             if index < len(labels):
                 frame["label"] = labels[index]
             # 추출이 검출한 실제 절단선 (쌍둥이 셀 좌표) — 원본 화질 뷰의 최종 대응
@@ -509,7 +442,6 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         "atlas": _atlas_info(run_dir),
         "fitPixelPerfect": bool((request.get("fit") or {}).get("pixel_perfect")),
         # 예산에 밀려 아직 못 만든 온디맨드 픽셀 프리뷰 수 — 0 이 아니면 리로드가 이어서 계산
-        "pixelPreviewDeferred": preview_budget["deferred"],
         "contract": contract,
     }
 
