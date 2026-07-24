@@ -84,3 +84,23 @@ def test_decision_is_re_evaluated_on_geometry_change():
         "sizePxGrids(기하 갱신 지점)가 syncPixelScaling 을 부르지 않는다"
     )
     assert 'addEventListener("resize"' in SRC["boot.js"], "창 크기 변경 재평가 훅이 없다"
+
+
+def test_decision_is_re_evaluated_when_the_image_source_changes():
+    """픽셀퍼펙트 토글은 **레이아웃이 아니라 원본 기하**를 바꾼다 — 로드에도 물려야 한다.
+
+    실사고 (수홍 2026-07-24 "달리기 시퀀스... 절대 원본 아님"): 토글을 끄면 src 가
+    64px 출력 → 704px 원본 트윈으로 갈리는데, 레이아웃 이벤트만 보던 재평가는
+    그 순간을 못 잡아 확대용 nearest 가 축소된 원본 위에 stale 로 남았다.
+    """
+    display = SRC["display.js"]
+    assert "installPixelScalingLoadHook" in display, "이미지 로드 재평가 훅이 없다"
+    # load 는 버블링하지 않는다 — capture 로 받아야 위임이 성립한다
+    assert re.search(
+        r'addEventListener\(\s*"load".*?\}\s*,\s*true\s*\)', display, re.S
+    ), "load 위임 훅이 capture 모드가 아니다 (load 는 버블링하지 않는다)"
+    assert "installPixelScalingLoadHook()" in SRC["boot.js"], "부팅에서 로드 훅을 설치하지 않는다"
+    # 같은 src 재대입(캐시)은 load 가 안 뜨므로 변형 스왑 경로가 직접 한 번 더 답한다
+    assert re.search(
+        r"refreshVariantImages\(\)\s*\{.*?applyPixelScaling\(el\)", display, re.S
+    ), "src 스왑 경로가 판정을 다시 받지 않는다"
