@@ -15,7 +15,7 @@ colors:
    extraction erase radius and would be deleted.
 3. The old fringe cut erased every pixel inside the fringe color band *anywhere
    in the image* — hot pink (~129 from magenta) and purple (~153) subjects fell
-   in the band and were bleached wholesale (demo sample_item_a /
+   in the band and were bleached wholesale (sample_item_a /
    sample_item_b, 2026-07-07). Soft-alpha unmix now treats boundary
    antialiasing as coverage while deeper interior subject pixels survive.
 """
@@ -56,7 +56,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 MOE_FIXTURES = FIXTURES / "moe"
 
 # Real accident colors: dominant subject pixels the old position-blind fringe
-# cut erased (demo raws, magenta key). Both sit inside the fringe band.
+# cut erased (raws, magenta key). Both sit inside the fringe band.
 HOT_PINK = (250, 77, 150)  # sample_item_a petals, ~129 from magenta
 PURPLE = (213, 112, 246)  # sample_item_b petals, ~153 from magenta
 
@@ -287,7 +287,7 @@ def _subject_band_survival(path: Path) -> float:
 
 
 def test_accident_raws_keep_pink_and_purple_material() -> None:
-    # 1/8-size NEAREST copies of the real demo accident raws (magenta key):
+    # 1/8-size NEAREST copies of the real accident raws (magenta key):
     # a hot-pink seed packet and a purple star bloom. The old cut erased 100%
     # of their fringe-band subject pixels; boundary-limited despill must keep
     # nearly all of them (only genuine key-blend edge pixels may go).

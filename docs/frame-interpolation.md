@@ -21,7 +21,7 @@ Default provider `codex` (GPT `image_gen`); `--provider grok` selects xAI Imagin
 
 Flow-based VFI (RIFE) was retired (Soohong, 2026-07-17). Rationale, measured on a
 real 3-way comparison (hero down_action arm swing, sheet `tween-3way-compare.png`
-in the demo tray): VFI interpolates *motion* photometrically, so appearance
+in the tray): VFI interpolates *motion* photometrically, so appearance
 changes come out as a blurry cross-fade; generative in-betweens drew the mid-pose in
 clean discrete pixels. codex preserved identity best; grok drifted; RIFE smeared.
 

@@ -116,7 +116,7 @@ time here. The `1.56.x` pin is lifted with this release (see the version policy 
 ### Docs
 
 - README (all six languages) gains a "Pixel lattice recovery" section with the old/new
-  comparison sheet from the full-project sweep: `docs/assets/engine-compare.png`.
+  comparison sheet from a full-project sweep.
 - The header animation strip was removed; it will be replaced with a breathing capture.
 
 ## v1.56.92 "Sol Raw Base Back" - the base's original view survives unification
@@ -1306,7 +1306,7 @@ mechanism. Regression: `test_pixel_snap.py::test_conform_flag_rejected` (the old
 
 The interpolation backend switches from flow-based VFI to the engine's own
 generation layer (Soohong decided 2026-07-17 after a live 3-way comparison on the
-hero down_action arm swing — sheet `tween-3way-compare.png` in the demo tray):
+hero down_action arm swing — sheet `tween-3way-compare.png` in the tray):
 codex drew the mid-pose in clean discrete pixels with identity intact, grok drifted
 off-model, RIFE cross-faded into blur. Full suite passes; plumbing tests updated.
 
@@ -1572,7 +1572,7 @@ Gemini/OpenRouter/fal/BytePlus providers are deliberately left out.
   into an engine shuttle; its implementation is DEPRECATED/archived.
 - **Real e2e**: the same row prompt generated on both codex (39.02s) and grok (18.42s);
   the speed comparison and side-by-side proof are preserved in
-  `docs/reports/perfectpixel-c-gen/` (grok ~2.1x faster).
+ (grok ~2.1x faster).
 - New tests `tests/test_gen.py` (extraction, chroma, prompt, orchestrator fake
   provider; no network) plus `gen` added to the package surface. Docs: `docs/gen.md`.
   Zero regression on the existing golden extraction path.
@@ -1599,7 +1599,7 @@ provider-less dry-run loop.
   reports only, no generation; actual regeneration runs only when a
   `--provider-command` is given explicitly (fail-loud otherwise). Best-candidate
   preservation is pinned by a small fixture test.
-- **hero_v7 real-data dry-run**: `docs/reports/perfectpixel-b-loop-hero-v7/`
+- **hero real-data dry-run**
   preserves the `up_idle` A-runlen warning (collapsed pitch/outlier) → score 91 →
   pixel-grid correction-hint log.
 - 3 new tests plus a package surface update. The existing golden extraction path is
@@ -1911,7 +1911,7 @@ Docs-only. A fresh installer could not resolve the `kuma:image-gen` dependency f
 
 Fixes the third way extraction destroyed real subject colors, and hardens the skill contract that a prior worker shortcut violated.
 
-- **The fringe tint-gate no longer erases key-tinted subject material.** `remove_chroma_background` cut every pixel with `distance <= 180` and `key_tint_score >= 18` *anywhere in the image*, so hot pink (~129 from magenta) and purple (~153) subjects fell inside the band and were bleached wholesale — real accidents: demo `sample_item_a` (hot-pink seed packet rendered three times as a white flower) and `sample_item_b` (purple star bloom turned white), both on a magenta key, 2026-07-07. Fringe is boundary antialiasing by definition, so the cut is now limited to pixels spatially adjacent to the keyed-out background, peeled at most `--fringe-reach` layers (default 2). Measured on the accident raws: 98.7% / 98.9% of the key-tinted subject pixels survive (previously 0%), while a green-subject control (`sample_plant_leaf`) removes the exact same 2,582 fringe pixels as before — no quality regression.
+- **The fringe tint-gate no longer erases key-tinted subject material.** `remove_chroma_background` cut every pixel with `distance <= 180` and `key_tint_score >= 18` *anywhere in the image*, so hot pink (~129 from magenta) and purple (~153) subjects fell inside the band and were bleached wholesale — real accidents: `sample_item_a` (hot-pink seed packet rendered three times as a white flower) and `sample_item_b` (purple star bloom turned white), both on a magenta key, 2026-07-07. Fringe is boundary antialiasing by definition, so the cut is now limited to pixels spatially adjacent to the keyed-out background, peeled at most `--fringe-reach` layers (default 2). Measured on the accident raws: 98.7% / 98.9% of the key-tinted subject pixels survive (previously 0%), while a green-subject control (`sample_plant_leaf`) removes the exact same 2,582 fringe pixels as before — no quality regression.
 - **Regression tests** in `tests/test_chroma_extraction.py`: boundary fringe still removed, isolated fringe-band colors treated as subject, hot-pink/purple interiors survive, and 1/8-size NEAREST copies of both accident raws (`tests/fixtures/accident/`) must keep >= 90% of their fringe-band subject pixels.
 - **SKILL.md leads with a BLOCKING gate**: AI touches raw generation only; the final asset must go through the deterministic extraction transform — a plain `PIL.resize()` downscale shortcut is a failed result (the shortcut a worker actually took on 2026-07-07, degrading edges). Chroma key selection by subject color (pink/purple → green, green plants → magenta) is part of the gate; the branch-table SSoT lives in image-gen's SKILL.md top gate.
 - **History moved out of the SKILL.md body** (per skill-hook-authoring): dated redesign narratives now live here. For the record — the pixel-pitch detector replaced a run-length-mode approach that antialiased 2px runs dominated; per-frame phase snapping replaced a strip-global grid that always let some frames slide (inter-frame phase drift); the `logical_height` default changed from half the usable height (which mushed a protagonist to ~logical 30) to cell-height 1:1 (2026-07-05); the style-contract prose ("compact chibi / chunky / thick outline") that kept polluting a slim base was removed in favor of reference-image style SSoT; a 64px-locked anchor re-input erased eyes while the raw anchor preserved them (double-degradation proof, 2026-07-05).

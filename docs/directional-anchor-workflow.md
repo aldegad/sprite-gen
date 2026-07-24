@@ -96,7 +96,7 @@ in one image.
    dilutes the facing lock. If only an idle row exists, crop one pose
    deterministically (frame 0 by default) and lock that single image as the
    anchor; the row itself stays a motion/timing artifact, never an anchor.
-   (수홍 확정 2026-07-12 — demo hero 5-anchor 사고에서 도출.)
+   (수홍 확정 2026-07-12 — hero 5-anchor 사고에서 도출.)
 
    **The anchor image is the CURATED export, not the raw generation.**
    When the anchor frame has curation (pixel edits, scale/move transforms),

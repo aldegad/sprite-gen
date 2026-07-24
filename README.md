@@ -34,6 +34,20 @@ flowchart LR
 
 > Full architecture: [`docs/architecture.md`](docs/architecture.md)
 
+## Example output
+
+Sprites generated and curated with this skill (`claudecy`, `howl`):
+
+<p>
+  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy idle" />
+  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy running" />
+  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy success" />
+  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy talking" />
+  <img src="docs/assets/howl-idle.gif" width="110" alt="howl idle" />
+  <img src="docs/assets/howl-running.gif" width="110" alt="howl running" />
+  <img src="docs/assets/howl-success.gif" width="110" alt="howl success" />
+</p>
+
 ## What you actually get
 
 - **A transparent sprite atlas** (`sprite-sheet-alpha.png`) — real alpha, no leftover chroma fringe, verified against white backgrounds.
@@ -77,15 +91,7 @@ AI-generated "pixel art" is not pixel art. The blocks wobble, the edges carry an
 
 **Backbone Lattice** measures one grid for the whole subject and holds every cut to it. Per-frame pitch detection feeds a row-wide, cross-frame consensus that outvotes harmonic misdetections; that consensus grid is the *backbone* every cut snaps to. Cuts land on actual colour boundaries, and a minimum cell width proportional to the measured pitch keeps two neighbouring cuts from ever collapsing onto the same band. One backbone, so the same block stays the same size across a whole animation instead of jumping between frames.
 
-Same source strip, same pinned palette. The engine is the only variable.
-
-It was verified on a whole project rather than a hand-picked frame: all 94 pixel-perfect runs of a live game were re-derived from their own source strips and compared pixel by pixel against what shipped.
-
-<p align="center">
-  <img src="docs/assets/engine-compare.png" width="720" alt="old engine versus new engine on the same sources" />
-</p>
-
-Across 26,690,432 canonical pixels the silhouette moved by 1.41%. The shape you approved stays the shape you get; what changes is where outlines and shading land, which is exactly what the backbone decides.
+The result is verified against what shipped, not eyeballed on a hand-picked frame: every pixel-perfect run is re-derived from its own source strip and compared pixel by pixel. The shape you approved stays the shape you get; what changes is only where outlines and shading land, which is exactly what the backbone decides.
 
 ## Curation webview
 

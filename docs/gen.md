@@ -113,7 +113,7 @@ against a real provider.
 
 ## Speed
 
-On a 4-frame idle mushroom row (see `docs/reports/perfectpixel-c-gen/`), grok generated
+On a 4-frame idle mushroom row, grok generated
 in ~18.4 s vs codex ~39.0 s (~2.1× faster). codex adhered better to negative constraints
 ("no grid lines"); grok added faint cell dividers. Pick per need: grok for speed, codex
 for tighter prompt adherence.

@@ -120,7 +120,7 @@ def test_non_integer_bbox_does_not_stretch_the_grid(fringe):
 
     v1.56.2 회귀: `_grid_edges` 가 length 를 셀 개수로 등분했다. AA 프린지 때문에 bbox 가
     27.46 블록이면 셀이 31.44px 로 늘어나(참 블록 30.92px) 칸마다 0.52px 씩 어긋났고,
-    오른쪽 끝에서 반 블록이 밀려 스냅 결과의 얼굴이 부서졌다 (데모 주인공 chibi-8).
+    오른쪽 끝에서 반 블록이 밀려 스냅 결과의 얼굴이 부서졌다 (주인공 chibi-8).
     """
     art = _logical_art(width=24, height=30)
     k = 31
@@ -141,7 +141,7 @@ def test_non_integer_bbox_does_not_stretch_the_grid(fringe):
 def test_pitch_is_detected_per_axis():
     """가로/세로 블록 크기가 다르면 축별로 따로 잡아야 한다.
 
-    비균등 리스케일된 생성물은 가로 블록과 세로 블록이 어긋난다 (데모 chibi 베이스:
+    비균등 리스케일된 생성물은 가로 블록과 세로 블록이 어긋난다 (chibi 베이스:
     가로 30.38 / 세로 30.92). 한 피치를 두 축에 강제하면 한 축이 통째로 미끄러졌다
     — 실측 가로 정렬률 11.7%.
     """
@@ -166,7 +166,7 @@ def test_non_square_pitch_roundtrips():
 def test_wildly_disagreeing_axes_fall_back_to_the_trusted_axis():
     """한 축의 검출이 무너지면(참 피치의 약수) 엣지가 많은 축의 피치를 쓴다.
 
-    데모 down_carry_walk 실사고: 팔을 위로 든 포즈는 세로로 균일한 막대가 많아 세로 엣지가
+    down_carry_walk 실사고: 팔을 위로 든 포즈는 세로로 균일한 막대가 많아 세로 엣지가
     적고, 그 축에서 참 피치 9 대신 약수 3 이 이겼다 (가로 9 / 세로 3). 스냅 결과가 짓눌렸다.
     축별 피치가 1.5배 넘게 벌어지는 것은 물리적으로 불가능하다 — 비균등 리스케일도 2% 수준이다.
     """

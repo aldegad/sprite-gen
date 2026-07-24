@@ -943,11 +943,11 @@ def detect_pixel_grid(
 ) -> tuple[tuple[float, float], tuple[float, float]]:
     """참 픽셀 격자 = ((가로 피치, 세로 피치), (가로 위상, 세로 위상)). 전부 소수.
 
-    AI 가 그린 도트는 블록 폭이 정수로 떨어지지 않는다 (데모 주인공 base = 17.24px).
+    AI 가 그린 도트는 블록 폭이 정수로 떨어지지 않는다 (주인공 base = 17.24px).
     측정은 소수로 하고, 스냅 결과(논리 픽셀 수)는 정수로 떨어진다.
 
     **피치는 축마다 다를 수 있다.** 생성물이 비균등 비율로 리스케일되면 가로 블록과 세로 블록의
-    크기가 어긋난다 (데모 주인공 chibi 베이스: 가로 30.38 / 세로 30.92). 한 피치를 두 축에
+    크기가 어긋난다 (주인공 chibi 베이스: 가로 30.38 / 세로 30.92). 한 피치를 두 축에
     강제하면 한 축이 통째로 미끄러진다 — 실측 가로 정렬률 11.7% (축별로 재면 75.7%).
 
     격자 확신이 없으면 ((1.0, 1.0), (0,0)) — 스냅하지 않는다.
@@ -992,9 +992,9 @@ def detect_pixel_grid(
     pitch_y, phase_y = refine(row_edges)
 
     # 축별 피치는 서로 크게 다를 수 없다. 비균등 리스케일이어도 실측 차이는 2% 수준이다
-    # (데모 chibi 베이스: 30.38 / 30.92). 한 축이 다른 축의 1.5배를 넘게 벗어나면 그 축의
+    # (chibi 베이스: 30.38 / 30.92). 한 축이 다른 축의 1.5배를 넘게 벗어나면 그 축의
     # 검출이 무너진 것이다 — 엣지가 적은 축(균일한 세로 막대가 화면을 채우는 carry 포즈 등)에서
-    # 참 피치의 약수가 이겨 3.00 같은 값이 나왔다 (데모 down_carry_walk, 참값 9).
+    # 참 피치의 약수가 이겨 3.00 같은 값이 나왔다 (down_carry_walk, 참값 9).
     # 엣지 총량이 많은 축을 신뢰해 양쪽에 쓴다. 조용히 고치지 않고 축 하나를 버렸음을 남긴다.
     lo, hi = sorted((pitch_x, pitch_y))
     if lo >= 2.0 and hi / lo > 1.5:
@@ -1073,7 +1073,7 @@ def estimate_pixel_grid_runlen(strip: Image.Image, max_pitch: int = 48) -> tuple
     perfectpixel-studio internal/sprite/pixelize.go 의 unfake(DetectPixelScale)
     이식 (MIT — NOTICE 표기). 원본은 수평/수직 런을 한 히스토그램에 합치지만,
     우리 목적은 detect_pixel_grid 의 축 붕괴 방어라 축별로 분리해 센다 — 실사고:
-    데모 주인공 컴포넌트에서 y 피치가 x 값(29.52)으로 붕괴, 실측 30.56. 붕괴
+    주인공 컴포넌트에서 y 피치가 x 값(29.52)으로 붕괴, 실측 30.56. 붕괴
     메커니즘은 정수 씨앗 로터리 실패(참 소수 피치가 어떤 씨앗의 ±0.75 정밀화 창에도
     안 들어감)라 경계 히스토그램 안에서는 자기 진단이 안 된다. 런 길이는 완전히
     다른 신호(경계 위치가 아니라 경계 사이 거리)라 세컨드 오피니언이 된다.
@@ -2487,7 +2487,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
     logical_width = max(1, cell_width // pp_scale)
     pp_detail_bias = bool(fit_config.get("detail_bias", True))
     # 기본 48 (24 에서 상향, 2026-07-17): run-wide 팔레트는 배치의 모든 행이 나눠 쓴다.
-    # 24 는 다상태 배치(데모 hero 36상태×150프레임)에서 희소 포인트 컬러를 굶겼다 —
+    # 24 는 다상태 배치(hero 36상태×150프레임)에서 희소 포인트 컬러를 굶겼다 —
     # population median-cut 이 금색(머리끈·목걸이) 클러스터를 갈색 박스에 흡수해
     # 디테일이 통째로 사라졌다 (실측: 24색 배치 팔레트에서 금색 최근접 ΔRGB 59,
     # 48색이면 5.5). 레트로 감축이 필요한 런은 request `fit.palette_size` 로 명시한다.
@@ -2640,7 +2640,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
             confident = sorted(g[0][axis] for g in grids if g[0][axis] >= 2.0)
             if confident:
                 # 붕괴한 프레임(참 피치의 약수로 떨어진 값)이 중앙값을 오염시킨다 —
-                # 데모 down_carry_run 은 6 프레임 중 절반이 3.00 으로 무너져 합의가 5.00 이 됐다.
+                # down_carry_run 은 6 프레임 중 절반이 3.00 으로 무너져 합의가 5.00 이 됐다.
                 # 스트립 안에서 참 피치는 거의 같으므로, 최대값의 60% 미만은 붕괴로 보고 버린다.
                 ceiling = confident[-1]
                 trusted = [p for p in confident if p >= ceiling * 0.6]
