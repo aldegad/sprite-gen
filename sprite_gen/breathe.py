@@ -144,6 +144,38 @@ def fitted_breath_count(seq_len: int, cfg: dict) -> int:
     return min(want, seq_len // max(2, 2 * k))
 
 
+# 부드러움 임계 (수홍 2026-07-24): 물리 최소 사이클(2*k)로 호흡을 담을 수는 있지만,
+# 사이클당 프레임이 적으면 위상이 매 프레임 토글해 1px 진동처럼 읽힌다("숨쉬기 스탭
+# 끊김"). 사이클당 이 정도 프레임이 있어야 쉼/눌림 홀드가 길어져 호흡으로 읽힌다.
+# fit_breathe_pattern 은 손대지 않는다 — 이건 프레임을 **찍어내는** 레시피(정지자세
+# 링크 복제)가 시퀀스 길이를 잡을 때 쓰는 권고치다. 유저 호흡 횟수를 클램프하지 않는다.
+SMOOTH_CYCLE_FRAMES = 6
+
+
+def recommended_breathe_frames(cfg: dict, per_cycle: int = SMOOTH_CYCLE_FRAMES) -> int:
+    """호흡이 부드럽게 읽히려면 필요한 최소 재생-시퀀스 길이.
+
+    정지 1컷 + 링크 복제로 프레임을 찍어내는 레시피(정지자세)는 이 값으로 복제 수를
+    정한다: `clones = recommended_breathe_frames(cfg) - 1` (정지 원본 1장 제외).
+    유저가 이미 가진 프레임 수를 줄이거나 호흡 횟수를 바꾸지 않는다 — 오직 프레임을
+    새로 만들 때의 목표 길이다."""
+    k = len(cfg["splits"])
+    want = max(1, int(cfg.get("breaths", 1)))
+    return want * max(per_cycle, 2 * k)
+
+
+def breathe_reads_smoothly(seq_len: int, cfg: dict, per_cycle: int = SMOOTH_CYCLE_FRAMES) -> bool:
+    """요청한 호흡 횟수가 이 시퀀스 길이에서 부드럽게 렌더되는가 (관측용).
+
+    요청 기준(fitted 아님)으로 판정한다 — 프레임이 부족하면 fit 이 조용히 호흡을 줄여도
+    '요청대로 부드럽지 않음'을 알려야 하기 때문. 프레임을 늘리라는 신호."""
+    if seq_len <= 0:
+        return False
+    k = len(cfg["splits"])
+    want = max(1, int(cfg.get("breaths", 1)))
+    return seq_len // want >= max(per_cycle, 2 * k)
+
+
 def _seam_rows(top: int, ys: list[int], amplitude: int, height: int) -> list[tuple[int, int]]:
     """서브픽셀 중간색을 허용하는 행 밴드 — 움직이는 경계(정수리 + 각 분할선 이음새)만.
 
