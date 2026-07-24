@@ -194,7 +194,7 @@ including non-display fields like `states[].action`, is assembled by
     }
   ],
   "contract": { "base": true, "refs": true, "refsStates": 1, "grid": true, "sourceless": false },
-                                            // self-report (§3): sourceless=true when base+refs+grid all absent → server warns at startup
+                                            // self-report (§3): grid is always true (measurement cannot fail); sourceless=true when base+refs are both absent → server warns at startup
   "curation": { /* current sidecar snapshot, or empty */ }
 }
 ```

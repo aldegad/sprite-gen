@@ -72,7 +72,7 @@ def test_imported_sources_expose_base_row_and_chips(tmp_path):
     roles = {(r["role"], r["name"]) for r in st["states"][0]["refs"]}
     assert ("anchor", "anchor-idle.png") in roles
     assert ("guide", "guide-walk.png") in roles
-    assert st["contract"] == {"base": True, "refs": True, "refsStates": 1, "grid": False, "sourceless": False}
+    assert st["contract"] == {"base": True, "refs": True, "refsStates": 1, "grid": True, "sourceless": False}
 
 
 def test_sourceless_import_is_reported(tmp_path):

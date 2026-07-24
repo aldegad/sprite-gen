@@ -123,62 +123,60 @@ def _base_grid_response(run_dir: Path, base_path: Path) -> dict:
     return result
 
 
-def _axis_pitch(edge_mass, length):
-    total = sum(edge_mass)
-    if total <= 0 or length < 8:
-        return None
-    best = None
-    for pitch in range(2, min(96, length // 3) + 1):
-        phase = [0] * pitch
-        for pos, mass in enumerate(edge_mass):
-            if mass:
-                phase[pos % pitch] += mass
-        if max(phase) / total >= 0.8:
-            best = pitch
-    return best
+def _uniform_blocks(px, w, h, k):
+    """이미지가 k×k 단색 블록으로만 이루어졌는가 (정확 판정)."""
+    for by in range(0, h, k):
+        for bx in range(0, w, k):
+            first = px[bx, by]
+            for y in range(by, by + k):
+                for x in range(bx, bx + k):
+                    if px[x, y] != first:
+                        return False
+    return True
 
 
 def detect_pixel_pitch(path):
-    """프레임 한 장의 블록 피치(셀px/논리px)를 측정한다. 실패 시 None."""
+    """이 프레임에서 논리 픽셀 1개가 차지하는 셀 픽셀 수 — **항상 ≥1, 실패 없음**.
+
+    정확 판정이다(추정 아님): 이미지가 k×k 단색 블록으로만 이루어져 있으면 그건
+    k 배 확대본이고, 조건을 만족하는 **최대 k** 가 답이다. k=1 은 1×1 블록이
+    자명히 단색이라 언제나 참이므로 이 측정은 **실패할 수 없다** — 즉 "격자를
+    모른다" 라는 상태 자체가 존재하지 않고, 그래서 격자 컨트롤을 숨길 근거도 없다.
+
+    왜 추정을 버렸나 (수홍 2026-07-24, "10번 넘게 말한" 조건부 숨김 버그의 뿌리):
+    옛 구현은 엣지 자기상관으로 피치를 **추정**하고 2 미만이면 None 으로 접었다.
+    그 결과 (a) 이미 논리 해상도인 1:1 픽셀아트가 전부 "검출 실패"로 접혀
+    임포트 런에 격자 버튼이 아예 뜨지 않았고, (b) 실측상 실제 스프라이트
+    프레임에서도 거의 항상 None 이라 임포트 런은 사실상 격자를 가진 적이 없다.
+    엔진의 주기성 검출기(`detect_pixel_grid`)도 대안이 못 된다 — 1:1 프레임에
+    4.99 를 냈다(캐릭터 디자인의 반복 무늬를 격자로 오인).
+    블록 단색성은 그런 오인이 구조적으로 불가능하다."""
     if Image is None:
-        return None
+        return 1
     try:
         stat = os.stat(path)
     except OSError:
-        return None
+        return 1
     key = (str(path), stat.st_mtime_ns)
     if key in _PITCH_CACHE:
         return _PITCH_CACHE[key]
-    pitch = None
+    scale = 1
     try:
         with Image.open(path) as im:
             im = im.convert("RGBA")
             px = im.load()
             w, h = im.size
-            col = [0] * max(0, w - 1)
-            row = [0] * max(0, h - 1)
-            for y in range(h):
-                for x in range(w - 1):
-                    a, b = px[x, y], px[x + 1, y]
-                    if abs(a[0]-b[0]) + abs(a[1]-b[1]) + abs(a[2]-b[2]) + abs(a[3]-b[3]) > 48:
-                        col[x] += 1
-            for x in range(w):
-                for y in range(h - 1):
-                    a, b = px[x, y], px[x, y + 1]
-                    if abs(a[0]-b[0]) + abs(a[1]-b[1]) + abs(a[2]-b[2]) + abs(a[3]-b[3]) > 48:
-                        row[y] += 1
-        pw, ph = _axis_pitch(col, w), _axis_pitch(row, h)
-        if pw and ph:
-            if max(pw, ph) % min(pw, ph) == 0 or abs(pw - ph) <= 1:
-                pitch = min(pw, ph)
-        else:
-            pitch = pw or ph
-        if pitch is not None and pitch < 2:
-            pitch = None
+            # 양축을 나누어떨어지게 하는 k 만 후보 (블록이 이미지에 딱 맞아야 한다)
+            for k in range(min(w, h), 1, -1):
+                if w % k or h % k:
+                    continue
+                if _uniform_blocks(px, w, h, k):
+                    scale = k
+                    break
     except OSError:
-        pitch = None
-    _PITCH_CACHE[key] = pitch
-    return pitch
+        scale = 1
+    _PITCH_CACHE[key] = scale
+    return scale
 
 
 _REF_DIRECTIONS = ("down45", "up45", "down", "side", "up", "left", "right", "front", "back")
@@ -471,20 +469,28 @@ def _build_run_state_impl(run_dir: Path) -> dict:
     # 충족 여부. 셋 다 없으면 "소스 없는 뷰" — 세션마다 경험이 갈라지는 신호.
     has_base = base_url is not None
     refs_states = sum(1 for st in states if st.get("refs"))
-    has_grid = pixel_perfect is not None or any(st.get("pixelScale") for st in states)
+    # 격자는 언제나 있다 — `detect_pixel_pitch` 가 실패할 수 없는 정확 판정이라
+    # 모든 상태가 ≥1 의 scale 을 갖는다. 조건부 False 는 곧 컨트롤 숨김이었고
+    # 그게 버그였다 (수홍 2026-07-24).
+    has_grid = True
     contract = {
         "base": has_base,
         "refs": refs_states > 0,
         "refsStates": refs_states,
         "grid": has_grid,
-        "sourceless": not (has_base or refs_states > 0 or has_grid),
+        # 격자가 보편이 된 뒤로는 판별자가 못 된다 — 항상 참인 항을 or 에 두면
+        # sourceless 가 영원히 False 라 경고가 죽는다. 남은 판별자(base/refs)로만 본다.
+        "sourceless": not (has_base or refs_states > 0),
     }
     return {
         "characterId": request["character"]["id"],
         "runDir": str(run_dir),
         "baseUrl": base_url,
         "cell": cell_state,
-        "pixelPerfect": pixel_perfect if pixel_perfect is not None else ({"source": "auto", "label": "auto", "scale": None} if any(st.get("pixelScale") for st in states) else None),
+        # 계약 scale(pp 런)이 없으면 줄별 실측이 진실이다 — null 로 접지 않는다.
+        "pixelPerfect": pixel_perfect if pixel_perfect is not None else {
+            "source": "auto", "label": "auto",
+            "scale": min((st["pixelScale"] for st in states if st.get("pixelScale")), default=1)},
         "schemaVersion": SCHEMA_VERSION,
         "runRevision": run_revision(run_dir),
         "directionGroups": direction_groups,

@@ -27,7 +27,7 @@ function renderState(state, replaceEl) {
   // 이 줄을 "무엇으로 생성했는가" — run dir 실재 파일 기준 ref 체인 (앵커/basis/가이드).
   // 같은 줄 우측 = 줄별 표시/굽기 컨트롤(픽셀 격자 · 픽셀퍼펙트 체크박스) — 이미지 바로 위.
   const hasRefs = state.refs && state.refs.length;
-  const showGridToggle = gridCapableStates.has(state.name);
+  const showGridToggle = true; // 격자는 모든 줄이 가진다 (display.js 계약)
   const showPpToggle = ppTwinStates.has(state.name) || ppPreviewStates.has(state.name);
   const showGifBtn = state.frames && state.frames.some((f) => f.present);
   if (hasRefs || showGridToggle || showPpToggle || showGifBtn) {

@@ -26,7 +26,7 @@ let ppStates = {};             // stateName -> bool (true = pixel-perfect varian
 
 // Same per-state + toggle-all shape as pixel-perfect: each grid-capable row has
 // its own checkbox, the header checkbox sets all rows at once.
-let gridCapableStates = new Set(); // states with a known/measured snap grid
+let gridCapableStates = new Set(); // 전 상태 (격자는 항상 정의됨) — 일괄 토글 대상 집합
 
 let gridStates = {};               // stateName -> bool (overlay shown)
 
