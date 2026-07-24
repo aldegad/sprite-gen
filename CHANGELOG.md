@@ -5,6 +5,35 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.56.90 "Sol Grid Always" - the pixel grid stops hiding itself
+
+- The pixel-grid controls vanished entirely on 1:1 pixel-art (every imported
+  run). Root cause was a single conflation: pitch measurement folded "measured
+  1" (identity - true) and "could not measure" (unknown) into the same `None`,
+  and that `None` propagated through seven gates - server `_axis_pitch`
+  (searched from 2, so 1 was unrepresentable), the `< 2` discard, the preview
+  guard, `has_grid`/`pixelPerfect` snapshot fields, then `gridCapableStates`,
+  `pxWrap.hidden`, and the per-row/zoom toggles - until no control was drawn.
+  Measured on real frames, the old estimator returned `None` for *every* sprite
+  frame tested, so imported runs had effectively never had a grid.
+- Measurement is now an exact test instead of an estimate: an image made only of
+  uniform k x k blocks is a k-times upscale, and the largest such k is the
+  answer. k=1 is trivially true, so **the measurement cannot fail** - there is no
+  "unknown grid" state left for a gate to key off. Verified exact on synthetic
+  2x/3x/4x/8x upscales and on 1:1 art; the engine's periodicity detector was not
+  usable here (it reported 4.99 on a 1:1 frame, mistaking design motifs for a
+  grid). Worst measured cost 0.17s on an 896px frame.
+- All grid gating is removed: every state has a grid (per-row measurement > run
+  contract > identity 1), the top toggle, per-row toggles and the zoom-modal
+  toggle are unconditional, and the overlay spacing never resolves to null.
+  `contract.sourceless` now keys off base+refs only - an always-true term in that
+  disjunction would have silently killed the warning.
+- Regression is written as a contract, not call-site names (the lesson from
+  v1.56.89): measurement must return >=1 for any input including missing files,
+  exactness is pinned per scale factor, and each removed gate is asserted absent.
+  Mutation-checked - restoring the `< 2` discard or the `gridCapableStates`
+  filter turns exactly the matching tests red.
+
 ## v1.56.89 "Sol Same Disease Third Address" - the contract stops naming call sites
 
 - Validator reject on v1.56.88, both findings correct. **R3 (a regression this

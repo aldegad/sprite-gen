@@ -235,7 +235,9 @@ function updateCardGrid(card) {
   const on = !!gridStates[cardState];
   const plainShown = (isBaseCard || ppTwinStates.has(cardState)) && !ppOn(cardState);
   const scale = isBaseCard ? 1
-    : ((st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || null);
+    // 격자 간격은 항상 정해진다: 줄별 실측 > 런 계약 > 항등 1. null 이 되는
+    // 경로가 없어야 오버레이가 조건부로 사라지지 않는다 (수홍 2026-07-24).
+    : ((st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || 1);
   const t = frame ? getTransform(card.dataset.state, frame.index) : null;
   const axisAligned = !t || (!t.rotate && t.scale === 1 && !t.shx && !t.shy);
   const useFinal = on && plainShown && frame && frame.contentBox && scale && stage && axisAligned;
