@@ -12,7 +12,6 @@ function applyCardTransform(stage, stateName, idx) {
   const m = matrixOf(t);
   const snap = snapScaleFor(stateName);
   const canvas = stage.querySelector(".snap-canvas");
-  const basePp = stateName === BASE_STATE && ppOn(stateName); // 베이스 pp ON = 논리 양자화 뷰
   if (!canvas) return; // 프레임 없는 스테이지(missing 라벨)는 그릴 것이 없다
   // ── 표시면은 캔버스 하나다 (수홍 2026-07-24 "구현체가 몇 종류라 노이즈"). ──
   // img 는 숨김 로더(natural size·load 이벤트·편집 소스)일 뿐 절대 표시면이 아니다.
@@ -26,12 +25,15 @@ function applyCardTransform(stage, stateName, idx) {
   //   미리 본다. 이동이 격자 단위로 스냅된다 (의도). 격자 오버레이와 같은 k — 격자 기준 퍼펙.
   // - 소스 (plain 뷰): 소스 해상도(ss)로 identity 렌더 + 이동은 CSS 변형.
   // 편집 세션도 같은 두 모드를 그대로 쓴다 (WYSIWYG, 수홍 2026-07-19).
-  const quantize = (!!snap || basePp);
+  const quantize = !!snap; // 베이스 pp ON 은 snapScaleFor 가 1 을 돌려 여기 포함된다
   const render = () => {
     // 소스 모드는 소스 해상도로 그린다 — 셀 크기 캔버스에 고해상 원본 트윈을
     // 그리면 64px 로 파괴된다 (수홍 2026-07-24). 양자화 모드는 결과 격자가
     // 목적이라 셀 크기 그대로다.
-    const source = editSourceFor(stateName, el);
+    // 소스 모드의 **표시** 소스는 el(frameUrl 이 고른 파일 — 베이스 pp OFF 면 raw)이다.
+    // editSourceFor 는 편집 좌표 계약(베이스 = 항상 논리 공간)이라 양자화 모드에서만
+    // 소스로 쓴다 — 표시까지 논리로 강제하면 베이스의 원본 뷰가 사라진다 (콩콩이 기각).
+    const source = quantize ? editSourceFor(stateName, el) : el;
     const ss = quantize ? 1 : superSampleFor(source, cw);
     canvas.width = cw * ss;
     canvas.height = ch * ss;

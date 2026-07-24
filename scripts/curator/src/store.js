@@ -103,8 +103,11 @@ function frameOf(stateName, idx) {
 //   이건 표시 렌즈다 — 임포트 런 굽기는 양자화가 없으므로 사이드카에 저장하지
 //   않는다 (persistence 의 트윈-줄 한정 저장이 그 계약이다).
 function snapScaleFor(stateName) {
-  if (stateName === BASE_STATE) return 1; // 베이스 논리 공간 = 캔버스 1:1
+  // ppOn 검사가 **모든 분기보다 먼저**다 — 베이스를 먼저 항등 처리하면 pp OFF 의
+  // 원본(raw) 뷰가 죽는다 (콩콩이 기각 2026-07-24: 퍼펙 체크박스가 아무것도 안
+  // 바꾸는 "거짓말하는 컨트롤"이 됐다). 베이스 pp OFF = 소스 모드로 raw 를 그린다.
   if (!ppOn(stateName)) return null;
+  if (stateName === BASE_STATE) return 1; // 베이스 pp ON = 논리 양자화 뷰 (캔버스 1:1)
   if (run.fitPixelPerfect && run.pixelPerfect && run.pixelPerfect.scale) return run.pixelPerfect.scale;
   const st = run.states.find((s) => s.name === stateName);
   return (st && st.pixelScale) || 1;
