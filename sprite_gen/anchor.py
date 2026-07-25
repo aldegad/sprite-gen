@@ -41,25 +41,31 @@ CONTENT_ALPHA_FLOOR = 40  # 콘텐츠 crop 기준 (프린지 알파를 콘텐츠
 
 
 class AnchorUnavailable(SystemExit):
-    """앵커를 지금 낼 수 없다. `code` 가 **"아직"(pending)** 과 **"깨졌다"(broken)** 를 가른다.
+    """앵커를 지금 낼 수 없다. `kind` 가 **"아직"(pending)** 과 **"깨졌다"(broken)** 를 가른다.
 
     두 상태는 사용자에게 전혀 다른 뜻이다: `pending` 은 생성이 거기까지 안 온 정상 구간
     (앵커 행을 아직 안 뽑았다)이고, broken 은 사람이 고쳐야 하는 것(지정이 사라진 프레임을
     가리킨다·다른 방향 프레임을 지정했다)이다. 이 구분이 없으면 뷰가 멀쩡한 작업 중간 런에
-    빨간 오류를 띄운다 (젯비 검증 2026-07-25 파생 증상 2).
+    빨간 오류를 띄운다.
 
-    `SystemExit` 하위라 기존 fail-loud 계약(CLI 종료 코드, 서버의 `except SystemExit`)은
-    그대로 산다 — 새 예외 계층을 만들어 호출부를 뜯지 않는다."""
+    `SystemExit` 하위라 기존 fail-loud 계약(CLI 종료 코드, 서버의 `except SystemExit`)이
+    그대로 산다 — 새 예외 계층을 만들어 호출부를 뜯지 않는다.
 
-    PENDING_CODES = frozenset({"no-frames", "row-not-extracted"})
+    분류를 `.code` 에 얹지 않는 이유 (젯비 검증 2026-07-25 2차 기각): `SystemExit.code` 는
+    **인터프리터가 종료 시 stderr 에 찍는 채널**이다. 거기에 슬러그를 넣으면 정성껏 쓴
+    안내문 대신 `no-frames` 한 단어만 사용자에게 간다 (실측: `anchor --for-state`
+    추출 전 호출의 stderr 가 정확히 `no-frames`). 분류는 `kind` 가 들고, `.code` 는
+    메시지가 흐르도록 손대지 않는다."""
 
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+    PENDING_KINDS = frozenset({"no-frames", "row-not-extracted"})
+
+    def __init__(self, kind: str, message: str) -> None:
+        super().__init__(message)  # .code = message — 인터프리터의 stderr 채널을 비워두지 않는다
+        self.kind = kind
 
     @property
     def pending(self) -> bool:
-        return self.code in self.PENDING_CODES
+        return self.kind in self.PENDING_KINDS
 
 
 # --- 방향/앵커 상태 어휘 ------------------------------------------------------
@@ -167,7 +173,7 @@ def anchor_status(run_dir: Path, request: dict[str, Any], curation: dict[str, An
         return {**resolved, "error": None, "code": None, "pending": False}
     except AnchorUnavailable as exc:
         return {"direction": direction, "state": None, "index": None, "source": None,
-                "error": str(exc), "code": exc.code, "pending": exc.pending}
+                "error": str(exc), "code": exc.kind, "pending": exc.pending}
     except (SystemExit, Exception) as exc:
         # 예상 밖 실패(손상된 매니페스트 등)도 뷰를 죽이지 않지만 pending 으로 위장하지 않는다
         return {"direction": direction, "state": None, "index": None, "source": None,
@@ -386,13 +392,22 @@ def run(run_dir: Path, direction: str | None = None, all_directions: bool = Fals
         scale: int = ANCHOR_SCALE) -> int:
     run_dir = Path(run_dir).expanduser().resolve()
     request = load_request(run_dir)
+    extra_targets: list[str] = []
     if pick and clear:
         raise SystemExit("anchor: --pick and --clear are mutually exclusive")
     if pick:
         state, index = _parse_pick(pick)
         written = _write_anchor_pick(run_dir, request, state, index)
         print(f"[anchor] {written['direction']} anchor frame pinned: {state}#{index}")
-        direction = direction or written["direction"]
+        if direction and direction != written["direction"]:
+            # 지정 방향은 state 소유자에서 파생된다 (교차 방향 지정은 resolve_anchor 가 막는다).
+            # 사용자가 적은 --direction 과 어긋나면 조용히 넘기지 않는다 — 말하고 둘 다 굽는다.
+            print(f"[anchor] note: --direction {direction} does not own '{state}' — pinned "
+                  f"{written['direction']} instead; baking both refs")
+            extra_targets = [written["direction"], direction]
+        else:
+            extra_targets = [written["direction"]]
+        direction = written["direction"]
     elif clear:
         written = _write_anchor_pick(run_dir, request, None, None, direction=direction)
         print(f"[anchor] {written['direction']} anchor frame unpinned "
@@ -404,7 +419,8 @@ def run(run_dir: Path, direction: str | None = None, all_directions: bool = Fals
         print(identity_ref(run_dir, for_state, request=request, quiet=True)
               .relative_to(run_dir).as_posix())
         return 0
-    targets = directions(request) if all_directions else ([direction] if direction else [])
+    targets = (directions(request) if all_directions
+               else (extra_targets or ([direction] if direction else [])))
     if not targets:
         raise SystemExit("anchor: pass --direction <dir>, --all, or --for-state <state>")
     for target in targets:

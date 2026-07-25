@@ -208,9 +208,53 @@ def test_ungenerated_run_for_state_fails_loud_with_the_real_reason(ungenerated_r
     """ref 를 **요구**하는 진입점은 조용히 넘어가지 않고, 원인을 정확히 말해야 한다."""
     with pytest.raises(anchor_mod.AnchorUnavailable) as excinfo:
         anchor_mod.run(run_dir=ungenerated_run, for_state="down_walk")
-    assert excinfo.value.code in anchor_mod.AnchorUnavailable.PENDING_CODES
+    assert excinfo.value.kind in anchor_mod.AnchorUnavailable.PENDING_KINDS
     assert excinfo.value.pending is True
     assert "corrupt" not in str(excinfo.value)
+
+
+# --- 실패 메시지가 **프로세스 stderr 까지** 도달하는가 -------------------------
+# 회귀 고정: 분류 슬러그를 `SystemExit.code` 에 얹으면 인터프리터가 그걸 stderr 에 찍어
+# 안내문이 통째로 사라진다 (실측: `anchor --for-state` 추출 전 호출의 stderr = "no-frames").
+# 예외 객체의 `str()` 만 보는 테스트는 이 사각을 못 본다 — CLI 를 **서브프로세스로** 돈다.
+
+def _cli(run_dir: Path, *args: str):
+    import subprocess
+
+    return subprocess.run([sys.executable, "-m", "sprite_gen.cli", "anchor",
+                           "--run-dir", str(run_dir), *args],
+                          capture_output=True, text=True, cwd=str(ROOT))
+
+
+@pytest.mark.parametrize("args,needle", [
+    (("--for-state", "down_walk"), "generate and extract"),
+    (("--direction", "down"), "generate and extract"),
+])
+def test_cli_pending_failure_prints_the_guidance(ungenerated_run: Path, args, needle) -> None:
+    proc = _cli(ungenerated_run, *args)
+    assert proc.returncode != 0
+    assert needle in proc.stderr, proc.stderr
+    assert proc.stderr.strip() not in anchor_mod.AnchorUnavailable.PENDING_KINDS
+
+
+def test_cli_broken_pin_failure_prints_the_guidance(direction_run: Path) -> None:
+    _save_curation(direction_run, {"down_idle": {"deleted": [3], "selected": [0, 1, 2]}},
+                   anchors={"down": {"state": "down_idle", "index": 3}})
+    proc = _cli(direction_run, "--for-state", "down_walk")
+    assert proc.returncode != 0
+    assert "no longer exists" in proc.stderr, proc.stderr
+    assert "re-pick the anchor frame" in proc.stderr
+    assert proc.stderr.strip() != "pick-missing"
+
+
+def test_cli_pick_direction_mismatch_is_reported(direction_run: Path) -> None:
+    """지정 방향과 명시 `--direction` 이 어긋나면 조용히 다른 방향을 굽지 않는다."""
+    proc = _cli(direction_run, "--pick", "side_idle#0", "--direction", "down")
+    assert proc.returncode == 0, proc.stderr
+    assert "does not own 'side_idle'" in proc.stdout
+    assert anchor_choices(load_curation(direction_run)) == {"side": {"state": "side_idle", "index": 0}}
+    for d in ("down", "side"):
+        assert (direction_run / f"references/anchors/{d}-anchor-x8.png").is_file()
 
 
 def test_invalid_pick_writes_nothing(direction_run: Path) -> None:
@@ -218,7 +262,7 @@ def test_invalid_pick_writes_nothing(direction_run: Path) -> None:
     run_dir = direction_run
     with pytest.raises(anchor_mod.AnchorUnavailable) as excinfo:
         anchor_mod.run(run_dir=run_dir, pick="down_idle#99")
-    assert excinfo.value.code == "pick-missing"
+    assert excinfo.value.kind == "pick-missing"
     assert anchor_choices(load_curation(run_dir)) == {}
 
 
@@ -245,7 +289,7 @@ def test_pending_and_broken_are_different_states(ungenerated_run: Path) -> None:
     pending = next(g for g in build_run_state(run_dir)["directionGroups"]
                    if g["direction"] == "down")
     assert pending["anchorPending"] is True
-    assert pending["anchorErrorCode"] in anchor_mod.AnchorUnavailable.PENDING_CODES
+    assert pending["anchorErrorCode"] in anchor_mod.AnchorUnavailable.PENDING_KINDS
     assert pending["anchorUrl"] is None
 
     _save_curation(run_dir, {}, anchors={"down": {"state": "side_walk", "index": 0}})

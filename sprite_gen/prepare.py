@@ -661,8 +661,12 @@ def build_generation_plan(request: dict[str, Any]) -> dict[str, Any] | None:
                 anchor_ref_rel(state_direction(state, directions)),
                 guide_rel(request, state),
             ],
+            # 기계 소비 필드라 **어디서나 도는 형태**로 굽는다: `sprite-gen` 콘솔 스크립트는
+            # 설치된 환경에만 있고(레포 체크아웃엔 없다), 문서의 `sprite-gen anchor` 산문은
+            # 레포 관례를 따른다 (같은 커맨드의 두 호출 형태 — 두 진실이 아니다).
             "materialize": (
-                f"sprite-gen anchor --run-dir . --direction {state_direction(state, directions)}"
+                f"python3 -m sprite_gen.cli anchor --run-dir . "
+                f"--direction {state_direction(state, directions)}"
             ),
             "note": ("앵커 ref 는 파생 캐시다 — 생성 직전 위 커맨드로 큐레이션 진실에서 다시 굽는다"
                      " (`--for-state <state>` 는 붙일 경로를 그대로 출력한다)"),

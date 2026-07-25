@@ -66,7 +66,8 @@ def test_directions_scaffold_anchors_and_plan(tmp_path: Path) -> None:
     # 워커가 크롭 위치를 판단하면 편집 전 모습이 identity 로 번진다)
     assert walk_item["refs"][0] == "references/anchors/side-anchor-x8.png"
     assert walk_item["refs"][1] == "references/layout-guides/side/walk.png"
-    assert walk_item["materialize"] == "sprite-gen anchor --run-dir . --direction side"
+    assert walk_item["materialize"] == ("python3 -m sprite_gen.cli anchor --run-dir . "
+                                      "--direction side")  # 기계 소비 필드는 어디서나 도는 형태
     # 미러 방향은 생성 생략이 계약으로 기록된다 (조용한 누락 금지)
     assert plan["mirrored_directions"][0]["direction"] == "left"
     assert plan["mirrored_directions"][0]["mirror_of"] == "side"

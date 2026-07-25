@@ -601,6 +601,15 @@ def write_curation_atomic(run_dir: Path, payload: dict[str, Any]) -> None:
         except json.JSONDecodeError:
             old = None
         if isinstance(old, dict):
+            # 앵커 지정의 **소실**도 states 와 같은 무게로 다룬다 (백업 대칭): 뷰가 열린 채
+            # CLI `--pick` 으로 심은 지정은 뷰의 다음 autosave 가 통째로 덮을 수 있고
+            # (뷰가 authoritative 인 건 다른 필드와 같은 semantics 지만), 관측 가능한 사본이
+            # 없으면 사용자가 사라진 지정을 되찾을 방법이 없다. **사라짐(direction 이 새
+            # 문서에 아예 없음)만** 백업한다 — 지정을 다른 프레임으로 옮기는 건 소실이
+            # 아니므로 정상 편집마다 백업 파일이 쌓이지 않는다.
+            new_anchors = anchor_choices(payload)
+            if any(d not in new_anchors for d in anchor_choices(old)):
+                backup_stale_curation(run_dir, old_text)
             new_states = payload.get("states") or {}
             same_generation = old.get("run_revision") == payload.get("run_revision")
             for name, old_entry in (old.get("states") or {}).items():
