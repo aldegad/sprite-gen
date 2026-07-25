@@ -23,8 +23,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sprite_gen.breathe import (MAX_ROW_STRAIN, freeze_anatomy, phase_frame,  # noqa: E402
-                                resolve_anatomy, row_strain)
+from sprite_gen.breathe import (MAX_ROW_STRAIN, anatomy_fingerprint,  # noqa: E402
+                                freeze_anatomy, phase_frame, resolve_anatomy, row_strain)
 from sprite_gen.extract import solid_alpha_bbox  # noqa: E402
 from tests.test_breathe import CFG, _dome, _humanoid, _winged  # noqa: E402
 
@@ -252,3 +252,53 @@ def test_the_mirror_refuses_the_same_strain_cap(tmp_path):
     got = json.loads((tmp_path / "js.json").read_text(encoding="utf-8"))[0]
     assert not got["ok"] and got["refused"], \
         f"굽기는 상한으로 거부하는데 미러는 통과시켰다: {got}"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 가 없어 JS 미러를 실행할 수 없다")
+def test_the_mirror_refuses_a_stale_anatomy_against_a_manual_rigid_row(tmp_path):
+    """사이드카 `rigid_row` 가 얼린 해부와 어긋나면 미러는 **거부**해야 한다.
+
+    `rigid_row` 는 의도(입력), `anatomy` 는 파생 캐시다. 굽기는 어긋나면 재검출해 의도를
+    따르는데 미러는 검출을 못 한다 — 낡은 캐시로 그리면 거짓말이다. 실측 (슉슉이
+    2026-07-25): override 31 을 굽기는 따르고 미러는 얼린 23 으로 그려 12위상 전부,
+    최대 164바이트 갈렸다. `row-export` 는 이 미러로 WebM/MP4 를 굽는다."""
+    src = _humanoid()
+    cfg = dict(CFG)
+    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    frozen_row = cfg["anatomy"]["rigid_row"]
+    override = frozen_row + 8
+    stale = {**cfg, "rigid_row": override}
+
+    anat, redetected = resolve_anatomy(src, stale)      # 굽기는 의도를 따른다
+    assert redetected is True and anat.rigid_row == override
+
+    payload = {
+        "script": str(CURATOR_BREATHE), "width": src.width, "height": src.height,
+        "cfg": {"depth": cfg["depth"], "breaths": cfg["breaths"], "lag": cfg["lag"],
+                "rigid_row": override, "anatomy": cfg["anatomy"]},
+        "cases": [{"phase": p, "rgba": _rgba(src)} for p in PHASES],
+        "out": str(tmp_path / "js.json"),
+    }
+    (tmp_path / "payload.json").write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / "harness.cjs").write_text(HARNESS, encoding="utf-8")
+    proc = subprocess.run([shutil.which("node"), str(tmp_path / "harness.cjs"),
+                           str(tmp_path / "payload.json")], capture_output=True, text=True)
+    assert proc.returncode == 0, f"node 하네스 실패:\n{proc.stderr}"
+    for phase, got in zip(PHASES, json.loads((tmp_path / "js.json").read_text(encoding="utf-8"))):
+        assert not got["ok"] and got["refused"], (
+            f"위상 {phase:.4f}: 캐시가 의도와 어긋나는데 미러가 그렸다 — "
+            f"프리뷰·WebM 이 굽기와 다른 애니메이션이 된다")
+
+    # 해부를 갱신하면 다시 같아진다 (거부가 영구 차단이 아니라는 것)
+    fresh = {**stale, "anatomy": {**anat.as_dict(), "fingerprint": anatomy_fingerprint(src)}}
+    payload["cfg"] = {"depth": cfg["depth"], "breaths": cfg["breaths"], "lag": cfg["lag"],
+                      "rigid_row": override, "anatomy": fresh["anatomy"]}
+    (tmp_path / "payload.json").write_text(json.dumps(payload), encoding="utf-8")
+    proc = subprocess.run([shutil.which("node"), str(tmp_path / "harness.cjs"),
+                           str(tmp_path / "payload.json")], capture_output=True, text=True)
+    assert proc.returncode == 0
+    for phase, got in zip(PHASES, json.loads((tmp_path / "js.json").read_text(encoding="utf-8"))):
+        assert got["ok"], f"갱신 후에도 거부한다: {got['message']}"
+        py = _rgba(phase_frame(src, fresh, phase, anat))
+        assert sum(1 for a, b in zip(py, got["data"]) if a != b) == 0, \
+            f"위상 {phase:.4f}: 갱신 후 굽기와 갈린다"

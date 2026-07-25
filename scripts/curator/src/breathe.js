@@ -132,6 +132,16 @@ function breatheComposite(base, cfg, phase) {
   const ctx = out.getContext("2d");
   ctx.imageSmoothingEnabled = false;
   const anat = cfg && cfg.anatomy;
+  // `rigid_row` 는 사람의 의도(입력)이고 `anatomy` 는 거기서 파생된 캐시다. 굽기는 둘이
+  // 어긋나면 재검출해 의도를 따르는데(`resolve_anatomy` 의 stale_override), 미러는 검출을
+  // 못 하므로 **낡은 캐시로 그리면 거짓말이 된다.** 그래서 거부한다 — 프리뷰는 원본을
+  // 보여주고 사용자는 해부를 갱신하라는 말을 듣는다 (슉슉이 실측 2026-07-25: override 31
+  // 을 굽기는 따르고 미러는 23 으로 그려 12위상 전부, 최대 164바이트 갈렸다).
+  if (anat && cfg.rigid_row != null && Number(cfg.rigid_row) !== anat.rigid_row) {
+    throw new BreatheRefused(
+      `강체 경계가 어긋난다 — 사이드카 rigid_row ${cfg.rigid_row} vs 해부 ${anat.rigid_row}. `
+      + `굽기는 ${cfg.rigid_row} 로 다시 재서 굽는다. 해부를 갱신해야 프리뷰가 같아진다.`);
+  }
   if (!anat) {
     // 해부 숫자가 아직 없다 — 서버가 채우기 전까지는 원본을 그대로 보여준다.
     // 여기서 대충 추정해 그리면 굽기와 다른 그림을 보여주게 된다 (조용한 폴백 금지).

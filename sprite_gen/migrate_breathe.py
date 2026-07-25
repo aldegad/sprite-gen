@@ -23,7 +23,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sprite_gen.curation import CURATION_FILENAME, RETIRED_BREATHE_KEYS
+from sprite_gen.curation import (BREATHE_BREATHS_MAX, BREATHE_DEPTH_MAX, BREATHE_LAG_MAX,
+                                 CURATION_FILENAME, RETIRED_BREATHE_KEYS)
 from sprite_gen.breathe import DEFAULT_DEPTH, DEFAULT_LAG
 from sprite_gen.runio import atomic_write_text
 
@@ -40,11 +41,30 @@ def migrate_entry(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
                for key, reason in RETIRED_BREATHE_KEYS.items() if key in raw]
     fresh: dict[str, Any] = {"depth": DEFAULT_DEPTH, "lag": DEFAULT_LAG}
     try:
-        fresh["breaths"] = max(1, min(8, int(raw.get("breaths", 1))))
+        want = int(raw.get("breaths", 1))
     except (TypeError, ValueError):
-        fresh["breaths"] = 1
+        want = 1
         dropped.append(f"breaths={raw.get('breaths')!r} (정수가 아니라 1 로 되돌림)")
-    for key in ("depth", "lag", "rigid_row", "anatomy"):
+    fresh["breaths"] = max(1, min(BREATHE_BREATHS_MAX, want))
+    if fresh["breaths"] != want:
+        # 깎았으면 **말한다.** 조용히 깎으면 모듈 계약("무엇을 버렸는지 전부 출력한다")이
+        # 깨지고, round-5 가 파이썬에서 없앤 조용한 클램프가 여기 남는다.
+        dropped.append(f"breaths={want!r} (범위 1~{BREATHE_BREATHS_MAX} 밖이라 {fresh['breaths']} 로 조정)")
+    # 이월하는 값도 **범위를 확인한다.** 안 하면 마이그레이션 산출물이 굽기에서 거부당한다
+    # (슉슉이 실측 2026-07-25: depth 0.5 를 그대로 이월해 결과 사이드카가 안 구워졌다).
+    for key, lo, hi in (("depth", 0.005, BREATHE_DEPTH_MAX), ("lag", 0.0, BREATHE_LAG_MAX)):
+        if key not in raw:
+            continue
+        try:
+            value = float(raw[key])
+        except (TypeError, ValueError):
+            dropped.append(f"{key}={raw[key]!r} (숫자가 아니라 기본값 {fresh[key]} 사용)")
+            continue
+        if lo <= value <= hi:
+            fresh[key] = value
+        else:
+            dropped.append(f"{key}={value!r} (범위 [{lo}, {hi}] 밖이라 기본값 {fresh[key]} 사용)")
+    for key in ("rigid_row", "anatomy"):
         if key in raw:
             fresh[key] = raw[key]
     return fresh, dropped
@@ -73,7 +93,7 @@ def run(**kwargs: object) -> int:
             continue
         fresh, dropped = migrate_entry(raw)
         touched += 1
-        print(f"  {state}: breaths {fresh['breaths']} 보존, depth={fresh['depth']} lag={fresh['lag']} 로 초기화")
+        print(f"  {state}: breaths {fresh['breaths']} · depth {fresh['depth']} · lag {fresh['lag']}")
         for line in dropped:
             print(f"      버림 {line}")
         entry["breathe"] = fresh

@@ -820,8 +820,11 @@ function openZoom(stateName, idx, keepWidth) {
     // 선은 "이 위가 움직인다" 였고 경계는 "이 위는 안 움직인다" 라 반대 개념이다.
     const lineEls = [];
     let anatomyBusy = false;
+    let anatomyPending = false;
     const refreshAnatomy = async () => {
-      if (anatomyBusy) return;
+      // 진행 중이면 **드롭하지 않고 예약한다** — 드롭하면 마지막 드래그 값이 서버에
+      // 반영되지 않은 채 낡은 파생값(basis_row·torso_half)이 사이드카에 남는다.
+      if (anatomyBusy) { anatomyPending = true; return; }
       anatomyBusy = true;
       try {
         const { anatomy } = await fetchBreatheAnatomy(stateName, bm.cfg.rigid_row);
@@ -830,9 +833,14 @@ function openZoom(stateName, idx, keepWidth) {
         commit();
         rebuildStrip();
       } catch (err) {
+        // 실패했으면 낡은 파생값을 **그대로 두지 않는다.** 지문을 무효화해 굽기가 다시
+        // 재게 하고(사이드카는 그래도 정합), 프리뷰는 거부되어 원본을 보여준다.
+        if (bm.cfg.anatomy) bm.cfg.anatomy = { ...bm.cfg.anatomy, fingerprint: null };
+        commit();
         setStatus(t("breatheFail") + err.message, "err");
       }
       anatomyBusy = false;
+      if (anatomyPending) { anatomyPending = false; await refreshAnatomy(); }
     };
     function wireLine(ln) {
       ln.addEventListener("pointerdown", (ev) => {
@@ -846,12 +854,11 @@ function openZoom(stateName, idx, keepWidth) {
           // 해부는 변형 후 프레임 기준이므로 셀 좌표의 콘텐츠 상단(btop)이 곧 0행이다.
           const row = Math.round(yCell - btop);
           bm.cfg.rigid_row = Math.min(bm.cfg.anatomy.height - 2, Math.max(1, row));
-          // 프리뷰가 새 경계를 즉시 그리도록 rigid_row 만 갈아끼우되, **지문을 무효화**해
-          // 굽기가 재검출하게 한다 — basis_row·torso_half·max_half 는 아직 낡은 값이고
-          // 그대로 구우면 조용히 틀린 파생값이 쓰인다 (부리 note 2026-07-25). pointerup 의
-          // refreshAnatomy() 가 서버 값으로 교체하지만 그 사이에도 안전해야 한다.
-          bm.cfg.anatomy = { ...bm.cfg.anatomy, rigid_row: bm.cfg.rigid_row,
-                             rigid_source: "manual", fingerprint: null };
+          // 드래그 중에는 `anatomy` 를 **손대지 않는다.** rigid_row 만 바꿔 놓으면 미러가
+          // "캐시가 의도와 어긋난다" 로 거부해 원본을 보여주고, pointerup 의
+          // refreshAnatomy() 가 서버 값으로 갱신한다. 여기서 rigid_row 만 갈아끼우면
+          // basis_row·torso_half 가 낡은 채 사이드카에 저장돼 굽기와 갈린다
+          // (슉슉이 실측 2026-07-25: _dome 에서 11/12 위상 불일치, 최대 320바이트).
           syncLines();
           commit();
         };

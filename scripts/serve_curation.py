@@ -100,7 +100,7 @@ def _breathe_source_frame(run_dir: Path, state: str):
     지킨다(`breathe.resolve_anatomy` 가 줄마다 한 벌만 확정한다). 예전엔 굽기가 프레임마다
     다시 재서 이 단언이 거짓이었고 프리뷰와 갈렸다 (슉슉이 실측 2026-07-25)."""
     from curation import (apply_pixel_edits, apply_transform, edit_index,
-                          state_pixel_ops, state_plan)
+                          source_frame_index, state_pixel_ops, state_plan)
     manifest = load_consistent_frames_manifest(run_dir, allow_pending_states=True) or {"rows": []}
     row = next((r for r in manifest.get("rows", []) if r.get("state") == state), None)
     if not row:
@@ -113,7 +113,10 @@ def _breathe_source_frame(run_dir: Path, state: str):
     cell = (int(request["cell_width"]), int(request["cell_height"]))
     snap = pixel_snap_scale(request) if variant == "pixel" else None
     for index in (ordered or list(range(total))):
-        candidate = run_dir / row_frame_rel(row, index, variant)
+        # 재생 첫 슬롯이 복제면 그 인덱스로는 파일이 없다 — 원본 인덱스로 해소해야
+        # 굽기가 쓰는 기준 프레임과 같은 인스턴스를 잰다 (복제는 자기 변형을 가질 수 있다).
+        source_index = source_frame_index(curation, state, index, total)
+        candidate = run_dir / row_frame_rel(row, source_index, variant)
         if not candidate.is_file():
             continue
         edit_idx = edit_index(curation, state, index)
