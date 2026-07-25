@@ -259,10 +259,30 @@ function seedPixelPerfect(snapshot) {
 // 그래서 굽기 변종은 **저장되는 값**으로만 해소한다 — 파이썬 `curation.frame_variant`
 // 미러(per-state bool > 런 전역 > pixel).
 
-// 이 줄의 `pixel_perfect` 로 사이드카에 실제로 기록되는 값 (기록 안 하면 undefined).
-// persistence 도 이걸 쓴다 — 저장 규칙과 굽기 해소가 두 벌이면 반드시 갈린다.
-function savedPixelPerfect(stateName) {
+// **뷰가 authoring 하는** per-state `pixel_perfect` (안 하면 undefined). persistence 전용.
+//
+// 트윈 없는 줄의 퍼펙은 표시 렌즈(측정 k 양자화)라 사이드카에 새로 적지 않는다 — 적으면
+// 굽기 리졸버가 존재하지 않는 `.plain` 변형을 요구한다.
+function authoredPixelPerfect(stateName) {
   return ppTwinStates.has(stateName) ? ppOn(stateName) : undefined;
+}
+
+// **사이드카에 남게 되는** per-state `pixel_perfect` — 굽기 변종 해소의 입력.
+//
+// 이걸 `authoredPixelPerfect` 와 같은 값으로 쓰면 안 된다. 파이썬 `frame_variant` 의
+// per-state 분기는 **무조건**이라(선언이 bool 이면 즉시 확정) 트윈 없는 줄에 선언이 있어도
+// 그 값이 이긴다. 트윈 존재로 게이트하면 18칸 해소표 중 3칸이 갈리고, 그 줄은 웹뷰가
+// `plain` 을 골라 키를 못 만들어 **프리뷰·영상 내보내기가 영구 거부**된다 — 굽기는 멀쩡히
+// `pixel` 로 구우면서 (슉슉이 실측 2026-07-26).
+//
+// 뷰가 authoring 하지 않는 줄의 선언은 서버가 이월하므로(`view_conditional`) 로드된 값이
+// 그대로 사이드카의 진실이다.
+function sidecarPixelPerfect(stateName) {
+  const authored = authoredPixelPerfect(stateName);
+  if (authored !== undefined) return authored;
+  const c = run && run.curation && run.curation.states
+    ? run.curation.states[stateName] : undefined;
+  return c && typeof c.pixel_perfect === "boolean" ? c.pixel_perfect : undefined;
 }
 
 // 사이드카의 런 전역 `pixel_perfect`. 뷰는 **트윈 줄이 전부 같을 때만** 이 필드를
@@ -280,7 +300,7 @@ function savedRunPixelPerfect() {
 
 // 굽기가 읽는 변종 — 파이썬 `curation.frame_variant` 미러.
 function bakeVariant(stateName) {
-  const own = savedPixelPerfect(stateName);
+  const own = sidecarPixelPerfect(stateName);
   if (typeof own === "boolean") return own ? "pixel" : "plain";
   const wide = savedRunPixelPerfect();
   if (typeof wide === "boolean") return wide ? "pixel" : "plain";

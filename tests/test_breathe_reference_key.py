@@ -17,6 +17,7 @@ BICUBIC 으로 리샘플하고(`snap_scale` 없는 런 = 기본 런 전부) 웹�
 """
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -351,22 +352,25 @@ def test_a_rotated_row_stays_fresh(web_run_plain):
 
 # ── 굽기 변종 해소표 전수 ────────────────────────────────────────────
 
-VARIANT_CASES = [
-    # (설명, 트윈 있음, per-state 선언, 런 전역 선언)
-    ("기본 런 (fit 없음 — orig/·.plain.png 가 하나도 없다)", False, None, None),
-    ("트윈 없는 줄 + 런 전역 켬", False, None, True),
-    ("트윈 없는 줄 + 런 전역 끔", False, None, False),
-    ("트윈 줄, 선언 없음", True, None, None),
-    ("트윈 줄 per-state 켬", True, True, None),
-    ("트윈 줄 per-state 끔", True, False, None),
-    ("트윈 줄 per-state 끔 + 런 전역 켬 (per-state 가 이긴다)", True, False, True),
-    ("트윈 줄 per-state 켬 + 런 전역 끔", True, True, False),
-]
+# 해소 축은 셋이다: 트윈 존재(2) × per-state 선언(없음/켬/끔) × 런 전역(없음/켬/끔) = **18칸**.
+#
+# 앞선 판은 8칸을 "전수" 라고 적었는데 `twin=False` 일 때 `own=None` 한 줄만 돌았다. 빠진
+# 6칸 중 3칸이 갈리고 있었다 — 파이썬 per-state 분기는 **무조건**인데 미러가 트윈 존재로
+# 게이트했기 때문이다. 곱집합을 코드로 만들어 "전수" 가 이름이 아니라 사실이 되게 한다.
+VARIANT_CASES = [(twin, own, wide)
+                 for twin in (False, True)
+                 for own in (None, True, False)
+                 for wide in (None, True, False)]
 
 
-@pytest.mark.parametrize("label,twin,own,wide", VARIANT_CASES,
-                         ids=[c[0][:24] for c in VARIANT_CASES])
-def test_the_webview_resolves_the_bake_variant_like_the_server(label, twin, own, wide):
+def _variant_id(case):
+    twin, own, wide = case
+    fmt = {None: "없음", True: "켬", False: "끔"}
+    return f"twin{'있음' if twin else '없음'}-own{fmt[own]}-wide{fmt[wide]}"
+
+
+@pytest.mark.parametrize("twin,own,wide", VARIANT_CASES, ids=[_variant_id(c) for c in VARIANT_CASES])
+def test_the_webview_resolves_the_bake_variant_like_the_server(twin, own, wide):
     """웹뷰의 굽기 변종 == 파이썬 `frame_variant` — 해소표 전수.
 
     `ppOn` 은 **표시 렌즈**다: boot 시드가 트윈 없는 줄을 기본 OFF 로 놓는데 그 값은
@@ -394,7 +398,8 @@ def test_the_webview_resolves_the_bake_variant_like_the_server(label, twin, own,
     got = _webview(payload, {"idle": {"order": [0], "sel": [0]}},
                    [{"id": "v", "kind": "variant", "state": "idle"}])
     assert got["v"] == frame_variant(curation, "idle"), (
-        f"{label}: 웹뷰 {got['v']!r} vs 서버 {frame_variant(curation, 'idle')!r}")
+        f"트윈{twin} per-state{own} 전역{wide}: "
+        f"웹뷰 {got['v']!r} vs 서버 {frame_variant(curation, 'idle')!r}")
 
 
 def test_the_saved_sidecar_is_what_the_variant_resolves_from():
@@ -411,3 +416,140 @@ def test_the_saved_sidecar_is_what_the_variant_resolves_from():
     off = _webview(payload, {"idle": {"order": [0], "sel": [0]}}, q, pp_override={"idle": False})
     assert on["v"] == off["v"] == "pixel", (
         f"트윈 없는 줄의 표시 토글이 굽기 변종을 바꾼다 (켬 {on['v']}, 끔 {off['v']})")
+
+
+def test_a_declared_twinless_row_still_builds_a_key():
+    """트윈 없는 줄에 per-state 선언이 있어도 웹뷰가 **키를 만들어야** 한다.
+
+    변종 해소가 갈리면 웹뷰는 `plain` 을 고르고 `bakeFrame` 이 null 을 돌려줘 키가 아예
+    안 만들어진다 → `breatheAssertFresh` 가 "기준 프레임 키를 만들 수 없다" 로 **영구
+    거부**하고, 프리뷰 3곳·`row-export`·비교뷰 다운로드·경계 드래그가 전부 죽는다.
+    굽기는 그 사이 멀쩡히 `pixel` 로 굽는다 (슉슉이 실측 2026-07-26).
+
+    "갈렸다" 를 값으로 보는 위 해소표와 달리, 이건 **사용자가 겪는 결과**를 본다."""
+    curation = {"pixel_perfect": False, "states": {"idle": {"pixel_perfect": True}}}
+    payload = {"requestStamp": "9:9", "curation": curation,
+               "states": [{"name": "idle", "frames": [
+                   {"index": 0, "present": True, "url": "/f0.png", "stamp": "1:1"}]}]}
+    got = _webview(payload, {"idle": {"order": [0], "sel": [0]}},
+                   [{"id": "k", "kind": "key", "state": "idle"},
+                    {"id": "g", "kind": "geometry", "state": "idle", "fallback": 0}])
+    assert got["k"] and "|pixel|" in got["k"], (
+        f"키를 못 만들거나 변종이 틀렸다: {got['k']!r} — 프리뷰·내보내기가 영구 거부된다")
+    assert got["g"]["url"], "경계 드래그가 잴 프레임을 못 잡는다"
+
+
+# ── 미러 전수: 파이썬 함수를 JS 가 베낀 자리는 **곱집합**으로 건다 ──────
+#
+# 여덟 라운드 동안 같은 형태로 기각당했다: 미러가 어떤 입력 부분집합에서 원본과 갈리고,
+# 그 부분집합이 손으로 적은 케이스 목록 밖에 있었다 (축만 파일 → 리샘플러 → 변종 이름 →
+# per-state 게이트로 옮겨갔다). 인스턴스가 아니라 **클래스**를 닫으려면 케이스를 적지 말고
+# 입력 축의 곱집합을 **생성**해야 한다. 이 절이 남은 미러들에 그 형태를 적용한다.
+
+MIRROR_HARNESS = r"""
+const fs = require("fs"), vm = require("vm");
+const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const sandbox = { console, TextEncoder, Set, Map, setTimeout,
+  document: { createElement: () => ({ getContext: () => ({}), style: {} }),
+              addEventListener() {}, querySelectorAll: () => [] },
+  window: {}, fetch: () => {}, setStatus() {}, t: () => "", STR: {}, lang: "ko",
+  scheduleSave() {}, flushSave: async () => {}, rebuildState() {},
+  URL: { createObjectURL() {}, revokeObjectURL() {} } };
+sandbox.globalThis = sandbox;
+vm.createContext(sandbox);
+for (const f of payload.scripts) vm.runInContext(fs.readFileSync(f, "utf8"), sandbox);
+sandbox.__payload = payload;
+vm.runInContext(`
+  __out = [];
+  for (const c of __payload.cases) {
+    if (__payload.fn === "normalizeTransform") {
+      __out.push(breatheNormalizeTransform(c.transform));
+    } else if (__payload.fn === "editIndex") {
+      entries = { idle: { order: [0, 1, 2], sel: new Set([0, 1, 2]),
+                          clones: c.clones || {},
+                          unlinked: new Set(c.unlinked || []) } };
+      __out.push(editIndex("idle", c.index));
+    }
+  }
+`, sandbox);
+process.stdout.write(JSON.stringify(sandbox.__out));
+"""
+
+
+def _mirror(fn, cases):
+    return _node(MIRROR_HARNESS, {
+        "scripts": [str(SRC / "breathe.js"), str(SRC / "store.js")],
+        "fn": fn, "cases": cases})
+
+
+# 변형 필드 × 값 모양의 곱집합 — 하나라도 갈리면 그 필드가 걸린 줄의 키가 통째로 갈린다.
+_TRANSFORM_FIELDS = ["rotate", "scale", "dx", "dy", "shx", "shy", "flipX"]
+_TRANSFORM_VALUES = [0, 1, -1, 3.0, 0.9, 1.0000005, "3", "0.5", True, False]
+NORMALIZE_CASES = ([{"transform": None}, {"transform": {}}]
+                   + [{"transform": {f: v}} for f in _TRANSFORM_FIELDS for v in _TRANSFORM_VALUES])
+
+
+def test_normalize_transform_mirror_agrees_on_the_full_product():
+    """`normalize_transform` 미러 — 필드 7 × 값 모양 10 곱집합.
+
+    이 함수의 출력이 그대로 기준 프레임 키에 들어간다. 한 필드의 한 모양만 갈려도 그
+    변형이 걸린 줄은 지문이 영구 불일치가 된다."""
+    from sprite_gen.curation import normalize_transform
+
+    got = _mirror("normalizeTransform", NORMALIZE_CASES)
+    assert len(got) == len(NORMALIZE_CASES)
+    for case, js in zip(NORMALIZE_CASES, got):
+        py = normalize_transform(case["transform"])
+        assert {k: float(v) for k, v in js.items()} == {k: float(v) for k, v in py.items()}, (
+            f"normalize_transform 미러가 갈렸다 — 입력 {case['transform']!r}\n"
+            f"  py: {py}\n  js: {js}")
+
+
+# 복제 링크 × 링크끊기 × 인덱스의 곱집합.
+EDIT_INDEX_CASES = [{"clones": clones, "unlinked": unlinked, "index": index}
+                    for clones in ({}, {"2": 0}, {"2": 1})
+                    for unlinked in ([], [2])
+                    for index in (0, 1, 2)]
+
+
+def test_edit_index_mirror_agrees_on_the_full_product():
+    """`edit_index` 미러 — 복제 링크 3 × 링크끊기 2 × 인덱스 3 곱집합.
+
+    이 값이 어느 프레임의 변형·픽셀편집을 읽을지 정하고, 그게 기준 프레임 키의 재료다.
+    갈리면 웹뷰와 굽기가 **다른 프레임의 편집**을 기준으로 삼는다. 미러라고 적혀 있지도
+    않았고 교차언어 테스트도 없었다."""
+    from sprite_gen.curation import edit_index
+
+    got = _mirror("editIndex", EDIT_INDEX_CASES)
+    assert len(got) == len(EDIT_INDEX_CASES)
+    for case, js in zip(EDIT_INDEX_CASES, got):
+        curation = {"states": {"idle": {"clones": case["clones"],
+                                        "unlinked": case["unlinked"]}}}
+        py = edit_index(curation, "idle", case["index"])
+        assert js == py, (
+            f"edit_index 미러가 갈렸다 — clones={case['clones']} "
+            f"unlinked={case['unlinked']} index={case['index']}: py={py} js={js}")
+
+
+def test_the_mirrored_limits_are_the_same_numbers():
+    """사이드카 허용 범위 상수 — 파이썬과 JS 가 **같은 숫자**여야 한다.
+
+    갈리면 웹뷰가 굽기의 loud reject 를 못 예측해, 사용자는 저장되는데 안 구워지는
+    설정을 만들 수 있다."""
+    from sprite_gen import curation as C
+
+    js = (SRC / "breathe.js").read_text(encoding="utf-8")
+    for name, want in (("BREATHE_DEPTH_MAX", C.BREATHE_DEPTH_MAX),
+                       ("BREATHE_BREATHS_MAX", C.BREATHE_BREATHS_MAX),
+                       ("BREATHE_LAG_MAX", C.BREATHE_LAG_MAX)):
+        m = re.search(rf"const {name} = ([\d.]+);", js)
+        assert m, f"{name} 이 미러에 없다"
+        assert float(m.group(1)) == float(want), \
+            f"{name}: py={want} js={m.group(1)} — 갈리면 저장은 되는데 안 구워진다"
+
+    retired = re.search(r"const RETIRED_BREATHE_KEYS = \[(.*?)\];",
+                        (SRC / "store.js").read_text(encoding="utf-8"))
+    assert retired, "폐기 키 목록이 미러에 없다"
+    js_keys = {k.strip().strip('"') for k in retired.group(1).split(",")}
+    assert js_keys == set(C.RETIRED_BREATHE_KEYS), \
+        f"폐기 키 목록이 갈렸다: py={sorted(C.RETIRED_BREATHE_KEYS)} js={sorted(js_keys)}"

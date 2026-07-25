@@ -1125,6 +1125,14 @@ class CurationHandler(BaseHTTPRequestHandler):
                         # 계약: 기존 파일에 있고 payload 의 그 행에 없는 화이트리스트
                         # 필드는 이월한다.
                         engine_owned = ("frozen",)
+                        # 뷰가 **조건부로만 authoring** 하는 행 필드: 트윈 없는 줄의
+                        # `pixel_perfect` 는 buildPayload 가 아예 안 싣는다(그 줄의 퍼펙은
+                        # 표시 렌즈라 사이드카에 새로 적으면 안 된다). 생략을 삭제로 받으면
+                        # **굽기가 읽는 변종이 바뀐다** — 사이드카에 `pixel_perfect: true` 가
+                        # 선언된 트윈 없는 줄이 큐레이터를 한 번 여는 것만으로 `plain` 으로
+                        # 뒤집히고, `.plain.png` 가 없으니 굽기가 죽는다. 사용자는 아무것도
+                        # 안 눌렀고 알림도 없다 (슉슉이 실측 2026-07-26).
+                        view_conditional = ("pixel_perfect",)
                         try:
                             existing = json.loads((self.run_dir / CURATION_FILENAME).read_text(encoding="utf-8"))
                         except (OSError, json.JSONDecodeError):
@@ -1148,7 +1156,7 @@ class CurationHandler(BaseHTTPRequestHandler):
                             slot = (payload.get("states") or {}).get(state_name)
                             if not isinstance(slot, dict):
                                 continue
-                            for field in engine_owned:
+                            for field in engine_owned + view_conditional:
                                 if field in prev_entry and field not in slot:
                                     slot[field] = prev_entry[field]
                         write_curation_atomic(self.run_dir, payload)
