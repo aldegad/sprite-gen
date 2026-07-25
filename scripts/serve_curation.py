@@ -54,12 +54,23 @@ from curation import (CURATION_FILENAME, SCHEMA_VERSION, effective_logical_heigh
 from extract import heal_run, load_consistent_frames_manifest
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from sprite_gen.breathe import DEFAULT_DEPTH, DEFAULT_LAG, freeze_anatomy
+from sprite_gen.breathe import (DEFAULT_DEPTH, DEFAULT_LAG, freeze_anatomy,
+                                reference_key)
 from sprite_gen.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel, state_frame_total
 from runio import publish_guard, read_guard
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 CURATOR_DIR = SCRIPTS_DIR / "curator"
+
+
+def _file_stamp(path: Path) -> str:
+    """파일의 정체성 — 크기:mtime_ns. 호흡 기준 프레임 키의 **원본 조각**이다.
+
+    내용 해시가 더 정확하지만 상태 응답마다 줄의 모든 프레임을 읽어야 한다. 크기+mtime 은
+    추출기가 파일을 다시 쓰면 반드시 바뀌므로 "기준 프레임이 갈렸나" 판정에 충분하고,
+    틀리는 방향도 안전하다 — 런을 복사해 mtime 만 바뀌면 시끄럽게 거부하고 한 번 다시 잰다."""
+    st = path.stat()
+    return f"{st.st_size}:{st.st_mtime_ns}"
 
 
 def _url(*parts) -> str:
@@ -128,10 +139,15 @@ def _breathe_source_frame(run_dir: Path, state: str):
         if not candidate.is_file():
             continue
         edit_idx = edit_index(curation, state, index)
+        ops = state_pixel_ops(curation, state).get(edit_idx)
         with Image.open(candidate) as opened:
-            source = apply_pixel_edits(opened.convert("RGBA"), state_pixel_ops(curation, state).get(edit_idx))
-        return apply_transform(source, transforms.get(edit_idx), cell, snap_scale=snap)
-    return None
+            source = apply_pixel_edits(opened.convert("RGBA"), ops)
+        key = reference_key(state=state, variant=variant,
+                            request_stamp=_file_stamp(run_dir / "sprite-request.json"),
+                            source_index=source_index, source_stamp=_file_stamp(candidate),
+                            pixel_ops=ops, transform=transforms.get(edit_idx))
+        return apply_transform(source, transforms.get(edit_idx), cell, snap_scale=snap), key
+    return None, None
 
 
 def _find_base_path(run_dir: Path):
@@ -413,8 +429,13 @@ def _build_run_state_impl(run_dir: Path) -> dict:
             # 위 `plainUrl` 은 표시 화질용이라 `orig/` 고해상본을 우선하는데, 굽기는 그걸
             # 절대 안 읽는다. 호흡 프리뷰·신선도 판정이 `plainUrl` 을 쓰면 지문이 **영구
             # 불일치**라 그 줄의 영상 내보내기가 영구 차단된다 (슉슉이 2026-07-26).
+            if present:
+                frame["stamp"] = _file_stamp(run_dir / rel)
             if (run_dir / plain_rel).is_file():
                 frame["plainBakeUrl"] = _url(*plain_rel.split("/"))
+                # URL 과 **짝으로** 나간다. 굽기가 읽는 파일이 곧 호흡 기준 프레임 키의
+                # 원본 조각이라, 둘 중 하나만 보내면 웹뷰가 키를 못 만든다.
+                frame["plainBakeStamp"] = _file_stamp(run_dir / plain_rel)
             # 트윈 없는 프레임의 퍼펙은 클라 렌더러가 측정 k(pixelScale)로 양자화한다
             # — 서버 추정 스냅 프리뷰 레거시는 표시 격자와 다른 검출기(엔진 주기성,
             # 1:1 에 4.99)로 스냅해 같은 줄의 프레임마다 다른 진실을 만들었다
@@ -539,6 +560,9 @@ def _build_run_state_impl(run_dir: Path) -> dict:
             "scale": min((st["pixelScale"] for st in states if st.get("pixelScale")), default=1)},
         "schemaVersion": SCHEMA_VERSION,
         "runRevision": revision,
+        # 호흡 기준 프레임 키의 조각 — 셀 크기·`pixel_snap_scale` 같은 request 파생값을
+        # 웹뷰가 재구현하지 않고 원인 하나로 덮는다 (`breathe.reference_key` 주석).
+        "requestStamp": _file_stamp(run_dir / "sprite-request.json"),
         "directionGroups": direction_groups,
         "anchorFiles": anchor_files,
         "states": states,
@@ -951,11 +975,11 @@ class CurationHandler(BaseHTTPRequestHandler):
             state = (query.get("state") or [""])[0]
             rigid = (query.get("rigid_row") or [""])[0]
             try:
-                frame = _breathe_source_frame(self.run_dir, state)
+                frame, key = _breathe_source_frame(self.run_dir, state)
                 if frame is None:
                     self._send_json({"error": f"no extracted frame for state {state!r}"}, 404)
                     return
-                frozen = freeze_anatomy(frame, {"rigid_row": int(rigid)} if rigid else {})
+                frozen = freeze_anatomy(frame, {"rigid_row": int(rigid)} if rigid else {}, key)
                 self._send_json({"anatomy": frozen, "defaults": {
                     "depth": DEFAULT_DEPTH, "lag": DEFAULT_LAG, "breaths": 1}})
             except (Exception, SystemExit) as exc:

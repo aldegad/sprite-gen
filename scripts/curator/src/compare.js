@@ -146,24 +146,10 @@ function openCompare() {
     drawFrameInto(bx, image, getTransform(name, idx), base.width, base.height,
       snapScaleFor(name), getPixelOps(name, idx));
     const bcfg = stateBreathe(name);
-    // 신선도 기준 = 재생 첫 슬롯 (굽기가 해부를 확정하는 프레임). 굽기와 같은 변형으로 그린다.
-    let ref = null;
-    if (bcfg) {
-      const play = playList(name);
-      const rf = play.length ? frameOf(name, play[0]) : null;
-      const rimg = rf ? img(bakeFrameUrl(name, rf)) : null;
-      if (rimg && rimg.complete && rimg.naturalWidth) {
-        ref = document.createElement("canvas");
-        ref.width = base.width;
-        ref.height = base.height;
-        const rx = ref.getContext("2d");
-        rx.imageSmoothingEnabled = false;
-        drawFrameInto(rx, rimg, getTransform(name, play[0]), ref.width, ref.height,
-          snapScaleFor(name), getPixelOps(name, play[0]));
-      }
-    }
+    // 신선도 기준 = 재생 첫 슬롯의 키 (굽기가 해부를 확정하는 프레임).
+    const refKey = breatheReferenceKey(name);
     // 위상 0 도 워프한다 — 진행파 지연 때문에 t=0 이 항등이 아니다 (굽기와 동일 계약)
-    const out = bcfg ? breatheComposeForPreview(base, bcfg, phase || 0, ref) : base;
+    const out = bcfg ? breatheComposeForPreview(base, bcfg, phase || 0, refKey) : base;
     // 콘텐츠 bbox (합성 결과 기준 — 변형으로 옮겨진 위치 반영)
     const d = out.getContext("2d").getImageData(0, 0, out.width, out.height).data;
     let x0 = out.width, y0 = out.height, x1 = 0, y1 = 0;
@@ -548,6 +534,15 @@ function openCompare() {
     const wasPlaying = anim.playing;
     try {
       const included = [...state.include];
+      // **파일을 만들기 전에** 멈춘다. `render()` 는 프리뷰 래퍼를 쓰는데, 그 래퍼는
+      // 거부를 잡아 워프하지 않은 원본을 돌려준다 — 화면에선 옳은 행동(알림 + 원본)이지만
+      // 여기서는 그 결과가 그대로 `toDataURL` 되어 **호흡이 빠진 파일**이 사용자 손에
+      // 들어가고 마지막에 "다운로드 완료" 초록 알림까지 떴다 (슉슉이 실측 2026-07-26).
+      // row-export 는 같은 조건에서 이미 예외를 올려 멈춘다 — 두 내보내기가 정반대였다.
+      for (const name of included) {
+        const bcfg = stateBreathe(name);
+        if (bcfg) breatheAssertFresh(breatheReferenceKey(name), bcfg);
+      }
       const gcd = (a, b) => (b ? gcd(b, a % b) : a);
       const cycles = included.map((name) => {
         const st = run.states.find((s) => s.name === name);

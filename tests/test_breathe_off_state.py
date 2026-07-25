@@ -149,24 +149,109 @@ def test_every_preview_call_passes_a_freshness_reference(site):
         f"{name}:{lineno} 가 기준 프레임을 안 넘긴다 — 신선도 검사가 건너뛰어진다.\n  {line}")
 
 
-# 굽기와 같은 그림을 내보내는 경로 — 여기서 신선도를 안 보면 낡은 해부로 굽는다.
-FRESH_CONSUMERS = ("row-export.js",)
+# ── 파일을 만드는 자리는 전부 신선도를 본다 ────────────────────────
+
+# 사용자 손에 **파일**이 떨어지는 연산. 프리뷰 래퍼는 거부를 잡아 원본을 돌려주므로
+# (화면에선 옳다) 이 자리에 신선도 검사가 없으면 호흡이 빠진 파일이 조용히 나간다.
+FILE_PRODUCERS = re.compile(r"toDataURL\s*\(|toBlob\s*\(|/api/compare-gif|/api/row-video")
+FRESH = re.compile(r"breatheAssertFresh\s*\(")
+
+# 호흡 계약이 사는 파일 안에서 파일을 만드는 **모든** 함수가 대상이다.
+# 손으로 적은 파일 화이트리스트(`FRESH_CONSUMERS = ("row-export.js",)`)로 쓰면 안 된다:
+# 그 판일 때 `compare.js` 의 영상 다운로드가 호흡을 조용히 뺀 파일을 만들고 있었는데
+# 그물은 아무 말도 안 했다 (슉슉이 실측 2026-07-26). 대상은 이름이 아니라 **연산**이다.
+EXPORT_EXEMPT = {
+    # (파일, 시작줄) : 이유
+}
 
 
-@pytest.mark.parametrize("name", FRESH_CONSUMERS)
-def test_export_paths_check_anatomy_freshness(name):
-    """클라에서 굽는 경로는 기준 프레임 신선도를 확인해야 한다.
+def _strip_comments(src: str) -> str:
+    """주석을 공백으로 (줄 수·오프셋 보존). 주석 속 `/api/compare-gif` 언급이 파일 생성
+    연산으로 잡히면 그물이 엉뚱한 자리를 지목한다."""
+    out, i, n = [], 0, len(src)
+    while i < n:
+        two = src[i:i + 2]
+        if two == "//":
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i)); i = j
+        elif two == "/*":
+            j = src.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append("".join(c if c == "\n" else " " for c in src[i:j])); i = j
+        else:
+            out.append(src[i]); i += 1
+    return "".join(out)
 
-    `row-export` 는 서버를 안 거치고 WebM/MP4 를 만든다. 얼린 해부가 지금의 기준
-    프레임에서 나온 게 아니면 GIF(서버 굽기)와 다른 애니메이션이 파일로 나간다
-    (슉슉이 실측 2026-07-25: 픽셀 편집 후 최대 617바이트)."""
-    src = (CURATOR_SRC / name).read_text(encoding="utf-8")
-    assert FRESH.search(src), (
-        f"{name} 이 breatheAssertFresh 를 안 부른다 — 낡은 해부로 구운 파일이 사용자에게 간다")
+
+HEADER = re.compile(r"(function\s*\w*\s*\([^)]*\)|\([^()]*\)\s*=>|\w+\s*=>)\s*$")
+
+
+def _enclosing_function(src: str, pos: int) -> tuple[str, int] | None:
+    """`pos` 를 감싸는 **가장 안쪽 함수 본문**과 그 시작줄.
+
+    줄 기준 휴리스틱으로 자르면 `const gcd = (a, b) => ...` 같은 한 줄 화살표 함수가
+    다음 함수 시작으로 잡혀 뒤따르는 본문을 통째로 삼킨다 — 그러면 검사가 있는데도
+    없다고 보고한다. 중괄호를 세어 진짜 블록을 찾는다."""
+    stack = []
+    for i, ch in enumerate(src[:pos]):
+        if ch == "{":
+            stack.append(i)
+        elif ch == "}" and stack:
+            stack.pop()
+    for open_at in reversed(stack):
+        if not HEADER.search(src[max(0, open_at - 200):open_at]):
+            continue
+        depth = 0
+        for j in range(open_at, len(src)):
+            if src[j] == "{":
+                depth += 1
+            elif src[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    return src[open_at:j + 1], src[:open_at].count("\n") + 1
+        return src[open_at:], src[:open_at].count("\n") + 1
+    return None
+
+
+def _file_producing_functions():
+    """(파일, 시작줄, 본문) — 파일을 만드는 연산을 감싼 함수 전수 (중복 제거)."""
+    out, seen = [], set()
+    for name in BREATHE_FILES:
+        src = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8"))
+        for m in FILE_PRODUCERS.finditer(src):
+            found = _enclosing_function(src, m.start())
+            assert found, f"{name}:{src[:m.start()].count(chr(10)) + 1} 를 감싼 함수를 못 찾았다"
+            body, line = found
+            if (name, line) in seen:
+                continue
+            seen.add((name, line))
+            out.append((name, line, body))
+    return out
+
+
+def test_every_file_producing_path_checks_freshness():
+    """파일을 만드는 자리는 **전부** 기준 프레임 신선도를 확인해야 한다.
+
+    `row-export` 는 예외를 올려 파일 생성 전에 멈췄는데 `compare.js` 의 영상
+    다운로드는 프리뷰 래퍼를 거쳐 거부를 삼켰다 — 같은 조건에서 두 내보내기가
+    **정반대로** 행동했고, 호흡 없는 파일이 나간 뒤 초록 "완료" 알림까지 떴다."""
+    sites = _file_producing_functions()
+    assert sites, "파일을 만드는 자리를 하나도 못 찾았다 — 스캐너가 고장났다"
+    missing = [(n, ln) for n, ln, body in sites
+               if not FRESH.search(body) and (n, ln) not in EXPORT_EXEMPT]
+    assert not missing, (
+        "파일을 만드는데 신선도를 안 본다 — 낡은 해부로 구운 파일이 사용자에게 간다:\n"
+        + "\n".join(f"  {n}:{ln}" for n, ln in missing))
 
 
 # ── 호흡은 굽기가 읽는 파일로 그린다 ───────────────────────────────
 
+# 굽기 파일에 도달하는 **인정 경로**. `bakeFrameUrl` 직접 호출이거나, 그것을 거쳐
+# URL 을 내주는 store 헬퍼에서 받은 값이거나. 이름 화이트리스트가 아니라 **출처**다 —
+# 헬퍼 자신은 `bakeFrame` 을 거치고, 그 선택은 node 동작 테스트가 따로 검증한다
+# (`tests/test_breathe_reference_key.py::test_geometry_measures_the_reference_frame...`).
+BAKE_SOURCES = ("bakeFrameUrl(", "breatheGeometryFrame(")
 BAKE_URL = re.compile(r"bakeFrameUrl\s*\(")
 IMG_CALL = re.compile(r"\bimg\s*\(")
 # 호흡 계약이 사는 파일 — 이 안의 **모든** 프레임 이미지 소스가 굽기 파일이어야 한다.
@@ -180,6 +265,17 @@ BREATHE_FILES = ("cards.js", "compare.js", "zoom-editor.js", "row-export.js")
 NON_BREATHE_IMG = {
     ("cards.js", "image"): "카드 표시면 — 호흡 합성 전 원본 표시 (frameUrl 이 맞다)",
 }
+
+
+def _bound_from_bake_source(name: str, lineno: int, symbol: str) -> bool:
+    """`symbol` 이 이 파일에서 굽기 경로로 바인딩됐는가 (선언 위쪽 40줄 안)."""
+    root = symbol.split(".")[0]
+    lines = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8")).splitlines()
+    for prev in lines[max(0, lineno - 41):lineno - 1]:
+        if re.search(rf"\b(const|let|var)\b[^=]*\b{re.escape(root)}\b[^=]*=", prev) and \
+                any(src in prev for src in BAKE_SOURCES):
+            return True
+    return False
 
 
 def _breathe_image_sites():
@@ -212,6 +308,12 @@ def test_breathe_draws_from_the_file_the_bake_reads(site):
 
     이 그물이 없던 동안 `frameUrl` → `f.url` 로 되돌려도 111개 테스트가 전부 통과했다."""
     name, lineno, line = site
-    assert BAKE_URL.search(line), (
+    # 한 줄 안의 직접 호출이거나, 같은 파일 위쪽에서 굽기 경로로 바인딩된 값이거나.
+    # 후자를 인정하지 않으면 선택을 헬퍼로 모으는 리팩토링이 곧 그물 실패가 되어
+    # 중복을 남기는 쪽이 유리해진다 — 그물이 나쁜 설계를 강요하면 안 된다.
+    arg = re.search(r"\bimg\s*\(\s*([\w.]+)", line)
+    ok = BAKE_URL.search(line) or (arg and _bound_from_bake_source(name, lineno, arg.group(1)))
+    assert ok, (
         f"{name}:{lineno} 가 굽기 파일이 아닌 소스로 호흡을 그린다.\n  {line}\n"
-        f"  `bakeFrameUrl(state, frame)` 을 써라 (frameUrl 은 표시용, f.url 은 캐노니컬).")
+        f"  `bakeFrameUrl(state, frame)` 또는 그걸 거치는 store 헬퍼를 써라 "
+        f"(frameUrl 은 표시용, f.url 은 캐노니컬).")

@@ -19,8 +19,7 @@ from pathlib import Path
 from sprite_gen.breathe import (DEFAULT_DEPTH, MAX_ROW_STRAIN, SMOOTH_CYCLE_FRAMES, TAPER,
                                 anatomy_report, bake_breathe_sequence, breathe_reads_smoothly,
                                 envelope, fit_breathe_pattern, fitted_breath_count,
-                                anatomy_fingerprint, freeze_anatomy,
-                                phase_frame, resolve_anatomy,
+                                freeze_anatomy, phase_frame, reference_key, resolve_anatomy,
                                 recommended_breathe_frames, row_strain, wave)
 from sprite_gen.curation import state_breathe
 from sprite_gen.extract import solid_alpha_bbox
@@ -87,9 +86,17 @@ def _dome(with_face: bool = False) -> Image.Image:
     return im
 
 
+def _key(tag: str = "fixture") -> str:
+    """테스트용 기준 프레임 키. 키는 그 프레임을 만드는 **입력**의 정규형이라 픽셀과
+    무관하다 — 픽스처에서는 태그 하나면 충분하고, 파이썬/JS 일치는
+    `test_breathe_reference_key.py` 가 전수로 본다."""
+    return reference_key(state="idle", variant="plain", request_stamp="1:1", source_index=0,
+                         source_stamp=tag, pixel_ops=None, transform=None)
+
+
 def _frames(image: Image.Image, count: int = 12, cfg: dict | None = None):
     cfg = dict(cfg or CFG)
-    cfg["anatomy"] = freeze_anatomy(image, cfg)
+    cfg["anatomy"] = freeze_anatomy(image, cfg, _key())
     return bake_breathe_sequence([image] * count, cfg)
 
 
@@ -128,7 +135,7 @@ def test_zero_strain_is_byte_identical_to_the_source() -> None:
     for build in (_humanoid, _winged, _dome):
         src = build()
         cfg = dict(CFG)
-        cfg["anatomy"] = freeze_anatomy(src, cfg)
+        cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
         rest = phase_frame(src, {**cfg, "lag": 0.0}, 0.0)   # lag 0 + 위상 0 = 전 행 g==0
         assert rest.tobytes() == src.tobytes(), f"{build.__name__}: 변형 0 인데 원본과 다르다"
 
@@ -149,7 +156,7 @@ def test_phase_zero_is_not_identity_when_the_wave_travels() -> None:
     소비자 가드 자체는 `tests/test_breathe_off_state.py` 가 JS·파이썬 양쪽으로 지킨다."""
     src = _humanoid()
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
     assert cfg["lag"] > 0, "이 계약은 지연이 있을 때의 이야기다"
     assert phase_frame(src, cfg, 0.0).tobytes() != src.tobytes(), \
         "위상 0 이 항등이면 소비자가 건너뛰어도 되는 것처럼 보인다"
@@ -162,7 +169,7 @@ def test_the_body_axis_column_is_a_fixed_point() -> None:
     src = _humanoid()
     anat = analyze(src)
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
     box = solid_alpha_bbox(src)
     axis_col = box[0] + anat.axis_x
     for i in range(12):
@@ -249,12 +256,20 @@ def test_manual_rigid_row_overrides_detection_and_is_observable() -> None:
 def test_stale_frozen_anatomy_self_heals() -> None:
     src = _humanoid()
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
     other = _winged()
-    # 다른 스프라이트에 옛 해부 결과를 물려도 지문이 어긋나 다시 잰다
+    assert _warp_inputs(analyze(src)) != _warp_inputs(analyze(other)), \
+        "픽스처 쌍이 워프 입력을 안 바꾸면 이 테스트는 아무것도 보증하지 못한다"
+
+    # 다른 스프라이트에 옛 해부 결과를 물려도 **그 프레임에서 다시 잰 값**으로 구워야 한다.
+    # 크기·bbox 만 보면 낡은 해부로 구워도 통과한다 — 실제로 쓴 해부를 픽셀로 대조한다.
     healed = phase_frame(other, cfg, 0.25)
-    assert healed.size == other.size
-    assert solid_alpha_bbox(healed)[3] == solid_alpha_bbox(other)[3]
+    want = phase_frame(other, {k: v for k, v in cfg.items() if k != "anatomy"}, 0.25)
+    assert healed.tobytes() == want.tobytes(), \
+        "낡은 해부가 굽기로 샜다 — 다른 스프라이트의 경계로 구웠다"
+    stale = phase_frame(src, cfg, 0.25)
+    assert healed.tobytes() != stale.tobytes(), \
+        "픽스처가 같은 그림을 내면 위 단언이 공허하다"
 
 
 # ── 6. 위상 시퀀스 ──────────────────────────────────────────────────
@@ -309,7 +324,7 @@ def test_clipping_the_cell_raises_instead_of_cropping_the_head() -> None:
     """여백이 없어 늘어난 프레임이 셀 밖으로 나가면 조용히 자르지 않는다."""
     tight = _humanoid().crop(solid_alpha_bbox(_humanoid()))   # 여백 0
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(tight, cfg)
+    cfg["anatomy"] = freeze_anatomy(tight, cfg, _key())
     with pytest.raises(SystemExit) as err:
         bake_breathe_sequence([tight] * 12, cfg)
     assert "셀 밖으로" in str(err.value)
@@ -385,7 +400,7 @@ def test_repeated_phases_render_byte_identical_frames() -> None:
     """위상이 같으면 구워진 픽셀도 같아야 칸 공유가 정당하다."""
     src = _humanoid()
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
     frames, phases = bake_breathe_sequence([src] * 18, {**cfg, "breaths": 3})
     by_phase: dict[float, bytes] = {}
     for frame, phase in zip(frames, phases):
@@ -403,40 +418,52 @@ def test_manual_rigid_row_beats_a_frozen_anatomy() -> None:
     (실측: cfg 33 을 줘도 얼린 23 이 구워지고 경고도 없었다, 새미 검증 2026-07-25)."""
     src = _humanoid()
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
     frozen_row = cfg["anatomy"]["rigid_row"]
 
-    same, redetected = resolve_anatomy(src, cfg)
-    assert same.rigid_row == frozen_row and redetected is False, "override 없으면 캐시 그대로"
+    same = resolve_anatomy(src, cfg)
+    assert same.rigid_row == frozen_row, "override 없으면 같은 프레임에서 같은 값이 나온다"
 
     want = frozen_row + 10
-    anat, redetected = resolve_anatomy(src, {**cfg, "rigid_row": want})
+    anat = resolve_anatomy(src, {**cfg, "rigid_row": want})
     assert anat.rigid_row == want, "사람이 준 값이 얼린 값에 먹혔다"
-    assert redetected is True, "캐시가 낡았으므로 재검출로 관측돼야 한다"
     assert anat.rigid_source == "manual"
     assert any("rigid-row-override" in w for w in anat.warnings)
 
+    # **거짓말하는 캐시가 굽기로 새지 않는다.** 굽기는 진짜 프레임을 손에 들고 있으니
+    # 재는 게 언제나 옳고, 얼린 값은 웹뷰가 그림을 그리려고 들고 있는 캐시일 뿐이다.
+    lying = {**cfg, "anatomy": {**cfg["anatomy"], "rigid_row": frozen_row + 7,
+                                "axis_x": cfg["anatomy"]["axis_x"] + 5}}
+    assert resolve_anatomy(src, lying).rigid_row == frozen_row, \
+        "사이드카 캐시가 굽기 값을 밀어냈다 — 캐시는 진실이 아니다"
 
-def test_fingerprint_covers_everything_detection_reads() -> None:
-    """지문은 **검출이 읽는 것 전부**를 덮어야 자가 복구가 깨어난다.
 
-    알파만 해시하면 `detect_face` 가 쓰는 휘도(RGB)가 지문 밖에 남는다. 그러면 불투명
-    픽셀 위에 눈을 덧칠하는 편집(큐레이터 픽셀 편집기의 문서화된 기능 — 알파가 1바이트도
-    안 바뀐다)이 재검출을 못 깨우고, 굽기는 낡은 경계로 구우면서 `redetected: False` 로
-    이상 없음을 보고한다 (새미 실측 2026-07-25: 눈 행이 12프레임 중 11프레임 흔들림)."""
+def test_the_bake_re_measures_alpha_invariant_paint() -> None:
+    """불투명 픽셀 위에 눈을 덧칠하면 굽기가 **그 얼굴을 찾아** 경계를 내린다.
+
+    이건 큐레이터 픽셀 편집기의 문서화된 기능이고 알파가 1바이트도 안 바뀐다. 예전 설계는
+    "얼린 해부를 믿을지" 를 프레임 RGBA 해시로 판정했는데, 그 해시가 웹뷰와 영구 불일치를
+    만드는 원흉이었다 (BICUBIC vs NEAREST). 지금은 굽기가 **캐시를 아예 안 믿고** 매번
+    자기 기준 프레임에서 재므로, 판정 자체가 필요 없다 — 그래서 이 테스트는 지문이 아니라
+    구워진 해부를 본다.
+
+    사용자 쪽 사이드카 캐시가 낡았는지는 `anatomy_report(...)["sidecar_drift"]` 가 값으로
+    보고하고, 웹뷰의 미리보기 신선도는 `reference_key`(입력 기반)가 판정한다."""
     plain = _dome(with_face=False)
     painted = _dome(with_face=True)          # 알파 동일, RGB 만 다름
     assert plain.getchannel("A").tobytes() == painted.getchannel("A").tobytes(), \
         "이 픽스처 쌍은 알파가 같아야 의미가 있다"
-    assert anatomy_fingerprint(plain) != anatomy_fingerprint(painted), \
-        "알파 불변 색 편집을 지문이 못 잡는다 — self-heal 이 안 깨어난다"
 
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(plain, cfg)      # 얼굴 없는 상태로 확정
-    anat, redetected = resolve_anatomy(painted, cfg)   # 그 뒤 눈을 덧칠
-    assert redetected is True, "지문이 어긋났는데 재검출이 안 돌았다"
+    cfg["anatomy"] = freeze_anatomy(plain, cfg, _key())      # 얼굴 없는 상태로 확정
+    anat = resolve_anatomy(painted, cfg)                      # 그 뒤 눈을 덧칠
     assert anat.face is not None and anat.rigid_source == "face", \
-        "재검출이 돌았으면 덧칠된 얼굴을 찾아 경계를 내려야 한다"
+        "덧칠된 얼굴을 못 찾았다 — 굽기가 낡은 경계로 굽는다"
+
+    report = anatomy_report([painted], cfg)
+    assert report["matches_sidecar"] is False, "사이드카가 낡았는데 보고가 조용하다"
+    assert "rigid_row" in (report["sidecar_drift"] or {}), \
+        "무엇이 어긋났는지 값으로 보고해야 한다 (원칙 6)"
 
 
 def test_out_of_range_values_are_refused_instead_of_clamped() -> None:
@@ -507,11 +534,10 @@ def test_row_anatomy_is_shared_across_the_sequence() -> None:
         "픽스처 쌍이 워프 입력을 안 바꾸면 이 테스트는 아무것도 보증하지 못한다"
 
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(base, cfg)
+    cfg["anatomy"] = freeze_anatomy(base, cfg, _key())
     seq = [base, other, base, other]
     frames, phases = bake_breathe_sequence(seq, cfg)
-    anat, redetected = resolve_anatomy(base, cfg)
-    assert redetected is False
+    anat = resolve_anatomy(base, cfg)
 
     diverged = 0
     for i, frame in enumerate(frames):
@@ -527,3 +553,19 @@ def test_row_anatomy_is_shared_across_the_sequence() -> None:
     report = anatomy_report(seq, cfg)
     assert "rigid_row_varies" not in report, "경계가 프레임마다 달라질 수 있는 표현이 남아 있다"
     assert report["anatomy"]["rigid_row"] == anat.rigid_row
+
+
+def test_a_non_integer_breaths_is_refused_not_truncated() -> None:
+    """비정수는 조용히 깎지 않는다 (round-7 R2).
+
+    `int(2.7) -> 2` 로 되돌려도 전체 스위트가 통과했다 — 그물이 없었다
+    (슉슉이 변이 검증 2026-07-26). 파이썬이 버리고 미러가 반올림하면 굽기 2회 /
+    프리뷰 3회가 되고, 첫 autosave 가 사이드카를 반올림값으로 덮는다."""
+    from sprite_gen.curation import state_breathe
+    for value in (2.7, "3.5", 1.0001):
+        with pytest.raises(SystemExit) as err:
+            state_breathe({"states": {"idle": {"breathe": {"depth": 0.06, "breaths": value}}}}, "idle")
+        assert "정수가 아니다" in str(err.value), f"{value!r}: 정수 계약이 아닌 사유로 죽었다"
+    # 정수로 표현되는 실수는 받는다 (3.0 == 3)
+    assert state_breathe({"states": {"idle": {"breathe": {"depth": 0.06, "breaths": 3.0}}}},
+                         "idle")["breaths"] == 3

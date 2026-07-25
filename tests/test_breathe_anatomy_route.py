@@ -78,8 +78,10 @@ def run_dir(tmp_path):
 def test_the_route_helper_returns_a_usable_reference_frame(run_dir):
     """예외 없이 셀 크기의 RGBA 프레임이 나와야 한다."""
     import serve_curation
-    frame = serve_curation._breathe_source_frame(run_dir, "idle")
+    frame, key = serve_curation._breathe_source_frame(run_dir, "idle")
     assert isinstance(frame, Image.Image), f"기준 프레임을 못 만든다 ({frame!r})"
+    assert isinstance(key, str) and key.startswith("breathe-ref-v1|"), \
+        f"기준 프레임 키를 같이 못 내놓는다 ({key!r}) — 웹뷰가 신선도를 못 본다"
     assert frame.mode == "RGBA"
     assert frame.size == (CELL, CELL), "굽기와 같은 셀 크기여야 한다"
 
@@ -89,7 +91,8 @@ def test_the_route_helper_feeds_freeze_anatomy(run_dir):
     import serve_curation
     from sprite_gen.breathe import freeze_anatomy
 
-    frozen = freeze_anatomy(serve_curation._breathe_source_frame(run_dir, "idle"), {})
+    frame, key = serve_curation._breathe_source_frame(run_dir, "idle")
+    frozen = freeze_anatomy(frame, {}, key)
     for key in ("rigid_row", "neck_row", "basis_row", "axis_x", "torso_half",
                 "max_half", "width", "height", "fingerprint"):
         assert key in frozen, f"라우트 응답에 {key} 가 없다"
@@ -101,10 +104,10 @@ def test_a_manual_rigid_row_is_honoured(run_dir):
     import serve_curation
     from sprite_gen.breathe import freeze_anatomy
 
-    frame = serve_curation._breathe_source_frame(run_dir, "idle")
-    auto = freeze_anatomy(frame, {})
+    frame, key = serve_curation._breathe_source_frame(run_dir, "idle")
+    auto = freeze_anatomy(frame, {}, key)
     want = min(auto["height"] - 2, auto["rigid_row"] + 5)
-    manual = freeze_anatomy(frame, {"rigid_row": want})
+    manual = freeze_anatomy(frame, {"rigid_row": want}, key)
     assert manual["rigid_row"] == want and manual["rigid_source"] == "manual"
 
 
@@ -116,11 +119,11 @@ def test_the_reference_is_the_frame_the_bake_starts_from(run_dir):
     첫 판은 `_breathe_source_frame` 을 두 번 불러 비교하는 **항등식**이었다 — 이름이
     단언하는 것을 한 번도 안 물었고 그 사유로는 절대 실패할 수 없었다 (슉슉이 note
     2026-07-26, round-6 N1 과 같은 클래스). 이제 실제로 `compose_gif` 를 돌려 manifest 가
-    기록한 `reference_fingerprint` 와 대조한다."""
-    import argparse
+    기록한 **해부 값**과 대조한다 — 굽기는 지문을 안 찍는다(캐시를 안 믿고 매번 다시
+    잰다). 프리뷰가 지켜야 하는 것도 지문이 아니라 "굽기와 같은 경계로 그린다" 이다."""
     import serve_curation
     from sprite_gen import compose_gif
-    from sprite_gen.breathe import anatomy_fingerprint
+    from sprite_gen.breathe import freeze_anatomy
 
     # 사이드카에 호흡을 켜고 실제로 굽는다
     from sprite_gen.curation import stamp_curation
@@ -133,12 +136,15 @@ def test_the_reference_is_the_frame_the_bake_starts_from(run_dir):
     compose_gif.run(run_dir=run_dir, out_dir=out)
     manifest = json.loads((out / "gif-manifest.json").read_text(encoding="utf-8"))
     baked = next(e for e in manifest["exports"] if e["state"] == "idle")
-    baked_fp = baked["breathe"]["resolved"]["reference_fingerprint"]
+    baked_anat = baked["breathe"]["resolved"]["anatomy"]
 
-    served = serve_curation._breathe_source_frame(run_dir, "idle")
-    assert anatomy_fingerprint(served) == baked_fp, (
-        "라우트가 얼리는 기준 프레임이 굽기가 쓰는 프레임과 다르다 — "
-        "지문이 영구 불일치라 프리뷰·영상 내보내기가 계속 거부된다")
+    frame, key = serve_curation._breathe_source_frame(run_dir, "idle")
+    served = freeze_anatomy(frame, {}, key)
+    drift = {k: [baked_anat[k], served[k]] for k in baked_anat
+             if k in served and baked_anat[k] != served[k]}
+    assert not drift, (
+        "라우트가 얼리는 해부가 굽기가 쓰는 해부와 다르다 — 프리뷰가 굽기와 다른 "
+        f"경계로 그린다: {drift}")
 
 
 def test_an_unknown_state_is_reported_not_crashed(run_dir):

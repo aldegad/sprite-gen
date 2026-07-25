@@ -435,19 +435,10 @@ function startPreview(state) {
         drawFrameInto(baseCtx, (canonical && canonical.complete && canonical.naturalWidth) ? canonical : image,
           tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
         const pattern = breathePattern(bcfg, play.length);
-        // 기준 프레임(재생 첫 슬롯)으로 신선도를 본다 — 굽기가 해부를 확정하는 그 프레임이다
-        const refFrame = frameOf(state.name, play[0]);
-        const refImg = refFrame ? img(bakeFrameUrl(state.name, refFrame)) : null;
-        let ref = null;
-        if (refImg && refImg.complete && refImg.naturalWidth) {
-          ref = document.createElement("canvas");
-          ref.width = cw; ref.height = ch;
-          const rx = ref.getContext("2d");
-          rx.imageSmoothingEnabled = false;
-          drawFrameInto(rx, refImg, getTransform(state.name, play[0]), cw, ch,
-            snapScaleFor(state.name), getPixelOps(state.name, play[0]));
-        }
-        ctx.drawImage(bcfg ? breatheComposeForPreview(base, bcfg, pattern[pv.cursor] || 0, ref) : base, 0, 0);
+        // 신선도 기준 = 재생 첫 슬롯의 **키** (굽기가 해부를 확정하는 프레임). 그림을 다시
+        // 그려 지문을 찍던 옛 방식은 리샘플러가 굽기와 달라 영구 불일치였다.
+        const refKey = breatheReferenceKey(state.name);
+        ctx.drawImage(bcfg ? breatheComposeForPreview(base, bcfg, pattern[pv.cursor] || 0, refKey) : base, 0, 0);
       } else {
         // 픽셀퍼펙트 줄은 카드와 동일하게 격자 재양자화로 그린다 (프리뷰 = 굽기)
         drawFrameInto(ctx, image, tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));

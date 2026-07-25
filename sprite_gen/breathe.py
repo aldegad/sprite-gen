@@ -51,6 +51,7 @@ import math
 from PIL import Image
 
 from sprite_gen.anatomy import Anatomy, analyze
+from sprite_gen.curation import normalize_transform
 from sprite_gen.extract import solid_alpha_bbox
 
 # 강체 경계에서 변형 강도가 0 이 되기까지의 테이퍼 반폭 (콘텐츠 높이 비율).
@@ -226,21 +227,83 @@ def _fnv1a(data: bytes) -> int:
     return h
 
 
-def anatomy_fingerprint(frame: Image.Image) -> str:
-    """해부 결과가 파생된 소스의 지문 — 캔버스 크기 + solid bbox + **RGBA 전체** 해시.
+def _num(value) -> str:
+    """키에 들어갈 수의 정규형 — 파이썬과 JS 가 **같은 문자열**을 내야 한다.
 
-    **검출이 읽는 것을 전부 덮어야 한다.** 알파만 해시하면 `detect_face` 가 쓰는 휘도(RGB)가
-    지문 밖에 남아, 불투명 픽셀 위에 눈·입을 덧칠하는 편집(큐레이터 픽셀 편집기의 문서화된
-    기능 — 알파가 1바이트도 안 바뀐다)이 자가 복구를 못 깨운다. 그러면 굽기는 낡은 경계로
-    구우면서 `redetected: False` 로 "이상 없음" 을 보고한다 (새미 실측 2026-07-25: 눈 행이
-    12프레임 중 11프레임에서 흔들렸고 관측에는 아무것도 안 남았다)."""
-    box = solid_alpha_bbox(frame) or (0, 0, 0, 0)
-    digest = _fnv1a(frame.convert("RGBA").tobytes())
-    return f"{frame.width}x{frame.height}:{box[0]},{box[1]},{box[2]},{box[3]}:{digest:08x}"
+    `f"{v:.6f}"` 와 `v.toFixed(6)` 는 6번째 자리가 정확히 반올림 경계일 때 갈린다(파이썬은
+    십진 표현 기준 round-half-even, JS 는 이진값 기준). `repr` 계열도 지수 표기가 다르다
+    (`1e-07` vs `1e-7`). 그래서 **부동소수 곱·합·floor 만** 쓴다 — 양쪽 다 IEEE754 double 이라
+    같은 입력에 같은 결과가 나오는 연산이다."""
+    if value is None:
+        return "~"
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, (int, float)):
+        return str(math.floor(float(value) * 1000000.0 + 0.5))
+    return str(value)
 
 
-def resolve_anatomy(reference: Image.Image, cfg: dict) -> tuple[Anatomy, bool]:
-    """(해부, 재검출 여부) — **줄 전체가 공유하는 한 벌**을 기준 프레임에서 확정한다.
+def _canon(value) -> str:
+    """키에 들어갈 값의 정규 직렬화 — dict 는 키 정렬, 수는 `_num`."""
+    if isinstance(value, dict):
+        return "{" + ",".join(f"{k}={_canon(value[k])}" for k in sorted(value, key=str)) + "}"
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_canon(v) for v in value) + "]"
+    return _num(value)
+
+
+def reference_key(*, state: str, variant: str, request_stamp: str, source_index: int,
+                  source_stamp: str, pixel_ops, transform) -> str:
+    """기준 프레임의 **정체성** — 그 프레임을 만드는 입력들로만 만든다. 픽셀은 안 읽는다.
+
+    예전엔 이게 *변형 결과 RGBA* 의 해시였다. 그런데 굽기는 `apply_transform` 에서
+    **BICUBIC** 으로 리샘플하고(`snap_scale` 없는 런 = 기본 런 전부) 웹뷰 캔버스는
+    `imageSmoothingEnabled=false`, 즉 **NEAREST** 다. 같은 원본에 같은 변형을 걸어도 두 쪽이
+    만드는 그림이 다르니 지문은 **영구 불일치**였다 — 회전·확대가 걸린 줄은 프리뷰가 영원히
+    원본으로 떨어지고 영상 내보내기가 영구 차단됐으며, 안내대로 "해부를 갱신" 해도 라우트가
+    또 BICUBIC 프레임으로 같은 숫자를 만들어 **절대 안 풀렸다** (슉슉이 실측 2026-07-26:
+    rotate 3°에서 555px 상이, 정수 이동만 걸린 줄은 우연히 일치).
+
+    입력을 해시하면 리샘플러가 식에서 아예 빠진다. 여기 들어가는 값은 전부 사이드카(사람의
+    의도)와 서버가 준 파일 스탬프라, 웹뷰가 **동기로 정확히** 아는 것들이다. 덤으로 웹뷰가
+    신선도 판정에 캔버스를 읽을 이유가 없어져서 "어느 캔버스를 쟀나" 계열 결함(9·10라운드)이
+    구조적으로 사라진다.
+
+    실패 방향도 안전하다: 런을 복사해 mtime 이 바뀌면 키가 달라져 **시끄럽게 거부**하고 한 번
+    다시 잰다 — 조용히 낡은 숫자로 굽는 반대 방향이 아니다.
+
+    ## 왜 이 재료들인가 (그리고 셀·snap 이 왜 없는가)
+
+    재료는 전부 웹뷰가 **동기로 정확히** 아는 것이어야 한다. 사이드카 값(변종·픽셀편집·변형)은
+    웹뷰가 소유한 canon 이고, 파일 스탬프 둘은 서버가 상태 응답에 실어 보낸다.
+
+    셀 크기와 `snap_scale` 은 뺐다 — 둘 다 `sprite-request.json` 과 변종의 순수 함수인데,
+    변종은 이미 키에 있고 request 는 `request_stamp` 로 통째로 덮인다. 파생값을 또 넣으면
+    양쪽이 그 파생을 각자 재구현해야 하고(웹뷰의 측정 k 는 `pixel_snap_scale` 과 다른
+    검출기다) 거기서 드리프트가 난다. 원인을 덮는 편이 결과를 흉내내는 것보다 안전하다."""
+    # 정규화를 **키 안에서** 한다. 호출부에 맡기면 한쪽은 사이드카 원문(`{"rotate": 3}`)을,
+    # 다른 쪽은 항등 머지본(7키 전부)을 넘겨 같은 프레임이 다른 키를 갖는다 — 변형이 없는
+    # 프레임(대부분)이 정확히 그 모양이었다.
+    return "|".join((
+        "breathe-ref-v1", str(state), str(variant), str(request_stamp),
+        str(int(source_index)), str(source_stamp),
+        _canon(pixel_ops or {}), _canon(normalize_transform(transform)),
+    ))
+
+
+def anatomy_fingerprint(key: str) -> str:
+    """기준 프레임 키의 지문 — 변종·소스 인덱스는 읽을 수 있게 남기고 나머지는 해시한다.
+
+    키를 그대로 쓰면 거부 메시지는 친절해지지만 사이드카가 픽셀 편집량만큼 부푼다(칠한
+    점 하나가 키 한 조각이다). 앞머리 두 조각만 남겨 "어느 변종의 몇 번 프레임" 은
+    보이게 하고, 입력 전체는 해시로 접는다."""
+    parts = key.split("|")
+    variant, index = (parts[2], parts[4]) if len(parts) > 5 else ("?", "?")
+    return f"{variant}:{index}:{_fnv1a(key.encode('utf-8')):08x}"
+
+
+def resolve_anatomy(reference: Image.Image, cfg: dict) -> Anatomy:
+    """**줄 전체가 공유하는 한 벌**을 기준 프레임에서 확정한다.
 
     해부는 **캐릭터의 속성이지 프레임의 속성이 아니다.** 깜빡임 프레임이라고 목이 옮겨
     가지 않는다. 프레임마다 다시 재면 검출 지터로 `rigid_row` 가 흔들리고(실측 2↔3),
@@ -259,24 +322,16 @@ def resolve_anatomy(reference: Image.Image, cfg: dict) -> tuple[Anatomy, bool]:
     그대로 쓰면 사람이 고친 숫자가 조용히 버려진다 (새미 검증 2026-07-25: cfg 33 을
     줘도 얼린 23 이 구워졌고 경고도 없었다).
 
-    **재검출 여부를 돌려주는 게 계약이다.** 자가 복구가 조용히 일어나면 사이드카의
-    숫자와 실제로 구운 숫자가 다른데도 아무도 모른다 (원칙 6). 굽기 경로는 이 값을
-    manifest 에 실어야 한다 — `anatomy_report` 참조."""
-    frozen = cfg.get("anatomy")
-    override = cfg.get("rigid_row")
-    stale_override = (isinstance(frozen, dict) and override is not None
-                      and int(override) != frozen.get("rigid_row"))
-    if (isinstance(frozen, dict) and not stale_override
-            and frozen.get("fingerprint") == anatomy_fingerprint(reference)):
-        face = frozen.get("face")
-        return Anatomy(width=frozen["width"], height=frozen["height"], axis_x=frozen["axis_x"],
-                       neck_row=frozen["neck_row"], neck_source=frozen["neck_source"],
-                       rigid_row=frozen["rigid_row"], rigid_source=frozen["rigid_source"],
-                       basis_row=frozen["basis_row"], torso_half=frozen["torso_half"],
-                       max_half=frozen["max_half"],
-                       face=tuple(face) if face else None,
-                       warnings=tuple(frozen.get("warnings", ()))), False
-    return analyze(reference, rigid_row=override), True
+    **굽기는 얼린 해부를 쓰지 않는다 — 매번 자기 기준 프레임에서 다시 잰다.** 굽기는
+    진짜 프레임을 손에 들고 있으니 재는 게 언제나 옳고, 얼린 값은 웹뷰가 미리보기를
+    그리려고 들고 있는 **캐시**일 뿐이다 (C11: `rigid_row` 는 의도, `anatomy` 는 캐시).
+    예전엔 여기서 얼린 값을 신뢰할지 판정하려고 프레임 RGBA 를 해시했는데, 그 해시가
+    웹뷰와 영구 불일치를 만드는 원흉이었다 — `reference_key` 주석 참조.
+
+    사이드카 캐시가 실제로 구운 값과 어긋났는지는 `anatomy_report` 가 대조해서 보고한다.
+    "재검출했나(proxy)" 보다 "**사이드카와 다른 값을 구웠나**" 가 원칙 6이 요구하는 바로
+    그 관측이다."""
+    return analyze(reference, rigid_row=cfg.get("rigid_row"))
 
 
 def anatomy_report(images: list[Image.Image], cfg: dict) -> dict:
@@ -286,23 +341,32 @@ def anatomy_report(images: list[Image.Image], cfg: dict) -> dict:
     `rigid_row_varies` 를 실어 보냈는데, 그건 관측이 아니라 결함의 증상이었다 —
     경계가 프레임마다 움직이면 강체 구간이 프레임 간 같은 구간이 아니다."""
     if not images:
-        return {"anatomy": None, "redetected": False, "warnings": []}
-    anat, redetected = resolve_anatomy(images[0], cfg)
+        return {"anatomy": None, "matches_sidecar": True, "warnings": []}
+    anat = resolve_anatomy(images[0], cfg)
+    baked = anat.as_dict()
+    frozen = cfg.get("anatomy")
+    # 사이드카가 들고 있던 캐시와 실제로 구운 값의 **대조**. 캐시가 없으면 대조할 게 없다.
+    # 지문 비교가 아니라 값 비교인 게 핵심이다 — 지문은 웹뷰가 자기 미리보기의 신선도를
+    # 판정하는 도구이고, 여기서 궁금한 건 "사이드카 숫자와 다른 그림을 구웠나" 다.
+    stale = None
+    if isinstance(frozen, dict):
+        stale = {k: [frozen.get(k), v] for k, v in baked.items()
+                 if k in frozen and frozen.get(k) != v}
     return {
-        "anatomy": anat.as_dict(),
-        "redetected": redetected,
-        "reference_fingerprint": anatomy_fingerprint(images[0]),
+        "anatomy": baked,
+        "matches_sidecar": not stale,
+        "sidecar_drift": stale or None,
         "warnings": sorted(anat.warnings),
     }
 
 
-def freeze_anatomy(frame: Image.Image, cfg: dict) -> dict:
+def freeze_anatomy(frame: Image.Image, cfg: dict, key: str) -> dict:
     """큐레이션 시점에 해부를 1회 돌려 사이드카에 얼릴 dict 를 만든다.
 
     이걸 사이드카에 넣어두면 굽기와 큐레이터 웹뷰가 같은 숫자를 읽는다 — 웹뷰는
     검출을 재구현하지 않고 warp 만 미러링하면 된다 (검출 중복 제거)."""
     anat = analyze(frame, rigid_row=cfg.get("rigid_row"))
-    return {**anat.as_dict(), "fingerprint": anatomy_fingerprint(frame)}
+    return {**anat.as_dict(), "fingerprint": anatomy_fingerprint(key)}
 
 
 # ── 재생 시퀀스 계약 (compose/GIF 진입점) ───────────────────────────
@@ -353,7 +417,7 @@ def phase_frame(frame: Image.Image, cfg: dict, phase: float,
     `anat` 를 주면 그것을 쓴다 — 줄 전체가 한 벌을 공유해야 하므로 호출자가 한 번
     확정해 넘기는 게 정석이다. 생략하면 이 프레임을 기준으로 확정한다 (단발 호출용)."""
     if anat is None:
-        anat, _ = resolve_anatomy(frame, cfg)
+        anat = resolve_anatomy(frame, cfg)
     depth = float(cfg.get("depth", DEFAULT_DEPTH))
     strain = row_strain(anat, depth)
     if strain > MAX_ROW_STRAIN:
@@ -372,5 +436,5 @@ def bake_breathe_sequence(images: list[Image.Image], cfg: dict) -> tuple[list[Im
     if not images:
         return images, []
     phases = fit_breathe_pattern(len(images), cfg)
-    anat, _ = resolve_anatomy(images[0], cfg)      # 줄 전체가 한 벌을 공유한다
+    anat = resolve_anatomy(images[0], cfg)        # 줄 전체가 한 벌을 공유한다
     return [phase_frame(images[i], cfg, phases[i], anat) for i in range(len(images))], phases

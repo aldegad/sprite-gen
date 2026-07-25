@@ -890,21 +890,9 @@ function openZoom(stateName, idx, keepWidth) {
 
     // 굽기가 해부를 확정하는 프레임 = 재생 첫 슬롯. 신선도 판정은 이 프레임으로만 한다
     // (프레임마다 보면 깜빡임처럼 정상적으로 다른 프레임까지 거부해 프리뷰가 죽는다).
-    const breatheRef = () => {
-      const play = playList(stateName);
-      if (!play.length) return null;
-      const f = frameOf(stateName, play[0]);
-      const image = f ? img(bakeFrameUrl(stateName, f)) : null;
-      if (!(image && image.complete && image.naturalWidth)) return null;
-      const c = document.createElement("canvas");
-      c.width = cellW;
-      c.height = cellH;
-      const cx2 = c.getContext("2d");
-      cx2.imageSmoothingEnabled = false;
-      drawFrameInto(cx2, image, getTransform(stateName, play[0]), cellW, cellH,
-        snapScaleFor(stateName), getPixelOps(stateName, play[0]));
-      return c;
-    };
+    // 그림이 아니라 **키**다. 굽기(BICUBIC)와 캔버스(NEAREST)는 같은 원본·같은 변형에도
+    // 다른 픽셀을 만들어서, 여기서 프레임을 다시 그려 지문을 찍으면 영구 불일치가 된다.
+    const breatheRef = () => breatheReferenceKey(stateName);
 
     // 시퀀스 재생 미리보기 — 실제 재생 순서(playList: 깜빡임 포함) 위에 위상을 얹는다.
     const bcanvas = stage.querySelector(".snap-canvas");
@@ -962,10 +950,8 @@ function openZoom(stateName, idx, keepWidth) {
       // 위치와 저장되는 행 번호가 굽기와 어긋난다 — 재생 순서만 바꿔도 도달하고,
       // 골든 픽스처에서 8px(50px 캐릭터의 16%) 어긋났다 (슉슉이 실측 2026-07-26).
       // 변형·픽셀편집을 적용한 뒤 재는 것은 그대로다 (실사고 2026-07-18 수홍).
-      const play0 = playList(stateName)[0];
-      const refIdx = play0 === undefined ? idx : play0;
-      const fr = frameOf(stateName, refIdx);
-      const canonImg = fr ? img(bakeFrameUrl(stateName, fr)) : null;
+      const { index: refIdx, url: refUrl } = breatheGeometryFrame(stateName, idx);
+      const canonImg = refUrl ? img(refUrl) : null;
       if (canonImg && canonImg.complete && canonImg.naturalWidth) {
         const cvs = document.createElement("canvas");
         cvs.width = cellW;
@@ -1195,9 +1181,8 @@ function openZoom(stateName, idx, keepWidth) {
       if (bImg) bImg.addEventListener("load", () => initSilhouette(), { once: true });
       // 지오메트리는 **기준 프레임의 굽기 파일**에서 잰다 — 기다릴 로드도 그 이미지다.
       // 다른 이미지의 로드를 기다리면 재시도가 엉뚱한 시점에 돌아 선이 안 잡힌다.
-      const play0g = playList(stateName)[0];
-      const fr0 = frameOf(stateName, play0g === undefined ? idx : play0g);
-      const canon0 = fr0 ? img(bakeFrameUrl(stateName, fr0)) : null;
+      const geom0 = breatheGeometryFrame(stateName, idx);
+      const canon0 = geom0.url ? img(geom0.url) : null;
       if (canon0 && !canon0.complete) canon0.addEventListener("load", () => initSilhouette(), { once: true });
       setTimeout(retryGeom, 120);
     }
