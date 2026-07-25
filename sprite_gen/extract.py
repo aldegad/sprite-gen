@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+from bisect import bisect_left
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -1153,67 +1154,128 @@ def crosscheck_pitch_runlen(
 
 
 
+# 임계값 t = ⌊평균⌋ 별 바이트 변환표. `_LE_KEEP[t]` 는 `v ≤ t` 를 그대로 두고 그 위를
+# 0 으로 접어 `sum()` 이 곧 `S_lo` 가 되게 하고, `_LE_ONES[t]` 는 같은 조건을 1/0 으로
+# 접어 `sum()` 이 `C_lo` 가 되게 한다 (`_grid_score_edges` 의 정수 정식화).
+_LE_KEEP: list[bytes] = [bytes(range(t + 1)) + bytes(255 - t) for t in range(256)]
+_LE_ONES: list[bytes] = [b"\x01" * (t + 1) + b"\x00" * (255 - t) for t in range(256)]
+
+
+def _grid_rows(component: Image.Image) -> tuple[list[list[int]], list[bytes]]:
+    """행별 불투명 픽셀 색인 — (행별 x 좌표 오름차순, 그 픽셀들의 RGB 를 이어붙인 bytes).
+
+    채점은 셀 안의 불투명 픽셀만 본다. 격자 위상이 바뀌어도 이 색인은 그대로이므로
+    컴포넌트당 한 번만 만들어 `_best_phase` 의 위상 스캔 전체가 공유한다. 압축해 두면
+    셀 픽셀 수집이 파이썬 픽셀 루프가 아니라 **bytes 슬라이스**가 된다.
+    """
+    if component.mode != "RGBA":
+        # 알파로 걸러 낸다 — 채널 수가 다르면 `row[3::4]` 가 조용히 엉뚱한 바이트를 읽는다.
+        raise ValueError(f"_grid_rows expects an RGBA component, got {component.mode!r}")
+    w, h = component.width, component.height
+    data = component.tobytes()  # RGBA, 행 우선
+    row_pos: list[list[int]] = []
+    row_rgb: list[bytes] = []
+    for y in range(h):
+        base = y * w * 4
+        row = data[base:base + w * 4]
+        alpha = row[3::4]
+        pos = [x for x in range(w) if alpha[x] >= 128]
+        row_pos.append(pos)
+        row_rgb.append(b"".join(row[4 * x:4 * x + 3] for x in pos))
+    return row_pos, row_rgb
+
+
+def _grid_row_splits(row_pos: list[list[int]], xs: tuple[int, ...] | list[int],
+                     w: int) -> list[list[int]]:
+    """행마다 x 절단선이 압축 색인의 어느 인덱스에 떨어지는지 (셀 픽셀 슬라이스 경계).
+
+    x 분할은 6종 정도만 나오는데 격자는 36종이라, 분할별로 한 번 구해 두면 셀마다
+    `bisect` 를 다시 돌리지 않는다.
+    """
+    cuts = [min(e, w) for e in xs]
+    out: list[list[int]] = []
+    for pos in row_pos:
+        lo = 0
+        idx = []
+        for cut in cuts:
+            lo = bisect_left(pos, cut, lo)
+            idx.append(lo)
+        out.append(idx)
+    return out
+
+
 def _grid_uniformity(component: Image.Image, pitch: tuple[float, float],
                      phase: tuple[float, float],
-                     flat: list | None = None,
-                     width: int | None = None, height: int | None = None) -> float:
-    """격자 가설의 셀 내부 색 분산 (낮을수록 진짜 격자). 불투명 픽셀만, 셀 크기 가중.
-
-    핫스팟 (실측: 상태당 추출의 ~절반이 여기 — `_best_phase` 가 8×8 위상을 훑는다).
-    산술은 원본과 **바이트 동일**하게 유지한다 (같은 순서의 순차 float 덧셈·같은
-    정수합·같은 나눗셈). 최적화는 순전히 호출 오버헤드 제거다: (1) 프레임 픽셀을
-    행 우선 flat 리스트로 한 번만 실어 `_best_phase` 의 64회 호출이 재로딩하지 않게
-    하고, (2) `sum()`/제너레이터 대신 명시 누적 루프로 같은 순서의 덧셈을 돌린다.
-    """
-    w = component.width if width is None else width
-    h = component.height if height is None else height
-    if flat is None:
-        flat = list(component.getdata())
+                     rows: tuple[list[list[int]], list[bytes]] | None = None) -> float:
+    """격자 가설의 셀 내부 색 분산 (낮을수록 진짜 격자). 불투명 픽셀만, 셀 크기 가중."""
+    w, h = component.width, component.height
+    if rows is None:
+        rows = _grid_rows(component)
     xs = _grid_edges(w, pitch[0], phase[0])
     ys = _grid_edges(h, pitch[1], phase[1])
-    return _grid_score_edges(flat, w, h, xs, ys)
+    return _grid_score_edges(rows, w, h, xs, ys)
 
 
-def _grid_score_edges(flat: list, w: int, h: int,
-                      xs: list[int], ys: list[int]) -> float:
+def _grid_score_edges(rows: tuple[list[list[int]], list[bytes]], w: int, h: int,
+                      xs: tuple[int, ...] | list[int], ys: tuple[int, ...] | list[int],
+                      splits: list[list[int]] | None = None) -> float:
     """`_grid_uniformity` 의 채점 코어 — 격자 경계가 이미 정해진 뒤의 순수 계산.
+
+    핫스팟이다 (실측 2026-07-25: `founder_v8 down_idle` 추출 35.5s 중 `_best_phase` 가
+    23.9s = 67%, 컴포넌트당 유니크 격자 36 × 셀 1344 ≈ 48k 셀 · 픽셀 방문 6.6M 회).
+
+    **정수 정확 산술** — 셀 편차를 float 로 누적하지 않는다. 셀의 한 채널 값 `v` 와
+    평균 `m = s/n` 에 대해 `Σ(v − m) = 0` 이므로 평균 아래/위의 절대편차 합이 같고,
+
+        Σ|v − m| = 2·(m·C_lo − S_lo)        (C_lo, S_lo = v ≤ ⌊m⌋ 의 개수·합)
+
+    양변에 `n` 을 곱하면 `n·Σ|v − m| = 2·(s·C_lo − n·S_lo)` 로 **전부 정수**다. 셀의
+    기여분 `dev·n` 은 `T/n` 이고(`dev = T/n²`), `T` 는 세 채널의 정확한 정수합이다.
+    부동소수는 셀당 나눗셈 한 번과 누적에만 남는다.
+
+    이 정식화 이전에는 원본 float 축약식(`sum(sum(abs(...)))`)을 글자 그대로 재현해
+    바이트 동일을 계약으로 삼았다. 계약을 **정확한 유리수 값**으로 교체했다 (plan
+    `sprite-gen/best-phase-hotspot`): 새 값은 같은 양의 정확판이라 옛 float 누적과
+    마지막 ULP 에서 갈리지만(실측 최대 상대차 1.8e-16), 파이프라인이 실제로 쓰는
+    출력인 `_best_phase` 의 argmin 은 전수 동일하다(founder_v8 8 컴포넌트 × 64 위상).
+
+    `C_lo`/`S_lo` 는 `bytes.translate` + `sum` 으로 C 레벨에서 뽑는다 — 임계값별 변환표는
+    256개뿐이라 모듈 상수로 굽는다.
 
     `_best_phase` 가 이 코어를 (xs, ys) 로 메모이즈한다: 8단계 위상 스캔은 `_grid_edges`
     의 정수 스냅 때문에 서로 다른 위상이 **같은 정수 경계**로 자주 붕괴한다 (offset 이
     피치의 1/4 미만이면 lead=0 등). 같은 경계 → 같은 계산 → 같은 값이므로 캐시는
-    바이트 동일하며, 64회 픽셀 순회가 고유 경계 수만큼으로 줄어든다.
+    정확하며, 64회 격자 순회가 고유 경계 수(실측 36)만큼으로 줄어든다.
     """
+    row_pos, row_rgb = rows
+    if splits is None:
+        splits = _grid_row_splits(row_pos, xs, w)
     total_dev = 0.0
     total_n = 0
+    ncol = len(xs) - 1
     for yi in range(len(ys) - 1):
-        y_lo, y_hi = ys[yi], min(ys[yi + 1], h)
-        for xi in range(len(xs) - 1):
-            x_lo, x_hi = xs[xi], min(xs[xi + 1], w)
-            # 평균 패스 — 정수 채널합은 순서 무관·정확(CPython sum 정수 경로와 값 동일).
-            acc = []
-            append = acc.append
-            s0 = s1 = s2 = 0
-            for y in range(y_lo, y_hi):
-                base = y * w
-                for x in range(x_lo, x_hi):
-                    q = flat[base + x]
-                    if q[3] >= 128:
-                        r, g, b = q[0], q[1], q[2]
-                        append((r, g, b))
-                        s0 += r
-                        s1 += g
-                        s2 += b
-            n = len(acc)
+        band = range(ys[yi], min(ys[yi + 1], h))
+        for xi in range(ncol):
+            parts = []
+            add = parts.append
+            for y in band:
+                idx = splits[y]
+                lo, hi = idx[xi], idx[xi + 1]
+                if hi > lo:
+                    add(row_rgb[y][3 * lo:3 * hi])
+            cell = b"".join(parts)
+            n = len(cell) // 3
             if n < 2:
                 continue
-            # `mean = [sum(c[k])/n for k]` 와 값 동일 (같은 정수합 / 같은 n).
-            mean = [s0 / n, s1 / n, s2 / n]
-            # 편차는 원본과 **바이트 동일**해야 한다: CPython 3.12+ 의 sum() 은 float 에
-            # 대해 보정합(Neumaier)을 쓰므로 순진한 += 루프와 마지막 ULP 가 갈린다.
-            # 따라서 float 축약은 원본 제너레이터 표현을 글자 그대로 유지한다 (속도
-            # 이득은 flat 로드 hoist + 위상 메모이즈에서 이미 확보).
-            dev = sum(sum(abs(c[k] - mean[k]) for k in range(3)) for c in acc) / n
-            total_dev += dev * n
+            t = 0
+            for k in range(3):
+                vals = cell[k::3]
+                s = sum(vals)
+                floor_mean = s // n
+                t += (s * sum(vals.translate(_LE_ONES[floor_mean]))
+                      - n * sum(vals.translate(_LE_KEEP[floor_mean])))
+            # `2 *` 는 위 대칭성(평균 아래 합 = 위 합)의 계수다.
+            total_dev += 2 * t / n
             total_n += n
     return (total_dev / total_n) if total_n else 1e9
 
@@ -1223,11 +1285,12 @@ def _best_phase(component: Image.Image, pitch: tuple[float, float]) -> tuple[flo
     best = (0.0, 0.0)
     best_score = None
     steps = 8
-    # 프레임 픽셀을 한 번만 실어 모든 위상이 공유한다 (재로딩 제거).
-    flat = list(component.getdata())
+    # 불투명 픽셀 색인을 한 번만 만들어 모든 위상이 공유한다 (재로딩 제거).
+    rows = _grid_rows(component)
     w, h = component.width, component.height
     # (xs, ys) 정수 경계로 채점을 메모이즈 — 위상 스캔은 같은 경계로 자주 붕괴한다.
     cache: dict[tuple, float] = {}
+    split_cache: dict[tuple, list[list[int]]] = {}
     for i in range(steps):
         for j in range(steps):
             phase = (pitch[0] * i / steps, pitch[1] * j / steps)
@@ -1236,7 +1299,10 @@ def _best_phase(component: Image.Image, pitch: tuple[float, float]) -> tuple[flo
             key = (xs, ys)
             score = cache.get(key)
             if score is None:
-                score = _grid_score_edges(flat, w, h, xs, ys)
+                splits = split_cache.get(xs)
+                if splits is None:
+                    splits = split_cache[xs] = _grid_row_splits(rows[0], xs, w)
+                score = _grid_score_edges(rows, w, h, xs, ys, splits)
                 cache[key] = score
             if best_score is None or score < best_score:
                 best_score = score

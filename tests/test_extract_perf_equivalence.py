@@ -6,14 +6,21 @@ The hot paths `_grid_score_edges`/`_best_phase`, `_matte_ycc`,
 `_flood_clear_background_ycc`, `_cleanup_alpha_ycc` and `_dominant_block_color`
 were rewritten for speed under an absolute determinism contract: same input ->
 byte-identical output. These tests pin that contract structurally by running a
-**naive reference** implementation (the pre-optimization form) beside the
-optimized one and asserting exact equality — so any future edit that changes a
-value, not just the golden run, trips here.
+**naive reference** implementation beside the optimized one and asserting exact
+equality — so any future edit that changes a value, not just the golden run,
+trips here.
+
+For the grid scorer the reference is the *integer-exact* naive form, not the
+original float reduction (plan `sprite-gen/best-phase-hotspot`, 2026-07-25).
+The metric is unchanged; only its evaluation is. See
+`test_grid_uniformity_matches_the_exact_rational_value` for why the rational
+value — not the old float's bit pattern — is the truth being pinned.
 """
 
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 
 from PIL import Image
 
@@ -48,12 +55,11 @@ def _synthetic_keyed(width: int = 60, height: int = 48) -> Image.Image:
 # --- reference (naive, pre-optimization) implementations --------------------
 
 
-def _ref_grid_uniformity(component, pitch, phase):
+def _ref_cells(component, pitch, phase):
+    """Cell-by-cell opaque pixels, in the scorer's iteration order."""
     xs = extract._grid_edges(component.width, pitch[0], phase[0])
     ys = extract._grid_edges(component.height, pitch[1], phase[1])
     p = component.load()
-    total_dev = 0.0
-    total_n = 0
     for yi in range(len(ys) - 1):
         for xi in range(len(xs) - 1):
             acc = []
@@ -62,13 +68,58 @@ def _ref_grid_uniformity(component, pitch, phase):
                     q = p[x, y]
                     if q[3] >= 128:
                         acc.append(q[:3])
-            n = len(acc)
-            if n < 2:
-                continue
-            mean = [sum(c[k] for c in acc) / n for k in range(3)]
-            dev = sum(sum(abs(c[k] - mean[k]) for k in range(3)) for c in acc) / n
-            total_dev += dev * n
-            total_n += n
+            yield acc
+
+
+def _ref_grid_uniformity(component, pitch, phase):
+    """Naive form of the integer-exact contract: the cell term is `T / n` with
+    `T = sum |n*v - s|` an exact integer, spelled out pixel by pixel with no
+    symmetry identity and no translate tables. Bit-identical to the optimized
+    scorer — same cell order, same single rounding per cell."""
+    total_dev = 0.0
+    total_n = 0
+    for acc in _ref_cells(component, pitch, phase):
+        n = len(acc)
+        if n < 2:
+            continue
+        s = [sum(c[k] for c in acc) for k in range(3)]
+        t = sum(abs(n * c[k] - s[k]) for c in acc for k in range(3))
+        total_dev += t / n
+        total_n += n
+    return (total_dev / total_n) if total_n else 1e9
+
+
+def _ref_grid_uniformity_rational(component, pitch, phase):
+    """Ground truth with no rounding anywhere — the metric as written on paper
+    (`mean absolute deviation from the cell mean, weighted by cell size`).
+    Independent of how either implementation gets there."""
+    total_dev = Fraction(0)
+    total_n = 0
+    for acc in _ref_cells(component, pitch, phase):
+        n = len(acc)
+        if n < 2:
+            continue
+        mean = [Fraction(sum(c[k] for c in acc), n) for k in range(3)]
+        dev = sum(sum(abs(c[k] - mean[k]) for k in range(3)) for c in acc) / n
+        total_dev += dev * n
+        total_n += n
+    return (total_dev / total_n) if total_n else Fraction(10 ** 9)
+
+
+def _ref_grid_uniformity_float(component, pitch, phase):
+    """The pre-2026-07-25 form: float mean, float absolute deviations, float
+    reduction. Kept to show the rewrite did not change the *metric* — only how
+    exactly it is evaluated."""
+    total_dev = 0.0
+    total_n = 0
+    for acc in _ref_cells(component, pitch, phase):
+        n = len(acc)
+        if n < 2:
+            continue
+        mean = [sum(c[k] for c in acc) / n for k in range(3)]
+        dev = sum(sum(abs(c[k] - mean[k]) for k in range(3)) for c in acc) / n
+        total_dev += dev * n
+        total_n += n
     return (total_dev / total_n) if total_n else 1e9
 
 
@@ -220,6 +271,36 @@ def test_grid_uniformity_byte_identical_to_reference():
             got = extract._grid_uniformity(img, pitch, phase)
             # exact float equality — determinism contract, not approximate
             assert got == ref, f"pitch={pitch} phase={phase}: {got!r} != {ref!r}"
+
+
+def test_grid_uniformity_matches_the_exact_rational_value():
+    """The scorer's only rounding is one division per cell plus the float
+    accumulation across cells — so it tracks the on-paper value to ~1e-15.
+
+    This is the contract that replaced "byte-identical to the old float
+    reduction" (plan `sprite-gen/best-phase-hotspot`, 2026-07-25). The old form
+    accumulated floats per pixel; the integer-exact form is the same metric
+    evaluated without that accumulation, which lands a last-ulp apart (measured
+    max relative gap 1.8e-16 on founder_v8). The truth is the rational value,
+    not the old float's bit pattern — so both are checked against it here.
+    """
+    img = _synthetic_keyed()
+    for pitch in [(7.0, 7.0), (7.82, 8.28), (6.17, 6.32)]:
+        for phase in [(0.0, 0.0), (1.3, 2.9), (pitch[0] * 5 / 8, pitch[1] * 3 / 8)]:
+            exact = float(_ref_grid_uniformity_rational(img, pitch, phase))
+            got = extract._grid_uniformity(img, pitch, phase)
+            old = _ref_grid_uniformity_float(img, pitch, phase)
+            assert math.isclose(got, exact, rel_tol=1e-14), f"{pitch} {phase}: {got!r} vs {exact!r}"
+            assert math.isclose(old, exact, rel_tol=1e-14), f"{pitch} {phase}: {old!r} vs {exact!r}"
+
+
+def test_grid_rows_rejects_a_non_rgba_component():
+    """The row index reads alpha at stride 4 — a 3-channel image would silently
+    read colour bytes as alpha, so it has to fail loudly instead."""
+    import pytest
+
+    with pytest.raises(ValueError, match="RGBA"):
+        extract._grid_rows(_synthetic_keyed().convert("RGB"))
 
 
 def test_best_phase_byte_identical_to_reference():
