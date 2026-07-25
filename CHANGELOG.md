@@ -7,6 +7,30 @@ All notable changes to `sprite-gen` are recorded here. Versions track the `versi
 
 ## Unreleased - the direction anchor is the frame you approved, and you can say which one
 
+- **Idle breathing stopped being a pair of split lines.** The old layer shifted the rows above
+  a horizontal split down by whole pixels, which in practice produced a two-state 1px toggle
+  (measured: idle GIFs ran `f0==f2==f4`, `f1==f3==f5`) and read as vibration. Cutting the head
+  off and translating it fixed the face but exposed the flat cut as a seam at the neck, so this
+  stops cutting: one continuous strain field runs over the whole sprite and tapers to zero at a
+  rigid boundary. Where the field is zero the transform is the identity rather than an
+  approximation, so the region above the boundary is bit-identical across frames - which is what
+  a few-dot eye needs. Horizontally each row integrates a density instead of scaling uniformly,
+  so the map is monotone by construction and appendages get pushed outward without stretching.
+- **The boundary is the neck, not the chest.** `sprite_gen/anatomy.py` finds it geometrically:
+  a prominence bottleneck on the silhouette's centre-run width profile, or - when the face sits
+  on the body, as on a mushroom or a slime - a symmetric eye pair that pushes the boundary below
+  the face. A slime has no bottleneck at all, and that case is what forced the amplitude
+  normaliser to use the neck only when the bottleneck is real. Detection runs once at curation
+  time (`GET /api/breathe-anatomy`) and is frozen into the sidecar with a fingerprint of the
+  frame it came from; a mismatch re-detects and says so in the manifest.
+- **The sidecar schema moved and the old one is refused, not reinterpreted.**
+  `states.<state>.breathe` is now `{depth, breaths, lag, rigid_row?, anatomy}`;
+  `splits`/`amplitude`/`subpixel`/`hold` raise. `sprite-gen migrate-breathe <run-dir>` (dry run
+  by default) moves an existing run: it keeps `breaths`, resets the rest, and prints everything
+  it dropped, because the old numbers have no honest translation - `splits` meant "above this
+  moves" while `rigid_row` means "above this does not". The curation view preserves a sidecar it
+  cannot parse instead of normalising it away, and tells you to migrate.
+
 - **The anchor is a curated frame, not a raw crop, on every path.** Resolution, the
   post-processing bake (pixel edits -> transform -> pixel-perfect re-quantization), and the
   `references/anchors/<dir>-anchor-x8.png` derived cache now live in one module,

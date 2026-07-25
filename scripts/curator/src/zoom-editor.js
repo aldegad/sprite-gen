@@ -846,7 +846,12 @@ function openZoom(stateName, idx, keepWidth) {
           // 해부는 변형 후 프레임 기준이므로 셀 좌표의 콘텐츠 상단(btop)이 곧 0행이다.
           const row = Math.round(yCell - btop);
           bm.cfg.rigid_row = Math.min(bm.cfg.anatomy.height - 2, Math.max(1, row));
-          bm.cfg.anatomy = { ...bm.cfg.anatomy, rigid_row: bm.cfg.rigid_row, rigid_source: "manual" };
+          // 프리뷰가 새 경계를 즉시 그리도록 rigid_row 만 갈아끼우되, **지문을 무효화**해
+          // 굽기가 재검출하게 한다 — basis_row·torso_half·max_half 는 아직 낡은 값이고
+          // 그대로 구우면 조용히 틀린 파생값이 쓰인다 (부리 note 2026-07-25). pointerup 의
+          // refreshAnatomy() 가 서버 값으로 교체하지만 그 사이에도 안전해야 한다.
+          bm.cfg.anatomy = { ...bm.cfg.anatomy, rigid_row: bm.cfg.rigid_row,
+                             rigid_source: "manual", fingerprint: null };
           syncLines();
           commit();
         };

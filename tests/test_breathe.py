@@ -17,7 +17,8 @@ from sprite_gen.anatomy import analyze
 from sprite_gen.breathe import (DEFAULT_DEPTH, MAX_ROW_STRAIN, SMOOTH_CYCLE_FRAMES, TAPER,
                                 bake_breathe_sequence, breathe_reads_smoothly,
                                 envelope, fit_breathe_pattern, fitted_breath_count,
-                                frame_anatomy, freeze_anatomy, phase_frame,
+                                anatomy_fingerprint, frame_anatomy, freeze_anatomy,
+                                phase_frame,
                                 recommended_breathe_frames, row_strain, wave)
 from sprite_gen.curation import state_breathe
 from sprite_gen.extract import solid_alpha_bbox
@@ -130,8 +131,12 @@ def test_phase_zero_is_not_identity_when_the_wave_travels() -> None:
     시작에서 튀고 GIF 굽기와 그림이 갈린다 (새미 검증 2026-07-25, 실측 353px 차이).
     소비자 3곳이 이 계약에 걸려 있다 — `compose_atlas`, `compare.js`, 그리고 확대
     편집기(`zoom-editor.js` 재생·필름스트립). 앞의 둘은 `if phase:` 가드였고, 편집기는
-    호흡을 **끈** 상태에서 위상만 0 으로 넘기던 경로였다(끈 프리뷰가 워프돼 굽기와
-    달랐다). 어느 쪽이든 "위상 0 은 원본" 이라는 가정이 되살아나면 여기서 잡힌다."""
+    호흡을 **끈** 상태에서 위상만 0 으로 넘기던 경로였다(끈 프리뷰가 워프돼 굽기와 달랐다).
+
+    **이 테스트는 성질만 고정한다 — 소비자가 되살아나는 것은 못 잡는다.** 처음엔
+    "어느 쪽이든 되살아나면 여기서 잡힌다"고 적었는데 거짓이었다: `compose_atlas` 의
+    가드를 옛 형태로 되돌려도 이 파일은 전부 통과한다(부리 변이 검증 2026-07-25).
+    소비자 가드 자체는 `tests/test_breathe_off_state.py` 가 JS·파이썬 양쪽으로 지킨다."""
     src = _humanoid()
     cfg = dict(CFG)
     cfg["anatomy"] = freeze_anatomy(src, cfg)
@@ -400,3 +405,25 @@ def test_manual_rigid_row_beats_a_frozen_anatomy() -> None:
     assert redetected is True, "캐시가 낡았으므로 재검출로 관측돼야 한다"
     assert anat.rigid_source == "manual"
     assert any("rigid-row-override" in w for w in anat.warnings)
+
+
+def test_fingerprint_covers_everything_detection_reads() -> None:
+    """지문은 **검출이 읽는 것 전부**를 덮어야 자가 복구가 깨어난다.
+
+    알파만 해시하면 `detect_face` 가 쓰는 휘도(RGB)가 지문 밖에 남는다. 그러면 불투명
+    픽셀 위에 눈을 덧칠하는 편집(큐레이터 픽셀 편집기의 문서화된 기능 — 알파가 1바이트도
+    안 바뀐다)이 재검출을 못 깨우고, 굽기는 낡은 경계로 구우면서 `redetected: False` 로
+    이상 없음을 보고한다 (새미 실측 2026-07-25: 눈 행이 12프레임 중 11프레임 흔들림)."""
+    plain = _dome(with_face=False)
+    painted = _dome(with_face=True)          # 알파 동일, RGB 만 다름
+    assert plain.getchannel("A").tobytes() == painted.getchannel("A").tobytes(), \
+        "이 픽스처 쌍은 알파가 같아야 의미가 있다"
+    assert anatomy_fingerprint(plain) != anatomy_fingerprint(painted), \
+        "알파 불변 색 편집을 지문이 못 잡는다 — self-heal 이 안 깨어난다"
+
+    cfg = dict(CFG)
+    cfg["anatomy"] = freeze_anatomy(plain, cfg)      # 얼굴 없는 상태로 확정
+    anat, redetected = frame_anatomy(painted, cfg)   # 그 뒤 눈을 덧칠
+    assert redetected is True, "지문이 어긋났는데 재검출이 안 돌았다"
+    assert anat.face is not None and anat.rigid_source == "face", \
+        "재검출이 돌았으면 덧칠된 얼굴을 찾아 경계를 내려야 한다"
