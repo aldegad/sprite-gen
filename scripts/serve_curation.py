@@ -146,6 +146,10 @@ def _base_grid_response(run_dir: Path, base_path: Path) -> dict:
         result = {"grid": None, "note": "base has no content to detect a grid on"}
     else:
         tight = cleaned.crop(box)
+        # 안내선 전용 — 여기서 쓰는 위상은 `detect_pixel_grid` 의 히스토그램 위상이고,
+        # 추출 스냅이 쓰는 실측 위상(`_best_phase`)이 아니다. 대상이 다른 이미지
+        # (base-source)이고 픽셀을 샘플링하지 않아 칸 병합 실사고가 성립하지 않는다
+        # (docs/pixel-perfect.md "위상은 근사가 아니라 실측으로 고른다").
         (pitch_x, pitch_y), (phase_x, phase_y) = detect_pixel_grid(tight)
         if min(pitch_x, pitch_y) < 2.0:
             result = {"grid": None, "note": "no confident pixel grid detected"}
