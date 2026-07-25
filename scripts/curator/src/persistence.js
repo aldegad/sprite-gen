@@ -51,6 +51,9 @@ function buildPayload() {
     if (entry.breathe) states[name].breathe = entry.breathe;
   }
   const payload = { version: run.schemaVersion || 1, kind: "sprite-gen-curation", states };
+  // 방향 앵커 프레임 지정 — **항상 실어 보낸다** (해제도 의도다). 키가 없으면 서버가
+  // 이전 지정을 이월하므로(엔진 CLI 로 심은 지정 보호), 빈 객체가 "지정 없음" 의 표현이다.
+  payload.anchors = { ...anchorPicks };
   // echo the run generation this view was loaded with; the server rejects the autosave
   // (409) if the run was re-imported/re-extracted under this session so stale selections
   // never land on new frames.
@@ -97,6 +100,11 @@ async function save() {
     if (!res.ok) throw new Error((await res.json()).error || res.statusText);
     setStatus(t("saved"), "ok");
     hideSaveLostBanner();
+    // 디스크 truth 가 바뀌었다 = 앵커 라이브 베이크도 달라졌을 수 있다 (앵커 프레임의
+    // 픽셀 편집·변형·시퀀스 변경). 칩은 서버에서 다시 받아야 최신이다 — 카운터의
+    // 단일 writer 는 여기다.
+    anchorCacheBust += 1;
+    if (typeof refreshAnchorChips === "function") refreshAnchorChips();
     // 디스크 truth 갱신 후 — 레이지 아틀라스 자동 굽기 (보일 때만 실제 굽기)
     if (typeof noteAtlasEdit === "function") noteAtlasEdit();
   } catch (e) {

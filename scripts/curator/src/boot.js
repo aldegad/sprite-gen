@@ -90,6 +90,20 @@ async function boot() {
   seedEntries();
   if (run.directionGroups && run.directionGroups.length) {
     anchorStates = new Set(run.directionGroups.map((g) => g.anchor).filter(Boolean));
+    // 생성 방향(미러 제외) + 사용자 앵커 프레임 지정 시드 — 앵커 배지/버튼의 입력
+    anchorDirections = run.directionGroups.filter((g) => !g.mirrorOf).map((g) => g.direction);
+    anchorPicks = {};
+    for (const [direction, pick] of Object.entries((run.curation && run.curation.anchors) || {})) {
+      if (pick && typeof pick.state === "string" && Number.isInteger(Number(pick.index))) {
+        anchorPicks[direction] = { state: pick.state, index: Number(pick.index) };
+      }
+    }
+    // 해석 실패(지정이 사라진 프레임을 가리킴 등)는 조용히 넘기지 않는다 — 이 상태로
+    // 생성하면 엔진이 fail-loud 하므로 사용자가 지금 알아야 한다.
+    const broken = run.directionGroups.filter((g) => g.anchorError);
+    if (broken.length) {
+      healParts.push(...broken.map((g) => STR[lang].anchorError(g.direction, g.anchorError)));
+    }
   }
   await seedTreeProgress();
   renderPipelineTree();
@@ -156,7 +170,9 @@ async function boot() {
   installPixelScalingLoadHook();
   syncPixelScaling();
   if (healParts.length) {
-    setStatus(healParts.join(" · "), run.heal.failed && run.heal.failed.length ? "err" : "ok");
+    const hadFailure = (run.heal && run.heal.failed && run.heal.failed.length)
+      || (run.directionGroups || []).some((g) => g.anchorError);
+    setStatus(healParts.join(" · "), hadFailure ? "err" : "ok");
   } else {
     setStatus(run.curation && Object.keys(run.curation.states || {}).length ? t("loaded") : t("ready"));
   }

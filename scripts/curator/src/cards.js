@@ -36,12 +36,16 @@ function renderState(state, replaceEl) {
     refs.innerHTML = hasRefs
       ? `<span class="refs-label">${t("refsLabel")}</span>` +
         state.refs
-          .map(
-            (r) =>
-              `<a class="ref-chip" href="${escapeHtml(r.url)}" target="_blank" title="${escapeHtml(r.name)}">` +
-              `<img src="${escapeHtml(r.url)}" alt="${escapeHtml(r.role)}" loading="lazy" />` +
-              `<span>${t("ref_" + r.role)}</span></a>`
-          )
+          .map((r) => {
+            // 앵커 칩은 서버 라이브 베이크(/api/anchor)라 사이드카가 바뀌면 다시 받아야
+            // 한다 (지정 변경뿐 아니라 앵커 프레임의 픽셀 편집·변형도 그림을 바꾼다).
+            // 저장이 디스크에 닿은 뒤 refreshAnchorChips 가 src 를 갈아준다.
+            const url = r.anchorFrame ? `${r.url}&t=${anchorCacheBust}` : r.url;
+            const mark = r.anchorFrame ? ` data-anchor="1" data-base-url="${escapeHtml(r.url)}"` : "";
+            return `<a class="ref-chip" href="${escapeHtml(url)}" target="_blank" title="${escapeHtml(r.name)}">` +
+              `<img src="${escapeHtml(url)}" alt="${escapeHtml(r.role)}" loading="lazy"${mark} />` +
+              `<span>${t("ref_" + r.role)}</span></a>`;
+          })
           .join("")
       : "";
     const controls = document.createElement("span");
@@ -131,6 +135,25 @@ function renderState(state, replaceEl) {
   syncPixelScaling(wrap);
 }
 
+// 앵커 칩(라이브 베이크) 재요청 — 저장이 디스크에 닿은 뒤 호출된다 (persistence.save).
+// 앵커 프레임의 픽셀 편집/변형도 앵커 그림을 바꾸므로, 지정 변경만으로는 부족하다.
+// 페인팅 중 autosave 가 연달아 터지므로 트레일링 디바운스로 묶는다.
+let anchorChipTimer = null;
+
+function refreshAnchorChips() {
+  clearTimeout(anchorChipTimer);
+  anchorChipTimer = setTimeout(() => {
+    for (const img of document.querySelectorAll('#states .ref-chip img[data-anchor]')) {
+      const base = img.getAttribute("data-base-url");
+      if (!base) continue;
+      const url = `${base}&t=${anchorCacheBust}`;
+      img.src = url;
+      const link = img.closest("a.ref-chip");
+      if (link) link.href = url;
+    }
+  }, 500);
+}
+
 function renderCard(state, frame) {
   const card = document.createElement("div");
   card.className = "card";
@@ -181,6 +204,21 @@ function renderCard(state, frame) {
     'fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>';
   const psize = frame.present && frame.contentSize
     ? `<span class="psize" data-tip="${t("tContentPx")}">${frame.contentSize[0]}×${frame.contentSize[1]}</span>` : "";
+  // 방향 앵커 지정 (수홍 2026-07-25): 방향 런의 프레임만 앵커가 될 수 있다.
+  // 앵커 = 이 방향의 다른 자세를 생성할 때 붙는 identity 한 장 — 큐레이션된 모습 그대로.
+  const anchorDir = frame.present ? directionOfState(state.name) : null;
+  const isAnchor = !!anchorDir && isAnchorFrame(state.name, frame.index);
+  const pinIcon =
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+    '<path d="M8 1.9a3.4 3.4 0 0 1 3.4 3.4c0 2.4-3.4 6.4-3.4 6.4S4.6 7.7 4.6 5.3A3.4 3.4 0 0 1 8 1.9Z" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>' +
+    '<circle cx="8" cy="5.2" r="1.3" fill="none" stroke="currentColor" stroke-width="1.2"/>' +
+    '<path d="M5.6 14.1h4.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+  const anchorBtn = anchorDir
+    ? `<button type="button" class="ghost anchor-btn${isAnchor ? " on" : ""}" ` +
+      `data-tip="${isAnchor ? t("tUnsetAnchorFrame") : t("tSetAnchorFrame")}" aria-label="anchor">${pinIcon}</button>`
+    : "";
+  if (isAnchor) card.classList.add("is-anchor");
   card.innerHTML =
     // 헤더: 복제 | 타이틀(드래그 핸들, 호버 시 풀네임 복사) | 확대 —
     // 복제를 좌측으로 분리 (수홍 지시 2026-07-17: 확대 옆에 붙어 있어 오클릭).
@@ -192,6 +230,7 @@ function renderCard(state, frame) {
     `${title}</span>` +
     (frame.present
       ? `<span class="ct-right">` +
+        (isAnchor ? `<span class="anchor-frame-badge" data-tip="${t("tAnchorFrameBadge")}">${t("anchorFrameBadge")}</span>` : "") +
         `<button type="button" class="ghost zoom-btn" data-tip="${t("tZoomOpen")}" aria-label="zoom">${zoomIcon}</button>` +
         `</span>`
       : "") +
@@ -203,6 +242,7 @@ function renderCard(state, frame) {
         `<div class="card-controls">` +
         `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
         `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}" aria-label="reset">↺</button>` +
+        anchorBtn +
         `<span class="ctrl-group">` +
         `<button type="button" class="sel-btn"></button>` +
         `<button type="button" class="ghost arch-btn" data-tip="${t("tArchiveBtn")}" aria-label="archive">${archIcon}</button>` +
@@ -287,6 +327,19 @@ function renderCard(state, frame) {
         void srcCard.offsetWidth;
         srcCard.classList.add("flash-target");
         srcCard.addEventListener("animationend", () => srcCard.classList.remove("flash-target"), { once: true });
+      });
+    }
+    const anchorBtnEl = card.querySelector(".anchor-btn");
+    if (anchorBtnEl) {
+      anchorBtnEl.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+      anchorBtnEl.addEventListener("click", async (ev) => {
+        ev.currentTarget.disabled = true;
+        try {
+          await setAnchorFrame(state.name, frame.index);
+        } finally {
+          // rebuildState 가 카드를 교체하므로 살아있을 때만 되살린다
+          if (ev.currentTarget.isConnected) ev.currentTarget.disabled = false;
+        }
       });
     }
     const archBtn = card.querySelector(".arch-btn");

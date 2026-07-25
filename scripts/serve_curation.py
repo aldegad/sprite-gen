@@ -47,8 +47,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from curation import (CURATION_FILENAME, SCHEMA_VERSION, backup_stale_curation, empty_curation,
-                      imported_ref_role, load_curation_report, run_revision, stamp_curation)
+from curation import (CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported_ref_role,
+                      load_curation_report, run_revision, write_curation_atomic)
 from extract import heal_run, load_consistent_frames_manifest
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -182,31 +182,53 @@ def detect_pixel_pitch(path):
 _REF_DIRECTIONS = ("down45", "up45", "down", "side", "up", "left", "right", "front", "back")
 
 
-def _state_refs(run_dir, state, request):
+def _anchor_views(run_dir: Path, request: dict, curation: dict | None, version: str) -> dict:
+    """방향별 앵커 상태 + 칩 URL. 방향당 한 번만 해석한다 (상태마다 재해석 금지).
+
+    칩은 **라이브 베이크**(`/api/anchor`)를 가리킨다 — `references/anchors/*.png` 는
+    생성 직전에 갱신되는 파생 캐시라, 그 파일을 칩으로 보여주면 사용자가 방금 한 편집
+    이전 모습이 화면에 남는다 (실사고 2026-07-19). `v=` 는 표시 캐시 무효화용이다."""
+    from sprite_gen import anchor as anchor_mod
+
+    views = {}
+    for direction in anchor_mod.directions(request):
+        status = anchor_mod.anchor_status(run_dir, request, curation, direction)
+        url = None
+        if not status.get("error"):
+            url = f"/api/anchor?direction={quote(direction, safe='')}&v={quote(version, safe='')}"
+        views[direction] = {**status, "url": url}
+    return views
+
+
+def _state_refs(run_dir, state, request, anchor_views=None):
     """상태 하나의 생성 레퍼런스 체인(방향 앵커/basis row/레이아웃 가이드).
 
     directional-anchor 규약의 관례 유도 — run dir 에 실재하는 파일만 노출한다.
+    앵커만 예외로 라이브 베이크 URL 을 쓴다 (_anchor_views 주석 참조).
     """
     refs = []
+    anchor_views = anchor_views or {}
     direction = None
-    for d in _REF_DIRECTIONS:
+    contract_directions = [str(d) for d in ((request.get("directions") or {}).get("set") or [])]
+    # 방향 계약이 있으면 그게 진실이고, 없는 런(임포트 등)만 이름 관례로 추정한다
+    for d in (contract_directions or _REF_DIRECTIONS):
         if state == d or state.startswith(d + "_"):
             direction = d
             break
     if direction is not None:
-        # 앵커 칩 = 실제 생성에 첨부되는 재료 우선 (수홍 2026-07-19 "다운앵커가 왜
-        # 내가 편집해둔 아틀라스가 아니야"): raw idle 스트립은 편집 전 원시 생성물이라
-        # 칩으로 보여주면 사용자 편집이 안 들어간 것처럼 오독된다. 리롤/재생성이 매번
-        # curated 진실에서 다시 굽는 x8 스냅샷(references/anchors/)이 실재하면 그걸
-        # 보여주고, 없을 때만 raw 로 폴백한다 (관례 유도 — 실재 파일만 노출 원칙 유지).
-        snapshot = run_dir / "references" / "anchors" / f"{direction}-idle-x8.png"
-        anchor_rel = raw_rel(request, f"{direction}_idle")
+        suffix = str((request.get("directions") or {}).get("anchor_suffix", "idle"))
+        anchor_state_name = f"{direction}_{suffix}"
+        view = anchor_views.get(direction) or {}
+        anchor_rel = raw_rel(request, anchor_state_name)
         anchor = run_dir / anchor_rel
-        if state != f"{direction}_idle":
-            if snapshot.is_file():
-                refs.append({"role": "anchor", "name": snapshot.name,
-                             "url": _url("run", "references", "anchors", snapshot.name)})
+        if state != anchor_state_name:
+            if view.get("url"):
+                refs.append({"role": "anchor",
+                             "name": f"{view['state']}#{view['index']}"
+                                     f"{' · picked' if view.get('source') == 'picked' else ''}",
+                             "url": view["url"], "anchorFrame": True})
             elif anchor.is_file():
+                # 앵커 행이 아직 큐레이션/추출 전 — 실재하는 raw 스트립을 그대로 보여준다
                 refs.append({"role": "anchor", "name": anchor.name, "url": _url("run", *anchor_rel.split("/"))})
         base = state[len(direction) + 1:] if state.startswith(direction + "_") else None
         if base and direction != "down":
@@ -258,6 +280,13 @@ def _build_run_state_impl(run_dir: Path) -> dict:
     # do_GET — never a silent empty-rows / stale-frame fallback (No Silent Fallback / Consistency).
     frames_manifest = load_consistent_frames_manifest(run_dir, allow_pending_states=True) or {"rows": []}
     rows_by_state = {row["state"]: row for row in frames_manifest.get("rows", [])}
+
+    # 큐레이션은 앵커 해석의 입력이라 상태 루프보다 먼저 읽는다 (앵커 칩이 방향별로
+    # 한 번 해석된 결과를 쓴다 — 상태마다 재해석하면 같은 방향에 다른 답이 나올 수 있다).
+    curation, curation_report = load_curation_report(run_dir)
+    curation = curation or empty_curation()
+    revision = run_revision(run_dir)
+    anchor_views = _anchor_views(run_dir, request, curation, revision)
 
     cell = request["cell"]
     cell_state = {
@@ -355,7 +384,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
                 "name": state,
                 "rawPresent": raw_present,
                 "pixelScale": state_scale,
-                "refs": _state_refs(run_dir, state, request),
+                "refs": _state_refs(run_dir, state, request, anchor_views),
                 "fps": int(entry.get("fps", 6)),
                 "loop": bool(entry.get("loop", True)),
                 "action": entry.get("action", ""),
@@ -379,10 +408,17 @@ def _build_run_state_impl(run_dir: Path) -> dict:
             # 앵커를 그룹 맨 앞으로 (요청 순서 보존, 앵커만 승격)
             if anchor in members:
                 members = [anchor, *[m for m in members if m != anchor]]
+            view = anchor_views.get(direction) or {}
             direction_groups.append({
                 "direction": direction,
                 "anchor": anchor if anchor in request["states"] else None,
                 "states": members,
+                # 지금 이 방향의 identity 로 쓰이는 인스턴스 (지정 or 앵커 행 시퀀스 헤드)
+                # — 뷰가 그 카드에 앵커 배지를 붙이고, 해석 실패는 이유를 보여준다.
+                "anchorFrame": ({"state": view["state"], "index": view["index"],
+                                 "source": view["source"]} if view.get("state") is not None else None),
+                "anchorError": view.get("error"),
+                "anchorUrl": view.get("url"),  # 라이브 베이크 (파이프라인 트리 썸네일도 이걸 쓴다)
             })
         for target, source in (directions_cfg.get("mirror") or {}).items():
             direction_groups.append({"direction": target, "mirrorOf": source, "states": []})
@@ -394,8 +430,6 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         for path in sorted(anchors_dir.glob("*.png")):
             anchor_files.append({"name": path.name, "url": _url("run", "references", "anchors", path.name)})
 
-    curation, curation_report = load_curation_report(run_dir)
-    curation = curation or empty_curation()
     # 원본 베이스(아이덴티티 truth)가 있으면 큐레이터 최상단에 참조 줄로 노출
     base_url = None
     for candidate in sorted(run_dir.glob("base-source.*")):
@@ -429,7 +463,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
             "source": "auto", "label": "auto",
             "scale": min((st["pixelScale"] for st in states if st.get("pixelScale")), default=1)},
         "schemaVersion": SCHEMA_VERSION,
-        "runRevision": run_revision(run_dir),
+        "runRevision": revision,
         "directionGroups": direction_groups,
         "anchorFiles": anchor_files,
         "states": states,
@@ -462,56 +496,6 @@ def _atlas_info(run_dir: Path) -> dict | None:
         "mtime": mtime,
         "manifestUrl": (_url("run", "manifest.json") + f"?v={mtime}") if manifest_path.is_file() else None,
     }
-
-
-def write_curation_atomic(run_dir: Path, payload: dict) -> None:
-    """Atomically replace curation.json (temp file in the same dir + os.replace). Stamps the
-    sidecar with the current run generation (`run_revision`) AND per-state `revision`
-    segment fingerprints (stamp_curation), so a later regeneration invalidates only the
-    rows it actually touched. Before replacing, any state entry in the existing file that
-    this write would lose (missing from the payload, or stamped for an incompatible
-    generation) triggers a `curation.stale-<hash>.json` backup of the old file — an
-    autosave can never permanently destroy selections without an observable copy.
-    `runRevision` is a transport-only echo field and is not stored."""
-    if payload.get("kind") != "sprite-gen-curation":
-        raise ValueError("payload is not a sprite-gen-curation document")
-    payload = stamp_curation(run_dir, payload)
-    target = run_dir / CURATION_FILENAME
-    if target.is_file():
-        old_text = target.read_text(encoding="utf-8")
-        try:
-            old = json.loads(old_text)
-        except json.JSONDecodeError:
-            old = None
-        if isinstance(old, dict):
-            new_states = payload.get("states") or {}
-            same_generation = old.get("run_revision") == payload.get("run_revision")
-            for name, old_entry in (old.get("states") or {}).items():
-                new_entry = new_states.get(name)
-                if not isinstance(old_entry, dict):
-                    continue
-                if not isinstance(new_entry, dict):
-                    lost = True
-                else:
-                    old_rev, new_rev = old_entry.get("revision"), new_entry.get("revision")
-                    if isinstance(old_rev, list) and isinstance(new_rev, list):
-                        lost = old_rev != new_rev[:len(old_rev)]
-                    else:
-                        # 레거시 스탬프 없는 항목: 같은 런 세대의 정상 편집이면 호환
-                        lost = not same_generation
-                if lost:
-                    backup_stale_curation(run_dir, old_text)
-                    break
-    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
-    fd, tmp_name = tempfile.mkstemp(dir=str(run_dir), prefix=".curation-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-        os.replace(tmp_name, target)
-    except BaseException:
-        if os.path.exists(tmp_name):
-            os.unlink(tmp_name)
-        raise
 
 
 _heal_lock = threading.Lock()
@@ -851,6 +835,39 @@ class CurationHandler(BaseHTTPRequestHandler):
                 "progress": _read_op_progress(self.run_dir),
             })
             return
+        if path == "/api/anchor":
+            # 방향 앵커 ref 를 **지금** 큐레이션 진실에서 굽어 그대로 응답한다 (파일 아님).
+            # 생성이 붙이는 `references/anchors/<dir>-anchor-x8.png` 와 같은 함수·같은
+            # 수학이라, 칩에 보이는 것이 다음 생성에 붙는 것이다 (표시/생성 드리프트 0).
+            query = parse_qs(urlparse(self.path).query)
+            direction = (query.get("direction") or [""])[0]
+            try:
+                scale = max(1, min(16, int((query.get("scale") or ["8"])[0])))
+            except ValueError:
+                self._send_json({"error": "scale must be an integer"}, 400)
+                return
+            try:
+                from sprite_gen import anchor as anchor_mod
+                with read_guard(self.run_dir):
+                    request = anchor_mod.load_request(self.run_dir)
+                    curation = load_curation_report(self.run_dir)[0]
+                    image, resolved = anchor_mod.anchor_image(
+                        self.run_dir, request, curation, direction, scale)
+                    buffer = io.BytesIO()
+                    image.save(buffer, format="PNG")
+            except (Exception, SystemExit) as exc:
+                self._send_json({"error": str(exc)}, 404)
+                return
+            data = buffer.getvalue()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Anchor-Frame", f"{resolved['state']}#{resolved['index']}")
+            self.send_header("X-Anchor-Source", str(resolved["source"]))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path == "/api/base-grid":
             # 베이스의 검출 픽셀 격자 — 편집기(줌 모달)의 논리 해상도와 base-edit 의
             # 논리→raw 확장이 같은 절단선을 쓴다 (_base_grid_response, mtime 캐시).
@@ -992,6 +1009,12 @@ class CurationHandler(BaseHTTPRequestHandler):
                             existing = json.loads((self.run_dir / CURATION_FILENAME).read_text(encoding="utf-8"))
                         except (OSError, json.JSONDecodeError):
                             existing = {}
+                        # 같은 계약의 최상위 필드: 앵커 프레임 지정. 뷰는 항상 `anchors` 를
+                        # (해제 시 빈 객체로) 실어 보내므로 키가 **없을 때만** 이월한다 —
+                        # `sprite-gen anchor --pick` 으로 심어둔 지정이 뷰를 모르는 저장
+                        # (구 클라이언트/수동 POST)에 조용히 사라지지 않게.
+                        if "anchors" in existing and "anchors" not in payload:
+                            payload["anchors"] = existing["anchors"]
                         for state_name, prev_entry in (existing.get("states") or {}).items():
                             if not isinstance(prev_entry, dict):
                                 continue
