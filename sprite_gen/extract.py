@@ -1208,12 +1208,15 @@ def _grid_row_splits(row_pos: list[list[int]], xs: tuple[int, ...] | list[int],
 
 
 def _grid_uniformity(component: Image.Image, pitch: tuple[float, float],
-                     phase: tuple[float, float],
-                     rows: tuple[list[list[int]], list[bytes]] | None = None) -> float:
-    """격자 가설의 셀 내부 색 분산 (낮을수록 진짜 격자). 불투명 픽셀만, 셀 크기 가중."""
+                     phase: tuple[float, float]) -> float:
+    """격자 가설의 셀 내부 색 분산 (낮을수록 진짜 격자). 불투명 픽셀만, 셀 크기 가중.
+
+    위상 스캔은 이 함수를 거치지 않는다 — `_best_phase` 는 행 색인을 한 번 만들어
+    `_grid_score_edges` 를 직접 부른다. 여기는 단발 채점(`arbitrate_pitch` 의 진단)
+    전용이라 색인을 주입받을 자리가 없다.
+    """
     w, h = component.width, component.height
-    if rows is None:
-        rows = _grid_rows(component)
+    rows = _grid_rows(component)
     xs = _grid_edges(w, pitch[0], phase[0])
     ys = _grid_edges(h, pitch[1], phase[1])
     return _grid_score_edges(rows, w, h, xs, ys)
