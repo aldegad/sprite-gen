@@ -20,5 +20,6 @@ __all__ = [
     "runio",
     "score",
     "slice_sheet",
+    "migrate_breathe",
     "unpack_atlas",
 ]

@@ -22,6 +22,7 @@ from sprite_gen import (
     preview,
     score,
     slice_sheet,
+    migrate_breathe,
     unpack_atlas,
 )
 from sprite_gen.prepare import STYLE_DEFAULT, _outline_config
@@ -243,6 +244,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Resolve/bake the direction anchor ref from curated truth (or pin which frame is the anchor).",
         _add_anchor,
         anchor.run,
+    ),
+    "migrate-breathe": (
+        "Migrate a run's retired split-line breathe sidecar to the envelope schema.",
+        migrate_breathe.add_arguments,
+        migrate_breathe.run,
     ),
     "slice-sheet": (
         "Slice a multi-figure grid sheet into per-cell standing cuts (tachi-e).",

@@ -11,7 +11,7 @@ from typing import Any
 
 from PIL import Image
 
-from sprite_gen.breathe import fit_breathe_pattern, phase_frame
+from sprite_gen.breathe import anatomy_report, fit_breathe_pattern, phase_frame
 from sprite_gen.curation import apply_pixel_edits, apply_transform, edit_index, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import heal_run, require_frames_manifest
@@ -107,6 +107,10 @@ def _run(args: argparse.Namespace):
     # 호흡 후처리 레이어 (사이드카, 수홍 확정 2026-07-18 루프-맞춤): 재생 위치 =
     # (프레임, 위상), 길이 = 기존 시퀀스 그대로 (루프 불변 — fit_breathe_pattern 이
     # breaths 회를 시퀀스에 딱 떨어지게 배분). 텍스처 칸은 유니크 (프레임×위상)만.
+    #
+    # 봉투 교체(2026-07-25) 이후 위상은 연속값이라 슬롯마다 다르다 — 구 분할선 방식의
+    # '쉼 위상 0.0 반복' 이 사라져 호흡하는 줄은 칸 재사용이 없다. 즉 그 줄의 칸 수는
+    # 재생 시퀀스 길이와 같아진다(원래의 하한). 아틀라스가 그만큼 넓어질 수 있다.
     def _positions(state: str) -> list[tuple[int, float]]:
         ordered = plans[state][0]
         cfg = state_breathe(curation, state)
@@ -146,6 +150,7 @@ def _run(args: argparse.Namespace):
         breathe_cfg = breathe_by_state[state]
         variant = variants[state]
         frames = []
+        row_source_frames: list[Image.Image] = []   # 호흡 적용 **직전** 프레임 (관측용)
         baked: dict[tuple, dict[str, Any]] = {}  # instance key -> shared rect
         for frame_index, breathe_phase in positions:
             key = _instance_key(state, frame_index, breathe_phase)
@@ -169,8 +174,13 @@ def _run(args: argparse.Namespace):
             # apply the human curation transform (identity when uncurated)
             frame = apply_transform(source, transforms.get(edit_idx), cell_size,
                                     snap_scale=snap_scale if variant == "pixel" else None)
-            if breathe_cfg and breathe_phase:
-                # 호흡 위상은 최종 셀 픽셀 위 결정론 행 시프트 — 팔레트·격자 불변
+            if breathe_cfg:
+                row_source_frames.append(frame)
+                # 호흡 위상은 최종 셀 픽셀 위 결정론 봉투 워프 — 팔레트·격자 불변.
+                # **위상 0 도 굽는다.** 구 분할선 방식에선 위상 0 이 항등이라 건너뛰어도
+                # 됐지만 봉투에선 아니다: 진행파 지연(lag) 때문에 t=0 에서도 윗행은
+                # wave(-lag*u) 만큼 변형된다. 건너뛰면 그 칸만 원본이 되어 아틀라스가
+                # 매 루프 시작에서 튀고 GIF 굽기와 그림이 갈린다 (새미 검증 2026-07-25).
                 frame = phase_frame(frame, breathe_cfg, breathe_phase)
             nontransparent = alpha_nonzero_count(frame)
             if nontransparent < args.min_used_pixels:
@@ -199,6 +209,10 @@ def _run(args: argparse.Namespace):
             "loop": bool(entry.get("loop", True)),
             "frame_variant": variant,
         }
+        if breathe_cfg:
+            # 자가 복구가 돌았는지, 프레임마다 경계가 달라졌는지 관측 (원칙 6).
+            animation["rows"][state]["breathe"] = anatomy_report(row_source_frames, breathe_cfg) \
+                if row_source_frames else None
 
     # top-level summary: uniform value when every row agrees, else 'mixed'
     # (per-row truth lives in animation.rows.<state>.frame_variant).

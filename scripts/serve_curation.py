@@ -48,11 +48,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from curation import (CURATION_FILENAME, SCHEMA_VERSION, effective_logical_height,
-                      empty_curation, imported_ref_role, load_curation_report, pixel_snap_scale,
+                      empty_curation, frame_variant, imported_ref_role,
+                      load_curation, load_curation_report, pixel_snap_scale,
                       run_revision, write_curation_atomic)
 from extract import heal_run, load_consistent_frames_manifest
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from sprite_gen.breathe import DEFAULT_DEPTH, DEFAULT_LAG, freeze_anatomy
 from sprite_gen.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel, state_frame_total
 from runio import publish_guard, read_guard
 
@@ -84,6 +86,39 @@ CONTENT_TYPES = {
 # (가짜 격자 금지). 결과는 (경로, mtime) 키로 캐시.
 _PITCH_CACHE: dict = {}
 _BASE_GRID_CACHE: dict = {}  # (base path, mtime_ns) -> /api/base-grid 응답 (검출은 수 초짜리)
+
+
+def _breathe_source_frame(run_dir: Path, state: str):
+    """호흡 해부를 잴 프레임 — **굽기가 보는 것과 같은 픽셀**.
+
+    굽기는 `apply_pixel_edits` -> `apply_transform` 뒤에 호흡을 얹으므로, 해부도 그
+    변형 후 프레임에서 재야 한다. 원본 프레임에서 재면 지문이 매번 어긋나 self-heal 이
+    돌고(동작은 맞지만) 웹뷰가 얼려둔 숫자와 굽기가 쓰는 숫자가 달라진다 — 미리보기와
+    결과가 갈라지는 바로 그 경로다.
+
+    해부는 상태 단위 상수라 첫 실재 프레임 하나면 충분하다."""
+    from curation import (apply_pixel_edits, apply_transform, edit_index,
+                          state_pixel_ops, state_plan)
+    manifest = load_consistent_frames_manifest(run_dir, allow_pending_states=True) or {"rows": []}
+    row = next((r for r in manifest.get("rows", []) if r.get("state") == state), None)
+    if not row:
+        return None
+    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    curation = load_curation(run_dir)
+    variant = frame_variant(curation, state)
+    total = state_frame_total(request, state)
+    ordered, transforms = state_plan(curation, request, state)
+    cell = (int(request["cell_width"]), int(request["cell_height"]))
+    snap = pixel_snap_scale(request) if variant == "pixel" else None
+    for index in (ordered or list(range(total))):
+        candidate = run_dir / row_frame_rel(row, index, variant)
+        if not candidate.is_file():
+            continue
+        edit_idx = edit_index(curation, state, index)
+        with Image.open(candidate) as opened:
+            source = apply_pixel_edits(opened.convert("RGBA"), state_pixel_ops(curation, state).get(edit_idx))
+        return apply_transform(source, transforms.get(edit_idx), cell, snap_scale=snap)
+    return None
 
 
 def _find_base_path(run_dir: Path):
@@ -880,6 +915,24 @@ class CurationHandler(BaseHTTPRequestHandler):
             self.send_header("X-Anchor-Source", str(resolved["source"]))
             self.end_headers()
             self.wfile.write(data)
+            return
+        if path == "/api/breathe-anatomy":
+            # 실루엣 해부는 **서버에서만** 돈다 (수홍 결정 2026-07-25 b안). 웹뷰는 이
+            # 숫자를 받아 워프만 미러링한다 — 눈쌍 대칭 매칭·연결요소·병목 검출을 JS 가
+            # 재구현하면 굽기와 미리보기의 진실이 갈라진다.
+            query = parse_qs(urlparse(self.path).query)
+            state = (query.get("state") or [""])[0]
+            rigid = (query.get("rigid_row") or [""])[0]
+            try:
+                frame = _breathe_source_frame(self.run_dir, state)
+                if frame is None:
+                    self._send_json({"error": f"no extracted frame for state {state!r}"}, 404)
+                    return
+                frozen = freeze_anatomy(frame, {"rigid_row": int(rigid)} if rigid else {})
+                self._send_json({"anatomy": frozen, "defaults": {
+                    "depth": DEFAULT_DEPTH, "lag": DEFAULT_LAG, "breaths": 1}})
+            except (Exception, SystemExit) as exc:
+                self._send_json({"error": str(exc)}, 500)
             return
         if path == "/api/base-grid":
             # 베이스의 검출 픽셀 격자 — 편집기(줌 모달)의 논리 해상도와 base-edit 의
