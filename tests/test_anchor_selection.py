@@ -1,0 +1,343 @@
+# SPDX-License-Identifier: Apache-2.0
+"""방향 앵커 = 승인된 프레임 (수홍 2026-07-25).
+
+- 기본 앵커 = 그 방향 앵커 행의 **큐레이션 시퀀스 첫 인스턴스** (index 0 이 아니다) 이고,
+  베이크는 픽셀 편집·변형까지 태운 결과다 — raw 크롭이 아니다.
+- 사용자가 큐레이션 뷰/CLI 로 **어떤 프레임이 앵커인지 지정**할 수 있다 (같은 방향의
+  다른 행, 시퀀스에 없는 후보 풀 프레임도 가능).
+- 사라진 인스턴스를 가리키는 지정은 fail-loud (조용한 기본값 복귀 금지).
+- 리롤/생성 플랜/뷰 칩이 같은 앵커 진실을 쓴다.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+from PIL import Image
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from sprite_gen import anchor as anchor_mod  # noqa: E402
+from sprite_gen import extract as extract_module  # noqa: E402
+from sprite_gen.curation import (anchor_choices, load_curation, state_instances,  # noqa: E402
+                                 write_curation_atomic)
+
+MAGENTA = (255, 0, 255)
+PITCH = 8
+LOGICAL = (20, 36)
+GAP = 40
+
+
+def _frame_art(seed: int) -> Image.Image:
+    """결정론 합성 프레임 — 논리 픽셀 노이즈(격자 검출이 가능한 밀도)를 PITCH 배 확대.
+
+    단색 블록은 내부 경계가 없어 피치 검출이 실패한다 (실측: "empty or too sparse")
+    — test_takes_heal 과 같은 노이즈 방식을 쓴다."""
+    import random
+
+    rng = random.Random(seed)
+    art = Image.new("RGB", LOGICAL, MAGENTA)
+    for y in range(LOGICAL[1]):
+        for x in range(LOGICAL[0]):
+            if rng.random() < 0.55:
+                art.putpixel((x, y), (rng.randrange(30, 220), rng.randrange(30, 220),
+                                      rng.randrange(30, 220)))
+    return art.resize((LOGICAL[0] * PITCH, LOGICAL[1] * PITCH), Image.Resampling.NEAREST)
+
+
+def _strip(frames: int, seed0: int) -> Image.Image:
+    frame = _frame_art(seed0)  # 한 행의 프레임들은 같은 그림 (앵커 판정은 인덱스로 한다)
+    strip = Image.new("RGB", (frame.width * frames + GAP * (frames + 1),
+                              frame.height + GAP * 2), MAGENTA)
+    for i in range(frames):
+        strip.paste(frame, (GAP + i * (frame.width + GAP), GAP))
+    return strip
+
+
+def _build_direction_run(root: Path) -> Path:
+    """down/side 방향 계약 + pp 추출 런 (down_idle 4프레임, down_walk 3, side_walk 3)."""
+    run_dir = root / "run"
+    request = {
+        "version": 1,
+        "kind": "sprite-gen-request",
+        "engine": "component-row",
+        "character": {"id": "anchorbot", "description": "anchor fixture", "base_image": None},
+        "cell": {"shape": "square", "width": 96, "height": 96, "safe_margin_x": 8,
+                 "safe_margin_y": 8, "size": 96, "safe_margin": 8},
+        "chroma_key": {"name": "magenta", "hex": "#FF00FF", "rgb": [255, 0, 255],
+                       "selection": "fallback"},
+        "layout": "taxonomy/v1",
+        "directions": {"set": ["down", "side"], "mirror": {}, "anchor_suffix": "idle"},
+        "states": {
+            "down_idle": {"frames": 4, "fps": 4, "loop": True, "action": "anchor row"},
+            "down_walk": {"frames": 3, "fps": 8, "loop": True, "action": "action row"},
+            "side_walk": {"frames": 3, "fps": 8, "loop": True, "action": "action row"},
+        },
+        "fit": {"pixel_perfect": True, "logical_height": 48},
+    }
+    (run_dir / "raw" / "down").mkdir(parents=True)
+    (run_dir / "raw" / "side").mkdir(parents=True)
+    _strip(4, seed0=1).save(run_dir / "raw" / "down" / "idle.png")
+    _strip(3, seed0=20).save(run_dir / "raw" / "down" / "walk.png")
+    _strip(3, seed0=40).save(run_dir / "raw" / "side" / "walk.png")
+    Image.new("RGB", (64, 64), (10, 200, 10)).save(run_dir / "base-source.png")
+    (run_dir / "sprite-request.json").write_text(
+        json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    assert extract_module.run(run_dir=run_dir) == 0
+    return run_dir
+
+
+def _save_curation(run_dir: Path, states: dict, anchors: dict | None = None) -> None:
+    payload = {"version": 1, "kind": "sprite-gen-curation", "states": states}
+    if anchors is not None:
+        payload["anchors"] = anchors
+    write_curation_atomic(run_dir, payload)
+
+
+def _request(run_dir: Path) -> dict:
+    return json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def direction_run(tmp_path: Path) -> Path:
+    return _build_direction_run(tmp_path)
+
+
+# --- 기본값: 시퀀스 첫 인스턴스 + 후처리 반영 ---------------------------------
+
+def test_default_anchor_is_the_curated_sequence_head_not_index_zero(direction_run: Path) -> None:
+    run_dir = direction_run
+    request = _request(run_dir)
+    # 사용자가 앞 두 프레임을 기각(보관)하고 3,2 순서로 재정렬
+    _save_curation(run_dir, {"down_idle": {"deleted": [0, 1], "selected": [3, 2]}})
+    resolved = anchor_mod.resolve_anchor(request, load_curation(run_dir), "down")
+    assert resolved == {"direction": "down", "state": "down_idle", "index": 3, "source": "default"}
+
+
+def test_anchor_bake_carries_pixel_edits_and_transform(direction_run: Path) -> None:
+    """앵커 재료 = 승인된 모습. 픽셀 편집이 앵커 ref 에 실제로 들어있어야 한다."""
+    run_dir = direction_run
+    request = _request(run_dir)
+    _save_curation(run_dir, {"down_idle": {
+        "selected": [0, 1, 2, 3],
+        # 셀 좌표 픽셀 편집 (한 논리 블록 전체를 덮는 8x8 은 아니어도 색은 나타난다)
+        "pixels": {"0": {f"{x},{y}": "#ff0000" for x in range(40, 48) for y in range(40, 48)}},
+    }})
+    image, resolved = anchor_mod.anchor_image(run_dir, request, load_curation(run_dir), "down")
+    assert resolved["state"] == "down_idle" and resolved["index"] == 0
+    colors = {px[:3] for px in image.convert("RGBA").getdata() if px[3] > 0}
+    assert (255, 0, 0) in colors, "픽셀 편집이 앵커 ref 에 반영되지 않았다 (raw 를 구웠다)"
+
+
+def test_materialize_writes_ref_and_removes_legacy_snapshot(direction_run: Path) -> None:
+    run_dir = direction_run
+    legacy = run_dir / "references" / "anchors" / "down-idle-x8.png"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_bytes(b"stale")
+    out = anchor_mod.materialize(run_dir, "down")
+    assert out == run_dir / "references" / "anchors" / "down-anchor-x8.png"
+    assert out.is_file()
+    assert not legacy.exists(), "앵커가 idle 행에 묶여 있던 시절의 파일이 남아 두 진실이 됐다"
+    with Image.open(out) as im:
+        assert im.width % 8 == 0 and im.height % 8 == 0  # x8 니어리스트 확대
+
+
+# --- 사용자 지정 ---------------------------------------------------------------
+
+def test_picked_frame_overrides_the_default_including_another_row(direction_run: Path) -> None:
+    run_dir = direction_run
+    request = _request(run_dir)
+    _save_curation(run_dir, {"down_idle": {"selected": [0, 1, 2, 3]}},
+                   anchors={"down": {"state": "down_walk", "index": 2}})
+    resolved = anchor_mod.resolve_anchor(request, load_curation(run_dir), "down")
+    assert resolved == {"direction": "down", "state": "down_walk", "index": 2, "source": "picked"}
+
+
+def test_picked_frame_may_be_a_pool_candidate(direction_run: Path) -> None:
+    """시퀀스에 없는(선택 안 된) 후보 프레임도 앵커가 될 수 있다 — 포즈가 제일 좋을 수 있다."""
+    run_dir = direction_run
+    request = _request(run_dir)
+    _save_curation(run_dir, {"down_idle": {"selected": [0, 1]}},
+                   anchors={"down": {"state": "down_idle", "index": 3}})
+    curation = load_curation(run_dir)
+    assert 3 in state_instances(curation, "down_idle", 4)
+    resolved = anchor_mod.resolve_anchor(request, curation, "down")
+    assert (resolved["index"], resolved["source"]) == (3, "picked")
+
+
+def test_picked_frame_that_vanished_fails_loud(direction_run: Path) -> None:
+    run_dir = direction_run
+    request = _request(run_dir)
+    _save_curation(run_dir, {"down_idle": {"deleted": [3], "selected": [0, 1, 2]}},
+                   anchors={"down": {"state": "down_idle", "index": 3}})
+    with pytest.raises(SystemExit) as excinfo:
+        anchor_mod.resolve_anchor(request, load_curation(run_dir), "down")
+    assert "no longer exists" in str(excinfo.value)
+    # 뷰는 죽지 않고 이유를 보여준다
+    status = anchor_mod.anchor_status(run_dir, request, load_curation(run_dir), "down")
+    assert status["state"] is None and "no longer exists" in status["error"]
+
+
+def test_pick_from_another_direction_is_rejected(direction_run: Path) -> None:
+    run_dir = direction_run
+    request = _request(run_dir)
+    _save_curation(run_dir, {}, anchors={"down": {"state": "side_walk", "index": 0}})
+    with pytest.raises(SystemExit) as excinfo:
+        anchor_mod.resolve_anchor(request, load_curation(run_dir), "down")
+    assert "belongs to direction" in str(excinfo.value)
+
+
+# --- CLI ---------------------------------------------------------------------
+
+def test_cli_pick_then_clear_roundtrip(direction_run: Path) -> None:
+    run_dir = direction_run
+    assert anchor_mod.run(run_dir=run_dir, pick="down_idle#2") == 0
+    assert anchor_choices(load_curation(run_dir)) == {"down": {"state": "down_idle", "index": 2}}
+    # 지정만으로 ref 도 갱신된다 (--direction 이 pick 에서 파생)
+    assert (run_dir / "references" / "anchors" / "down-anchor-x8.png").is_file()
+    assert anchor_mod.run(run_dir=run_dir, clear=True, direction="down") == 0
+    assert anchor_choices(load_curation(run_dir)) == {}
+
+
+def test_cli_for_state_prints_the_identity_ref(direction_run: Path, capsys) -> None:
+    run_dir = direction_run
+    # 액션 행 = 방향 앵커 (실제로 구워진 파일)
+    assert anchor_mod.run(run_dir=run_dir, for_state="down_walk") == 0
+    printed = capsys.readouterr().out.strip()
+    assert printed == "references/anchors/down-anchor-x8.png"
+    assert (run_dir / printed).is_file()
+    # 앵커 행 자체 = base-source (앵커 이전 체인)
+    assert anchor_mod.run(run_dir=run_dir, for_state="down_idle") == 0
+    assert capsys.readouterr().out.strip() == "base-source.png"
+
+
+def test_cli_pick_preserves_existing_curation_rows(direction_run: Path) -> None:
+    """지정 쓰기가 사용자의 선택/편집을 덮지 않는다 (fresh 재독 → 갱신)."""
+    run_dir = direction_run
+    _save_curation(run_dir, {"down_idle": {"selected": [1, 2], "transforms": {"1": {"dx": 3}}}})
+    assert anchor_mod.run(run_dir=run_dir, pick="down_idle#1") == 0
+    curation = load_curation(run_dir)
+    assert curation["states"]["down_idle"]["selected"] == [1, 2]
+    assert curation["states"]["down_idle"]["transforms"]["1"]["dx"] == 3
+    assert anchor_choices(curation)["down"] == {"state": "down_idle", "index": 1}
+
+
+# --- 소비자 정합 --------------------------------------------------------------
+
+def test_reroll_identity_ref_uses_the_picked_anchor(direction_run: Path) -> None:
+    """리롤이 붙이는 identity ref = 같은 앵커 진실 (reroll 안에 두 번째 규칙이 없다)."""
+    from sprite_gen import reroll
+
+    run_dir = direction_run
+    request = _request(run_dir)
+    _save_curation(run_dir, {}, anchors={"down": {"state": "down_walk", "index": 1}})
+    ref = reroll.identity_ref(run_dir, "down_walk", request=request, quiet=True)
+    assert ref == run_dir / "references" / "anchors" / "down-anchor-x8.png"
+    baked = anchor_mod.anchor_image(run_dir, request, load_curation(run_dir), "down")[0]
+    with Image.open(ref) as written:
+        assert list(written.convert("RGBA").getdata()) == list(baked.convert("RGBA").getdata())
+
+
+def test_anchor_suffix_other_than_idle_is_honored(direction_run: Path) -> None:
+    """앵커 행 이름은 `anchor_suffix` 계약이 정한다 — `idle` 하드코딩 금지."""
+    run_dir = direction_run
+    request = _request(run_dir)
+    request["directions"]["anchor_suffix"] = "walk"
+    assert anchor_mod.anchor_state(request, "down") == "down_walk"
+    resolved = anchor_mod.resolve_anchor(request, load_curation(run_dir), "down")
+    assert resolved["state"] == "down_walk"
+    # 이제 앵커 행이 된 down_walk 는 base-source 로 생성된다 (자기 자신을 앵커로 붙이지 않는다)
+    assert anchor_mod.identity_ref(run_dir, "down_walk", request=request,
+                                   quiet=True).name == "base-source.png"
+
+
+def test_view_chip_is_a_live_bake_endpoint(direction_run: Path) -> None:
+    """앵커 칩 = `/api/anchor` 라이브 베이크 (파일 스냅샷이면 편집 직후 낡는다)."""
+    from serve_curation import build_run_state
+
+    run_dir = direction_run
+    _save_curation(run_dir, {"down_idle": {"deleted": [0], "selected": [1, 2, 3]}})
+    snapshot = build_run_state(run_dir)
+    walk = next(s for s in snapshot["states"] if s["name"] == "down_walk")
+    anchor_chip = next(r for r in walk["refs"] if r["role"] == "anchor")
+    assert anchor_chip["url"].startswith("/api/anchor?direction=down")
+    assert anchor_chip["name"] == "down_idle#1"
+    group = next(g for g in snapshot["directionGroups"] if g["direction"] == "down")
+    assert group["anchorFrame"] == {"state": "down_idle", "index": 1, "source": "default"}
+    assert group["anchorError"] is None
+    # 앵커 행 자체에는 앵커 칩이 붙지 않는다 (자기 자신이 앵커다)
+    idle = next(s for s in snapshot["states"] if s["name"] == "down_idle")
+    assert not [r for r in idle["refs"] if r["role"] == "anchor"]
+
+
+def test_api_anchor_serves_the_baked_png(direction_run: Path) -> None:
+    import threading
+    import urllib.request
+    from functools import partial
+    from http.server import ThreadingHTTPServer
+
+    from serve_curation import CurationHandler
+
+    run_dir = direction_run
+    _save_curation(run_dir, {}, anchors={"down": {"state": "down_idle", "index": 2}})
+    CurationHandler.run_dir = run_dir
+    CurationHandler.lang = "en"
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), partial(CurationHandler))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{srv.server_address[1]}/api/anchor?direction=down") as res:
+            assert res.status == 200
+            assert res.headers["Content-Type"] == "image/png"
+            assert res.headers["X-Anchor-Frame"] == "down_idle#2"
+            assert res.headers["X-Anchor-Source"] == "picked"
+            assert res.read()[:8] == b"\x89PNG\r\n\x1a\n"
+    finally:
+        srv.shutdown()
+
+
+def test_curation_post_without_anchors_key_keeps_the_pick(direction_run: Path) -> None:
+    """엔진(CLI)이 심은 지정은 그 키를 모르는 저장에 조용히 사라지지 않는다."""
+    import json as _json
+    import threading
+    import urllib.request
+    from functools import partial
+    from http.server import ThreadingHTTPServer
+
+    from serve_curation import CurationHandler
+
+    run_dir = direction_run
+    assert anchor_mod.run(run_dir=run_dir, pick="down_idle#2") == 0
+    CurationHandler.run_dir = run_dir
+    CurationHandler.lang = "en"
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), partial(CurationHandler))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+
+    def post(body: dict) -> int:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/curation",
+                                     data=_json.dumps(body).encode(), method="POST")
+        with urllib.request.urlopen(req) as res:
+            return res.status
+
+    try:
+        revision = _json.loads(
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/api/run").read())["runRevision"]
+        # anchors 키가 없는 저장 → 이월
+        assert post({"version": 1, "kind": "sprite-gen-curation", "runRevision": revision,
+                     "states": {"down_idle": {"selected": [0, 1]}}}) == 200
+        assert anchor_choices(load_curation(run_dir))["down"] == {"state": "down_idle", "index": 2}
+        # 빈 anchors 를 명시로 실으면 해제 (뷰의 해제 동작)
+        revision = _json.loads(
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/api/run").read())["runRevision"]
+        assert post({"version": 1, "kind": "sprite-gen-curation", "runRevision": revision,
+                     "anchors": {}, "states": {"down_idle": {"selected": [0, 1]}}}) == 200
+        assert anchor_choices(load_curation(run_dir)) == {}
+        assert "anchors" not in _json.loads(
+            (run_dir / "curation.json").read_text(encoding="utf-8"))
+    finally:
+        srv.shutdown()
