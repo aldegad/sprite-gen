@@ -30,7 +30,29 @@ For true pixel-perfect output (game-ready chunky pixel art with intact 1px outli
 
 **셀 높이의 정수 약수만 유효하다** (수홍 2026-07-25). 격자 배율은 정수(`cell_h // logical_height`)라 약수가 아닌 선언은 반올림돼 사라진다 — 셀 64 + 로지컬 48 은 배율 1 로 접혀 **논리 높이가 64 로 되돌아간다**(선언은 아무 픽셀도 바꾸지 않음). 그 상태를 조용히 두지 않는다: 추출이 `fit.logical_height=<값> is not applied as declared` 경고를 남기고, 큐레이터 헤더 라벨과 큐레이션 행 지문은 선언값이 아니라 **파생 유효값**(`curation.effective_logical_height` / `pixel_snap_scale`)을 쓴다. 실사고 (hero founder_v7·v8): `conform` 눌림이 제거된 뒤 남은 무효값 48 이 라벨을 "48px" 로 거짓 표기했고, 그 값을 지우는 편집만으로 프레임이 바이트 동일한데도 14행 큐레이션이 통째로 드롭됐다. 배율 식의 소유자는 `pixel_snap_scale` 한 곳이다 — 소비자(extract·웹뷰·compose)가 손으로 다시 유도하지 않는다(`tests/test_logical_height_contract.py`).
 
-Pipeline (unfake.js/pixeldetector-style): 포즈 컴포넌트를 먼저 분리한 뒤 **프레임별** 처리 — 엣지-정렬 스코어링 피치 검출(그리드선 ±w 에 색 경계가 모이는 비율 − 우연 기대치 |잉여류|/p 의 argmax; 창 폭 w 는 모든 p 에 동일하고 잉여류는 집합으로 세어 중복 합산하지 않는다 — w 를 p>=8 에서만 열면 참 피치가 자기 약수에게 져서 k=8,10,12,14 가 k/2 로 붕괴한다, `tests/test_pitch_ground_truth.py`) → 피치는 **소수**로 잰다 (AI 도트의 블록 폭은 정수로 안 떨어진다 — 예: 17.24px; 정수로 반올림하면 그 오차가 폭 전체에 누적돼 셀 경계가 블록 한가운데를 지난다). 격자선은 `_grid_edges` 가 길이를 셀 개수로 등분해 정수 픽셀로 확정하므로 **결과는 항상 정수 격자**다. **프레임 자체 검출 피치가 1순위 진실**이다 (수홍 2026-07-20, plan `sprite-gen/per-frame-pixel-grid`: 합의를 프레임에 강제하면 측정차 0.5px/셀이 폭 전체에 누적돼 눈이 반쪽 나는 실사고) — 단, own 채택은 **합의 '피치 패밀리'(비율 1.1, `PITCH_FAMILY_RATIO`) 이내에서만**이다. 하모닉/붕괴 오검출(×2/×3·÷2/÷3)까지 own 으로 믿으면 한 프레임의 거대 native 가 행 일관 축소(`conform_row_logical`)의 배율을 끌어내려 행 전체가 콩알로 붕괴한다 (실사고 hero_v7 up_run frame-2, 2026-07-22: own 3.00 → native 87×162 → 행 전체 0.36배 → sparse 검증 전멸, plan `sprite-gen/pitch-outlier-guard-heal-isolation`). 패밀리 밖 = 합의로 스냅 + 프레임별 warning (`resolve_frame_pitch`, `tests/test_pitch_ground_truth.py`). 프레임별 검출값의 중앙값(붕괴값 필터)은 **자체 검출이 실패한 프레임의 fallback** 이기도 하며 적용 시 프레임별 warning. 전 프레임 검출 실패면 `fit.pitch_hint`(보통 베이스 검출값) → **위상은 프레임마다** 다시 잡아 grid-snap → conform to `logical_height` (kCentroid) → run-wide shared median-cut palette (`palette_size`, kills frame-to-frame color flicker) → alpha binarization → integer NEAREST upscale into the cell. `detail_bias` (default true) prefers a near-black minority cluster (share ≥ 0.40, luma < 70/255) so eyes and outlines survive dominant voting. The final display scale is `cell_height // logical_height` — e.g. cell 64 + logical 32 → crisp 2× chunky pixels. (폐기된 대안과 그 이유는 `CHANGELOG.md` v1.10.0.)
+Pipeline (unfake.js/pixeldetector-style): 포즈 컴포넌트를 먼저 분리한 뒤 **프레임별** 처리 — 엣지-정렬 스코어링 피치 검출(그리드선 ±w 에 색 경계가 모이는 비율 − 우연 기대치 |잉여류|/p 의 argmax; 창 폭 w 는 모든 p 에 동일하고 잉여류는 집합으로 세어 중복 합산하지 않는다 — w 를 p>=8 에서만 열면 참 피치가 자기 약수에게 져서 k=8,10,12,14 가 k/2 로 붕괴한다, `tests/test_pitch_ground_truth.py`) → 피치는 **소수**로 잰다 (AI 도트의 블록 폭은 정수로 안 떨어진다 — 예: 17.24px; 정수로 반올림하면 그 오차가 폭 전체에 누적돼 셀 경계가 블록 한가운데를 지난다). 격자선은 `_grid_edges` 가 길이를 셀 개수로 등분해 정수 픽셀로 확정하므로 **결과는 항상 정수 격자**다. **프레임 자체 검출 피치가 1순위 진실**이다 (수홍 2026-07-20, plan `sprite-gen/per-frame-pixel-grid`: 합의를 프레임에 강제하면 측정차 0.5px/셀이 폭 전체에 누적돼 눈이 반쪽 나는 실사고) — 단, own 채택은 **합의 '피치 패밀리'(비율 1.1, `PITCH_FAMILY_RATIO`) 이내에서만**이다. 하모닉/붕괴 오검출(×2/×3·÷2/÷3)까지 own 으로 믿으면 한 프레임의 거대 native 가 행 일관 축소(`conform_row_logical`)의 배율을 끌어내려 행 전체가 콩알로 붕괴한다 (실사고 hero_v7 up_run frame-2, 2026-07-22: own 3.00 → native 87×162 → 행 전체 0.36배 → sparse 검증 전멸, plan `sprite-gen/pitch-outlier-guard-heal-isolation`). 패밀리 밖 = 합의로 스냅 + 프레임별 warning (`resolve_frame_pitch`, `tests/test_pitch_ground_truth.py`). 프레임별 검출값의 중앙값(붕괴값 필터)은 **자체 검출이 실패한 프레임의 fallback** 이기도 하며 적용 시 프레임별 warning. 전 프레임 검출 실패면 `fit.pitch_hint`(보통 베이스 검출값) → **위상은 프레임마다 셀 균일도 실측(`_best_phase`)으로** 다시 잡아 grid-snap → conform to `logical_height` (kCentroid) → run-wide shared median-cut palette (`palette_size`, kills frame-to-frame color flicker) → alpha binarization → integer NEAREST upscale into the cell. `detail_bias` (default true) prefers a near-black minority cluster (share ≥ 0.40, luma < 70/255) so eyes and outlines survive dominant voting. The final display scale is `cell_height // logical_height` — e.g. cell 64 + logical 32 → crisp 2× chunky pixels. (폐기된 대안과 그 이유는 `CHANGELOG.md` v1.10.0.)
+
+## 위상은 근사가 아니라 실측으로 고른다
+
+피치를 맞게 재도 **위상이 틀리면 격자가 블록을 반으로 가른다.** 위상 출처는
+`_best_phase` — 후보 위상마다 실제 셀 균일도(`_grid_score_edges`)를 채점해 축별 8단계에서
+최선을 고른다. 피치 검출이 부산물로 내놓는 히스토그램 위상(`_axis_refine` 의 최적 창
+가중 무게중심)은 쓰지 않는다.
+
+이유는 그 근사가 **참 위상에서 최대 pitch/2 까지 밀리기 때문**이다 (실사고 수홍
+2026-07-25, founder_v8 `down_jump` frame-0: 피치 13.00 에서 히스토그램 위상 y=2.02 vs
+실측 최적 y=8.12, 차이 6.1 ≈ pitch/2). `refine_edges_to_boundaries` 는 절단선을
+**±pitch/3 창 안에서만** 당기므로 이 크기의 위상 오차는 구조적으로 복구되지 않는다 —
+캐릭터 눈 4행이 3행으로 병합돼 8칸이 7칸이 됐다 (plan
+`sprite-gen/frame-pitch-consensus-eats-a-row`).
+
+피치가 고정된 상태에서 위상만 비교하므로, 균일도 지표의 '거친 격자 편애' 편향
+(칸이 클수록 칸 안이 균일해지는 자명한 편향)은 이 판정에 개입하지 않는다.
+
+**비용**: 축별 8단계 = 최대 64조합을 전체 이미지 픽셀로 채점한다 — 컴포넌트당
++1.75~2.6s (실측 `down_idle` 8컴포넌트 7s→21s). 정확도를 택한 명시 트레이드오프이며
+등가 최적화는 `sprite-gen/extract-performance` 소관이다. 전수 회귀는 68프레임 중
+동일 53 / 변경 15(전부 ±1칸)였다.
 
 ## Stage ownership (불변)
 
