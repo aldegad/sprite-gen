@@ -96,7 +96,9 @@ def _breathe_source_frame(run_dir: Path, state: str):
     돌고(동작은 맞지만) 웹뷰가 얼려둔 숫자와 굽기가 쓰는 숫자가 달라진다 — 미리보기와
     결과가 갈라지는 바로 그 경로다.
 
-    해부는 상태 단위 상수라 첫 실재 프레임 하나면 충분하다."""
+    해부는 상태 단위 상수라 첫 실재 프레임 하나면 충분하다 — 그리고 굽기도 그 계약을
+    지킨다(`breathe.resolve_anatomy` 가 줄마다 한 벌만 확정한다). 예전엔 굽기가 프레임마다
+    다시 재서 이 단언이 거짓이었고 프리뷰와 갈렸다 (슉슉이 실측 2026-07-25)."""
     from curation import (apply_pixel_edits, apply_transform, edit_index,
                           state_pixel_ops, state_plan)
     manifest = load_consistent_frames_manifest(run_dir, allow_pending_states=True) or {"rows": []}

@@ -90,7 +90,7 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 - 호흡(idle breathing)은 **후처리 레이어**다 (수홍 확정 2026-07-18) — 스크립트가 아니라 curation.json 사이드카 `states.<state>.breathe = {depth, breaths, lag, rigid_row?, anatomy}` 로 선언하고, compose/GIF 가 재생 시퀀스 위에 결정론(봉투 워프, `sprite_gen/breathe.py`)으로 굽는다. 깜빡임 프레임도 그대로 숨쉰다 (프레임 선택과 직교).
   - **변형은 자르지 않고 강도를 떨군다** (2026-07-25 교체): 스프라이트 전체에 연속 변형장을 걸고 그 강도를 강체 경계에서 0 으로 테이퍼한다. `env=0` 인 행은 가로 사상이 항등이고 세로 누적이 정확히 1씩 늘어 **그 구간이 프레임 간 비트 동일**하다 — 눈·입이 몇 도트뿐이라 근사로는 표정이 뭉갠다. 가로는 행 안에서 밀도를 적분하므로 사상이 단조라 접힘이 없고, 날개 같은 부속은 밀리기만 하고 안 늘어난다.
   - **강체 경계는 가슴이 아니라 목이다.** 가슴은 해부학 개념이라 몬스터마다 다르지만 목은 기하학적 병목이라 안정적으로 잡힌다. 얼굴이 몸통에 있으면(버섯·슬라임) 대칭 눈쌍을 찾아 얼굴 아래로 내린다. 병목도 얼굴도 없으면 어깨-기울기로 떨어지고 그 사실이 `anatomy.warnings` 에 남는다.
-  - 큐레이션 뷰: 줄 헤더 호흡 체크박스(즉시 on/off) + 라벨 클릭 편집기(실재생 위 **강체 경계 1개 드래그** · 진폭(몸통 높이 %) · 루프당 호흡 횟수 · `auto` 되돌리기 — 즉시 반영, Esc 복원, 최종 굽기 필름스트립). 루프 길이는 시퀀스 그대로 불변이고 위상이 연속값이라 breaths 는 언제나 요청 그대로 적용된다. 재추출/굽기 대기 없음.
+  - 큐레이션 뷰: 줄 헤더 호흡 체크박스(즉시 on/off) + 라벨 클릭 편집기(실재생 위 **강체 경계 1개 드래그** · 진폭(몸통 높이 %) · 루프당 호흡 횟수 · `auto` 되돌리기 — 즉시 반영, Esc 복원, 최종 굽기 필름스트립). 루프 길이는 시퀀스 그대로 불변이고 위상이 연속값이라 breaths 는 요청 그대로 적용된다 (범위 1~8; 밖이면 조용히 깎지 않고 요란하게 거부한다 — `depth` 0.005~0.20, `lag` 0~0.45 도 같다). 재추출/굽기 대기 없음.
 - `interpolate_frames.py` — AI in-between: 두 프레임을 ref 로 물려 **생성형**(codex 기본/grok)으로 중간 프레임을 그려 **테이크**로 기록 (raw 단계 AI — 최종 프레임은 여전히 결정론 추출이 굽는다). 서버 머신의 provider CLI OAuth 를 쓰므로 GUI 버튼도 동작 — 인증 전제와 실측 근거(RIFE 파기): [`docs/frame-interpolation.md`](docs/frame-interpolation.md).
 - `compose_sprite_atlas.py` — compose `sprite-sheet-alpha.png` + runtime `manifest.json.frame_layout`.
 - `preview_animation.py` — QA previews from extracted frames: contact sheets + state GIFs under `qa/`.

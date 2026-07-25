@@ -14,11 +14,13 @@ import pytest
 from PIL import Image
 
 from sprite_gen.anatomy import analyze
+from pathlib import Path
+
 from sprite_gen.breathe import (DEFAULT_DEPTH, MAX_ROW_STRAIN, SMOOTH_CYCLE_FRAMES, TAPER,
-                                bake_breathe_sequence, breathe_reads_smoothly,
+                                anatomy_report, bake_breathe_sequence, breathe_reads_smoothly,
                                 envelope, fit_breathe_pattern, fitted_breath_count,
-                                anatomy_fingerprint, frame_anatomy, freeze_anatomy,
-                                phase_frame,
+                                anatomy_fingerprint, freeze_anatomy,
+                                phase_frame, resolve_anatomy,
                                 recommended_breathe_frames, row_strain, wave)
 from sprite_gen.curation import state_breathe
 from sprite_gen.extract import solid_alpha_bbox
@@ -290,9 +292,9 @@ def test_retired_split_schema_is_rejected_loudly(retired: dict) -> None:
     assert "migrate-breathe" in message, "마이그레이션 경로를 알려줘야 한다"
 
 
-def test_new_schema_normalizes_and_clamps() -> None:
-    cfg = state_breathe({"states": {"idle": {"breathe": {"depth": 99, "breaths": 99, "lag": -1}}}}, "idle")
-    assert cfg == {"depth": 0.20, "breaths": 8, "lag": 0.0, "rigid_row": None, "anatomy": None}
+def test_new_schema_normalizes_within_range() -> None:
+    cfg = state_breathe({"states": {"idle": {"breathe": {"depth": 0.08, "breaths": 3}}}}, "idle")
+    assert cfg == {"depth": 0.08, "breaths": 3, "lag": 0.10, "rigid_row": None, "anatomy": None}
 
 
 def test_clipping_the_cell_raises_instead_of_cropping_the_head() -> None:
@@ -396,11 +398,11 @@ def test_manual_rigid_row_beats_a_frozen_anatomy() -> None:
     cfg["anatomy"] = freeze_anatomy(src, cfg)
     frozen_row = cfg["anatomy"]["rigid_row"]
 
-    same, redetected = frame_anatomy(src, cfg)
+    same, redetected = resolve_anatomy(src, cfg)
     assert same.rigid_row == frozen_row and redetected is False, "override 없으면 캐시 그대로"
 
     want = frozen_row + 10
-    anat, redetected = frame_anatomy(src, {**cfg, "rigid_row": want})
+    anat, redetected = resolve_anatomy(src, {**cfg, "rigid_row": want})
     assert anat.rigid_row == want, "사람이 준 값이 얼린 값에 먹혔다"
     assert redetected is True, "캐시가 낡았으므로 재검출로 관측돼야 한다"
     assert anat.rigid_source == "manual"
@@ -423,7 +425,75 @@ def test_fingerprint_covers_everything_detection_reads() -> None:
 
     cfg = dict(CFG)
     cfg["anatomy"] = freeze_anatomy(plain, cfg)      # 얼굴 없는 상태로 확정
-    anat, redetected = frame_anatomy(painted, cfg)   # 그 뒤 눈을 덧칠
+    anat, redetected = resolve_anatomy(painted, cfg)   # 그 뒤 눈을 덧칠
     assert redetected is True, "지문이 어긋났는데 재검출이 안 돌았다"
     assert anat.face is not None and anat.rigid_source == "face", \
         "재검출이 돌았으면 덧칠된 얼굴을 찾아 경계를 내려야 한다"
+
+
+def test_out_of_range_values_are_refused_instead_of_clamped() -> None:
+    """범위 밖 값은 조용히 깎지 않는다.
+
+    클램프가 파이썬에만 있어서 미러·배지·문서가 굽기와 다른 값을 말했다 (슉슉이 실측
+    2026-07-25: `breaths 12` 를 8 로 깎는데 프리뷰·필름스트립·WebM 은 12회 숨쉬고
+    배지는 "적용 12회" 라고 띄웠다). 폐기 키는 요란하게 거부하면서 값 범위만 조용한 것도
+    계약이 어긋난다 — 한쪽으로 정했다."""
+    from sprite_gen.curation import (BREATHE_BREATHS_MAX, BREATHE_DEPTH_MAX,
+                                     BREATHE_LAG_MAX, state_breathe)
+    for key, over in (("depth", BREATHE_DEPTH_MAX + 0.01),
+                      ("breaths", BREATHE_BREATHS_MAX + 1),
+                      ("lag", BREATHE_LAG_MAX + 0.01)):
+        with pytest.raises(SystemExit) as err:
+            state_breathe({"states": {"idle": {"breathe": {key: over}}}}, "idle")
+        assert key in str(err.value) and "범위" in str(err.value)
+    # 경계값은 통과한다
+    ok = state_breathe({"states": {"idle": {"breathe": {
+        "depth": BREATHE_DEPTH_MAX, "breaths": BREATHE_BREATHS_MAX, "lag": BREATHE_LAG_MAX}}}}, "idle")
+    assert ok["breaths"] == BREATHE_BREATHS_MAX
+
+
+def test_the_curator_ui_cap_matches_the_schema_bound() -> None:
+    """UI 컨트롤 상한과 스키마 상한이 갈리면 UI 가 만든 값을 굽기가 거부한다."""
+    from sprite_gen.curation import BREATHE_BREATHS_MAX, BREATHE_DEPTH_MAX, BREATHE_LAG_MAX
+    import re
+    js = (Path(__file__).resolve().parent.parent
+          / "scripts" / "curator" / "src" / "breathe.js").read_text(encoding="utf-8")
+    for name, want in (("BREATHE_BREATHS_MAX", BREATHE_BREATHS_MAX),
+                       ("BREATHE_DEPTH_MAX", BREATHE_DEPTH_MAX),
+                       ("BREATHE_LAG_MAX", BREATHE_LAG_MAX)):
+        # 값을 숫자로 파싱해서 비교한다 — 문자열 포함 검사는 0.2 가 0.25 에도 걸린다
+        m = re.search(rf"^const {name} = ([0-9.]+);", js, re.M)
+        assert m, f"{name} 미러 상수가 breathe.js 에 없다"
+        assert float(m.group(1)) == float(want), \
+            f"{name} 미러 {m.group(1)} != 파이썬 {want} — UI 가 만든 값을 굽기가 거부한다"
+
+
+def test_row_anatomy_is_shared_across_the_sequence() -> None:
+    """줄 전체가 해부 한 벌을 쓴다 — 프레임마다 다시 재면 경계가 흔들린다.
+
+    경계가 프레임마다 움직이면 '강체 구간' 이 프레임 간 같은 구간이 아니게 되고,
+    사이드카 한 벌로 그리는 프리뷰와도 갈린다 (슉슉이 실측 2026-07-25)."""
+    base = _humanoid()
+    other = base.copy()                       # 같은 줄의 다른 프레임 (알파 무변 RGB 덧칠)
+    px = other.load()
+    box = solid_alpha_bbox(other)
+    axis = (box[0] + box[2]) // 2
+    for y in range(box[1] + 4, box[1] + 14):
+        for x in range(axis - 3, axis + 4):
+            if px[x, y][3] >= 128:
+                px[x, y] = (12, 14, 18, px[x, y][3])
+    cfg = dict(CFG)
+    cfg["anatomy"] = freeze_anatomy(base, cfg)
+
+    frames, _ = bake_breathe_sequence([base, other, base, other], cfg)
+    anat, redetected = resolve_anatomy(base, cfg)
+    assert redetected is False
+    for i, frame in enumerate(frames):
+        src = base if i % 2 == 0 else other
+        want = phase_frame(src, cfg, fit_breathe_pattern(4, cfg)[i], anat)
+        assert frame.tobytes() == want.tobytes(), \
+            f"frame {i}: 줄 해부 한 벌로 구운 것과 다르다 — 프레임별 재검출이 되살아났다"
+
+    report = anatomy_report([base, other, base, other], cfg)
+    assert "rigid_row_varies" not in report, "경계가 프레임마다 달라질 수 있는 표현이 남아 있다"
+    assert report["anatomy"]["rigid_row"] == anat.rigid_row
