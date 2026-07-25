@@ -170,7 +170,11 @@ sandbox.__payload = payload;
 vm.runInContext(`
   run = __payload.run;
   entries = {};
-  ppStates = __payload.ppStates || {};
+  // **손으로 ppStates 를 먹이지 않는다.** 웹뷰가 서버 페이로드에서 변종을 스스로
+  // 골라내는지가 이 하네스의 요점이다 — 시드를 밖에 두면 그 질문을 영영 못 묻는다
+  // (슉슉이 실측 2026-07-26: 변종 불일치가 그 공백으로 한 라운드를 살아남았다).
+  seedPixelPerfect(__payload.run);
+  for (const [name, v] of Object.entries(__payload.ppOverride || {})) ppStates[name] = v;
   for (const [name, e] of Object.entries(__payload.entries)) {
     entries[name] = { order: e.order, sel: new Set(e.sel), transforms: e.transforms || {},
                       pixels: e.pixels || {}, clones: e.clones || {},
@@ -180,16 +184,20 @@ vm.runInContext(`
   for (const q of __payload.queries) {
     if (q.kind === "key") __out[q.id] = breatheReferenceKey(q.state);
     if (q.kind === "geometry") __out[q.id] = breatheGeometryFrame(q.state, q.fallback);
+    if (q.kind === "variant") __out[q.id] = bakeVariant(q.state);
   }
 `, sandbox);
 process.stdout.write(JSON.stringify(sandbox.__out));
 """
 
 
-def _webview(run_payload, entries, queries, pp_states=None):
+def _webview(run_payload, entries, queries, pp_override=None):
+    """웹뷰를 서버 페이로드로 부팅해 질의한다 — `ppStates` 는 `seedPixelPerfect` 가 짓는다.
+
+    `pp_override` 는 사용자가 화면에서 토글을 누른 상태를 흉내낼 때만 쓴다."""
     return _node(STORE_HARNESS, {
         "scripts": [str(SRC / "breathe.js"), str(SRC / "store.js")],
-        "run": run_payload, "entries": entries, "ppStates": pp_states or {},
+        "run": run_payload, "entries": entries, "ppOverride": pp_override or {},
         "queries": queries})
 
 
@@ -228,8 +236,7 @@ def test_the_webview_builds_the_same_key_the_route_used(web_run):
     payload = _server_payload(web_run)
     got = _webview(payload,
                    {"idle": {"order": [0, 1, 2, 3], "sel": [0, 1, 2, 3]}},
-                   [{"id": "k", "kind": "key", "state": "idle"}],
-                   pp_states={"idle": True})
+                   [{"id": "k", "kind": "key", "state": "idle"}])
     assert got["k"] == route_key, (
         "웹뷰가 라우트와 다른 키를 만든다 — 프리뷰가 영원히 원본으로 떨어진다.\n"
         f"  라우트: {route_key}\n  웹뷰  : {got['k']}")
@@ -312,8 +319,7 @@ def test_the_webview_agrees_on_the_plain_variant_too(web_run_plain):
     assert "|plain|" in route_key, f"라우트가 plain 변종을 안 골랐다: {route_key}"
     payload = _server_payload(web_run_plain)
     got = _webview(payload, {"idle": {"order": [0, 1, 2, 3], "sel": [0, 1, 2, 3]}},
-                   [{"id": "k", "kind": "key", "state": "idle"}],
-                   pp_states={"idle": False})
+                   [{"id": "k", "kind": "key", "state": "idle"}])
     assert got["k"] == route_key, (
         f"pp OFF 줄에서 갈렸다\n  라우트: {route_key}\n  웹뷰  : {got['k']}")
 
@@ -337,8 +343,71 @@ def test_a_rotated_row_stays_fresh(web_run_plain):
     got = _webview(payload,
                    {"idle": {"order": [0, 1, 2, 3], "sel": [0, 1, 2, 3],
                              "transforms": {"0": {"rotate": 3.0}}}},
-                   [{"id": "k", "kind": "key", "state": "idle"}],
-                   pp_states={"idle": False})
+                   [{"id": "k", "kind": "key", "state": "idle"}])
     assert got["k"] == route_key, "회전이 걸린 줄에서 웹뷰가 다른 키를 만든다"
     assert anatomy_fingerprint(got["k"]) == frozen["fingerprint"], (
         "회전이 걸린 줄이 얼린 지문과 안 맞는다 — 프리뷰가 영원히 원본으로 떨어진다")
+
+
+# ── 굽기 변종 해소표 전수 ────────────────────────────────────────────
+
+VARIANT_CASES = [
+    # (설명, 트윈 있음, per-state 선언, 런 전역 선언)
+    ("기본 런 (fit 없음 — orig/·.plain.png 가 하나도 없다)", False, None, None),
+    ("트윈 없는 줄 + 런 전역 켬", False, None, True),
+    ("트윈 없는 줄 + 런 전역 끔", False, None, False),
+    ("트윈 줄, 선언 없음", True, None, None),
+    ("트윈 줄 per-state 켬", True, True, None),
+    ("트윈 줄 per-state 끔", True, False, None),
+    ("트윈 줄 per-state 끔 + 런 전역 켬 (per-state 가 이긴다)", True, False, True),
+    ("트윈 줄 per-state 켬 + 런 전역 끔", True, True, False),
+]
+
+
+@pytest.mark.parametrize("label,twin,own,wide", VARIANT_CASES,
+                         ids=[c[0][:24] for c in VARIANT_CASES])
+def test_the_webview_resolves_the_bake_variant_like_the_server(label, twin, own, wide):
+    """웹뷰의 굽기 변종 == 파이썬 `frame_variant` — 해소표 전수.
+
+    `ppOn` 은 **표시 렌즈**다: boot 시드가 트윈 없는 줄을 기본 OFF 로 놓는데 그 값은
+    사이드카에 저장되지 않으므로 서버는 그 줄을 `pixel` 로 본다. 둘을 같은 값으로 쓰면
+    `fit.pixel_perfect` 없이 만든 **기본 런 전부**에서 지문이 영구 불일치가 되고,
+    해부를 갱신해도 라우트가 또 `pixel` 로 같은 키를 만들어 절대 안 풀린다
+    (슉슉이 실측 2026-07-26).
+
+    한 칸씩 메우지 않고 표를 통째로 건다 — 같은 실패 모드가 축만 바꿔(파일 → 리샘플러
+    → 변종 이름) 세 번 되돌아왔다."""
+    from sprite_gen.curation import frame_variant
+
+    curation = {"states": {}}
+    if own is not None:
+        curation["states"]["idle"] = {"pixel_perfect": own}
+    if wide is not None:
+        curation["pixel_perfect"] = wide
+    frames = [{"index": 0, "present": True, "url": "/f0.png", "stamp": "1:1"}]
+    if twin:
+        frames[0]["plainUrl"] = "/f0.plain.png"
+        frames[0]["plainBakeUrl"] = "/f0.plain.png"
+        frames[0]["plainBakeStamp"] = "2:2"
+    payload = {"requestStamp": "9:9", "curation": curation,
+               "states": [{"name": "idle", "frames": frames}]}
+    got = _webview(payload, {"idle": {"order": [0], "sel": [0]}},
+                   [{"id": "v", "kind": "variant", "state": "idle"}])
+    assert got["v"] == frame_variant(curation, "idle"), (
+        f"{label}: 웹뷰 {got['v']!r} vs 서버 {frame_variant(curation, 'idle')!r}")
+
+
+def test_the_saved_sidecar_is_what_the_variant_resolves_from():
+    """굽기 변종은 **저장되는 값**으로 해소한다.
+
+    트윈 없는 줄의 퍼펙은 사이드카에 안 적힌다(적으면 굽기가 존재하지 않는 `.plain`
+    변형을 요구한다). 그래서 그 줄의 화면 토글은 변종을 바꾸면 안 된다 — 눌렀다고
+    키가 바뀌면 굽기는 그대로인데 프리뷰만 거부된다."""
+    payload = {"requestStamp": "9:9", "curation": {"states": {}},
+               "states": [{"name": "idle", "frames": [
+                   {"index": 0, "present": True, "url": "/f0.png", "stamp": "1:1"}]}]}
+    q = [{"id": "v", "kind": "variant", "state": "idle"}]
+    on = _webview(payload, {"idle": {"order": [0], "sel": [0]}}, q, pp_override={"idle": True})
+    off = _webview(payload, {"idle": {"order": [0], "sel": [0]}}, q, pp_override={"idle": False})
+    assert on["v"] == off["v"] == "pixel", (
+        f"트윈 없는 줄의 표시 토글이 굽기 변종을 바꾼다 (켬 {on['v']}, 끔 {off['v']})")

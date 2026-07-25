@@ -37,18 +37,7 @@ async function boot() {
   }
   // pixel-perfect twin state must resolve BEFORE first render (frameUrl reads it):
   // per-state truth = states.<state>.pixel_perfect override > run-wide default > on.
-  ppTwinStates = new Set(run.states.filter((s) => s.frames.some((f) => f.plainUrl)).map((s) => s.name));
-  // 퍼펙 토글은 **모든 줄**이 가진다 — 트윈 줄은 소스 전환(canonical↔orig), 트윈 없는
-  // 줄은 측정 k 양자화 렌즈(snapScaleFor). "가능한 줄" 게이팅은 격자 게이팅과 같은
-  // 병이었다 (수홍 2026-07-24: 확대화면에 퍼펙 버튼이 없다 — 조건 분기 = 버그).
-  const ppDefault = !(run.curation && run.curation.pixel_perfect === false);
-  ppStates = {};
-  for (const s of run.states) {
-    const c = run.curation && run.curation.states && run.curation.states[s.name];
-    // 트윈 없는 줄 기본 OFF (원본 먼저 — 양자화 렌즈는 사용자가 눌러서 본다).
-    const fallback = ppTwinStates.has(s.name) ? ppDefault : false;
-    ppStates[s.name] = c && typeof c.pixel_perfect === "boolean" ? c.pixel_perfect : fallback;
-  }
+  seedPixelPerfect(run);
   // 격자 오버레이는 모든 줄이 가진다 — "격자 가능 줄" 이라는 집합 자체를 두지 않는다.
   // 집합이 존재하면 언젠가 필터가 다시 붙는다 (콩콩이 R3 실증: 5줄 mutant 로 병 복원).
   // 스위치가 없으면 되살릴 knob 도 없다.

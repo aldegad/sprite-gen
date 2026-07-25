@@ -204,17 +204,40 @@ _VALUE_SHAPES = {
     "negative": -1,
     "huge": 999,
     "fractional": 2.5,
+    # `Number("")` 과 `Number([])` 는 **0** 이다 — 정수 검사만 하는 미러는 이 둘을 통과시켜
+    # 첫 autosave 가 사용자 값을 0 으로 덮었다. 파이썬은 `float("")` 이 터져 거부한다.
+    "empty-string": "",
+    "empty-list": [],
 }
 
 
+# 매트릭스가 도는 키 = 사이드카 `breathe` 의 **전체 키**. 한때 `depth`·`breaths`·`lag`
+# 셋뿐이었고, 그동안 `rigid_row` 는 빈 문자열·빈 리스트를 0 으로 덮으면서 알림도 없었다
+# (슉슉이 실측 2026-07-26) — "전수 매트릭스" 가 안 도는 키에 같은 실패 모드가 남아 있었다.
+# `anatomy` 는 값 모양 매트릭스에 넣지 않는다: 굽기가 dict 아닌 값을 전부 `None` 으로
+# 보므로 `0`/`""`/`[]` 가 서로 **동치**이고, 그 칸들은 통과해도 아무것도 보증하지 못한다.
+# 대신 의미 있는 계약(유효한 해부가 왕복에서 그대로 살아남는가)을 아래 전용 테스트로 건다.
+MATRIX_KEYS = ["depth", "breaths", "lag", "rigid_row"]
+
+
 def _sidecar_for(key, shape):
-    base = {"depth": 0.06, "breaths": 2, "lag": 0.1}
+    base = {"depth": 0.06, "breaths": 2, "lag": 0.1, "rigid_row": 12,
+            # `anatomy` 는 서버가 써넣는 파생 캐시다. 굽기는 이 값을 안 읽지만(매번 다시
+            # 잰다) 큐레이터가 손상된 값을 **조용히 갈아치우면** 안 된다 — 미러가 거부할
+            # 근거이자 사용자가 무엇을 들고 있었는지의 증거다.
+            "anatomy": {"width": 40, "height": 50, "axis_x": 20, "neck_row": 10,
+                        "neck_source": "bottleneck", "rigid_row": 12,
+                        "rigid_source": "neck", "basis_row": 12, "torso_half": 9.0,
+                        "max_half": 11.0, "face": None, "warnings": [],
+                        "fingerprint": "pixel:0:deadbeef"}}
     if shape == "omitted":
         base.pop(key)
     elif shape == "null":
         base[key] = None
     elif shape == "string":
         base[key] = "0.08" if key in ("depth", "lag") else "3"
+    elif shape in ("empty-string", "empty-list"):
+        base[key] = "" if shape == "empty-string" else []
     else:
         base[key] = _VALUE_SHAPES[shape]
     return base
@@ -230,7 +253,7 @@ def _bake_verdict(sidecar):
 
 @node
 @pytest.mark.parametrize("shape", sorted(_VALUE_SHAPES))
-@pytest.mark.parametrize("key", ["depth", "breaths", "lag"])
+@pytest.mark.parametrize("key", MATRIX_KEYS)
 def test_the_curator_agrees_with_the_bake_on_every_value_shape(key, shape, tmp_path):
     """굽기가 거부하는 사이드카는 큐레이터도 **원본 그대로 두고 알린다**.
     굽기가 받는 사이드카는 큐레이터도 받고, 왕복해도 굽기가 쓰는 값이 안 바뀐다.
@@ -263,3 +286,27 @@ def test_the_curator_agrees_with_the_bake_on_every_value_shape(key, shape, tmp_p
             f"  원본={sidecar}\n  저장={saved}")
         assert after == before, (
             f"{key}={shape}: 왕복이 굽기가 쓰는 값을 바꿨다\n  전={before}\n  후={after}")
+
+
+@node
+def test_a_valid_anatomy_survives_the_round_trip_verbatim(tmp_path):
+    """서버가 얼린 해부는 왕복에서 **한 글자도** 안 바뀐다.
+
+    특히 `fingerprint` 다: 이 값이 왕복에서 사라지거나 바뀌면 미러의 신선도 판정이
+    통째로 무력해지고(지문 없음 = 확인 불가 = 거부), 사용자는 호흡 프리뷰가 영구
+    거부되는 상태에 빠진다. 값 모양 매트릭스는 이 계약을 못 본다 — 굽기가 dict 아닌
+    해부를 전부 `None` 으로 보므로 손상 모양끼리 동치라서다."""
+    anatomy = {"width": 40, "height": 50, "axis_x": 20, "neck_row": 10,
+               "neck_source": "bottleneck", "rigid_row": 12, "rigid_source": "neck",
+               "basis_row": 12, "torso_half": 9.0, "max_half": 11.0,
+               "face": None, "warnings": [], "fingerprint": "pixel:0:deadbeef"}
+    sidecar = {"depth": 0.06, "breaths": 2, "lag": 0.1, "rigid_row": 12, "anatomy": anatomy}
+    run = {"schemaVersion": 1, "fps": 6,
+           "states": [{"name": "idle", "fps": 6,
+                       "frames": [{"index": 0, "present": True}, {"index": 1, "present": True}]}],
+           "curation": {"states": {"idle": {"selected": [0, 1], "breathe": sidecar}}}}
+    got = _run({"mode": "roundtrip", "run": run}, tmp_path)
+    saved = got["payload"]["states"]["idle"].get("breathe")
+    assert saved.get("anatomy") == anatomy, (
+        f"왕복이 해부를 바꿨다 — 신선도 판정의 근거가 사라진다\n"
+        f"  전={anatomy}\n  후={saved.get('anatomy')}")

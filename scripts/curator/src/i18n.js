@@ -58,6 +58,9 @@ const STR = {
     
         breatheHint: "drag the rigid boundary — everything above it stays bit-identical, the body below squashes and stretches, and the head follows a beat later. Applies instantly; Cmd/Ctrl+Z steps back/forward, Esc restores.",
     breatheFail: "breathe failed: ",
+    breatheResample: (rows) =>
+      `heads-up: ${rows} has a rotate/scale transform. the bake resamples BICUBIC, this canvas `
+      + `NEAREST — the exported file will differ from the GIF by a few edge pixels.`,
     opProgress: (p, pct) => `re-deriving ${p.done}/${p.total} (${pct}%) — ${p.label} · ${p.phase}`,
     healTitle: "Updating frames for the new engine",
     healNote: "Sorry for the wait~ this only happens once per engine update. We'll open right up when it's done!",
@@ -205,6 +208,9 @@ const STR = {
     
         breatheHint: "강체 경계를 드래그 — 이 위는 도트 단위로 그대로 남고, 아래 몸통이 눌렸다 펴지며 머리가 반 박자 늦게 따라옵니다. 즉시 반영, Cmd/Ctrl+Z 이전/다음, Esc 복원.",
     breatheFail: "호흡 실패: ",
+    breatheResample: (rows) =>
+      `참고: ${rows} 에 회전/확대 변형이 걸려 있다. 굽기는 BICUBIC, 이 캔버스는 NEAREST 로 `
+      + `리샘플하므로 내보낸 파일이 GIF 와 가장자리 몇 px 다르다.`,
     opProgress: (p, pct) => `재추출 ${p.done}/${p.total} (${pct}%) — ${p.label} · ${p.phase === "components" ? "컴포넌트" : "픽셀퍼펙트"}`,
     healTitle: "엔진 갱신 반영 중 — 프레임 재계산",
     healNote: "죄송해요~ 조금만 기다려 주세요! 엔진 갱신 반영은 이번 한 번이면 돼요. 끝나면 바로 열어 드릴게요!",

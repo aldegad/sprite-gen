@@ -75,7 +75,8 @@ async function downloadRowVideo(stateName, fmt) {
     // 굽기는 `frame_variant` 로 해소한 변형(pp OFF 면 .plain)에서 굽는다 — 미러도 같은
     // 변형에서 그려야 지문이 맞고 그림도 같다. 캐노니컬(`f.url`)로 그리면 지문이
     // **영구 불일치**라 그 줄의 영상 내보내기가 계속 막힌다 (슉슉이 실측 2026-07-26).
-    const image = f ? img(bakeFrameUrl(stateName, f)) : null;
+    const bakeSrc = f && bakeFrameUrl(stateName, f);
+    const image = bakeSrc ? img(bakeSrc) : null;
     if (!(image && image.complete && image.naturalWidth)) throw new Error("frame images still loading");
     const base = document.createElement("canvas");
     base.width = cellW;
@@ -86,7 +87,13 @@ async function downloadRowVideo(stateName, fmt) {
       snapScaleFor(stateName), getPixelOps(stateName, play[i]));
     // 줄의 첫 프레임 = 굽기의 기준 프레임. 얼린 해부가 그 프레임에서 나온 게 아니면
     // 여기서 멈춘다 — 안 그러면 GIF(서버 굽기)와 다른 애니메이션이 파일로 나간다.
-    if (bcfg && i === 0) breatheAssertFresh(breatheReferenceKey(stateName), bcfg);
+    if (bcfg && i === 0) {
+      breatheAssertFresh(breatheReferenceKey(stateName), bcfg);
+      // 고칠 수 없는 차이라도 관측 가능해야 한다 (원칙 6) — 아래 `breatheResamplesDifferently`.
+      if (breatheResamplesDifferently(stateName)) {
+        setStatus(STR[lang].breatheResample(stateName), "warn");
+      }
+    }
     const composed = bcfg ? breatheComposite(base, bcfg, pattern[i] || 0) : base;
     const out = document.createElement("canvas");
     out.width = cellW * scale;

@@ -42,6 +42,8 @@ body {
 .status { color: var(--muted); font-size: 12px; min-width: 80px; text-align: right; }
 .status.ok { color: #16a34a; }
 .status.err { color: var(--danger); }
+/* 고칠 수 없지만 알려야 하는 것 — 오류(빨강)도 성공(초록)도 아니다 */
+.status.warn { color: #b45309; }
 
 button {
   background: var(--panel);
