@@ -1686,32 +1686,6 @@ def binarize_alpha(image: Image.Image) -> Image.Image:
     return image
 
 
-def pixel_snap_logical(image: Image.Image, pitch: int, logical_width: int, logical_height: int, detail_bias: bool = True) -> Image.Image:
-    sprite = image
-    # 격자 크롭은 solid bbox 기준 — any-alpha 는 프린지가 셀 개수를 부풀린다
-    # (`solid_alpha_bbox` docstring 의 부스러기 메커니즘과 동일).
-    bbox = solid_alpha_bbox(sprite) or sprite.getbbox()
-    if bbox is not None:
-        sprite = sprite.crop(bbox)
-    if pitch >= 2:
-        sprite = grid_snap_downscale(sprite, pitch, detail_bias)
-        bbox = sprite.getbbox()
-        if bbox is not None:
-            sprite = sprite.crop(bbox)
-    if sprite.width > logical_width or sprite.height > logical_height:
-        scale = min(logical_width / sprite.width, logical_height / sprite.height)
-        sprite = _kcentroid_downscale(
-            sprite,
-            max(1, round(sprite.width * scale)),
-            max(1, round(sprite.height * scale)),
-            detail_bias,
-        )
-        bbox = sprite.getbbox()
-        if bbox is not None:
-            sprite = sprite.crop(bbox)
-    return binarize_alpha(sprite)
-
-
 def conform_row_logical(images: list, logical_width: int, logical_height: int, detail_bias: bool = True) -> list:
     # 행(row) 단위 크기 통일: 축소 배율을 행에서 가장 큰 프레임 기준 하나로 계산해
     # 전 프레임에 동일 적용한다(프레임 간 크기 호흡 제거). 입력은 이미 격자 스냅된

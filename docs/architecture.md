@@ -240,14 +240,24 @@ the code realizes it. The path is unfake.js/pixeldetector-style and contains
    records divisor/harmonic or axis-ratio disagreement as observable warnings.
    The run-length estimate is a crosscheck only and never silently replaces the
    canonical grid score.
-2. **Grid-phase snap** — `_grid_phase()` re-derives the grid offset **per
-   frame**, then `grid_snap_downscale()` collapses each detected pixel block to
-   one output pixel via `_dominant_block_color()` voting. `detail_bias`
-   (default true) prefers a near-black minority cluster (share ≥ 0.40,
-   luma < 70/255) so eyes and 1px outlines survive dominant voting.
-3. **Conform to logical size** — `conform_row_logical()` scales every frame of
-   the row to `logical_height` (kCentroid, `_kcentroid_downscale()`);
-   `logical_height` omitted = cell height 1:1.
+2. **Grid-phase snap** — the phase is **measured, not inferred from the pitch
+   detector**: `_best_phase()` scores real cell uniformity per frame and picks
+   the best offset, `refine_edges_to_boundaries()` then pulls each interior cut
+   onto a real colour boundary (±pitch/3), and `snap_by_edges()` collapses each
+   block to one output pixel via `_dominant_block_color()` voting. The
+   histogram phase that `_axis_refine()` returns alongside the pitch is **not**
+   used here — it can sit up to pitch/2 off the true phase, which is outside the
+   ±pitch/3 recovery window and merged a character's eye from 4 rows into 3
+   (plan `sprite-gen/frame-pitch-consensus-eats-a-row`; see
+   [`pixel-perfect.md`](pixel-perfect.md) "위상은 근사가 아니라 실측으로 고른다").
+   `detail_bias` (default true) prefers a near-black minority cluster
+   (share ≥ 0.40, luma < 70/255) so eyes and 1px outlines survive dominant voting.
+3. **Physical cap only — no conform squash** — `conform_row_logical()` keeps the
+   snapped native logical size and only enforces the physical cell cap
+   (kCentroid, `_kcentroid_downscale()`), warning observably when a frame hits
+   it. Squashing to a declared `logical_height` was removed (Soohong
+   2026-07-14/17: it merges cells and eats detail); `fit.conform` is now
+   rejected loudly if present in a request.
 4. **Alpha binarization** — `binarize_alpha()`, applied on the snap/conform
    outputs so every logical pixel is fully opaque or fully transparent.
 5. **Inter-frame registration** — `register_row_frames()` aligns frames on the
