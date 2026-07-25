@@ -374,7 +374,7 @@ function startPreview(state) {
         drawFrameInto(baseCtx, (canonical && canonical.complete && canonical.naturalWidth) ? canonical : image,
           tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
         const pattern = breathePattern(bcfg, play.length);
-        ctx.drawImage(breatheComposite(base, bcfg, pattern[pv.cursor] || 0), 0, 0);
+        ctx.drawImage(bcfg ? breatheComposite(base, bcfg, pattern[pv.cursor] || 0) : base, 0, 0);
       } else {
         // 픽셀퍼펙트 줄은 카드와 동일하게 격자 재양자화로 그린다 (프리뷰 = 굽기)
         drawFrameInto(ctx, image, tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));

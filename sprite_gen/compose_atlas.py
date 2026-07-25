@@ -108,9 +108,11 @@ def _run(args: argparse.Namespace):
     # (프레임, 위상), 길이 = 기존 시퀀스 그대로 (루프 불변 — fit_breathe_pattern 이
     # breaths 회를 시퀀스에 딱 떨어지게 배분). 텍스처 칸은 유니크 (프레임×위상)만.
     #
-    # 봉투 교체(2026-07-25) 이후 위상은 연속값이라 슬롯마다 다르다 — 구 분할선 방식의
-    # '쉼 위상 0.0 반복' 이 사라져 호흡하는 줄은 칸 재사용이 없다. 즉 그 줄의 칸 수는
-    # 재생 시퀀스 길이와 같아진다(원래의 하한). 아틀라스가 그만큼 넓어질 수 있다.
+    # 위상은 연속값이지만 **반복된다**: breaths 회가 시퀀스에 딱 떨어지므로 슬롯 i 와
+    # i + seq_len/breaths 는 수학적으로 같은 위상이고, `fit_breathe_pattern` 이 정수
+    # 나머지를 먼저 취해 그 둘을 비트 동일한 double 로 만든다. 그래서 칸 재사용이
+    # 살아 있다 — 18슬롯 3호흡이면 유니크 칸 6개다. (분자를 정수로 접지 않으면 표현
+    # 노이즈로 14칸이 되어 바이트 동일한 칸이 8개 중복 구워졌다, 새미 검증 2026-07-25.)
     def _positions(state: str) -> list[tuple[int, float]]:
         ordered = plans[state][0]
         cfg = state_breathe(curation, state)
