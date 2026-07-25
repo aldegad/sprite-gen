@@ -109,15 +109,36 @@ def test_a_manual_rigid_row_is_honoured(run_dir):
 
 
 def test_the_reference_is_the_frame_the_bake_starts_from(run_dir):
-    """서버가 얼리는 기준 프레임 = 굽기가 해부를 확정하는 프레임이어야 한다.
+    """서버가 얼리는 기준 프레임 = **굽기가 실제로 해부를 확정하는 프레임**이어야 한다.
 
-    둘이 다르면 지문이 영구 불일치라 프리뷰·영상 내보내기가 계속 거부된다."""
+    둘이 다르면 지문이 영구 불일치라 프리뷰·영상 내보내기가 계속 거부된다.
+
+    첫 판은 `_breathe_source_frame` 을 두 번 불러 비교하는 **항등식**이었다 — 이름이
+    단언하는 것을 한 번도 안 물었고 그 사유로는 절대 실패할 수 없었다 (슉슉이 note
+    2026-07-26, round-6 N1 과 같은 클래스). 이제 실제로 `compose_gif` 를 돌려 manifest 가
+    기록한 `reference_fingerprint` 와 대조한다."""
+    import argparse
     import serve_curation
+    from sprite_gen import compose_gif
     from sprite_gen.breathe import anatomy_fingerprint
 
+    # 사이드카에 호흡을 켜고 실제로 굽는다
+    from sprite_gen.curation import stamp_curation
+    curation = stamp_curation(run_dir, {
+        "version": 1, "kind": "sprite-gen-curation",
+        "states": {"idle": {"selected": [0, 1, 2, 3],
+                            "breathe": {"depth": 0.06, "breaths": 1, "lag": 0.1}}}})
+    (run_dir / "curation.json").write_text(json.dumps(curation), encoding="utf-8")
+    out = run_dir / "gif"
+    compose_gif.run(run_dir=run_dir, out_dir=out)
+    manifest = json.loads((out / "gif-manifest.json").read_text(encoding="utf-8"))
+    baked = next(e for e in manifest["exports"] if e["state"] == "idle")
+    baked_fp = baked["breathe"]["resolved"]["reference_fingerprint"]
+
     served = serve_curation._breathe_source_frame(run_dir, "idle")
-    baked_first = serve_curation._breathe_source_frame(run_dir, "idle")   # 같은 해소 경로
-    assert anatomy_fingerprint(served) == anatomy_fingerprint(baked_first)
+    assert anatomy_fingerprint(served) == baked_fp, (
+        "라우트가 얼리는 기준 프레임이 굽기가 쓰는 프레임과 다르다 — "
+        "지문이 영구 불일치라 프리뷰·영상 내보내기가 계속 거부된다")
 
 
 def test_an_unknown_state_is_reported_not_crashed(run_dir):

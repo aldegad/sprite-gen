@@ -163,3 +163,48 @@ def test_export_paths_check_anatomy_freshness(name):
     src = (CURATOR_SRC / name).read_text(encoding="utf-8")
     assert FRESH.search(src), (
         f"{name} 이 breatheAssertFresh 를 안 부른다 — 낡은 해부로 구운 파일이 사용자에게 간다")
+
+
+# ── 호흡은 굽기가 읽는 파일로 그린다 ───────────────────────────────
+
+BAKE_URL = re.compile(r"bakeFrameUrl\s*\(")
+IMG_SRC = re.compile(r"\bimg\s*\(\s*([^)]*)\)")
+# 호흡 워프 base / 신선도 기준을 만드는 지점 — 굽기가 읽는 파일이어야 한다.
+BREATHE_IMAGE_SITES = {
+    "cards.js": ("canonical", "refImg"),
+    "compare.js": ("image", "rimg"),
+    "zoom-editor.js": ("image",),
+    "row-export.js": ("image",),
+}
+
+
+def _breathe_image_sites():
+    for name, vars_ in BREATHE_IMAGE_SITES.items():
+        path = CURATOR_SRC / name
+        if not path.is_file():
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            m = re.match(r"\s*const (\w+) = .*\bimg\(", line)
+            if m and m.group(1) in vars_:
+                yield name, lineno, line.strip()
+
+
+def test_there_are_breathe_image_sites():
+    assert list(_breathe_image_sites()), "호흡 이미지 소스 지점이 사라졌다 — 계약 위치 확인"
+
+
+@pytest.mark.parametrize("site", list(_breathe_image_sites()), ids=lambda s: f"{s[0]}:{s[1]}")
+def test_breathe_draws_from_the_file_the_bake_reads(site):
+    """워프 base 도 신선도 기준도 **굽기가 읽는 파일**에서 와야 한다.
+
+    `frameUrl` 은 표시용이라 pp OFF 에서 `orig/` 고해상 트윈을 준다 — 굽기(`row_frame_rel`)
+    는 그 파일을 절대 안 읽는다. 기준이 굽기가 안 읽는 파일이면 지문이 **영구 불일치**라
+    해부를 갱신해도 안 풀리고 그 줄의 영상 내보내기가 영구 차단된다. 캐노니컬(`f.url`)로
+    그리면 pp OFF 줄에서 굽기와 다른 그림이 나간다 (슉슉이 2026-07-26: 같은 캔버스를
+    다른 해부로 워프해 4위상에서 최대 114바이트).
+
+    이 그물이 없던 동안 `frameUrl` → `f.url` 로 되돌려도 111개 테스트가 전부 통과했다."""
+    name, lineno, line = site
+    assert BAKE_URL.search(line), (
+        f"{name}:{lineno} 가 굽기 파일이 아닌 소스로 호흡을 그린다.\n  {line}\n"
+        f"  `bakeFrameUrl(state, frame)` 을 써라 (frameUrl 은 표시용, f.url 은 캐노니컬).")

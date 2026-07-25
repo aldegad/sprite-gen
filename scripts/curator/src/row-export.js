@@ -75,7 +75,7 @@ async function downloadRowVideo(stateName, fmt) {
     // 굽기는 `frame_variant` 로 해소한 변형(pp OFF 면 .plain)에서 굽는다 — 미러도 같은
     // 변형에서 그려야 지문이 맞고 그림도 같다. 캐노니컬(`f.url`)로 그리면 지문이
     // **영구 불일치**라 그 줄의 영상 내보내기가 계속 막힌다 (슉슉이 실측 2026-07-26).
-    const image = f ? img(frameUrl(stateName, f)) : null;
+    const image = f ? img(bakeFrameUrl(stateName, f)) : null;
     if (!(image && image.complete && image.naturalWidth)) throw new Error("frame images still loading");
     const base = document.createElement("canvas");
     base.width = cellW;

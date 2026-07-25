@@ -409,6 +409,12 @@ def _build_run_state_impl(run_dir: Path) -> dict:
                 frame["plainUrl"] = _url(*orig_rel.split("/"))
             elif (run_dir / plain_rel).is_file():
                 frame["plainUrl"] = _url(*plain_rel.split("/"))
+            # **굽기가 실제로 읽는 파일** — `row_frame_rel(row, i, "plain")` 과 같은 경로다.
+            # 위 `plainUrl` 은 표시 화질용이라 `orig/` 고해상본을 우선하는데, 굽기는 그걸
+            # 절대 안 읽는다. 호흡 프리뷰·신선도 판정이 `plainUrl` 을 쓰면 지문이 **영구
+            # 불일치**라 그 줄의 영상 내보내기가 영구 차단된다 (슉슉이 2026-07-26).
+            if (run_dir / plain_rel).is_file():
+                frame["plainBakeUrl"] = _url(*plain_rel.split("/"))
             # 트윈 없는 프레임의 퍼펙은 클라 렌더러가 측정 k(pixelScale)로 양자화한다
             # — 서버 추정 스냅 프리뷰 레거시는 표시 격자와 다른 검출기(엔진 주기성,
             # 1:1 에 4.99)로 스냅해 같은 줄의 프레임마다 다른 진실을 만들었다

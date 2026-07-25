@@ -431,13 +431,13 @@ function startPreview(state) {
         const baseCtx = base.getContext("2d");
         baseCtx.imageSmoothingEnabled = false;
         // 워프 base 도 신선도 기준과 **같은 변형**이어야 한다 (굽기가 쓰는 그 파일).
-        const canonical = f ? img(frameUrl(state.name, f)) : image;
+        const canonical = f ? img(bakeFrameUrl(state.name, f)) : image;
         drawFrameInto(baseCtx, (canonical && canonical.complete && canonical.naturalWidth) ? canonical : image,
           tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
         const pattern = breathePattern(bcfg, play.length);
         // 기준 프레임(재생 첫 슬롯)으로 신선도를 본다 — 굽기가 해부를 확정하는 그 프레임이다
         const refFrame = frameOf(state.name, play[0]);
-        const refImg = refFrame ? img(frameUrl(state.name, refFrame)) : null;
+        const refImg = refFrame ? img(bakeFrameUrl(state.name, refFrame)) : null;
         let ref = null;
         if (refImg && refImg.complete && refImg.naturalWidth) {
           ref = document.createElement("canvas");

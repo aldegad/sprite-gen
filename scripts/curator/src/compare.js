@@ -135,7 +135,8 @@ function openCompare() {
       idx = f0.index;
     }
     const f = frameOf(name, idx);
-    const image = f ? img(f.url) : null;
+    // 굽기가 읽는 파일로 그린다 — 신선도 기준과 같은 파일이어야 검사가 의미를 갖는다
+    const image = f ? img(bakeFrameUrl(name, f)) : null;
     if (!(image && image.complete && image.naturalWidth)) return null;
     const base = document.createElement("canvas");
     base.width = run.cell.width;
@@ -150,7 +151,7 @@ function openCompare() {
     if (bcfg) {
       const play = playList(name);
       const rf = play.length ? frameOf(name, play[0]) : null;
-      const rimg = rf ? img(frameUrl(name, rf)) : null;
+      const rimg = rf ? img(bakeFrameUrl(name, rf)) : null;
       if (rimg && rimg.complete && rimg.naturalWidth) {
         ref = document.createElement("canvas");
         ref.width = base.width;

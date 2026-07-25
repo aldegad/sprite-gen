@@ -189,6 +189,15 @@ function frameUrl(stateName, frame) {
   return frame.url;
 }
 
+// **굽기가 읽는 파일** — 파이썬 `frame_variant` + `row_frame_rel` 미러.
+// `frameUrl` 은 표시용이라 pp OFF 에서 `orig/` 고해상본(굽기가 안 읽는 파일)을 줄 수
+// 있다. 호흡은 굽기와 같은 그림을 내야 하므로 워프 base 도 신선도 기준도 이걸 쓴다 —
+// 안 그러면 지문이 영구 불일치라 영상 내보내기가 영구 차단된다 (슉슉이 2026-07-26).
+function bakeFrameUrl(stateName, frame) {
+  if (!ppOn(stateName) && frame.plainBakeUrl) return frame.plainBakeUrl;
+  return frame.url;
+}
+
 // 복제 인스턴스 (entries[state].clones = {복제idx: 원본idx}) 인식 프레임 조회.
 // 복제 카드는 원본의 frame 객체(이미지 URL/크기)를 빌리되 자기 인덱스로 표시된다.
 // 서버/스키마 계약: 파일은 원본을 읽고, 변형/픽셀편집/순서는 복제 인덱스 소유.
@@ -406,7 +415,10 @@ function seedEntries() {
       // 켜짐/꺼짐이 반대가 되고 첫 autosave 가 설정을 지운다 (슉슉이 note 2026-07-26).
       // `depth: null` 은 굽기가 거부하므로 위 범위 검사에 걸려 여기 안 온다.
       breathe: rawBreathe && !retired.length && !outOfRange.length
-        ? { depth: Number(rawBreathe.depth),
+        // `depth` 생략은 굽기에서 0.06 이다. `Number(undefined)` = NaN 이고
+        // `JSON.stringify(NaN)` 은 `null` 이라, 기본값 분기가 없으면 첫 autosave 가
+        // 사이드카에 `depth: null` 을 박아 **굽기가 죽는다** (슉슉이 실측 2026-07-26).
+        ? { depth: rawBreathe.depth == null ? 0.06 : Number(rawBreathe.depth),
             // 위에서 정수 검증을 통과했으므로 반올림이 필요 없다 — 반올림하면 굽기와 갈린다
             breaths: Number(rawBreathe.breaths == null ? 1 : rawBreathe.breaths),
             lag: Number(rawBreathe.lag == null ? 0.1 : rawBreathe.lag),

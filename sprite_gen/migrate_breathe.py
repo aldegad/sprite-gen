@@ -74,6 +74,10 @@ def migrate_entry(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         if row is not None:
             if row == int(row) and row > 0:
                 fresh["rigid_row"] = int(row)
+                # 상한(콘텐츠 높이)은 마이그레이션 시점에 알 수 없다 — 프레임을 안 읽으니까.
+                # 완전 검증이 불가능하면 **그렇다고 말한다** (모듈 계약: 버린 것 전부 출력).
+                dropped.append(f"rigid_row={int(row)} (이월 — 콘텐츠 높이를 여기서 모르므로 "
+                               f"굽기가 범위 밖이라고 다시 거부할 수 있다)")
             else:
                 dropped.append(f"rigid_row={raw['rigid_row']!r} (정수 양수가 아니라 버림 — 자동 검출)")
     if "anatomy" in raw:
