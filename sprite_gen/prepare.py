@@ -20,6 +20,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw
 
+from sprite_gen.anchor import anchor_ref_rel
 from sprite_gen.layout import TAXONOMY, guide_rel, prompt_rel, raw_rel
 
 
@@ -645,21 +646,26 @@ def build_generation_plan(request: dict[str, Any]) -> dict[str, Any] | None:
         }
         for d in directions["set"]
     ]
+    # 앵커 ref 진실 = 사람이 승인한 최종 모습(픽셀 편집·변형·삭제·재정렬 반영)이고,
+    # 그 한 장을 고르는 규칙은 `sprite_gen/anchor.py` 가 소유한다 (지정 > 앵커 행 시퀀스
+    # 헤드). 그래서 플랜은 "curated export 를 알아서 찾아 붙여라" 라는 산문 대신
+    # **결정론 커맨드 + 그 커맨드가 쓰는 실제 경로**를 준다 (수홍 확정 2026-07-19 편집
+    # 반영 요구 + 2026-07-25 앵커 프레임 직접 지정): 워커가 크롭 위치를 판단할 여지가
+    # 없어야 승인 전 모습이 identity 로 번지지 않는다.
     stage_rows = [
         {
             "state": state,
             "role": "action-row",
             "direction": state_direction(state, directions),
             "refs": [
-                # 앵커 ref 진실 = 사람이 승인한 최종 모습. 큐레이션(픽셀 편집·변형)이
-                # 있으면 curated export 가 그 진실이고, raw 크롭은 큐레이션이 없을 때의
-                # 폴백일 뿐이다 (수홍 확정 2026-07-19 — 편집 반영 안 된 raw 앵커로
-                # 바리에이션을 치면 승인 전 모습이 identity 로 번진다).
-                "<accepted anchor single-pose — prefer the curated export "
-                f"(export-pngs -> curated/{anchors[state_direction(state, directions)]}/frame-0.png, edits+transforms baked); "
-                f"only when no curation exists, crop of {raw_rel(request, anchors[state_direction(state, directions)])}>",
+                anchor_ref_rel(state_direction(state, directions)),
                 guide_rel(request, state),
             ],
+            "materialize": (
+                f"sprite-gen anchor --run-dir . --direction {state_direction(state, directions)}"
+            ),
+            "note": ("앵커 ref 는 파생 캐시다 — 생성 직전 위 커맨드로 큐레이션 진실에서 다시 굽는다"
+                     " (`--for-state <state>` 는 붙일 경로를 그대로 출력한다)"),
         }
         for state in request["states"]
         if state not in anchor_names and state_direction(state, directions)

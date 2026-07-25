@@ -2,6 +2,7 @@
 """Importable core for the sprite-gen pipeline."""
 
 __all__ = [
+    "anchor",
     "check_visible_magenta",
     "compose_atlas",
     "compose_cycle",

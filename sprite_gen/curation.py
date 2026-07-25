@@ -29,6 +29,14 @@ Schema (`curation.json`):
                                               #   canonical frame-N.png. Only
                                               #   meaningful when extraction saved
                                               #   both variants (fit.pixel_perfect).
+      "anchors": {                           # optional DIRECTION ANCHOR FRAME PICKS
+        "down": {"state": "down_idle",        #   (Soohong 2026-07-25): which curated instance
+                 "index": 2}                  #   is this direction's identity truth for
+      },                                      #   generating its other rows. Any instance of any
+                                              #   row of that direction is allowed (a pool
+                                              #   candidate too). Absent direction -> the
+                                              #   anchor row's sequence head (explicit default).
+                                              #   Resolution/bake SSoT = sprite_gen/anchor.py.
       "states": {
         "<state>": {
           "revision": ["a1b2c3d4e5f6"],      # per-state generation stamp: ordered SOURCE-
@@ -92,6 +100,8 @@ Defaults when absent (explicit, not a silent fallback):
                                    (idempotent content-hash name) and the drop is reported on stderr
                                    and to the webview (load_curation_report) — stale edits are never
                                    silently applied, and never silently destroyed either.
+- `anchors` missing/direction absent -> that direction's anchor is the anchor row's curated
+                                   sequence head (`sprite_gen.anchor.resolve_anchor`).
 - state missing from sidecar   -> same all-frames default for that state.
 - `selected` missing/empty     -> all non-deleted frames in extraction order.
 - `deleted` missing             -> no frames are deleted.
@@ -523,6 +533,102 @@ def source_frame_index(curation: dict[str, Any] | None, state: str,
     소비자는 파일을 열 때만 이 리졸버를 쓰고, transforms/pixels 는 인스턴스
     인덱스로 그대로 조회한다 — 복제마다 다른 변형이 가능해야 하므로."""
     return state_clones(curation, state, default_count).get(index, index)
+
+
+def state_instances(curation: dict[str, Any] | None, state: str, default_count: int) -> list[int]:
+    """행의 **살아있는 인스턴스** 전체 (물리 프레임 + 복제, 보관분 제외).
+
+    시퀀스(state_plan)와 다르다: 후보 풀에 있는(선택 안 된) 프레임도 포함한다.
+    "선택되진 않았지만 존재하는 인스턴스" 를 물어야 하는 소비자 — 앵커 프레임 지정
+    검증(sprite_gen.anchor) — 의 SSoT."""
+    clones = state_clones(curation, state, default_count)
+    entry = ((curation or {}).get("states") or {}).get(state)
+    deleted: set[int] = set()
+    if isinstance(entry, dict):
+        deleted = set(normalize_frame_indices(entry.get("deleted"), default_count, set(clones)))
+    return [index for index in [*range(default_count), *sorted(clones)] if index not in deleted]
+
+
+def anchor_choices(curation: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """방향 앵커 프레임 지정 — {direction: {"state": str, "index": int}}.
+
+    사용자가 큐레이션 뷰에서 "이 프레임을 앵커로" 라고 지정한 것 (수홍 2026-07-25).
+    지정이 없는 방향은 여기 없다 = 앵커 행의 시퀀스 첫 인스턴스가 앵커라는 뜻.
+    손상 항목은 스킵 (손으로 편집된 사이드카가 크래시를 내지 않는다) — 지정이 가리키는
+    인스턴스의 **실재 검증은 해석 시점**(sprite_gen.anchor.resolve_anchor)에 fail-loud."""
+    raw = (curation or {}).get("anchors")
+    picks: dict[str, dict[str, Any]] = {}
+    if isinstance(raw, dict):
+        for direction, value in raw.items():
+            if not isinstance(value, dict):
+                continue
+            state = value.get("state")
+            try:
+                index = int(value.get("index"))
+            except (TypeError, ValueError):
+                continue
+            if isinstance(state, str) and state:
+                picks[str(direction)] = {"state": state, "index": index}
+    return picks
+
+
+def write_curation_atomic(run_dir: Path, payload: dict[str, Any]) -> None:
+    """Atomically replace curation.json (temp file in the same dir + os.replace). Stamps the
+    sidecar with the current run generation (`run_revision`) AND per-state `revision`
+    segment fingerprints (stamp_curation), so a later regeneration invalidates only the
+    rows it actually touched. Before replacing, any state entry in the existing file that
+    this write would lose (missing from the payload, or stamped for an incompatible
+    generation) triggers a `curation.stale-<hash>.json` backup of the old file — an
+    autosave can never permanently destroy selections without an observable copy.
+    `runRevision` is a transport-only echo field and is not stored.
+
+    Sidecar write semantics live with the sidecar schema (this module) so every writer —
+    the webview POST and the `sprite-gen anchor --pick` CLI — stamps and backs up
+    identically. Callers own the run-dir lock (publish_guard)."""
+    import os
+    import tempfile
+
+    if payload.get("kind") != "sprite-gen-curation":
+        raise ValueError("payload is not a sprite-gen-curation document")
+    payload = stamp_curation(run_dir, payload)
+    if isinstance(payload.get("anchors"), dict) and not payload["anchors"]:
+        payload.pop("anchors")  # 빈 지정은 기록하지 않는다 (없음 = 기본값, 같은 뜻)
+    target = run_dir / CURATION_FILENAME
+    if target.is_file():
+        old_text = target.read_text(encoding="utf-8")
+        try:
+            old = json.loads(old_text)
+        except json.JSONDecodeError:
+            old = None
+        if isinstance(old, dict):
+            new_states = payload.get("states") or {}
+            same_generation = old.get("run_revision") == payload.get("run_revision")
+            for name, old_entry in (old.get("states") or {}).items():
+                new_entry = new_states.get(name)
+                if not isinstance(old_entry, dict):
+                    continue
+                if not isinstance(new_entry, dict):
+                    lost = True
+                else:
+                    old_rev, new_rev = old_entry.get("revision"), new_entry.get("revision")
+                    if isinstance(old_rev, list) and isinstance(new_rev, list):
+                        lost = old_rev != new_rev[:len(old_rev)]
+                    else:
+                        # 레거시 스탬프 없는 항목: 같은 런 세대의 정상 편집이면 호환
+                        lost = not same_generation
+                if lost:
+                    backup_stale_curation(run_dir, old_text)
+                    break
+    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    fd, tmp_name = tempfile.mkstemp(dir=str(run_dir), prefix=".curation-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp_name, target)
+    except BaseException:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+        raise
 
 
 def transform_matrix(t: dict[str, float]) -> tuple[float, float, float, float]:

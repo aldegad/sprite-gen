@@ -6,13 +6,10 @@
 + request `states.<state>.takes` 로 기록되므로, 추출 후 큐레이션 뷰에는 기존 프레임
 뒤에 `rerollN#i` 라벨 후보가 이어 붙는다. 픽/기각은 사람 몫.
 
-생성 refs 는 행 생성 계약(directional-anchor-workflow)을 따른다:
-- 방향(택소노미) 런의 액션 행 = 대상 방향 idle 앵커 + 레이아웃 가이드.
-  앵커 ref 는 실재하는 것 중 우선순위로 고른다:
-  ① `references/anchors/<dir>-idle-x8.png` (런이 준비한 확대 앵커 ref)
-  ② `curated/<dir>_idle/frame-0.png` 또는 `curated/<dir>_idle-frame-0.png` (curated export 진실)
-  ③ `frames/<dir>/idle/frame-0.png` (추출 캐노니컬 폴백)
-- 방향 런의 idle 앵커 행 자체 / 단순 런 = base-source + 가이드 (pre-anchor 체인).
+생성 refs 는 행 생성 계약(directional-anchor-workflow)을 따른다 — 결정은 `anchor.py`
+하나가 소유한다 (`identity_ref`): 방향 런의 액션 행이면 그 방향 앵커를 큐레이션 진실에서
+매번 다시 구워 붙이고, 앵커 행 자체/단순 런이면 `base-source.*` 를 붙인다. 여기에
+레이아웃 가이드를 더한 두 장이 리롤 refs 다.
 
 AI 개입은 raw 생성 한 곳 — 최종 프레임은 언제나 결정론 추출이 굽는다. 부분 추출은
 없다 (공유 팔레트가 추출 배치 구성에 결합 — interpolate 와 같은 계약).
@@ -26,8 +23,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .anchor import identity_ref
 from .gen import PROVIDERS, generate_image
-from .layout import guide_rel, prompt_rel, split_state, state_frame_total, take_raw_rel
+from .layout import guide_rel, prompt_rel, take_raw_rel
 
 
 def next_reroll_label(request: dict[str, Any], state: str) -> str:
@@ -41,96 +39,6 @@ def next_reroll_label(request: dict[str, Any], state: str) -> str:
     while n in used:
         n += 1
     return f"reroll{n}"
-
-
-def _find_base_source(run_dir: Path) -> Path | None:
-    for candidate in sorted(run_dir.glob("base-source.*")):
-        if candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
-            return candidate
-    return None
-
-
-def _bake_curated_sequence_head(run_dir: Path, request: dict[str, Any], state: str):
-    """상태의 **큐레이션 시퀀스 첫 인스턴스**를 뷰에 보이는 그대로 굽는다 (RGBA 셀 캔버스).
-
-    앵커 진실 = 시퀀스 첫 프레임이다 — index 0 이 아니다. 사용자가 프레임을
-    삭제/재정렬했으면 index 0 은 기각분일 수 있다 (실사고 2026-07-19 수홍: side_idle
-    은 0·1·2 삭제 + 시퀀스가 3부터라, export 의 무조건 frame-0(=index 0) 베이크가
-    **삭제된 미편집 프레임**을 앵커로 만들었다 — down/up 은 우연히 order[0]=0 이라
-    멀쩡해 보여 방향별로 갈라졌다). export_pngs 와 같은 프리미티브(클론 해소·변형·
-    픽셀편집·pp 변형)를 그대로 태우되 대상 인덱스만 ordered[0] 으로 고정한다."""
-    from PIL import Image
-
-    from .curation import (apply_pixel_edits, apply_transform, edit_index, frame_variant,
-                           load_curation, pixel_snap_scale, source_frame_index,
-                           state_pixel_ops, state_plan)
-    from .extract import require_frames_manifest
-    from .layout import row_frame_rel
-
-    cell = request["cell"]
-    cell_size = (int(cell.get("width", cell.get("size", 0))),
-                 int(cell.get("height", cell.get("size", 0))))
-    curation = load_curation(run_dir)
-    manifest = require_frames_manifest(run_dir)
-    row = next((r for r in manifest.get("rows", []) if r.get("state") == state), None)
-    if row is None:
-        raise SystemExit(f"reroll: no extracted row for {state}")
-    default_count = state_frame_total(request, state)
-    ordered, transforms = state_plan(curation, state, default_count)
-    if not ordered:
-        raise SystemExit(f"reroll: {state} has an empty curated sequence")
-    index = ordered[0]
-    src_index = source_frame_index(curation, state, index, default_count)
-    variant = frame_variant(curation, state)
-    src_path = run_dir / row_frame_rel(row, src_index, variant)
-    if not src_path.is_file():
-        raise SystemExit(f"reroll: frame missing for {state} sequence head: {src_path}")
-    edit_idx = edit_index(curation, state, index)
-    with Image.open(src_path) as opened:
-        return apply_transform(
-            apply_pixel_edits(opened.convert("RGBA"),
-                              state_pixel_ops(curation, state).get(edit_idx)),
-            transforms.get(edit_idx), cell_size,
-            snap_scale=pixel_snap_scale(request) if variant == "pixel" else None)
-
-
-def refresh_anchor_ref(run_dir: Path, request: dict[str, Any], direction: str,
-                       scale: int = 8) -> Path:
-    """앵커 ref 를 curated 진실에서 방금 구워 스냅샷을 갱신한다 (self-heal 캐시).
-
-    `references/anchors/<dir>-idle-x8.png` 는 파생 캐시일 뿐이다 — 정적 스냅샷을
-    그대로 쓰면 사용자가 뷰에서 앵커를 더 편집한 순간 소리 없이 낡고, 이후 생성
-    행 전부가 옛 정체성/치수를 물려받는다 (실사고 2026-07-19 수홍 "다운앵커가 왜
-    내가 편집해둔 아틀라스가 아니야"). 그래서 생성 직전마다 시퀀스 첫 인스턴스를
-    다시 굽고 콘텐츠 crop ×N 니어리스트로 스냅샷 자리를 덮어쓴다 — 뷰의 ref 칩에도
-    최신본이 보인다."""
-    from PIL import Image
-
-    img = _bake_curated_sequence_head(run_dir, request, f"{direction}_idle")
-    box = img.split()[3].point(lambda a: 255 if a >= 40 else 0).getbbox()
-    if box is None:
-        raise SystemExit(f"reroll: curated export for {direction}_idle is empty")
-    content = img.crop(box)
-    upscaled = content.resize((content.width * scale, content.height * scale),
-                              Image.Resampling.NEAREST)
-    out = run_dir / "references" / "anchors" / f"{direction}-idle-x{scale}.png"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    upscaled.save(out)
-    print(f"[reroll] anchor ref refreshed from curated truth: {out.relative_to(run_dir)} "
-          f"({content.width}x{content.height} content)")
-    return out
-
-
-def resolve_identity_ref(run_dir: Path, request: dict[str, Any], state: str) -> Path:
-    """행 정체성 ref — 방향 액션 행은 대상 방향 idle 앵커(매번 curated 재베이크),
-    그 외(idle 앵커 행 자체 / 단순 런)는 base-source."""
-    direction, pose = split_state(request, state)
-    if direction is not None and pose != "idle":
-        return refresh_anchor_ref(run_dir, request, direction)
-    base = _find_base_source(run_dir)
-    if base is None:
-        raise SystemExit(f"reroll: no base-source image in run dir: {run_dir}")
-    return base
 
 
 def record_take(run_dir: Path, state: str, label: str, frames: int) -> None:
@@ -176,7 +84,7 @@ def reroll_state(run_dir: Path | str, state: str, provider: str = "codex",
     prompt_path = run_dir / prompt_rel(request, state)
     if not prompt_path.is_file():
         raise SystemExit(f"reroll: prompt file missing: {prompt_path}")
-    refs = [resolve_identity_ref(run_dir, request, state)]
+    refs = [identity_ref(run_dir, state, request=request)]
     guide_path = run_dir / guide_rel(request, state)
     if guide_path.is_file():
         refs.append(guide_path)
