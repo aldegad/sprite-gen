@@ -1330,8 +1330,14 @@ def arbitrate_pitch(images: list, detect_pitch: tuple[float, float],
     # 채택은 하지 않는다 (실사고 2026-07-18: 균일도 지표는 세밀 격자에 자명하게
     # 유리한 편향이 있어 up_idle 을 잘못 뒤집었다). 관측 로그만 남긴다 — 큰 불일치의
     # 실제 의미는 대개 '생성 해상도가 셀 계약보다 세밀' (해법 = 굵기 강제 리롤).
+    # 두 가설을 같은 조건으로 채점한다 — 양쪽 다 위상을 실측(`_best_phase`)으로 잡는다.
+    # 예전에는 detect 만 히스토그램 위상(`detect_phases[0]`)으로 채점했는데, 그 위상은
+    # 참 위상에서 pitch/2 까지 밀릴 수 있어(plan `frame-pitch-consensus-eats-a-row`:
+    # 피치 13.00 에서 2.02 vs 실측 8.12) detect 쪽 균일도만 부당하게 낮게 나왔다.
+    # 채택 로직은 그대로 detect 고정이고 이 점수는 경고 문구에만 쓰이지만, 사람이 읽고
+    # 판단하는 숫자라 편향을 남겨두지 않는다.
     sample = images[0]
-    detect_score = _grid_uniformity(sample, detect_pitch, detect_phases[0])
+    detect_score = _grid_uniformity(sample, detect_pitch, _best_phase(sample, detect_pitch))
     runlen_phase0 = _best_phase(sample, runlen_pitch)
     runlen_score = _grid_uniformity(sample, runlen_pitch, runlen_phase0)
     warnings_out.append(
@@ -2754,9 +2760,12 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
             print(f"[pitch-crosscheck] {tag}: {note}", file=sys.stderr)
         # 피치 중재 (하모닉 오검출 방어): 세컨드 오피니언과 크게 어긋나면 셀 균일도
         # 실측으로 승자 채택 — 채택 결과는 경고로 관측된다 (arbitrate_pitch docstring).
-        frame_phases = [frame_phase for (_, frame_phase) in grids]
-        (consensus_x, consensus_y), frame_phases, _pitch_src = arbitrate_pitch(
-            images, (consensus_x, consensus_y), frame_phases,
+        # 반환 위상은 받지 않는다 — 스냅 루프가 위상을 `_best_phase` 로 다시 잡으므로
+        # (plan `frame-pitch-consensus-eats-a-row`) 여기서 돌려받는 리스트는 소비자가
+        # 없다. 검출 위상은 여전히 **입력**으로 필요하다 (arbitrate_pitch 의 채점 대상).
+        detect_phases = [frame_phase for (_, frame_phase) in grids]
+        (consensus_x, consensus_y), _phases, _pitch_src = arbitrate_pitch(
+            images, (consensus_x, consensus_y), detect_phases,
             (_runlen_consensus(0), _runlen_consensus(1)), tag, all_warnings)
         # 프레임 자체 검출 격자가 1순위 진실이다 (수홍 2026-07-20, plan
         # sprite-gen/per-frame-pixel-grid): 합의 피치를 프레임에 강제하면 측정차

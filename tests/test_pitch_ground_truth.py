@@ -236,6 +236,34 @@ def test_inconclusive_consensus_keeps_own_pitch():
     assert use == (9.0, 9.0) and not outlier
 
 
+@pytest.mark.parametrize("offset", [3, 11])
+def test_measured_phase_survives_an_offset_grid_where_the_histogram_phase_does_not(offset):
+    """참 위상이 비영인 판에서, 실측 위상만 논리 픽셀을 지켜낸다.
+
+    실사고 (수홍 2026-07-25, founder_v8 down_jump frame-0): 히스토그램 위상이 참 위상에서
+    pitch/2 까지 밀려 눈 4행이 3행으로 병합됐다(8칸→7칸). 여기서는 업스케일한 판을
+    잘라 참 위상을 강제로 비영으로 만든 뒤 두 위상을 나란히 돌린다 — 실측(k=13):
+
+      offset 3  → 히스토그램 위상은 불일치 377픽셀, 실측 위상은 0
+      offset 11 → 히스토그램 위상은 논리 크기가 23x39 로 **한 칸을 잃고**, 실측은 24x40 유지
+
+    앞의 라운드트립 테스트(오프셋 0)는 `_best_phase` 가 전 케이스 (0,0) 을 돌려주는 탓에
+    위상 오검출을 못 잡았다. 이 테스트가 그 구멍을 메운다.
+    """
+    art = _logical_art()
+    k = 13
+    upscaled = art.resize((art.width * k, art.height * k), Image.NEAREST)
+    cropped = upscaled.crop((offset, offset, upscaled.width, upscaled.height))
+
+    pitch, _histogram_phase = detect_pixel_grid(cropped)
+    measured = _best_phase(cropped.convert("RGBA"), pitch)
+    snapped = grid_snap_downscale(cropped, pitch, phase=measured)
+
+    # 논리 격자 칸 수는 잘린 첫 칸까지 세어 원본과 같아야 한다 — 한 칸이라도 잃으면
+    # 그 행/열의 디테일(눈 같은 2x4 덩어리)이 이웃 칸에 병합된 것이다.
+    assert snapped.size == art.size, f"offset {offset}: {snapped.size} != {art.size}"
+
+
 @pytest.mark.parametrize("scale", [12.0, 14.35, 16.0, 17.24, 20.0])
 def test_measured_phase_roundtrips_like_the_detected_phase(scale):
     """스냅 경로가 쓰는 위상(`_best_phase`)도 원본 논리 픽셀을 되돌려야 한다.
