@@ -303,6 +303,45 @@ def test_grid_rows_rejects_a_non_rgba_component():
         extract._grid_rows(_synthetic_keyed().convert("RGB"))
 
 
+def _sparse_alpha_grid() -> Image.Image:
+    """12x12 / 4px cells, built to exercise the two edges `_synthetic_keyed` misses.
+
+    That fixture is opaque everywhere (alpha 255) and its smallest scored cell holds
+    3 opaque pixels, so the alpha cutoff and the `n < 2` guard never actually run —
+    mutating either survived the suite (howl, 2026-07-25). Here:
+
+    - cell (0,0) holds **exactly two** opaque pixels of different colours, so its
+      deviation is non-zero and dropping it (`n < 3`) moves the total.
+    - cell (1,1) mixes alpha 127 and 128 in colours far apart, so shifting the
+      cutoff by one moves both the membership and the mean.
+    """
+    img = Image.new("RGBA", (12, 12), (0, 0, 0, 0))
+    px = img.load()
+    px[0, 0] = (10, 20, 30, 255)
+    px[1, 0] = (200, 210, 220, 255)          # cell (0,0): n == 2 exactly
+    px[4, 4] = (0, 0, 0, 128)                # cell (1,1): on the cutoff — opaque
+    px[5, 4] = (255, 255, 255, 127)          # cell (1,1): one below — transparent
+    px[6, 4] = (90, 40, 160, 255)
+    px[4, 5] = (30, 200, 70, 200)
+    for y in range(8, 12):                   # cell (2,2): a plain populated cell
+        for x in range(8, 12):
+            px[x, y] = (120 + x, 60 + y, 200 - x, 255)
+    return img
+
+
+def test_grid_uniformity_honours_the_alpha_cutoff_and_the_two_pixel_floor():
+    """Pins the cell-membership rules, not just the arithmetic — the reference
+    re-derives both from the pixels, so a drifted cutoff or floor shows up as a
+    score mismatch."""
+    img = _sparse_alpha_grid()
+    for phase in [(0.0, 0.0), (1.0, 2.0)]:
+        ref = _ref_grid_uniformity(img, (4.0, 4.0), phase)
+        got = extract._grid_uniformity(img, (4.0, 4.0), phase)
+        assert got == ref, f"phase={phase}: {got!r} != {ref!r}"
+        # the fixture is only meaningful if those cells actually reach the scorer
+        assert got != 1e9, "fixture scored nothing — the cells were all skipped"
+
+
 def test_best_phase_byte_identical_to_reference():
     img = _synthetic_keyed()
     for pitch in [(7.0, 7.0), (7.82, 8.28), (6.17, 6.32)]:
