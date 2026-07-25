@@ -19,7 +19,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 CURATOR_SRC = ROOT / "scripts" / "curator" / "src"
-CALL = re.compile(r"breatheComposite\s*\(")
+CALL = re.compile(r"breatheComposite\s*\(|breatheComposeForPreview\s*\(")
 # 파이썬 굽기 소비자 — 위상 0 을 건너뛰면 그 슬롯만 원본이 구워진다.
 PY_CONSUMERS = ("sprite_gen/compose_atlas.py", "sprite_gen/compose_gif.py")
 PY_CALL = re.compile(r"phase_frame\s*\(|bake_breathe_sequence\s*\(")

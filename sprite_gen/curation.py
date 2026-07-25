@@ -210,8 +210,12 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
         depth = max(0.005, min(0.20, float(raw.get("depth", 0.06))))
         breaths = max(1, min(8, int(raw.get("breaths", 1))))
         lag = max(0.0, min(0.45, float(raw.get("lag", 0.10))))
-    except (TypeError, ValueError):
-        return None
+    except (TypeError, ValueError) as exc:
+        # 폐기 키는 요란하게 거부하면서 형식 오류만 조용히 호흡을 꺼버리면 계약이 어긋난다
+        # — 둘 다 "이 사이드카는 그대로 못 쓴다" 이고, 조용한 쪽은 사용자가 못 알아챈다.
+        raise SystemExit(
+            f"curation: states.{state}.breathe 의 depth/breaths/lag 를 숫자로 못 읽는다: {exc}\n"
+            f"  받은 값: depth={raw.get('depth')!r} breaths={raw.get('breaths')!r} lag={raw.get('lag')!r}")
     rigid_row = raw.get("rigid_row")
     if rigid_row is not None:
         try:

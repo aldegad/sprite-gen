@@ -915,7 +915,7 @@ function openZoom(stateName, idx, keepWidth) {
       // 꺼진 줄은 워프를 **아예 안 부른다.** 봉투에서 위상 0 은 항등이 아니라서
       // (진행파 지연) 위상만 0 으로 넘기면 정지 상태가 워프된 그림이 된다 — 굽기는
       // off 면 state_breathe 가 None 이라 원본을 굽는다 (새미 검증 2026-07-25).
-      bctx.drawImage(bm.enabled ? breatheComposite(base, bm.cfg, phase) : base, 0, 0);
+      bctx.drawImage(bm.enabled ? breatheComposeForPreview(base, bm.cfg, phase) : base, 0, 0);
     };
     // 재생 타이밍 = 줄 프리뷰와 동일 계약: 현재 fps × 줄 배속(pv.speed)
     // (수홍 2026-07-18 "배속 해둔 거 확대해서도 배속으로"; fps 는 줄 스텝퍼로 실시간 변경)
@@ -1024,7 +1024,7 @@ function openZoom(stateName, idx, keepWidth) {
           bx.imageSmoothingEnabled = false;
           drawFrameInto(bx, image, getTransform(stateName, frameIdx), cellW, cellH,
             snapScaleFor(stateName), getPixelOps(stateName, frameIdx));
-          cctx.drawImage(bm.enabled ? breatheComposite(b, bm.cfg, phase) : b, 0, 0);
+          cctx.drawImage(bm.enabled ? breatheComposeForPreview(b, bm.cfg, phase) : b, 0, 0);
         }
         cellEl.appendChild(cv);
         const capEl = document.createElement("span");

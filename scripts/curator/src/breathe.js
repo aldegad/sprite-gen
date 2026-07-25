@@ -16,6 +16,14 @@
 // 서버 상수 미러 (sprite_gen/breathe.py)
 const BREATHE_TAPER = 0.055;
 const BREATHE_FOOT = 0.28;
+const BREATHE_MAX_ROW_STRAIN = 0.25;
+
+// 굽기가 거부하는 프레임은 미리보기도 만들어 주지 않는다.
+// 파이썬은 셀 밖으로 나간 불투명 픽셀을 세어 SystemExit 으로 멈추고 행당 변형 상한도
+// 강제한다. 미러가 그걸 안 지키면 (a) 프리뷰는 멀쩡한데 굽기가 죽고 (b) row-export 의
+// WebM/MP4 는 서버를 안 거치므로 **잘린 영상이 그대로 사용자 손에 들어간다**
+// (슉슉이 실측 2026-07-25: 여백 0 셀에서 불투명 73px 소실, 오류 0건).
+class BreatheRefused extends Error {}
 
 let pendingBreathe = false; // 호흡 라벨 → 줌 모달 오픈 시 호흡 모드 진입 플래그
 
@@ -90,6 +98,24 @@ function breatheSolidBox(data, w, h) {
   return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
 }
 
+// 프리뷰 전용 래퍼 — 굽기가 거부하는 설정이면 **원본을 그리고 loud 하게 알린다.**
+// 내보내기(row-export)는 이 래퍼를 쓰지 않는다: 거기서는 예외가 그대로 올라가 파일이
+// 만들어지기 전에 중단돼야 한다. 프리뷰는 타이머 루프라 예외가 올라가면 재생이 죽으므로
+// 잡되, **조용히 워프된 그림을 보여주지는 않는다** — 못 굽는 설정이면 못 굽는 대로 보인다.
+let _breatheWarned = "";
+function breatheComposeForPreview(base, cfg, phase) {
+  try {
+    return breatheComposite(base, cfg, phase);
+  } catch (err) {
+    if (!(err instanceof BreatheRefused)) throw err;
+    if (_breatheWarned !== err.message) {
+      _breatheWarned = err.message;
+      setStatus(`호흡 미리보기 중단 — 이 설정은 굽기에서도 거부된다: ${err.message}`, "err");
+    }
+    return base;
+  }
+}
+
 // 서버 phase_frame 미러 — 캔버스 크기 불변, 발바닥 고정.
 // 세로는 행 국소 배율 누적, 가로는 행 안 밀도 적분(단조 → 접힘 없음). 전부 정수 연산.
 function breatheComposite(base, cfg, phase) {
@@ -122,6 +148,14 @@ function breatheComposite(base, cfg, phase) {
   const { env, ru, norm } = breatheEnvelope(anat);
   const pOf = breatheProtect(anat);
   const depth = cfg.depth || 0.06;
+  let peak = 0;
+  for (let j = 0; j < anat.height; j++) peak = Math.max(peak, env(j / Math.max(1, anat.height - 1)));
+  const strain = depth * norm * peak;
+  if (strain > BREATHE_MAX_ROW_STRAIN) {
+    throw new BreatheRefused(
+      `행당 변형 ${strain.toFixed(3)} > 상한 ${BREATHE_MAX_ROW_STRAIN} — 변형 구간이 너무 좁다 `
+      + `(강체 경계 ${anat.rigid_row}/${anat.height}). depth 를 낮추거나 경계를 올려라.`);
+  }
   const lag = cfg.lag == null ? 0.1 : cfg.lag;
   const gain = (u) => {
     const e = env(u);
@@ -142,6 +176,7 @@ function breatheComposite(base, cfg, phase) {
   const od = outImg.data;
   let yCursor = baseline - total;
   let prev = 0;
+  let clipped = 0;
   for (let j = 0; j < height; j++) {
     const u = 1 - j / Math.max(1, height - 1);
     const cur = Math.round(heights[j]);
@@ -168,11 +203,10 @@ function breatheComposite(base, cfg, phase) {
     }
     for (let r = 0; r < reps; r++) {
       const yy = yCursor + r;
-      if (yy < 0 || yy >= h) continue;
       for (const [ox, si] of rowMap) {
-        if (ox < 0 || ox >= w) continue;
         const s4 = ((by0 + j) * w + (bx0 + si)) * 4;
         if (!src[s4 + 3]) continue;
+        if (yy < 0 || yy >= h || ox < 0 || ox >= w) { clipped += 1; continue; }
         const d4 = (yy * w + ox) * 4;
         od[d4] = src[s4];
         od[d4 + 1] = src[s4 + 1];
@@ -181,6 +215,11 @@ function breatheComposite(base, cfg, phase) {
       }
     }
     yCursor += reps;
+  }
+  if (clipped) {
+    throw new BreatheRefused(
+      `늘어난 프레임이 셀 밖으로 나가 불투명 픽셀 ${clipped}개가 잘린다 `
+      + `(셀 ${w}x${h}). 셀 여백을 늘리거나 depth 를 낮춰라.`);
   }
   ctx.putImageData(outImg, 0, 0);
   return out;
