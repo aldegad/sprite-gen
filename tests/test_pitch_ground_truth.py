@@ -261,7 +261,13 @@ def test_measured_phase_survives_an_offset_grid_where_the_histogram_phase_does_n
 
     # 논리 격자 칸 수는 잘린 첫 칸까지 세어 원본과 같아야 한다 — 한 칸이라도 잃으면
     # 그 행/열의 디테일(눈 같은 2x4 덩어리)이 이웃 칸에 병합된 것이다.
+    # (offset 11 에서 히스토그램 위상은 23x39 로 한 칸을 잃는다.)
     assert snapped.size == art.size, f"offset {offset}: {snapped.size} != {art.size}"
+    if offset == 3:
+        # 크기만으로는 offset 3 을 못 가른다(양쪽 다 24x40). 픽셀로 가른다 —
+        # 실측 위상 0 vs 히스토그램 위상 377 이 판별선이다.
+        assert _mismatch(snapped, art) == 0, (
+            f"offset {offset}: 실측 위상인데 픽셀이 어긋난다 ({_mismatch(snapped, art)})")
 
 
 @pytest.mark.parametrize("scale", [12.0, 14.35, 16.0, 17.24, 20.0])
