@@ -46,9 +46,9 @@ function buildPayload() {
     // per-state pixel-perfect — **트윈 줄만 저장** (계약): 트윈 없는 줄의 퍼펙은
     // 표시 렌즈(측정 k 양자화)라 사이드카에 적으면 굽기 리졸버가 존재하지 않는
     // .plain 변형을 요구하게 된다. 격자 토글과 같은 표시-전용 상태다.
-    // 저장 규칙의 SSoT 는 `savedPixelPerfect` 다 — 굽기 변종 해소(`bakeVariant`)가
-    // 같은 함수를 읽으므로 "무엇이 저장되나" 와 "굽기가 무엇을 읽나" 가 갈릴 수 없다.
-    const ownPp = savedPixelPerfect(name);
+    // authoring 규칙의 SSoT 는 `authoredPixelPerfect` 다. **해소 규칙과는 다른 함수**다 —
+    // 뷰가 안 적는 값도 사이드카엔 남아 있을 수 있고(서버 이월), 굽기는 그걸 읽는다.
+    const ownPp = authoredPixelPerfect(name);
     if (ownPp !== undefined) states[name].pixel_perfect = ownPp;
     // 호흡 후처리 레이어 (수홍 2026-07-18) — 켠 상태만 기록 (없음 = off)
     if (entry.breathe) states[name].breathe = entry.breathe;

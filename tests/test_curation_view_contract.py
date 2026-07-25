@@ -616,3 +616,60 @@ def test_extract_frame_publish_holds_publish_guard(tmp_path):
     assert (run / "frames" / "items" / "frame-0.png").read_bytes() == b"NEW"
     assert (run / "frames" / "items" / "frame-0.png").read_bytes() == b"NEW"  # single new generation
     assert not staging.exists()
+
+
+@pytest.mark.parametrize("field,where", [
+    ("run-wide", "top"),
+    ("per-state", "state"),
+])
+def test_autosave_preserves_pixel_perfect_the_view_does_not_author(tmp_path, field, where):
+    """뷰가 **authoring 하지 않는** `pixel_perfect` 선언은 autosave 가 지우면 안 된다.
+
+    `buildPayload` 는 이 필드를 조건부로만 싣는다: per-state 는 트윈이 있는 줄만, 런 전역은
+    트윈 줄이 전부 같을 때만. 생략은 "안 건드림" 이지 삭제가 아니다 — 삭제로 받으면
+    **굽기가 읽는 변종이 바뀐다**(`frame_variant`). `.plain.png` 가 없는 줄이 `plain` 으로
+    뒤집히면 `row_frame_rel(row, i, "plain")` 이 없는 파일을 가리켜 굽기가 죽는데, 사용자는
+    큐레이터를 한 번 열었을 뿐이고 화면에는 아무 알림도 없다 (슉슉이 실측 2026-07-26).
+
+    `anchors`·`frozen` 과 같은 이월 계약이다. 이 그물이 없는 동안 이월 두 줄을 지워도
+    전체 스위트가 513 passed 로 통과했다 — round-9 R2 가 `bakeFrameUrl` 에 대해 기각한
+    것과 같은 상태였다."""
+    from sprite_gen.curation import frame_variant, stamp_curation
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png", color=(200, 0, 0, 255))
+    _png(pngs / "items" / "2-b.png", color=(0, 200, 0, 255))
+    out = tmp_path / "run"
+    assert _run_import(pngs, out).returncode == 0
+
+    curation = {"version": 1, "kind": "sprite-gen-curation", "states": {"items": {}}}
+    if where == "top":
+        curation["pixel_perfect"] = False
+    else:
+        curation["states"]["items"]["pixel_perfect"] = True
+        curation["pixel_perfect"] = False          # per-state 가 이기는지도 같이 본다
+    (out / "curation.json").write_text(json.dumps(stamp_curation(out, curation)), encoding="utf-8")
+    before = frame_variant(json.loads((out / "curation.json").read_text(encoding="utf-8")), "items")
+
+    CurationHandler.run_dir = out
+    CurationHandler.lang = "en"
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), partial(CurationHandler))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+    try:
+        revision = json.loads(
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/api/run").read())["runRevision"]
+        # 뷰가 authoring 하지 않은 저장 — `pixel_perfect` 키가 어디에도 없다
+        body = json.dumps({"version": 1, "kind": "sprite-gen-curation", "runRevision": revision,
+                           "states": {"items": {"selected": [0, 1]}}}).encode()
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/curation",
+                                     data=body, method="POST")
+        assert urllib.request.urlopen(req).status == 200
+    finally:
+        srv.shutdown()
+
+    saved = json.loads((out / "curation.json").read_text(encoding="utf-8"))
+    after = frame_variant(saved, "items")
+    assert after == before, (
+        f"{field} 선언이 autosave 에 사라져 굽기 변종이 {before} -> {after} 로 바뀌었다\n"
+        f"  저장된 사이드카: {saved}")
