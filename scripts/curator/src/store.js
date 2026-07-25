@@ -259,11 +259,12 @@ function seedEntries() {
     }
     entries[state.name] = { order, sel, transforms, archived, pixels, clones, unlinked, names,
       // 호흡 후처리 레이어 (사이드카 breathe — curation.state_breathe 와 같은 형태)
-      breathe: c && c.breathe && Array.isArray(c.breathe.splits) && c.breathe.splits.length
-        ? { splits: c.breathe.splits.map(Number).sort((a, b) => a - b).slice(0, 3),
-            amplitude: Math.max(1, Math.min(4, Number(c.breathe.amplitude) || 1)),
+      breathe: c && c.breathe && typeof c.breathe.depth === "number"
+        ? { depth: Math.max(0.005, Math.min(0.2, Number(c.breathe.depth) || 0.06)),
             breaths: Math.max(1, Math.min(8, Number(c.breathe.breaths) || 1)),
-            subpixel: !!c.breathe.subpixel }
+            lag: Math.max(0, Math.min(0.45, c.breathe.lag == null ? 0.1 : Number(c.breathe.lag))),
+            rigid_row: c.breathe.rigid_row == null ? null : Number(c.breathe.rigid_row),
+            anatomy: c.breathe.anatomy || null }
         : null };
   }
 }
