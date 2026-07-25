@@ -396,3 +396,51 @@ def test_the_fingerprint_is_computed_identically_on_both_sides(tmp_path):
     assert proc.returncode == 0, f"node 하네스 실패:\n{proc.stderr}"
     got = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
     assert got == want, f"지문이 갈린다 — 미러가 신선도를 판정할 수 없다\n  py={want}\n  js={got}"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 가 없어 JS 미러를 실행할 수 없다")
+@pytest.mark.parametrize("anatomy_shape", ["fingerprint-null", "fingerprint-missing"],
+                         ids=["null", "missing"])
+def test_the_mirror_refuses_when_it_cannot_verify(anatomy_shape, tmp_path):
+    """지문이 없으면 "확인 불가" 이지 "괜찮음" 이 아니다.
+
+    `refreshAnatomy` 가 실패하면 지문만 무효화한 해부가 남는데, 미러가 그걸 조용히
+    통과시켜 낡은 숫자로 그렸다 — 굽기와 164바이트, 불투명 픽셀 수까지 불일치
+    (슉슉이 실측 2026-07-26). `row-export` 가 같은 함수를 쓰므로 WebM/MP4 가 GIF 와
+    다른 애니메이션으로 나갔다."""
+    src = _humanoid()
+    cfg = dict(CFG)
+    frozen = freeze_anatomy(src, cfg)
+    if anatomy_shape == "fingerprint-null":
+        frozen = {**frozen, "fingerprint": None}
+    else:
+        frozen = {k: v for k, v in frozen.items() if k != "fingerprint"}
+    cfg["anatomy"] = frozen
+
+    harness = tmp_path / "fresh.cjs"
+    harness.write_text(
+        'const fs=require("fs"),vm=require("vm");'
+        'const P=JSON.parse(fs.readFileSync(process.argv[3],"utf8"));'
+        'function mk(w,h,d){const b=Uint8ClampedArray.from(d);'
+        ' const c={imageSmoothingEnabled:false,getImageData:()=>({data:b,width:w,height:h}),'
+        ' putImageData:i=>b.set(i.data),createImageData:(a,e)=>({data:new Uint8ClampedArray(a*e*4),width:a,height:e}),'
+        ' drawImage:s=>b.set(s.__buf),clearRect:()=>{}};return{width:w,height:h,getContext:()=>c,__buf:b};}'
+        'const sb={document:{createElement:()=>mk(P.w,P.h,new Array(P.w*P.h*4).fill(0))},console,'
+        'entries:{},run:{states:[]},t:()=>"",setStatus:()=>{},fetch:()=>{}};'
+        'sb.globalThis=sb;vm.createContext(sb);'
+        'vm.runInContext(fs.readFileSync(process.argv[2],"utf8"),sb);'
+        'let out;try{sb.breatheAssertFresh(mk(P.w,P.h,P.rgba),P.cfg);out={ok:true};}'
+        'catch(e){out={ok:false,refused:e.constructor.name==="BreatheRefused",message:e.message};}'
+        'fs.writeFileSync(P.out,JSON.stringify(out));', encoding="utf-8")
+    src_json = tmp_path / "in.json"
+    src_json.write_text(json.dumps({
+        "w": src.width, "h": src.height, "rgba": _rgba(src),
+        "cfg": {"depth": cfg["depth"], "breaths": cfg["breaths"], "lag": cfg["lag"],
+                "anatomy": frozen},
+        "out": str(tmp_path / "out.json")}), encoding="utf-8")
+    proc = subprocess.run([shutil.which("node"), str(harness), str(CURATOR_BREATHE), str(src_json)],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, f"node 하네스 실패:\n{proc.stderr}"
+    got = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert not got["ok"] and got["refused"], (
+        f"지문 {anatomy_shape} 인데 미러가 신선하다고 판정했다 — 확인 불가는 괜찮음이 아니다")

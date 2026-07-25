@@ -187,3 +187,79 @@ def test_an_omitted_depth_survives_the_round_trip(sidecar, tmp_path):
     after = state_breathe({"states": {"idle": {"breathe": saved}}}, "idle")
     assert after["depth"] == before["depth"], "왕복이 굽기가 쓰는 값을 바꿨다"
     assert after["breaths"] == before["breaths"]
+
+
+# ── 왕복 계약 전수 매트릭스 ─────────────────────────────────────────
+#
+# 아홉 라운드 동안 같은 실패 모드가 값 모양만 바꿔 네 번 반복됐다 (round-3 `splits`,
+# round-6 `depth:"0.08"`, round-7 `breaths:"3.5"`, round-9 `depth` 생략, round-10 `lag:null`).
+# 매번 지적된 한 칸만 메웠기 때문이다. 여기서는 **키 × 값 모양을 전수 열거**해 굽기와
+# 큐레이터의 판정이 어긋나는 칸이 하나도 없음을 한 번에 고정한다.
+
+_VALUE_SHAPES = {
+    "omitted": None,                 # 키 자체를 안 넣는다
+    "null": None,
+    "string": None,
+    "zero": 0,
+    "negative": -1,
+    "huge": 999,
+    "fractional": 2.5,
+}
+
+
+def _sidecar_for(key, shape):
+    base = {"depth": 0.06, "breaths": 2, "lag": 0.1}
+    if shape == "omitted":
+        base.pop(key)
+    elif shape == "null":
+        base[key] = None
+    elif shape == "string":
+        base[key] = "0.08" if key in ("depth", "lag") else "3"
+    else:
+        base[key] = _VALUE_SHAPES[shape]
+    return base
+
+
+def _bake_verdict(sidecar):
+    """굽기의 판정 — (수용?, 정규화 결과)."""
+    try:
+        return True, state_breathe({"states": {"idle": {"breathe": sidecar}}}, "idle")
+    except SystemExit:
+        return False, None
+
+
+@node
+@pytest.mark.parametrize("shape", sorted(_VALUE_SHAPES))
+@pytest.mark.parametrize("key", ["depth", "breaths", "lag"])
+def test_the_curator_agrees_with_the_bake_on_every_value_shape(key, shape, tmp_path):
+    """굽기가 거부하는 사이드카는 큐레이터도 **원본 그대로 두고 알린다**.
+    굽기가 받는 사이드카는 큐레이터도 받고, 왕복해도 굽기가 쓰는 값이 안 바뀐다.
+
+    어느 쪽이든 **첫 autosave 가 사용자의 원래 숫자를 바꾸면 안 된다** — 그게 이
+    플랜에서 네 번 반복된 실패 모드다(굽기가 거부하던 근거가 조용히 사라진다)."""
+    sidecar = _sidecar_for(key, shape)
+    accepted, before = _bake_verdict(sidecar)
+
+    run = {"schemaVersion": 1, "fps": 6,
+           "states": [{"name": "idle", "fps": 6,
+                       "frames": [{"index": 0, "present": True}, {"index": 1, "present": True}]}],
+           "curation": {"states": {"idle": {"selected": [0, 1], "breathe": sidecar}}}}
+    got = _run({"mode": "roundtrip", "run": run}, tmp_path)
+    saved = got["payload"]["states"]["idle"].get("breathe")
+    errs = [m for kind, m in got["status"] if kind == "err"]
+
+    if not accepted:
+        assert saved == sidecar, (
+            f"{key}={shape}: 굽기가 거부하는 사이드카를 큐레이터가 바꿔 썼다 — "
+            f"거부 근거가 사라진다\n  원본={sidecar}\n  저장={saved}")
+        assert errs, f"{key}={shape}: 굽기가 거부하는데 화면 알림이 없다"
+        after_accepted, _ = _bake_verdict(saved)
+        assert not after_accepted, f"{key}={shape}: 왕복이 거부를 통과로 바꿨다"
+    else:
+        assert saved is not None, f"{key}={shape}: 굽기가 받는 설정을 큐레이터가 지웠다"
+        after_accepted, after = _bake_verdict(saved)
+        assert after_accepted, (
+            f"{key}={shape}: 왕복이 굽기가 죽는 사이드카를 만들었다\n"
+            f"  원본={sidecar}\n  저장={saved}")
+        assert after == before, (
+            f"{key}={shape}: 왕복이 굽기가 쓰는 값을 바꿨다\n  전={before}\n  후={after}")

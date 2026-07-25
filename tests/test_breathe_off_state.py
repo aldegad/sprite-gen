@@ -168,25 +168,32 @@ def test_export_paths_check_anatomy_freshness(name):
 # ── 호흡은 굽기가 읽는 파일로 그린다 ───────────────────────────────
 
 BAKE_URL = re.compile(r"bakeFrameUrl\s*\(")
-IMG_SRC = re.compile(r"\bimg\s*\(\s*([^)]*)\)")
-# 호흡 워프 base / 신선도 기준을 만드는 지점 — 굽기가 읽는 파일이어야 한다.
-BREATHE_IMAGE_SITES = {
-    "cards.js": ("canonical", "refImg"),
-    "compare.js": ("image", "rimg"),
-    "zoom-editor.js": ("image",),
-    "row-export.js": ("image",),
+IMG_CALL = re.compile(r"\bimg\s*\(")
+# 호흡 계약이 사는 파일 — 이 안의 **모든** 프레임 이미지 소스가 굽기 파일이어야 한다.
+#
+# 변수명 화이트리스트로 쓰면 안 된다: round-9 판은 `zoom-editor.js: ("image",)` 였고,
+# 그래서 `const canonImg = img(fr.url)` 로 지오메트리를 재던 자리가 **스캔 대상에조차
+# 없었다** (슉슉이 실측 2026-07-26: 경계가 8px 어긋났는데 그물은 조용했다). 이름이
+# 아니라 **파일 전체**를 훑고, 호흡과 무관한 줄만 명시적으로 면제한다.
+BREATHE_FILES = ("cards.js", "compare.js", "zoom-editor.js", "row-export.js")
+# 호흡 경로가 아닌 이미지 소스 (표시·썸네일 등) — 면제는 **이유와 함께** 명시한다.
+NON_BREATHE_IMG = {
+    ("cards.js", "image"): "카드 표시면 — 호흡 합성 전 원본 표시 (frameUrl 이 맞다)",
 }
 
 
 def _breathe_image_sites():
-    for name, vars_ in BREATHE_IMAGE_SITES.items():
+    for name in BREATHE_FILES:
         path = CURATOR_SRC / name
         if not path.is_file():
             continue
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            m = re.match(r"\s*const (\w+) = .*\bimg\(", line)
-            if m and m.group(1) in vars_:
-                yield name, lineno, line.strip()
+            m = re.match(r"\s*const (\w+) = .*", line)
+            if not (m and IMG_CALL.search(line)):
+                continue
+            if (name, m.group(1)) in NON_BREATHE_IMG:
+                continue
+            yield name, lineno, line.strip()
 
 
 def test_there_are_breathe_image_sites():

@@ -956,19 +956,24 @@ function openZoom(stateName, idx, keepWidth) {
 
     const initSilhouette = () => {
       if (bm.geomReady) return true;
-      // 지오메트리 truth = 굽기와 같은 합성 결과의 bbox — 캐노니컬 픽셀 + 변형 +
-      // 픽셀 편집을 적용한 뒤 잰다 (실사고 2026-07-18 수홍: 캐릭터를 축소하니
-      // 선이 축소 전 위치를 기준으로 잡힘 — 굽기는 변형 후 bbox 를 쓴다).
-      const fr = frameOf(stateName, idx);
-      const canonImg = fr ? img(fr.url) : null;
+      // 지오메트리 truth = **굽기가 해부를 확정하는 기준 프레임**의 합성 bbox.
+      // `rigid_row` 는 그 프레임의 콘텐츠 행 인덱스이고, 굽기는 그걸 `rigid_u` 비율로
+      // 바꿔 각 프레임에 건다. 모달이 열린 프레임(`idx`)을 재면 원점이 달라져 선의 화면
+      // 위치와 저장되는 행 번호가 굽기와 어긋난다 — 재생 순서만 바꿔도 도달하고,
+      // 골든 픽스처에서 8px(50px 캐릭터의 16%) 어긋났다 (슉슉이 실측 2026-07-26).
+      // 변형·픽셀편집을 적용한 뒤 재는 것은 그대로다 (실사고 2026-07-18 수홍).
+      const play0 = playList(stateName)[0];
+      const refIdx = play0 === undefined ? idx : play0;
+      const fr = frameOf(stateName, refIdx);
+      const canonImg = fr ? img(bakeFrameUrl(stateName, fr)) : null;
       if (canonImg && canonImg.complete && canonImg.naturalWidth) {
         const cvs = document.createElement("canvas");
         cvs.width = cellW;
         cvs.height = cellH;
         const cctx = cvs.getContext("2d");
         cctx.imageSmoothingEnabled = false;
-        drawFrameInto(cctx, canonImg, getTransform(stateName, idx), cellW, cellH,
-          snapScaleFor(stateName), getPixelOps(stateName, idx));
+        drawFrameInto(cctx, canonImg, getTransform(stateName, refIdx), cellW, cellH,
+          snapScaleFor(stateName), getPixelOps(stateName, refIdx));
         const dd = cctx.getImageData(0, 0, cellW, cellH).data;
         let ttop = cellH, tbot = 0;
         for (let y = 0; y < cellH; y++) {
@@ -1188,8 +1193,11 @@ function openZoom(stateName, idx, keepWidth) {
         if (!initSilhouette() && ++geomTries < 50) setTimeout(retryGeom, 120);
       };
       if (bImg) bImg.addEventListener("load", () => initSilhouette(), { once: true });
-      const fr0 = frameOf(stateName, idx);
-      const canon0 = fr0 ? img(fr0.url) : null; // 지오메트리 truth 는 캐노니컬 — 그 로드가 진짜 신호
+      // 지오메트리는 **기준 프레임의 굽기 파일**에서 잰다 — 기다릴 로드도 그 이미지다.
+      // 다른 이미지의 로드를 기다리면 재시도가 엉뚱한 시점에 돌아 선이 안 잡힌다.
+      const play0g = playList(stateName)[0];
+      const fr0 = frameOf(stateName, play0g === undefined ? idx : play0g);
+      const canon0 = fr0 ? img(bakeFrameUrl(stateName, fr0)) : null;
       if (canon0 && !canon0.complete) canon0.addEventListener("load", () => initSilhouette(), { once: true });
       setTimeout(retryGeom, 120);
     }
