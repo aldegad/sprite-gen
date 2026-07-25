@@ -474,34 +474,67 @@ def test_the_warn_notice_has_a_visible_style():
 
 # ── 워프 base 는 폴백하지 않는다 ────────────────────────────────────
 
-WARP_BASE = re.compile(r"drawFrameInto\(\s*(\w*[Bb]aseCtx)\s*,\s*([^,]+),")
+# 워프 base 사이트는 **이름이 아니라 의미**로 모은다.
+#
+# 앞선 판은 `drawFrameInto\(\s*(\w*[Bb]aseCtx)` 로 ctx **이름**을 훑었다. 그 패턴에 걸리는
+# 자리는 레포 전체에 2곳뿐이었고, `baseCtx` 를 `warpCtx` 로 바꾸는 것만으로 cards.js 가
+# 통째로 스캐너에서 사라지면서 폴백을 원문 그대로 되살려도 537 passed 였다 — 개수까지
+# 기준선과 같아서 테스트가 사라진 신호조차 없었다 (노을이 실측 2026-07-26).
+#
+# 그래서 사이트를 **호흡 워프에 실제로 들어가는 캔버스**에서 역산한다:
+#   breatheComposite(X, ...) / breatheComposeForPreview(X, ...) -> 캔버스 X
+#   const <ctx> = X.getContext(...)                             -> 그 캔버스의 ctx
+#   drawFrameInto(<ctx>, ARG, ...)                              -> ARG 가 워프 base 다
+# 이름을 바꿔도 역산이 따라가므로 리네임으로 빠져나갈 수 없다. 덤으로 `bx` 처럼 이름이
+# 다른 자리 3곳(compare·row-export·zoom-editor 두 번째)도 이제 계약에 들어온다 —
+# row-export 는 프리뷰가 아니라 **WebM 파일을 굽는** 경로다.
+COMPOSITE_CALL = re.compile(r"breathe(?:Composite|ComposeForPreview)\(\s*(\w+)")
+CTX_BIND = re.compile(r"\b(?:const|let|var)\s+(\w+)\s*=\s*(\w+)\.getContext\(")
+DRAW_INTO = re.compile(r"drawFrameInto\(\s*(\w+)\s*,\s*([^,]+),")
+# 워프 base 를 가진 파일 — 사이트가 여기서 사라지면 **실패**다 (형제 스캐너와 같은 못).
+FILES_WITH_WARP_BASES = {"cards.js", "compare.js", "zoom-editor.js", "row-export.js"}
+
+
+def _warp_base_sites():
+    for name in BREATHE_FILES:
+        src = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8"))
+        canvases = set(COMPOSITE_CALL.findall(src))
+        ctxs = {ctx for ctx, canvas in CTX_BIND.findall(src) if canvas in canvases}
+        for m in DRAW_INTO.finditer(src):
+            if m.group(1) in ctxs:
+                yield name, src[:m.start()].count("\n") + 1, m.group(2).strip()
+
+
+def test_every_file_with_a_warp_base_is_still_scanned():
+    """워프 base 사이트가 **파일 단위로** 살아 있어야 한다.
+
+    전역 `assert found` 하나로는 부족하다 — 한 파일이 통째로 증발해도 다른 파일이 남아
+    참이 되고, 그 사이 그 파일은 무방비다. 형제 스캐너(`FILES_WITH_IMAGE_SITES`)에는
+    이 못을 박아놓고 같은 커밋에서 만든 이 스캐너에는 안 박았다."""
+    covered = {name for name, _, _ in _warp_base_sites()}
+    missing = FILES_WITH_WARP_BASES - covered
+    assert not missing, (
+        f"이 파일들의 호흡 워프 base 가 스캐너에서 사라졌다: {sorted(missing)}\n"
+        "  캔버스·ctx 이름을 바꾸면 사이트가 조용히 증발한다.")
 
 
 def test_the_warp_base_never_falls_back_to_a_display_file():
-    """호흡 워프의 base 는 **굽기가 읽는 파일 하나**다 — 폴백 삼항을 두지 않는다.
+    """호흡 워프의 base 는 **굽기가 읽는 파일 하나**다 — 폴백을 두지 않는다.
 
     `cards.js` 는 `(canonical && canonical.complete) ? canonical : image` 였다. 굽기 파일
     이미지가 아직 로드 중이면 **표시 파일**(pp OFF 트윈 줄은 `orig/` 고해상본)을 워프
-    base 로 썼고 알림은 0건이었다 (슉슉이 note 2026-07-26). 로드되면 자가 교정되는
-    일시적 현상이라 산출물은 안 깨지지만, 조용히 **틀린 그림**을 그리는 건 조용히
-    **안 그리는** 것과 다르다 — 아직 준비 안 됐으면 워프하지 않는다(`zoom-editor` 처럼).
+    base 로 썼고 알림은 0건이었다. 로드되면 자가 교정되는 일시적 현상이라 산출물은 안
+    깨지지만, 조용히 **틀린 그림**을 그리는 건 조용히 **안 그리는** 것과 다르다 —
+    준비 안 됐으면 워프하지 않는다(`zoom-editor`·`compare`·`row-export` 가 쓰는 형태).
 
-    `test_breathe_draws_from_the_file_the_bake_reads` 는 `img(...)` 바인딩만 봐서 이
-    폴백 가지를 못 본다."""
-    found = 0
-    for name in BREATHE_FILES:
-        src = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8"))
-        for m in WARP_BASE.finditer(src):
-            found += 1
-            arg = m.group(2).strip()
-            line = src[:m.start()].count("\n") + 1
-            # 사용 지점의 모양(`\w+` 인지)이 아니라 **분기 전수**로 본다 — 삼항을 한 칸 위
-            # 변수로 옮기는 것만으로 우회되던 판이었다.
-            assert _bake_only(name, line, arg), (
-                f"{name}:{line} 워프 base {arg!r} 의 어떤 분기가 굽기 파일이 아니다.\n"
-                "  준비 안 된 소스는 폴백이 아니라 **안 그리는 것**으로 다뤄라 "
-                "(zoom-editor/compare/row-export 가 이미 쓰는 형태).")
-    assert found, "워프 base 자리를 하나도 못 찾았다 — 스캐너가 고장났다"
+    판정은 도달도 선언도 아닌 **분기 전수 + 재대입 금지**다 (`_bake_only`): 세 번의 탈출이
+    각각 분기·흐름·사이트 수집을 노렸다."""
+    sites = list(_warp_base_sites())
+    assert sites, "워프 base 자리를 하나도 못 찾았다 — 스캐너가 고장났다"
+    for name, line, arg in sites:
+        assert _bake_only(name, line, arg), (
+            f"{name}:{line} 워프 base {arg!r} 의 어떤 분기가 굽기 파일이 아니다.\n"
+            "  준비 안 된 소스는 폴백이 아니라 **안 그리는 것**으로 다뤄라.")
 
 
 # ── 문서가 폐기된 설계를 말하지 않는다 ──────────────────────────────
