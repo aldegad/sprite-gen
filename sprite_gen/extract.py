@@ -1179,6 +1179,9 @@ def _grid_rows(component: Image.Image) -> tuple[list[list[int]], list[bytes]]:
         base = y * w * 4
         row = data[base:base + w * 4]
         alpha = row[3::4]
+        # 알파 128 = 이 모듈 전역의 불투명 판정 관례다 (extract.py 안 15곳이 같은 리터럴을
+        # 쓴다). 이 함수만 이름 붙인 상수로 빼면 SSoT 가 반쯤만 옮겨져 더 나빠지므로,
+        # 통일은 모듈 전체를 한 번에 바꾸는 별도 작업으로 둔다 (plan Notes).
         pos = [x for x in range(w) if alpha[x] >= 128]
         row_pos.append(pos)
         row_rgb.append(b"".join(row[4 * x:4 * x + 3] for x in pos))
@@ -1238,6 +1241,17 @@ def _grid_score_edges(rows: tuple[list[list[int]], list[bytes]], w: int, h: int,
     `sprite-gen/best-phase-hotspot`): 새 값은 같은 양의 정확판이라 옛 float 누적과
     마지막 ULP 에서 갈리지만(실측 최대 상대차 1.8e-16), 파이프라인이 실제로 쓰는
     출력인 `_best_phase` 의 argmin 은 전수 동일하다(founder_v8 8 컴포넌트 × 64 위상).
+
+    **argmin 불변은 정리가 아니라 측정이다** — argmin 은 점수의 불연속 함수라 "점수가
+    ULP 만큼 바뀌면 argmin 이 안 바뀐다"를 보장하는 정리는 없다. 뒤집히려면 서로 다른
+    두 위상의 점수가 유효숫자 15자리까지 붙어야 하는데, 관측된 distinct 점수 최소 간격은
+    ~1e-5 다 (콩콩이 독립 측정 2026-07-25: 저대비 팔레트를 포함한 무작위·적대 컴포넌트
+    160개에서 최소 간격 1.15e-5 vs 신·구 최대 상대차 8.39e-15 = 여유 1.4e9 배, 별도
+    300 컴포넌트 argmin 불일치 0건). 점수가 수천 개 정수 유래 셀 기여분의 합이라 그렇게
+    붙기 어렵다. 그리고 뒤집히는 경우가 오더라도 **새 값이 정답 쪽**이다 — 정확 산술이지
+    누적 float 이 아니다. 자기 자산에서 다시 재려면 이 두 수(점수 간격 / 상대차)를 재라.
+    정확 동점은 양쪽 다 안전하다: 순회 순서(`for i / for j`)와 strict `<` 동점 처리가
+    구 코드와 동일해 동점은 양쪽 다 첫 위상으로 간다.
 
     `C_lo`/`S_lo` 는 `bytes.translate` + `sum` 으로 C 레벨에서 뽑는다 — 임계값별 변환표는
     256개뿐이라 모듈 상수로 굽는다.
