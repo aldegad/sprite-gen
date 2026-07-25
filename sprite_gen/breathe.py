@@ -22,14 +22,16 @@ AI 개입 0 — 같은 입력이면 항상 같은 출력.
 
 ## 불변식 (테스트가 지키는 것)
 
-1. **강체 구간은 항등이다 — 근사가 아니다.** env=0 인 행은 sx=1 -> parity_round(W,1)==W
-   -> 가로 사상이 항등, sy=1 -> 누적 높이가 정확히 1씩 증가 -> 행 복제/삭제 0.
+1. **강체 구간은 항등이다 — 근사가 아니다.** env=0 인 행은 g=0 -> 가로 사상이 원본
+   좌표 그대로, sy=1 -> 누적 높이가 정확히 1씩 증가 -> 행 복제/삭제 0.
    그래서 그 구간은 프레임 간 **비트 동일**하다. 눈·입이 몇 도트뿐인 픽셀아트에서
    3% 세로 신장도 표정을 뭉개므로 이게 핵심 계약이다.
 2. **가로 사상은 단조다.** X(x) = ∫ dens(s) ds 이고 dens > 0 이므로 접힘이 구조적으로
    불가능하다. 몸통만 1+g, 부속(날개)은 1 -> 날개는 밖으로 밀리기만 하고 안 늘어난다.
-3. **가로 폭은 원본과 홀짝을 유지한다.** 홀짝이 바뀌면 중앙 정렬이 1px 튀어 좌우
-   지터로 보인다.
+3. **몸통 축 열이 가로 사상의 고정점이다.** 출력 위치를 축의 적분값 기준으로 잡으므로
+   축은 언제나 제자리이고, 그래서 (a) 변형이 0 이면 사상이 진짜 항등이 되고
+   (b) 배율이 변해도 스프라이트가 통째로 좌우로 튀지 않는다. bbox 중앙을 기준으로
+   잡으면 축이 중앙과 다른 캐릭터가 변형 0 에서도 밀린다 (실사고 2026-07-25 새미 검증).
 4. **격자를 벗어나는 연산이 없다.** 세로는 행 정수 복제/삭제, 가로는 정수 열 사상.
    보간·블렌딩·비정수 스케일이 한 번도 일어나지 않으므로 출력이 항상 정수 도트다.
    언페이크(pitch 검출)를 프레임마다 다시 할 필요가 없는 이유이자, 다시 하면 안 되는
@@ -79,15 +81,6 @@ def smoothstep(a: float, b: float, x: float) -> float:
         return 1.0 if x >= b else 0.0
     u = min(1.0, max(0.0, (x - a) / (b - a)))
     return u * u * (3 - 2 * u)
-
-
-def parity_round(w0: int, scale: float) -> int:
-    """배율 적용 폭을 **원본과 같은 홀짝**으로 반올림.
-
-    중앙 정렬은 `anchor_x - nw // 2` 이라 nw 의 홀짝이 바뀌면 스프라이트가 통째로
-    1px 좌우로 튄다(프레임마다 좌우 지터). 홀짝을 고정하면 중심축이 안 흔들린다.
-    scale == 1.0 이면 반드시 w0 을 그대로 돌려준다 — 강체 항등의 근거."""
-    return max(1, w0 + 2 * round((w0 * scale - w0) / 2))
 
 
 # ── 변형 강도 봉투 ──────────────────────────────────────────────────
@@ -179,23 +172,24 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
             continue
         g = gain(u)
         if g == 0.0:
-            left = anchor_x - width // 2
-            row_map = [(left + i, i) for i in range(width)]
+            # 변형 없음 = 원본 위치 그대로. 축 고정점 사상의 g->0 극한과 정확히 같다.
+            row_map = [(box[0] + i, i) for i in range(width)]
         else:
             dens = [max(0.05, 1.0 + g * (1.0 - p_of(i))) for i in range(width)]
             edge = [0.0]
             for d in dens:
                 edge.append(edge[-1] + d)
-            span = edge[width]
-            nw = parity_round(width, span / max(1e-6, float(width)))
-            scale = nw / span if span > 1e-6 else 1.0
-            left = anchor_x - nw // 2
+            origin = edge[anat.axis_x]       # 축을 고정점으로 — 여기가 anchor_x 에 박힌다
+            # half-up 반올림: 파이썬 기본 round() 는 은행가 반올림(round(0.5)==0)이라
+            # JS Math.round(half-up) 미러와 .5 경계에서 갈린다. 규칙을 명시해 고정한다.
+            lo = math.floor(edge[0] - origin + 0.5)
+            hi = math.floor(edge[width] - origin + 0.5)
             row_map = []
             i = 0
-            for ox in range(nw):
-                while i < width - 1 and edge[i + 1] * scale <= ox:
+            for ox in range(lo, hi):
+                while i < width - 1 and (edge[i + 1] - origin) <= ox:
                     i += 1
-                row_map.append((left + ox, i))
+                row_map.append((anchor_x + ox, i))
         for r in range(reps):
             yy = y_cursor + r
             for ox, si in row_map:
@@ -229,11 +223,15 @@ def anatomy_fingerprint(frame: Image.Image) -> str:
     return f"{frame.width}x{frame.height}:{box[0]},{box[1]},{box[2]},{box[3]}:{digest}"
 
 
-def frame_anatomy(frame: Image.Image, cfg: dict) -> Anatomy:
-    """cfg 에 얼려둔 해부 결과를 쓰되, 없거나 지문이 어긋나면 다시 잰다 (self-heal).
+def frame_anatomy(frame: Image.Image, cfg: dict) -> tuple[Anatomy, bool]:
+    """(해부, 재검출 여부) — 얼려둔 결과를 쓰되 없거나 지문이 어긋나면 다시 잰다.
 
     사람이 덮어쓴 `rigid_row` 는 지문과 무관하게 보존한다 — 그건 캐시가 아니라
-    명시된 의도라서 자가 복구 대상이 아니다."""
+    명시된 의도라서 자가 복구 대상이 아니다.
+
+    **재검출 여부를 돌려주는 게 계약이다.** 자가 복구가 조용히 일어나면 사이드카의
+    숫자와 실제로 구운 숫자가 다른데도 아무도 모른다 (원칙 6). 굽기 경로는 이 값을
+    manifest 에 실어야 한다 — `anatomy_report` 참조."""
     frozen = cfg.get("anatomy")
     if isinstance(frozen, dict) and frozen.get("fingerprint") == anatomy_fingerprint(frame):
         face = frozen.get("face")
@@ -243,8 +241,31 @@ def frame_anatomy(frame: Image.Image, cfg: dict) -> Anatomy:
                        basis_row=frozen["basis_row"], torso_half=frozen["torso_half"],
                        max_half=frozen["max_half"],
                        face=tuple(face) if face else None,
-                       warnings=tuple(frozen.get("warnings", ())))
-    return analyze(frame, rigid_row=cfg.get("rigid_row"))
+                       warnings=tuple(frozen.get("warnings", ()))), False
+    return analyze(frame, rigid_row=cfg.get("rigid_row")), True
+
+
+def anatomy_report(images: list[Image.Image], cfg: dict) -> dict:
+    """굽기가 실제로 쓴 해부를 manifest 에 실을 형태로 — 자가 복구를 관측 가능하게.
+
+    프레임마다 따로 잰다: 시퀀스 프레임이 서로 다르면(깜빡임 등) 얼려둔 지문은 하나만
+    맞으므로 나머지는 프레임별 재검출이 되고, 그러면 `rigid_row` 가 프레임마다 달라질
+    수 있다. 그 사실이 숨으면 안 된다."""
+    used, redetected, rows = [], [], set()
+    for index, frame in enumerate(images):
+        anat, fresh = frame_anatomy(frame, cfg)
+        if fresh:
+            redetected.append(index)
+        rows.add(anat.rigid_row)
+        used.append(anat)
+    first = used[0] if used else None
+    return {
+        "anatomy": first.as_dict() if first else None,
+        "redetected_frames": redetected,
+        "redetected": bool(redetected),
+        "rigid_row_varies": sorted(rows) if len(rows) > 1 else [],
+        "warnings": sorted({w for a in used for w in a.warnings}),
+    }
 
 
 def freeze_anatomy(frame: Image.Image, cfg: dict) -> dict:
@@ -294,7 +315,7 @@ def breathe_reads_smoothly(seq_len: int, cfg: dict, per_cycle: int = SMOOTH_CYCL
 
 def phase_frame(frame: Image.Image, cfg: dict, phase: float) -> Image.Image:
     """프레임에 호흡 위상 하나(0 <= phase < 1)를 적용."""
-    anat = frame_anatomy(frame, cfg)
+    anat, _ = frame_anatomy(frame, cfg)
     depth = float(cfg.get("depth", DEFAULT_DEPTH))
     strain = row_strain(anat, depth)
     if strain > MAX_ROW_STRAIN:
