@@ -38,6 +38,15 @@ MUTS = [
     ("N2 변형 생략", "scripts/serve_curation.py",
      "return apply_transform(source, transforms.get(edit_idx), cell, snap_scale=snap), key",
      "return source, key"),
+    ("N2 재생순서 무시", "scripts/serve_curation.py",
+     "    for index in (ordered or list(range(total))):",
+     "    for index in list(range(total)):"),
+    ("N2 픽셀편집 생략", "scripts/serve_curation.py",
+     '            source = apply_pixel_edits(opened.convert("RGBA"), ops)',
+     '            source = opened.convert("RGBA")'),
+    ("N2 스냅 무시", "scripts/serve_curation.py",
+     '    snap = pixel_snap_scale(request) if variant == "pixel" else None',
+     "    snap = None"),
     ("N3 캐노니컬 폴백", "scripts/curator/src/store.js",
      "return { url: frame.plainBakeUrl || null, stamp: frame.plainBakeStamp || null };",
      "return { url: frame.plainBakeUrl || frame.url, stamp: frame.plainBakeStamp || frame.stamp || null };"),
@@ -85,6 +94,12 @@ MUTS = [
          "return (i && i.complete && i.naturalWidth) ? i : alt; };\n"
          "        const canonical = pick(f && bakeFrameUrl(state.name, f), image);\n"
          "        if (false) {"),
+    ]),
+    ("N5 탈출 H1: drawFrameInto 별칭 + 폴백", [
+        ("scripts/curator/src/zoom-editor.js", '          const b = document.createElement("canvas");\n          b.width = cellW;\n          b.height = cellH;\n          const bx = b.getContext("2d");\n          bx.imageSmoothingEnabled = false;\n          drawFrameInto(bx, image, getTransform(stateName, frameIdx), cellW, cellH,\n            snapScaleFor(stateName), getPixelOps(stateName, frameIdx));', '          const b = document.createElement("canvas");\n          b.width = cellW;\n          b.height = cellH;\n          const bx = b.getContext("2d");\n          bx.imageSmoothingEnabled = false;\n          const paint = drawFrameInto;\n          paint(bx, (image && image.complete && image.naturalWidth) ? image : img(frameUrl(stateName, f)), getTransform(stateName, frameIdx), cellW, cellH,\n            snapScaleFor(stateName), getPixelOps(stateName, frameIdx));'),
+    ]),
+    ("N5 탈출 H1b: ctx 바인딩을 헬퍼로 묶기 + 폴백", [
+        ("scripts/curator/src/zoom-editor.js", '          const b = document.createElement("canvas");\n          b.width = cellW;\n          b.height = cellH;\n          const bx = b.getContext("2d");\n          bx.imageSmoothingEnabled = false;\n          drawFrameInto(bx, image, getTransform(stateName, frameIdx), cellW, cellH,\n            snapScaleFor(stateName), getPixelOps(stateName, frameIdx));', '          const makeCell = (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h;\n            const x = c.getContext("2d"); x.imageSmoothingEnabled = false; return { canvas: c, ctx: x }; };\n          const { canvas: b, ctx: bx } = makeCell(cellW, cellH);\n          drawFrameInto(bx, (image && image.complete && image.naturalWidth) ? image : img(frameUrl(stateName, f)), getTransform(stateName, frameIdx), cellW, cellH,\n            snapScaleFor(stateName), getPixelOps(stateName, frameIdx));'),
     ]),
     ("N6 폐기 문구 복원", "CHANGELOG.md",
      "is frozen into the sidecar as a cache",
