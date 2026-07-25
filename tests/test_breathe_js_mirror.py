@@ -302,3 +302,97 @@ def test_the_mirror_refuses_a_stale_anatomy_against_a_manual_rigid_row(tmp_path)
         py = _rgba(phase_frame(src, fresh, phase, anat))
         assert sum(1 for a, b in zip(py, got["data"]) if a != b) == 0, \
             f"위상 {phase:.4f}: 갱신 후 굽기와 갈린다"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 가 없어 JS 미러를 실행할 수 없다")
+def test_the_mirror_refuses_a_stale_reference_frame(tmp_path):
+    """`rigid_row` 가 auto(null)여도 신선도 검사가 돌아야 한다.
+
+    round-6 의 가드는 `cfg.rigid_row` 가 있을 때만 걸렸다. 그런데 `rigid_row` 는 사람이
+    경계를 드래그할 때만 채워지므로 **기본값은 null** 이고, 그 경우 미러엔 신선도 검사가
+    하나도 없었다. 굽기는 지문으로 자가 복구하는데 미러는 얼린 숫자로 계속 그린다 —
+    큐레이터 픽셀 편집기로 도트를 찍기만 해도 도달한다(호흡을 건드릴 필요조차 없다).
+    실측 (슉슉이 2026-07-25): 최대 617바이트, 불투명 픽셀 **수**까지 불일치."""
+    base = _humanoid()
+    cfg = dict(CFG)
+    cfg["anatomy"] = freeze_anatomy(base, cfg)
+    assert cfg.get("rigid_row") is None, "이 계약은 override 가 없을 때의 이야기다"
+
+    edited = base.copy()                        # 픽셀 편집기로 팔을 뻗은 프레임
+    px = edited.load()
+    box = solid_alpha_bbox(edited)
+    for y in range(box[1] + 40, box[1] + 50):
+        for x in range(box[2], min(edited.width, box[2] + 6)):
+            px[x, y] = (90, 60, 30, 255)
+    assert anatomy_fingerprint(edited) != cfg["anatomy"]["fingerprint"]
+
+    anat, redetected = resolve_anatomy(edited, cfg)     # 굽기는 자가 복구한다
+    assert redetected is True
+
+    harness = tmp_path / "fresh.cjs"
+    harness.write_text(
+        'const fs=require("fs"),vm=require("vm");'
+        'const P=JSON.parse(fs.readFileSync(process.argv[3],"utf8"));'
+        'function mk(w,h,d){const b=Uint8ClampedArray.from(d);'
+        ' const c={imageSmoothingEnabled:false,getImageData:()=>({data:b,width:w,height:h}),'
+        ' putImageData:i=>b.set(i.data),createImageData:(a,e)=>({data:new Uint8ClampedArray(a*e*4),width:a,height:e}),'
+        ' drawImage:s=>b.set(s.__buf),clearRect:()=>{}};return{width:w,height:h,getContext:()=>c,__buf:b};}'
+        'const sb={document:{createElement:()=>mk(P.w,P.h,new Array(P.w*P.h*4).fill(0))},console,'
+        'entries:{},run:{states:[]},t:()=>"",setStatus:()=>{},fetch:()=>{}};'
+        'sb.globalThis=sb;vm.createContext(sb);'
+        'vm.runInContext(fs.readFileSync(process.argv[2],"utf8"),sb);'
+        'let out;try{sb.breatheAssertFresh(mk(P.w,P.h,P.rgba),P.cfg);out={ok:true};}'
+        'catch(e){out={ok:false,refused:e.constructor.name==="BreatheRefused",message:e.message};}'
+        'fs.writeFileSync(P.out,JSON.stringify(out));', encoding="utf-8")
+    src_json = tmp_path / "in.json"
+    src_json.write_text(json.dumps({
+        "w": edited.width, "h": edited.height, "rgba": _rgba(edited),
+        "cfg": {"depth": cfg["depth"], "breaths": cfg["breaths"], "lag": cfg["lag"],
+                "anatomy": cfg["anatomy"]},
+        "out": str(tmp_path / "out.json")}), encoding="utf-8")
+    proc = subprocess.run([shutil.which("node"), str(harness), str(CURATOR_BREATHE), str(src_json)],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, f"node 하네스 실패:\n{proc.stderr}"
+    got = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert not got["ok"] and got["refused"], (
+        "기준 프레임이 바뀌었는데 미러가 신선하다고 판정했다 — "
+        "프리뷰·WebM 이 굽기와 다른 애니메이션이 된다")
+
+    # 원래 기준 프레임에는 걸리지 않는다 (거부가 상시가 아니라는 것)
+    src_json.write_text(json.dumps({
+        "w": base.width, "h": base.height, "rgba": _rgba(base),
+        "cfg": {"depth": cfg["depth"], "breaths": cfg["breaths"], "lag": cfg["lag"],
+                "anatomy": cfg["anatomy"]},
+        "out": str(tmp_path / "out.json")}), encoding="utf-8")
+    subprocess.run([shutil.which("node"), str(harness), str(CURATOR_BREATHE), str(src_json)],
+                   capture_output=True, text=True, check=True)
+    assert json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))["ok"], \
+        "기준 프레임 그대로인데 거부한다 — 프리뷰가 상시 죽는다"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 가 없어 JS 미러를 실행할 수 없다")
+def test_the_fingerprint_is_computed_identically_on_both_sides(tmp_path):
+    """미러가 지문을 **직접** 계산할 수 있어야 신선도를 볼 수 있다."""
+    harness = tmp_path / "fp.cjs"
+    harness.write_text(
+        'const fs=require("fs"),vm=require("vm");'
+        'const P=JSON.parse(fs.readFileSync(process.argv[3],"utf8"));'
+        'const sb={document:{createElement:()=>({getContext:()=>({})})},console,entries:{},'
+        'run:{states:[]},t:()=>"",setStatus:()=>{},fetch:()=>{}};sb.globalThis=sb;vm.createContext(sb);'
+        'vm.runInContext(fs.readFileSync(process.argv[2],"utf8"),sb);'
+        'fs.writeFileSync(P.out, JSON.stringify(P.cases.map(c =>'
+        ' sb.breatheFingerprint({width:c.w,height:c.h}, Uint8ClampedArray.from(c.rgba), c.box))));',
+        encoding="utf-8")
+    cases, want = [], []
+    for build in (_humanoid, _winged, _dome):
+        im = build()
+        cases.append({"w": im.width, "h": im.height, "rgba": _rgba(im),
+                      "box": list(solid_alpha_bbox(im))})
+        want.append(anatomy_fingerprint(im))
+    src = tmp_path / "in.json"
+    src.write_text(json.dumps({"cases": cases, "out": str(tmp_path / "out.json")}), encoding="utf-8")
+    proc = subprocess.run([shutil.which("node"), str(harness), str(CURATOR_BREATHE), str(src)],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, f"node 하네스 실패:\n{proc.stderr}"
+    got = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert got == want, f"지문이 갈린다 — 미러가 신선도를 판정할 수 없다\n  py={want}\n  js={got}"

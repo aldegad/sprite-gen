@@ -46,7 +46,6 @@ AI 개입 0 — 같은 입력이면 항상 같은 출력.
 
 from __future__ import annotations
 
-import hashlib
 import math
 
 from PIL import Image
@@ -213,6 +212,20 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
 
 # ── 해부 결과 얼리기 / 자가 복구 ────────────────────────────────────
 
+def _fnv1a(data: bytes) -> int:
+    """FNV-1a 32비트 — **JS 미러가 똑같이 계산할 수 있어야 해서** 이 해시를 쓴다.
+
+    SHA-256 은 브라우저에서 동기로 못 구한다(SubtleCrypto 는 async 라 렌더 루프에서 못 쓴다).
+    미러가 지문을 못 구하면 프리뷰는 자기가 그리는 프레임이 얼린 해부와 맞는지 확인할
+    방법이 없고, 그러면 굽기만 자가 복구하고 프리뷰는 낡은 숫자로 계속 그린다
+    (슉슉이 실측 2026-07-25: 픽셀 편집 후 최대 617바이트, 불투명 픽셀 수까지 불일치).
+    충돌 위험은 "프레임이 바뀌었나" 판정에는 무시할 수준이다."""
+    h = 2166136261
+    for b in data:
+        h = ((h ^ b) * 16777619) & 0xFFFFFFFF
+    return h
+
+
 def anatomy_fingerprint(frame: Image.Image) -> str:
     """해부 결과가 파생된 소스의 지문 — 캔버스 크기 + solid bbox + **RGBA 전체** 해시.
 
@@ -222,8 +235,8 @@ def anatomy_fingerprint(frame: Image.Image) -> str:
     구우면서 `redetected: False` 로 "이상 없음" 을 보고한다 (새미 실측 2026-07-25: 눈 행이
     12프레임 중 11프레임에서 흔들렸고 관측에는 아무것도 안 남았다)."""
     box = solid_alpha_bbox(frame) or (0, 0, 0, 0)
-    digest = hashlib.sha256(frame.convert("RGBA").tobytes()).hexdigest()[:16]
-    return f"{frame.width}x{frame.height}:{box[0]},{box[1]},{box[2]},{box[3]}:{digest}"
+    digest = _fnv1a(frame.convert("RGBA").tobytes())
+    return f"{frame.width}x{frame.height}:{box[0]},{box[1]},{box[2]},{box[3]}:{digest:08x}"
 
 
 def resolve_anatomy(reference: Image.Image, cfg: dict) -> tuple[Anatomy, bool]:

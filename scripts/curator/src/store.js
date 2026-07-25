@@ -9,7 +9,15 @@ function breatheRangeProblems(raw) {
   const bad = [];
   for (const [key, lo, hi, dflt] of bounds) {
     const v = Number(raw[key] == null ? dflt : raw[key]);
-    if (!Number.isFinite(v) || v < lo || v > hi) bad.push(`${key}=${JSON.stringify(raw[key])}`);
+    if (!Number.isFinite(v) || v < lo || v > hi) { bad.push(`${key}=${JSON.stringify(raw[key])}`); continue; }
+    // 정수여야 하는 값은 **정수인지도** 본다. `Math.round` 로 조용히 반올림하면 굽기
+    // (`_exact_int` 가 거부)와 갈리고, 첫 autosave 가 사이드카를 반올림값으로 덮어써
+    // loud reject 자체가 사라진다 (슉슉이 실측 2026-07-25: breaths 2.7 → 굽기 2 vs 프리뷰 3).
+    if (key === "breaths" && !Number.isInteger(v)) bad.push(`${key}=${JSON.stringify(raw[key])} (정수 아님)`);
+  }
+  if (raw.rigid_row != null) {
+    const r = Number(raw.rigid_row);
+    if (!Number.isInteger(r)) bad.push(`rigid_row=${JSON.stringify(raw.rigid_row)} (정수 아님)`);
   }
   return bad;
 }
@@ -395,7 +403,8 @@ function seedEntries() {
       breathe: rawBreathe && !retired.length && !outOfRange.length
                  && rawBreathe.depth != null
         ? { depth: Number(rawBreathe.depth),
-            breaths: Math.round(Number(rawBreathe.breaths == null ? 1 : rawBreathe.breaths)),
+            // 위에서 정수 검증을 통과했으므로 반올림이 필요 없다 — 반올림하면 굽기와 갈린다
+            breaths: Number(rawBreathe.breaths == null ? 1 : rawBreathe.breaths),
             lag: Number(rawBreathe.lag == null ? 0.1 : rawBreathe.lag),
             rigid_row: rawBreathe.rigid_row == null ? null : Number(rawBreathe.rigid_row),
             anatomy: rawBreathe.anatomy || null }
