@@ -10,6 +10,18 @@
 
 ---
 
+このスキルで生成・キュレーションしたスプライト（`claudecy`、`howl`）:
+
+<p align="center">
+  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy 待機" />
+  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy 走行" />
+  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy 成功" />
+  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy 会話" />
+  <img src="docs/assets/howl-idle.gif" width="110" alt="howl 待機" />
+  <img src="docs/assets/howl-running.gif" width="110" alt="howl 走行" />
+  <img src="docs/assets/howl-success.gif" width="110" alt="howl 成功" />
+</p>
+
 画像モデルに「スプライトシート」を頼むと、何が出てくるかはご存じでしょう。フレームごとに顔が変わるキャラクター、キーアウトできない背景、重なったりグリッドからずれたりするポーズ、そしてゲームエンジンが実際には読み込めない PNG。かわいいデモですが、アセットとしては役に立ちません。
 
 `sprite-gen` は、Codex/Claude のスキルとしてその隔たりを埋めます。**1枚のベース画像**とアクションのリストを渡すと、行ごとに生成を進め、キャラクターの同一性を固定し、クロマ背景を実アルファに変換し、各ポーズをクリーンな透明フレームとして抽出し、ランタイム用アトラスを **機械可読な `manifest.json.frame_layout` 付きで**作成します。
@@ -33,20 +45,6 @@ flowchart LR
 ```
 
 > アーキテクチャ全体: [`docs/architecture.md`](docs/architecture.md)
-
-## 出力例
-
-このスキルで生成・キュレーションしたスプライト（`claudecy`、`howl`）:
-
-<p>
-  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy 待機" />
-  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy 走行" />
-  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy 成功" />
-  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy 会話" />
-  <img src="docs/assets/howl-idle.gif" width="110" alt="howl 待機" />
-  <img src="docs/assets/howl-running.gif" width="110" alt="howl 走行" />
-  <img src="docs/assets/howl-success.gif" width="110" alt="howl 成功" />
-</p>
 
 ## 実際に得られるもの
 

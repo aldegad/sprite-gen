@@ -10,6 +10,18 @@
 
 ---
 
+Sprites generados y curados con esta skill (`claudecy`, `howl`):
+
+<p align="center">
+  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy en reposo" />
+  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy corriendo" />
+  <img src="docs/assets/claudecy-success.gif" width="110" alt="éxito de claudecy" />
+  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy hablando" />
+  <img src="docs/assets/howl-idle.gif" width="110" alt="howl en reposo" />
+  <img src="docs/assets/howl-running.gif" width="110" alt="howl corriendo" />
+  <img src="docs/assets/howl-success.gif" width="110" alt="éxito de howl" />
+</p>
+
 Pídele a un modelo de imágenes una «hoja de sprites» y ya sabes lo que obtienes: un personaje cuyo rostro cambia en cada fotograma, un fondo que no se puede eliminar mediante clave de color, poses que se superponen y se desvían de la cuadrícula, y un PNG que tu motor de juego realmente no puede consumir. Una demo bonita, un recurso inútil.
 
 `sprite-gen` es una skill de Codex/Claude que cierra esa brecha. Dale **una imagen base** y una lista de acciones: controla la generación fila por fila, bloquea la identidad del personaje, elimina el fondo cromático para obtener un alfa real, extrae cada pose como un fotograma transparente limpio y genera un atlas de ejecución **con un `manifest.json.frame_layout` legible por máquinas**.
@@ -33,20 +45,6 @@ flowchart LR
 ```
 
 > Arquitectura completa: [`docs/architecture.md`](docs/architecture.md)
-
-## Ejemplo de salida
-
-Sprites generados y curados con esta skill (`claudecy`, `howl`):
-
-<p>
-  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy en reposo" />
-  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy corriendo" />
-  <img src="docs/assets/claudecy-success.gif" width="110" alt="éxito de claudecy" />
-  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy hablando" />
-  <img src="docs/assets/howl-idle.gif" width="110" alt="howl en reposo" />
-  <img src="docs/assets/howl-running.gif" width="110" alt="howl corriendo" />
-  <img src="docs/assets/howl-success.gif" width="110" alt="éxito de howl" />
-</p>
 
 ## Lo que realmente obtienes
 

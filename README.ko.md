@@ -10,6 +10,18 @@
 
 ---
 
+이 스킬로 생성하고 큐레이션한 스프라이트(`claudecy`, `howl`):
+
+<p align="center">
+  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy 대기" />
+  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy 달리기" />
+  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy 성공" />
+  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy 대화" />
+  <img src="docs/assets/howl-idle.gif" width="110" alt="howl 대기" />
+  <img src="docs/assets/howl-running.gif" width="110" alt="howl 달리기" />
+  <img src="docs/assets/howl-success.gif" width="110" alt="howl 성공" />
+</p>
+
 이미지 모델에게 “스프라이트 시트”를 요청하면 어떤 결과가 나오는지 알 것이다. 프레임마다 얼굴이 바뀌는 캐릭터, 키가 빠지지 않는 배경, 서로 겹치고 격자에서 벗어나는 포즈, 그리고 게임 엔진이 실제로 읽을 수 없는 PNG. 귀여운 데모일 뿐, 쓸모 있는 에셋은 아니다.
 
 `sprite-gen`은 그 간극을 메우는 Codex/Claude 스킬이다. **기본 이미지 하나**와 액션 목록을 주면 행 단위로 생성을 수행하고, 캐릭터의 정체성을 고정하며, 크로마 배경을 실제 알파로 제거하고, 각 포즈를 깔끔한 투명 프레임으로 추출한 뒤, **기계가 읽을 수 있는 `manifest.json.frame_layout`**을 포함한 런타임 아틀라스를 구워낸다.
@@ -33,20 +45,6 @@ flowchart LR
 ```
 
 > 전체 아키텍처: [`docs/architecture.md`](docs/architecture.md)
-
-## 예시 출력
-
-이 스킬로 생성하고 큐레이션한 스프라이트(`claudecy`, `howl`):
-
-<p>
-  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy 대기" />
-  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy 달리기" />
-  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy 성공" />
-  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy 대화" />
-  <img src="docs/assets/howl-idle.gif" width="110" alt="howl 대기" />
-  <img src="docs/assets/howl-running.gif" width="110" alt="howl 달리기" />
-  <img src="docs/assets/howl-success.gif" width="110" alt="howl 성공" />
-</p>
 
 ## 실제로 얻는 것
 

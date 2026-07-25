@@ -10,6 +10,18 @@
 
 ---
 
+Sprites générés et curatés avec cette compétence (`claudecy`, `howl`) :
+
+<p align="center">
+  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy au repos" />
+  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy en train de courir" />
+  <img src="docs/assets/claudecy-success.gif" width="110" alt="réussite de claudecy" />
+  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy en train de parler" />
+  <img src="docs/assets/howl-idle.gif" width="110" alt="howl au repos" />
+  <img src="docs/assets/howl-running.gif" width="110" alt="howl en train de courir" />
+  <img src="docs/assets/howl-success.gif" width="110" alt="réussite de howl" />
+</p>
+
 Demandez à un modèle d'image une « sprite sheet » et vous savez ce que vous allez obtenir : un personnage dont le visage change à chaque frame, un arrière-plan impossible à détourer, des poses qui se chevauchent et dérivent hors de la grille, ainsi qu'un PNG que votre moteur de jeu ne peut réellement pas utiliser. Une jolie démo, un asset inutile.
 
 `sprite-gen` est une compétence Codex/Claude qui comble cet écart. Donnez-lui **une image de base** et une liste d'actions : elle pilote la génération ligne par ligne, verrouille l'identité du personnage, supprime l'arrière-plan chromatique pour obtenir un véritable canal alpha, extrait chaque pose sous forme de frame transparente propre, puis fabrique un atlas d'exécution **avec un `manifest.json.frame_layout` lisible par machine**.
@@ -33,20 +45,6 @@ flowchart LR
 ```
 
 > Architecture complète : [`docs/architecture.md`](docs/architecture.md)
-
-## Exemple de sortie
-
-Sprites générés et curatés avec cette compétence (`claudecy`, `howl`) :
-
-<p>
-  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy au repos" />
-  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy en train de courir" />
-  <img src="docs/assets/claudecy-success.gif" width="110" alt="réussite de claudecy" />
-  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy en train de parler" />
-  <img src="docs/assets/howl-idle.gif" width="110" alt="howl au repos" />
-  <img src="docs/assets/howl-running.gif" width="110" alt="howl en train de courir" />
-  <img src="docs/assets/howl-success.gif" width="110" alt="réussite de howl" />
-</p>
 
 ## Ce que vous obtenez réellement
 

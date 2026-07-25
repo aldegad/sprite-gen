@@ -10,6 +10,18 @@
 
 ---
 
+使用此技能生成并整理的精灵（`claudecy`、`howl`）：
+
+<p align="center">
+  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy 待机" />
+  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy 奔跑" />
+  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy 成功" />
+  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy 说话" />
+  <img src="docs/assets/howl-idle.gif" width="110" alt="howl 待机" />
+  <img src="docs/assets/howl-running.gif" width="110" alt="howl 奔跑" />
+  <img src="docs/assets/howl-success.gif" width="110" alt="howl 成功" />
+</p>
+
 向图像模型请求一张“sprite sheet（精灵表）”，你大概知道会得到什么：角色的脸每帧都在变化，背景无法抠掉，姿势相互重叠并且偏离网格，还有一张游戏引擎根本无法实际使用的 PNG。演示很可爱，资源却毫无用处。
 
 `sprite-gen` 是一个 Codex/Claude 技能，用来填补这一空白。给它**一张基础图像**和一组动作——它会逐行驱动生成，锁定角色身份，将色键背景去除为真正的 alpha，提取每个姿势作为干净的透明帧，并构建运行时图集，同时生成**机器可读的 `manifest.json.frame_layout`**。
@@ -33,20 +45,6 @@ flowchart LR
 ```
 
 > 完整架构：[`docs/architecture.md`](docs/architecture.md)
-
-## 示例输出
-
-使用此技能生成并整理的精灵（`claudecy`、`howl`）：
-
-<p>
-  <img src="docs/assets/claudecy-idle.gif" width="110" alt="claudecy 待机" />
-  <img src="docs/assets/claudecy-running.gif" width="110" alt="claudecy 奔跑" />
-  <img src="docs/assets/claudecy-success.gif" width="110" alt="claudecy 成功" />
-  <img src="docs/assets/claudecy-talking.gif" width="110" alt="claudecy 说话" />
-  <img src="docs/assets/howl-idle.gif" width="110" alt="howl 待机" />
-  <img src="docs/assets/howl-running.gif" width="110" alt="howl 奔跑" />
-  <img src="docs/assets/howl-success.gif" width="110" alt="howl 成功" />
-</p>
 
 ## 你实际得到的内容
 
