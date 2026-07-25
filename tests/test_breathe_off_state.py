@@ -291,11 +291,32 @@ def _split_top(expr: str, seps: tuple[str, ...]) -> list[str]:
     return [x.strip() for x in out]
 
 
+def _reassigned(name: str, symbol: str) -> bool:
+    """`symbol` 이 선언 밖에서 다시 대입되는가.
+
+    `_bake_only` 는 이름을 만나면 **선언만** 읽는다. 그래서 `const` 를 `let` 으로 바꾸고
+    가드 본문에서 되돌리면 그물이 침묵했다:
+
+        let canonical = canonSrc ? img(canonSrc) : null;
+        if (!(canonical && canonical.complete)) canonical = image;   // <- 무사통과
+
+    선언 RHS 가 굽기 소스라 참을 주고 그 뒤 흐름을 안 봤다 — 그물이 자기 규칙("증명 못
+    하는 이름은 거짓")을 자기가 어긴 것이다. 재대입된 이름은 증명된 이름이 아니다
+    (노을이 실측 2026-07-26). 지난 라운드의 "분기를 안 봤다" 와 축만 다르다."""
+    lines = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8")).splitlines()
+    sym = re.escape(symbol)
+    decl = re.compile(rf"\b(const|let|var)\s+({sym}\b|\{{[^}}]*\b{sym}\b[^}}]*\}})\s*=")
+    assign = re.compile(rf"(^|[^\w.]){sym}\s*(=(?![=>])|\+=|\|\|=|\?\?=)")
+    return any(assign.search(ln) and not decl.search(ln) for ln in lines)
+
+
 def _binding_rhs(name: str, lineno: int, symbol: str):
-    """`symbol` 의 선언(위쪽 40줄)과 그 줄 번호. 못 찾으면 None.
+    """`symbol` 의 선언(위쪽 40줄)과 그 줄 번호. 못 찾거나 **재대입되면** None.
 
     구조분해(`const { url: refUrl } = breatheGeometryFrame(...)`)도 읽는다 — 못 읽으면
     "증명 불가 = 거짓" 규칙 때문에 **정상 코드를 오진**한다."""
+    if _reassigned(name, symbol):
+        return None                      # 흐름에 따라 값이 바뀐다 = 증명 불가
     lines = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8")).splitlines()
     start = max(0, lineno - 41)
     sym = re.escape(symbol)
@@ -373,7 +394,9 @@ def _breathe_image_sites():
         if not path.is_file():
             continue
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            m = re.match(r"\s*const (\w+) = .*", line)
+            # `const` 만 보면 `let` 한 단어로 사이트가 **수집 목록에서 사라진다** —
+            # 커버리지 상실이 조용하고 신호는 "테스트가 하나 줄었다" 뿐이다.
+            m = re.match(r"\s*(?:const|let|var) (\w+) = .*", line)
             if not (m and IMG_CALL.search(line)):
                 continue
             if (name, m.group(1)) in NON_BREATHE_IMG:
@@ -381,8 +404,21 @@ def _breathe_image_sites():
             yield name, lineno, line.strip()
 
 
+# 호흡 이미지 소스를 실제로 가진 파일 — 여기서 사이트가 **사라지면** 커버리지가 조용히
+# 준다. `const` 만 보던 스캐너는 `let` 한 단어로 `cards.js` 사이트를 통째로 잃었고 신호는
+# "테스트가 하나 줄었다" 뿐이었다 (노을이 실측 2026-07-26).
+FILES_WITH_IMAGE_SITES = {"cards.js", "compare.js", "zoom-editor.js", "row-export.js"}
+
+
 def test_there_are_breathe_image_sites():
-    assert list(_breathe_image_sites()), "호흡 이미지 소스 지점이 사라졌다 — 계약 위치 확인"
+    sites = list(_breathe_image_sites())
+    assert sites, "호흡 이미지 소스 지점이 사라졌다 — 계약 위치 확인"
+    covered = {name for name, _, _ in sites}
+    missing = FILES_WITH_IMAGE_SITES - covered
+    assert not missing, (
+        f"이 파일들의 호흡 이미지 소스가 스캐너에서 사라졌다: {sorted(missing)}\n"
+        "  선언 키워드나 대입 모양을 바꾸면 사이트가 조용히 증발한다 — 개수가 줄어도 "
+        "실패는 안 나므로 파일 단위로 못박는다.")
 
 
 @pytest.mark.parametrize("site", list(_breathe_image_sites()), ids=lambda s: f"{s[0]}:{s[1]}")

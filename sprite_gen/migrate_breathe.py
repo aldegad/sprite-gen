@@ -89,6 +89,12 @@ def migrate_entry(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         except (TypeError, ValueError):
             dropped.append(f"rigid_row={raw['rigid_row']!r} (숫자가 아니라 버림 — 자동 검출로 돌아간다)")
             row = None
+        if row is not None and not math.isfinite(row):
+            # `breaths` 와 **같은 클래스**의 크래시다: `int(nan)` 은 ValueError 라
+            # 마이그레이션이 트레이스백으로 죽고 "무엇을 버렸는지 전부 출력한다" 가 깨진다
+            # (노을이 note 2026-07-26; 이쪽은 본 플랜 base 이전부터 있던 구멍).
+            dropped.append(f"rigid_row={raw['rigid_row']!r} (유한한 수가 아니라 버림 — 자동 검출로 돌아간다)")
+            row = None
         if row is not None:
             if row == int(row) and row > 0:
                 fresh["rigid_row"] = int(row)
