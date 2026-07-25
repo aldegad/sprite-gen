@@ -1,148 +1,231 @@
 # SPDX-License-Identifier: Apache-2.0
-"""결정론 호흡 레이어(sprite_gen.breathe) 회귀 — 행 시프트·루프-맞춤·서브픽셀 규칙."""
+"""결정론 호흡 레이어(sprite_gen.breathe) 회귀 — 봉투 워프의 불변식.
 
+지키는 것 (구현이 아니라 계약):
+  1. 강체 구간은 프레임 간 **비트 동일** (근사가 아니라 항등)
+  2. 가로 사상은 단조 — 접힘 없음
+  3. 홀짝 보존 — 중심축이 프레임마다 안 튄다
+  4. 발바닥 고정 · 루프 길이 불변
+  5. 정규화 기준은 병목이 진짜일 때만 목
+  6. 행당 변형 상한 초과는 조용히 깎지 않고 멈춘다
+"""
+
+import pytest
 from PIL import Image
 
-from sprite_gen.breathe import (SMOOTH_CYCLE_FRAMES, _seam_rows, bake_breathe_sequence,
-                                breathe_frames, breathe_reads_smoothly, fit_breathe_pattern,
-                                fitted_breath_count, phase_frame, recommended_breathe_frames)
+from sprite_gen.anatomy import analyze
+from sprite_gen.breathe import (DEFAULT_DEPTH, MAX_ROW_STRAIN, SMOOTH_CYCLE_FRAMES, TAPER,
+                                bake_breathe_sequence, breathe_reads_smoothly,
+                                envelope, fit_breathe_pattern, fitted_breath_count,
+                                freeze_anatomy, parity_round, phase_frame,
+                                recommended_breathe_frames, row_strain, wave)
+from sprite_gen.curation import state_breathe
+from sprite_gen.extract import solid_alpha_bbox
+
+CFG = {"depth": DEFAULT_DEPTH, "breaths": 1, "lag": 0.10}
 
 
-def _figure() -> Image.Image:
-    im = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    for y in range(10, 58):          # 콘텐츠 h=48
-        for x in range(20, 44):
-            im.putpixel((x, y), (90, 60, 30, 255))
+def _humanoid() -> Image.Image:
+    """머리 + 목 병목 + 몸통 + 대칭 눈쌍. 검출 세 경로를 모두 태우는 최소 도형."""
+    im = Image.new("RGBA", (64, 96), (0, 0, 0, 0))
+    body = (90, 60, 30, 255)
+    for y in range(8, 30):                       # 머리
+        for x in range(22, 42):
+            im.putpixel((x, y), body)
+    for y in range(30, 36):                      # 목 (병목)
+        for x in range(28, 36):
+            im.putpixel((x, y), body)
+    for y in range(36, 84):                      # 몸통
+        for x in range(18, 46):
+            im.putpixel((x, y), body)
+    for x0 in (25, 35):                          # 눈 — 축 좌우 대칭
+        for y in range(14, 20):
+            for x in range(x0, x0 + 4):
+                im.putpixel((x, y), (10, 10, 12, 255))
     return im
 
 
-def _bbox(im):
-    return im.split()[3].getbbox()
+def _winged() -> Image.Image:
+    """몸통 + 옆으로 뻗은 얇은 부속 — 부속 보호 경로를 태운다."""
+    im = Image.new("RGBA", (120, 96), (0, 0, 0, 0))
+    body = (60, 40, 120, 255)
+    for y in range(10, 30):
+        for x in range(50, 70):
+            im.putpixel((x, y), body)
+    for y in range(30, 34):
+        for x in range(56, 64):
+            im.putpixel((x, y), body)
+    for y in range(34, 84):
+        for x in range(46, 74):
+            im.putpixel((x, y), body)
+    for y in range(40, 56):                      # 날개
+        for x in range(6, 114):
+            im.putpixel((x, y), body)
+    return im
 
 
-def test_single_squash_keeps_feet_and_compresses() -> None:
-    src = _figure()
-    (ex,) = breathe_frames(src, split=0.55)
-    b0, b1 = _bbox(src), _bbox(ex)
-    assert b1[3] == b0[3], "발(하단)은 고정"
-    assert b1[1] == b0[1] + 1, "상단은 1px 하강 (압축)"
+def _frames(image: Image.Image, count: int = 12, cfg: dict | None = None):
+    cfg = dict(cfg or CFG)
+    cfg["anatomy"] = freeze_anatomy(image, cfg)
+    return bake_breathe_sequence([image] * count, cfg)
 
 
-def test_two_band_lag_keeps_height_then_compresses() -> None:
-    src = _figure()
-    p1, p2 = breathe_frames(src, split=0.55, two_band=True, head_split=0.32)
-    b0 = _bbox(src)
-    assert _bbox(p1)[1] == b0[1] and _bbox(p1)[3] == b0[3], "P1: 머리 제자리(목 스트레치)"
-    assert _bbox(p2)[1] == b0[1] + 1 and _bbox(p2)[3] == b0[3], "P2: 전체 1px 하강"
+# ── 1. 강체 구간 항등 ───────────────────────────────────────────────
+
+def test_rigid_region_is_bit_identical_across_frames() -> None:
+    src = _humanoid()
+    anat = analyze(src)
+    frames, _ = _frames(src)
+    band = int(max(1.5, TAPER * anat.height)) + 1
+    rigid_h = anat.rigid_row - band
+    assert rigid_h > 0, "테스트 도형이 강체 구간을 갖도록 잡혀야 한다"
+    ref = frames[0]
+    top = solid_alpha_bbox(ref)[1]
+    expect = ref.crop((0, top, ref.width, top + rigid_h)).tobytes()
+    for i, frame in enumerate(frames[1:], 1):
+        t = solid_alpha_bbox(frame)[1]
+        got = frame.crop((0, t, frame.width, t + rigid_h)).tobytes()
+        assert got == expect, f"frame {i}: 강체 구간이 바뀌었다 — 항등이어야 한다"
 
 
-def test_fit_pattern_loop_length_invariant() -> None:
-    """루프-맞춤: 패턴 길이 = 시퀀스 길이 (루프 불변)."""
-    cfg = {"splits": [0.55], "amplitude": 1, "breaths": 1}
-    assert fit_breathe_pattern(6, cfg) == [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
-    cfg2 = {"splits": [0.55], "amplitude": 1, "breaths": 2}
-    assert fit_breathe_pattern(6, cfg2) == [0.0, 1.0, 1.0, 0.0, 1.0, 1.0]
+def test_parity_round_is_identity_at_scale_one() -> None:
+    # 강체 항등의 근거. 홀짝이 바뀌면 중앙 정렬이 1px 튄다.
+    for width in (1, 2, 17, 64, 173):
+        assert parity_round(width, 1.0) == width
+        assert parity_round(width, 1.06) % 2 == width % 2
+        assert parity_round(width, 0.94) % 2 == width % 2
 
 
-def test_fit_pattern_two_lines_cascade() -> None:
-    cfg = {"splits": [0.32, 0.55], "amplitude": 1, "breaths": 1}
-    assert fit_breathe_pattern(6, cfg) == [0.0, 0.0, 1.0, 2.0, 2.0, 1.0]
+# ── 2. 발바닥 고정 · 루프 길이 불변 ─────────────────────────────────
+
+def test_feet_stay_planted_and_loop_length_is_preserved() -> None:
+    src = _humanoid()
+    baseline = solid_alpha_bbox(src)[3]
+    frames, phases = _frames(src, count=12)
+    assert len(frames) == 12 and len(phases) == 12
+    for i, frame in enumerate(frames):
+        assert solid_alpha_bbox(frame)[3] == baseline, f"frame {i}: 발이 떴다"
 
 
-def test_fit_pattern_exact_requested_count_v2() -> None:
-    """v2 (수홍 정정): 요청 횟수 그대로 — 등분 안 되면 나머지를 앞 사이클 쉼에 배분."""
-    cfg = {"splits": [0.55], "amplitude": 1, "breaths": 2}
-    pattern = fit_breathe_pattern(5, cfg)   # 사이클 [3,2]
-    assert len(pattern) == 5
-    assert pattern == [0.0, 1.0, 1.0, 0.0, 1.0]
-    cfg3 = {"splits": [0.62], "amplitude": 1, "breaths": 3}
-    p11 = fit_breathe_pattern(11, cfg3)     # 사이클 [4,4,3] — 정확히 3회 하강
-    assert len(p11) == 11
-    downs = sum(1 for i, v in enumerate(p11) if v > 0 and p11[i - 1] == 0)
-    assert downs == 3
+def test_breathing_actually_moves_the_body() -> None:
+    src = _humanoid()
+    frames, _ = _frames(src, count=12)
+    heights = {solid_alpha_bbox(f)[3] - solid_alpha_bbox(f)[1] for f in frames}
+    assert len(heights) > 1, "봉투 워프가 높이를 전혀 안 바꿨다"
 
 
-def test_fit_pattern_too_short_is_all_zero() -> None:
-    cfg = {"splits": [0.3, 0.55], "amplitude": 1, "breaths": 1}
-    assert fit_breathe_pattern(2, cfg) == [0.0, 0.0]  # 사이클 최소 2K 미만 — 호흡 없음 (관측)
+# ── 3. 부속은 밀리기만 하고 늘어나지 않는다 ─────────────────────────
+
+def test_appendage_is_pushed_not_stretched() -> None:
+    src = _winged()
+    anat = analyze(src)
+    assert anat.has_appendage, "테스트 도형은 부속이 있어야 한다"
+    frames, _ = _frames(src, count=12)
+    spans = [solid_alpha_bbox(f)[2] - solid_alpha_bbox(f)[0] for f in frames]
+    body_h = anat.height
+    # 날개 전체 폭 변화가 몸통이 부푸는 양(depth*기준높이)을 크게 넘지 않아야 한다 —
+    # 넘으면 부속이 몸통과 같은 배율로 늘어난 것이다.
+    assert max(spans) - min(spans) <= 2 * round(DEFAULT_DEPTH * body_h) + 2
 
 
-def test_fit_pattern_subpixel_preserves_length() -> None:
-    cfg = {"splits": [0.55], "amplitude": 1, "breaths": 2, "subpixel": True}
-    pattern = fit_breathe_pattern(6, cfg)
-    assert len(pattern) == 6, "서브픽셀은 길이 보존 (루프 불변)"
-    assert pattern == [0.0, 0.5, 1.0, 0.0, 0.5, 1.0]
+# ── 4. 정규화 기준 분기 ─────────────────────────────────────────────
+
+def test_amplitude_basis_uses_neck_only_when_the_bottleneck_is_real() -> None:
+    real = analyze(_humanoid())
+    assert real.neck_source == "bottleneck"
+    assert real.basis_row == real.neck_row
+
+    # 아래로 갈수록 단조 증가하는 돔 — 병목이 없다 (슬라임형)
+    dome = Image.new("RGBA", (80, 80), (0, 0, 0, 0))
+    for y in range(80):
+        half = 4 + int(34 * (y / 79) ** 0.6)
+        for x in range(40 - half, 40 + half):
+            dome.putpixel((x, y), (40, 160, 90, 255))
+    anat = analyze(dome)
+    assert anat.neck_source == "shoulder-gradient"
+    assert anat.basis_row == anat.rigid_row, "병목이 가짜면 기준은 강체 경계여야 한다"
+    assert any("neck-absent" in w for w in anat.warnings), "대체 판정은 관측 가능해야 한다"
+    # 기준이 목이었다면 정규화가 폭주했을 것 — 상한 안에 들어와야 한다
+    assert row_strain(anat, DEFAULT_DEPTH) <= MAX_ROW_STRAIN
 
 
-def test_bake_sequence_length_unchanged() -> None:
-    src = _figure()
-    cfg = {"splits": [0.55], "amplitude": 1, "breaths": 2}
-    baked, phases = bake_breathe_sequence([src] * 6, cfg)
-    assert len(baked) == 6 and len(phases) == 6, "굽기 후에도 루프 길이 불변"
+def test_row_strain_over_the_cap_raises_instead_of_clamping() -> None:
+    src = _humanoid()
+    anat = analyze(src)
+    depth = DEFAULT_DEPTH
+    while row_strain(anat, depth) <= MAX_ROW_STRAIN:
+        depth *= 2
+        assert depth < 10, "상한을 넘길 수 있어야 한다"
+    with pytest.raises(SystemExit) as err:
+        phase_frame(src, {**CFG, "depth": depth}, 0.25)
+    assert "행당 변형" in str(err.value)
 
 
-def test_bake_sequence_blink_breathes_too() -> None:
-    """깜빡임 프레임(다른 그림)도 같은 위상 변조를 받는다 — 직교 레이어 계약."""
-    a = _figure()
-    blink = _figure()
-    blink.putpixel((30, 20), (0, 0, 0, 255))
-    cfg = {"splits": [0.55], "amplitude": 1, "breaths": 1}
-    baked, phases = bake_breathe_sequence([a, blink], cfg)
-    assert phases == [0.0, 1.0]
-    assert _bbox(baked[1])[1] == _bbox(blink)[1] + 1, "깜빡임 프레임이 날숨 위상으로 하강"
+# ── 5. 수동 override 와 자가 복구 ───────────────────────────────────
+
+def test_manual_rigid_row_overrides_detection_and_is_observable() -> None:
+    src = _humanoid()
+    auto = analyze(src)
+    manual = analyze(src, rigid_row=auto.rigid_row + 6)
+    assert manual.rigid_row == auto.rigid_row + 6
+    assert manual.rigid_source == "manual"
+    assert any("rigid-row-override" in w for w in manual.warnings)
 
 
-def test_subpixel_craft_rules() -> None:
-    """서브픽셀 도트 규칙: (1) 이음새 밴드 밖 잔상 0, (2) 반투명 생성 0,
-    (3) 중간색은 프레임에 이미 있는 색만 (수홍 확정 2026-07-18)."""
-    im = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    for y in range(10, 58):
-        for x in range(20, 44):
-            im.putpixel((x, y), (200, 50, 50, 255) if 20 <= y <= 24 else (90, 60, 30, 255))
-    cfg = {"splits": [0.55], "amplitude": 1, "breaths": 1, "subpixel": True}
-    base = phase_frame(im, cfg, 0.0)
-    half = phase_frame(im, cfg, 0.5)
-    band_rows = set()
-    for r0, r1 in _seam_rows(10, [10 + int(48 * 0.55)], 1, 64):
-        band_rows.update(range(r0, r1))
-    base_colors = {p[:3] for p in {base.getpixel((x, y)) for x in range(64) for y in range(64)} if p[3] >= 128}
-    for y in range(64):
-        for x in range(64):
-            ph = half.getpixel((x, y))
-            if y not in band_rows:
-                assert base.getpixel((x, y)) == ph, f"밴드 밖 잔상 at ({x},{y})"
-            assert ph[3] in (0, 255), f"반투명 생성 at ({x},{y})"
-            if ph[3] == 255:
-                assert ph[:3] in base_colors, f"팔레트 밖 색 at ({x},{y}): {ph}"
+def test_stale_frozen_anatomy_self_heals() -> None:
+    src = _humanoid()
+    cfg = dict(CFG)
+    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    other = _winged()
+    # 다른 스프라이트에 옛 해부 결과를 물려도 지문이 어긋나 다시 잰다
+    healed = phase_frame(other, cfg, 0.25)
+    assert healed.size == other.size
+    assert solid_alpha_bbox(healed)[3] == solid_alpha_bbox(other)[3]
 
 
-# --- 부드러움 프레임 게이트 (수홍 2026-07-24, 에이전트 레시피 전용) ---
+# ── 6. 위상 시퀀스 ──────────────────────────────────────────────────
 
-def test_recommended_frames_scales_with_breaths() -> None:
-    # k=1 단일 분할선: 호흡당 SMOOTH_CYCLE_FRAMES 프레임 확보
-    assert recommended_breathe_frames({"splits": [0.6], "breaths": 1}) == SMOOTH_CYCLE_FRAMES
-    assert recommended_breathe_frames({"splits": [0.6], "breaths": 3}) == 3 * SMOOTH_CYCLE_FRAMES
-    # 기본 정지자세 레시피(breaths 3) = 18컷
-    assert recommended_breathe_frames({"splits": [0.6], "breaths": 3}) == 18
-
-
-def test_recommended_frames_respects_physical_min_for_multi_split() -> None:
-    # 2K 물리 최소가 부드러움 임계보다 크면 그걸 쓴다 (per_cycle 이 작을 때)
-    got = recommended_breathe_frames({"splits": [0.3, 0.6], "breaths": 2}, per_cycle=3)
-    assert got == 2 * max(3, 2 * 2)  # 2*4 = 8
+def test_phase_pattern_fits_requested_breaths_into_the_loop() -> None:
+    for seq_len, breaths in ((12, 1), (12, 2), (10, 3), (7, 2)):
+        pattern = fit_breathe_pattern(seq_len, {"breaths": breaths})
+        assert len(pattern) == seq_len
+        assert all(0.0 <= p < 1.0 for p in pattern)
+        assert pattern[0] == 0.0
+        assert fitted_breath_count(seq_len, {"breaths": breaths}) == breaths
 
 
-def test_old_short_recipe_reads_as_jitter_gate() -> None:
-    # 옛 레시피(11컷 × breaths 3)는 게이트 미달 = 진동으로 판정
-    cfg = {"splits": [0.61], "breaths": 3}
-    assert breathe_reads_smoothly(11, cfg) is False
-    # 게이트가 권고한 프레임수는 통과
-    assert breathe_reads_smoothly(recommended_breathe_frames(cfg), cfg) is True
+def test_wave_is_loop_closed() -> None:
+    assert wave(0.0) == pytest.approx(wave(1.0), abs=1e-9)
 
 
-def test_smooth_gate_does_not_clamp_breaths() -> None:
-    # 게이트는 관측/권고일 뿐 fit_breathe_pattern 의 호흡 횟수를 바꾸지 않는다
-    cfg = {"splits": [0.61], "amplitude": 1, "breaths": 3, "subpixel": False}
-    before = fitted_breath_count(18, cfg)
-    _ = recommended_breathe_frames(cfg)
-    assert fitted_breath_count(18, cfg) == before == 3  # 여전히 3회, 손대지 않음
+def test_envelope_is_zero_above_the_rigid_boundary() -> None:
+    anat = analyze(_humanoid())
+    env, _ = envelope(anat)
+    band = max(1.5, TAPER * anat.height) / anat.height
+    above = anat.rigid_u + band + 1e-6
+    assert env(min(1.0, above)) == pytest.approx(0.0, abs=1e-12)
+    assert env(0.0) == pytest.approx(0.0, abs=1e-12), "발바닥도 고정"
+
+
+def test_smoothness_hint_scales_with_breath_count() -> None:
+    assert recommended_breathe_frames({"breaths": 1}) == SMOOTH_CYCLE_FRAMES
+    assert recommended_breathe_frames({"breaths": 3}) == 3 * SMOOTH_CYCLE_FRAMES
+    assert breathe_reads_smoothly(SMOOTH_CYCLE_FRAMES, {"breaths": 1}) is True
+    assert breathe_reads_smoothly(SMOOTH_CYCLE_FRAMES - 1, {"breaths": 1}) is False
+
+
+# ── 7. 폐기된 분할선 스키마는 요란하게 거부된다 ─────────────────────
+
+@pytest.mark.parametrize("retired", [{"splits": [0.55]}, {"amplitude": 2}, {"subpixel": True}])
+def test_retired_split_schema_is_rejected_loudly(retired: dict) -> None:
+    curation = {"states": {"idle": {"breathe": {**retired, "breaths": 1}}}}
+    with pytest.raises(SystemExit) as err:
+        state_breathe(curation, "idle")
+    message = str(err.value)
+    assert "폐기된" in message
+    assert "migrate-breathe" in message, "마이그레이션 경로를 알려줘야 한다"
+
+
+def test_new_schema_normalizes_and_clamps() -> None:
+    cfg = state_breathe({"states": {"idle": {"breathe": {"depth": 99, "breaths": 99, "lag": -1}}}}, "idle")
+    assert cfg == {"depth": 0.20, "breaths": 8, "lag": 0.0, "rigid_row": None, "anatomy": None}

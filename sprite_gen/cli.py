@@ -21,6 +21,7 @@ from sprite_gen import (
     preview,
     score,
     slice_sheet,
+    migrate_breathe,
     unpack_atlas,
 )
 from sprite_gen.prepare import STYLE_DEFAULT, _outline_config
@@ -234,6 +235,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         unpack_atlas.run,
     ),
     "export-pngs": ("Export curated frames back to named PNGs.", _add_export_pngs, export_pngs.run),
+    "migrate-breathe": (
+        "Migrate a run's retired split-line breathe sidecar to the envelope schema.",
+        migrate_breathe.add_arguments,
+        migrate_breathe.run,
+    ),
     "slice-sheet": (
         "Slice a multi-figure grid sheet into per-cell standing cuts (tachi-e).",
         _add_slice_sheet,

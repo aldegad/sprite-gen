@@ -60,18 +60,31 @@ Schema (`curation.json`):
                                                #   Restores the row arrangement on reload.
                                                #   Consumers key off `selected`; ignored here.
           "breathe": {                         # optional idle-breathing POST-PROCESS LAYER
-            "splits": [0.55],                  #   (Soohong 2026-07-18: breathing is a
-            "amplitude": 1,                    #   modulation ORTHOGONAL to frame selection —
-            "breaths": 1,                      #   a blink frame can breathe too). 1-3 split
-            "subpixel": false                  #   lines (content-height fractions, asc);
-          },                                   #   K lines = K-phase cascade. amplitude px,
-                                               #   breaths = breath count PER LOOP — the loop
-                                               #   length never changes (fit_breathe_pattern
-                                               #   divides the played sequence exactly).
-                                               #   subpixel = palette-snapped intermediate
-                                               #   colors on moving seams only. Compose/GIF
-                                               #   bake deterministically; frames on disk
-                                               #   never change, no re-extraction.
+            "depth": 0.06,                     #   (Soohong 2026-07-18: breathing is a
+            "breaths": 1,                      #   modulation ORTHOGONAL to frame selection —
+            "lag": 0.10,                       #   a blink frame can breathe too).
+            "rigid_row": null,                 #   depth = total stretch as a fraction of the
+            "anatomy": {                       #   body height. breaths = breath count PER
+              "rigid_row": 58,                 #   LOOP; the loop length never changes.
+              "neck_row": 49,                  #   lag = travelling-wave phase delay, which is
+              "neck_source": "bottleneck",     #   what makes the head follow a beat late.
+              "face": [45, 57],                #   rigid_row = manual override of the rigid
+              "basis_row": 49,                 #   boundary (null = auto-detected).
+              "axis_x": 35,                    #
+              "torso_half": 21,                #   `anatomy` is the detection result frozen at
+              "max_half": 28,                  #   curation time so the bake and the webview
+              "width": 72, "height": 81,       #   read the same numbers instead of both
+              "rigid_source": "face",          #   re-implementing detection. `fingerprint`
+              "warnings": [],                  #   pins the source it was derived from; on a
+              "fingerprint": "72x81:..."       #   mismatch the bake re-detects and refreshes
+            }                                  #   it (self-heal). A manual rigid_row survives
+          },                                   #   regardless — that is intent, not a cache.
+                                               #
+                                               #   `splits`/`amplitude`/`subpixel` are the
+                                               #   retired split-line schema and are REJECTED
+                                               #   loudly, never reinterpreted (2026-07-25).
+                                               #   Compose/GIF bake deterministically; frames
+                                               #   on disk never change, no re-extraction.
           "transforms": {                      # keyed by 0-based frame index (string)
             "0": {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0}
           },
@@ -139,11 +152,24 @@ def curation_path(run_dir: Path) -> Path:
     return run_dir / CURATION_FILENAME
 
 
+# 폐기된 분할선 스키마 키. 조용히 무시하거나 재해석하지 않고 요란하게 거부한다 —
+# 제거된 결정이 필드 하나로 되살아나는 경로를 만들지 않기 위해서다 (docs/pixel-perfect.md
+# 의 `conform` 사고, 2026-07-17). splits 없이는 구 정규화가 None 을 냈으므로 구 설정은
+# 전부 이 게이트에 걸린다 — 조용히 다른 동작으로 바뀌는 사이드카는 없다.
+RETIRED_BREATHE_KEYS = {
+    "splits": "분할선은 봉투 경계로 대체됐다 — 경계는 자동 검출되고 `rigid_row` 로만 덮어쓴다",
+    "amplitude": "정수 px 진폭은 몸통 높이 비율 `depth` 로 대체됐다 (기본 0.06)",
+    "subpixel": "서브픽셀 중간색은 2상태 토글을 보정하려던 것이라 연속 위상에서 의미가 없다",
+}
+
+
 def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any] | None:
     """상태의 호흡 후처리 레이어 설정 (없으면 None) — 정규화·클램프 포함.
 
     호흡은 프레임 선택(깜빡임 등)과 직교하는 변조 레이어다 (수홍 확정 2026-07-18).
-    반환: {"splits": [asc floats], "amplitude": int, "hold": int, "subpixel": bool}
+    변형 수학은 봉투 기반 스쿼시&스트레치다 (2026-07-25 교체, `sprite_gen.breathe`).
+    반환: {"depth": float, "breaths": int, "lag": float, "rigid_row": int|None,
+           "anatomy": dict|None}
     compose/GIF 가 재생 시퀀스 위에 결정론으로 굽는다 — 디스크 프레임 불변."""
     if not curation:
         return None
@@ -151,20 +177,29 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
     raw = entry.get("breathe") if isinstance(entry, dict) else None
     if not isinstance(raw, dict):
         return None
+    retired = sorted(k for k in RETIRED_BREATHE_KEYS if k in raw)
+    if retired:
+        detail = "\n".join(f"  - {k}: {RETIRED_BREATHE_KEYS[k]}" for k in retired)
+        raise SystemExit(
+            f"curation: states.{state}.breathe 에 폐기된 분할선 스키마 키가 있다: {', '.join(retired)}\n"
+            f"{detail}\n"
+            f"  마이그레이션: `sprite-gen migrate-breathe <run-dir> --apply` 또는 해당 키를 지우고 "
+            f"`depth`(기본 0.06)·`breaths`·`lag`(기본 0.10) 로 다시 적어라. 조용히 변환하지 않는다.")
     try:
-        splits = sorted({round(float(s), 4) for s in (raw.get("splits") or [])})
-    except (TypeError, ValueError):
-        return None
-    splits = [s for s in splits if 0.02 < s < 0.98][:3]
-    if not splits:
-        return None
-    try:
-        amplitude = max(1, min(4, int(raw.get("amplitude", 1))))
+        depth = max(0.005, min(0.20, float(raw.get("depth", 0.06))))
         breaths = max(1, min(8, int(raw.get("breaths", 1))))
+        lag = max(0.0, min(0.45, float(raw.get("lag", 0.10))))
     except (TypeError, ValueError):
         return None
-    return {"splits": splits, "amplitude": amplitude, "breaths": breaths,
-            "subpixel": bool(raw.get("subpixel"))}
+    rigid_row = raw.get("rigid_row")
+    if rigid_row is not None:
+        try:
+            rigid_row = int(rigid_row)
+        except (TypeError, ValueError):
+            raise SystemExit(f"curation: states.{state}.breathe.rigid_row 가 정수가 아니다: {rigid_row!r}")
+    frozen = raw.get("anatomy")
+    return {"depth": depth, "breaths": breaths, "lag": lag, "rigid_row": rigid_row,
+            "anatomy": frozen if isinstance(frozen, dict) else None}
 
 
 def edit_index(curation: dict[str, Any] | None, state: str, index: int) -> int:

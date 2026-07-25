@@ -107,6 +107,10 @@ def _run(args: argparse.Namespace):
     # 호흡 후처리 레이어 (사이드카, 수홍 확정 2026-07-18 루프-맞춤): 재생 위치 =
     # (프레임, 위상), 길이 = 기존 시퀀스 그대로 (루프 불변 — fit_breathe_pattern 이
     # breaths 회를 시퀀스에 딱 떨어지게 배분). 텍스처 칸은 유니크 (프레임×위상)만.
+    #
+    # 봉투 교체(2026-07-25) 이후 위상은 연속값이라 슬롯마다 다르다 — 구 분할선 방식의
+    # '쉼 위상 0.0 반복' 이 사라져 호흡하는 줄은 칸 재사용이 없다. 즉 그 줄의 칸 수는
+    # 재생 시퀀스 길이와 같아진다(원래의 하한). 아틀라스가 그만큼 넓어질 수 있다.
     def _positions(state: str) -> list[tuple[int, float]]:
         ordered = plans[state][0]
         cfg = state_breathe(curation, state)
@@ -170,7 +174,8 @@ def _run(args: argparse.Namespace):
             frame = apply_transform(source, transforms.get(edit_idx), cell_size,
                                     snap_scale=snap_scale if variant == "pixel" else None)
             if breathe_cfg and breathe_phase:
-                # 호흡 위상은 최종 셀 픽셀 위 결정론 행 시프트 — 팔레트·격자 불변
+                # 호흡 위상은 최종 셀 픽셀 위 결정론 봉투 워프 — 팔레트·격자 불변.
+                # 위상 0 은 항등이라 건너뛰어도 결과가 같다 (wave(0) == 0).
                 frame = phase_frame(frame, breathe_cfg, breathe_phase)
             nontransparent = alpha_nonzero_count(frame)
             if nontransparent < args.min_used_pixels:
