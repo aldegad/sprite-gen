@@ -31,19 +31,206 @@ PY_CALL = re.compile(r"phase_frame\s*\(|bake_breathe_sequence\s*\(")
 GUARDS = ("bm.enabled ?", "bcfg ?")
 
 
+def _strip_comments(src: str) -> str:
+    """주석을 공백으로 (줄 수·오프셋 보존). 주석 속 `/api/compare-gif` 언급이 파일 생성
+    연산으로 잡히면 그물이 엉뚱한 자리를 지목한다."""
+    out, i, n = [], 0, len(src)
+    while i < n:
+        two = src[i:i + 2]
+        if two == "//":
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i)); i = j
+        elif two == "/*":
+            j = src.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append("".join(c if c == "\n" else " " for c in src[i:j])); i = j
+        else:
+            out.append(src[i]); i += 1
+    return "".join(out)
+
+
+# ── 문장 리더 — 그물 넷이 **같은 것**을 읽는다 ──────────────────────
+#
+# 앞선 판은 스캐너 넷이 전부 **줄 단위**로 읽었다. 그래서 잎 판정을 아무리 좁혀도 `\n`
+# 하나가 그 좁힘 전체를 우회했다 (노을이 탈출 J/J2/K 2026-07-26):
+#
+#     const canonical = (canonImg && canonImg.complete)     // <- 여기까지만 읽고 참
+#       ? canonImg
+#       : image;                                            // <- 폴백이 안 보인다
+#
+# prettier 식 줄바꿈만 입히면 되므로 적대적 트릭이 필요 없다. 문장(깊이 0 의 `;` 까지)을
+# 단위로 읽으면 이 축이 통째로 사라진다.
+def _neutralize_literals(src: str, strip_comments: bool = False) -> str:
+    """문자열·템플릿·정규식 리터럴의 **내용만** `_` 로 덮는다 (구조·길이·줄수 보존).
+
+    `strip_comments=True` 면 주석도 **같은 패스**에서 지운다. 두 패스로 나누면 서로를
+    오인한다 — 주석 제거를 먼저 하면 정규식 `/^\\/run\\//` 안의 `//` 를 줄주석으로 읽어
+    그 줄 뒤를 통째로 날리고, 리터럴을 먼저 하면 주석 안의 따옴표에 걸린다.
+
+    내용을 남기면 템플릿 리터럴의 `${...}` 중괄호가 문장을 끊고, 정규식의 `/`·`{` 도
+    같은 짓을 한다 — 실제로 `cards.js` 의 `` `#${frame.index}` `` 한 줄이 문장 리더를
+    무너뜨려 그 파일의 사이트가 통째로 어긋났다. 통째로 공백으로 지우면 `""`(빈 값 잎)
+    같은 의미 있는 리터럴이 사라지므로, 따옴표는 남기고 안만 덮는다."""
+    out, i, n, prev = [], 0, len(src), ""
+    while i < n:
+        ch = src[i]
+        if strip_comments and src.startswith("//", i):
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i))
+            i = j
+            continue
+        if strip_comments and src.startswith("/*", i):
+            j = src.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append("".join(c if c == "\n" else " " for c in src[i:j]))
+            i = j
+            continue
+        if ch in "'\"":
+            j = i + 1
+            while j < n and src[j] != ch:
+                j += 2 if src[j] == "\\" else 1
+            out.append(ch + "".join("\n" if c == "\n" else "_" for c in src[i + 1:j]) + ch)
+            i = j + 1
+            prev = "x"
+            continue
+        if ch == "`":
+            j, tdepth = i + 1, 0
+            while j < n:
+                if src[j] == "\\":
+                    j += 2
+                    continue
+                if src[j] == "$" and j + 1 < n and src[j + 1] == "{":
+                    tdepth += 1
+                    j += 2
+                    continue
+                if src[j] == "}" and tdepth:
+                    tdepth -= 1
+                    j += 1
+                    continue
+                if src[j] == "`" and not tdepth:
+                    break
+                j += 1
+            out.append("`" + "".join("\n" if c == "\n" else "_" for c in src[i + 1:j]) + "`")
+            i = j + 1
+            prev = "x"
+            continue
+        if ch == "/" and (prev == "" or prev in "(,=:[!&|?{;+-*%~^<>"):
+            j = i + 1
+            while j < n and src[j] not in "/\n":
+                j += 2 if src[j] == "\\" else 1
+            if j < n and src[j] == "/":
+                out.append("/" + "_" * (j - i - 1) + "/")
+                i = j + 1
+                prev = "x"
+                continue
+        out.append(ch)
+        if not ch.isspace():
+            prev = ch
+        i += 1
+    return "".join(out)
+
+
+def _statements(name: str):
+    """[(시작줄, 문장 텍스트)] — 주석·리터럴 중립화 후 깊이 0 의 `;`/`{`/`}` 로 끊는다."""
+    src = _neutralize_literals((CURATOR_SRC / name).read_text(encoding="utf-8"),
+                               strip_comments=True)
+    out, buf, start, line = [], "", 1, 1
+    stack, prev = [], ""          # stack: 열린 괄호 종류 ("(" "[" "{obj")
+    for ch in src:
+        if ch == "\n":
+            line += 1
+            buf += " "
+            continue
+        if ch in "([":
+            stack.append(ch)
+        elif ch in ")]":
+            if stack:
+                stack.pop()
+        elif ch == "{":
+            # **블록이냐 리터럴이냐** — 구조분해/객체 리터럴의 `{}` 를 문장 구분자로 쓰면
+            # `const { url: refUrl } = ...` 같은 선언이 토막난다(실제로 났다). 앞의 유의미
+            # 문자로 가른다: `=`·`(`·`,`·`:`·`?`·`return` 뒤면 값이고, 그 외는 블록이다.
+            # `const {` / `let {` / `var {` / `return {` 뒤도 값(구조분해·객체)이다 —
+            # 선언 키워드 뒤를 블록으로 읽으면 `const { url: refUrl } = ...` 가 토막나서
+            # 그 이름의 바인딩을 영영 못 찾고 "증명 불가 = 거짓" 으로 정상 코드를 오진한다.
+            tail = buf.rstrip().rsplit(" ", 1)[-1] if buf.strip() else ""
+            if prev in "=(,:?[&|" or tail in ("const", "let", "var", "return"):
+                stack.append("{obj")
+            elif not stack:
+                text = buf.strip()
+                if text:
+                    out.append((start, text))
+                buf, start = "", line
+                prev = ch
+                continue
+            else:
+                stack.append("{blk")
+        elif ch == "}":
+            kind = stack.pop() if stack else None
+            if kind is None:
+                text = buf.strip()
+                if text:
+                    out.append((start, text))
+                buf, start = "", line
+                prev = ch
+                continue
+        if not stack and ch == ";":
+            text = buf.strip()
+            if text:
+                out.append((start, text))
+            buf, start = "", line
+            prev = ch
+            continue
+        if not buf.strip():
+            start = line
+        buf += ch
+        if not ch.isspace():
+            prev = ch
+    if buf.strip():
+        out.append((start, buf.strip()))
+    return out
+
+
+def _js_files():
+    return [p.name for p in sorted(CURATOR_SRC.glob("*.js")) if p.name != "breathe.js"]
+
+
+def _inventory(sites):
+    got = {}
+    for name, *_ in sites:
+        got[name] = got.get(name, 0) + 1
+    return got
+
+
+def _assert_inventory(kind, got, expected):
+    """사이트 인벤토리는 **파일당 개수**까지 못박는다.
+
+    존재만 보면 사이트가 여럿인 파일의 상실을 못 보고, 전역 "비어있지 않다" 만 보면
+    파일 하나가 통째로 사라져도 통과한다. 둘 다 이 플랜에서 실제로 뚫린 형태다."""
+    assert got == expected, (
+        f"{kind} 인벤토리가 달라졌다.\n  기대: {expected}\n  실제: {got}\n"
+        "  줄었으면 사이트가 조용히 증발한 것이고(줄바꿈·이름 변경), 늘었으면 새 자리가"
+        " 계약에 들어온 것이다 — 어느 쪽이든 표를 같이 고쳐라.")
+
+
+EXPECTED_CALL_SITES = {"cards.js": 1, "compare.js": 1, "row-export.js": 1, "zoom-editor.js": 2}
+
+
 def _call_sites():
-    for path in sorted(CURATOR_SRC.glob("*.js")):
-        if path.name == "breathe.js":
-            continue                      # 정의부 — 호출부가 아니다
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if CALL.search(line):
-                yield path.name, lineno, line.strip()
+    for name in _js_files():              # breathe.js 는 정의부 — 호출부가 아니다
+        for lineno, text in _statements(name):
+            if CALL.search(text):
+                yield name, lineno, text
 
 
 def test_there_are_call_sites_to_guard():
-    """그물이 빈 채로 통과하지 않게 — 호출부가 사라졌으면 이 테스트를 고쳐야 한다."""
-    sites = list(_call_sites())
-    assert sites, "breatheComposite 호출부가 하나도 없다 — 계약이 옮겨갔는지 확인하라"
+    """호출부 **인벤토리**가 그대로여야 한다.
+
+    "비어있지 않다" 만 보면 한 자리가 줄바꿈 한 번으로 증발해도 통과한다 — 신호는
+    "테스트가 하나 줄었다" 뿐이고, 그건 이 플랜이 두 번 1급 계약으로 올린 실패 모드다."""
+    _assert_inventory("breatheComposite 호출부", _inventory(_call_sites()), EXPECTED_CALL_SITES)
 
 
 @pytest.mark.parametrize("site", list(_call_sites()), ids=lambda s: f"{s[0]}:{s[1]}")
@@ -108,18 +295,20 @@ PREVIEW_CALL = re.compile(r"breatheComposeForPreview\s*\(([^;]*)\)")
 FRESH = re.compile(r"breatheAssertFresh\s*\(")
 
 
+EXPECTED_PREVIEW_SITES = {"cards.js": 1, "compare.js": 1, "zoom-editor.js": 2}
+
+
 def _preview_call_sites():
-    for path in sorted(CURATOR_SRC.glob("*.js")):
-        if path.name == "breathe.js":
-            continue
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            m = PREVIEW_CALL.search(line)
+    for name in _js_files():
+        for lineno, text in _statements(name):
+            m = PREVIEW_CALL.search(text)
             if m:
-                yield path.name, lineno, line.strip(), m.group(1)
+                yield name, lineno, text, m.group(1)
 
 
 def test_there_are_preview_call_sites():
-    assert list(_preview_call_sites()), "프리뷰 호출부가 사라졌다 — 계약 위치 확인"
+    _assert_inventory("프리뷰 호출부",
+                      _inventory(_preview_call_sites()), EXPECTED_PREVIEW_SITES)
 
 
 @pytest.mark.parametrize("site", list(_preview_call_sites()), ids=lambda s: f"{s[0]}:{s[1]}")
@@ -163,25 +352,6 @@ FRESH = re.compile(r"breatheAssertFresh\s*\(")
 EXPORT_EXEMPT = {
     # (파일, 시작줄) : 이유
 }
-
-
-def _strip_comments(src: str) -> str:
-    """주석을 공백으로 (줄 수·오프셋 보존). 주석 속 `/api/compare-gif` 언급이 파일 생성
-    연산으로 잡히면 그물이 엉뚱한 자리를 지목한다."""
-    out, i, n = [], 0, len(src)
-    while i < n:
-        two = src[i:i + 2]
-        if two == "//":
-            j = src.find("\n", i)
-            j = n if j < 0 else j
-            out.append(" " * (j - i)); i = j
-        elif two == "/*":
-            j = src.find("*/", i + 2)
-            j = n if j < 0 else j + 2
-            out.append("".join(c if c == "\n" else " " for c in src[i:j])); i = j
-        else:
-            out.append(src[i]); i += 1
-    return "".join(out)
 
 
 HEADER = re.compile(r"(function\s*\w*\s*\([^)]*\)|\([^()]*\)\s*=>|\w+\s*=>)\s*$")
@@ -302,31 +472,33 @@ def _reassigned(name: str, symbol: str) -> bool:
         if (!(canonical && canonical.complete)) canonical = image;   // <- 무사통과
 
     선언 RHS 가 굽기 소스라 참을 주고 그 뒤 흐름을 안 봤다 — 그물이 자기 규칙("증명 못
-    하는 이름은 거짓")을 자기가 어긴 것이다. 재대입된 이름은 증명된 이름이 아니다
-    (노을이 실측 2026-07-26). 지난 라운드의 "분기를 안 봤다" 와 축만 다르다."""
-    lines = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8")).splitlines()
+    하는 이름은 거짓")을 자기가 어긴 것이다. 재대입된 이름은 증명된 이름이 아니다."""
     sym = re.escape(symbol)
     decl = re.compile(rf"\b(const|let|var)\s+({sym}\b|\{{[^}}]*\b{sym}\b[^}}]*\}})\s*=")
     assign = re.compile(rf"(^|[^\w.]){sym}\s*(=(?![=>])|\+=|\|\|=|\?\?=)")
-    return any(assign.search(ln) and not decl.search(ln) for ln in lines)
+    return any(assign.search(t) and not decl.search(t) for _, t in _statements(name))
 
 
 def _binding_rhs(name: str, lineno: int, symbol: str):
-    """`symbol` 의 선언(위쪽 40줄)과 그 줄 번호. 못 찾거나 **재대입되면** None.
+    """`symbol` 의 선언(위쪽)과 그 시작줄. 못 찾거나 **재대입되면** None.
 
-    구조분해(`const { url: refUrl } = breatheGeometryFrame(...)`)도 읽는다 — 못 읽으면
-    "증명 불가 = 거짓" 규칙 때문에 **정상 코드를 오진**한다."""
+    **문장 단위**로 읽는다. 줄 단위(`prev.split("=", 1)[1]`)로 읽던 판은 RHS 가 다음
+    줄로 넘어가면 뒷부분이 통째로 안 보였고, 잘린 머리가 참을 줬다 — prettier 식
+    줄바꿈만으로 분기 전수 판정이 통째로 우회됐다 (노을이 탈출 J 2026-07-26).
+
+    구조분해(`const { url: refUrl } = breatheGeometryFrame(...)`)도 읽는다."""
     if _reassigned(name, symbol):
         return None                      # 흐름에 따라 값이 바뀐다 = 증명 불가
-    lines = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8")).splitlines()
-    start = max(0, lineno - 41)
     sym = re.escape(symbol)
-    direct = rf"\b(const|let|var)\s+{sym}\b\s*="
-    destructured = rf"\b(const|let|var)\s*\{{[^}}]*\b{sym}\b[^}}]*\}}\s*="
-    for offset, prev in enumerate(lines[start:lineno - 1]):
-        if re.search(direct, prev) or re.search(destructured, prev):
-            return prev.split("=", 1)[1].strip().rstrip(";"), start + offset + 1
-    return None
+    direct = re.compile(rf"\b(const|let|var)\s+{sym}\b\s*=")
+    destructured = re.compile(rf"\b(const|let|var)\s*\{{[^}}]*\b{sym}\b[^}}]*\}}\s*=")
+    best = None
+    for start, text in _statements(name):
+        if start > lineno:
+            break
+        if direct.search(text) or destructured.search(text):
+            best = (text.split("=", 1)[1].strip(), start)
+    return best
 
 
 def _bake_only(name: str, lineno: int, expr: str, depth: int = 8) -> bool:
@@ -402,23 +574,15 @@ def _bound_from_bake_source(name: str, lineno: int, symbol: str) -> bool:
 
 def _breathe_image_sites():
     for name in BREATHE_FILES:
-        path = CURATOR_SRC / name
-        if not path.is_file():
-            continue
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            # `const` 만 보면 `let` 한 단어로 사이트가 **수집 목록에서 사라진다** —
-            # 커버리지 상실이 조용하고 신호는 "테스트가 하나 줄었다" 뿐이다.
-            m = re.match(r"\s*(?:const|let|var) (\w+) = .*", line)
-            if not (m and IMG_CALL.search(line)):
+        for lineno, text in _statements(name):
+            m = re.match(r"(?:const|let|var)\s+(\w+)\s*=", text)
+            if not (m and IMG_CALL.search(text)):
                 continue
             if (name, m.group(1)) in NON_BREATHE_IMG:
                 continue
-            yield name, lineno, line.strip()
+            yield name, lineno, text
 
 
-# 호흡 이미지 소스를 실제로 가진 파일 — 여기서 사이트가 **사라지면** 커버리지가 조용히
-# 준다. `const` 만 보던 스캐너는 `let` 한 단어로 `cards.js` 사이트를 통째로 잃었고 신호는
-# "테스트가 하나 줄었다" 뿐이었다 (노을이 실측 2026-07-26).
 EXPECTED_IMAGE_SITES = {"cards.js": 1, "compare.js": 1, "zoom-editor.js": 4, "row-export.js": 1}
 
 
@@ -522,12 +686,14 @@ EXPECTED_WARP_BASES = {"cards.js": 1, "compare.js": 1, "zoom-editor.js": 2, "row
 
 def _warp_base_sites():
     for name in BREATHE_FILES:
-        src = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8"))
-        canvases = set(COMPOSITE_CALL.findall(src))
-        ctxs = {ctx for ctx, canvas in CTX_BIND.findall(src) if canvas in canvases}
-        for m in DRAW_INTO.finditer(src):
-            if m.group(1) in ctxs:
-                yield name, src[:m.start()].count("\n") + 1, m.group(2).strip()
+        stmts = _statements(name)
+        joined = " ".join(t for _, t in stmts)
+        canvases = set(COMPOSITE_CALL.findall(joined))
+        ctxs = {ctx for ctx, canvas in CTX_BIND.findall(joined) if canvas in canvases}
+        for lineno, text in stmts:
+            m = DRAW_INTO.search(text)
+            if m and m.group(1) in ctxs:
+                yield name, lineno, m.group(2).strip()
 
 
 def test_the_warp_base_inventory_is_intact():
