@@ -894,7 +894,7 @@ function openZoom(stateName, idx, keepWidth) {
       const play = playList(stateName);
       if (!play.length) return null;
       const f = frameOf(stateName, play[0]);
-      const image = f ? img(frameUrl(stateName, f)) : null;
+      const image = f ? img(bakeFrameUrl(stateName, f)) : null;
       if (!(image && image.complete && image.naturalWidth)) return null;
       const c = document.createElement("canvas");
       c.width = cellW;
@@ -917,10 +917,10 @@ function openZoom(stateName, idx, keepWidth) {
       const frameIdx = play.length ? play[cursor] : idx;
       const phase = bm.enabled ? (pattern[cursor] || 0) : 0; // off = 무호흡 재생
       const f = frameOf(stateName, frameIdx);
-      // 호흡 프리뷰 = 굽기 결과 미리보기 — 항상 캐노니컬 프레임(f.url)으로 그린다.
-      // 표시 변형(원본 쌍둥이)은 풋프린트가 달라 이음새가 프레임마다 다른 줄에 생겨
-      // 선이 두 개처럼 흔들렸다 (실사고 2026-07-18 수홍).
-      const image = f ? img(f.url) : null;
+      // 호흡 프리뷰 = 굽기 결과 미리보기 — **굽기가 읽는 파일**로 그린다.
+      // (구 2026-07-18 결정 "항상 캐노니컬" 은 분할선 시절 이음매가 근거였고, 봉투에는
+      // 이음매가 없다. 굽기는 `frame_variant` 로 해소한 파일을 읽으므로 그걸 따라간다.)
+      const image = f ? img(bakeFrameUrl(stateName, f)) : null;
       bImg.style.visibility = "hidden";
       bcanvas.style.display = "block";
       bcanvas.width = cellW;
@@ -1033,7 +1033,7 @@ function openZoom(stateName, idx, keepWidth) {
         const frameIdx = play[i];
         const phase = pattern[i] || 0;
         const f = frameOf(stateName, frameIdx);
-        const image = f ? img(frameUrl(stateName, f)) : null;
+        const image = f ? img(bakeFrameUrl(stateName, f)) : null;
         const cellEl = document.createElement("div");
         cellEl.className = "bs-cell";
         const cv = document.createElement("canvas");

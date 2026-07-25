@@ -156,3 +156,34 @@ def test_the_curator_accepts_what_the_bake_accepts(tmp_path):
     assert saved is not None, "굽기가 받는 값을 웹뷰가 호흡 없음으로 읽고 지웠다"
     assert float(saved["depth"]) == 0.08
     assert state_breathe({"states": {"idle": {"breathe": saved}}}, "idle")["depth"] == 0.08
+
+
+@node
+@pytest.mark.parametrize("sidecar", [
+    {"breaths": 2},
+    {"breaths": 2, "lag": 0.1},
+    {"depth": 0.06, "breaths": 2},
+], ids=["depth-omitted", "depth-omitted-with-lag", "depth-explicit"])
+def test_an_omitted_depth_survives_the_round_trip(sidecar, tmp_path):
+    """`depth` 생략은 굽기에서 기본값 0.06 이다 — 왕복이 그걸 파괴하면 안 된다.
+
+    `Number(undefined)` 는 NaN 이고 `JSON.stringify(NaN)` 은 `null` 이라, 기본값 분기가
+    없으면 첫 autosave 가 사이드카에 `depth: null` 을 박는다. 그러면 **굽기가 정상 수용하던
+    사이드카를 큐레이터로 한 번 여는 것만으로 굽기가 죽는 사이드카로 바꿔놓고 아무 말도
+    안 한다** (슉슉이 실측 2026-07-26). `SKILL.md` 가 문서화한 "뷰 없이 에이전트가 breathe
+    만 쓴 런" 이 정확히 이 모양이다."""
+    before = state_breathe({"states": {"idle": {"breathe": sidecar}}}, "idle")
+    assert before is not None, "이 사이드카는 굽기가 받아야 의미가 있다"
+
+    run = {"schemaVersion": 1, "fps": 6,
+           "states": [{"name": "idle", "fps": 6,
+                       "frames": [{"index": 0, "present": True}, {"index": 1, "present": True}]}],
+           "curation": {"states": {"idle": {"selected": [0, 1], "breathe": sidecar}}}}
+    got = _run({"mode": "roundtrip", "run": run}, tmp_path)
+    saved = got["payload"]["states"]["idle"].get("breathe")
+    assert saved is not None, "왕복이 호흡 설정을 통째로 지웠다"
+    assert saved.get("depth") is not None, f"왕복이 depth 를 null 로 박았다: {saved}"
+
+    after = state_breathe({"states": {"idle": {"breathe": saved}}}, "idle")
+    assert after["depth"] == before["depth"], "왕복이 굽기가 쓰는 값을 바꿨다"
+    assert after["breaths"] == before["breaths"]
