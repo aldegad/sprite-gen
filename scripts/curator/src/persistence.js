@@ -46,7 +46,10 @@ function buildPayload() {
     // per-state pixel-perfect — **트윈 줄만 저장** (계약): 트윈 없는 줄의 퍼펙은
     // 표시 렌즈(측정 k 양자화)라 사이드카에 적으면 굽기 리졸버가 존재하지 않는
     // .plain 변형을 요구하게 된다. 격자 토글과 같은 표시-전용 상태다.
-    if (ppTwinStates.has(name)) states[name].pixel_perfect = ppOn(name);
+    // 저장 규칙의 SSoT 는 `savedPixelPerfect` 다 — 굽기 변종 해소(`bakeVariant`)가
+    // 같은 함수를 읽으므로 "무엇이 저장되나" 와 "굽기가 무엇을 읽나" 가 갈릴 수 없다.
+    const ownPp = savedPixelPerfect(name);
+    if (ownPp !== undefined) states[name].pixel_perfect = ownPp;
     // 호흡 후처리 레이어 (수홍 2026-07-18) — 켠 상태만 기록 (없음 = off)
     if (entry.breathe) states[name].breathe = entry.breathe;
     // 폐기 스키마는 **원본 그대로 되쓴다.** 정규화도 삭제도 하지 않는다 — 웹뷰가 못 읽는
@@ -64,10 +67,10 @@ function buildPayload() {
   // run-wide default field: written only when every twin row agrees (uniform),
   // so a consumer without per-state awareness still bakes the right variant.
   // Mixed rows -> omitted; the per-state values above are the truth.
-  if (ppTwinStates.size) {
-    const vals = [...ppTwinStates].map((n) => ppOn(n));
-    if (vals.every((v) => v === vals[0])) payload.pixel_perfect = vals[0];
-  }
+  // `savedRunPixelPerfect` 가 이 필드의 authoring 규칙을 소유한다 (트윈 줄이 전부 같을
+  // 때만 authoring; 아니면 로드된 값을 그대로 둔다 — 서버가 이월한다).
+  const widePp = savedRunPixelPerfect();
+  if (widePp !== undefined) payload.pixel_perfect = widePp;
   return payload;
 }
 

@@ -115,7 +115,10 @@ def _breathe_source_frame(run_dir: Path, state: str):
     manifest = load_consistent_frames_manifest(run_dir, allow_pending_states=True) or {"rows": []}
     row = next((r for r in manifest.get("rows", []) if r.get("state") == state), None)
     if not row:
-        return None
+        # **반환 모양은 하나다.** 한쪽만 맨 `None` 이면 호출부의 `frame, key = ...` 가
+        # `TypeError` 로 터져 의도한 404("no extracted frame") 대신 그 문구로 500 이 나간다
+        # — 추출이 아직 안 끝난 줄에서 호흡을 켜면 도달한다 (슉슉이 실측 2026-07-26).
+        return None, None
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     curation = load_curation(run_dir)
     variant = frame_variant(curation, state)
@@ -1132,6 +1135,13 @@ class CurationHandler(BaseHTTPRequestHandler):
                         # (구 클라이언트/수동 POST)에 조용히 사라지지 않게.
                         if "anchors" in existing and "anchors" not in payload:
                             payload["anchors"] = existing["anchors"]
+                        # 런 전역 `pixel_perfect` 도 같은 계약이다 — 뷰는 **트윈 줄이 전부
+                        # 같을 때만** 이 필드를 싣는다(혼합/트윈 없음이면 생략). 생략을
+                        # 삭제로 받으면 굽기가 읽는 **변종이 바뀐다**(plain→pixel): 사용자는
+                        # 아무것도 안 눌렀는데 다른 파일로 구워지고, 뷰의 호흡 기준 프레임
+                        # 키도 같이 갈린다. 뷰가 authoring 하지 않은 값은 이월한다.
+                        if "pixel_perfect" in existing and "pixel_perfect" not in payload:
+                            payload["pixel_perfect"] = existing["pixel_perfect"]
                         for state_name, prev_entry in (existing.get("states") or {}).items():
                             if not isinstance(prev_entry, dict):
                                 continue

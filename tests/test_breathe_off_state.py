@@ -317,3 +317,31 @@ def test_breathe_draws_from_the_file_the_bake_reads(site):
         f"{name}:{lineno} 가 굽기 파일이 아닌 소스로 호흡을 그린다.\n  {line}\n"
         f"  `bakeFrameUrl(state, frame)` 또는 그걸 거치는 store 헬퍼를 써라 "
         f"(frameUrl 은 표시용, f.url 은 캐노니컬).")
+
+
+# ── 고칠 수 없는 차이도 관측 가능해야 한다 ──────────────────────────
+
+RESAMPLE_NOTICE = re.compile(r"breatheResamplesDifferently\s*\(")
+
+
+def test_file_producing_paths_report_the_resampler_gap():
+    """회전·확대가 걸린 줄은 프리뷰와 굽기의 **픽셀이 다르다** — 말은 해야 한다.
+
+    굽기는 `apply_transform` 에서 BICUBIC(`snap_scale` 없는 런 = 기본 런 전부),
+    웹뷰는 `imageSmoothingEnabled=false` 캔버스라 NEAREST 다. 실측 (슉슉이 2026-07-26,
+    96px 픽스처, 신선도는 통과시킨 상태): rotate 3° 에서 12/12 위상 최대 1803px 상이,
+    scale 1.03 에서 최대 1699px. 원인은 표시 파이프라인이라 호흡이 고칠 수 있는 게
+    아니지만, `row-export` 와 비교뷰 다운로드는 **이 캔버스로 파일을 굽는다** —
+    조용히 두면 사용자는 GIF 와 다른 파일을 받고도 모른다 (원칙 6).
+
+    "고칠 수 없으니 말하지 않는다" 는 이 플랜에서 금지된 형태다."""
+    for name, line, body in _file_producing_functions():
+        assert RESAMPLE_NOTICE.search(body), (
+            f"{name}:{line} 이 파일을 만들면서 리샘플러 차이를 안 알린다 — "
+            "사용자는 GIF 와 다른 파일을 받고도 모른다")
+
+
+def test_the_warn_notice_has_a_visible_style():
+    """`warn` 알림이 스타일 없이 나가면 '알렸다' 가 사실상 거짓이 된다."""
+    css = (CURATOR_SRC.parent / "curator.css").read_text(encoding="utf-8")
+    assert ".status.warn" in css, "warn 알림에 스타일이 없다 — 오류·성공과 구분이 안 된다"

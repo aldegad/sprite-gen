@@ -4,6 +4,13 @@ const RETIRED_BREATHE_KEYS = ["splits", "amplitude", "subpixel", "hold"];
 
 // 파이썬 curation 의 허용 범위 미러. 굽기가 요란하게 거부하는 값을 웹뷰가 조용히 깎아
 // 되쓰면 사용자의 원래 숫자가 파괴되고 게이트 자체가 사라진다 — 같은 값으로 판정한다.
+// 파이썬 `float(v)` 가 받는 모양인가 — 수, 또는 수로만 이루어진 문자열.
+// `""`·`[]`·`{}`·`true` 는 JS `Number()` 가 조용히 0/1 로 바꾸지만 파이썬은 거부한다.
+function isNumericScalar(v) {
+  if (typeof v === "number") return Number.isFinite(v);
+  return typeof v === "string" && /^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$/.test(v);
+}
+
 function breatheRangeProblems(raw) {
   const bounds = [["depth", 0.005, 0.20, 0.06], ["breaths", 1, 8, 1], ["lag", 0, 0.45, 0.1]];
   const bad = [];
@@ -13,6 +20,13 @@ function breatheRangeProblems(raw) {
     // 만 범위 검사를 통과해 빠져나갔다 (슉슉이 실측 2026-07-26: 원본이 0.1 로 덮였다).
     const given = raw[key];
     if (given === null) { bad.push(`${key}=null`); continue; }
+    // `Number("")`·`Number([])` 는 **0** 이다 — 값이 있는지만 보고 `Number()` 로 넘기면
+    // 하한이 0 인 `lag` 가 통과해 첫 autosave 가 사용자 값을 0 으로 덮는다(알림 0건).
+    // 파이썬은 `float("")`/`float([])` 이 터져 거부하는 값들이라 여기서도 거부한다.
+    if (given !== undefined && !isNumericScalar(given)) {
+      bad.push(`${key}=${JSON.stringify(given)} (수가 아님)`);
+      continue;
+    }
     const v = given === undefined ? dflt : Number(given);
     if (!Number.isFinite(v) || v < lo || v > hi) { bad.push(`${key}=${JSON.stringify(raw[key])}`); continue; }
     // 정수여야 하는 값은 **정수인지도** 본다. `Math.round` 로 조용히 반올림하면 굽기
@@ -21,8 +35,19 @@ function breatheRangeProblems(raw) {
     if (key === "breaths" && !Number.isInteger(v)) bad.push(`${key}=${JSON.stringify(raw[key])} (정수 아님)`);
   }
   if (raw.rigid_row != null) {
-    const r = Number(raw.rigid_row);
-    if (!Number.isInteger(r)) bad.push(`rigid_row=${JSON.stringify(raw.rigid_row)} (정수 아님)`);
+    // `Number("")` 과 `Number([])` 는 **0** 이라 정수 검사만 하면 통과한다 — 그러면 첫
+    // autosave 가 사용자 사이드카를 0 으로 덮고 굽기의 loud reject 근거가 사라진다
+    // (슉슉이 실측 2026-07-26: 알림 0건). 파이썬은 `float("")` 이 터져 거부하는 값들이다.
+    const raw_r = raw.rigid_row;
+    const numeric = isNumericScalar(raw_r);
+    const r = Number(raw_r);
+    if (!numeric || !Number.isInteger(r)) {
+      bad.push(`rigid_row=${JSON.stringify(raw_r)} (정수 아님)`);
+    } else if (r < 1) {
+      // `analyze` 가 `0 < rigid_row < height` 를 loud fail 한다. 상한은 해부 없이 모르므로
+      // 여기서 아는 하한만 본다 — 모르는 것을 아는 척하지 않는다.
+      bad.push(`rigid_row=${JSON.stringify(raw_r)} (1 이상이어야 한다)`);
+    }
   }
   return bad;
 }
@@ -196,11 +221,79 @@ function frameUrl(stateName, frame) {
 // `frameUrl` 은 표시용이라 pp OFF 에서 `orig/` 고해상본(굽기가 안 읽는 파일)을 줄 수
 // 있다. 호흡은 굽기와 같은 그림을 내야 하므로 워프 base 도 신선도 기준도 이걸 쓴다 —
 // 안 그러면 지문이 영구 불일치라 영상 내보내기가 영구 차단된다 (슉슉이 2026-07-26).
+// 퍼펙 토글 시드 — 첫 렌더 전에 해소돼야 한다 (`frameUrl` 이 읽는다).
+// boot 에 인라인돼 있던 것을 여기로 옮겼다: 이 시드가 `bakeVariant` 의 입력이라,
+// 그물이 `ppStates` 를 손으로 먹이면 "웹뷰가 서버와 같은 변종을 **스스로** 골라내는가"
+// 를 영영 못 묻는다 — 그 공백으로 변종 불일치가 한 라운드를 살아남았다
+// (슉슉이 실측 2026-07-26).
+//
+// 퍼펙 토글은 **모든 줄**이 가진다 — 트윈 줄은 소스 전환(canonical↔orig), 트윈 없는
+// 줄은 측정 k 양자화 렌즈(snapScaleFor). "가능한 줄" 게이팅은 격자 게이팅과 같은
+// 병이었다 (수홍 2026-07-24: 확대화면에 퍼펙 버튼이 없다 — 조건 분기 = 버그).
+function seedPixelPerfect(snapshot) {
+  ppTwinStates = new Set(
+    snapshot.states.filter((s) => s.frames.some((f) => f.plainUrl)).map((s) => s.name));
+  const ppDefault = !(snapshot.curation && snapshot.curation.pixel_perfect === false);
+  ppStates = {};
+  for (const s of snapshot.states) {
+    const c = snapshot.curation && snapshot.curation.states && snapshot.curation.states[s.name];
+    // 트윈 없는 줄 기본 OFF (원본 먼저 — 양자화 렌즈는 사용자가 눌러서 본다).
+    // 이건 **표시 렌즈 기본값**이고 굽기 변종이 아니다 (아래 `bakeVariant`).
+    const fallback = ppTwinStates.has(s.name) ? ppDefault : false;
+    ppStates[s.name] = c && typeof c.pixel_perfect === "boolean" ? c.pixel_perfect : fallback;
+  }
+}
+
+// ── 굽기 변종 (표시 렌즈와 **다른 개념**) ───────────────────────────
+//
+// `ppOn` 은 **표시 렌즈**다: 트윈 없는 줄은 boot 시드가 기본 OFF 로 놓는다(원본 먼저,
+// 양자화 렌즈는 눌러서 본다). 그런데 그 값은 사이드카에 **저장되지 않으므로**
+// (persistence: 트윈 줄만 기록) 서버 `frame_variant` 는 그 줄을 `pixel` 로 본다.
+//
+// 이 둘을 같은 값으로 쓰면 기본 런(= `fit.pixel_perfect` 없는 런, `orig/`·`.plain.png`
+// 가 하나도 없다) 전부에서 웹뷰는 `plain`, 서버는 `pixel` 로 키를 지어 지문이 **영구
+// 불일치**가 된다 — 프리뷰가 영원히 원본으로 떨어지고 영상 내보내기가 영구 차단되며,
+// 안내대로 해부를 갱신해도 라우트가 또 `pixel` 로 같은 키를 만들어 안 풀린다
+// (슉슉이 실측 2026-07-26).
+//
+// 그래서 굽기 변종은 **저장되는 값**으로만 해소한다 — 파이썬 `curation.frame_variant`
+// 미러(per-state bool > 런 전역 > pixel).
+
+// 이 줄의 `pixel_perfect` 로 사이드카에 실제로 기록되는 값 (기록 안 하면 undefined).
+// persistence 도 이걸 쓴다 — 저장 규칙과 굽기 해소가 두 벌이면 반드시 갈린다.
+function savedPixelPerfect(stateName) {
+  return ppTwinStates.has(stateName) ? ppOn(stateName) : undefined;
+}
+
+// 사이드카의 런 전역 `pixel_perfect`. 뷰는 **트윈 줄이 전부 같을 때만** 이 필드를
+// authoring 한다(혼합/트윈 없음이면 생략). 생략은 삭제가 아니라 "안 건드림" 이고
+// 서버가 기존 값을 이월하므로, 여기서도 로드된 값이 그대로 진실이다 — 그러지 않으면
+// 트윈 없는 줄에서 서버는 `plain`, 웹뷰는 `pixel` 로 갈린다 (해소표 전수에서 발견).
+function savedRunPixelPerfect() {
+  if (ppTwinStates.size) {
+    const vals = [...ppTwinStates].map((n) => ppOn(n));
+    if (vals.every((v) => v === vals[0])) return vals[0];
+  }
+  const loaded = run && run.curation ? run.curation.pixel_perfect : undefined;
+  return typeof loaded === "boolean" ? loaded : undefined;
+}
+
+// 굽기가 읽는 변종 — 파이썬 `curation.frame_variant` 미러.
+function bakeVariant(stateName) {
+  const own = savedPixelPerfect(stateName);
+  if (typeof own === "boolean") return own ? "pixel" : "plain";
+  const wide = savedRunPixelPerfect();
+  if (typeof wide === "boolean") return wide ? "pixel" : "plain";
+  return "pixel";
+}
+
 // URL 과 파일 스탬프를 **한 자리에서** 고른다. 둘을 따로 고르면 "어느 변종을 골랐나" 가
 // 갈릴 수 있고, 그러면 호흡 기준 프레임 키가 굽기와 다른 파일을 가리킨다.
 function bakeFrame(stateName, frame) {
-  if (!ppOn(stateName) && frame.plainBakeUrl) {
-    return { url: frame.plainBakeUrl, stamp: frame.plainBakeStamp || null };
+  if (bakeVariant(stateName) === "plain") {
+    // 변종이 plain 인데 트윈 파일이 없으면 **없는 파일을 가리키는 것**이다. 캐노니컬로
+    // 조용히 떨어지면 굽기(그 파일을 못 찾아 실패)와 웹뷰가 다른 진실을 갖는다.
+    return { url: frame.plainBakeUrl || null, stamp: frame.plainBakeStamp || null };
   }
   return { url: frame.url, stamp: frame.stamp || null };
 }
@@ -220,6 +313,23 @@ function breatheGeometryFrame(stateName, fallbackIdx) {
   const index = play0 === undefined ? fallbackIdx : play0;
   const frame = frameOf(stateName, index);
   return { index, frame, url: frame ? bakeFrameUrl(stateName, frame) : null };
+}
+
+// 이 줄의 기준 프레임에 **정수 이동이 아닌** 변형이 걸려 있나.
+//
+// 굽기는 `apply_transform` 에서 BICUBIC 으로 리샘플하고(`snap_scale` 없는 런 = 기본 런
+// 전부) 이 웹뷰는 `imageSmoothingEnabled=false` 캔버스, 즉 NEAREST 다. 회전·확대가
+// 걸리면 같은 입력에도 두 쪽 그림이 다르다 (실측: rotate 3° 에서 12/12 위상 최대
+// 1803px 상이). 원인은 표시 파이프라인이라 호흡이 고칠 수 있는 게 아니지만, `row-export`
+// 와 비교뷰는 **이 캔버스로 파일을 굽는다** — 조용히 두면 사용자는 GIF 와 다른 파일을
+// 받고도 모른다 (원칙 6). 고치지 못하는 차이라도 말은 해야 한다.
+function breatheResamplesDifferently(stateName) {
+  const play = playList(stateName);
+  if (!play.length) return false;
+  const t = (entries[stateName].transforms || {})[editIndex(stateName, play[0])];
+  if (!t) return false;
+  return Number(t.rotate || 0) !== 0 || Number(t.scale || 1) !== 1
+    || Number(t.shx || 0) !== 0 || Number(t.shy || 0) !== 0;
 }
 
 // 파이썬 `breathe.reference_key` 의 재료를 사이드카에서 모은다 — **줄의 기준 프레임**
@@ -244,7 +354,7 @@ function breatheReferenceKey(stateName) {
   const t = e.transforms ? e.transforms[editIdx] : null;
   return breatheReferenceKeyOf({
     state: stateName,
-    variant: ppOn(stateName) ? "pixel" : "plain",
+    variant: bakeVariant(stateName),
     requestStamp: run.requestStamp,
     sourceIndex: src === null ? idx : src,
     sourceStamp: stamp,

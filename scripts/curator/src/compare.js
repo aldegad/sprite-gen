@@ -136,7 +136,8 @@ function openCompare() {
     }
     const f = frameOf(name, idx);
     // 굽기가 읽는 파일로 그린다 — 신선도 기준과 같은 파일이어야 검사가 의미를 갖는다
-    const image = f ? img(bakeFrameUrl(name, f)) : null;
+    const bakeSrc = f && bakeFrameUrl(name, f);
+    const image = bakeSrc ? img(bakeSrc) : null;
     if (!(image && image.complete && image.naturalWidth)) return null;
     const base = document.createElement("canvas");
     base.width = run.cell.width;
@@ -539,10 +540,14 @@ function openCompare() {
       // 여기서는 그 결과가 그대로 `toDataURL` 되어 **호흡이 빠진 파일**이 사용자 손에
       // 들어가고 마지막에 "다운로드 완료" 초록 알림까지 떴다 (슉슉이 실측 2026-07-26).
       // row-export 는 같은 조건에서 이미 예외를 올려 멈춘다 — 두 내보내기가 정반대였다.
+      const resampled = [];
       for (const name of included) {
         const bcfg = stateBreathe(name);
-        if (bcfg) breatheAssertFresh(breatheReferenceKey(name), bcfg);
+        if (!bcfg) continue;
+        breatheAssertFresh(breatheReferenceKey(name), bcfg);
+        if (breatheResamplesDifferently(name)) resampled.push(name);
       }
+      if (resampled.length) setStatus(STR[lang].breatheResample(resampled.join(", ")), "warn");
       const gcd = (a, b) => (b ? gcd(b, a % b) : a);
       const cycles = included.map((name) => {
         const st = run.states.find((s) => s.name === name);

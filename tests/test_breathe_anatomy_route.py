@@ -147,6 +147,30 @@ def test_the_reference_is_the_frame_the_bake_starts_from(run_dir):
         f"경계로 그린다: {drift}")
 
 
-def test_an_unknown_state_is_reported_not_crashed(run_dir):
+@pytest.mark.parametrize("state,why", [
+    ("no-such-state", "manifest 에 줄이 없다"),
+    ("pending", "request 에 선언됐지만 아직 추출 안 된 줄 (manifest row 없음)"),
+])
+def test_a_resolvable_frame_is_always_reported_the_same_way(run_dir, state, why):
+    """기준 프레임을 못 만드는 **모든** 사유가 같은 모양으로 나와야 한다.
+
+    핸들러는 `frame, key = _breathe_source_frame(...)` 로 받는다. 한 갈래만 맨 `None`
+    이면 거기서 `TypeError: cannot unpack non-iterable NoneType` 이 나고, 의도한
+    404("no extracted frame for state") 대신 그 문구로 **500** 이 나간다 — 추출이 아직
+    안 끝난 줄에서 호흡을 켜면 도달한다 (슉슉이 실측 2026-07-26).
+
+    앞선 판은 `is None` 만 봐서 반환 **모양**을 한 번도 안 물었다 (round-6 N1 ·
+    round-9 N1 과 같은 클래스: 이름이 단언하는 것을 안 묻는 테스트)."""
     import serve_curation
-    assert serve_curation._breathe_source_frame(run_dir, "no-such-state") is None
+    if state == "pending":
+        # 사용자가 실제로 닿는 모양: request 에는 있는데 아직 안 구워진 줄이다
+        # (`load_consistent_frames_manifest(allow_pending_states=True)` 가 허용하는 상태).
+        # manifest 에 row 를 넣고 파일만 없애는 판은 로더가 먼저 loud fail 해서 도달 불가다.
+        rp = run_dir / "sprite-request.json"
+        req = json.loads(rp.read_text(encoding="utf-8"))
+        req["states"]["pending"] = {"frames": 1, "fps": 6, "loop": True}
+        rp.write_text(json.dumps(req), encoding="utf-8")
+
+    got = serve_curation._breathe_source_frame(run_dir, state)
+    frame, key = got                       # 핸들러와 **같은 모양**으로 받는다 ({why})
+    assert frame is None and key is None, f"{why}: {got!r}"
