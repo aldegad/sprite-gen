@@ -155,8 +155,13 @@ def test_twins_share_pixel_perfect_footprint(tmp_path) -> None:
             scale = orig.width // pixel.width
             assert scale >= 2
             ob = orig.getchannel("A").getbbox()
+            # 관용치 2 논리픽셀 -> **1** 로 조인다 (실측 근거: 2026-07-25 계측 10조합에서 실제
+            # 어긋남은 0.0 논리픽셀, plan sprite-gen/grid-record-exactness). 0 으로 두지 않는
+            # 이유는 이 파일이 conform/native·물리캡 등 여러 fit 경로를 함께 돌려서다 — 정확
+            # 일치 단정은 경로를 고정한 tests/test_grid_record_exactness.py 가 소유하고,
+            # 여기는 그 경로들 전체의 회귀 안전망으로 1픽셀 여유만 남긴다.
             for a, b in zip(ob, tuple(v * scale for v in pb)):
-                assert abs(a - b) <= 2 * scale, f"frame {index}: orig bbox {ob} vs pixel bbox x{scale}"
+                assert abs(a - b) <= scale, f"frame {index}: orig bbox {ob} vs pixel bbox x{scale}"
 
 
 def test_partial_generation_view_tolerance(tmp_path) -> None:

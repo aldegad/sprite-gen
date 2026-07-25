@@ -286,6 +286,15 @@ function drawFinalGrid(canvas, stage, box, scale, t, inputGrid) {
   // 기록 격자 신뢰 게이트 (실사고 2026-07-18 side_idle: 최종 31칸인데 기록은 45칸 —
   // 반피치 하모닉 오검출): 칸수가 최종 픽셀 수와 ±1 이상 어긋나면 그 기록은 버린다.
   // 균등 격자는 "칸 수 = 최종 픽셀 수" 를 보장한다 (가짜 격자 금지).
+  //
+  // **층위 주의 — 이 가드는 엔진측 단정의 대체물이 아니다** (plan grid-record-exactness):
+  //   · 여기(표시측)는 **가드**다: 기록이 거짓이어도 화면에 가짜 격자를 그리지 않는 게 임무라
+  //     실패 방향이 "격자를 접는다" 이고, 그래서 ±1 관용이 맞다 (구세대 캐시·테이크 프레임처럼
+  //     기록이 없거나 근사인 정상 경우도 통과시켜야 한다).
+  //   · 엔진측(`tests/test_grid_record_exactness.py`)은 **단정**이다: 기록 칸수 == 최종 픽셀 수
+  //     정확 일치를 요구하고, 반피치 하모닉 mutant 로 그 단정이 실제로 잡는지까지 고정한다.
+  //   이 가드를 "이제 기록이 참이니 완화/제거" 하면 안 된다 — 그러면 엔진 회귀가 조용히
+  //   화면으로 새어나온다. 두 층위는 함께 있어야 한다 (실측 2026-07-25: 10조합 delta 0).
   if (inputGrid && Array.isArray(inputGrid.x) && Array.isArray(inputGrid.y)) {
     const expCols = Math.max(1, Math.round((box[2] - box[0]) / scale));
     const expRows = Math.max(1, Math.round((box[3] - box[1]) / scale));
