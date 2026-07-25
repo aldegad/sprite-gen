@@ -254,7 +254,6 @@ def test_every_file_producing_path_checks_freshness():
 BAKE_SOURCES = ("bakeFrameUrl(", "breatheGeometryFrame(")
 # 잎 판정용 — 식 **전체**가 굽기 소스 호출이어야 한다 (뒤따르는 프로퍼티 접근은 허용).
 BAKE_CALL = re.compile(r"(?:bakeFrameUrl|breatheGeometryFrame)\(.*\)(?:\.\w+)?")
-BAKE_URL = re.compile(r"bakeFrameUrl\s*\(")
 IMG_CALL = re.compile(r"\bimg\s*\(")
 # 호흡 계약이 사는 파일 — 이 안의 **모든** 프레임 이미지 소스가 굽기 파일이어야 한다.
 #
@@ -448,13 +447,19 @@ def test_breathe_draws_from_the_file_the_bake_reads(site):
 
     이 그물이 없던 동안 `frameUrl` → `f.url` 로 되돌려도 111개 테스트가 전부 통과했다."""
     name, lineno, line = site
-    # 한 줄 안의 직접 호출이거나, 같은 파일 위쪽에서 굽기 경로로 바인딩된 값이거나.
-    # 후자를 인정하지 않으면 선택을 헬퍼로 모으는 리팩토링이 곧 그물 실패가 되어
-    # 중복을 남기는 쪽이 유리해진다 — 그물이 나쁜 설계를 강요하면 안 된다.
-    arg = re.search(r"\bimg\s*\(\s*([\w.]+)", line)
-    ok = BAKE_URL.search(line) or (arg and _bound_from_bake_source(name, lineno, arg.group(1)))
-    assert ok, (
-        f"{name}:{lineno} 가 굽기 파일이 아닌 소스로 호흡을 그린다.\n  {line}\n"
+    # 판정은 **`_bake_only` 하나**가 소유한다 — 형제 스캐너(워프 base)와 같은 판정기다.
+    #
+    # 앞선 판은 여기서만 옛 관대함을 들고 있었다: (a) 줄에서 첫 `img(` 인자 **한 심볼**만
+    # 뽑아 봐서 같은 선언의 다른 분기가 안 보였고(탈출 C 의 분기 사각이 축만 바꿔 재발),
+    # (b) 줄 **부분문자열** 지름길(`bakeFrameUrl(` 이 어딘가 있으면 통과)이 탈출 G 에서 잎에서는 없앤 그
+    # 관대함을 그대로 남겨뒀다. 그래서 `img(refUrl || frameUrl(...))` 같은 폴백이 540 passed
+    # 로 통과했다 (노을이 탈출 I 실측 2026-07-26).
+    #
+    # 판정기를 좁히면 **모든 호출부가 같이 좁아져야** 한다. 한 곳만 고치면 다음 우회가
+    # 안 고친 쪽으로 간다 — 이 플랜에서 여섯 라운드 반복된 형태다.
+    rhs = line.split("=", 1)[1].strip().rstrip(";") if "=" in line else line
+    assert _bake_only(name, lineno, rhs), (
+        f"{name}:{lineno} 의 어떤 분기가 굽기 파일이 아니다.\n  {line}\n"
         f"  `bakeFrameUrl(state, frame)` 또는 그걸 거치는 store 헬퍼를 써라 "
         f"(frameUrl 은 표시용, f.url 은 캐노니컬).")
 

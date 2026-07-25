@@ -101,6 +101,16 @@ MUTS = [
     ("N5 탈출 H1b: ctx 바인딩을 헬퍼로 묶기 + 폴백", [
         ("scripts/curator/src/zoom-editor.js", '          const b = document.createElement("canvas");\n          b.width = cellW;\n          b.height = cellH;\n          const bx = b.getContext("2d");\n          bx.imageSmoothingEnabled = false;\n          drawFrameInto(bx, image, getTransform(stateName, frameIdx), cellW, cellH,\n            snapScaleFor(stateName), getPixelOps(stateName, frameIdx));', '          const makeCell = (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h;\n            const x = c.getContext("2d"); x.imageSmoothingEnabled = false; return { canvas: c, ctx: x }; };\n          const { canvas: b, ctx: bx } = makeCell(cellW, cellH);\n          drawFrameInto(bx, (image && image.complete && image.naturalWidth) ? image : img(frameUrl(stateName, f)), getTransform(stateName, frameIdx), cellW, cellH,\n            snapScaleFor(stateName), getPixelOps(stateName, frameIdx));'),
     ]),
+    ("N5 탈출 I: || 폴백을 img 인자 안에", [
+        ("scripts/curator/src/zoom-editor.js", '      const canonImg = refUrl ? img(refUrl) : null;',
+         "      const refFrame = frameOf(stateName, refIdx);\n"
+         "      const canonImg = img(refUrl || frameUrl(stateName, refFrame));"),
+    ]),
+    ("N5 탈출 I2: 삼항 else 가 표시 파일", [
+        ("scripts/curator/src/zoom-editor.js", '      const canonImg = refUrl ? img(refUrl) : null;',
+         "      const refFrame = frameOf(stateName, refIdx);\n"
+         "      const canonImg = refUrl ? img(refUrl) : img(frameUrl(stateName, refFrame));"),
+    ]),
     ("N6 폐기 문구 복원", "CHANGELOG.md",
      "is frozen into the sidecar as a cache",
      "is frozen into the sidecar with a fingerprint of the\n  frame it came from; a mismatch re-detects and says so. cache"),
