@@ -121,6 +121,15 @@ def resolve_anchor(request: dict[str, Any], curation: dict[str, Any] | None,
     pick = anchor_choices(curation).get(direction)
     if pick is not None:
         state, index = pick["state"], pick["index"]
+        if pick.get("stale"):
+            # 핀한 행이 재생성됐다 (리롤/재추출). 같은 인덱스는 이제 **다른 그림**이라
+            # 그대로 쓰면 사용자가 본 적 없는 프레임이 방향 identity 가 된다 — 이 플랜이
+            # 존재하는 사고와 정확히 같은 형태다. 조용히 기본값으로 돌아가지도 않는다.
+            raise AnchorUnavailable(
+                "pick-stale-generation",
+                f"anchor: pinned anchor frame {state}#{index} is from an older generation of "
+                f"'{state}' (the row was regenerated, so that index is a different image now) "
+                f"— re-pick the anchor frame in the curation view")
         if state not in request.get("states", {}):
             raise AnchorUnavailable(
                 "pick-unknown-state",
@@ -420,6 +429,17 @@ def run(run_dir: Path, direction: str | None = None, all_directions: bool = Fals
     if for_state:
         if for_state not in request.get("states", {}):
             raise SystemExit(f"anchor: unknown state: {for_state}")
+        # 지정/해제가 굽기로 약속한 방향(교차 방향 경고 포함)을 먼저 처리한다 — 그냥
+        # early return 하면 "양쪽 굽는다" 는 안내가 거짓이 된다.
+        for target in extra_targets:
+            if target == state_direction(request, for_state):
+                continue  # identity_ref 가 아래에서 어차피 굽는다
+            try:
+                materialize(run_dir, target, scale, request=request)
+            except AnchorUnavailable as exc:
+                if not exc.pending:
+                    raise
+                print(f"[anchor] ref not baked yet: {exc}")
         print(identity_ref(run_dir, for_state, request=request, quiet=True)
               .relative_to(run_dir).as_posix())
         return 0
@@ -447,8 +467,10 @@ def run(run_dir: Path, direction: str | None = None, all_directions: bool = Fals
             print(f"[anchor] {target}: {exc}")
             failures.append(exc)
     if failures:
+        # broken 이 하나라도 있으면 그 kind 로 분류한다 — 전부 pending 일 때만 pending.
+        worst = next((f for f in failures if not f.pending), failures[0])
         raise AnchorUnavailable(
-            failures[0].kind,
+            worst.kind,
             f"anchor: {len(failures)} of {len(targets)} direction(s) could not be baked "
             f"(the others were written; re-run for the rest): "
             + " | ".join(str(exc) for exc in failures))

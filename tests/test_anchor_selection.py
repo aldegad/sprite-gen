@@ -104,6 +104,11 @@ def _save_curation(run_dir: Path, states: dict, anchors: dict | None = None) -> 
     write_curation_atomic(run_dir, payload)
 
 
+def _pins(doc: dict | None) -> dict:
+    """지정의 **의미만** 비교 (state/index) — `revision` 세대 스탬프는 구현 세부다."""
+    return {d: {"state": p["state"], "index": p["index"]} for d, p in anchor_choices(doc).items()}
+
+
 def _request(run_dir: Path) -> dict:
     return json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
 
@@ -190,7 +195,7 @@ def test_stage1_run_serves_the_anchor_ref(stage1_run: Path, capsys) -> None:
 def test_stage1_run_pick_persists_and_bakes(stage1_run: Path) -> None:
     run_dir = stage1_run
     assert anchor_mod.run(run_dir=run_dir, pick="down_idle#2") == 0
-    assert anchor_choices(load_curation(run_dir))["down"] == {"state": "down_idle", "index": 2}
+    assert _pins(load_curation(run_dir))["down"] == {"state": "down_idle", "index": 2}
     assert (run_dir / "references" / "anchors" / "down-anchor-x8.png").is_file()
 
 
@@ -200,7 +205,7 @@ def test_ungenerated_run_pick_keeps_pin_and_reports_pending(ungenerated_run: Pat
     assert anchor_mod.run(run_dir=run_dir, pick="down_idle#1") == 0
     out = capsys.readouterr().out
     assert "ref not baked yet" in out and "corrupt" not in out
-    assert anchor_choices(load_curation(run_dir))["down"] == {"state": "down_idle", "index": 1}
+    assert _pins(load_curation(run_dir))["down"] == {"state": "down_idle", "index": 1}
     assert not (run_dir / "references" / "anchors").exists()
 
 
@@ -262,7 +267,7 @@ def test_cli_pick_direction_mismatch_is_reported(direction_run: Path) -> None:
     proc = _cli(direction_run, "--pick", "side_idle#0", "--direction", "down")
     assert proc.returncode == 0, proc.stderr
     assert "does not own 'side_idle'" in proc.stdout
-    assert anchor_choices(load_curation(direction_run)) == {"side": {"state": "side_idle", "index": 0}}
+    assert _pins(load_curation(direction_run)) == {"side": {"state": "side_idle", "index": 0}}
     for d in ("down", "side"):
         assert (direction_run / f"references/anchors/{d}-anchor-x8.png").is_file()
 
@@ -273,7 +278,7 @@ def test_invalid_pick_writes_nothing(direction_run: Path) -> None:
     with pytest.raises(anchor_mod.AnchorUnavailable) as excinfo:
         anchor_mod.run(run_dir=run_dir, pick="down_idle#99")
     assert excinfo.value.kind == "pick-missing"
-    assert anchor_choices(load_curation(run_dir)) == {}
+    assert _pins(load_curation(run_dir)) == {}
 
 
 def test_stage1_view_reports_no_anchor_error(stage1_run: Path) -> None:
@@ -334,10 +339,53 @@ def test_cli_pick_does_not_resurrect_dropped_curation(direction_run: Path) -> No
     assert anchor_mod.run(run_dir=run_dir, pick="side_idle#0") == 0
     doc = load_curation_report(run_dir)[0] or {}
     assert "down_idle" not in (doc.get("states") or {}), "드롭된 큐레이션이 부활했다"
-    assert anchor_choices(doc) == {"side": {"state": "side_idle", "index": 0}}
+    assert _pins(doc) == {"side": {"state": "side_idle", "index": 0}}
     # 그래서 down 앵커는 새 세대의 시퀀스 헤드다 (죽은 selected 의 index 2 가 아니다)
     resolved = anchor_mod.resolve_anchor(_request(run_dir), doc, "down")
     assert (resolved["index"], resolved["source"]) == (0, "default")
+
+
+def test_pin_on_a_regenerated_row_fails_loud_instead_of_following(direction_run: Path) -> None:
+    """핀한 **그 행**이 리롤되면 같은 인덱스는 다른 그림이다 — 조용히 따라가지 않는다.
+
+    따라가면 사용자가 본 적 없는 새 세대 프레임이 방향 identity 가 되어 액션 행 전부에
+    번진다 (이 플랜이 존재하는 2026-07-19 사고와 같은 형태). 조용히 기본값으로 복귀해서도
+    안 된다 — 문서 3곳이 "hard error" 로 못박은 계약이다."""
+    from sprite_gen.curation import load_curation_report
+
+    run_dir = direction_run
+    _save_curation(run_dir, {"down_idle": {"selected": [0, 1, 2, 3],
+                                           "pixels": {"2": {"10,10": "#ff0000"}}},
+                             "side_idle": {"selected": [0, 1, 2, 3]}},
+                   anchors={"down": {"state": "down_idle", "index": 2}})
+    before = anchor_mod.materialize(run_dir, "down", quiet=True).read_bytes()
+    _regenerate_row(run_dir, "down", "idle", seed=31337)
+
+    doc, report = load_curation_report(run_dir)
+    assert report["anchors_stale"] == ["down"]
+    assert (doc.get("anchors") or {}).get("down"), "지정이 조용히 사라졌다 (기본값 복귀)"
+    with pytest.raises(anchor_mod.AnchorUnavailable) as excinfo:
+        anchor_mod.resolve_anchor(_request(run_dir), doc, "down")
+    assert excinfo.value.kind == "pick-stale-generation"
+    assert excinfo.value.pending is False  # 뷰가 오류로 표시해야 한다
+    # 다시 찍으면 풀린다 (그리고 그때 비로소 새 세대 프레임을 굽는다)
+    assert anchor_mod.run(run_dir=run_dir, pick="down_idle#2") == 0
+    after = (run_dir / anchor_mod.anchor_ref_rel("down")).read_bytes()
+    assert after != before, "재지정 후에도 옛 세대 그림이 남았다"
+
+
+def test_pin_survives_when_every_curated_row_is_dropped(direction_run: Path) -> None:
+    """전 행이 드롭돼도 지정은 남아야 한다 — 남아 있어야 오류를 낼 수 있다."""
+    from sprite_gen.curation import load_curation_report
+
+    run_dir = direction_run
+    _save_curation(run_dir, {"down_idle": {"selected": [0, 1, 2, 3]}},
+                   anchors={"down": {"state": "down_idle", "index": 1}})
+    _regenerate_row(run_dir, "down", "idle", seed=4242)
+    doc, report = load_curation_report(run_dir)
+    assert report["dropped"] == ["down_idle"]
+    assert doc is not None, "지정까지 통째로 사라져 조용히 기본값으로 돌아갔다"
+    assert anchor_choices(doc)["down"]["stale"] is True
 
 
 def test_cli_clear_does_not_resurrect_dropped_curation(direction_run: Path) -> None:
@@ -351,7 +399,7 @@ def test_cli_clear_does_not_resurrect_dropped_curation(direction_run: Path) -> N
     assert anchor_mod.run(run_dir=run_dir, clear=True, direction="side") == 0
     doc = load_curation_report(run_dir)[0] or {}
     assert "down_idle" not in (doc.get("states") or {})
-    assert anchor_choices(doc) == {}
+    assert _pins(doc) == {}
 
 
 # --- 사용자 지정 ---------------------------------------------------------------
@@ -404,11 +452,11 @@ def test_pick_from_another_direction_is_rejected(direction_run: Path) -> None:
 def test_cli_pick_then_clear_roundtrip(direction_run: Path) -> None:
     run_dir = direction_run
     assert anchor_mod.run(run_dir=run_dir, pick="down_idle#2") == 0
-    assert anchor_choices(load_curation(run_dir)) == {"down": {"state": "down_idle", "index": 2}}
+    assert _pins(load_curation(run_dir)) == {"down": {"state": "down_idle", "index": 2}}
     # 지정만으로 ref 도 갱신된다 (--direction 이 pick 에서 파생)
     assert (run_dir / "references" / "anchors" / "down-anchor-x8.png").is_file()
     assert anchor_mod.run(run_dir=run_dir, clear=True, direction="down") == 0
-    assert anchor_choices(load_curation(run_dir)) == {}
+    assert _pins(load_curation(run_dir)) == {}
 
 
 def test_cli_for_state_prints_the_identity_ref(direction_run: Path, capsys) -> None:
@@ -431,7 +479,7 @@ def test_cli_pick_preserves_existing_curation_rows(direction_run: Path) -> None:
     curation = load_curation(run_dir)
     assert curation["states"]["down_idle"]["selected"] == [1, 2]
     assert curation["states"]["down_idle"]["transforms"]["1"]["dx"] == 3
-    assert anchor_choices(curation)["down"] == {"state": "down_idle", "index": 1}
+    assert _pins(curation)["down"] == {"state": "down_idle", "index": 1}
 
 
 # --- 소비자 정합 --------------------------------------------------------------
@@ -538,13 +586,13 @@ def test_curation_post_without_anchors_key_keeps_the_pick(direction_run: Path) -
         # anchors 키가 없는 저장 → 이월
         assert post({"version": 1, "kind": "sprite-gen-curation", "runRevision": revision,
                      "states": {"down_idle": {"selected": [0, 1]}}}) == 200
-        assert anchor_choices(load_curation(run_dir))["down"] == {"state": "down_idle", "index": 2}
+        assert _pins(load_curation(run_dir))["down"] == {"state": "down_idle", "index": 2}
         # 빈 anchors 를 명시로 실으면 해제 (뷰의 해제 동작)
         revision = _json.loads(
             urllib.request.urlopen(f"http://127.0.0.1:{port}/api/run").read())["runRevision"]
         assert post({"version": 1, "kind": "sprite-gen-curation", "runRevision": revision,
                      "anchors": {}, "states": {"down_idle": {"selected": [0, 1]}}}) == 200
-        assert anchor_choices(load_curation(run_dir)) == {}
+        assert _pins(load_curation(run_dir)) == {}
         assert "anchors" not in _json.loads(
             (run_dir / "curation.json").read_text(encoding="utf-8"))
     finally:

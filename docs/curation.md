@@ -161,6 +161,11 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   `sprite-gen anchor --pick <state>#<index>`)이 쓰고, 지정이 없는 방향은 **앵커 행
   (`<dir>_<anchor_suffix>`)의 시퀀스 첫 인스턴스**가 앵커다(index 0 이 아니다 — 삭제/재정렬을
   존중한다). 같은 방향이면 다른 행의 프레임도, 시퀀스에 없는 후보 풀 프레임도 지정할 수 있다.
+  각 지정은 **핀한 행의 `state_revision`** 을 함께 들고(쓰기 시 스탬프, 이월 시 재스탬프
+  금지) 그 행이 리롤·재추출되면 게이트가 `stale` 표식을 붙인다 — 같은 인덱스가 다른 그림이
+  되므로 조용히 따라가지 않고, 지정을 지워 기본값으로 되돌리지도 않는다. 그 상태의 생성은
+  `pick-stale-generation` 으로 fail-loud 하고 뷰가 이유를 띄운다(재지정 한 번으로 풀린다).
+  전 행이 드롭돼도 지정은 남는다 — 남아 있어야 오류를 낼 수 있다.
   해석·베이크 SSoT 는 `sprite_gen/anchor.py`, 생성에 붙는 파일은 그 함수가 매번 다시 굽는
   파생 캐시 `references/anchors/<dir>-anchor-x8.png` 이고, 뷰의 앵커 칩은 낡을 수 없게
   `GET /api/anchor?direction=<dir>` 라이브 베이크를 본다. 사라진 인스턴스를 가리키는 지정은

@@ -31,11 +31,16 @@ Schema (`curation.json`):
                                               #   both variants (fit.pixel_perfect).
       "anchors": {                           # optional DIRECTION ANCHOR FRAME PICKS
         "down": {"state": "down_idle",        #   (Soohong 2026-07-25): which curated instance
-                 "index": 2}                  #   is this direction's identity truth for
-      },                                      #   generating its other rows. Any instance of any
-                                              #   row of that direction is allowed (a pool
-                                              #   candidate too). Absent direction -> the
-                                              #   anchor row's sequence head (explicit default).
+                 "index": 2,                  #   is this direction's identity truth for
+                 "revision": ["a1b2c3d4e5f6"] #   generating its other rows. Any instance of any
+        }                                     #   row of that direction is allowed (a pool
+      },                                      #   candidate too). Absent direction -> the anchor
+                                              #   row's sequence head (explicit default).
+                                              #   `revision` = the PINNED ROW's state_revision at
+                                              #   pin time; when the row is later regenerated the
+                                              #   gate marks the pin stale (never re-stamped, never
+                                              #   silently followed to a new frame) and generation
+                                              #   fails loud until it is re-picked.
                                               #   Resolution/bake SSoT = sprite_gen/anchor.py.
       "states": {
         "<state>": {
@@ -102,6 +107,11 @@ Defaults when absent (explicit, not a silent fallback):
                                    silently applied, and never silently destroyed either.
 - `anchors` missing/direction absent -> that direction's anchor is the anchor row's curated
                                    sequence head (`sprite_gen.anchor.resolve_anchor`).
+- pinned row regenerated       -> the pin is KEPT and marked `stale` by the load gate (reported in
+                                   `report["anchors_stale"]`), so resolution fails loud
+                                   (`pick-stale-generation`) instead of silently pointing the pin at
+                                   a brand-new frame the human never saw, and instead of silently
+                                   reverting to the sequence head. Re-pick to clear it.
 - state missing from sidecar   -> same all-frames default for that state.
 - `selected` missing/empty     -> all non-deleted frames in extraction order.
 - `deleted` missing             -> no frames are deleted.
@@ -384,7 +394,7 @@ def backup_stale_curation(run_dir: Path, raw_text: str) -> str:
 def load_curation_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """사이드카 로드 + 세대 검증 보고. Returns (doc|None, report).
 
-    report = {"dropped": [state...], "backup": filename|None}. 규칙:
+    report = {"dropped": [state...], "backup": filename|None, "anchors_stale": [direction...]}. 규칙:
     - run_revision 이 현재와 일치 → 문서 전체 유효 (fast path, dropped 없음).
     - 불일치 → 행 단위 구제: `revision` 스탬프가 현재 state_revision 의 접두인 행만
       유지, 나머지는 드롭. 드롭이 하나라도 있으면 원문을 먼저 백업하고 stderr 로
@@ -392,7 +402,7 @@ def load_curation_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str
     스탬프 없는 행(레거시/수동 편집)은 불일치 세대에서 검증 불가 → 드롭 (No Silent
     Fallback — 증명 없는 선택을 새 프레임에 적용하지 않는다)."""
     path = curation_path(run_dir)
-    report: dict[str, Any] = {"dropped": [], "backup": None}
+    report: dict[str, Any] = {"dropped": [], "backup": None, "anchors_stale": []}
     if not path.is_file():
         return None, report
     raw_text = path.read_text(encoding="utf-8")
@@ -414,16 +424,42 @@ def load_curation_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str
             kept[name] = entry
         else:
             report["dropped"].append(name)
-    if not report["dropped"]:
+    # 앵커 지정은 **드롭하지 않고 stale 표식**을 붙인다. 드롭하면 지정이 조용히 사라져
+    # 기본값(시퀀스 헤드)으로 복귀하고, 이월만 하면 지정이 새 세대의 전혀 다른 프레임에
+    # 조용히 옮겨 붙는다 — 둘 다 "조용한 기본값/엉뚱한 프레임" 금지에 걸린다. 표식을
+    # 달아두면 `sprite_gen.anchor.resolve_anchor` 가 fail-loud 하고 뷰가 이유를 보여준다
+    # (젯비 검증 2026-07-25 4차 기각: 핀한 행을 리롤하면 사용자가 본 적 없는 프레임이
+    # '당신이 핀한 앵커'로 표시되며 액션 행 전부에 번졌다).
+    anchors_out: dict[str, Any] = {}
+    for direction, pick in anchor_choices(data).items():
+        stored = pick.get("revision")
+        current = state_revision(run_dir, pick["state"], request=request) if request else None
+        fresh = (isinstance(stored, list) and stored and current
+                 and stored == current[:len(stored)])
+        entry = {"state": pick["state"], "index": pick["index"]}
+        if stored is not None:
+            entry["revision"] = stored
+        if not fresh:
+            entry["stale"] = True
+            report["anchors_stale"].append(direction)
+        anchors_out[direction] = entry
+    if not report["dropped"] and not report["anchors_stale"]:
         # 런 세대 지문은 바뀌었지만 (예: request 메타 편집) 전 행이 개별 검증을 통과.
-        return {**data, "states": kept}, report
-    report["backup"] = backup_stale_curation(run_dir, raw_text)
-    print(f"[curation] frames regenerated under {CURATION_FILENAME}: dropped "
-          f"{', '.join(report['dropped'])} (kept {len(kept)}), backup {report['backup']}: {run_dir}",
-          file=sys.stderr)
-    if not kept:
+        return {**data, "states": kept, **({"anchors": anchors_out} if anchors_out else {})}, report
+    if report["dropped"]:
+        report["backup"] = backup_stale_curation(run_dir, raw_text)
+        print(f"[curation] frames regenerated under {CURATION_FILENAME}: dropped "
+              f"{', '.join(report['dropped'])} (kept {len(kept)}), backup {report['backup']}: {run_dir}",
+              file=sys.stderr)
+    if report["anchors_stale"]:
+        print(f"[curation] anchor pin(s) point at a regenerated row: "
+              f"{', '.join(report['anchors_stale'])} — generation will fail loud until they are "
+              f"re-picked (they are NOT silently reverted to the sequence head): {run_dir}",
+              file=sys.stderr)
+    if not kept and not anchors_out:
         return None, report
-    return {**data, "states": kept}, report
+    # 전 행이 드롭돼도 지정은 남긴다 — 남아 있어야 오류를 낼 수 있다.
+    return {**data, "states": kept, **({"anchors": anchors_out} if anchors_out else {})}, report
 
 
 def load_curation(run_dir: Path) -> dict[str, Any] | None:
@@ -444,6 +480,19 @@ def stamp_curation(run_dir: Path, payload: dict[str, Any]) -> dict[str, Any]:
         request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         request = None
+    anchors = payload.get("anchors")
+    if isinstance(anchors, dict):
+        for direction, pick in list(anchors.items()):
+            if not isinstance(pick, dict) or not isinstance(pick.get("state"), str):
+                continue
+            pick.pop("stale", None)  # 파생 표식은 저장하지 않는다 (게이트가 매번 재판정)
+            # **없을 때만** 찍는다: 이월되는 기존 지정에 현재 지문을 다시 찍으면 낡은 지정이
+            # 새 세대에서 유효해져 버린다 (states 부활과 같은 병). 새 지정(revision 없음)만
+            # 지금 세대로 도장받는다.
+            if pick.get("revision") is None:
+                rev = state_revision(run_dir, pick["state"], request=request) if request else None
+                if rev:
+                    pick["revision"] = rev
     states = payload.get("states")
     if isinstance(states, dict):
         for name, entry in states.items():
@@ -568,7 +617,14 @@ def anchor_choices(curation: dict[str, Any] | None) -> dict[str, dict[str, Any]]
             except (TypeError, ValueError):
                 continue
             if isinstance(state, str) and state:
-                picks[str(direction)] = {"state": state, "index": index}
+                pick = {"state": state, "index": index}
+                # 세대 지문 (쓰기 시 stamp_curation 이 찍는다) + 로드 게이트가 붙인 stale 표식.
+                # stale 은 파생값이라 파일에 쓰지 않는다 — 게이트가 매번 다시 판정한다.
+                if value.get("revision") is not None:
+                    pick["revision"] = value["revision"]
+                if value.get("stale"):
+                    pick["stale"] = True
+                picks[str(direction)] = pick
     return picks
 
 

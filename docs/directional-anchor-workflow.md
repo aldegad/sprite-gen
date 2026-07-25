@@ -126,8 +126,14 @@ in one image.
      that is not in the played sequence — the best facing pose is not always in
      the idle sequence. Stored in `curation.json` as
      `anchors.<direction> = {state, index}`; `--clear` drops it back to the default.
-   - a pin that points at a vanished instance (archived, row regenerated) is a
-     **hard error** on generation, not a silent fall back to the default.
+   - a pin that points at a vanished instance (archived) is a **hard error** on
+     generation, not a silent fall back to the default.
+   - a pin whose row was later **regenerated** (reroll / re-extract) is equally a
+     hard error (`pick-stale-generation`): the pin carries the pinned row's
+     `state_revision`, so when that row is re-derived the same index is a
+     *different image*, and following it would make a frame the human never saw
+     the direction's identity. The pin is neither re-stamped nor dropped — it is
+     kept and marked stale, so the view can say why and one re-pick clears it.
 
    Two failure classes, deliberately distinct (`AnchorUnavailable.code`): *pending*
    (`no-frames`, `row-not-extracted`) means the anchor row is simply not generated

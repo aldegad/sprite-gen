@@ -34,7 +34,13 @@ All notable changes to `sprite-gen` are recorded here. Versions track the `versi
 - `anchor_suffix` is honoured everywhere (reroll had `idle` hardcoded), the sidecar's stamping
   atomic writer moved to its schema owner `curation.py` so the CLI and the webview stamp
   identically, and a `curation` POST without an `anchors` key carries the stored pin forward.
-- Tests: `tests/test_anchor_selection.py` (15 cases - sequence-head default, edits in the bake,
+- A pin carries the **pinned row's generation stamp**, so regenerating that row marks the pin
+  stale (`pick-stale-generation`) instead of silently following the same index to a different
+  image, and instead of silently dropping the pin back to the sequence head. Re-pick clears it.
+  Existing pins are never re-stamped on carry-forward — that is the same resurrection bug the
+  generation gate exists to prevent, and it was found in the anchors block after being fixed in
+  states.
+- Tests: `tests/test_anchor_selection.py` (31 cases - sequence-head default, edits in the bake,
   cross-row/pool pins, dangling-pin fail-loud, CLI roundtrip, `--for-state`, legacy snapshot
   removal, live chip endpoint, pin carry-over).
 
