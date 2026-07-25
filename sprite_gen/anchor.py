@@ -121,15 +121,6 @@ def resolve_anchor(request: dict[str, Any], curation: dict[str, Any] | None,
     pick = anchor_choices(curation).get(direction)
     if pick is not None:
         state, index = pick["state"], pick["index"]
-        if pick.get("stale"):
-            # 핀한 행이 재생성됐다 (리롤/재추출). 같은 인덱스는 이제 **다른 그림**이라
-            # 그대로 쓰면 사용자가 본 적 없는 프레임이 방향 identity 가 된다 — 이 플랜이
-            # 존재하는 사고와 정확히 같은 형태다. 조용히 기본값으로 돌아가지도 않는다.
-            raise AnchorUnavailable(
-                "pick-stale-generation",
-                f"anchor: pinned anchor frame {state}#{index} is from an older generation of "
-                f"'{state}' (the row was regenerated, so that index is a different image now) "
-                f"— re-pick the anchor frame in the curation view")
         if state not in request.get("states", {}):
             raise AnchorUnavailable(
                 "pick-unknown-state",
@@ -141,6 +132,22 @@ def resolve_anchor(request: dict[str, Any], curation: dict[str, Any] | None,
                 "pick-wrong-direction",
                 f"anchor: picked frame {state}#{index} belongs to direction '{owner}', not "
                 f"'{direction}' — an anchor owns its own facing")
+        if pick.get("stale"):
+            # 핀이 지금 프레임을 가리킨다고 **증명되지 않는다**. 그대로 쓰면 사용자가 본 적
+            # 없는 프레임이 방향 identity 가 된다 (이 플랜이 존재하는 사고와 같은 형태).
+            # 조용히 기본값으로 돌아가지도 않는다. 두 사유를 구분해 말한다 — "재생성됐다" 를
+            # 증명 없는 핀에 붙이면 사실과 다른 오류가 된다 (젯비 5차 기각 2).
+            if pick.get("stale_reason") == "unverifiable":
+                raise AnchorUnavailable(
+                    "pick-unverifiable",
+                    f"anchor: pinned anchor frame {state}#{index} carries no generation stamp, so "
+                    f"it cannot be proven to point at the current frames (a hand-written or "
+                    f"pre-stamp pin) — re-pick the anchor frame in the curation view")
+            raise AnchorUnavailable(
+                "pick-stale-generation",
+                f"anchor: pinned anchor frame {state}#{index} is from an older generation of "
+                f"'{state}' (the row was regenerated, so that index is a different image now) "
+                f"— re-pick the anchor frame in the curation view")
         live = state_instances(curation, state, state_frame_total(request, state))
         if index not in live:
             raise AnchorUnavailable(
@@ -367,11 +374,30 @@ def _write_anchor_pick(run_dir: Path, request: dict[str, Any], state: str | None
         if state is None:
             anchors.pop(direction, None)
         else:
-            anchors[direction] = {"state": state, "index": int(index)}
+            # `repin` = 명시 재지정 의도. CLI 로 찍는 건 언제나 사람이 방금 한 행동이므로
+            # 낡은 핀을 그 자리에서 푼다 (writer 가 소비·제거한다). 뷰는 stale 핀을 다시
+            # 누를 때만 이 플래그를 싣는다 (autosave 가 세탁하지 못하게).
+            anchors[direction] = {"state": state, "index": int(index), "repin": True}
         # 커밋 전 검증 (Atomicity): 지정을 얹은 문서로 먼저 해석해 본다. 없는 인스턴스·
         # 타 방향 프레임을 디스크에 남긴 뒤 죽으면, 사용자는 "지정은 됐는데 매번 에러"
         # 상태에 갇힌다 (젯비 검증 2026-07-25 파생 증상 1 — write 후 크래시로 잔류).
-        resolve_anchor(request, {**doc, "anchors": anchors}, direction)
+        if state is not None:
+            resolve_anchor(request, {**doc, "anchors": anchors}, direction)
+            # 그 행이 아직 추출 전이면 지정 자체를 거부한다. 사람이 본 적 없는 프레임을
+            # 앵커로 찍을 수는 없고, 세대 지문도 계산되지 않아 저장하면 다음 로드에서
+            # "재생성됐다" 로 오분류돼 그 방향 생성이 막힌다 (젯비 5차 기각 2 실측).
+            try:
+                path = frame_source_path(run_dir, request, doc, state, int(index))
+            except AnchorUnavailable as exc:
+                if not exc.pending:
+                    raise
+                path = None
+            if path is None or not path.is_file():
+                raise AnchorUnavailable(
+                    "row-not-extracted",
+                    f"anchor: cannot pin {state}#{index} — that row is not extracted yet "
+                    f"(nothing to look at, and the pin could not be verified later). Generate "
+                    f"and extract '{state}' first, then pin the frame you approved")
         doc["anchors"] = anchors
         write_curation_atomic(run_dir, doc)
     return {"direction": direction, "state": state, "index": index}

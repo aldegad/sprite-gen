@@ -416,6 +416,10 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 }
 .card-controls .anchor-btn.on { color: #b45309; background: rgba(180, 83, 9, 0.1); }
 .card-top .anchor-frame-badge.pinned { background: rgba(180, 83, 9, 0.12); }
+/* 증명되지 않는 핀 = 경고색 (지금 이대로 생성하면 fail-loud 한다) */
+.card-top .anchor-frame-badge.stale { color: #b91c1c; border-color: rgba(185, 28, 28, 0.4); background: rgba(185, 28, 28, 0.08); }
+.card.is-anchor:has(.anchor-frame-badge.stale) { border-color: #b91c1c; background: rgba(185, 28, 28, 0.04); }
+.card-controls .anchor-btn.stale { color: #b91c1c; background: rgba(185, 28, 28, 0.1); }
 
 /* two rows per state: sequence (top) + candidate pool (bottom) */
 .zones { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }

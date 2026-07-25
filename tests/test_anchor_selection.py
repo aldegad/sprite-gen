@@ -199,14 +199,16 @@ def test_stage1_run_pick_persists_and_bakes(stage1_run: Path) -> None:
     assert (run_dir / "references" / "anchors" / "down-anchor-x8.png").is_file()
 
 
-def test_ungenerated_run_pick_keeps_pin_and_reports_pending(ungenerated_run: Path, capsys) -> None:
-    """지정은 사용자 의도라 저장하고, ref 를 아직 못 굽는 건 실패가 아니라 순서다."""
-    run_dir = ungenerated_run
-    assert anchor_mod.run(run_dir=run_dir, pick="down_idle#1") == 0
-    out = capsys.readouterr().out
-    assert "ref not baked yet" in out and "corrupt" not in out
-    assert _pins(load_curation(run_dir))["down"] == {"state": "down_idle", "index": 1}
-    assert not (run_dir / "references" / "anchors").exists()
+def test_ungenerated_run_pick_is_refused_not_half_saved(ungenerated_run: Path) -> None:
+    """추출 전 런에서는 지정 자체가 거부된다 (본 적 없는 프레임 + 지문 계산 불가).
+
+    옛 계약은 "지정은 저장하고 ref 만 나중에" 였는데, 그렇게 저장된 스탬프 없는 핀이 다음
+    로드에서 '재생성됐다' 로 오분류돼 그 방향 생성을 막았다 (젯비 5차 기각 2)."""
+    with pytest.raises(anchor_mod.AnchorUnavailable) as excinfo:
+        anchor_mod.run(run_dir=ungenerated_run, pick="down_idle#1")
+    assert excinfo.value.kind == "row-not-extracted"
+    assert _pins(load_curation(ungenerated_run)) == {}
+    assert not (ungenerated_run / "references" / "anchors").exists()
 
 
 def test_ungenerated_run_for_state_fails_loud_with_the_real_reason(ungenerated_run: Path) -> None:
@@ -372,6 +374,114 @@ def test_pin_on_a_regenerated_row_fails_loud_instead_of_following(direction_run:
     assert anchor_mod.run(run_dir=run_dir, pick="down_idle#2") == 0
     after = (run_dir / anchor_mod.anchor_ref_rel("down")).read_bytes()
     assert after != before, "재지정 후에도 옛 세대 그림이 남았다"
+
+
+def _post_curation(run_dir: Path, body: dict) -> int:
+    """뷰의 저장 경로(HTTP POST /api/curation)를 그대로 태운다 — 서버 writer 검증용."""
+    import json as _json
+    import threading
+    import urllib.request
+    from functools import partial
+    from http.server import ThreadingHTTPServer
+
+    from serve_curation import CurationHandler
+
+    CurationHandler.run_dir = run_dir
+    CurationHandler.lang = "en"
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), partial(CurationHandler))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+    try:
+        snapshot = _json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/run").read())
+        payload = {"version": 1, "kind": "sprite-gen-curation",
+                   "runRevision": snapshot["runRevision"], **body}
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/curation",
+                                     data=_json.dumps(payload).encode(), method="POST")
+        with urllib.request.urlopen(req) as res:
+            return res.status
+    finally:
+        srv.shutdown()
+
+
+def test_view_save_cannot_launder_a_stale_pin(direction_run: Path) -> None:
+    """뷰 저장(무관한 편집)이 낡은 핀을 현재 세대로 **세탁하지 못한다**.
+
+    지문(`revision`)은 엔진 소유다: 뷰 payload 는 `{state, index}` 만 싣고, 저장 시 writer 가
+    저장된 지문을 이월한다. 이월이 없으면 stamp 단계가 지문 없는 핀에 현재 세대 도장을 찍어
+    낡은 핀이 유효해지고 오류 배너가 사라진다 — 4차에서 세운 fail-loud 계약이 뷰 저장 한 번에
+    무효화됐다 (젯비 5차 기각 실측)."""
+    from sprite_gen.curation import load_curation_report
+
+    run_dir = direction_run
+    _save_curation(run_dir, {"down_idle": {"selected": [0, 1, 2, 3]},
+                             "side_idle": {"selected": [0, 1, 2, 3]}},
+                   anchors={"down": {"state": "down_idle", "index": 2}})
+    _regenerate_row(run_dir, "down", "idle", seed=8888)
+    assert load_curation_report(run_dir)[1]["anchors_stale"] == ["down"]
+
+    # 사용자가 재지정은 안 하고 무관한 편집만 저장한다 (뷰는 {state,index} 만 싣는다)
+    assert _post_curation(run_dir, {
+        "anchors": {"down": {"state": "down_idle", "index": 2}},
+        "states": {"side_idle": {"selected": [0, 1]}}}) == 200
+
+    doc, report = load_curation_report(run_dir)
+    assert report["anchors_stale"] == ["down"], "무관한 저장이 낡은 핀을 세탁했다"
+    with pytest.raises(anchor_mod.AnchorUnavailable) as excinfo:
+        anchor_mod.resolve_anchor(_request(run_dir), doc, "down")
+    assert excinfo.value.kind == "pick-stale-generation"
+
+
+def test_explicit_repin_clears_the_stale_pin(direction_run: Path) -> None:
+    """푸는 길은 **명시 재지정**뿐이다 (뷰의 stale 핀 버튼이 `repin: true` 를 싣는다)."""
+    from sprite_gen.curation import load_curation_report
+
+    run_dir = direction_run
+    _save_curation(run_dir, {"down_idle": {"selected": [0, 1, 2, 3]}},
+                   anchors={"down": {"state": "down_idle", "index": 2}})
+    _regenerate_row(run_dir, "down", "idle", seed=5150)
+    assert load_curation_report(run_dir)[1]["anchors_stale"] == ["down"]
+
+    assert _post_curation(run_dir, {
+        "anchors": {"down": {"state": "down_idle", "index": 2, "repin": True}},
+        "states": {}}) == 200
+
+    doc, report = load_curation_report(run_dir)
+    assert report["anchors_stale"] == []
+    resolved = anchor_mod.resolve_anchor(_request(run_dir), doc, "down")
+    assert (resolved["index"], resolved["source"]) == (2, "picked")
+    stored = json.loads((run_dir / "curation.json").read_text(encoding="utf-8"))
+    assert "repin" not in stored["anchors"]["down"]  # 의도 표식은 저장하지 않는다
+
+
+def test_cannot_pin_a_row_that_is_not_extracted(stage1_run: Path) -> None:
+    """추출 전 행은 핀할 수 없다 — 본 적 없는 프레임이고, 지문도 계산되지 않아 나중에
+    "재생성됐다" 로 오분류돼 그 방향 생성을 막았다 (젯비 5차 기각 2)."""
+    from sprite_gen.curation import load_curation
+
+    with pytest.raises(anchor_mod.AnchorUnavailable) as excinfo:
+        anchor_mod.run(run_dir=stage1_run, pick="down_walk#1")
+    assert excinfo.value.kind == "row-not-extracted"
+    assert "not extracted yet" in str(excinfo.value)
+    assert _pins(load_curation(stage1_run)) == {}, "거부된 지정이 디스크에 남았다"
+
+
+def test_unstamped_pin_reports_unverifiable_not_regenerated(direction_run: Path) -> None:
+    """손으로 쓴(스탬프 없는) 핀은 "재생성됨" 이 아니라 "증명 불가" 로 말해야 한다."""
+    from sprite_gen.curation import load_curation_report
+
+    run_dir = direction_run
+    _save_curation(run_dir, {"down_idle": {"selected": [0, 1, 2, 3]}})
+    doc = json.loads((run_dir / "curation.json").read_text(encoding="utf-8"))
+    doc["anchors"] = {"down": {"state": "down_idle", "index": 2}}       # 지문 없이 직접 기입
+    doc["run_revision"] = "0" * 16                                      # fast-path 우회
+    (run_dir / "curation.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    loaded, report = load_curation_report(run_dir)
+    assert report["anchors_stale"] == ["down"]
+    with pytest.raises(anchor_mod.AnchorUnavailable) as excinfo:
+        anchor_mod.resolve_anchor(_request(run_dir), loaded, "down")
+    assert excinfo.value.kind == "pick-unverifiable"
+    assert "no generation stamp" in str(excinfo.value)
 
 
 def test_pin_survives_when_every_curated_row_is_dropped(direction_run: Path) -> None:

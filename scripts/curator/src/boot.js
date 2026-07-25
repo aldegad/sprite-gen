@@ -95,7 +95,14 @@ async function boot() {
     anchorPicks = {};
     for (const [direction, pick] of Object.entries((run.curation && run.curation.anchors) || {})) {
       if (pick && typeof pick.state === "string" && Number.isInteger(Number(pick.index))) {
+        // `stale` 을 **반드시 왕복**시킨다: 이걸 버리면 무관한 편집의 autosave 가 낡은 핀을
+        // 현재 세대로 세탁해 오류 배너가 사라진다 (젯비 5차 기각 실측). 서버 writer 도
+        // fail-safe 로 막지만, 뷰가 진실을 들고 있어야 배지/버튼 상태가 맞는다.
         anchorPicks[direction] = { state: pick.state, index: Number(pick.index) };
+        if (pick.stale) {
+          anchorPicks[direction].stale = true;
+          anchorPicks[direction].stale_reason = pick.stale_reason || "regenerated";
+        }
       }
     }
     // 해석 실패(지정이 사라진 프레임을 가리킴 등)는 조용히 넘기지 않는다 — 이 상태로

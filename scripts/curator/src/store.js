@@ -77,6 +77,13 @@ function isPinnedAnchorFrame(stateName, idx) {
   return !!p && p.state === stateName && p.index === idx;
 }
 
+// 낡은 핀(재생성된 행 / 증명 없는 핀) — 그 프레임을 다시 누르면 재지정으로 풀린다.
+function isStaleAnchorFrame(stateName, idx) {
+  const d = directionOfState(stateName);
+  const p = d && anchorPicks[d];
+  return !!p && !!p.stale && p.state === stateName && p.index === idx;
+}
+
 function anchorFrameLabel(direction) {
   const a = resolvedAnchorFrame(direction);
   return a ? `${a.state}#${a.index}` : "—";
@@ -94,8 +101,18 @@ async function setAnchorFrame(stateName, idx) {
   // 앵커를 눌러도 무반응이면 "지금 이 프레임을 고정해서 재정렬·삭제에도 안 움직이게"
   // 를 뷰에서 할 방법이 없다 (젯비 검증 2026-07-25 범위 밖 note 1 — CLI 로만 가능했다).
   const pinned = anchorPicks[direction];
-  if (pinned && pinned.state === stateName && pinned.index === idx) delete anchorPicks[direction];
-  else anchorPicks[direction] = { state: stateName, index: idx };
+  if (pinned && pinned.state === stateName && pinned.index === idx) {
+    if (pinned.stale) {
+      // 낡은(증명 안 되는) 핀을 그 프레임에서 다시 누른 것 = **명시 재지정**. 지문을 새로
+      // 받아야 오류가 풀린다 — 저장 경로가 조용히 유효화하지 않는 게 계약이라(fail-safe),
+      // 푸는 길은 이 명시 의도뿐이다.
+      anchorPicks[direction] = { state: stateName, index: idx, repin: true };
+    } else {
+      delete anchorPicks[direction];
+    }
+  } else {
+    anchorPicks[direction] = { state: stateName, index: idx };
+  }
   scheduleSave();
   await flushSave();  // 저장이 카운터를 올리고 칩을 다시 받아온다 (persistence.save)
   const group = (run.directionGroups || []).find((g) => g.direction === direction && !g.mirrorOf);
