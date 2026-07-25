@@ -28,6 +28,9 @@ if dirty and not os.environ.get("BATTERY_ALLOW_DIRTY"):
     sys.exit(2)
 os.chdir(REPO)
 
+# 각 항목: (설명, [(파일, 옛 문자열, 새 문자열), ...])
+# 편집을 **묶을 수 있어야 한다** — "이름을 바꾸고 폴백을 되살린다" 처럼 두 곳을 동시에
+# 건드리는 회귀가 실제 탈출구였다 (노을이 탈출 E, 2026-07-26).
 MUTS = [
     ("N1 isfinite 게이트 제거", "sprite_gen/migrate_breathe.py",
      "integral = math.isfinite(raw_breaths) and raw_breaths == int(raw_breaths)",
@@ -53,6 +56,17 @@ MUTS = [
     ("N5 탈출 D: let + 재대입", "scripts/curator/src/cards.js",
      "        const canonical = canonSrc ? img(canonSrc) : null;\n        if (!(canonical && canonical.complete && canonical.naturalWidth)) {",
      "        let canonical = canonSrc ? img(canonSrc) : null;\n        if (!(canonical && canonical.complete && canonical.naturalWidth)) canonical = image;\n        if (false) {"),
+    ("N5 탈출 E: ctx 리네임 + 폴백 복원", [
+        ("scripts/curator/src/cards.js",
+         '        const baseCtx = base.getContext("2d");',
+         '        const warpCtx = base.getContext("2d");'),
+        ("scripts/curator/src/cards.js",
+         "        baseCtx.imageSmoothingEnabled = false;",
+         "        warpCtx.imageSmoothingEnabled = false;"),
+        ("scripts/curator/src/cards.js",
+         "          drawFrameInto(baseCtx, canonical,",
+         "          drawFrameInto(warpCtx, (canonical && canonical.complete && canonical.naturalWidth) ? canonical : image,"),
+    ]),
     ("N6 폐기 문구 복원", "CHANGELOG.md",
      "is frozen into the sidecar as a cache",
      "is frozen into the sidecar with a fingerprint of the\n  frame it came from; a mismatch re-detects and says so. cache"),
@@ -60,14 +74,23 @@ MUTS = [
 
 TARGET = "tests"
 failed_to_bite = []
-for label, rel, old, new in MUTS:
-    path = pathlib.Path(rel)
-    backup = path.read_text(encoding="utf-8")
-    if old not in backup:
-        print(f"  !! {label}: 변이 대상 문자열을 못 찾았다 ({rel}) — 배터리가 낡았다")
+for label, *rest in MUTS:
+    edits = rest[0] if len(rest) == 1 else [(rest[0], rest[1], rest[2])]
+    backups, stale = {}, False
+    for rel, old, new in edits:
+        path = pathlib.Path(rel)
+        text = backups.setdefault(rel, path.read_text(encoding="utf-8"))
+        current = path.read_text(encoding="utf-8")
+        if old not in current:
+            print(f"  !! {label}: 변이 대상 문자열을 못 찾았다 ({rel}) — 배터리가 낡았다")
+            stale = True
+            break
+        path.write_text(current.replace(old, new, 1), encoding="utf-8")
+    if stale:
+        for rel, text in backups.items():
+            pathlib.Path(rel).write_text(text, encoding="utf-8")
         failed_to_bite.append(label + " (대상 없음)")
         continue
-    path.write_text(backup.replace(old, new, 1), encoding="utf-8")
     try:
         r = subprocess.run([PY, "-m", "pytest", TARGET, "-q", "--no-header", "-x",
                             "-k", "breathe or migrate"],
@@ -77,7 +100,8 @@ for label, rel, old, new in MUTS:
         if not bit:
             failed_to_bite.append(label)
     finally:
-        path.write_text(backup, encoding="utf-8")
+        for rel, text in backups.items():
+            pathlib.Path(rel).write_text(text, encoding="utf-8")
 
 print()
 if failed_to_bite:
