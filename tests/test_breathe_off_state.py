@@ -267,14 +267,27 @@ NON_BREATHE_IMG = {
 }
 
 
-def _bound_from_bake_source(name: str, lineno: int, symbol: str) -> bool:
-    """`symbol` 이 이 파일에서 굽기 경로로 바인딩됐는가 (선언 위쪽 40줄 안)."""
+def _bound_from_bake_source(name: str, lineno: int, symbol: str, _depth: int = 3) -> bool:
+    """`symbol` 이 이 파일에서 굽기 경로로 바인딩됐는가 (선언 위쪽 40줄 안).
+
+    **전이적으로** 따라간다: `const canonSrc = bakeFrameUrl(...)` → `const canonical =
+    canonSrc ? img(canonSrc) : null` 처럼 한 단계 건너 오는 게 정상 형태이고, 한 단계만
+    보면 선택을 헬퍼/중간변수로 모으는 리팩토링이 곧 그물 실패가 된다."""
+    if _depth <= 0:
+        return False
     root = symbol.split(".")[0]
     lines = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8")).splitlines()
-    for prev in lines[max(0, lineno - 41):lineno - 1]:
-        if re.search(rf"\b(const|let|var)\b[^=]*\b{re.escape(root)}\b[^=]*=", prev) and \
-                any(src in prev for src in BAKE_SOURCES):
+    for offset, prev in enumerate(lines[max(0, lineno - 41):lineno - 1]):
+        if not re.search(rf"\b(const|let|var)\b[^=]*\b{re.escape(root)}\b[^=]*=", prev):
+            continue
+        if any(src in prev for src in BAKE_SOURCES):
             return True
+        # 이 바인딩이 참조하는 다른 지역 이름을 따라간다
+        rhs = prev.split("=", 1)[1] if "=" in prev else ""
+        prev_line = max(0, lineno - 41) + offset + 1
+        for ref in set(re.findall(r"\b[a-zA-Z_]\w*\b", rhs)) - {root}:
+            if _bound_from_bake_source(name, prev_line, ref, _depth - 1):
+                return True
     return False
 
 
@@ -345,3 +358,64 @@ def test_the_warn_notice_has_a_visible_style():
     """`warn` 알림이 스타일 없이 나가면 '알렸다' 가 사실상 거짓이 된다."""
     css = (CURATOR_SRC.parent / "curator.css").read_text(encoding="utf-8")
     assert ".status.warn" in css, "warn 알림에 스타일이 없다 — 오류·성공과 구분이 안 된다"
+
+
+# ── 워프 base 는 폴백하지 않는다 ────────────────────────────────────
+
+WARP_BASE = re.compile(r"drawFrameInto\(\s*(\w*[Bb]aseCtx)\s*,\s*([^,]+),")
+
+
+def test_the_warp_base_never_falls_back_to_a_display_file():
+    """호흡 워프의 base 는 **굽기가 읽는 파일 하나**다 — 폴백 삼항을 두지 않는다.
+
+    `cards.js` 는 `(canonical && canonical.complete) ? canonical : image` 였다. 굽기 파일
+    이미지가 아직 로드 중이면 **표시 파일**(pp OFF 트윈 줄은 `orig/` 고해상본)을 워프
+    base 로 썼고 알림은 0건이었다 (슉슉이 note 2026-07-26). 로드되면 자가 교정되는
+    일시적 현상이라 산출물은 안 깨지지만, 조용히 **틀린 그림**을 그리는 건 조용히
+    **안 그리는** 것과 다르다 — 아직 준비 안 됐으면 워프하지 않는다(`zoom-editor` 처럼).
+
+    `test_breathe_draws_from_the_file_the_bake_reads` 는 `img(...)` 바인딩만 봐서 이
+    폴백 가지를 못 본다."""
+    found = 0
+    for name in BREATHE_FILES:
+        src = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8"))
+        for m in WARP_BASE.finditer(src):
+            found += 1
+            arg = m.group(2).strip()
+            line = src[:m.start()].count("\n") + 1
+            assert re.fullmatch(r"\w+", arg), (
+                f"{name}:{line} 워프 base 가 폴백을 가진다: {arg!r}\n"
+                "  준비 안 된 소스는 폴백이 아니라 **안 그리는 것**으로 다뤄라.")
+            assert _bound_from_bake_source(name, line, arg), (
+                f"{name}:{line} 워프 base {arg!r} 가 굽기 파일에서 온 값이 아니다")
+    assert found, "워프 base 자리를 하나도 못 찾았다 — 스캐너가 고장났다"
+
+
+# ── 문서가 폐기된 설계를 말하지 않는다 ──────────────────────────────
+
+REPO_ROOT = CURATOR_SRC.parent.parent.parent
+# round-11 이 폐기한 설계의 문구. 문서가 이걸 말하면 다음 사람이 폐기된 모델로 고친다.
+RETIRED_DOC_CLAIMS = [
+    ("fingerprint of the\n  frame it came from", "지문은 프레임이 아니라 **입력 키**의 지문이다"),
+    ("a mismatch re-detects", "굽기는 지문을 안 보고 **매번** 재검출한다"),
+]
+DOC_FILES = ["CHANGELOG.md", "SKILL.md", "README.md",
+             "docs/static-pose-recipe.md", "docs/run-contract.md", "docs/curation.md"]
+
+
+def test_no_doc_still_describes_the_retired_fingerprint_design():
+    """문서는 지금 설계를 말해야 한다 (SSoT 드리프트 금지).
+
+    round-11 이 지문을 *변형 결과 픽셀* 에서 *입력 키* 로 옮겼고 굽기가 캐시를 아예 안
+    믿게 됐는데, CHANGELOG 한 곳만 옛 모델을 계속 말하고 있었다 (슉슉이 note 2026-07-26).
+    같은 규칙을 말하는 진입점이 여럿이면 한쪽만 고쳐진다 — 그래서 전 진입점을 훑는다."""
+    stale = []
+    for rel in DOC_FILES:
+        path = REPO_ROOT / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for claim, why in RETIRED_DOC_CLAIMS:
+            if claim in text:
+                stale.append(f"{rel}: {claim!r} — {why}")
+    assert not stale, "문서가 폐기된 지문 설계를 말한다:\n  " + "\n  ".join(stale)
