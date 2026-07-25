@@ -131,7 +131,14 @@ function breatheSolidBox(data, w, h) {
 // 픽셀 수까지 불일치 (슉슉이 2026-07-25).
 function breatheAssertFresh(referenceCanvas, cfg) {
   const anat = cfg && cfg.anatomy;
-  if (!anat || !anat.fingerprint) return;          // 해부가 없으면 굽기가 매번 재검출한다
+  if (!anat) return;                               // 해부가 아예 없으면 굽기가 매번 재검출한다
+  if (!anat.fingerprint) {
+    // 해부는 있는데 지문이 없다 = **확인할 수 없다.** 조용히 통과시키면 낡은 숫자로
+    // 그리게 된다 — `refreshAnatomy` 가 실패해 지문만 무효화한 상태가 정확히 이 모양이고,
+    // 그때 미러가 통과해 굽기와 164바이트 갈렸다 (슉슉이 실측 2026-07-26).
+    throw new BreatheRefused(
+      "해부에 지문이 없다 — 이 프레임에서 나온 값인지 확인할 수 없다. 해부를 갱신해라.");
+  }
   const w = referenceCanvas.width, h = referenceCanvas.height;
   const data = referenceCanvas.getContext("2d").getImageData(0, 0, w, h).data;
   const now = breatheFingerprint(referenceCanvas, data, breatheSolidBox(data, w, h));

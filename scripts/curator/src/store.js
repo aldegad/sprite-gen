@@ -8,8 +8,11 @@ function breatheRangeProblems(raw) {
   const bounds = [["depth", 0.005, 0.20, 0.06], ["breaths", 1, 8, 1], ["lag", 0, 0.45, 0.1]];
   const bad = [];
   for (const [key, lo, hi, dflt] of bounds) {
-    // 생략(undefined)은 기본값, 명시적 null 은 굽기가 거부하므로 여기서도 문제로 본다
+    // 생략(undefined)은 기본값. 명시적 null 은 굽기가 `float(None)` 으로 거부하므로
+    // **키와 무관하게** 여기서도 문제로 본다 — `Number(null) = 0` 이라 하한이 0 인 `lag`
+    // 만 범위 검사를 통과해 빠져나갔다 (슉슉이 실측 2026-07-26: 원본이 0.1 로 덮였다).
     const given = raw[key];
+    if (given === null) { bad.push(`${key}=null`); continue; }
     const v = given === undefined ? dflt : Number(given);
     if (!Number.isFinite(v) || v < lo || v > hi) { bad.push(`${key}=${JSON.stringify(raw[key])}`); continue; }
     // 정수여야 하는 값은 **정수인지도** 본다. `Math.round` 로 조용히 반올림하면 굽기
@@ -413,7 +416,7 @@ function seedEntries() {
       // (파이썬 `float()`/`int()` 처럼 숫자 문자열도 받는다).
       // `depth` 생략은 굽기에서 기본값 0.06 이다 — 웹뷰만 "호흡 없음" 으로 읽으면
       // 켜짐/꺼짐이 반대가 되고 첫 autosave 가 설정을 지운다 (슉슉이 note 2026-07-26).
-      // `depth: null` 은 굽기가 거부하므로 위 범위 검사에 걸려 여기 안 온다.
+      // 명시적 `null` 은 키와 무관하게 위 범위 검사에 걸려 여기 안 온다.
       breathe: rawBreathe && !retired.length && !outOfRange.length
         // `depth` 생략은 굽기에서 0.06 이다. `Number(undefined)` = NaN 이고
         // `JSON.stringify(NaN)` 은 `null` 이라, 기본값 분기가 없으면 첫 autosave 가
