@@ -194,7 +194,10 @@ def test_the_reference_frame_is_measured_after_the_transform(run_dir):
     plain = freeze_anatomy(plain_frame, {}, plain_key)
 
     curation = {"version": 1, "kind": "sprite-gen-curation",
+                # 호흡을 **켜둔다** — 안 켜면 manifest 에 `breathe` 가 없어 아래 굽기 대조
+                # 절이 통째로 죽은 코드가 된다 (노을이 note 2026-07-26).
                 "states": {"idle": {"selected": [0, 1, 2, 3],
+                                    "breathe": {"depth": 0.06, "breaths": 1, "lag": 0.1},
                                     "transforms": {"0": {"rotate": 5.0, "scale": 1.05}}}}}
     (run_dir / "curation.json").write_text(
         json.dumps(stamp_curation(run_dir, curation)), encoding="utf-8")
@@ -213,8 +216,8 @@ def test_the_reference_frame_is_measured_after_the_transform(run_dir):
     compose_gif.run(run_dir=run_dir, out_dir=out)
     manifest = json.loads((out / "gif-manifest.json").read_text(encoding="utf-8"))
     baked = next(e for e in manifest["exports"] if e["state"] == "idle")
-    baked_anat = baked["breathe"]["resolved"]["anatomy"] if baked.get("breathe") else None
-    if baked_anat:
-        drift = {k: [baked_anat[k], rotated[k]] for k in baked_anat
-                 if k in rotated and baked_anat[k] != rotated[k]}
-        assert not drift, f"라우트가 변형 후 프레임을 안 쟀다 — 굽기와 어긋난다: {drift}"
+    assert baked.get("breathe"), "굽기가 호흡을 안 실었다 — 이 대조 절이 죽은 코드가 된다"
+    baked_anat = baked["breathe"]["resolved"]["anatomy"]
+    drift = {k: [baked_anat[k], rotated[k]] for k in baked_anat
+             if k in rotated and baked_anat[k] != rotated[k]}
+    assert not drift, f"라우트가 변형 후 프레임을 안 쟀다 — 굽기와 어긋난다: {drift}"

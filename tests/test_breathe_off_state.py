@@ -267,28 +267,104 @@ NON_BREATHE_IMG = {
 }
 
 
-def _bound_from_bake_source(name: str, lineno: int, symbol: str, _depth: int = 3) -> bool:
-    """`symbol` 이 이 파일에서 굽기 경로로 바인딩됐는가 (선언 위쪽 40줄 안).
+EMPTY_LEAF = re.compile(r"^(null|undefined|false|0|\"\"|\'\')$")
 
-    **전이적으로** 따라간다: `const canonSrc = bakeFrameUrl(...)` → `const canonical =
-    canonSrc ? img(canonSrc) : null` 처럼 한 단계 건너 오는 게 정상 형태이고, 한 단계만
-    보면 선택을 헬퍼/중간변수로 모으는 리팩토링이 곧 그물 실패가 된다."""
-    if _depth <= 0:
-        return False
-    root = symbol.split(".")[0]
-    lines = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8")).splitlines()
-    for offset, prev in enumerate(lines[max(0, lineno - 41):lineno - 1]):
-        if not re.search(rf"\b(const|let|var)\b[^=]*\b{re.escape(root)}\b[^=]*=", prev):
+
+def _split_top(expr: str, seps: tuple[str, ...]) -> list[str]:
+    """괄호 깊이 0 에서만 자른다 (`?:` 는 `?` 와 `:` 를 짝으로 다룬다)."""
+    out, cur, depth, i = [], "", 0, 0
+    while i < len(expr):
+        ch = expr[i]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if depth == 0:
+            for sep in seps:
+                if expr.startswith(sep, i):
+                    out.append(cur); cur = ""; i += len(sep); break
+            else:
+                cur += ch; i += 1
             continue
-        if any(src in prev for src in BAKE_SOURCES):
-            return True
-        # 이 바인딩이 참조하는 다른 지역 이름을 따라간다
-        rhs = prev.split("=", 1)[1] if "=" in prev else ""
-        prev_line = max(0, lineno - 41) + offset + 1
-        for ref in set(re.findall(r"\b[a-zA-Z_]\w*\b", rhs)) - {root}:
-            if _bound_from_bake_source(name, prev_line, ref, _depth - 1):
-                return True
+        cur += ch; i += 1
+    out.append(cur)
+    return [x.strip() for x in out]
+
+
+def _binding_rhs(name: str, lineno: int, symbol: str):
+    """`symbol` 의 선언(위쪽 40줄)과 그 줄 번호. 못 찾으면 None.
+
+    구조분해(`const { url: refUrl } = breatheGeometryFrame(...)`)도 읽는다 — 못 읽으면
+    "증명 불가 = 거짓" 규칙 때문에 **정상 코드를 오진**한다."""
+    lines = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8")).splitlines()
+    start = max(0, lineno - 41)
+    sym = re.escape(symbol)
+    direct = rf"\b(const|let|var)\s+{sym}\b\s*="
+    destructured = rf"\b(const|let|var)\s*\{{[^}}]*\b{sym}\b[^}}]*\}}\s*="
+    for offset, prev in enumerate(lines[start:lineno - 1]):
+        if re.search(direct, prev) or re.search(destructured, prev):
+            return prev.split("=", 1)[1].strip().rstrip(";"), start + offset + 1
+    return None
+
+
+def _bake_only(name: str, lineno: int, expr: str, depth: int = 8) -> bool:
+    """`expr` 이 **모든 분기에서** 굽기 소스이거나 빈 값인가.
+
+    "굽기 소스에 닿는가" 로는 부족하다 — 앞선 판은 도달만 보고 True 를 줬고, 그래서
+    폐기된 폴백을 한 줄 변수 추출로 원문 그대로 되살려도 537 전부 통과했다:
+
+        const canonImg = canonSrc ? img(canonSrc) : null;
+        const canonical = (canonImg && canonImg.complete) ? canonImg : image;   // <- 무사통과
+
+    워커가 `canonImg` 를 따라 `bakeFrameUrl` 에 닿으면 참을 돌려주고, **같은 바인딩의
+    `: image` 가지를 안 봤다.** 그물을 강화하려고 넣은 전이 추적이 정확히 그 탈출구를 열었다
+    (노을이 실측 2026-07-26 R1). 그래서 도달이 아니라 **분기 전수**로 판정한다.
+
+    증명 못 하면 거짓이다 — 못 찾은 이름(파라미터·상위 스코프)을 통과시키면 같은 구멍이 난다.
+
+    예산(`depth`)은 **바인딩을 따라갈 때만** 깎는다. 삼항·`&&`·`||` 분해는 같은 식을 쪼개는
+    것이라 홉이 아닌데, 거기서도 깎으면 정상 체인이 예산 고갈로 거짓이 되어 오진한다."""
+    if depth <= 0:
+        return False
+    expr = expr.strip()
+    while expr.startswith("(") and expr.endswith(")") and len(_split_top(expr[1:-1], (",",))) == 1:
+        expr = expr[1:-1].strip()
+    if not expr:
+        return False
+    # 삼항: 두 가지가 **모두** 성립해야 한다 (조건절은 값이 아니다)
+    parts = _split_top(expr, ("?",))
+    if len(parts) == 2:
+        branches = _split_top(parts[1], (":",))
+        if len(branches) == 2:
+            return all(_bake_only(name, lineno, b, depth) for b in branches)
+    # `||` 도 분기다 — 모든 피연산자가 성립해야 한다
+    ors = _split_top(expr, ("||",))
+    if len(ors) > 1:
+        return all(_bake_only(name, lineno, o, depth) for o in ors)
+    # `&&` 는 가드 + 값 — 마지막 피연산자만 값이다
+    ands = _split_top(expr, ("&&",))
+    if len(ands) > 1:
+        return _bake_only(name, lineno, ands[-1], depth)
+    # 잎
+    if EMPTY_LEAF.match(expr):
+        return True                       # 값 없음 = 워프 안 함 (폴백이 아니다)
+    if any(src in expr for src in BAKE_SOURCES):
+        return True
+    call = re.fullmatch(r"[\w.]+\(\s*([\w.]+)\s*\)", expr)
+    if call:                              # `img(x)` — 인자를 따라간다
+        return _bake_only(name, lineno, call.group(1), depth - 1)
+    if re.fullmatch(r"[\w.]+", expr):
+        found = _binding_rhs(name, lineno, expr.split(".")[0])
+        if not found:
+            return False                  # 증명 불가 = 거짓
+        rhs, at = found
+        return _bake_only(name, at, rhs, depth - 1)
     return False
+
+
+def _bound_from_bake_source(name: str, lineno: int, symbol: str) -> bool:
+    """호환 진입점 — 판정은 `_bake_only` 하나가 소유한다."""
+    return _bake_only(name, lineno, symbol)
 
 
 def _breathe_image_sites():
@@ -383,11 +459,12 @@ def test_the_warp_base_never_falls_back_to_a_display_file():
             found += 1
             arg = m.group(2).strip()
             line = src[:m.start()].count("\n") + 1
-            assert re.fullmatch(r"\w+", arg), (
-                f"{name}:{line} 워프 base 가 폴백을 가진다: {arg!r}\n"
-                "  준비 안 된 소스는 폴백이 아니라 **안 그리는 것**으로 다뤄라.")
-            assert _bound_from_bake_source(name, line, arg), (
-                f"{name}:{line} 워프 base {arg!r} 가 굽기 파일에서 온 값이 아니다")
+            # 사용 지점의 모양(`\w+` 인지)이 아니라 **분기 전수**로 본다 — 삼항을 한 칸 위
+            # 변수로 옮기는 것만으로 우회되던 판이었다.
+            assert _bake_only(name, line, arg), (
+                f"{name}:{line} 워프 base {arg!r} 의 어떤 분기가 굽기 파일이 아니다.\n"
+                "  준비 안 된 소스는 폴백이 아니라 **안 그리는 것**으로 다뤄라 "
+                "(zoom-editor/compare/row-export 가 이미 쓰는 형태).")
     assert found, "워프 base 자리를 하나도 못 찾았다 — 스캐너가 고장났다"
 
 

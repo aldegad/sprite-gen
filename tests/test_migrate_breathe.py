@@ -95,7 +95,10 @@ def test_a_non_integer_breaths_is_reported_not_truncated() -> None:
     "무엇을 버렸는지 전부 출력한다" 다."""
     from sprite_gen.migrate_breathe import migrate_entry
 
-    for value in (2.7, "3.5", 1.5, 0.5):
+    # `nan`/`inf` 도 담는다: `json.loads` 는 기본값으로 `NaN` 리터럴을 받으므로 사이드카에서
+    # 실제로 들어오고, `int(nan)` 은 `ValueError` 를 올려 마이그레이션을 **트레이스백으로
+    # 죽인다**. 값 목록에 없어서 그 회귀를 그물이 못 봤다 (노을이 실측 2026-07-26 R2).
+    for value in (2.7, "3.5", 1.5, 0.5, float("nan"), float("inf"), float("-inf")):
         fresh, dropped = migrate_entry({"splits": [10], "breaths": value})
         said = [d for d in dropped if d.startswith("breaths=")]
         assert said, f"breaths={value!r} 를 조용히 {fresh['breaths']} 로 바꿨다 — 버린 걸 안 말한다"
