@@ -54,6 +54,45 @@ def _parse_session_id(stdout: str) -> str | None:
     return hits[-1] if hits else None
 
 
+def _extract_stream_errors(stdout: str) -> list[str]:
+    """Pull the human-readable failure cause out of the `codex exec --json` stream.
+
+    codex reports a fatal error (e.g. an unsupported model) as a `turn.failed` or
+    top-level `error` event on **stdout**, not stderr — so surfacing only the exit
+    code and stderr leaves the real reason invisible. Unwraps the API error JSON
+    that codex nests inside `message`."""
+    msgs: list[str] = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "turn.failed":
+            raw = (event.get("error") or {}).get("message")
+        elif event.get("type") == "error":
+            raw = event.get("message")
+        else:
+            continue
+        if not raw:
+            continue
+        text = raw
+        try:
+            inner = json.loads(raw)
+            if isinstance(inner, dict):
+                text = (inner.get("error") or {}).get("message") or inner.get("message") or raw
+        except (json.JSONDecodeError, TypeError):
+            pass
+        text = str(text).strip()
+        if text and text not in msgs:
+            msgs.append(text)
+    return msgs
+
+
 def _resolve_rollout(session_id: str) -> Path:
     home = os.path.expanduser("~/.codex/sessions")
     hits = glob.glob(f"{home}/**/rollout-*{session_id}*.jsonl", recursive=True)
@@ -148,9 +187,11 @@ class CodexProvider:
         elapsed = time.monotonic() - started
         stdout = completed.stdout or ""
         if completed.returncode != 0:
+            stream_errors = _extract_stream_errors(stdout)
             tail = (completed.stderr or "").strip().splitlines()[-20:]
+            detail = "\n".join(stream_errors + tail).strip() or "(no error detail on stdout/stderr)"
             raise SystemExit(
-                f"codex-gen: codex exec exited {completed.returncode}\n" + "\n".join(tail)
+                f"codex-gen: codex exec exited {completed.returncode}\n{detail}"
             )
 
         session_id = _parse_session_id(stdout)

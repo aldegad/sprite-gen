@@ -342,3 +342,23 @@ def test_run_default_falls_back_to_grok_and_reports_it(tmp_path: Path, monkeypat
     assert "codex not logged in" in payload["provider_fallback"]["reason"]
     # And the fallback is loud on stderr (No Silent Fallback).
     assert "falling back to 'grok'" in capsys.readouterr().err
+
+
+def test_codex_stream_errors_surface_the_real_cause() -> None:
+    # codex reports a fatal error (e.g. an unsupported model) on stdout as a
+    # `turn.failed` event, with the API error nested as JSON inside `message`.
+    # Item-level warnings (model metadata, skills budget) must not drown it out.
+    stream = "\n".join([
+        '{"type":"thread.started","thread_id":"abc"}',
+        '{"type":"item.completed","item":{"type":"error","message":"Model metadata for `x` not found."}}',
+        '{"type":"turn.failed","error":{"message":'
+        '"{\\"type\\":\\"error\\",\\"status\\":400,\\"error\\":'
+        '{\\"type\\":\\"invalid_request_error\\",'
+        '\\"message\\":\\"The model is not supported.\\"}}"}}',
+    ])
+    assert codex_provider._extract_stream_errors(stream) == ["The model is not supported."]
+
+
+def test_codex_stream_errors_empty_when_no_failure() -> None:
+    stream = '{"type":"thread.started","thread_id":"abc"}\n{"type":"turn.completed"}'
+    assert codex_provider._extract_stream_errors(stream) == []
