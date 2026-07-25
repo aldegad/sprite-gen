@@ -420,18 +420,20 @@ def _breathe_image_sites():
 # 호흡 이미지 소스를 실제로 가진 파일 — 여기서 사이트가 **사라지면** 커버리지가 조용히
 # 준다. `const` 만 보던 스캐너는 `let` 한 단어로 `cards.js` 사이트를 통째로 잃었고 신호는
 # "테스트가 하나 줄었다" 뿐이었다 (노을이 실측 2026-07-26).
-FILES_WITH_IMAGE_SITES = {"cards.js", "compare.js", "zoom-editor.js", "row-export.js"}
+EXPECTED_IMAGE_SITES = {"cards.js": 1, "compare.js": 1, "zoom-editor.js": 4, "row-export.js": 1}
 
 
 def test_there_are_breathe_image_sites():
     sites = list(_breathe_image_sites())
     assert sites, "호흡 이미지 소스 지점이 사라졌다 — 계약 위치 확인"
-    covered = {name for name, _, _ in sites}
-    missing = FILES_WITH_IMAGE_SITES - covered
-    assert not missing, (
-        f"이 파일들의 호흡 이미지 소스가 스캐너에서 사라졌다: {sorted(missing)}\n"
-        "  선언 키워드나 대입 모양을 바꾸면 사이트가 조용히 증발한다 — 개수가 줄어도 "
-        "실패는 안 나므로 파일 단위로 못박는다.")
+    got = {}
+    for name, _, _ in sites:
+        got[name] = got.get(name, 0) + 1
+    assert got == EXPECTED_IMAGE_SITES, (
+        f"호흡 이미지 사이트 인벤토리가 달라졌다.\n  기대: {EXPECTED_IMAGE_SITES}\n"
+        f"  실제: {got}\n"
+        "  선언 키워드·대입 모양을 바꾸면 사이트가 조용히 증발한다 — 파일 존재만 보면 "
+        "여러 사이트를 가진 파일의 상실을 못 본다(워프 base 스캐너가 그렇게 뚫렸다).")
 
 
 @pytest.mark.parametrize("site", list(_breathe_image_sites()), ids=lambda s: f"{s[0]}:{s[1]}")
@@ -504,8 +506,13 @@ def test_the_warn_notice_has_a_visible_style():
 COMPOSITE_CALL = re.compile(r"breathe(?:Composite|ComposeForPreview)\(\s*(\w+)")
 CTX_BIND = re.compile(r"\b(?:const|let|var)\s+(\w+)\s*=\s*(\w+)\.getContext\(")
 DRAW_INTO = re.compile(r"drawFrameInto\(\s*(\w+)\s*,\s*([^,]+),")
-# 워프 base 를 가진 파일 — 사이트가 여기서 사라지면 **실패**다 (형제 스캐너와 같은 못).
-FILES_WITH_WARP_BASES = {"cards.js", "compare.js", "zoom-editor.js", "row-export.js"}
+# 워프 base **인벤토리** — 파일마다 몇 곳인지까지 못박는다.
+#
+# "파일에 하나라도 있나" 만 보면 사이트가 2곳인 파일(zoom-editor)은 하나가 사라져도
+# 못이 안 운다. 그 자리에 조용한 표시파일 폴백을 되살리면 538 passed, **기준선과 개수까지
+# 동일**이었다 (노을이 탈출 H 실측 2026-07-26). ctx 바인딩을 헬퍼로 묶는 자연스러운 DRY
+# 리팩토링만으로 도달한다 — 적대적 트릭이 필요 없다.
+EXPECTED_WARP_BASES = {"cards.js": 1, "compare.js": 1, "zoom-editor.js": 2, "row-export.js": 1}
 
 
 def _warp_base_sites():
@@ -518,17 +525,22 @@ def _warp_base_sites():
                 yield name, src[:m.start()].count("\n") + 1, m.group(2).strip()
 
 
-def test_every_file_with_a_warp_base_is_still_scanned():
-    """워프 base 사이트가 **파일 단위로** 살아 있어야 한다.
+def test_the_warp_base_inventory_is_intact():
+    """워프 base 사이트가 **파일마다 몇 곳인지까지** 그대로여야 한다.
 
-    전역 `assert found` 하나로는 부족하다 — 한 파일이 통째로 증발해도 다른 파일이 남아
-    참이 되고, 그 사이 그 파일은 무방비다. 형제 스캐너(`FILES_WITH_IMAGE_SITES`)에는
-    이 못을 박아놓고 같은 커밋에서 만든 이 스캐너에는 안 박았다."""
-    covered = {name for name, _, _ in _warp_base_sites()}
-    missing = FILES_WITH_WARP_BASES - covered
-    assert not missing, (
-        f"이 파일들의 호흡 워프 base 가 스캐너에서 사라졌다: {sorted(missing)}\n"
-        "  캔버스·ctx 이름을 바꾸면 사이트가 조용히 증발한다.")
+    존재만 보는 못은 사이트가 여럿인 파일에서 상실을 못 본다 — 하나가 사라져도 나머지가
+    파일을 커버한다. 조용한 커버리지 상실은 이 플랜이 이미 두 번 1급 계약으로 올린
+    실패 모드이고, 이건 그 다음 granularity 다.
+
+    개수가 바뀌면 실패하는 게 **의도다**: 워프 base 를 늘리거나 줄이는 변경은 사람이
+    한 번 보고 이 표를 같이 고쳐야 한다."""
+    got = {}
+    for name, _, _ in _warp_base_sites():
+        got[name] = got.get(name, 0) + 1
+    assert got == EXPECTED_WARP_BASES, (
+        f"워프 base 인벤토리가 달라졌다.\n  기대: {EXPECTED_WARP_BASES}\n  실제: {got}\n"
+        "  줄었으면 사이트가 조용히 증발한 것이고(캔버스·ctx·호출 이름 변경), "
+        "늘었으면 새 워프 base 가 계약에 들어온 것이다 — 어느 쪽이든 표를 같이 고쳐라.")
 
 
 def test_the_warp_base_never_falls_back_to_a_display_file():

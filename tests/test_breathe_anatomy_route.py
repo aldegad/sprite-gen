@@ -221,3 +221,104 @@ def test_the_reference_frame_is_measured_after_the_transform(run_dir):
     drift = {k: [baked_anat[k], rotated[k]] for k in baked_anat
              if k in rotated and baked_anat[k] != rotated[k]}
     assert not drift, f"라우트가 변형 후 프레임을 안 쟀다 — 굽기와 어긋난다: {drift}"
+
+
+def test_the_reference_frame_honours_every_axis_the_bake_uses(run_dir):
+    """"굽기가 보는 것과 같은 픽셀" 은 **네 축 전부**다 — 변형만이 아니다.
+
+    `_breathe_source_frame` 은 (1) 재생 순서로 기준 프레임을 고르고 (2) 픽셀 편집을 얹고
+    (3) 변형을 걸고 (4) pp 런이면 격자로 재양자화한다. 앞선 그물은 (3) 만 태웠고, 나머지
+    셋은 픽스처가 기본값이라 변이를 걸어도 **행동이 안 바뀌어** 통과했다 (노을이 note
+    2026-07-26: `snap=None`, `pixel_ops={}`, `ordered==range(4)`).
+
+    그래서 축마다 **결과를 실제로 바꾸는** 값을 준 뒤, 그 축을 무시하는 변이가 다른
+    프레임을 만들어내는지 본다. "닫았다" 고 적은 계약이 한 축만 덮고 있던 것을 고친다."""
+    import serve_curation
+    from sprite_gen.curation import stamp_curation
+
+    # 재생 첫 슬롯을 2번 프레임으로 바꾸고(순서), 그 프레임에만 픽셀을 칠하고(편집),
+    # 변형을 건다 — 셋 다 기준 프레임의 픽셀을 바꾼다.
+    paint = {f"{x},{y}": "#ff00ff" for x in range(20, 34) for y in range(44, 58)}
+    curation = {"version": 1, "kind": "sprite-gen-curation",
+                "states": {"idle": {"selected": [2, 0, 1, 3],
+                                    "breathe": {"depth": 0.06, "breaths": 1, "lag": 0.1},
+                                    "pixels": {"2": paint},
+                                    "transforms": {"2": {"rotate": 5.0, "scale": 1.05}}}}}
+    (run_dir / "curation.json").write_text(
+        json.dumps(stamp_curation(run_dir, curation)), encoding="utf-8")
+
+    frame, key = serve_curation._breathe_source_frame(run_dir, "idle")
+    assert frame is not None, "기준 프레임을 못 만든다"
+    got = frame.tobytes()
+
+    # 축 (1) 재생 순서: 물리 0번을 기준으로 삼으면 다른 그림이 나와야 한다
+    plain = {"version": 1, "kind": "sprite-gen-curation",
+             "states": {"idle": {"selected": [0, 1, 2, 3],
+                                 "breathe": {"depth": 0.06, "breaths": 1, "lag": 0.1},
+                                 "pixels": {"2": paint},
+                                 "transforms": {"2": {"rotate": 5.0, "scale": 1.05}}}}}
+    (run_dir / "curation.json").write_text(
+        json.dumps(stamp_curation(run_dir, plain)), encoding="utf-8")
+    other, _ = serve_curation._breathe_source_frame(run_dir, "idle")
+    assert other.tobytes() != got, (
+        "재생 순서를 바꿔도 같은 기준 프레임이 나온다 — 이 축이 그물 밖이다")
+
+    # 축 (2) 픽셀 편집: 칠한 색이 기준 프레임에 실제로 있어야 한다
+    (run_dir / "curation.json").write_text(
+        json.dumps(stamp_curation(run_dir, curation)), encoding="utf-8")
+    frame, _ = serve_curation._breathe_source_frame(run_dir, "idle")
+    colors = {px[:3] for px in frame.convert("RGBA").getdata() if px[3] > 0}
+    assert (255, 0, 255) in colors, (
+        "픽셀 편집이 기준 프레임에 안 얹혔다 — 굽기는 얹고 굽는다")
+
+    # 축 (4) 스냅은 별도 테스트 — sprite-request 를 도중에 고쳐 쓰면 `run_revision` 이
+    # 바뀌어 큐레이션이 통째로 무효화되고, 그러면 "달라졌다" 가 **엉뚱한 이유로** 참이 된다
+    # (실제로 그랬다: snap 을 None 으로 만든 변이에서도 통과했다).
+
+
+def test_a_pixel_perfect_run_snaps_the_reference_frame_to_the_grid(tmp_path):
+    """pp 런의 기준 프레임은 **격자에 물려** 있다 (`pixel_snap_scale` 재양자화).
+
+    앞선 판은 테스트 도중 `sprite-request.json` 을 고쳐 써서 두 프레임을 비교했는데,
+    그러면 `run_revision` 이 바뀌어 큐레이션이 무효화되고 "달라졌다" 가 스냅과 무관한
+    이유로 참이 된다 — snap 을 None 으로 만든 변이에서도 통과했다. 그래서 비교가 아니라
+    **속성**을 본다: 격자에 물린 그림은 k 로 줄였다 늘려도 자기 자신이다."""
+    import serve_curation
+    from sprite_gen.curation import pixel_snap_scale, stamp_curation
+
+    run = tmp_path / "run"
+    (run / "frames" / "idle").mkdir(parents=True)
+    request = {
+        "character": {"id": "fixture", "name": "fixture"},
+        "cell": {"shape": "square", "width": CELL, "height": CELL, "size": CELL,
+                 "safe_margin_x": 8, "safe_margin_y": 8, "safe_margin": 8},
+        "fit": {"pixel_perfect": True, "logical_height": CELL // 2},
+        "states": {"idle": {"frames": 2, "fps": 6, "loop": True}},
+    }
+    (run / "sprite-request.json").write_text(json.dumps(request), encoding="utf-8")
+    k = pixel_snap_scale(request)
+    assert k and k > 1, f"픽스처가 스냅 배율을 안 만든다 (k={k}) — 이 테스트는 공허하다"
+    files = []
+    for i in range(2):
+        rel = f"frames/idle/frame-{i}.png"
+        _figure().save(run / rel)
+        files.append(rel)
+    (run / "frames" / "frames-manifest.json").write_text(json.dumps({
+        "ok": True, "errors": [], "warnings": [],
+        "rows": [{"state": "idle", "frames": 2, "method": "components", "files": files,
+                  "ok": True}]}), encoding="utf-8")
+    # 회전을 걸어 둔다 — 스냅이 없으면 BICUBIC 결과가 격자를 벗어난다
+    curation = {"version": 1, "kind": "sprite-gen-curation",
+                "states": {"idle": {"selected": [0, 1],
+                                    "breathe": {"depth": 0.06, "breaths": 1, "lag": 0.1},
+                                    "transforms": {"0": {"rotate": 5.0}}}}}
+    (run / "curation.json").write_text(
+        json.dumps(stamp_curation(run, curation)), encoding="utf-8")
+
+    frame, _ = serve_curation._breathe_source_frame(run, "idle")
+    assert frame is not None
+    small = frame.resize((CELL // k, CELL // k), Image.NEAREST)
+    regrid = small.resize((CELL, CELL), Image.NEAREST)
+    assert regrid.tobytes() == frame.tobytes(), (
+        f"기준 프레임이 k={k} 격자에 안 물려 있다 — 굽기는 물려서 굽는다"
+        " (`apply_transform(snap_scale=...)`)")
