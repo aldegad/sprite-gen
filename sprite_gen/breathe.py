@@ -156,7 +156,7 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
         g = gain(1.0 - j / max(1, height - 1))
         acc += 1.0 if g == 0.0 else 1.0 / (1.0 + g)
         heights.append(acc)
-    total = max(1, round(acc))
+    total = max(1, math.floor(acc + 0.5))
 
     out = Image.new("RGBA", frame.size, (0, 0, 0, 0))
     dst = out.load()
@@ -165,7 +165,7 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
     clipped = 0
     for j in range(height):
         u = 1.0 - j / max(1, height - 1)
-        cur = round(heights[j])
+        cur = math.floor(heights[j] + 0.5)
         reps = max(0, cur - prev)
         prev = cur
         if reps == 0:
@@ -226,14 +226,20 @@ def anatomy_fingerprint(frame: Image.Image) -> str:
 def frame_anatomy(frame: Image.Image, cfg: dict) -> tuple[Anatomy, bool]:
     """(해부, 재검출 여부) — 얼려둔 결과를 쓰되 없거나 지문이 어긋나면 다시 잰다.
 
-    사람이 덮어쓴 `rigid_row` 는 지문과 무관하게 보존한다 — 그건 캐시가 아니라
-    명시된 의도라서 자가 복구 대상이 아니다.
+    `rigid_row` 는 **사람의 의도(입력)** 이고 `anatomy` 는 거기서 파생된 **캐시**다.
+    그래서 얼린 값이 override 와 어긋나면 캐시가 낡은 것이므로 다시 잰다 — 얼린 값을
+    그대로 쓰면 사람이 고친 숫자가 조용히 버려진다 (새미 검증 2026-07-25: cfg 33 을
+    줘도 얼린 23 이 구워졌고 경고도 없었다).
 
     **재검출 여부를 돌려주는 게 계약이다.** 자가 복구가 조용히 일어나면 사이드카의
     숫자와 실제로 구운 숫자가 다른데도 아무도 모른다 (원칙 6). 굽기 경로는 이 값을
     manifest 에 실어야 한다 — `anatomy_report` 참조."""
     frozen = cfg.get("anatomy")
-    if isinstance(frozen, dict) and frozen.get("fingerprint") == anatomy_fingerprint(frame):
+    override = cfg.get("rigid_row")
+    stale_override = (isinstance(frozen, dict) and override is not None
+                      and int(override) != frozen.get("rigid_row"))
+    if (isinstance(frozen, dict) and not stale_override
+            and frozen.get("fingerprint") == anatomy_fingerprint(frame)):
         face = frozen.get("face")
         return Anatomy(width=frozen["width"], height=frozen["height"], axis_x=frozen["axis_x"],
                        neck_row=frozen["neck_row"], neck_source=frozen["neck_source"],
@@ -242,7 +248,7 @@ def frame_anatomy(frame: Image.Image, cfg: dict) -> tuple[Anatomy, bool]:
                        max_half=frozen["max_half"],
                        face=tuple(face) if face else None,
                        warnings=tuple(frozen.get("warnings", ()))), False
-    return analyze(frame, rigid_row=cfg.get("rigid_row")), True
+    return analyze(frame, rigid_row=override), True
 
 
 def anatomy_report(images: list[Image.Image], cfg: dict) -> dict:
@@ -283,11 +289,16 @@ def fit_breathe_pattern(seq_len: int, cfg: dict) -> list[float]:
     """시퀀스 길이에 딱 맞는 호흡 위상 시퀀스 (길이 == seq_len, 루프 불변).
 
     위상은 [0, 1) 의 연속 값이다 — 구 방식의 정수 분할선 단계가 아니다. breaths 회가
-    시퀀스 안에서 정확히 반복되므로 루프 이음매가 없고, 등분 보정도 필요 없다."""
+    시퀀스 안에서 정확히 반복되므로 루프 이음매가 없고, 등분 보정도 필요 없다.
+
+    **정수 나머지를 먼저 취한다.** `(i*breaths/seq_len) % 1.0` 로 쓰면 수학적으로 같은
+    위상이 서로 다른 double 이 되어(18슬롯 3호흡: 유니크 6 -> 14) 아틀라스 칸 재사용이
+    표현 노이즈로 깨진다. 분자를 정수로 접고 한 번만 나누면 반복 위상이 비트 동일하다
+    (새미 검증 2026-07-25: 시트 1344x192 -> 576x192)."""
     if seq_len <= 0:
         return []
     breaths = max(1, int(cfg.get("breaths", 1)))
-    return [(i * breaths / seq_len) % 1.0 for i in range(seq_len)]
+    return [((i * breaths) % seq_len) / seq_len for i in range(seq_len)]
 
 
 def fitted_breath_count(seq_len: int, cfg: dict) -> int:
