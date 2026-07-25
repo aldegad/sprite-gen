@@ -349,8 +349,9 @@ FRESH = re.compile(r"breatheAssertFresh\s*\(")
 # 손으로 적은 파일 화이트리스트(`FRESH_CONSUMERS = ("row-export.js",)`)로 쓰면 안 된다:
 # 그 판일 때 `compare.js` 의 영상 다운로드가 호흡을 조용히 뺀 파일을 만들고 있었는데
 # 그물은 아무 말도 안 했다 (슉슉이 실측 2026-07-26). 대상은 이름이 아니라 **연산**이다.
-EXPORT_EXEMPT = {
-    # (파일, 시작줄) : 이유
+# 파일을 만들지만 **호흡 경로가 아닌** 자리 — 면제는 파일 단위로, 이유와 함께.
+NON_BREATHE_PRODUCERS = {
+    "base-editor.js": "베이스 이미지 편집 업로드 — 호흡 레이어를 안 거친다 (/api/base-edit)",
 }
 
 
@@ -385,10 +386,22 @@ def _enclosing_function(src: str, pos: int) -> tuple[str, int] | None:
 
 
 def _file_producing_functions():
-    """(파일, 시작줄, 본문) — 파일을 만드는 연산을 감싼 함수 전수 (중복 제거)."""
+    """(파일, 시작줄, 본문) — 파일을 만드는 연산을 감싼 함수 전수 (중복 제거).
+
+    **큐레이터 전 파일**을 훑는다. `BREATHE_FILES` 로 한정하면 내보내기 플러밍을 공용
+    헬퍼로 빼는 흔한 DRY 리팩토링만으로 그 함수가 수집에서 통째로 증발한다 — 그리고
+    같은 커밋에서 신선도 게이트를 지워도 540 passed, 기준선과 개수까지 동일이었다
+    (노을이 탈출 L 실측 2026-07-26). 이 그물이 잡으려고 존재하는 **역사적 버그 그 자체**가
+    원문 그대로 되살아나도 신호가 없었다.
+
+    리터럴·주석은 문장 리더와 **같은 중립화**를 쓴다 — 두 리더가 다른 것을 보면 한쪽에만
+    보이는 자리가 생긴다."""
     out, seen = [], set()
-    for name in BREATHE_FILES:
-        src = _strip_comments((CURATOR_SRC / name).read_text(encoding="utf-8"))
+    for name in (p.name for p in sorted(CURATOR_SRC.glob("*.js"))):
+        if name in NON_BREATHE_PRODUCERS:
+            continue
+        src = _neutralize_literals((CURATOR_SRC / name).read_text(encoding="utf-8"),
+                                   strip_comments=True)
         for m in FILE_PRODUCERS.finditer(src):
             found = _enclosing_function(src, m.start())
             assert found, f"{name}:{src[:m.start()].count(chr(10)) + 1} 를 감싼 함수를 못 찾았다"
@@ -400,6 +413,9 @@ def _file_producing_functions():
     return out
 
 
+EXPECTED_FILE_PRODUCERS = {"compare.js": 1, "row-export.js": 1}
+
+
 def test_every_file_producing_path_checks_freshness():
     """파일을 만드는 자리는 **전부** 기준 프레임 신선도를 확인해야 한다.
 
@@ -407,9 +423,8 @@ def test_every_file_producing_path_checks_freshness():
     다운로드는 프리뷰 래퍼를 거쳐 거부를 삼켰다 — 같은 조건에서 두 내보내기가
     **정반대로** 행동했고, 호흡 없는 파일이 나간 뒤 초록 "완료" 알림까지 떴다."""
     sites = _file_producing_functions()
-    assert sites, "파일을 만드는 자리를 하나도 못 찾았다 — 스캐너가 고장났다"
-    missing = [(n, ln) for n, ln, body in sites
-               if not FRESH.search(body) and (n, ln) not in EXPORT_EXEMPT]
+    _assert_inventory("파일 생성 경로", _inventory(sites), EXPECTED_FILE_PRODUCERS)
+    missing = [(n, ln) for n, ln, body in sites if not FRESH.search(body)]
     assert not missing, (
         "파일을 만드는데 신선도를 안 본다 — 낡은 해부로 구운 파일이 사용자에게 간다:\n"
         + "\n".join(f"  {n}:{ln}" for n, ln in missing))
