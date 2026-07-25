@@ -83,3 +83,27 @@ def test_running_twice_is_idempotent(tmp_path, capsys):
 def test_a_missing_sidecar_fails_loudly(tmp_path, capsys):
     assert run(run_dir=tmp_path) == 1
     assert "없다" in capsys.readouterr().out
+
+
+def test_a_non_integer_breaths_is_reported_not_truncated() -> None:
+    """비정수 `breaths` 는 조용히 깎지 않고 **버렸다고 말한다**.
+
+    `int(2.7)` 은 조용히 2 다 — 사용자가 적은 값과 다른 값이 산출물에 들어가고 `dropped`
+    엔 한 줄도 안 남는다. `"3.5"` 문자열만 `ValueError` 로 걸려 보고됐고 실수만 샜다
+    (슉슉이 note 2026-07-26). 굽기(`curation._exact_int`)와 큐레이터 미러가 이미 거부하는
+    값이라 이 **세 번째 구현**만 규칙을 안 지키고 있었고, 이 모듈 자신의 계약이
+    "무엇을 버렸는지 전부 출력한다" 다."""
+    from sprite_gen.migrate_breathe import migrate_entry
+
+    for value in (2.7, "3.5", 1.5, 0.5):
+        fresh, dropped = migrate_entry({"splits": [10], "breaths": value})
+        said = [d for d in dropped if d.startswith("breaths=")]
+        assert said, f"breaths={value!r} 를 조용히 {fresh['breaths']} 로 바꿨다 — 버린 걸 안 말한다"
+        assert "정수" in said[0], f"breaths={value!r}: 정수 계약이 아닌 사유로 버렸다 ({said[0]})"
+
+    # 정수로 표현되는 실수·정수는 그대로 통과한다 (과잉 거부 금지)
+    for value in (3, 3.0):
+        fresh, dropped = migrate_entry({"splits": [10], "breaths": value})
+        assert fresh["breaths"] == 3, f"{value!r} 가 3 으로 안 들어갔다"
+        assert not [d for d in dropped if d.startswith("breaths=")], \
+            f"{value!r} 는 멀쩡한 값인데 버렸다고 보고한다"

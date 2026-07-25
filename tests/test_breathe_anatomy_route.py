@@ -174,3 +174,47 @@ def test_a_resolvable_frame_is_always_reported_the_same_way(run_dir, state, why)
     got = serve_curation._breathe_source_frame(run_dir, state)
     frame, key = got                       # 핸들러와 **같은 모양**으로 받는다 ({why})
     assert frame is None and key is None, f"{why}: {got!r}"
+
+
+def test_the_reference_frame_is_measured_after_the_transform(run_dir):
+    """해부는 **변형을 적용한 뒤**의 프레임에서 잰다.
+
+    굽기는 `apply_pixel_edits` → `apply_transform` 뒤에 호흡을 얹으므로, 원본 프레임에서
+    재면 라우트가 얼리는 경계와 굽기가 쓰는 경계가 다르다. 계약은 지켜지고 있었지만
+    `_breathe_source_frame` 의 마지막 줄을 `return source, key`(변형 생략)로 되돌려도
+    **전체 스위트 529 가 전부 통과했다** — 회귀하면 경계가 몇 행 어긋난 채 조용히 나간다
+    (슉슉이 note 2026-07-26; round-8 이 "라우트 그물 0" 으로 기각한 그 자리다).
+
+    변형이 해부를 **실제로 바꾸는** 값을 쓴다 — 안 그러면 단언이 공허하다."""
+    import serve_curation
+    from sprite_gen.breathe import freeze_anatomy
+    from sprite_gen.curation import stamp_curation
+
+    plain_frame, plain_key = serve_curation._breathe_source_frame(run_dir, "idle")
+    plain = freeze_anatomy(plain_frame, {}, plain_key)
+
+    curation = {"version": 1, "kind": "sprite-gen-curation",
+                "states": {"idle": {"selected": [0, 1, 2, 3],
+                                    "transforms": {"0": {"rotate": 5.0, "scale": 1.05}}}}}
+    (run_dir / "curation.json").write_text(
+        json.dumps(stamp_curation(run_dir, curation)), encoding="utf-8")
+    rot_frame, rot_key = serve_curation._breathe_source_frame(run_dir, "idle")
+    rotated = freeze_anatomy(rot_frame, {}, rot_key)
+
+    moved = {k for k in ("rigid_row", "axis_x", "height", "neck_row")
+             if plain[k] != rotated[k]}
+    assert moved, (
+        "변형을 걸었는데 해부가 하나도 안 움직였다 — 이 픽스처로는 '변형 후에 잰다' 를 "
+        f"보증할 수 없다 (plain={plain}, rotated={rotated})")
+
+    # 그리고 그 값은 **굽기가 쓰는 값**과 같아야 한다
+    from sprite_gen import compose_gif
+    out = run_dir / "gif-rot"
+    compose_gif.run(run_dir=run_dir, out_dir=out)
+    manifest = json.loads((out / "gif-manifest.json").read_text(encoding="utf-8"))
+    baked = next(e for e in manifest["exports"] if e["state"] == "idle")
+    baked_anat = baked["breathe"]["resolved"]["anatomy"] if baked.get("breathe") else None
+    if baked_anat:
+        drift = {k: [baked_anat[k], rotated[k]] for k in baked_anat
+                 if k in rotated and baked_anat[k] != rotated[k]}
+        assert not drift, f"라우트가 변형 후 프레임을 안 쟀다 — 굽기와 어긋난다: {drift}"

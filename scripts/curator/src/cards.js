@@ -432,14 +432,23 @@ function startPreview(state) {
         baseCtx.imageSmoothingEnabled = false;
         // 워프 base 도 신선도 기준과 **같은 변형**이어야 한다 (굽기가 쓰는 그 파일).
         const canonSrc = f && bakeFrameUrl(state.name, f);
-        const canonical = canonSrc ? img(canonSrc) : image;
-        drawFrameInto(baseCtx, (canonical && canonical.complete && canonical.naturalWidth) ? canonical : image,
-          tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
-        const pattern = breathePattern(bcfg, play.length);
-        // 신선도 기준 = 재생 첫 슬롯의 **키** (굽기가 해부를 확정하는 프레임). 그림을 다시
-        // 그려 지문을 찍던 옛 방식은 리샘플러가 굽기와 달라 영구 불일치였다.
-        const refKey = breatheReferenceKey(state.name);
-        ctx.drawImage(bcfg ? breatheComposeForPreview(base, bcfg, pattern[pv.cursor] || 0, refKey) : base, 0, 0);
+        const canonical = canonSrc ? img(canonSrc) : null;
+        if (!(canonical && canonical.complete && canonical.naturalWidth)) {
+          // 굽기 파일이 아직 로드 전이면 **워프하지 않는다.** 표시 파일로 폴백해 워프하면
+          // (pp OFF 트윈 줄은 `orig/` 고해상본이다) 굽기와 다른 그림을 알림 없이 보여준다.
+          // 로드되면 다음 틱에 자가 교정되므로, 그때까지는 호흡 없는 원본을 그린다 —
+          // 조용히 **틀린 그림**을 그리는 것보다 조용히 **안 그리는** 쪽이 맞다
+          // (슉슉이 note 2026-07-26).
+          drawFrameInto(ctx, image, tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
+        } else {
+          drawFrameInto(baseCtx, canonical,
+            tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
+          const pattern = breathePattern(bcfg, play.length);
+          // 신선도 기준 = 재생 첫 슬롯의 **키** (굽기가 해부를 확정하는 프레임). 그림을 다시
+          // 그려 지문을 찍던 옛 방식은 리샘플러가 굽기와 달라 영구 불일치였다.
+          const refKey = breatheReferenceKey(state.name);
+          ctx.drawImage(bcfg ? breatheComposeForPreview(base, bcfg, pattern[pv.cursor] || 0, refKey) : base, 0, 0);
+        }
       } else {
         // 픽셀퍼펙트 줄은 카드와 동일하게 격자 재양자화로 그린다 (프리뷰 = 굽기)
         drawFrameInto(ctx, image, tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));

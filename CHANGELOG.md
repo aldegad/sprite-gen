@@ -21,8 +21,13 @@ All notable changes to `sprite-gen` are recorded here. Versions track the `versi
   on the body, as on a mushroom or a slime - a symmetric eye pair that pushes the boundary below
   the face. A slime has no bottleneck at all, and that case is what forced the amplitude
   normaliser to use the neck only when the bottleneck is real. Detection runs once at curation
-  time (`GET /api/breathe-anatomy`) and is frozen into the sidecar with a fingerprint of the
-  frame it came from; a mismatch re-detects and says so in the manifest.
+  time (`GET /api/breathe-anatomy`) and is frozen into the sidecar as a cache for the curator's
+  preview. The bake never trusts that cache - it re-measures from its own reference frame every
+  time and reports any disagreement as `sidecar_drift` in the manifest. Whether the cached
+  numbers still describe the current frame is decided by a fingerprint of the *inputs* that
+  produce it (source file stamp, pixel edits, transform, variant), not of the resampled pixels:
+  the bake resamples BICUBIC and the webview canvas NEAREST, so a pixel fingerprint was
+  permanently mismatched on any row with a rotate or scale.
 - **The sidecar schema moved and the old one is refused, not reinterpreted.**
   `states.<state>.breathe` is now `{depth, breaths, lag, rigid_row?, anatomy}`;
   `splits`/`amplitude`/`subpixel`/`hold` raise. `sprite-gen migrate-breathe <run-dir>` (dry run

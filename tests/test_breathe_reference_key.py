@@ -553,3 +553,61 @@ def test_the_mirrored_limits_are_the_same_numbers():
     js_keys = {k.strip().strip('"') for k in retired.group(1).split(",")}
     assert js_keys == set(C.RETIRED_BREATHE_KEYS), \
         f"폐기 키 목록이 갈렸다: py={sorted(C.RETIRED_BREATHE_KEYS)} js={sorted(js_keys)}"
+
+
+def test_a_plain_variant_without_a_twin_refuses_instead_of_falling_back():
+    """변종이 `plain` 인데 트윈 파일이 없으면 **캐노니컬로 조용히 떨어지지 않는다**.
+
+    그 상태는 굽기도 `row_frame_rel(row, i, "plain")` 로 없는 파일을 가리켜 실패하는
+    상태다. 웹뷰만 캐노니컬로 떨어지면 두 쪽이 서로 다른 진실을 갖고, 프리뷰는 멀쩡해
+    보이는데 굽기는 죽는다.
+
+    이 계약은 round-12 가 세웠는데 그물이 없었다 — `frame.plainBakeUrl || frame.url` 로
+    되돌려도 529 전부 통과했다 (슉슉이 note 2026-07-26)."""
+    curation = {"states": {"idle": {"pixel_perfect": False}}}   # plain 을 강제
+    payload = {"requestStamp": "9:9", "curation": curation,
+               "states": [{"name": "idle", "frames": [        # 트윈 없음
+                   {"index": 0, "present": True, "url": "/f0.png", "stamp": "1:1"}]}]}
+    got = _webview(payload, {"idle": {"order": [0], "sel": [0]}},
+                   [{"id": "v", "kind": "variant", "state": "idle"},
+                    {"id": "k", "kind": "key", "state": "idle"},
+                    {"id": "g", "kind": "geometry", "state": "idle", "fallback": 0}])
+    assert got["v"] == "plain", "픽스처가 plain 변종을 안 만든다 — 이 테스트는 공허하다"
+    assert got["k"] is None, (
+        f"트윈이 없는데 키를 만들어냈다: {got['k']!r} — 캐노니컬로 조용히 떨어졌다는 뜻이다")
+    assert got["g"]["url"] is None, (
+        f"지오메트리가 굽기가 못 읽는 파일을 가리킨다: {got['g']['url']!r}")
+
+
+@pytest.mark.parametrize("shape", ["null", "empty", "missing"])
+def test_the_mirror_refuses_when_the_key_cannot_be_built(shape):
+    """키를 못 만들면 "확인 불가" 이지 "괜찮음" 이 아니다.
+
+    형제 분기(지문 없음)는 round-10 R3 이후 그물이 있는데 이쪽만 비어 있었다 —
+    `throw` 를 `return` 으로 바꿔도 529 전부 통과했다 (슉슉이 note 2026-07-26).
+    키가 없는 상태는 트윈 없는 plain 줄·빈 재생목록·스탬프 없는 프레임에서 실제로 나온다."""
+    key = {"null": None, "empty": "", "missing": None}[shape]
+    harness = r"""
+const fs = require("fs"), vm = require("vm");
+const P = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const sb = { console, TextEncoder, document: { createElement: () => ({ getContext: () => ({}) }) },
+             entries: {}, run: {}, t: () => "", setStatus: () => {}, fetch: () => {} };
+sb.globalThis = sb; vm.createContext(sb);
+vm.runInContext(fs.readFileSync(P.script, "utf8"), sb);
+let out;
+try {
+  if (P.shape === "missing") sb.breatheAssertFresh(undefined, P.cfg);
+  else sb.breatheAssertFresh(P.key, P.cfg);
+  out = { ok: true };
+} catch (e) {
+  out = { ok: false, refused: e.constructor.name === "BreatheRefused", message: e.message };
+}
+process.stdout.write(JSON.stringify(out));
+"""
+    cfg = {"depth": 0.06, "breaths": 1, "lag": 0.1,
+           "anatomy": {"height": 50, "rigid_row": 12, "fingerprint": "pixel:0:deadbeef"}}
+    got = _node(harness, {"script": str(SRC / "breathe.js"), "key": key,
+                          "shape": shape, "cfg": cfg})
+    assert not got["ok"] and got["refused"], (
+        f"키가 {shape} 인데 미러가 신선하다고 판정했다 — 낡은 해부로 그리고, "
+        f"`row-export` 는 그 캔버스로 파일을 굽는다 ({got})")
