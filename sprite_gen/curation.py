@@ -252,7 +252,9 @@ def pixel_snap_scale(request: dict[str, Any]) -> int | None:
     """Logical-grid scale (cell px per logical px) for a `fit.pixel_perfect` run, or None
     for a legacy run. Mirrors extract's pp_scale so a curation transform baked onto the
     canonical pixel frames re-snaps to the SAME grid the extraction snapped to. Single
-    source for compose/GIF/PNG-export/cycle and (mirrored) the webview preview."""
+    source for compose/GIF/PNG-export/cycle, the extraction itself, and the webview
+    preview — every consumer calls this instead of re-deriving the formula (hand copies
+    drifted: the webview omitted the usable-height clamp branch entirely)."""
     fit = request.get("fit") or {}
     if not fit.get("pixel_perfect"):
         return None
@@ -265,6 +267,22 @@ def pixel_snap_scale(request: dict[str, Any]) -> int | None:
     if logical_height * scale > cell_height:
         scale = max(1, usable_height // max(1, logical_height))
     return scale
+
+
+def effective_logical_height(request: dict[str, Any]) -> int | None:
+    """엔진이 **실제로** 쓰는 논리 높이 = 셀 높이 / 파생 배율. 선언값이 아니다.
+
+    격자 배율은 정수라, 셀 높이의 약수가 아닌 `fit.logical_height` 는 선언대로 적용될
+    수 없다 — 셀 64 에 48 을 선언하면 배율은 `64//48 = 1` 이 되어 논리 높이가 64 로
+    되돌아간다 (선언은 무효, 실사고 hero founder_v7/v8: conform 눌림이 제거된 뒤로
+    48 은 아무 픽셀도 바꾸지 않으면서 웹뷰 라벨만 "48px" 로 거짓 표기했다, 2026-07-25).
+    소비자는 선언값 대신 이 값을 보고, 추출은 선언이 무효화되면 경고로 관측시킨다."""
+    scale = pixel_snap_scale(request)
+    if scale is None:
+        return None
+    cell = request.get("cell", {})
+    cell_height = int(cell.get("height", cell.get("size", 0)))
+    return max(1, cell_height // scale)
 
 
 def run_revision(run_dir: Path) -> str:
@@ -349,8 +367,16 @@ def state_revision(run_dir: Path, state: str, request: dict[str, Any] | None = N
         return None
     cell = request.get("cell", {})
     fit = request.get("fit") or {}
+    # 기하 세그먼트는 **파생된 격자 배율**을 넣는다 — 선언값(`fit.logical_height`)이 아니다.
+    # 선언값을 넣으면 추출 출력이 한 픽셀도 안 바뀌는 선언 편집이 전 행 큐레이션을 무효화
+    # 한다 (실사고 hero founder_v8 2026-07-25: 셀 64 에서 무효값 48 을 지웠을 뿐인데 배율은
+    # 1 그대로, 프레임은 바이트 동일이었는데도 14행이 통째로 드롭됐다). 지문은 "엔진이
+    # 실제로 만들 격자"만 보면 되고, 그게 `pixel_snap_scale` 이다.
+    # 주의: 이 basis 문자열이 바뀌면서 배율 표기 방식이 한 번 바뀐다 (v1.57.1). run_revision
+    # fast-path 가 맞는 사이드카는 영향 없고, 이미 세대가 어긋난 사이드카만 첫 로드에서
+    # 평소대로 드롭 + stale 백업된다 (조용히 재해석하지 않는다 — 원칙 6).
     basis = (f"{cell.get('width', cell.get('size'))}x{cell.get('height', cell.get('size'))}"
-             f":pp={1 if fit.get('pixel_perfect') else 0}:lh={fit.get('logical_height')}")
+             f":pp={1 if fit.get('pixel_perfect') else 0}:scale={pixel_snap_scale(request)}")
     segments = row.get("takes")
     if not segments:
         segments = [{

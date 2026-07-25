@@ -47,8 +47,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from curation import (CURATION_FILENAME, SCHEMA_VERSION, empty_curation, imported_ref_role,
-                      load_curation_report, run_revision, write_curation_atomic)
+from curation import (CURATION_FILENAME, SCHEMA_VERSION, effective_logical_height,
+                      empty_curation, imported_ref_role, load_curation_report, pixel_snap_scale,
+                      run_revision, write_curation_atomic)
 from extract import heal_run, load_consistent_frames_manifest
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -315,8 +316,11 @@ def _build_run_state_impl(run_dir: Path) -> dict:
     fit = request.get("fit") or {}
     pixel_perfect = None
     if fit.get("pixel_perfect"):
-        logical_height = int(fit.get("logical_height", cell_state["height"]))
-        scale = max(1, cell_state["height"] // max(1, logical_height))
+        # 배율·논리 높이는 파생값 SSoT 에서 받는다 — 손으로 복제한 식은 클램프 분기가
+        # 빠져 있었고, 선언값을 그대로 라벨에 쓰면 정수 격자가 반올림한 뒤에도 "48px"
+        # 처럼 거짓 표기가 된다 (수홍 2026-07-25).
+        scale = pixel_snap_scale(request) or 1
+        logical_height = effective_logical_height(request) or cell_state["height"]
         pixel_perfect = {"logicalHeight": logical_height, "scale": scale, "source": "request", "label": f"{logical_height}px"}
 
     states = []

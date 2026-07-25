@@ -17,6 +17,7 @@ from typing import Any
 
 from PIL import Image, ImageChops
 
+from sprite_gen.curation import effective_logical_height, pixel_snap_scale
 from sprite_gen.layout import frames_dir_rel, raw_rel, take_raw_rel
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, publish_guard, relative_posix, release_run_dir_lock
 from sprite_gen.segment import separate_fused_poses
@@ -2475,16 +2476,24 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
     all_warnings: list[str] = []
 
     pixel_perfect = bool(fit_config.get("pixel_perfect"))
-    usable_width = max(1, cell_width - safe_margin_x * 2)
-    usable_height = max(1, cell_height - safe_margin_y * 2)
     # 기본 = 셀과 동일(1:1) — 생성 프롬프트가 "TRUE 셀xN pixel grid" 를 명시하는
     # 현행 레시피에서 원본 그리드를 그대로 따라간다. 청키 2x 룩을 원할 때만
     # 절반 값(예: 셀 64 + 로지컬 32)을 명시한다. (2026-07-05, 이전 기본은 usable//2)
-    logical_height = int(fit_config.get("logical_height", cell_height))
-    pp_scale = max(1, cell_height // max(1, logical_height))
-    if logical_height * pp_scale > cell_height:
-        pp_scale = max(1, usable_height // max(1, logical_height))
+    # 배율·유효 논리 높이의 SSoT 는 `curation.pixel_snap_scale` / `effective_logical_height`
+    # 다 — 여기서 식을 손으로 복제하면 소비자(웹뷰·compose)와 조용히 갈린다 (원칙 1).
+    pp_scale = pixel_snap_scale(request) or 1
+    logical_height = effective_logical_height(request) or cell_height
     logical_width = max(1, cell_width // pp_scale)
+    # 정수 격자가 선언을 반올림해 무효로 만들면 관측시킨다 — 아무 일도 안 하는 값이
+    # 요청 파일에 남아 라벨과 지문만 오염시키던 조용한 실패다 (원칙 6, 수홍 2026-07-25).
+    declared_logical_height = fit_config.get("logical_height")
+    if (pixel_perfect and declared_logical_height is not None
+            and int(declared_logical_height) != logical_height):
+        all_warnings.append(
+            f"fit.logical_height={declared_logical_height} is not applied as declared: the "
+            f"integer logical grid rounds it to {logical_height} (scale {pp_scale}x). Declare a "
+            f"divisor of cell height {cell_height} (e.g. {cell_height}, {max(1, cell_height // 2)}) "
+            f"for a chunkier look, or drop the key — as declared it changes nothing.")
     pp_detail_bias = bool(fit_config.get("detail_bias", True))
     # 기본 48 (24 에서 상향, 2026-07-17): run-wide 팔레트는 배치의 모든 행이 나눠 쓴다.
     # 24 는 다상태 배치(hero 36상태×150프레임)에서 희소 포인트 컬러를 굶겼다 —
