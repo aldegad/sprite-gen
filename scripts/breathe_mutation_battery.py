@@ -67,6 +67,25 @@ MUTS = [
          "          drawFrameInto(baseCtx, canonical,",
          "          drawFrameInto(warpCtx, (canonical && canonical.complete && canonical.naturalWidth) ? canonical : image,"),
     ]),
+    ("N5 탈출 F: 한 인자 헬퍼에 폴백 은닉", [
+        ("scripts/curator/src/cards.js",
+         "        const canonical = canonSrc ? img(canonSrc) : null;\n"
+         "        if (!(canonical && canonical.complete && canonical.naturalWidth)) {",
+         "        const canonImg = canonSrc ? img(canonSrc) : null;\n"
+         "        const readyOr = (c) => (c && c.complete && c.naturalWidth) ? c : image;\n"
+         "        const canonical = readyOr(canonImg);\n"
+         "        if (false) {"),
+    ]),
+    ("N5 탈출 G: 굽기 소스를 인자로 품은 호출", [
+        ("scripts/curator/src/cards.js",
+         "        const canonSrc = f && bakeFrameUrl(state.name, f);\n"
+         "        const canonical = canonSrc ? img(canonSrc) : null;\n"
+         "        if (!(canonical && canonical.complete && canonical.naturalWidth)) {",
+         "        const pick = (u, alt) => { const i = u && img(u); "
+         "return (i && i.complete && i.naturalWidth) ? i : alt; };\n"
+         "        const canonical = pick(f && bakeFrameUrl(state.name, f), image);\n"
+         "        if (false) {"),
+    ]),
     ("N6 폐기 문구 복원", "CHANGELOG.md",
      "is frozen into the sidecar as a cache",
      "is frozen into the sidecar with a fingerprint of the\n  frame it came from; a mismatch re-detects and says so. cache"),
