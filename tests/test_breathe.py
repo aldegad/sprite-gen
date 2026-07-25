@@ -64,6 +64,26 @@ def _winged() -> Image.Image:
     return im
 
 
+def _dome(with_face: bool = False) -> Image.Image:
+    """아래로 갈수록 단조 증가하는 돔 — 병목이 없다 (슬라임형).
+
+    `with_face` 면 몸통 한가운데에 대칭 눈쌍을 둔다. 목이 없고 얼굴이 몸통에 있는
+    가장 어려운 조합이라, 실제 스프라이트를 레포에 넣지 않고도 얼굴 주도 경계
+    경로를 그대로 태운다 (실 스프라이트는 출처·라이선스가 불분명해 픽스처로 안 넣는다)."""
+    pad = 10                                     # 셀 여백 — 늘어난 프레임이 나갈 자리
+    im = Image.new("RGBA", (80, 80 + 2 * pad), (0, 0, 0, 0))
+    for y in range(80):
+        half = 4 + int(34 * (y / 79) ** 0.6)
+        for x in range(40 - half, 40 + half):
+            im.putpixel((x, y + pad), (40, 160, 90, 255))
+    if with_face:
+        for x0 in (30, 44):
+            for y in range(44, 52):
+                for x in range(x0, x0 + 6):
+                    im.putpixel((x, y + pad), (8, 20, 14, 255))
+    return im
+
+
 def _frames(image: Image.Image, count: int = 12, cfg: dict | None = None):
     cfg = dict(cfg or CFG)
     cfg["anatomy"] = freeze_anatomy(image, cfg)
@@ -135,13 +155,7 @@ def test_amplitude_basis_uses_neck_only_when_the_bottleneck_is_real() -> None:
     assert real.neck_source == "bottleneck"
     assert real.basis_row == real.neck_row
 
-    # 아래로 갈수록 단조 증가하는 돔 — 병목이 없다 (슬라임형)
-    dome = Image.new("RGBA", (80, 80), (0, 0, 0, 0))
-    for y in range(80):
-        half = 4 + int(34 * (y / 79) ** 0.6)
-        for x in range(40 - half, 40 + half):
-            dome.putpixel((x, y), (40, 160, 90, 255))
-    anat = analyze(dome)
+    anat = analyze(_dome())
     assert anat.neck_source == "shoulder-gradient"
     assert anat.basis_row == anat.rigid_row, "병목이 가짜면 기준은 강체 경계여야 한다"
     assert any("neck-absent" in w for w in anat.warnings), "대체 판정은 관측 가능해야 한다"
@@ -229,3 +243,58 @@ def test_retired_split_schema_is_rejected_loudly(retired: dict) -> None:
 def test_new_schema_normalizes_and_clamps() -> None:
     cfg = state_breathe({"states": {"idle": {"breathe": {"depth": 99, "breaths": 99, "lag": -1}}}}, "idle")
     assert cfg == {"depth": 0.20, "breaths": 8, "lag": 0.0, "rigid_row": None, "anatomy": None}
+
+
+def test_clipping_the_cell_raises_instead_of_cropping_the_head() -> None:
+    """여백이 없어 늘어난 프레임이 셀 밖으로 나가면 조용히 자르지 않는다."""
+    tight = _humanoid().crop(solid_alpha_bbox(_humanoid()))   # 여백 0
+    cfg = dict(CFG)
+    cfg["anatomy"] = freeze_anatomy(tight, cfg)
+    with pytest.raises(SystemExit) as err:
+        bake_breathe_sequence([tight] * 12, cfg)
+    assert "셀 밖으로" in str(err.value)
+
+
+# ── 8. 얼굴이 몸통에 있는 실루엣 (목 없음) ─────────────────────────
+
+def test_face_on_the_body_pushes_the_boundary_below_the_face() -> None:
+    """슬라임형: 목이 없고 얼굴이 몸통 한가운데다.
+
+    목만 보면 경계가 얼굴 위에 걸려 눈 행이 변형 구간에 들어간다. 얼굴 검출이
+    경계를 얼굴 아래로 내려야 표정이 살아남는다."""
+    slime = _dome(with_face=True)
+    anat = analyze(slime)
+    assert anat.neck_source == "shoulder-gradient", "돔에는 병목이 없어야 한다"
+    assert anat.face is not None, "대칭 눈쌍을 찾아야 한다"
+    assert anat.rigid_row > anat.face[0], "경계가 얼굴 위에 걸리면 안 된다"
+    assert anat.rigid_source == "face"
+    assert anat.basis_row == anat.rigid_row
+
+    frames, _ = _frames(slime)
+    band = int(max(1.5, TAPER * anat.height)) + 1
+    rigid_h = anat.rigid_row - band
+    # 눈(픽스처 44~51행)이 강체 구간 안이어야 한다. face[1] 아래쪽은 입 여유분이라
+    # 테이퍼가 걸쳐도 된다 — 지켜야 하는 건 표정을 만드는 도트지 여유분이 아니다.
+    assert rigid_h > 51, f"눈이 변형 구간에 들어갔다 (강체 {rigid_h}행까지)"
+    ref = frames[0]
+    top = solid_alpha_bbox(ref)[1]
+    expect = ref.crop((0, top, ref.width, top + rigid_h)).tobytes()
+    for i, frame in enumerate(frames[1:], 1):
+        t = solid_alpha_bbox(frame)[1]
+        assert frame.crop((0, t, frame.width, t + rigid_h)).tobytes() == expect, \
+            f"frame {i}: 얼굴이 흔들렸다"
+
+
+def test_face_detection_ignores_a_single_eye_paired_with_a_centred_mouth() -> None:
+    """눈 후보는 축을 **사이에 두고** 있어야 한다.
+
+    이 제약이 없으면 한쪽 눈과 축 위의 입이 짝으로 잡혀 얼굴 구간이 입 아래까지
+    늘어난다 (실측: 버섯에서 경계가 57 -> 64 로 밀렸다)."""
+    im = _dome(with_face=True)
+    for y in range(66, 72):                    # 축 위 입 (눈보다 아래, 눈과 안 닿게)
+        for x in range(37, 44):
+            im.putpixel((x, y), (8, 20, 14, 255))
+    anat = analyze(im)
+    assert anat.face is not None
+    # 눈쌍(44~52)이 이겨야 한다 — 입(56~62)까지 삼키면 bottom 이 훨씬 아래로 간다
+    assert anat.face[0] < 56, f"눈쌍이 아니라 다른 짝이 이겼다: {anat.face}"

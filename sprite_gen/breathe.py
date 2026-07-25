@@ -169,6 +169,7 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
     dst = out.load()
     y_cursor = baseline - total
     prev = 0
+    clipped = 0
     for j in range(height):
         u = 1.0 - j / max(1, height - 1)
         cur = round(heights[j])
@@ -197,14 +198,22 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
                 row_map.append((left + ox, i))
         for r in range(reps):
             yy = y_cursor + r
-            if not 0 <= yy < canvas_h:
-                continue
             for ox, si in row_map:
-                if 0 <= ox < canvas_w:
-                    pixel = src[si, j]
-                    if pixel[3]:
-                        dst[ox, yy] = pixel
+                pixel = src[si, j]
+                if not pixel[3]:
+                    continue
+                if 0 <= yy < canvas_h and 0 <= ox < canvas_w:
+                    dst[ox, yy] = pixel
+                else:
+                    clipped += 1
         y_cursor += reps
+    if clipped:
+        # 조용히 자르지 않는다 — 정수리나 옆구리가 셀 밖으로 나가면 스프라이트가
+        # 망가지고, 그건 여백이나 진폭을 사람이 정해야 하는 문제다 (No Silent Fallback).
+        raise SystemExit(
+            f"breathe: 늘어난 프레임이 셀 밖으로 나가 불투명 픽셀 {clipped}개가 잘린다 "
+            f"(셀 {canvas_w}x{canvas_h}, 콘텐츠 {box[0]},{box[1]}-{box[2]},{box[3]}). "
+            f"셀 여백을 늘리거나 depth 를 낮춰라.")
     return out
 
 
