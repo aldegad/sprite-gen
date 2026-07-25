@@ -148,8 +148,18 @@ function breatheAssertFresh(referenceCanvas, cfg) {
 // 잡되, **조용히 워프된 그림을 보여주지는 않는다** — 못 굽는 설정이면 못 굽는 대로 보인다.
 let _breatheWarned = "";
 function breatheComposeForPreview(base, cfg, phase, reference) {
+  // `reference` 는 **필수 인자**다. 선택으로 두면 호출부가 빠뜨렸을 때 신선도 검사가
+  // 조용히 건너뛰어져, 같은 웹뷰의 두 화면이 정반대로 행동한다 — 줄 카드는 거부하는데
+  // 호흡 편집 모달은 낡은 숫자로 그렸다 (슉슉이 실측 2026-07-26: 12/12 위상 갈림, 알림 0건).
+  //
+  // 인자를 **안 넘긴 것**(프로그래머 실수)과 넘겼는데 **null**(이미지 로딩 중)은 다르다:
+  // 전자는 하드 에러, 후자는 "확인할 수 없으니 워프하지 않는다" 로 부드럽게 거부한다.
+  if (arguments.length < 4) {
+    throw new Error("breatheComposeForPreview: reference 인자가 필요하다 (신선도 검사)");
+  }
   try {
-    if (reference) breatheAssertFresh(reference, cfg);
+    if (!reference) throw new BreatheRefused("기준 프레임을 아직 못 그렸다 — 신선도 확인 불가");
+    breatheAssertFresh(reference, cfg);
     return breatheComposite(base, cfg, phase);
   } catch (err) {
     if (!(err instanceof BreatheRefused)) throw err;

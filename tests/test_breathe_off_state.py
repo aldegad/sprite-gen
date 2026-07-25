@@ -104,7 +104,51 @@ def test_python_bake_never_skips_a_phase(site):
 
 # ── 줄 단위 신선도 검사가 실제로 걸리는가 ──────────────────────────
 
+PREVIEW_CALL = re.compile(r"breatheComposeForPreview\s*\(([^;]*)\)")
 FRESH = re.compile(r"breatheAssertFresh\s*\(")
+
+
+def _preview_call_sites():
+    for path in sorted(CURATOR_SRC.glob("*.js")):
+        if path.name == "breathe.js":
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            m = PREVIEW_CALL.search(line)
+            if m:
+                yield path.name, lineno, line.strip(), m.group(1)
+
+
+def test_there_are_preview_call_sites():
+    assert list(_preview_call_sites()), "프리뷰 호출부가 사라졌다 — 계약 위치 확인"
+
+
+@pytest.mark.parametrize("site", list(_preview_call_sites()), ids=lambda s: f"{s[0]}:{s[1]}")
+def test_every_preview_call_passes_a_freshness_reference(site):
+    """프리뷰 호출부는 **전부** 기준 프레임을 넘겨야 한다.
+
+    round-7 은 `reference` 를 선택 인자로 뒀고 5곳 중 2곳만 넘겼다. 나머지 3곳은
+    `if (reference)` 를 통째로 건너뛰어, 같은 웹뷰의 두 화면이 정반대로 행동했다 —
+    줄 카드는 거부하는데 호흡 편집 모달은 낡은 숫자로 조용히 그렸다 (슉슉이 실측
+    2026-07-26: 12/12 위상 갈림, 알림 0건). round-2 가 켜짐 게이트를 호출부 전수
+    파라미터화로 고정한 것과 같은 형태의 그물이다."""
+    name, lineno, line, args = site
+    # `breatheComposeForPreview(a, b, c, ref)` — 인자 4개여야 한다
+    depth = 0
+    parts, cur = [], ""
+    for ch in args:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(cur.strip()); cur = ""
+        else:
+            cur += ch
+    parts.append(cur.strip())
+    assert len(parts) >= 4 and parts[3], (
+        f"{name}:{lineno} 가 기준 프레임을 안 넘긴다 — 신선도 검사가 건너뛰어진다.\n  {line}")
+
+
 # 굽기와 같은 그림을 내보내는 경로 — 여기서 신선도를 안 보면 낡은 해부로 굽는다.
 FRESH_CONSUMERS = ("row-export.js",)
 

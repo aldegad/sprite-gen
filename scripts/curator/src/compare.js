@@ -145,8 +145,24 @@ function openCompare() {
     drawFrameInto(bx, image, getTransform(name, idx), base.width, base.height,
       snapScaleFor(name), getPixelOps(name, idx));
     const bcfg = stateBreathe(name);
+    // 신선도 기준 = 재생 첫 슬롯 (굽기가 해부를 확정하는 프레임). 굽기와 같은 변형으로 그린다.
+    let ref = null;
+    if (bcfg) {
+      const play = playList(name);
+      const rf = play.length ? frameOf(name, play[0]) : null;
+      const rimg = rf ? img(frameUrl(name, rf)) : null;
+      if (rimg && rimg.complete && rimg.naturalWidth) {
+        ref = document.createElement("canvas");
+        ref.width = base.width;
+        ref.height = base.height;
+        const rx = ref.getContext("2d");
+        rx.imageSmoothingEnabled = false;
+        drawFrameInto(rx, rimg, getTransform(name, play[0]), ref.width, ref.height,
+          snapScaleFor(name), getPixelOps(name, play[0]));
+      }
+    }
     // 위상 0 도 워프한다 — 진행파 지연 때문에 t=0 이 항등이 아니다 (굽기와 동일 계약)
-    const out = bcfg ? breatheComposeForPreview(base, bcfg, phase || 0) : base;
+    const out = bcfg ? breatheComposeForPreview(base, bcfg, phase || 0, ref) : base;
     // 콘텐츠 bbox (합성 결과 기준 — 변형으로 옮겨진 위치 반영)
     const d = out.getContext("2d").getImageData(0, 0, out.width, out.height).data;
     let x0 = out.width, y0 = out.height, x1 = 0, y1 = 0;
