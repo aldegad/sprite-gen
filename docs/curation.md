@@ -147,7 +147,10 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   생기면 원문 전체가 `curation.stale-<hash>.json` 으로 먼저 백업**되고(내용 해시 파일명,
   멱등) stderr + 웹뷰 배너(`/api/run` 의 `curationDropped`/`curationBackup`)로 보고된다 —
   같은 raw 의 엔진 업그레이드 재유도에는 선택이 살아남고, raw 리롤은 그 행만 리셋되며,
-  무엇도 조용히 소실되지 않는다.
+  무엇도 조용히 소실되지 않는다. 다이제스트의 기하 세그먼트는 셀 크기 + `pixel_perfect` +
+  **파생 격자 배율**(`pixel_snap_scale`)이다 — `fit.logical_height` 선언값 자체가 아니다.
+  출력이 한 픽셀도 안 바뀌는 선언 편집(무효값 제거 등)이 전 행을 무효화하지 않게 하기 위해서다
+  (실사고 hero founder_v8 2026-07-25, 계약 = `tests/test_logical_height_contract.py`).
 - `clones` — 프레임 복제 인스턴스 맵 `{복제 인덱스: 원본 프레임 인덱스}` (웹뷰 카드의 ⧉
   버튼). 복제 인덱스는 물리 범위(0..N-1) 밖의 정수이고 `selected`/`order`/`transforms`/
   `pixels` 에 자기 인덱스로 참여하는 정식 인스턴스다 — 자기만의 변형/픽셀편집/순서를 갖고,

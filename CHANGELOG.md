@@ -5,6 +5,36 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.57.1 "Honest Grid" - the logical grid reports what the engine actually does, not what the request declared
+
+A dead `fit.logical_height` value poisoned two things and nobody could see it. Cell 64 with
+`logical_height: 48` folds to scale 1 (`64 // 48 == 1 == 64 // 64`), so the declaration changed
+no pixel at all once `fit.conform` was removed (2026-07-14/17). What it *did* do: the curator
+header labelled the row "48px" while the real logical height was 64, and the curation row
+fingerprint carried the raw declaration — so deleting the dead key dropped 14 curated rows of a
+hero run whose frames were byte-identical before and after (product `solvell` founder_v7/v8,
+Soohong 2026-07-25).
+
+- **Derived truth, not declared truth.** New `curation.effective_logical_height(request)` =
+  cell height / derived scale. The webview label and the row fingerprint both read it, so a
+  declaration the integer grid rounds away can no longer misreport the grid or invalidate work.
+- **`state_revision` geometry segment now records the derived scale** (`scale=<n>`) instead of
+  `lh=<declaration>`. Output-identical request edits keep curation alive; a declaration that
+  really changes the scale still invalidates the rows, as it must.
+- **An unhonored declaration is now observable** (원칙 6): extraction warns
+  `fit.logical_height=<v> is not applied as declared: the integer logical grid rounds it to <n>
+  (scale <s>x)` with divisor guidance. Valid divisor declarations stay silent.
+- **One owner for the scale formula** (원칙 1): `extract.py` and `serve_curation.py` call
+  `pixel_snap_scale` instead of re-deriving it. The hand copies had already drifted — the webview
+  copy was missing the usable-height clamp branch entirely. Two dead locals removed with it.
+- Contract regressions: `tests/test_logical_height_contract.py` (6 cases, incl. byte-identity of
+  frames across the dead-value edit and the no-warning-on-valid-declaration case).
+
+Migration: the fingerprint's geometry segment string changes once. A sidecar whose
+`run_revision` still matches its run is unaffected (fast path). A sidecar that was *already*
+stale re-validates under the new segment and drops rows on first load with the usual
+`curation.stale-<hash>.json` backup and stderr report — nothing is silently reinterpreted.
+
 ## v1.57.0 "First Pixel Breath" - the first tagged release since v1.56.16: the sprites breathe, and the pixel lattice is measured rather than assumed
 
 The last published tag was **v1.56.16 "Atelier" (2026-07-16)**. Seventy-three
