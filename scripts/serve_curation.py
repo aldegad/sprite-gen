@@ -200,6 +200,19 @@ def _anchor_views(run_dir: Path, request: dict, curation: dict | None, version: 
     return views
 
 
+def _anchor_group_fields(view: dict) -> dict:
+    """directionGroups 항목에 실리는 앵커 필드. `pending`(그 행을 아직 안 뽑았다)은
+    오류가 아니라 정상 구간이라 뷰가 경고색으로 칠하지 않는다 — 코드로 구분한다."""
+    return {
+        "anchorFrame": ({"state": view["state"], "index": view["index"], "source": view["source"]}
+                        if view.get("state") is not None else None),
+        "anchorError": view.get("error"),
+        "anchorErrorCode": view.get("code"),
+        "anchorPending": bool(view.get("pending")),
+        "anchorUrl": view.get("url"),  # 라이브 베이크 (파이프라인 트리 썸네일도 이걸 쓴다)
+    }
+
+
 def _state_refs(run_dir, state, request, anchor_views=None):
     """상태 하나의 생성 레퍼런스 체인(방향 앵커/basis row/레이아웃 가이드).
 
@@ -408,17 +421,13 @@ def _build_run_state_impl(run_dir: Path) -> dict:
             # 앵커를 그룹 맨 앞으로 (요청 순서 보존, 앵커만 승격)
             if anchor in members:
                 members = [anchor, *[m for m in members if m != anchor]]
-            view = anchor_views.get(direction) or {}
+            # 지금 이 방향의 identity 로 쓰이는 인스턴스 (지정 or 앵커 행 시퀀스 헤드)
+            # — 뷰가 그 카드에 앵커 배지를 붙이고, 해석 실패는 이유를 보여준다.
             direction_groups.append({
                 "direction": direction,
                 "anchor": anchor if anchor in request["states"] else None,
                 "states": members,
-                # 지금 이 방향의 identity 로 쓰이는 인스턴스 (지정 or 앵커 행 시퀀스 헤드)
-                # — 뷰가 그 카드에 앵커 배지를 붙이고, 해석 실패는 이유를 보여준다.
-                "anchorFrame": ({"state": view["state"], "index": view["index"],
-                                 "source": view["source"]} if view.get("state") is not None else None),
-                "anchorError": view.get("error"),
-                "anchorUrl": view.get("url"),  # 라이브 베이크 (파이프라인 트리 썸네일도 이걸 쓴다)
+                **_anchor_group_fields(anchor_views.get(direction) or {}),
             })
         for target, source in (directions_cfg.get("mirror") or {}).items():
             direction_groups.append({"direction": target, "mirrorOf": source, "states": []})

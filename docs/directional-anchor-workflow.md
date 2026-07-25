@@ -129,6 +129,17 @@ in one image.
    - a pin that points at a vanished instance (archived, row regenerated) is a
      **hard error** on generation, not a silent fall back to the default.
 
+   Two failure classes, deliberately distinct (`AnchorUnavailable.code`): *pending*
+   (`no-frames`, `row-not-extracted`) means the anchor row is simply not generated
+   yet — the normal state during stage 1, so the curation view stays quiet and
+   `--pick` still records the pin; everything else is *broken* (a pin the human must
+   re-make) and the view reports it. The anchor consumer runs **mid-generation** by
+   definition, so it gates on the manifest row it actually needs
+   (`load_consistent_frames_manifest(allow_pending_states=True)`), never on the
+   finished-generation gate — the strict gate demands a manifest row for every
+   requested state, which is never true at the moment an action row is about to be
+   generated.
+
 3. **State anchor gate** — for each requested non-locomotion state and
    direction, create one representative state anchor before generating the
    multi-frame row. For example, `working-front-right-anchor` can show the

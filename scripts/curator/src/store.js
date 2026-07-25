@@ -69,6 +69,14 @@ function isAnchorFrame(stateName, idx) {
   return !!a && a.state === stateName && a.index === idx;
 }
 
+// 명시 지정된(고정된) 앵커인가 — 배지는 "지금 앵커인가"(isAnchorFrame), 버튼의 토글
+// 방향은 "고정돼 있나"(이것)로 갈린다. 기본값 앵커도 눌러서 고정할 수 있어야 한다.
+function isPinnedAnchorFrame(stateName, idx) {
+  const d = directionOfState(stateName);
+  const p = d && anchorPicks[d];
+  return !!p && p.state === stateName && p.index === idx;
+}
+
 function anchorFrameLabel(direction) {
   const a = resolvedAnchorFrame(direction);
   return a ? `${a.state}#${a.index}` : "—";
@@ -81,10 +89,12 @@ let anchorCacheBust = 0; // 칩(라이브 베이크) 표시 캐시 무효화 —
 async function setAnchorFrame(stateName, idx) {
   const direction = directionOfState(stateName);
   if (!direction) return;
-  const current = resolvedAnchorFrame(direction);
-  const already = current && current.state === stateName && current.index === idx;
-  if (already && anchorPicks[direction]) delete anchorPicks[direction];
-  else if (already) return; // 이미 기본값으로 앵커인 프레임 — 해제할 지정이 없다
+  // 토글 축은 **명시 지정 여부**다 (기본값으로 앵커인가가 아니다): 지정된 그 프레임을
+  // 다시 누르면 해제, 그 외에는(기본값으로 이미 앵커인 프레임 포함) 명시 지정. 기본값
+  // 앵커를 눌러도 무반응이면 "지금 이 프레임을 고정해서 재정렬·삭제에도 안 움직이게"
+  // 를 뷰에서 할 방법이 없다 (젯비 검증 2026-07-25 범위 밖 note 1 — CLI 로만 가능했다).
+  const pinned = anchorPicks[direction];
+  if (pinned && pinned.state === stateName && pinned.index === idx) delete anchorPicks[direction];
   else anchorPicks[direction] = { state: stateName, index: idx };
   scheduleSave();
   await flushSave();  // 저장이 카운터를 올리고 칩을 다시 받아온다 (persistence.save)

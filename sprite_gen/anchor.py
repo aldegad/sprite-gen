@@ -40,6 +40,28 @@ ANCHOR_SCALE = 8
 CONTENT_ALPHA_FLOOR = 40  # 콘텐츠 crop 기준 (프린지 알파를 콘텐츠로 세지 않는다)
 
 
+class AnchorUnavailable(SystemExit):
+    """앵커를 지금 낼 수 없다. `code` 가 **"아직"(pending)** 과 **"깨졌다"(broken)** 를 가른다.
+
+    두 상태는 사용자에게 전혀 다른 뜻이다: `pending` 은 생성이 거기까지 안 온 정상 구간
+    (앵커 행을 아직 안 뽑았다)이고, broken 은 사람이 고쳐야 하는 것(지정이 사라진 프레임을
+    가리킨다·다른 방향 프레임을 지정했다)이다. 이 구분이 없으면 뷰가 멀쩡한 작업 중간 런에
+    빨간 오류를 띄운다 (젯비 검증 2026-07-25 파생 증상 2).
+
+    `SystemExit` 하위라 기존 fail-loud 계약(CLI 종료 코드, 서버의 `except SystemExit`)은
+    그대로 산다 — 새 예외 계층을 만들어 호출부를 뜯지 않는다."""
+
+    PENDING_CODES = frozenset({"no-frames", "row-not-extracted"})
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+    @property
+    def pending(self) -> bool:
+        return self.code in self.PENDING_CODES
+
+
 # --- 방향/앵커 상태 어휘 ------------------------------------------------------
 # 방향 접두사 판정은 `directions.set` 만 본다 (layout 계약과 독립) — 택소노미
 # 이전 flat 방향 런도 같은 앵커 계약을 받아야 한다. 파일 경로는 그대로 layout
@@ -86,51 +108,70 @@ def resolve_anchor(request: dict[str, Any], curation: dict[str, Any] | None,
     source: "picked"(사용자 지정) | "default"(앵커 행 시퀀스 첫 인스턴스).
     해석 불가는 SystemExit — 앵커 없이 방향 행을 생성하지 않는다."""
     if direction not in directions(request):
-        raise SystemExit(f"anchor: '{direction}' is not a generated direction "
-                         f"({', '.join(directions(request)) or 'run has no directions block'})")
+        raise AnchorUnavailable(
+            "unknown-direction",
+            f"anchor: '{direction}' is not a generated direction "
+            f"({', '.join(directions(request)) or 'run has no directions block'})")
     pick = anchor_choices(curation).get(direction)
     if pick is not None:
         state, index = pick["state"], pick["index"]
         if state not in request.get("states", {}):
-            raise SystemExit(f"anchor: picked anchor state '{state}' is not in this run "
-                             f"(direction {direction}) — re-pick the anchor frame in the curation view")
+            raise AnchorUnavailable(
+                "pick-unknown-state",
+                f"anchor: picked anchor state '{state}' is not in this run (direction "
+                f"{direction}) — re-pick the anchor frame in the curation view")
         owner = state_direction(request, state)
         if owner != direction:
-            raise SystemExit(f"anchor: picked frame {state}#{index} belongs to direction "
-                             f"'{owner}', not '{direction}' — an anchor owns its own facing")
+            raise AnchorUnavailable(
+                "pick-wrong-direction",
+                f"anchor: picked frame {state}#{index} belongs to direction '{owner}', not "
+                f"'{direction}' — an anchor owns its own facing")
         live = state_instances(curation, state, state_frame_total(request, state))
         if index not in live:
-            raise SystemExit(f"anchor: picked anchor frame {state}#{index} no longer exists "
-                             f"(archived, or the row was regenerated) — re-pick the anchor "
-                             f"frame in the curation view")
+            raise AnchorUnavailable(
+                "pick-missing",
+                f"anchor: picked anchor frame {state}#{index} no longer exists (archived, or "
+                f"the row was regenerated) — re-pick the anchor frame in the curation view")
         return {"direction": direction, "state": state, "index": index, "source": "picked"}
     state = anchor_state(request, direction)
     if state not in request.get("states", {}):
-        raise SystemExit(f"anchor: direction '{direction}' has no anchor row '{state}' and no "
-                         f"picked anchor frame — generate the anchor row first")
+        raise AnchorUnavailable(
+            "no-anchor-row",
+            f"anchor: direction '{direction}' has no anchor row '{state}' and no picked anchor "
+            f"frame — declare/generate the anchor row, or pick a frame of this direction")
     ordered, _ = state_plan(curation, state, state_frame_total(request, state))
     if not ordered:
-        raise SystemExit(f"anchor: '{state}' has an empty curated sequence — nothing to use as "
-                         f"the direction anchor")
+        raise AnchorUnavailable(
+            "empty-sequence",
+            f"anchor: '{state}' has an empty curated sequence — nothing to use as the direction "
+            f"anchor (restore a frame, or pick one explicitly)")
     return {"direction": direction, "state": state, "index": ordered[0], "source": "default"}
 
 
 def anchor_status(run_dir: Path, request: dict[str, Any], curation: dict[str, Any] | None,
                   direction: str) -> dict[str, Any]:
-    """뷰용 비-예외 상태: 해석 + 재료 파일 실재까지 확인하고 실패는 `error` 로 돌려준다.
+    """뷰용 비-예외 상태: 해석 + 재료 파일 실재까지 확인하고 실패는 `error`(+`code`,
+    `pending`)로 돌려준다.
 
-    표시는 죽지 않아야 하지만 **이유는 보여야** 한다 (조용한 빈칸 금지). 생성 경로는
-    언제나 `resolve_anchor`/`anchor_image` 의 fail-loud 를 쓴다."""
+    표시는 죽지 않아야 하지만 **이유는 보여야** 한다 (조용한 빈칸 금지). 다만 `pending`
+    (아직 그 행을 안 뽑았다)은 오류가 아니라 정상 구간이므로 뷰가 경고색으로 칠하지
+    않는다 — 그 구분이 `code` 다. 생성 경로는 언제나 `resolve_anchor`/`anchor_image` 의
+    fail-loud 를 쓴다."""
     try:
         resolved = resolve_anchor(request, curation, direction)
         path = frame_source_path(run_dir, request, curation, resolved["state"], resolved["index"])
         if not path.is_file():
-            raise SystemExit(f"anchor: frame file missing for {resolved['state']}"
-                             f"#{resolved['index']}: {path}")
-        return {**resolved, "error": None}
+            raise AnchorUnavailable(
+                "frame-file-missing",
+                f"anchor: frame file missing for {resolved['state']}#{resolved['index']}: {path}")
+        return {**resolved, "error": None, "code": None, "pending": False}
+    except AnchorUnavailable as exc:
+        return {"direction": direction, "state": None, "index": None, "source": None,
+                "error": str(exc), "code": exc.code, "pending": exc.pending}
     except (SystemExit, Exception) as exc:
-        return {"direction": direction, "state": None, "index": None,
-                "source": None, "error": str(exc)}
+        # 예상 밖 실패(손상된 매니페스트 등)도 뷰를 죽이지 않지만 pending 으로 위장하지 않는다
+        return {"direction": direction, "state": None, "index": None, "source": None,
+                "error": str(exc), "code": "unexpected", "pending": False}
 
 
 # --- 후처리 베이크 ------------------------------------------------------------
@@ -139,13 +180,30 @@ def frame_source_path(run_dir: Path, request: dict[str, Any], curation: dict[str
                       state: str, index: int) -> Path:
     """이 인스턴스가 읽는 실제 프레임 파일 (복제 해소 + 표시/굽기 variant 반영).
 
-    위치 SSoT 는 frames-manifest 의 `files` 다 (패턴 조립 금지 — layout.row_frame_rel)."""
-    from .extract import require_frames_manifest
+    위치 SSoT 는 frames-manifest 의 `files` 다 (패턴 조립 금지 — layout.row_frame_rel).
 
-    manifest = require_frames_manifest(run_dir)
+    게이트는 `load_consistent_frames_manifest(allow_pending_states=True)` 다 —
+    `require_frames_manifest`(완성된 생성물 소비자 게이트: compose/export/preview)가
+    **아니다**. 앵커 소비자는 정의상 **생성 도중**에 돈다: stage-1 로 앵커 행만 뽑은
+    시점에 stage-2 행들의 프레임은 아직 없고, 바로 그때 앵커 ref 가 필요하다. strict
+    게이트를 물리면 request 의 모든 행에 매니페스트 행을 요구해서 "행 생성 직전에
+    매번 돌려라" 라는 계약이 **항상** 실패한다 (젯비 검증 2026-07-25 실측 —
+    stage-1 런에서 `--for-state`/`--direction`/`--all`/`--pick` 전부 corrupt-manifest
+    로 죽었다). 뷰가 같은 이유로 이미 관용 게이트를 쓴다."""
+    from .extract import load_consistent_frames_manifest
+
+    manifest = load_consistent_frames_manifest(run_dir, allow_pending_states=True)
+    if not manifest:
+        raise AnchorUnavailable(
+            "no-frames",
+            f"anchor: nothing extracted yet in {run_dir} — generate and extract the anchor row "
+            f"'{state}' first, then ask for its anchor ref")
     row = next((r for r in manifest.get("rows", []) if r.get("state") == state), None)
     if row is None:
-        raise SystemExit(f"anchor: no extracted row for {state}")
+        raise AnchorUnavailable(
+            "row-not-extracted",
+            f"anchor: row '{state}' is not extracted yet — generate and extract it first "
+            f"(this is the normal state before that row exists, not a broken run)")
     src_index = source_frame_index(curation, state, index, state_frame_total(request, state))
     return run_dir / row_frame_rel(row, src_index, frame_variant(curation, state))
 
@@ -166,7 +224,8 @@ def bake_frame(run_dir: Path, request: dict[str, Any], curation: dict[str, Any] 
     variant = frame_variant(curation, state)
     src_path = frame_source_path(run_dir, request, curation, state, index)
     if not src_path.is_file():
-        raise SystemExit(f"anchor: frame file missing for {state}#{index}: {src_path}")
+        raise AnchorUnavailable(
+            "frame-file-missing", f"anchor: frame file missing for {state}#{index}: {src_path}")
     edit_idx = edit_index(curation, state, index)
     with Image.open(src_path) as opened:
         return apply_transform(
@@ -188,8 +247,10 @@ def anchor_image(run_dir: Path, request: dict[str, Any], curation: dict[str, Any
     img = bake_frame(run_dir, request, curation, resolved["state"], resolved["index"])
     box = img.split()[3].point(lambda a: 255 if a >= CONTENT_ALPHA_FLOOR else 0).getbbox()
     if box is None:
-        raise SystemExit(f"anchor: baked anchor frame {resolved['state']}#{resolved['index']} "
-                         f"is empty (no visible pixels)")
+        raise AnchorUnavailable(
+            "empty-content",
+            f"anchor: baked anchor frame {resolved['state']}#{resolved['index']} is empty "
+            f"(no visible pixels)")
     content = img.crop(box)
     upscaled = content.resize((content.width * scale, content.height * scale),
                               Image.Resampling.NEAREST)
@@ -270,8 +331,10 @@ def _write_anchor_pick(run_dir: Path, request: dict[str, Any], state: str | None
     if state is not None:
         owner = state_direction(request, state)
         if owner is None:
-            raise SystemExit(f"anchor: '{state}' does not belong to a generated direction — "
-                             f"only direction rows can own a direction anchor")
+            raise AnchorUnavailable(
+                "pick-wrong-direction",
+                f"anchor: '{state}' does not belong to a generated direction — only direction "
+                f"rows can own a direction anchor")
         direction = owner
     if direction is None:
         raise SystemExit("anchor: --clear needs a direction (--direction <dir>)")
@@ -286,6 +349,10 @@ def _write_anchor_pick(run_dir: Path, request: dict[str, Any], state: str | None
             anchors.pop(direction, None)
         else:
             anchors[direction] = {"state": state, "index": int(index)}
+        # 커밋 전 검증 (Atomicity): 지정을 얹은 문서로 먼저 해석해 본다. 없는 인스턴스·
+        # 타 방향 프레임을 디스크에 남긴 뒤 죽으면, 사용자는 "지정은 됐는데 매번 에러"
+        # 상태에 갇힌다 (젯비 검증 2026-07-25 파생 증상 1 — write 후 크래시로 잔류).
+        resolve_anchor(request, {**doc, "anchors": anchors}, direction)
         doc["anchors"] = anchors
         write_curation_atomic(run_dir, doc)
     return {"direction": direction, "state": state, "index": index}
@@ -341,7 +408,16 @@ def run(run_dir: Path, direction: str | None = None, all_directions: bool = Fals
     if not targets:
         raise SystemExit("anchor: pass --direction <dir>, --all, or --for-state <state>")
     for target in targets:
-        materialize(run_dir, target, scale, request=request)
+        try:
+            materialize(run_dir, target, scale, request=request)
+        except AnchorUnavailable as exc:
+            # 지정/해제는 사용자 의도라 이미 저장됐다. 그 행이 아직 추출 전이라 ref 를 못
+            # 굽는 건 실패가 아니라 정상 순서 — 이유를 밝히고 계속한다. 그 외에는 fail-loud.
+            # ref 를 **요구**하는 진입점(`--for-state`)은 위에서 예외 없이 통과해야 한다.
+            if not ((pick or clear) and exc.pending):
+                raise
+            print(f"[anchor] ref not baked yet: {exc} — re-run this command right before "
+                  f"generating a row of '{target}'")
     return 0
 
 

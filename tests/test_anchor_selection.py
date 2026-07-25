@@ -58,8 +58,11 @@ def _strip(frames: int, seed0: int) -> Image.Image:
     return strip
 
 
-def _build_direction_run(root: Path) -> Path:
-    """down/side 방향 계약 + pp 추출 런 (down_idle 4프레임, down_walk 3, side_walk 3)."""
+def _build_direction_run(root: Path, extract_states: str | None = "all") -> Path:
+    """down/side 방향 계약 + pp 추출 런 (방향별 idle 앵커 행 4프레임 + walk 행 3프레임).
+
+    `extract_states` 로 생성 진행 구간을 고른다: `"all"`(완전 추출) ·
+    `"down_idle,side_idle"`(stage-1: 앵커 행만) · `None`(추출 전)."""
     run_dir = root / "run"
     request = {
         "version": 1,
@@ -74,6 +77,7 @@ def _build_direction_run(root: Path) -> Path:
         "directions": {"set": ["down", "side"], "mirror": {}, "anchor_suffix": "idle"},
         "states": {
             "down_idle": {"frames": 4, "fps": 4, "loop": True, "action": "anchor row"},
+            "side_idle": {"frames": 4, "fps": 4, "loop": True, "action": "anchor row"},
             "down_walk": {"frames": 3, "fps": 8, "loop": True, "action": "action row"},
             "side_walk": {"frames": 3, "fps": 8, "loop": True, "action": "action row"},
         },
@@ -82,12 +86,14 @@ def _build_direction_run(root: Path) -> Path:
     (run_dir / "raw" / "down").mkdir(parents=True)
     (run_dir / "raw" / "side").mkdir(parents=True)
     _strip(4, seed0=1).save(run_dir / "raw" / "down" / "idle.png")
+    _strip(4, seed0=60).save(run_dir / "raw" / "side" / "idle.png")
     _strip(3, seed0=20).save(run_dir / "raw" / "down" / "walk.png")
     _strip(3, seed0=40).save(run_dir / "raw" / "side" / "walk.png")
     Image.new("RGB", (64, 64), (10, 200, 10)).save(run_dir / "base-source.png")
     (run_dir / "sprite-request.json").write_text(
         json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    assert extract_module.run(run_dir=run_dir) == 0
+    if extract_states is not None:
+        assert extract_module.run(run_dir=run_dir, states=extract_states) == 0
     return run_dir
 
 
@@ -105,6 +111,23 @@ def _request(run_dir: Path) -> dict:
 @pytest.fixture
 def direction_run(tmp_path: Path) -> Path:
     return _build_direction_run(tmp_path)
+
+
+@pytest.fixture
+def stage1_run(tmp_path: Path) -> Path:
+    """**워크플로 stage-1 그대로**: 방향 앵커 행만 생성·추출됐고 액션 행은 아직 없다.
+
+    앵커 소비자는 정의상 이 구간에서 돈다 (stage-2 행을 생성하려면 그 방향 앵커 ref 가
+    먼저 필요하다). 플랜 초기 픽스처가 전부 '완전 추출된 런'이라 이 구간을 한 건도
+    덮지 않았고, 그래서 `require_frames_manifest`(완성 소비자 게이트) 오사용이
+    테스트를 통과했다 — 젯비 검증 2026-07-25 reject 의 근본 원인."""
+    return _build_direction_run(tmp_path, extract_states="down_idle,side_idle")
+
+
+@pytest.fixture
+def ungenerated_run(tmp_path: Path) -> Path:
+    """방향 계약만 선언되고 추출이 아예 없는 런 (생성 이전 구간)."""
+    return _build_direction_run(tmp_path, extract_states=None)
 
 
 # --- 기본값: 시퀀스 첫 인스턴스 + 후처리 반영 ---------------------------------
@@ -144,6 +167,92 @@ def test_materialize_writes_ref_and_removes_legacy_snapshot(direction_run: Path)
     assert not legacy.exists(), "앵커가 idle 행에 묶여 있던 시절의 파일이 남아 두 진실이 됐다"
     with Image.open(out) as im:
         assert im.width % 8 == 0 and im.height % 8 == 0  # x8 니어리스트 확대
+
+
+# --- 생성 도중 구간 (앵커 소비자가 실제로 도는 시점) ---------------------------
+# 회귀 고정: 앵커 진입점이 `require_frames_manifest`(완성된 생성물 소비자 게이트)를
+# 물면 request 의 *모든* 행에 매니페스트 행을 요구해서, "행 생성 직전에 매번 돌려라"
+# 라는 계약이 **항상** corrupt-manifest 로 죽는다 (젯비 검증 2026-07-25 실측).
+
+def test_stage1_run_serves_the_anchor_ref(stage1_run: Path, capsys) -> None:
+    """앵커 행만 추출된 시점에 액션 행의 identity ref 가 나와야 한다 (그게 유일한 용도다)."""
+    run_dir = stage1_run
+    assert anchor_mod.run(run_dir=run_dir, for_state="side_walk") == 0
+    printed = capsys.readouterr().out.strip()
+    assert printed == "references/anchors/side-anchor-x8.png"
+    assert (run_dir / printed).is_file()
+    assert anchor_mod.run(run_dir=run_dir, direction="down") == 0
+    assert anchor_mod.run(run_dir=run_dir, all_directions=True) == 0
+    for direction in ("down", "side"):
+        assert (run_dir / f"references/anchors/{direction}-anchor-x8.png").is_file()
+
+
+def test_stage1_run_pick_persists_and_bakes(stage1_run: Path) -> None:
+    run_dir = stage1_run
+    assert anchor_mod.run(run_dir=run_dir, pick="down_idle#2") == 0
+    assert anchor_choices(load_curation(run_dir))["down"] == {"state": "down_idle", "index": 2}
+    assert (run_dir / "references" / "anchors" / "down-anchor-x8.png").is_file()
+
+
+def test_ungenerated_run_pick_keeps_pin_and_reports_pending(ungenerated_run: Path, capsys) -> None:
+    """지정은 사용자 의도라 저장하고, ref 를 아직 못 굽는 건 실패가 아니라 순서다."""
+    run_dir = ungenerated_run
+    assert anchor_mod.run(run_dir=run_dir, pick="down_idle#1") == 0
+    out = capsys.readouterr().out
+    assert "ref not baked yet" in out and "corrupt" not in out
+    assert anchor_choices(load_curation(run_dir))["down"] == {"state": "down_idle", "index": 1}
+    assert not (run_dir / "references" / "anchors").exists()
+
+
+def test_ungenerated_run_for_state_fails_loud_with_the_real_reason(ungenerated_run: Path) -> None:
+    """ref 를 **요구**하는 진입점은 조용히 넘어가지 않고, 원인을 정확히 말해야 한다."""
+    with pytest.raises(anchor_mod.AnchorUnavailable) as excinfo:
+        anchor_mod.run(run_dir=ungenerated_run, for_state="down_walk")
+    assert excinfo.value.code in anchor_mod.AnchorUnavailable.PENDING_CODES
+    assert excinfo.value.pending is True
+    assert "corrupt" not in str(excinfo.value)
+
+
+def test_invalid_pick_writes_nothing(direction_run: Path) -> None:
+    """커밋 전 검증 (Atomicity): 잘못된 지정은 사이드카에 잔류하지 않는다."""
+    run_dir = direction_run
+    with pytest.raises(anchor_mod.AnchorUnavailable) as excinfo:
+        anchor_mod.run(run_dir=run_dir, pick="down_idle#99")
+    assert excinfo.value.code == "pick-missing"
+    assert anchor_choices(load_curation(run_dir)) == {}
+
+
+def test_stage1_view_reports_no_anchor_error(stage1_run: Path) -> None:
+    """작업 중간 런은 멀쩡한 상태다 — 뷰에 오류가 뜨면 안 된다."""
+    from serve_curation import build_run_state
+
+    snapshot = build_run_state(stage1_run)
+    for group in snapshot["directionGroups"]:
+        if group.get("mirrorOf"):
+            continue
+        assert group["anchorError"] is None, group
+        assert group["anchorPending"] is False
+        assert group["anchorFrame"]["state"] == f"{group['direction']}_idle"
+    walk = next(s for s in snapshot["states"] if s["name"] == "side_walk")
+    assert [r for r in walk["refs"] if r["role"] == "anchor"], "앵커 칩이 사라졌다"
+
+
+def test_pending_and_broken_are_different_states(ungenerated_run: Path) -> None:
+    """`pending`(아직 안 뽑음)과 `broken`(사람이 고쳐야 함)은 뷰에서 다르게 취급된다."""
+    from serve_curation import build_run_state
+
+    run_dir = ungenerated_run
+    pending = next(g for g in build_run_state(run_dir)["directionGroups"]
+                   if g["direction"] == "down")
+    assert pending["anchorPending"] is True
+    assert pending["anchorErrorCode"] in anchor_mod.AnchorUnavailable.PENDING_CODES
+    assert pending["anchorUrl"] is None
+
+    _save_curation(run_dir, {}, anchors={"down": {"state": "side_walk", "index": 0}})
+    broken = next(g for g in build_run_state(run_dir)["directionGroups"]
+                  if g["direction"] == "down")
+    assert broken["anchorPending"] is False
+    assert broken["anchorErrorCode"] == "pick-wrong-direction"
 
 
 # --- 사용자 지정 ---------------------------------------------------------------

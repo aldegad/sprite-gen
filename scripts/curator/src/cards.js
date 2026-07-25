@@ -208,6 +208,7 @@ function renderCard(state, frame) {
   // 앵커 = 이 방향의 다른 자세를 생성할 때 붙는 identity 한 장 — 큐레이션된 모습 그대로.
   const anchorDir = frame.present ? directionOfState(state.name) : null;
   const isAnchor = !!anchorDir && isAnchorFrame(state.name, frame.index);
+  const isPinned = !!anchorDir && isPinnedAnchorFrame(state.name, frame.index);
   const pinIcon =
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
     '<path d="M8 1.9a3.4 3.4 0 0 1 3.4 3.4c0 2.4-3.4 6.4-3.4 6.4S4.6 7.7 4.6 5.3A3.4 3.4 0 0 1 8 1.9Z" ' +
@@ -215,8 +216,8 @@ function renderCard(state, frame) {
     '<circle cx="8" cy="5.2" r="1.3" fill="none" stroke="currentColor" stroke-width="1.2"/>' +
     '<path d="M5.6 14.1h4.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
   const anchorBtn = anchorDir
-    ? `<button type="button" class="ghost anchor-btn${isAnchor ? " on" : ""}" ` +
-      `data-tip="${isAnchor ? t("tUnsetAnchorFrame") : t("tSetAnchorFrame")}" aria-label="anchor">${pinIcon}</button>`
+    ? `<button type="button" class="ghost anchor-btn${isPinned ? " on" : ""}" ` +
+      `data-tip="${isPinned ? t("tUnsetAnchorFrame") : t("tSetAnchorFrame")}" aria-label="anchor">${pinIcon}</button>`
     : "";
   if (isAnchor) card.classList.add("is-anchor");
   card.innerHTML =
@@ -230,7 +231,8 @@ function renderCard(state, frame) {
     `${title}</span>` +
     (frame.present
       ? `<span class="ct-right">` +
-        (isAnchor ? `<span class="anchor-frame-badge" data-tip="${t("tAnchorFrameBadge")}">${t("anchorFrameBadge")}</span>` : "") +
+        (isAnchor ? `<span class="anchor-frame-badge${isPinned ? " pinned" : ""}" ` +
+          `data-tip="${isPinned ? t("tAnchorFramePinned") : t("tAnchorFrameBadge")}">${t("anchorFrameBadge")}</span>` : "") +
         `<button type="button" class="ghost zoom-btn" data-tip="${t("tZoomOpen")}" aria-label="zoom">${zoomIcon}</button>` +
         `</span>`
       : "") +

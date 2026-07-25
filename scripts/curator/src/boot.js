@@ -99,8 +99,10 @@ async function boot() {
       }
     }
     // 해석 실패(지정이 사라진 프레임을 가리킴 등)는 조용히 넘기지 않는다 — 이 상태로
-    // 생성하면 엔진이 fail-loud 하므로 사용자가 지금 알아야 한다.
-    const broken = run.directionGroups.filter((g) => g.anchorError);
+    // 생성하면 엔진이 fail-loud 하므로 사용자가 지금 알아야 한다. 단 `anchorPending`
+    // (그 방향 앵커 행을 아직 안 뽑았다)은 **정상 작업 구간**이라 오류로 칠하지 않는다 —
+    // 그러면 생성 중인 모든 런에 빨간 배너가 뜬다 (젯비 검증 2026-07-25 파생 증상 2).
+    const broken = run.directionGroups.filter((g) => g.anchorError && !g.anchorPending);
     if (broken.length) {
       healParts.push(...broken.map((g) => STR[lang].anchorError(g.direction, g.anchorError)));
     }
@@ -171,7 +173,7 @@ async function boot() {
   syncPixelScaling();
   if (healParts.length) {
     const hadFailure = (run.heal && run.heal.failed && run.heal.failed.length)
-      || (run.directionGroups || []).some((g) => g.anchorError);
+      || (run.directionGroups || []).some((g) => g.anchorError && !g.anchorPending);
     setStatus(healParts.join(" · "), hadFailure ? "err" : "ok");
   } else {
     setStatus(run.curation && Object.keys(run.curation.states || {}).length ? t("loaded") : t("ready"));

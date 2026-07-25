@@ -22,7 +22,13 @@ All notable changes to `sprite-gen` are recorded here. Versions track the `versi
   in the played sequence. With no pin the anchor is the anchor row's **curated sequence head**
   (not index 0), so deleting or reordering frames moves it.
 - A pin that points at a vanished instance fails loud at generation and surfaces its reason in
-  the view's status bar, instead of silently reverting to the default.
+  the view's status bar, instead of silently reverting to the default. "Not generated yet" is a
+  *separate* class (`AnchorUnavailable.code` pending vs broken): the anchor consumer runs
+  mid-generation by definition, so it gates on the one manifest row it needs — the
+  finished-generation gate demands a row for every requested state, which is never true at the
+  moment an action row is about to be generated, and it made every anchor entry point die with
+  "corrupt frames manifest" during stage 1 (caught by validator 젯비, not by the first tests,
+  whose fixtures were all fully-extracted runs).
 - The view's anchor chip is a live bake (`GET /api/anchor?direction=<dir>`) rather than the
   on-disk snapshot, so what the chip shows is what the next generation attaches.
 - `anchor_suffix` is honoured everywhere (reroll had `idle` hardcoded), the sidecar's stamping
