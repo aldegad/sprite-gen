@@ -24,9 +24,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sprite_gen.breathe import (MAX_ROW_STRAIN, anatomy_fingerprint,  # noqa: E402
-                                freeze_anatomy, phase_frame, resolve_anatomy, row_strain)
+                                freeze_anatomy, phase_frame, reference_key, resolve_anatomy,
+                                row_strain)
 from sprite_gen.extract import solid_alpha_bbox  # noqa: E402
-from tests.test_breathe import CFG, _dome, _humanoid, _winged  # noqa: E402
+from tests.test_breathe import CFG, _dome, _humanoid, _key, _winged  # noqa: E402
 
 CURATOR_BREATHE = Path(__file__).resolve().parent.parent / "scripts" / "curator" / "src" / "breathe.js"
 PHASES = [i / 12 for i in range(12)]
@@ -84,7 +85,7 @@ def _rgba(image):
 def test_curator_mirror_is_byte_identical_to_the_bake(build, tmp_path):
     src = build()
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
 
     payload = {
         "script": str(CURATOR_BREATHE),
@@ -125,7 +126,7 @@ def test_the_mirror_refuses_exactly_what_the_bake_refuses(build, tmp_path):
     src = build()
     src = src.crop(solid_alpha_bbox(src))            # 여백 0 — 늘어나면 반드시 잘린다
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
 
     refused_py = []
     for phase in PHASES:
@@ -172,7 +173,7 @@ def test_the_mirror_matches_on_frames_other_than_the_frozen_one(build, tmp_path)
     그물 밖이었다."""
     frozen_src = build()
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(frozen_src, cfg)
+    cfg["anatomy"] = freeze_anatomy(frozen_src, cfg, _key())
 
     # 같은 줄의 '다른 프레임' — 알파 무변 RGB 덧칠 (큐레이터 픽셀 편집기의 문서화된 기능)
     other = frozen_src.copy()
@@ -188,8 +189,7 @@ def test_the_mirror_matches_on_frames_other_than_the_frozen_one(build, tmp_path)
     assert painted, "덧칠할 불투명 픽셀을 못 찾았다"
     assert other.tobytes() != frozen_src.tobytes(), "픽스처가 실제로 달라야 의미가 있다"
 
-    anat, redetected = resolve_anatomy(frozen_src, cfg)   # 기준은 얼린 프레임
-    assert redetected is False, "기준 프레임은 지문이 맞아야 한다"
+    anat = resolve_anatomy(frozen_src, cfg)   # 줄 전체가 기준 프레임의 한 벌을 쓴다
 
     payload = {
         "script": str(CURATOR_BREATHE), "width": other.width, "height": other.height,
@@ -222,10 +222,10 @@ def test_the_mirror_refuses_the_same_strain_cap(tmp_path):
     # 상한을 넘는다 — 사람이 `rigid_row` 로 도달할 수 있는 실제 조합이다.
     src = _humanoid()
     base = dict(CFG)
-    base["anatomy"] = freeze_anatomy(src, base)
+    base["anatomy"] = freeze_anatomy(src, base, _key())
     height = base["anatomy"]["height"]
     cfg = {**base, "rigid_row": int(height * 0.78)}
-    anat, _ = resolve_anatomy(src, cfg)
+    anat = resolve_anatomy(src, cfg)
     cfg["anatomy"] = {**anat.as_dict(), "fingerprint": base["anatomy"]["fingerprint"]}
     depth = next((round(0.005 * i, 3) for i in range(1, 41)
                   if row_strain(anat, round(0.005 * i, 3)) > MAX_ROW_STRAIN), None)
@@ -264,13 +264,13 @@ def test_the_mirror_refuses_a_stale_anatomy_against_a_manual_rigid_row(tmp_path)
     최대 164바이트 갈렸다. `row-export` 는 이 미러로 WebM/MP4 를 굽는다."""
     src = _humanoid()
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
     frozen_row = cfg["anatomy"]["rigid_row"]
     override = frozen_row + 8
     stale = {**cfg, "rigid_row": override}
 
-    anat, redetected = resolve_anatomy(src, stale)      # 굽기는 의도를 따른다
-    assert redetected is True and anat.rigid_row == override
+    anat = resolve_anatomy(src, stale)                  # 굽기는 의도를 따른다
+    assert anat.rigid_row == override
 
     payload = {
         "script": str(CURATOR_BREATHE), "width": src.width, "height": src.height,
@@ -290,7 +290,7 @@ def test_the_mirror_refuses_a_stale_anatomy_against_a_manual_rigid_row(tmp_path)
             f"프리뷰·WebM 이 굽기와 다른 애니메이션이 된다")
 
     # 해부를 갱신하면 다시 같아진다 (거부가 영구 차단이 아니라는 것)
-    fresh = {**stale, "anatomy": {**anat.as_dict(), "fingerprint": anatomy_fingerprint(src)}}
+    fresh = {**stale, "anatomy": {**anat.as_dict(), "fingerprint": anatomy_fingerprint(_key())}}
     payload["cfg"] = {"depth": cfg["depth"], "breaths": cfg["breaths"], "lag": cfg["lag"],
                       "rigid_row": override, "anatomy": fresh["anatomy"]}
     (tmp_path / "payload.json").write_text(json.dumps(payload), encoding="utf-8")
@@ -315,19 +315,18 @@ def test_the_mirror_refuses_a_stale_reference_frame(tmp_path):
     실측 (슉슉이 2026-07-25): 최대 617바이트, 불투명 픽셀 **수**까지 불일치."""
     base = _humanoid()
     cfg = dict(CFG)
-    cfg["anatomy"] = freeze_anatomy(base, cfg)
+    cfg["anatomy"] = freeze_anatomy(base, cfg, _key())
     assert cfg.get("rigid_row") is None, "이 계약은 override 가 없을 때의 이야기다"
 
-    edited = base.copy()                        # 픽셀 편집기로 팔을 뻗은 프레임
-    px = edited.load()
-    box = solid_alpha_bbox(edited)
-    for y in range(box[1] + 40, box[1] + 50):
-        for x in range(box[2], min(edited.width, box[2] + 6)):
-            px[x, y] = (90, 60, 30, 255)
-    assert anatomy_fingerprint(edited) != cfg["anatomy"]["fingerprint"]
-
-    anat, redetected = resolve_anatomy(edited, cfg)     # 굽기는 자가 복구한다
-    assert redetected is True
+    # 픽셀 편집기로 도트를 찍는다 = 사이드카 `pixels` 가 바뀐다 = 기준 프레임 키가 바뀐다.
+    # 근거가 **그림**이 아니라 **사이드카**인 것이 이 설계의 요점이다: 굽기는 BICUBIC 으로
+    # 리샘플하고 웹뷰는 NEAREST 라 그림은 구조적으로 다르고, 그림을 근거로 삼으면 회전이
+    # 걸린 줄이 영구 불일치가 된다 (슉슉이 실측 2026-07-26, R1).
+    edited_key = reference_key(state="idle", variant="plain", request_stamp="1:1",
+                               source_index=0, source_stamp="fixture",
+                               pixel_ops={"12,40": "#5a3c1e"}, transform=None)
+    assert anatomy_fingerprint(edited_key) != cfg["anatomy"]["fingerprint"], \
+        "픽셀 편집이 키를 안 바꾼다 — 신선도 판정이 그걸 못 본다"
 
     harness = tmp_path / "fresh.cjs"
     harness.write_text(
@@ -338,15 +337,15 @@ def test_the_mirror_refuses_a_stale_reference_frame(tmp_path):
         ' putImageData:i=>b.set(i.data),createImageData:(a,e)=>({data:new Uint8ClampedArray(a*e*4),width:a,height:e}),'
         ' drawImage:s=>b.set(s.__buf),clearRect:()=>{}};return{width:w,height:h,getContext:()=>c,__buf:b};}'
         'const sb={document:{createElement:()=>mk(P.w,P.h,new Array(P.w*P.h*4).fill(0))},console,'
-        'entries:{},run:{states:[]},t:()=>"",setStatus:()=>{},fetch:()=>{}};'
+        'entries:{},run:{states:[]},t:()=>"",setStatus:()=>{},fetch:()=>{},TextEncoder};'
         'sb.globalThis=sb;vm.createContext(sb);'
         'vm.runInContext(fs.readFileSync(process.argv[2],"utf8"),sb);'
-        'let out;try{sb.breatheAssertFresh(mk(P.w,P.h,P.rgba),P.cfg);out={ok:true};}'
+        'let out;try{sb.breatheAssertFresh(P.key,P.cfg);out={ok:true};}'
         'catch(e){out={ok:false,refused:e.constructor.name==="BreatheRefused",message:e.message};}'
         'fs.writeFileSync(P.out,JSON.stringify(out));', encoding="utf-8")
     src_json = tmp_path / "in.json"
     src_json.write_text(json.dumps({
-        "w": edited.width, "h": edited.height, "rgba": _rgba(edited),
+        "w": base.width, "h": base.height, "key": edited_key,
         "cfg": {"depth": cfg["depth"], "breaths": cfg["breaths"], "lag": cfg["lag"],
                 "anatomy": cfg["anatomy"]},
         "out": str(tmp_path / "out.json")}), encoding="utf-8")
@@ -360,7 +359,7 @@ def test_the_mirror_refuses_a_stale_reference_frame(tmp_path):
 
     # 원래 기준 프레임에는 걸리지 않는다 (거부가 상시가 아니라는 것)
     src_json.write_text(json.dumps({
-        "w": base.width, "h": base.height, "rgba": _rgba(base),
+        "w": base.width, "h": base.height, "key": _key(),
         "cfg": {"depth": cfg["depth"], "breaths": cfg["breaths"], "lag": cfg["lag"],
                 "anatomy": cfg["anatomy"]},
         "out": str(tmp_path / "out.json")}), encoding="utf-8")
@@ -370,32 +369,9 @@ def test_the_mirror_refuses_a_stale_reference_frame(tmp_path):
         "기준 프레임 그대로인데 거부한다 — 프리뷰가 상시 죽는다"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node 가 없어 JS 미러를 실행할 수 없다")
-def test_the_fingerprint_is_computed_identically_on_both_sides(tmp_path):
-    """미러가 지문을 **직접** 계산할 수 있어야 신선도를 볼 수 있다."""
-    harness = tmp_path / "fp.cjs"
-    harness.write_text(
-        'const fs=require("fs"),vm=require("vm");'
-        'const P=JSON.parse(fs.readFileSync(process.argv[3],"utf8"));'
-        'const sb={document:{createElement:()=>({getContext:()=>({})})},console,entries:{},'
-        'run:{states:[]},t:()=>"",setStatus:()=>{},fetch:()=>{}};sb.globalThis=sb;vm.createContext(sb);'
-        'vm.runInContext(fs.readFileSync(process.argv[2],"utf8"),sb);'
-        'fs.writeFileSync(P.out, JSON.stringify(P.cases.map(c =>'
-        ' sb.breatheFingerprint({width:c.w,height:c.h}, Uint8ClampedArray.from(c.rgba), c.box))));',
-        encoding="utf-8")
-    cases, want = [], []
-    for build in (_humanoid, _winged, _dome):
-        im = build()
-        cases.append({"w": im.width, "h": im.height, "rgba": _rgba(im),
-                      "box": list(solid_alpha_bbox(im))})
-        want.append(anatomy_fingerprint(im))
-    src = tmp_path / "in.json"
-    src.write_text(json.dumps({"cases": cases, "out": str(tmp_path / "out.json")}), encoding="utf-8")
-    proc = subprocess.run([shutil.which("node"), str(harness), str(CURATOR_BREATHE), str(src)],
-                          capture_output=True, text=True)
-    assert proc.returncode == 0, f"node 하네스 실패:\n{proc.stderr}"
-    got = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
-    assert got == want, f"지문이 갈린다 — 미러가 신선도를 판정할 수 없다\n  py={want}\n  js={got}"
+# 지문·기준 프레임 키의 교차언어 계약은 `tests/test_breathe_reference_key.py` 가 소유한다
+# (값 모양 전수 + 서버 페이로드 → 웹뷰 키 왕복). 여기 있던 이미지 기반 지문 비교는
+# 그 설계가 폐기되면서 같이 지웠다 — 두 파일이 같은 계약을 말하면 한쪽만 고쳐진다.
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 가 없어 JS 미러를 실행할 수 없다")
@@ -410,7 +386,7 @@ def test_the_mirror_refuses_when_it_cannot_verify(anatomy_shape, tmp_path):
     다른 애니메이션으로 나갔다."""
     src = _humanoid()
     cfg = dict(CFG)
-    frozen = freeze_anatomy(src, cfg)
+    frozen = freeze_anatomy(src, cfg, _key())
     if anatomy_shape == "fingerprint-null":
         frozen = {**frozen, "fingerprint": None}
     else:
@@ -426,10 +402,10 @@ def test_the_mirror_refuses_when_it_cannot_verify(anatomy_shape, tmp_path):
         ' putImageData:i=>b.set(i.data),createImageData:(a,e)=>({data:new Uint8ClampedArray(a*e*4),width:a,height:e}),'
         ' drawImage:s=>b.set(s.__buf),clearRect:()=>{}};return{width:w,height:h,getContext:()=>c,__buf:b};}'
         'const sb={document:{createElement:()=>mk(P.w,P.h,new Array(P.w*P.h*4).fill(0))},console,'
-        'entries:{},run:{states:[]},t:()=>"",setStatus:()=>{},fetch:()=>{}};'
+        'entries:{},run:{states:[]},t:()=>"",setStatus:()=>{},fetch:()=>{},TextEncoder};'
         'sb.globalThis=sb;vm.createContext(sb);'
         'vm.runInContext(fs.readFileSync(process.argv[2],"utf8"),sb);'
-        'let out;try{sb.breatheAssertFresh(mk(P.w,P.h,P.rgba),P.cfg);out={ok:true};}'
+        'let out;try{sb.breatheAssertFresh(P.key,P.cfg);out={ok:true};}'
         'catch(e){out={ok:false,refused:e.constructor.name==="BreatheRefused",message:e.message};}'
         'fs.writeFileSync(P.out,JSON.stringify(out));', encoding="utf-8")
     src_json = tmp_path / "in.json"

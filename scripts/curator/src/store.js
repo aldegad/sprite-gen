@@ -196,9 +196,61 @@ function frameUrl(stateName, frame) {
 // `frameUrl` 은 표시용이라 pp OFF 에서 `orig/` 고해상본(굽기가 안 읽는 파일)을 줄 수
 // 있다. 호흡은 굽기와 같은 그림을 내야 하므로 워프 base 도 신선도 기준도 이걸 쓴다 —
 // 안 그러면 지문이 영구 불일치라 영상 내보내기가 영구 차단된다 (슉슉이 2026-07-26).
+// URL 과 파일 스탬프를 **한 자리에서** 고른다. 둘을 따로 고르면 "어느 변종을 골랐나" 가
+// 갈릴 수 있고, 그러면 호흡 기준 프레임 키가 굽기와 다른 파일을 가리킨다.
+function bakeFrame(stateName, frame) {
+  if (!ppOn(stateName) && frame.plainBakeUrl) {
+    return { url: frame.plainBakeUrl, stamp: frame.plainBakeStamp || null };
+  }
+  return { url: frame.url, stamp: frame.stamp || null };
+}
+
 function bakeFrameUrl(stateName, frame) {
-  if (!ppOn(stateName) && frame.plainBakeUrl) return frame.plainBakeUrl;
-  return frame.url;
+  return bakeFrame(stateName, frame).url;
+}
+
+// 호흡 경계선(rigid_row)을 재고 그릴 프레임 — **굽기가 해부를 확정하는 기준 프레임**.
+//
+// `rigid_row` 는 그 프레임의 콘텐츠 행 인덱스라, 모달이 열린 프레임을 재면 선의 화면
+// 위치와 저장되는 행 번호가 굽기와 어긋난다 (골든 픽스처에서 8px = 50px 캐릭터의 16%,
+// 슉슉이 실측 2026-07-26). 선택을 **한 함수로** 모아 둔다: 재는 자리와 그 재시도가
+// 각자 고르면 한쪽만 고쳐도 조용히 갈린다 — round-10 이 정확히 그 모양이었다.
+function breatheGeometryFrame(stateName, fallbackIdx) {
+  const play0 = playList(stateName)[0];
+  const index = play0 === undefined ? fallbackIdx : play0;
+  const frame = frameOf(stateName, index);
+  return { index, frame, url: frame ? bakeFrameUrl(stateName, frame) : null };
+}
+
+// 파이썬 `breathe.reference_key` 의 재료를 사이드카에서 모은다 — **줄의 기준 프레임**
+// (`playList[0]`, 굽기의 `images[0]`) 하나에 대해서만.
+//
+// 픽셀을 안 읽는다: 굽기는 BICUBIC 으로 리샘플하고 캔버스는 NEAREST 라 결과 픽셀은
+// 구조적으로 다르다. 여기 들어가는 값은 전부 사이드카(사람의 의도)와 서버가 준 스탬프다.
+// 재료가 하나라도 없으면 **null 을 돌려 거부시킨다** — 없는 값을 기본값으로 메우면
+// 서로 다른 프레임이 같은 키를 갖는다.
+function breatheReferenceKey(stateName) {
+  const e = entries[stateName];
+  if (!e || !run || !run.requestStamp) return null;
+  const play = playList(stateName);
+  if (!play.length) return null;
+  const idx = play[0];
+  const frame = frameOf(stateName, idx);
+  if (!frame) return null;
+  const stamp = bakeFrame(stateName, frame).stamp;
+  if (!stamp) return null;
+  const src = cloneSrc(stateName, idx);
+  const editIdx = editIndex(stateName, idx);
+  const t = e.transforms ? e.transforms[editIdx] : null;
+  return breatheReferenceKeyOf({
+    state: stateName,
+    variant: ppOn(stateName) ? "pixel" : "plain",
+    requestStamp: run.requestStamp,
+    sourceIndex: src === null ? idx : src,
+    sourceStamp: stamp,
+    pixelOps: getPixelOps(stateName, idx),
+    transform: t,
+  });
 }
 
 // 복제 인스턴스 (entries[state].clones = {복제idx: 원본idx}) 인식 프레임 조회.

@@ -183,7 +183,7 @@ def _run(args: argparse.Namespace):
                     # 해부는 캐릭터 속성이라 줄 전체가 한 벌을 쓴다 — 프레임마다 다시 재면
                     # 경계가 흔들려 강체 구간이 프레임 간 같은 구간이 아니게 되고,
                     # 사이드카 한 벌로 그리는 프리뷰와도 갈린다 (슉슉이 실측 2026-07-25).
-                    row_anatomy, _ = resolve_anatomy(frame, breathe_cfg)
+                    row_anatomy = resolve_anatomy(frame, breathe_cfg)
                 # 호흡 위상은 최종 셀 픽셀 위 결정론 봉투 워프 — 팔레트·격자 불변.
                 # **위상 0 도 굽는다.** 구 분할선 방식에선 위상 0 이 항등이라 건너뛰어도
                 # 됐지만 봉투에선 아니다: 진행파 지연(lag) 때문에 t=0 에서도 윗행은

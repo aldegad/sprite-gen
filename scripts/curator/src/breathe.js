@@ -92,16 +92,59 @@ function breatheProtect(anat) {
 // 자기가 그리는 프레임이 얼린 해부와 맞는지 확인할 수 있다. 못 하면 굽기만 자가 복구하고
 // 프리뷰는 낡은 숫자로 계속 그린다 (슉슉이 실측 2026-07-25: 픽셀 편집 후 최대 617바이트,
 // 불투명 픽셀 수까지 불일치). SHA-256 을 안 쓰는 이유는 브라우저에서 동기로 못 구해서다.
-function breatheFnv1a(data) {
+function breatheFnv1a(text) {
+  // 파이썬은 `key.encode("utf-8")` 을 해시한다 — 여기도 **UTF-8 바이트**여야 한다.
+  // `charCodeAt` 로 하면 상태 이름에 비-ASCII 가 한 글자만 들어와도 갈린다.
+  const data = new TextEncoder().encode(text);
   let h = 2166136261;
   for (let i = 0; i < data.length; i++) h = Math.imul(h ^ data[i], 16777619) >>> 0;
   return h;
 }
 
-function breatheFingerprint(canvas, data, box) {
-  const hex = breatheFnv1a(data).toString(16).padStart(8, "0");
-  const b = box || [0, 0, 0, 0];
-  return `${canvas.width}x${canvas.height}:${b[0]},${b[1]},${b[2]},${b[3]}:${hex}`;
+// 파이썬 `breathe._num` 미러. `toFixed(6)` 은 파이썬 `f"{v:.6f}"` 와 경계에서 갈리고
+// (JS 는 이진값, 파이썬은 십진 표현 기준 반올림) 지수 표기도 다르다. 곱·합·floor 만 쓰면
+// 양쪽 다 IEEE754 double 이라 같은 입력에 반드시 같은 결과가 나온다.
+function breatheNum(v) {
+  if (v === null || v === undefined) return "~";
+  if (typeof v === "boolean") return v ? "1" : "0";
+  if (typeof v === "number") return String(Math.floor(v * 1000000.0 + 0.5));
+  return String(v);
+}
+
+function breatheCanon(v) {
+  if (Array.isArray(v)) return "[" + v.map(breatheCanon).join(",") + "]";
+  if (v && typeof v === "object") {
+    // 파이썬은 `sorted(key=str)`, JS 는 UTF-16 코드유닛 정렬 — 실제 키(`"x,y"`, 변형
+    // 필드명)는 전부 ASCII 라 같은 순서다. 비-ASCII 키가 생기면 이 가정이 깨진다.
+    return "{" + Object.keys(v).sort().map((k) => `${k}=${breatheCanon(v[k])}`).join(",") + "}";
+  }
+  return breatheNum(v);
+}
+
+// 파이썬 `breathe.reference_key` 미러 — **픽셀을 안 읽는다.**
+// 굽기는 BICUBIC(`apply_transform`), 웹뷰 캔버스는 NEAREST 라 같은 원본·같은 변형에도
+// 두 쪽이 만드는 그림이 다르다. 결과 픽셀을 해시하던 옛 지문이 회전·확대가 걸린 줄에서
+// 영구 불일치였던 이유다 (슉슉이 실측 2026-07-26).
+// 파이썬 `curation.normalize_transform` 미러 — 항상 7키 전체.
+function breatheNormalizeTransform(raw) {
+  const t = raw && typeof raw === "object" ? raw : {};
+  const num = (v, d) => (v === undefined || v === null ? d : Number(v));
+  return { rotate: num(t.rotate, 0), scale: num(t.scale, 1), dx: num(t.dx, 0),
+           dy: num(t.dy, 0), shx: num(t.shx, 0), shy: num(t.shy, 0), flipX: t.flipX ? 1 : 0 };
+}
+
+function breatheReferenceKeyOf(p) {
+  return ["breathe-ref-v1", String(p.state), String(p.variant), String(p.requestStamp),
+          String(p.sourceIndex), String(p.sourceStamp),
+          breatheCanon(p.pixelOps || {}),
+          breatheCanon(breatheNormalizeTransform(p.transform))].join("|");
+}
+
+function breatheFingerprint(key) {
+  const parts = key.split("|");
+  const variant = parts.length > 5 ? parts[2] : "?";
+  const index = parts.length > 5 ? parts[4] : "?";
+  return `${variant}:${index}:${breatheFnv1a(key).toString(16).padStart(8, "0")}`;
 }
 
 function breatheSolidBox(data, w, h) {
@@ -129,7 +172,7 @@ function breatheSolidBox(data, w, h) {
 // 이게 없으면 큐레이터 픽셀 편집기로 도트를 찍기만 해도(호흡을 건드릴 필요조차 없다)
 // 굽기는 자가 복구하고 프리뷰는 낡은 숫자로 계속 그린다 — 실측 최대 617바이트, 불투명
 // 픽셀 수까지 불일치 (슉슉이 2026-07-25).
-function breatheAssertFresh(referenceCanvas, cfg) {
+function breatheAssertFresh(referenceKey, cfg) {
   const anat = cfg && cfg.anatomy;
   if (!anat) return;                               // 해부가 아예 없으면 굽기가 매번 재검출한다
   if (!anat.fingerprint) {
@@ -139,9 +182,11 @@ function breatheAssertFresh(referenceCanvas, cfg) {
     throw new BreatheRefused(
       "해부에 지문이 없다 — 이 프레임에서 나온 값인지 확인할 수 없다. 해부를 갱신해라.");
   }
-  const w = referenceCanvas.width, h = referenceCanvas.height;
-  const data = referenceCanvas.getContext("2d").getImageData(0, 0, w, h).data;
-  const now = breatheFingerprint(referenceCanvas, data, breatheSolidBox(data, w, h));
+  if (!referenceKey) {
+    // 키를 못 만든다 = 기준 프레임의 정체를 모른다 (스탬프 없는 프레임, 빈 재생목록).
+    throw new BreatheRefused("기준 프레임 키를 만들 수 없다 — 신선도 확인 불가.");
+  }
+  const now = breatheFingerprint(referenceKey);
   if (now !== anat.fingerprint) {
     throw new BreatheRefused(
       `해부가 지금의 기준 프레임에서 나온 게 아니다 — 얼린 지문 ${anat.fingerprint} vs `
@@ -154,19 +199,18 @@ function breatheAssertFresh(referenceCanvas, cfg) {
 // 만들어지기 전에 중단돼야 한다. 프리뷰는 타이머 루프라 예외가 올라가면 재생이 죽으므로
 // 잡되, **조용히 워프된 그림을 보여주지는 않는다** — 못 굽는 설정이면 못 굽는 대로 보인다.
 let _breatheWarned = "";
-function breatheComposeForPreview(base, cfg, phase, reference) {
+function breatheComposeForPreview(base, cfg, phase, referenceKey) {
   // `reference` 는 **필수 인자**다. 선택으로 두면 호출부가 빠뜨렸을 때 신선도 검사가
   // 조용히 건너뛰어져, 같은 웹뷰의 두 화면이 정반대로 행동한다 — 줄 카드는 거부하는데
   // 호흡 편집 모달은 낡은 숫자로 그렸다 (슉슉이 실측 2026-07-26: 12/12 위상 갈림, 알림 0건).
   //
-  // 인자를 **안 넘긴 것**(프로그래머 실수)과 넘겼는데 **null**(이미지 로딩 중)은 다르다:
-  // 전자는 하드 에러, 후자는 "확인할 수 없으니 워프하지 않는다" 로 부드럽게 거부한다.
+  // 인자를 **안 넘긴 것**(프로그래머 실수)과 넘겼는데 **빈 값**(상태가 아직 안 실림)은
+  // 다르다: 전자는 하드 에러, 후자는 "확인할 수 없으니 워프하지 않는다" 로 부드럽게 거부.
   if (arguments.length < 4) {
-    throw new Error("breatheComposeForPreview: reference 인자가 필요하다 (신선도 검사)");
+    throw new Error("breatheComposeForPreview: referenceKey 인자가 필요하다 (신선도 검사)");
   }
   try {
-    if (!reference) throw new BreatheRefused("기준 프레임을 아직 못 그렸다 — 신선도 확인 불가");
-    breatheAssertFresh(reference, cfg);
+    breatheAssertFresh(referenceKey, cfg);
     return breatheComposite(base, cfg, phase);
   } catch (err) {
     if (!(err instanceof BreatheRefused)) throw err;
