@@ -111,6 +111,25 @@ MUTS = [
          "      const refFrame = frameOf(stateName, refIdx);\n"
          "      const canonImg = refUrl ? img(refUrl) : img(frameUrl(stateName, refFrame));"),
     ]),
+    ("N5 탈출 J: 줄바꿈으로 분기 숨기기", [
+        ("scripts/curator/src/cards.js", '        const canonical = canonSrc ? img(canonSrc) : null;\n        if (!(canonical && canonical.complete && canonical.naturalWidth)) {',
+         "        const canonImg = canonSrc ? img(canonSrc) : null;\n"
+         "        const canonical = (canonImg && canonImg.complete && canonImg.naturalWidth)\n"
+         "          ? canonImg\n"
+         "          : image;\n"
+         "        if (false) {"),
+    ]),
+    ("N5 탈출 J2: || 폴백을 다음 줄로", [
+        ("scripts/curator/src/zoom-editor.js", '      const canonImg = refUrl ? img(refUrl) : null;',
+         "      const refFrame = frameOf(stateName, refIdx);\n"
+         "      const canonImg = (refUrl && img(refUrl))\n"
+         "        || img(frameUrl(stateName, refFrame));"),
+    ]),
+    ("N5 탈출 K: 줄바꿈으로 프리뷰 사이트 증발 + 기준 인자 제거", [
+        ("scripts/curator/src/zoom-editor.js", '      bctx.drawImage(bm.enabled ? breatheComposeForPreview(base, bm.cfg, phase, breatheRef()) : base, 0, 0);',
+         "      bctx.drawImage(bm.enabled ? breatheComposeForPreview(base, bm.cfg,\n"
+         "        phase) : base, 0, 0);"),
+    ]),
     ("N6 폐기 문구 복원", "CHANGELOG.md",
      "is frozen into the sidecar as a cache",
      "is frozen into the sidecar with a fingerprint of the\n  frame it came from; a mismatch re-detects and says so. cache"),
