@@ -48,11 +48,6 @@ function breatheSmoothstep(a, b, x) {
   return u * u * (3 - 2 * u);
 }
 
-// 홀짝 보존 — 바뀌면 중앙 정렬이 1px 튀어 좌우 지터가 된다. scale===1 이면 항등.
-function breatheParityRound(w0, scale) {
-  return Math.max(1, w0 + 2 * Math.round((w0 * scale - w0) / 2));
-}
-
 // 변형 강도 봉투 + 진폭 정규화 계수 (서버 envelope() 미러).
 function breatheEnvelope(anat) {
   const height = anat.height;
@@ -152,20 +147,19 @@ function breatheComposite(base, cfg, phase) {
     const g = gain(u);
     let rowMap;
     if (g === 0) {
-      const left = anchorX - (width >> 1);
-      rowMap = Array.from({ length: width }, (_, i) => [left + i, i]);
+      // 변형 없음 = 원본 위치 그대로 (축 고정점 사상의 g->0 극한과 동일)
+      rowMap = Array.from({ length: width }, (_, i) => [bx0 + i, i]);
     } else {
       const edge = [0];
       for (let i = 0; i < width; i++) edge.push(edge[i] + Math.max(0.05, 1 + g * (1 - pOf(i))));
-      const span = edge[width];
-      const nw = breatheParityRound(width, span / Math.max(1e-6, width));
-      const scale = span > 1e-6 ? nw / span : 1;
-      const left = anchorX - (nw >> 1);
+      const origin = edge[anat.axis_x];    // 축이 고정점 — 여기가 anchorX 에 박힌다
+      const lo = Math.round(edge[0] - origin);
+      const hi = Math.round(edge[width] - origin);
       rowMap = [];
       let i = 0;
-      for (let ox = 0; ox < nw; ox++) {
-        while (i < width - 1 && edge[i + 1] * scale <= ox) i += 1;
-        rowMap.push([left + ox, i]);
+      for (let ox = lo; ox < hi; ox++) {
+        while (i < width - 1 && edge[i + 1] - origin <= ox) i += 1;
+        rowMap.push([anchorX + ox, i]);
       }
     }
     for (let r = 0; r < reps; r++) {

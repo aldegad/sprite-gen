@@ -17,7 +17,7 @@ from sprite_gen.anatomy import analyze
 from sprite_gen.breathe import (DEFAULT_DEPTH, MAX_ROW_STRAIN, SMOOTH_CYCLE_FRAMES, TAPER,
                                 bake_breathe_sequence, breathe_reads_smoothly,
                                 envelope, fit_breathe_pattern, fitted_breath_count,
-                                freeze_anatomy, parity_round, phase_frame,
+                                freeze_anatomy, phase_frame,
                                 recommended_breathe_frames, row_strain, wave)
 from sprite_gen.curation import state_breathe
 from sprite_gen.extract import solid_alpha_bbox
@@ -108,12 +108,51 @@ def test_rigid_region_is_bit_identical_across_frames() -> None:
         assert got == expect, f"frame {i}: 강체 구간이 바뀌었다 — 항등이어야 한다"
 
 
-def test_parity_round_is_identity_at_scale_one() -> None:
-    # 강체 항등의 근거. 홀짝이 바뀌면 중앙 정렬이 1px 튄다.
-    for width in (1, 2, 17, 64, 173):
-        assert parity_round(width, 1.0) == width
-        assert parity_round(width, 1.06) % 2 == width % 2
-        assert parity_round(width, 0.94) % 2 == width % 2
+def test_zero_strain_is_byte_identical_to_the_source() -> None:
+    """변형이 0 이면 **원본과 바이트 동일**이어야 한다.
+
+    프레임끼리 비교하는 테스트는 전 프레임이 똑같이 밀려도 통과한다. 원본 대비로
+    재야 축 재중심화 같은 전역 오프셋이 잡힌다 (실사고 2026-07-25: bbox 중앙을
+    기준으로 잡아 축이 중앙과 다른 3/3 픽스처가 변형 0 에서 1px 밀렸다)."""
+    for build in (_humanoid, _winged, _dome):
+        src = build()
+        cfg = dict(CFG)
+        cfg["anatomy"] = freeze_anatomy(src, cfg)
+        rest = phase_frame(src, {**cfg, "lag": 0.0}, 0.0)   # lag 0 + 위상 0 = 전 행 g==0
+        assert rest.tobytes() == src.tobytes(), f"{build.__name__}: 변형 0 인데 원본과 다르다"
+
+
+def test_phase_zero_is_not_identity_when_the_wave_travels() -> None:
+    """진행파 지연이 있으면 위상 0 도 변형된 프레임이다.
+
+    구 분할선 방식에선 위상 0 이 항등이라 소비자가 건너뛰어도 됐다. 봉투에선 윗행이
+    `wave(-lag*u)` 만큼 변형되므로 건너뛰면 그 슬롯만 원본이 되어 아틀라스가 매 루프
+    시작에서 튀고 GIF 굽기와 그림이 갈린다 (새미 검증 2026-07-25, 실측 353px 차이).
+    소비자(`compose_atlas`, `compare.js`)의 `if phase:` 가드가 되살아나면 여기서 잡힌다."""
+    src = _humanoid()
+    cfg = dict(CFG)
+    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    assert cfg["lag"] > 0, "이 계약은 지연이 있을 때의 이야기다"
+    assert phase_frame(src, cfg, 0.0).tobytes() != src.tobytes(), \
+        "위상 0 이 항등이면 소비자가 건너뛰어도 되는 것처럼 보인다"
+    # 지연이 0 이면 위상 0 은 진짜 항등 — 두 경우의 차이가 계약의 핵심이다
+    assert phase_frame(src, {**cfg, "lag": 0.0}, 0.0).tobytes() == src.tobytes()
+
+
+def test_the_body_axis_column_is_a_fixed_point() -> None:
+    """어떤 위상에서도 몸통 축 열은 제자리 — 이게 좌우 지터를 구조적으로 막는다."""
+    src = _humanoid()
+    anat = analyze(src)
+    cfg = dict(CFG)
+    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    box = solid_alpha_bbox(src)
+    axis_col = box[0] + anat.axis_x
+    ref = [src.getpixel((axis_col, y))[3] >= 128 for y in range(box[1], box[3])]
+    for i in range(12):
+        frame = phase_frame(src, cfg, i / 12)
+        fb = solid_alpha_bbox(frame)
+        got = [frame.getpixel((axis_col, y))[3] >= 128 for y in range(fb[1], fb[3])]
+        assert any(got), f"위상 {i}: 축 열이 비었다 — 통째로 밀렸다"
 
 
 # ── 2. 발바닥 고정 · 루프 길이 불변 ─────────────────────────────────
