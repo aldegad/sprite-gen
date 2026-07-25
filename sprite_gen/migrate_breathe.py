@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import math
+
 import argparse
 import json
 from pathlib import Path
@@ -40,18 +42,23 @@ def migrate_entry(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     dropped = [f"{key}={raw[key]!r} ({reason})"
                for key, reason in RETIRED_BREATHE_KEYS.items() if key in raw]
     fresh: dict[str, Any] = {"depth": DEFAULT_DEPTH, "lag": DEFAULT_LAG}
+    # `int(2.7)` 은 **조용히 2** 다 — 그러면 사용자가 적은 값과 다른 값이 마이그레이션
+    # 산출물에 들어가고 `dropped` 엔 한 줄도 안 남는다. `"3.5"` 문자열만 예외로 걸려
+    # 보고되고 실수만 샜다 (슉슉이 note 2026-07-26). 굽기(`_exact_int`)와 미러가 이미
+    # 거부하는 값이라, 이 세 번째 구현만 규칙을 안 지키고 있었다.
+    #
+    # `isfinite` 게이트가 **먼저** 와야 한다: `int(nan)` 은 `ValueError` 를 올리고,
+    # `json.loads` 는 기본값으로 `NaN` 리터럴을 받으므로 사이드카에서 실제로 들어온다.
+    # 이 판정을 try 밖으로 빼면 마이그레이션이 트레이스백으로 죽어 "무엇을 버렸는지 전부
+    # 출력한다" 는 모듈 계약이 그 입력에서 깨진다 (노을이 실측 2026-07-26 R2).
     try:
-        # `int(2.7)` 은 **조용히 2** 다 — 그러면 사용자가 적은 값과 다른 값이 마이그레이션
-        # 산출물에 들어가고 `dropped` 엔 한 줄도 안 남는다. `"3.5"` 문자열만 예외로 걸려
-        # 보고되고 실수만 샜다 (슉슉이 note 2026-07-26). 굽기(`_exact_int`)와 미러가 이미
-        # 거부하는 값이라, 이 세 번째 구현만 규칙을 안 지키고 있었다.
-        # 아래 `rigid_row` 가 쓰는 판정과 같은 형태로 맞춘다.
         raw_breaths = float(raw.get("breaths", 1))
+        integral = math.isfinite(raw_breaths) and raw_breaths == int(raw_breaths)
     except (TypeError, ValueError):
         want = 1
         dropped.append(f"breaths={raw.get('breaths')!r} (정수가 아니라 1 로 되돌림)")
     else:
-        if raw_breaths == int(raw_breaths):
+        if integral:
             want = int(raw_breaths)
         else:
             want = 1
