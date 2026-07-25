@@ -29,7 +29,11 @@ function stateBreathe(stateName) {
 function breathePattern(cfg, seqLen) {
   if (!seqLen || seqLen <= 0) return [];
   const breaths = Math.max(1, cfg.breaths || 1);
-  return Array.from({ length: seqLen }, (_, i) => ((i * breaths) / seqLen) % 1);
+  // 분자를 정수 나머지로 **먼저** 접는다 — 파이썬 fit_breathe_pattern 과 같은 식이어야
+  // 같은 double 이 나온다. `(i*breaths/seqLen) % 1` 로 쓰면 수학적으로 같은 위상이 서로
+  // 다른 double 이 되어 프리뷰가 굽기와 갈린다 (부리 실측 2026-07-25: seq=30 breaths=7
+  // 에서 slot 24 py=0.6 vs js=0.5999999999999996 → 4바이트 차이).
+  return Array.from({ length: seqLen }, (_, i) => ((i * breaths) % seqLen) / seqLen);
 }
 
 // 연속 위상이라 요청 횟수가 그대로 성립한다 (물리 클램프 없음).

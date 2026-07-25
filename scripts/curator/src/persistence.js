@@ -49,6 +49,9 @@ function buildPayload() {
     if (ppTwinStates.has(name)) states[name].pixel_perfect = ppOn(name);
     // 호흡 후처리 레이어 (수홍 2026-07-18) — 켠 상태만 기록 (없음 = off)
     if (entry.breathe) states[name].breathe = entry.breathe;
+    // 폐기 스키마는 **원본 그대로 되쓴다.** 정규화도 삭제도 하지 않는다 — 웹뷰가 못 읽는
+    // 사이드카를 웹뷰가 파괴하면 굽기의 loud reject 와 migrate-breathe 가 근거를 잃는다.
+    else if (entry.breatheRetired) states[name].breathe = entry.breatheRetired.raw;
   }
   const payload = { version: run.schemaVersion || 1, kind: "sprite-gen-curation", states };
   // 방향 앵커 프레임 지정 — **항상 실어 보낸다** (해제도 의도다). 키가 없으면 서버가

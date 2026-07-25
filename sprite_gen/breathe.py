@@ -214,12 +214,15 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
 # ── 해부 결과 얼리기 / 자가 복구 ────────────────────────────────────
 
 def anatomy_fingerprint(frame: Image.Image) -> str:
-    """해부 결과가 파생된 소스의 지문 — 캔버스 크기 + solid bbox + 알파 해시.
+    """해부 결과가 파생된 소스의 지문 — 캔버스 크기 + solid bbox + **RGBA 전체** 해시.
 
-    스프라이트가 바뀌면 지문이 달라지고 다음 굽기에서 자동으로 재검출된다
-    (원칙 1: 캐시 미스 시 canonical state 가 live truth 로부터 자가 복구)."""
+    **검출이 읽는 것을 전부 덮어야 한다.** 알파만 해시하면 `detect_face` 가 쓰는 휘도(RGB)가
+    지문 밖에 남아, 불투명 픽셀 위에 눈·입을 덧칠하는 편집(큐레이터 픽셀 편집기의 문서화된
+    기능 — 알파가 1바이트도 안 바뀐다)이 자가 복구를 못 깨운다. 그러면 굽기는 낡은 경계로
+    구우면서 `redetected: False` 로 "이상 없음" 을 보고한다 (새미 실측 2026-07-25: 눈 행이
+    12프레임 중 11프레임에서 흔들렸고 관측에는 아무것도 안 남았다)."""
     box = solid_alpha_bbox(frame) or (0, 0, 0, 0)
-    digest = hashlib.sha256(frame.convert("RGBA").getchannel("A").tobytes()).hexdigest()[:16]
+    digest = hashlib.sha256(frame.convert("RGBA").tobytes()).hexdigest()[:16]
     return f"{frame.width}x{frame.height}:{box[0]},{box[1]},{box[2]},{box[3]}:{digest}"
 
 

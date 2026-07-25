@@ -1,3 +1,7 @@
+// 폐기된 호흡 사이드카 키 (파이썬 curation.RETIRED_BREATHE_KEYS 미러 — 둘이 갈리면
+// 한쪽만 보존하게 되므로 같이 고친다).
+const RETIRED_BREATHE_KEYS = ["splits", "amplitude", "subpixel", "hold"];
+
 // SPDX-License-Identifier: Apache-2.0
 // curator/store.js — 런 스냅샷 + 큐레이션 인메모리 모델 (run/entries/프레임·복제 해석) — 클라이언트 상태 SSoT
 // 로드 순서 SSoT = index.html (classic script 전역 어휘 공유; 빌드 스텝 없음)
@@ -357,14 +361,31 @@ function seedEntries() {
         if (Number.isInteger(i) && typeof v === "string" && v.trim()) names[i] = v.trim().slice(0, 24);
       }
     }
+    // 폐기된 분할선 스키마(splits/amplitude/subpixel/hold)를 가진 사이드카는 **건드리지
+    // 않고 그대로 들고 있는다.** 파싱 실패로 null 처리하면 그 줄이 "호흡 꺼짐"으로 보이고
+    // 첫 autosave 가 폐기 키를 사이드카에서 지워버려, 굽기의 loud reject 도 migrate-breathe
+    // 도 근거를 잃는다 (새미·부리 독립 실측 2026-07-25 — 구 런을 한 번 여는 것만으로 소실).
+    const rawBreathe = c && c.breathe;
+    const retired = rawBreathe
+      ? RETIRED_BREATHE_KEYS.filter((k) => k in rawBreathe) : [];
     entries[state.name] = { order, sel, transforms, archived, pixels, clones, unlinked, names,
+      // 원본 보존 — persistence 가 이걸 그대로 되쓴다 (정규화·삭제 금지)
+      breatheRetired: retired.length ? { keys: retired, raw: rawBreathe } : null,
       // 호흡 후처리 레이어 (사이드카 breathe — curation.state_breathe 와 같은 형태)
-      breathe: c && c.breathe && typeof c.breathe.depth === "number"
-        ? { depth: Math.max(0.005, Math.min(0.2, Number(c.breathe.depth) || 0.06)),
-            breaths: Math.max(1, Math.min(8, Number(c.breathe.breaths) || 1)),
-            lag: Math.max(0, Math.min(0.45, c.breathe.lag == null ? 0.1 : Number(c.breathe.lag))),
-            rigid_row: c.breathe.rigid_row == null ? null : Number(c.breathe.rigid_row),
-            anatomy: c.breathe.anatomy || null }
+      breathe: rawBreathe && !retired.length && typeof rawBreathe.depth === "number"
+        ? { depth: Math.max(0.005, Math.min(0.2, Number(rawBreathe.depth) || 0.06)),
+            breaths: Math.max(1, Math.min(8, Number(rawBreathe.breaths) || 1)),
+            lag: Math.max(0, Math.min(0.45, rawBreathe.lag == null ? 0.1 : Number(rawBreathe.lag))),
+            rigid_row: rawBreathe.rigid_row == null ? null : Number(rawBreathe.rigid_row),
+            anatomy: rawBreathe.anatomy || null }
         : null };
+  }
+  // 폐기 스키마가 하나라도 있으면 조용히 넘어가지 않는다 — 사용자가 마이그레이션을
+  // 실행할 수 있게 알린다 (굽기 쪽 loud reject 와 같은 계약을 UI 에서도 지킨다).
+  const stale = run.states.filter((s2) => entries[s2.name] && entries[s2.name].breatheRetired);
+  if (stale.length) {
+    const names = stale.map((s2) => s2.name).join(", ");
+    setStatus(`폐기된 호흡 스키마: ${names} — 사이드카는 그대로 두었다. `
+      + `\`sprite-gen migrate-breathe <run-dir> --apply\` 로 옮겨라.`, "err");
   }
 }

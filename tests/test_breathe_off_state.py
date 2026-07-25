@@ -17,8 +17,12 @@ from pathlib import Path
 
 import pytest
 
-CURATOR_SRC = Path(__file__).resolve().parent.parent / "scripts" / "curator" / "src"
+ROOT = Path(__file__).resolve().parent.parent
+CURATOR_SRC = ROOT / "scripts" / "curator" / "src"
 CALL = re.compile(r"breatheComposite\s*\(")
+# 파이썬 굽기 소비자 — 위상 0 을 건너뛰면 그 슬롯만 원본이 구워진다.
+PY_CONSUMERS = ("sprite_gen/compose_atlas.py", "sprite_gen/compose_gif.py")
+PY_CALL = re.compile(r"phase_frame\s*\(|bake_breathe_sequence\s*\(")
 
 # 게이트는 **호출부 같은 줄**에 있어야 한다. 감싸는 블록까지 인정하면 그물이 무의미해진다
 # — 실측: 25줄 창으로 넓혔더니 무관한 `bm.enabled ?`(위상 계산 줄)가 걸려서, 정작 워프
@@ -49,3 +53,50 @@ def test_every_breathe_composite_call_is_gated_on_enabled(site):
         f"{name}:{lineno} 가 켜짐 여부로 게이트되지 않았다 — 꺼진 줄이 워프된다.\n"
         f"  {line}\n"
         f"  허용 형태: {', '.join(GUARDS)}")
+
+
+# ── 파이썬 굽기 소비자 ──────────────────────────────────────────────
+
+def _py_call_sites():
+    for rel in PY_CONSUMERS:
+        path = ROOT / rel
+        if not path.is_file():
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for lineno, line in enumerate(lines, 1):
+            if PY_CALL.search(line) and not line.lstrip().startswith("#"):
+                # 이 호출을 감싸는 가장 가까운 `if` 조건 (들여쓰기가 더 얕은 첫 if)
+                indent = len(line) - len(line.lstrip())
+                guard = ""
+                for prev in range(lineno - 2, -1, -1):
+                    cand = lines[prev]
+                    if not cand.strip():
+                        continue
+                    cind = len(cand) - len(cand.lstrip())
+                    if cind < indent and cand.lstrip().startswith("if "):
+                        guard = cand.strip()
+                        break
+                    if cind < indent:
+                        break
+                yield rel, lineno, line.strip(), guard
+
+
+def test_there_are_python_bake_call_sites():
+    assert list(_py_call_sites()), "굽기 소비자에서 호흡 호출부가 사라졌다 — 계약 위치 확인"
+
+
+@pytest.mark.parametrize("site", list(_py_call_sites()), ids=lambda s: f"{s[0].split('/')[-1]}:{s[1]}")
+def test_python_bake_never_skips_a_phase(site):
+    """굽기가 **위상 값으로** 워프 여부를 가르면 안 된다.
+
+    `if breathe_cfg and breathe_phase:` 는 위상 0 슬롯을 건너뛰어 그 칸만 원본이 되고,
+    같은 런의 GIF 굽기와 그림이 갈린다 (round-1 reject 1, 실측 353px). 게이트는
+    "호흡이 켜져 있는가"(`breathe_cfg`)만 봐야 한다.
+
+    이 그물이 필요한 이유: 부리가 변이 테스트로 확인했다 — `compose_atlas` 의 가드를
+    옛 형태로 되돌려도 `pytest -k "atlas or breathe"` 40개가 **전부 통과**했다.
+    JS 쪽엔 그물이 있었고 파이썬 쪽만 비어 있었다 (2026-07-25)."""
+    rel, lineno, line, guard = site
+    assert "phase" not in guard.replace("breathe_cfg", ""), (
+        f"{rel}:{lineno} 의 가드가 위상 값을 본다 — 위상 0 이 안 구워진다.\n"
+        f"  가드: {guard}\n  호출: {line}")
