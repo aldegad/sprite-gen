@@ -2726,7 +2726,15 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
                 cut_edges.append(None)
                 used_pitches.append((1.0, 1.0))
                 continue
-            frame_phase = frame_phases[index]
+            # 위상은 엣지 히스토그램의 무게중심(`_axis_refine` 반환값)이 아니라 실제
+            # 셀 균일도로 다시 고른다 (수홍 관측 2026-07-25 "눈이 8칸이어야 하는데 7칸",
+            # founder_v8 down_jump frame-0). 히스토그램 위상은 1차원 신호의 근사라
+            # 참 위상에서 반 칸까지 밀린다 — 실측: 피치 13.00 에서 검출 위상 y=2.02 vs
+            # 실측 최적 8.12 (차이 6.1 ≈ pitch/2). `refine_edges_to_boundaries` 는
+            # ±pitch/3 창 안에서만 절단선을 당기므로 이 크기의 위상 오차는 구조적으로
+            # 복구되지 않고, 눈 4행이 3행으로 병합됐다. 피치가 고정된 상태에서 위상만
+            # 비교하므로 균일도 지표의 '거친 격자 편애' 편향은 개입하지 않는다.
+            frame_phase = _best_phase(component, (use_x, use_y))
             xs = _grid_edges(component.width, use_x, frame_phase[0])
             ys = _grid_edges(component.height, use_y, frame_phase[1])
             xs, ys = refine_edges_to_boundaries(component, xs, ys, (use_x, use_y))

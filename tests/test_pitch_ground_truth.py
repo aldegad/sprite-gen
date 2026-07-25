@@ -11,6 +11,7 @@ import pytest
 from PIL import Image
 
 from sprite_gen.extract import (
+    _best_phase,
     detect_pixel_grid,
     detect_pixel_pitch,
     grid_snap_downscale,
@@ -233,3 +234,24 @@ def test_inconclusive_consensus_keeps_own_pitch():
     # 합의가 무근거(<2.0)면 own 이 유일한 측정이다 — 가드는 발동하지 않는다
     use, outlier = _resolve((9.0, 9.0), (1.0, 1.0))
     assert use == (9.0, 9.0) and not outlier
+
+
+@pytest.mark.parametrize("scale", [12.0, 14.35, 16.0, 17.24, 20.0])
+def test_measured_phase_roundtrips_like_the_detected_phase(scale):
+    """스냅 경로가 쓰는 위상(`_best_phase`)도 원본 논리 픽셀을 되돌려야 한다.
+
+    실사고 (수홍 2026-07-25, founder_v8 down_jump frame-0): 엣지 히스토그램이 낸
+    위상이 참 위상에서 pitch/2 만큼 밀려(13.00 에서 2.02 vs 8.12) 눈 4행이 3행으로
+    병합됐다. `refine_edges_to_boundaries` 는 ±pitch/3 안에서만 절단선을 당기므로
+    그 크기의 위상 오차는 복구되지 않는다. 그래서 스냅 루프는 위상을 실측
+    (`_best_phase`, 셀 균일도)으로 다시 고른다 — 이 테스트는 그 경로가 기존
+    라운드트립 보장을 깨지 않음을 고정한다.
+    """
+    art = _logical_art()
+    upscaled = _upscaled(art, scale)
+    pitch, _ = detect_pixel_grid(upscaled)
+    phase = _best_phase(upscaled.convert("RGBA"), pitch)
+    snapped = grid_snap_downscale(upscaled, pitch, phase=phase)
+
+    assert snapped.size == art.size, f"scale {scale}: {snapped.size} != {art.size}"
+    assert _mismatch(snapped, art) <= art.width * art.height // 100
