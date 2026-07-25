@@ -252,6 +252,8 @@ def test_every_file_producing_path_checks_freshness():
 # 헬퍼 자신은 `bakeFrame` 을 거치고, 그 선택은 node 동작 테스트가 따로 검증한다
 # (`tests/test_breathe_reference_key.py::test_geometry_measures_the_reference_frame...`).
 BAKE_SOURCES = ("bakeFrameUrl(", "breatheGeometryFrame(")
+# 잎 판정용 — 식 **전체**가 굽기 소스 호출이어야 한다 (뒤따르는 프로퍼티 접근은 허용).
+BAKE_CALL = re.compile(r"(?:bakeFrameUrl|breatheGeometryFrame)\(.*\)(?:\.\w+)?")
 BAKE_URL = re.compile(r"bakeFrameUrl\s*\(")
 IMG_CALL = re.compile(r"\bimg\s*\(")
 # 호흡 계약이 사는 파일 — 이 안의 **모든** 프레임 이미지 소스가 굽기 파일이어야 한다.
@@ -366,13 +368,24 @@ def _bake_only(name: str, lineno: int, expr: str, depth: int = 8) -> bool:
     ands = _split_top(expr, ("&&",))
     if len(ands) > 1:
         return _bake_only(name, lineno, ands[-1], depth)
-    # 잎
+    # 잎 — 여기서 참을 주는 형태를 **좁게 열거**한다. 넓게 열면 매 라운드 새 우회가 생겼다.
     if EMPTY_LEAF.match(expr):
         return True                       # 값 없음 = 워프 안 함 (폴백이 아니다)
-    if any(src in expr for src in BAKE_SOURCES):
+    # 굽기 소스는 "그 식이 **그 호출이다**" 여야 한다. `src in expr` 부분문자열 판정은
+    # `imgOrDisplay(bakeFrameUrl(...), image)` 처럼 굽기 소스를 **인자로 품은** 임의의
+    # 호출에 참을 준다 — 폴백을 두 번째 인자로 숨기면 그만이다 (노을이 탈출 G).
+    if BAKE_CALL.fullmatch(expr):
         return True
-    call = re.fullmatch(r"[\w.]+\(\s*([\w.]+)\s*\)", expr)
-    if call:                              # `img(x)` — 인자를 따라간다
+    # 호출 투명성은 `img(` **하나에만** 준다. `[\w.]+\(x\)` 로 열어두면 폐기된 폴백을
+    # 한 인자 헬퍼에 넣는 것만으로 통과한다 — 그물이 인자만 보고 헬퍼가 그걸로 무엇을
+    # 하는지 한 번도 안 본다 (노을이 탈출 F 실측 2026-07-26: 538 passed, 기준선과 동일):
+    #
+    #     const readyOr = (c) => (c && c.complete) ? c : image;
+    #     const canonical = readyOr(canonImg);          // <- 무사통과였다
+    #
+    # 자기 계약("증명 못 하는 이름은 거짓")과 맞추려면 아는 함수만 투명해야 한다.
+    call = re.fullmatch(r"img\(\s*([\w.]+)\s*\)", expr)
+    if call:
         return _bake_only(name, lineno, call.group(1), depth - 1)
     if re.fullmatch(r"[\w.]+", expr):
         found = _binding_rhs(name, lineno, expr.split(".")[0])
