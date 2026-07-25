@@ -808,35 +808,52 @@ function openZoom(stateName, idx, keepWidth) {
       syncLines();
       commit();
     };
-    bm.cfg = e0.breathe ? clone(e0.breathe) : { splits: [0.55], amplitude: 1, breaths: 1, subpixel: false };
+    bm.cfg = e0.breathe ? clone(e0.breathe) : { depth: 0.06, breaths: 1, lag: 0.1, rigid_row: null, anatomy: null };
 
     // 실루엣 지오메트리 (선 표시 기준): 이미지 로드 전 빈 합성이면 재시도
     // (실사고 2026-07-17 로드 레이스 — 선이 바닥에 붙고 드래그 죽음)
     let btop = 0;
     let bh = 1;
 
-    // 분할선들 — 드래그 = 즉시 반영, 놓으면 히스토리 스냅샷
+    // 강체 경계 1개 — 이 위는 안 움직인다. 드래그 = 즉시 반영, 놓으면 서버에 다시
+    // 물어 해부를 갱신한다(검출 SSoT = 서버). 구 방식의 분할선 N개는 폐기됐다:
+    // 선은 "이 위가 움직인다" 였고 경계는 "이 위는 안 움직인다" 라 반대 개념이다.
     const lineEls = [];
+    let anatomyBusy = false;
+    const refreshAnatomy = async () => {
+      if (anatomyBusy) return;
+      anatomyBusy = true;
+      try {
+        const { anatomy } = await fetchBreatheAnatomy(stateName, bm.cfg.rigid_row);
+        bm.cfg.anatomy = anatomy;
+        syncLines();
+        commit();
+        rebuildStrip();
+      } catch (err) {
+        setStatus(t("breatheFail") + err.message, "err");
+      }
+      anatomyBusy = false;
+    };
     function wireLine(ln) {
       ln.addEventListener("pointerdown", (ev) => {
         ev.preventDefault();
         ev.stopImmediatePropagation();
-        if (!bm.geomReady) return;
+        if (!bm.geomReady || !bm.cfg.anatomy) return;
         ln.setPointerCapture(ev.pointerId);
-        const li = lineEls.indexOf(ln);
         const onMove = (e2) => {
           const r = stage.getBoundingClientRect();
           const yCell = ((e2.clientY - r.top) / r.height) * cellH;
-          bm.cfg.splits[li] = Math.min(0.9, Math.max(0.1, Math.round(((yCell - btop) / bh) * 100) / 100));
+          // 해부는 변형 후 프레임 기준이므로 셀 좌표의 콘텐츠 상단(btop)이 곧 0행이다.
+          const row = Math.round(yCell - btop);
+          bm.cfg.rigid_row = Math.min(bm.cfg.anatomy.height - 2, Math.max(1, row));
+          bm.cfg.anatomy = { ...bm.cfg.anatomy, rigid_row: bm.cfg.rigid_row, rigid_source: "manual" };
           syncLines();
           commit();
         };
         const onUp = () => {
           ln.removeEventListener("pointermove", onMove);
           ln.removeEventListener("pointerup", onUp);
-          bm.cfg.splits.sort((a, b) => a - b); // 선 순서 불변식: 위→아래 오름차순
-          syncLines();
-          commit();
+          refreshAnatomy();  // basis_row 등 파생값은 서버가 다시 계산한다
           pushHist();
         };
         ln.addEventListener("pointermove", onMove);
@@ -844,8 +861,10 @@ function openZoom(stateName, idx, keepWidth) {
       });
     }
     const syncLines = () => {
-      while (lineEls.length > bm.cfg.splits.length) lineEls.pop().remove();
-      while (lineEls.length < bm.cfg.splits.length) {
+      const anat = bm.cfg.anatomy;
+      while (lineEls.length > (anat ? 1 : 0)) lineEls.pop().remove();
+      if (!anat) return;
+      if (!lineEls.length) {
         const ln = document.createElement("div");
         ln.className = "breathe-line";
         ln.setAttribute("data-tip", t("breatheHint"));
@@ -853,11 +872,8 @@ function openZoom(stateName, idx, keepWidth) {
         stage.appendChild(ln);
         lineEls.push(ln);
       }
-      bm.cfg.splits.forEach((s, i) => {
-        lineEls[i].style.top = `${((btop + s * bh) / cellH) * 100}%`;
-        // 지오메트리 확정 전(임시 위치 점프 방지)과 호흡 꺼짐 상태에선 숨김
-        lineEls[i].style.visibility = bm.geomReady && bm.enabled ? "" : "hidden";
-      });
+      lineEls[0].style.top = `${((btop + anat.rigid_row) / cellH) * 100}%`;
+      lineEls[0].style.visibility = bm.geomReady && bm.enabled ? "" : "hidden";
     };
 
     // 시퀀스 재생 미리보기 — 실제 재생 순서(playList: 깜빡임 포함) 위에 위상을 얹는다.
@@ -934,19 +950,16 @@ function openZoom(stateName, idx, keepWidth) {
         if (tbot <= ttop) return false; // 아직 빈 합성 — 재시도 경로가 처리
         btop = ttop;
         bh = Math.max(1, tbot - ttop);
+        if (!bm.cfg.anatomy) {
+          // 해부 숫자는 서버에서만 나온다 — 여기서 추정하지 않는다 (b안, 2026-07-25).
+          // 도착 전까지 경계선은 숨겨져 있고 프리뷰는 원본 그대로다.
+          refreshAnatomy();
+        }
         if (!e0.breathe && !beforeCfg && bm.histPos <= 0) {
-          // 기본 split 사슬 = defaultBreatheConfig 와 동일: 형제 행 상속 → 허리 → 가슴
           const sib = run.states
-            .map((s) => s.name !== stateName && entries[s.name] && entries[s.name].breathe)
-            .find((b) => b && Array.isArray(b.splits) && b.splits.length);
-          const cxh = compositeCell();
-          const dd2 = cxh.getImageData(0, 0, cellW, cellH).data;
-          const silh = silhouetteStats(dd2, cellW, cellH);
-          if (sib) bm.cfg.splits = [sib.splits[0]];
-          else if (silh.top < cellH) {
-            const waist = waistSplitFrom(dd2, cellW, cellH);
-            bm.cfg.splits = [Math.round((waist !== null ? waist : silh.split) * 100) / 100];
-          }
+            .map((s) => (s.name !== stateName && entries[s.name] ? entries[s.name].breathe : null))
+            .find((b) => b && typeof b.depth === "number");
+          if (sib) { bm.cfg.depth = sib.depth; bm.cfg.breaths = sib.breaths; bm.cfg.lag = sib.lag; }
           if (bm.histPos === 0) bm.hist[0] = { enabled: bm.enabled, cfg: clone(bm.cfg) };
         }
         bm.geomReady = true;
@@ -1054,36 +1067,23 @@ function openZoom(stateName, idx, keepWidth) {
       sel.addEventListener("change", () => onchange(parseInt(sel.value, 10)));
       return sel;
     };
-    const lineBtns = document.createElement("span");
-    lineBtns.className = "breathe-linectl";
-    lineBtns.title = t("tBreatheLines");
-    const addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.textContent = t("breatheLineAdd");
-    addBtn.addEventListener("click", () => {
-      if (bm.cfg.splits.length >= 3) return;
-      bm.cfg.splits.unshift(Math.max(0.1, bm.cfg.splits[0] - 0.18)); // 새 선은 최상단 위로
-      bm.cfg.splits.sort((a, b) => a - b);
-      syncLines();
-      commit();
+    // 강체 경계는 하나뿐이라 +선/−선 버튼이 없다. 경계는 드래그로만 움직이고,
+    // 자동 검출값으로 되돌리는 버튼을 대신 둔다 (수동 override 해제).
+    const autoBtn = document.createElement("button");
+    autoBtn.type = "button";
+    autoBtn.className = "breathe-auto";
+    autoBtn.textContent = t("breatheAuto");
+    autoBtn.title = t("tBreatheAuto");
+    autoBtn.addEventListener("click", () => {
+      bm.cfg.rigid_row = null;
+      refreshAnatomy();
       pushHist();
     });
-    const delBtn = document.createElement("button");
-    delBtn.type = "button";
-    delBtn.textContent = t("breatheLineDel");
-    delBtn.addEventListener("click", () => {
-      if (bm.cfg.splits.length <= 1) return;
-      bm.cfg.splits.shift(); // 맨 위 선부터 제거 — 최하단(기본 가슴선) 유지
-      syncLines();
-      commit();
-      pushHist();
-    });
-    lineBtns.appendChild(addBtn);
-    lineBtns.appendChild(delBtn);
-    bar.appendChild(lineBtns);
-    const ampSel = mkSel([1, 2], bm.cfg.amplitude,
-      (v) => `${t("breatheAmp")} ${v}px`,
-      (v) => { bm.cfg.amplitude = v || 1; commit(); pushHist(); });
+    bar.appendChild(autoBtn);
+    // 진폭 = 몸통 높이 비율. px 가 아니라 비율이라 캐릭터가 달라도 같은 뜻을 갖는다.
+    const depthSel = mkSel([3, 4, 5, 6, 8, 10, 12], Math.round((bm.cfg.depth || 0.06) * 100),
+      (v) => `${t("breatheAmp")} ${v}%`,
+      (v) => { bm.cfg.depth = (v || 6) / 100; commit(); pushHist(); });
     // 호흡 횟수: 숫자 입력 + −/+ 스텝퍼 (수홍 2026-07-18 — 약수 셀렉트 대신 자유 입력;
     // 나눠떨어지지 않으면 fit_breathe_pattern 이 보정하고 스트립 캡션이 알려준다)
     const breathWrap = document.createElement("span");
@@ -1129,30 +1129,15 @@ function openZoom(stateName, idx, keepWidth) {
     breathWrap.appendChild(breathInput);
     breathWrap.appendChild(plusBtn);
     breathWrap.appendChild(fitBadge);
-    bar.appendChild(ampSel);
+    bar.appendChild(depthSel);
     bar.appendChild(breathWrap);
-    const subWrap = document.createElement("label");
-    subWrap.className = "breathe-subpixel";
-    subWrap.title = t("tBreatheSub");
-    const subCheck = document.createElement("input");
-    subCheck.type = "checkbox";
-    subCheck.checked = !!bm.cfg.subpixel;
-    subCheck.addEventListener("change", () => {
-      bm.cfg.subpixel = subCheck.checked;
-      commit();
-      pushHist();
-    });
-    subWrap.appendChild(subCheck);
-    subWrap.appendChild(Object.assign(document.createElement("span"), { textContent: t("breatheSub") }));
-    bar.appendChild(subWrap);
     toolbar.appendChild(bar);
     function syncBreatheControls() {
       onCheck.checked = bm.enabled;
       const off = !bm.enabled;
-      for (const el of [addBtn, delBtn, ampSel, minusBtn, breathInput, plusBtn, subCheck]) el.disabled = off;
-      ampSel.value = String(bm.cfg.amplitude);
+      for (const el of [autoBtn, depthSel, minusBtn, breathInput, plusBtn]) el.disabled = off;
+      depthSel.value = String(Math.round((bm.cfg.depth || 0.06) * 100));
       breathInput.value = String(bm.cfg.breaths || 1);
-      subCheck.checked = !!bm.cfg.subpixel;
       syncFitBadge();
     }
     syncBreatheControls();

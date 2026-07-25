@@ -46,6 +46,46 @@ def project_alpha(image: Image.Image) -> list[float]:
     return profile
 
 
+def mask_components(mask: list[bool], w: int, h: int, min_area: int = 1,
+                    max_area: int | None = None) -> list[tuple[int, int, int, int]]:
+    """불리언 마스크의 4-이웃 연결요소 -> bbox 리스트.
+
+    `extract.connected_components` 는 알파 채널 전용(불투명 덩어리)이라 "어두운
+    픽셀"처럼 임의 술어로 만든 마스크에는 못 쓴다. 이 함수가 그 자리를 맡는다 —
+    `unpack_atlas` 의 아틀라스 블롭 검출과 `anatomy` 의 눈 후보 검출이 같은 구현을
+    공유한다 (2026-07-25: anatomy 이식 때 세 번째 사본을 만들지 않으려 여기로 옮겼다).
+
+    `max_area` 는 **너무 큰 덩어리를 아예 후보에서 뺀다**. 눈 검출처럼 "작고 컴팩트한
+    것만" 찾는 쪽은 이 상한이 있어야 아웃라인·팔 같은 큰 어두운 영역이 걸러진다 —
+    bbox 만으로 사후 필터하면 픽셀 수가 아니라 외접 사각형을 재게 되어 판정이 달라진다."""
+    visited = bytearray(len(mask))
+    boxes: list[tuple[int, int, int, int]] = []
+    for seed in range(len(mask)):
+        if not mask[seed] or visited[seed]:
+            continue
+        stack = [seed]
+        visited[seed] = 1
+        minx = miny = 1 << 30
+        maxx = maxy = -1
+        area = 0
+        while stack:
+            cur = stack.pop()
+            area += 1
+            x, y = cur % w, cur // w
+            minx, miny, maxx, maxy = min(minx, x), min(miny, y), max(maxx, x), max(maxy, y)
+            if x > 0 and mask[cur - 1] and not visited[cur - 1]:
+                visited[cur - 1] = 1; stack.append(cur - 1)
+            if x < w - 1 and mask[cur + 1] and not visited[cur + 1]:
+                visited[cur + 1] = 1; stack.append(cur + 1)
+            if y > 0 and mask[cur - w] and not visited[cur - w]:
+                visited[cur - w] = 1; stack.append(cur - w)
+            if y < h - 1 and mask[cur + w] and not visited[cur + w]:
+                visited[cur + w] = 1; stack.append(cur + w)
+        if area >= min_area and (max_area is None or area <= max_area):
+            boxes.append((minx, miny, maxx + 1, maxy + 1))
+    return boxes
+
+
 def smooth_profile(profile: list[float], window: int) -> list[float]:
     """박스 이동평균으로 프로파일을 평활한다 (압축 잡음/얇은 틈 억제)."""
     if window < 1 or not profile:

@@ -43,42 +43,13 @@ from sprite_gen.runio import (
     publish_guard,
     relative_posix,
 )
+from sprite_gen.segment import mask_components
 
 ALPHA_THRESHOLD = 16  # a pixel counts as content above this alpha
 MIN_GUTTER = 1        # a fully-empty line of >= this many px separates frames
 
 
 # --- auto-detect (visual blob clustering) -----------------------------------
-
-def _components(mask: list[bool], w: int, h: int, min_area: int) -> list[tuple[int, int, int, int]]:
-    """4-neighbour connected components over a boolean mask -> list of bboxes."""
-    visited = bytearray(len(mask))
-    boxes: list[tuple[int, int, int, int]] = []
-    for seed in range(len(mask)):
-        if not mask[seed] or visited[seed]:
-            continue
-        stack = [seed]
-        visited[seed] = 1
-        minx = miny = 1 << 30
-        maxx = maxy = -1
-        area = 0
-        while stack:
-            cur = stack.pop()
-            area += 1
-            x, y = cur % w, cur // w
-            minx, miny, maxx, maxy = min(minx, x), min(miny, y), max(maxx, x), max(maxy, y)
-            if x > 0 and mask[cur - 1] and not visited[cur - 1]:
-                visited[cur - 1] = 1; stack.append(cur - 1)
-            if x < w - 1 and mask[cur + 1] and not visited[cur + 1]:
-                visited[cur + 1] = 1; stack.append(cur + 1)
-            if y > 0 and mask[cur - w] and not visited[cur - w]:
-                visited[cur - w] = 1; stack.append(cur - w)
-            if y < h - 1 and mask[cur + w] and not visited[cur + w]:
-                visited[cur + w] = 1; stack.append(cur + w)
-        if area >= min_area:
-            boxes.append((minx, miny, maxx + 1, maxy + 1))
-    return boxes
-
 
 def auto_detect(atlas: Image.Image) -> tuple[list[dict[str, Any]], tuple[int, int]]:
     """Read the sheet visually: find content blobs, cluster them into a grid.
@@ -95,7 +66,7 @@ def auto_detect(atlas: Image.Image) -> tuple[list[dict[str, Any]], tuple[int, in
     sw, sh = atlas.width // scale, atlas.height // scale
     small = atlas.getchannel("A").resize((sw, sh), Image.BILINEAR)
     mask = [b > ALPHA_THRESHOLD for b in small.tobytes()]  # 'L' mode: 1 byte/px
-    boxes_small = _components(mask, sw, sh, min_area=max(6, (sw * sh) // 4000))
+    boxes_small = mask_components(mask, sw, sh, min_area=max(6, (sw * sh) // 4000))
     if not boxes_small:
         raise SystemExit("auto-detect found no content blobs in the atlas")
 
