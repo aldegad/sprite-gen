@@ -87,9 +87,12 @@ function renderPipelineTree() {
     const r = rawThumb(name);
     return r ? { raw: r } : false;
   };
+  // 앵커 노드 썸네일 = 칩과 같은 라이브 베이크 (`/api/anchor`). 파일 스냅샷을 이름으로
+  // 찾던 옛 구현은 실제 파일명(`<dir>-idle-x8.png`)과 어긋나 언제나 폴백했고, 맞았더라도
+  // 편집 직후엔 낡은 그림을 보여줬다.
   const anchorFileThumb = (direction) => {
-    const f = (run.anchorFiles || []).find((a) => a.name === `${direction}.png`);
-    return f ? `${f.url}?v=${treeRevision || 0}` : null;
+    const g = (run.directionGroups || []).find((x) => x.direction === direction && !x.mirrorOf);
+    return g && g.anchorUrl ? `${g.anchorUrl}&t=${anchorCacheBust}` : null;
   };
   const chipList = () => {
     const ul = document.createElement("ul");

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from sprite_gen import (
+    anchor,
     compose_atlas,
     compose_cycle,
     compose_gif,
@@ -203,6 +204,10 @@ def _add_cutout(p: argparse.ArgumentParser) -> None:
     cutout.add_arguments(p)
 
 
+def _add_anchor(p: argparse.ArgumentParser) -> None:
+    anchor.add_arguments(p)
+
+
 def _add_correction_loop(p: argparse.ArgumentParser) -> None:
     p.add_argument("--run-dir", required=True, type=Path)
     p.add_argument("--states", default="all")
@@ -235,6 +240,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         unpack_atlas.run,
     ),
     "export-pngs": ("Export curated frames back to named PNGs.", _add_export_pngs, export_pngs.run),
+    "anchor": (
+        "Resolve/bake the direction anchor ref from curated truth (or pin which frame is the anchor).",
+        _add_anchor,
+        anchor.run,
+    ),
     "migrate-breathe": (
         "Migrate a run's retired split-line breathe sidecar to the envelope schema.",
         migrate_breathe.add_arguments,
