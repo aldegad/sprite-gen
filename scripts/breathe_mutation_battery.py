@@ -130,6 +130,29 @@ MUTS = [
          "      bctx.drawImage(bm.enabled ? breatheComposeForPreview(base, bm.cfg,\n"
          "        phase) : base, 0, 0);"),
     ]),
+    ("N5 탈출 L: 내보내기 플러밍을 공용 헬퍼로 + 게이트 제거", [
+        # 흔한 DRY 리팩토링 — compare 와 row-export 가 `/api/compare-gif` POST 를 중복한다.
+        ("scripts/curator/src/util.js",
+         "const IDENTITY = () => ({ rotate: 0, scale: 1, dx: 0, dy: 0, shx: 0, shy: 0, flipX: 0 });",
+         "const IDENTITY = () => ({ rotate: 0, scale: 1, dx: 0, dy: 0, shx: 0, shy: 0, flipX: 0 });\n"
+         "const snapshotPng = (c) => c.toDataURL(\"image/png\");\n"
+         "const postFramesForAssembly = (body) => fetch(\"/api/compare-gif\", "
+         "{ method: \"POST\", headers: { \"Content-Type\": \"application/json\" }, "
+         "body: JSON.stringify(body) });"),
+        ("scripts/curator/src/compare.js",
+         '        frames.push(canvas.toDataURL("image/png"));',
+         "        frames.push(snapshotPng(canvas));"),
+        ("scripts/curator/src/compare.js",
+         '      const res = await fetch("/api/compare-gif", {\n'
+         "        method: \"POST\",\n"
+         '        headers: { "Content-Type": "application/json" },\n'
+         "        body: JSON.stringify({ frames, duration_ms: step, format: fmt }),\n"
+         "      });",
+         "      const res = await postFramesForAssembly({ frames, duration_ms: step, format: fmt });"),
+        ("scripts/curator/src/compare.js",
+         "      const resampled = [];",
+         "      const resampled = []; if (false)"),
+    ]),
     ("N6 폐기 문구 복원", "CHANGELOG.md",
      "is frozen into the sidecar as a cache",
      "is frozen into the sidecar with a fingerprint of the\n  frame it came from; a mismatch re-detects and says so. cache"),
