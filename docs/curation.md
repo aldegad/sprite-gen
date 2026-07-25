@@ -118,6 +118,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   "kind": "sprite-gen-curation",
   "run_revision": "9f3c1a0b7e2d4c58",
   "pixel_perfect": true,
+  "anchors": { "down": { "state": "down_idle", "index": 2 } },
   "states": {
     "idle": {
       "revision": ["a1b2c3d4e5f6"],
@@ -155,6 +156,15 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   파생 캐시이므로 복제 파일을 만들지 않는다(복제 의도는 사이드카 소유). 웹뷰에서 복제
   카드의 보관 버튼은 보관함이 아니라 인스턴스 삭제다.
 - `pixel_perfect` — **두 층위**. top-level = 런 전체 기본값(웹뷰 우측 상단 "전체 토글" — 모든 줄을 한번에 설정; 줄별 값이 섞이면 웹뷰는 이 필드를 생략한다). `states.<state>.pixel_perfect` = 줄별 override(각 줄 헤더의 토글). 해석 순서는 `curation.frame_variant(curation, state)` 가 SSoT: 줄별 값 > top-level > 기본 `true`. `false` 인 줄은 compose/export/GIF 가 적용 전 쌍둥이(`frame-N.plain.png`)를 굽고, 없거나 `true` 인 줄은 canonical `frame-N.png`. plain 쌍둥이가 없는 런에서는 **굽기에** 무의미(플래그와 무관하게 canonical 을 굽는다) — 웹뷰의 이런 줄 퍼펙 토글은 **표시 렌즈**다: 표시 렌더러가 측정 격자 `pixelScale`(격자 오버레이와 같은 k)로 재양자화해 보여줄 뿐, sidecar 로 저장되지 않고 **파이썬 파이프라인 굽기**(compose/export_pngs/compose_gif — 사이드카만 읽는다)에 영향이 없다. 단 **웹뷰 줄 GIF/WebM/MP4**(`row-export.js`)는 화면 그대로(WYSIWYG) 굽므로 토글 상태가 반영된다 (구 서버 `.pixel-preview` 온디맨드 스냅은 표시 격자와 다른 검출기로 스냅해 폐기, v1.56.91). manifest 는 줄별 `animation.rows.<state>.frame_variant` 와 top-level 요약(`pixel`/`plain`/`mixed`)을 기록한다. 상세는 [`pixel-perfect.md`](pixel-perfect.md).
+- `anchors` — 방향 앵커 **프레임 지정** `{<direction>: {state, index}}` (수홍 2026-07-25). 그
+  방향의 다른 행을 생성할 때 identity 로 붙는 인스턴스 하나다 — 카드의 앵커(핀) 버튼(또는
+  `sprite-gen anchor --pick <state>#<index>`)이 쓰고, 지정이 없는 방향은 **앵커 행
+  (`<dir>_<anchor_suffix>`)의 시퀀스 첫 인스턴스**가 앵커다(index 0 이 아니다 — 삭제/재정렬을
+  존중한다). 같은 방향이면 다른 행의 프레임도, 시퀀스에 없는 후보 풀 프레임도 지정할 수 있다.
+  해석·베이크 SSoT 는 `sprite_gen/anchor.py`, 생성에 붙는 파일은 그 함수가 매번 다시 굽는
+  파생 캐시 `references/anchors/<dir>-anchor-x8.png` 이고, 뷰의 앵커 칩은 낡을 수 없게
+  `GET /api/anchor?direction=<dir>` 라이브 베이크를 본다. 사라진 인스턴스를 가리키는 지정은
+  생성 시 fail-loud (조용한 기본값 복귀 금지) — 뷰는 로드 시 그 이유를 상태줄에 띄운다.
 - `selected` — 0-based frame indices in play order. Absent/empty → all extracted frames in order.
 - `order` — optional, webview-owned: the full display order (sequence row then candidate-pool row) so reopening the curator restores the exact arrangement of both rows. `compose` / `state_plan` ignore it and key off `selected`.
 - `transforms` — keyed by 0-based frame index. `rotate` degrees (counter-clockwise positive, PIL convention), `scale` multiplier about center, `dx`/`dy` pixel offsets in the cell (+x right, +y down), `shx`/`shy` shear, `flipX` (0|1) horizontal mirror. Absent → identity. On a `fit.pixel_perfect` run, rows baking the pixel variant re-snap the transformed result onto the fixed logical grid (`apply_transform(snap_scale=…)`, mirrored live by the webview) — see [`pixel-perfect.md`](pixel-perfect.md).

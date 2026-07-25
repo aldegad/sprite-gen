@@ -56,6 +56,10 @@ not restate it elsewhere; point here.
   sprite-request.json                # numeric SSoT (cell, chroma, states, fit) — every stage reads this
   base-source.<ext>                  # identity truth; drives the view's base reference row (§3)
   references/layout-guides/<state>.png   # per-state layout guide (motion only)
+  references/anchors/<dir>-anchor-x8.png # DERIVED CACHE: the curated direction-anchor frame, baked
+                                         #   ×8 NEAREST for row generation. `sprite-gen anchor`
+                                         #   (SSoT sprite_gen/anchor.py) rewrites it on demand —
+                                         #   never hand-edit it and never treat it as truth.
   references/imported/<group>/           # imported-run generation material → chips (§4); real runs use raw/ anchors instead
   prompts/<state>.txt                # generated row prompt (frame count, safe margin, anchor lock)
   raw/<state>.png                    # one horizontal image-gen strip per state (the only AI output)
@@ -153,9 +157,10 @@ whole point is that the experience does not vary by who launched it.
 | Element | Shown when | Payload source | Rule |
 |---|---|---|---|
 | **Base reference row** | `base-source.*` exists | `baseUrl` (null if absent) | Top row, pure image — no preview/select UI. Identity truth, always visible. |
-| **Generation-material chips** | the state has resolvable material | `states[].refs[]` — each `{role, name, url}` | Per-state header shows *what generated this row*. `role ∈ {anchor, basis, guide}`, labelled `방향 앵커` / `basis row` / `레이아웃 가이드` (i18n key `ref_<role>`). Only run-dir files that actually exist appear. |
+| **Generation-material chips** | the state has resolvable material | `states[].refs[]` — each `{role, name, url}` | Per-state header shows *what generated this row*. `role ∈ {anchor, basis, guide}`, labelled `방향 앵커` / `basis row` / `레이아웃 가이드` (i18n key `ref_<role>`). Only run-dir files that actually exist appear — **except the anchor chip** (`anchorFrame: true`), which is a live bake (`/api/anchor?direction=<dir>`) named `<state>#<index>`, because the on-disk `references/anchors/*.png` is a derived cache that goes stale the moment the user edits the anchor frame. |
+| **Anchor frame** | request has a `directions` block | `directionGroups[].anchorFrame` `{state, index, source}` + `anchorError` · `curation.anchors` | The one curated instance that is this direction's identity for generating its other rows. `source: "picked"` = pinned by the human (frame card pin button → `curation.anchors.<dir>`), `"default"` = the anchor row's sequence head. The picked card carries an `앵커` badge; an unresolvable pin (archived frame, regenerated row) surfaces `anchorError` in the status bar instead of silently reverting. Resolution SSoT = `sprite_gen/anchor.py`. |
 | **Pixel grid** | **always** — the measurement cannot fail | `states[].pixelScale` (≥1, never null) + `pixelPerfect{label,scale}` + `states[].frames[].contentBox` | **Per-state** checkbox on every row's refs strip; the top checkbox is a **toggle-all** (indeterminate when mixed). Display only, never persisted. `pixelScale` is an exact test (largest k where the frame is only uniform k×k blocks; k=1 is trivially true — identity), so "unknown grid" does not exist and nothing gates on it. On the pixel-perfect view: the output raster (request scale on `fit.pixel_perfect` runs, measured k labelled `auto` otherwise). On the original (plain) view: the **final correspondence grid** — green, one cell = one result pixel. (The stage-1 cut lattice in `frames-manifest input_grids` stays diagnostic-only.) An identity grid (k=1) is a true grid, not a missing one — density is a property of the fact, not a reason to hide the control. |
-| **Direction groups** | request has a `directions` block | `directionGroups[]` — `{direction, anchor, states}` + mirror entries `{direction, mirrorOf}` | States render grouped per direction with the direction anchor first (badge `방향 앵커`); mirrored directions render as an informational strip (`<src> 런타임 미러 — 생성 없음`), never as silently missing rows. Runs without the block keep the flat request order. |
+| **Direction groups** | request has a `directions` block | `directionGroups[]` — `{direction, anchor, states, anchorFrame, anchorError}` + mirror entries `{direction, mirrorOf}` | States render grouped per direction with the direction anchor first (badge `방향 앵커`); mirrored directions render as an informational strip (`<src> 런타임 미러 — 생성 없음`), never as silently missing rows. Runs without the block keep the flat request order. |
 | **Original-quality toggle** | **always** — every row has the control | `states[].frames[].plainUrl` + `fitPixelPerfect` | **Per-state** checkbox on every row's refs strip + zoom modal (same contract, no per-surface gating). Twin rows: on = canonical `frame-N.png`, off = `plainUrl` (hi-res `orig/` else `.plain.png`) — a **source** switch, persisted per state. Twin-less rows: on = the display renderer re-quantizes by the measured grid `pixelScale` (the same k the grid overlay draws — grid-based pixel-perfect; k=1 is identity), a **display lens**, never persisted (persisting would make the bake resolver demand a `.plain` variant that does not exist). The top-right checkbox is a toggle-all (indeterminate when mixed). |
 
 `GET /api/run` payload — the display-relevant subset below (the full snapshot,
@@ -181,7 +186,8 @@ including non-display fields like `states[].action`, is assembled by
       "name": "down_walk",
       "pixelScale": 5,                       // request scale, or exact measured k — always ≥1, never null (k=1 = identity)
       "refs": [                              // generation-material chips
-        { "role": "anchor", "name": "down_idle.png", "url": "/run/raw/down_idle.png" },
+        { "role": "anchor", "name": "down_idle#2 · picked",  // live bake of the curated anchor frame
+          "url": "/api/anchor?direction=down&v=9f3c1a0b7e2d4c58", "anchorFrame": true },
         { "role": "guide",  "name": "down_walk.png", "url": "/run/references/layout-guides/down_walk.png" }
       ],
       "fps": 8, "loop": true, "requestFrames": 6, "extractOk": true,

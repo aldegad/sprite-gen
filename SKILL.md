@@ -97,7 +97,8 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 - `score_sprite_run.py` — score an inspect report (0-100), preserve the best-candidate rank signal, and turn measured defects into provider-ready correction hints.
 - `run_correction_loop.py` — bounded inspect → score → correction-hint loop (max 3 passes by default). It can run as a dry-run verifier without a provider, or call an explicit provider command; missing provider without `--dry-run` fails loudly.
 - `gif_utils.py` — shared transparent-GIF writer.
-- `curation.py` — curation sidecar SSoT (schema + transform math) shared by the compose scripts and the webview server so they never drift.
+- `curation.py` — curation sidecar SSoT (schema + transform math + the stamping atomic writer) shared by the compose scripts, the anchor CLI, and the webview server so they never drift.
+- `sprite_gen/anchor.py` (`sprite-gen anchor`) — direction-anchor SSoT: which curated instance is a direction's identity (human pin > the anchor row's sequence head), the post-processing bake of that one frame, and the `references/anchors/<dir>-anchor-x8.png` derived cache that row generation attaches. Reroll, the generation plan, and the curation view's anchor chip all resolve through it.
 - `runio.py` — safe run-dir IO: single-writer lock (`.sprite-gen.lock`) + atomic writes for the extract/compose/export/unpack writers, so parallel agents cannot interleave writes into one character folder.
 - `serve_curation.py` — standalone curation webview for one run dir (works from Claude Code Desktop, the Codex app, or any host with the skill).
 - `unpack_atlas_run.py` — inverse of compose: rebuild a curator-ready run dir from a finished sheet (`--grid` > `--manifest` > auto-detect) or import a PNG folder (`--pngs-dir`, with sibling `meta.json` labels/iso grid).
@@ -168,7 +169,13 @@ worker/agent is the caller's orchestrator concern — out of this engine's scope
 Command chain: [`docs/gen.md`](docs/gen.md#provider-topology).
 
 - Simple/default states (before direction-anchor mode exists): attach exactly two references — `base-source.<ext>` (canonical identity) + `references/layout-guides/<state>.png` (layout only).
-- Direction-anchor mode: do **not** attach `base-source.<ext>` to action rows. Attach the accepted target-direction idle anchor (**a single-pose single image — never a multi-frame idle row**; **anchor truth = the CURATED export** — when the anchor has curation, bake `export-pngs` and attach `curated/<dir>_idle/frame-0.png`, raw crop only as no-curation fallback) + the state layout guide; for a paired row also attach the basis row as timing/scale/motion reference only. Chain details: [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md).
+- Direction-anchor mode: do **not** attach `base-source.<ext>` to action rows. Attach the accepted target-direction anchor (**a single-pose single image — never a multi-frame idle row**) + the state layout guide; for a paired row also attach the basis row as timing/scale/motion reference only. **Never choose the anchor crop by hand** — ask the pipeline, right before each generation:
+
+```bash
+sprite-gen anchor --run-dir <run> --for-state <state>   # prints the identity ref path (bakes it)
+```
+
+  It returns `references/anchors/<dir>-anchor-x8.png` for an action row (the curated anchor frame — pixel edits, transforms, deletions and reordering all baked, upscaled ×8 NEAREST) and `base-source.<ext>` for an anchor row or a non-direction run. The file is a derived cache, so re-run it every time; which frame is the anchor is the human's call (`--pick <state>#<index>`, or the pin button in the curation view) and defaults to the anchor row's curated sequence head. Chain details: [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md).
 - Hatch-pet-style locomotion may attach additional references only when they are part of the row plan, recorded in `qa-notes.md`: original sheet / canonical base (identity support only), a previous gait row such as `raw/running-right.png` (motion rhythm only), or an accepted motion-QA artifact (gait readability support only).
 
 3. Extract frames:

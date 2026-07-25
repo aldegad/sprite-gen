@@ -16,3 +16,6 @@ uv.lock
 
 # transient validator reply scratch (never track)
 .darami-validator-*
+
+# plan worktrees (git worktree add .kuma/worktrees/<branch>) — 작업 사본, 추적 금지
+/.kuma/worktrees/

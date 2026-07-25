@@ -98,15 +98,36 @@ in one image.
    anchor; the row itself stays a motion/timing artifact, never an anchor.
    (수홍 확정 2026-07-12 — hero 5-anchor 사고에서 도출.)
 
-   **The anchor image is the CURATED export, not the raw generation.**
-   When the anchor frame has curation (pixel edits, scale/move transforms),
-   bake it first — `sprite-gen export-pngs --state <dir>_idle` →
-   `curated/<dir>_idle/frame-0.png` — and attach THAT as the anchor ref
-   (upscale ×8 NEAREST for legibility is fine; pixel data unchanged).
-   The raw crop is only a fallback when no curation exists. Rationale: the
-   accepted identity is what the human approved on screen; generating
-   variations from the un-edited raw leaks the pre-approval look into every
-   downstream row. (수홍 확정 2026-07-19.)
+   **The anchor image is the CURATED frame, and one command bakes it.**
+   Never hand-pick a crop: run
+
+   ```bash
+   sprite-gen anchor --run-dir <run> --direction <dir>      # writes references/anchors/<dir>-anchor-x8.png
+   sprite-gen anchor --run-dir <run> --for-state <state>    # prints the ref path to attach for that row
+   ```
+
+   That command bakes the anchor frame exactly as the curation view shows it
+   (pixel edits → transform → pixel-perfect re-quantization) and upscales it ×8
+   NEAREST for legibility (pixel data unchanged). It is a **derived cache**:
+   re-run it immediately before every generation, because a later edit in the
+   view silently invalidates the file. Rationale: the accepted identity is what
+   the human approved on screen; generating variations from the un-edited raw
+   leaks the pre-approval look into every downstream row. (수홍 확정 2026-07-19,
+   결정론 커맨드화 2026-07-25.)
+
+   **Which frame is the anchor** (`sprite_gen/anchor.py` owns the rule):
+
+   - default: the **curated sequence head** of `<dir>_<anchor_suffix>` — the
+     first frame of the played sequence, *not* index 0. Deleting/reordering
+     frames moves it, so an archived pre-edit frame can never become the anchor.
+   - override: the frame the human pinned in the curation view (pin button on the
+     frame card) or via `sprite-gen anchor --pick <state>#<index>`. Any instance
+     of any row of that direction is allowed, including a candidate-pool frame
+     that is not in the played sequence — the best facing pose is not always in
+     the idle sequence. Stored in `curation.json` as
+     `anchors.<direction> = {state, index}`; `--clear` drops it back to the default.
+   - a pin that points at a vanished instance (archived, row regenerated) is a
+     **hard error** on generation, not a silent fall back to the default.
 
 3. **State anchor gate** — for each requested non-locomotion state and
    direction, create one representative state anchor before generating the

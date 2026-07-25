@@ -5,6 +5,33 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## Unreleased - the direction anchor is the frame you approved, and you can say which one
+
+- **The anchor is a curated frame, not a raw crop, on every path.** Resolution, the
+  post-processing bake (pixel edits -> transform -> pixel-perfect re-quantization), and the
+  `references/anchors/<dir>-anchor-x8.png` derived cache now live in one module,
+  `sprite_gen/anchor.py`, exposed as `sprite-gen anchor`. Reroll used to be the only caller
+  that re-baked from curated truth; the agent generation path had only a prose instruction
+  pointing at `curated/<dir>_idle/frame-0.png`, a path `export-pngs` never writes and an index
+  that can be an archived pre-edit frame. `references/generation-plan.json` stage 2 now carries
+  the real ref path plus the command that bakes it, so no worker has to judge a crop.
+- **You pick which frame is the anchor.** The curation view's frame cards get a pin button
+  (`ANCHOR` badge on the pinned card), stored as `curation.json` `anchors.<direction> =
+  {state, index}`; `sprite-gen anchor --pick <state>#<index>` / `--clear` is the CLI face. Any
+  instance of any row of that direction qualifies, including a candidate-pool frame that is not
+  in the played sequence. With no pin the anchor is the anchor row's **curated sequence head**
+  (not index 0), so deleting or reordering frames moves it.
+- A pin that points at a vanished instance fails loud at generation and surfaces its reason in
+  the view's status bar, instead of silently reverting to the default.
+- The view's anchor chip is a live bake (`GET /api/anchor?direction=<dir>`) rather than the
+  on-disk snapshot, so what the chip shows is what the next generation attaches.
+- `anchor_suffix` is honoured everywhere (reroll had `idle` hardcoded), the sidecar's stamping
+  atomic writer moved to its schema owner `curation.py` so the CLI and the webview stamp
+  identically, and a `curation` POST without an `anchors` key carries the stored pin forward.
+- Tests: `tests/test_anchor_selection.py` (15 cases - sequence-head default, edits in the bake,
+  cross-row/pool pins, dangling-pin fail-loud, CLI roundtrip, `--for-state`, legacy snapshot
+  removal, live chip endpoint, pin carry-over).
+
 ## v1.57.0 "First Pixel Breath" - the first tagged release since v1.56.16: the sprites breathe, and the pixel lattice is measured rather than assumed
 
 The last published tag was **v1.56.16 "Atelier" (2026-07-16)**. Seventy-three
