@@ -25,6 +25,106 @@ let gridStates = {};               // stateName -> bool (overlay shown)
 
 let anchorStates = new Set();      // direction-anchor states (directionGroups runs)
 
+// ── 방향 앵커 프레임 (수홍 2026-07-25) ──────────────────────────────────────
+// 앵커 = 그 방향의 identity 로 생성에 붙는 **단 한 장**. 지정(curation.json anchors)이
+// 있으면 그것, 없으면 앵커 행의 시퀀스 첫 프레임 (엔진 sprite_gen/anchor.py 와 같은 규칙).
+// 배지는 **클라가 직접 해석**한다 — 지금 편집 중인 상태(삭제·재정렬·지정)에서 "저장하면
+// 무엇이 앵커가 되는가" 를 보여야 하므로, 디스크 스냅샷(run.directionGroups[].anchorFrame)
+// 을 그대로 쓰면 한 박자 늦는다. 디스크 값은 칩 라벨/오류 표시에만 쓴다.
+let anchorPicks = {};              // direction -> {state, index} (사용자 지정)
+
+let anchorDirections = [];         // 생성 방향 목록 (미러 방향 제외)
+
+function directionOfState(stateName) {
+  for (const d of anchorDirections) {
+    if (stateName === d || stateName.startsWith(d + "_")) return d;
+  }
+  return null;
+}
+
+function anchorRowOf(direction) {
+  const g = (run.directionGroups || []).find((x) => x.direction === direction && !x.mirrorOf);
+  return (g && g.anchor) || null;
+}
+
+// 그 방향의 기본 앵커 인스턴스 = 앵커 행의 시퀀스 첫 프레임 (index 0 이 아니다 —
+// 앞 프레임을 삭제/재정렬했으면 index 0 은 기각분이다).
+function defaultAnchorFrame(direction) {
+  const row = anchorRowOf(direction);
+  if (!row || !entries[row]) return null;
+  const play = playList(row);
+  return play.length ? { state: row, index: play[0], source: "default" } : null;
+}
+
+function resolvedAnchorFrame(direction) {
+  const pick = anchorPicks[direction];
+  if (pick) return { ...pick, source: "picked" };
+  return defaultAnchorFrame(direction);
+}
+
+function isAnchorFrame(stateName, idx) {
+  const d = directionOfState(stateName);
+  if (!d) return false;
+  const a = resolvedAnchorFrame(d);
+  return !!a && a.state === stateName && a.index === idx;
+}
+
+// 명시 지정된(고정된) 앵커인가 — 배지는 "지금 앵커인가"(isAnchorFrame), 버튼의 토글
+// 방향은 "고정돼 있나"(이것)로 갈린다. 기본값 앵커도 눌러서 고정할 수 있어야 한다.
+function isPinnedAnchorFrame(stateName, idx) {
+  const d = directionOfState(stateName);
+  const p = d && anchorPicks[d];
+  return !!p && p.state === stateName && p.index === idx;
+}
+
+// 낡은 핀(재생성된 행 / 증명 없는 핀) — 그 프레임을 다시 누르면 재지정으로 풀린다.
+function isStaleAnchorFrame(stateName, idx) {
+  const d = directionOfState(stateName);
+  const p = d && anchorPicks[d];
+  return !!p && !!p.stale && p.state === stateName && p.index === idx;
+}
+
+function anchorFrameLabel(direction) {
+  const a = resolvedAnchorFrame(direction);
+  return a ? `${a.state}#${a.index}` : "—";
+}
+
+let anchorCacheBust = 0; // 칩(라이브 베이크) 표시 캐시 무효화 — 지정이 바뀔 때만 증가
+
+// 지정/해제. 앵커 칩은 서버가 **디스크의 curation.json** 에서 굽기 때문에, 저장을
+// 먼저 밀어낸 뒤에 다시 그린다 (디바운스 250ms 를 기다리면 한 박자 옛 앵커가 보인다).
+async function setAnchorFrame(stateName, idx) {
+  const direction = directionOfState(stateName);
+  if (!direction) return;
+  // 토글 축은 **명시 지정 여부**다 (기본값으로 앵커인가가 아니다): 지정된 그 프레임을
+  // 다시 누르면 해제, 그 외에는(기본값으로 이미 앵커인 프레임 포함) 명시 지정. 기본값
+  // 앵커를 눌러도 무반응이면 "지금 이 프레임을 고정해서 재정렬·삭제에도 안 움직이게"
+  // 를 뷰에서 할 방법이 없다 (젯비 검증 2026-07-25 범위 밖 note 1 — CLI 로만 가능했다).
+  const pinned = anchorPicks[direction];
+  if (pinned && pinned.state === stateName && pinned.index === idx) {
+    if (pinned.stale) {
+      // 낡은(증명 안 되는) 핀을 그 프레임에서 다시 누른 것 = **명시 재지정**. 지문을 새로
+      // 받아야 오류가 풀린다 — 저장 경로가 조용히 유효화하지 않는 게 계약이라(fail-safe),
+      // 푸는 길은 이 명시 의도뿐이다.
+      anchorPicks[direction] = { state: stateName, index: idx, repin: true };
+    } else {
+      delete anchorPicks[direction];
+    }
+  } else {
+    anchorPicks[direction] = { state: stateName, index: idx };
+  }
+  scheduleSave();
+  await flushSave();  // 저장이 카운터를 올리고 칩을 다시 받아온다 (persistence.save)
+  const group = (run.directionGroups || []).find((g) => g.direction === direction && !g.mirrorOf);
+  for (const name of (group ? group.states : [stateName])) {
+    if (entries[name]) rebuildState(name);
+  }
+  if (typeof renderPipelineTree === "function") renderPipelineTree();  // 트리 앵커 노드도 같은 진실
+  const label = anchorFrameLabel(direction);
+  setStatus(anchorPicks[direction] ? STR[lang].anchorPinned(direction, label)
+                                   : STR[lang].anchorUnpinned(direction, label), "ok");
+}
+
 let pixelEdit = null; // 모달 편집 세션: {state, idx, tool: 'pen'|'eraser', color, journal: []}
 
 // 편집 truth 인덱스 (수홍 확정 2026-07-18): 링크된 복제의 편집 SSoT 는 원본

@@ -90,6 +90,29 @@ async function boot() {
   seedEntries();
   if (run.directionGroups && run.directionGroups.length) {
     anchorStates = new Set(run.directionGroups.map((g) => g.anchor).filter(Boolean));
+    // 생성 방향(미러 제외) + 사용자 앵커 프레임 지정 시드 — 앵커 배지/버튼의 입력
+    anchorDirections = run.directionGroups.filter((g) => !g.mirrorOf).map((g) => g.direction);
+    anchorPicks = {};
+    for (const [direction, pick] of Object.entries((run.curation && run.curation.anchors) || {})) {
+      if (pick && typeof pick.state === "string" && Number.isInteger(Number(pick.index))) {
+        // `stale` 을 **반드시 왕복**시킨다: 이걸 버리면 무관한 편집의 autosave 가 낡은 핀을
+        // 현재 세대로 세탁해 오류 배너가 사라진다 (젯비 5차 기각 실측). 서버 writer 도
+        // fail-safe 로 막지만, 뷰가 진실을 들고 있어야 배지/버튼 상태가 맞는다.
+        anchorPicks[direction] = { state: pick.state, index: Number(pick.index) };
+        if (pick.stale) {
+          anchorPicks[direction].stale = true;
+          anchorPicks[direction].stale_reason = pick.stale_reason || "regenerated";
+        }
+      }
+    }
+    // 해석 실패(지정이 사라진 프레임을 가리킴 등)는 조용히 넘기지 않는다 — 이 상태로
+    // 생성하면 엔진이 fail-loud 하므로 사용자가 지금 알아야 한다. 단 `anchorPending`
+    // (그 방향 앵커 행을 아직 안 뽑았다)은 **정상 작업 구간**이라 오류로 칠하지 않는다 —
+    // 그러면 생성 중인 모든 런에 빨간 배너가 뜬다 (젯비 검증 2026-07-25 파생 증상 2).
+    const broken = run.directionGroups.filter((g) => g.anchorError && !g.anchorPending);
+    if (broken.length) {
+      healParts.push(...broken.map((g) => STR[lang].anchorError(g.direction, g.anchorError)));
+    }
   }
   await seedTreeProgress();
   renderPipelineTree();
@@ -156,7 +179,9 @@ async function boot() {
   installPixelScalingLoadHook();
   syncPixelScaling();
   if (healParts.length) {
-    setStatus(healParts.join(" · "), run.heal.failed && run.heal.failed.length ? "err" : "ok");
+    const hadFailure = (run.heal && run.heal.failed && run.heal.failed.length)
+      || (run.directionGroups || []).some((g) => g.anchorError && !g.anchorPending);
+    setStatus(healParts.join(" · "), hadFailure ? "err" : "ok");
   } else {
     setStatus(run.curation && Object.keys(run.curation.states || {}).length ? t("loaded") : t("ready"));
   }

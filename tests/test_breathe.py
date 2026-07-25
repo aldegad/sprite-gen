@@ -17,7 +17,7 @@ from sprite_gen.anatomy import analyze
 from sprite_gen.breathe import (DEFAULT_DEPTH, MAX_ROW_STRAIN, SMOOTH_CYCLE_FRAMES, TAPER,
                                 bake_breathe_sequence, breathe_reads_smoothly,
                                 envelope, fit_breathe_pattern, fitted_breath_count,
-                                freeze_anatomy, phase_frame,
+                                frame_anatomy, freeze_anatomy, phase_frame,
                                 recommended_breathe_frames, row_strain, wave)
 from sprite_gen.curation import state_breathe
 from sprite_gen.extract import solid_alpha_bbox
@@ -128,7 +128,10 @@ def test_phase_zero_is_not_identity_when_the_wave_travels() -> None:
     구 분할선 방식에선 위상 0 이 항등이라 소비자가 건너뛰어도 됐다. 봉투에선 윗행이
     `wave(-lag*u)` 만큼 변형되므로 건너뛰면 그 슬롯만 원본이 되어 아틀라스가 매 루프
     시작에서 튀고 GIF 굽기와 그림이 갈린다 (새미 검증 2026-07-25, 실측 353px 차이).
-    소비자(`compose_atlas`, `compare.js`)의 `if phase:` 가드가 되살아나면 여기서 잡힌다."""
+    소비자 3곳이 이 계약에 걸려 있다 — `compose_atlas`, `compare.js`, 그리고 확대
+    편집기(`zoom-editor.js` 재생·필름스트립). 앞의 둘은 `if phase:` 가드였고, 편집기는
+    호흡을 **끈** 상태에서 위상만 0 으로 넘기던 경로였다(끈 프리뷰가 워프돼 굽기와
+    달랐다). 어느 쪽이든 "위상 0 은 원본" 이라는 가정이 되살아나면 여기서 잡힌다."""
     src = _humanoid()
     cfg = dict(CFG)
     cfg["anatomy"] = freeze_anatomy(src, cfg)
@@ -147,12 +150,15 @@ def test_the_body_axis_column_is_a_fixed_point() -> None:
     cfg["anatomy"] = freeze_anatomy(src, cfg)
     box = solid_alpha_bbox(src)
     axis_col = box[0] + anat.axis_x
-    ref = [src.getpixel((axis_col, y))[3] >= 128 for y in range(box[1], box[3])]
     for i in range(12):
         frame = phase_frame(src, cfg, i / 12)
         fb = solid_alpha_bbox(frame)
-        got = [frame.getpixel((axis_col, y))[3] >= 128 for y in range(fb[1], fb[3])]
-        assert any(got), f"위상 {i}: 축 열이 비었다 — 통째로 밀렸다"
+        # 축 열의 콘텐츠가 그 프레임 안에서도 축 열에 그대로 있어야 한다: 소스 축 열의
+        # 불투명 span 이 출력 축 열에서도 연속으로 살아 있고, 좌우 이웃 열로 새지 않는다.
+        col = [frame.getpixel((axis_col, y))[3] >= 128 for y in range(fb[1], fb[3])]
+        assert sum(col) == fb[3] - fb[1], f"위상 {i}: 축 열에 구멍 — 열이 통째로 밀렸다"
+        left_edge = solid_alpha_bbox(frame)[0]
+        assert left_edge <= axis_col < solid_alpha_bbox(frame)[2], f"위상 {i}: 축이 실루엣 밖"
 
 
 # ── 2. 발바닥 고정 · 루프 길이 불변 ─────────────────────────────────
@@ -337,3 +343,60 @@ def test_face_detection_ignores_a_single_eye_paired_with_a_centred_mouth() -> No
     assert anat.face is not None
     # 눈쌍(44~52)이 이겨야 한다 — 입(56~62)까지 삼키면 bottom 이 훨씬 아래로 간다
     assert anat.face[0] < 56, f"눈쌍이 아니라 다른 짝이 이겼다: {anat.face}"
+
+
+# ── 9. Validator round 2 회귀 ───────────────────────────────────────
+
+def test_repeated_phases_are_bit_identical_so_atlas_cells_can_be_shared() -> None:
+    """수학적으로 같은 위상은 **같은 double** 이어야 한다.
+
+    아틀라스는 (프레임, 위상)을 칸 키로 써서 같은 그림을 한 칸만 굽는다. 위상을
+    `(i*breaths/seq_len) % 1.0` 로 계산하면 표현 노이즈로 같은 위상이 갈려서
+    바이트 동일한 칸이 중복 구워진다 (실측 18슬롯 3호흡: 유니크 6 -> 14,
+    시트 폭 576 -> 1344, 새미 검증 2026-07-25)."""
+    for seq_len, breaths in ((18, 3), (12, 2), (12, 4), (20, 5)):
+        pattern = fit_breathe_pattern(seq_len, {"breaths": breaths})
+        exact = {(i * breaths) % seq_len for i in range(seq_len)}
+        assert len(set(pattern)) == len(exact), \
+            f"{seq_len}슬롯 {breaths}호흡: 유니크 위상 {len(set(pattern))} != 수학적 {len(exact)}"
+        # 같은 나머지를 갖는 슬롯끼리 실제로 같은 값인지
+        for i in range(seq_len):
+            j = i + seq_len // breaths
+            if j < seq_len and (i * breaths) % seq_len == (j * breaths) % seq_len:
+                assert pattern[i] == pattern[j], f"슬롯 {i}/{j}: 같은 위상인데 double 이 다르다"
+
+
+def test_repeated_phases_render_byte_identical_frames() -> None:
+    """위상이 같으면 구워진 픽셀도 같아야 칸 공유가 정당하다."""
+    src = _humanoid()
+    cfg = dict(CFG)
+    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    frames, phases = bake_breathe_sequence([src] * 18, {**cfg, "breaths": 3})
+    by_phase: dict[float, bytes] = {}
+    for frame, phase in zip(frames, phases):
+        data = frame.tobytes()
+        if phase in by_phase:
+            assert by_phase[phase] == data, f"위상 {phase}: 같은 위상인데 픽셀이 다르다"
+        by_phase[phase] = data
+    assert len(by_phase) == 6, f"18슬롯 3호흡의 유니크 위상은 6이어야 한다 (got {len(by_phase)})"
+
+
+def test_manual_rigid_row_beats_a_frozen_anatomy() -> None:
+    """`rigid_row` 는 사람의 의도(입력)고 `anatomy` 는 파생 캐시다 — 의도가 이긴다.
+
+    frozen 분기가 `cfg["rigid_row"]` 를 안 보면 사람이 고친 숫자가 조용히 버려진다
+    (실측: cfg 33 을 줘도 얼린 23 이 구워지고 경고도 없었다, 새미 검증 2026-07-25)."""
+    src = _humanoid()
+    cfg = dict(CFG)
+    cfg["anatomy"] = freeze_anatomy(src, cfg)
+    frozen_row = cfg["anatomy"]["rigid_row"]
+
+    same, redetected = frame_anatomy(src, cfg)
+    assert same.rigid_row == frozen_row and redetected is False, "override 없으면 캐시 그대로"
+
+    want = frozen_row + 10
+    anat, redetected = frame_anatomy(src, {**cfg, "rigid_row": want})
+    assert anat.rigid_row == want, "사람이 준 값이 얼린 값에 먹혔다"
+    assert redetected is True, "캐시가 낡았으므로 재검출로 관측돼야 한다"
+    assert anat.rigid_source == "manual"
+    assert any("rigid-row-override" in w for w in anat.warnings)

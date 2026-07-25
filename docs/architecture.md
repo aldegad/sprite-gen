@@ -171,6 +171,14 @@ flowchart TD
 
 - The prompt text in `row_prompt()` enforces this ("Anchor lock" block):
   identity comes from the anchor, the row owns motion only.
+- **Which image is "the accepted anchor" is code, not judgment** (`sprite_gen/anchor.py`,
+  `sprite-gen anchor`): it resolves the human's pin (`curation.json` `anchors.<direction>`)
+  or, absent one, the anchor row's curated sequence head; bakes that instance with the
+  same primitives compose/export use (clone → pixel edits → transform → pixel-perfect
+  re-quantization); and writes the derived cache
+  `references/anchors/<dir>-anchor-x8.png` that row generation attaches. Reroll, the
+  generation plan, and the curation view's anchor chip all go through it, so the picture
+  the human approved on screen is the picture the next row inherits.
 - Default/simple states (`idle`/`jump`/`attack`/`wave`) skip the multi-anchor
   chain. Directional / 45° / locomotion use the chain documented in
   [`directional-anchor-workflow.md`](directional-anchor-workflow.md).

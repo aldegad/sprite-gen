@@ -13,6 +13,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 PACKAGE_RUN_MODULES = [
+    "anchor",
     "compose_atlas",
     "compose_cycle",
     "compose_gif",

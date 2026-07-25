@@ -768,7 +768,7 @@ function openZoom(stateName, idx, keepWidth) {
   // 뷰 확대 휠 = 뷰포트 레벨 앵커 줌 (위 stage-viewport 블록이 소유)
 
   // ── 호흡 모드 (레이어, 수홍 확정 2026-07-18): 실제 시퀀스가 재생되는 위에
-  // 분할선·진폭·주기·서브픽셀을 조정하면 즉시 truth(사이드카)에 반영된다.
+  // 강체 경계·진폭·호흡 횟수를 조정하면 즉시 truth(사이드카)에 반영된다.
   // 깜빡임 프레임도 그대로 숨쉰다 (직교 레이어). 굽기/재추출/적용 대기 없음.
   if (!isBase && pendingBreathe) {
     pendingBreathe = false;
@@ -907,7 +907,10 @@ function openZoom(stateName, idx, keepWidth) {
       baseCtx.imageSmoothingEnabled = false;
       drawFrameInto(baseCtx, image, getTransform(stateName, frameIdx), cellW, cellH,
         snapScaleFor(stateName), getPixelOps(stateName, frameIdx));
-      bctx.drawImage(breatheComposite(base, bm.cfg, phase), 0, 0);
+      // 꺼진 줄은 워프를 **아예 안 부른다.** 봉투에서 위상 0 은 항등이 아니라서
+      // (진행파 지연) 위상만 0 으로 넘기면 정지 상태가 워프된 그림이 된다 — 굽기는
+      // off 면 state_breathe 가 None 이라 원본을 굽는다 (새미 검증 2026-07-25).
+      bctx.drawImage(bm.enabled ? breatheComposite(base, bm.cfg, phase) : base, 0, 0);
     };
     // 재생 타이밍 = 줄 프리뷰와 동일 계약: 현재 fps × 줄 배속(pv.speed)
     // (수홍 2026-07-18 "배속 해둔 거 확대해서도 배속으로"; fps 는 줄 스텝퍼로 실시간 변경)
@@ -1016,7 +1019,7 @@ function openZoom(stateName, idx, keepWidth) {
           bx.imageSmoothingEnabled = false;
           drawFrameInto(bx, image, getTransform(stateName, frameIdx), cellW, cellH,
             snapScaleFor(stateName), getPixelOps(stateName, frameIdx));
-          cctx.drawImage(breatheComposite(b, bm.cfg, phase), 0, 0);
+          cctx.drawImage(bm.enabled ? breatheComposite(b, bm.cfg, phase) : b, 0, 0);
         }
         cellEl.appendChild(cv);
         const capEl = document.createElement("span");
