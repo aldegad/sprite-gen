@@ -226,8 +226,20 @@ def anatomy_fingerprint(frame: Image.Image) -> str:
     return f"{frame.width}x{frame.height}:{box[0]},{box[1]},{box[2]},{box[3]}:{digest}"
 
 
-def frame_anatomy(frame: Image.Image, cfg: dict) -> tuple[Anatomy, bool]:
-    """(해부, 재검출 여부) — 얼려둔 결과를 쓰되 없거나 지문이 어긋나면 다시 잰다.
+def resolve_anatomy(reference: Image.Image, cfg: dict) -> tuple[Anatomy, bool]:
+    """(해부, 재검출 여부) — **줄 전체가 공유하는 한 벌**을 기준 프레임에서 확정한다.
+
+    해부는 **캐릭터의 속성이지 프레임의 속성이 아니다.** 깜빡임 프레임이라고 목이 옮겨
+    가지 않는다. 프레임마다 다시 재면 검출 지터로 `rigid_row` 가 흔들리고(실측 2↔3),
+    그러면 "강체 구간" 이 프레임 간 **같은 구간이 아니게 된다** — 이 모듈의 핵심 계약이
+    프레임별 재검출 때문에 깨지는 것이다. 게다가 사이드카에는 해부가 한 벌뿐이라
+    프리뷰(미러)는 그 한 벌로 그리고 굽기는 프레임마다 다른 값으로 구워 갈렸다
+    (슉슉이 실측 2026-07-25: 골든 픽스처 idle 4프레임에서 최대 220바이트, 불투명 픽셀
+    **수**까지 불일치 — 위치가 아니라 그림이 달랐다).
+
+    그래서 지문은 **기준 프레임 하나**를 지킨다: 스프라이트가 바뀌면 여기서 잡혀 한 번
+    다시 재고 그 사실을 보고한다. 나머지 프레임이 서로 다른 것은 정상이며 재검출 사유가
+    아니다.
 
     `rigid_row` 는 **사람의 의도(입력)** 이고 `anatomy` 는 거기서 파생된 **캐시**다.
     그래서 얼린 값이 override 와 어긋나면 캐시가 낡은 것이므로 다시 잰다 — 얼린 값을
@@ -242,7 +254,7 @@ def frame_anatomy(frame: Image.Image, cfg: dict) -> tuple[Anatomy, bool]:
     stale_override = (isinstance(frozen, dict) and override is not None
                       and int(override) != frozen.get("rigid_row"))
     if (isinstance(frozen, dict) and not stale_override
-            and frozen.get("fingerprint") == anatomy_fingerprint(frame)):
+            and frozen.get("fingerprint") == anatomy_fingerprint(reference)):
         face = frozen.get("face")
         return Anatomy(width=frozen["width"], height=frozen["height"], axis_x=frozen["axis_x"],
                        neck_row=frozen["neck_row"], neck_source=frozen["neck_source"],
@@ -251,29 +263,23 @@ def frame_anatomy(frame: Image.Image, cfg: dict) -> tuple[Anatomy, bool]:
                        max_half=frozen["max_half"],
                        face=tuple(face) if face else None,
                        warnings=tuple(frozen.get("warnings", ()))), False
-    return analyze(frame, rigid_row=override), True
+    return analyze(reference, rigid_row=override), True
 
 
 def anatomy_report(images: list[Image.Image], cfg: dict) -> dict:
     """굽기가 실제로 쓴 해부를 manifest 에 실을 형태로 — 자가 복구를 관측 가능하게.
 
-    프레임마다 따로 잰다: 시퀀스 프레임이 서로 다르면(깜빡임 등) 얼려둔 지문은 하나만
-    맞으므로 나머지는 프레임별 재검출이 되고, 그러면 `rigid_row` 가 프레임마다 달라질
-    수 있다. 그 사실이 숨으면 안 된다."""
-    used, redetected, rows = [], [], set()
-    for index, frame in enumerate(images):
-        anat, fresh = frame_anatomy(frame, cfg)
-        if fresh:
-            redetected.append(index)
-        rows.add(anat.rigid_row)
-        used.append(anat)
-    first = used[0] if used else None
+    줄 전체가 **한 벌**을 쓰므로 보고도 한 벌이다. 예전엔 프레임별로 재서
+    `rigid_row_varies` 를 실어 보냈는데, 그건 관측이 아니라 결함의 증상이었다 —
+    경계가 프레임마다 움직이면 강체 구간이 프레임 간 같은 구간이 아니다."""
+    if not images:
+        return {"anatomy": None, "redetected": False, "warnings": []}
+    anat, redetected = resolve_anatomy(images[0], cfg)
     return {
-        "anatomy": first.as_dict() if first else None,
-        "redetected_frames": redetected,
-        "redetected": bool(redetected),
-        "rigid_row_varies": sorted(rows) if len(rows) > 1 else [],
-        "warnings": sorted({w for a in used for w in a.warnings}),
+        "anatomy": anat.as_dict(),
+        "redetected": redetected,
+        "reference_fingerprint": anatomy_fingerprint(images[0]),
+        "warnings": sorted(anat.warnings),
     }
 
 
@@ -327,9 +333,14 @@ def breathe_reads_smoothly(seq_len: int, cfg: dict, per_cycle: int = SMOOTH_CYCL
     return seq_len // max(1, int(cfg.get("breaths", 1))) >= max(2, per_cycle)
 
 
-def phase_frame(frame: Image.Image, cfg: dict, phase: float) -> Image.Image:
-    """프레임에 호흡 위상 하나(0 <= phase < 1)를 적용."""
-    anat, _ = frame_anatomy(frame, cfg)
+def phase_frame(frame: Image.Image, cfg: dict, phase: float,
+                anat: Anatomy | None = None) -> Image.Image:
+    """프레임에 호흡 위상 하나(0 <= phase < 1)를 적용.
+
+    `anat` 를 주면 그것을 쓴다 — 줄 전체가 한 벌을 공유해야 하므로 호출자가 한 번
+    확정해 넘기는 게 정석이다. 생략하면 이 프레임을 기준으로 확정한다 (단발 호출용)."""
+    if anat is None:
+        anat, _ = resolve_anatomy(frame, cfg)
     depth = float(cfg.get("depth", DEFAULT_DEPTH))
     strain = row_strain(anat, depth)
     if strain > MAX_ROW_STRAIN:
@@ -348,4 +359,5 @@ def bake_breathe_sequence(images: list[Image.Image], cfg: dict) -> tuple[list[Im
     if not images:
         return images, []
     phases = fit_breathe_pattern(len(images), cfg)
-    return [phase_frame(images[i], cfg, phases[i]) for i in range(len(images))], phases
+    anat, _ = resolve_anatomy(images[0], cfg)      # 줄 전체가 한 벌을 공유한다
+    return [phase_frame(images[i], cfg, phases[i], anat) for i in range(len(images))], phases

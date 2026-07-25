@@ -54,7 +54,7 @@ const STR = {
     tRowBreatheEdit: "open the breathing editor — adjustments apply instantly over the playing sequence; Esc restores the previous setting",
     breatheAmp: "depth", breatheCountLabel: "breaths/loop", breatheFitted: (n) => n === 0 ? "→ no room to breathe" : `→ ${n} applied`,
     breatheAuto: "auto", tBreatheAuto: "drop the manual boundary and use the detected one (neck bottleneck, or below the face when the face sits on the body)",
-    tBreatheFitted: (len) => `the loop is ${len} frames — add frames to the sequence for a smoother breath`, tBreatheCount: "breath count per loop — phases are continuous, so the requested count always applies exactly",
+    tBreatheFitted: (len) => `the loop is ${len} frames — add frames to the sequence for a smoother breath`, tBreatheCount: "breath count per loop (1-8) — phases are continuous, so the requested count applies exactly",
     
         breatheHint: "drag the rigid boundary — everything above it stays bit-identical, the body below squashes and stretches, and the head follows a beat later. Applies instantly; Cmd/Ctrl+Z steps back/forward, Esc restores.",
     breatheFail: "breathe failed: ",
@@ -201,7 +201,7 @@ const STR = {
     tRowBreatheEdit: "호흡 편집기 열기 — 조정은 재생 중인 시퀀스에 즉시 반영됩니다. Esc = 이전 설정 복원",
     breatheAmp: "진폭", breatheCountLabel: "호흡/루프", breatheFitted: (n) => n === 0 ? "→ 숨쉴 자리 없음" : `→ 적용 ${n}회`,
     breatheAuto: "자동", tBreatheAuto: "수동 경계를 버리고 검출값을 쓴다 (목 병목, 얼굴이 몸통에 있으면 얼굴 아래)",
-    tBreatheFitted: (len) => `루프가 ${len}프레임 — 더 부드럽게 하려면 시퀀스에 프레임을 늘리세요`, tBreatheCount: "루프당 호흡 횟수 — 위상이 연속값이라 요청한 횟수가 그대로 적용됩니다",
+    tBreatheFitted: (len) => `루프가 ${len}프레임 — 더 부드럽게 하려면 시퀀스에 프레임을 늘리세요`, tBreatheCount: "루프당 호흡 횟수 (1~8) — 위상이 연속값이라 요청한 횟수가 그대로 적용됩니다",
     
         breatheHint: "강체 경계를 드래그 — 이 위는 도트 단위로 그대로 남고, 아래 몸통이 눌렸다 펴지며 머리가 반 박자 늦게 따라옵니다. 즉시 반영, Cmd/Ctrl+Z 이전/다음, Esc 복원.",
     breatheFail: "호흡 실패: ",

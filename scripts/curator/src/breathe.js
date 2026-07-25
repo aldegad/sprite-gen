@@ -17,6 +17,11 @@
 const BREATHE_TAPER = 0.055;
 const BREATHE_FOOT = 0.28;
 const BREATHE_MAX_ROW_STRAIN = 0.25;
+// 사이드카 허용 범위 — 파이썬 curation.BREATHE_*_MAX 미러. UI 가 이 밖의 값을 만들면
+// 굽기가 loud reject 하므로 컨트롤이 여기서 막아야 한다.
+const BREATHE_DEPTH_MAX = 0.20;
+const BREATHE_BREATHS_MAX = 8;
+const BREATHE_LAG_MAX = 0.45;
 
 // 굽기가 거부하는 프레임은 미리보기도 만들어 주지 않는다.
 // 파이썬은 셀 밖으로 나간 불투명 픽셀을 세어 SystemExit 으로 멈추고 행당 변형 상한도

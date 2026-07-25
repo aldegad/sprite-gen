@@ -176,6 +176,12 @@ def curation_path(run_dir: Path) -> Path:
 # 제거된 결정이 필드 하나로 되살아나는 경로를 만들지 않기 위해서다 (docs/pixel-perfect.md
 # 의 `conform` 사고, 2026-07-17). splits 없이는 구 정규화가 None 을 냈으므로 구 설정은
 # 전부 이 게이트에 걸린다 — 조용히 다른 동작으로 바뀌는 사이드카는 없다.
+# 호흡 파라미터 허용 범위 — 큐레이터 컨트롤(`breathe.js` BREATHE_*_MAX)과 같은 값이어야
+# 한다. 둘이 갈리면 UI 가 만들 수 있는 값을 굽기가 거부한다.
+BREATHE_DEPTH_MAX = 0.20
+BREATHE_BREATHS_MAX = 8
+BREATHE_LAG_MAX = 0.45
+
 RETIRED_BREATHE_KEYS = {
     "splits": "분할선은 봉투 경계로 대체됐다 — 경계는 자동 검출되고 `rigid_row` 로만 덮어쓴다",
     "amplitude": "정수 px 진폭은 몸통 높이 비율 `depth` 로 대체됐다 (기본 0.06)",
@@ -207,15 +213,26 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
             f"  마이그레이션: `sprite-gen migrate-breathe <run-dir> --apply` 또는 해당 키를 지우고 "
             f"`depth`(기본 0.06)·`breaths`·`lag`(기본 0.10) 로 다시 적어라. 조용히 변환하지 않는다.")
     try:
-        depth = max(0.005, min(0.20, float(raw.get("depth", 0.06))))
-        breaths = max(1, min(8, int(raw.get("breaths", 1))))
-        lag = max(0.0, min(0.45, float(raw.get("lag", 0.10))))
+        depth = float(raw.get("depth", 0.06))
+        breaths = int(raw.get("breaths", 1))
+        lag = float(raw.get("lag", 0.10))
     except (TypeError, ValueError) as exc:
         # 폐기 키는 요란하게 거부하면서 형식 오류만 조용히 호흡을 꺼버리면 계약이 어긋난다
         # — 둘 다 "이 사이드카는 그대로 못 쓴다" 이고, 조용한 쪽은 사용자가 못 알아챈다.
         raise SystemExit(
             f"curation: states.{state}.breathe 의 depth/breaths/lag 를 숫자로 못 읽는다: {exc}\n"
             f"  받은 값: depth={raw.get('depth')!r} breaths={raw.get('breaths')!r} lag={raw.get('lag')!r}")
+    # 범위 밖은 **조용히 깎지 않는다.** 클램프는 파이썬에만 있어서 미러·배지·문서가 굽기와
+    # 다른 값을 말하게 됐다 (슉슉이 실측 2026-07-25: breaths 12 를 8 로 깎는데 프리뷰·
+    # 필름스트립·WebM 은 12회 숨쉬고 배지는 "적용 12회" 라고 띄웠다). 폐기 키는 요란하게
+    # 거부하면서 값 범위만 조용한 것도 계약이 어긋난다.
+    for name, value, lo, hi in (("depth", depth, 0.005, BREATHE_DEPTH_MAX),
+                                ("breaths", breaths, 1, BREATHE_BREATHS_MAX),
+                                ("lag", lag, 0.0, BREATHE_LAG_MAX)):
+        if not lo <= value <= hi:
+            raise SystemExit(
+                f"curation: states.{state}.breathe.{name} = {value!r} 가 범위 [{lo}, {hi}] 밖이다. "
+                f"조용히 깎지 않는다 — 사이드카를 고쳐라 (큐레이터 컨트롤은 이 범위 안에서만 값을 낸다).")
     rigid_row = raw.get("rigid_row")
     if rigid_row is not None:
         try:

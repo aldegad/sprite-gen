@@ -999,7 +999,7 @@ function openZoom(stateName, idx, keepWidth) {
       const cap = document.createElement("div");
       cap.className = "bs-caption";
       cap.textContent = bm.enabled
-        ? STR[lang].breatheStrip(play.length, actualBreaths, bm.cfg.breaths || 1)
+        ? STR[lang].breatheStrip(play.length, actualBreaths)
         : STR[lang].breatheStripOff(play.length);
       strip.appendChild(cap);
       const rowEl = document.createElement("div");
@@ -1112,7 +1112,10 @@ function openZoom(stateName, idx, keepWidth) {
     plusBtn.textContent = "+";
     const setBreaths = (v) => {
       const seqLen = playList(stateName).length || 1;
-      const clamped = Math.max(1, Math.min(Math.max(1, seqLen), Math.round(Number(v)) || 1));
+      // 상한은 스키마(BREATHE_BREATHS_MAX)와 시퀀스 길이 둘 다 — 스키마를 넘기면 굽기가
+      // loud reject 하므로 컨트롤이 애초에 그 값을 못 만들게 한다.
+      const cap = Math.min(BREATHE_BREATHS_MAX, Math.max(1, seqLen));
+      const clamped = Math.max(1, Math.min(cap, Math.round(Number(v)) || 1));
       bm.cfg.breaths = clamped;
       breathInput.value = String(clamped);
       commit();
