@@ -468,32 +468,54 @@ def test_the_curator_ui_cap_matches_the_schema_bound() -> None:
             f"{name} 미러 {m.group(1)} != 파이썬 {want} — UI 가 만든 값을 굽기가 거부한다"
 
 
+def _reaches_further(base):
+    """같은 줄의 다른 프레임 — **워프가 실제로 쓰는 값**이 갈리게 만든다.
+
+    round-5 에 넣은 첫 판은 RGB 만 덧칠해서 `face`/`warnings` 만 바뀌고 워프 입력
+    (`axis_x`·`torso_half`·`max_half`)은 그대로였다. 그래서 프레임별 재검출로 되돌리는
+    변이를 넣어도 출력이 바이트 동일해 **테스트가 안 물었다** (슉슉이 note 2026-07-25).
+    팔을 뻗으면 `axis_x` 13→14, `max_half` 14→19 로 워프 입력이 실제로 갈린다."""
+    out = base.copy()
+    px = out.load()
+    box = solid_alpha_bbox(out)
+    for y in range(box[1] + 40, box[1] + 50):
+        for x in range(box[2], min(out.width, box[2] + 6)):
+            px[x, y] = (90, 60, 30, 255)
+    return out
+
+
+def _warp_inputs(anat):
+    return (anat.rigid_row, anat.basis_row, anat.axis_x, anat.torso_half, anat.max_half)
+
+
 def test_row_anatomy_is_shared_across_the_sequence() -> None:
-    """줄 전체가 해부 한 벌을 쓴다 — 프레임마다 다시 재면 경계가 흔들린다.
+    """줄 전체가 해부 한 벌을 쓴다 — 프레임마다 다시 재면 경계·축이 흔들린다.
 
     경계가 프레임마다 움직이면 '강체 구간' 이 프레임 간 같은 구간이 아니게 되고,
     사이드카 한 벌로 그리는 프리뷰와도 갈린다 (슉슉이 실측 2026-07-25)."""
     base = _humanoid()
-    other = base.copy()                       # 같은 줄의 다른 프레임 (알파 무변 RGB 덧칠)
-    px = other.load()
-    box = solid_alpha_bbox(other)
-    axis = (box[0] + box[2]) // 2
-    for y in range(box[1] + 4, box[1] + 14):
-        for x in range(axis - 3, axis + 4):
-            if px[x, y][3] >= 128:
-                px[x, y] = (12, 14, 18, px[x, y][3])
+    other = _reaches_further(base)
+    assert _warp_inputs(analyze(base)) != _warp_inputs(analyze(other)), \
+        "픽스처 쌍이 워프 입력을 안 바꾸면 이 테스트는 아무것도 보증하지 못한다"
+
     cfg = dict(CFG)
     cfg["anatomy"] = freeze_anatomy(base, cfg)
-
-    frames, _ = bake_breathe_sequence([base, other, base, other], cfg)
+    seq = [base, other, base, other]
+    frames, phases = bake_breathe_sequence(seq, cfg)
     anat, redetected = resolve_anatomy(base, cfg)
     assert redetected is False
+
+    diverged = 0
     for i, frame in enumerate(frames):
-        src = base if i % 2 == 0 else other
-        want = phase_frame(src, cfg, fit_breathe_pattern(4, cfg)[i], anat)
+        want = phase_frame(seq[i], cfg, phases[i], anat)
         assert frame.tobytes() == want.tobytes(), \
             f"frame {i}: 줄 해부 한 벌로 구운 것과 다르다 — 프레임별 재검출이 되살아났다"
+        per_frame = phase_frame(seq[i], cfg, phases[i])      # 프레임 자기 해부로 구운 것
+        if per_frame.tobytes() != frame.tobytes():
+            diverged += 1
+    assert diverged, ("어떤 프레임도 자기 해부와 줄 해부의 출력이 다르지 않다 — "
+                      "이 픽스처로는 변이가 안 잡힌다 (그물이 이름값을 못 한다)")
 
-    report = anatomy_report([base, other, base, other], cfg)
+    report = anatomy_report(seq, cfg)
     assert "rigid_row_varies" not in report, "경계가 프레임마다 달라질 수 있는 표현이 남아 있다"
     assert report["anatomy"]["rigid_row"] == anat.rigid_row

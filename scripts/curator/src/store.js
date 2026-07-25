@@ -2,6 +2,18 @@
 // 한쪽만 보존하게 되므로 같이 고친다).
 const RETIRED_BREATHE_KEYS = ["splits", "amplitude", "subpixel", "hold"];
 
+// 파이썬 curation 의 허용 범위 미러. 굽기가 요란하게 거부하는 값을 웹뷰가 조용히 깎아
+// 되쓰면 사용자의 원래 숫자가 파괴되고 게이트 자체가 사라진다 — 같은 값으로 판정한다.
+function breatheRangeProblems(raw) {
+  const bounds = [["depth", 0.005, 0.20, 0.06], ["breaths", 1, 8, 1], ["lag", 0, 0.45, 0.1]];
+  const bad = [];
+  for (const [key, lo, hi, dflt] of bounds) {
+    const v = Number(raw[key] == null ? dflt : raw[key]);
+    if (!Number.isFinite(v) || v < lo || v > hi) bad.push(`${key}=${JSON.stringify(raw[key])}`);
+  }
+  return bad;
+}
+
 // SPDX-License-Identifier: Apache-2.0
 // curator/store.js — 런 스냅샷 + 큐레이션 인메모리 모델 (run/entries/프레임·복제 해석) — 클라이언트 상태 SSoT
 // 로드 순서 SSoT = index.html (classic script 전역 어휘 공유; 빌드 스텝 없음)
@@ -368,14 +380,23 @@ function seedEntries() {
     const rawBreathe = c && c.breathe;
     const retired = rawBreathe
       ? RETIRED_BREATHE_KEYS.filter((k) => k in rawBreathe) : [];
+    // 범위 밖 값도 **조용히 깎지 않는다.** 굽기는 loud reject 하는데 웹뷰만 깎아서 되쓰면
+    // 사용자의 원래 숫자가 파괴되고 loud reject 자체가 사라진다 (슉슉이 실측 2026-07-25).
+    // 폐기 키와 같은 취급: 원본 보존 + 화면 통지.
+    const outOfRange = rawBreathe && !retired.length
+      ? breatheRangeProblems(rawBreathe) : [];
     entries[state.name] = { order, sel, transforms, archived, pixels, clones, unlinked, names,
       // 원본 보존 — persistence 가 이걸 그대로 되쓴다 (정규화·삭제 금지)
-      breatheRetired: retired.length ? { keys: retired, raw: rawBreathe } : null,
-      // 호흡 후처리 레이어 (사이드카 breathe — curation.state_breathe 와 같은 형태)
-      breathe: rawBreathe && !retired.length && typeof rawBreathe.depth === "number"
-        ? { depth: Math.max(0.005, Math.min(0.2, Number(rawBreathe.depth) || 0.06)),
-            breaths: Math.max(1, Math.min(8, Number(rawBreathe.breaths) || 1)),
-            lag: Math.max(0, Math.min(0.45, rawBreathe.lag == null ? 0.1 : Number(rawBreathe.lag))),
+      breatheRetired: (retired.length || outOfRange.length)
+        ? { keys: retired.length ? retired : outOfRange, raw: rawBreathe } : null,
+      // 호흡 후처리 레이어 (사이드카 breathe — curation.state_breathe 와 같은 형태).
+      // 클램프하지 않는다: 범위 검증은 위에서 하고, 여기서는 굽기와 같은 형변환만 한다
+      // (파이썬 `float()`/`int()` 처럼 숫자 문자열도 받는다).
+      breathe: rawBreathe && !retired.length && !outOfRange.length
+                 && rawBreathe.depth != null
+        ? { depth: Number(rawBreathe.depth),
+            breaths: Math.round(Number(rawBreathe.breaths == null ? 1 : rawBreathe.breaths)),
+            lag: Number(rawBreathe.lag == null ? 0.1 : rawBreathe.lag),
             rigid_row: rawBreathe.rigid_row == null ? null : Number(rawBreathe.rigid_row),
             anatomy: rawBreathe.anatomy || null }
         : null };
@@ -385,7 +406,8 @@ function seedEntries() {
   const stale = run.states.filter((s2) => entries[s2.name] && entries[s2.name].breatheRetired);
   if (stale.length) {
     const names = stale.map((s2) => s2.name).join(", ");
-    setStatus(`폐기된 호흡 스키마: ${names} — 사이드카는 그대로 두었다. `
-      + `\`sprite-gen migrate-breathe <run-dir> --apply\` 로 옮겨라.`, "err");
+    const why = stale.map((s2) => entries[s2.name].breatheRetired.keys.join("/")).join(" · ");
+    setStatus(`읽을 수 없는 호흡 사이드카: ${names} (${why}) — 원본은 그대로 두었다. `
+      + `\`sprite-gen migrate-breathe <run-dir> --apply\` 로 옮기거나 값을 범위 안으로 고쳐라.`, "err");
   }
 }

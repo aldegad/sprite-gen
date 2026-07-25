@@ -110,3 +110,49 @@ def test_js_phase_pattern_is_bit_identical_to_python(seq, breaths, tmp_path):
     for i, (a, b) in enumerate(zip(want, got)):
         assert a == b, f"seq={seq} breaths={breaths} slot {i}: py={a!r} js={b!r}"
     assert len(set(got)) == len(set(want)), "유니크 위상 개수가 다르다 (표현 노이즈)"
+
+
+@node
+@pytest.mark.parametrize("bad", [
+    {"depth": 0.5, "breaths": 12, "lag": 0.9},
+    {"depth": 0},
+    {"breaths": 12},
+], ids=["all-three", "depth-zero", "breaths-over"])
+def test_the_curator_never_clamps_an_out_of_range_sidecar(bad, tmp_path):
+    """굽기가 요란하게 거부하는 값을 웹뷰가 조용히 깎아 되쓰면 원본이 파괴된다.
+
+    실측 (슉슉이 2026-07-25): `depth 0.5 / breaths 12 / lag 0.9` 를 웹뷰가 `0.2 / 8 / 0.45`
+    로 조용히 로드하고(status 0건) 첫 autosave 가 그 값으로 사이드카를 갈아치웠다 —
+    loud reject 자체가 사라진다. round-3 A(폐기 키 삼킴)와 같은 경로다."""
+    breathe = {"depth": 0.06, "breaths": 1, "lag": 0.1, **bad}
+    run = {"schemaVersion": 1, "fps": 6,
+           "states": [{"name": "idle", "fps": 6,
+                       "frames": [{"index": 0, "present": True}, {"index": 1, "present": True}]}],
+           "curation": {"states": {"idle": {"selected": [0, 1], "breathe": breathe}}}}
+    got = _run({"mode": "roundtrip", "run": run}, tmp_path)
+
+    saved = got["payload"]["states"]["idle"].get("breathe")
+    assert saved == breathe, f"웹뷰가 범위 밖 사이드카를 바꿔 썼다: {saved}"
+    errs = [m for kind, m in got["status"] if kind == "err"]
+    assert errs, "범위 밖인데 아무 알림도 없다"
+
+    # 굽기 쪽 게이트가 왕복 후에도 그대로 걸린다
+    with pytest.raises(SystemExit):
+        state_breathe({"states": {"idle": {"breathe": saved}}}, "idle")
+
+
+@node
+def test_the_curator_accepts_what_the_bake_accepts(tmp_path):
+    """굽기가 받는 값(숫자 문자열 포함)을 웹뷰도 호흡 켜짐으로 읽어야 한다.
+
+    `typeof !== "number"` 게이트는 `"0.08"` 을 호흡 없음으로 읽고 저장에서 breathe 키를
+    통째로 지웠다 — 굽기는 정상 수용하는 값이라 켜짐/꺼짐 자체가 반대였다."""
+    breathe = {"depth": "0.08", "breaths": 3, "lag": 0.1}
+    run = {"schemaVersion": 1, "fps": 6,
+           "states": [{"name": "idle", "fps": 6, "frames": [{"index": 0, "present": True}]}],
+           "curation": {"states": {"idle": {"selected": [0], "breathe": breathe}}}}
+    got = _run({"mode": "roundtrip", "run": run}, tmp_path)
+    saved = got["payload"]["states"]["idle"].get("breathe")
+    assert saved is not None, "굽기가 받는 값을 웹뷰가 호흡 없음으로 읽고 지웠다"
+    assert float(saved["depth"]) == 0.08
+    assert state_breathe({"states": {"idle": {"breathe": saved}}}, "idle")["depth"] == 0.08
