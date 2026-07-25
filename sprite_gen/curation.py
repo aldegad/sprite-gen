@@ -190,6 +190,23 @@ RETIRED_BREATHE_KEYS = {
 }
 
 
+def _exact_int(name: str, value: Any, state: str) -> int:
+    """정수만 받는다 — 2.7 이나 "3.5" 를 조용히 깎지 않는다.
+
+    파이썬 `int()` 는 2.7 을 2 로 깎고 "3.5" 에는 예외를 던지는데, 미러의 `Math.round`
+    는 3 과 4 를 낸다. 어느 쪽으로 맞추든 조용히 깎는 순간 프리뷰와 굽기가 갈리므로
+    **양쪽 다 거부**하는 쪽으로 정했다 (범위 밖 loud reject 와 같은 판단)."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise SystemExit(f"curation: states.{state}.breathe.{name} 을 숫자로 못 읽는다: {value!r}")
+    if number != int(number):
+        raise SystemExit(
+            f"curation: states.{state}.breathe.{name} = {value!r} 가 정수가 아니다. "
+            f"조용히 깎지 않는다 — 프리뷰는 반올림하고 굽기는 버려서 서로 다른 애니메이션이 된다.")
+    return int(number)
+
+
 def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any] | None:
     """상태의 호흡 후처리 레이어 설정 (없으면 None) — 정규화·클램프 포함.
 
@@ -212,10 +229,13 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
             f"{detail}\n"
             f"  마이그레이션: `sprite-gen migrate-breathe <run-dir> --apply` 또는 해당 키를 지우고 "
             f"`depth`(기본 0.06)·`breaths`·`lag`(기본 0.10) 로 다시 적어라. 조용히 변환하지 않는다.")
+    # 형변환 계약(미러와 동일해야 한다): depth/lag 는 실수(숫자 문자열 허용),
+    # breaths/rigid_row 는 **정수여야 한다**. 2.7 을 조용히 2 로 깎으면 프리뷰(반올림 3)와
+    # 갈리고, "요청 그대로 적용된다" 는 문서도 거짓이 된다 (슉슉이 실측 2026-07-25).
     try:
         depth = float(raw.get("depth", 0.06))
-        breaths = int(raw.get("breaths", 1))
         lag = float(raw.get("lag", 0.10))
+        breaths = _exact_int("breaths", raw.get("breaths", 1), state)
     except (TypeError, ValueError) as exc:
         # 폐기 키는 요란하게 거부하면서 형식 오류만 조용히 호흡을 꺼버리면 계약이 어긋난다
         # — 둘 다 "이 사이드카는 그대로 못 쓴다" 이고, 조용한 쪽은 사용자가 못 알아챈다.
@@ -235,10 +255,7 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
                 f"조용히 깎지 않는다 — 사이드카를 고쳐라 (큐레이터 컨트롤은 이 범위 안에서만 값을 낸다).")
     rigid_row = raw.get("rigid_row")
     if rigid_row is not None:
-        try:
-            rigid_row = int(rigid_row)
-        except (TypeError, ValueError):
-            raise SystemExit(f"curation: states.{state}.breathe.rigid_row 가 정수가 아니다: {rigid_row!r}")
+        rigid_row = _exact_int("rigid_row", rigid_row, state)
     frozen = raw.get("anatomy")
     return {"depth": depth, "breaths": breaths, "lag": lag, "rigid_row": rigid_row,
             "anatomy": frozen if isinstance(frozen, dict) else None}

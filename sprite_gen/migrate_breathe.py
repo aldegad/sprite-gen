@@ -64,9 +64,20 @@ def migrate_entry(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
             fresh[key] = value
         else:
             dropped.append(f"{key}={value!r} (범위 [{lo}, {hi}] 밖이라 기본값 {fresh[key]} 사용)")
-    for key in ("rigid_row", "anatomy"):
-        if key in raw:
-            fresh[key] = raw[key]
+    if "rigid_row" in raw and raw["rigid_row"] is not None:
+        # 이월 값도 굽기가 받을 수 있어야 한다 — `_exact_int` 가 비정수를 거부한다.
+        try:
+            row = float(raw["rigid_row"])
+        except (TypeError, ValueError):
+            dropped.append(f"rigid_row={raw['rigid_row']!r} (숫자가 아니라 버림 — 자동 검출로 돌아간다)")
+            row = None
+        if row is not None:
+            if row == int(row) and row > 0:
+                fresh["rigid_row"] = int(row)
+            else:
+                dropped.append(f"rigid_row={raw['rigid_row']!r} (정수 양수가 아니라 버림 — 자동 검출)")
+    if "anatomy" in raw:
+        fresh["anatomy"] = raw["anatomy"]
     return fresh, dropped
 
 

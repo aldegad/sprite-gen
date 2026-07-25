@@ -81,6 +81,9 @@ async function downloadRowVideo(stateName, fmt) {
     bx.imageSmoothingEnabled = false;
     drawFrameInto(bx, image, getTransform(stateName, play[i]), cellW, cellH,
       snapScaleFor(stateName), getPixelOps(stateName, play[i]));
+    // 줄의 첫 프레임 = 굽기의 기준 프레임. 얼린 해부가 그 프레임에서 나온 게 아니면
+    // 여기서 멈춘다 — 안 그러면 GIF(서버 굽기)와 다른 애니메이션이 파일로 나간다.
+    if (bcfg && i === 0) breatheAssertFresh(base, bcfg);
     const composed = bcfg ? breatheComposite(base, bcfg, pattern[i] || 0) : base;
     const out = document.createElement("canvas");
     out.width = cellW * scale;

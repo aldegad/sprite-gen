@@ -88,6 +88,22 @@ function breatheProtect(anat) {
   return (x) => breatheSmoothstep(t0, t1, Math.abs(x - anat.axis_x));
 }
 
+// 파이썬 `breathe._fnv1a` / `anatomy_fingerprint` 미러. 미러가 지문을 **직접 계산**해야
+// 자기가 그리는 프레임이 얼린 해부와 맞는지 확인할 수 있다. 못 하면 굽기만 자가 복구하고
+// 프리뷰는 낡은 숫자로 계속 그린다 (슉슉이 실측 2026-07-25: 픽셀 편집 후 최대 617바이트,
+// 불투명 픽셀 수까지 불일치). SHA-256 을 안 쓰는 이유는 브라우저에서 동기로 못 구해서다.
+function breatheFnv1a(data) {
+  let h = 2166136261;
+  for (let i = 0; i < data.length; i++) h = Math.imul(h ^ data[i], 16777619) >>> 0;
+  return h;
+}
+
+function breatheFingerprint(canvas, data, box) {
+  const hex = breatheFnv1a(data).toString(16).padStart(8, "0");
+  const b = box || [0, 0, 0, 0];
+  return `${canvas.width}x${canvas.height}:${b[0]},${b[1]},${b[2]},${b[3]}:${hex}`;
+}
+
 function breatheSolidBox(data, w, h) {
   let x0 = w, y0 = h, x1 = 0, y1 = 0;
   for (let y = 0; y < h; y++) {
@@ -103,13 +119,37 @@ function breatheSolidBox(data, w, h) {
   return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
 }
 
+// 줄 단위 신선도 검사 — **기준 프레임 하나**에만 건다.
+//
+// 굽기는 줄의 첫 프레임으로 해부를 확정하고(`bake_breathe_sequence` 의 `images[0]`) 그
+// 한 벌로 모든 프레임을 굽는다. 그래서 프레임마다 지문을 보면 안 된다 — 깜빡임처럼
+// 정상적으로 다른 프레임까지 거부해 프리뷰가 통째로 죽는다. 봐야 하는 건 "얼린 해부가
+// **지금의 기준 프레임**에서 나온 것인가" 하나다.
+//
+// 이게 없으면 큐레이터 픽셀 편집기로 도트를 찍기만 해도(호흡을 건드릴 필요조차 없다)
+// 굽기는 자가 복구하고 프리뷰는 낡은 숫자로 계속 그린다 — 실측 최대 617바이트, 불투명
+// 픽셀 수까지 불일치 (슉슉이 2026-07-25).
+function breatheAssertFresh(referenceCanvas, cfg) {
+  const anat = cfg && cfg.anatomy;
+  if (!anat || !anat.fingerprint) return;          // 해부가 없으면 굽기가 매번 재검출한다
+  const w = referenceCanvas.width, h = referenceCanvas.height;
+  const data = referenceCanvas.getContext("2d").getImageData(0, 0, w, h).data;
+  const now = breatheFingerprint(referenceCanvas, data, breatheSolidBox(data, w, h));
+  if (now !== anat.fingerprint) {
+    throw new BreatheRefused(
+      `해부가 지금의 기준 프레임에서 나온 게 아니다 — 얼린 지문 ${anat.fingerprint} vs `
+      + `현재 ${now}. 굽기는 다시 재서 굽는다. 해부를 갱신해야 프리뷰가 같아진다.`);
+  }
+}
+
 // 프리뷰 전용 래퍼 — 굽기가 거부하는 설정이면 **원본을 그리고 loud 하게 알린다.**
 // 내보내기(row-export)는 이 래퍼를 쓰지 않는다: 거기서는 예외가 그대로 올라가 파일이
 // 만들어지기 전에 중단돼야 한다. 프리뷰는 타이머 루프라 예외가 올라가면 재생이 죽으므로
 // 잡되, **조용히 워프된 그림을 보여주지는 않는다** — 못 굽는 설정이면 못 굽는 대로 보인다.
 let _breatheWarned = "";
-function breatheComposeForPreview(base, cfg, phase) {
+function breatheComposeForPreview(base, cfg, phase, reference) {
   try {
+    if (reference) breatheAssertFresh(reference, cfg);
     return breatheComposite(base, cfg, phase);
   } catch (err) {
     if (!(err instanceof BreatheRefused)) throw err;

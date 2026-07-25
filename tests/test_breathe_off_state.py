@@ -100,3 +100,22 @@ def test_python_bake_never_skips_a_phase(site):
     assert "phase" not in guard.replace("breathe_cfg", ""), (
         f"{rel}:{lineno} 의 가드가 위상 값을 본다 — 위상 0 이 안 구워진다.\n"
         f"  가드: {guard}\n  호출: {line}")
+
+
+# ── 줄 단위 신선도 검사가 실제로 걸리는가 ──────────────────────────
+
+FRESH = re.compile(r"breatheAssertFresh\s*\(")
+# 굽기와 같은 그림을 내보내는 경로 — 여기서 신선도를 안 보면 낡은 해부로 굽는다.
+FRESH_CONSUMERS = ("row-export.js",)
+
+
+@pytest.mark.parametrize("name", FRESH_CONSUMERS)
+def test_export_paths_check_anatomy_freshness(name):
+    """클라에서 굽는 경로는 기준 프레임 신선도를 확인해야 한다.
+
+    `row-export` 는 서버를 안 거치고 WebM/MP4 를 만든다. 얼린 해부가 지금의 기준
+    프레임에서 나온 게 아니면 GIF(서버 굽기)와 다른 애니메이션이 파일로 나간다
+    (슉슉이 실측 2026-07-25: 픽셀 편집 후 최대 617바이트)."""
+    src = (CURATOR_SRC / name).read_text(encoding="utf-8")
+    assert FRESH.search(src), (
+        f"{name} 이 breatheAssertFresh 를 안 부른다 — 낡은 해부로 구운 파일이 사용자에게 간다")

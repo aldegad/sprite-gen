@@ -95,8 +95,16 @@ def _frames(image: Image.Image, count: int = 12, cfg: dict | None = None):
 
 # ── 1. 강체 구간 항등 ───────────────────────────────────────────────
 
-def test_rigid_region_is_bit_identical_across_frames() -> None:
-    src = _humanoid()
+@pytest.mark.parametrize("build", [_humanoid, _winged, lambda: _dome(with_face=True)],
+                         ids=["humanoid", "winged", "dome-with-face"])
+def test_rigid_region_is_bit_identical_across_frames(build) -> None:
+    """강체 구간은 프레임 간 비트 동일하다.
+
+    **얼굴 없는 돔(`_dome()`)은 이 계약을 태울 수 없다** — 경계가 4행이고 테이퍼 밴드가
+    5행이라 강체 구간 높이가 음수다. 병목도 얼굴도 없는 실루엣은 지킬 강체 구간이 애초에
+    없고, 그건 결함이 아니라 그 분기의 성질이다 (슉슉이 note 2026-07-25). 그래서 여기서는
+    강체 구간이 실재하는 3종만 태운다."""
+    src = build()
     anat = analyze(src)
     frames, _ = _frames(src)
     band = int(max(1.5, TAPER * anat.height)) + 1

@@ -153,6 +153,7 @@ CANVAS_BUFFER_SITES = {
     ("zoom-editor.js", "prev"): "display",     # 마키 라이브 프리뷰
     ("zoom-editor.js", "bcanvas"): "display",  # 호흡 모드 줌 재생면
     ("zoom-editor.js", "cv"): "display",       # 호흡 필름스트립 셀
+    ("cards.js", "ref"): "offscreen",     # 호흡 신선도 판정용 기준 프레임 합성면
     ("compare.js", "base"): "offscreen",
     ("compare.js", "canvas"): "rect",          # cmp-canvas — 버퍼=표시
     ("breathe.js", "out"): "offscreen",
