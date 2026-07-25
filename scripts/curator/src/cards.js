@@ -430,7 +430,8 @@ function startPreview(state) {
         base.height = ch;
         const baseCtx = base.getContext("2d");
         baseCtx.imageSmoothingEnabled = false;
-        const canonical = f && f.url ? img(f.url) : image;
+        // 워프 base 도 신선도 기준과 **같은 변형**이어야 한다 (굽기가 쓰는 그 파일).
+        const canonical = f ? img(frameUrl(state.name, f)) : image;
         drawFrameInto(baseCtx, (canonical && canonical.complete && canonical.naturalWidth) ? canonical : image,
           tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
         const pattern = breathePattern(bcfg, play.length);

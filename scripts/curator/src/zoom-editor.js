@@ -888,6 +888,24 @@ function openZoom(stateName, idx, keepWidth) {
       lineEls[0].style.visibility = bm.geomReady && bm.enabled ? "" : "hidden";
     };
 
+    // 굽기가 해부를 확정하는 프레임 = 재생 첫 슬롯. 신선도 판정은 이 프레임으로만 한다
+    // (프레임마다 보면 깜빡임처럼 정상적으로 다른 프레임까지 거부해 프리뷰가 죽는다).
+    const breatheRef = () => {
+      const play = playList(stateName);
+      if (!play.length) return null;
+      const f = frameOf(stateName, play[0]);
+      const image = f ? img(frameUrl(stateName, f)) : null;
+      if (!(image && image.complete && image.naturalWidth)) return null;
+      const c = document.createElement("canvas");
+      c.width = cellW;
+      c.height = cellH;
+      const cx2 = c.getContext("2d");
+      cx2.imageSmoothingEnabled = false;
+      drawFrameInto(cx2, image, getTransform(stateName, play[0]), cellW, cellH,
+        snapScaleFor(stateName), getPixelOps(stateName, play[0]));
+      return c;
+    };
+
     // 시퀀스 재생 미리보기 — 실제 재생 순서(playList: 깜빡임 포함) 위에 위상을 얹는다.
     const bcanvas = stage.querySelector(".snap-canvas");
     const bImg = stage.querySelector("img");
@@ -922,7 +940,7 @@ function openZoom(stateName, idx, keepWidth) {
       // 꺼진 줄은 워프를 **아예 안 부른다.** 봉투에서 위상 0 은 항등이 아니라서
       // (진행파 지연) 위상만 0 으로 넘기면 정지 상태가 워프된 그림이 된다 — 굽기는
       // off 면 state_breathe 가 None 이라 원본을 굽는다 (새미 검증 2026-07-25).
-      bctx.drawImage(bm.enabled ? breatheComposeForPreview(base, bm.cfg, phase) : base, 0, 0);
+      bctx.drawImage(bm.enabled ? breatheComposeForPreview(base, bm.cfg, phase, breatheRef()) : base, 0, 0);
     };
     // 재생 타이밍 = 줄 프리뷰와 동일 계약: 현재 fps × 줄 배속(pv.speed)
     // (수홍 2026-07-18 "배속 해둔 거 확대해서도 배속으로"; fps 는 줄 스텝퍼로 실시간 변경)
@@ -1031,7 +1049,7 @@ function openZoom(stateName, idx, keepWidth) {
           bx.imageSmoothingEnabled = false;
           drawFrameInto(bx, image, getTransform(stateName, frameIdx), cellW, cellH,
             snapScaleFor(stateName), getPixelOps(stateName, frameIdx));
-          cctx.drawImage(bm.enabled ? breatheComposeForPreview(b, bm.cfg, phase) : b, 0, 0);
+          cctx.drawImage(bm.enabled ? breatheComposeForPreview(b, bm.cfg, phase, breatheRef()) : b, 0, 0);
         }
         cellEl.appendChild(cv);
         const capEl = document.createElement("span");

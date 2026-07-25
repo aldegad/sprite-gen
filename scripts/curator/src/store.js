@@ -8,7 +8,9 @@ function breatheRangeProblems(raw) {
   const bounds = [["depth", 0.005, 0.20, 0.06], ["breaths", 1, 8, 1], ["lag", 0, 0.45, 0.1]];
   const bad = [];
   for (const [key, lo, hi, dflt] of bounds) {
-    const v = Number(raw[key] == null ? dflt : raw[key]);
+    // 생략(undefined)은 기본값, 명시적 null 은 굽기가 거부하므로 여기서도 문제로 본다
+    const given = raw[key];
+    const v = given === undefined ? dflt : Number(given);
     if (!Number.isFinite(v) || v < lo || v > hi) { bad.push(`${key}=${JSON.stringify(raw[key])}`); continue; }
     // 정수여야 하는 값은 **정수인지도** 본다. `Math.round` 로 조용히 반올림하면 굽기
     // (`_exact_int` 가 거부)와 갈리고, 첫 autosave 가 사이드카를 반올림값으로 덮어써
@@ -400,8 +402,10 @@ function seedEntries() {
       // 호흡 후처리 레이어 (사이드카 breathe — curation.state_breathe 와 같은 형태).
       // 클램프하지 않는다: 범위 검증은 위에서 하고, 여기서는 굽기와 같은 형변환만 한다
       // (파이썬 `float()`/`int()` 처럼 숫자 문자열도 받는다).
+      // `depth` 생략은 굽기에서 기본값 0.06 이다 — 웹뷰만 "호흡 없음" 으로 읽으면
+      // 켜짐/꺼짐이 반대가 되고 첫 autosave 가 설정을 지운다 (슉슉이 note 2026-07-26).
+      // `depth: null` 은 굽기가 거부하므로 위 범위 검사에 걸려 여기 안 온다.
       breathe: rawBreathe && !retired.length && !outOfRange.length
-                 && rawBreathe.depth != null
         ? { depth: Number(rawBreathe.depth),
             // 위에서 정수 검증을 통과했으므로 반올림이 필요 없다 — 반올림하면 굽기와 갈린다
             breaths: Number(rawBreathe.breaths == null ? 1 : rawBreathe.breaths),

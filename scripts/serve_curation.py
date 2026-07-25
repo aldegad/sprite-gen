@@ -109,8 +109,16 @@ def _breathe_source_frame(run_dir: Path, state: str):
     curation = load_curation(run_dir)
     variant = frame_variant(curation, state)
     total = state_frame_total(request, state)
-    ordered, transforms = state_plan(curation, request, state)
-    cell = (int(request["cell_width"]), int(request["cell_height"]))
+    # 시그니처·키를 굽기(`compose_gif`)와 **같은 모양**으로 읽는다. 예전엔 인자 순서가
+    # 뒤바뀌고(`state_plan(curation, request, state)`) 없는 키(`request["cell_width"]`)를
+    # 읽어 이 라우트가 **항상 HTTP 500** 이었다 — 큐레이터에서 호흡을 켤 수조차 없었고
+    # 7라운드를 살아남은 건 이 경로를 태우는 테스트가 0개였기 때문이다 (슉슉이 2026-07-26).
+    ordered, transforms = state_plan(curation, state, total)
+    cell_spec = request.get("cell", {})
+    cell = (int(cell_spec.get("width") or cell_spec.get("size") or 0),
+            int(cell_spec.get("height") or cell_spec.get("size") or 0))
+    if not all(cell):
+        raise SystemExit(f"breathe-anatomy: sprite-request 에 셀 크기가 없다 (cell={cell_spec!r})")
     snap = pixel_snap_scale(request) if variant == "pixel" else None
     for index in (ordered or list(range(total))):
         # 재생 첫 슬롯이 복제면 그 인덱스로는 파일이 없다 — 원본 인덱스로 해소해야
