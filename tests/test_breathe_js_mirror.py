@@ -24,6 +24,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sprite_gen.breathe import freeze_anatomy, phase_frame  # noqa: E402
+from sprite_gen.extract import solid_alpha_bbox  # noqa: E402
 from tests.test_breathe import CFG, _dome, _humanoid, _winged  # noqa: E402
 
 CURATOR_BREATHE = Path(__file__).resolve().parent.parent / "scripts" / "curator" / "src" / "breathe.js"
@@ -62,8 +63,12 @@ vm.runInContext(fs.readFileSync(payload.script, "utf8"), sandbox);
 const out = [];
 for (const item of payload.cases) {
   const base = makeCanvas(payload.width, payload.height, item.rgba);
-  const res = sandbox.breatheComposite(base, payload.cfg, item.phase);
-  out.push(Array.from(res.getContext().getImageData().data));
+  try {
+    const res = sandbox.breatheComposite(base, payload.cfg, item.phase);
+    out.push({ ok: true, data: Array.from(res.getContext().getImageData().data) });
+  } catch (e) {
+    out.push({ ok: false, refused: e.constructor.name === "BreatheRefused", message: e.message });
+  }
 }
 fs.writeFileSync(payload.out, JSON.stringify(out));
 """
@@ -101,6 +106,52 @@ def test_curator_mirror_is_byte_identical_to_the_bake(build, tmp_path):
 
     assert len(js_frames) == len(PHASES)
     for phase, js in zip(PHASES, js_frames):
+        assert js["ok"], f"{build.__name__} 위상 {phase:.4f}: JS 가 거부했다 — {js['message']}"
         py = _rgba(phase_frame(src, cfg, phase))
-        diff = sum(1 for a, b in zip(py, js) if a != b)
+        diff = sum(1 for a, b in zip(py, js["data"]) if a != b)
         assert diff == 0, f"{build.__name__} 위상 {phase:.4f}: JS 미러가 굽기와 {diff}바이트 다르다"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 가 없어 JS 미러를 실행할 수 없다")
+@pytest.mark.parametrize("build", [_humanoid, _winged, _dome], ids=["humanoid", "winged", "dome"])
+def test_the_mirror_refuses_exactly_what_the_bake_refuses(build, tmp_path):
+    """굽기가 `SystemExit` 으로 거부하는 프레임은 미러도 만들어 주면 안 된다.
+
+    미러가 조용히 잘라 내보내면 (a) 프리뷰는 멀쩡한데 굽기가 죽고 (b) `row-export` 의
+    WebM/MP4 는 서버를 안 거치므로 **잘린 영상이 사용자 손에 들어간다** (슉슉이 실측
+    2026-07-25: 여백 0 셀에서 불투명 73px 소실, 오류 0건). 여기서 여백을 없애 그 상황을
+    강제로 만든다."""
+    src = build()
+    src = src.crop(solid_alpha_bbox(src))            # 여백 0 — 늘어나면 반드시 잘린다
+    cfg = dict(CFG)
+    cfg["anatomy"] = freeze_anatomy(src, cfg)
+
+    refused_py = []
+    for phase in PHASES:
+        try:
+            phase_frame(src, cfg, phase)
+        except SystemExit:
+            refused_py.append(phase)
+    assert refused_py, "이 픽스처는 굽기가 거부하는 위상을 가져야 의미가 있다"
+
+    payload = {
+        "script": str(CURATOR_BREATHE), "width": src.width, "height": src.height,
+        "cfg": {"depth": cfg["depth"], "breaths": cfg["breaths"], "lag": cfg["lag"],
+                "anatomy": cfg["anatomy"]},
+        "cases": [{"phase": p, "rgba": _rgba(src)} for p in PHASES],
+        "out": str(tmp_path / "js.json"),
+    }
+    (tmp_path / "payload.json").write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / "harness.cjs").write_text(HARNESS, encoding="utf-8")
+    proc = subprocess.run([shutil.which("node"), str(tmp_path / "harness.cjs"),
+                           str(tmp_path / "payload.json")], capture_output=True, text=True)
+    assert proc.returncode == 0, f"node 하네스 실패:\n{proc.stderr}"
+    js = json.loads((tmp_path / "js.json").read_text(encoding="utf-8"))
+
+    for phase, got in zip(PHASES, js):
+        py_refused = phase in refused_py
+        assert got["ok"] != py_refused, (
+            f"{build.__name__} 위상 {phase:.4f}: 굽기 거부={py_refused} 인데 "
+            f"미러는 {'거부' if not got['ok'] else '통과'} — 계약이 한쪽에만 있다")
+        if not got["ok"]:
+            assert got["refused"], f"BreatheRefused 가 아닌 예외로 죽었다: {got['message']}"

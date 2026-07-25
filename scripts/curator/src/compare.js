@@ -146,7 +146,7 @@ function openCompare() {
       snapScaleFor(name), getPixelOps(name, idx));
     const bcfg = stateBreathe(name);
     // 위상 0 도 워프한다 — 진행파 지연 때문에 t=0 이 항등이 아니다 (굽기와 동일 계약)
-    const out = bcfg ? breatheComposite(base, bcfg, phase || 0) : base;
+    const out = bcfg ? breatheComposeForPreview(base, bcfg, phase || 0) : base;
     // 콘텐츠 bbox (합성 결과 기준 — 변형으로 옮겨진 위치 반영)
     const d = out.getContext("2d").getImageData(0, 0, out.width, out.height).data;
     let x0 = out.width, y0 = out.height, x1 = 0, y1 = 0;

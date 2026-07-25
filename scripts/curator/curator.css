@@ -1201,13 +1201,9 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   height: 12px;
 }
 .breathe-bar { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
+.breathe-auto { padding: 2px 7px; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.breathe-auto:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .breathe-bar select { padding: 2px 4px; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; }
-.breathe-linectl { display: inline-flex; gap: 2px; }
-.breathe-linectl button { padding: 2px 6px; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
-.breathe-linectl button:hover { border-color: var(--accent); color: var(--accent); }
-.breathe-subpixel { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; }
-.breathe-subpixel input { margin: 0; }
-.breathe-subpixel { color: var(--muted); } /* 실험 기능 — 낮은 시각 우선순위 */
 .breathe-count { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); }
 .breathe-count input { width: 44px; padding: 2px 4px; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; text-align: center; }
 .breathe-count button { padding: 2px 7px; font-size: 12px; border: 1px solid var(--line); border-radius: 4px; background: transparent; cursor: pointer; }
