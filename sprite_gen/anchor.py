@@ -330,8 +330,16 @@ def _write_anchor_pick(run_dir: Path, request: dict[str, Any], state: str | None
     """`curation.json` 의 `anchors.<direction>` 갱신 (state=None → 지정 해제).
 
     Isolation: 사이드카는 뷰 autosave 와 공유 자원이라 배타락(publish_guard) 안에서
-    **fresh 재독 → 갱신 → 원자 쓰기** 한다 (lost update 금지)."""
-    from .curation import CURATION_FILENAME, empty_curation, write_curation_atomic
+    **fresh 재독 → 갱신 → 원자 쓰기** 한다 (lost update 금지).
+
+    Consistency: 재독은 raw `json.loads` 가 아니라 **세대 게이트**(`load_curation_report`)를
+    통과해야 한다. 그냥 읽어 되쓰면 `stamp_curation` 이 payload 의 모든 행에 현재 세대
+    지문을 다시 찍어서, 행 재생성으로 게이트가 이미 드롭한 낡은 선택·기각·픽셀편집이
+    **현재 세대 도장을 받아 부활**하고 새 프레임에 적용된다 — 그 부활한 selected 가 방향
+    앵커까지 고른다 (젯비 검증 2026-07-25 3차 기각 실측: 리롤 후 다른 방향 `--pick` 한 번에
+    `down_idle` 의 죽은 선택이 되살아나 `down` 앵커가 됐다). 게이트 도크스트링이 못박은
+    불변식이 이거다 — "증명 없는 선택을 새 프레임에 적용하지 않는다"."""
+    from .curation import empty_curation, load_curation_report, write_curation_atomic
     from .runio import publish_guard
 
     if state is not None:
@@ -345,11 +353,7 @@ def _write_anchor_pick(run_dir: Path, request: dict[str, Any], state: str | None
     if direction is None:
         raise SystemExit("anchor: --clear needs a direction (--direction <dir>)")
     with publish_guard(run_dir):
-        path = run_dir / CURATION_FILENAME
-        if path.is_file():
-            doc = json.loads(path.read_text(encoding="utf-8"))
-        else:
-            doc = empty_curation()
+        doc = load_curation_report(run_dir)[0] or empty_curation()
         anchors = {k: dict(v) for k, v in anchor_choices(doc).items()}
         if state is None:
             anchors.pop(direction, None)
@@ -423,6 +427,10 @@ def run(run_dir: Path, direction: str | None = None, all_directions: bool = Fals
                else (extra_targets or ([direction] if direction else [])))
     if not targets:
         raise SystemExit("anchor: pass --direction <dir>, --all, or --for-state <state>")
+    # 여러 방향을 도는 벌크(`--all`)는 **끝까지 돌고 나서** 한 번에 보고한다: 중간에 raise
+    # 하면 앞의 방향만 구운 채 죽어서 재실행 지점이 모호해진다 (젯비 3차 note 1). 단건은
+    # 즉시 fail-loud 그대로다.
+    failures: list[AnchorUnavailable] = []
     for target in targets:
         try:
             materialize(run_dir, target, scale, request=request)
@@ -430,10 +438,20 @@ def run(run_dir: Path, direction: str | None = None, all_directions: bool = Fals
             # 지정/해제는 사용자 의도라 이미 저장됐다. 그 행이 아직 추출 전이라 ref 를 못
             # 굽는 건 실패가 아니라 정상 순서 — 이유를 밝히고 계속한다. 그 외에는 fail-loud.
             # ref 를 **요구**하는 진입점(`--for-state`)은 위에서 예외 없이 통과해야 한다.
-            if not ((pick or clear) and exc.pending):
+            if (pick or clear) and exc.pending:
+                print(f"[anchor] ref not baked yet: {exc} — re-run this command right before "
+                      f"generating a row of '{target}'")
+                continue
+            if len(targets) == 1:
                 raise
-            print(f"[anchor] ref not baked yet: {exc} — re-run this command right before "
-                  f"generating a row of '{target}'")
+            print(f"[anchor] {target}: {exc}")
+            failures.append(exc)
+    if failures:
+        raise AnchorUnavailable(
+            failures[0].kind,
+            f"anchor: {len(failures)} of {len(targets)} direction(s) could not be baked "
+            f"(the others were written; re-run for the rest): "
+            + " | ".join(str(exc) for exc in failures))
     return 0
 
 

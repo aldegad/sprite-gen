@@ -247,6 +247,16 @@ def test_cli_broken_pin_failure_prints_the_guidance(direction_run: Path) -> None
     assert proc.stderr.strip() != "pick-missing"
 
 
+def test_all_bakes_every_bakeable_direction_before_failing(tmp_path: Path) -> None:
+    """벌크(`--all`)는 끝까지 돌고 한 번에 보고한다 — 중간에 죽으면 재실행 지점이 모호하다."""
+    run_dir = _build_direction_run(tmp_path, extract_states="side_idle")
+    with pytest.raises(anchor_mod.AnchorUnavailable) as excinfo:
+        anchor_mod.run(run_dir=run_dir, all_directions=True)
+    assert "1 of 2 direction(s)" in str(excinfo.value)
+    assert (run_dir / "references" / "anchors" / "side-anchor-x8.png").is_file()
+    assert not (run_dir / "references" / "anchors" / "down-anchor-x8.png").exists()
+
+
 def test_cli_pick_direction_mismatch_is_reported(direction_run: Path) -> None:
     """지정 방향과 명시 `--direction` 이 어긋나면 조용히 다른 방향을 굽지 않는다."""
     proc = _cli(direction_run, "--pick", "side_idle#0", "--direction", "down")
@@ -297,6 +307,51 @@ def test_pending_and_broken_are_different_states(ungenerated_run: Path) -> None:
                   if g["direction"] == "down")
     assert broken["anchorPending"] is False
     assert broken["anchorErrorCode"] == "pick-wrong-direction"
+
+
+# --- 세대 경계 (행이 재생성된 뒤) ----------------------------------------------
+# 회귀 고정: 사이드카 writer 가 세대 게이트(`load_curation_report`)를 우회해 raw 로 읽으면,
+# `stamp_curation` 이 모든 행에 현재 세대 지문을 다시 찍어 **드롭된 낡은 큐레이션이 부활**
+# 한다 — 그 부활한 selected 가 새 아트의 방향 앵커를 고른다 (젯비 3차 기각 실측).
+
+def _regenerate_row(run_dir: Path, direction: str, pose: str, seed: int) -> None:
+    """raw 를 갈아끼우고 그 행만 재추출 = 리롤/재생성 (새 세대)."""
+    _strip(4, seed0=seed).save(run_dir / "raw" / direction / f"{pose}.png")
+    assert extract_module.run(run_dir=run_dir, states=f"{direction}_{pose}") == 0
+
+
+def test_cli_pick_does_not_resurrect_dropped_curation(direction_run: Path) -> None:
+    from sprite_gen.curation import load_curation_report
+
+    run_dir = direction_run
+    _save_curation(run_dir, {"down_idle": {"deleted": [0, 1], "selected": [2, 3],
+                                           "pixels": {"2": {"10,10": "#ff0000"}}}})
+    _regenerate_row(run_dir, "down", "idle", seed=999)
+    dropped = load_curation_report(run_dir)[1]["dropped"]
+    assert "down_idle" in dropped, "세대 게이트가 낡은 행을 드롭하지 않았다 (전제 실패)"
+
+    # 다른 방향 지정 한 번 — 이것만으로 down_idle 이 되살아나면 안 된다
+    assert anchor_mod.run(run_dir=run_dir, pick="side_idle#0") == 0
+    doc = load_curation_report(run_dir)[0] or {}
+    assert "down_idle" not in (doc.get("states") or {}), "드롭된 큐레이션이 부활했다"
+    assert anchor_choices(doc) == {"side": {"state": "side_idle", "index": 0}}
+    # 그래서 down 앵커는 새 세대의 시퀀스 헤드다 (죽은 selected 의 index 2 가 아니다)
+    resolved = anchor_mod.resolve_anchor(_request(run_dir), doc, "down")
+    assert (resolved["index"], resolved["source"]) == (0, "default")
+
+
+def test_cli_clear_does_not_resurrect_dropped_curation(direction_run: Path) -> None:
+    from sprite_gen.curation import load_curation_report
+
+    run_dir = direction_run
+    _save_curation(run_dir, {"down_idle": {"deleted": [0], "selected": [1, 2, 3]}},
+                   anchors={"side": {"state": "side_idle", "index": 1}})
+    _regenerate_row(run_dir, "down", "idle", seed=777)
+    assert "down_idle" in load_curation_report(run_dir)[1]["dropped"]
+    assert anchor_mod.run(run_dir=run_dir, clear=True, direction="side") == 0
+    doc = load_curation_report(run_dir)[0] or {}
+    assert "down_idle" not in (doc.get("states") or {})
+    assert anchor_choices(doc) == {}
 
 
 # --- 사용자 지정 ---------------------------------------------------------------
