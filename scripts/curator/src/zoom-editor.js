@@ -346,6 +346,8 @@ function openZoom(stateName, idx, keepWidth) {
   stage.appendChild(selBox);
   const syncMarqueeBox = () => {
     const sel = pixelEdit && pixelEdit.sel;
+    // 핸들도 선택을 따라간다 — 사각 선택으로 잡았을 때도 같아야 한다.
+    regionPlaceHandles(stage, stateName, sel);
     selBox.hidden = !sel;
     if (!sel) return;
     // sel 은 소스 공간 — 표시가 변형(WYSIWYG)이라 점선도 순변환해서 그린다
@@ -636,6 +638,7 @@ function openZoom(stateName, idx, keepWidth) {
       if (!pixelEdit) return;
       pixelEdit.sel = sel;
       lassoRenderMask(stage, stateName, sel);
+      regionPlaceHandles(stage, stateName, sel);
       syncMarqueeBox();
       if (sel) {
         // 잡았으면 바로 비틀 수 있게 변형 툴로 넘긴다 — 올가미의 용법이 그것이다.
@@ -644,8 +647,7 @@ function openZoom(stateName, idx, keepWidth) {
       }
     },
   });
-  // 선택 영역만 변형 — 마퀴가 있을 때 스테이지 드래그를 가져간다.
-  wireRegionTransform(stage, stateName, idx, {
+  const regionCtx = {
     isTransformTool: () => !!pixelEdit && pixelEdit.tool === "transform"
       && pixelEdit.state === stateName && pixelEdit.idx === idx,
     hasSelection: () => !!(pixelEdit && pixelEdit.sel),
@@ -659,7 +661,11 @@ function openZoom(stateName, idx, keepWidth) {
       scheduleSave();
       setStatus(t("regionTransformed"), "ok");
     },
-  });
+  };
+  // 순서가 계약이다 — 둘 다 `wireStage`(아래, 셀 전체)보다 먼저 등록돼야
+  // stopImmediatePropagation 이 셀 전체 경로를 막는다.
+  wireRegionHandles(stage, stateName, idx, regionCtx);
+  wireRegionTransform(stage, stateName, idx, regionCtx);
   syncToolbar();
   buildPalette();
 
