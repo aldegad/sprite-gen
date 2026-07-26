@@ -154,6 +154,8 @@ CANVAS_BUFFER_SITES = {
     ("zoom-editor.js", "bcanvas"): "display",  # 호흡 모드 줌 재생면
     ("zoom-editor.js", "cv"): "display",       # 호흡 필름스트립 셀
     ("cards.js", "ref"): "offscreen",     # 호흡 신선도 판정용 기준 프레임 합성면
+    ("region-transform.js", "buf"): "offscreen",  # 영역 캡처용 합성면 (읽기 전용)
+    ("region-transform.js", "cv"): "display",     # 영역 변형 라이브 프리뷰
     ("compare.js", "base"): "offscreen",
     ("compare.js", "ref"): "offscreen",   # 호흡 신선도 판정용 기준 프레임 합성면
     ("compare.js", "canvas"): "rect",          # cmp-canvas — 버퍼=표시
