@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -125,8 +126,11 @@ def main(argv: list[str] | None = None) -> int:
             return code
         print("[reroll] full-batch re-extraction done")
     else:
+        # 인터프리터는 sys.executable 로 찍는다 — 이 힌트는 붙여넣어 바로 실행되는
+        # 명령이고, 전역 `python3` 는 이 패키지의 의존(NumPy/Pillow)이 없는 다른
+        # 인터프리터일 수 있다 (SKILL.md "실행 인터프리터" 게이트).
         print("[reroll] next: re-extract the FULL batch so the shared palette stays "
-              f"consistent -> python3 -m sprite_gen.extract --run-dir {args.run_dir}")
+              f"consistent -> {sys.executable} -m sprite_gen.extract --run-dir {args.run_dir}")
     return 0
 
 

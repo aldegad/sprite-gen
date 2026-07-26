@@ -127,7 +127,7 @@ The quickstart requires a Python install with working `venv`/`ensurepip`. If `py
 ## Quickstart
 
 ```bash
-# 0. install dependencies (Pillow) into a fresh virtualenv
+# 0. install dependencies (Pillow, NumPy) into a fresh virtualenv
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 

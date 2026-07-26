@@ -71,7 +71,7 @@ sprite-gen gen \
   [--keep-session]        # codex: keep the rollout jsonl instead of deleting it
 ```
 
-Backward-compatible wrapper: `python3 scripts/generate_sprite_image.py …` (same args).
+Backward-compatible wrapper: `$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/generate_sprite_image.py …` (same args).
 
 - **Non-transparent**: the raw PNG (chroma background included) is copied to `--out`.
 - **`--transparent`**: the raw is keyed to clean RGBA via the ported transparent

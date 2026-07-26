@@ -127,7 +127,7 @@ python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # または ko
 ## クイックスタート
 
 ```bash
-# 0. 新しい仮想環境に依存関係（Pillow）をインストール
+# 0. 新しい仮想環境に依存関係（Pillow、NumPy）をインストール
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 

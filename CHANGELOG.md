@@ -5,6 +5,36 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## Unreleased - NumPy is a declared dependency now, and the floor is the one 3.10 can actually install
+
+The chroma extraction path is about to stop looping over pixels in Python, which needs NumPy. Until
+now the only reason `import numpy` worked here at all was that a development virtualenv still had
+onnxruntime sitting in it from the removed RIFE feature, and onnxruntime depends on NumPy. That is
+not a dependency, that is a coincidence that survives until the next clean environment.
+
+- `pyproject.toml` declares `numpy>=2.2.6,<3` directly, next to Pillow. The gate was run before the
+  declaration, as `SECURITY.md` requires.
+- The floor is **2.2.6**, not the 2.3.4 the plan started from and not the 2.5.1 that happened to be
+  installed. This package declares `requires-python = ">=3.10"` and CI runs 3.10 as its minimum job;
+  2.3.x requires >=3.11 and 2.5.x requires >=3.12, so either floor would have turned the 3.10 job
+  into a resolution failure on the first push. 2.2.6 is the newest release that still ships CPython
+  3.10 wheels, so it is the highest floor that keeps the supported-version claim honest. The range
+  resolves to three distinct versions across the supported interpreters - 2.2.6 on 3.10, 2.4.6 on
+  3.11, and 2.5.1 on 3.12 and later - and all three are approved in the advisory ledger. CI runs
+  3.10 and 3.14, so the 3.11 resolution is covered by approval rather than by a test job.
+- The floor is also >= 2.0 on purpose. The extraction path is under a byte-identity contract, and
+  NEP 50 changed how scalars and arrays promote - the default only from NumPy 2.0. Allowing 1.x
+  would allow a second set of promotion rules under a contract that says the bytes never move. The
+  `<3` ceiling is the same argument pointed forward.
+- No pure-Python fallback accompanies this. Two code paths for one byte-identity contract is two
+  answers to one question; an interpreter without NumPy is expected to fail loudly instead.
+- That expectation is now enforced rather than described. `sprite_gen/_deps.py` is the only module
+  that imports NumPy, and `sprite_gen/__init__.py` imports it, so every entrypoint - the
+  `scripts/*.py` wrappers, `-m sprite_gen.cli`, a downstream `import sprite_gen` - stops at package
+  import on a NumPy-less interpreter and prints which interpreter it ran under plus the exact
+  `.venv/bin/python -m pip install -e <repo>` that fixes it. A bare `ModuleNotFoundError` names
+  neither. `tests/test_numpy_dependency_gate.py` locks the behavior and the single import site.
+
 ## Unreleased - the card footer stopped spilling out of the card
 
 The curation card grew a button at a time - flip, reset, anchor pin, add/remove, archive - and the

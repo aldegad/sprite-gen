@@ -14,6 +14,17 @@ license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = [
     "pillow>=12.0,<13",
+    # NumPy is a direct dependency, never a transitive ride-along: the chroma
+    # extraction path imports it directly and must not depend on some other
+    # package happening to pull it in.
+    # Floor 2.2.6 is the newest release with CPython 3.10 wheels, so it is the
+    # highest floor that keeps `requires-python = ">=3.10"` honest (2.3.x
+    # requires >=3.11, 2.5.x requires >=3.12 — either would break the 3.10 CI
+    # job outright). It is also >= 2.0, which matters: the byte-identity
+    # contract for the extraction path depends on NEP 50 promotion rules, which
+    # only became the default in NumPy 2.0. The `<3` ceiling is there for the
+    # same reason — a major bump is free to change promotion again.
+    "numpy>=2.2.6,<3",
 ]
 
 [project.optional-dependencies]

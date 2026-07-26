@@ -44,7 +44,7 @@ machine-local OAuth sessions.
 ## Usage
 
 ```bash
-python3 scripts/interpolate_frames.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/interpolate_frames.py \
   --run-dir <run> --state down_idle --between 1 2 \
   [--provider codex|grok] [--t 0.5] [--label blink_mid] [--extract]
 ```

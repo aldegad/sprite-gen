@@ -17,7 +17,7 @@ Use this only for explicit locomotion experiments. The guide is not final art an
 When a generated locomotion row contains usable frames but the full row fails motion QA, do not pretend the full row passed and do not ask image generation to redraw locked peak frames. Preserve the generated frame truth and make a separate selected-cycle artifact:
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/compose_selected_cycle.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/compose_selected_cycle.py \
   --run-dir <target>/assets/generated/sprites/<character-id> \
   --state running-right \
   --frames 2,3,4,5 \
@@ -45,7 +45,7 @@ For precise humanoid running today, the most reliable path is candidate generati
 Use `compose_sprite_gif.py` whenever you need a shareable transparent GIF from extracted frames or from a human-picked frame order. Do not hand-roll GIFs with ad-hoc `magick` commands unless you are debugging.
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/compose_sprite_gif.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/compose_sprite_gif.py \
   --frame-dir <target>/assets/generated/sprites/<character-id>/frames/running-right \
   --frame-order 2,1,5,3 \
   --delay-ticks 14 \

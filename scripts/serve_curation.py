@@ -2,12 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Serve the sprite-gen curation webview for a single run directory.
 
-Standalone, dependency-free (Python standard library + the PIL already used by
-the pipeline). Launch it against any sprite-gen run folder and open the printed
-URL in a browser to compare frames per state, select/reject frames, and apply a
-non-destructive per-frame transform (rotate/scale/move). All edits are persisted
-to `curation.json` in the run directory; the original frame PNGs are never
-touched. The compose scripts read that sidecar and bake the result.
+Standalone — no server framework, just the standard library plus the dependencies
+the pipeline already declares (Pillow, and NumPy via the `sprite_gen` import
+below that `heal_run` comes from). Launch it against any sprite-gen run folder
+and open the printed URL in a browser to compare frames per state, select/reject
+frames, and apply a non-destructive per-frame transform (rotate/scale/move). All
+edits are persisted to `curation.json` in the run directory; the original frame
+PNGs are never touched. The compose scripts read that sidecar and bake the result.
 
     python3 serve_curation.py --run-dir <run-folder>
 

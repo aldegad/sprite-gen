@@ -107,6 +107,40 @@ The base idle locks only when **all** of these hold:
 
 If the answer is `n`: generate/iterate base candidates, review each against the criteria above, and re-gate. **Do not run `prepare_sprite_run.py` until a base is locked.** "Good enough for now" is not a pass — drift only grows once the rows start. When the answer is `y`, that exact file becomes the accepted idle anchor for its direction; keep the original generation so the lock decision is auditable, but do not attach it again after the idle anchors have replaced it as row identity truth.
 
+## 실행 인터프리터 — 전역 `python3` 는 이 스킬의 인터프리터가 아니다 (BLOCKING)
+
+이 스킬의 모든 명령은 **레포 루트의 venv 인터프리터**로 실행한다:
+
+```bash
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python <script.py> ...
+```
+
+- **부트스트랩은 README quickstart·CI 와 같은 한 줄이다** — `python3 -m venv .venv && .venv/bin/pip install -e .`.
+  `.venv` 가 없으면 만든 뒤 실행한다. 다른 경로에 만들었다면 그 인터프리터의 절대경로로 바꿔 쓴다 —
+  바뀌면 안 되는 것은 경로가 아니라 **"전역 `python3` 를 쓰지 않는다"** 는 규칙이다.
+- **이유**: 의존(Pillow, NumPy)의 SSoT 는 `pyproject.toml` 이고, 그것을 실물로 만드는 곳은 이 venv 하나다.
+  전역 `python3` 는 `$PATH` 가 그날 가리키는 아무 인터프리터이고(macOS 에서는 보통 homebrew CPython,
+  PEP 668 `EXTERNALLY-MANAGED`), 거기 든 패키지는 손으로 넣은 것이라 선언과 실물이 갈린다. 실제로
+  그렇게 갈렸다: homebrew python3 에는 Pillow 만 있고 NumPy 가 없어서, **한 개가 깔려 있다는 이유로
+  다 깔린 것처럼 보이는** 상태였다.
+- **폴백 금지**: "`.venv` 있으면 그거, 없으면 `python3`" 같은 해석은 두지 않는다 (원칙 6).
+  없으면 만들거나 요란하게 실패한다 — 조용히 다른 인터프리터로 도는 경로는 없다.
+- **NumPy 가 없는 인터프리터에서는 아무것도 시작하지 않는다**: 진입점은 패키지 import 시점에
+  멈추고, 실행한 인터프리터 경로와 위 부트스트랩 명령을 그대로 찍는다. 추출 경로는 바이트 동일
+  계약을 지고 있어서 **순수 파이썬 폴백은 없다** — 느리게라도 도는 두 번째 구현을 두면 같은 질문에
+  답이 둘이 된다. (게이트 `sprite_gen/_deps.py`, 잠금 `tests/test_numpy_dependency_gate.py`)
+- **자식 프로세스는 상속한다**: `heal_run` 과 큐레이션 서버는 자식을 `sys.executable` 로 띄운다.
+  즉 부모를 옳은 인터프리터로 띄우면 그 아래는 자동으로 옳고, 반대로 큐레이션 서버를 전역 `python3` 로
+  띄우면 그 서버가 부르는 재추출·compose 가 전부 같이 틀린다. 고칠 곳은 **띄우는 순간 한 곳**이다.
+- 문서에 `sprite-gen <tool>` 로 적힌 명령(`anchor`, `cutout`, `migrate-breathe` …)은 콘솔 스크립트가
+  아니라 CLI 모듈이다 — `$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python -m sprite_gen.cli <tool> ...`
+  로 읽는다.
+- **레지스터는 파일로 갈린다**: 상대경로 `python3 scripts/...` 형식이 같은 인터프리터를 가리키는 건
+  `source .venv/bin/activate` 가 **바로 앞에 적혀 있는** README quickstart 안에서만이다. `SKILL.md` 와
+  `docs/*.md` 는 활성화 단계가 없는 셸에서 읽히므로, 절대경로든 상대경로든 **여기서는 상대형을 쓰지
+  않는다** — 위 venv 절대경로 형식 하나만 쓴다. (`tests/test_entrypoint_interpreter.py` 가 이 두 파일군에
+  대해 잠근다.)
+
 ## Script Map
 
 Scripts are explicit pipeline commands, not hidden imports. One job each (stage detail: [`docs/architecture.md`](docs/architecture.md) §2):
@@ -145,7 +179,7 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 1. Prepare the run:
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/prepare_sprite_run.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/prepare_sprite_run.py \
   --out-dir <target>/assets/generated/sprites/<character-id> \
   --character-id <character-id> \
   --base-image /absolute/path/to/base.png \
@@ -177,7 +211,7 @@ frames/
 2. Generate one image per state with the engine's own `gen` command (generation is engine-owned; the `image-gen` skill is now a thin shuttle over this — [`docs/gen.md`](docs/gen.md)):
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/generate_sprite_image.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/generate_sprite_image.py \
   --provider codex \
   --prompt-file <run>/prompts/<state>.txt \
   --out <run>/raw/<state>.png \
@@ -203,7 +237,8 @@ Command chain: [`docs/gen.md`](docs/gen.md#provider-topology).
 - Direction-anchor mode: do **not** attach `base-source.<ext>` to action rows. Attach the accepted target-direction anchor (**a single-pose single image — never a multi-frame idle row**) + the state layout guide; for a paired row also attach the basis row as timing/scale/motion reference only. **Never choose the anchor crop by hand** — ask the pipeline, right before each generation:
 
 ```bash
-sprite-gen anchor --run-dir <run> --for-state <state>   # prints the identity ref path (bakes it)
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python -m sprite_gen.cli anchor \
+  --run-dir <run> --for-state <state>   # prints the identity ref path (bakes it)
 ```
 
   It returns `references/anchors/<dir>-anchor-x8.png` for an action row (the curated anchor frame — pixel edits, transforms, deletions and reordering all baked, upscaled ×8 NEAREST) and `base-source.<ext>` for an anchor row or a non-direction run. The file is a derived cache, so re-run it every time; which frame is the anchor is the human's call (`--pick <state>#<index>`, or the pin button in the curation view) and defaults to the anchor row's curated sequence head. Chain details: [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md).
@@ -212,7 +247,7 @@ sprite-gen anchor --run-dir <run> --for-state <state>   # prints the identity re
 3. Extract frames:
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/extract_sprite_row_frames.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/extract_sprite_row_frames.py \
   --run-dir <target>/assets/generated/sprites/<character-id>
 ```
 
@@ -221,7 +256,7 @@ This removes the request chroma key, finds connected sprite components, fits eac
 3.5. (Optional) Curate frames in the webview:
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \
   --run-dir <target>/assets/generated/sprites/<character-id>
 ```
 
@@ -230,7 +265,7 @@ Standalone local webview: side-by-side frame compare, select/reject, drag-to-reo
 4. Compose the runtime atlas:
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/compose_sprite_atlas.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/compose_sprite_atlas.py \
   --run-dir <target>/assets/generated/sprites/<character-id>
 ```
 
@@ -247,7 +282,7 @@ manifest.json
 5. Launch the curation webview automatically (default closing step):
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \
   --run-dir <target>/assets/generated/sprites/<character-id> &
 ```
 
@@ -363,7 +398,7 @@ Automated checks (must all pass before reporting done):
 Automatic correction-loop dry run:
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/run_correction_loop.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/run_correction_loop.py \
   --run-dir <target>/assets/generated/sprites/<character-id> \
   --states <state> \
   --dry-run
@@ -380,7 +415,7 @@ regeneration even when the seed candidate already clears the score gate.
 Static identity QA is not enough — a row can have the right frame count, clean alpha, and consistent identity and still animate as garbage. Build the previews and review motion **as motion**:
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/preview_animation.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/preview_animation.py \
   --run-dir <target>/assets/generated/sprites/<character-id>
 ```
 
