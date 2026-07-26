@@ -523,6 +523,58 @@ def _split_top(expr: str, seps: tuple[str, ...]) -> list[str]:
     return [x.strip() for x in out]
 
 
+def _neutral_src(name: str) -> str:
+    return _neutralize_literals((CURATOR_SRC / name).read_text(encoding="utf-8"),
+                                strip_comments=True)
+
+
+def _line_start(src: str, lineno: int) -> int:
+    """1-기반 줄 번호의 시작 오프셋."""
+    pos, line = 0, 1
+    while line < lineno:
+        nxt = src.find("\n", pos)
+        if nxt < 0:
+            return len(src)
+        pos, line = nxt + 1, line + 1
+    return pos
+
+
+def _enclosing_spans(src: str, pos: int):
+    """`pos` 를 감싸는 함수 본문들 — [(여는{ 오프셋, 닫는} 오프셋, 헤더텍스트)], 안쪽부터."""
+    stack = []
+    for i, ch in enumerate(src[:pos]):
+        if ch == "{":
+            stack.append(i)
+        elif ch == "}" and stack:
+            stack.pop()
+    out = []
+    for open_at in reversed(stack):
+        header = src[max(0, open_at - 200):open_at]
+        if not HEADER.search(header):
+            continue
+        depth, close = 0, len(src)
+        for j in range(open_at, len(src)):
+            if src[j] == "{":
+                depth += 1
+            elif src[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    close = j
+                    break
+        out.append((open_at, close, header))
+    return out
+
+
+PARAMS = re.compile(r"\(([^()]*)\)\s*(?:=>)?\s*$")
+
+
+def _param_names(header: str) -> set:
+    m = PARAMS.search(header.rstrip())
+    if not m:
+        return set()
+    return {t.strip().split(":")[0].strip() for t in m.group(1).split(",") if t.strip()}
+
+
 def _reassigned(name: str, symbol: str) -> bool:
     """`symbol` 이 선언 밖에서 다시 대입되는가.
 
@@ -550,6 +602,15 @@ def _binding_rhs(name: str, lineno: int, symbol: str):
     구조분해(`const { url: refUrl } = breatheGeometryFrame(...)`)도 읽는다."""
     if _reassigned(name, symbol):
         return None                      # 흐름에 따라 값이 바뀐다 = 증명 불가
+    # **스코프**를 본다. 예전엔 파일 전체에서 "그 줄 앞의 마지막 선언" 을 찾아, 그리는
+    # 자리가 **함수 파라미터**를 받으면 같은 파일 위쪽의 무관한 `const image = ...` 가
+    # 그 파라미터를 증명해버렸다 — 실제 인자는 호출부에 있고 호출부는 수집되지도 않는다.
+    # 두 블록이 거의 같아 그리기를 헬퍼로 빼는 **평범한 DRY 리팩토링**만으로 도달했고,
+    # 540 passed(기준선과 개수까지 동일)였다 (노을이 탈출 N 2026-07-26).
+    src = _neutral_src(name)
+    spans = _enclosing_spans(src, _line_start(src, lineno))
+    if spans and symbol in _param_names(spans[0][2]):
+        return None                      # 파라미터 = 값이 호출부에 있다 = 증명 불가
     sym = re.escape(symbol)
     direct = re.compile(rf"\b(const|let|var)\s+{sym}\b\s*=")
     destructured = re.compile(rf"\b(const|let|var)\s*\{{[^}}]*\b{sym}\b[^}}]*\}}\s*=")
@@ -558,6 +619,11 @@ def _binding_rhs(name: str, lineno: int, symbol: str):
         if start > lineno:
             break
         if direct.search(text) or destructured.search(text):
+            # 선언이 사이트의 **스코프 체인 안**에 있어야 한다. 형제 스코프의 동명 바인딩은
+            # 이 자리를 증명하지 못한다 (자기 계약: 증명 못 하면 거짓).
+            at = _line_start(src, start)
+            if spans and not any(o < at < c for o, c, _ in spans):
+                continue
             best = (text.split("=", 1)[1].strip(), start)
     return best
 
