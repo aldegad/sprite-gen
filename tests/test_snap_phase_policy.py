@@ -67,7 +67,7 @@ def _build_run(run_dir: Path, frames: int = 2) -> Image.Image:
                  "safe_margin_x": 2, "safe_margin_y": 2, "size": 64, "safe_margin": 2},
         "chroma_key": {"name": "magenta", "hex": "#FF00FF", "rgb": list(MAGENTA),
                        "selection": "fallback"},
-        "fit": {"pixel_perfect": True},
+        "fit": {"pixel_unfake": True},
         "states": {"idle": {"frames": frames, "fps": 8, "loop": True,
                             "action": "offset-phase probe"}},
         "style": "synthetic, flat solid shapes on magenta",

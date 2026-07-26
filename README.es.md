@@ -89,7 +89,7 @@ El «pixel art» generado por IA no es pixel art. Los bloques oscilan, los borde
 
 **Backbone Lattice** mide una cuadrícula para todo el sujeto y mantiene cada corte ajustado a ella. La detección del paso por fotograma alimenta un consenso entre fotogramas de toda la fila que supera las detecciones armónicas erróneas; esa cuadrícula consensuada es la *malla troncal* a la que se ajusta cada corte. Los cortes caen sobre límites de color reales, y un ancho mínimo de celda proporcional al paso medido evita que dos cortes vecinos colapsen alguna vez sobre la misma banda. Una sola malla troncal garantiza que el mismo bloque conserve el mismo tamaño en toda la animación, en lugar de saltar entre fotogramas.
 
-El resultado se verifica contra lo que se publicó, no se juzga visualmente en un fotograma elegido a mano: cada ejecución pixel-perfect se vuelve a derivar de su propia tira de origen y se compara píxel a píxel. La forma que aprobaste sigue siendo la forma que obtienes; lo único que cambia es dónde caen los contornos y el sombreado, que es exactamente lo que decide la malla troncal.
+El resultado se verifica contra lo que se publicó, no se juzga visualmente en un fotograma elegido a mano: cada ejecución pixel-unfake se vuelve a derivar de su propia tira de origen y se compara píxel a píxel. La forma que aprobaste sigue siendo la forma que obtienes; lo único que cambia es dónde caen los contornos y el sombreado, que es exactamente lo que decide la malla troncal.
 
 ## Vista web de curación
 

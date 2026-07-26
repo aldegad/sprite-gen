@@ -81,7 +81,7 @@ def _build_direction_run(root: Path, extract_states: str | None = "all") -> Path
             "down_walk": {"frames": 3, "fps": 8, "loop": True, "action": "action row"},
             "side_walk": {"frames": 3, "fps": 8, "loop": True, "action": "action row"},
         },
-        "fit": {"pixel_perfect": True, "logical_height": 48},
+        "fit": {"pixel_unfake": True, "logical_height": 48},
     }
     (run_dir / "raw" / "down").mkdir(parents=True)
     (run_dir / "raw" / "side").mkdir(parents=True)

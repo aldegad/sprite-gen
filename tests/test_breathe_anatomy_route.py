@@ -292,7 +292,7 @@ def test_a_pixel_perfect_run_snaps_the_reference_frame_to_the_grid(tmp_path):
         "character": {"id": "fixture", "name": "fixture"},
         "cell": {"shape": "square", "width": CELL, "height": CELL, "size": CELL,
                  "safe_margin_x": 8, "safe_margin_y": 8, "safe_margin": 8},
-        "fit": {"pixel_perfect": True, "logical_height": CELL // 2},
+        "fit": {"pixel_unfake": True, "logical_height": CELL // 2},
         "states": {"idle": {"frames": 2, "fps": 6, "loop": True}},
     }
     (run / "sprite-request.json").write_text(json.dumps(request), encoding="utf-8")

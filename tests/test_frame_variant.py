@@ -22,26 +22,26 @@ def test_frame_variant_resolution_order() -> None:
     assert frame_variant(None, "idle") == "pixel"
 
     # run-wide default only
-    assert frame_variant({"pixel_perfect": False, "states": {}}) == "plain"
-    assert frame_variant({"pixel_perfect": False, "states": {}}, "idle") == "plain"
-    assert frame_variant({"pixel_perfect": True, "states": {}}, "idle") == "pixel"
+    assert frame_variant({"pixel_unfake": False, "states": {}}) == "plain"
+    assert frame_variant({"pixel_unfake": False, "states": {}}, "idle") == "plain"
+    assert frame_variant({"pixel_unfake": True, "states": {}}, "idle") == "pixel"
 
     # per-state override beats the run-wide default, both directions
     mixed = {
-        "pixel_perfect": False,
-        "states": {"idle": {"pixel_perfect": True}, "walk": {}},
+        "pixel_unfake": False,
+        "states": {"idle": {"pixel_unfake": True}, "walk": {}},
     }
     assert frame_variant(mixed, "idle") == "pixel"    # override wins over global false
     assert frame_variant(mixed, "walk") == "plain"    # no override -> global
     assert frame_variant(mixed, "unknown") == "plain"  # unknown state -> global
     assert frame_variant(mixed) == "plain"             # stateless call -> global only
 
-    over_off = {"states": {"idle": {"pixel_perfect": False}}}
+    over_off = {"states": {"idle": {"pixel_unfake": False}}}
     assert frame_variant(over_off, "idle") == "plain"  # override wins over absent global
     assert frame_variant(over_off, "walk") == "pixel"
 
     # a non-bool per-state value is ignored (hand-edited sidecar), not truthy-coerced
-    corrupt = {"states": {"idle": {"pixel_perfect": "yes"}}}
+    corrupt = {"states": {"idle": {"pixel_unfake": "yes"}}}
     assert frame_variant(corrupt, "idle") == "pixel"
 
 
@@ -69,7 +69,7 @@ def test_compose_bakes_mixed_variants_per_state(fixture_run_dir: Path) -> None:
         "version": 1,
         "kind": "sprite-gen-curation",
         "run_revision": run_revision(run),  # .plain.png twins do not shift the revision
-        "states": {plain_state: {"pixel_perfect": False}},
+        "states": {plain_state: {"pixel_unfake": False}},
     }
     (run / "curation.json").write_text(json.dumps(sidecar), encoding="utf-8")
 

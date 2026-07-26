@@ -77,10 +77,10 @@ instead of a manifest-consistency error.
    description, chroma color, t) and `sprite_gen.gen.generate_image` runs the provider
    with both frames attached as refs.
 5. The generated mid frame is saved as the take raw; extraction re-derives the state
-   row (the frame appears labeled `<label>#0`) and pixel-perfect quantization snaps it
+   row (the frame appears labeled `<label>#0`) and pixel-unfake quantization snaps it
    onto the logical grid.
 
-Quality note: judge the result **after** pixel-perfect re-quantization, and touch up
+Quality note: judge the result **after** pixel-unfake re-quantization, and touch up
 stray pixels with the curator's pixel editor if needed. Identity drift is a reroll
 (regenerate the take), not a local repair.
 

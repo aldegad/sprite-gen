@@ -171,11 +171,11 @@ sandbox.__payload = payload;
 vm.runInContext(`
   run = __payload.run;
   entries = {};
-  // **손으로 ppStates 를 먹이지 않는다.** 웹뷰가 서버 페이로드에서 변종을 스스로
+  // **손으로 unfakeStates 를 먹이지 않는다.** 웹뷰가 서버 페이로드에서 변종을 스스로
   // 골라내는지가 이 하네스의 요점이다 — 시드를 밖에 두면 그 질문을 영영 못 묻는다
   // (슉슉이 실측 2026-07-26: 변종 불일치가 그 공백으로 한 라운드를 살아남았다).
   seedPixelPerfect(__payload.run);
-  for (const [name, v] of Object.entries(__payload.ppOverride || {})) ppStates[name] = v;
+  for (const [name, v] of Object.entries(__payload.ppOverride || {})) unfakeStates[name] = v;
   for (const [name, e] of Object.entries(__payload.entries)) {
     entries[name] = { order: e.order, sel: new Set(e.sel), transforms: e.transforms || {},
                       pixels: e.pixels || {}, clones: e.clones || {},
@@ -193,7 +193,7 @@ process.stdout.write(JSON.stringify(sandbox.__out));
 
 
 def _webview(run_payload, entries, queries, pp_override=None):
-    """웹뷰를 서버 페이로드로 부팅해 질의한다 — `ppStates` 는 `seedPixelPerfect` 가 짓는다.
+    """웹뷰를 서버 페이로드로 부팅해 질의한다 — `unfakeStates` 는 `seedPixelPerfect` 가 짓는다.
 
     `pp_override` 는 사용자가 화면에서 토글을 누른 상태를 흉내낼 때만 쓴다."""
     return _node(STORE_HARNESS, {
@@ -306,7 +306,7 @@ def web_run_plain(web_run):
                 src.with_suffix("").with_suffix(".plain.png"))
     from sprite_gen.curation import empty_curation
     curation = empty_curation()
-    curation["states"]["idle"] = {"pixel_perfect": False}
+    curation["states"]["idle"] = {"pixel_unfake": False}
     _write_curation(web_run, curation)
     return web_run
 
@@ -385,9 +385,9 @@ def test_the_webview_resolves_the_bake_variant_like_the_server(twin, own, wide):
 
     curation = {"states": {}}
     if own is not None:
-        curation["states"]["idle"] = {"pixel_perfect": own}
+        curation["states"]["idle"] = {"pixel_unfake": own}
     if wide is not None:
-        curation["pixel_perfect"] = wide
+        curation["pixel_unfake"] = wide
     frames = [{"index": 0, "present": True, "url": "/f0.png", "stamp": "1:1"}]
     if twin:
         frames[0]["plainUrl"] = "/f0.plain.png"
@@ -427,7 +427,7 @@ def test_a_declared_twinless_row_still_builds_a_key():
     굽기는 그 사이 멀쩡히 `pixel` 로 굽는다 (슉슉이 실측 2026-07-26).
 
     "갈렸다" 를 값으로 보는 위 해소표와 달리, 이건 **사용자가 겪는 결과**를 본다."""
-    curation = {"pixel_perfect": False, "states": {"idle": {"pixel_perfect": True}}}
+    curation = {"pixel_unfake": False, "states": {"idle": {"pixel_unfake": True}}}
     payload = {"requestStamp": "9:9", "curation": curation,
                "states": [{"name": "idle", "frames": [
                    {"index": 0, "present": True, "url": "/f0.png", "stamp": "1:1"}]}]}
@@ -564,7 +564,7 @@ def test_a_plain_variant_without_a_twin_refuses_instead_of_falling_back():
 
     이 계약은 round-12 가 세웠는데 그물이 없었다 — `frame.plainBakeUrl || frame.url` 로
     되돌려도 529 전부 통과했다 (슉슉이 note 2026-07-26)."""
-    curation = {"states": {"idle": {"pixel_perfect": False}}}   # plain 을 강제
+    curation = {"states": {"idle": {"pixel_unfake": False}}}   # plain 을 강제
     payload = {"requestStamp": "9:9", "curation": curation,
                "states": [{"name": "idle", "frames": [        # 트윈 없음
                    {"index": 0, "present": True, "url": "/f0.png", "stamp": "1:1"}]}]}

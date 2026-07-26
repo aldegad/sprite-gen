@@ -59,7 +59,7 @@ def _build_pp_run(root: Path, logical_height: int | None) -> Path:
     strip.paste(frame, (gap, gap))
     strip.paste(frame, (frame.width + gap * 2, gap))
     strip.save(run_dir / "raw" / "walk.png")
-    fit: dict = {"pixel_perfect": True}
+    fit: dict = {"pixel_unfake": True}
     if logical_height is not None:
         fit["logical_height"] = logical_height
     request = {
@@ -94,18 +94,18 @@ def _request(cell: int, **fit) -> dict:
 
 def test_declaration_that_the_integer_grid_rounds_away_reports_the_effective_height():
     """셀 64 + 선언 48 = 배율 1 = 유효 논리 높이 64 (선언은 무효)."""
-    assert pixel_snap_scale(_request(64, pixel_perfect=True, logical_height=48)) == 1
-    assert effective_logical_height(_request(64, pixel_perfect=True, logical_height=48)) == 64
+    assert pixel_snap_scale(_request(64, pixel_unfake=True, logical_height=48)) == 1
+    assert effective_logical_height(_request(64, pixel_unfake=True, logical_height=48)) == 64
     # 생략 = 셀과 1:1 (권장 기본값)
-    assert effective_logical_height(_request(64, pixel_perfect=True)) == 64
+    assert effective_logical_height(_request(64, pixel_unfake=True)) == 64
 
 
 def test_a_real_declaration_still_scales():
     """약수 선언은 그대로 살아있다 — 청키 룩은 기능이지 레거시가 아니다."""
-    assert pixel_snap_scale(_request(64, pixel_perfect=True, logical_height=32)) == 2
-    assert effective_logical_height(_request(64, pixel_perfect=True, logical_height=32)) == 32
-    assert pixel_snap_scale(_request(96, pixel_perfect=True, logical_height=32)) == 3
-    assert effective_logical_height(_request(96, pixel_perfect=True, logical_height=32)) == 32
+    assert pixel_snap_scale(_request(64, pixel_unfake=True, logical_height=32)) == 2
+    assert effective_logical_height(_request(64, pixel_unfake=True, logical_height=32)) == 32
+    assert pixel_snap_scale(_request(96, pixel_unfake=True, logical_height=32)) == 3
+    assert effective_logical_height(_request(96, pixel_unfake=True, logical_height=32)) == 32
 
 
 def test_legacy_run_without_pixel_perfect_has_no_logical_grid():
@@ -125,7 +125,7 @@ def test_row_fingerprint_survives_removing_a_dead_declaration(tmp_path: Path):
     with_dead_value = state_revision(run, "walk")
     assert with_dead_value, "행 지문을 계산하지 못했다 — 픽스처 전제가 깨졌다"
 
-    _set_fit(run, {"pixel_perfect": True})
+    _set_fit(run, {"pixel_unfake": True})
     assert state_revision(run, "walk") == with_dead_value, (
         "무효 선언을 지웠을 뿐인데 행 지문이 바뀌었다 — 큐레이션이 통째로 드롭된다")
 
@@ -136,7 +136,7 @@ def test_row_fingerprint_survives_removing_a_dead_declaration(tmp_path: Path):
     assert frames_after == frames_before, "전제 붕괴: 선언 제거가 픽셀을 바꿨다"
 
     # 진짜로 격자를 바꾸는 선언은 지문을 바꿔야 한다 (검증이 무력화되면 안 된다)
-    _set_fit(run, {"pixel_perfect": True, "logical_height": CELL // 2})
+    _set_fit(run, {"pixel_unfake": True, "logical_height": CELL // 2})
     assert state_revision(run, "walk") != with_dead_value, (
         "배율이 실제로 바뀌는 선언인데 지문이 그대로다 — 낡은 선택이 새 프레임에 적용된다")
 

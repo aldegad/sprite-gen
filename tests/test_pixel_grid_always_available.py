@@ -77,9 +77,9 @@ def test_server_never_reports_grid_as_absent():
     assert re.search(r"has_grid\s*=\s*True", SERVE), (
         "has_grid 가 조건식으로 되돌아갔다 — 조건이 곧 컨트롤 숨김이다"
     )
-    # pixelPerfect 가 null 로 접히면 클라의 contractScale 이 사라진다
-    assert not re.search(r'"pixelPerfect":[^\n]*else None', SERVE), (
-        "pixelPerfect 를 None 으로 접는 분기 부활 — 격자 scale 이 사라진다"
+    # pixelUnfake 가 null 로 접히면 클라의 contractScale 이 사라진다
+    assert not re.search(r'"pixelUnfake":[^\n]*else None', SERVE), (
+        "pixelUnfake 를 None 으로 접는 분기 부활 — 격자 scale 이 사라진다"
     )
 
 
@@ -107,5 +107,5 @@ def test_grid_spacing_never_resolves_to_null():
     """격자 간격은 항상 정해진다 (줄별 실측 > 계약 > 항등 1)."""
     display = SRC["display.js"]
     assert re.search(
-        r"run\.pixelPerfect && run\.pixelPerfect\.scale\)\s*\|\|\s*1\)", display
+        r"run\.pixelUnfake && run\.pixelUnfake\.scale\)\s*\|\|\s*1\)", display
     ), "scale 이 null 로 떨어지는 경로 부활 — 오버레이가 조건부로 사라진다"

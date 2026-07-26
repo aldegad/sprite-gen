@@ -53,7 +53,7 @@ def _build_run(root: Path, takes=None) -> Path:
                  "safe_margin_y": 8, "size": 96, "safe_margin": 8},
         "chroma_key": {"name": "magenta", "hex": "#FF00FF", "rgb": [255, 0, 255], "selection": "fallback"},
         "states": {"walk": {"frames": 2, "fps": 8, "loop": True, "action": "takes fixture"}},
-        "fit": {"pixel_perfect": True, "logical_height": 48},
+        "fit": {"pixel_unfake": True, "logical_height": 48},
     }
     if takes is not None:
         request["states"]["walk"]["takes"] = takes
@@ -100,7 +100,7 @@ def test_take_raw_missing_fails_loud(tmp_path: Path) -> None:
 def test_takes_require_pixel_perfect(tmp_path: Path) -> None:
     run_dir = _build_run(tmp_path, takes=[{"label": "alt", "frames": 2}])
     request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
-    del request["fit"]["pixel_perfect"]
+    del request["fit"]["pixel_unfake"]
     (run_dir / "sprite-request.json").write_text(json.dumps(request), encoding="utf-8")
     take_path = run_dir / take_raw_rel(request, "walk", "alt")
     take_path.parent.mkdir(parents=True)
