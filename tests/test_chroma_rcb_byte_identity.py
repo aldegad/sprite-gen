@@ -614,6 +614,17 @@ def _alpha_boundary_field(width: int = 40, height: int = 24) -> Image.Image:
     # 시작 조건(`<= 16`)에서 걸러져 무해해진다.
     px[20, 7] = (90, 140, 220, 255)
     px[21, 7] = (90, 140, 220, 16)
+    # `_boundary_mass` AND 항의 **위쪽** 경계 (노드 3 attempt 2, R2).
+    # 위 alpha 127/128 가로 띠는 XOR 항만 밟는다 — 색이 같아서 AND 항의 색차
+    # 조건이 거짓이기 때문이다. `a[3] >= 128 and b[3] >= 128` 을 `> 128` 로 옮기는
+    # 변경을 잡으려면 **양쪽 알파가 >= 128 이고 한쪽이 정확히 128 이면서 색차 L1
+    # 이 48 을 넘는** 인접쌍이 필요하다 (그 쌍은 XOR 항이 거짓이라 AND 항만 판정한다).
+    # attempt 1 의 `>=128 -> >=127` 은 killed 였으므로 임계가 한쪽에서만 잠겨 있었다.
+    # 색차는 100 (200 vs 100 채널 0) 이라 `> 48` 쪽 임계와는 독립이다.
+    px[2, 6] = (200, 100, 100, 128)   # 가로쌍 왼쪽 — 알파 정확히 128
+    px[3, 6] = (100, 100, 100, 255)
+    px[6, 5] = (200, 100, 100, 128)   # 세로쌍 위 — 알파 정확히 128
+    px[6, 6] = (100, 100, 100, 255)
     return img
 
 
@@ -718,6 +729,48 @@ def _synthetic_transparent_spill_field(width: int = 40, height: int = 30) -> Ima
     return img
 
 
+def _synthetic_classification_priority_field(width: int = 44, height: int = 32) -> Image.Image:
+    """P1 분류 if/elif 의 **우선순위**를 잠근다 (노드 3 attempt 2, R1).
+
+    `key_tint_score < fringe_delta -> _SUBJECT` 와
+    `color_distance <= fringe_threshold -> _BLEND_IN_BAND` 의 순서를 맞바꾼 mutant 는
+    **두 조건이 동시에 참인 픽셀**이 있어야만 관측된다. 기본 CLI 값에서는 그런 픽셀이
+    존재할 수 없다 — 포화 2채널 키에서 교집합이 생기려면 코시-슈바르츠 상한
+    `sqrt(1.5) * T > 255 - delta` 를 넘어야 하는데 `T=180, delta=18` 이면
+    `220.4 vs 237` 로 **공집합**이다. 임계는 `T > 193.5`.
+    `--fringe-key-threshold` 는 상한 없는 `type=float` CLI 플래그이고
+    (`sprite_gen/cli.py:88,173,189`, `inspect.py:38`, 기본 180.0)
+    `slice_sheet`·`inspect`·`cutout` 까지 그대로 흘러간다 — 도달 가능한 설정이다.
+    그래서 이 케이스만 `fringe_threshold` 를 **196.0** 으로 둔다.
+
+    if/elif 사슬을 벡터화하는 표준 수단이 `np.select`/중첩 `np.where` 이고, 그 변환에서
+    유일하게 사람이 손으로 정하는 값이 **조건 우선순위**다. 잠글 자리가 바로 여기다.
+
+    충돌 픽셀 `(80, 95, 80)`: 키 거리 195.959 <= 196, tint 15.0 < 18.
+    - 원본 순서: `_SUBJECT` — unmix 패스가 건드리지 않아 `(80, 95, 80, 255)` 유지
+    - 순서 교환: `_BLEND_IN_BAND` — depth <= 2 라 unmix 되어 `(85, 85, 85, 240)`
+
+    `_REF_IN_BAND_UNMIX_KEY_DEPTH` 가 2 라 깊이 3 이상이면 in-band 도 건너뛰어져
+    차이가 사라진다. 그래서 피험체 블록 왼쪽 모서리에 붙여 깊이 1·2 만 쓴다
+    (`(12,11)`·`(12,12)` = 깊이 1, `(13,11)` = 깊이 2).
+
+    unmix 뒤 색은 `(85, 85, 85)` 라 tint 0 이고 원본도 tint 15 < 18 이라, 두 갈래 모두
+    스필 후보가 아니다 — 차이가 뒤 패스에서 씻기지 않고 출력까지 남는다.
+    """
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    px = img.load()
+    for y in range(height):
+        for x in range(width):
+            # 흔들리는 키 배경 (거리 33.7~41.4 <= 96 → 전부 keyed)
+            px[x, y] = (11 + ((x * 3) % 5), 238 - ((x + y) % 7), 27 + ((y * 2) % 5), 255)
+    for y in range(10, 24):
+        for x in range(12, 32):
+            px[x, y] = (200, 40, 180, 255)  # 피험체 (거리 344.4, tint -150 → subject)
+    for x, y in ((12, 11), (12, 12), (13, 11)):
+        px[x, y] = (80, 95, 80, 255)  # 충돌 픽셀 — 거리 195.959, tint 15.0
+    return img
+
+
 # (case id, image builder, key, threshold, fringe_threshold, fringe_delta, reach, spill_fraction)
 CASES = [
     ("moe-magenta", lambda: _open_moe("moe_green.png"), MAGENTA,
@@ -745,6 +798,11 @@ CASES = [
     # 유일하게 fringe_delta 를 0 으로 두는 케이스 — 픽스처 docstring 에 이유가 있다
     ("synthetic-transparent-spill", _synthetic_transparent_spill_field, GREEN,
      CLI_KEY_THRESHOLD, CLI_FRINGE_THRESHOLD, 0.0, CLI_UNMIX_REACH, CLI_SPILL_MAX_FRACTION),
+    # 유일하게 fringe_threshold 를 기본값 위로 올리는 케이스 (196.0 > 193.5 임계).
+    # 기본 180.0 에서는 subject/in-band 조건의 교집합이 공집합이라 분류 우선순위가
+    # 관측 불가다 — 픽스처 docstring 에 유도가 있다.
+    ("synthetic-classification-priority", _synthetic_classification_priority_field, GREEN,
+     CLI_KEY_THRESHOLD, 196.0, CLI_FRINGE_DELTA, CLI_UNMIX_REACH, CLI_SPILL_MAX_FRACTION),
 ]
 
 # 절대 잠금 — 프로덕션과 참조를 **같이** 고쳐 1번 잠금을 우회하는 경로를 막는다.
@@ -764,6 +822,9 @@ EXPECTED_OUTPUT_SHA256 = {
     "synthetic-spill-semantics": "ef45e6c84f334c8925c9e0df6be3a1beecfa6b59cec7611bbeb1b65af8fae2d1",
     "synthetic-reach-geometry": "0d5030be40603283ea3e9743b2c1e069481b9ae38695bc99d50ec4c75415cf5f",
     "synthetic-transparent-spill": "62309e999d53448eaab201e023cf24e734a1c780fc5d5287f0176eb755eafebf",
+    # 노드 3 attempt 2(R1) 추가분. 같은 기준선이다 — `extract.py` 는 노드 3 내내
+    # 무변경이고(engine_revision 3adf0169561a) 이 커밋에서도 손대지 않았다.
+    "synthetic-classification-priority": "65f0961c7e4a9a6cc98b2ec2f1bfd08d3341fff1df8b8576ce8fa1f71f41be03",
 }
 
 # 분기 도달 계측 고정 — 픽스처가 조용히 분기를 잃으면 여기서 걸린다.
@@ -958,6 +1019,21 @@ EXPECTED_COVERAGE = {
         "unmix_collapsed_to_transparent": 0,
         "unmix_in_band": 8,
         "unmix_in_band_skipped_deep": 8,
+    },
+    # 이 케이스가 고정하는 것은 **분기 도달이 아니라 미도달**이다: `blend_in_band` 와
+    # `unmix_*` 가 아예 없다. 충돌 픽셀 3개가 전부 `subject 280` 안에 들어 있고 unmix
+    # 패스가 아무것도 안 한다 — 그래서 우선순위를 뒤집은 프로덕션이 그 3개를 unmix 하면
+    # 출력 바이트가 갈린다. (이 표는 참조 구현으로 재는 픽스처측 가드라 프로덕션
+    # mutant 로는 안 빨개진다. 잠그는 것은 픽스처가 조용히 이 구도를 잃는 경우다 —
+    # 충돌 픽셀이 subject 를 벗어나면 `subject 280` 이 어긋나 여기서 걸린다.)
+    "synthetic-classification-priority": {
+        "degenerate_key_tint": 0,
+        "depth_positive": 208,
+        "depth_reached_max": 1,
+        "keyed_by_distance": 1128,
+        "spill_candidates": 0,
+        "spill_limit_from_fraction": 0,
+        "subject": 280,
     },
 }
 
