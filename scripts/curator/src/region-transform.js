@@ -171,10 +171,15 @@ function regionPlaceHandles(stage, stateName, sel) {
 // `wireStage` 의 셀 전체 핸들러가 그대로 가져간다.
 // `wireStage`(zoom-editor.js:1291)보다 **먼저** 등록돼야 stopImmediatePropagation 이 먹는다.
 function wireRegionHandles(stage, stateName, idx, ctx) {
-  const { isTransformTool, hasSelection, selectionRect, afterCommit } = ctx;
+  const { isRegionTool, hasSelection, selectionRect, afterCommit } = ctx;
   const common = (axis) => ({
     axis,
-    enabled: () => isTransformTool() && hasSelection(),
+    // **올가미 툴에서도 먹어야 한다.** `regionPlaceHandles` 는 툴과 무관하게 핸들을 선택
+    // 위로 옮기고 올가미는 비페인팅 툴이라 핸들이 숨지도 않는다 — 게이트만 변형 툴로
+    // 좁혀 두면 올가미 상태에서 그 핸들이 **셀 전체를 돌린다**(노을이 note 2026-07-26:
+    // `L` 한 번이면 수홍이 겪은 증상에 다시 도달한다). "핸들 위치 = 대상" 불변식이
+    // 거짓이 되는 자리라 게이트를 선택 기준으로 맞춘다.
+    enabled: () => isRegionTool() && hasSelection(),
     pixelsPerUnit: () => stage.clientWidth / cellDims(stateName)[0],
     centerOf: () => {
       const r = stage.getBoundingClientRect();

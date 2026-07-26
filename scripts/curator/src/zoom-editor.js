@@ -348,6 +348,10 @@ function openZoom(stateName, idx, keepWidth) {
     const sel = pixelEdit && pixelEdit.sel;
     // 핸들도 선택을 따라간다 — 사각 선택으로 잡았을 때도 같아야 한다.
     regionPlaceHandles(stage, stateName, sel);
+    // 올가미 마스크 오버레이도 여기서 동기화한다 — 안 하면 연필로 전환했을 때
+    // 선택은 없는데 파란 영역만 유령으로 남는다(노을이 note 2026-07-26).
+    // 사각 선택(mask 없음)으로 교체돼도 이 호출이 지워 준다.
+    lassoRenderMask(stage, stateName, sel && sel.mask ? sel : null);
     selBox.hidden = !sel;
     if (!sel) return;
     // sel 은 소스 공간 — 표시가 변형(WYSIWYG)이라 점선도 순변환해서 그린다
@@ -649,6 +653,9 @@ function openZoom(stateName, idx, keepWidth) {
   });
   const regionCtx = {
     isTransformTool: () => !!pixelEdit && pixelEdit.tool === "transform"
+      && pixelEdit.state === stateName && pixelEdit.idx === idx,
+    // 핸들은 **선택이 살아 있는 비페인팅 툴 전부**에서 영역을 대상으로 한다.
+    isRegionTool: () => !!pixelEdit && (pixelEdit.tool === "transform" || pixelEdit.tool === "lasso")
       && pixelEdit.state === stateName && pixelEdit.idx === idx,
     hasSelection: () => !!(pixelEdit && pixelEdit.sel),
     selectionRect: () => {
