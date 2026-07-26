@@ -36,8 +36,18 @@ The runtime surface is two PyPI packages, both declared directly in
 (the vectorized chroma extraction path). Neither may be relied on transitively —
 a package that arrives only because some other dependency pulls it in can leave
 on the next clean environment, and this package's own code must not be at the
-mercy of another package's dependency list. Both were cleared through the
-advisory gate above before they were declared.
+mercy of another package's dependency list.
+
+NumPy was cleared through the advisory gate above before it was declared, and
+every version that `numpy>=2.2.6,<3` resolves to on a supported interpreter
+carries a live approval: 2.2.6 on CPython 3.10, 2.4.6 on 3.11, and 2.5.1 on 3.12
+and later.
+
+Pillow is a separate matter and predates this section, so this document does not
+claim it is cleared. Its ledger approval for 12.2.0 is recorded as revoked, and
+12.3.0 — the version `pillow>=12.0,<13` actually resolves to today — has no
+ledger entry at all. The declared Pillow range is therefore not covered by a
+live approval. Closing that gap is tracked separately and is not resolved here.
 
 A pure-Python fallback for a missing NumPy is not permitted. The extraction path
 carries a byte-identity contract, and a second code path for the same contract

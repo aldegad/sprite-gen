@@ -18,8 +18,10 @@ not a dependency, that is a coincidence that survives until the next clean envir
   installed. This package declares `requires-python = ">=3.10"` and CI runs 3.10 as its minimum job;
   2.3.x requires >=3.11 and 2.5.x requires >=3.12, so either floor would have turned the 3.10 job
   into a resolution failure on the first push. 2.2.6 is the newest release that still ships CPython
-  3.10 wheels, so it is the highest floor that keeps the supported-version claim honest. On 3.10 the
-  resolver lands on exactly 2.2.6; on 3.12+ it lands on 2.5.1.
+  3.10 wheels, so it is the highest floor that keeps the supported-version claim honest. The range
+  resolves to three distinct versions across the supported interpreters - 2.2.6 on 3.10, 2.4.6 on
+  3.11, and 2.5.1 on 3.12 and later - and all three are approved in the advisory ledger. CI runs
+  3.10 and 3.14, so the 3.11 resolution is covered by approval rather than by a test job.
 - The floor is also >= 2.0 on purpose. The extraction path is under a byte-identity contract, and
   NEP 50 changed how scalars and arrays promote - the default only from NumPy 2.0. Allowing 1.x
   would allow a second set of promotion rules under a contract that says the bytes never move. The
