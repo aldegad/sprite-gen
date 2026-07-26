@@ -253,9 +253,24 @@ def remove_chroma_background(
         for y, x in zip(rows.tolist(), cols.tolist()):
             red, green, blue, alpha = (int(value) for value in data[y, x])
             color = (red, green, blue)
-            data[y, x] = unmix_key_blend(
+            out_red, out_green, out_blue, out_alpha = unmix_key_blend(
                 color, alpha, chroma_key, key_tint, key_tint_score(color, chroma_key)
             )
+            # The scalar path wrote this through `pixels[x, y] = (...)`, and PIL
+            # clamped every channel to 0..255 on the way in. A uint8 array does
+            # not — it raises — so the clamp has to be restored here or the
+            # rewrite changes behavior instead of just its speed.
+            #
+            # Exactly one channel needs it. The three color channels leave
+            # `despill_color` already squeezed by its own `min(255, max(0, …))`,
+            # and re-clamping them here would put that bound in two places; the
+            # alpha is the one value nothing bounds, because `coverage` exceeds
+            # 1 whenever `tint` is negative (reachable with `--fringe-delta < 0`)
+            # and `round(alpha * coverage)` then lands above `alpha`. It cannot
+            # go the other way: `unmix_key_blend` returns a fully transparent
+            # pixel for `out_alpha <= 0`, so the only unbounded direction is up.
+            # Both premises are asserted in tests/test_chroma_rcb_byte_identity.py.
+            data[y, x] = (out_red, out_green, out_blue, min(255, out_alpha))
 
     # Trapped-spill despill — generators paint key-colored spill *inside* the
     # subject (a green streak buried in crimson hair, key reflections between

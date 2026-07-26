@@ -248,6 +248,11 @@ def _ref_remove_chroma_background(
                     color, alpha, chroma_key, key_tint, _ref_key_tint_score(color, chroma_key)
                 )
                 bump("unmix_collapsed_to_transparent", 1 if out[3] == 0 else 0)
+                # 조건부 bump — 안 걸리면 키 자체가 안 생겨 기존 13 케이스의 기대표가
+                # 그대로다. 이 자리가 옛 경로에서 PIL 클램프에 기대던 유일한 지점이다:
+                # `pixels[x, y] = out` 이 258 을 255 로 조여서 넣었다.
+                if out[3] > 255:
+                    bump("unmix_alpha_over_255")
                 pixels[x, y] = out
 
     if key_tint > 0 and keyed and spill_max_fraction > 0:
@@ -772,6 +777,71 @@ def _synthetic_classification_priority_field(width: int = 44, height: int = 32) 
     return img
 
 
+def _synthetic_negative_fringe_delta_field(width: int = 32, height: int = 24) -> Image.Image:
+    """되쓰기의 **0..255 클램프**를 잠근다 (노드 7 attempt 2, R1).
+
+    옛 스칼라 경로는 `pixels[x, y] = unmix_key_blend(...)` 로 PIL 에 넣었고 PIL 이
+    범위 밖 채널을 클램프했다. 벡터화 경로는 uint8 배열에 직접 대입이라 numpy 가
+    **던진다** — `OverflowError: Python integer 257 out of bounds for uint8`.
+
+    `out_alpha > 255` 가 되는 조건은 정확히 하나다: `fringe_delta < 0` 이면 tint 가
+    음수인 픽셀이 `_SUBJECT` 로 안 빠지고 블렌드로 분류되고, `k = tint/key_tint < 0`
+    → `coverage = 1 - k > 1` → `round(alpha * coverage) > alpha` 가 된다.
+    `fringe_delta >= 0` 이면 블렌드는 tint >= 0 뿐이라 `coverage <= 1` 이다 —
+    그래서 기존 13 케이스(delta 18.0·0.0)는 이 자리를 **한 번도 안 밟는다.**
+
+    `--fringe-delta` 는 하한 없는 `type=float` CLI 플래그이고 진입점이 5자리다
+    (`sprite_gen/cli.py:89,174,190`, `inspect.py:39`, `slice_sheet.py:315`) —
+    `slice_sheet --fringe-delta=-5` 로 CLI 에서 그대로 도달한다. 노드 3 §C 가
+    `fringe_delta = 0` 을 등가 논증 대신 픽스처로 처리하고 노드 3 R1 이
+    `--fringe-key-threshold > 193.5` 를 블로킹으로 판정한 것과 같은 형태다.
+
+    그래서 이 케이스만 `fringe_delta = -5.0` 으로 돌린다. **넘침의 크기는 delta 가
+    가둔다** — 블렌드로 분류되려면 `tint >= fringe_delta` 여야 하므로 tint 는
+    `[-5, 0)` 뿐이고 `coverage <= 1 + 5/255`, 즉 알파 255 픽셀의 상한이 260 이다.
+    심은 픽셀 6종은 그 창 안에서 클램프 경계와 대조군을 같이 덮는다
+    (키 `(0, 255, 0)`, `key_tint = 255`):
+
+    | 좌표     | 입력                | tint  | 분류     | out_alpha | 되쓰기 | 잡는 변형 |
+    |----------|---------------------|------:|----------|----------:|-------:|-----------|
+    | (10, 9)  | `(60,58,60,255)`    |  -2.0 | out-band |       257 |    255 | 클램프 삭제 → OverflowError |
+    | (10, 11) | `(60,59,60,255)`    |  -1.0 | out-band |       256 |    255 | `min(256, …)` 오프바이원 |
+    | (10, 13) | `(60,56,60,255)`    |  -4.0 | out-band |       259 |    255 | `% 256` wrap (→ 3) |
+    | (10, 15) | `(60,58,60,200)`    |  -2.0 | out-band |       202 |    202 | `out_alpha = 255` 무조건 대입 / `min(alpha, …)` |
+    | (10, 17) | `(120,200,90,255)`  |  95.0 | in-band  |       160 |    160 | 양수 tint 경로 동반 회귀 |
+    | (10, 19) | `(60,55,60,255)`    |  -5.0 | out-band |       260 |    255 | 음수 경계의 `< fringe_delta` → `<=` (피험체로 새면 무변경) |
+
+    여섯 자리 모두 피험체 블록의 왼쪽 열이라 keyed 배경과 붙어 **깊이 1** 이고,
+    (10, 17) 을 뺀 다섯은 키 거리 213.6~217.3 > 180 이라 `_BLEND_OUT_OF_BAND` 다 —
+    in-band 깊이 제한(`_IN_BAND_UNMIX_KEY_DEPTH`)과 무관하게 unmix 된다. (10, 17) 은
+    거리 159.8 로 in-band 이고 깊이 1 <= 2 라 역시 unmix 된다.
+
+    블록 본체 `(200, 40, 180)` 은 tint -150 < -5 라 음수 delta 에서도 `_SUBJECT` 로
+    남는다 — 이 케이스의 피험체 대조군이 그것이다.
+
+    unmix 뒤 색은 전부 tint 0 (회색) 이라 스필 후보로는 잡히되 `_SPILL_MIN_TINT`
+    40 이하라 치료되지 않는다 — 차이가 뒤 패스에서 씻기지 않고 출력까지 남는다.
+    행 간격을 2로 벌려 여섯 픽셀이 서로 8-이웃이 아니게 두었다: 각자 1px 클러스터라
+    스필 패스의 판정이 픽셀마다 독립이고 기대표가 흔들리지 않는다.
+    """
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    px = img.load()
+    for y in range(height):
+        for x in range(width):
+            # 흔들리는 키 배경 (거리 33.7~41.4 <= 96 → 전부 keyed)
+            px[x, y] = (11 + ((x * 3) % 5), 238 - ((x + y) % 7), 27 + ((y * 2) % 5), 255)
+    for y in range(8, 21):
+        for x in range(10, 24):
+            px[x, y] = (200, 40, 180, 255)  # 피험체 (거리 344.4, tint -150 → delta -5 에서도 subject)
+    px[10, 9] = (60, 58, 60, 255)     # coverage 1.0078 → 257
+    px[10, 11] = (60, 59, 60, 255)    # coverage 1.0039 → 256 (클램프 경계 정확히 +1)
+    px[10, 13] = (60, 56, 60, 255)    # coverage 1.0157 → 259
+    px[10, 15] = (60, 58, 60, 200)    # 같은 coverage, 알파가 낮아 202 — 클램프 미적용 대조군
+    px[10, 17] = (120, 200, 90, 255)  # 양수 tint 95 → coverage 0.6275 → 160
+    px[10, 19] = (60, 55, 60, 255)    # tint 가 정확히 fringe_delta — coverage 1.0196 → 260
+    return img
+
+
 # (case id, image builder, key, threshold, fringe_threshold, fringe_delta, reach, spill_fraction)
 CASES = [
     ("moe-magenta", lambda: _open_moe("moe_green.png"), MAGENTA,
@@ -804,6 +874,10 @@ CASES = [
     # 관측 불가다 — 픽스처 docstring 에 유도가 있다.
     ("synthetic-classification-priority", _synthetic_classification_priority_field, GREEN,
      CLI_KEY_THRESHOLD, 196.0, CLI_FRINGE_DELTA, CLI_UNMIX_REACH, CLI_SPILL_MAX_FRACTION),
+    # 유일하게 fringe_delta 를 **음수**로 두는 케이스. 되쓰기의 0..255 클램프는
+    # 여기서만 관측된다 — 나머지 13 케이스는 delta 18.0·0.0 이라 coverage <= 1 이다.
+    ("synthetic-negative-fringe-delta", _synthetic_negative_fringe_delta_field, GREEN,
+     CLI_KEY_THRESHOLD, CLI_FRINGE_THRESHOLD, -5.0, CLI_UNMIX_REACH, CLI_SPILL_MAX_FRACTION),
 ]
 
 # 절대 잠금 — 프로덕션과 참조를 **같이** 고쳐 1번 잠금을 우회하는 경로를 막는다.
@@ -826,6 +900,13 @@ EXPECTED_OUTPUT_SHA256 = {
     # 노드 3 attempt 2(R1) 추가분. 같은 기준선이다 — `extract.py` 는 노드 3 내내
     # 무변경이고(engine_revision 3adf0169561a) 이 커밋에서도 손대지 않았다.
     "synthetic-classification-priority": "65f0961c7e4a9a6cc98b2ec2f1bfd08d3341fff1df8b8576ce8fa1f71f41be03",
+    # 노드 7 attempt 2(R1) 추가분. 위 13개는 최적화 전 커밋에서 뽑았고 이 값도 같은
+    # 기준선이다 — **동결 사본이 아니라 `git show 05c549a:sprite_gen/extract.py` 로
+    # 뽑은 그때 실제로 돌던 모듈**에 이 픽스처를 먹여 얻었다(하네스
+    # `_assets/extract-numpy-vectorization/probe_negative_delta_case.py`).
+    # 클램프를 잃은 4ae7d70 은 이 케이스에서 해시를 내지 못한다 — OverflowError 로
+    # 죽는다. 그래서 이 한 줄은 "값이 다르다" 가 아니라 "돌긴 하는가" 까지 잠근다.
+    "synthetic-negative-fringe-delta": "8711c53554807c59714d1d6485ac107e234e8530e895475afbc474a4bc363b9b",
 }
 
 # 분기 도달 계측 고정 — 픽스처가 조용히 분기를 잃으면 여기서 걸린다.
@@ -1036,6 +1117,28 @@ EXPECTED_COVERAGE = {
         "spill_limit_from_fraction": 0,
         "subject": 280,
     },
+    # `unmix_alpha_over_255: 4` 가 이 케이스의 본체다 — 이 계수는 **여기에만** 있고
+    # (조건부 bump 라 나머지 12 케이스에는 키 자체가 없다) 되쓰기 클램프가 실제로
+    # 일하는 픽셀 수를 센다. 픽스처가 조용히 그 4자리를 잃으면
+    # `test_every_branch_is_reached_by_some_case` 가 먼저 빨개진다.
+    # `blend_out_of_band 5 / unmix_out_of_band 5` 는 심은 6종 중 (10,17) 을 뺀 다섯이고,
+    # `subject 176` 은 블록 본체(음수 delta 에서도 피험체로 남는 대조군)다.
+    "synthetic-negative-fringe-delta": {
+        "blend_in_band": 1,
+        "blend_out_of_band": 5,
+        "degenerate_key_tint": 0,
+        "depth_positive": 152,
+        "depth_reached_max": 1,
+        "keyed_by_distance": 586,
+        "spill_candidates": 6,
+        "spill_cluster_low_tint": 6,
+        "spill_limit_from_fraction": 0,
+        "subject": 176,
+        "unmix_alpha_over_255": 4,
+        "unmix_collapsed_to_transparent": 0,
+        "unmix_in_band": 1,
+        "unmix_out_of_band": 5,
+    },
 }
 
 
@@ -1144,6 +1247,67 @@ def test_despill_and_unmix_match_frozen_scalar_reference():
                         _ref_unmix_key_blend(color, alpha, key, key_tint, tint)
 
 
+# --- 음수 tint 영역: 되쓰기 클램프가 기대는 두 전제 --------------------------
+# 위 스윕은 `tint <= 0` 을 건너뛴다. 그 영역이 `--fringe-delta < 0` 에서 블렌드로
+# 분류되는 자리이고, `coverage = 1 - tint/key_tint > 1` 이라 `round(alpha*coverage)`
+# 가 알파를 **키운다** — 옛 경로는 그걸 PIL 이 조여서 넣었고 배열 되쓰기는 던진다.
+# 프로덕션 되쓰기가 알파 **하나만**, **위로만** 조이는 근거가 아래 두 단정이다.
+# 둘 다 프로덕션 프리미티브를 재는 것이지 동결 사본을 재는 게 아니다.
+
+
+def _sweep_tints(key):
+    """스칼라 스윕 1,331 색을 tint 부호로 갈라 준다."""
+    key_tint = _ref_key_tint_score(key, key)
+    negative, positive = [], []
+    for red in _SWEEP:
+        for green in _SWEEP:
+            for blue in _SWEEP:
+                color = (red, green, blue)
+                tint = _ref_key_tint_score(color, key)
+                (negative if tint <= 0 else positive).append((color, tint))
+    return key_tint, negative, positive
+
+
+def test_despill_color_channels_stay_in_byte_range():
+    """되쓰기가 RGB 를 다시 클램프하지 않는 근거 — `despill_color` 가 이미 조인다.
+
+    두 영역 다 돈다. `k >= 0` 에서는 외삽이라 범위를 벗어날 수 있고
+    (`min(255, max(0, …))` 가 거기서 일한다), `k < 0` 에서는 색과 키의 볼록결합이라
+    구조적으로 못 벗어난다. 이 단정이 빨개지면 되쓰기의 "알파 하나만" 전제가 깨진
+    것이므로 클램프 자리를 다시 정해야 한다.
+    """
+    for key in (GREEN, MAGENTA):
+        key_tint, negative, positive = _sweep_tints(key)
+        assert negative and positive, f"{key}: 한쪽 영역이 비었다 — 스윕이 공허하다"
+        for color, tint in negative + positive:
+            _, despilled = extract.despill_color(color, key, key_tint, tint)
+            assert all(0 <= channel <= 255 for channel in despilled), \
+                f"key={key} color={color} tint={tint}: {despilled}"
+
+
+def test_unmix_key_blend_alpha_overflows_upward_only_for_negative_tint():
+    """되쓰기가 위쪽 한 방향만 조이는 근거 + 그 자리가 공허하지 않다는 근거.
+
+    - 알파는 절대 음수가 안 된다: `out_alpha <= 0` 이면 완전 투명으로 접힌다.
+      그래서 되쓰기에 `max(0, …)` 가 없다.
+    - 알파는 음수 tint 에서 **실제로 255 를 넘는다**. 넘는 사례가 0이면 되쓰기
+      클램프도, 게이트의 음수 delta 케이스도 아무것도 잠그지 않는 장식이 된다.
+    - 그 영역에서도 프로덕션 프리미티브는 동결 사본과 정확히 같은 값을 낸다 —
+      클램프는 프리미티브가 아니라 되쓰기의 일이다 (프리미티브를 고치면 이 단정이
+      빨개진다).
+    """
+    overflowed = 0
+    for key in (GREEN, MAGENTA):
+        key_tint, negative, _ = _sweep_tints(key)
+        for color, tint in negative:
+            for alpha in (0, 1, 17, 128, 200, 254, 255):
+                got = extract.unmix_key_blend(color, alpha, key, key_tint, tint)
+                assert got == _ref_unmix_key_blend(color, alpha, key, key_tint, tint)
+                assert got[3] >= 0, f"key={key} color={color} alpha={alpha}: {got}"
+                overflowed += got[3] > 255
+    assert overflowed > 0, "음수 tint 스윕이 알파 255 초과를 한 번도 안 냈다 — 공허하다"
+
+
 # --- 배열 커널: 프로덕션 vs 같은 동결 사본 ------------------------------------
 # `remove_chroma_background` 는 이제 픽셀마다 `color_distance`·`key_tint_score` 를
 # 부르지 않고 `_key_distance_field`·`_key_tint_field` 에 이미지를 통째로 넘긴다.
@@ -1227,6 +1391,9 @@ def test_every_branch_is_reached_by_some_case():
         "unmix_out_of_band", "unmix_collapsed_to_transparent", "spill_candidates",
         "spill_cluster_treated", "spill_cluster_too_big", "spill_cluster_low_tint",
         "spill_limit_from_fraction", "degenerate_key_tint", "spill_zero_coverage",
+        # 되쓰기 클램프가 일하는 유일한 분기. 어느 픽스처도 알파 255 를 넘기지
+        # 않으면 클램프 단정 전체가 공허해지므로 여기서 미도달을 잡는다.
+        "unmix_alpha_over_255",
     }
     reached = {name for coverage in EXPECTED_COVERAGE.values()
                for name, count in coverage.items() if count}
