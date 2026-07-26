@@ -55,6 +55,24 @@
 경계 픽스처를 추가한 뒤 **23/23 killed** 이 됐다. 각 픽스처 docstring 에 "어떤 변형을
 잡기 위한 자리인지" 를 적어 뒀으니 값을 바꿀 때 그 이유를 먼저 읽을 것 —
 숫자 하나(예: 클러스터 41px == spill_limit 41)가 mutant 두 종을 잡고 있다.
+
+## 노드 3 (체크리스트 3번) 에서 다시 만든 부분
+
+모듈 소스 전체를 변형해 갈아끼우는 하네스로 mutant 64종을 돌렸다
+(`_assets/extract-numpy-vectorization/mutants_node3.py`). 함수 단위 치환과 달리
+프리미티브 mutant 가 `remove_chroma_background` 안쪽까지 전파되고 모듈 상수도 대상이
+된다. 1라운드 50/63 killed → 살아남은 13종 중 **8종이 진짜 게이트 구멍**이라
+아래를 추가했다 (나머지 5종은 관측 불가능한 등가 mutant — 노드 3 결과 문서에 논증):
+
+- `_KEYS` 에 `(192, 255, 0)`·`(0, 255, 64)` — `key_tint_score` 의 채널 선택 임계
+  `>= 192`·`< 64` 를 정확히 밟는 키가 없어 두 연산자가 안 잠겨 있었다.
+- `_synthetic_spill_semantics_field` — 스필 한도 산식의 입력(`subject_count`),
+  클러스터 축약(`max` vs `mean`), 알파 보존, 반올림 규약(half-to-even).
+- `_synthetic_reach_geometry_field` — 거리변환의 연결성 패리티와 경계 padding
+  (`np.roll` wrap).
+
+**여기 숫자는 하나도 임의값이 아니다.** 각 값이 어떤 변형을 잡는지 픽스처 docstring 에
+적어 뒀다.
 """
 
 from __future__ import annotations
@@ -599,6 +617,107 @@ def _alpha_boundary_field(width: int = 40, height: int = 24) -> Image.Image:
     return img
 
 
+def _synthetic_spill_semantics_field(width: int = 160, height: int = 120) -> Image.Image:
+    """갇힌 스필 패스의 **의미**를 고정한다 (노드 3 추가 — mutant 4종을 잡는 자리).
+
+    - 비-키 픽셀이 **정확히 8,000** 개다 (피험체 100x80, 안쪽 재색칠은 개수를 안
+      바꾼다). 캔버스는 19,200px 이라 `subject_count` 를 `width * height` 로 갈음하면
+      한도가 `round(8000*0.005)=40` 에서 `round(19200*0.005)=96` 으로 뛴다. 그
+      사이에 **60px 클러스터**를 놓았다 — 원본은 `60 > 40` 이라 too_big 로 안
+      건드리고, 갈음한 구현은 despill 한다.
+    - **11px 클러스터** = 강한 틴트 1px(tint 95) + 약한 틴트 10px(tint 19).
+      `max` 95 > 40 이라 원본은 treated, 평균은 25.909 <= 40 이라 클러스터 축약을
+      `max` 대신 `mean`(np.mean) 으로 짜면 통째로 빠진다.
+    - 그 11px 는 **alpha 200** 이다. 스필은 색보정이라 알파를 보존한다 — despill
+      결과에 255 를 박는 구현은 여기서 갈린다. (다른 픽스처의 스필 클러스터는 전부
+      alpha 255 라 이 계약이 안 잠겨 있었다.)
+    - **(2, 52, 0) 단독 픽셀**: tint 51 이라 `k = 51/255 = 0.2`, `coverage = 0.8`,
+      채널 0 이 정확히 `2 / 0.8 == 2.5`. 파이썬 `round` 는 half-to-even 이라 **2**,
+      손으로 짠 `np.floor(x + 0.5)` 는 **3** 이다. 반올림 규약이 갈리는 유일한 자리다.
+
+    피험체 테두리는 subject 색이라 unmix 패스는 이 케이스에서 아무것도 하지 않는다 —
+    스필 패스만 관측된다.
+    """
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    px = img.load()
+    for y in range(height):
+        for x in range(width):
+            red = 11 + ((x * 3) % 5)
+            green = 238 - ((x + y) % 7)
+            blue = 27 + ((y * 2) % 5)
+            alpha = 255
+            if 20 <= x < 120 and 15 <= y < 95:  # 피험체 100x80 = 8,000px
+                red, green, blue = 180 + (x % 20), 40 + (y % 15), 150 - (x % 12)
+                if 30 <= x < 40 and 30 <= y < 36:
+                    red, green, blue = 120, 200, 90  # 60px — 한도 40 초과, 96 미만
+                if x == 60 and y == 50:
+                    red, green, blue, alpha = 120, 200, 90, 200  # 11px 클러스터의 씨앗
+                if 61 <= x < 66 and 50 <= y < 52:
+                    red, green, blue, alpha = 150, 169, 150, 200  # tint 19 x 10px
+                if x == 90 and y == 70:
+                    red, green, blue = 2, 52, 0  # coverage 0.8 → 채널0 이 정확히 2.5
+            px[x, y] = (red, green, blue, alpha)
+    return img
+
+
+def _synthetic_reach_geometry_field(width: int = 40, height: int = 28) -> Image.Image:
+    """거리변환(P2)의 **연결성 패리티와 경계 padding** 을 고정한다 (노드 3 추가).
+
+    깊이는 최근접 keyed 픽셀까지의 체비셰프 거리다. 그 정의가 깨지는 두 방향이
+    기존 9 케이스에서 안 잠겨 있었다.
+
+    - **키 구멍 1px** `(10, 15)` 과 거기서 오프셋 `(4, 1)` 인 out-of-band 블렌드
+      픽셀 `(14, 16)`. 체비셰프 깊이는 `max(4, 1) = 4` 라 원본은 unmix 하지만, 같은
+      행 이웃을 잃은 구현(`for dy in (-1, 1)`)은 y 를 매 스텝 ±1 옮겨야 해서 홀수
+      스텝이 필요하고 깊이 5 -> 미도달이다. 기존 픽스처는 최대깊이 픽셀이 전부 짝수
+      패리티(오프셋 `(4, 0)`) 자리라 이 변형이 통과했다.
+    - **상단 1행만 키 배경**, 나머지는 피험체. 바닥 행 `(25, 27)` 의 블렌드 픽셀은
+      원본에서 깊이 27 이라 도달 불가지만, 시프트를 `np.roll` 로 짜면 바닥이 상단
+      키 행과 이웃이 되어 깊이 1 -> unmix 된다. (가장자리를 clip 하는 구현은 등가다 —
+      clip 이 만드는 좌표는 `dx = 0` / `dy = 0` 으로 어차피 도달하는 칸이다.)
+
+    두 블렌드 픽셀 모두 tint 35 다 — 40 이하라 스필 패스가 손대지 않으므로
+    **unmix 되었는가만** 관측된다.
+    """
+    img = Image.new("RGBA", (width, height), (200, 40, 180, 255))  # 피험체 바탕
+    px = img.load()
+    for x in range(width):  # 키 배경은 상단 1행뿐
+        px[x, 0] = (11 + ((x * 3) % 5), 238 - (x % 7), 27, 255)
+    px[10, 15] = (13, 235, 29, 255)   # 피험체 안쪽 키 구멍 (머리카락 틈)
+    px[14, 16] = (150, 120, 20, 255)  # 오프셋 (4, 1) — 체비셰프 깊이 4
+    px[25, 27] = (150, 120, 20, 255)  # 바닥 행 — wrap 구현에서만 깊이 1
+    return img
+
+
+def _synthetic_transparent_spill_field(width: int = 40, height: int = 30) -> Image.Image:
+    """스필 후보 루프의 `if not alpha: continue` 를 잠근다 (노드 3 추가).
+
+    이 스킵은 **`fringe_delta > 0` 일 때만** 무의미하다: P1 이 지운 픽셀은 전부
+    `(0, 0, 0, 0)` 이고 그 tint 는 0 이라 `tint >= fringe_delta` 에서 걸러지기
+    때문이다. 그런데 `--fringe-delta` 는 하한 없는 `type=float` CLI 플래그이고
+    `slice_sheet`·`inspect`·`cutout` 까지 그대로 흘러간다. `0` 을 주면 지워진
+    픽셀이 전부 후보가 되고, **강한 틴트 클러스터에 붙어 있으면 클러스터가 배경
+    전체와 이어져 한도를 넘겨** 진짜 스필이 치료를 면한다.
+
+    그래서 투명 24px 를 강한 틴트 24px **바로 옆에** 붙여 두고 이 케이스만
+    `fringe_delta = 0.0` 으로 돌린다. 스킵을 지운 구현은 여기서 갈린다.
+    (노드 3 1라운드에서는 이 mutant 가 살아남았고, 등가라고 논증할 뻔했다 —
+    적대적 코퍼스 차분이 `fringe_delta = 0` 에서 29건의 차이를 찾아냈다.)
+    """
+    img = Image.new("RGBA", (width, height), (11, 238, 27, 255))
+    px = img.load()
+    for y in range(8, 24):
+        for x in range(8, 32):
+            px[x, y] = (200, 40, 180, 255)  # 피험체 (tint -150 → fringe_delta 0 에서도 subject)
+    for y in range(14, 18):
+        for x in range(14, 20):
+            px[x, y] = (120, 200, 90, 255)  # 강한 틴트 24px (tint 95)
+    for y in range(14, 18):
+        for x in range(20, 26):
+            px[x, y] = (0, 0, 0, 0)         # 거기 붙은 투명 24px
+    return img
+
+
 # (case id, image builder, key, threshold, fringe_threshold, fringe_delta, reach, spill_fraction)
 CASES = [
     ("moe-magenta", lambda: _open_moe("moe_green.png"), MAGENTA,
@@ -619,6 +738,13 @@ CASES = [
      CLI_KEY_THRESHOLD, CLI_FRINGE_THRESHOLD, CLI_FRINGE_DELTA, CLI_UNMIX_REACH, CLI_SPILL_MAX_FRACTION),
     ("synthetic-threshold-boundaries", _synthetic_threshold_boundary_field, GREEN,
      CLI_KEY_THRESHOLD, CLI_FRINGE_THRESHOLD, CLI_FRINGE_DELTA, CLI_UNMIX_REACH, CLI_SPILL_MAX_FRACTION),
+    ("synthetic-spill-semantics", _synthetic_spill_semantics_field, GREEN,
+     CLI_KEY_THRESHOLD, CLI_FRINGE_THRESHOLD, CLI_FRINGE_DELTA, CLI_UNMIX_REACH, CLI_SPILL_MAX_FRACTION),
+    ("synthetic-reach-geometry", _synthetic_reach_geometry_field, GREEN,
+     CLI_KEY_THRESHOLD, CLI_FRINGE_THRESHOLD, CLI_FRINGE_DELTA, CLI_UNMIX_REACH, CLI_SPILL_MAX_FRACTION),
+    # 유일하게 fringe_delta 를 0 으로 두는 케이스 — 픽스처 docstring 에 이유가 있다
+    ("synthetic-transparent-spill", _synthetic_transparent_spill_field, GREEN,
+     CLI_KEY_THRESHOLD, CLI_FRINGE_THRESHOLD, 0.0, CLI_UNMIX_REACH, CLI_SPILL_MAX_FRACTION),
 ]
 
 # 절대 잠금 — 프로덕션과 참조를 **같이** 고쳐 1번 잠금을 우회하는 경로를 막는다.
@@ -633,6 +759,11 @@ EXPECTED_OUTPUT_SHA256 = {
     "synthetic-zero-coverage": "32b2bdfc5d97d8ad7b97cc5f0da65bd5cd1be19ac6c4a4016c1f5bc69a48f762",
     "synthetic-fraction-spill-limit": "262fd62b164365c23a6505da8ce025b8d38841c572dbf13c2781a94757da898c",
     "synthetic-threshold-boundaries": "e1c84624a9a497595fe0f7db45a242e94d97e168935b24a0ffb347aee681d82a",
+    # 노드 3 추가분. 같은 최적화 전 엔진(`extract.py` 무변경, engine_revision
+    # 3adf0169561a)에서 뽑았다 — 위 7개와 같은 기준선이다.
+    "synthetic-spill-semantics": "ef45e6c84f334c8925c9e0df6be3a1beecfa6b59cec7611bbeb1b65af8fae2d1",
+    "synthetic-reach-geometry": "0d5030be40603283ea3e9743b2c1e069481b9ae38695bc99d50ec4c75415cf5f",
+    "synthetic-transparent-spill": "62309e999d53448eaab201e023cf24e734a1c780fc5d5287f0176eb755eafebf",
 }
 
 # 분기 도달 계측 고정 — 픽스처가 조용히 분기를 잃으면 여기서 걸린다.
@@ -777,6 +908,57 @@ EXPECTED_COVERAGE = {
         "unmix_in_band_skipped_deep": 2,
         "unmix_out_of_band": 6,
     },
+    # 노드 3 추가분. `subject 7928 + 61 + 11 == 8000` 이 스필 한도 산식의 입력이고,
+    # `treated 2 / too_big 1 / treated_px 12` 가 max-vs-mean·한도 갈음 mutant 를
+    # 잡는 구성이다 — 이 숫자가 흔들리면 그 mutant 들이 다시 살아난다.
+    "synthetic-spill-semantics": {
+        "blend_in_band": 61,
+        "blend_out_of_band": 11,
+        "degenerate_key_tint": 0,
+        "depth_positive": 1376,
+        "depth_reached_max": 1,
+        "keyed_by_distance": 11200,
+        "spill_candidates": 72,
+        "spill_cluster_too_big": 1,
+        "spill_cluster_treated": 2,
+        "spill_limit_from_fraction": 1,
+        "spill_treated_px": 12,
+        "subject": 7928,
+    },
+    # `unmix_out_of_band == 1` 이 이 케이스의 전부다 — 깊이 4 짜리 블렌드 픽셀
+    # 하나가 unmix 되고 바닥 행 픽셀은 도달하지 않는다는 사실 자체가 단정이다.
+    "synthetic-reach-geometry": {
+        "blend_out_of_band": 2,
+        "degenerate_key_tint": 0,
+        "depth_positive": 240,
+        "depth_reached_max": 1,
+        "keyed_by_distance": 41,
+        "spill_candidates": 1,
+        "spill_cluster_low_tint": 1,
+        "spill_limit_from_fraction": 0,
+        "subject": 1077,
+        "unmix_collapsed_to_transparent": 0,
+        "unmix_out_of_band": 1,
+    },
+    # `keyed_alpha_zero 24` 가 `spill_candidates 24` 에 **안 섞여 있다**는 것이
+    # 이 케이스의 단정이다 — 스킵을 지우면 후보가 배경 전체로 번져 클러스터가
+    # 한도를 넘고 `spill_cluster_treated` 가 0 이 된다.
+    "synthetic-transparent-spill": {
+        "blend_in_band": 24,
+        "degenerate_key_tint": 0,
+        "depth_positive": 328,
+        "depth_reached_max": 1,
+        "keyed_alpha_zero": 24,
+        "keyed_by_distance": 816,
+        "spill_candidates": 24,
+        "spill_cluster_treated": 1,
+        "spill_limit_from_fraction": 0,
+        "spill_treated_px": 24,
+        "subject": 336,
+        "unmix_collapsed_to_transparent": 0,
+        "unmix_in_band": 8,
+        "unmix_in_band_skipped_deep": 8,
+    },
 }
 
 
@@ -787,10 +969,13 @@ def _case_params(case):
     ))
 
 
-def _run_production(case):
+def _run_production(case, image=None):
+    """`image` 를 주면 **그 이미지 객체 그대로** 넘긴다 — 입력 불변 단정은 자기가
+    들고 있는 객체가 들어가야 성립한다 (노드 3: 매번 새로 빌드하면 공허해진다)."""
     _, builder, key, threshold, fringe_threshold, fringe_delta, reach, spill = case
     return extract.remove_chroma_background(
-        builder(), key, threshold, fringe_threshold, fringe_delta,
+        builder() if image is None else image,
+        key, threshold, fringe_threshold, fringe_delta,
         unmix_reach=reach, spill_max_fraction=spill,
     )
 
@@ -811,9 +996,15 @@ def _sha256(image: Image.Image) -> str:
 
 # 결정론 스윕 — 임계 경계(63/64, 191/192)와 채널 극단을 모두 포함한다
 _SWEEP = (0, 1, 17, 63, 64, 127, 128, 191, 192, 254, 255)
+# 마지막 두 키는 `key_tint_score` 의 **채널 선택 임계 자체**를 밟는 자리다 (노드 3).
+# 색 쪽 스윕만으로는 `value >= 192` -> `> 192`, `value < 64` -> `<= 64` 가 안 잠긴다 —
+# 채널값이 정확히 192·64 인 키가 없으면 두 연산자가 같은 채널 집합을 고른다.
+#   (192, 255, 0): keyed 가 [0, 1] vs [1] 로 갈린다
+#   (0, 255, 64):  unkeyed 가 [0] vs [0, 2] 로 갈린다
 _KEYS = [
     GREEN, MAGENTA, (0, 255, 255), (255, 255, 0), (11, 238, 27), (0, 200, 0),
     (255, 255, 255), (0, 0, 0), (128, 128, 128), (200, 255, 30),
+    (192, 255, 0), (0, 255, 64),
 ]
 
 
@@ -919,11 +1110,16 @@ def test_every_branch_is_reached_by_some_case():
 def test_remove_chroma_background_does_not_mutate_its_input():
     """`convert("RGBA")` 가 사본을 만든다는 계약. numpy 로 옮길 때 `np.asarray`
     뷰에 제자리 기록하면 조용히 깨지고, `slice_sheet`·`cutout` 은 입력 이미지를
-    호출 뒤에도 들고 있다."""
+    호출 뒤에도 들고 있다.
+
+    노드 3 수리: 첫 판은 `source` 를 만들어 놓고 프로덕션에는 `builder()` 로 **새로
+    빌드한 다른 객체**를 넘겨서, `rgba = image` (사본 미생성) mutant 가 그대로
+    통과했다. 통과만 하는 단정이었다. 이제 들고 있는 객체를 그대로 넘긴다."""
     for case in CASES:
         source = case[1]()
         before = source.tobytes()
-        _run_production(case)
+        result = _run_production(case, image=source)
+        assert result is not source, f"{case[0]}: 입력 객체를 그대로 반환했다"
         assert source.tobytes() == before, f"{case[0]}: 입력이 변형됐다"
 
 
