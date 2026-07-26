@@ -317,6 +317,13 @@ If image generation produces guide boxes, visible labels, overlapping poses, bac
 
 ## Output Contract
 
+**Install from `curated/`, never from `frames/`.** `frames/` is pre-curation — the human's
+picks, pixel edits and transforms live in `curation.json` and are applied downstream. Copying
+`frames/` into an app silently ships the un-edited image and nothing fails (real incident
+2026-07-26: 191 hand-edited pixels dropped, reported as "applied"). Stills →
+`export_curated_pngs.py` then `curated/`. Animation → the composed atlas + manifest.
+Contract: [`docs/run-contract.md`](docs/run-contract.md) §2-c.
+
 One worker owns exactly one character folder. The canonical run-dir folder tree — every input/output file and which ones drive the curation view — is owned by [`docs/run-contract.md`](docs/run-contract.md) §2. Do not let multiple workers write the same character folder. The `curation.json` sidecar schema (selected/order/transforms/pixel_unfake) and its folder-collision rule: [`docs/curation.md`](docs/curation.md).
 
 ## Runtime Contract

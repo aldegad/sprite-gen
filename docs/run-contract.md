@@ -63,7 +63,12 @@ not restate it elsewhere; point here.
   references/imported/<group>/           # imported-run generation material → chips (§4); real runs use raw/ anchors instead
   prompts/<state>.txt                # generated row prompt (frame count, safe margin, anchor lock)
   raw/<state>.png                    # one horizontal image-gen strip per state (the only AI output)
-  frames/<state>/frame-N.png         # extracted transparent cells (canonical)
+  frames/<state>/frame-N.png         # extracted transparent cells — PRE-CURATION.
+                                     #   **Not the deliverable.** These are the extractor's own
+                                     #   output; the human's picks, pixel edits, transforms,
+                                     #   deletions and clones live in `curation.json` and are
+                                     #   applied downstream. An app that copies from here
+                                     #   silently ships the un-edited image (see §2-c).
   # ── 파일 택소노미 (layout: taxonomy/v1 — 신규 런 기본, 수홍 확정 2026-07-14) ──
   # 방향 계약(directions) 런은 위 두 경로가 방향/자세 폴더로 나뉜다. 상태 ID 는 그대로
   # <direction>_<pose>, 파일 경로만 분리. 리졸버 SSoT = sprite_gen/layout.py.
@@ -103,7 +108,8 @@ not restate it elsewhere; point here.
   qa/<state>.gif                     # QA state GIF
   qa/<name>.gif, qa/<name>-contact.png, qa/<name>.json   # compose_selected_cycle.py: named selected-frame cycle + its manifest
   qa-notes.md                        # per-state motion verdict + reference-plan notes
-  curated/                           # only when export_curated_pngs.py runs
+  curated/                           # only when export_curated_pngs.py runs — CURATION APPLIED.
+                                     #   This is what an external consumer installs (§2-c).
   exports/                           # only when compose_sprite_gif.py --run-dir runs (per-state GIF + gif-manifest.json)
   .sprite-gen.lock                   # single-writer lock (runio.py); a live holder blocks a second writer (§7 guarantee boundary)
   .frames.sg-staging/                # transient: extract builds the new generation here, swapped into frames/ under publish_guard
@@ -146,6 +152,34 @@ Rules the display depends on:
 The runtime `manifest.json.frame_layout` contract (absolute rects, no runtime
 alpha-recovery, `degraded_static_fallback: false`) is owned by
 [`../SKILL.md`](../SKILL.md) "Runtime Contract" and is out of scope here.
+
+## 2-c. External consumers install from `curated/`, never from `frames/`
+
+`frames/` is the extractor's own output. Everything a human does in the curation view —
+frame picks, play order, **pixel edits**, transforms, deletions, clones — lives in
+`curation.json` and is applied *downstream*, not written back into `frames/`.
+
+So an app that copies `frames/<state>/frame-N.png` into its assets **silently ships the
+un-edited image**. Nothing fails: extract succeeded, the file exists, the copy succeeded.
+The only signal is a human noticing their work is gone.
+
+**Real incident 2026-07-26** (`solvell`): a repo tool installed a game object sprite straight
+from `frames/`. The user had edited 191 pixels in the curation view; all of them were dropped.
+The agent had even run `export_curated_pngs.py` first — and then installed from the other
+folder. It reported "your edit is applied" and pushed the *original* to the user for review.
+The user caught it by eye: "저거 내가 편집한게 아닌데?"
+
+Rules for anything outside this repo:
+
+- **Stills / single frames** → run `export_curated_pngs.py`, install from `curated/`.
+- **Animation** → consume `sprite-sheet-alpha.png` + `manifest.json` from
+  `compose_sprite_atlas.py` (compose already reads `curation.json`).
+- **Never** reach into `frames/` unless you are re-deriving the cache itself.
+- If a tool must accept both, it **prefers `curated/` and says which one it read** — a silent
+  choice between two sources is how the edit disappears.
+
+Inside this repo the compose/GIF/atlas paths already read `frames/` *together with*
+`curation.json`, which is correct; the hazard is external copying.
 
 ## 3. Curation-view display contract
 
