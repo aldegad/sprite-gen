@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import re
 import shutil
 import sys
@@ -21,6 +20,7 @@ from typing import Any
 from PIL import Image, ImageDraw
 
 from sprite_gen.anchor import anchor_ref_rel
+from sprite_gen.extract import color_distance
 from sprite_gen.layout import TAXONOMY, guide_rel, prompt_rel, raw_rel
 
 
@@ -210,10 +210,6 @@ def parse_hex_color(value: str) -> tuple[int, int, int]:
 
 def rgb_to_hex(rgb: tuple[int, int, int]) -> str:
     return f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
-
-
-def color_distance(left: tuple[int, int, int], right: tuple[int, int, int]) -> float:
-    return math.sqrt(sum((left[index] - right[index]) ** 2 for index in range(3)))
 
 
 # The reference is sampled with NEAREST, not LANCZOS: a resampling filter that
