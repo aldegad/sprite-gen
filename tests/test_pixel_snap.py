@@ -72,9 +72,12 @@ def _walk_frame0_height(run_dir) -> int:
 
 
 def test_default_keeps_native_logical_size(tmp_path) -> None:
-    """DEFAULT (no conform key) skips the contract squeeze: the output keeps the
-    snapped native logical size (36) even though logical_height is 30 (physical
-    cap 42 only). The squeeze runs only on explicit `fit.conform: true`."""
+    """The output keeps the snapped native logical size (36) even though
+    logical_height is 30 — only the physical cap (42) is enforced.
+
+    There is no contract squeeze to opt into: `fit.conform` was removed
+    (Soohong 2026-07-14/17) and declaring it now fails loudly — see
+    `test_conform_flag_rejected` in this file."""
     run_dir = _build_pp_run(tmp_path)
     _conform_request(run_dir, conform=None)
     assert extract_module.run(run_dir=run_dir) == 0
