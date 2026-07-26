@@ -128,7 +128,7 @@ function drawFrameInto(ctx, image, t, cw, ch, snap, edits, ss = 1) {
 }
 
 // 픽셀퍼펙트 격자 오버레이: 픽셀퍼펙트가 실제로 스냅한 논리 픽셀 간격을 그린다.
-// run.pixelPerfect.scale = 논리 픽셀 1칸이 차지하는 셀 픽셀 수 (extract 의 pp_scale).
+// run.pixelUnfake.scale = 논리 픽셀 1칸이 차지하는 셀 픽셀 수 (extract 의 pp_scale).
 // 예전엔 셀 픽셀마다(scale 무시) 그어서, logical_height < cell 인 런에서 실제 스냅
 // 격자보다 촘촘한 거짓 격자를 보여줬다. 픽셀퍼펙트가 아닌 런은 격자 자체가 없다.
 function sizePxGrids() {
@@ -237,11 +237,11 @@ function updateCardGrid(card) {
   const st = run.states.find((s) => s.name === cardState);
   const frame = isBaseCard ? frameOf(BASE_STATE, 0) : (st && st.frames[Number(card.dataset.idx)]);
   const on = !!gridStates[cardState];
-  const plainShown = (isBaseCard || ppTwinStates.has(cardState)) && !ppOn(cardState);
+  const plainShown = (isBaseCard || unfakeTwinStates.has(cardState)) && !unfakeOn(cardState);
   const scale = isBaseCard ? 1
     // 격자 간격은 항상 정해진다: 줄별 실측 > 런 계약 > 항등 1. null 이 되는
     // 경로가 없어야 오버레이가 조건부로 사라지지 않는다 (수홍 2026-07-24).
-    : ((st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || 1);
+    : ((st && st.pixelScale) || (run.pixelUnfake && run.pixelUnfake.scale) || 1);
   const t = frame ? getTransform(card.dataset.state, frame.index) : null;
   const axisAligned = !t || (!t.rotate && t.scale === 1 && !t.shx && !t.shy);
   const useFinal = on && plainShown && frame && frame.contentBox && scale && stage && axisAligned;
@@ -371,12 +371,12 @@ function syncAggregate(checkbox, names, isOn) {
   checkbox.indeterminate = !allOn && !vals.every((v) => !v);
 }
 
-// per-state row checkboxes + the header toggle-all checkboxes reflect ppStates/gridStates
-function syncPpControls() {
+// per-state row checkboxes + the header toggle-all checkboxes reflect unfakeStates/gridStates
+function syncUnfakeControls() {
   document.querySelectorAll(".pp-state-check").forEach((el) => {
-    el.checked = ppOn(el.dataset.state);
+    el.checked = unfakeOn(el.dataset.state);
   });
-  syncAggregate(document.getElementById("pp-apply"),
+  syncAggregate(document.getElementById("unfake-apply"),
     new Set(run.states.map((s) => s.name)), ppOn);
 }
 

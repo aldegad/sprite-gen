@@ -6,7 +6,7 @@
 // sync*Controls 가 양쪽 인스턴스를 함께 갱신한다 (per-state truth 하나, 표시 N개).
 function makeStateToggle(cls, stateName, label, title, checked, onChange) {
   const el = document.createElement("label");
-  el.className = "pp-apply row-toggle";
+  el.className = "unfake-apply row-toggle";
   el.title = title;
   const input = document.createElement("input");
   input.type = "checkbox";
@@ -70,11 +70,11 @@ function makeRerollButton(stateName) {
   return wrap;
 }
 
-function makePpToggle(stateName) {
-  return makeStateToggle("pp-state-check", stateName, t("ppState"), t("tPpState"),
-    ppOn(stateName), (checked) => {
-      ppStates[stateName] = checked;
-      syncPpControls();
+function makeUnfakeToggle(stateName) {
+  return makeStateToggle("pp-state-check", stateName, t("unfakeState"), t("tUnfakeState"),
+    unfakeOn(stateName), (checked) => {
+      unfakeStates[stateName] = checked;
+      syncUnfakeControls();
       refreshVariantImages();
       scheduleSave();
     });

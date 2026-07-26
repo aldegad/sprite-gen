@@ -163,7 +163,7 @@ function openZoom(stateName, idx, keepWidth) {
   // 완전 동일 계약 (수홍 지시 2026-07-17 "다 똑같이"): 픽셀퍼펙트·격자·변형은
   // 베이스에도 전부. 프레임 전용은 GIF/이전·다음(다중 프레임 개념)뿐.
   controls.appendChild(makeGridToggle(stateName)); // 격자는 언제나 — 베이스·프레임 공통
-  controls.appendChild(makePpToggle(stateName)); // 퍼펙은 언제나 — 줄 컨트롤과 같은 계약
+  controls.appendChild(makeUnfakeToggle(stateName)); // 퍼펙은 언제나 — 줄 컨트롤과 같은 계약
   if (!isBase) {
     controls.appendChild(makeGifButton(stateName));
     // 보간 버튼은 줄 헤더 전용 — 확대뷰에선 카드 픽이 불가능해 쓸 수 없다 (수홍 2026-07-17).
@@ -1065,7 +1065,7 @@ function openZoom(stateName, idx, keepWidth) {
     // 호흡 on/off 토글 — 줄 헤더 체크박스와 같은 truth (수홍 2026-07-19: 확대 재생
     // 뷰에서도 끄고 켤 수 있게 — 끄면 선/조정 컨트롤이 쉬고 무호흡 재생만 남는다)
     const onWrap = document.createElement("label");
-    onWrap.className = "pp-apply breathe-enable";
+    onWrap.className = "unfake-apply breathe-enable";
     onWrap.title = t("tRowBreathe");
     const onCheck = document.createElement("input");
     onCheck.type = "checkbox";
@@ -1207,7 +1207,7 @@ function openZoom(stateName, idx, keepWidth) {
 
   wireStage(stage, stateName, idx); // 베이스도 변형 동일 — 저장 시 파일에 굽는다 (수홍 지시)
   applyCardTransform(stage, stateName, idx);
-  syncPpControls();
+  syncUnfakeControls();
   syncGridControls();
   sizePxGrids();
   document.addEventListener("keydown", onZoomKey);

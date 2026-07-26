@@ -57,7 +57,7 @@ _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sprite_gen.breathe import (DEFAULT_DEPTH, DEFAULT_LAG, freeze_anatomy,
                                 reference_key)
 from sprite_gen.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel, state_frame_total
-from runio import publish_guard, read_guard
+from runio import load_request, publish_guard, read_guard
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 CURATOR_DIR = SCRIPTS_DIR / "curator"
@@ -91,7 +91,7 @@ CONTENT_TYPES = {
 
 
 # ── 픽셀 격자 자동 측정 ──────────────────────────────────────────────
-# fit.pixel_perfect 계약이 없는 런(예: --pngs-dir 임포트)에서도 격자 오버레이를 켠다:
+# fit.pixel_unfake 계약이 없는 런(예: --pngs-dir 임포트)에서도 격자 오버레이를 켠다:
 # 인접픽셀 색경계 위치가 한 간격의 배수에 몰려 있으면 그 간격이 블록 피치다.
 # 축별 브루트포스(경계 질량 ≥80% 인 최대 간격). 측정 실패한 줄은 격자를 그리지 않는다
 # (가짜 격자 금지). 결과는 (경로, mtime) 키로 캐시.
@@ -119,7 +119,7 @@ def _breathe_source_frame(run_dir: Path, state: str):
         # `TypeError` 로 터져 의도한 404("no extracted frame") 대신 그 문구로 500 이 나간다
         # — 추출이 아직 안 끝난 줄에서 호흡을 켜면 도달한다 (슉슉이 실측 2026-07-26).
         return None, None
-    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(run_dir)
     curation = load_curation(run_dir)
     variant = frame_variant(curation, state)
     total = state_frame_total(request, state)
@@ -167,7 +167,7 @@ def _base_grid_response(run_dir: Path, base_path: Path) -> dict:
     cached = _BASE_GRID_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(run_dir)
     chroma = tuple(request.get("chroma_key", {}).get("rgb") or (255, 0, 255))
     from extract import (_grid_edges, detect_pixel_grid,
                          remove_chroma_background_ycbcr, solid_alpha_bbox)
@@ -362,7 +362,7 @@ def build_run_state(run_dir: Path) -> dict:
 
 def _build_run_state_impl(run_dir: Path) -> dict:
     """Assemble the run snapshot the SPA needs, from the canonical SSoT files."""
-    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(run_dir)
     # No generation yet (no manifest AND no physical frames) → serve the request/state scaffold
     # (legitimate). A present-but-corrupt/inconsistent manifest, or an orphan (frames without a
     # manifest), fails loud (load_consistent_frames_manifest raises) and surfaces as HTTP 500 in
@@ -389,14 +389,14 @@ def _build_run_state_impl(run_dir: Path) -> dict:
     # 픽셀퍼펙트 격자: 논리 픽셀 1칸이 셀 픽셀 몇 칸인가. extract 의 pp_scale 과 같은 식이어야
     # 큐레이터 오버레이가 "실제로 스냅된 격자"를 그린다 (셀 래스터가 아니라).
     fit = request.get("fit") or {}
-    pixel_perfect = None
-    if fit.get("pixel_perfect"):
+    pixel_unfake = None
+    if fit.get("pixel_unfake"):
         # 배율·논리 높이는 파생값 SSoT 에서 받는다 — 손으로 복제한 식은 클램프 분기가
         # 빠져 있었고, 선언값을 그대로 라벨에 쓰면 정수 격자가 반올림한 뒤에도 "48px"
         # 처럼 거짓 표기가 된다 (수홍 2026-07-25).
         scale = pixel_snap_scale(request) or 1
         logical_height = effective_logical_height(request) or cell_state["height"]
-        pixel_perfect = {"logicalHeight": logical_height, "scale": scale, "source": "request", "label": f"{logical_height}px"}
+        pixel_unfake = {"logicalHeight": logical_height, "scale": scale, "source": "request", "label": f"{logical_height}px"}
 
     states = []
     # 온디맨드 픽셀 프리뷰 계산 예산 (요청당) — 초과분은 deferred 로 세서 보고한다
@@ -466,8 +466,8 @@ def _build_run_state_impl(run_dir: Path) -> dict:
                     pass
             frames.append(frame)
         state_scale = None
-        if pixel_perfect is not None:
-            state_scale = pixel_perfect["scale"]
+        if pixel_unfake is not None:
+            state_scale = pixel_unfake["scale"]
         else:
             for fr in frames:
                 if fr.get("present"):
@@ -558,7 +558,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         "baseUrl": base_url,
         "cell": cell_state,
         # 계약 scale(pp 런)이 없으면 줄별 실측이 진실이다 — null 로 접지 않는다.
-        "pixelPerfect": pixel_perfect if pixel_perfect is not None else {
+        "pixelUnfake": pixel_unfake if pixel_unfake is not None else {
             "source": "auto", "label": "auto",
             "scale": min((st["pixelScale"] for st in states if st.get("pixelScale")), default=1)},
         "schemaVersion": SCHEMA_VERSION,
@@ -580,7 +580,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         # 최종 산출물 섹션 (뷰 맨 아래, 아틀라스+manifest 좌우) — 파일이 실재할 때만.
         # 아틀라스는 다운로드/합성 시점 산출물이라 mtime 을 실어 시점을 표시한다.
         "atlas": _atlas_info(run_dir),
-        "fitPixelPerfect": bool((request.get("fit") or {}).get("pixel_perfect")),
+        "fitPixelUnfake": bool((request.get("fit") or {}).get("pixel_unfake")),
         # 예산에 밀려 아직 못 만든 온디맨드 픽셀 프리뷰 수 — 0 이 아니면 리로드가 이어서 계산
         "contract": contract,
     }
@@ -740,7 +740,7 @@ def build_download(run_dir: Path, kind: str) -> tuple[bytes, str] | dict:
     게임/어디에 적용한다는 의미가 아니다 — 현재 (프레임 캐시 + 큐레이션)를
     합성 스크립트로 계산해 파일로 손에 쥐여준다. 계산 산출물은 런 폴더에도
     남는다 (런 폴더 = 작업장, 다운로드 = 핸드오프). 실패 시 dict(에러)."""
-    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(run_dir)
     character = str(request.get("character", {}).get("id") or run_dir.name)
     if kind == "atlas":
         result = run_compose(run_dir)
@@ -1046,7 +1046,7 @@ class CurationHandler(BaseHTTPRequestHandler):
                                      "progress": _read_op_progress(self.run_dir)}, 503)
                     return
                 with read_guard(self.run_dir):
-                    request = json.loads((self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+                    request = load_request(self.run_dir)
                     progress = []
                     for state in request["states"]:
                         state_frames = frames_dir_rel(request, state)
@@ -1126,13 +1126,13 @@ class CurationHandler(BaseHTTPRequestHandler):
                         # 필드는 이월한다.
                         engine_owned = ("frozen",)
                         # 뷰가 **조건부로만 authoring** 하는 행 필드: 트윈 없는 줄의
-                        # `pixel_perfect` 는 buildPayload 가 아예 안 싣는다(그 줄의 퍼펙은
+                        # `pixel_unfake` 는 buildPayload 가 아예 안 싣는다(그 줄의 퍼펙은
                         # 표시 렌즈라 사이드카에 새로 적으면 안 된다). 생략을 삭제로 받으면
-                        # **굽기가 읽는 변종이 바뀐다** — 사이드카에 `pixel_perfect: true` 가
+                        # **굽기가 읽는 변종이 바뀐다** — 사이드카에 `pixel_unfake: true` 가
                         # 선언된 트윈 없는 줄이 큐레이터를 한 번 여는 것만으로 `plain` 으로
                         # 뒤집히고, `.plain.png` 가 없으니 굽기가 죽는다. 사용자는 아무것도
                         # 안 눌렀고 알림도 없다 (슉슉이 실측 2026-07-26).
-                        view_conditional = ("pixel_perfect",)
+                        view_conditional = ("pixel_unfake",)
                         try:
                             existing = json.loads((self.run_dir / CURATION_FILENAME).read_text(encoding="utf-8"))
                         except (OSError, json.JSONDecodeError):
@@ -1143,13 +1143,13 @@ class CurationHandler(BaseHTTPRequestHandler):
                         # (구 클라이언트/수동 POST)에 조용히 사라지지 않게.
                         if "anchors" in existing and "anchors" not in payload:
                             payload["anchors"] = existing["anchors"]
-                        # 런 전역 `pixel_perfect` 도 같은 계약이다 — 뷰는 **트윈 줄이 전부
+                        # 런 전역 `pixel_unfake` 도 같은 계약이다 — 뷰는 **트윈 줄이 전부
                         # 같을 때만** 이 필드를 싣는다(혼합/트윈 없음이면 생략). 생략을
                         # 삭제로 받으면 굽기가 읽는 **변종이 바뀐다**(plain→pixel): 사용자는
                         # 아무것도 안 눌렀는데 다른 파일로 구워지고, 뷰의 호흡 기준 프레임
                         # 키도 같이 갈린다. 뷰가 authoring 하지 않은 값은 이월한다.
-                        if "pixel_perfect" in existing and "pixel_perfect" not in payload:
-                            payload["pixel_perfect"] = existing["pixel_perfect"]
+                        if "pixel_unfake" in existing and "pixel_unfake" not in payload:
+                            payload["pixel_unfake"] = existing["pixel_unfake"]
                         for state_name, prev_entry in (existing.get("states") or {}).items():
                             if not isinstance(prev_entry, dict):
                                 continue
@@ -1271,8 +1271,7 @@ class CurationHandler(BaseHTTPRequestHandler):
                 elif space != "raw":
                     self._send_json({"error": f"unknown ops space: {space}"}, 400)
                     return
-                request = json.loads(
-                    (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+                request = load_request(self.run_dir)
                 chroma = tuple(request.get("chroma_key", {}).get("rgb") or (255, 0, 255))
                 backup = base_path.with_name(base_path.name + ".orig")
                 if not backup.exists():
@@ -1357,8 +1356,7 @@ class CurationHandler(BaseHTTPRequestHandler):
             if path == "/api/interpolate":
                 payload = self._read_body()
                 state = str(payload.get("state") or "")
-                request = json.loads(
-                    (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+                request = load_request(self.run_dir)
                 if state not in request.get("states", {}):
                     self._send_json({"error": f"unknown state: {state}"}, 400)
                     return
@@ -1384,8 +1382,7 @@ class CurationHandler(BaseHTTPRequestHandler):
             if path == "/api/reroll":
                 payload = self._read_body()
                 state = str(payload.get("state") or "")
-                request = json.loads(
-                    (self.run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+                request = load_request(self.run_dir)
                 if state not in request.get("states", {}):
                     self._send_json({"error": f"unknown state: {state}"}, 400)
                     return
@@ -1444,7 +1441,7 @@ def main() -> int:
               f"grid={'yes' if c.get('grid') else 'no'}")
         if c.get("sourceless"):
             print("  WARNING: sourceless view — no base-source, no generation-material refs, no pixel grid. "
-                  "이 뷰는 세션마다 경험이 갈라진다 (run-contract.md §3/§4: _base/_refs 동봉 또는 fit.pixel_perfect 권장).")
+                  "이 뷰는 세션마다 경험이 갈라진다 (run-contract.md §3/§4: _base/_refs 동봉 또는 fit.pixel_unfake 권장).")
     except Exception as exc:  # 계약 보고 실패는 서빙을 막지 않는다 — 관측만
         print(f"  view-contract: unavailable ({exc})")
     print("  Ctrl-C to stop.")

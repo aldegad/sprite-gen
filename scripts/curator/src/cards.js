@@ -28,9 +28,9 @@ function renderState(state, replaceEl) {
   // 같은 줄 우측 = 줄별 표시/굽기 컨트롤(픽셀 격자 · 픽셀퍼펙트 체크박스) — 이미지 바로 위.
   const hasRefs = state.refs && state.refs.length;
   const showGridToggle = true; // 격자는 모든 줄이 가진다 (display.js 계약)
-  const showPpToggle = true; // 퍼펙 토글은 모든 줄 (트윈=소스 전환, 그 외=측정 k 렌즈)
+  const showUnfakeToggle = true; // 퍼펙 토글은 모든 줄 (트윈=소스 전환, 그 외=측정 k 렌즈)
   const showGifBtn = state.frames && state.frames.some((f) => f.present);
-  if (hasRefs || showGridToggle || showPpToggle || showGifBtn) {
+  if (hasRefs || showGridToggle || showUnfakeToggle || showGifBtn) {
     const refs = document.createElement("div");
     refs.className = "state-refs";
     refs.innerHTML = hasRefs
@@ -52,7 +52,7 @@ function renderState(state, replaceEl) {
     controls.className = "row-controls";
     controls.appendChild(makeFpsStepper(state.name));
     if (showGridToggle) controls.appendChild(makeGridToggle(state.name));
-    if (showPpToggle) controls.appendChild(makePpToggle(state.name));
+    if (showUnfakeToggle) controls.appendChild(makeUnfakeToggle(state.name));
     controls.appendChild(makeTweenButton(state.name));
     controls.appendChild(makeRerollButton(state.name));
     controls.appendChild(makeBreatheToggle(state.name));

@@ -29,11 +29,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image
 
 import sprite_gen.extract as extract
+from sprite_gen.runio import load_request
 
 
 def _prepare_work_dir(source: Path, work: Path, states: list[str], align_x: str) -> None:
     (work / "raw").mkdir(parents=True, exist_ok=True)
-    request = json.loads((source / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(source)
     fit = dict(request.get("fit") or {})
     fit["align_x"] = align_x
     request["fit"] = fit

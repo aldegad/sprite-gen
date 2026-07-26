@@ -667,7 +667,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 }
 
 /* pixel-perfect apply checkbox (top-right) + view toggle */
-.pp-apply {
+.unfake-apply {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -682,7 +682,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   user-select: none;
   white-space: nowrap;
 }
-.pp-apply input {
+.unfake-apply input {
   margin: 0;
   cursor: pointer;
 }
