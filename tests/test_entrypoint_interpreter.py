@@ -9,11 +9,18 @@ installed by hand, so declaration and reality drift there (observed: Pillow
 present, NumPy absent — one dependency installed made the surface *look*
 provisioned).
 
-Agent-facing commands are written with an absolute skill path (they run in
-shells that never activated the venv), so those must name the venv interpreter
-explicitly. Repo-relative examples (`python3 scripts/...`) belong to the README
-quickstart register, where `source .venv/bin/activate` already resolved the same
-interpreter — they are deliberately out of scope here.
+Agent-facing docs (`SKILL.md`, `docs/*.md`) are read by agents in shells that
+never activated the venv, so *every* invocation there must name the interpreter
+explicitly — the absolute skill-path form and the repo-relative
+`python3 scripts/<script>.py` form alike. The relative form is not safer: it was
+the shape that actually drifted (`docs/frame-interpolation.md` carried
+`python3 scripts/interpolate_frames.py` as its only command, with zero mentions
+of `venv`/`activate` anywhere in the file, and that script imports
+`sprite_gen.extract` at module load).
+
+Only the README quickstart register stays out of scope, and it is out of scope
+by not being scanned at all: its relative examples follow an explicit
+`source .venv/bin/activate` line that resolves to this same interpreter.
 """
 
 from __future__ import annotations
@@ -23,18 +30,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# An invocation is "agent-register" when it either targets a path anchored
-# outside the current directory (`$ALEX_EXTENSIONS_DIR/...`, the `$SG` shorthand
-# docs/curation.md defines, the elliptical `.../<script>.py` form) or runs this
-# package via `-m sprite_gen...` — SKILL.md and docs/ are read by agents in
-# shells that never activated the venv, so both forms need the explicit
-# interpreter. Only the README quickstart may assume an activated shell.
+# An invocation is "agent-register" when it names a script or this package at
+# all: a path anchored outside the current directory (`$ALEX_EXTENSIONS_DIR/...`,
+# the `$SG` shorthand docs/curation.md defines, the elliptical `.../<script>.py`
+# form), a repo-relative `scripts/<script>.py`, or `-m sprite_gen...`. These
+# files are the agent register in full, so every form needs the explicit
+# interpreter. Only the README quickstart may assume an activated shell, and it
+# is excluded by file, not by form (see `_agent_facing_docs`).
 _BARE_INTERPRETER = r"(?<![\w./-])python3?\s+"
 _AGENT_REGISTER_BARE = re.compile(
     _BARE_INTERPRETER
     + r"(?:"
     + r"[\"']?(?:\$\{?(?:ALEX_EXTENSIONS_DIR|SG)\b|\.\.\./)"   # skill-absolute path
     + r"|-m\s+sprite_gen"                                       # or the package CLI
+    + r"|(?:\./)?(?:[\w.-]+/)*[\w-]+\.py\b"                     # or a repo-relative script
     + r")"
 )
 

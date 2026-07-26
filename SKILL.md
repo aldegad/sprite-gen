@@ -131,8 +131,11 @@ $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python <script.py> ...
 - 문서에 `sprite-gen <tool>` 로 적힌 명령(`anchor`, `cutout`, `migrate-breathe` …)은 콘솔 스크립트가
   아니라 CLI 모듈이다 — `$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python -m sprite_gen.cli <tool> ...`
   로 읽는다.
-- 레포 루트에서 `source .venv/bin/activate` 한 셸이라면 README 예제처럼 상대경로 `python3 scripts/...`
-  가 같은 인터프리터를 가리킨다. 활성화하지 않은 셸(에이전트가 여는 대부분의 셸)에서는 위 절대경로 형식을 쓴다.
+- **레지스터는 파일로 갈린다**: 상대경로 `python3 scripts/...` 형식이 같은 인터프리터를 가리키는 건
+  `source .venv/bin/activate` 가 **바로 앞에 적혀 있는** README quickstart 안에서만이다. `SKILL.md` 와
+  `docs/*.md` 는 활성화 단계가 없는 셸에서 읽히므로, 절대경로든 상대경로든 **여기서는 상대형을 쓰지
+  않는다** — 위 venv 절대경로 형식 하나만 쓴다. (`tests/test_entrypoint_interpreter.py` 가 이 두 파일군에
+  대해 잠근다.)
 
 ## Script Map
 
