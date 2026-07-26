@@ -70,9 +70,12 @@ function tpWireGesture(el, opts) {
       const ddy = e.clientY - start.y;
       if (Math.abs(ddx) > TP_DRAG_THRESHOLD || Math.abs(ddy) > TP_DRAG_THRESHOLD) moved = true;
       const delta = { dx: 0, dy: 0, rotate: 0, shx: 0, shy: 0 };
-      if (e.shiftKey) {
+      // 축 고정 — 핸들에서 온 제스처는 모디파이어와 무관하게 자기 축만 움직인다.
+      // (스테이지 드래그는 axis 없이 걸어 모디파이어로 가른다.)
+      const axis = opts.axis;
+      if (axis === "rotate" || (!axis && e.shiftKey)) {
         delta.rotate = tpScreenDeltaToRotate(startAngle, tpAngleAt(cx, cy, e));
-      } else if (e.altKey) {
+      } else if (axis === "shear" || (!axis && e.altKey)) {
         const [sw, sh] = spanOf ? spanOf() : [el.clientWidth, el.clientHeight];
         const sh2 = tpShearDelta(ddx, ddy, sw, sh);
         delta.shx = sh2.shx;

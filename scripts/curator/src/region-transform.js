@@ -138,6 +138,78 @@ function regionCancel() {
   regionEdit = null;
 }
 
+// 선택이 있으면 회전·비틀기 핸들을 **선택 영역으로 옮긴다** (수홍 지시 2026-07-26
+// "로테이트랑 비틀기가 올가미 영역 위주로 위치를 이동했으면 좋겠어").
+//
+// 왜 중요한가: 핸들은 스테이지 고정 위치(위 가운데 / 왼아래)라 선택과 무관해 보이고,
+// 실제로도 셀 전체를 돌린다. 올가미로 팔 하나를 잡아 놓고 그 핸들을 잡으면 캐릭터가
+// 통째로 돈다 — 수홍이 실사용에서 바로 밟았다. 핸들이 선택 위로 따라오면 "이건 이 영역을
+// 돌린다" 가 위치로 읽히고, 아래 `wireRegionHandles` 가 실제 대상도 영역으로 바꾼다.
+function regionPlaceHandles(stage, stateName, sel) {
+  const rot = stage.querySelector(".rotate-handle");
+  const shr = stage.querySelector(".shear-handle");
+  if (!rot || !shr) return;
+  if (!sel) {
+    // 선택 해제 = CSS 기본 자리로 되돌린다 (인라인 제거).
+    for (const el of [rot, shr]) {
+      el.style.left = ""; el.style.top = ""; el.style.bottom = ""; el.style.marginLeft = "";
+    }
+    return;
+  }
+  const [cw, ch] = cellDims(stateName);
+  const pct = (v, span) => `${(v / span) * 100}%`;
+  rot.style.left = pct((sel.x0 + sel.x1) / 2, cw);
+  rot.style.top = `calc(${pct(sel.y0, ch)} - 18px)`;
+  rot.style.marginLeft = "-8px";
+  shr.style.left = `calc(${pct(sel.x0, cw)} - 16px)`;
+  shr.style.top = `calc(${pct(sel.y1, ch)} - 0px)`;
+  shr.style.bottom = "auto";
+}
+
+
+// 핸들 드래그의 **대상**을 영역으로 바꾼다. 선택이 없으면 아무것도 안 하고
+// `wireStage` 의 셀 전체 핸들러가 그대로 가져간다.
+// `wireStage`(zoom-editor.js:1291)보다 **먼저** 등록돼야 stopImmediatePropagation 이 먹는다.
+function wireRegionHandles(stage, stateName, idx, ctx) {
+  const { isTransformTool, hasSelection, selectionRect, afterCommit } = ctx;
+  const common = (axis) => ({
+    axis,
+    enabled: () => isTransformTool() && hasSelection(),
+    pixelsPerUnit: () => stage.clientWidth / cellDims(stateName)[0],
+    centerOf: () => {
+      const r = stage.getBoundingClientRect();
+      const [cw, ch] = cellDims(stateName);
+      const rect = selectionRect();
+      return [
+        r.left + ((rect.x + rect.w / 2) / cw) * r.width,
+        r.top + ((rect.y + rect.h / 2) / ch) * r.height,
+      ];
+    },
+    spanOf: () => [stage.clientWidth, stage.clientHeight],
+    onStart: () => {
+      const rect = selectionRect();
+      const src = regionCapture(stage, stateName, idx, rect);
+      regionEdit = { state: stateName, idx, rect, src: src || [],
+                     t: { dx: 0, dy: 0, rotate: 0, shx: 0, shy: 0 }, canvas: null };
+    },
+    onDelta: (d) => {
+      if (!regionEdit) return;
+      regionEdit.t = { dx: Math.round(d.dx), dy: Math.round(d.dy),
+                       rotate: d.rotate, shx: d.shx, shy: d.shy };
+      regionRenderPreview(stage, stateName);
+    },
+    onEnd: (moved) => {
+      if (!moved) { regionCancel(); return; }
+      if (regionCommit(stateName, idx) && afterCommit) afterCommit();
+    },
+  });
+  const rot = stage.querySelector(".rotate-handle");
+  const shr = stage.querySelector(".shear-handle");
+  if (rot) tpWireGesture(rot, common("rotate"));
+  if (shr) tpWireGesture(shr, common("shear"));
+}
+
+
 // 스테이지에 영역 변형 제스처를 건다. 마퀴 선택이 있고 변형 툴이 활성일 때만 먹는다.
 function wireRegionTransform(stage, stateName, idx, ctx) {
   const { hasSelection, selectionRect, isTransformTool, afterCommit } = ctx;
