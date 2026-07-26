@@ -1174,6 +1174,17 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .stage.selecting { cursor: crosshair; }
 /* 변형 툴 — 기본 모드. 선택이 있으면 그 영역만, 없으면 셀 전체를 옮긴다. */
 .stage.transforming { cursor: move; }
+.stage.lassoing { cursor: crosshair; }
+/* 올가미 — 그리는 중 윤곽(위)과 확정 마스크(아래). 둘 다 포인터 통과. */
+.lasso-path, .lasso-mask {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.lasso-path { z-index: 5; }
+.lasso-mask { z-index: 4; }
 /* 영역 변형 실시간 미리보기 — 스테이지 위에 겹치는 결과 레이어 (포인터는 통과). */
 .region-preview {
   position: absolute;

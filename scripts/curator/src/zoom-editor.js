@@ -31,7 +31,8 @@ const TOOL_ICONS = {
   eraser: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M9.5 2.5 2.8 9.2a1 1 0 0 0 0 1.4l2.6 2.6h4.1l4-4a1 1 0 0 0 0-1.4L9.5 2.5zM5.5 13.2 9.9 8.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
   pick: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M10.6 2a1.9 1.9 0 0 1 2.7 2.7l-1 1 .5.5-1.1 1.1-.5-.5-4.3 4.3-2.4.6.6-2.4 4.3-4.3-.5-.5L10 6.4l-.5-.5 1.1-1.1.5.5 1-1z" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/></svg>',
   select: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.4 1.7"/></svg>',
-  transform: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3.2 2.2v9.3l2.4-2.3h3.3L3.2 2.2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M10.2 9.4l3.4 3.4M13.6 9.9v3h-3" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  transform: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M4 1.8 12.6 8.4H8.2l-1.1 4.9L4 1.8z" fill="currentColor" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>',
+  lasso: LASSO_ICON,
   hand: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M5.3 8V3.8a.95.95 0 0 1 1.9 0V7m0-3.9v-.6a.95.95 0 0 1 1.9 0V7m0-3.3a.95.95 0 0 1 1.9 0V7.8m0-2.3a.95.95 0 0 1 1.9 0v3.7c0 2.9-1.8 4.7-4.5 4.7-2.1 0-3.1-.9-4.2-2.5L3 9.9c-.5-.8-.3-1.6.4-2 .6-.4 1.3-.2 1.7.4z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/></svg>',
 };
 
@@ -40,6 +41,7 @@ const TOOL_ICONS = {
 
 function clearMarquee() {
   if (pixelEdit) pixelEdit.sel = null;
+  document.querySelectorAll(".lasso-mask").forEach((el) => el.parentNode && el.parentNode.removeChild(el));
   document.querySelectorAll(".marquee").forEach((m) => { m.hidden = true; });
 }
 
@@ -48,7 +50,7 @@ function clearMarquee() {
 // 같은 툴 키 재입력 = 툴 끔 (버튼 재클릭과 동일 거동).
 // ev.code (물리 키) 기준 — 한글 IME/타 레이아웃에서도 동작 (ev.key 는 한글 모드에서
 // "ㅠ" 같은 조합 문자가 와 매칭이 죽는다 — 실사고 2026-07-19 수홍).
-const TOOL_SHORTCUTS = { KeyV: ".et-transform", KeyB: ".et-pen", KeyP: ".et-pen", KeyE: ".et-eraser", KeyI: ".et-pick", KeyM: ".et-select", KeyH: ".et-hand" };
+const TOOL_SHORTCUTS = { KeyV: ".et-transform", KeyL: ".et-lasso", KeyB: ".et-pen", KeyP: ".et-pen", KeyE: ".et-eraser", KeyI: ".et-pick", KeyM: ".et-select", KeyH: ".et-hand" };
 document.addEventListener("keydown", (ev) => {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
   const sel = TOOL_SHORTCUTS[ev.code];
@@ -199,6 +201,7 @@ function openZoom(stateName, idx, keepWidth) {
     `<button type="button" class="ghost et-eraser" data-tip="${t("eraserTool")} (E)">${TOOL_ICONS.eraser}</button>` +
     `<button type="button" class="ghost et-pick" data-tip="${t("tPick")} (I)">${TOOL_ICONS.pick}</button>` +
     `<button type="button" class="ghost et-select" data-tip="${t("tSelectTool")} (M)">${TOOL_ICONS.select}</button>` +
+    `<button type="button" class="ghost et-lasso" data-tip="${t("tLassoTool")} (L)">${TOOL_ICONS.lasso}</button>` +
     `<button type="button" class="ghost et-hand" data-tip="${t("tHandTool")} (H)">${TOOL_ICONS.hand}</button>` +
     `<button type="button" class="ghost et-undo" data-tip="${t("tUndoKeys")}">${t("undoEdit")}</button>` +
     `<button type="button" class="ghost et-redo" data-tip="${t("tRedoKeys")}">${t("redoEdit")}</button>` +
@@ -243,6 +246,7 @@ function openZoom(stateName, idx, keepWidth) {
   const pickBtn = toolbar.querySelector(".et-pick");
   const selectBtn = toolbar.querySelector(".et-select");
   const transformBtn = toolbar.querySelector(".et-transform");
+  const lassoBtn = toolbar.querySelector(".et-lasso");
   // ── 팔레트 도크 (Aseprite 식, 수홍 지시 2026-07-17): 스테이지 왼쪽 세로 팔레트 —
   // 위 = 현재 쓰인 색 전부 (같은 색 1개, 빈도순), 아래 = 자유 색상 피커.
   const stageRow = document.createElement("div");
@@ -355,6 +359,8 @@ function openZoom(stateName, idx, keepWidth) {
     pickBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "pick");
     selectBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "select");
     transformBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "transform");
+    lassoBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "lasso");
+    stage.classList.toggle("lassoing", !!pixelEdit && pixelEdit.tool === "lasso");
     stage.classList.toggle("transforming", !!pixelEdit && pixelEdit.tool === "transform");
     stage.classList.toggle("pixel-editing", !!pixelEdit);
     stage.classList.toggle("picking", !!pixelEdit && pixelEdit.tool === "pick");
@@ -367,7 +373,7 @@ function openZoom(stateName, idx, keepWidth) {
                        journal: (pixelEdit && pixelEdit.journal) || [],
                        redo: (pixelEdit && pixelEdit.redo) || [],
                        // 변형 툴은 선택을 이어받는다 — "네모로 잡고 넘어와서 비튼다" 가 이 툴의 용법이다.
-                       sel: (tool === "select" || tool === "transform")
+                       sel: (tool === "select" || tool === "transform" || tool === "lasso")
                          ? (pixelEdit && pixelEdit.sel) || null : null,
                        undoFn: () => undoPixel(), redoFn: () => redoPixel() };
     syncToolbar();
@@ -378,6 +384,7 @@ function openZoom(stateName, idx, keepWidth) {
   pickBtn.addEventListener("click", () => setTool("pick"));
   selectBtn.addEventListener("click", () => setTool("select"));
   transformBtn.addEventListener("click", () => setTool("transform"));
+  lassoBtn.addEventListener("click", () => setTool("lasso"));
   colorInput.addEventListener("input", () => {
     rememberPenColor(colorInput.value);
     if (pixelEdit) pixelEdit.color = colorInput.value;
@@ -595,6 +602,23 @@ function openZoom(stateName, idx, keepWidth) {
   pixelEdit = { state: stateName, idx, tool: "transform", color: colorInput.value,
                 journal: [], redo: [], sel: null,
                 undoFn: () => undoPixel(), redoFn: () => redoPixel() };
+  // 올가미 — 자유곡선으로 잡고 그 마스크를 `sel` 에 얹는다 (bbox 는 유지).
+  wireLasso(stage, stateName, {
+    isLassoTool: () => !!pixelEdit && pixelEdit.tool === "lasso"
+      && pixelEdit.state === stateName && pixelEdit.idx === idx,
+    srcXY: (e2) => pointerSrcXY(stage, stateName, idx, e2),
+    onSelection: (sel) => {
+      if (!pixelEdit) return;
+      pixelEdit.sel = sel;
+      lassoRenderMask(stage, stateName, sel);
+      syncMarqueeBox();
+      if (sel) {
+        // 잡았으면 바로 비틀 수 있게 변형 툴로 넘긴다 — 올가미의 용법이 그것이다.
+        setTool("transform");
+        setStatus(t("lassoSelected")(sel.mask.size), "ok");
+      }
+    },
+  });
   // 선택 영역만 변형 — 마퀴가 있을 때 스테이지 드래그를 가져간다.
   wireRegionTransform(stage, stateName, idx, {
     isTransformTool: () => !!pixelEdit && pixelEdit.tool === "transform"
@@ -602,7 +626,8 @@ function openZoom(stateName, idx, keepWidth) {
     hasSelection: () => !!(pixelEdit && pixelEdit.sel),
     selectionRect: () => {
       const s0 = pixelEdit.sel;
-      return { x: s0.x0, y: s0.y0, w: s0.x1 - s0.x0, h: s0.y1 - s0.y0 };
+      // 올가미면 bbox 에 마스크를 얹어 넘긴다 — 마스크가 없으면 사각 선택 그대로다.
+      return { x: s0.x0, y: s0.y0, w: s0.x1 - s0.x0, h: s0.y1 - s0.y0, mask: s0.mask || null };
     },
     afterCommit: () => {
       applyFrameTransformAll(stateName, idx);
@@ -618,7 +643,7 @@ function openZoom(stateName, idx, keepWidth) {
     if (!pixelEdit || pixelEdit.state !== stateName || pixelEdit.idx !== idx) return;
     // 변형 툴은 픽셀을 안 찍는다. 선택이 있으면 영역 변형(region-transform.js)이,
     // 없으면 `wireStage` 의 셀 전체 변형이 그 드래그를 가져간다.
-    if (pixelEdit.tool === "transform") return;
+    if (pixelEdit.tool === "transform" || pixelEdit.tool === "lasso") return;
     if (ev.button || !ev.isPrimary) return;
     ev.preventDefault();
     ev.stopImmediatePropagation();

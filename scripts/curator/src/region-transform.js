@@ -36,9 +36,13 @@ function regionCapture(stage, stateName, idx, rect) {
     getPixelOps(stateName, idx), 1);
   const src = [];
   const data = ctx.getImageData(0, 0, cw, ch).data;
+  // 올가미 선택이면 `rect` 는 바운딩 박스일 뿐이고 실제 모양은 `mask` 다 —
+  // 마스크 밖 픽셀을 집으면 올가미가 사각으로 퇴화한다.
+  const mask = rect.mask || null;
   for (let y = rect.y; y < rect.y + rect.h; y += 1) {
     for (let x = rect.x; x < rect.x + rect.w; x += 1) {
       if (x < 0 || y < 0 || x >= cw || y >= ch) continue;
+      if (mask && !mask.has(`${x},${y}`)) continue;
       const o = (y * cw + x) * 4;
       const a = data[o + 3];
       if (!a) continue;
