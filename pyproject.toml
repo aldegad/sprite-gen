@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 [build-system]
-requires = ["setuptools>=68"]
+# 77, not 68: `license = "Apache-2.0"` below is the PEP 639 string form, which older
+# setuptools rejects outright — measured, backend called directly, this very tree:
+# 76.1.0 dies with "`project.license` must be valid exactly by one definition", 77.0.1
+# builds. Nobody hit it because pip's build isolation always fetches the newest setuptools,
+# but the floor was a claim about a build that could not happen.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -30,6 +35,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    # The packaging guard builds a wheel and reads what is inside it, because the declarations
+    # below are a claim and only the build is the fact. That needs the declared build backend
+    # importable in the test environment — build isolation puts it somewhere the tests cannot
+    # see, and a modern `python -m venv` no longer provides it. Same floor as build-system.
+    "setuptools>=77",
 ]
 
 # The console script is what removes the "which python?" question: pip writes it
@@ -58,7 +68,12 @@ include = ["sprite_gen*"]
 
 # The curation SPA is package data, not a repo-side script asset: the server resolves it
 # relative to its own module (serve_curation.CURATOR_DIR), so it has to travel inside the
-# wheel or the installed console script serves a 404 shell. One location, no fallback —
-# tests/test_curation_asset_packaging.py fails if an asset file matches no pattern here.
+# wheel or the installed console script serves a 404 shell. One location, no fallback.
+#
+# Whole subtree, not an extension list: setuptools expands these with glob(recursive=True),
+# where a single `*` stops at a directory boundary. A hand-listed `curator/src/*.js` therefore
+# drops `curator/src/<anything>/*.js` from the wheel the day someone nests a folder — measured,
+# not feared: adding curator/src/deep/new.js under the old patterns built a wheel without it.
+# `curator/**/*` derives the answer from the filesystem, the same fix as packages.find above.
 [tool.setuptools.package-data]
-sprite_gen = ["curator/*.html", "curator/*.css", "curator/src/*.js"]
+sprite_gen = ["curator/**/*"]
