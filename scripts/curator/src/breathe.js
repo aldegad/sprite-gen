@@ -403,7 +403,7 @@ function migrateLegacyBreathe(stateName) {
 
 function makeBreatheToggle(stateName) {
   const wrap = document.createElement("span");
-  wrap.className = "pp-apply row-toggle breathe-toggle";
+  wrap.className = "unfake-apply row-toggle breathe-toggle";
   wrap.title = t("tRowBreathe");
   const input = document.createElement("input");
   input.type = "checkbox";

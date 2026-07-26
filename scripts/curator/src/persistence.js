@@ -43,13 +43,13 @@ function buildPayload() {
       if (ops && Object.keys(ops).length) px[i] = ops;
     }
     if (Object.keys(px).length) states[name].pixels = px;
-    // per-state pixel-perfect — **트윈 줄만 저장** (계약): 트윈 없는 줄의 퍼펙은
+    // per-state pixel-unfake — **트윈 줄만 저장** (계약): 트윈 없는 줄의 퍼펙은
     // 표시 렌즈(측정 k 양자화)라 사이드카에 적으면 굽기 리졸버가 존재하지 않는
     // .plain 변형을 요구하게 된다. 격자 토글과 같은 표시-전용 상태다.
-    // authoring 규칙의 SSoT 는 `authoredPixelPerfect` 다. **해소 규칙과는 다른 함수**다 —
+    // authoring 규칙의 SSoT 는 `authoredUnfake` 다. **해소 규칙과는 다른 함수**다 —
     // 뷰가 안 적는 값도 사이드카엔 남아 있을 수 있고(서버 이월), 굽기는 그걸 읽는다.
-    const ownPp = authoredPixelPerfect(name);
-    if (ownPp !== undefined) states[name].pixel_perfect = ownPp;
+    const ownPp = authoredUnfake(name);
+    if (ownPp !== undefined) states[name].pixel_unfake = ownPp;
     // 호흡 후처리 레이어 (수홍 2026-07-18) — 켠 상태만 기록 (없음 = off)
     if (entry.breathe) states[name].breathe = entry.breathe;
     // 폐기 스키마는 **원본 그대로 되쓴다.** 정규화도 삭제도 하지 않는다 — 웹뷰가 못 읽는
@@ -67,10 +67,10 @@ function buildPayload() {
   // run-wide default field: written only when every twin row agrees (uniform),
   // so a consumer without per-state awareness still bakes the right variant.
   // Mixed rows -> omitted; the per-state values above are the truth.
-  // `savedRunPixelPerfect` 가 이 필드의 authoring 규칙을 소유한다 (트윈 줄이 전부 같을
+  // `savedRunUnfake` 가 이 필드의 authoring 규칙을 소유한다 (트윈 줄이 전부 같을
   // 때만 authoring; 아니면 로드된 값을 그대로 둔다 — 서버가 이월한다).
-  const widePp = savedRunPixelPerfect();
-  if (widePp !== undefined) payload.pixel_perfect = widePp;
+  const widePp = savedRunUnfake();
+  if (widePp !== undefined) payload.pixel_unfake = widePp;
   return payload;
 }
 

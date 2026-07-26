@@ -74,9 +74,9 @@ function openCompare() {
     `<div class="card cmp-card">` +
     `<div class="zoom-head"><span class="zoom-title">${t("cmpTitle")}</span>` +
     `<span class="cmp-controls">` +
-    `<label class="pp-apply"><input type="radio" name="cmp-mode" value="h" checked /><span>${t("cmpH")}</span></label>` +
-    `<label class="pp-apply"><input type="radio" name="cmp-mode" value="v" /><span>${t("cmpV")}</span></label>` +
-    `<label class="pp-apply"><input type="radio" name="cmp-mode" value="overlay" /><span>${t("cmpOverlay")}</span></label>` +
+    `<label class="unfake-apply"><input type="radio" name="cmp-mode" value="h" checked /><span>${t("cmpH")}</span></label>` +
+    `<label class="unfake-apply"><input type="radio" name="cmp-mode" value="v" /><span>${t("cmpV")}</span></label>` +
+    `<label class="unfake-apply"><input type="radio" name="cmp-mode" value="overlay" /><span>${t("cmpOverlay")}</span></label>` +
     `<button type="button" class="ghost cmp-play" data-tip="${t("tCmpPlay")}">▶</button>` +
     `<button type="button" class="ghost cmp-hand" data-tip="${t("tHandTool")} (H)">${TOOL_ICONS.hand}</button>` +
     `<span class="cmp-dl-wrap"><button type="button" class="ghost cmp-dl" data-tip="${t("tCmpDl")}">${t("cmpDl")} ▾</button>` +

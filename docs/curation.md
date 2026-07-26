@@ -117,12 +117,12 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   "version": 1,
   "kind": "sprite-gen-curation",
   "run_revision": "9f3c1a0b7e2d4c58",
-  "pixel_perfect": true,
+  "pixel_unfake": true,
   "anchors": { "down": { "state": "down_idle", "index": 2 } },
   "states": {
     "idle": {
       "revision": ["a1b2c3d4e5f6"],
-      "pixel_perfect": false,
+      "pixel_unfake": false,
       "selected": [0, 2, 3, 7],
       "order": [0, 2, 3, 7, 1],
       "clones": { "7": 0 },
@@ -148,7 +148,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   생기면 원문 전체가 `curation.stale-<hash>.json` 으로 먼저 백업**되고(내용 해시 파일명,
   멱등) stderr + 웹뷰 배너(`/api/run` 의 `curationDropped`/`curationBackup`)로 보고된다 —
   같은 raw 의 엔진 업그레이드 재유도에는 선택이 살아남고, raw 리롤은 그 행만 리셋되며,
-  무엇도 조용히 소실되지 않는다. 다이제스트의 기하 세그먼트는 셀 크기 + `pixel_perfect` +
+  무엇도 조용히 소실되지 않는다. 다이제스트의 기하 세그먼트는 셀 크기 + `pixel_unfake` +
   **파생 격자 배율**(`pixel_snap_scale`)이다 — `fit.logical_height` 선언값 자체가 아니다.
   출력이 한 픽셀도 안 바뀌는 선언 편집(무효값 제거 등)이 전 행을 무효화하지 않게 하기 위해서다
   (실사고 hero founder_v8 2026-07-25, 계약 = `tests/test_logical_height_contract.py`).
@@ -158,7 +158,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   compose/export/GIF 는 파일만 원본 프레임(`source_frame_index`)에서 읽는다. `frames/` 는
   파생 캐시이므로 복제 파일을 만들지 않는다(복제 의도는 사이드카 소유). 웹뷰에서 복제
   카드의 보관 버튼은 보관함이 아니라 인스턴스 삭제다.
-- `pixel_perfect` — **두 층위**. top-level = 런 전체 기본값(웹뷰 우측 상단 "전체 토글" — 모든 줄을 한번에 설정; 줄별 값이 섞이면 웹뷰는 이 필드를 생략한다). `states.<state>.pixel_perfect` = 줄별 override(각 줄 헤더의 토글). 해석 순서는 `curation.frame_variant(curation, state)` 가 SSoT: 줄별 값 > top-level > 기본 `true`. `false` 인 줄은 compose/export/GIF 가 적용 전 쌍둥이(`frame-N.plain.png`)를 굽고, 없거나 `true` 인 줄은 canonical `frame-N.png`. plain 쌍둥이가 없는 런에서는 **굽기에** 무의미(플래그와 무관하게 canonical 을 굽는다) — 웹뷰의 이런 줄 퍼펙 토글은 **표시 렌즈**다: 표시 렌더러가 측정 격자 `pixelScale`(격자 오버레이와 같은 k)로 재양자화해 보여줄 뿐, sidecar 로 저장되지 않고 **파이썬 파이프라인 굽기**(compose/export_pngs/compose_gif — 사이드카만 읽는다)에 영향이 없다. 단 **웹뷰 줄 GIF/WebM/MP4**(`row-export.js`)는 화면 그대로(WYSIWYG) 굽므로 토글 상태가 반영된다 (구 서버 `.pixel-preview` 온디맨드 스냅은 표시 격자와 다른 검출기로 스냅해 폐기, v1.56.91). manifest 는 줄별 `animation.rows.<state>.frame_variant` 와 top-level 요약(`pixel`/`plain`/`mixed`)을 기록한다. 상세는 [`pixel-perfect.md`](pixel-perfect.md).
+- `pixel_unfake` — **두 층위**. top-level = 런 전체 기본값(웹뷰 우측 상단 "전체 토글" — 모든 줄을 한번에 설정; 줄별 값이 섞이면 웹뷰는 이 필드를 생략한다). `states.<state>.pixel_unfake` = 줄별 override(각 줄 헤더의 토글). 해석 순서는 `curation.frame_variant(curation, state)` 가 SSoT: 줄별 값 > top-level > 기본 `true`. `false` 인 줄은 compose/export/GIF 가 적용 전 쌍둥이(`frame-N.plain.png`)를 굽고, 없거나 `true` 인 줄은 canonical `frame-N.png`. plain 쌍둥이가 없는 런에서는 **굽기에** 무의미(플래그와 무관하게 canonical 을 굽는다) — 웹뷰의 이런 줄 퍼펙 토글은 **표시 렌즈**다: 표시 렌더러가 측정 격자 `pixelScale`(격자 오버레이와 같은 k)로 재양자화해 보여줄 뿐, sidecar 로 저장되지 않고 **파이썬 파이프라인 굽기**(compose/export_pngs/compose_gif — 사이드카만 읽는다)에 영향이 없다. 단 **웹뷰 줄 GIF/WebM/MP4**(`row-export.js`)는 화면 그대로(WYSIWYG) 굽므로 토글 상태가 반영된다 (구 서버 `.pixel-preview` 온디맨드 스냅은 표시 격자와 다른 검출기로 스냅해 폐기, v1.56.91). manifest 는 줄별 `animation.rows.<state>.frame_variant` 와 top-level 요약(`pixel`/`plain`/`mixed`)을 기록한다. 상세는 [`pixel-unfake.md`](pixel-unfake.md).
 - `anchors` — 방향 앵커 **프레임 지정** `{<direction>: {state, index}}` (수홍 2026-07-25). 그
   방향의 다른 행을 생성할 때 identity 로 붙는 인스턴스 하나다 — 카드의 앵커(핀) 버튼(또는
   `sprite-gen anchor --pick <state>#<index>`)이 쓰고, 지정이 없는 방향은 **앵커 행
@@ -175,7 +175,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   생성 시 fail-loud (조용한 기본값 복귀 금지) — 뷰는 로드 시 그 이유를 상태줄에 띄운다.
 - `selected` — 0-based frame indices in play order. Absent/empty → all extracted frames in order.
 - `order` — optional, webview-owned: the full display order (sequence row then candidate-pool row) so reopening the curator restores the exact arrangement of both rows. `compose` / `state_plan` ignore it and key off `selected`.
-- `transforms` — keyed by 0-based frame index. `rotate` degrees (counter-clockwise positive, PIL convention), `scale` multiplier about center, `dx`/`dy` pixel offsets in the cell (+x right, +y down), `shx`/`shy` shear, `flipX` (0|1) horizontal mirror. Absent → identity. On a `fit.pixel_perfect` run, rows baking the pixel variant re-snap the transformed result onto the fixed logical grid (`apply_transform(snap_scale=…)`, mirrored live by the webview) — see [`pixel-perfect.md`](pixel-perfect.md).
+- `transforms` — keyed by 0-based frame index. `rotate` degrees (counter-clockwise positive, PIL convention), `scale` multiplier about center, `dx`/`dy` pixel offsets in the cell (+x right, +y down), `shx`/`shy` shear, `flipX` (0|1) horizontal mirror. Absent → identity. On a `fit.pixel_unfake` run, rows baking the pixel variant re-snap the transformed result onto the fixed logical grid (`apply_transform(snap_scale=…)`, mirrored live by the webview) — see [`pixel-unfake.md`](pixel-unfake.md).
 - A state missing from the sidecar uses the all-frames identity default.
 - The transform is applied at compose time inside the request-sized cell, so atlas geometry never changes. `manifest.json.animation.rows.<state>.frames` reflects the curated frame count, and `manifest.json.curation_applied` records whether a sidecar was used.
 
@@ -186,7 +186,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
 - [`../SKILL.md`](../SKILL.md) — canonical behavior contract (Workflow 스텝 3.5/5)
 - [`architecture.md`](architecture.md) — 큐레이션 사이드카가 파이프라인에서 소비되는 위치
 - [`locomotion-curation.md`](locomotion-curation.md) — 수동 selected-cycle, 클린 GIF export
-- [`pixel-perfect.md`](pixel-perfect.md) — 전/후 쌍둥이 토글과 `pixel_perfect` 굽기 결정
+- [`pixel-unfake.md`](pixel-unfake.md) — 전/후 쌍둥이 토글과 `pixel_unfake` 굽기 결정
 
 
 ## Base editing (same component as frames)
@@ -199,7 +199,7 @@ editing (Soohong 2026-07-17: no parallel editor). What differs is only the targe
   Display quantization, painting, marquee, eyedropper, palette, and the grid
   overlay all live in this uniform logical space; a uniform grid over the raw
   would drift (non-uniform fractional pitch + origin offset), so the raw view
-  (pixel-perfect toggle OFF) shows no uniform grid — same rule as frames' plain view.
+  (pixel-unfake toggle OFF) shows no uniform grid — same rule as frames' plain view.
 - Edits/transforms accumulate client-side and bake into `base-source` only via the
   explicit **save-to-base** button (`POST /api/base-edit`, `space: "logical"`;
   pixel ops expand to raw blocks and the transform bakes after edits with

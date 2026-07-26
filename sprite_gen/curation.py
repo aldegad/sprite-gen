@@ -23,12 +23,12 @@ Schema (`curation.json`):
                                               #   (fast path). When it does not, each state
                                               #   is judged by its own `revision` stamp
                                               #   below — never silently applied wholesale.
-      "pixel_perfect": true,                 # optional run-wide DEFAULT; false -> compose
+      "pixel_unfake": true,                  # optional run-wide DEFAULT; false -> compose
                                               #   reads the frame-N.plain.png variant (pre-
-                                              #   pixel-perfect). absent/true -> the
+                                              #   pixel unfake). absent/true -> the
                                               #   canonical frame-N.png. Only
                                               #   meaningful when extraction saved
-                                              #   both variants (fit.pixel_perfect).
+                                              #   both variants (fit.pixel_unfake).
       "anchors": {                           # optional DIRECTION ANCHOR FRAME PICKS
         "down": {"state": "down_idle",        #   (Soohong 2026-07-25): which curated instance
                  "index": 2,                  #   is this direction's identity truth for
@@ -49,7 +49,7 @@ Schema (`curation.json`):
                                               #   Valid while it is a prefix of the current
                                               #   segments — an engine-upgrade heal of the
                                               #   same raw keeps it, a raw re-roll drops it.
-          "pixel_perfect": false,            # optional per-state override of the run-wide
+          "pixel_unfake": false,             # optional per-state override of the run-wide
                                               #   default above (the curator's per-row
                                               #   toggle). absent -> the run-wide value.
           "selected": [0, 1, 2, 3],          # 0-based frame indices, in play order
@@ -148,6 +148,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen.layout import raw_rel
+from sprite_gen.runio import load_request
 
 CURATION_FILENAME = "curation.json"
 SCHEMA_VERSION = 1
@@ -157,6 +158,32 @@ IDENTITY = {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0, "shx": 0.0, "shy": 0.
 # (run-contract.md §4). Single source shared by the importer (fail-loud on an
 # unknown role) and the webview server (render), so neither silently invents a role.
 IMPORTED_REF_ROLES = ("anchor", "basis", "guide")
+
+# 은퇴한 사이드카 키 -> 현행 키. `fit` 쪽과 같은 어휘 교체다 (runio.LEGACY_FIT_KEYS 참조):
+# "pixel perfect" 는 광의 통용어의 오용이고, 이 파이프라인이 하는 일의 정확한 명칭은
+# "unfake"(격자 스냅/재양자화로 가짜 픽셀아트를 되돌린다) 다 — 수홍 2026-07-25.
+LEGACY_CURATION_KEYS = {"pixel_perfect": "pixel_unfake"}
+
+
+def _migrate_curation_keys(doc: dict[str, Any], where: str) -> bool:
+    """은퇴 키를 현행 키로 옮긴다 (최상위 + 행별, in-place). 옮겼으면 True.
+
+    두 키가 동시에 있으면 hard fail — 어느 쪽이 진실인지 코드가 고를 수 없다."""
+    moved = False
+    scopes = [("", doc)] + [(f"states.{name}.", entry)
+                            for name, entry in (doc.get("states") or {}).items()
+                            if isinstance(entry, dict)]
+    for prefix, scope in scopes:
+        for legacy, current in LEGACY_CURATION_KEYS.items():
+            if legacy not in scope:
+                continue
+            if current in scope:
+                raise SystemExit(
+                    f"{where}: both `{prefix}{legacy}` (retired) and `{prefix}{current}` are "
+                    f"present — two truths for one setting. Delete the `{prefix}{legacy}` line.")
+            scope[current] = scope.pop(legacy)
+            moved = True
+    return moved
 
 
 def imported_ref_role(filename: str) -> str | None:
@@ -173,7 +200,7 @@ def curation_path(run_dir: Path) -> Path:
 
 
 # 폐기된 분할선 스키마 키. 조용히 무시하거나 재해석하지 않고 요란하게 거부한다 —
-# 제거된 결정이 필드 하나로 되살아나는 경로를 만들지 않기 위해서다 (docs/pixel-perfect.md
+# 제거된 결정이 필드 하나로 되살아나는 경로를 만들지 않기 위해서다 (docs/pixel-unfake.md
 # 의 `conform` 사고, 2026-07-17). splits 없이는 구 정규화가 None 을 냈으므로 구 설정은
 # 전부 이 게이트에 걸린다 — 조용히 다른 동작으로 바뀌는 사이드카는 없다.
 # 호흡 파라미터 허용 범위 — 큐레이터 컨트롤(`breathe.js` BREATHE_*_MAX)과 같은 값이어야
@@ -297,9 +324,9 @@ def frame_variant(curation: dict[str, Any] | None, state: str | None = None) -> 
     """Which extracted frame variant consumers read: 'pixel' or 'plain'.
 
     Resolution order (single source for every consumer):
-    1. the state's own `states.<state>.pixel_perfect` (the curator's per-row toggle),
-    2. the run-wide `pixel_perfect` default (the curator's toggle-all),
-    3. absent sidecar / absent fields -> the canonical pixel-perfected frames.
+    1. the state's own `states.<state>.pixel_unfake` (the curator's per-row toggle),
+    2. the run-wide `pixel_unfake` default (the curator's toggle-all),
+    3. absent sidecar / absent fields -> the canonical pixel unfakeed frames.
 
     Called without `state` it resolves the run-wide default only (legacy callers,
     single-state tools that pass their state explicitly elsewhere)."""
@@ -307,30 +334,30 @@ def frame_variant(curation: dict[str, Any] | None, state: str | None = None) -> 
         return "pixel"
     if state is not None:
         entry = curation.get("states", {}).get(state)
-        if isinstance(entry, dict) and isinstance(entry.get("pixel_perfect"), bool):
-            return "pixel" if entry["pixel_perfect"] else "plain"
-    if curation.get("pixel_perfect") is False:
+        if isinstance(entry, dict) and isinstance(entry.get("pixel_unfake"), bool):
+            return "pixel" if entry["pixel_unfake"] else "plain"
+    if curation.get("pixel_unfake") is False:
         return "plain"
     return "pixel"
 
 
 def frame_filename(index: int, variant: str = "pixel") -> str:
     """Frame file name for a variant. 'pixel' = canonical frame-N.png; 'plain'
-    = the pre-pixel-perfect twin saved by extraction when fit.pixel_perfect."""
+    = the pre-unfake twin saved by extraction when fit.pixel_unfake."""
     if variant == "plain":
         return f"frame-{index}.plain.png"
     return f"frame-{index}.png"
 
 
 def pixel_snap_scale(request: dict[str, Any]) -> int | None:
-    """Logical-grid scale (cell px per logical px) for a `fit.pixel_perfect` run, or None
+    """Logical-grid scale (cell px per logical px) for a `fit.pixel_unfake` run, or None
     for a legacy run. Mirrors extract's pp_scale so a curation transform baked onto the
     canonical pixel frames re-snaps to the SAME grid the extraction snapped to. Single
     source for compose/GIF/PNG-export/cycle, the extraction itself, and the webview
     preview — every consumer calls this instead of re-deriving the formula (hand copies
     drifted: the webview omitted the usable-height clamp branch entirely)."""
     fit = request.get("fit") or {}
-    if not fit.get("pixel_perfect"):
+    if not fit.get("pixel_unfake"):
         return None
     cell = request.get("cell", {})
     cell_height = int(cell.get("height", cell.get("size", 0)))
@@ -416,7 +443,7 @@ def state_revision(run_dir: Path, state: str, request: dict[str, Any] | None = N
     세그먼트 = 그 행의 프레임 인덱스 공간을 만드는 원료 단위: primary raw, 그리고 선언
     순서의 take raw (manifest row `takes` 가 SSoT). raw 가 아예 없는 임포트 행은 프레임
     파일 내용 자체가 원료다. 다이제스트 입력은 원료의 **내용**(sha256)·세그먼트 프레임
-    수·셀/픽셀퍼펙트 기하이고, frames/ 캐시의 mtime 이나 엔진 리비전은 넣지 않는다 —
+    수·셀/픽셀 언페이크 기하이고, frames/ 캐시의 mtime 이나 엔진 리비전은 넣지 않는다 —
     엔진 업그레이드 heal 이 같은 raw 를 재유도해도 지문이 유지돼 큐레이션이 살아남고,
     raw 리롤·테이크 교체·셀 변경은 지문을 바꾼다.
 
@@ -425,7 +452,7 @@ def state_revision(run_dir: Path, state: str, request: dict[str, Any] | None = N
     manifest row 가 없으면 None (검증 불가 — 그 행 큐레이션은 살릴 수 없다)."""
     try:
         if request is None:
-            request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+            request = load_request(run_dir)
     except (OSError, json.JSONDecodeError):
         return None
     if state not in (request.get("states") or {}):
@@ -450,7 +477,7 @@ def state_revision(run_dir: Path, state: str, request: dict[str, Any] | None = N
     # fast-path 가 맞는 사이드카는 영향 없고, 이미 세대가 어긋난 사이드카만 첫 로드에서
     # 평소대로 드롭 + stale 백업된다 (조용히 재해석하지 않는다 — 원칙 6).
     basis = (f"{cell.get('width', cell.get('size'))}x{cell.get('height', cell.get('size'))}"
-             f":pp={1 if fit.get('pixel_perfect') else 0}:scale={pixel_snap_scale(request)}")
+             f":pp={1 if fit.get('pixel_unfake') else 0}:scale={pixel_snap_scale(request)}")
     segments = row.get("takes")
     if not segments:
         segments = [{
@@ -545,8 +572,10 @@ def load_curation_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str
     data = json.loads(raw_text)
     if data.get("kind") != "sprite-gen-curation":
         raise SystemExit(f"{path} is not a sprite-gen-curation file")
+    # 은퇴 키 이관 (메모리) — 다음 저장이 현행 키로 파일을 갱신한다. 두 키 동시 = hard fail.
+    _migrate_curation_keys(data, str(path))
     try:
-        request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+        request = load_request(run_dir)
     except (OSError, json.JSONDecodeError):
         request = None
     # 앵커 지정 검증은 **fast path 와 무관하게 항상** 돈다. run_revision 은 "이 문서를 쓴
@@ -600,7 +629,7 @@ def stamp_curation(run_dir: Path, payload: dict[str, Any]) -> dict[str, Any]:
     payload = {k: v for k, v in payload.items() if k != "runRevision"}
     payload["run_revision"] = run_revision(run_dir)
     try:
-        request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+        request = load_request(run_dir)
     except (OSError, json.JSONDecodeError):
         request = None
     anchors = payload.get("anchors")
@@ -813,6 +842,7 @@ def write_curation_atomic(run_dir: Path, payload: dict[str, Any]) -> None:
 
     if payload.get("kind") != "sprite-gen-curation":
         raise ValueError("payload is not a sprite-gen-curation document")
+    _migrate_curation_keys(payload, str(run_dir / CURATION_FILENAME))
     payload = _carry_anchor_provenance(run_dir, payload)
     payload = stamp_curation(run_dir, payload)
     if isinstance(payload.get("anchors"), dict) and not payload["anchors"]:
@@ -987,7 +1017,7 @@ def apply_transform(
     which the webview uses for its preview, so alignment to the ground grid is
     faithful to the bake.
 
-    `snap_scale` (a `fit.pixel_perfect` run baking the canonical pixel variant,
+    `snap_scale` (a `fit.pixel_unfake` run baking the canonical pixel variant,
     from `pixel_snap_scale`): the transform is sampled NEAREST and the result is
     re-quantized to the fixed logical grid (cell-anchored, `snap_scale` px per
     logical px), so a curated move/scale/rotate cannot smear the pixel grid —

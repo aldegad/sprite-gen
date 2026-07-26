@@ -89,7 +89,7 @@ Le « pixel art » généré par IA n'est pas du pixel art. Les blocs vacillent,
 
 **Backbone Lattice** mesure une grille unique pour tout le sujet et y maintient chaque découpe. La détection du pas par frame alimente un consensus transversal à toute la ligne et à toutes les frames, qui l'emporte sur les erreurs de détection harmoniques ; cette grille consensuelle est la *colonne vertébrale* sur laquelle chaque découpe s'aligne. Les découpes tombent sur les véritables frontières de couleur, et une largeur minimale de cellule proportionnelle au pas mesuré empêche deux découpes voisines de se retrouver sur la même bande. Une seule colonne vertébrale : le même bloc conserve donc la même taille sur toute l'animation au lieu de sauter d'une frame à l'autre.
 
-Le résultat est vérifié par rapport à ce qui a été livré, et non évalué à l'œil sur une frame choisie : chaque séquence pixel-perfect est recalculée depuis sa propre bande source, puis comparée pixel par pixel. La forme que vous avez approuvée reste celle que vous obtenez ; seul l'emplacement des contours et des ombrages change, exactement comme le décide la colonne vertébrale.
+Le résultat est vérifié par rapport à ce qui a été livré, et non évalué à l'œil sur une frame choisie : chaque séquence pixel-unfake est recalculée depuis sa propre bande source, puis comparée pixel par pixel. La forme que vous avez approuvée reste celle que vous obtenez ; seul l'emplacement des contours et des ombrages change, exactement comme le décide la colonne vertébrale.
 
 ## Vue web de curation
 

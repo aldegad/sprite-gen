@@ -522,7 +522,7 @@ body.sidebar-collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 /* 원본 픽셀보다 확대 표시될 때만 붙는 클래스 — 픽셀아트 계단을 그대로 보여준다.
    부여 주체는 display.js `applyPixelScaling` 하나뿐이다 (표시 기하로 판정·재평가). */
 .px-upscale { image-rendering: pixelated; }
-/* 변형 편집 중 실시간 격자 스냅 프리뷰 캔버스 (픽셀퍼펙트 줄 전용, applyCardTransform 소유) */
+/* 변형 편집 중 실시간 격자 스냅 프리뷰 캔버스 (픽셀 언페이크 줄 전용, applyCardTransform 소유) */
 .stage .snap-canvas {
   position: absolute;
   inset: 0;
@@ -666,8 +666,8 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   white-space: pre-wrap;
 }
 
-/* pixel-perfect apply checkbox (top-right) + view toggle */
-.pp-apply {
+/* pixel unfake apply checkbox (top-right) + view toggle */
+.unfake-apply {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -682,7 +682,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   user-select: none;
   white-space: nowrap;
 }
-.pp-apply input {
+.unfake-apply input {
   margin: 0;
   cursor: pointer;
 }
@@ -711,7 +711,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .stage .pxgrid {
   position: absolute;
   inset: 0;
-  z-index: 2; /* snap-canvas(z1) 위 — 픽셀퍼펙트 뷰에서도 격자가 보여야 한다 */
+  z-index: 2; /* snap-canvas(z1) 위 — 픽셀 언페이크 뷰에서도 격자가 보여야 한다 */
   pointer-events: none;
   display: none;
   background-image:
@@ -912,7 +912,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .arch-card .stage { cursor: default; }
 .arch-card .card-controls { justify-content: center; gap: 6px; }
 
-/* 확대 편집 모달 — 한 프레임 크게, 격자/픽셀퍼펙트 토글하며 조정 */
+/* 확대 편집 모달 — 한 프레임 크게, 격자/픽셀 언페이크 토글하며 조정 */
 #zoom-modal { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; }
 #zoom-modal .zoom-backdrop { position: absolute; inset: 0; background: rgba(15, 18, 24, 0.5); }
 /* 3계층 계약 (수홍 2026-07-20): 모달 = 최대 크기 고정, 그 안의 뷰포트가 화면

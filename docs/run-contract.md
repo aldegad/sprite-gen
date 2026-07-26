@@ -26,7 +26,7 @@ canonical files, not hidden imports.
 |---|---|---|---|
 | Prepare | `prepare_sprite_run.py` | base image + request flags/JSON | `sprite-request.json`, per-state layout guide, per-state prompt, empty `raw/`+`frames/` |
 | Generate | `sprite-gen gen` (`generate_sprite_image.py`) | `prompts/<state>.txt` + refs | verified `raw/<state>.png` strip + audit raw/report |
-| Extract | `extract_sprite_row_frames.py` | `raw/<state>.png` | on success: `frames/<state>/frame-N.png` (+ `.plain.png` twin on pixel-perfect runs), `frames/frames-manifest.json`; on failure: nothing in `frames/`, `extract-failure.json` instead (§6) |
+| Extract | `extract_sprite_row_frames.py` | `raw/<state>.png` | on success: `frames/<state>/frame-N.png` (+ `.plain.png` twin on pixel-unfake runs), `frames/frames-manifest.json`; on failure: nothing in `frames/`, `extract-failure.json` instead (§6) |
 | Curate (opt) | `serve_curation.py` + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
 | QA | `preview_animation.py` | `frames/` | `qa/<state>-contact.png`, `qa/<state>.gif` |
@@ -41,7 +41,7 @@ canonical files, not hidden imports.
 
 The happy path is `prepare → gen → extract → (curate) → compose`, with a curation
 webview opened as the closing step. Stage internals (chroma removal, connected
-components, pixel-perfect path, the `.sprite-gen.lock` single-writer rule, the
+components, pixel-unfake path, the `.sprite-gen.lock` single-writer rule, the
 inspect/score/loop split) are described in
 [`architecture.md`](architecture.md) §2, §6 — this table is the contract, that doc
 is the explanation.
@@ -82,8 +82,8 @@ not restate it elsewhere; point here.
   # manifest row 에 labels("blink#0"…)/takes(start·frames·raw)가 남고, 소비자가 행
   # 크기를 request 에서 셀 때는 layout.state_frame_total(primary+takes 합)을 쓴다.
   # 어느 스트립 하나라도 실패하면 행 전체가 이전 세대로 남는다 (부분 풀 게시 금지).
-  frames/<state>/frame-N.plain.png   # pixel-perfect runs only: cell-sized pre-pixel-perfect twin, baked by compose on pixel_perfect:false (§3)
-  frames/<state>/orig/frame-N.png    # pixel-perfect runs only: hi-res original twin (display-only), drives the pp-off toggle at original quality (§3)
+  frames/<state>/frame-N.plain.png   # pixel-unfake runs only: cell-sized pre-pixel-unfake twin, baked by compose on pixel_unfake:false (§3)
+  frames/<state>/orig/frame-N.png    # pixel-unfake runs only: hi-res original twin (display-only), drives the pp-off toggle at original quality (§3)
   frames/frames-manifest.json        # per-row extract report (files, labels, ok) — only ever a COMPLETE ok generation (§6)
   # frames/ 는 (raw + request + 엔진)의 파생 캐시다 (실시간 계약, 수홍 확정 2026-07-14):
   # 행별 engine_revision(엔진 소스 해시) 스탬프가 캐시 키. 소비자(큐레이션 뷰 /api/run·
@@ -91,7 +91,7 @@ not restate it elsewhere; point here.
   # raw 에서 자동 재유도한다 — 뷰에 '재추출' 개념이 없다. raw 가 없는 행은 보존 + 관측
   # 노트(kept_stale). manifest 의 extract_args 가 재유도 플래그 재현을 보장한다.
   extract-failure.json               # while any state's extract is unresolved: per-state ok:false diagnostics, OUTSIDE frames/ (§6); merged per state, removed once all resolved
-  curation.json                      # optional, non-destructive sidecar (selected/order/transforms/pixel_perfect)
+  curation.json                      # optional, non-destructive sidecar (selected/order/transforms/pixel_unfake)
   unpack-source.json                 # import runs only (unpack_atlas_run.py): provenance — atlas/pngs source, base_source, imported_refs
   sprite-sheet-alpha.png             # composed runtime atlas
   sprite-sheet-alpha.report.json     # compose report
@@ -124,23 +124,23 @@ Rules the display depends on:
 - **`references/imported/<group>/`** is the imported-run equivalent of those raw
   anchors: an imported row carries its generation material here so the view produces
   the same chips (§4).
-- **`frames/<state>/frame-N.plain.png`** (pixel-perfect runs only) is the *cell-sized*
-  pre-fit twin that `compose` bakes when the sidecar turns pixel-perfect off for that
-  state (`states.<state>.pixel_perfect:false`, or the run-wide `pixel_perfect:false`
+- **`frames/<state>/frame-N.plain.png`** (pixel-unfake runs only) is the *cell-sized*
+  pre-fit twin that `compose` bakes when the sidecar turns pixel-unfake off for that
+  state (`states.<state>.pixel_unfake:false`, or the run-wide `pixel_unfake:false`
   default — resolver: `curation.frame_variant(curation, state)`) — the
   atlas slot is cell-sized, so this twin must be too. **`frames/<state>/orig/frame-N.png`**
   is the *hi-res* (S×cell) pre-fit twin the view displays when the user turns
-  pixel-perfect off, so "off = original" is crisp instead of an upscaled cell blur.
+  pixel-unfake off, so "off = original" is crisp instead of an upscaled cell blur.
   S is **per-row native**: the ceil of the largest component-crop / final-content-bbox
   ratio across the row's frames (bounded by `2048 // cell`), so the twin resample is a
   mild upscale — never a downscale. The old fixed ×4 cap squeezed high-pitch raws
   (hero_v8 down rows, ~14px pitch) ~3.5× and the "original" view stopped being the
   original (Soohong, 2026-07-23). The
   view prefers `orig/`, falling back to `.plain.png` when no hi-res twin exists. Both
-  twins are fitted into the pixel-perfect frame's content bbox (same footprint), so the
+  twins are fitted into the pixel-unfake frame's content bbox (same footprint), so the
   toggle compares pixel treatment at identical size and a plain bake keeps the same
   character size as pixel rows.
-  Sidecar-baking semantics are owned by [`pixel-perfect.md`](pixel-perfect.md); the
+  Sidecar-baking semantics are owned by [`pixel-unfake.md`](pixel-unfake.md); the
   display contract for the toggle is §3.
 
 The runtime `manifest.json.frame_layout` contract (absolute rects, no runtime
@@ -159,9 +159,9 @@ whole point is that the experience does not vary by who launched it.
 | **Base reference row** | `base-source.*` exists | `baseUrl` (null if absent) | Top row, pure image — no preview/select UI. Identity truth, always visible. |
 | **Generation-material chips** | the state has resolvable material | `states[].refs[]` — each `{role, name, url}` | Per-state header shows *what generated this row*. `role ∈ {anchor, basis, guide}`, labelled `방향 앵커` / `basis row` / `레이아웃 가이드` (i18n key `ref_<role>`). Only run-dir files that actually exist appear — **except the anchor chip** (`anchorFrame: true`), which is a live bake (`/api/anchor?direction=<dir>`) named `<state>#<index>`, because the on-disk `references/anchors/*.png` is a derived cache that goes stale the moment the user edits the anchor frame. |
 | **Anchor frame** | request has a `directions` block | `directionGroups[].anchorFrame` `{state, index, source}` + `anchorError`/`anchorErrorCode`/`anchorPending`/`anchorUrl` · `curation.anchors` | The one curated instance that is this direction's identity for generating its other rows. `source: "picked"` = pinned by the human (frame card pin button → `curation.anchors.<dir>`), `"default"` = the anchor row's sequence head. The anchor card carries an `앵커` badge (tinted when pinned); an unresolvable pin surfaces `anchorError` in the status bar instead of silently reverting — archived frame (`pick-missing`) or **regenerated row** (`pick-stale-generation`: the pin carries the pinned row's `state_revision`, so a re-derived row makes the pin stale rather than silently pointing it at a different image). **`anchorPending: true` is not an error** — the anchor row is not generated yet (the normal mid-work state), so the view must not colour it as a failure. Resolution SSoT = `sprite_gen/anchor.py`. |
-| **Pixel grid** | **always** — the measurement cannot fail | `states[].pixelScale` (≥1, never null) + `pixelPerfect{label,scale}` + `states[].frames[].contentBox` | **Per-state** checkbox on every row's refs strip; the top checkbox is a **toggle-all** (indeterminate when mixed). Display only, never persisted. `pixelScale` is an exact test (largest k where the frame is only uniform k×k blocks; k=1 is trivially true — identity), so "unknown grid" does not exist and nothing gates on it. On the pixel-perfect view: the output raster (request scale on `fit.pixel_perfect` runs, measured k labelled `auto` otherwise). On the original (plain) view: the **final correspondence grid** — green, one cell = one result pixel. (The stage-1 cut lattice in `frames-manifest input_grids` stays diagnostic-only.) An identity grid (k=1) is a true grid, not a missing one — density is a property of the fact, not a reason to hide the control. |
+| **Pixel grid** | **always** — the measurement cannot fail | `states[].pixelScale` (≥1, never null) + `pixelUnfake{label,scale}` + `states[].frames[].contentBox` | **Per-state** checkbox on every row's refs strip; the top checkbox is a **toggle-all** (indeterminate when mixed). Display only, never persisted. `pixelScale` is an exact test (largest k where the frame is only uniform k×k blocks; k=1 is trivially true — identity), so "unknown grid" does not exist and nothing gates on it. On the pixel-unfake view: the output raster (request scale on `fit.pixel_unfake` runs, measured k labelled `auto` otherwise). On the original (plain) view: the **final correspondence grid** — green, one cell = one result pixel. (The stage-1 cut lattice in `frames-manifest input_grids` stays diagnostic-only.) An identity grid (k=1) is a true grid, not a missing one — density is a property of the fact, not a reason to hide the control. |
 | **Direction groups** | request has a `directions` block | `directionGroups[]` — `{direction, anchor, states, anchorFrame, anchorError}` + mirror entries `{direction, mirrorOf}` | States render grouped per direction with the direction anchor first (badge `방향 앵커`); mirrored directions render as an informational strip (`<src> 런타임 미러 — 생성 없음`), never as silently missing rows. Runs without the block keep the flat request order. |
-| **Original-quality toggle** | **always** — every row has the control | `states[].frames[].plainUrl` + `fitPixelPerfect` | **Per-state** checkbox on every row's refs strip + zoom modal (same contract, no per-surface gating). Twin rows: on = canonical `frame-N.png`, off = `plainUrl` (hi-res `orig/` else `.plain.png`) — a **source** switch, persisted per state. Twin-less rows: on = the display renderer re-quantizes by the measured grid `pixelScale` (the same k the grid overlay draws — grid-based pixel-perfect; k=1 is identity), a **display lens**, never persisted (persisting would make the bake resolver demand a `.plain` variant that does not exist). The top-right checkbox is a toggle-all (indeterminate when mixed). |
+| **Original-quality toggle** | **always** — every row has the control | `states[].frames[].plainUrl` + `fitPixelUnfake` | **Per-state** checkbox on every row's refs strip + zoom modal (same contract, no per-surface gating). Twin rows: on = canonical `frame-N.png`, off = `plainUrl` (hi-res `orig/` else `.plain.png`) — a **source** switch, persisted per state. Twin-less rows: on = the display renderer re-quantizes by the measured grid `pixelScale` (the same k the grid overlay draws — grid-based pixel-unfake; k=1 is identity), a **display lens**, never persisted (persisting would make the bake resolver demand a `.plain` variant that does not exist). The top-right checkbox is a toggle-all (indeterminate when mixed). |
 
 `GET /api/run` payload — the display-relevant subset below (the full snapshot,
 including non-display fields like `states[].action`, is assembled by
@@ -173,9 +173,9 @@ including non-display fields like `states[].action`, is assembled by
   "runDir": "<abs path>",
   "baseUrl": "/run/base-source.png",        // base reference row; null when no base-source.*
   "cell": { "width": 256, "height": 256 },
-  "pixelPerfect": { "logicalHeight": 48, "scale": 5, "source": "request", "label": "48px" },
+  "pixelUnfake": { "logicalHeight": 48, "scale": 5, "source": "request", "label": "48px" },
                                             // or { "source": "auto", "label": "auto", "scale": <min measured k, ≥1> } — never null
-  "fitPixelPerfect": true,                   // request opted into the deterministic pixel-perfect path
+  "fitPixelUnfake": true,                   // request opted into the deterministic pixel-unfake path
   "runRevision": "9f3c1a0b7e2d4c58",         // frame-content fingerprint of this generation; POST /api/curation echoes it (stale ⇒ 409)
   "hasAtlas": true,
   "iso": null,                               // sibling meta.json iso tile/anchor → ground-grid overlay
@@ -205,11 +205,11 @@ including non-display fields like `states[].action`, is assembled by
 }
 ```
 
-`pixelPerfect.scale` is `cell.height // fit.logical_height` (integer floor), so the
+`pixelUnfake.scale` is `cell.height // fit.logical_height` (integer floor), so the
 example's `256 // 48 = 5` (not 5.33 — floor); `label` is `"<logical_height>px"` and
 `logicalHeight` echoes `fit.logical_height`. `states[].pixelScale` mirrors that scale
-on a `fit.pixel_perfect` run, or carries the per-row auto-measured block pitch on a
-run with no pixel-perfect contract (import/plain), or `null` when a row's pitch cannot
+on a `fit.pixel_unfake` run, or carries the per-row auto-measured block pitch on a
+run with no pixel-unfake contract (import/plain), or `null` when a row's pitch cannot
 be measured. Real runs are usually smaller than this synthetic 256 example — the
 hero v7 anchor is `cell 56 / logical 48 → 56 // 48 = 1`.
 
@@ -444,7 +444,7 @@ service, revisit both here.
 ## Related
 
 - [`../SKILL.md`](../SKILL.md) — behavior contract (Workflow, Base Lock Gate, Runtime Contract)
-- [`architecture.md`](architecture.md) — how the code realizes these contracts (stage internals, lock, extraction, pixel-perfect path)
+- [`architecture.md`](architecture.md) — how the code realizes these contracts (stage internals, lock, extraction, pixel-unfake path)
 - [`curation.md`](curation.md) — webview interaction model, `curation.json` schema, standalone image-candidate path, multi-agent launch rules
-- [`pixel-perfect.md`](pixel-perfect.md) — `fit`/`pixel_perfect` behavior + plain-twin bake decision
+- [`pixel-unfake.md`](pixel-unfake.md) — `fit`/`pixel_unfake` behavior + plain-twin bake decision
 - [`directional-anchor-workflow.md`](directional-anchor-workflow.md) — directional/45° anchor chains that name the `raw/` anchors §3 resolves into chips

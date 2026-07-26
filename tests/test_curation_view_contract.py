@@ -644,10 +644,10 @@ def test_autosave_preserves_pixel_perfect_the_view_does_not_author(tmp_path, fie
 
     curation = {"version": 1, "kind": "sprite-gen-curation", "states": {"items": {}}}
     if where == "top":
-        curation["pixel_perfect"] = False
+        curation["pixel_unfake"] = False
     else:
-        curation["states"]["items"]["pixel_perfect"] = True
-        curation["pixel_perfect"] = False          # per-state 가 이기는지도 같이 본다
+        curation["states"]["items"]["pixel_unfake"] = True
+        curation["pixel_unfake"] = False          # per-state 가 이기는지도 같이 본다
     (out / "curation.json").write_text(json.dumps(stamp_curation(out, curation)), encoding="utf-8")
     before = frame_variant(json.loads((out / "curation.json").read_text(encoding="utf-8")), "items")
 

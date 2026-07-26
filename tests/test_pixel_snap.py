@@ -47,7 +47,7 @@ def _build_pp_run(root):
         "cell": {"shape": "square", "width": 96, "height": 96, "safe_margin_x": 8, "safe_margin_y": 8, "size": 96, "safe_margin": 8},
         "chroma_key": {"name": "magenta", "hex": "#FF00FF", "rgb": [255, 0, 255], "selection": "fallback"},
         "states": {"walk": {"frames": 2, "fps": 8, "loop": True, "action": "synthetic snap fixture"}},
-        "fit": {"pixel_perfect": True, "logical_height": 48},
+        "fit": {"pixel_unfake": True, "logical_height": 48},
     }
     (run_dir / "sprite-request.json").write_text(json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return run_dir
@@ -87,9 +87,9 @@ def test_pixel_snap_scale_resolution() -> None:
     assert pixel_snap_scale({"cell": {"size": 64}}) is None  # no fit
     assert pixel_snap_scale({"cell": {"size": 64}, "fit": {"resample": "kcentroid"}}) is None
     base = {"cell": {"width": 64, "height": 64, "safe_margin_x": 6, "safe_margin_y": 6}}
-    assert pixel_snap_scale({**base, "fit": {"pixel_perfect": True, "logical_height": 48}}) == 1
-    assert pixel_snap_scale({**base, "fit": {"pixel_perfect": True, "logical_height": 32}}) == 2
-    assert pixel_snap_scale({**base, "fit": {"pixel_perfect": True}}) == 1  # logical = cell
+    assert pixel_snap_scale({**base, "fit": {"pixel_unfake": True, "logical_height": 48}}) == 1
+    assert pixel_snap_scale({**base, "fit": {"pixel_unfake": True, "logical_height": 32}}) == 2
+    assert pixel_snap_scale({**base, "fit": {"pixel_unfake": True}}) == 1  # logical = cell
 
 
 def _blocks_uniform(image: Image.Image, scale: int) -> bool:

@@ -64,7 +64,7 @@ def _build_run(root, pitch: float, cell: int = 96, logical_height: int = 48,
         "chroma_key": {"name": "magenta", "hex": "#FF00FF", "rgb": [255, 0, 255],
                        "selection": "fallback"},
         "states": {"walk": {"frames": frames, "fps": 8, "loop": True, "action": "grid fixture"}},
-        "fit": {"pixel_perfect": True, "logical_height": logical_height},
+        "fit": {"pixel_unfake": True, "logical_height": logical_height},
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return run_dir
 

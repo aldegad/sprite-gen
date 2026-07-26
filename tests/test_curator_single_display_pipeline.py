@@ -49,7 +49,7 @@ def test_base_pp_off_is_the_raw_source_view():
     """베이스 pp OFF = 소스 모드로 raw 를 그린다 — 항등 선처리 금지.
 
     실사고 (콩콩이 기각 2026-07-24, kongkongi-20260724-154426): `snapScaleFor` 가
-    BASE 분기를 `ppOn` 검사보다 먼저 둬서 베이스가 항상 양자화 모드가 됐고, img
+    BASE 분기를 `unfakeOn` 검사보다 먼저 둬서 베이스가 항상 양자화 모드가 됐고, img
     표시 분기는 이미 삭제돼 raw 가 표시면에 도달할 경로가 없었다 — 퍼펙 체크박스가
     아무것도 안 바꾸는 "거짓말하는 컨트롤"이 됐다.
     """
@@ -57,10 +57,10 @@ def test_base_pp_off_is_the_raw_source_view():
     m = re.search(r"function snapScaleFor\(.*?\n\}", store, re.S)
     assert m, "snapScaleFor 를 찾지 못했다"
     body = m.group(0)
-    pp_at = body.index("!ppOn(stateName)")
+    pp_at = body.index("!unfakeOn(stateName)")
     base_at = body.index("BASE_STATE")
     assert pp_at < base_at, (
-        "snapScaleFor 에서 BASE 분기가 ppOn 검사보다 앞이다 — 베이스 pp OFF 의 "
+        "snapScaleFor 에서 BASE 분기가 unfakeOn 검사보다 앞이다 — 베이스 pp OFF 의 "
         "원본(raw) 뷰가 죽는다"
     )
     # 소스 모드의 표시 소스는 el(frameUrl 이 고른 파일)이어야 raw 가 화면에 닿는다
@@ -80,16 +80,16 @@ def test_quantize_grid_is_the_displayed_grid():
         "트윈 없는 줄의 양자화가 측정 k(pixelScale)로 떨어지지 않는다 — "
         "격자 따로 퍼펙 따로가 재발한다"
     )
-    assert "run.pixelPerfect.scale" in body, "pp 런의 계약 scale(굽기 거울)이 사라졌다"
+    assert "run.pixelUnfake.scale" in body, "pp 런의 계약 scale(굽기 거울)이 사라졌다"
 
 
-def test_pp_toggle_is_ungated_on_every_surface():
+def test_unfake_toggle_is_ungated_on_every_surface():
     """퍼펙 토글은 줄 컨트롤·줌 모달 어디에도 게이트가 없다."""
-    assert re.search(r"const showPpToggle\s*=\s*true", SRC["cards.js"]), (
+    assert re.search(r"const showUnfakeToggle\s*=\s*true", SRC["cards.js"]), (
         "줄별 퍼펙 토글이 조건부로 돌아갔다"
     )
     assert not re.search(
-        r"ppTwinStates\.has\([^)]*\)\)?\s*controls\.appendChild\(makePpToggle",
+        r"unfakeTwinStates\.has\([^)]*\)\)?\s*controls\.appendChild\(makeUnfakeToggle",
         SRC["zoom-editor.js"],
     ), "줌 모달 퍼펙 토글이 트윈 줄로 게이트됐다 (수홍 재현: 확대화면에 버튼 없음)"
 
@@ -133,7 +133,7 @@ def test_server_snapshot_grid_behavior(tmp_path):
     import serve_curation
     snap = serve_curation.build_run_state(out)
     assert snap["contract"]["grid"] is True
-    assert snap["pixelPerfect"] and snap["pixelPerfect"]["scale"] >= 1
+    assert snap["pixelUnfake"] and snap["pixelUnfake"]["scale"] >= 1
     for st in snap["states"]:
         assert isinstance(st["pixelScale"], int) and st["pixelScale"] >= 1, (
             f"{st['name']}: pixelScale={st['pixelScale']!r} — 격자 없는 줄이 다시 생겼다"

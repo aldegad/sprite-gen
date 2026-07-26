@@ -5,6 +5,33 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## Unreleased - "pixel perfect" was the wrong name; the pipeline now says pixel unfake
+
+Terminology, all the way into the schema. `domains/tools/spritefusion-pixel-snapper.md` had the
+footnote for a while: **"pixel perfect" is a broad, borrowed term** (UI alignment, hit testing) —
+what this pipeline actually does is **grid snapping / re-quantization**, whose community name is
+**unfake** (after unfake.js). Docs saying one word while the schema said another is exactly the
+drift this repo refuses elsewhere, so the rename goes all the way down.
+
+- `fit.pixel_perfect` -> `fit.pixel_unfake`, `curation.json` `pixel_perfect` (run-wide and
+  per-state) -> `pixel_unfake`, CLI `--fit-pixel-unfake`, `/api/run` `pixelUnfake` /
+  `fitPixelUnfake`, and the curator's vocabulary (`unfakeOn`, `unfakeStates`, `unfake-apply`).
+  `docs/pixel-perfect.md` is now `docs/pixel-unfake.md`.
+- **Existing runs migrate once, observably.** A new single load gate (`runio.load_request`) is the
+  only place `sprite-request.json` is read — the 18 call sites that each did their own
+  `json.loads` now pass through it — and it rewrites a legacy key to the current one with a loud
+  log. Both keys present is a **hard error**, never a guess. The sidecar gets the same contract in
+  `load_curation_report` + the atomic writer, so a client that still sends the retired key cannot
+  leave the file with two truths. Verified on three real solvell runs (108/122/12 frames): key
+  rewritten, frames byte-intact.
+- The retired CLI flag does not survive as a quiet alias: `--fit-pixel-perfect` exits with the new
+  name. Two spellings of one flag is how scripts and docs drift apart.
+- Pure rename, and the golden regression says so: the fixture run and a synthetic unfake run both
+  extract **byte-identical** frames before and after (7 and 6 frames).
+- The one defect this shook out: `reroll.py` still read `fit.pixel_perfect`, so once the gate moved
+  the key a reroll would have refused with "takes require fit.pixel_perfect". A full-repo sweep
+  caught it — which is the argument for one gate instead of eighteen migration sites.
+
 ## Unreleased - the direction anchor is the frame you approved, and you can say which one
 
 - **Idle breathing stopped being a pair of split lines.** The old layer shifted the rows above

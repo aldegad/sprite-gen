@@ -50,7 +50,7 @@ def _build_run(root: Path) -> Path:
                  "safe_margin_y": 8, "size": 96, "safe_margin": 8},
         "chroma_key": {"name": "magenta", "hex": "#FF00FF", "rgb": [255, 0, 255], "selection": "fallback"},
         "states": {"walk": {"frames": 2, "fps": 8, "loop": True, "action": "palette fixture"}},
-        "fit": {"pixel_perfect": True, "logical_height": 48},
+        "fit": {"pixel_unfake": True, "logical_height": 48},
     }
     (run_dir / "sprite-request.json").write_text(
         json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

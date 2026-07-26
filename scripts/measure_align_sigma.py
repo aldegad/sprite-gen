@@ -29,11 +29,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image
 
 import sprite_gen.extract as extract
+from sprite_gen.runio import load_request
 
 
 def _prepare_work_dir(source: Path, work: Path, states: list[str], align_x: str) -> None:
     (work / "raw").mkdir(parents=True, exist_ok=True)
-    request = json.loads((source / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(source)
     fit = dict(request.get("fit") or {})
     fit["align_x"] = align_x
     request["fit"] = fit
@@ -48,7 +49,7 @@ def _prepare_work_dir(source: Path, work: Path, states: list[str], align_x: str)
 
 
 def _measure_state(work: Path, state: str) -> dict:
-    # frame-N.png 만 — frame-N.plain.png (픽셀퍼펙트 전 쌍둥이) 는 제외.
+    # frame-N.png 만 — frame-N.plain.png (픽셀 언페이크 전 쌍둥이) 는 제외.
     frame_paths = sorted(
         (path for path in (work / "frames" / state).glob("frame-*.png") if path.stem.split("-")[1].isdigit()),
         key=lambda p: int(p.stem.split("-")[1]),

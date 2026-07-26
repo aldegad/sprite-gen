@@ -20,7 +20,9 @@ from PIL import Image, ImageChops
 
 from sprite_gen.curation import effective_logical_height, pixel_snap_scale
 from sprite_gen.layout import frames_dir_rel, raw_rel, take_raw_rel
-from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, publish_guard, relative_posix, release_run_dir_lock
+from sprite_gen.runio import (REQUEST_FILENAME, acquire_run_dir_lock, atomic_save_image,
+                              atomic_write_text, load_request, publish_guard, relative_posix,
+                              release_run_dir_lock)
 from sprite_gen.segment import separate_fused_poses
 
 
@@ -717,7 +719,7 @@ def _alpha_centroid_x(sprite: Image.Image, bottom_fraction: float = 1.0, min_alp
 
 
 def _alpha_centroid_row_left(frame: Image.Image, cell_width: int, scale: int) -> int:
-    # 픽셀퍼펙트 행 경로의 프레임별 가로 배치 (align_x: alpha-centroid 전용).
+    # 픽셀 언페이크 행 경로의 프레임별 가로 배치 (align_x: alpha-centroid 전용).
     # 행 union 공동 left 는 register_row_frames 의 정합 잔차가 그대로 지터로
     # 남는다 — perfectpixel 방식대로 프레임마다 무게중심을 셀 중앙에 앉힌다.
     # NEAREST xN 업스케일은 논리 픽셀 중심 (x+0.5) 을 scale·(x+0.5) 로 보내므로
@@ -773,11 +775,11 @@ def fit_to_cell(
     #             trailing hair/capes do not pull the body off the cell axis
     #             (critical for runtime horizontal flip); alpha-centroid is the
     #             perfectpixel-studio port — full alpha-weighted centroid that
-    #             ignores soft-matte fringe (α ≤ 10), and in the pixel-perfect
+    #             ignores soft-matte fringe (α ≤ 10), and in the pixel unfake
     #             row path it is applied per frame instead of the row union
     #   align_y:  "bottom" (default) | "center" — bottom pins feet to a shared baseline
     # 2026-07-04 (알렉스): 기본값을 foot-centroid/bottom 으로 승격 — 프레임 간
-    # "무게감"(발밑 기준선)이 기본으로 잡혀야 한다. pixel_perfect 경로와 동일 기본.
+    # "무게감"(발밑 기준선)이 기본으로 잡혀야 한다. pixel_unfake 경로와 동일 기본.
     fit = fit or {}
     resample_name = str(fit.get("resample", "lanczos")).lower()
     align_x = str(fit.get("align_x", "foot-centroid")).lower()
@@ -821,7 +823,7 @@ def fit_to_cell(
     return target
 
 
-# --- pixel-perfect pipeline (fit.pixel_perfect) -----------------------------
+# --- pixel unfake pipeline (fit.pixel_unfake) -----------------------------
 # unfake.js/pixeldetector 계열 접근: ① runs 기반으로 생성물의 논리 픽셀 pitch 검출
 # ② 에지 히스토그램으로 격자 위상(offset) 정렬 ③ 격자 단위 dominant-color 스냅
 # 다운스케일(진짜 해상도 복원) ④ 런 전체 공유 팔레트 양자화 + 알파 이진화
@@ -1523,7 +1525,7 @@ def _pitch_pair(pitch: float | tuple[float, float]) -> tuple[float, float]:
 def solid_alpha_bbox(image: Image.Image, threshold: int = 128) -> tuple[int, int, int, int] | None:
     """α>=threshold 픽셀만의 bbox — AA 프린지(반투명 가장자리)를 제외한 실 콘텐츠 범위.
 
-    픽셀퍼펙트 경로의 불투명 판정(α>=128: `grid_snap_downscale`/`binarize_alpha`/
+    픽셀 언페이크 경로의 불투명 판정(α>=128: `grid_snap_downscale`/`binarize_alpha`/
     `apply_palette`)과 같은 기준이어야 한다. any-alpha `getbbox()` 로 격자를 치면
     프린지가 bbox 를 부풀려 `_grid_edges` 의 셀 개수 반올림이 한 칸 늘고, 내용이
     프린지뿐인 가장자리 셀이 50% 규칙을 통과해 실루엣 밖 부스러기 픽셀로 굳는다
@@ -1533,7 +1535,7 @@ def solid_alpha_bbox(image: Image.Image, threshold: int = 128) -> tuple[int, int
 
 
 def tighten_components(images: list[Image.Image]) -> list[Image.Image]:
-    """픽셀퍼펙트 스냅 전에 컴포넌트를 실 콘텐츠(solid alpha) bbox 로 타이트하게 조인다.
+    """픽셀 언페이크 스냅 전에 컴포넌트를 실 콘텐츠(solid alpha) bbox 로 타이트하게 조인다.
 
     `_grid_edges` 의 lead-스냅(위상 < 피치의 1/4 이면 0 으로)은 컴포넌트가 bbox 로
     잘려 블록 경계에서 시작한다는 전제다. `component_group_image` 는 사방 4px
@@ -1946,7 +1948,7 @@ def enforce_outline(image: Image.Image, strength: float = 0.62) -> Image.Image:
     return image
 
 
-def fit_pixel_perfect(logical: Image.Image, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, scale: int, fit: dict[str, Any]) -> Image.Image:
+def fit_pixel_unfake(logical: Image.Image, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, scale: int, fit: dict[str, Any]) -> Image.Image:
     target = Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0))
     bbox = logical.getbbox()
     if bbox is None:
@@ -1978,10 +1980,10 @@ def fit_pixel_perfect(logical: Image.Image, cell_width: int, cell_height: int, s
 def fit_component_to_bbox(component: Image.Image, cell_width: int, cell_height: int,
                           bbox: tuple[int, int, int, int], scale: int = 1,
                           ) -> tuple[Image.Image, dict[str, float] | None]:
-    """원본 컴포넌트를 픽셀퍼펙트 프레임의 콘텐츠 bbox(×scale) 풋프린트에 앉힌다.
+    """원본 컴포넌트를 픽셀 언페이크 프레임의 콘텐츠 bbox(×scale) 풋프린트에 앉힌다.
 
-    plain/orig 쌍둥이용: 픽셀퍼펙트 결과와 같은 크기·같은 자리에 원본 화질 스프라이트를
-    두어, 큐레이터의 픽셀퍼펙트 토글이 크기 변화 없이 픽셀 처리 품질만 비교하게 한다
+    plain/orig 쌍둥이용: 픽셀 언페이크 결과와 같은 크기·같은 자리에 원본 화질 스프라이트를
+    두어, 큐레이터의 픽셀 언페이크 토글이 크기 변화 없이 픽셀 처리 품질만 비교하게 한다
     (contain 맞춤 + 하단 정렬 + 가로 중앙 — bbox 종횡비와의 오차는 격자 반올림 수준).
 
     두 번째 반환값은 컴포넌트 좌표 → 쌍둥이 좌표 매핑 {crop_x, crop_y, ratio, left, top}
@@ -2262,7 +2264,7 @@ def _require_generation_consistency(run_dir: Path, manifest: dict, name: str,
     소비자(compose/export 등)는 기본값(False)으로 완결 세대를 계속 강제한다."""
     frames_root = run_dir / "frames"
     try:
-        request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+        request = load_request(run_dir)
     except (OSError, ValueError) as exc:
         raise SystemExit(f"cannot read sprite-request.json for {run_dir}: {exc}")
     request_states = set(request.get("states", {}))
@@ -2474,7 +2476,7 @@ def _run(args: argparse.Namespace):
 
 
 def _run_locked(args: argparse.Namespace, run_dir: Path):
-    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(run_dir)
     # 크로마 튜너블의 SSoT 는 request JSON `chroma` — CLI 는 명시 override 만.
     # 실제 적용값은 request 에 되써서 런이 스스로 재현 가능하게 남긴다.
     chroma_config = dict(request.get("chroma") or {})
@@ -2548,7 +2550,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
     all_errors: list[str] = []
     all_warnings: list[str] = []
 
-    pixel_perfect = bool(fit_config.get("pixel_perfect"))
+    pixel_unfake = bool(fit_config.get("pixel_unfake"))
     # 기본 = 셀과 동일(1:1) — 생성 프롬프트가 "TRUE 셀xN pixel grid" 를 명시하는
     # 현행 레시피에서 원본 그리드를 그대로 따라간다. 청키 2x 룩을 원할 때만
     # 절반 값(예: 셀 64 + 로지컬 32)을 명시한다. (2026-07-05, 이전 기본은 usable//2)
@@ -2560,7 +2562,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
     # 정수 격자가 선언을 반올림해 무효로 만들면 관측시킨다 — 아무 일도 안 하는 값이
     # 요청 파일에 남아 라벨과 지문만 오염시키던 조용한 실패다 (원칙 6, 수홍 2026-07-25).
     declared_logical_height = fit_config.get("logical_height")
-    if (pixel_perfect and declared_logical_height is not None
+    if (pixel_unfake and declared_logical_height is not None
             and int(declared_logical_height) != logical_height):
         all_warnings.append(
             f"fit.logical_height={declared_logical_height} is not applied as declared: the "
@@ -2614,7 +2616,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
             output = state_dir / f"frame-{index}.png"
             atomic_save_image(frame, output)
             output_paths.append(f"{rel_dir}/frame-{index}.png")  # final location (staging is swapped in)
-        # 픽셀퍼펙트 전 원본 변형(.plain.png) — curation.json `pixel_perfect: false`
+        # 픽셀 언페이크 전 원본 변형(.plain.png) — curation.json `pixel_unfake: false`
         # 굽기(compose)가 이 셀 크기 쌍둥이를 읽는다. 아틀라스 슬롯 = 셀 크기라 여긴
         # 셀 해상도로 유지한다 (compose_atlas 가 정확히 셀 크기를 요구, 기하 불변).
         plain_paths = []
@@ -2687,7 +2689,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
     def _snap_strip(tag: str, strip: Image.Image, frame_count: int) -> dict[str, Any] | None:
         """한 생성 스트립(primary 또는 take)을 컴포넌트 분리→합의 스냅→캡까지.
 
-        프레임별 픽셀퍼펙트 (2026-07-05 재설계, 2026-07-20 per-frame 확정): 포즈
+        프레임별 픽셀 언페이크 (2026-07-05 재설계, 2026-07-20 per-frame 확정): 포즈
         컴포넌트를 먼저 분리한 뒤 각 프레임마다 피치·위상을 독립 검출해 **자기
         검출값으로** 스냅한다. 스트립 전역 단일 격자는 프레임 간 위상 드리프트로
         미끄러졌고(알렉스 관찰: "격자가 픽셀에 안 맞음"), 합의 피치 강제는 측정차를
@@ -2866,10 +2868,10 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         state_cfg = request["states"][state]
         frame_count = int(state_cfg["frames"])
         takes_cfg = state_cfg.get("takes") or []
-        if takes_cfg and not pixel_perfect:
-            all_errors.append(f"{state}: takes require fit.pixel_perfect")
+        if takes_cfg and not pixel_unfake:
+            all_errors.append(f"{state}: takes require fit.pixel_unfake")
             continue
-        if not pixel_perfect:
+        if not pixel_unfake:
             strip = _load_strip(state, state, raw_rel(request, state), frame_count)
             if strip is None:
                 continue
@@ -2925,7 +2927,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
                 {"label": p["label"] or None, "start": start, "frames": p["count"], "raw": p["raw"]}
                 for p, start in zip(parts, starts)
             ]
-        # 전/후 비교 쌍둥이(plain/orig)는 픽셀퍼펙트 프레임의 최종 콘텐츠 bbox 가
+        # 전/후 비교 쌍둥이(plain/orig)는 픽셀 언페이크 프레임의 최종 콘텐츠 bbox 가
         # 확정된 뒤(아래 pending 루프) 같은 풋프린트에 앉힌다 — 여기서는 원본
         # 컴포넌트만 보관한다. (이전: legacy fit 이 가용영역을 채워 pp 결과보다
         # 크게 앉음 → 토글 순간 크기가 튀어 품질 비교가 안 됐다.)
@@ -2938,7 +2940,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
             "labels": labels, "takes": takes_summary,
         })
 
-    if pixel_perfect and pending:
+    if pixel_unfake and pending:
         # 팔레트는 런 전체(모든 state 의 논리 프레임)에서 한 번 뽑아 공유한다 —
         # 프레임/행 간 색 흔들림(플리커) 제거 + 아이덴티티 색 고정.
         pinned = None if getattr(args, "repalette", False) else load_pinned_palette(run_dir)
@@ -2953,7 +2955,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         total_steps = progress_step + len(pending)  # 스킵된 행 반영 재산정
         outline_cfg = fit_config.get("outline", True)
         for entry in pending:
-            _write_progress(run_dir, "extract", progress_step, total_steps, entry["state"], "pixel-perfect")
+            _write_progress(run_dir, "extract", progress_step, total_steps, entry["state"], "pixel unfake")
             progress_step += 1
             quantized = [apply_palette(frame, palette) for frame in entry["frames"]]
             if outline_cfg:
@@ -2971,7 +2973,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
                     top, safe_margin_y, ground_frames)
                 for frame in quantized
             ]
-            # 전/후 비교 쌍둥이: 픽셀퍼펙트 프레임의 최종 콘텐츠 bbox 와 같은 풋프린트에
+            # 전/후 비교 쌍둥이: 픽셀 언페이크 프레임의 최종 콘텐츠 bbox 와 같은 풋프린트에
             # 원본 컴포넌트를 앉힌다 (plain=셀 크기 굽기용, orig=S×셀 표시용). 빈 프레임은
             # 관측 가능하게 스킵 — 조용한 폴백 없음.
             plain_frames = []
@@ -3010,7 +3012,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
                            input_grids=input_grids, labels=entry.get("labels"),
                            takes=entry.get("takes"))
         all_warnings.append(
-            "pixel-perfect: pitch=%s scale=%dx logical<=%dx%d palette=%d"
+            "pixel unfake: pitch=%s scale=%dx logical<=%dx%d palette=%d"
             % (",".join(str(entry["pitch"]) for entry in pending), pp_scale, logical_width, logical_height, len(palette))
         )
 
@@ -3106,11 +3108,11 @@ def heal_run(run_dir: Path | str) -> dict[str, Any]:
     run_dir = Path(run_dir)
     report: dict[str, Any] = {"healed": [], "kept_stale": [], "notes": []}
     manifest_path = run_dir / "frames" / "frames-manifest.json"
-    request_path = run_dir / "sprite-request.json"
+    request_path = run_dir / REQUEST_FILENAME
     if not manifest_path.is_file() or not request_path.is_file():
         return report
     manifest = load_frames_manifest(manifest_path)
-    request = json.loads(request_path.read_text(encoding="utf-8"))
+    request = load_request(run_dir)   # 게이트 경유 — heal 도 은퇴 키 런에서 돈다
     current = engine_revision()
     # 확정 행 동결 (수홍 확정 2026-07-18): curation states.<state>.frozen == true 인
     # 행은 사용자가 승인·편집을 끝낸 확정본 — 엔진이 바뀌어도 자가치유가 절대

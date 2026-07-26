@@ -29,7 +29,7 @@ from PIL import Image
 from sprite_gen.curation import edit_index, apply_pixel_edits, apply_transform, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
-from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image
+from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, load_request
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -63,7 +63,7 @@ def _run(args: argparse.Namespace):
 
     run_dir = args.run_dir.expanduser().resolve()
     acquire_run_dir_lock(run_dir, "export_curated_pngs")
-    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(run_dir)
     cell = request["cell"]
     cell_size = (int(cell.get("width", cell.get("size", 0))), int(cell.get("height", cell.get("size", 0))))
     curation = load_curation(run_dir)

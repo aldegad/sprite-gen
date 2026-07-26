@@ -65,7 +65,11 @@ def _add_prepare(p: argparse.ArgumentParser) -> None:
     p.add_argument("--fit-resample", choices=["lanczos", "nearest", "kcentroid"], default=None)
     p.add_argument("--fit-align-x", choices=["bbox-center", "centroid", "foot-centroid", "alpha-centroid"], default=None)
     p.add_argument("--fit-align-y", choices=["center", "bottom"], default=None)
-    p.add_argument("--fit-pixel-perfect", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--fit-pixel-unfake", action=argparse.BooleanOptionalAction, default=None)
+    # 은퇴한 이름. 조용한 별칭으로 살려두지 않는다 — 두 이름이 공존하면 문서와 스크립트가
+    # 갈라진다. 대신 무엇으로 바뀌었는지 말하며 죽는다 (숨은 인자라 --help 를 어지럽히지 않음).
+    p.add_argument("--fit-pixel-perfect", "--no-fit-pixel-perfect", dest="_retired_pp",
+                   action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--fit-logical-height", type=int, default=None)
     p.add_argument("--fit-palette-size", type=int, default=None)
     p.add_argument("--fit-detail-bias", action=argparse.BooleanOptionalAction, default=None)
@@ -287,7 +291,12 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if getattr(args, "_retired_pp", False):
+        from sprite_gen.prepare import RETIRED_PP_MESSAGE
+
+        raise SystemExit(RETIRED_PP_MESSAGE)
     kwargs = vars(args).copy()
+    kwargs.pop("_retired_pp", None)
     command = kwargs.pop("command")
     _description, _add_args, run_fn = COMMANDS[command]
     return run_fn(**kwargs)

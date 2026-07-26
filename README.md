@@ -89,7 +89,7 @@ AI-generated "pixel art" is not pixel art. The blocks wobble, the edges carry an
 
 **Backbone Lattice** measures one grid for the whole subject and holds every cut to it. Per-frame pitch detection feeds a row-wide, cross-frame consensus that outvotes harmonic misdetections; that consensus grid is the *backbone* every cut snaps to. Cuts land on actual colour boundaries, and a minimum cell width proportional to the measured pitch keeps two neighbouring cuts from ever collapsing onto the same band. One backbone, so the same block stays the same size across a whole animation instead of jumping between frames.
 
-The result is verified against what shipped, not eyeballed on a hand-picked frame: every pixel-perfect run is re-derived from its own source strip and compared pixel by pixel. The shape you approved stays the shape you get; what changes is only where outlines and shading land, which is exactly what the backbone decides.
+The result is verified against what shipped, not eyeballed on a hand-picked frame: every pixel-unfake run is re-derived from its own source strip and compared pixel by pixel. The shape you approved stays the shape you get; what changes is only where outlines and shading land, which is exactly what the backbone decides.
 
 ## Curation webview
 

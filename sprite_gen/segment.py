@@ -15,7 +15,7 @@ P[x] = Σ_y α(x,y) 의 골(gutter)로 자연 포즈 수를 세고, 포즈가 �
 엔진 통합은 `separate_fused_poses` 하나로 한다: 옵트인(sprite-request
 `fit.segmentation: "projection"` 또는 extract CLI `--segmentation
 projection`)일 때만 스트립을 세그먼트 경계에서 갈라 투명 거터를 넣어
-재조립한다. 이후의 connected-components 추출·위성 병합·pixel-perfect
+재조립한다. 이후의 connected-components 추출·위성 병합·pixel unfake
 경로는 무변경으로 그대로 동작한다. 기본은 off — 기존 런 골든 재현성
 보존 (No Silent Fallback: 분리 실패는 stderr 로 보고하고 스트립을
 건드리지 않아 하류가 기존 에러로 관측 가능하게 실패한다).

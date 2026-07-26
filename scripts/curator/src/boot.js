@@ -35,9 +35,9 @@ async function boot() {
     if (run.heal.kept_stale && run.heal.kept_stale.length) healParts.push(`원본 없음(구엔진 유지): ${run.heal.kept_stale.join(", ")}`);
     if (run.heal.failed && run.heal.failed.length) healParts.push(`재계산 실패(이전 세대 유지): ${run.heal.failed.join(", ")}`);
   }
-  // pixel-perfect twin state must resolve BEFORE first render (frameUrl reads it):
-  // per-state truth = states.<state>.pixel_perfect override > run-wide default > on.
-  seedPixelPerfect(run);
+  // pixel-unfake twin state must resolve BEFORE first render (frameUrl reads it):
+  // per-state truth = states.<state>.pixel_unfake override > run-wide default > on.
+  seedUnfakeState(run);
   // 격자 오버레이는 모든 줄이 가진다 — "격자 가능 줄" 이라는 집합 자체를 두지 않는다.
   // 집합이 존재하면 언젠가 필터가 다시 붙는다 (콩콩이 R3 실증: 5줄 mutant 로 병 복원).
   // 스위치가 없으면 되살릴 knob 도 없다.
@@ -53,14 +53,14 @@ async function boot() {
   if (run.iso) gridToggle.hidden = false;
   {
     // 퍼펙 전체 토글 — 항상 보인다 (조건 게이트 = 컨트롤 숨김 버그 클래스).
-    // 줄들이 섞이면(일부 on/off) indeterminate 로 표시한다 (syncPpControls).
-    const ppWrap = document.getElementById("pp-wrap");
-    const ppCheck = document.getElementById("pp-apply");
-    ppWrap.hidden = false;
-    ppCheck.addEventListener("change", () => {
-      const on = ppCheck.checked;
-      for (const s of run.states) ppStates[s.name] = on;
-      syncPpControls();
+    // 줄들이 섞이면(일부 on/off) indeterminate 로 표시한다 (syncUnfakeControls).
+    const unfakeWrap = document.getElementById("unfake-wrap");
+    const unfakeCheck = document.getElementById("unfake-apply");
+    unfakeWrap.hidden = false;
+    unfakeCheck.addEventListener("change", () => {
+      const on = unfakeCheck.checked;
+      for (const s of run.states) unfakeStates[s.name] = on;
+      syncUnfakeControls();
       refreshVariantImages();
       scheduleSave();
     });
@@ -129,7 +129,7 @@ async function boot() {
   } else {
     for (const state of run.states) renderState(state);
   }
-  syncPpControls();
+  syncUnfakeControls();
   syncGridControls();
   refreshVariantImages();
   // 레거시 테이크 방식 호흡의 자가 이전 (시퀀스 위상 프레임 → 사이드카 레이어)

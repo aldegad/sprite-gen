@@ -107,7 +107,7 @@ in one image.
    ```
 
    That command bakes the anchor frame exactly as the curation view shows it
-   (pixel edits → transform → pixel-perfect re-quantization) and upscales it ×8
+   (pixel edits → transform → pixel-unfake re-quantization) and upscales it ×8
    NEAREST for legibility (pixel data unchanged). It is a **derived cache**:
    re-run it immediately before every generation, because a later edit in the
    view silently invalidates the file. Rationale: the accepted identity is what

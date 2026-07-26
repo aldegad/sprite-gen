@@ -48,10 +48,38 @@ Use only the `component-row` pipeline. Do not treat one-shot master sheets, fixe
 
 이 스킬의 모든 산출물은 아래 체크리스트를 통과해야 한다. 하나라도 어기면 그 결과물은 실패로 보고한다:
 
-- [ ] **AI 개입은 raw 생성 한 곳뿐이다.** `raw/<state>.png` 는 중간 산출물이며, 최종 에셋은 반드시 결정론 변환 — `extract_sprite_row_frames.py`(크로마 제거 → 컴포넌트 분리 → 피치 검출/그리드 스냅 → kCentroid → 공유 팔레트 → 셀 배치) — 를 거친다. 같은 입력이면 항상 같은 출력이 나오는 코드 경로만 픽셀퍼펙트다.
-- [ ] **단순 다운스케일 쇼트컷 금지.** raw 를 PIL `resize()` 한 줄로 줄여 최종 경로에 놓는 것은 픽셀퍼펙트 변환이 아니다 — AA 가장자리 열화와 그리드 미정렬이 그대로 남는다. "이번 한 번만 빠르게" 도 금지. 파이프라인 없이 낱장만 변환할 때도 run dir 를 만들어 같은 추출 경로를 태운다.
+- [ ] **AI 개입은 raw 생성 한 곳뿐이다.** `raw/<state>.png` 는 중간 산출물이며, 최종 에셋은 반드시 결정론 변환 — `extract_sprite_row_frames.py`(크로마 제거 → 컴포넌트 분리 → 피치 검출/그리드 스냅 → kCentroid → 공유 팔레트 → 셀 배치) — 를 거친다. 같은 입력이면 항상 같은 출력이 나오는 코드 경로만 픽셀 언페이크다.
+- [ ] **단순 다운스케일 쇼트컷 금지.** raw 를 PIL `resize()` 한 줄로 줄여 최종 경로에 놓는 것은 픽셀 언페이크 변환이 아니다 — AA 가장자리 열화와 그리드 미정렬이 그대로 남는다. "이번 한 번만 빠르게" 도 금지. 파이프라인 없이 낱장만 변환할 때도 run dir 를 만들어 같은 추출 경로를 태운다.
 - [ ] **크로마 키는 소재색을 먼저 보고 고른다.** 핑크/보라/자주 소재 → 그린 `#00FF00`, 녹색/청록 식물 → 마젠타 `#FF00FF`. 분기표 SSoT 는 image-gen SKILL.md 최상단 게이트 (상세는 [`docs/chroma-alpha.md`](docs/chroma-alpha.md)).
 - [ ] **변환 후 소재색 보존을 검증한다.** 꽃이 희게 탈색됐거나 주요 색이 빠졌으면 키 선택이 소재와 충돌한 것이다 — 로컬 보정이 아니라 키를 바꿔 재생성한다.
+
+## 리네임 게이트 — 어휘/키를 바꿀 때 (BLOCKING)
+
+스키마 키·식별자·라벨을 걸쳐 어휘를 바꾸는 작업(`pixel_perfect` → `pixel_unfake` 류)은
+**일괄 치환으로 시작하지 않는다**. 치환은 이름을 바꾸지만 계약은 **층위**로 존재한다:
+
+```text
+식별자 → 키 문자열 → 사용자 라벨(en+ko) → 문서 예제 → --help 문구 → 테스트 하니스
+```
+
+순서가 정해져 있다 (실사고 2026-07-25/26, plan `sprite-gen/pixel-unfake-rename` — 이 순서를
+거꾸로 해서 검증자 리젝트 3라운드가 났다):
+
+- [ ] **구조 단정을 스윕보다 먼저 쓴다.** 판독 SSoT(게이트) 밖에서 그 파일/키를 읽는 프로덕션
+      경로가 있으면 실패하는 테스트. **정규식이 아니라 AST** 로 — 실제 회귀 형태는 보통 두
+      줄(경로를 변수에 담고 다음 줄에서 읽기)이라 한 줄 정규식은 못 잡는다
+      (`tests/test_pixel_unfake_migration.py` 마지막 케이스가 그 형태).
+- [ ] **그 단정을 mutant 로 검증한다.** 옛 형태를 일부러 되돌려 실제로 실패하는지 본다. 통과만
+      하는 단정은 장식이고, 그걸 근거로 "구조로 닫았다" 고 말하면 거짓 보고가 된다.
+- [ ] **판독부는 키 이름만 바꾸지 않고 게이트 뒤로 옮긴다.** 이관 전 데이터에서 그 판독부만
+      조용히 틀린 답을 본다 (실측: 리롤이 "언페이크가 꺼져 있다" 며 거짓 거부).
+- [ ] **구분자가 바뀌는 치환은 토큰 단위로.** `pixel-perfect` → `pixel unfake` 처럼 하이픈이
+      공백이 되는 치환은 argparse 옵션·경로·식별자를 깨뜨린다 (실측: `--fit-pixel unfake` 유령
+      옵션 등록 + 은퇴 안내문이 현행 플래그를 은퇴했다고 말하는 자기모순).
+- [ ] **은퇴 이름은 조용한 별칭으로 남기지 않는다.** 새 이름을 안내하며 hard error. 그 안내
+      문구 자체는 치환 대상에서 제외한다.
+- [ ] **순수 리네임 주장은 골든 회귀로 증명한다.** 리네임 전/후 산출물이 바이트 동일한지.
+
 
 ## Base Lock Gate (Stage 0, BLOCKING)
 
@@ -262,8 +290,8 @@ manifest `labels`("blink#0"…)로 큐레이션 뷰에 표시된다. 계약 상�
 Optional `fit` object (opt-in; absent means legacy behavior), exposed by `prepare_sprite_run.py` as `--fit-*` flags:
 
 - `"fit": { "resample": "kcentroid", "align_x": "foot-centroid", "align_y": "bottom" }` — pixel-art-aware downscale and jitter-free frame alignment. `align_x: "alpha-centroid"` (opt-in, perfectpixel-studio port) aligns the fringe-insensitive alpha-weighted centroid per frame — the strongest anti-jitter anchor for walk/run rows.
-- `"fit": { "pixel_perfect": true, "logical_height": 64, ... }` — true pixel-perfect extraction with no non-integer resampling (per-frame pitch detection → grid snap → kCentroid → run-wide shared palette → integer NEAREST). Fully deterministic code, applied at the row-extraction stage only; the style SSoT is the attached base/anchor reference, never prompt text.
-- Parameter reference, stage ownership, the pixel-density reference rule, and the before/after plain-twin + curator toggle: [`docs/pixel-perfect.md`](docs/pixel-perfect.md).
+- `"fit": { "pixel_unfake": true, "logical_height": 64, ... }` — true pixel-unfake extraction with no non-integer resampling (per-frame pitch detection → grid snap → kCentroid → run-wide shared palette → integer NEAREST). Fully deterministic code, applied at the row-extraction stage only; the style SSoT is the attached base/anchor reference, never prompt text.
+- Parameter reference, stage ownership, the pixel-density reference rule, and the before/after plain-twin + curator toggle: [`docs/pixel-unfake.md`](docs/pixel-unfake.md).
 
 Rectangular generation cells are allowed when the target motion benefits from hatch-pet-style row proportions:
 
@@ -289,7 +317,7 @@ If image generation produces guide boxes, visible labels, overlapping poses, bac
 
 ## Output Contract
 
-One worker owns exactly one character folder. The canonical run-dir folder tree — every input/output file and which ones drive the curation view — is owned by [`docs/run-contract.md`](docs/run-contract.md) §2. Do not let multiple workers write the same character folder. The `curation.json` sidecar schema (selected/order/transforms/pixel_perfect) and its folder-collision rule: [`docs/curation.md`](docs/curation.md).
+One worker owns exactly one character folder. The canonical run-dir folder tree — every input/output file and which ones drive the curation view — is owned by [`docs/run-contract.md`](docs/run-contract.md) §2. Do not let multiple workers write the same character folder. The `curation.json` sidecar schema (selected/order/transforms/pixel_unfake) and its folder-collision rule: [`docs/curation.md`](docs/curation.md).
 
 ## Runtime Contract
 
@@ -379,7 +407,7 @@ sprite-gen (this SKILL.md = behavior contract + hub)
 │
 ├─ REQUEST AUTHORING ── "fill sprite-request.json before generating"
 │   ├─ docs/states-and-frames.md # which states · frame counts (4/5/6/8/9/12) · Quick Path JSON
-│   ├─ docs/pixel-perfect.md     # fit / pixel_perfect params · plain-twin curator toggle · density refs
+│   ├─ docs/pixel-unfake.md     # fit / pixel_unfake params · plain-twin curator toggle · density refs
 │   └─ docs/chroma-alpha.md      # chroma key branch table · --chroma-key auto · alpha cleanup
 │
 ├─ GENERATION ── "raw/<state>.png from prompts (the one AI step)"
@@ -408,8 +436,8 @@ Concept taxonomy (which doc owns each term, so agents don't guess):
 
 - `sprite-request.json`, cell, states, takes → run-contract.md §2 · states-and-frames.md
 - `run_revision`, `state_revision`, per-state salvage, `curation.stale-*.json` → curation.py + curation.md
-- `curation.json` fields (`selected`/`order`/`deleted`/`transforms`/`pixels`/`clones`/`pixel_perfect`/`revision`) → curation.md
+- `curation.json` fields (`selected`/`order`/`deleted`/`transforms`/`pixels`/`clones`/`pixel_unfake`/`revision`) → curation.md
 - frame **clones** (duplicate instances, `source_frame_index`) → curation.md + compose consumers
 - `frame_layout`, `manifest.json` runtime contract → run-contract.md + this SKILL.md "Runtime Contract"
-- pixel-perfect `fit`, `.plain.png`/`orig/` twins → pixel-perfect.md
+- pixel-unfake `fit`, `.plain.png`/`orig/` twins → pixel-unfake.md
 - webview interactions (title-drag reorder, 넣기/빼기 toggle, 2-tier card, custom `data-tip` tooltip) → curator/ (도메인 분할 `src/*.js` — 로드 순서 SSoT 는 index.html — + curator.css), described in curation.md

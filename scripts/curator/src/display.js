@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// curator/display.js — 프레임 그리기 + 픽셀퍼펙트/격자 표시 변형 동기화
+// curator/display.js — 프레임 그리기 + 픽셀 언페이크/격자 표시 변형 동기화
 // 로드 순서 SSoT = index.html (classic script 전역 어휘 공유; 빌드 스텝 없음)
 
 // ── 프레임 공간 변환 SSoT (수홍 지시 2026-07-19 "코드 좀 체계적으로") ──
@@ -48,7 +48,7 @@ function pointerSrcXY(stage, stateName, idx, e2) {
 
 // 스포이드 진실 = "화면에 보이는 그 색". 표시 파이프라인이 양자화 캔버스든
 // (비트맵 = 표시 공간) CSS 변형 캔버스든 (비트맵 = 소스 공간), 실제 렌더된
-// 비트맵에서 집는다 — 소스 픽셀을 따로 재계산하면 픽셀퍼펙트 재양자화와
+// 비트맵에서 집는다 — 소스 픽셀을 따로 재계산하면 픽셀 언페이크 재양자화와
 // 어긋난 색이 잡힌다 (실사고 2026-07-19 수홍 "스포이드가 다른 색을 잡음").
 function sampleDisplayedColor(stage, stateName, idx, e2) {
   const canvas = stage.querySelector(".snap-canvas");
@@ -127,10 +127,10 @@ function drawFrameInto(ctx, image, t, cw, ch, snap, edits, ss = 1) {
   }
 }
 
-// 픽셀퍼펙트 격자 오버레이: 픽셀퍼펙트가 실제로 스냅한 논리 픽셀 간격을 그린다.
-// run.pixelPerfect.scale = 논리 픽셀 1칸이 차지하는 셀 픽셀 수 (extract 의 pp_scale).
+// 픽셀 언페이크 격자 오버레이: 픽셀 언페이크가 실제로 스냅한 논리 픽셀 간격을 그린다.
+// run.pixelUnfake.scale = 논리 픽셀 1칸이 차지하는 셀 픽셀 수 (extract 의 pp_scale).
 // 예전엔 셀 픽셀마다(scale 무시) 그어서, logical_height < cell 인 런에서 실제 스냅
-// 격자보다 촘촘한 거짓 격자를 보여줬다. 픽셀퍼펙트가 아닌 런은 격자 자체가 없다.
+// 격자보다 촘촘한 거짓 격자를 보여줬다. 픽셀 언페이크가 아닌 런은 격자 자체가 없다.
 function sizePxGrids() {
   document.querySelectorAll(".card").forEach(updateCardGrid);
   syncPixelScaling();
@@ -193,7 +193,7 @@ function superSampleFor(source, cellWidth) {
 // 원본 기하: <img> 는 naturalWidth, <canvas> 는 그리기 버퍼 width.
 // 표시 기하는 clientWidth (레이아웃 후 실제 CSS 픽셀).
 //
-// **원본 기하는 src 가 바뀌면 같이 바뀐다** — 픽셀퍼펙트 토글은 레이아웃을 안 건드리고
+// **원본 기하는 src 가 바뀌면 같이 바뀐다** — 픽셀 언페이크 토글은 레이아웃을 안 건드리고
 // 이미지 소스만 64px 출력 ↔ 700~900px 원본 트윈으로 갈아끼운다. 그래서 판정 재평가는
 // 레이아웃 이벤트만으로 부족하고 **이미지 로드**에도 걸려야 한다 — 안 그러면 확대용
 // nearest 가 축소된 원본 위에 stale 로 남아, 토글을 끄면 원본이 2% 표본으로
@@ -216,14 +216,14 @@ function installPixelScalingLoadHook() {
 }
 
 // 줄 단위 격자: 그 줄의 격자 체크박스가 켜져 있을 때만 그린다.
-// - 픽셀퍼펙트 표시 줄: 출력 격자(빨/파, 셀 픽셀 눈금) — 결과가 앉은 격자 그 자체.
+// - 픽셀 언페이크 표시 줄: 출력 격자(빨/파, 셀 픽셀 눈금) — 결과가 앉은 격자 그 자체.
 //   셀에 고정이다: 이동/회전 변형은 스프라이트가 이 고정 래스터에 재양자화되는 것이지
 //   래스터가 따라 움직이는 게 아니다 (수홍 확정 2026-07-14 실시간 스냅 동작).
 // - 원본(plain) 표시 줄: 최종 대응 격자(초록) — 최종 픽셀 콘텐츠 bbox 를 픽셀 수만큼
 //   균등 분할해 원본 위에 겹친다. 칸 하나 = 최종 픽셀 하나 (칸 수 = 픽셀 수 보장).
 //   콘텐츠 기준 격자이므로 이동(dx/dy)·좌우반전은 따라간다 (수홍 지적 2026-07-15).
 //   회전/기울임/배율 변형은 소스↔결과 대응이 더 이상 직사각 격자가 아니라 숨긴다 —
-//   비축정렬 상태로 가짜 격자를 겹치지 않는다 (결과 픽셀은 픽셀퍼펙트 뷰가 보여준다).
+//   비축정렬 상태로 가짜 격자를 겹치지 않는다 (결과 픽셀은 픽셀 언페이크 뷰가 보여준다).
 //   절단선(manifest input_grids)은 conform 축소 폐지(v1.56.22) 이후 1차 절단이 곧 최종
 //   대응이라 표시 격자로 쓴다 — 아래 updateZoomGrid 주석 참조 (구 서술: "축소가 칸을
 //   합칠 수 있어 진단 기록으로만" 은 그 폐지 전 이야기다).
@@ -238,11 +238,11 @@ function updateCardGrid(card) {
   const st = run.states.find((s) => s.name === cardState);
   const frame = isBaseCard ? frameOf(BASE_STATE, 0) : (st && st.frames[Number(card.dataset.idx)]);
   const on = !!gridStates[cardState];
-  const plainShown = (isBaseCard || ppTwinStates.has(cardState)) && !ppOn(cardState);
+  const plainShown = (isBaseCard || unfakeTwinStates.has(cardState)) && !unfakeOn(cardState);
   const scale = isBaseCard ? 1
     // 격자 간격은 항상 정해진다: 줄별 실측 > 런 계약 > 항등 1. null 이 되는
     // 경로가 없어야 오버레이가 조건부로 사라지지 않는다 (수홍 2026-07-24).
-    : ((st && st.pixelScale) || (run.pixelPerfect && run.pixelPerfect.scale) || 1);
+    : ((st && st.pixelScale) || (run.pixelUnfake && run.pixelUnfake.scale) || 1);
   const t = frame ? getTransform(card.dataset.state, frame.index) : null;
   const axisAligned = !t || (!t.rotate && t.scale === 1 && !t.shx && !t.shy);
   const useFinal = on && plainShown && frame && frame.contentBox && scale && stage && axisAligned;
@@ -372,13 +372,13 @@ function syncAggregate(checkbox, names, isOn) {
   checkbox.indeterminate = !allOn && !vals.every((v) => !v);
 }
 
-// per-state row checkboxes + the header toggle-all checkboxes reflect ppStates/gridStates
-function syncPpControls() {
+// per-state row checkboxes + the header toggle-all checkboxes reflect unfakeStates/gridStates
+function syncUnfakeControls() {
   document.querySelectorAll(".pp-state-check").forEach((el) => {
-    el.checked = ppOn(el.dataset.state);
+    el.checked = unfakeOn(el.dataset.state);
   });
-  syncAggregate(document.getElementById("pp-apply"),
-    new Set(run.states.map((s) => s.name)), ppOn);
+  syncAggregate(document.getElementById("unfake-apply"),
+    new Set(run.states.map((s) => s.name)), unfakeOn);
 }
 
 function syncGridControls() {

@@ -10,7 +10,7 @@
 A character image plus a numeric request becomes a transparent sprite atlas by
 generating **one horizontal strip per animation state**, cleaning chroma,
 extracting poses as connected components, refitting each pose into a fixed cell
-(optionally through the deterministic pixel-perfect path), and packing the
+(optionally through the deterministic pixel-unfake path), and packing the
 cells into a single sheet described by a runtime manifest.
 
 ```mermaid
@@ -19,11 +19,11 @@ flowchart TD
     PREP --> GUIDES["references/layout-guides/&lt;state&gt;.png<br/>prompts/&lt;state&gt;.txt"]
     GUIDES --> GEN["sprite-gen gen<br/>(codex or grok; one image per state — the only AI step)"]
     GEN --> RAW["raw/&lt;state&gt;.png<br/>(one horizontal strip per state)"]
-    RAW --> EXTRACT["extract_sprite_row_frames.py<br/>chroma removal → connected components<br/>→ fit_to_cell or pixel-perfect path"]
+    RAW --> EXTRACT["extract_sprite_row_frames.py<br/>chroma removal → connected components<br/>→ fit_to_cell or pixel-unfake path"]
     EXTRACT --> FRAMES["frames/&lt;state&gt;/frame-N.png (+ frame-N.plain.png twin)<br/>frames/frames-manifest.json"]
     FRAMES --> CURATE["serve_curation.py (optional webview)<br/>curation.json (non-destructive sidecar)"]
     FRAMES --> COMPOSE["compose_sprite_atlas.py"]
-    CURATE -. "selected / transforms / pixel_perfect" .-> COMPOSE
+    CURATE -. "selected / transforms / pixel_unfake" .-> COMPOSE
     COMPOSE --> ATLAS["sprite-sheet-alpha.png + manifest.json<br/>(frame_layout = runtime SSoT)"]
     FRAMES --> QA["preview_animation.py<br/>qa/&lt;state&gt;-contact.png · qa/&lt;state&gt;.gif"]
 ```
@@ -73,7 +73,7 @@ Every run starts here. It owns the recipe consumed by both prompts and scripts:
   "chroma_key": { "name": "magenta", "hex": "#FF00FF", "rgb": [255, 0, 255] },
   "chroma": { "mode": "rgb" },
   "states": { "idle": { "frames": 4, "fps": 4, "loop": true, "action": "..." } },
-  "fit": { "pixel_perfect": true, "logical_height": 64, "palette_size": 24, "align_x": "foot-centroid", "align_y": "bottom", "segmentation": "components" },
+  "fit": { "pixel_unfake": true, "logical_height": 64, "palette_size": 24, "align_x": "foot-centroid", "align_y": "bottom", "segmentation": "components" },
   "style": "...",
   "motion_phase_guides": false
 }
@@ -87,8 +87,8 @@ Every run starts here. It owns the recipe consumed by both prompts and scripts:
   [`chroma-alpha.md`](chroma-alpha.md)).
 - `states` is a free map; `frames`/`fps`/`loop`/`action` per state.
 - `fit` is optional (absent = legacy behavior): `resample`/`align_x`/`align_y`
-  tuning, or the full deterministic `pixel_perfect` mode (§6.1). Behavior
-  contract: [`pixel-perfect.md`](pixel-perfect.md).
+  tuning, or the full deterministic `pixel_unfake` mode (§6.1). Behavior
+  contract: [`pixel-unfake.md`](pixel-unfake.md).
 - `fit.segmentation` is `components` by default; opt-in `projection` is the
   fused-pose recovery path (§6). The extract CLI can explicitly override it.
 - `chroma.mode` is `rgb` by default; opt-in `ycbcr` is owned by
@@ -174,7 +174,7 @@ flowchart TD
 - **Which image is "the accepted anchor" is code, not judgment** (`sprite_gen/anchor.py`,
   `sprite-gen anchor`): it resolves the human's pin (`curation.json` `anchors.<direction>`)
   or, absent one, the anchor row's curated sequence head; bakes that instance with the
-  same primitives compose/export use (clone → pixel edits → transform → pixel-perfect
+  same primitives compose/export use (clone → pixel edits → transform → pixel-unfake
   re-quantization); and writes the derived cache
   `references/anchors/<dir>-anchor-x8.png` that row generation attaches. Reroll, the
   generation plan, and the curation view's anchor chip all go through it, so the picture
@@ -209,18 +209,18 @@ flowchart TD
    reported as `method: slots-explicit`.
 5. `fit_to_cell()` — crop, aspect-preserving downscale (`resample`:
    lanczos | nearest | kcentroid), `align_x`/`align_y` placement, into the
-   cell. On `fit.pixel_perfect` runs this legacy path still runs once per
+   cell. On `fit.pixel_unfake` runs this legacy path still runs once per
    frame to produce the `.plain.png` twin (§6.1); the canonical frame goes
-   through the pixel-perfect path instead.
+   through the pixel-unfake path instead.
 6. `inspect_frames()` — per-frame QA: empty/sparse, edge bleed, chroma-adjacent
    pixels, size outliers → `frames-manifest.json`.
 
 This is intentionally closer to hatch-pet's cleanup than to a plain
 `magick -transparent`.
 
-### 6.1 Pixel-perfect path (`fit.pixel_perfect`, deterministic)
+### 6.1 Pixel-unfake path (`fit.pixel_unfake`, deterministic)
 
-The behavior contract is [`pixel-perfect.md`](pixel-perfect.md); this is how
+The behavior contract is [`pixel-unfake.md`](pixel-unfake.md); this is how
 the code realizes it. The path is unfake.js/pixeldetector-style and contains
 **no model call and no non-integer resampling** — same input, same output:
 
@@ -249,7 +249,7 @@ the code realizes it. The path is unfake.js/pixeldetector-style and contains
    used here — it can sit up to pitch/2 off the true phase, which is outside the
    ±pitch/3 recovery window and merged a character's eye from 4 rows into 3
    (plan `sprite-gen/frame-pitch-consensus-eats-a-row`; see
-   [`pixel-perfect.md`](pixel-perfect.md) "위상은 근사가 아니라 실측으로 고른다").
+   [`pixel-unfake.md`](pixel-unfake.md) "위상은 근사가 아니라 실측으로 고른다").
    `detail_bias` (default true) prefers a near-black minority cluster
    (share ≥ 0.40, luma < 70/255) so eyes and 1px outlines survive dominant voting.
 3. **Physical cap only — no conform squash** — `conform_row_logical()` keeps the
@@ -268,7 +268,7 @@ the code realizes it. The path is unfake.js/pixeldetector-style and contains
    run-wide median-cut palette (`palette_size`) kills frame-to-frame color
    flicker.
 7. **Outline** — `enforce_outline()` draws a uniform 1px silhouette outline.
-8. **Integer placement** — `fit_pixel_perfect()` / `row_placement()` upscale by
+8. **Integer placement** — `fit_pixel_unfake()` / `row_placement()` upscale by
    the integer factor `cell_height // logical_height` (NEAREST) and place with
    offsets honoring `align_x`/`align_y`. `align_x: "alpha-centroid"` computes
    the fringe-insensitive alpha-weighted centroid per frame (alpha ≤ 10 is
@@ -280,7 +280,7 @@ perfect twins (same strip through the legacy fit path; if twin production fails
 it is a warning, only that twin is dropped): the cell-sized `frame-N.plain.png`
 and the hi-res `orig/frame-N.png` (legacy fit at S×cell, `S = min(4, 1024//cell)`,
 display-only). The curation webview toggles the display to `orig/` when present
-(crisp "off = original", else `.plain.png`), while `curation.json.pixel_perfect:
+(crisp "off = original", else `.plain.png`), while `curation.json.pixel_unfake:
 false` makes compose/GIF/PNG export bake the cell-sized `.plain.png` variant —
 missing plain files are a hard error, not a silent fallback. The hi-res twin
 lives in a subdir so non-recursive `frame-*.png` globs (inspect, measure) never
@@ -295,7 +295,7 @@ original `frames/<state>/frame-N.png` files are never rewritten.
 
 ```json
 { "version": 1, "kind": "sprite-gen-curation", "run_revision": "9f3c1a0b7e2d4c58",
-  "pixel_perfect": true,
+  "pixel_unfake": true,
   "states": { "idle": { "selected": [0,2,3], "order": [0,2,3,1],
     "transforms": { "0": { "rotate": 15, "scale": 1.2, "dx": 10, "dy": -8, "flipX": 0 } } } } }
 ```
@@ -304,7 +304,7 @@ original `frames/<state>/frame-N.png` files are never rewritten.
   sidecar only when it matches the current run; a mismatched **or missing** stamp is
   stale and ignored (all-frames default, stderr-warned) — a re-import/re-extract or a
   legacy/hand-written sidecar never applies to frames it isn't proven to belong to.
-- `pixel_perfect` — top-level bake decision: `false` → compose/export bake the
+- `pixel_unfake` — top-level bake decision: `false` → compose/export bake the
   `.plain.png` twins (§6.1); absent/`true` → canonical `frame-N.png`.
 - `selected` — 0-based indices in play order; absent → all frames in order.
 - `order` — webview-owned full display order (sequence row then candidate-pool
@@ -365,7 +365,7 @@ Key differences:
 |---|---|---|
 | Atlas | fixed 8×9, fixed 192×208 cell, 9 fixed pet states | variable state list, variable cell (square default 256) |
 | Cell shape | fixed rect 192×208 | square or rect, one config end-to-end (§4) |
-| Frame cut | slot-based geometry | content-based connected components + refit (+ pixel-perfect path) |
+| Frame cut | slot-based geometry | content-based connected components + refit (+ pixel-unfake path) |
 | Identity | canonical base reference reused on every row | idle-anchor ownership; base dropped after anchors |
 | Curation | n/a | non-destructive `curation.json` + webview |
 | Inverse | n/a | unpack atlas / import PNG pack / export stills |
@@ -377,7 +377,7 @@ whole atlas in a single generation.
 ## Related
 
 - [`../SKILL.md`](../SKILL.md) — canonical behavior contract
-- [`pixel-perfect.md`](pixel-perfect.md) — `fit`/`pixel_perfect` behavior contract
+- [`pixel-unfake.md`](pixel-unfake.md) — `fit`/`pixel_unfake` behavior contract
 - [`curation.md`](curation.md) — webview usage + `curation.json` field semantics
 - [`chroma-alpha.md`](chroma-alpha.md) — chroma key selection + alpha cleanup contract
 - [`gen.md`](gen.md) — provider CLI, verified PNG/report contract, and `image-gen` shuttle boundary
