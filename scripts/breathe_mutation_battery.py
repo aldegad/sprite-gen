@@ -162,6 +162,9 @@ MUTS = [
     ("N5 탈출 M3: 콤마 연산자 폴백", "scripts/curator/src/compare.js",
      "    const bakeSrc = f && bakeFrameUrl(name, f);",
      "    const bakeSrc = f && (bakeFrameUrl(name, f), frameUrl(name, f));"),
+    ("N5 탈출 N: 그리기를 헬퍼로 빼고 폴백을 호출부에", [
+        ("scripts/curator/src/zoom-editor.js", '        if (image && image.complete && image.naturalWidth) {\n          const b = document.createElement("canvas");\n          b.width = cellW;\n          b.height = cellH;\n          const bx = b.getContext("2d");\n          bx.imageSmoothingEnabled = false;\n          drawFrameInto(bx, image, getTransform(stateName, frameIdx), cellW, cellH,\n            snapScaleFor(stateName), getPixelOps(stateName, frameIdx));', '        const paintCell = (bx, image) => {\n          drawFrameInto(bx, image, getTransform(stateName, frameIdx), cellW, cellH,\n            snapScaleFor(stateName), getPixelOps(stateName, frameIdx));\n        };\n        if (f) {\n          const b = document.createElement("canvas");\n          b.width = cellW;\n          b.height = cellH;\n          const bx = b.getContext("2d");\n          bx.imageSmoothingEnabled = false;\n          paintCell(bx, (image && image.complete && image.naturalWidth) ? image : img(frameUrl(stateName, f)));'),
+    ]),
     ("N6 폐기 문구 복원", "CHANGELOG.md",
      "is frozen into the sidecar as a cache",
      "is frozen into the sidecar with a fingerprint of the\n  frame it came from; a mismatch re-detects and says so. cache"),
