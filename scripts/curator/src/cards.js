@@ -9,6 +9,20 @@ const SEL_ICON = {
   remove: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M8 3.5v8.3M4.6 8.6 8 12l3.4-3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
+// 반전·초기화 라인 아이콘 (수홍 2026-07-26: 유니코드 ↔/↺ 글리프는 폭이 폰트마다
+// 제각각이라 카드 푸터가 168px 밖으로 넘쳤다 — 다른 카드 버튼과 같은 12px SVG 로 통일).
+// 확대 모달 툴바(zoom-editor.js)도 같은 상수를 쓴다 — 같은 액션은 같은 그림.
+const FLIP_X_ICON =
+  '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+  '<path d="M8 2.1v11.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-dasharray="1.9 1.8"/>' +
+  '<path d="M6 5.4 3.1 8l2.9 2.6M10 5.4 12.9 8l-2.9 2.6" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const RESET_ICON =
+  '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+  '<path d="M4.85 4.25A4.9 4.9 0 1 0 8 3.1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
+  '<path d="M9.7 1.9 8 3.1 9.7 4.3" fill="none" stroke="currentColor" stroke-width="1.3" ' +
+  'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 function renderState(state, replaceEl) {
   const wrap = document.createElement("section");
   wrap.className = "state";
@@ -247,8 +261,8 @@ function renderCard(state, frame) {
     (frame.present
       ? `<div class="card-info">${psize}<span class="tvals"></span></div>` +
         `<div class="card-controls">` +
-        `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
-        `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}" aria-label="reset">↺</button>` +
+        `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">${FLIP_X_ICON}</button>` +
+        `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}" aria-label="reset">${RESET_ICON}</button>` +
         anchorBtn +
         `<span class="ctrl-group">` +
         `<button type="button" class="sel-btn"></button>` +

@@ -597,9 +597,12 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 }
 .card-info .psize { font-size: 10.5px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 .card-info .tvals { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+/* 버튼이 카드 폭(168px)을 넘으면 잘리지 말고 2줄로 접힌다 — 로케일마다 라벨 폭이
+   달라(빼기 / remove) 한 줄 고정은 언제든 다시 넘친다 (수홍 2026-07-26 실측 오버플로). */
 .card-controls {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
   margin-top: 4px;
 }
@@ -829,8 +832,27 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .scale-scrub .ss-grab { cursor: ew-resize; padding: 2px 3px; display: inline-flex; touch-action: none; }
 .scale-scrub .ss-grab:hover, .scale-scrub .ss-step:hover { color: var(--accent, #0ea5e9); }
 
-/* 버튼 줄: [반전][초기화] ... [넣기/빼기][보관] (오른쪽 그룹) */
+/* 버튼 줄: [반전][초기화][앵커] ... [넣기/빼기][보관] (오른쪽 그룹).
+   아이콘 전용 버튼은 헤더 우측(ct-right)과 같은 컴팩트 규격으로 통일한다 —
+   button.ghost 기본 padding(3px 8px)을 그대로 쓰면 글자 없는 버튼이 30px 을 먹는다. */
 .card-controls .flip-btn, .card-controls .reset-btn { flex: none; }
+.card-controls .flip-btn,
+.card-controls .reset-btn,
+.card-controls .anchor-btn,
+.card-controls .arch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border-radius: 5px;
+  color: var(--muted);
+  line-height: 0;
+}
+.card-controls .flip-btn:hover,
+.card-controls .reset-btn:hover {
+  color: var(--accent, #0ea5e9);
+  background: rgba(37, 99, 235, 0.08);
+}
 /* 넣기·빼기 + 보관을 한 묶음으로 오른쪽 정렬 (성격이 비슷한 멤버십 액션) */
 .card-controls .ctrl-group { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; flex: none; }
 
@@ -866,11 +888,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 }
 .sel-btn svg { display: block; }
 .sel-btn:hover { border-color: var(--accent, #0ea5e9); color: var(--accent, #0ea5e9); }
-/* 보관 버튼: 그룹 안의 아이콘 전용 */
-.card-controls .arch-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 3px; border-radius: 5px; color: var(--muted); line-height: 0;
-}
+/* 보관 버튼 규격은 위 아이콘 버튼 공통 규칙이 소유한다 (여기 재선언 금지) */
 .card-controls .arch-btn:hover { color: var(--accent, #0ea5e9); background: rgba(37, 99, 235, 0.08); }
 
 /* 픽셀 편집 툴바 (확대 모달) */

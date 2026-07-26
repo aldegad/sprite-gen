@@ -5,6 +5,21 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## Unreleased - the card footer stopped spilling out of the card
+
+The curation card grew a button at a time - flip, reset, anchor pin, add/remove, archive - and the
+footer row finally ran past the 168px card edge, clipping the archive button outside the border.
+
+- The icon-only footer buttons now use the same compact 12px line-icon size as the header ones
+  (`padding: 3px`) instead of inheriting `button.ghost`'s text padding, which was spending 30px on
+  a button with no text. Five controls now fit with room left.
+- `↔` / `↺` were Unicode glyphs whose advance width is a font decision, so the row's width was not
+  something the stylesheet could know. They are inline SVG now, like every other icon in the view,
+  and the zoom modal's toolbar draws from the same two constants - one action, one picture.
+- `.card-controls` wraps. Label width is per-locale (`빼기` vs `remove`) and states keep gaining
+  buttons, so a single hard-coded row is a bug waiting for the next addition; it folds to a second
+  line rather than clipping.
+
 ## Unreleased - "pixel perfect" was the wrong name; the pipeline now says pixel unfake
 
 Terminology, all the way into the schema. `domains/tools/spritefusion-pixel-snapper.md` had the

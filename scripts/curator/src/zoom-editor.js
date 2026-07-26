@@ -145,8 +145,8 @@ function openZoom(stateName, idx, keepWidth) {
     `<div class="card-controls">` +
     `<span class="psize" data-tip="${t("tContentPx")}">${frame.contentSize ? `${frame.contentSize[0]}x${frame.contentSize[1]}px` : ""}</span>` +
     `<span class="tvals"></span>` +
-    `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">↔</button>` +
-    `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}">↺</button>` +
+    `<button type="button" class="ghost flip-btn" data-tip="${t("tFlipX")}" aria-label="flip-x">${FLIP_X_ICON}</button>` +
+    `<button type="button" class="ghost reset-btn" data-tip="${t("tReset")}" aria-label="reset">${RESET_ICON}</button>` +
     `</div>` +
     `</div>`;
   document.body.appendChild(modal);
