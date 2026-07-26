@@ -5,6 +5,67 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## Unreleased - the documented `sprite-gen` command exists now, and it opens the curation view
+
+Three of the fixes below are bugs that were already sitting in the tree, not consequences of the new
+subcommand. The package advertised a command line it had never registered, shipped wheels with a
+subpackage missing from them, and declared a build that could not have succeeded.
+
+- **The `sprite-gen` console script was documentation only.** `pyproject.toml` had no
+  `[project.scripts]` table at all, so every `sprite-gen anchor ...` in `SKILL.md` and `docs/` named a
+  command that had never run on any machine. It is registered now, which also settles "which python":
+  pip writes the installing environment's interpreter into the shebang, so the caller stops choosing.
+  It binds the same `sprite_gen.cli:main` as `-m sprite_gen.cli`, so the two surfaces cannot diverge -
+  `--help` output is byte-identical between them.
+- **`sprite_gen.gen` was missing from every built wheel.** `packages = ["sprite_gen"]` was a
+  hand-written list, and a hand-written list does not know about subpackages. `cli.py` imports `gen`
+  at module scope, so `sprite-gen --help` died with an `ImportError` on any non-editable install -
+  measured, not reasoned, and invisible until now because every check had been run against `pip
+  install -e .`. `[tool.setuptools.packages.find]` derives the list from the filesystem instead, so
+  the next subpackage cannot go missing the same way.
+- **The declared build floor described a build that could not happen.** `[build-system] requires` said
+  `setuptools>=68`, but `license = "Apache-2.0"` is the PEP 639 string form: calling the backend
+  directly on this tree, 76.1.0 refuses it during `project.license` validation and 77.0.1 builds.
+  Nobody had hit it because pip's build isolation always fetches the newest setuptools. The floor is
+  `>=77` now, and the `dev` extra carries `setuptools>=77` as well, because the wheel guard below has
+  to import the backend from the test environment, where the copy build isolation installs is not
+  visible.
+
+The new part, and the reason the three above surfaced:
+
+- **`sprite-gen curation --run-dir <run>`.** The curation view is a subcommand, carrying the flags it
+  already had (`--host`, `--port`, `--no-open`, `--lang`) unchanged. `serve_curation` splits into one
+  argument declaration (`add_arguments`), one implementation (`run`), and a thin `main` joining them;
+  `cli.COMMANDS["curation"]` points at that same function object rather than a copy, so the three
+  entry paths - the subcommand, `-m sprite_gen.serve_curation`, and the `scripts/serve_curation.py`
+  wrapper - cannot grow a flag one of them lacks or a default one of them disagrees with.
+- **`serve_curation` moved into the package** (`scripts/serve_curation.py` to
+  `sprite_gen/serve_curation.py`, logic untouched; the old path stays as the same thin wrapper the
+  other tools use). The move exposed nine bare sibling imports of `curation`, `extract`, and `runio`
+  that only resolved when `scripts/` happened to be `sys.path[0]`. Started as
+  `-m sprite_gen.serve_curation`, the SPA came up but `/api/run` answered 500 with
+  `No module named 'extract'` - six of the nine are lazy, so they failed at request time rather than
+  import time. An AST guard now forbids bare sibling imports inside the package, and a second guard
+  checks that the wrapper really starts a parser instead of quietly doing nothing.
+- **The curation SPA travels inside the wheel.** `scripts/curator/` moved to `sprite_gen/curator/` and
+  is declared as package data; the server resolves it relative to its own module, so a checkout and an
+  installed wheel take the same path, and there is deliberately no "package first, `scripts/` if
+  missing" fallback. In the same pass `_run_script` became `_run_module`: compose, interpolate,
+  reroll, export and export-gif shelled out to `scripts/<tool>.py`, which an installed wheel does not
+  contain.
+- **The asset guard treats the built wheel as the truth.** Its first version compared declared
+  patterns using `fnmatch`, whose `*` crosses `/` while setuptools' glob stops at the directory
+  boundary, so adding `curator/src/deep/new.js` left the suite green and the file out of the wheel.
+  The guard now expands the patterns the way the build does, then builds an actual wheel and reads
+  what is inside it - which is also what catches a missing `.py` module. The declaration became
+  `curator/**/*`, the same derive-from-the-filesystem fix as `packages.find`.
+- Documentation follows the command that works. The curation examples in `SKILL.md` and
+  `docs/curation.md` are `sprite-gen curation ...` now, with the other two entry paths written down
+  beside them rather than removed, since all three staying alive is the point. Three statements the
+  move had made false went with it: `SKILL.md` claiming `sprite-gen <tool>` is a CLI module and not a
+  console script, a `pyproject.toml` comment introducing `python3 scripts/<tool>.py` as the repo's
+  calling form, and `docs/pixel-unfake.md` pointing at the pre-move implementation file.
+
 ## Unreleased - NumPy is a declared dependency now, and the floor is the one 3.10 can actually install
 
 The chroma extraction path is about to stop looping over pixels in Python, which needs NumPy. Until
