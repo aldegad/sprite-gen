@@ -19,7 +19,7 @@ from pathlib import Path
 from PIL import Image
 
 from sprite_gen.extract import require_frames_manifest
-from sprite_gen.runio import read_guard
+from sprite_gen.runio import REQUEST_FILENAME, load_request, read_guard
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, save_clean_gif
 
 
@@ -98,8 +98,10 @@ def _run(args: argparse.Namespace):
 
 def _run_guarded(args, run_dir):
     manifest = require_frames_manifest(run_dir)  # fail loud if absent/corrupt
-    request_path = run_dir / "sprite-request.json"
-    request = json.loads(request_path.read_text(encoding="utf-8")) if request_path.is_file() else {}
+    # 읽기는 게이트 경유 (`load_request`) — raw 로 읽으면 은퇴 키 런에서 이관이 비껴간다.
+    # 이 소비자는 request 없는 런도 허용하므로 부재만 관용한다 (게이트는 부재에 fail-loud).
+    request_path = run_dir / REQUEST_FILENAME
+    request = load_request(run_dir) if request_path.is_file() else {}
     state_meta = request.get("states", {})
 
     qa_dir = run_dir / "qa"

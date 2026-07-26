@@ -1,4 +1,4 @@
-# Pixel-Perfect Fit (`fit` / `pixel_unfake`) — sprite-gen reference
+# Pixel Unfake Fit (`fit` / `pixel_unfake`) — sprite-gen reference
 
 > `SKILL.md` 허브에서 분리한 시나리오 상세. 픽셀아트 타깃, 지터 없는 locomotion, 게임-레디 청키 픽셀 출력이 필요할 때 이 문서를 따른다. 구현 내부(피치 검출·grid-snap·팔레트 단계별 코드 동작)는 [`architecture.md`](architecture.md) §6 참조.
 
@@ -21,7 +21,7 @@ Optional `fit` object (opt-in; absent means legacy behavior). For pixel-art targ
 For true pixel-unfake output (game-ready chunky pixel art with intact 1px outlines), use the `pixel_unfake` mode instead of `resample` — it removes ALL non-integer resampling:
 
 ```json
-"fit": { "pixel_perfect": true, "logical_height": 64, "palette_size": 48, "align_x": "foot-centroid", "align_y": "bottom" }
+"fit": { "pixel_unfake": true, "logical_height": 64, "palette_size": 48, "align_x": "foot-centroid", "align_y": "bottom" }
 ```
 
 **눌림 없음 — 유일한 동작** (수홍 확정 2026-07-14, 옵트인 잔재 완전 제거 2026-07-17): 스냅된 네이티브 논리 크기를 유지한다 — `logical_height` 계약으로의 conform 축소는 칸을 병합해 디테일(눈·아웃라인)을 갈라먹는다. 과거의 `"conform": true` 옵트인은 **제거됐고 선언 시 요란하게 거부된다** — 제거된 결정이 플래그 하나로 되살아나는 회귀 경로였다 (실사고 2026-07-17: 높이 통일 시도가 이 플래그로 재발). 물리 한계(셀 바닥 마진 유지, `(cell_h − margin_y)/scale`)만 캡으로 강제되고 캡에 걸린 프레임은 경고로 관측된다. **안전영역(사방 여백 준수 상한)을 넘었지만 물리캡 이내인 여백 침범은 리롤 대상이 아니다** — 정보성 알림만 남는다(manifest warning + 큐레이터 줄 헤더 "여백 침범" 배지, 수홍 확정 2026-07-14). 계약 키(logical_height)는 생성 목표/경고 기준일 뿐 강제 수단이 아니다.
@@ -105,4 +105,4 @@ AI 개입은 **raw 생성 한 곳뿐**이다 (`SKILL.md` 필수 게이트). 픽�
 
 - [`../SKILL.md`](../SKILL.md) — canonical behavior contract (필수 게이트, SSoT 요청 스키마)
 - [`architecture.md`](architecture.md) — 추출 내부 구현 (피치 검출·grid-snap·팔레트 코드 동작)
-- [`curation.md`](curation.md) — 큐레이션뷰 사용법, `curation.json.pixel_perfect` 플래그
+- [`curation.md`](curation.md) — 큐레이션뷰 사용법, `curation.json.pixel_unfake` 플래그

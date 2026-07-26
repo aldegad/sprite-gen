@@ -6,8 +6,8 @@ const STR = {
   en: {
     title: "curation", compose: "Download atlas", export: "Download PNGs", exportGif: "Download GIFs",
     groundGrid: "Ground grid", langOther: "한국어",
-    unfakeApply: "Pixel-perfect (all)", baseNote: "identity reference — not baked",
-    unfakeState: "Pixel-perfect",
+    unfakeApply: "Pixel unfake (all)", baseNote: "identity reference — not baked",
+    unfakeState: "Pixel unfake",
     tUnfakeState: "toggle pixel-unfake for THIS row only — what it displays and what compose bakes",
     pxGrid: "Pixel grid", pxGridAll: "Pixel grid (all)",
     tGridState: "grid overlay for THIS row — output pixel raster on the pixel-unfake view; on the original view the FINAL correspondence grid (green): one cell = one result pixel (display only)",
@@ -156,13 +156,13 @@ const STR = {
   ko: {
     title: "큐레이션", compose: "아틀라스 다운로드", export: "PNG 다운로드", exportGif: "GIF 다운로드",
     groundGrid: "바닥 그리드", langOther: "EN",
-    unfakeApply: "픽셀퍼펙트 전체", baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
-    unfakeState: "픽셀퍼펙트",
-    tUnfakeState: "이 줄만 픽셀퍼펙트 켜기/끄기 — 표시와 굽기가 같이 바뀐다",
+    unfakeApply: "픽셀 언페이크 전체", baseNote: "원본 베이스 (아이덴티티 참조 — 굽기와 무관)",
+    unfakeState: "픽셀 언페이크",
+    tUnfakeState: "이 줄만 픽셀 언페이크 켜기/끄기 — 표시와 굽기가 같이 바뀐다",
     pxGrid: "픽셀 격자", pxGridAll: "픽셀 격자 전체",
-    tGridState: "이 줄 격자 오버레이 — 픽셀퍼펙트 뷰에선 출력 픽셀 눈금, 원본 뷰에선 최종 대응 격자(초록, 칸 하나 = 결과 픽셀 하나) (표시 전용)",
+    tGridState: "이 줄 격자 오버레이 — 픽셀 언페이크 뷰에선 출력 픽셀 눈금, 원본 뷰에선 최종 대응 격자(초록, 칸 하나 = 결과 픽셀 하나) (표시 전용)",
     refsLabel: "생성 재료", ref_anchor: "방향 앵커", ref_basis: "basis row", ref_guide: "레이아웃 가이드", tPxGrid: "모든 줄의 격자 오버레이를 한번에 켜기/끄기 (표시 전용; 줄별 체크박스는 각 줄에)",
-    tUnfakeApply: "모든 줄의 픽셀퍼펙트를 한번에 켜기/끄기 (줄별 체크박스는 각 줄에)",
+    tUnfakeApply: "모든 줄의 픽셀 언페이크를 한번에 켜기/끄기 (줄별 체크박스는 각 줄에)",
     frames: "프레임", loop: "루프", nonLoop: "비루프", preview: "프리뷰",
     excluded: "✗ 제외", selected: "✓ 선택됨", extractFail: "⚠ 추출 미완료",
     editing: "편집 중…", saved: "저장됨", saveFail: "저장 실패: ",
@@ -211,7 +211,7 @@ const STR = {
     breatheResample: (rows) =>
       `참고: ${rows} 에 회전/확대 변형이 걸려 있다. 굽기는 BICUBIC, 이 캔버스는 NEAREST 로 `
       + `리샘플하므로 내보낸 파일이 GIF 와 가장자리 몇 px 다르다.`,
-    opProgress: (p, pct) => `재추출 ${p.done}/${p.total} (${pct}%) — ${p.label} · ${p.phase === "components" ? "컴포넌트" : "픽셀퍼펙트"}`,
+    opProgress: (p, pct) => `재추출 ${p.done}/${p.total} (${pct}%) — ${p.label} · ${p.phase === "components" ? "컴포넌트" : "픽셀 언페이크"}`,
     healTitle: "엔진 갱신 반영 중 — 프레임 재계산",
     healNote: "죄송해요~ 조금만 기다려 주세요! 엔진 갱신 반영은 이번 한 번이면 돼요. 끝나면 바로 열어 드릴게요!",
     healWaiting: "준비하고 있어요~",

@@ -25,7 +25,7 @@ Schema (`curation.json`):
                                               #   below — never silently applied wholesale.
       "pixel_unfake": true,                  # optional run-wide DEFAULT; false -> compose
                                               #   reads the frame-N.plain.png variant (pre-
-                                              #   pixel-perfect). absent/true -> the
+                                              #   pixel unfake). absent/true -> the
                                               #   canonical frame-N.png. Only
                                               #   meaningful when extraction saved
                                               #   both variants (fit.pixel_unfake).
@@ -200,7 +200,7 @@ def curation_path(run_dir: Path) -> Path:
 
 
 # 폐기된 분할선 스키마 키. 조용히 무시하거나 재해석하지 않고 요란하게 거부한다 —
-# 제거된 결정이 필드 하나로 되살아나는 경로를 만들지 않기 위해서다 (docs/pixel-perfect.md
+# 제거된 결정이 필드 하나로 되살아나는 경로를 만들지 않기 위해서다 (docs/pixel-unfake.md
 # 의 `conform` 사고, 2026-07-17). splits 없이는 구 정규화가 None 을 냈으므로 구 설정은
 # 전부 이 게이트에 걸린다 — 조용히 다른 동작으로 바뀌는 사이드카는 없다.
 # 호흡 파라미터 허용 범위 — 큐레이터 컨트롤(`breathe.js` BREATHE_*_MAX)과 같은 값이어야
@@ -326,7 +326,7 @@ def frame_variant(curation: dict[str, Any] | None, state: str | None = None) -> 
     Resolution order (single source for every consumer):
     1. the state's own `states.<state>.pixel_unfake` (the curator's per-row toggle),
     2. the run-wide `pixel_unfake` default (the curator's toggle-all),
-    3. absent sidecar / absent fields -> the canonical pixel-perfected frames.
+    3. absent sidecar / absent fields -> the canonical pixel unfakeed frames.
 
     Called without `state` it resolves the run-wide default only (legacy callers,
     single-state tools that pass their state explicitly elsewhere)."""
@@ -443,7 +443,7 @@ def state_revision(run_dir: Path, state: str, request: dict[str, Any] | None = N
     세그먼트 = 그 행의 프레임 인덱스 공간을 만드는 원료 단위: primary raw, 그리고 선언
     순서의 take raw (manifest row `takes` 가 SSoT). raw 가 아예 없는 임포트 행은 프레임
     파일 내용 자체가 원료다. 다이제스트 입력은 원료의 **내용**(sha256)·세그먼트 프레임
-    수·셀/픽셀퍼펙트 기하이고, frames/ 캐시의 mtime 이나 엔진 리비전은 넣지 않는다 —
+    수·셀/픽셀 언페이크 기하이고, frames/ 캐시의 mtime 이나 엔진 리비전은 넣지 않는다 —
     엔진 업그레이드 heal 이 같은 raw 를 재유도해도 지문이 유지돼 큐레이션이 살아남고,
     raw 리롤·테이크 교체·셀 변경은 지문을 바꾼다.
 

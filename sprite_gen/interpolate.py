@@ -47,6 +47,7 @@ from PIL import Image
 from .extract import (extract_component_images, register_row_frames,
                       remove_chroma_background_ycbcr, tighten_components)
 from .layout import raw_rel, take_raw_rel
+from .runio import REQUEST_FILENAME, load_request
 
 PROVIDERS = ("codex", "grok")
 
@@ -155,7 +156,7 @@ def normalize_tween_scale(mid: Image.Image, img0: Image.Image, img1: Image.Image
     다른 크기로 그릴 수 있다 (실사고 2026-07-17: tween 이 32×58 로 나와 형제 28×48
     보다 14% 커짐 — 재생 시 프레임에서 캐릭터가 튐, 수홍 발견). 참조 두 장의 콘텐츠
     높이 평균을 목표로 중간 프레임의 콘텐츠 높이를 리스케일하고, 참조와 같은 크로마
-    캔버스에 바닥 정렬로 다시 앉힌다. 이후의 픽셀퍼펙트 추출이 격자를 다시 굽는다."""
+    캔버스에 바닥 정렬로 다시 앉힌다. 이후의 픽셀 언페이크 추출이 격자를 다시 굽는다."""
     ref_boxes = [_chroma_content_bbox(im, chroma_rgb) for im in (img0, img1)]
     mid_box = _chroma_content_bbox(mid, chroma_rgb)
     if not all(ref_boxes) or not mid_box:
@@ -187,9 +188,11 @@ def write_take(run_dir: Path, request: dict[str, Any], state: str, label: str,
     target = run_dir / rel
     target.parent.mkdir(parents=True, exist_ok=True)
     image.save(target)
-    request_path = run_dir / "sprite-request.json"
+    request_path = run_dir / REQUEST_FILENAME
     with publish_guard(run_dir):
-        fresh = json.loads(request_path.read_text(encoding="utf-8"))
+        # 락 안 fresh 재독도 게이트 경유 — 이관 판정·두 키 hard fail 이 한 곳에만 있어야 한다
+        # (게이트는 락 보유를 감지하면 재기록을 미룬다).
+        fresh = load_request(run_dir)
         takes = fresh["states"][state].setdefault("takes", [])
         entry = next((t for t in takes if t.get("label") == label), None)
         if entry is None:
@@ -207,10 +210,9 @@ def interpolate_between(run_dir: Path | str, state: str, index_a: int, index_b: 
                         interpolator: Interpolator | None = None) -> Path:
     """두 프레임 사이 중간 프레임을 만들어 테이크로 기록한다. 반환 = 테이크 raw 경로."""
     run_dir = Path(run_dir)
-    request_path = run_dir / "sprite-request.json"
-    if not request_path.is_file():
-        raise SystemExit(f"not a sprite-gen run dir (no sprite-request.json): {run_dir}")
-    request = json.loads(request_path.read_text(encoding="utf-8"))
+    # 읽기는 게이트만 (`load_request`): raw 로 읽으면 은퇴 키 런에서 이관이 비껴간다 —
+    # 리롤에서 실제로 났던 회귀와 같은 클래스다 (젯비 R1).
+    request = load_request(run_dir)
     if state not in request.get("states", {}):
         raise SystemExit(f"unknown state: {state}")
     if not 0.0 < t < 1.0:

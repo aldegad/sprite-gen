@@ -185,7 +185,7 @@ def _base_grid_response(run_dir: Path, base_path: Path) -> dict:
         # 절단선으로 raw 블록을 채워 base-source 에 굽는다. 즉 위상이 밀리면 추출 스냅과
         # 같은 계열의 오배치가 난다. 그럼에도 추출 정책을 강제하지 않는 이유는 대상이
         # 별개 이미지(base-source)이고 사람이 보며 편집하는 경로이기 때문이며, 이 경로의
-        # 위상 정확도는 별건이다 (docs/pixel-perfect.md "위상은 근사가 아니라 실측으로 고른다").
+        # 위상 정확도는 별건이다 (docs/pixel-unfake.md "위상은 근사가 아니라 실측으로 고른다").
         (pitch_x, pitch_y), (phase_x, phase_y) = detect_pixel_grid(tight)
         if min(pitch_x, pitch_y) < 2.0:
             result = {"grid": None, "note": "no confident pixel grid detected"}
@@ -386,7 +386,7 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         "safeMarginY": int(cell.get("safe_margin_y", cell.get("safe_margin", 0))),
     }
 
-    # 픽셀퍼펙트 격자: 논리 픽셀 1칸이 셀 픽셀 몇 칸인가. extract 의 pp_scale 과 같은 식이어야
+    # 픽셀 언페이크 격자: 논리 픽셀 1칸이 셀 픽셀 몇 칸인가. extract 의 pp_scale 과 같은 식이어야
     # 큐레이터 오버레이가 "실제로 스냅된 격자"를 그린다 (셀 래스터가 아니라).
     fit = request.get("fit") or {}
     pixel_unfake = None

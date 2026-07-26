@@ -82,7 +82,7 @@ not restate it elsewhere; point here.
   # manifest row 에 labels("blink#0"…)/takes(start·frames·raw)가 남고, 소비자가 행
   # 크기를 request 에서 셀 때는 layout.state_frame_total(primary+takes 합)을 쓴다.
   # 어느 스트립 하나라도 실패하면 행 전체가 이전 세대로 남는다 (부분 풀 게시 금지).
-  frames/<state>/frame-N.plain.png   # pixel-unfake runs only: cell-sized pre-pixel-unfake twin, baked by compose on pixel_perfect:false (§3)
+  frames/<state>/frame-N.plain.png   # pixel-unfake runs only: cell-sized pre-pixel-unfake twin, baked by compose on pixel_unfake:false (§3)
   frames/<state>/orig/frame-N.png    # pixel-unfake runs only: hi-res original twin (display-only), drives the pp-off toggle at original quality (§3)
   frames/frames-manifest.json        # per-row extract report (files, labels, ok) — only ever a COMPLETE ok generation (§6)
   # frames/ 는 (raw + request + 엔진)의 파생 캐시다 (실시간 계약, 수홍 확정 2026-07-14):
@@ -126,7 +126,7 @@ Rules the display depends on:
   the same chips (§4).
 - **`frames/<state>/frame-N.plain.png`** (pixel-unfake runs only) is the *cell-sized*
   pre-fit twin that `compose` bakes when the sidecar turns pixel-unfake off for that
-  state (`states.<state>.pixel_unfake:false`, or the run-wide `pixel_perfect:false`
+  state (`states.<state>.pixel_unfake:false`, or the run-wide `pixel_unfake:false`
   default — resolver: `curation.frame_variant(curation, state)`) — the
   atlas slot is cell-sized, so this twin must be too. **`frames/<state>/orig/frame-N.png`**
   is the *hi-res* (S×cell) pre-fit twin the view displays when the user turns

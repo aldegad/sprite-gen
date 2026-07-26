@@ -125,3 +125,71 @@ def test_retired_cli_flag_reports_the_new_name(tmp_path) -> None:
               "--fit-pixel-perfect"])
     message = str(excinfo.value)
     assert "--fit-pixel-unfake" in message and "retired" in message
+
+
+def test_reroll_reads_through_the_gate_not_raw(tmp_path) -> None:
+    """레거시 런의 리롤이 **거짓 거부**되지 않는다 (젯비 2026-07-26 R1 재현 고정).
+
+    리롤은 `fit.pixel_unfake` 계약 위에서만 테이크를 병합한다. 그 검사 앞의 request 읽기가
+    게이트를 우회해 raw 로 읽으면, 아직 이관되지 않은 런(디스크에 은퇴 키만)에서 검사가 항상
+    False 가 되어 "언페이크가 켜진 런"의 리롤을 켜져 있지 않다며 막는다. 리롤은 뷰가 **별도
+    서브프로세스**로 띄우므로 뷰 프로세스의 in-memory 이관도 넘어오지 않는다 — 그래서 읽기
+    자체가 게이트 뒤에 있어야 한다 (키 이름만 바꾸는 것으로는 부족하다)."""
+    import random
+
+    from PIL import Image
+
+    from sprite_gen import reroll
+
+    run_dir = tmp_path / "run"
+    (run_dir / "raw").mkdir(parents=True)
+    rng = random.Random(7)
+    art = Image.new("RGB", (20, 36), (255, 0, 255))
+    for y in range(36):
+        for x in range(20):
+            if rng.random() < 0.55:
+                art.putpixel((x, y), (rng.randrange(30, 220), 90, 200))
+    frame = art.resize((160, 288), Image.Resampling.NEAREST)
+    strip = Image.new("RGB", (frame.width * 2 + 120, frame.height + 80), (255, 0, 255))
+    strip.paste(frame, (40, 40))
+    strip.paste(frame, (frame.width + 80, 40))
+    strip.save(run_dir / "raw" / "walk.png")
+    _write_request(run_dir, {"pixel_perfect": True, "logical_height": 48})   # 은퇴 키만
+
+    with pytest.raises(SystemExit) as excinfo:
+        reroll.reroll_state(run_dir, "walk")
+    # pp 계약 검사를 통과해 **다음** 단계(프롬프트 부재)에서 멈춰야 한다
+    assert "require fit.pixel_unfake" not in str(excinfo.value), (
+        "레거시 런이 언페이크 계약 검사에서 거짓 거부됐다 — 읽기가 게이트를 우회한다")
+    assert "prompt file missing" in str(excinfo.value)
+    # 그리고 게이트를 지났으니 파일도 이관돼 있다
+    assert "pixel_unfake" in json.loads(
+        (run_dir / "sprite-request.json").read_text(encoding="utf-8"))["fit"]
+
+
+def test_no_production_path_reads_the_request_outside_the_gate() -> None:
+    """프로덕션 코드가 `sprite-request.json` 을 게이트 밖에서 읽지 않는다 (구조 단정).
+
+    이게 이 플랜의 핵심 계약이다. 키 이름만 바꾸고 읽기를 게이트 뒤로 옮기지 않으면, 아직
+    이관되지 않은 런에서 그 판독부만 조용히 틀린 답을 본다 — 실제로 `reroll.py` 에서 리롤이
+    거짓 거부되는 회귀가 났고(젯비 R1), 같은 클래스가 `interpolate.py`·`preview.py` 에도
+    있었다. 사람이 grep 으로 잡는 것에 의존하지 않고 구조로 못박는다.
+
+    테스트 코드는 예외다: 테스트는 "디스크에 실제로 무엇이 쓰였는가" 를 검사해야 하므로 원문을
+    읽는 게 목적이다."""
+    import re
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).resolve().parents[1]
+    pattern = re.compile(r'sprite-request\.json"\)\.read_text|json\.loads?\([^)]*sprite-request')
+    offenders = []
+    for path in sorted(list((root / "sprite_gen").glob("*.py")) + list((root / "scripts").glob("*.py"))):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("#") or "load_request" in line:
+                continue
+            if pattern.search(line):
+                offenders.append(f"{path.relative_to(root)}:{number}: {stripped[:80]}")
+    assert not offenders, (
+        "게이트를 우회해 request 를 직접 읽는 프로덕션 경로:\n  " + "\n  ".join(offenders)
+        + "\n→ `runio.load_request` 를 쓰라 (이관·두 키 hard fail 판정이 그 안에만 있다)")

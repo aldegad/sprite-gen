@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .anchor import identity_ref
+from .runio import REQUEST_FILENAME, load_request
 from .gen import PROVIDERS, generate_image
 from .layout import guide_rel, prompt_rel, take_raw_rel
 
@@ -49,9 +50,11 @@ def record_take(run_dir: Path, state: str, label: str, frames: int) -> None:
     배타락 안에서 **fresh 재독 → 갱신 → 원자 쓰기** 로만 기록한다."""
     from .runio import publish_guard
 
-    request_path = run_dir / "sprite-request.json"
+    request_path = run_dir / REQUEST_FILENAME
     with publish_guard(run_dir):
-        fresh = json.loads(request_path.read_text(encoding="utf-8"))
+        # 락 안 fresh 재독도 게이트를 통과한다 — 이관 판정·두 키 hard fail 이 한 곳에만 있어야
+        # 한다. 게이트는 락 보유를 감지하면 재기록을 미루므로 이 안에서 안전하다.
+        fresh = load_request(run_dir)
         takes = fresh["states"][state].setdefault("takes", [])
         entry = next((t for t in takes if t.get("label") == label), None)
         if entry is None:
@@ -66,18 +69,20 @@ def reroll_state(run_dir: Path | str, state: str, provider: str = "codex",
                  label: str | None = None) -> Path:
     """행 리롤 한 번: 테이크 raw 생성 + request takes 기록. 반환 = 테이크 raw 경로."""
     run_dir = Path(run_dir)
-    request_path = run_dir / "sprite-request.json"
-    if not request_path.is_file():
-        raise SystemExit(f"not a sprite-gen run dir (no sprite-request.json): {run_dir}")
-    request = json.loads(request_path.read_text(encoding="utf-8"))
+    request_path = run_dir / REQUEST_FILENAME
+    # 읽기는 **게이트만** 쓴다 (`load_request`): 여기서 raw 로 읽으면 아직 이관되지 않은
+    # 레거시 런에서 아래 `fit.pixel_unfake` 검사가 항상 False 가 되어, 언페이크가 켜진 런의
+    # 리롤을 "켜져 있지 않다" 며 거부한다 (젯비 검증 2026-07-26 R1 재현). 리롤은 뷰가 **별도
+    # 서브프로세스**로 띄우므로 뷰 프로세스의 in-memory 이관도 여기로 넘어오지 않는다.
+    request = load_request(run_dir)
     if state not in request.get("states", {}):
         raise SystemExit(f"unknown state: {state}")
     label = label or next_reroll_label(request, state)
     if "/" in label or label.startswith("."):
         raise SystemExit(f"take label must be filesystem-safe: {label!r}")
-    # 테이크는 pixel_perfect 추출 계약 위에서만 병합된다 — 생성비를 쓰기 전에 막는다
+    # 테이크는 pixel_unfake 추출 계약 위에서만 병합된다 — 생성비를 쓰기 전에 막는다
     # (실측 2026-07-19: 비-pp 런에서 생성까지 간 뒤 추출이 "takes require
-    # fit.pixel_perfect" 로 죽었다 — fail-loud 는 맞지만 늦다).
+    # fit.pixel_unfake" 로 죽었다 — fail-loud 는 맞지만 늦다).
     if not (request.get("fit") or {}).get("pixel_unfake"):
         raise SystemExit("reroll: takes require fit.pixel_unfake on this run "
                          "(candidate pool rides the take pipeline)")

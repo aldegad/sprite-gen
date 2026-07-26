@@ -379,7 +379,7 @@ sprite-gen (this SKILL.md = behavior contract + hub)
 │
 ├─ REQUEST AUTHORING ── "fill sprite-request.json before generating"
 │   ├─ docs/states-and-frames.md # which states · frame counts (4/5/6/8/9/12) · Quick Path JSON
-│   ├─ docs/pixel-unfake.md     # fit / pixel_perfect params · plain-twin curator toggle · density refs
+│   ├─ docs/pixel-unfake.md     # fit / pixel_unfake params · plain-twin curator toggle · density refs
 │   └─ docs/chroma-alpha.md      # chroma key branch table · --chroma-key auto · alpha cleanup
 │
 ├─ GENERATION ── "raw/<state>.png from prompts (the one AI step)"

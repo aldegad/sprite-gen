@@ -160,7 +160,7 @@ function openZoom(stateName, idx, keepWidth) {
 
   // 컨트롤: 줄별 토글과 같은 클래스 → sync*Controls 가 카드/모달을 함께 갱신
   const controls = card.querySelector(".row-controls");
-  // 완전 동일 계약 (수홍 지시 2026-07-17 "다 똑같이"): 픽셀퍼펙트·격자·변형은
+  // 완전 동일 계약 (수홍 지시 2026-07-17 "다 똑같이"): 픽셀 언페이크·격자·변형은
   // 베이스에도 전부. 프레임 전용은 GIF/이전·다음(다중 프레임 개념)뿐.
   controls.appendChild(makeGridToggle(stateName)); // 격자는 언제나 — 베이스·프레임 공통
   controls.appendChild(makeUnfakeToggle(stateName)); // 퍼펙은 언제나 — 줄 컨트롤과 같은 계약

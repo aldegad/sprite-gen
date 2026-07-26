@@ -25,7 +25,7 @@ function renderState(state, replaceEl) {
   wrap.appendChild(head);
 
   // 이 줄을 "무엇으로 생성했는가" — run dir 실재 파일 기준 ref 체인 (앵커/basis/가이드).
-  // 같은 줄 우측 = 줄별 표시/굽기 컨트롤(픽셀 격자 · 픽셀퍼펙트 체크박스) — 이미지 바로 위.
+  // 같은 줄 우측 = 줄별 표시/굽기 컨트롤(픽셀 격자 · 픽셀 언페이크 체크박스) — 이미지 바로 위.
   const hasRefs = state.refs && state.refs.length;
   const showGridToggle = true; // 격자는 모든 줄이 가진다 (display.js 계약)
   const showUnfakeToggle = true; // 퍼펙 토글은 모든 줄 (트윈=소스 전환, 그 외=측정 k 렌즈)
@@ -450,7 +450,7 @@ function startPreview(state) {
           ctx.drawImage(bcfg ? breatheComposeForPreview(base, bcfg, pattern[pv.cursor] || 0, refKey) : base, 0, 0);
         }
       } else {
-        // 픽셀퍼펙트 줄은 카드와 동일하게 격자 재양자화로 그린다 (프리뷰 = 굽기)
+        // 픽셀 언페이크 줄은 카드와 동일하게 격자 재양자화로 그린다 (프리뷰 = 굽기)
         drawFrameInto(ctx, image, tr, cw, ch, snapScaleFor(state.name), getPixelOps(state.name, idx));
       }
     }

@@ -84,11 +84,11 @@ def _run(args: argparse.Namespace):
         state: state_plan(curation, state, state_frame_total(request, state))
         for state in states
     }
-    # 'plain' = pre-pixel-perfect twin (curator toggle off). Resolved per state
+    # 'plain' = pre-unfake twin (curator toggle off). Resolved per state
     # (per-row curator toggle > run-wide default). Fail loud when the twin is
     # missing — a plain bake must never silently fall back to pixel.
     variants = {state: frame_variant(curation, state) for state in states}
-    # pixel-variant rows of a fit.pixel_perfect run re-snap curated transforms to the
+    # pixel-variant rows of a fit.pixel_unfake run re-snap curated transforms to the
     # logical grid (plain rows keep the smooth BICUBIC bake — they are not grid art).
     snap_scale = pixel_snap_scale(request)
 
