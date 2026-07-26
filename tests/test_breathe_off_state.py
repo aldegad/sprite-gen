@@ -342,7 +342,14 @@ def test_every_preview_call_passes_a_freshness_reference(site):
 
 # 사용자 손에 **파일**이 떨어지는 연산. 프리뷰 래퍼는 거부를 잡아 원본을 돌려주므로
 # (화면에선 옳다) 이 자리에 신선도 검사가 없으면 호흡이 빠진 파일이 조용히 나간다.
-FILE_PRODUCERS = re.compile(r"toDataURL\s*\(|toBlob\s*\(|/api/compare-gif|/api/row-video")
+# 파일을 만드는 연산. **두 축**이다:
+#  - 캔버스 축(`toDataURL`/`toBlob`) — 코드에 그대로 있다.
+#  - 엔드포인트 축(`/api/...`) — **문자열 리터럴 안에만** 있다.
+# 리터럴 중립화한 소스에서 후자를 찾으면 영원히 0건이다(라운드 9 가 중립화를 통일하면서
+# 그 축을 조용히 죽였다 — 현행 두 경로가 우연히 `toDataURL` 도 써서 초록이었을 뿐이다).
+# 그래서 엔드포인트 축은 **원문**에서 찾는다 (노을이 M2 실측 2026-07-26).
+FILE_PRODUCERS = re.compile(r"toDataURL\s*\(|toBlob\s*\(")
+FILE_PRODUCER_URLS = re.compile(r"/api/compare-gif|/api/row-video")
 FRESH = re.compile(r"breatheAssertFresh\s*\(")
 
 # 호흡 계약이 사는 파일 안에서 파일을 만드는 **모든** 함수가 대상이다.
@@ -400,11 +407,15 @@ def _file_producing_functions():
     for name in (p.name for p in sorted(CURATOR_SRC.glob("*.js"))):
         if name in NON_BREATHE_PRODUCERS:
             continue
-        src = _neutralize_literals((CURATOR_SRC / name).read_text(encoding="utf-8"),
-                                   strip_comments=True)
-        for m in FILE_PRODUCERS.finditer(src):
-            found = _enclosing_function(src, m.start())
-            assert found, f"{name}:{src[:m.start()].count(chr(10)) + 1} 를 감싼 함수를 못 찾았다"
+        raw = (CURATOR_SRC / name).read_text(encoding="utf-8")
+        src = _neutralize_literals(raw, strip_comments=True)
+        stripped = _strip_comments(raw)
+        # 캔버스 축은 중립화 소스에서, 엔드포인트 축은 **원문**(주석만 제거)에서 찾는다.
+        spots = {m.start() for m in FILE_PRODUCERS.finditer(src)}
+        spots |= {m.start() for m in FILE_PRODUCER_URLS.finditer(stripped)}
+        for start in sorted(spots):
+            found = _enclosing_function(src, start)
+            assert found, f"{name}:{src[:start].count(chr(10)) + 1} 를 감싼 함수를 못 찾았다"
             body, line = found
             if (name, line) in seen:
                 continue
@@ -437,8 +448,28 @@ def test_every_file_producing_path_checks_freshness():
 # 헬퍼 자신은 `bakeFrame` 을 거치고, 그 선택은 node 동작 테스트가 따로 검증한다
 # (`tests/test_breathe_reference_key.py::test_geometry_measures_the_reference_frame...`).
 BAKE_SOURCES = ("bakeFrameUrl(", "breatheGeometryFrame(")
-# 잎 판정용 — 식 **전체**가 굽기 소스 호출이어야 한다 (뒤따르는 프로퍼티 접근은 허용).
-BAKE_CALL = re.compile(r"(?:bakeFrameUrl|breatheGeometryFrame)\(.*\)(?:\.\w+)?")
+BAKE_HEAD = re.compile(r"(?:bakeFrameUrl|breatheGeometryFrame)\s*\(")
+
+
+def _is_bake_call(expr: str) -> bool:
+    """식 **전체**가 정확히 굽기 소스 호출인가 (뒤따르는 프로퍼티 접근만 허용).
+
+    정규식 `fullmatch` + 탐욕 `.*` 로 판정하면 `bakeFrameUrl(a) ?? frameUrl(b)` 도,
+    `bakeFrameUrl(a) , frameUrl(b)` 도 참이 된다 — 탈출 G 에서 없앤 "부분문자열 관대함" 이
+    정규식 형태로 되돌아온 것이다. 인자 괄호를 **세어** 호출이 어디서 끝나는지 보고,
+    그 뒤에 뭐가 더 있으면 거짓이다. 이러면 같은 축의 다음 철자(새 연산자)도 안 샌다."""
+    if not BAKE_HEAD.match(expr):
+        return False
+    depth = 0
+    for i, ch in enumerate(expr):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                rest = expr[i + 1:].strip()
+                return rest == "" or bool(re.fullmatch(r"(?:\.\w+)+", rest))
+    return False
 IMG_CALL = re.compile(r"\bimg\s*\(")
 # 호흡 계약이 사는 파일 — 이 안의 **모든** 프레임 이미지 소스가 굽기 파일이어야 한다.
 #
@@ -456,11 +487,26 @@ NON_BREATHE_IMG = {
 EMPTY_LEAF = re.compile(r"^(null|undefined|false|0|\"\"|\'\')$")
 
 
+# 자르면 안 되는 2글자 토큰 — `?` 로 시작하지만 삼항이 아니다.
+# `??` 는 **분기**라 따로 자르고(아래), `?.`·`=>` 는 통째로 지나가야 한다.
+ATOMIC = ("??", "?.", "=>", "===", "!==", "==", "!=", ">=", "<=")
+
+
 def _split_top(expr: str, seps: tuple[str, ...]) -> list[str]:
-    """괄호 깊이 0 에서만 자른다 (`?:` 는 `?` 와 `:` 를 짝으로 다룬다)."""
+    """괄호 깊이 0 에서만 자른다 (`?:` 는 `?` 와 `:` 를 짝으로 다룬다).
+
+    `??`·`?.` 같은 원자 토큰은 통째로 지나간다 — 안 그러면 `a ?? b` 를 삼항으로 잘못
+    쪼개고, 쪼개다 실패하면 잎으로 떨어져 **분기 전수 판정이 통째로 우회된다**
+    (노을이 탈출 M 2026-07-26)."""
     out, cur, depth, i = [], "", 0, 0
     while i < len(expr):
         ch = expr[i]
+        if depth == 0:
+            atom = next((a for a in ATOMIC if expr.startswith(a, i) and a not in seps), None)
+            if atom:
+                cur += atom
+                i += len(atom)
+                continue
         if ch in "([{":
             depth += 1
         elif ch in ")]}":
@@ -546,10 +592,18 @@ def _bake_only(name: str, lineno: int, expr: str, depth: int = 8) -> bool:
         branches = _split_top(parts[1], (":",))
         if len(branches) == 2:
             return all(_bake_only(name, lineno, b, depth) for b in branches)
-    # `||` 도 분기다 — 모든 피연산자가 성립해야 한다
-    ors = _split_top(expr, ("||",))
-    if len(ors) > 1:
-        return all(_bake_only(name, lineno, o, depth) for o in ors)
+    # `||`·`??` 는 분기다 — 모든 피연산자가 성립해야 한다.
+    # `??` 를 빠뜨렸더니 "굽기 URL 이 없으면 표시 URL" 을 `??` 로 적는 것만으로 그물 둘이
+    # 동시에 침묵했다. 그건 적대적 트릭이 아니라 **린터가 권하는 표현**이고, `bakeFrameUrl`
+    # 은 plain+트윈없음에서 실제로 `null` 을 돌려주므로 그 폴백은 진짜로 발화한다.
+    for op in ("||", "??"):
+        parts = _split_top(expr, (op,))
+        if len(parts) > 1:
+            return all(_bake_only(name, lineno, o, depth) for o in parts)
+    # 콤마 연산자도 분기다 (값은 마지막이지만, 앞 항이 굽기 소스라고 통과시키면 안 된다)
+    commas = _split_top(expr, (",",))
+    if len(commas) > 1:
+        return all(_bake_only(name, lineno, c, depth) for c in commas)
     # `&&` 는 가드 + 값 — 마지막 피연산자만 값이다
     ands = _split_top(expr, ("&&",))
     if len(ands) > 1:
@@ -560,7 +614,7 @@ def _bake_only(name: str, lineno: int, expr: str, depth: int = 8) -> bool:
     # 굽기 소스는 "그 식이 **그 호출이다**" 여야 한다. `src in expr` 부분문자열 판정은
     # `imgOrDisplay(bakeFrameUrl(...), image)` 처럼 굽기 소스를 **인자로 품은** 임의의
     # 호출에 참을 준다 — 폴백을 두 번째 인자로 숨기면 그만이다 (노을이 탈출 G).
-    if BAKE_CALL.fullmatch(expr):
+    if _is_bake_call(expr):
         return True
     # 호출 투명성은 `img(` **하나에만** 준다. `[\w.]+\(x\)` 로 열어두면 폐기된 폴백을
     # 한 인자 헬퍼에 넣는 것만으로 통과한다 — 그물이 인자만 보고 헬퍼가 그걸로 무엇을
