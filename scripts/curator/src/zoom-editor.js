@@ -31,6 +31,7 @@ const TOOL_ICONS = {
   eraser: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M9.5 2.5 2.8 9.2a1 1 0 0 0 0 1.4l2.6 2.6h4.1l4-4a1 1 0 0 0 0-1.4L9.5 2.5zM5.5 13.2 9.9 8.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
   pick: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M10.6 2a1.9 1.9 0 0 1 2.7 2.7l-1 1 .5.5-1.1 1.1-.5-.5-4.3 4.3-2.4.6.6-2.4 4.3-4.3-.5-.5L10 6.4l-.5-.5 1.1-1.1.5.5 1-1z" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/></svg>',
   select: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.4 1.7"/></svg>',
+  transform: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3.2 2.2v9.3l2.4-2.3h3.3L3.2 2.2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M10.2 9.4l3.4 3.4M13.6 9.9v3h-3" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   hand: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M5.3 8V3.8a.95.95 0 0 1 1.9 0V7m0-3.9v-.6a.95.95 0 0 1 1.9 0V7m0-3.3a.95.95 0 0 1 1.9 0V7.8m0-2.3a.95.95 0 0 1 1.9 0v3.7c0 2.9-1.8 4.7-4.5 4.7-2.1 0-3.1-.9-4.2-2.5L3 9.9c-.5-.8-.3-1.6.4-2 .6-.4 1.3-.2 1.7.4z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/></svg>',
 };
 
@@ -47,7 +48,7 @@ function clearMarquee() {
 // 같은 툴 키 재입력 = 툴 끔 (버튼 재클릭과 동일 거동).
 // ev.code (물리 키) 기준 — 한글 IME/타 레이아웃에서도 동작 (ev.key 는 한글 모드에서
 // "ㅠ" 같은 조합 문자가 와 매칭이 죽는다 — 실사고 2026-07-19 수홍).
-const TOOL_SHORTCUTS = { KeyB: ".et-pen", KeyP: ".et-pen", KeyE: ".et-eraser", KeyI: ".et-pick", KeyM: ".et-select", KeyH: ".et-hand" };
+const TOOL_SHORTCUTS = { KeyV: ".et-transform", KeyB: ".et-pen", KeyP: ".et-pen", KeyE: ".et-eraser", KeyI: ".et-pick", KeyM: ".et-select", KeyH: ".et-hand" };
 document.addEventListener("keydown", (ev) => {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
   const sel = TOOL_SHORTCUTS[ev.code];
@@ -192,6 +193,7 @@ function openZoom(stateName, idx, keepWidth) {
   const toolbar = document.createElement("div");
   toolbar.className = "edit-toolbar";
   toolbar.innerHTML =
+    `<button type="button" class="ghost et-transform" data-tip="${t("tTransformTool")} (V)">${TOOL_ICONS.transform}</button>` +
     `<button type="button" class="ghost et-pen" data-tip="${t("penTool")} (B)">` +
     `${TOOL_ICONS.pen}</button>` +
     `<button type="button" class="ghost et-eraser" data-tip="${t("eraserTool")} (E)">${TOOL_ICONS.eraser}</button>` +
@@ -240,6 +242,7 @@ function openZoom(stateName, idx, keepWidth) {
   const eraserBtn = toolbar.querySelector(".et-eraser");
   const pickBtn = toolbar.querySelector(".et-pick");
   const selectBtn = toolbar.querySelector(".et-select");
+  const transformBtn = toolbar.querySelector(".et-transform");
   // ── 팔레트 도크 (Aseprite 식, 수홍 지시 2026-07-17): 스테이지 왼쪽 세로 팔레트 —
   // 위 = 현재 쓰인 색 전부 (같은 색 1개, 빈도순), 아래 = 자유 색상 피커.
   const stageRow = document.createElement("div");
@@ -351,6 +354,8 @@ function openZoom(stateName, idx, keepWidth) {
     eraserBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "eraser");
     pickBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "pick");
     selectBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "select");
+    transformBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "transform");
+    stage.classList.toggle("transforming", !!pixelEdit && pixelEdit.tool === "transform");
     stage.classList.toggle("pixel-editing", !!pixelEdit);
     stage.classList.toggle("picking", !!pixelEdit && pixelEdit.tool === "pick");
     stage.classList.toggle("selecting", !!pixelEdit && pixelEdit.tool === "select");
@@ -361,7 +366,9 @@ function openZoom(stateName, idx, keepWidth) {
     else pixelEdit = { state: stateName, idx, tool, color: colorInput.value,
                        journal: (pixelEdit && pixelEdit.journal) || [],
                        redo: (pixelEdit && pixelEdit.redo) || [],
-                       sel: tool === "select" ? (pixelEdit && pixelEdit.sel) || null : null,
+                       // 변형 툴은 선택을 이어받는다 — "네모로 잡고 넘어와서 비튼다" 가 이 툴의 용법이다.
+                       sel: (tool === "select" || tool === "transform")
+                         ? (pixelEdit && pixelEdit.sel) || null : null,
                        undoFn: () => undoPixel(), redoFn: () => redoPixel() };
     syncToolbar();
     applyFrameTransformAll(stateName, idx); // 편집 모드도 변형 유지(WYSIWYG) — 재표시만
@@ -370,6 +377,7 @@ function openZoom(stateName, idx, keepWidth) {
   eraserBtn.addEventListener("click", () => setTool("eraser"));
   pickBtn.addEventListener("click", () => setTool("pick"));
   selectBtn.addEventListener("click", () => setTool("select"));
+  transformBtn.addEventListener("click", () => setTool("transform"));
   colorInput.addEventListener("input", () => {
     rememberPenColor(colorInput.value);
     if (pixelEdit) pixelEdit.color = colorInput.value;
@@ -581,11 +589,36 @@ function openZoom(stateName, idx, keepWidth) {
     buildPalette();
   }
 
+  // ── 변형 툴이 기본 상태다 (수홍 지시 2026-07-26 "이게 기본상태인걸로"). ──
+  // 예전엔 "아무 툴도 안 켜진 상태" 가 암묵적으로 셀 전체 변형이었다 — 화면에 표시가
+  // 없어서 지금 무슨 모드인지 알 수 없었다. 그 암묵 모드를 이름 있는 툴로 승격한다.
+  pixelEdit = { state: stateName, idx, tool: "transform", color: colorInput.value,
+                journal: [], redo: [], sel: null,
+                undoFn: () => undoPixel(), redoFn: () => redoPixel() };
+  // 선택 영역만 변형 — 마퀴가 있을 때 스테이지 드래그를 가져간다.
+  wireRegionTransform(stage, stateName, idx, {
+    isTransformTool: () => !!pixelEdit && pixelEdit.tool === "transform"
+      && pixelEdit.state === stateName && pixelEdit.idx === idx,
+    hasSelection: () => !!(pixelEdit && pixelEdit.sel),
+    selectionRect: () => {
+      const s0 = pixelEdit.sel;
+      return { x: s0.x0, y: s0.y0, w: s0.x1 - s0.x0, h: s0.y1 - s0.y0 };
+    },
+    afterCommit: () => {
+      applyFrameTransformAll(stateName, idx);
+      scheduleSave();
+      setStatus(t("regionTransformed"), "ok");
+    },
+  });
+  syncToolbar();
   buildPalette();
 
   // 페인트: 편집 툴 활성 시 스테이지 드래그는 그리기 (다른 핸들러보다 먼저 등록해 가로챔)
   stage.addEventListener("pointerdown", (ev) => {
     if (!pixelEdit || pixelEdit.state !== stateName || pixelEdit.idx !== idx) return;
+    // 변형 툴은 픽셀을 안 찍는다. 선택이 있으면 영역 변형(region-transform.js)이,
+    // 없으면 `wireStage` 의 셀 전체 변형이 그 드래그를 가져간다.
+    if (pixelEdit.tool === "transform") return;
     if (ev.button || !ev.isPrimary) return;
     ev.preventDefault();
     ev.stopImmediatePropagation();
