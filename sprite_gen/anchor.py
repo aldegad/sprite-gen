@@ -308,10 +308,11 @@ def materialize(run_dir: Path, direction: str, scale: int = ANCHOR_SCALE,
 # --- 행 생성용 identity ref ---------------------------------------------------
 
 def load_request(run_dir: Path) -> dict[str, Any]:
-    path = Path(run_dir) / "sprite-request.json"
-    if not path.is_file():
-        raise SystemExit(f"not a sprite-gen run dir (no sprite-request.json): {run_dir}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    """request 로드는 게이트 하나만 쓴다 (`runio.load_request`) — 여기 자체 구현을 두면
+    스키마 이관이 이 경로만 비껴간다."""
+    from .runio import load_request as _load
+
+    return _load(run_dir)
 
 
 def base_source(run_dir: Path) -> Path:

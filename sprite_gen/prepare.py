@@ -974,7 +974,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fit-resample", choices=["lanczos", "nearest", "kcentroid"], default=None, help="frame downscale filter; nearest keeps pixel-art edges crisp, kcentroid keeps 1px outlines readable")
     parser.add_argument("--fit-align-x", choices=["bbox-center", "centroid", "foot-centroid", "alpha-centroid"], default=None, help="horizontal frame anchor; centroid stabilizes body position across variable-width poses, foot-centroid anchors on the bottom-20%% alpha (legs), alpha-centroid is the perfectpixel-studio per-frame alpha-weighted centroid (fringe-insensitive, per-frame in the pixel-perfect row path)")
     parser.add_argument("--fit-align-y", choices=["center", "bottom"], default=None, help="vertical frame anchor; bottom pins feet to a shared baseline")
-    parser.add_argument("--fit-pixel-perfect", action=argparse.BooleanOptionalAction, default=None, help="true pixel-perfect extraction: pitch detection -> grid snap -> kCentroid -> shared palette -> integer NEAREST (see docs/pixel-perfect.md)")
+    parser.add_argument("--fit-pixel-unfake", action=argparse.BooleanOptionalAction, default=None, help="unfake the AI dots: pitch detection -> grid snap -> kCentroid -> shared palette -> integer NEAREST (see docs/pixel-unfake.md)")
+    # 은퇴한 이름 (조용한 별칭 금지 — 두 이름이 공존하면 문서·스크립트가 갈라진다)
+    parser.add_argument("--fit-pixel-perfect", "--no-fit-pixel-perfect", dest="_retired_pp",
+                        action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--fit-logical-height", type=int, default=None, help="pixel-perfect logical grid height; omit for 1:1 with the cell height")
     parser.add_argument("--fit-palette-size", type=int, default=None, help="pixel-perfect run-wide shared palette size (default 48)")
     parser.add_argument("--fit-detail-bias", action=argparse.BooleanOptionalAction, default=None, help="pixel-perfect dominant-color voting bias toward near-black detail clusters (default on)")
@@ -1072,7 +1075,7 @@ def _run(args: argparse.Namespace):
         "resample": args.fit_resample,
         "align_x": args.fit_align_x,
         "align_y": args.fit_align_y,
-        "pixel_perfect": args.fit_pixel_perfect,
+        "pixel_unfake": args.fit_pixel_unfake,
         "logical_height": args.fit_logical_height,
         "palette_size": args.fit_palette_size,
         "detail_bias": args.fit_detail_bias,
@@ -1123,9 +1126,17 @@ def _run(args: argparse.Namespace):
 def run(**kwargs: object):
     return _run(_namespace_from_kwargs(**kwargs))
 
+RETIRED_PP_MESSAGE = (
+    "--fit-pixel-perfect is retired: the accurate name for this pipeline is **pixel unfake** "
+    "(grid snapping / re-quantization — community name from unfake.js), while 'pixel perfect' is "
+    "a broad UI-alignment term. Use --fit-pixel-unfake / --no-fit-pixel-unfake.")
+
+
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
+    if getattr(args, "_retired_pp", False):
+        raise SystemExit(RETIRED_PP_MESSAGE)
     return _run(args)
 
 

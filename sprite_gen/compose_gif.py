@@ -18,7 +18,7 @@ from sprite_gen.breathe import anatomy_report, bake_breathe_sequence
 from sprite_gen.curation import apply_pixel_edits, apply_transform, edit_index, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
-from sprite_gen.runio import read_guard
+from sprite_gen.runio import read_guard, load_request
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, gif_report, save_clean_gif
 
 
@@ -107,7 +107,7 @@ def run_dir_mode(args: argparse.Namespace) -> int:
 def _run_dir_mode_guarded(args, run_dir):
     frames_manifest = require_frames_manifest(run_dir)  # fail loud if this generation's manifest is absent/corrupt
     rows_by_state = {row["state"]: row for row in frames_manifest.get("rows", [])}
-    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(run_dir)
     cell = request.get("cell", {})
     cell_w = int(cell.get("width") or cell.get("size") or 0)
     cell_h = int(cell.get("height") or cell.get("size") or 0)

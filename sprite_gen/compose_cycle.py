@@ -20,7 +20,7 @@ from sprite_gen.curation import apply_pixel_edits, apply_transform, frame_varian
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import require_frames_manifest
 from sprite_gen.gif_utils import delay_ticks_to_duration_ms, save_clean_gif
-from sprite_gen.runio import read_guard, relative_posix
+from sprite_gen.runio import read_guard, relative_posix, load_request
 
 
 def sha256(path: Path) -> str:
@@ -138,7 +138,7 @@ def _run_guarded(args, run_dir):
     qa_dir = run_dir / "qa"
     qa_dir.mkdir(parents=True, exist_ok=True)
 
-    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(run_dir)
     cell = request["cell"]
     cell_size = (
         int(cell.get("width", cell.get("size", 0))),

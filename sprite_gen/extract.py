@@ -20,7 +20,8 @@ from PIL import Image, ImageChops
 
 from sprite_gen.curation import effective_logical_height, pixel_snap_scale
 from sprite_gen.layout import frames_dir_rel, raw_rel, take_raw_rel
-from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, publish_guard, relative_posix, release_run_dir_lock
+from sprite_gen.runio import (acquire_run_dir_lock, atomic_save_image, atomic_write_text,
+                              load_request, publish_guard, relative_posix, release_run_dir_lock)
 from sprite_gen.segment import separate_fused_poses
 
 
@@ -777,7 +778,7 @@ def fit_to_cell(
     #             row path it is applied per frame instead of the row union
     #   align_y:  "bottom" (default) | "center" — bottom pins feet to a shared baseline
     # 2026-07-04 (알렉스): 기본값을 foot-centroid/bottom 으로 승격 — 프레임 간
-    # "무게감"(발밑 기준선)이 기본으로 잡혀야 한다. pixel_perfect 경로와 동일 기본.
+    # "무게감"(발밑 기준선)이 기본으로 잡혀야 한다. pixel_unfake 경로와 동일 기본.
     fit = fit or {}
     resample_name = str(fit.get("resample", "lanczos")).lower()
     align_x = str(fit.get("align_x", "foot-centroid")).lower()
@@ -821,7 +822,7 @@ def fit_to_cell(
     return target
 
 
-# --- pixel-perfect pipeline (fit.pixel_perfect) -----------------------------
+# --- pixel-perfect pipeline (fit.pixel_unfake) -----------------------------
 # unfake.js/pixeldetector 계열 접근: ① runs 기반으로 생성물의 논리 픽셀 pitch 검출
 # ② 에지 히스토그램으로 격자 위상(offset) 정렬 ③ 격자 단위 dominant-color 스냅
 # 다운스케일(진짜 해상도 복원) ④ 런 전체 공유 팔레트 양자화 + 알파 이진화
@@ -1946,7 +1947,7 @@ def enforce_outline(image: Image.Image, strength: float = 0.62) -> Image.Image:
     return image
 
 
-def fit_pixel_perfect(logical: Image.Image, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, scale: int, fit: dict[str, Any]) -> Image.Image:
+def fit_pixel_unfake(logical: Image.Image, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, scale: int, fit: dict[str, Any]) -> Image.Image:
     target = Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0))
     bbox = logical.getbbox()
     if bbox is None:
@@ -2262,7 +2263,7 @@ def _require_generation_consistency(run_dir: Path, manifest: dict, name: str,
     소비자(compose/export 등)는 기본값(False)으로 완결 세대를 계속 강제한다."""
     frames_root = run_dir / "frames"
     try:
-        request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+        request = load_request(run_dir)
     except (OSError, ValueError) as exc:
         raise SystemExit(f"cannot read sprite-request.json for {run_dir}: {exc}")
     request_states = set(request.get("states", {}))
@@ -2474,7 +2475,7 @@ def _run(args: argparse.Namespace):
 
 
 def _run_locked(args: argparse.Namespace, run_dir: Path):
-    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(run_dir)
     # 크로마 튜너블의 SSoT 는 request JSON `chroma` — CLI 는 명시 override 만.
     # 실제 적용값은 request 에 되써서 런이 스스로 재현 가능하게 남긴다.
     chroma_config = dict(request.get("chroma") or {})
@@ -2548,7 +2549,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
     all_errors: list[str] = []
     all_warnings: list[str] = []
 
-    pixel_perfect = bool(fit_config.get("pixel_perfect"))
+    pixel_unfake = bool(fit_config.get("pixel_unfake"))
     # 기본 = 셀과 동일(1:1) — 생성 프롬프트가 "TRUE 셀xN pixel grid" 를 명시하는
     # 현행 레시피에서 원본 그리드를 그대로 따라간다. 청키 2x 룩을 원할 때만
     # 절반 값(예: 셀 64 + 로지컬 32)을 명시한다. (2026-07-05, 이전 기본은 usable//2)
@@ -2560,7 +2561,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
     # 정수 격자가 선언을 반올림해 무효로 만들면 관측시킨다 — 아무 일도 안 하는 값이
     # 요청 파일에 남아 라벨과 지문만 오염시키던 조용한 실패다 (원칙 6, 수홍 2026-07-25).
     declared_logical_height = fit_config.get("logical_height")
-    if (pixel_perfect and declared_logical_height is not None
+    if (pixel_unfake and declared_logical_height is not None
             and int(declared_logical_height) != logical_height):
         all_warnings.append(
             f"fit.logical_height={declared_logical_height} is not applied as declared: the "
@@ -2614,7 +2615,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
             output = state_dir / f"frame-{index}.png"
             atomic_save_image(frame, output)
             output_paths.append(f"{rel_dir}/frame-{index}.png")  # final location (staging is swapped in)
-        # 픽셀퍼펙트 전 원본 변형(.plain.png) — curation.json `pixel_perfect: false`
+        # 픽셀퍼펙트 전 원본 변형(.plain.png) — curation.json `pixel_unfake: false`
         # 굽기(compose)가 이 셀 크기 쌍둥이를 읽는다. 아틀라스 슬롯 = 셀 크기라 여긴
         # 셀 해상도로 유지한다 (compose_atlas 가 정확히 셀 크기를 요구, 기하 불변).
         plain_paths = []
@@ -2866,10 +2867,10 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         state_cfg = request["states"][state]
         frame_count = int(state_cfg["frames"])
         takes_cfg = state_cfg.get("takes") or []
-        if takes_cfg and not pixel_perfect:
-            all_errors.append(f"{state}: takes require fit.pixel_perfect")
+        if takes_cfg and not pixel_unfake:
+            all_errors.append(f"{state}: takes require fit.pixel_unfake")
             continue
-        if not pixel_perfect:
+        if not pixel_unfake:
             strip = _load_strip(state, state, raw_rel(request, state), frame_count)
             if strip is None:
                 continue
@@ -2938,7 +2939,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
             "labels": labels, "takes": takes_summary,
         })
 
-    if pixel_perfect and pending:
+    if pixel_unfake and pending:
         # 팔레트는 런 전체(모든 state 의 논리 프레임)에서 한 번 뽑아 공유한다 —
         # 프레임/행 간 색 흔들림(플리커) 제거 + 아이덴티티 색 고정.
         pinned = None if getattr(args, "repalette", False) else load_pinned_palette(run_dir)

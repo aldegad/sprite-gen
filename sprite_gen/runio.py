@@ -266,3 +266,72 @@ def atomic_save_image(image: Image.Image, target: Path) -> None:
         image.save(tmp_name, format=fmt)
 
     _atomic_replace(target, payload)
+
+
+# --- sprite-request.json 단일 로드 게이트 ------------------------------------
+# 18곳이 각자 `json.loads((run_dir / "sprite-request.json").read_text())` 하던 것을 하나로
+# 모은다 (`load_curation` 이 큐레이션 사이드카에 대해 그렇게 하는 것과 같은 이유). 게이트가
+# 하나면 스키마 이관을 걸 자리도 하나다 — 열여덟 곳에 같은 이관 코드를 흩뿌리면 그중 하나가
+# 빠진 날 조용히 두 진실이 생긴다.
+REQUEST_FILENAME = "sprite-request.json"
+
+# 은퇴한 키 -> 현행 키. "pixel perfect" 는 광의 통용어(UI 정합·충돌판정)의 오용이었고, 이
+# 파이프라인이 실제로 하는 일의 정확한 명칭은 커뮤니티 속칭 "unfake"(unfake.js 유래)다
+# — 격자 스냅/재양자화로 가짜 픽셀아트를 되돌린다 (수홍 2026-07-25, vault
+# domains/tools/spritefusion-pixel-snapper.md 용어 각주).
+LEGACY_FIT_KEYS = {"pixel_perfect": "pixel_unfake"}
+
+
+def _migrate_fit_keys(request: dict, run_dir: Path) -> bool:
+    """은퇴 키를 현행 키로 옮긴다 (in-place). 옮겼으면 True.
+
+    두 키가 동시에 있으면 **hard fail** — 어느 쪽이 진실인지 코드가 고를 수 없고, 고르는
+    순간 그게 조용한 폴백이다."""
+    fit = request.get("fit")
+    if not isinstance(fit, dict):
+        return False
+    moved = False
+    for legacy, current in LEGACY_FIT_KEYS.items():
+        if legacy not in fit:
+            continue
+        if current in fit:
+            raise SystemExit(
+                f"{run_dir / REQUEST_FILENAME}: both `fit.{legacy}` (retired) and "
+                f"`fit.{current}` are present — two truths for one setting. Delete the "
+                f"`fit.{legacy}` line (its value was {fit[legacy]!r}); the current key is "
+                f"`fit.{current}` = {fit[current]!r}.")
+        fit[current] = fit.pop(legacy)
+        moved = True
+    return moved
+
+
+def load_request(run_dir: Path, *, migrate: bool = True) -> dict:
+    """런의 numeric SSoT (`sprite-request.json`) 를 읽는 **유일한 게이트**.
+
+    은퇴한 키(`fit.pixel_perfect`)를 현행 키(`fit.pixel_unfake`)로 이관하고 파일을 한 번
+    다시 쓴다 — 읽고 메모리에서만 바꾸면 디스크에 구키가 영원히 남아 SSoT 가 둘이 된다
+    (이관이지 폴백이 아니다: 관측 가능한 1회 재기록이고, 두 키 동시 존재는 hard fail).
+
+    재기록은 rwlock(`publish_guard`)을 잡지 않는다. 이유가 두 개다: (1) 이 함수는
+    `read_guard` 안에서도 불리고(뷰 스냅샷), 같은 프로세스가 자기 shared lock 위에서
+    exclusive 를 요구하면 flock 이 자기 자신에 막힌다 (2) 단일 파일 원자 교체는 rwlock 이
+    지키는 대상(프레임 트리 content swap)이 아니다 — 리더는 항상 완전한 옛/새 파일 하나를
+    본다. 다만 파이프라인 writer 가 락을 쥐고 있으면(`.sprite-gen.lock`) 재기록을 미룬다:
+    그 시점의 run dir 는 스왑 중일 수 있고, 이관은 다음 로드에서 하면 된다 (메모리 값은
+    이미 현행 키라 호출부 동작은 지금도 정상)."""
+    path = Path(run_dir) / REQUEST_FILENAME
+    if not path.is_file():
+        raise SystemExit(f"not a sprite-gen run dir (no {REQUEST_FILENAME}): {run_dir}")
+    request = json.loads(path.read_text(encoding="utf-8"))
+    if not _migrate_fit_keys(request, Path(run_dir)):
+        return request
+    if not migrate:
+        return request
+    if (Path(run_dir) / LOCK_FILENAME).exists():
+        print(f"[request] retired fit key migrated in memory only — a pipeline writer holds "
+              f"{LOCK_FILENAME}; the file is rewritten on the next load: {path}")
+        return request
+    atomic_write_text(path, json.dumps(request, ensure_ascii=False, indent=2) + "\n")
+    print(f"[request] migrated retired fit key(s) "
+          f"{', '.join(f'{k} -> {v}' for k, v in LEGACY_FIT_KEYS.items())} in {path}")
+    return request

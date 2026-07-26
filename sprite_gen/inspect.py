@@ -14,7 +14,8 @@ from PIL import Image, ImageChops
 
 from sprite_gen import extract
 from sprite_gen.layout import frames_dir_rel, raw_rel, state_frame_total
-from sprite_gen.runio import acquire_run_dir_lock, atomic_write_text, read_guard, relative_posix
+from sprite_gen.runio import (acquire_run_dir_lock, atomic_write_text, load_request,
+                              read_guard, relative_posix)
 from sprite_gen.segment import segment_strip
 
 
@@ -311,7 +312,7 @@ def _inspect_run_impl(run_dir: Path, states: str = "all", **kwargs: object) -> d
     # otherwise the correction loop would read stale frames as ok:true (No Silent Fallback). A run
     # with no generation at all ({}) is fine: inspect falls back to raw-projection below.
     extract.load_consistent_frames_manifest(run_dir)
-    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(run_dir)
     selected = _state_list(request, args.states)
     rows: list[dict[str, Any]] = []
     errors: list[str] = []

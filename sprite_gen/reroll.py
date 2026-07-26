@@ -78,8 +78,8 @@ def reroll_state(run_dir: Path | str, state: str, provider: str = "codex",
     # 테이크는 pixel_perfect 추출 계약 위에서만 병합된다 — 생성비를 쓰기 전에 막는다
     # (실측 2026-07-19: 비-pp 런에서 생성까지 간 뒤 추출이 "takes require
     # fit.pixel_perfect" 로 죽었다 — fail-loud 는 맞지만 늦다).
-    if not (request.get("fit") or {}).get("pixel_perfect"):
-        raise SystemExit("reroll: takes require fit.pixel_perfect on this run "
+    if not (request.get("fit") or {}).get("pixel_unfake"):
+        raise SystemExit("reroll: takes require fit.pixel_unfake on this run "
                          "(candidate pool rides the take pipeline)")
     prompt_path = run_dir / prompt_rel(request, state)
     if not prompt_path.is_file():

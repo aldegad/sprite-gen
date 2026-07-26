@@ -15,7 +15,7 @@ from sprite_gen.breathe import anatomy_report, fit_breathe_pattern, phase_frame,
 from sprite_gen.curation import apply_pixel_edits, apply_transform, edit_index, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import heal_run, require_frames_manifest
-from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text
+from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, load_request
 
 
 def alpha_nonzero_count(image: Image.Image) -> int:
@@ -69,7 +69,7 @@ def _run(args: argparse.Namespace):
     if heal_report["healed"]:
         print(f"[heal] re-derived stale rows: {', '.join(heal_report['healed'])}", file=sys.stderr)
     acquire_run_dir_lock(run_dir, "compose_sprite_atlas")
-    request = json.loads((run_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    request = load_request(run_dir)
     frames_manifest = require_frames_manifest(run_dir)  # fail loud if absent/corrupt/not-ok
     rows_by_state = {row["state"]: row for row in frames_manifest.get("rows", [])}
 
