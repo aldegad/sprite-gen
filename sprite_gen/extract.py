@@ -20,8 +20,9 @@ from PIL import Image, ImageChops
 
 from sprite_gen.curation import effective_logical_height, pixel_snap_scale
 from sprite_gen.layout import frames_dir_rel, raw_rel, take_raw_rel
-from sprite_gen.runio import (acquire_run_dir_lock, atomic_save_image, atomic_write_text,
-                              load_request, publish_guard, relative_posix, release_run_dir_lock)
+from sprite_gen.runio import (REQUEST_FILENAME, acquire_run_dir_lock, atomic_save_image,
+                              atomic_write_text, load_request, publish_guard, relative_posix,
+                              release_run_dir_lock)
 from sprite_gen.segment import separate_fused_poses
 
 
@@ -3107,11 +3108,11 @@ def heal_run(run_dir: Path | str) -> dict[str, Any]:
     run_dir = Path(run_dir)
     report: dict[str, Any] = {"healed": [], "kept_stale": [], "notes": []}
     manifest_path = run_dir / "frames" / "frames-manifest.json"
-    request_path = run_dir / "sprite-request.json"
+    request_path = run_dir / REQUEST_FILENAME
     if not manifest_path.is_file() or not request_path.is_file():
         return report
     manifest = load_frames_manifest(manifest_path)
-    request = json.loads(request_path.read_text(encoding="utf-8"))
+    request = load_request(run_dir)   # 게이트 경유 — heal 도 은퇴 키 런에서 돈다
     current = engine_revision()
     # 확정 행 동결 (수홍 확정 2026-07-18): curation states.<state>.frozen == true 인
     # 행은 사용자가 승인·편집을 끝낸 확정본 — 엔진이 바뀌어도 자가치유가 절대

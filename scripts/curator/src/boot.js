@@ -37,7 +37,7 @@ async function boot() {
   }
   // pixel-unfake twin state must resolve BEFORE first render (frameUrl reads it):
   // per-state truth = states.<state>.pixel_unfake override > run-wide default > on.
-  seedPixelPerfect(run);
+  seedUnfakeState(run);
   // 격자 오버레이는 모든 줄이 가진다 — "격자 가능 줄" 이라는 집합 자체를 두지 않는다.
   // 집합이 존재하면 언젠가 필터가 다시 붙는다 (콩콩이 R3 실증: 5줄 mutant 로 병 복원).
   // 스위치가 없으면 되살릴 knob 도 없다.

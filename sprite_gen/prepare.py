@@ -976,7 +976,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fit-align-y", choices=["center", "bottom"], default=None, help="vertical frame anchor; bottom pins feet to a shared baseline")
     parser.add_argument("--fit-pixel-unfake", action=argparse.BooleanOptionalAction, default=None, help="unfake the AI dots: pitch detection -> grid snap -> kCentroid -> shared palette -> integer NEAREST (see docs/pixel-unfake.md)")
     # 은퇴한 이름 (조용한 별칭 금지 — 두 이름이 공존하면 문서·스크립트가 갈라진다)
-    parser.add_argument("--fit-pixel unfake", "--no-fit-pixel unfake", dest="_retired_pp",
+    parser.add_argument("--fit-pixel-perfect", "--no-fit-pixel-perfect", dest="_retired_pp",
                         action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--fit-logical-height", type=int, default=None, help="pixel unfake logical grid height; omit for 1:1 with the cell height")
     parser.add_argument("--fit-palette-size", type=int, default=None, help="pixel unfake run-wide shared palette size (default 48)")
@@ -1127,7 +1127,7 @@ def run(**kwargs: object):
     return _run(_namespace_from_kwargs(**kwargs))
 
 RETIRED_PP_MESSAGE = (
-    "--fit-pixel unfake is retired: the accurate name for this pipeline is **pixel unfake** "
+    "--fit-pixel-perfect is retired: the accurate name for this pipeline is **pixel unfake** "
     "(grid snapping / re-quantization — community name from unfake.js), while 'pixel perfect' is "
     "a broad UI-alignment term. Use --fit-pixel-unfake / --no-fit-pixel-unfake.")
 

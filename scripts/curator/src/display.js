@@ -377,7 +377,7 @@ function syncUnfakeControls() {
     el.checked = unfakeOn(el.dataset.state);
   });
   syncAggregate(document.getElementById("unfake-apply"),
-    new Set(run.states.map((s) => s.name)), ppOn);
+    new Set(run.states.map((s) => s.name)), unfakeOn);
 }
 
 function syncGridControls() {

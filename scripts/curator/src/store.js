@@ -230,7 +230,7 @@ function frameUrl(stateName, frame) {
 // 퍼펙 토글은 **모든 줄**이 가진다 — 트윈 줄은 소스 전환(canonical↔orig), 트윈 없는
 // 줄은 측정 k 양자화 렌즈(snapScaleFor). "가능한 줄" 게이팅은 격자 게이팅과 같은
 // 병이었다 (수홍 2026-07-24: 확대화면에 퍼펙 버튼이 없다 — 조건 분기 = 버그).
-function seedPixelPerfect(snapshot) {
+function seedUnfakeState(snapshot) {
   unfakeTwinStates = new Set(
     snapshot.states.filter((s) => s.frames.some((f) => f.plainUrl)).map((s) => s.name));
   const unfakeDefault = !(snapshot.curation && snapshot.curation.pixel_unfake === false);
@@ -246,7 +246,7 @@ function seedPixelPerfect(snapshot) {
 
 // ── 굽기 변종 (표시 렌즈와 **다른 개념**) ───────────────────────────
 //
-// `ppOn` 은 **표시 렌즈**다: 트윈 없는 줄은 boot 시드가 기본 OFF 로 놓는다(원본 먼저,
+// `unfakeOn` 은 **표시 렌즈**다: 트윈 없는 줄은 boot 시드가 기본 OFF 로 놓는다(원본 먼저,
 // 양자화 렌즈는 눌러서 본다). 그런데 그 값은 사이드카에 **저장되지 않으므로**
 // (persistence: 트윈 줄만 기록) 서버 `frame_variant` 는 그 줄을 `pixel` 로 본다.
 //
@@ -263,13 +263,13 @@ function seedPixelPerfect(snapshot) {
 //
 // 트윈 없는 줄의 퍼펙은 표시 렌즈(측정 k 양자화)라 사이드카에 새로 적지 않는다 — 적으면
 // 굽기 리졸버가 존재하지 않는 `.plain` 변형을 요구한다.
-function authoredPixelPerfect(stateName) {
+function authoredUnfake(stateName) {
   return unfakeTwinStates.has(stateName) ? unfakeOn(stateName) : undefined;
 }
 
 // **사이드카에 남게 되는** per-state `pixel_unfake` — 굽기 변종 해소의 입력.
 //
-// 이걸 `authoredPixelPerfect` 와 같은 값으로 쓰면 안 된다. 파이썬 `frame_variant` 의
+// 이걸 `authoredUnfake` 와 같은 값으로 쓰면 안 된다. 파이썬 `frame_variant` 의
 // per-state 분기는 **무조건**이라(선언이 bool 이면 즉시 확정) 트윈 없는 줄에 선언이 있어도
 // 그 값이 이긴다. 트윈 존재로 게이트하면 18칸 해소표 중 3칸이 갈리고, 그 줄은 웹뷰가
 // `plain` 을 골라 키를 못 만들어 **프리뷰·영상 내보내기가 영구 거부**된다 — 굽기는 멀쩡히
@@ -277,8 +277,8 @@ function authoredPixelPerfect(stateName) {
 //
 // 뷰가 authoring 하지 않는 줄의 선언은 서버가 이월하므로(`view_conditional`) 로드된 값이
 // 그대로 사이드카의 진실이다.
-function sidecarPixelPerfect(stateName) {
-  const authored = authoredPixelPerfect(stateName);
+function sidecarUnfake(stateName) {
+  const authored = authoredUnfake(stateName);
   if (authored !== undefined) return authored;
   const c = run && run.curation && run.curation.states
     ? run.curation.states[stateName] : undefined;
@@ -289,7 +289,7 @@ function sidecarPixelPerfect(stateName) {
 // authoring 한다(혼합/트윈 없음이면 생략). 생략은 삭제가 아니라 "안 건드림" 이고
 // 서버가 기존 값을 이월하므로, 여기서도 로드된 값이 그대로 진실이다 — 그러지 않으면
 // 트윈 없는 줄에서 서버는 `plain`, 웹뷰는 `pixel` 로 갈린다 (해소표 전수에서 발견).
-function savedRunPixelPerfect() {
+function savedRunUnfake() {
   if (unfakeTwinStates.size) {
     const vals = [...unfakeTwinStates].map((n) => unfakeOn(n));
     if (vals.every((v) => v === vals[0])) return vals[0];
@@ -300,9 +300,9 @@ function savedRunPixelPerfect() {
 
 // 굽기가 읽는 변종 — 파이썬 `curation.frame_variant` 미러.
 function bakeVariant(stateName) {
-  const own = sidecarPixelPerfect(stateName);
+  const own = sidecarUnfake(stateName);
   if (typeof own === "boolean") return own ? "pixel" : "plain";
-  const wide = savedRunPixelPerfect();
+  const wide = savedRunUnfake();
   if (typeof wide === "boolean") return wide ? "pixel" : "plain";
   return "pixel";
 }
@@ -423,7 +423,7 @@ function frameOf(stateName, idx) {
 //   이건 표시 렌즈다 — 임포트 런 굽기는 양자화가 없으므로 사이드카에 저장하지
 //   않는다 (persistence 의 트윈-줄 한정 저장이 그 계약이다).
 function snapScaleFor(stateName) {
-  // ppOn 검사가 **모든 분기보다 먼저**다 — 베이스를 먼저 항등 처리하면 pp OFF 의
+  // unfakeOn 검사가 **모든 분기보다 먼저**다 — 베이스를 먼저 항등 처리하면 pp OFF 의
   // 원본(raw) 뷰가 죽는다 (콩콩이 기각 2026-07-24: 퍼펙 체크박스가 아무것도 안
   // 바꾸는 "거짓말하는 컨트롤"이 됐다). 베이스 pp OFF = 소스 모드로 raw 를 그린다.
   if (!unfakeOn(stateName)) return null;

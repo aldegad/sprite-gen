@@ -57,7 +57,7 @@ _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sprite_gen.breathe import (DEFAULT_DEPTH, DEFAULT_LAG, freeze_anatomy,
                                 reference_key)
 from sprite_gen.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel, state_frame_total
-from runio import load_request, publish_guard, read_guard
+from runio import REQUEST_FILENAME, load_request, publish_guard, read_guard
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 CURATOR_DIR = SCRIPTS_DIR / "curator"
@@ -1342,8 +1342,9 @@ class CurationHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"fps must be 1..30: {fps}"}, 400)
                     return
                 with publish_guard(self.run_dir):
-                    request_path = self.run_dir / "sprite-request.json"
-                    request = json.loads(request_path.read_text(encoding="utf-8"))
+                    # 게이트 경유 (락 안이어도 안전 — 게이트가 락 보유 시 재기록을 미룬다)
+                    request_path = self.run_dir / REQUEST_FILENAME
+                    request = load_request(self.run_dir)
                     if state not in request.get("states", {}):
                         self._send_json({"error": f"unknown state: {state}"}, 400)
                         return

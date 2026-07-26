@@ -174,7 +174,7 @@ vm.runInContext(`
   // **손으로 unfakeStates 를 먹이지 않는다.** 웹뷰가 서버 페이로드에서 변종을 스스로
   // 골라내는지가 이 하네스의 요점이다 — 시드를 밖에 두면 그 질문을 영영 못 묻는다
   // (슉슉이 실측 2026-07-26: 변종 불일치가 그 공백으로 한 라운드를 살아남았다).
-  seedPixelPerfect(__payload.run);
+  seedUnfakeState(__payload.run);
   for (const [name, v] of Object.entries(__payload.ppOverride || {})) unfakeStates[name] = v;
   for (const [name, e] of Object.entries(__payload.entries)) {
     entries[name] = { order: e.order, sel: new Set(e.sel), transforms: e.transforms || {},
@@ -193,7 +193,7 @@ process.stdout.write(JSON.stringify(sandbox.__out));
 
 
 def _webview(run_payload, entries, queries, pp_override=None):
-    """웹뷰를 서버 페이로드로 부팅해 질의한다 — `unfakeStates` 는 `seedPixelPerfect` 가 짓는다.
+    """웹뷰를 서버 페이로드로 부팅해 질의한다 — `unfakeStates` 는 `seedUnfakeState` 가 짓는다.
 
     `pp_override` 는 사용자가 화면에서 토글을 누른 상태를 흉내낼 때만 쓴다."""
     return _node(STORE_HARNESS, {
@@ -373,7 +373,7 @@ def _variant_id(case):
 def test_the_webview_resolves_the_bake_variant_like_the_server(twin, own, wide):
     """웹뷰의 굽기 변종 == 파이썬 `frame_variant` — 해소표 전수.
 
-    `ppOn` 은 **표시 렌즈**다: boot 시드가 트윈 없는 줄을 기본 OFF 로 놓는데 그 값은
+    `unfakeOn` 은 **표시 렌즈**다: boot 시드가 트윈 없는 줄을 기본 OFF 로 놓는데 그 값은
     사이드카에 저장되지 않으므로 서버는 그 줄을 `pixel` 로 본다. 둘을 같은 값으로 쓰면
     `fit.pixel_perfect` 없이 만든 **기본 런 전부**에서 지문이 영구 불일치가 되고,
     해부를 갱신해도 라우트가 또 `pixel` 로 같은 키를 만들어 절대 안 풀린다

@@ -172,24 +172,57 @@ def test_no_production_path_reads_the_request_outside_the_gate() -> None:
 
     이게 이 플랜의 핵심 계약이다. 키 이름만 바꾸고 읽기를 게이트 뒤로 옮기지 않으면, 아직
     이관되지 않은 런에서 그 판독부만 조용히 틀린 답을 본다 — 실제로 `reroll.py` 에서 리롤이
-    거짓 거부되는 회귀가 났고(젯비 R1), 같은 클래스가 `interpolate.py`·`preview.py` 에도
-    있었다. 사람이 grep 으로 잡는 것에 의존하지 않고 구조로 못박는다.
+    거짓 거부되는 회귀가 났고(젯비 R1), 같은 클래스가 `interpolate.py`·`preview.py` 에도 있었다.
 
-    테스트 코드는 예외다: 테스트는 "디스크에 실제로 무엇이 쓰였는가" 를 검사해야 하므로 원문을
-    읽는 게 목적이다."""
-    import re
+    **AST 로 본다.** 첫 버전은 한 줄 정규식이었고, 실제 회귀 형태(경로를 변수에 담고 다음 줄에서
+    `json.loads(path.read_text())`)를 못 잡았다 — 젯비가 mutant 로 증명했다(interpolate 를 옛
+    형태로 되돌려도 548 passed). 그래서 판정 단위를 **함수**로 올린다: 한 함수 안에서 request
+    파일을 가리키면서(`REQUEST_FILENAME` 또는 리터럴 파일명) `json.load(s)` 를 호출하면 그것이
+    게이트 우회다. 쓰기 경로는 `json.dumps` 를 쓰므로 걸리지 않는다.
+
+    테스트 코드는 예외다: 테스트는 "디스크에 실제로 무엇이 쓰였는가" 를 검사해야 한다."""
+    import ast
     from pathlib import Path as _Path
 
+    REQUEST_MARKERS = {"REQUEST_FILENAME", "sprite-request.json"}
+
+    def _mentions_request(node: ast.AST) -> bool:
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name) and child.id in REQUEST_MARKERS:
+                return True
+            if isinstance(child, ast.Constant) and child.value in REQUEST_MARKERS:
+                return True
+        return False
+
     root = _Path(__file__).resolve().parents[1]
-    pattern = re.compile(r'sprite-request\.json"\)\.read_text|json\.loads?\([^)]*sprite-request')
-    offenders = []
+    offenders: list[str] = []
     for path in sorted(list((root / "sprite_gen").glob("*.py")) + list((root / "scripts").glob("*.py"))):
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            stripped = line.strip()
-            if stripped.startswith("#") or "load_request" in line:
+        if path.name == "runio.py":            # 게이트 자신이 사는 곳
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            if pattern.search(line):
-                offenders.append(f"{path.relative_to(root)}:{number}: {stripped[:80]}")
+            # ① 이 함수 안에서 request 경로를 담은 변수 이름들
+            request_vars = set()
+            for child in ast.walk(node):
+                if isinstance(child, ast.Assign) and _mentions_request(child.value):
+                    for target in child.targets:
+                        if isinstance(target, ast.Name):
+                            request_vars.add(target.id)
+            # ② 그 변수(또는 리터럴/상수)를 읽는 json.load(s) 호출만 우회다.
+            #    같은 함수가 curation.json 을 읽는 건 무관하다 (오탐 방지 — 판정 단위를
+            #    함수 전체로 두면 do_POST/heal_run 이 걸린다).
+            for child in ast.walk(node):
+                if not isinstance(child, ast.Call):
+                    continue
+                target = child.func
+                if not (isinstance(target, ast.Attribute) and target.attr in {"load", "loads"}
+                        and isinstance(target.value, ast.Name) and target.value.id == "json"):
+                    continue
+                arg_names = {n.id for n in ast.walk(child) if isinstance(n, ast.Name)}
+                if (arg_names & request_vars) or _mentions_request(child):
+                    offenders.append(f"{path.relative_to(root)}:{child.lineno} in {node.name}()")
     assert not offenders, (
         "게이트를 우회해 request 를 직접 읽는 프로덕션 경로:\n  " + "\n  ".join(offenders)
         + "\n→ `runio.load_request` 를 쓰라 (이관·두 키 hard fail 판정이 그 안에만 있다)")
