@@ -7,7 +7,7 @@ Static identity QA is not enough. A row can have the right frame count, clean al
 - Build a per-state contact sheet and an animated preview, then watch the loop:
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/preview_animation.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/preview_animation.py \
   --run-dir <target>/assets/generated/sprites/<character-id>
 ```
 

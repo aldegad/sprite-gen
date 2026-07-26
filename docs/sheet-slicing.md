@@ -28,7 +28,7 @@ accident, twice).
 ## Usage
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/slice_sheet_cells.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/slice_sheet_cells.py \
   --sheet raw/hero_expressions.png \
   --out-dir portraits/hero \
   --chroma-key green \

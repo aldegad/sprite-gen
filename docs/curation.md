@@ -17,8 +17,8 @@ cp <후보들> "$STAGE/pngs/"   # 의미 있는 이름으로: 1-hub-cube.png, 2-
 # 셀 크기는 전 그룹 공유 최대치이므로, 거대한 레퍼런스는 미리 다른 후보 크기대로 축소해 넣는다.
 # 소스 1급 수용(run-contract.md §4): pngs/_base/<img> → 베이스 참조 줄, pngs/<group>/_refs/<role>-<name>.png
 #   (role=anchor|basis|guide) → 그 줄의 생성 재료 칩. _base·_refs 는 예약 폴더라 큐레이터 줄이 되지 않는다.
-python3 "$SG/scripts/unpack_atlas_run.py" --pngs-dir "$STAGE/pngs" --out-dir "$STAGE/run" --force
-nohup python3 "$SG/scripts/serve_curation.py" --run-dir "$STAGE/run" --lang ko > "$STAGE/server.log" 2>&1 &
+"$SG/.venv/bin/python" "$SG/scripts/unpack_atlas_run.py" --pngs-dir "$STAGE/pngs" --out-dir "$STAGE/run" --force
+nohup "$SG/.venv/bin/python" "$SG/scripts/serve_curation.py" --run-dir "$STAGE/run" --lang ko > "$STAGE/server.log" 2>&1 &
 sleep 2
 PORT=$(lsof -nP -a -p $! -iTCP -sTCP:LISTEN | awk 'END{sub(".*:","",$9); print $9}')   # stdout 버퍼링 때문에 log 대신 lsof 로 포트 확보
 curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/"   # 200 = positive proof, 그 후 URL 보고
@@ -45,7 +45,7 @@ curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/"   # 200 = posit
 변형)과 시나리오다.
 
 ```bash
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \
   --run-dir <target>/assets/generated/sprites/<character-id>
 ```
 
@@ -88,14 +88,14 @@ When only the combined sheet survives (a deployed asset whose run dir is gone), 
 
 ```bash
 # default: auto-detect the grid by reading the atlas alpha
-python3 $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/unpack_atlas_run.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/unpack_atlas_run.py \
   --atlas <sheet>.png --out-dir <run-dir> --force
 
 # when a manifest carries exact rectangles (position-faithful)
-python3 .../unpack_atlas_run.py --manifest <manifest>.json [--direction <dir>] --out-dir <run-dir>
+.venv/bin/python .../unpack_atlas_run.py --manifest <manifest>.json [--direction <dir>] --out-dir <run-dir>
 
 # when a human states the grid, e.g. "8x9"
-python3 .../unpack_atlas_run.py --atlas <sheet>.png --grid 8x9 --out-dir <run-dir>
+.venv/bin/python .../unpack_atlas_run.py --atlas <sheet>.png --grid 8x9 --out-dir <run-dir>
 ```
 
 The chosen layout source is always reported (`manifest` / `grid-explicit` / `auto-detect`) and stored in `unpack-source.json` for a later writeback. Then point `serve_curation.py` at the new run dir. Auto-detect is the no-instruction default; `--grid` and `--manifest` are position-faithful (they crop full cells), while auto-detect crops each blob's content bbox and centers it in the cell.
