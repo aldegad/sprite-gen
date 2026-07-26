@@ -11,16 +11,14 @@ UI 없이 빈 화면으로 수십 분 멈춘다 (실사고 2026-07-20). maybe_he
 
 from __future__ import annotations
 
-import sys
 import time
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
 
-import serve_curation  # noqa: E402
+import sprite_gen.serve_curation as serve_curation  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

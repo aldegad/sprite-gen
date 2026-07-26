@@ -164,7 +164,7 @@ def test_scale_formula_has_a_single_owner():
 
     복제본은 실제로 갈렸다 — 웹뷰 사본에는 usable-height 클램프 분기가 없었다."""
     formula = re.compile(r"cell(_state\[.height.\]|_height)\s*//\s*max\(1,\s*logical_height")
-    for rel in ("sprite_gen/extract.py", "scripts/serve_curation.py"):
+    for rel in ("sprite_gen/extract.py", "sprite_gen/serve_curation.py"):
         source = (REPO_ROOT / rel).read_text(encoding="utf-8")
         assert not formula.search(source), (
             f"{rel} 가 배율 식을 다시 유도한다 — pixel_snap_scale 을 호출해야 한다")

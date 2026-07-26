@@ -21,9 +21,8 @@ import pytest
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
 
-from serve_curation import CurationHandler, _url, build_run_state  # noqa: E402
+from sprite_gen.serve_curation import CurationHandler, _url, build_run_state  # noqa: E402
 from sprite_gen.unpack_atlas import import_png_groups  # noqa: E402
 
 
@@ -277,7 +276,7 @@ def test_api_run_reader_isolated_from_concurrent_publish(tmp_path):
     import threading
     import time
 
-    from serve_curation import build_run_state
+    from sprite_gen.serve_curation import build_run_state
     from sprite_gen import runio
 
     pngs = tmp_path / "pngs"
@@ -469,7 +468,7 @@ def test_stale_curation_post_rejected_across_run_generations(tmp_path):
     from functools import partial
     from http.server import ThreadingHTTPServer
 
-    from serve_curation import CurationHandler
+    from sprite_gen.serve_curation import CurationHandler
 
     pngs = tmp_path / "pngs"
     _png(pngs / "items" / "1-a.png", color=(200, 0, 0, 255))
@@ -521,7 +520,7 @@ def test_stored_curation_ignored_after_frame_regeneration(tmp_path):
     This is the single load_curation gate every consumer passes through."""
     import time
 
-    from serve_curation import build_run_state, write_curation_atomic
+    from sprite_gen.serve_curation import build_run_state, write_curation_atomic
     from sprite_gen import curation as cur
 
     pngs = tmp_path / "pngs"
@@ -551,7 +550,7 @@ def test_unstamped_curation_ignored(tmp_path):
     rather than silently applying stale selections/transforms — the single gate has no bypass."""
     import json as _json
 
-    from serve_curation import build_run_state
+    from sprite_gen.serve_curation import build_run_state
     from sprite_gen import curation as cur
 
     pngs = tmp_path / "pngs"
@@ -567,7 +566,7 @@ def test_unstamped_curation_ignored(tmp_path):
     assert cur.load_curation(out) is None                 # unstamped -> ignored, not applied
     assert build_run_state(out)["curation"]["states"] == {}
     # a valid save (via the stamping writer) then applies for the matching generation
-    from serve_curation import write_curation_atomic
+    from sprite_gen.serve_curation import write_curation_atomic
     write_curation_atomic(out, {"version": 1, "kind": "sprite-gen-curation",
                                 "states": {"items": {"selected": [0]}}})
     assert cur.load_curation(out) is not None
