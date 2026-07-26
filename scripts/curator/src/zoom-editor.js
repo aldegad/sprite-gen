@@ -89,7 +89,8 @@ document.addEventListener("keydown", (ev) => {
   // (노을이 기각 R3 2026-07-26). 단 변형 툴로 **영역 변형을 구운 뒤**엔 픽셀 저널이
   // 차므로 그때는 픽셀 undo 가 맞다 — 저널 유무로 가른다.
   const pixelUndoable = pixelEdit && pixelEdit.undoFn
-    && (pixelEdit.tool !== "transform" || (pixelEdit.journal && pixelEdit.journal.length));
+    && ((pixelEdit.tool !== "transform" && pixelEdit.tool !== "lasso")
+        || (pixelEdit.journal && pixelEdit.journal.length));
   const target = zoomView && zoomView.breatheUndo
     ? { undo: zoomView.breatheUndo, redo: zoomView.breatheRedo }
     : (pixelUndoable
@@ -372,7 +373,8 @@ function openZoom(stateName, idx, keepWidth) {
     // `pixel-editing` 은 **픽셀을 찍는 툴** 일 때만이다. 변형/올가미는 픽셀을 안 찍는데
     // 이 클래스가 붙으면 curator.css 가 회전·비틀기 핸들과 크기 스크러버를 숨겨
     // 확대뷰에서 셀 전체 변형 경로가 통째로 막힌다(노을이 기각 R2 2026-07-26).
-    const painting = !!pixelEdit && pixelEdit.tool !== "transform";
+    const NON_PAINTING = { transform: true, lasso: true };
+    const painting = !!pixelEdit && !NON_PAINTING[pixelEdit.tool];
     stage.classList.toggle("pixel-editing", painting);
     stage.classList.toggle("picking", !!pixelEdit && pixelEdit.tool === "pick");
     stage.classList.toggle("selecting", !!pixelEdit && pixelEdit.tool === "select");
