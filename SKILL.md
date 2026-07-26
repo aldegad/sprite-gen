@@ -482,4 +482,4 @@ Concept taxonomy (which doc owns each term, so agents don't guess):
 - frame **clones** (duplicate instances, `source_frame_index`) → curation.md + compose consumers
 - `frame_layout`, `manifest.json` runtime contract → run-contract.md + this SKILL.md "Runtime Contract"
 - pixel-unfake `fit`, `.plain.png`/`orig/` twins → pixel-unfake.md
-- webview interactions (title-drag reorder, 넣기/빼기 toggle, 2-tier card, custom `data-tip` tooltip) → curator/ (도메인 분할 `src/*.js` — 로드 순서 SSoT 는 index.html — + curator.css), described in curation.md
+- webview interactions (title-drag reorder, 넣기/빼기 toggle, 2-tier card, custom `data-tip` tooltip) → `sprite_gen/curator/` (도메인 분할 `src/*.js` — 로드 순서 SSoT 는 index.html — + curator.css), described in curation.md

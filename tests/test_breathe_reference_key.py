@@ -28,8 +28,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sprite_gen.breathe import anatomy_fingerprint, reference_key  # noqa: E402
+from sprite_gen.serve_curation import CURATOR_DIR  # noqa: E402
 
-SRC = Path(__file__).resolve().parent.parent / "scripts" / "curator" / "src"
+SRC = CURATOR_DIR / "src"
 
 pytestmark = pytest.mark.skipif(
     not __import__("shutil").which("node"), reason="node 없음 — 미러를 못 돌린다")

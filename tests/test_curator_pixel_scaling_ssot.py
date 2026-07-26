@@ -14,9 +14,10 @@ nearest 데시메이션을 겪어(896px → 152px, 전체의 2.1%만 표본) 화
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
-CURATOR = Path(__file__).resolve().parent.parent / "scripts" / "curator"
+from sprite_gen.serve_curation import CURATOR_DIR
+
+CURATOR = CURATOR_DIR
 CSS = (CURATOR / "curator.css").read_text(encoding="utf-8")
 SRC = {p.name: p.read_text(encoding="utf-8") for p in (CURATOR / "src").glob("*.js")}
 

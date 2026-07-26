@@ -2,7 +2,7 @@
 """큐레이터 JS 미러가 파이썬 굽기와 **바이트 동일**한지 (Task Card Verification).
 
 호흡 워프는 두 곳에 구현돼 있다: 굽기(`sprite_gen/breathe.py`)와 라이브 프리뷰
-(`scripts/curator/src/breathe.js`). 검출은 서버 한 곳으로 몰았지만 워프는 프리뷰를
+(`sprite_gen/curator/src/breathe.js`). 검출은 서버 한 곳으로 몰았지만 워프는 프리뷰를
 위해 미러가 남아 있고, 미러가 갈리면 "미리보기와 결과가 다르다"가 된다.
 
 이 테스트가 그 계약을 고정한다 — 위상 0 을 포함한 전 위상을 비교한다. 위상 0 이
@@ -27,9 +27,10 @@ from sprite_gen.breathe import (MAX_ROW_STRAIN, anatomy_fingerprint,  # noqa: E4
                                 freeze_anatomy, phase_frame, reference_key, resolve_anatomy,
                                 row_strain)
 from sprite_gen.extract import solid_alpha_bbox  # noqa: E402
+from sprite_gen.serve_curation import CURATOR_DIR  # noqa: E402
 from tests.test_breathe import CFG, _dome, _humanoid, _key, _winged  # noqa: E402
 
-CURATOR_BREATHE = Path(__file__).resolve().parent.parent / "scripts" / "curator" / "src" / "breathe.js"
+CURATOR_BREATHE = CURATOR_DIR / "src" / "breathe.js"
 PHASES = [i / 12 for i in range(12)]
 
 # breathe.js 는 클래식 스크립트(모듈 아님)라 전역 어휘를 공유한다. node 에서 돌리려면

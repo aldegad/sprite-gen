@@ -26,8 +26,9 @@ sys.path.insert(0, str(ROOT))
 
 from sprite_gen.breathe import fit_breathe_pattern  # noqa: E402
 from sprite_gen.curation import RETIRED_BREATHE_KEYS, state_breathe  # noqa: E402
+from sprite_gen.serve_curation import CURATOR_DIR  # noqa: E402
 
-CURATOR = ROOT / "scripts" / "curator" / "src"
+CURATOR = CURATOR_DIR / "src"
 node = pytest.mark.skipif(shutil.which("node") is None, reason="node 가 없어 큐레이터 JS 를 실행할 수 없다")
 
 HARNESS = r"""

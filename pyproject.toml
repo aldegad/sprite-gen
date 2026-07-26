@@ -48,5 +48,17 @@ testpaths = ["tests"]
 
 # The pipeline ships an importable sprite_gen package plus backwards-compatible
 # scripts/ CLI wrappers invoked as `python3 scripts/<tool>.py`.
-[tool.setuptools]
-packages = ["sprite_gen"]
+#
+# Discovered, not hand-listed: a literal `packages = ["sprite_gen"]` silently dropped the
+# `sprite_gen.gen` subpackage from every built wheel, so `sprite-gen --help` (cli.py imports
+# `gen` at module scope) died on a non-editable install. The filesystem is the truth about
+# which packages exist; this derives from it so a new subpackage cannot go missing again.
+[tool.setuptools.packages.find]
+include = ["sprite_gen*"]
+
+# The curation SPA is package data, not a repo-side script asset: the server resolves it
+# relative to its own module (serve_curation.CURATOR_DIR), so it has to travel inside the
+# wheel or the installed console script serves a 404 shell. One location, no fallback —
+# tests/test_curation_asset_packaging.py fails if an asset file matches no pattern here.
+[tool.setuptools.package-data]
+sprite_gen = ["curator/*.html", "curator/*.css", "curator/src/*.js"]

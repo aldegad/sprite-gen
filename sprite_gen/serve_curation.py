@@ -22,7 +22,7 @@ API:
     GET  /frames/<state>/<f>  -> a frame PNG
     GET  /run/<relpath>       -> a file inside the run dir (atlas/qa previews)
     POST /api/curation        -> atomically write curation.json (request body)
-    POST /api/compose         -> re-run compose_sprite_atlas.py, return its result
+    POST /api/compose         -> re-run the atlas compose step, return its result
 """
 
 from __future__ import annotations
@@ -58,11 +58,10 @@ from sprite_gen.extract import heal_run, load_consistent_frames_manifest
 from sprite_gen.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel, state_frame_total
 from sprite_gen.runio import REQUEST_FILENAME, load_request, publish_guard, read_guard
 
-# The SPA assets and the compose scripts this server shells out to still live beside the
-# package, so both paths are resolved from the repo root rather than from the module.
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = REPO_ROOT / "scripts"
-CURATOR_DIR = SCRIPTS_DIR / "curator"
+# The SPA assets are package data (declared in pyproject's `package-data`), so the one
+# path that finds them is relative to this module — the same place in a repo checkout and
+# in an installed wheel. There is no second location to try.
+CURATOR_DIR = Path(__file__).resolve().parent / "curator"
 
 
 def _file_stamp(path: Path) -> str:
@@ -779,9 +778,19 @@ def build_download(run_dir: Path, kind: str) -> tuple[bytes, str] | dict:
     return {"ok": False, "error": f"unknown download kind: {kind}"}
 
 
-def _run_script(name: str, run_dir: Path, *extra: str) -> dict:
+def _run_module(name: str, run_dir: Path, *extra: str) -> dict:
+    """Shell out to a pipeline step as a module of this package.
+
+    `-m sprite_gen.<step>` resolves through the interpreter's own import path, so it finds
+    the step wherever the package itself was found. Naming `scripts/<step>.py` instead would
+    tie every one of these routes to a repo checkout: the wrappers under `scripts/` are not
+    installed, so an installed `sprite-gen curation` would 500 on compose/interpolate/reroll/
+    export while still serving the SPA. The wrappers are re-exports of these same modules
+    (`scripts/compose_sprite_atlas.py` -> `sprite_gen.compose_atlas`), so this is the same
+    program, reached by the path that survives installation.
+    """
     proc = subprocess.run(
-        [sys.executable, str(SCRIPTS_DIR / name), "--run-dir", str(run_dir), *extra],
+        [sys.executable, "-m", f"sprite_gen.{name}", "--run-dir", str(run_dir), *extra],
         capture_output=True,
         text=True,
     )
@@ -795,12 +804,12 @@ def _run_script(name: str, run_dir: Path, *extra: str) -> dict:
 
 def run_compose(run_dir: Path) -> dict:
     """Re-run the atlas compose step so curation bakes into atlas/manifest."""
-    return _run_script("compose_sprite_atlas.py", run_dir)
+    return _run_module("compose_atlas", run_dir)
 
 
 def run_interpolate(run_dir: Path, state: str, index_a: int, index_b: int,
                     t: float, label: str | None, provider: str = "codex") -> dict:
-    """AI in-between (interpolate_frames.py): 테이크 기록 + 전체 배치 재추출.
+    """AI in-between (`sprite_gen.interpolate`): 테이크 기록 + 전체 배치 재추출.
 
     생성은 서버 머신의 provider CLI(codex/grok, 머신 로컬 OAuth)가 수행한다 —
     브라우저에는 자격증명이 지나가지 않는다. 부분 추출은 제공하지 않는다 —
@@ -810,22 +819,22 @@ def run_interpolate(run_dir: Path, state: str, index_a: int, index_b: int,
              "--provider", provider, "--t", str(t), "--extract"]
     if label:
         extra += ["--label", str(label)]
-    return _run_script("interpolate_frames.py", run_dir, *extra)
+    return _run_module("interpolate", run_dir, *extra)
 
 
 def run_reroll(run_dir: Path, state: str, provider: str = "codex") -> dict:
-    """행 리롤 (reroll_state_row.py): 새 테이크 생성 + 전체 배치 재추출.
+    """행 리롤 (`sprite_gen.reroll`): 새 테이크 생성 + 전체 배치 재추출.
 
     primary 를 덮지 않는다 — 후보군 병기(테이크)가 계약이다 (수홍 2026-07-19
     "리롤버튼 눌러서 후보군에 추가"). 생성은 interpolate 와 같이 서버 머신의
     provider CLI 가 수행하고, 부분 추출 없이 전체 배치를 재추출한다."""
-    return _run_script("reroll_state_row.py", run_dir,
+    return _run_module("reroll", run_dir,
                        "--state", state, "--provider", provider, "--extract")
 
 
 def run_export(run_dir: Path) -> dict:
     """Export curated frames back to named PNGs under <run-dir>/curated/."""
-    result = _run_script("export_curated_pngs.py", run_dir)
+    result = _run_module("export_pngs", run_dir)
     if result["ok"] and result["stdout"]:
         try:
             result["export"] = json.loads(result["stdout"])
@@ -837,11 +846,11 @@ def run_export(run_dir: Path) -> dict:
 def run_export_gif(run_dir: Path, state: str | None = None, scale: int = 1) -> dict:
     """Export clean transparent GIF(s) under <run-dir>/exports/.
 
-    Reuses compose_sprite_gif.py --run-dir, which applies the same curation
+    Reuses `sprite_gen.compose_gif` --run-dir, which applies the same curation
     selection/order/transform as the atlas compose (curation.py SSoT).
     `state` limits to one row (`--state`) — the per-row download button path."""
     extra = (["--state", state] if state else []) + (["--scale", str(scale)] if scale > 1 else [])
-    result = _run_script("compose_sprite_gif.py", run_dir, *extra)
+    result = _run_module("compose_gif", run_dir, *extra)
     if result["ok"] and result["stdout"]:
         try:
             result["gif"] = json.loads(result["stdout"])

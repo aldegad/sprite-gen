@@ -17,8 +17,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from sprite_gen.serve_curation import CURATOR_DIR
+
 ROOT = Path(__file__).resolve().parent.parent
-CURATOR = ROOT / "scripts" / "curator"
+CURATOR = CURATOR_DIR
 SRC = {p.name: p.read_text(encoding="utf-8") for p in (CURATOR / "src").glob("*.js")}
 SERVE = (ROOT / "sprite_gen" / "serve_curation.py").read_text(encoding="utf-8")
 INDEX = (CURATOR / "index.html").read_text(encoding="utf-8")

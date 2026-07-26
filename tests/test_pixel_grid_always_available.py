@@ -21,9 +21,10 @@ from pathlib import Path
 
 from PIL import Image
 
+from sprite_gen.serve_curation import CURATOR_DIR
+
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPTS = ROOT / "scripts"
-CURATOR = SCRIPTS / "curator"
+CURATOR = CURATOR_DIR
 SRC = {p.name: p.read_text(encoding="utf-8") for p in (CURATOR / "src").glob("*.js")}
 SERVE = (ROOT / "sprite_gen" / "serve_curation.py").read_text(encoding="utf-8")
 

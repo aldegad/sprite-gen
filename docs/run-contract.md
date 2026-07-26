@@ -184,7 +184,7 @@ Inside this repo the compose/GIF/atlas paths already read `frames/` *together wi
 ## 3. Curation-view display contract
 
 `serve_curation.py` serves one run dir and returns the run snapshot at `GET /api/run`.
-The webview (`scripts/curator/*`) renders exactly four contract elements from that
+The webview (`sprite_gen/curator/*`) renders exactly four contract elements from that
 payload. **A view that omits any element it has the data for is a broken view** — the
 whole point is that the experience does not vary by who launched it.
 
