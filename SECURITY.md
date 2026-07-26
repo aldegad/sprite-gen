@@ -52,7 +52,11 @@ live approval. Closing that gap is tracked separately and is not resolved here.
 A pure-Python fallback for a missing NumPy is not permitted. The extraction path
 carries a byte-identity contract, and a second code path for the same contract
 is two answers to one question, so an interpreter without NumPy must fail
-loudly rather than silently take a slower route.
+loudly rather than silently take a slower route. `sprite_gen/_deps.py` is the
+single module that imports NumPy and is imported by `sprite_gen/__init__.py`, so
+that failure happens at package import and names both the interpreter that was
+used and the install command for the skill venv;
+`tests/test_numpy_dependency_gate.py` holds it there.
 
 This repository currently has no npm lockfile, so `safedeps audit npm` cannot
 produce a reproducible npm verdict yet. If a package manager is added later,

@@ -28,6 +28,12 @@ not a dependency, that is a coincidence that survives until the next clean envir
   `<3` ceiling is the same argument pointed forward.
 - No pure-Python fallback accompanies this. Two code paths for one byte-identity contract is two
   answers to one question; an interpreter without NumPy is expected to fail loudly instead.
+- That expectation is now enforced rather than described. `sprite_gen/_deps.py` is the only module
+  that imports NumPy, and `sprite_gen/__init__.py` imports it, so every entrypoint - the
+  `scripts/*.py` wrappers, `-m sprite_gen.cli`, a downstream `import sprite_gen` - stops at package
+  import on a NumPy-less interpreter and prints which interpreter it ran under plus the exact
+  `.venv/bin/python -m pip install -e <repo>` that fixes it. A bare `ModuleNotFoundError` names
+  neither. `tests/test_numpy_dependency_gate.py` locks the behavior and the single import site.
 
 ## Unreleased - "pixel perfect" was the wrong name; the pipeline now says pixel unfake
 
