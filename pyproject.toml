@@ -32,6 +32,14 @@ dev = [
     "pytest>=8.0",
 ]
 
+# The console script is what removes the "which python?" question: pip writes it
+# with a shebang naming the interpreter of the environment it was installed
+# into, so `sprite-gen <tool>` runs on that environment's dependencies without
+# anyone naming an interpreter. It fronts the same parser as
+# `python -m sprite_gen.cli`, so the two forms cannot drift.
+[project.scripts]
+sprite-gen = "sprite_gen.cli:main"
+
 [project.urls]
 Repository = "https://github.com/aldegad/sprite-gen"
 
