@@ -30,6 +30,7 @@ PACKAGE_RUN_MODULES = [
     "prepare",
     "preview",
     "score",
+    "serve_curation",
     "slice_sheet",
     "unpack_atlas",
 ]

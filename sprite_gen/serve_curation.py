@@ -1419,16 +1419,28 @@ class CurationHandler(BaseHTTPRequestHandler):
         self._send_json({"error": "not found", "path": path}, 404)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """The webview's argument surface — declared once, for all three launch paths.
+
+    `sprite-gen curation`, `python -m sprite_gen.serve_curation`, and the
+    `scripts/serve_curation.py` wrapper all reach this same declaration, so a flag
+    cannot exist on one form and be missing (or differently defaulted) on another.
+    """
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=0, help="0 picks a free port")
     parser.add_argument("--no-open", action="store_true", help="do not auto-open the browser")
     parser.add_argument("--lang", choices=["en", "ko"], default="en", help="initial UI language (toggleable in the webview)")
-    args = parser.parse_args()
 
-    run_dir = args.run_dir.expanduser().resolve()
+
+def run(*, run_dir: Path, host: str = "127.0.0.1", port: int = 0,
+        no_open: bool = False, lang: str = "en") -> int:
+    """Serve the curation webview until interrupted.
+
+    Keyword-only, matching the `cli.COMMANDS` run-fn convention (`run_fn(**vars(args))`),
+    which is also what `main()` below calls — one implementation, no per-entrypoint branch.
+    """
+    run_dir = run_dir.expanduser().resolve()
     if not (run_dir / "sprite-request.json").is_file():
         raise SystemExit(f"not a sprite-gen run dir (no sprite-request.json): {run_dir}")
     if not CURATOR_DIR.is_dir():
@@ -1436,8 +1448,8 @@ def main() -> int:
 
     handler = partial(CurationHandler)
     CurationHandler.run_dir = run_dir
-    CurationHandler.lang = args.lang
-    server = ThreadingHTTPServer((args.host, args.port), handler)
+    CurationHandler.lang = lang
+    server = ThreadingHTTPServer((host, port), handler)
     host, port = server.server_address
     url = f"http://{host}:{port}/"
     print(f"sprite-gen curation webview: {url}")
@@ -1457,7 +1469,7 @@ def main() -> int:
     except Exception as exc:  # 계약 보고 실패는 서빙을 막지 않는다 — 관측만
         print(f"  view-contract: unavailable ({exc})")
     print("  Ctrl-C to stop.")
-    if not args.no_open:
+    if not no_open:
         webbrowser.open(url)
     try:
         server.serve_forever()
@@ -1466,6 +1478,13 @@ def main() -> int:
     finally:
         server.server_close()
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`python -m sprite_gen.serve_curation` / `scripts/serve_curation.py` entrypoint."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_arguments(parser)
+    return run(**vars(parser.parse_args(argv)))
 
 
 if __name__ == "__main__":
