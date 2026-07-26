@@ -132,9 +132,21 @@ $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python <script.py> ...
 - **자식 프로세스는 상속한다**: `heal_run` 과 큐레이션 서버는 자식을 `sys.executable` 로 띄운다.
   즉 부모를 옳은 인터프리터로 띄우면 그 아래는 자동으로 옳고, 반대로 큐레이션 서버를 전역 `python3` 로
   띄우면 그 서버가 부르는 재추출·compose 가 전부 같이 틀린다. 고칠 곳은 **띄우는 순간 한 곳**이다.
-- 문서에 `sprite-gen <tool>` 로 적힌 명령(`anchor`, `cutout`, `migrate-breathe` …)은 콘솔 스크립트가
-  아니라 CLI 모듈이다 — `$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python -m sprite_gen.cli <tool> ...`
-  로 읽는다.
+- **`sprite-gen <tool>` 은 실재하는 콘솔 스크립트다** (`anchor`, `cutout`, `curation`,
+  `migrate-breathe` …). `pip install` 이 venv 의 `bin/` 에 써 넣고 그 shebang 이 **바로 그 venv 의
+  인터프리터**를 가리키므로, 이 형식은 인터프리터를 고르는 문제 자체가 없다:
+
+  ```bash
+  $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen <tool> ...
+  ```
+
+  - **여기서도 절대경로다** — 맨 `sprite-gen` 이 PATH 에 있는 건 venv 를 활성화했거나 그 환경에
+    설치한 셸 안에서뿐이다. `SKILL.md`·`docs/*.md` 는 활성화 없는 셸에서 읽히므로 맨 `python3` 와
+    같은 이유로 맨 `sprite-gen` 도 쓰지 않는다 (README quickstart 는 활성화가 앞에 있어 예외).
+  - **이 변경 이전에 만든 `.venv` 에는 없다** — `[project.scripts]` 가 없던 시절 설치본이라
+    `bin/sprite-gen` 이 안 만들어졌다. `pip install -e .` 를 한 번 다시 돌리면 생긴다.
+  - `$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python -m sprite_gen.cli <tool> ...` 는 같은
+    `cli:main` 을 부르는 동치 형식이다 — 콘솔 스크립트가 아직 없는 venv 에서 쓴다.
 - **레지스터는 파일로 갈린다**: 상대경로 `python3 scripts/...` 형식이 같은 인터프리터를 가리키는 건
   `source .venv/bin/activate` 가 **바로 앞에 적혀 있는** README quickstart 안에서만이다. `SKILL.md` 와
   `docs/*.md` 는 활성화 단계가 없는 셸에서 읽히므로, 절대경로든 상대경로든 **여기서는 상대형을 쓰지
@@ -165,7 +177,7 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 - `curation.py` — curation sidecar SSoT (schema + transform math + the stamping atomic writer) shared by the compose scripts, the anchor CLI, and the webview server so they never drift.
 - `sprite_gen/anchor.py` (`sprite-gen anchor`) — direction-anchor SSoT: which curated instance is a direction's identity (human pin > the anchor row's sequence head), the post-processing bake of that one frame, and the `references/anchors/<dir>-anchor-x8.png` derived cache that row generation attaches. Reroll, the generation plan, and the curation view's anchor chip all resolve through it.
 - `runio.py` — safe run-dir IO: single-writer lock (`.sprite-gen.lock`) + atomic writes for the extract/compose/export/unpack writers, so parallel agents cannot interleave writes into one character folder.
-- `serve_curation.py` — standalone curation webview for one run dir (works from Claude Code Desktop, the Codex app, or any host with the skill).
+- `sprite_gen/serve_curation.py` (`sprite-gen curation`) — standalone curation webview for one run dir (works from Claude Code Desktop, the Codex app, or any host with the skill). The `-m sprite_gen.serve_curation` module form and the `scripts/serve_curation.py` wrapper reach the same declaration and the same implementation — three live entry forms, one program (launch forms: [`docs/curation.md`](docs/curation.md)).
 - `unpack_atlas_run.py` — inverse of compose: rebuild a curator-ready run dir from a finished sheet (`--grid` > `--manifest` > auto-detect) or import a PNG folder (`--pngs-dir`, with sibling `meta.json` labels/iso grid).
 - `export_curated_pngs.py` — export curated frames back to named PNGs with the transform baked in, into `<run-dir>/curated/`; the deliverable for imported still sets.
 - `cutout.py` (`sprite-gen cutout`) — background remover for **imported** images (not pipeline output, which is already keyed). Routes on the corner background colour (`--key auto|white|magenta|green`): **white/ivory** → position matte (corner flood-fill keeps interior highlights unholed → decontaminated soft-alpha border + soft erode); **magenta/green key** → reuse the verified `extract.remove_chroma_background` engine as-is (no drift — key colours are absent from objects so its colour-only cut is safe there). `--white-check` writes cyan/magenta/yellow verification composites. No Silent Fallback (leftover non-zero RGB under transparency raises).
@@ -256,7 +268,7 @@ This removes the request chroma key, finds connected sprite components, fits eac
 3.5. (Optional) Curate frames in the webview:
 
 ```bash
-$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen curation \
   --run-dir <target>/assets/generated/sprites/<character-id>
 ```
 
@@ -282,7 +294,7 @@ manifest.json
 5. Launch the curation webview automatically (default closing step):
 
 ```bash
-$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen curation \
   --run-dir <target>/assets/generated/sprites/<character-id> &
 ```
 

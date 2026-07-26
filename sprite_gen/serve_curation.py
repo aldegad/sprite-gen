@@ -10,7 +10,12 @@ frames, and apply a non-destructive per-frame transform (rotate/scale/move). All
 edits are persisted to `curation.json` in the run directory; the original frame
 PNGs are never touched. The compose scripts read that sidecar and bake the result.
 
-    python3 serve_curation.py --run-dir <run-folder>
+    sprite-gen curation --run-dir <run-folder>
+
+Three entry forms reach this same module — the console script above, `python -m
+sprite_gen.serve_curation`, and the `scripts/serve_curation.py` wrapper. They
+share one argument declaration (`add_arguments`) and one implementation (`run`),
+so none of them can drift from the others.
 
 This is intentionally a standalone skill tool (not a Studio panel) so it works
 from Claude Code Desktop, the Codex app, or any environment where the skill is

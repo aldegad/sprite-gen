@@ -56,8 +56,12 @@ Repository = "https://github.com/aldegad/sprite-gen"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-# The pipeline ships an importable sprite_gen package plus backwards-compatible
-# scripts/ CLI wrappers invoked as `python3 scripts/<tool>.py`.
+# The pipeline ships an importable sprite_gen package. The canonical invocation is the
+# console script declared above (`sprite-gen <tool>`); `scripts/<tool>.py` survives as a
+# backwards-compatible wrapper for callers that already name the file, and it is a wrapper
+# only — never the form docs teach, because a bare `python3` in a shell that never activated
+# the venv is a different interpreter than the one holding this file's dependencies
+# (`tests/test_entrypoint_interpreter.py` locks that rule for SKILL.md and docs/).
 #
 # Discovered, not hand-listed: a literal `packages = ["sprite_gen"]` silently dropped the
 # `sprite_gen.gen` subpackage from every built wheel, so `sprite-gen --help` (cli.py imports
