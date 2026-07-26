@@ -18,6 +18,7 @@ from typing import Any
 
 from PIL import Image, ImageChops
 
+from sprite_gen._deps import np
 from sprite_gen.curation import effective_logical_height, pixel_snap_scale
 from sprite_gen.layout import frames_dir_rel, raw_rel, take_raw_rel
 from sprite_gen.runio import (REQUEST_FILENAME, acquire_run_dir_lock, atomic_save_image,
@@ -48,10 +49,24 @@ def edge_alpha_count(image: Image.Image, margin: int) -> int:
     return total
 
 
-def key_tint_score(color: tuple[int, int, int], chroma_key: tuple[int, int, int]) -> float:
+def _key_channel_split(chroma_key: tuple[int, int, int]) -> tuple[list[int], list[int]]:
+    """Which channels the key saturates, and which it leaves dark.
+
+    Depends only on the key, so the whole-image path resolves it once instead of
+    per pixel. Degenerate keys — no saturated channel, or no dark one — have no
+    tint axis at all and come back as two empty lists; that emptiness is the one
+    switch both callers read, and it turns off the unmix and spill passes.
+    """
     keyed_channels = [index for index, value in enumerate(chroma_key) if value >= 192]
     unkeyed_channels = [index for index, value in enumerate(chroma_key) if value < 64]
     if not keyed_channels or not unkeyed_channels:
+        return [], []
+    return keyed_channels, unkeyed_channels
+
+
+def key_tint_score(color: tuple[int, int, int], chroma_key: tuple[int, int, int]) -> float:
+    keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
+    if not keyed_channels:
         return 0.0
     keyed_average = sum(color[index] for index in keyed_channels) / len(keyed_channels)
     unkeyed_average = sum(color[index] for index in unkeyed_channels) / len(unkeyed_channels)
@@ -98,6 +113,61 @@ def unmix_key_blend(
     return (*despilled, out_alpha)
 
 
+# --- whole-image forms of the two primitives above ---------------------------
+# remove_chroma_background asks `color_distance` and `key_tint_score` the same
+# question of every pixel, which at 1.5 Mpx a row is where the extraction time
+# went. These compute the identical float64 values one array at a time.
+#
+# "Identical" is the contract, not an aspiration: both quantities start as exact
+# integer arithmetic on uint8 channels, and the one float operation in each
+# (`math.sqrt`, `int / int`) is IEEE-754 correctly rounded, so the array form
+# reproduces the scalar form bit for bit. tests/test_chroma_rcb_byte_identity.py
+# holds the scalar side against a frozen pre-vectorization copy.
+
+
+def _key_distance_field(rgb: np.ndarray, chroma_key: tuple[int, int, int]) -> np.ndarray:
+    """`color_distance` for an (H, W, 3) integer array of colors.
+
+    The squared differences accumulate in int64 on purpose. 255**2 * 3 = 195_075
+    overflows uint16 as well as uint8, and a wrapped square does not raise — it
+    returns a plausible distance for the wrong pixel.
+    """
+    diff = rgb - np.asarray(chroma_key, dtype=np.int32)
+    return np.sqrt((diff * diff).sum(axis=-1, dtype=np.int64).astype(np.float64))
+
+
+def _key_tint_field(rgb: np.ndarray, keyed_channels: list[int],
+                    unkeyed_channels: list[int]) -> np.ndarray:
+    """`key_tint_score` for an (H, W, 3) integer array of colors.
+
+    Takes the channel split rather than the key, so the degenerate-key decision
+    stays where `_key_channel_split` made it — one answer, read the same way here
+    as in the scalar primitive.
+    """
+    if not keyed_channels:
+        return np.zeros(rgb.shape[:2], dtype=np.float64)
+    keyed_sum = rgb[..., keyed_channels].sum(axis=-1, dtype=np.int64)
+    unkeyed_sum = rgb[..., unkeyed_channels].sum(axis=-1, dtype=np.int64)
+    return keyed_sum / len(keyed_channels) - unkeyed_sum / len(unkeyed_channels)
+
+
+def _grow_chebyshev(mask: np.ndarray) -> np.ndarray:
+    """One step of 8-connected growth: the 3x3 neighborhood of every set pixel.
+
+    Shifts are explicit slices, not `np.roll`, because roll wraps the far edge
+    into the near one and would hand a bottom-row pixel the depth of the top
+    row. The two axes are applied in sequence — a 3x3 dilation is separable, and
+    Chebyshev distance is exactly what repeating this step counts.
+    """
+    grown = mask.copy()
+    grown[:, 1:] |= mask[:, :-1]
+    grown[:, :-1] |= mask[:, 1:]
+    spread = grown.copy()
+    spread[1:, :] |= grown[:-1, :]
+    spread[:-1, :] |= grown[1:, :]
+    return spread
+
+
 # remove_chroma_background pixel classes, decided once on the source colors.
 _KEYED = 0  # erased: transparent input or hard key cut
 _SUBJECT = 1  # not key-tinted — never touched
@@ -124,27 +194,28 @@ def remove_chroma_background(
 ) -> Image.Image:
     rgba = image.convert("RGBA")
     width, height = rgba.size
-    pixels = rgba.load()
-    classes = bytearray(width * height)
+    data = np.array(rgba, dtype=np.uint8)  # (H, W, 4); written back at the end
+    source_rgb = data[..., :3].astype(np.int32)
+    keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
     unseen = 255
-    depths = bytearray(b"\xff" * (width * height))  # chebyshev distance to keyed region
-    keyed: list[int] = []
-    for y in range(height):
-        for x in range(width):
-            red, green, blue, alpha = pixels[x, y]
-            index = y * width + x
-            color = (red, green, blue)
-            if alpha == 0 or color_distance(color, chroma_key) <= threshold:
-                pixels[x, y] = (0, 0, 0, 0)
-                classes[index] = _KEYED
-                depths[index] = 0
-                keyed.append(index)
-            elif key_tint_score(color, chroma_key) < fringe_delta:
-                classes[index] = _SUBJECT
-            elif color_distance(color, chroma_key) <= fringe_threshold:
-                classes[index] = _BLEND_IN_BAND
-            else:
-                classes[index] = _BLEND_OUT_OF_BAND
+
+    # Classification, decided on the source colors before anything is erased.
+    # np.select takes the first condition that holds, so the condlist order below
+    # *is* the if/elif order it replaces — swapping the subject and in-band rows
+    # changes the output wherever both hold at once (a wide --fringe-key-threshold
+    # makes that reachable, and the gate has a case for it).
+    key_distance = _key_distance_field(source_rgb, chroma_key)
+    source_tint = _key_tint_field(source_rgb, keyed_channels, unkeyed_channels)
+    keyed_mask = (data[..., 3] == 0) | (key_distance <= threshold)
+    classes = np.select(
+        [keyed_mask, source_tint < fringe_delta, key_distance <= fringe_threshold],
+        [_KEYED, _SUBJECT, _BLEND_IN_BAND],
+        default=_BLEND_OUT_OF_BAND,
+    ).astype(np.uint8)
+    data[keyed_mask] = 0
+
+    depths = np.full((height, width), unseen, dtype=np.uint8)  # chebyshev distance to keyed region
+    depths[keyed_mask] = 0
 
     key_tint = key_tint_score(chroma_key, chroma_key)
     max_reach = min(unseen - 1, unmix_reach if key_tint > 0 else 0)
@@ -152,28 +223,16 @@ def remove_chroma_background(
     # Geometric distance to the nearest keyed-out pixel — outer background
     # *and* interior holes (hair gaps) alike. This walk is not blocked by
     # subject pixels, so an isolated key blend locked inside subject material
-    # still gets a depth.
-    frontier = keyed
+    # still gets a depth. Growing the keyed set one ring at a time numbers the
+    # rings in the order a breadth-first walk would reach them.
+    frontier = keyed_mask
+    reached = keyed_mask
     depth = 0
-    while frontier and depth < max_reach:
+    while frontier.any() and depth < max_reach:
         depth += 1
-        next_frontier: list[int] = []
-        for index in frontier:
-            x = index % width
-            y = index // width
-            for dy in (-1, 0, 1):
-                ny = y + dy
-                if ny < 0 or ny >= height:
-                    continue
-                for dx in (-1, 0, 1):
-                    nx = x + dx
-                    if nx < 0 or nx >= width:
-                        continue
-                    neighbor = ny * width + nx
-                    if depths[neighbor] == unseen:
-                        depths[neighbor] = depth
-                        next_frontier.append(neighbor)
-        frontier = next_frontier
+        frontier = _grow_chebyshev(frontier) & ~reached
+        depths[frontier] = depth
+        reached = reached | frontier
 
     # Soft-alpha unmix — binary erase cannot represent antialiased coverage.
     # Any key-tinted pixel within unmix_reach of the keyed region is separated
@@ -181,23 +240,22 @@ def remove_chroma_background(
     #   - out-of-band blends always (they are too subject-heavy to erase);
     #   - in-band blends only within the AA band nearest the key. Deeper
     #     key-tinted material stays byte-identical (v1.10.1 guardrail).
+    # Only the selection is vectorized. The pixels that survive it are the AA
+    # fringe — a thin minority — so the blend itself stays on the scalar
+    # primitives that despill_color and unmix_key_blend already own.
     if key_tint > 0 and unmix_reach > 0:
-        for y in range(height):
-            for x in range(width):
-                index = y * width + x
-                if not 0 < depths[index] <= unmix_reach:
-                    continue
-                pixel_class = classes[index]
-                if pixel_class == _BLEND_IN_BAND:
-                    if depths[index] > _IN_BAND_UNMIX_KEY_DEPTH:
-                        continue
-                elif pixel_class != _BLEND_OUT_OF_BAND:
-                    continue
-                red, green, blue, alpha = pixels[x, y]
-                color = (red, green, blue)
-                pixels[x, y] = unmix_key_blend(
-                    color, alpha, chroma_key, key_tint, key_tint_score(color, chroma_key)
-                )
+        in_reach = (depths > 0) & (depths <= min(unmix_reach, unseen))
+        unmixable = in_reach & (
+            ((classes == _BLEND_IN_BAND) & (depths <= _IN_BAND_UNMIX_KEY_DEPTH))
+            | (classes == _BLEND_OUT_OF_BAND)
+        )
+        rows, cols = np.nonzero(unmixable)
+        for y, x in zip(rows.tolist(), cols.tolist()):
+            red, green, blue, alpha = (int(value) for value in data[y, x])
+            color = (red, green, blue)
+            data[y, x] = unmix_key_blend(
+                color, alpha, chroma_key, key_tint, key_tint_score(color, chroma_key)
+            )
 
     # Trapped-spill despill — generators paint key-colored spill *inside* the
     # subject (a green streak buried in crimson hair, key reflections between
@@ -207,18 +265,19 @@ def remove_chroma_background(
     # material (the hot-pink seed packet) and stays untouched. Spill keeps its
     # alpha — it sits inside opaque subject, so this is color correction, not
     # coverage: partial alpha here would punch pinholes through the sprite.
-    if key_tint > 0 and keyed and spill_max_fraction > 0:
-        subject_count = sum(1 for pixel_class in classes if pixel_class != _KEYED)
+    if key_tint > 0 and keyed_mask.any() and spill_max_fraction > 0:
+        subject_count = int(np.count_nonzero(~keyed_mask))
         spill_limit = max(32, round(subject_count * spill_max_fraction))
-        tints_left: dict[int, float] = {}
-        for y in range(height):
-            for x in range(width):
-                red, green, blue, alpha = pixels[x, y]
-                if not alpha:
-                    continue
-                tint = key_tint_score((red, green, blue), chroma_key)
-                if tint >= fringe_delta:
-                    tints_left[y * width + x] = tint
+        # Re-scored on the *current* colors: the unmix pass above rewrote part of
+        # the image, and a pixel it despilled is no longer a spill candidate.
+        current_tint = _key_tint_field(data[..., :3].astype(np.int32),
+                                       keyed_channels, unkeyed_channels)
+        candidates = np.flatnonzero(
+            ((data[..., 3] != 0) & (current_tint >= fringe_delta)).reshape(-1)
+        )
+        tints_left: dict[int, float] = dict(
+            zip(candidates.tolist(), current_tint.reshape(-1)[candidates].tolist())
+        )
         visited: set[int] = set()
         for start in tints_left:
             if start in visited:
@@ -245,13 +304,17 @@ def remove_chroma_background(
             for index in cluster:
                 x = index % width
                 y = index // width
-                red, green, blue, alpha = pixels[x, y]
+                red, green, blue, alpha = (int(value) for value in data[y, x])
                 color = (red, green, blue)
                 coverage, despilled = despill_color(
                     color, chroma_key, key_tint, key_tint_score(color, chroma_key)
                 )
                 if coverage > 0:
-                    pixels[x, y] = (*despilled, alpha)
+                    data[y, x] = (*despilled, alpha)
+    # Back into the converted copy rather than a fresh Image.fromarray, so the
+    # returned image keeps the mode, size and `info` (icc profile, dpi) that
+    # `convert` carried over from the caller's image.
+    rgba.frombytes(data.tobytes())
     return rgba
 
 

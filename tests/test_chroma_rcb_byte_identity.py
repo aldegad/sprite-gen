@@ -82,6 +82,7 @@ import math
 import re
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -1082,6 +1083,10 @@ _KEYS = [
     (255, 255, 255), (0, 0, 0), (128, 128, 128), (200, 255, 30),
     (192, 255, 0), (0, 255, 64),
 ]
+# 축퇴 키 — 키 채널이 아예 없거나(전부 어두움) 언키 채널이 아예 없다(전부 밝음).
+# 두 방향이 다 있어야 `_key_channel_split` 의 가드가 양쪽에서 잠긴다: 한쪽 항만
+# 남기면 나머지 방향에서 0 나눗셈이 샌다.
+_DEGENERATE_KEYS = [(128, 128, 128), (255, 255, 255), (0, 0, 0), (200, 200, 200), (63, 63, 63)]
 
 
 def test_color_distance_matches_frozen_scalar_reference():
@@ -1116,7 +1121,7 @@ def test_key_tint_score_matches_frozen_scalar_reference():
 def test_key_tint_score_returns_zero_for_degenerate_keys():
     """축퇴 키(키 채널 없음 / 언키 채널 없음)는 0.0 — 이 값이
     `remove_chroma_background` 의 unmix·spill 패스 전체를 끄는 스위치다."""
-    for key in [(128, 128, 128), (255, 255, 255), (0, 0, 0), (200, 200, 200), (63, 63, 63)]:
+    for key in _DEGENERATE_KEYS:
         assert extract.key_tint_score((10, 200, 30), key) == 0.0
         assert _ref_key_tint_score((10, 200, 30), key) == 0.0
 
@@ -1137,6 +1142,51 @@ def test_despill_and_unmix_match_frozen_scalar_reference():
                         _ref_despill_color(color, key, key_tint, tint)
                     assert extract.unmix_key_blend(color, alpha, key, key_tint, tint) == \
                         _ref_unmix_key_blend(color, alpha, key, key_tint, tint)
+
+
+# --- 배열 커널: 프로덕션 vs 같은 동결 사본 ------------------------------------
+# `remove_chroma_background` 는 이제 픽셀마다 `color_distance`·`key_tint_score` 를
+# 부르지 않고 `_key_distance_field`·`_key_tint_field` 에 이미지를 통째로 넘긴다.
+# 위의 스칼라 스윕이 지키던 그 산수가 **이 함수들로 옮겨간 것**이라, 스윕도 같이
+# 옮긴다 — 안 옮기면 rcb 가 타는 경로는 픽스처 몇 장으로만 덮이고, float32 강등처럼
+# 임계에 정확히 걸리는 픽셀이 없으면 관측되지 않는 슬립이 조용히 통과한다
+# (노드 7 하네스에서 실제로 SURVIVED 로 재현한 뒤 이 두 단정을 넣었다).
+# 참조는 위와 **같은 동결 스칼라 사본**이므로 프로덕션을 따라 움직이지 않는다.
+
+
+def _sweep_color_field():
+    """스칼라 스윕과 같은 1,331 색을 (N, 1, 3) 배열 한 장으로."""
+    colors = [(red, green, blue) for red in _SWEEP for green in _SWEEP for blue in _SWEEP]
+    return colors, np.array(colors, dtype=np.int32).reshape(len(colors), 1, 3)
+
+
+def test_key_distance_field_matches_frozen_scalar_reference():
+    """1,331 색 x 12 키 전수 — 배열 쪽도 근사가 아니라 정확한 float 동일."""
+    colors, field = _sweep_color_field()
+    checked = 0
+    for key in _KEYS:
+        got = extract._key_distance_field(field, key)
+        assert got.dtype == np.float64, f"key={key}: {got.dtype} — float64 계약 위반"
+        for index, color in enumerate(colors):
+            ref = _ref_color_distance(color, key)
+            assert got[index, 0] == ref, f"key={key} color={color}: {got[index, 0]!r} != {ref!r}"
+            checked += 1
+    assert checked == len(_KEYS) * len(_SWEEP) ** 3
+
+
+def test_key_tint_field_matches_frozen_scalar_reference():
+    """축퇴 키까지 포함한다 — 배열 경로의 축퇴 스위치도 같은 자리에서 갈려야 한다."""
+    colors, field = _sweep_color_field()
+    checked = 0
+    for key in _KEYS + _DEGENERATE_KEYS:
+        keyed_channels, unkeyed_channels = extract._key_channel_split(key)
+        got = extract._key_tint_field(field, keyed_channels, unkeyed_channels)
+        assert got.dtype == np.float64, f"key={key}: {got.dtype} — float64 계약 위반"
+        for index, color in enumerate(colors):
+            ref = _ref_key_tint_score(color, key)
+            assert got[index, 0] == ref, f"key={key} color={color}: {got[index, 0]!r} != {ref!r}"
+            checked += 1
+    assert checked == (len(_KEYS) + len(_DEGENERATE_KEYS)) * len(_SWEEP) ** 3
 
 
 # --- remove_chroma_background: 바이트 동일 ---------------------------------
