@@ -127,7 +127,7 @@ python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # 또는 ko
 ## 빠른 시작
 
 ```bash
-# 0. 새 가상환경에 의존성(Pillow) 설치
+# 0. 새 가상환경에 의존성(Pillow, NumPy) 설치
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 

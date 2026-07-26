@@ -31,6 +31,19 @@ example files limited to placeholders.
 
 ## Current Dependency Surface
 
+The runtime surface is two PyPI packages, both declared directly in
+`pyproject.toml`: **Pillow** (image I/O and the PIL-vector paths) and **NumPy**
+(the vectorized chroma extraction path). Neither may be relied on transitively —
+a package that arrives only because some other dependency pulls it in can leave
+on the next clean environment, and this package's own code must not be at the
+mercy of another package's dependency list. Both were cleared through the
+advisory gate above before they were declared.
+
+A pure-Python fallback for a missing NumPy is not permitted. The extraction path
+carries a byte-identity contract, and a second code path for the same contract
+is two answers to one question, so an interpreter without NumPy must fail
+loudly rather than silently take a slower route.
+
 This repository currently has no npm lockfile, so `safedeps audit npm` cannot
 produce a reproducible npm verdict yet. If a package manager is added later,
 commit the lockfile and let the pre-commit hook audit it.

@@ -127,7 +127,7 @@ python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # 或 ko
 ## 快速开始
 
 ```bash
-# 0. 将依赖项（Pillow）安装到新的虚拟环境中
+# 0. 将依赖项（Pillow、NumPy）安装到新的虚拟环境中
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 

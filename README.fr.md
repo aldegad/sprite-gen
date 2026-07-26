@@ -127,7 +127,7 @@ Le démarrage rapide nécessite une installation de Python avec un fonctionnemen
 ## Démarrage rapide
 
 ```bash
-# 0. installer les dépendances (Pillow) dans un environnement virtuel vierge
+# 0. installer les dépendances (Pillow, NumPy) dans un environnement virtuel vierge
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 

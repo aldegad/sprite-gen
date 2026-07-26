@@ -5,6 +5,28 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## Unreleased - NumPy is a declared dependency now, and the floor is the one 3.10 can actually install
+
+The chroma extraction path is about to stop looping over pixels in Python, which needs NumPy. Until
+now the only reason `import numpy` worked here at all was that a development virtualenv still had
+onnxruntime sitting in it from the removed RIFE feature, and onnxruntime depends on NumPy. That is
+not a dependency, that is a coincidence that survives until the next clean environment.
+
+- `pyproject.toml` declares `numpy>=2.2.6,<3` directly, next to Pillow. The gate was run before the
+  declaration, as `SECURITY.md` requires.
+- The floor is **2.2.6**, not the 2.3.4 the plan started from and not the 2.5.1 that happened to be
+  installed. This package declares `requires-python = ">=3.10"` and CI runs 3.10 as its minimum job;
+  2.3.x requires >=3.11 and 2.5.x requires >=3.12, so either floor would have turned the 3.10 job
+  into a resolution failure on the first push. 2.2.6 is the newest release that still ships CPython
+  3.10 wheels, so it is the highest floor that keeps the supported-version claim honest. On 3.10 the
+  resolver lands on exactly 2.2.6; on 3.12+ it lands on 2.5.1.
+- The floor is also >= 2.0 on purpose. The extraction path is under a byte-identity contract, and
+  NEP 50 changed how scalars and arrays promote - the default only from NumPy 2.0. Allowing 1.x
+  would allow a second set of promotion rules under a contract that says the bytes never move. The
+  `<3` ceiling is the same argument pointed forward.
+- No pure-Python fallback accompanies this. Two code paths for one byte-identity contract is two
+  answers to one question; an interpreter without NumPy is expected to fail loudly instead.
+
 ## Unreleased - "pixel perfect" was the wrong name; the pipeline now says pixel unfake
 
 Terminology, all the way into the schema. `domains/tools/spritefusion-pixel-snapper.md` had the

@@ -127,7 +127,7 @@ La guía rápida requiere una instalación de Python con `venv`/`ensurepip` func
 ## Guía rápida
 
 ```bash
-# 0. instalar dependencias (Pillow) en un virtualenv nuevo
+# 0. instalar dependencias (Pillow, NumPy) en un virtualenv nuevo
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
