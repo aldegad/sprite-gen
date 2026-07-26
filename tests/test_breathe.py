@@ -491,8 +491,8 @@ def test_the_curator_ui_cap_matches_the_schema_bound() -> None:
     """UI 컨트롤 상한과 스키마 상한이 갈리면 UI 가 만든 값을 굽기가 거부한다."""
     from sprite_gen.curation import BREATHE_BREATHS_MAX, BREATHE_DEPTH_MAX, BREATHE_LAG_MAX
     import re
-    js = (Path(__file__).resolve().parent.parent
-          / "scripts" / "curator" / "src" / "breathe.js").read_text(encoding="utf-8")
+    from sprite_gen.serve_curation import CURATOR_DIR
+    js = (CURATOR_DIR / "src" / "breathe.js").read_text(encoding="utf-8")
     for name, want in (("BREATHE_BREATHS_MAX", BREATHE_BREATHS_MAX),
                        ("BREATHE_DEPTH_MAX", BREATHE_DEPTH_MAX),
                        ("BREATHE_LAG_MAX", BREATHE_LAG_MAX)):

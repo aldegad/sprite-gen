@@ -19,7 +19,6 @@ import pytest
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from sprite_gen import anchor as anchor_mod  # noqa: E402
 from sprite_gen import extract as extract_module  # noqa: E402
@@ -285,7 +284,7 @@ def test_invalid_pick_writes_nothing(direction_run: Path) -> None:
 
 def test_stage1_view_reports_no_anchor_error(stage1_run: Path) -> None:
     """작업 중간 런은 멀쩡한 상태다 — 뷰에 오류가 뜨면 안 된다."""
-    from serve_curation import build_run_state
+    from sprite_gen.serve_curation import build_run_state
 
     snapshot = build_run_state(stage1_run)
     for group in snapshot["directionGroups"]:
@@ -300,7 +299,7 @@ def test_stage1_view_reports_no_anchor_error(stage1_run: Path) -> None:
 
 def test_pending_and_broken_are_different_states(ungenerated_run: Path) -> None:
     """`pending`(아직 안 뽑음)과 `broken`(사람이 고쳐야 함)은 뷰에서 다르게 취급된다."""
-    from serve_curation import build_run_state
+    from sprite_gen.serve_curation import build_run_state
 
     run_dir = ungenerated_run
     pending = next(g for g in build_run_state(run_dir)["directionGroups"]
@@ -384,7 +383,7 @@ def _post_curation(run_dir: Path, body: dict) -> int:
     from functools import partial
     from http.server import ThreadingHTTPServer
 
-    from serve_curation import CurationHandler
+    from sprite_gen.serve_curation import CurationHandler
 
     CurationHandler.run_dir = run_dir
     CurationHandler.lang = "en"
@@ -623,7 +622,7 @@ def test_anchor_suffix_other_than_idle_is_honored(direction_run: Path) -> None:
 
 def test_view_chip_is_a_live_bake_endpoint(direction_run: Path) -> None:
     """앵커 칩 = `/api/anchor` 라이브 베이크 (파일 스냅샷이면 편집 직후 낡는다)."""
-    from serve_curation import build_run_state
+    from sprite_gen.serve_curation import build_run_state
 
     run_dir = direction_run
     _save_curation(run_dir, {"down_idle": {"deleted": [0], "selected": [1, 2, 3]}})
@@ -646,7 +645,7 @@ def test_api_anchor_serves_the_baked_png(direction_run: Path) -> None:
     from functools import partial
     from http.server import ThreadingHTTPServer
 
-    from serve_curation import CurationHandler
+    from sprite_gen.serve_curation import CurationHandler
 
     run_dir = direction_run
     _save_curation(run_dir, {}, anchors={"down": {"state": "down_idle", "index": 2}})
@@ -674,7 +673,7 @@ def test_curation_post_without_anchors_key_keeps_the_pick(direction_run: Path) -
     from functools import partial
     from http.server import ThreadingHTTPServer
 
-    from serve_curation import CurationHandler
+    from sprite_gen.serve_curation import CurationHandler
 
     run_dir = direction_run
     assert anchor_mod.run(run_dir=run_dir, pick="down_idle#2") == 0

@@ -9,7 +9,6 @@ manifest row.files 가 소비자(합성/뷰)의 경로 SSoT 다. legacy 런(layo
 
 import json
 import random
-import sys
 from pathlib import Path
 
 from PIL import Image
@@ -86,8 +85,7 @@ def test_taxonomy_end_to_end(tmp_path: Path) -> None:
     assert set(atlas_manifest["frame_layout"]["rows"]) == set(request["states"])
 
     # 뷰 스냅샷도 같은 경로를 서빙
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     snapshot = serve_curation.build_run_state(out_dir)
     walk = next(s for s in snapshot["states"] if s["name"] == "down_walk")
     assert walk["frames"][0]["present"]

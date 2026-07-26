@@ -50,9 +50,9 @@ Pipeline (unfake.js/pixeldetector-style): 포즈 컴포넌트를 먼저 분리�
 (칸이 클수록 칸 안이 균일해지는 자명한 편향)은 이 판정에 개입하지 않는다.
 
 **이 정책의 범위는 추출 스냅 경로다.** 큐레이터의 베이스 격자(`/api/base-grid`,
-`scripts/serve_curation.py`)는 여전히 `detect_pixel_grid` 가 돌려주는 히스토그램 위상으로
+`sprite_gen/serve_curation.py`)는 여전히 `detect_pixel_grid` 가 돌려주는 히스토그램 위상으로
 절단선을 만든다. 그 절단선은 **표시용 오버레이 선 그리기에 그치지 않는다** — 베이스 편집기가
-각 블록의 중심 픽셀을 raw 에서 샘플해 논리 편집 캔버스를 만들고(`scripts/curator/src/base-editor.js`),
+각 블록의 중심 픽셀을 raw 에서 샘플해 논리 편집 캔버스를 만들고(`sprite_gen/curator/src/base-editor.js`),
 논리 좌표 편집을 되돌릴 때 같은 절단선으로 raw 블록 전체를 채워 `base-source` 파일에 굽는다
 (`space: "logical"` ops). 즉 여기서도 위상이 밀리면 중심 샘플이 이웃 블록으로 넘어가고,
 칠한 칸이 실제 블록 경계를 가로질러 굳는다 — **추출 스냅에서 잡은 것과 같은 실패 계열**이다.

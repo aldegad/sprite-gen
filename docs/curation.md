@@ -18,7 +18,7 @@ cp <후보들> "$STAGE/pngs/"   # 의미 있는 이름으로: 1-hub-cube.png, 2-
 # 소스 1급 수용(run-contract.md §4): pngs/_base/<img> → 베이스 참조 줄, pngs/<group>/_refs/<role>-<name>.png
 #   (role=anchor|basis|guide) → 그 줄의 생성 재료 칩. _base·_refs 는 예약 폴더라 큐레이터 줄이 되지 않는다.
 "$SG/.venv/bin/python" "$SG/scripts/unpack_atlas_run.py" --pngs-dir "$STAGE/pngs" --out-dir "$STAGE/run" --force
-nohup "$SG/.venv/bin/python" "$SG/scripts/serve_curation.py" --run-dir "$STAGE/run" --lang ko > "$STAGE/server.log" 2>&1 &
+nohup "$SG/.venv/bin/sprite-gen" curation --run-dir "$STAGE/run" --lang ko > "$STAGE/server.log" 2>&1 &
 sleep 2
 PORT=$(lsof -nP -a -p $! -iTCP -sTCP:LISTEN | awk 'END{sub(".*:","",$9); print $9}')   # stdout 버퍼링 때문에 log 대신 lsof 로 포트 확보
 curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/"   # 200 = positive proof, 그 후 URL 보고
@@ -45,9 +45,22 @@ curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/"   # 200 = posit
 변형)과 시나리오다.
 
 ```bash
-$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py \
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen curation \
   --run-dir <target>/assets/generated/sprites/<character-id>
 ```
+
+**세 진입 형식이 전부 살아 있다** — 위 콘솔 스크립트, 모듈 형식, 그리고 파일 이름을 이미 쓰고
+있는 호출자를 위한 래퍼:
+
+```bash
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python -m sprite_gen.serve_curation --run-dir <run-dir>
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py --run-dir <run-dir>
+```
+
+셋은 인자 선언 하나(`add_arguments`)와 구현 하나(`run`)를 공유하므로 플래그도 기본값도 갈릴 수
+없다 (`tests/test_curation_cli_entrypoint.py`). 콘솔 스크립트를 먼저 쓰는 이유는 기능이 아니라
+인터프리터다 — shebang 이 자기 venv 를 가리켜서 고를 것이 없다. 이 변경 이전에 만든 venv 에는
+`bin/sprite-gen` 이 없으니 `pip install -e .` 를 한 번 다시 돌리거나 위 두 형식을 쓴다.
 
 This launches a standalone local webview (no orchestrator dependency — usable from Claude Code Desktop, the Codex app, or any host with the skill installed). It shows every state's frames side by side so you can compare them in parallel. Two rows per state: a **sequence** row (the selected play order, saved to `curation.json.selected`, baked left-to-right by compose) and a **candidate pool** row below it (unselected frames, e.g. an extra generated take). A per-frame transform (drag the stage = move, bottom-right magnifier = scale, top handle = rotate, side handle = shear) corrects an off angle/position. A live preview animates the selected frames at the state fps, with play/pause, frame stepping, and a 0.25×–4× speed control.
 
@@ -98,7 +111,7 @@ $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen
 .venv/bin/python .../unpack_atlas_run.py --atlas <sheet>.png --grid 8x9 --out-dir <run-dir>
 ```
 
-The chosen layout source is always reported (`manifest` / `grid-explicit` / `auto-detect`) and stored in `unpack-source.json` for a later writeback. Then point `serve_curation.py` at the new run dir. Auto-detect is the no-instruction default; `--grid` and `--manifest` are position-faithful (they crop full cells), while auto-detect crops each blob's content bbox and centers it in the cell.
+The chosen layout source is always reported (`manifest` / `grid-explicit` / `auto-detect`) and stored in `unpack-source.json` for a later writeback. Then point `sprite-gen curation` at the new run dir. Auto-detect is the no-instruction default; `--grid` and `--manifest` are position-faithful (they crop full cells), while auto-detect crops each blob's content bbox and centers it in the cell.
 
 ## Multi-agent rules for the auto-launch (클로징 스텝 5)
 
@@ -110,7 +123,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
 
 ## Curation Sidecar (`curation.json`)
 
-`curation.json` is an optional, non-destructive sidecar written by the curation webview (`serve_curation.py`) and consumed by `compose_sprite_atlas.py` and `compose_selected_cycle.py`. It records a human selection plus a per-frame affine transform; the original frame PNGs are never modified.
+`curation.json` is an optional, non-destructive sidecar written by the curation webview (`sprite_gen/serve_curation.py`) and consumed by `compose_sprite_atlas.py` and `compose_selected_cycle.py`. It records a human selection plus a per-frame affine transform; the original frame PNGs are never modified.
 
 ```json
 {

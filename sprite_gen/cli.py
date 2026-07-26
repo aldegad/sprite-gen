@@ -21,6 +21,7 @@ from sprite_gen import (
     prepare,
     preview,
     score,
+    serve_curation,
     slice_sheet,
     migrate_breathe,
     unpack_atlas,
@@ -268,6 +269,14 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Cut a uniform (white/ivory/solid) background off an imported image into a clean transparent PNG.",
         _add_cutout,
         cutout.run,
+    ),
+    # The argument surface is `serve_curation.add_arguments` itself, not a copy of it: the
+    # webview's own `--help` and this subcommand are the same declaration, so `sprite-gen
+    # curation` cannot drift from the launch form the READMEs still document.
+    "curation": (
+        "Serve the curation webview for one run directory.",
+        serve_curation.add_arguments,
+        serve_curation.run,
     ),
     "inspect": ("Inspect sprite rows for frame-count, identity, and motion defects.", _add_inspect, inspect.run),
     "score": ("Score a sprite inspect report and emit correction hints.", _add_score, score.run),

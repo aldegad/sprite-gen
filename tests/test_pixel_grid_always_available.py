@@ -17,22 +17,20 @@ None 으로 뭉갰고, 그 None 이 서버·클라 7겹 게이트를 타고 컨�
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 
 from PIL import Image
 
-ROOT = Path(__file__).resolve().parent.parent
-SCRIPTS = ROOT / "scripts"
-CURATOR = SCRIPTS / "curator"
-SRC = {p.name: p.read_text(encoding="utf-8") for p in (CURATOR / "src").glob("*.js")}
-SERVE = (SCRIPTS / "serve_curation.py").read_text(encoding="utf-8")
+from sprite_gen.serve_curation import CURATOR_DIR
 
-sys.path.insert(0, str(SCRIPTS))
+ROOT = Path(__file__).resolve().parent.parent
+CURATOR = CURATOR_DIR
+SRC = {p.name: p.read_text(encoding="utf-8") for p in (CURATOR / "src").glob("*.js")}
+SERVE = (ROOT / "sprite_gen" / "serve_curation.py").read_text(encoding="utf-8")
 
 
 def _pitch(path):
-    from serve_curation import detect_pixel_pitch  # noqa: PLC0415
+    from sprite_gen.serve_curation import detect_pixel_pitch  # noqa: PLC0415
     return detect_pixel_pitch(path)
 
 

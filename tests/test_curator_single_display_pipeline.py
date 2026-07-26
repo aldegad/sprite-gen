@@ -17,10 +17,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from sprite_gen.serve_curation import CURATOR_DIR
+
 ROOT = Path(__file__).resolve().parent.parent
-CURATOR = ROOT / "scripts" / "curator"
+CURATOR = CURATOR_DIR
 SRC = {p.name: p.read_text(encoding="utf-8") for p in (CURATOR / "src").glob("*.js")}
-SERVE = (ROOT / "scripts" / "serve_curation.py").read_text(encoding="utf-8")
+SERVE = (ROOT / "sprite_gen" / "serve_curation.py").read_text(encoding="utf-8")
 INDEX = (CURATOR / "index.html").read_text(encoding="utf-8")
 
 
@@ -129,8 +131,7 @@ def test_server_snapshot_grid_behavior(tmp_path):
          "--pngs-dir", str(tmp_path / "pngs"), "--out-dir", str(out), "--force"],
         capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    sys.path.insert(0, str(ROOT / "scripts"))
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     snap = serve_curation.build_run_state(out)
     assert snap["contract"]["grid"] is True
     assert snap["pixelUnfake"] and snap["pixelUnfake"]["scale"] >= 1

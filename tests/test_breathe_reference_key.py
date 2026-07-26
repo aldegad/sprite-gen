@@ -28,8 +28,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sprite_gen.breathe import anatomy_fingerprint, reference_key  # noqa: E402
+from sprite_gen.serve_curation import CURATOR_DIR  # noqa: E402
 
-SRC = Path(__file__).resolve().parent.parent / "scripts" / "curator" / "src"
+SRC = CURATOR_DIR / "src"
 
 pytestmark = pytest.mark.skipif(
     not __import__("shutil").which("node"), reason="node 없음 — 미러를 못 돌린다")
@@ -221,7 +222,7 @@ def _write_curation(run_dir, curation):
 
 
 def _server_payload(run_dir):
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     return serve_curation._build_run_state_impl(run_dir)
 
 
@@ -232,7 +233,7 @@ def test_the_webview_builds_the_same_key_the_route_used(web_run):
     도달할 수 있는가" 를 묻지 않았다 — 그래서 리샘플러 불일치가 10라운드를 살아남았다.
     여기서는 서버가 실제로 응답에 실어 보낸 페이로드만으로 웹뷰가 키를 만들게 하고,
     라우트가 해부를 얼릴 때 쓴 키와 **문자열 동일**한지 본다."""
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     _, route_key = serve_curation._breathe_source_frame(web_run, "idle")
     payload = _server_payload(web_run)
     got = _webview(payload,
@@ -315,7 +316,7 @@ def test_the_webview_agrees_on_the_plain_variant_too(web_run_plain):
     """pp OFF 줄에서도 웹뷰 키 == 라우트 키.
 
     변종이 갈리면 서로 다른 **파일**을 기준으로 삼는다 — 이 줄이 정확히 그 경로다."""
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     _, route_key = serve_curation._breathe_source_frame(web_run_plain, "idle")
     assert "|plain|" in route_key, f"라우트가 plain 변종을 안 골랐다: {route_key}"
     payload = _server_payload(web_run_plain)
@@ -332,7 +333,7 @@ def test_a_rotated_row_stays_fresh(web_run_plain):
     떨어지고 영상 내보내기가 영구 차단됐다 — 그리고 안내대로 해부를 갱신해도 라우트가
     또 BICUBIC 프레임으로 같은 숫자를 만들어 **절대 안 풀렸다** (슉슉이 실측 2026-07-26:
     rotate 3° 에서 555px 상이)."""
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     from sprite_gen.breathe import freeze_anatomy
     curation = json.loads((web_run_plain / "curation.json").read_text(encoding="utf-8"))
     curation["states"]["idle"]["transforms"] = {"0": {"rotate": 3.0}}

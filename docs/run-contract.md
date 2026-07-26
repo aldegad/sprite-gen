@@ -27,7 +27,7 @@ canonical files, not hidden imports.
 | Prepare | `prepare_sprite_run.py` | base image + request flags/JSON | `sprite-request.json`, per-state layout guide, per-state prompt, empty `raw/`+`frames/` |
 | Generate | `sprite-gen gen` (`generate_sprite_image.py`) | `prompts/<state>.txt` + refs | verified `raw/<state>.png` strip + audit raw/report |
 | Extract | `extract_sprite_row_frames.py` | `raw/<state>.png` | on success: `frames/<state>/frame-N.png` (+ `.plain.png` twin on pixel-unfake runs), `frames/frames-manifest.json`; on failure: nothing in `frames/`, `extract-failure.json` instead (§6) |
-| Curate (opt) | `serve_curation.py` + `curation.py` | `frames/` | `curation.json` sidecar |
+| Curate (opt) | `sprite-gen curation` (`serve_curation.py`) + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
 | QA | `preview_animation.py` | `frames/` | `qa/<state>-contact.png`, `qa/<state>.gif` |
 | Inspect | `inspect_sprite_run.py` | `sprite-request.json`, `raw/` or `frames/` | `sprite-inspect.report.json` |
@@ -184,7 +184,7 @@ Inside this repo the compose/GIF/atlas paths already read `frames/` *together wi
 ## 3. Curation-view display contract
 
 `serve_curation.py` serves one run dir and returns the run snapshot at `GET /api/run`.
-The webview (`scripts/curator/*`) renders exactly four contract elements from that
+The webview (`sprite_gen/curator/*`) renders exactly four contract elements from that
 payload. **A view that omits any element it has the data for is a broken view** — the
 whole point is that the experience does not vary by who launched it.
 

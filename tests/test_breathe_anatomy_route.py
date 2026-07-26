@@ -22,9 +22,6 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-# `scripts/` 만 넣는다 — `sprite_gen/` 을 sys.path 에 올리면 그 안의 `inspect.py` 가 표준
-# `inspect` 를 가려 dataclass 정의가 죽는다. serve_curation 이 자기 경로는 알아서 잡는다.
-sys.path.insert(0, str(ROOT / "scripts"))
 
 CELL = 96
 
@@ -77,7 +74,7 @@ def run_dir(tmp_path):
 
 def test_the_route_helper_returns_a_usable_reference_frame(run_dir):
     """예외 없이 셀 크기의 RGBA 프레임이 나와야 한다."""
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     frame, key = serve_curation._breathe_source_frame(run_dir, "idle")
     assert isinstance(frame, Image.Image), f"기준 프레임을 못 만든다 ({frame!r})"
     assert isinstance(key, str) and key.startswith("breathe-ref-v1|"), \
@@ -88,7 +85,7 @@ def test_the_route_helper_returns_a_usable_reference_frame(run_dir):
 
 def test_the_route_helper_feeds_freeze_anatomy(run_dir):
     """그 프레임으로 해부를 얼릴 수 있어야 한다 — 라우트가 돌려주는 값 그대로."""
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     from sprite_gen.breathe import freeze_anatomy
 
     frame, key = serve_curation._breathe_source_frame(run_dir, "idle")
@@ -101,7 +98,7 @@ def test_the_route_helper_feeds_freeze_anatomy(run_dir):
 
 def test_a_manual_rigid_row_is_honoured(run_dir):
     """`?rigid_row=` 경로 — 큐레이터의 경계 드래그가 쓰는 인자."""
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     from sprite_gen.breathe import freeze_anatomy
 
     frame, key = serve_curation._breathe_source_frame(run_dir, "idle")
@@ -121,7 +118,7 @@ def test_the_reference_is_the_frame_the_bake_starts_from(run_dir):
     2026-07-26, round-6 N1 과 같은 클래스). 이제 실제로 `compose_gif` 를 돌려 manifest 가
     기록한 **해부 값**과 대조한다 — 굽기는 지문을 안 찍는다(캐시를 안 믿고 매번 다시
     잰다). 프리뷰가 지켜야 하는 것도 지문이 아니라 "굽기와 같은 경계로 그린다" 이다."""
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     from sprite_gen import compose_gif
     from sprite_gen.breathe import freeze_anatomy
 
@@ -161,7 +158,7 @@ def test_a_resolvable_frame_is_always_reported_the_same_way(run_dir, state, why)
 
     앞선 판은 `is None` 만 봐서 반환 **모양**을 한 번도 안 물었다 (round-6 N1 ·
     round-9 N1 과 같은 클래스: 이름이 단언하는 것을 안 묻는 테스트)."""
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     if state == "pending":
         # 사용자가 실제로 닿는 모양: request 에는 있는데 아직 안 구워진 줄이다
         # (`load_consistent_frames_manifest(allow_pending_states=True)` 가 허용하는 상태).
@@ -186,7 +183,7 @@ def test_the_reference_frame_is_measured_after_the_transform(run_dir):
     (슉슉이 note 2026-07-26; round-8 이 "라우트 그물 0" 으로 기각한 그 자리다).
 
     변형이 해부를 **실제로 바꾸는** 값을 쓴다 — 안 그러면 단언이 공허하다."""
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     from sprite_gen.breathe import freeze_anatomy
     from sprite_gen.curation import stamp_curation
 
@@ -233,7 +230,7 @@ def test_the_reference_frame_honours_every_axis_the_bake_uses(run_dir):
 
     그래서 축마다 **결과를 실제로 바꾸는** 값을 준 뒤, 그 축을 무시하는 변이가 다른
     프레임을 만들어내는지 본다. "닫았다" 고 적은 계약이 한 축만 덮고 있던 것을 고친다."""
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     from sprite_gen.curation import stamp_curation
 
     # 재생 첫 슬롯을 2번 프레임으로 바꾸고(순서), 그 프레임에만 픽셀을 칠하고(편집),
@@ -283,7 +280,7 @@ def test_a_pixel_perfect_run_snaps_the_reference_frame_to_the_grid(tmp_path):
     그러면 `run_revision` 이 바뀌어 큐레이션이 무효화되고 "달라졌다" 가 스냅과 무관한
     이유로 참이 된다 — snap 을 None 으로 만든 변이에서도 통과했다. 그래서 비교가 아니라
     **속성**을 본다: 격자에 물린 그림은 k 로 줄였다 늘려도 자기 자신이다."""
-    import serve_curation
+    import sprite_gen.serve_curation as serve_curation
     from sprite_gen.curation import pixel_snap_scale, stamp_curation
 
     run = tmp_path / "run"
