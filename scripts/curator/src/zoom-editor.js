@@ -81,9 +81,16 @@ document.addEventListener("keydown", (ev) => {
   // 호흡 포커스 모드가 열려 있으면 선/진폭/주기 조정 히스토리가 우선이다 (수홍 2026-07-17)
   // 셋째 폴백 = 변형 히스토리 (수홍 2026-07-20 "캐릭터 이동한 담에 Cmd+Z 안 먹혀"):
   // 픽셀 툴이 꺼져 있으면 이동/회전/스케일/플립 제스처를 되돌린다 — 모달·그리드 공통.
+  // 변형 툴은 픽셀을 안 찍으므로 **"픽셀 툴 꺼짐" 과 같게** 라우팅한다. 안 그러면
+  // 변형 툴이 기본 활성이 된 뒤로 항상 undoPixel 로 가고 저널이 비어 조용히 아무 일도
+  // 안 일어난다 — 2026-07-20 수홍 신고("캐릭터 이동한 담에 Cmd+Z 안 먹혀")의 재발이다
+  // (노을이 기각 R3 2026-07-26). 단 변형 툴로 **영역 변형을 구운 뒤**엔 픽셀 저널이
+  // 차므로 그때는 픽셀 undo 가 맞다 — 저널 유무로 가른다.
+  const pixelUndoable = pixelEdit && pixelEdit.undoFn
+    && (pixelEdit.tool !== "transform" || (pixelEdit.journal && pixelEdit.journal.length));
   const target = zoomView && zoomView.breatheUndo
     ? { undo: zoomView.breatheUndo, redo: zoomView.breatheRedo }
-    : (pixelEdit && pixelEdit.undoFn
+    : (pixelUndoable
       ? { undo: pixelEdit.undoFn, redo: pixelEdit.redoFn }
       : { undo: undoTransform, redo: redoTransform });
   ev.preventDefault();
@@ -356,7 +363,11 @@ function openZoom(stateName, idx, keepWidth) {
     selectBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "select");
     transformBtn.classList.toggle("active", !!pixelEdit && pixelEdit.tool === "transform");
     stage.classList.toggle("transforming", !!pixelEdit && pixelEdit.tool === "transform");
-    stage.classList.toggle("pixel-editing", !!pixelEdit);
+    // `pixel-editing` 은 **픽셀을 찍는 툴** 일 때만이다. 변형/올가미는 픽셀을 안 찍는데
+    // 이 클래스가 붙으면 curator.css 가 회전·비틀기 핸들과 크기 스크러버를 숨겨
+    // 확대뷰에서 셀 전체 변형 경로가 통째로 막힌다(노을이 기각 R2 2026-07-26).
+    const painting = !!pixelEdit && pixelEdit.tool !== "transform";
+    stage.classList.toggle("pixel-editing", painting);
     stage.classList.toggle("picking", !!pixelEdit && pixelEdit.tool === "pick");
     stage.classList.toggle("selecting", !!pixelEdit && pixelEdit.tool === "select");
     syncMarqueeBox();
@@ -421,11 +432,23 @@ function openZoom(stateName, idx, keepWidth) {
   toolbar.querySelector(".et-undo").addEventListener("click", undoPixel);
   toolbar.querySelector(".et-redo").addEventListener("click", redoPixel);
   toolbar.querySelector(".et-clear").addEventListener("click", () => {
+    // **픽셀과 변형을 둘 다 비운다.** 예전엔 픽셀 op 만 지웠는데, 확대뷰에서 변형이
+    // 일급 툴이 된 뒤로 "옮기기만 하고 편집 비우기를 눌렀는데 아무 일도 안 난다" 가 됐다
+    // (수홍 신고 2026-07-26 "클리어에디트도 안돼"). 버튼 이름이 약속하는 건 "이 프레임에
+    // 내가 한 편집을 없앤다" 이고, 이동·회전·비틀기도 그 편집이다.
     const e = entries[stateName];
     const ops = e.pixels[idx];
-    if (!ops || !Object.keys(ops).length) return;
-    if (pixelEdit) { pixelEdit.journal.push({ full: { ...ops } }); pixelEdit.redo.length = 0; }
-    e.pixels[idx] = {};
+    const hadPixels = !!(ops && Object.keys(ops).length);
+    const tr = getTransform(stateName, idx);
+    const hadTransform = !isIdentityTransform(tr);
+    if (!hadPixels && !hadTransform) return;
+    if (hadPixels) {
+      if (pixelEdit) { pixelEdit.journal.push({ full: { ...ops } }); pixelEdit.redo.length = 0; }
+      e.pixels[idx] = {};
+    }
+    // `resetTransform` 이 스냅샷·히스토리 push·저장까지 스스로 한다 — 여기서 또 쌓으면
+    // Cmd+Z 를 두 번 눌러야 돌아온다.
+    if (hadTransform) resetTransform(stateName, idx);
     applyFrameTransformAll(stateName, idx);
     scheduleSave();
   });

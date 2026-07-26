@@ -19,6 +19,11 @@ function tpScreenDeltaToRotate(startAngle, nowAngle) {
   return -(((nowAngle - startAngle) * 180) / Math.PI);
 }
 
+// 기울기 정규화 — 전폭 드래그가 대략 1.0 기울기. 셀 전체·영역 두 경로가 같은 감도를 쓴다.
+function tpShearDelta(ddx, ddy, spanW, spanH) {
+  return { shx: ddx / Math.max(1, spanW), shy: ddy / Math.max(1, spanH) };
+}
+
 function tpAngleAt(cx, cy, ev) {
   return Math.atan2(ev.clientY - cy, ev.clientX - cx);
 }
@@ -46,7 +51,12 @@ function tpWireGesture(el, opts) {
     if (enabled && !enabled(ev)) return;
     if (ev.button || !ev.isPrimary) return;
     ev.preventDefault();
-    ev.stopPropagation();
+    // **stopPropagation 이 아니라 stopImmediatePropagation 이다.** 같은 엘리먼트(stage)에
+    // 셀 전체 이동 핸들러(`transforms.js` wireStage)가 같이 붙어 있어서, 버블링만 막으면
+    // 그놈이 그대로 실행돼 영역과 셀이 **같이** 움직인다(노을이 재현 2026-07-26:
+    // regionDelta dx=6 인데 wholeCellDx=6 도 같이 발생). 바로 옆 페인트 핸들러가
+    // 같은 이유로 이미 stopImmediatePropagation 을 쓴다.
+    ev.stopImmediatePropagation();
     el.setPointerCapture(ev.pointerId);
     if (onStart) onStart(ev);
 
@@ -64,8 +74,9 @@ function tpWireGesture(el, opts) {
         delta.rotate = tpScreenDeltaToRotate(startAngle, tpAngleAt(cx, cy, e));
       } else if (e.altKey) {
         const [sw, sh] = spanOf ? spanOf() : [el.clientWidth, el.clientHeight];
-        delta.shx = ddx / Math.max(1, sw);
-        delta.shy = ddy / Math.max(1, sh);
+        const sh2 = tpShearDelta(ddx, ddy, sw, sh);
+        delta.shx = sh2.shx;
+        delta.shy = sh2.shy;
       } else {
         const ppu = pixelsPerUnit ? pixelsPerUnit() : 1;
         delta.dx = ddx / ppu;

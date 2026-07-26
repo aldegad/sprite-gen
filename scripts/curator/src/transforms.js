@@ -176,10 +176,10 @@ function wireStage(stage, stateName, idx) {
     const origRotate = t.rotate;
 
     const onMove = (e) => {
-      const now = Math.atan2(e.clientY - cy, e.clientX - cx);
-      // screen angle grows clockwise; schema is CCW positive -> subtract.
-      const deltaDeg = ((now - startScreen) * 180) / Math.PI;
-      t.rotate = origRotate - deltaDeg;
+      // 화면각 → 스키마각(CCW+) 변환은 `transform-provider.js` 가 소유한다 — 여기서
+      // 따로 뒤집으면 영역 변형과 부호가 갈릴 수 있다(노을이 기각 R4 2026-07-26:
+      // "부호 반전이 한 곳" 이라는 주장이 사실이 아니었다. 이제 사실이다).
+      t.rotate = origRotate + tpScreenDeltaToRotate(startScreen, tpAngleAt(cx, cy, e));
       applyFrameTransformAll(stateName, idx);
     };
     const onUp = () => {
@@ -203,9 +203,12 @@ function wireStage(stage, stateName, idx) {
     const t = getTransform(stateName, idx);
     const start = { x: ev.clientX, y: ev.clientY, shx: t.shx || 0, shy: t.shy || 0 };
     const onMove = (e) => {
-      // full-width drag ≈ 1.0 slope; small moves give fine control
-      t.shx = start.shx + (e.clientX - start.x) / stage.clientWidth;
-      t.shy = start.shy + (e.clientY - start.y) / stage.clientHeight;
+      // 기울기 정규화(전폭 드래그 ≈ 1.0)도 프로바이더가 소유한다 — 영역 변형과 감도가
+      // 갈리면 "전체는 되는데 영역은 덜 기운다" 가 된다.
+      const sh = tpShearDelta(e.clientX - start.x, e.clientY - start.y,
+                              stage.clientWidth, stage.clientHeight);
+      t.shx = start.shx + sh.shx;
+      t.shy = start.shy + sh.shy;
       applyFrameTransformAll(stateName, idx);
     };
     const onUp = () => {
