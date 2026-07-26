@@ -224,8 +224,9 @@ function installPixelScalingLoadHook() {
 //   콘텐츠 기준 격자이므로 이동(dx/dy)·좌우반전은 따라간다 (수홍 지적 2026-07-15).
 //   회전/기울임/배율 변형은 소스↔결과 대응이 더 이상 직사각 격자가 아니라 숨긴다 —
 //   비축정렬 상태로 가짜 격자를 겹치지 않는다 (결과 픽셀은 픽셀 언페이크 뷰가 보여준다).
-//   1차 절단 뒤 48 계약 conform 축소가 칸을 합칠 수 있어 절단선(manifest input_grids)은
-//   최종 대응이 아니다 — 진단 기록으로만 남긴다 (수홍 발견 2026-07-14).
+//   절단선(manifest input_grids)은 conform 축소 폐지(v1.56.22) 이후 1차 절단이 곧 최종
+//   대응이라 표시 격자로 쓴다 — 아래 updateZoomGrid 주석 참조 (구 서술: "축소가 칸을
+//   합칠 수 있어 진단 기록으로만" 은 그 폐지 전 이야기다).
 // 측정/계약이 없는 줄은 오버레이를 숨긴다 — 가짜 격자 금지.
 function updateCardGrid(card) {
   const overlay = card.querySelector(".pxgrid");

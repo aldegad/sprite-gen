@@ -258,8 +258,9 @@ the code realizes it. The path is unfake.js/pixeldetector-style and contains
    it. Squashing to a declared `logical_height` was removed (Soohong
    2026-07-14/17: it merges cells and eats detail); `fit.conform` is now
    rejected loudly if present in a request.
-4. **Alpha binarization** — `binarize_alpha()`, applied on the snap/conform
-   outputs so every logical pixel is fully opaque or fully transparent.
+4. **Alpha binarization** — `binarize_alpha()`, applied on the outputs of steps
+   2-3 (snap, then cap) so every logical pixel is fully opaque or fully
+   transparent.
 5. **Inter-frame registration** — `register_row_frames()` aligns frames on the
    stable upper body (alpha overlap, small slack), so locomotion rows don't
    jitter on per-frame content changes.
