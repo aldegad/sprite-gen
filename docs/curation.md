@@ -64,6 +64,26 @@ $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen
 
 This launches a standalone local webview (no orchestrator dependency — usable from Claude Code Desktop, the Codex app, or any host with the skill installed). It shows every state's frames side by side so you can compare them in parallel. Two rows per state: a **sequence** row (the selected play order, saved to `curation.json.selected`, baked left-to-right by compose) and a **candidate pool** row below it (unselected frames, e.g. an extra generated take). A per-frame transform (drag the stage = move, bottom-right magnifier = scale, top handle = rotate, side handle = shear) corrects an off angle/position. A live preview animates the selected frames at the state fps, with play/pause, frame stepping, and a 0.25×–4× speed control.
 
+### Colourway (recolor) compare and pick
+
+When the run has a bake under `variants/` (`recolor.report.json` present), the view
+adds a colourway section above the state rows (`curator/src/recolor.js`):
+
+- **Blink comparison** — one stacked stage holds every variant sheet; hovering a
+  list row swaps the visible sheet in place. Side-by-side eye travel loses small
+  palette shifts; blink does not.
+- **Frame-cell thumbnails** — one cell cropped from the sheet via
+  `manifest.frame_layout` (first frame of the first state). Origin assumptions
+  are forbidden; no layout → no crop style.
+- **Adopt** writes `curation.json.recolor.picked` as the variant **name**. A name
+  the current bake no longer produces is kept and flagged (`pickedKnown: false`),
+  never silently cleared. A save from a run without a recolor section does not
+  author the field; the server carries the existing pick over (same carry
+  contract as `anchors`).
+
+Bake the colourways first with `sprite-gen recolor` — command, spec, and report
+schema: [`recolor.md`](recolor.md).
+
 **Card interaction model** (수홍 2026-07-15 — a stray click must never add/remove a frame):
 
 - **Move between rows / reorder = grab the card TITLE and drag** (the whole header strip is the handle; there is no separate ⠿ grip). A plain click on the card does nothing.
@@ -132,6 +152,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   "run_revision": "9f3c1a0b7e2d4c58",
   "pixel_unfake": true,
   "anchors": { "down": { "state": "down_idle", "index": 2 } },
+  "recolor": { "picked": "moss" },
   "states": {
     "idle": {
       "revision": ["a1b2c3d4e5f6"],
@@ -186,6 +207,14 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   파생 캐시 `references/anchors/<dir>-anchor-x8.png` 이고, 뷰의 앵커 칩은 낡을 수 없게
   `GET /api/anchor?direction=<dir>` 라이브 베이크를 본다. 사라진 인스턴스를 가리키는 지정은
   생성 시 fail-loud (조용한 기본값 복귀 금지) — 뷰는 로드 시 그 이유를 상태줄에 띄운다.
+- `recolor` — optional adopted colourway `{ "picked": "<variant-name>" }`. Written by the
+  curation view's colourway Adopt button after `sprite-gen recolor` has baked sheets into
+  `<run-dir>/variants/`. Keyed by **name** (a colour decision, not a frame generation), so
+  re-baking does not stamp it stale the way anchors do. A name the current bake no longer
+  produces is kept and reported as `pickedKnown: false` — never silently cleared. A save
+  that does not author this field carries the existing value over (same contract as
+  `anchors`). Reader: `curation.recolor_pick()`. Full bake + view contract:
+  [`recolor.md`](recolor.md).
 - `selected` — 0-based frame indices in play order. Absent/empty → all extracted frames in order.
 - `order` — optional, webview-owned: the full display order (sequence row then candidate-pool row) so reopening the curator restores the exact arrangement of both rows. `compose` / `state_plan` ignore it and key off `selected`.
 - `transforms` — keyed by 0-based frame index. `rotate` degrees (counter-clockwise positive, PIL convention), `scale` multiplier about center, `dx`/`dy` pixel offsets in the cell (+x right, +y down), `shx`/`shy` shear, `flipX` (0|1) horizontal mirror. Absent → identity. On a `fit.pixel_unfake` run, rows baking the pixel variant re-snap the transformed result onto the fixed logical grid (`apply_transform(snap_scale=…)`, mirrored live by the webview) — see [`pixel-unfake.md`](pixel-unfake.md).
@@ -196,8 +225,9 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
 
 ## Related
 
-- [`../SKILL.md`](../SKILL.md) — canonical behavior contract (Workflow 스텝 3.5/5)
+- [`../SKILL.md`](../SKILL.md) — canonical behavior contract (Workflow 스텝 3.5/4.5/5)
 - [`architecture.md`](architecture.md) — 큐레이션 사이드카가 파이프라인에서 소비되는 위치
+- [`recolor.md`](recolor.md) — palette-swap bake CLI, report schema, colourway adopt
 - [`locomotion-curation.md`](locomotion-curation.md) — 수동 selected-cycle, 클린 GIF export
 - [`pixel-unfake.md`](pixel-unfake.md) — 전/후 쌍둥이 토글과 `pixel_unfake` 굽기 결정
 

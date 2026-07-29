@@ -50,6 +50,7 @@ flowchart LR
 
 - **A transparent sprite atlas** (`sprite-sheet-alpha.png`) — real alpha, no leftover chroma fringe, verified against white backgrounds.
 - **A runtime manifest** (`manifest.json.frame_layout`) — absolute frame rectangles, per-state fps and loop flags. Your engine samples rectangles; it never guesses a grid.
+- **Deterministic colourways** — `sprite-gen recolor` takes the base sheet plus a palette map and bakes N variant sheets in one command (exact RGB match by default; same input, same output bytes). The curation webview blink-compares them and records the adopted name. Detail: [`docs/recolor.md`](docs/recolor.md).
 - **QA you can watch** — per-state GIFs and contact sheets, so motion is judged as motion before anything ships.
 - **Honest labels** — short readable actions (idle, jump, attack, wave) are the stable path; cyclic locomotion (walk/run) is marked experimental unless motion QA actually passes. No silent overpromising.
 
@@ -165,6 +166,26 @@ python3 scripts/export_curated_pngs.py --run-dir <run-dir>
 ```
 
 Output defaults to a findable `<source>-curator` folder next to the input.
+
+### Baking colourways of a finished sheet
+
+Once the atlas is composed, swap selected colours into N finished sheets without
+re-running generation. Dot art is exact-match by default; soft-edged art can opt
+into a tolerance. Geometry and alpha never move — the base manifest describes
+every variant.
+
+```bash
+# draft the opaque colours (edit into a recolor spec with kind "sprite-gen-recolor")
+python3 -m sprite_gen.cli recolor-palette --base <run-dir>/sprite-sheet-alpha.png --out palette.draft.json
+
+# bake every colourway into <run-dir>/variants/
+python3 -m sprite_gen.cli recolor --run-dir <run-dir> --spec recolor.spec.json
+
+# blink-compare and adopt in the curation view
+python3 -m sprite_gen.cli curation --run-dir <run-dir>
+```
+
+Full spec/report contract and the adopt sidecar field: [`docs/recolor.md`](docs/recolor.md).
 
 ### Cutting a background off an imported image
 

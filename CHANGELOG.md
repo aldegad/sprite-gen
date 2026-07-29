@@ -5,6 +5,41 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## Unreleased - deterministic palette-swap bake and colourway pick in the curation view
+
+Dot art is controlled by its palette, so colour variants are baked into finished sheets
+rather than tinted at runtime: a baked sheet is QA-able and costs the renderer nothing.
+The bake rewrites RGB only and leaves alpha and geometry alone, so one base
+`manifest.json.frame_layout` describes every colourway.
+
+- **`sprite-gen recolor`** takes a base sheet (or a run dir's atlas) plus a recolor
+  spec (`kind: "sprite-gen-recolor"`, N named variants each with a source→target hex
+  map) and writes `variants/<name>.png` + `variants/recolor.report.json` in one
+  command. Exact RGB match is the default (anti-aliased edge pixels stay untouched);
+  `match: "tolerance"` is opt-in for soft-edged art (Chebyshev distance, nearest
+  source wins, map order breaks ties). Same input bytes → same output bytes. Optional
+  `--manifest` propagates a sibling manifest per variant with the known sheet-filename
+  fields repointed.
+- **`sprite-gen recolor-palette`** drafts the frequency-ordered opaque palette of a
+  base sheet so a consumer can author a recolor spec without eyedropping by hand.
+  `--max-colors` reports how many pixels it dropped — never a silent cap.
+- **No Silent Fallback on the report.** Per variant the report names every substitution
+  hit count, every map source that never matched (a typo), and every opaque colour the
+  map did not cover (passed through unchanged, named and counted; over-cap announced).
+  A colour outside the map never vanishes quietly. A foreign file at the report path
+  fails loud instead of reading as "no variants".
+- **Curation view colourway section.** When `variants/recolor.report.json` is present,
+  the webview stacks every variant on one stage and swaps on list hover (blink
+  comparison), crops thumbnails from `manifest.frame_layout` (no origin assumption),
+  and writes the adopted name to `curation.json.recolor.picked`. A name the current
+  bake no longer produces is kept and flagged (`pickedKnown: false`), never cleared;
+  a save that does not author the field carries the existing pick over (same contract
+  as `anchors`).
+- Documentation and surface locks: `docs/recolor.md`, hub wiring in `SKILL.md` /
+  `docs/curation.md` / `docs/run-contract.md` / `README.md`, plus
+  `tests/test_recolor_bake.py`, `tests/test_recolor_curation_view.py`,
+  `tests/test_recolor_cli_entrypoint.py`, `tests/test_recolor_docs.py`.
+
 ## Unreleased - the documented `sprite-gen` command exists now, and it opens the curation view
 
 Three of the fixes below are bugs that were already sitting in the tree, not consequences of the new
