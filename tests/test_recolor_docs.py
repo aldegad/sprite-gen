@@ -11,20 +11,32 @@ Internal project names and absolute personal paths must not appear in the new le
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Patterns that would leak internal/operator context into the published tree.
-# Keep this list about *this* feature's docs — do not re-scan the whole history.
-FORBIDDEN_IN_RECOLOR_LEAF = (
+# A denylist is itself published. Anything that would only be secret until this
+# file is read (an operator's login name, a private address, an unpublished
+# project id) is expressed as a *class* below, never as a literal — otherwise the
+# guard leaks exactly what it guards.
+#
+# Literals here are limited to names this repository already prints in its own
+# tracked tree (CHANGELOG / docs / other tests), so naming them again costs
+# nothing new.
+FORBIDDEN_LITERALS_IN_RECOLOR_LEAF = (
     "solvell",
-    "npc-colorplay",
-    "colorplay",
-    "aldegad@",
-    "/Users/soohongkim",
-    "discord",
     "kuma-studio",
+    "discord",
+)
+
+# Classes of operator context that must never reach a published doc.
+FORBIDDEN_PATTERNS_IN_RECOLOR_LEAF = (
+    # An absolute path inside somebody's home directory — leaks a login name and
+    # is unusable for every reader who is not that person.
+    (re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+"), "an absolute personal home path"),
+    # A contact address of any kind.
+    (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "an e-mail address"),
 )
 
 
@@ -86,7 +98,29 @@ def test_readme_and_changelog_surface_the_feature() -> None:
     assert "recolor.picked" in changelog or "colourway" in changelog.lower() or "colorway" in changelog.lower()
 
 
+# Every file this feature adds to the published tree. The leak found in review was
+# in a *test* file, not in the leaf — so the vocabulary lock covers all of them.
+RECOLOR_SURFACE = (
+    "docs/recolor.md",
+    "scripts/recolor.py",
+    "sprite_gen/recolor.py",
+    "sprite_gen/curator/src/recolor.js",
+    "tests/test_recolor_bake.py",
+    "tests/test_recolor_cli_entrypoint.py",
+    "tests/test_recolor_curation_view.py",
+    "tests/test_recolor_docs.py",
+)
+
+
 def test_recolor_leaf_stays_open_source_vocabulary() -> None:
-    text = _read("docs/recolor.md").lower()
-    for token in FORBIDDEN_IN_RECOLOR_LEAF:
-        assert token.lower() not in text, f"docs/recolor.md must not mention {token!r}"
+    lowered = _read("docs/recolor.md").lower()
+    for token in FORBIDDEN_LITERALS_IN_RECOLOR_LEAF:
+        assert token.lower() not in lowered, f"docs/recolor.md must not mention {token!r}"
+
+
+def test_recolor_surface_carries_no_operator_context() -> None:
+    for rel in RECOLOR_SURFACE:
+        raw = _read(rel)
+        for pattern, what in FORBIDDEN_PATTERNS_IN_RECOLOR_LEAF:
+            hit = pattern.search(raw)
+            assert hit is None, f"{rel} must not carry {what} (found at offset {hit.start()})"
