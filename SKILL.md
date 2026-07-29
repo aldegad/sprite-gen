@@ -1,7 +1,7 @@
 ---
 name: sprite-gen
 version: 1.57.2
-description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick."
+description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Deterministic palette-swap bake (`sprite-gen recolor` / `recolor-palette`) turns one base sheet + a palette map into N colourway sheets in one command; the curation view blink-compares and adopts a pick into curation.json.recolor.picked. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick. Recolor triggers (KR/EN): 팔레트 스왑, 팔레트 베이크, 리컬러, 색깔 바꾸기, 컬러웨이, 색 변형, 팔레트 맵, 색갈이, palette swap, recolor, colourway, colorway, bake variants, palette map."
 license: Apache-2.0
 depends_on:
   required_bins:
@@ -28,6 +28,7 @@ depends_on:
     - scripts/slice_sheet_cells.py
     - scripts/unpack_atlas_run.py
     - scripts/export_curated_pngs.py
+    - scripts/recolor.py
 modes:
   default: component-row
 ---
@@ -142,7 +143,7 @@ $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python <script.py> ...
   즉 부모를 옳은 인터프리터로 띄우면 그 아래는 자동으로 옳고, 반대로 큐레이션 서버를 전역 `python3` 로
   띄우면 그 서버가 부르는 재추출·compose 가 전부 같이 틀린다. 고칠 곳은 **띄우는 순간 한 곳**이다.
 - **`sprite-gen <tool>` 은 실재하는 콘솔 스크립트다** (`anchor`, `cutout`, `curation`,
-  `migrate-breathe` …). `pip install` 이 venv 의 `bin/` 에 써 넣고 그 shebang 이 **바로 그 venv 의
+  `recolor`, `recolor-palette`, `migrate-breathe` …). `pip install` 이 venv 의 `bin/` 에 써 넣고 그 shebang 이 **바로 그 venv 의
   인터프리터**를 가리키므로, 이 형식은 인터프리터를 고르는 문제 자체가 없다:
 
   ```bash
@@ -186,7 +187,8 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 - `curation.py` — curation sidecar SSoT (schema + transform math + the stamping atomic writer) shared by the compose scripts, the anchor CLI, and the webview server so they never drift.
 - `sprite_gen/anchor.py` (`sprite-gen anchor`) — direction-anchor SSoT: which curated instance is a direction's identity (human pin > the anchor row's sequence head), the post-processing bake of that one frame, and the `references/anchors/<dir>-anchor-x8.png` derived cache that row generation attaches. Reroll, the generation plan, and the curation view's anchor chip all resolve through it.
 - `runio.py` — safe run-dir IO: single-writer lock (`.sprite-gen.lock`) + atomic writes for the extract/compose/export/unpack writers, so parallel agents cannot interleave writes into one character folder.
-- `sprite_gen/serve_curation.py` (`sprite-gen curation`) — standalone curation webview for one run dir (works from Claude Code Desktop, the Codex app, or any host with the skill). The `-m sprite_gen.serve_curation` module form and the `scripts/serve_curation.py` wrapper reach the same declaration and the same implementation — three live entry forms, one program (launch forms: [`docs/curation.md`](docs/curation.md)).
+- `sprite_gen/serve_curation.py` (`sprite-gen curation`) — standalone curation webview for one run dir (works from Claude Code Desktop, the Codex app, or any host with the skill). The `-m sprite_gen.serve_curation` module form and the `scripts/serve_curation.py` wrapper reach the same declaration and the same implementation — three live entry forms, one program (launch forms: [`docs/curation.md`](docs/curation.md)). When `<run-dir>/variants/recolor.report.json` is present, the view also blink-compares baked colourways and records the adopted name in `curation.json.recolor.picked` (detail: [`docs/recolor.md`](docs/recolor.md)).
+- `sprite_gen/recolor.py` (`sprite-gen recolor` / `sprite-gen recolor-palette`) — deterministic palette-swap bake. `recolor-palette` drafts a frequency-ordered palette map from a base sheet; `recolor` takes `base sheet + recolor spec` and bakes N variant sheets + a per-variant substitution report into `<run-dir>/variants/` (or an explicit `--out-dir`). Exact RGB match by default (dot-art safe); opt-in Chebyshev tolerance for soft edges. Alpha preserved, geometry untouched — a base manifest describes every variant. No Silent Fallback: unused map sources and unmapped passthrough colours are named and counted in `recolor.report.json`. Detail: [`docs/recolor.md`](docs/recolor.md).
 - `unpack_atlas_run.py` — inverse of compose: rebuild a curator-ready run dir from a finished sheet (`--grid` > `--manifest` > auto-detect) or import a PNG folder (`--pngs-dir`, with sibling `meta.json` labels/iso grid).
 - `export_curated_pngs.py` — export curated frames back to named PNGs with the transform baked in, into `<run-dir>/curated/`; the deliverable for imported still sets.
 - `cutout.py` (`sprite-gen cutout`) — background remover for **imported** images (not pipeline output, which is already keyed). Routes on the corner background colour (`--key auto|white|magenta|green`): **white/ivory** → position matte (corner flood-fill keeps interior highlights unholed → decontaminated soft-alpha border + soft erode); **magenta/green key** → reuse the verified `extract.remove_chroma_background` engine as-is (no drift — key colours are absent from objects so its colour-only cut is safe there). `--white-check` writes cyan/magenta/yellow verification composites. No Silent Fallback (leftover non-zero RGB under transparency raises).
@@ -299,6 +301,20 @@ manifest.json
 ```
 
 `manifest.json.frame_layout` is the runtime SSoT. Game code must consume rectangles from the manifest and must not recover frame rectangles from alpha content at runtime.
+
+4.5. (Optional) Bake palette-swap colourways of the finished atlas:
+
+```bash
+# draft the opaque colours of the base sheet (edit into a recolor spec)
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen recolor-palette \
+  --base <run>/sprite-sheet-alpha.png --out <run>/palette.draft.json
+
+# bake N variants from a recolor spec (kind "sprite-gen-recolor") into <run>/variants/
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen recolor \
+  --run-dir <run> --spec <run>/recolor.spec.json
+```
+
+Exact RGB match by default (dot art); opt-in `match: "tolerance"` for soft edges. Same input → same output bytes. The report names every unused map source and every unmapped passthrough colour — nothing outside the map vanishes quietly. Spec schema, report fields, and curation-view adopt flow: [`docs/recolor.md`](docs/recolor.md).
 
 5. Launch the curation webview automatically (default closing step):
 
@@ -479,8 +495,13 @@ sprite-gen (this SKILL.md = behavior contract + hub)
 │
 ├─ CURATION ── "human/agent picks, edits, and downloads via the webview"
 │   └─ docs/curation.md          # webview · curation.json schema (selected/order/transforms/
-│                                #   deleted/clones/revision) · per-state salvage · frame CLONES ·
-│                                #   standalone image-candidate path · finished-sheet re-edit (unpack)
+│                                #   deleted/clones/revision/recolor.picked) · per-state salvage ·
+│                                #   frame CLONES · standalone image-candidate path · finished-sheet
+│                                #   re-edit (unpack)
+│
+├─ COLOURWAYS ── "bake N palette-swapped sheets from one base atlas"
+│   └─ docs/recolor.md           # recolor / recolor-palette CLI · spec + report schema · exact vs
+│                                #   tolerance match · variants/ layout · curation blink-compare + adopt
 │
 ├─ SPECIALIZED INPUTS ── "not the plain animation-row path"
 │   ├─ docs/directional-anchor-workflow.md  # directional / 45° anchor chains · hatch-pet locomotion
@@ -499,8 +520,9 @@ Concept taxonomy (which doc owns each term, so agents don't guess):
 
 - `sprite-request.json`, cell, states, takes → run-contract.md §2 · states-and-frames.md
 - `run_revision`, `state_revision`, per-state salvage, `curation.stale-*.json` → curation.py + curation.md
-- `curation.json` fields (`selected`/`order`/`deleted`/`transforms`/`pixels`/`clones`/`pixel_unfake`/`revision`) → curation.md
+- `curation.json` fields (`selected`/`order`/`deleted`/`transforms`/`pixels`/`clones`/`pixel_unfake`/`revision`/`recolor.picked`) → curation.md
 - frame **clones** (duplicate instances, `source_frame_index`) → curation.md + compose consumers
 - `frame_layout`, `manifest.json` runtime contract → run-contract.md + this SKILL.md "Runtime Contract"
 - pixel-unfake `fit`, `.plain.png`/`orig/` twins → pixel-unfake.md
-- webview interactions (title-drag reorder, 넣기/빼기 toggle, 2-tier card, custom `data-tip` tooltip) → `sprite_gen/curator/` (도메인 분할 `src/*.js` — 로드 순서 SSoT 는 index.html — + curator.css), described in curation.md
+- recolor spec / report / `variants/` bake + colourway adopt → recolor.md
+- webview interactions (title-drag reorder, 넣기/빼기 toggle, 2-tier card, custom `data-tip` tooltip, recolor blink-compare) → `sprite_gen/curator/` (도메인 분할 `src/*.js` — 로드 순서 SSoT 는 index.html — + curator.css), described in curation.md + recolor.md

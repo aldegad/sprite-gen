@@ -60,6 +60,10 @@ function buildPayload() {
   // 방향 앵커 프레임 지정 — **항상 실어 보낸다** (해제도 의도다). 키가 없으면 서버가
   // 이전 지정을 이월하므로(엔진 CLI 로 심은 지정 보호), 빈 객체가 "지정 없음" 의 표현이다.
   payload.anchors = { ...anchorPicks };
+  // 채택 컬러웨이 — **variant 섹션이 있는 런에서만** authoring 한다. 이 런에 베이크
+  // 산출물이 없으면 뷰는 이 필드를 모르는 것이고, 안 싣는 것이 곧 "건드리지 않음" 이다
+  // (서버가 기존 값을 이월한다). 섹션이 있으면 해제도 의도라 빈 객체를 싣는다.
+  if (run.recolor) payload.recolor = recolorPicked ? { picked: recolorPicked } : {};
   // echo the run generation this view was loaded with; the server rejects the autosave
   // (409) if the run was re-imported/re-extracted under this session so stale selections
   // never land on new frames.

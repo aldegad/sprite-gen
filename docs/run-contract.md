@@ -29,6 +29,7 @@ canonical files, not hidden imports.
 | Extract | `extract_sprite_row_frames.py` | `raw/<state>.png` | on success: `frames/<state>/frame-N.png` (+ `.plain.png` twin on pixel-unfake runs), `frames/frames-manifest.json`; on failure: nothing in `frames/`, `extract-failure.json` instead (§6) |
 | Curate (opt) | `sprite-gen curation` (`serve_curation.py`) + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
+| Recolor (opt) | `sprite-gen recolor` / `recolor-palette` (`sprite_gen/recolor.py`) | base sheet (default `sprite-sheet-alpha.png`) + recolor spec | `variants/<name>.png`, optional `variants/<name>.manifest.json`, `variants/recolor.report.json` |
 | QA | `preview_animation.py` | `frames/` | `qa/<state>-contact.png`, `qa/<state>.gif` |
 | Inspect | `inspect_sprite_run.py` | `sprite-request.json`, `raw/` or `frames/` | `sprite-inspect.report.json` |
 | Score | `score_sprite_run.py` | `sprite-inspect.report.json` | `sprite-score.report.json`, correction hints |
@@ -101,6 +102,12 @@ not restate it elsewhere; point here.
   sprite-sheet-alpha.png             # composed runtime atlas
   sprite-sheet-alpha.report.json     # compose report
   manifest.json                      # runtime SSoT: frame_layout absolute rects
+  variants/                          # only when sprite-gen recolor runs — baked colourway sheets
+                                     #   (<name>.png + optional <name>.manifest.json) +
+                                     #   recolor.report.json (SSoT for substituted / unused /
+                                     #   passthrough pixels). Adopted pick lives in
+                                     #   curation.json.recolor.picked (name-keyed). See
+                                     #   docs/recolor.md.
   sprite-inspect.report.json         # inspect_sprite_run.py output (per-state health rows)
   sprite-score.report.json           # score_sprite_run.py output (overall score + correction hints)
   correction-loop/                   # run_correction_loop.py: attempt-N/ (inspect/score/hints) + candidate-N/ regenerated run dirs
@@ -480,5 +487,6 @@ service, revisit both here.
 - [`../SKILL.md`](../SKILL.md) — behavior contract (Workflow, Base Lock Gate, Runtime Contract)
 - [`architecture.md`](architecture.md) — how the code realizes these contracts (stage internals, lock, extraction, pixel-unfake path)
 - [`curation.md`](curation.md) — webview interaction model, `curation.json` schema, standalone image-candidate path, multi-agent launch rules
+- [`recolor.md`](recolor.md) — palette-swap bake (`variants/`), report schema, colourway adopt
 - [`pixel-unfake.md`](pixel-unfake.md) — `fit`/`pixel_unfake` behavior + plain-twin bake decision
 - [`directional-anchor-workflow.md`](directional-anchor-workflow.md) — directional/45° anchor chains that name the `raw/` anchors §3 resolves into chips
