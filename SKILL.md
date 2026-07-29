@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.57.1
+version: 1.57.2
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick."
 license: Apache-2.0
 depends_on:
@@ -50,6 +50,14 @@ Use only the `component-row` pipeline. Do not treat one-shot master sheets, fixe
 
 - [ ] **AI 개입은 raw 생성 한 곳뿐이다.** `raw/<state>.png` 는 중간 산출물이며, 최종 에셋은 반드시 결정론 변환 — `extract_sprite_row_frames.py`(크로마 제거 → 컴포넌트 분리 → 피치 검출/그리드 스냅 → kCentroid → 공유 팔레트 → 셀 배치) — 를 거친다. 같은 입력이면 항상 같은 출력이 나오는 코드 경로만 픽셀 언페이크다.
 - [ ] **단순 다운스케일 쇼트컷 금지.** raw 를 PIL `resize()` 한 줄로 줄여 최종 경로에 놓는 것은 픽셀 언페이크 변환이 아니다 — AA 가장자리 열화와 그리드 미정렬이 그대로 남는다. "이번 한 번만 빠르게" 도 금지. 파이프라인 없이 낱장만 변환할 때도 run dir 를 만들어 같은 추출 경로를 태운다.
+- [ ] **베이스/앵커가 스타일 SSoT 다 — 도트 런이면 베이스부터 진짜 도트여야 한다.** 조립되는
+      프롬프트의 `Style contract:` 기본값은 "첨부한 베이스/앵커 레퍼런스를 그대로 따라라"이고,
+      이미지 모델은 첨부 레퍼런스를 프롬프트 텍스트보다 강하게 따른다. 그래서 `fit.pixel_unfake`
+      런에 AA/벡터풍 베이스를 붙이면 프롬프트에 "TRUE 32x32 pixel art" 를 적어도 raw 가 도트로
+      나오지 않는다 (실사고 2026-07-29 gptaku 아이콘: AA 블롭 베이스 → 비도트 raw → 추출 피치
+      x/y 불균일(10.5/9.7) → 실루엣 눌림 반려 3회). 잠금 전에 베이스에서 **픽셀 격자가 실측으로
+      검출되는지**(균일 블록 피치, AA 반투명 가장자리 없음) 확인하고, 아니면 베이스부터 다시
+      만든다. 프롬프트 문구로 베이스의 스타일을 이기려 하지 마라.
 - [ ] **크로마 키는 소재색을 먼저 보고 고른다.** 핑크/보라/자주 소재 → 그린 `#00FF00`, 녹색/청록 식물 → 마젠타 `#FF00FF`. 분기표 SSoT 는 image-gen SKILL.md 최상단 게이트 (상세는 [`docs/chroma-alpha.md`](docs/chroma-alpha.md)).
 - [ ] **변환 후 소재색 보존을 검증한다.** 꽃이 희게 탈색됐거나 주요 색이 빠졌으면 키 선택이 소재와 충돌한 것이다 — 로컬 보정이 아니라 키를 바꿔 재생성한다.
 
@@ -101,6 +109,7 @@ The base idle locks only when **all** of these hold:
 
 - Full body, nothing cropped (head to feet inside frame).
 - The final proportions and style the user asked for are already correct in this image (for example SD / chibi head-to-body ratio, pixel look, outline weight). The base defines the target — do not plan to "fix it later" in the rows.
+- For a pixel-art run (`fit.pixel_unfake`): the base itself is true pixel art — a uniform pixel-block grid is measurably present and edges are hard (no anti-aliased fringe). The style contract delegates style authority to this image, so a non-pixel base structurally produces a non-pixel row.
 - Identity matches the character sheet / reference (face, hair, markings, palette, props).
 - One clear single idle pose, facing the intended camera, readable silhouette at small size.
 - Background is a flat clean chroma-ready fill (or trivially keyable).
