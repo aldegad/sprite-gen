@@ -387,8 +387,10 @@ function openZoom(stateName, idx, keepWidth) {
     syncMarqueeBox();
   };
   const setTool = (tool) => {
-    if (pixelEdit && pixelEdit.tool === tool) pixelEdit = null; // 같은 툴 재클릭 = 끔
-    else pixelEdit = { state: stateName, idx, tool, color: colorInput.value,
+    // 같은 툴 재클릭/재단축키(B 두 번)는 유지한다 — 해제 안 함 (수홍 지시 2026-07-29:
+    // "두 번 누른다고 선택 해제되는 기능 없애줘"). 툴 끄기는 다른 툴 선택/모달 닫기로만.
+    if (pixelEdit && pixelEdit.tool === tool) return;
+    pixelEdit = { state: stateName, idx, tool, color: colorInput.value,
                        journal: (pixelEdit && pixelEdit.journal) || [],
                        redo: (pixelEdit && pixelEdit.redo) || [],
                        // 변형 툴은 선택을 이어받는다 — "네모로 잡고 넘어와서 비튼다" 가 이 툴의 용법이다.
