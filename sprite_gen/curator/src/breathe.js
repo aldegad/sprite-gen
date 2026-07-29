@@ -368,6 +368,24 @@ async function defaultBreatheConfig(stateName) {
   };
 }
 
+// 사이드카에서 breathe 가 켜진 채 로드됐지만 anatomy 캐시가 비어 있으면(뷰 없이
+// 에이전트/CLI 가 breathe 만 쓴 런, 레거시 이전 직후) 미리보기 미러는 해부를 로컬로 못
+// 재 조용히 정지 그림을 그린다 (breatheComposite: !anat → base 원본). 굽기는 서버가
+// 매번 재서 숨쉬는데 미리보기만 죽어 "체크됐는데 안 쉰다" 가 된다. 로드 시 서버에 한 번
+// 물어 캐시를 채운다 — 토글 ON(defaultBreatheConfig) 과 같은 검출 경로다(SSoT = 서버).
+async function ensureBreatheAnatomy(stateName) {
+  const e = entries[stateName];
+  const cfg = e && e.breathe;
+  if (!cfg || cfg.anatomy) return false;
+  const { anatomy } = await fetchBreatheAnatomy(stateName, cfg.rigid_row);
+  // 재진입/경쟁 사이 다른 경로가 이미 채웠으면 덮지 않는다.
+  if (e.breathe && !e.breathe.anatomy) {
+    e.breathe.anatomy = anatomy;
+    return true;
+  }
+  return false;
+}
+
 // 레거시 자가 이전 (self-heal): 구 테이크 방식이 시퀀스에 끼워둔 breathe 위상
 // 프레임들을 시퀀스에서 걷어내고, 테이크에 기록된 파라미터를 레이어 설정으로 옮긴다.
 // (테이크 원본/추출 프레임은 그대로 — 풀에서는 숨겨진다. 재추출 불필요.)

@@ -141,6 +141,28 @@ async function boot() {
       setStatus(`호흡 레이어로 자동 이전: ${migrated.map((s) => s.name).join(", ")}`);
     }
   }
+  // breathe 가 켜진 채 anatomy 캐시 없이 로드된 줄: 서버에 물어 채운다. 안 그러면 미리보기가
+  // 조용히 정지 그림을 그려 "체크됐는데 안 쉰다" 가 된다 (굽기는 서버가 재서 정상). 검출은
+  // 서버 SSoT 라 로컬 추정하지 않는다 — 실패하면 loud 하게 알린다 (조용한 폴백 금지).
+  {
+    const need = run.states.filter((s) => {
+      const b = entries[s.name] && entries[s.name].breathe;
+      return b && !b.anatomy;
+    });
+    if (need.length) {
+      const filled = [];
+      await Promise.all(need.map(async (s) => {
+        try { if (await ensureBreatheAnatomy(s.name)) filled.push(s.name); }
+        catch (err) {
+          setStatus(`${s.name} 호흡 해부 로드 실패 — 미리보기가 숨쉬지 않는다: ${err.message}`, "err");
+        }
+      }));
+      if (filled.length) {
+        for (const n of filled) rebuildState(n);
+        scheduleSave();
+      }
+    }
+  }
   // 세대 불일치로 서버가 이번 로드에서 무효화한 행 알림 — 조용한 소실 금지.
   // 백업 파일명을 함께 보여줘 수동 복원 경로를 남긴다 (load_curation_report 계약).
   if (run.curationDropped && run.curationDropped.length) {
