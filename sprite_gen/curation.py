@@ -42,6 +42,15 @@ Schema (`curation.json`):
                                               #   silently followed to a new frame) and generation
                                               #   fails loud until it is re-picked.
                                               #   Resolution/bake SSoT = sprite_gen/anchor.py.
+      "recolor": {                           # optional ADOPTED COLOURWAY: which baked
+        "picked": "crimson"                  #   recolor variant (sprite_gen/recolor.py,
+      },                                     #   `<run>/variants/`) the human picked in the
+                                             #   curation view. Keyed by variant NAME — a
+                                             #   colourway survives re-baking, so unlike
+                                             #   `anchors` this carries no generation stamp.
+                                             #   A name no longer in the bake report is
+                                             #   reported as unknown by the view, never
+                                             #   silently cleared. Reader = recolor_pick().
       "states": {
         "<state>": {
           "revision": ["a1b2c3d4e5f6"],      # per-state generation stamp: ordered SOURCE-
@@ -785,6 +794,26 @@ def anchor_choices(curation: dict[str, Any] | None) -> dict[str, dict[str, Any]]
                     pick["repin"] = True  # 명시 재지정 의도 (쓰기 경로에서 소비·제거)
                 picks[str(direction)] = pick
     return picks
+
+
+def recolor_pick(curation: dict[str, Any] | None) -> str | None:
+    """The adopted recolor variant name, or None when none is picked.
+
+    Keyed by VARIANT NAME, not by a frame generation: a colourway ("crimson") is a
+    decision about colour, and re-baking the same spec against re-curated frames
+    produces the same colourway. So this pick is deliberately NOT stamped with a
+    run/state revision the way anchor pins are — there is nothing about new frames
+    that could make "crimson" the wrong answer to "which colourway".
+
+    What CAN go wrong is the name disappearing from the spec. That is not resolved
+    here: the pick is returned as stored, and the reader (the curation view via
+    `serve_curation`) reports it as unknown against the current bake report instead
+    of silently clearing it (No Silent Fallback)."""
+    raw = (curation or {}).get("recolor")
+    if not isinstance(raw, dict):
+        return None
+    picked = raw.get("picked")
+    return picked if isinstance(picked, str) and picked else None
 
 
 def _carry_anchor_provenance(run_dir: Path, payload: dict[str, Any]) -> dict[str, Any]:

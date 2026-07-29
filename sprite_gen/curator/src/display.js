@@ -172,6 +172,8 @@ const PIXEL_SCALE_TARGETS = [
   ".ap-card img",                      // 후보 풀 썸네일
   "#compare-modal .cmp-item img",      // 비교 모달 썸네일
   ".final-atlas .atlas-sheet img",     // 최종 아틀라스 시트
+  ".recolor-variants .rc-stage img",   // 컬러웨이 비교 스테이지
+  ".recolor-variants .rc-swatch img",  // 컬러웨이 프레임 썸네일
 ].join(", ");
 
 function syncPixelScaling(root) {

@@ -103,6 +103,8 @@ async function boot() {
       healParts.push(...broken.map((g) => STR[lang].anchorError(g.direction, g.anchorError)));
     }
   }
+  // 컬러웨이 채택은 트리 배지도 쓴다 — 트리를 그리기 전에 진실을 세운다.
+  seedRecolorPick(run);
   await seedTreeProgress();
   renderPipelineTree();
   setInterval(pollTreeProgress, 3000);
@@ -178,6 +180,8 @@ async function boot() {
     document.body.prepend(note);
   }
   await renderFinalAtlas(run.atlas);
+  // 컬러웨이 비교·픽 섹션 — 베이크 산출물(`<run>/variants/`)이 있는 런에만 뜬다.
+  renderRecolorVariants(run.recolor);
   // 힌트바를 우측 본문 컬럼 끝으로 이동 — 좌측 스플릿이 페이지 바닥까지 유지되게
   document.getElementById("states").appendChild(document.getElementById("hintbar"));
   // 표시 샘플링 판정은 기하가 바뀔 때마다 다시 답해야 한다 (창 크기·패널 폭이

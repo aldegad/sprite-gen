@@ -31,7 +31,9 @@ function treeNode(label, note, thumbUrl, targetState, extra) {
         ? document.querySelector(".base-row")
         : targetState === "__atlas__"
           ? document.getElementById("final-atlas")
-          : document.querySelector(`.state[data-state="${cssEscape(targetState)}"]`);
+          : targetState === "__recolor__"
+            ? document.getElementById("recolor-variants")
+            : document.querySelector(`.state[data-state="${cssEscape(targetState)}"]`);
       if (!section) return;
       section.scrollIntoView({ behavior: "smooth", block: "start" });
       flashSection(section);
@@ -220,6 +222,18 @@ function renderPipelineTree() {
     // 파일 트리의 아틀라스 노드도 클릭 = 최종 아틀라스 섹션 스크롤 (수홍 2026-07-18 —
     // 파이프라인 트리의 아틀라스 노드와 같은 목적지; "__atlas__" 라우팅 공유)
     liWith(fileUl, treeNode("sprite-sheet-alpha.png", t("treeAtlasNote"), `/run/sprite-sheet-alpha.png?v=${treeRevision || 0}`, "__atlas__"));
+  }
+  if (run.recolor) {
+    // 구운 컬러웨이 폴더 — 클릭 = 컬러웨이 섹션 스크롤 ("__recolor__" 라우팅)
+    const rcLi = liWith(fileUl, folderNode(`${run.recolor.dir}/`, t("treeRecolorNote")));
+    const rcUl = chipList();
+    for (const v of run.recolor.variants) {
+      // 채택 배지는 **라이브 진실**(recolorPicked)로 그린다 — run.recolor.picked 는
+      // 로드 시점 스냅샷이라, 픽 후 트리 폴링 재렌더가 옛 채택을 되살려 보인다.
+      chipItem(rcUl, treeNode(v.sheet, v.name === recolorPicked ? t("rcPicked") : null,
+        v.url || false, "__recolor__"));
+    }
+    rcLi.appendChild(rcUl);
   }
 
   const wrap = document.createElement("section");

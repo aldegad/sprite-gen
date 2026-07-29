@@ -54,6 +54,13 @@ PALETTE_KIND = "sprite-gen-palette"
 SPEC_KIND = "sprite-gen-recolor"
 REPORT_KIND = "sprite-gen-recolor-report"
 
+# Where a run-dir bake puts its variants, and what it names the report. These are
+# the one place the convention lives: the bake writes here (`_resolve_base_and_manifest`
+# defaults `--out-dir` to `<run-dir>/variants`) and the curation webview looks here
+# (`load_report`). A second copy of either string is a second truth.
+VARIANTS_DIRNAME = "variants"
+DEFAULT_REPORT_NAME = "recolor.report.json"
+
 # Manifest string fields that name the atlas image, repointed per variant. Only
 # these known keys are rewritten; an unknown schema is copied verbatim.
 MANIFEST_SHEET_FIELDS = ("atlas", "game_input", "sprite_sheet_alpha", "sprite_sheet")
@@ -281,7 +288,7 @@ def bake(
     *,
     manifest: Path | None = None,
     alpha_threshold: int = DEFAULT_ALPHA_THRESHOLD,
-    report_name: str = "recolor.report.json",
+    report_name: str = DEFAULT_REPORT_NAME,
 ) -> dict:
     spec = _load_spec(spec_path)
     arr = _load_rgba(base)
@@ -336,6 +343,31 @@ def bake(
     return report
 
 
+def load_report(
+    run_dir: Path,
+    *,
+    dirname: str = VARIANTS_DIRNAME,
+    report_name: str = DEFAULT_REPORT_NAME,
+) -> dict | None:
+    """The bake report of a run dir's variants, or ``None`` if nothing was baked.
+
+    ``None`` means exactly one thing — no report file — so a consumer can treat it
+    as "this run has no variants" without guessing. A file that exists but is not
+    a recolor report is an error, never an empty result: silently reading it as
+    "no variants" would hide a bake that wrote somewhere unexpected, and the
+    curation view would show nothing while the sheets sit on disk.
+    """
+    path = run_dir / dirname / report_name
+    if not path.is_file():
+        return None
+    report = json.loads(path.read_text(encoding="utf-8"))
+    if report.get("kind") != REPORT_KIND:
+        raise SystemExit(
+            f"{path}: not a recolor report (kind must be {REPORT_KIND!r}, got {report.get('kind')!r})"
+        )
+    return report
+
+
 # --- CLI ----------------------------------------------------------------------
 
 
@@ -373,7 +405,7 @@ def add_recolor_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--out-dir", type=Path, help="output dir (default <run-dir>/variants)")
     p.add_argument("--manifest", type=Path, help="source manifest to propagate per variant")
     p.add_argument("--alpha-threshold", type=int, default=DEFAULT_ALPHA_THRESHOLD)
-    p.add_argument("--report", default="recolor.report.json")
+    p.add_argument("--report", default=DEFAULT_REPORT_NAME)
 
 
 def run(
@@ -385,7 +417,7 @@ def run(
     out_dir: Path | None = None,
     manifest: Path | None = None,
     alpha_threshold: int = DEFAULT_ALPHA_THRESHOLD,
-    report: str = "recolor.report.json",
+    report: str = DEFAULT_REPORT_NAME,
 ) -> int:
     resolved_base, resolved_manifest, resolved_out = _resolve_base_and_manifest(
         base, run_dir, atlas, manifest, out_dir

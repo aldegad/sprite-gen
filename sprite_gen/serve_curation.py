@@ -58,7 +58,7 @@ from sprite_gen.breathe import (DEFAULT_DEPTH, DEFAULT_LAG, freeze_anatomy,
 from sprite_gen.curation import (CURATION_FILENAME, SCHEMA_VERSION, effective_logical_height,
                                  empty_curation, frame_variant, imported_ref_role,
                                  load_curation, load_curation_report, pixel_snap_scale,
-                                 run_revision, write_curation_atomic)
+                                 recolor_pick, run_revision, write_curation_atomic)
 from sprite_gen.extract import heal_run, load_consistent_frames_manifest
 from sprite_gen.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel, state_frame_total
 from sprite_gen.runio import REQUEST_FILENAME, load_request, publish_guard, read_guard
@@ -586,9 +586,107 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         # 최종 산출물 섹션 (뷰 맨 아래, 아틀라스+manifest 좌우) — 파일이 실재할 때만.
         # 아틀라스는 다운로드/합성 시점 산출물이라 mtime 을 실어 시점을 표시한다.
         "atlas": _atlas_info(run_dir),
+        # 팔레트 스왑 베이크 산출물 (`<run>/variants/`) — 없으면 None (섹션 자체가 안 뜬다).
+        "recolor": _recolor_info(run_dir, curation),
         "fitPixelUnfake": bool((request.get("fit") or {}).get("pixel_unfake")),
         # 예산에 밀려 아직 못 만든 온디맨드 픽셀 프리뷰 수 — 0 이 아니면 리로드가 이어서 계산
         "contract": contract,
+    }
+
+
+def _first_frame_rect(run_dir: Path) -> dict | None:
+    """Where the atlas's first frame sits, from the manifest's `frame_layout`.
+
+    Colourway thumbnails crop to this box: a colour swap reads on a sprite, not on a
+    1280px strip shrunk to a chip. The rect comes from the layout the compose step
+    wrote — the view does not assume "frame 0 is at the origin", because a layout that
+    ever changes would leave the thumbnails cropping the wrong pixels and looking right.
+    None (no manifest, or no layout in it) means the thumbnails show the whole sheet:
+    there is no frame box to crop to, and inventing one would be a display lie.
+    """
+    try:
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    layout = manifest.get("frame_layout")
+    if not isinstance(layout, dict):
+        return None
+    rows = layout.get("rows")
+    if not isinstance(rows, dict):
+        return None
+    for cells in rows.values():
+        if isinstance(cells, list) and cells and isinstance(cells[0], dict):
+            cell = cells[0]
+            try:
+                return {
+                    "x": int(cell["x"]), "y": int(cell["y"]),
+                    "w": int(cell["w"]), "h": int(cell["h"]),
+                    "sheetWidth": int(layout["sheetWidth"]),
+                    "sheetHeight": int(layout["sheetHeight"]),
+                }
+            except (KeyError, TypeError, ValueError):
+                return None
+    return None
+
+
+def _recolor_info(run_dir: Path, curation: dict | None) -> dict | None:
+    """Baked recolor variants + the adopted pick, for the view's variant section.
+
+    None = this run has no bake report (`recolor.load_report` owns that judgement,
+    and fails loud on a foreign file). Everything the section shows comes from the
+    report — the view never re-derives colour counts, so the numbers it prints are
+    the numbers the bake measured.
+
+    A variant sheet whose PNG is missing is reported with `present: false` rather
+    than dropped: a report row without its sheet means the bake was interrupted or
+    the file was deleted, and a silently shorter list would read as "that variant
+    was never baked".
+    """
+    from sprite_gen.recolor import VARIANTS_DIRNAME, load_report
+
+    report = load_report(run_dir)
+    if report is None:
+        return None
+    variants = []
+    for entry in report.get("variants", []):
+        sheet = str(entry.get("sheet") or "")
+        path = run_dir / VARIANTS_DIRNAME / sheet
+        present = bool(sheet) and path.is_file()
+        manifest_name = entry.get("manifest")
+        variants.append({
+            "name": entry.get("name"),
+            "sheet": sheet,
+            # mtime cache-bust: a re-bake rewrites the same filename, and a stale
+            # browser cache would show the previous colourway under the new name.
+            "url": (_url("run", VARIANTS_DIRNAME, sheet) + f"?v={int(path.stat().st_mtime)}") if present else None,
+            "present": present,
+            "substitutedPixels": entry.get("substituted_pixels"),
+            "passthroughPixels": entry.get("passthrough_pixels"),
+            "passthroughColorCount": entry.get("passthrough_color_count"),
+            "unusedSources": [record.get("from") for record in entry.get("unused_sources", [])],
+            "manifestUrl": (_url("run", VARIANTS_DIRNAME, str(manifest_name))
+                            if isinstance(manifest_name, str) else None),
+        })
+    base_name = str(report.get("base") or "")
+    base_path = run_dir / base_name if base_name else None
+    base_present = bool(base_name) and base_path.is_file()
+    picked = recolor_pick(curation)
+    return {
+        "dir": VARIANTS_DIRNAME,
+        # 썸네일이 잘라 볼 프레임 상자 (없으면 시트 전체를 보여준다 — _first_frame_rect 참조)
+        "swatch": _first_frame_rect(run_dir),
+        "match": report.get("match"),
+        "tolerance": report.get("tolerance"),
+        "base": {
+            "name": base_name,
+            "url": (_url("run", base_name) + f"?v={int(base_path.stat().st_mtime)}") if base_present else None,
+            "present": base_present,
+        },
+        "variants": variants,
+        "picked": picked,
+        # The pick is stored by name; if the spec dropped that variant the name is
+        # kept and flagged, so the view can say so instead of quietly un-picking.
+        "pickedKnown": picked is not None and any(v["name"] == picked for v in variants),
     }
 
 
@@ -1159,6 +1257,12 @@ class CurationHandler(BaseHTTPRequestHandler):
                         # (구 클라이언트/수동 POST)에 조용히 사라지지 않게.
                         if "anchors" in existing and "anchors" not in payload:
                             payload["anchors"] = existing["anchors"]
+                        # 채택 컬러웨이도 같은 계약이다. 뷰는 variant 섹션이 있는 런에서만
+                        # 이 필드를 authoring 한다 (variants 를 안 구운 런에서는 아예 안 싣는다)
+                        # — 생략을 삭제로 받으면 다른 런에서 고른 채택이, 또는 손으로/CLI 로
+                        # 심어둔 채택이 무관한 편집 한 번에 조용히 사라진다.
+                        if "recolor" in existing and "recolor" not in payload:
+                            payload["recolor"] = existing["recolor"]
                         # 런 전역 `pixel_unfake` 도 같은 계약이다 — 뷰는 **트윈 줄이 전부
                         # 같을 때만** 이 필드를 싣는다(혼합/트윈 없음이면 생략). 생략을
                         # 삭제로 받으면 굽기가 읽는 **변종이 바뀐다**(plain→pixel): 사용자는
