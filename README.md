@@ -1,12 +1,49 @@
 <h1 align="center">sprite-gen</h1>
 
-<p align="center"><b>One drawing in. A game-ready sprite atlas out.</b></p>
+<p align="center"><b>One drawing in. A game-ready sprite atlas out — breathing.</b></p>
 
 <p align="center">
 
 **English** · [한국어](README.ko.md) · [日本語](README.ja.md) · [简体中文](README.zh-Hans.md) · [Español](README.es.md) · [Français](README.fr.md)
 
 </p>
+
+<p align="center">
+  <img src="docs/assets/gptaku-idle.gif" width="170" alt="gptaku octopus idle, breathing" />
+  <img src="docs/assets/gptaku-jump.gif" width="170" alt="gptaku octopus jump" />
+  <img src="docs/assets/gptaku-flail.gif" width="170" alt="gptaku octopus flail" />
+</p>
+
+<p align="center"><sub>gptaku, a 32×32 pixel-perfect octopus from <i>Cinderisle</i>. The idle on the left is <b>one still frame</b> — the breathing is baked by the engine.</sub></p>
+
+---
+
+## Breathe
+
+A still idle reads as frozen. **Breathe** turns a single pose into a living loop — deterministic squash & stretch baked on top of your curated frames. No regeneration, no re-extraction, no extra art. One sidecar field:
+
+```json
+"breathe": { "depth": 0.05, "breaths": 3 }
+```
+
+- **Anatomy-aware.** The engine measures the silhouette: neck bottleneck, symmetric eye pair on neckless blobs, torso-vs-appendage width. Heads stay **bit-identical** across every frame; wings and arms get pushed, never stretched.
+- **Pixel-true.** Integer row/column mapping only — every output frame is still clean pixel art on the same grid. A 1px outline stays a 1px outline: the warp preserves silhouette edges and normalizes staircase doubling, anchored on the inner line.
+- **A ruler you can grab.** Drag the rigid boundary (red), the body axis (blue), and the torso width (dashed) right on the live playback. The server re-derives the anatomy on release — and the preview keeps breathing while it recalculates.
+- **Byte-identical preview.** The webview mirror and the Python bake produce the same bytes, enforced by golden tests. What you watch looping is exactly what ships in the atlas.
+
+<p align="center">
+  <img src="docs/assets/breathe-editor.png" width="760" alt="breathe region editor: rigid boundary, body axis and torso width lines over live playback, with the baked phase filmstrip" />
+</p>
+
+Any silhouette works — humanoids, blobs, tentacles. Front, side, back:
+
+<p align="center">
+  <img src="docs/assets/founder-idle.gif" width="128" alt="hero idle, breathing" />
+  <img src="docs/assets/founder-side-idle.gif" width="128" alt="hero side idle, breathing" />
+  <img src="docs/assets/founder-up-idle.gif" width="128" alt="hero idle from behind, breathing" />
+</p>
+
+<p align="center"><sub>Every loop above is one still frame + <code>breathe</code>.</sub></p>
 
 ---
 
