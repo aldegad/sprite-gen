@@ -121,6 +121,75 @@ def row_strain(anat: Anatomy, depth: float) -> float:
     return depth * norm * peak
 
 
+# ── 외곽선 1px 다듬기 ───────────────────────────────────────────────
+
+def _dark(p) -> bool:
+    return bool(p[3]) and (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) < 96.0
+
+
+def _thin_outline_1px(out: Image.Image) -> None:
+    """워프된 프레임의 실루엣 외곽선 2px 계단 모서리를 1px 로 정규화 (제자리 수정).
+
+    세로 스쿼시&스트레치는 정수 행 복제/삭제라, 가파른 대각선 외곽선의 계단 모서리
+    (세로로 2px 겹치는 지점)가 위상마다 위치·개수를 바꾸며 "가로 2줄 검은선" 으로 읽힌다
+    (실측 2026-07-30: 문어 idle 왼쪽 볼 대각선, 수홍 발견). 각 열/행의 실루엣 끝에서
+    '어두움-어두움-내부색' 3연속을 만나면 안쪽을 내부색으로 되돌려 바깥 1px 만 외곽선으로
+    남긴다 — 모든 위상에 같은 규칙이 걸리므로 모서리가 위상 간에 두꺼워졌다 얇아졌다
+    하지 않는다.
+
+    호출자는 **변형이 실제로 일어난 프레임에만** 부른다(_warp 의 deformed 게이트). 변형 0
+    프레임은 이 함수를 타지 않아 "변형 0 = 원본 동일" 계약이 유지되고, 원본에 작가가
+    그린 계단 모서리는 정지 상태에서 그대로다.
+
+    **알파(모양)는 절대 바꾸지 않는다** — 불투명 픽셀의 색만 교체하므로 실루엣 연결이
+    끊기지 않는다. 원본 스냅샷에서만 읽고 한 번에 치환하므로 열/행 순서와 무관하게 결과가
+    같다(JS 미러와 바이트 동일하기 위한 성질)."""
+    src = out.load()
+    w, h = out.size
+    op = lambda x, y: bool(src[x, y][3])
+    # 실루엣 끝 좌표 — 그 픽셀 자체가 다른 축의 1px 외곽선이므로 다듬기가 지우면 안 된다.
+    # (실측: 세로 다듬기가 우측 가장자리 열의 복원된 발끝 외곽선을 내부색으로 바꿔
+    # 발끝 소실이 재발했다 — 좌우 끝은 세로 패스에서, 상하 끝은 가로 패스에서 보호한다.)
+    row_end: set[tuple[int, int]] = set()
+    col_end: set[tuple[int, int]] = set()
+    for y in range(h):
+        xs = [x for x in range(w) if op(x, y)]
+        if xs:
+            row_end.add((xs[0], y))
+            row_end.add((xs[-1], y))
+    for x in range(w):
+        ys = [y for y in range(h) if op(x, y)]
+        if ys:
+            col_end.add((x, ys[0]))
+            col_end.add((x, ys[-1]))
+    # (x, y) -> 내부색을 가져올 (sx, sy). 세로 패스가 먼저 잡으면 가로는 덮지 않는다.
+    repl: dict[tuple[int, int], tuple[int, int]] = {}
+    for x in range(w):
+        ys = [y for y in range(h) if op(x, y)]
+        if not ys:
+            continue
+        t0, b0 = ys[0], ys[-1]
+        if (t0 + 2 <= b0 and _dark(src[x, t0]) and _dark(src[x, t0 + 1]) and (x, t0 + 1) not in row_end
+                and op(x, t0 + 2) and not _dark(src[x, t0 + 2])):
+            repl[(x, t0 + 1)] = (x, t0 + 2)
+        if (b0 - 2 >= t0 and _dark(src[x, b0]) and _dark(src[x, b0 - 1]) and (x, b0 - 1) not in row_end
+                and op(x, b0 - 2) and not _dark(src[x, b0 - 2])):
+            repl[(x, b0 - 1)] = (x, b0 - 2)
+    for y in range(h):
+        xs = [x for x in range(w) if op(x, y)]
+        if not xs:
+            continue
+        l0, r0 = xs[0], xs[-1]
+        if (l0 + 2 <= r0 and _dark(src[l0, y]) and _dark(src[l0 + 1, y]) and (l0 + 1, y) not in col_end
+                and op(l0 + 2, y) and not _dark(src[l0 + 2, y])):
+            repl.setdefault((l0 + 1, y), (l0 + 2, y))
+        if (r0 - 2 >= l0 and _dark(src[r0, y]) and _dark(src[r0 - 1, y]) and (r0 - 1, y) not in col_end
+                and op(r0 - 2, y) and not _dark(src[r0 - 2, y])):
+            repl.setdefault((r0 - 1, y), (r0 - 2, y))
+    for (x, y), (sx, sy) in repl.items():
+        out.putpixel((x, y), src[sx, sy])
+
+
 # ── 워프 ────────────────────────────────────────────────────────────
 
 def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float) -> Image.Image:
@@ -163,6 +232,7 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
     y_cursor = baseline - total
     prev = 0
     clipped = 0
+    deformed = False   # 이 위상에서 변형이 실제로 일어났나 (다듬기 게이트)
     for j in range(height):
         u = 1.0 - j / max(1, height - 1)
         cur = math.floor(heights[j] + 0.5)
@@ -171,10 +241,13 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
         if reps == 0:
             continue
         g = gain(u)
+        if reps != 1:
+            deformed = True                  # 행 복제/삭제 = 세로 변형이 실재
         if g == 0.0:
             # 변형 없음 = 원본 위치 그대로. 축 고정점 사상의 g->0 극한과 정확히 같다.
             row_map = [(box[0] + i, i) for i in range(width)]
         else:
+            deformed = True                  # 가로 사상 변형이 실재
             dens = [max(0.05, 1.0 + g * (1.0 - p_of(i))) for i in range(width)]
             edge = [0.0]
             for d in dens:
@@ -190,6 +263,24 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
                 while i < width - 1 and (edge[i + 1] - origin) <= ox:
                     i += 1
                 row_map.append((anchor_x + ox, i))
+            # 외곽선 보존: 가로 축소 위상에서 forward 밀도매핑이 실루엣 양끝 열을 통째로
+            # 떨궈 1px 외곽선이 사라진다(발끝 플리커, 실측 2026-07-30: 문어 idle y25~y28
+            # 이 날숨 위상마다 소실). 이 행의 최말단 불투명 소스 열(= 외곽선)을 출력의
+            # 양끝 불투명 픽셀에 그대로 실어 항상 1px 외곽선이 남게 한다 — 원본 외곽선
+            # 픽셀을 복사하므로 색·밝기가 정확히 보존되고(재도색 아님) 위상 간 잔여
+            # 깜빡임이 없다. g==0 항등 분기(위)는 손대지 않아 "변형 0 = 원본 동일" 계약이
+            # 그대로 산다. 축소가 아니면(양끝이 이미 외곽선을 실으면) no-op 이다.
+            op = [k for k in range(width) if src[k, j][3]]
+            if op and row_map:
+                op_lo, op_hi = op[0], op[-1]
+                for k in range(len(row_map) - 1, -1, -1):
+                    if src[row_map[k][1], j][3]:
+                        row_map[k] = (row_map[k][0], op_hi)
+                        break
+                for k in range(len(row_map)):
+                    if src[row_map[k][1], j][3]:
+                        row_map[k] = (row_map[k][0], op_lo)
+                        break
         for r in range(reps):
             yy = y_cursor + r
             for ox, si in row_map:
@@ -208,6 +299,8 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
             f"breathe: 늘어난 프레임이 셀 밖으로 나가 불투명 픽셀 {clipped}개가 잘린다 "
             f"(셀 {canvas_w}x{canvas_h}, 콘텐츠 {box[0]},{box[1]}-{box[2]},{box[3]}). "
             f"셀 여백을 늘리거나 depth 를 낮춰라.")
+    if deformed:
+        _thin_outline_1px(out)
     return out
 
 
@@ -331,7 +424,8 @@ def resolve_anatomy(reference: Image.Image, cfg: dict) -> Anatomy:
     사이드카 캐시가 실제로 구운 값과 어긋났는지는 `anatomy_report` 가 대조해서 보고한다.
     "재검출했나(proxy)" 보다 "**사이드카와 다른 값을 구웠나**" 가 원칙 6이 요구하는 바로
     그 관측이다."""
-    return analyze(reference, rigid_row=cfg.get("rigid_row"))
+    return analyze(reference, rigid_row=cfg.get("rigid_row"),
+                   axis_x=cfg.get("axis_x"), torso_half=cfg.get("torso_half"))
 
 
 def anatomy_report(images: list[Image.Image], cfg: dict) -> dict:
@@ -365,7 +459,8 @@ def freeze_anatomy(frame: Image.Image, cfg: dict, key: str) -> dict:
 
     이걸 사이드카에 넣어두면 굽기와 큐레이터 웹뷰가 같은 숫자를 읽는다 — 웹뷰는
     검출을 재구현하지 않고 warp 만 미러링하면 된다 (검출 중복 제거)."""
-    anat = analyze(frame, rigid_row=cfg.get("rigid_row"))
+    anat = analyze(frame, rigid_row=cfg.get("rigid_row"),
+                   axis_x=cfg.get("axis_x"), torso_half=cfg.get("torso_half"))
     return {**anat.as_dict(), "fingerprint": anatomy_fingerprint(key)}
 
 

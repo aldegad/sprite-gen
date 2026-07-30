@@ -164,6 +164,154 @@ def test_phase_zero_is_not_identity_when_the_wave_travels() -> None:
     assert phase_frame(src, {**cfg, "lag": 0.0}, 0.0).tobytes() == src.tobytes()
 
 
+def _small_outlined() -> Image.Image:
+    """문어 크기대(폭 26px)의 밝은 내부 + 1px 검은 외곽선 — 좁은 머리 + 넓은 몸통.
+
+    발끝 외곽선 플리커는 **작은 스프라이트**에서만 난다 — forward 밀도매핑의 정수
+    반올림이 좁은 폭에서 실루엣 양끝 열을 통째로 떨구기 때문이다. 큰 픽스처는 여유가
+    있어 안 떨어진다. 이 기하(폭 26, 몸통폭 21, depth 0.08)는 fix 없이 24위상에서
+    수백 건 드롭을 재현한다(탐색으로 확정, 2026-07-30). 내부색(밝음)과 외곽선(검음)을
+    뚜렷이 갈라 소실을 색으로 검출한다."""
+    pad = 4
+    w = 26
+    im = Image.new("RGBA", (w, 30 + 2 * pad), (0, 0, 0, 0))
+    px = im.load()
+    cx = w // 2
+    for y in range(30):
+        bw = 10 if y < 12 else 21                              # 좁은 머리(병목) → 넓은 몸통
+        for x in range(cx - bw // 2, cx - bw // 2 + bw):
+            px[x, y + pad] = (210, 185, 120, 255)              # 밝은 내부
+    edge = []
+    for y in range(im.size[1]):
+        for x in range(w):
+            if px[x, y][3] == 0:
+                continue
+            for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                if nx < 0 or ny < 0 or nx >= w or ny >= im.size[1] or px[nx, ny][3] == 0:
+                    edge.append((x, y))
+                    break
+    for x, y in edge:
+        px[x, y] = (0, 0, 0, 255)                               # 1px 검은 외곽선
+    return im
+
+
+def test_side_outline_survives_every_phase() -> None:
+    """가로 축소 위상에서도 좌우 1px 외곽선이 사라지지 않는다 (발끝 플리커 회귀, 2026-07-30).
+
+    forward 밀도매핑이 축소(날숨) 위상에서 실루엣 양끝 열을 통째로 떨궈, 큐레이터
+    미리보기·굽기 모두에서 발끝 검은 외곽선 1px 가 위상마다 사라졌다 나타났다 했다
+    (실측: 문어 gptaku-pet idle y25~y28). `_warp` 의 외곽선 보존이 이 행의 최말단 불투명
+    소스 열(= 외곽선)을 출력 양끝 불투명 픽셀에 실어 막는다. 실루엣 끝에 내부색(밝음)이
+    노출되면 = 외곽선이 떨어진 것이므로, 전 위상 우측 끝이 어두워야 한다."""
+    src = _small_outlined()
+    cfg = dict(CFG)
+    cfg["depth"] = 0.08
+    cfg["breaths"] = 3
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
+    anat = resolve_anatomy(src, cfg)
+    dark = lambda p: (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) < 96
+    dropped = []
+    for i in range(24):
+        phase = i / 24
+        frame = phase_frame(src, cfg, phase, anat)
+        px = frame.load()
+        w, h = frame.size
+        for y in range(h):
+            rm = next((x for x in range(w - 1, -1, -1) if px[x, y][3] >= 128), None)
+            if rm is not None and not dark(px[rm, y]):
+                dropped.append((round(phase, 3), y, rm))
+    assert not dropped, (
+        f"실루엣 우측 끝에 내부색 노출(1px 외곽선 소실) {len(dropped)}건 — "
+        f"발끝 플리커 회귀: {dropped[:8]}")
+
+
+def test_region_overrides_change_the_anatomy_and_the_bake() -> None:
+    """axis_x/torso_half 사람 오버라이드 (큐레이터 영역 UI, 2026-07-30).
+
+    rigid_row 와 같은 지위: 사이드카의 의도 입력이고 anatomy 는 파생 캐시다.
+    (a) analyze 가 오버라이드를 값으로 받아들이고 관측 warning 을 남긴다,
+    (b) 범위 밖은 조용히 깎지 않고 거부한다,
+    (c) torso_half 를 좁히면 부속 보호가 실제로 걸려 굽기 출력이 달라진다."""
+    src = _winged()
+    auto = analyze(src)
+    manual = analyze(src, axis_x=auto.axis_x + 3, torso_half=5)
+    assert manual.axis_x == auto.axis_x + 3
+    assert manual.torso_half == 5
+    assert any("axis-x-override" in w for w in manual.warnings)
+    assert any("torso-half-override" in w for w in manual.warnings)
+
+    with pytest.raises(SystemExit):
+        analyze(src, axis_x=auto.width + 10)
+    with pytest.raises(SystemExit):
+        analyze(src, torso_half=0)
+
+    # (c) 날개 픽스처: torso_half 를 좁히면 protect() 가 더 넓게 걸려 출력이 달라진다.
+    # 기본 depth 는 정수 반올림에 묻힐 수 있어 크게 잡고 전 위상에서 차이를 찾는다.
+    cfg = dict(CFG)
+    cfg["depth"] = 0.15
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
+    narrow = {**cfg, "torso_half": 4,
+              "anatomy": freeze_anatomy(src, {**cfg, "torso_half": 4}, _key())}
+    assert any(phase_frame(src, cfg, i / 12).tobytes() != phase_frame(src, narrow, i / 12).tobytes()
+               for i in range(12)), "torso_half 오버라이드가 굽기에 아무 효과가 없다"
+
+
+def test_thinning_normalizes_warp_doubled_outline(monkeypatch) -> None:
+    """워프가 복제로 두껍게 만든 외곽선을 다듬기가 1px 로 정규화한다 (볼 2줄 회귀, 2026-07-30).
+
+    세로/가로 정수 복제가 외곽선을 국소적으로 2px 두께로 만들어 "가로 2줄 검은선" 으로
+    읽혔다 (실측: 문어 idle 왼쪽 볼, 수홍 발견). `_thin_outline_1px` 가 변형 프레임의
+    두꺼워진 구간을 내부색으로 되돌린다. 외곽선 경로가 꺾이는 정당한 모서리(실루엣 끝
+    픽셀)는 보호되므로 "모서리 0" 을 단정하지 않는다 — 다듬기 유/무를 같은 위상에서
+    비교해 (a) 있으면 항상 적거나 같고 (b) 최소 한 위상에서 실제로 줄이는 것을 단정한다.
+    변형 0 프레임은 다듬지 않으므로 원본 동일 계약과 공존한다 (zero-strain 테스트가 지킴)."""
+    import sprite_gen.breathe as breathe_mod
+
+    src = _small_outlined()
+    cfg = dict(CFG)
+    cfg["depth"] = 0.08
+    cfg["breaths"] = 3
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
+    anat = resolve_anatomy(src, cfg)
+
+    def non_end_dark(frame):
+        """실루엣 끝(외곽선의 정당한 경로)이 아닌 위치의 어두운 픽셀 수.
+
+        1px 외곽선의 픽셀은 전부 행 끝이거나 열 끝이다. 워프 복제로 두꺼워진 안쪽
+        분(가로 2줄의 두 번째 줄)만 이 메트릭에 잡힌다. 눈처럼 원래 내부에 있는
+        어두운 특징도 잡히지만 다듬기 유/무 양쪽에 똑같이 들어가 상쇄된다. 다듬기는
+        어두운 픽셀을 내부색으로 바꾸기만 하고 알파는 불변이라, 이 메트릭은 다듬기로
+        단조 감소하며 with/without 프레임의 끝 집합이 동일해 비교가 정확하다."""
+        px = frame.load()
+        w, h = frame.size
+        dark = lambda p: p[3] >= 128 and (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) < 96
+        opaque = lambda p: p[3] >= 128
+        ends = set()
+        for y in range(h):
+            xs = [x for x in range(w) if opaque(px[x, y])]
+            if xs:
+                ends.add((xs[0], y))
+                ends.add((xs[-1], y))
+        for x in range(w):
+            ys = [y for y in range(h) if opaque(px[x, y])]
+            if ys:
+                ends.add((x, ys[0]))
+                ends.add((x, ys[-1]))
+        return sum(1 for y in range(h) for x in range(w)
+                   if dark(px[x, y]) and (x, y) not in ends)
+
+    with_thin = [non_end_dark(phase_frame(src, cfg, i / 24, anat)) for i in range(24)]
+    monkeypatch.setattr(breathe_mod, "_thin_outline_1px", lambda out: None)
+    without = [non_end_dark(phase_frame(src, cfg, i / 24, anat)) for i in range(24)]
+    monkeypatch.undo()
+
+    for i, (a, b) in enumerate(zip(with_thin, without)):
+        assert a <= b, f"위상 {i / 24:.3f}: 다듬기가 두꺼운 구간을 오히려 늘렸다 ({a} > {b})"
+    assert sum(with_thin) < sum(without), (
+        f"다듬기가 어떤 위상에서도 두꺼운 외곽선을 줄이지 못했다 "
+        f"(with={sum(with_thin)}, without={sum(without)}) — 볼 2줄 회귀")
+
+
 def test_the_body_axis_column_is_a_fixed_point() -> None:
     """어떤 위상에서도 몸통 축 열은 제자리 — 이게 좌우 지터를 구조적으로 막는다."""
     src = _humanoid()
@@ -317,7 +465,8 @@ def test_retired_split_schema_is_rejected_loudly(retired: dict) -> None:
 
 def test_new_schema_normalizes_within_range() -> None:
     cfg = state_breathe({"states": {"idle": {"breathe": {"depth": 0.08, "breaths": 3}}}}, "idle")
-    assert cfg == {"depth": 0.08, "breaths": 3, "lag": 0.10, "rigid_row": None, "anatomy": None}
+    assert cfg == {"depth": 0.08, "breaths": 3, "lag": 0.10, "rigid_row": None,
+                   "axis_x": None, "torso_half": None, "anatomy": None}
 
 
 def test_clipping_the_cell_raises_instead_of_cropping_the_head() -> None:

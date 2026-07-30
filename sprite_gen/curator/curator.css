@@ -1242,6 +1242,25 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   top: -6px;
   height: 12px;
 }
+.breathe-line-v { /* 세로선 (몸통 축·반폭, 영역 조정 UI 2026-07-30) */
+  top: 0;
+  bottom: 0;
+  left: auto;
+  right: auto;
+  height: auto;
+  width: 0;
+  border-top: none;
+  border-left: 2px dashed rgba(40, 110, 220, 0.7);
+  cursor: ew-resize;
+}
+.breathe-line-v::after {
+  left: -6px;
+  right: auto;
+  top: 0;
+  width: 12px;
+  height: 100%;
+}
+.breathe-axis { border-left-style: solid; border-left-color: rgba(40, 110, 220, 0.45); }
 .breathe-bar { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
 .breathe-auto { padding: 2px 7px; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .breathe-auto:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }

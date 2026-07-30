@@ -94,6 +94,10 @@ def axis_x(image: Image.Image, box: tuple[int, int, int, int]) -> int:
     return acc // max(1, total)
 
 
+# analyze() 의 `axis_x` **파라미터**(사람 오버라이드)가 함수 이름을 가리므로 별칭으로 부른다.
+_axis_centroid = axis_x
+
+
 def width_profile(image: Image.Image, box: tuple[int, int, int, int], cx: int) -> list[int]:
     """행별 '몸통 중심 런' 폭.
 
@@ -257,22 +261,34 @@ def torso_metrics(image: Image.Image, box: tuple[int, int, int, int], cx: int,
     return max(1, torso), max(1, max_half)
 
 
-def analyze(image: Image.Image, rigid_row: int | None = None) -> Anatomy:
+def analyze(image: Image.Image, rigid_row: int | None = None,
+            axis_x: int | None = None, torso_half: int | None = None) -> Anatomy:
     """한 프레임의 실루엣 해부 — 검출 SSoT.
 
-    `rigid_row` 를 주면 사람이 정한 값으로 강체 경계를 덮어쓴다(자동 검출은 그대로
-    수행해 관측값으로 남긴다). 값 하나에 출처만 auto/manual 로 갈릴 뿐 진실은 하나다."""
+    `rigid_row`/`axis_x`/`torso_half` 를 주면 사람이 정한 값으로 덮어쓴다(자동 검출은
+    그대로 수행해 관측값으로 남긴다). 값 하나에 출처만 auto/manual 로 갈릴 뿐 진실은
+    하나다. `axis_x` 는 몸통 세로축(콘텐츠 bbox 상대 열)이라 얼굴 검출·폭 프로파일·
+    부속 판정까지 그 축 기준으로 다시 돈다. `torso_half` 는 몸통 반폭 — 부속 보호
+    밴드가 어디서 시작하는지를 정한다 (큐레이터 영역 조정 UI, 2026-07-30)."""
     box = solid_alpha_bbox(image)
     if not box:
         raise SystemExit("anatomy: 프레임에 불투명 콘텐츠가 없다")
     x0, y0, x1, y1 = box
     w, h = x1 - x0, y1 - y0
-    cx = axis_x(image, box)
+    cx = _axis_centroid(image, box)
+    if axis_x is not None:
+        if not 0 <= axis_x < w:
+            raise SystemExit(f"anatomy: axis_x {axis_x} 가 콘텐츠 폭 {w} 밖이다")
+        if axis_x != cx:
+            cx = int(axis_x)
     profile = width_profile(image, box, cx)
     neck_row, neck_source = detect_neck(profile)
     face = detect_face(image, box, cx)
 
     warnings: list[str] = []
+    auto_cx = _axis_centroid(image, box)
+    if axis_x is not None and axis_x != auto_cx:
+        warnings.append(f"axis-x-override: auto {auto_cx} -> manual {axis_x}")
     auto_rigid = max(neck_row, (face[1] + 1) if face else 0)
     auto_rigid = min(auto_rigid, int(h * 0.80))   # 몸통이 통째로 사라지지는 않게
     rigid_source = "face" if (face and face[1] + 1 > neck_row) else "neck"
@@ -293,6 +309,12 @@ def analyze(image: Image.Image, rigid_row: int | None = None) -> Anatomy:
         warnings.append("face-absent: 대칭 눈쌍을 못 찾아 목만으로 경계를 정했다")
 
     torso, max_half = torso_metrics(image, box, cx, profile, auto_rigid, h)
+    if torso_half is not None:
+        if not 1 <= torso_half <= w:
+            raise SystemExit(f"anatomy: torso_half {torso_half} 가 범위 [1, {w}] 밖이다")
+        if torso_half != torso:
+            warnings.append(f"torso-half-override: auto {torso} -> manual {torso_half}")
+        torso = int(torso_half)
     return Anatomy(width=w, height=h, axis_x=cx, neck_row=neck_row, neck_source=neck_source,
                    rigid_row=auto_rigid, rigid_source=rigid_source, basis_row=basis_row,
                    torso_half=torso, max_half=max_half, face=face,

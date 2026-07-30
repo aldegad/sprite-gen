@@ -292,8 +292,18 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
     rigid_row = raw.get("rigid_row")
     if rigid_row is not None:
         rigid_row = _exact_int("rigid_row", rigid_row, state)
+    # 영역 조정 오버라이드 (2026-07-30, 큐레이터 영역 UI): rigid_row 와 같은 지위의
+    # 사람 의도 입력 — anatomy 는 파생 캐시일 뿐이다. 범위 검증은 프레임을 아는
+    # anatomy.analyze 가 한다 (여기서는 정수성만).
+    axis_x = raw.get("axis_x")
+    if axis_x is not None:
+        axis_x = _exact_int("axis_x", axis_x, state)
+    torso_half = raw.get("torso_half")
+    if torso_half is not None:
+        torso_half = _exact_int("torso_half", torso_half, state)
     frozen = raw.get("anatomy")
     return {"depth": depth, "breaths": breaths, "lag": lag, "rigid_row": rigid_row,
+            "axis_x": axis_x, "torso_half": torso_half,
             "anatomy": frozen if isinstance(frozen, dict) else None}
 
 

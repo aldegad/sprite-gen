@@ -243,6 +243,18 @@ function breatheComposite(base, cfg, phase) {
       `강체 경계가 어긋난다 — 사이드카 rigid_row ${cfg.rigid_row} vs 해부 ${anat.rigid_row}. `
       + `굽기는 ${cfg.rigid_row} 로 다시 재서 굽는다. 해부를 갱신해야 프리뷰가 같아진다.`);
   }
+  // axis_x / torso_half 도 rigid_row 와 같은 지위의 사람 의도 입력이다 (영역 UI 2026-07-30).
+  // 캐시가 의도와 어긋나면 낡은 숫자로 그리지 않는다 — 굽기는 의도로 다시 재서 굽는다.
+  if (anat && cfg.axis_x != null && Number(cfg.axis_x) !== anat.axis_x) {
+    throw new BreatheRefused(
+      `몸통 축이 어긋난다 — 사이드카 axis_x ${cfg.axis_x} vs 해부 ${anat.axis_x}. `
+      + `해부를 갱신해야 프리뷰가 같아진다.`);
+  }
+  if (anat && cfg.torso_half != null && Number(cfg.torso_half) !== anat.torso_half) {
+    throw new BreatheRefused(
+      `몸통 반폭이 어긋난다 — 사이드카 torso_half ${cfg.torso_half} vs 해부 ${anat.torso_half}. `
+      + `해부를 갱신해야 프리뷰가 같아진다.`);
+  }
   if (!anat) {
     // 해부 숫자가 아직 없다 — 서버가 채우기 전까지는 원본을 그대로 보여준다.
     // 여기서 대충 추정해 그리면 굽기와 다른 그림을 보여주게 된다 (조용한 폴백 금지).
@@ -293,6 +305,7 @@ function breatheComposite(base, cfg, phase) {
   let yCursor = baseline - total;
   let prev = 0;
   let clipped = 0;
+  let deformed = false;   // 이 위상에서 변형이 실제로 일어났나 (다듬기 게이트, 파이썬 미러)
   for (let j = 0; j < height; j++) {
     const u = 1 - j / Math.max(1, height - 1);
     const cur = Math.round(heights[j]);
@@ -300,11 +313,13 @@ function breatheComposite(base, cfg, phase) {
     prev = cur;
     if (reps === 0) continue;
     const g = gain(u);
+    if (reps !== 1) deformed = true;         // 행 복제/삭제 = 세로 변형이 실재
     let rowMap;
     if (g === 0) {
       // 변형 없음 = 원본 위치 그대로 (축 고정점 사상의 g->0 극한과 동일)
       rowMap = Array.from({ length: width }, (_, i) => [bx0 + i, i]);
     } else {
+      deformed = true;                       // 가로 사상 변형이 실재
       const edge = [0];
       for (let i = 0; i < width; i++) edge.push(edge[i] + Math.max(0.05, 1 + g * (1 - pOf(i))));
       const origin = edge[anat.axis_x];    // 축이 고정점 — 여기가 anchorX 에 박힌다
@@ -315,6 +330,20 @@ function breatheComposite(base, cfg, phase) {
       for (let ox = lo; ox < hi; ox++) {
         while (i < width - 1 && edge[i + 1] - origin <= ox) i += 1;
         rowMap.push([anchorX + ox, i]);
+      }
+      // 외곽선 보존 (파이썬 _warp 미러) — 가로 축소 위상에서 실루엣 양끝 열이 떨어져
+      // 1px 외곽선이 사라지는 것을 막는다. 이 행의 최말단 불투명 소스 열(= 외곽선)을
+      // 출력 양끝 불투명 픽셀에 그대로 실어 항상 1px 외곽선을 남긴다.
+      const rowOpaque = (si) => src[((by0 + j) * w + (bx0 + si)) * 4 + 3];
+      let opLo = -1, opHi = -1;
+      for (let k = 0; k < width; k++) if (rowOpaque(k)) { if (opLo < 0) opLo = k; opHi = k; }
+      if (opHi >= 0 && rowMap.length) {
+        for (let k = rowMap.length - 1; k >= 0; k--) {
+          if (rowOpaque(rowMap[k][1])) { rowMap[k] = [rowMap[k][0], opHi]; break; }
+        }
+        for (let k = 0; k < rowMap.length; k++) {
+          if (rowOpaque(rowMap[k][1])) { rowMap[k] = [rowMap[k][0], opLo]; break; }
+        }
       }
     }
     for (let r = 0; r < reps; r++) {
@@ -337,16 +366,81 @@ function breatheComposite(base, cfg, phase) {
       `늘어난 프레임이 셀 밖으로 나가 불투명 픽셀 ${clipped}개가 잘린다 `
       + `(셀 ${w}x${h}). 셀 여백을 늘리거나 depth 를 낮춰라.`);
   }
+  if (deformed) breatheThinOutline(od, w, h);
   ctx.putImageData(outImg, 0, 0);
   return out;
+}
+
+// 워프된 프레임의 실루엣 외곽선 2px 계단 모서리를 1px 로 정규화 — 파이썬
+// `_thin_outline_1px` 의 바이트 동일 미러. 각 열/행의 실루엣 끝에서
+// '어두움-어두움-내부색' 3연속의 안쪽을 내부색으로 되돌린다. 실루엣 끝 픽셀
+// (row_end/col_end)은 다른 축의 1px 외곽선이므로 보호한다. 알파는 절대 안 바꾼다.
+function breatheThinOutline(od, w, h) {
+  const op = (x, y) => od[(y * w + x) * 4 + 3] !== 0;
+  const rowEnd = new Set();
+  const colEnd = new Set();
+  for (let y = 0; y < h; y++) {
+    let l = -1, r = -1;
+    for (let x = 0; x < w; x++) if (op(x, y)) { if (l < 0) l = x; r = x; }
+    if (l >= 0) { rowEnd.add(l + "," + y); rowEnd.add(r + "," + y); }
+  }
+  for (let x = 0; x < w; x++) {
+    let t = -1, b = -1;
+    for (let y = 0; y < h; y++) if (op(x, y)) { if (t < 0) t = y; b = y; }
+    if (t >= 0) { colEnd.add(x + "," + t); colEnd.add(x + "," + b); }
+  }
+  // 원본 스냅샷에서만 읽고 한 번에 치환 (열/행 순서 무관 — 파이썬과 같은 성질)
+  const snap = Uint8ClampedArray.from(od);
+  const sOp = (x, y) => snap[(y * w + x) * 4 + 3] !== 0;
+  const sDk = (x, y) => {
+    const i = (y * w + x) * 4;
+    return snap[i + 3] !== 0 && (0.299 * snap[i] + 0.587 * snap[i + 1] + 0.114 * snap[i + 2]) < 96;
+  };
+  const repl = new Map();   // "x,y" -> [sx, sy]
+  for (let x = 0; x < w; x++) {
+    let t0 = -1, b0 = -1;
+    for (let y = 0; y < h; y++) if (sOp(x, y)) { if (t0 < 0) t0 = y; b0 = y; }
+    if (t0 < 0) continue;
+    if (t0 + 2 <= b0 && sDk(x, t0) && sDk(x, t0 + 1) && !rowEnd.has(x + "," + (t0 + 1))
+        && sOp(x, t0 + 2) && !sDk(x, t0 + 2)) {
+      repl.set(x + "," + (t0 + 1), [x, t0 + 2]);
+    }
+    if (b0 - 2 >= t0 && sDk(x, b0) && sDk(x, b0 - 1) && !rowEnd.has(x + "," + (b0 - 1))
+        && sOp(x, b0 - 2) && !sDk(x, b0 - 2)) {
+      repl.set(x + "," + (b0 - 1), [x, b0 - 2]);
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    let l0 = -1, r0 = -1;
+    for (let x = 0; x < w; x++) if (sOp(x, y)) { if (l0 < 0) l0 = x; r0 = x; }
+    if (l0 < 0) continue;
+    if (l0 + 2 <= r0 && sDk(l0, y) && sDk(l0 + 1, y) && !colEnd.has((l0 + 1) + "," + y)
+        && sOp(l0 + 2, y) && !sDk(l0 + 2, y)) {
+      const k = (l0 + 1) + "," + y;
+      if (!repl.has(k)) repl.set(k, [l0 + 2, y]);
+    }
+    if (r0 - 2 >= l0 && sDk(r0, y) && sDk(r0 - 1, y) && !colEnd.has((r0 - 1) + "," + y)
+        && sOp(r0 - 2, y) && !sDk(r0 - 2, y)) {
+      const k = (r0 - 1) + "," + y;
+      if (!repl.has(k)) repl.set(k, [r0 - 2, y]);
+    }
+  }
+  for (const [key, [sx, sy]] of repl) {
+    const [x, y] = key.split(",").map(Number);
+    const d = (y * w + x) * 4;
+    const s = (sy * w + sx) * 4;
+    od[d] = snap[s]; od[d + 1] = snap[s + 1]; od[d + 2] = snap[s + 2]; od[d + 3] = snap[s + 3];
+  }
 }
 
 // 첫 활성화 기본값: 서버에 해부를 물어본다 (검출 SSoT = 서버).
 // 예전엔 여기서 JS 가 어깨/허리선을 직접 추정했지만, 그 추정이 굽기 쪽 검출과 달라
 // 미리보기와 결과가 갈라졌다. 이제 숫자는 한 곳에서만 나온다.
-async function fetchBreatheAnatomy(stateName, rigidRow) {
+async function fetchBreatheAnatomy(stateName, rigidRow, axisX, torsoHalf) {
   const q = new URLSearchParams({ state: stateName });
   if (rigidRow != null) q.set("rigid_row", String(rigidRow));
+  if (axisX != null) q.set("axis_x", String(axisX));
+  if (torsoHalf != null) q.set("torso_half", String(torsoHalf));
   const res = await fetch(`/api/breathe-anatomy?${q}`);
   const body = await res.json();
   if (!res.ok || body.error) throw new Error(body.error || `HTTP ${res.status}`);
@@ -377,7 +471,7 @@ async function ensureBreatheAnatomy(stateName) {
   const e = entries[stateName];
   const cfg = e && e.breathe;
   if (!cfg || cfg.anatomy) return false;
-  const { anatomy } = await fetchBreatheAnatomy(stateName, cfg.rigid_row);
+  const { anatomy } = await fetchBreatheAnatomy(stateName, cfg.rigid_row, cfg.axis_x, cfg.torso_half);
   // 재진입/경쟁 사이 다른 경로가 이미 채웠으면 덮지 않는다.
   if (e.breathe && !e.breathe.anatomy) {
     e.breathe.anatomy = anatomy;

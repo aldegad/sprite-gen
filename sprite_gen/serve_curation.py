@@ -1090,13 +1090,17 @@ class CurationHandler(BaseHTTPRequestHandler):
             # 재구현하면 굽기와 미리보기의 진실이 갈라진다.
             query = parse_qs(urlparse(self.path).query)
             state = (query.get("state") or [""])[0]
-            rigid = (query.get("rigid_row") or [""])[0]
+            overrides = {}
+            for name in ("rigid_row", "axis_x", "torso_half"):
+                value = (query.get(name) or [""])[0]
+                if value:
+                    overrides[name] = int(value)
             try:
                 frame, key = _breathe_source_frame(self.run_dir, state)
                 if frame is None:
                     self._send_json({"error": f"no extracted frame for state {state!r}"}, 404)
                     return
-                frozen = freeze_anatomy(frame, {"rigid_row": int(rigid)} if rigid else {}, key)
+                frozen = freeze_anatomy(frame, overrides, key)
                 self._send_json({"anatomy": frozen, "defaults": {
                     "depth": DEFAULT_DEPTH, "lag": DEFAULT_LAG, "breaths": 1}})
             except (Exception, SystemExit) as exc:

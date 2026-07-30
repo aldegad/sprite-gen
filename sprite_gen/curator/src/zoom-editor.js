@@ -906,12 +906,13 @@ function openZoom(stateName, idx, keepWidth) {
       syncLines();
       commit();
     };
-    bm.cfg = e0.breathe ? clone(e0.breathe) : { depth: 0.06, breaths: 1, lag: 0.1, rigid_row: null, anatomy: null };
+    bm.cfg = e0.breathe ? clone(e0.breathe)
+      : { depth: 0.06, breaths: 1, lag: 0.1, rigid_row: null, axis_x: null, torso_half: null, anatomy: null };
 
     // 실루엣 지오메트리 (선 표시 기준): 이미지 로드 전 빈 합성이면 재시도
     // (실사고 2026-07-17 로드 레이스 — 선이 바닥에 붙고 드래그 죽음)
     let btop = 0;
-    let bh = 1;
+    let bleft = 0;
 
     // 강체 경계 1개 — 이 위는 안 움직인다. 드래그 = 즉시 반영, 놓으면 서버에 다시
     // 물어 해부를 갱신한다(검출 SSoT = 서버). 구 방식의 분할선 N개는 폐기됐다:
@@ -925,7 +926,8 @@ function openZoom(stateName, idx, keepWidth) {
       if (anatomyBusy) { anatomyPending = true; return; }
       anatomyBusy = true;
       try {
-        const { anatomy } = await fetchBreatheAnatomy(stateName, bm.cfg.rigid_row);
+        const { anatomy } = await fetchBreatheAnatomy(
+          stateName, bm.cfg.rigid_row, bm.cfg.axis_x, bm.cfg.torso_half);
         bm.cfg.anatomy = anatomy;
         syncLines();
         commit();
@@ -940,23 +942,19 @@ function openZoom(stateName, idx, keepWidth) {
       anatomyBusy = false;
       if (anatomyPending) { anatomyPending = false; await refreshAnatomy(); }
     };
-    function wireLine(ln) {
+    function wireLine(ln, apply) {
+      // apply(e2, rect) 가 드래그 좌표를 bm.cfg 의 의도 값으로 바꾼다. 드래그 중에는
+      // `anatomy` 를 **손대지 않는다** — 의도만 바꿔 두면 미러가 "캐시가 의도와
+      // 어긋난다" 로 거부해 원본을 보여주고, pointerup 의 refreshAnatomy() 가 서버
+      // 값으로 갱신한다. 의도만 갈아끼우면 파생값(basis_row 등)이 낡은 채 저장돼
+      // 굽기와 갈린다 (슉슉이 실측 2026-07-25: _dome 에서 11/12 위상 불일치).
       ln.addEventListener("pointerdown", (ev) => {
         ev.preventDefault();
         ev.stopImmediatePropagation();
         if (!bm.geomReady || !bm.cfg.anatomy) return;
         ln.setPointerCapture(ev.pointerId);
         const onMove = (e2) => {
-          const r = stage.getBoundingClientRect();
-          const yCell = ((e2.clientY - r.top) / r.height) * cellH;
-          // 해부는 변형 후 프레임 기준이므로 셀 좌표의 콘텐츠 상단(btop)이 곧 0행이다.
-          const row = Math.round(yCell - btop);
-          bm.cfg.rigid_row = Math.min(bm.cfg.anatomy.height - 2, Math.max(1, row));
-          // 드래그 중에는 `anatomy` 를 **손대지 않는다.** rigid_row 만 바꿔 놓으면 미러가
-          // "캐시가 의도와 어긋난다" 로 거부해 원본을 보여주고, pointerup 의
-          // refreshAnatomy() 가 서버 값으로 갱신한다. 여기서 rigid_row 만 갈아끼우면
-          // basis_row·torso_half 가 낡은 채 사이드카에 저장돼 굽기와 갈린다
-          // (슉슉이 실측 2026-07-25: _dome 에서 11/12 위상 불일치, 최대 320바이트).
+          apply(e2, stage.getBoundingClientRect());
           syncLines();
           commit();
         };
@@ -970,20 +968,57 @@ function openZoom(stateName, idx, keepWidth) {
         ln.addEventListener("pointerup", onUp);
       });
     }
+    // 영역 조정 4선 (2026-07-30 수홍): [0] 강체 경계(가로) [1] 몸통 축(세로 중앙)
+    // [2][3] 몸통 반폭(세로 좌/우, 축 대칭 — 어느 쪽을 끌든 같은 torso_half 가 바뀐다).
+    // 축·반폭은 부속(팔·날개) 보호 밴드가 어디서 시작하는지를 사람이 정하는 손잡이다.
+    const cellCol = (e2, r) => ((e2.clientX - r.left) / r.width) * cellW - bleft;
+    const LINES = [
+      { cls: "breathe-line", hint: "breatheHint", apply: (e2, r) => {
+        const yCell = ((e2.clientY - r.top) / r.height) * cellH;
+        // 해부는 변형 후 프레임 기준이므로 셀 좌표의 콘텐츠 상단(btop)이 곧 0행이다.
+        const row = Math.round(yCell - btop);
+        bm.cfg.rigid_row = Math.min(bm.cfg.anatomy.height - 2, Math.max(1, row));
+      } },
+      { cls: "breathe-line breathe-line-v breathe-axis", hint: "breatheAxisHint", apply: (e2, r) => {
+        const col = Math.round(cellCol(e2, r));
+        bm.cfg.axis_x = Math.min(bm.cfg.anatomy.width - 1, Math.max(0, col));
+      } },
+      { cls: "breathe-line breathe-line-v", hint: "breatheTorsoHint", apply: (e2, r) => {
+        const axis = bm.cfg.axis_x != null ? bm.cfg.axis_x : bm.cfg.anatomy.axis_x;
+        const half = Math.round(Math.abs(cellCol(e2, r) - axis));
+        bm.cfg.torso_half = Math.min(bm.cfg.anatomy.width, Math.max(1, half));
+      } },
+      { cls: "breathe-line breathe-line-v", hint: "breatheTorsoHint", apply: (e2, r) => {
+        const axis = bm.cfg.axis_x != null ? bm.cfg.axis_x : bm.cfg.anatomy.axis_x;
+        const half = Math.round(Math.abs(cellCol(e2, r) - axis));
+        bm.cfg.torso_half = Math.min(bm.cfg.anatomy.width, Math.max(1, half));
+      } },
+    ];
     const syncLines = () => {
       const anat = bm.cfg.anatomy;
-      while (lineEls.length > (anat ? 1 : 0)) lineEls.pop().remove();
+      while (lineEls.length > (anat ? LINES.length : 0)) lineEls.pop().remove();
       if (!anat) return;
-      if (!lineEls.length) {
+      while (lineEls.length < LINES.length) {
+        const spec = LINES[lineEls.length];
         const ln = document.createElement("div");
-        ln.className = "breathe-line";
-        ln.setAttribute("data-tip", t("breatheHint"));
-        wireLine(ln);
+        ln.className = spec.cls;
+        ln.setAttribute("data-tip", t(spec.hint));
+        wireLine(ln, spec.apply);
         stage.appendChild(ln);
         lineEls.push(ln);
       }
+      const vis = bm.geomReady && bm.enabled ? "" : "hidden";
       lineEls[0].style.top = `${((btop + anat.rigid_row) / cellH) * 100}%`;
-      lineEls[0].style.visibility = bm.geomReady && bm.enabled ? "" : "hidden";
+      const axisCol = bleft + anat.axis_x;
+      lineEls[1].style.left = `${((axisCol + 0.5) / cellW) * 100}%`;
+      lineEls[2].style.left = `${((axisCol - anat.torso_half + 0.5) / cellW) * 100}%`;
+      lineEls[3].style.left = `${((axisCol + anat.torso_half + 0.5) / cellW) * 100}%`;
+      for (const ln of lineEls) ln.style.visibility = vis;
+      // 몸통 반폭 선은 부속 보호가 실제로 걸릴 때만 실선처럼 진하게 — 그 판정
+      // (max_half >= 1.3 x torso_half)은 굽기 protect() 와 같은 식이다. 흐릿한
+      // 상태에서도 끌 수는 있다 (안쪽으로 끌면 보호가 켜진다).
+      const appendage = anat.max_half >= 1.3 * anat.torso_half;
+      for (const ln of [lineEls[2], lineEls[3]]) ln.style.opacity = appendage ? "" : "0.35";
     };
 
     // 굽기가 해부를 확정하는 프레임 = 재생 첫 슬롯. 신선도 판정은 이 프레임으로만 한다
@@ -1060,19 +1095,19 @@ function openZoom(stateName, idx, keepWidth) {
         drawFrameInto(cctx, canonImg, getTransform(stateName, refIdx), cellW, cellH,
           snapScaleFor(stateName), getPixelOps(stateName, refIdx));
         const dd = cctx.getImageData(0, 0, cellW, cellH).data;
-        let ttop = cellH, tbot = 0;
+        let ttop = cellH, tbot = 0, tleft = cellW;
         for (let y = 0; y < cellH; y++) {
           for (let x = 0; x < cellW; x++) {
             if (dd[(y * cellW + x) * 4 + 3] >= 40) {
               if (y < ttop) ttop = y;
               if (y + 1 > tbot) tbot = y + 1;
-              break;
+              if (x < tleft) tleft = x;
             }
           }
         }
         if (tbot <= ttop) return false; // 아직 빈 합성 — 재시도 경로가 처리
         btop = ttop;
-        bh = Math.max(1, tbot - ttop);
+        bleft = tleft;
         if (!bm.cfg.anatomy) {
           // 해부 숫자는 서버에서만 나온다 — 여기서 추정하지 않는다 (b안, 2026-07-25).
           // 도착 전까지 경계선은 숨겨져 있고 프리뷰는 원본 그대로다.
@@ -1200,6 +1235,8 @@ function openZoom(stateName, idx, keepWidth) {
     autoBtn.title = t("tBreatheAuto");
     autoBtn.addEventListener("click", () => {
       bm.cfg.rigid_row = null;
+      bm.cfg.axis_x = null;       // 영역 오버라이드도 같은 버튼으로 자동 복귀 (2026-07-30)
+      bm.cfg.torso_half = null;
       refreshAnatomy();
       pushHist();
     });
