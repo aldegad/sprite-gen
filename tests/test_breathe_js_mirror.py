@@ -28,7 +28,7 @@ from sprite_gen.breathe import (MAX_ROW_STRAIN, anatomy_fingerprint,  # noqa: E4
                                 row_strain)
 from sprite_gen.extract import solid_alpha_bbox  # noqa: E402
 from sprite_gen.serve_curation import CURATOR_DIR  # noqa: E402
-from tests.test_breathe import CFG, _dome, _humanoid, _key, _winged  # noqa: E402
+from tests.test_breathe import CFG, _dome, _humanoid, _key, _small_outlined, _winged  # noqa: E402
 
 CURATOR_BREATHE = CURATOR_DIR / "src" / "breathe.js"
 PHASES = [i / 12 for i in range(12)]
@@ -82,10 +82,17 @@ def _rgba(image):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 가 없어 JS 미러를 실행할 수 없다")
-@pytest.mark.parametrize("build", [_humanoid, _winged, _dome], ids=["humanoid", "winged", "dome"])
-def test_curator_mirror_is_byte_identical_to_the_bake(build, tmp_path):
+@pytest.mark.parametrize("build,overrides", [
+    (_humanoid, {}), (_winged, {}), (_dome, {}),
+    # 다듬기(_thin_outline_1px/breatheThinOutline)가 **실제로 픽셀을 치환하는** 유일한
+    # 픽스처 — 기본 3종은 depth 0.06 에서 다듬기가 0바이트라, 이 케이스가 없으면
+    # JS 다듬기 미러가 파이썬과 갈라져도 패리티 스위트가 못 잡는다
+    # (opus-4.8 validator 지정 2026-07-30: depth 0.08 24위상에서 294바이트 치환 실측).
+    (_small_outlined, {"depth": 0.08, "breaths": 3}),
+], ids=["humanoid", "winged", "dome", "small-outlined-thinning"])
+def test_curator_mirror_is_byte_identical_to_the_bake(build, overrides, tmp_path):
     src = build()
-    cfg = dict(CFG)
+    cfg = {**CFG, **overrides}
     cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
 
     payload = {
