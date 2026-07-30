@@ -371,66 +371,98 @@ function breatheComposite(base, cfg, phase) {
   return out;
 }
 
-// 워프된 프레임의 실루엣 외곽선 2px 계단 모서리를 1px 로 정규화 — 파이썬
-// `_thin_outline_1px` 의 바이트 동일 미러. 각 열/행의 실루엣 끝에서
-// '어두움-어두움-내부색' 3연속의 안쪽을 내부색으로 되돌린다. 실루엣 끝 픽셀
-// (row_end/col_end)은 다른 축의 1px 외곽선이므로 보호한다. 알파는 절대 안 바꾼다.
+// 워프된 실루엣 외곽선 2px 를 **안쪽점 기준** 1px 로 정규화 — 파이썬 `_thin_outline_1px`
+// 의 바이트 동일 미러 (고정점 반복: 한 패스의 제거가 새 돌출점을 만들 수 있다).
+// 패턴1: 끝 '어두움-어두움-내부색' → 바깥 픽셀 제거(알파 0). 패턴2: 어두운 끝점이
+// 위아래 행 끝보다 정확히 1px 바깥으로 튄 단독 돌출점 → 제거하고 안쪽 자리에 그 색을
+// 그린다(가로 한정 — 세로 1px 계단은 작가 의도와 구분 불가). 안전 필터: 제거로 내부색
+// 노출·어두운 선 중간 구멍이 생기는 후보는 제외, 고정점까지 재평가.
 function breatheThinOutline(od, w, h) {
-  const op = (x, y) => od[(y * w + x) * 4 + 3] !== 0;
-  const rowEnd = new Set();
-  const colEnd = new Set();
-  for (let y = 0; y < h; y++) {
-    let l = -1, r = -1;
-    for (let x = 0; x < w; x++) if (op(x, y)) { if (l < 0) l = x; r = x; }
-    if (l >= 0) { rowEnd.add(l + "," + y); rowEnd.add(r + "," + y); }
-  }
-  for (let x = 0; x < w; x++) {
-    let t = -1, b = -1;
-    for (let y = 0; y < h; y++) if (op(x, y)) { if (t < 0) t = y; b = y; }
-    if (t >= 0) { colEnd.add(x + "," + t); colEnd.add(x + "," + b); }
-  }
-  // 원본 스냅샷에서만 읽고 한 번에 치환 (열/행 순서 무관 — 파이썬과 같은 성질)
+  while (breatheThinOutlinePass(od, w, h) > 0) { /* 불투명 픽셀 단조 감소 — 종료 보장 */ }
+}
+
+function breatheThinOutlinePass(od, w, h) {
   const snap = Uint8ClampedArray.from(od);
-  const sOp = (x, y) => snap[(y * w + x) * 4 + 3] !== 0;
-  const sDk = (x, y) => {
+  const op = (x, y) => x >= 0 && x < w && y >= 0 && y < h && snap[(y * w + x) * 4 + 3] !== 0;
+  const dk = (x, y) => {
+    if (!op(x, y)) return false;
     const i = (y * w + x) * 4;
-    return snap[i + 3] !== 0 && (0.299 * snap[i] + 0.587 * snap[i + 1] + 0.114 * snap[i + 2]) < 96;
+    return (0.299 * snap[i] + 0.587 * snap[i + 1] + 0.114 * snap[i + 2]) < 96;
   };
-  const repl = new Map();   // "x,y" -> [sx, sy]
+  // 후보: "x,y" -> 'v'|'h' (같은 픽셀이 양축 후보면 먼저 등록된 세로가 이긴다 — 파이썬 setdefault)
+  const cand = new Map();
+  const put = (x, y, ax) => { const k = x + "," + y; if (!cand.has(k)) cand.set(k, ax); };
   for (let x = 0; x < w; x++) {
     let t0 = -1, b0 = -1;
-    for (let y = 0; y < h; y++) if (sOp(x, y)) { if (t0 < 0) t0 = y; b0 = y; }
+    for (let y = 0; y < h; y++) if (op(x, y)) { if (t0 < 0) t0 = y; b0 = y; }
     if (t0 < 0) continue;
-    if (t0 + 2 <= b0 && sDk(x, t0) && sDk(x, t0 + 1) && !rowEnd.has(x + "," + (t0 + 1))
-        && sOp(x, t0 + 2) && !sDk(x, t0 + 2)) {
-      repl.set(x + "," + (t0 + 1), [x, t0 + 2]);
-    }
-    if (b0 - 2 >= t0 && sDk(x, b0) && sDk(x, b0 - 1) && !rowEnd.has(x + "," + (b0 - 1))
-        && sOp(x, b0 - 2) && !sDk(x, b0 - 2)) {
-      repl.set(x + "," + (b0 - 1), [x, b0 - 2]);
-    }
+    if (t0 + 2 <= b0 && dk(x, t0) && dk(x, t0 + 1) && op(x, t0 + 2) && !dk(x, t0 + 2)) put(x, t0, "v");
+    if (b0 - 2 >= t0 && dk(x, b0) && dk(x, b0 - 1) && op(x, b0 - 2) && !dk(x, b0 - 2)) put(x, b0, "v");
   }
+  const rowLo = new Map();
+  const rowHi = new Map();
   for (let y = 0; y < h; y++) {
     let l0 = -1, r0 = -1;
-    for (let x = 0; x < w; x++) if (sOp(x, y)) { if (l0 < 0) l0 = x; r0 = x; }
+    for (let x = 0; x < w; x++) if (op(x, y)) { if (l0 < 0) l0 = x; r0 = x; }
     if (l0 < 0) continue;
-    if (l0 + 2 <= r0 && sDk(l0, y) && sDk(l0 + 1, y) && !colEnd.has((l0 + 1) + "," + y)
-        && sOp(l0 + 2, y) && !sDk(l0 + 2, y)) {
-      const k = (l0 + 1) + "," + y;
-      if (!repl.has(k)) repl.set(k, [l0 + 2, y]);
+    rowLo.set(y, l0); rowHi.set(y, r0);
+    if (l0 + 2 <= r0 && dk(l0, y) && dk(l0 + 1, y) && op(l0 + 2, y) && !dk(l0 + 2, y)) put(l0, y, "h");
+    if (r0 - 2 >= l0 && dk(r0, y) && dk(r0 - 1, y) && op(r0 - 2, y) && !dk(r0 - 2, y)) put(r0, y, "h");
+  }
+  const moves = new Map();   // "x,y"(안쪽) -> 스냅샷 색 인덱스
+  for (const y of [...rowLo.keys()].sort((a, b) => a - b)) {
+    const m = rowLo.get(y);
+    const upLo = rowLo.get(y - 1), dnLo = rowLo.get(y + 1);
+    if (upLo !== undefined && dnLo !== undefined && Math.min(upLo, dnLo) - m === 1
+        && dk(m, y) && op(m + 1, y)) {
+      put(m, y, "h");
+      if (!dk(m + 1, y)) moves.set((m + 1) + "," + y, (y * w + m) * 4);
     }
-    if (r0 - 2 >= l0 && sDk(r0, y) && sDk(r0 - 1, y) && !colEnd.has((r0 - 1) + "," + y)
-        && sOp(r0 - 2, y) && !sDk(r0 - 2, y)) {
-      const k = (r0 - 1) + "," + y;
-      if (!repl.has(k)) repl.set(k, [r0 - 2, y]);
+    const r = rowHi.get(y);
+    const upHi = rowHi.get(y - 1), dnHi = rowHi.get(y + 1);
+    if (upHi !== undefined && dnHi !== undefined && r - Math.max(upHi, dnHi) === 1
+        && dk(r, y) && op(r - 1, y)) {
+      put(r, y, "h");
+      if (!dk(r - 1, y)) moves.set((r - 1) + "," + y, (y * w + r) * 4);
     }
   }
-  for (const [key, [sx, sy]] of repl) {
-    const [x, y] = key.split(",").map(Number);
+  // 안전 필터 고정점 (파이썬과 동일한 정렬 순회·재시작)
+  const drop = new Set(cand.keys());
+  const keyCmp = (a, b) => {
+    const [ax, ay] = a.split(",").map(Number);
+    const [bx, by] = b.split(",").map(Number);
+    return ax !== bx ? ax - bx : ay - by;
+  };
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const k of [...drop].sort(keyCmp)) {
+      const [x, y] = k.split(",").map(Number);
+      const neigh = cand.get(k) === "h" ? [[x, y - 1], [x, y + 1]] : [[x - 1, y], [x + 1, y]];
+      let keptDark = 0;
+      let ok = true;
+      for (const [nx, ny] of neigh) {
+        if (!op(nx, ny) || drop.has(nx + "," + ny)) continue;
+        if (dk(nx, ny)) keptDark += 1;
+        else { ok = false; break; }
+      }
+      if (!ok || keptDark >= 2) { drop.delete(k); changed = true; break; }
+    }
+  }
+  for (const k of drop) {
+    const [x, y] = k.split(",").map(Number);
     const d = (y * w + x) * 4;
-    const s = (sy * w + sx) * 4;
-    od[d] = snap[s]; od[d + 1] = snap[s + 1]; od[d + 2] = snap[s + 2]; od[d + 3] = snap[s + 3];
+    od[d] = 0; od[d + 1] = 0; od[d + 2] = 0; od[d + 3] = 0;
   }
+  let applied = drop.size;
+  for (const [k, s] of moves) {
+    if (drop.has(k)) continue;
+    const [x, y] = k.split(",").map(Number);
+    const d = (y * w + x) * 4;
+    od[d] = snap[s]; od[d + 1] = snap[s + 1]; od[d + 2] = snap[s + 2]; od[d + 3] = snap[s + 3];
+    applied += 1;
+  }
+  return applied;
 }
 
 // 첫 활성화 기본값: 서버에 해부를 물어본다 (검출 SSoT = 서버).

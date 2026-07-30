@@ -256,6 +256,48 @@ def test_region_overrides_change_the_anatomy_and_the_bake() -> None:
                for i in range(12)), "torso_half 오버라이드가 굽기에 아무 효과가 없다"
 
 
+def test_no_intermittent_dark_edge_protrusion() -> None:
+    """변형 프레임의 좌우 실루엣 끝에 1px 어두운 돌출점이 남지 않는다 (안쪽점 기준, 2026-07-30).
+
+    바깥점 기준 다듬기(초기 구현)는 2점 지점의 바깥점을 선으로 남겨, 이웃 행들과 1px
+    어긋난 돌출점이 위상마다 나타났다 사라졌다 했다 (수홍 실기기 판정: "안쪽 검은점
+    기준이 더 정확하다"). 지금은 바깥 복제분을 제거하고 안쪽 자리에 선을 그린다 —
+    위아래 행 끝보다 바깥으로 튄 어두운 끝점이 0 이어야 한다. 원본에 없던 돌출만
+    문제이므로 원본 돌출 수를 기준치로 삼는다."""
+    src = _small_outlined()
+    cfg = dict(CFG)
+    cfg["depth"] = 0.08
+    cfg["breaths"] = 3
+    cfg["anatomy"] = freeze_anatomy(src, cfg, _key())
+    anat = resolve_anatomy(src, cfg)
+
+    def protrusions(frame):
+        px = frame.load()
+        w, h = frame.size
+        dark = lambda p: p[3] >= 128 and (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) < 96
+        opaque = lambda p: p[3] >= 128
+        lo, hi = {}, {}
+        for y in range(h):
+            xs = [x for x in range(w) if opaque(px[x, y])]
+            if xs:
+                lo[y], hi[y] = xs[0], xs[-1]
+        n = 0
+        for y, m in lo.items():
+            if y - 1 in lo and y + 1 in lo and m < lo[y - 1] and m < lo[y + 1] and dark(px[m, y]):
+                n += 1
+        for y, r in hi.items():
+            if y - 1 in hi and y + 1 in hi and r > hi[y - 1] and r > hi[y + 1] and dark(px[r, y]):
+                n += 1
+        return n
+
+    base = protrusions(src)
+    for i in range(24):
+        frame = phase_frame(src, cfg, i / 24, anat)
+        got = protrusions(frame)
+        assert got <= base, (
+            f"위상 {i / 24:.3f}: 어두운 끝 돌출점 {got} > 원본 {base} — 간헐 2줄/돌출점 회귀")
+
+
 def test_thinning_normalizes_warp_doubled_outline(monkeypatch) -> None:
     """워프가 복제로 두껍게 만든 외곽선을 다듬기가 1px 로 정규화한다 (볼 2줄 회귀, 2026-07-30).
 

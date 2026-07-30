@@ -128,66 +128,116 @@ def _dark(p) -> bool:
 
 
 def _thin_outline_1px(out: Image.Image) -> None:
-    """워프된 프레임의 실루엣 외곽선 2px 계단 모서리를 1px 로 정규화 (제자리 수정).
+    """안쪽점 기준 다듬기를 고정점까지 반복 — 한 패스의 제거가 새 돌출점을 만들 수 있다.
 
-    세로 스쿼시&스트레치는 정수 행 복제/삭제라, 가파른 대각선 외곽선의 계단 모서리
-    (세로로 2px 겹치는 지점)가 위상마다 위치·개수를 바꾸며 "가로 2줄 검은선" 으로 읽힌다
-    (실측 2026-07-30: 문어 idle 왼쪽 볼 대각선, 수홍 발견). 각 열/행의 실루엣 끝에서
-    '어두움-어두움-내부색' 3연속을 만나면 안쪽을 내부색으로 되돌려 바깥 1px 만 외곽선으로
-    남긴다 — 모든 위상에 같은 규칙이 걸리므로 모서리가 위상 간에 두꺼워졌다 얇아졌다
-    하지 않는다.
+    실측(문어 idle 위상 0): 2점 패턴의 바깥점 (2,13) 을 지우면 남은 (3,13) 이 이웃 행보다
+    1px 튀어나온 새 돌출점이 되는데, 단일 패스 스냅샷은 그걸 못 본다. 각 패스가 불투명
+    픽셀을 단조 감소시키므로 종료가 보장된다 (JS 미러 동일)."""
+    while _thin_outline_pass(out):
+        pass
+
+
+def _thin_outline_pass(out: Image.Image) -> int:
+    """워프된 프레임의 실루엣 외곽선 2px 를 **안쪽점 기준** 1px 로 정규화하는 1패스.
+
+    세로 스쿼시&스트레치는 정수 행 복제/삭제라, 가파른 대각선 외곽선이 국소적으로 2px
+    두께가 되며 위상마다 위치를 바꿔 "간헐 2줄 검은점" 으로 읽힌다 (실측 2026-07-30:
+    문어 idle 왼쪽 볼, 수홍 발견). 각 열/행의 실루엣 끝에서 '어두움-어두움-내부색'
+    3연속을 만나면 **바깥 픽셀을 제거(알파 0)** 해 이웃 행들과 정렬된 **안쪽** 선만
+    남긴다 — 초기 구현은 안쪽을 내부색으로 되돌려 바깥점을 선으로 남겼는데, 돌출한
+    바깥점이 이웃 행 선과 어긋나 여전히 2줄로 읽혔다 (수홍 실기기 판정 2026-07-30:
+    "안쪽 검은점 기준이 더 정확하다").
+
+    안전 필터 — 제거가 새 결함을 만들면 안 된다:
+      · 제거된 자리의 수직(가로 패턴)/수평(세로 패턴) 이웃이 불투명 내부색이면 제거로
+        실루엣 끝에 내부색이 노출된다 → 제외.
+      · 이웃 양쪽이 제거되지 않는 어두운 픽셀이면 어두운 선 **중간에 구멍**이 난다 → 제외.
+      · 이웃이 같은 패스에서 같이 제거되는 후보면 안전(돌출 열/행이 통째로 사라짐).
+      제외가 다른 후보의 안전성을 바꾸므로 고정점까지 반복한다(결정론 — 정렬 순회).
 
     호출자는 **변형이 실제로 일어난 프레임에만** 부른다(_warp 의 deformed 게이트). 변형 0
-    프레임은 이 함수를 타지 않아 "변형 0 = 원본 동일" 계약이 유지되고, 원본에 작가가
-    그린 계단 모서리는 정지 상태에서 그대로다.
-
-    **알파(모양)는 절대 바꾸지 않는다** — 불투명 픽셀의 색만 교체하므로 실루엣 연결이
-    끊기지 않는다. 원본 스냅샷에서만 읽고 한 번에 치환하므로 열/행 순서와 무관하게 결과가
-    같다(JS 미러와 바이트 동일하기 위한 성질)."""
+    프레임은 이 함수를 타지 않아 "변형 0 = 원본 동일" 계약이 유지된다. 원본 스냅샷에서만
+    읽고 한 번에 적용하므로 순회 순서와 무관하게 결과가 같다(JS 미러 바이트 동일 성질)."""
     src = out.load()
     w, h = out.size
-    op = lambda x, y: bool(src[x, y][3])
-    # 실루엣 끝 좌표 — 그 픽셀 자체가 다른 축의 1px 외곽선이므로 다듬기가 지우면 안 된다.
-    # (실측: 세로 다듬기가 우측 가장자리 열의 복원된 발끝 외곽선을 내부색으로 바꿔
-    # 발끝 소실이 재발했다 — 좌우 끝은 세로 패스에서, 상하 끝은 가로 패스에서 보호한다.)
-    row_end: set[tuple[int, int]] = set()
-    col_end: set[tuple[int, int]] = set()
-    for y in range(h):
-        xs = [x for x in range(w) if op(x, y)]
-        if xs:
-            row_end.add((xs[0], y))
-            row_end.add((xs[-1], y))
-    for x in range(w):
-        ys = [y for y in range(h) if op(x, y)]
-        if ys:
-            col_end.add((x, ys[0]))
-            col_end.add((x, ys[-1]))
-    # (x, y) -> 내부색을 가져올 (sx, sy). 세로 패스가 먼저 잡으면 가로는 덮지 않는다.
-    repl: dict[tuple[int, int], tuple[int, int]] = {}
+    op = lambda x, y: 0 <= x < w and 0 <= y < h and bool(src[x, y][3])
+    dark = lambda x, y: op(x, y) and _dark(src[x, y])
+    # 후보 수집: (바깥픽셀 좌표) -> 패턴 축 ('h' = 행 끝 패턴, 'v' = 열 끝 패턴)
+    cand: dict[tuple[int, int], str] = {}
     for x in range(w):
         ys = [y for y in range(h) if op(x, y)]
         if not ys:
             continue
         t0, b0 = ys[0], ys[-1]
-        if (t0 + 2 <= b0 and _dark(src[x, t0]) and _dark(src[x, t0 + 1]) and (x, t0 + 1) not in row_end
-                and op(x, t0 + 2) and not _dark(src[x, t0 + 2])):
-            repl[(x, t0 + 1)] = (x, t0 + 2)
-        if (b0 - 2 >= t0 and _dark(src[x, b0]) and _dark(src[x, b0 - 1]) and (x, b0 - 1) not in row_end
-                and op(x, b0 - 2) and not _dark(src[x, b0 - 2])):
-            repl[(x, b0 - 1)] = (x, b0 - 2)
+        if t0 + 2 <= b0 and dark(x, t0) and dark(x, t0 + 1) and op(x, t0 + 2) and not dark(x, t0 + 2):
+            cand[(x, t0)] = "v"
+        if b0 - 2 >= t0 and dark(x, b0) and dark(x, b0 - 1) and op(x, b0 - 2) and not dark(x, b0 - 2):
+            cand[(x, b0)] = "v"
+    # 행 끝 좌표 맵 (돌출점 판정용)
+    row_lo: dict[int, int] = {}
+    row_hi: dict[int, int] = {}
     for y in range(h):
         xs = [x for x in range(w) if op(x, y)]
         if not xs:
             continue
+        row_lo[y], row_hi[y] = xs[0], xs[-1]
         l0, r0 = xs[0], xs[-1]
-        if (l0 + 2 <= r0 and _dark(src[l0, y]) and _dark(src[l0 + 1, y]) and (l0 + 1, y) not in col_end
-                and op(l0 + 2, y) and not _dark(src[l0 + 2, y])):
-            repl.setdefault((l0 + 1, y), (l0 + 2, y))
-        if (r0 - 2 >= l0 and _dark(src[r0, y]) and _dark(src[r0 - 1, y]) and (r0 - 1, y) not in col_end
-                and op(r0 - 2, y) and not _dark(src[r0 - 2, y])):
-            repl.setdefault((r0 - 1, y), (r0 - 2, y))
-    for (x, y), (sx, sy) in repl.items():
-        out.putpixel((x, y), src[sx, sy])
+        if l0 + 2 <= r0 and dark(l0, y) and dark(l0 + 1, y) and op(l0 + 2, y) and not dark(l0 + 2, y):
+            cand.setdefault((l0, y), "h")
+        if r0 - 2 >= l0 and dark(r0, y) and dark(r0 - 1, y) and op(r0 - 2, y) and not dark(r0 - 2, y):
+            cand.setdefault((r0, y), "h")
+    # 1px 단독 돌출점 — 그 행의 어두운 끝점이 위아래 행 끝보다 정확히 1px 바깥으로 튀어나온
+    # 경우(가로 매핑 반올림이 행마다 갈린 아티팩트). 2점 패턴이 아니라 위 후보에 안 잡힌다.
+    # 점을 지우고 **안쪽 자리에 그 색을 그대로 그린다** — 이웃 행들과 정렬된 안쪽 선이 된다.
+    # 안전: 돌출 정의상 (x, y±1) 은 투명이라(이웃 행 끝이 더 안쪽) 제거로 노출·구멍이 없다.
+    # 가로(좌우) 한정 — 세로(정수리) 1px 계단은 작가 의도(머리카락 스파이크류)와 구분이
+    # 안 돼 건드리지 않는다.
+    moves: dict[tuple[int, int], tuple[int, int, int, int]] = {}   # 안쪽좌표 -> 칠할 색
+    for y in sorted(row_lo):
+        up_lo, dn_lo = row_lo.get(y - 1), row_lo.get(y + 1)
+        m = row_lo[y]
+        if (up_lo is not None and dn_lo is not None and min(up_lo, dn_lo) - m == 1
+                and dark(m, y) and op(m + 1, y)):
+            cand.setdefault((m, y), "h")
+            if not dark(m + 1, y):
+                moves[(m + 1, y)] = src[m, y]
+        up_hi, dn_hi = row_hi.get(y - 1), row_hi.get(y + 1)
+        r = row_hi[y]
+        if (up_hi is not None and dn_hi is not None and r - max(up_hi, dn_hi) == 1
+                and dark(r, y) and op(r - 1, y)):
+            cand.setdefault((r, y), "h")
+            if not dark(r - 1, y):
+                moves[(r - 1, y)] = src[r, y]
+    # 안전 필터 고정점: 제거 대상에서 빠진 픽셀은 이웃 후보의 kept-dark 가 되므로 반복.
+    drop = set(cand)
+    changed = True
+    while changed:
+        changed = False
+        for p in sorted(drop):
+            x, y = p
+            neigh = ((x, y - 1), (x, y + 1)) if cand[p] == "h" else ((x - 1, y), (x + 1, y))
+            kept_dark = 0
+            ok = True
+            for nx, ny in neigh:
+                if not op(nx, ny) or (nx, ny) in drop:
+                    continue
+                if dark(nx, ny):
+                    kept_dark += 1
+                else:
+                    ok = False        # 내부색이 실루엣 끝으로 노출된다
+                    break
+            if not ok or kept_dark >= 2:  # 어두운 선 중간 구멍
+                drop.discard(p)
+                changed = True
+                break
+    for x, y in drop:
+        out.putpixel((x, y), (0, 0, 0, 0))
+    applied = len(drop)
+    for (x, y), color in moves.items():
+        if (x, y) not in drop:
+            out.putpixel((x, y), color)
+            applied += 1
+    return applied
 
 
 # ── 워프 ────────────────────────────────────────────────────────────

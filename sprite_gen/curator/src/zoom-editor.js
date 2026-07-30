@@ -883,7 +883,7 @@ function openZoom(stateName, idx, keepWidth) {
     // enabled = 호흡 레이어 on/off (수홍 2026-07-19: 이 뷰가 유일한 확대 재생 뷰라
     // 꺼진 상태로 열거나 여기서 꺼도 무호흡 애니메이션이 그대로 재생돼야 한다).
     // 열 때 줄 체크박스 truth 를 승계 — 꺼진 행을 열어도 강제로 켜지 않는다.
-    const bm = { cfg: null, enabled: !!e0.breathe, geomReady: false, hist: [], histPos: -1, cancelled: false, tick: 0 };
+    const bm = { cfg: null, enabled: !!e0.breathe, geomReady: false, hist: [], histPos: -1, cancelled: false, tick: 0, dragging: false };
     const clone = (o) => JSON.parse(JSON.stringify(o));
     const commit = () => { // 조정 = 즉시 truth 반영 + 디바운스 저장 (수홍: 적용 대기 금지)
       if (bm.cancelled) return;
@@ -953,14 +953,16 @@ function openZoom(stateName, idx, keepWidth) {
         ev.stopImmediatePropagation();
         if (!bm.geomReady || !bm.cfg.anatomy) return;
         ln.setPointerCapture(ev.pointerId);
+        bm.dragging = true;      // 프리뷰는 직전 해부로 계속 재생 (renderTick 참조)
         const onMove = (e2) => {
           apply(e2, stage.getBoundingClientRect());
-          syncLines();
-          commit();
-        };
+          syncLines();           // 선은 의도값을 즉시 따라온다. commit 은 놓을 때 한 번 —
+        };                       // per-move 저장/리빌드는 드래그를 무겁게만 한다.
         const onUp = () => {
           ln.removeEventListener("pointermove", onMove);
           ln.removeEventListener("pointerup", onUp);
+          bm.dragging = false;
+          commit();
           refreshAnatomy();  // basis_row 등 파생값은 서버가 다시 계산한다
           pushHist();
         };
@@ -1008,16 +1010,21 @@ function openZoom(stateName, idx, keepWidth) {
         lineEls.push(ln);
       }
       const vis = bm.geomReady && bm.enabled ? "" : "hidden";
-      lineEls[0].style.top = `${((btop + anat.rigid_row) / cellH) * 100}%`;
-      const axisCol = bleft + anat.axis_x;
+      // 선 위치는 **의도값 우선** — anatomy 는 서버 재검출 후에야 갱신되므로 anatomy 만
+      // 읽으면 드래그 중 선이 커서를 안 따라온다 (수홍 실기기 2026-07-30).
+      const rigid = bm.cfg.rigid_row != null ? bm.cfg.rigid_row : anat.rigid_row;
+      const axis = bm.cfg.axis_x != null ? bm.cfg.axis_x : anat.axis_x;
+      const torso = bm.cfg.torso_half != null ? bm.cfg.torso_half : anat.torso_half;
+      lineEls[0].style.top = `${((btop + rigid) / cellH) * 100}%`;
+      const axisCol = bleft + axis;
       lineEls[1].style.left = `${((axisCol + 0.5) / cellW) * 100}%`;
-      lineEls[2].style.left = `${((axisCol - anat.torso_half + 0.5) / cellW) * 100}%`;
-      lineEls[3].style.left = `${((axisCol + anat.torso_half + 0.5) / cellW) * 100}%`;
+      lineEls[2].style.left = `${((axisCol - torso + 0.5) / cellW) * 100}%`;
+      lineEls[3].style.left = `${((axisCol + torso + 0.5) / cellW) * 100}%`;
       for (const ln of lineEls) ln.style.visibility = vis;
       // 몸통 반폭 선은 부속 보호가 실제로 걸릴 때만 실선처럼 진하게 — 그 판정
       // (max_half >= 1.3 x torso_half)은 굽기 protect() 와 같은 식이다. 흐릿한
       // 상태에서도 끌 수는 있다 (안쪽으로 끌면 보호가 켜진다).
-      const appendage = anat.max_half >= 1.3 * anat.torso_half;
+      const appendage = anat.max_half >= 1.3 * torso;
       for (const ln of [lineEls[2], lineEls[3]]) ln.style.opacity = appendage ? "" : "0.35";
     };
 
@@ -1062,7 +1069,14 @@ function openZoom(stateName, idx, keepWidth) {
       // 꺼진 줄은 워프를 **아예 안 부른다.** 봉투에서 위상 0 은 항등이 아니라서
       // (진행파 지연) 위상만 0 으로 넘기면 정지 상태가 워프된 그림이 된다 — 굽기는
       // off 면 state_breathe 가 None 이라 원본을 굽는다 (새미 검증 2026-07-25).
-      bctx.drawImage(bm.enabled ? breatheComposeForPreview(base, bm.cfg, phase, breatheRef()) : base, 0, 0);
+      // 드래그 중에는 오버라이드를 직전 해부값으로 중화해 재생을 유지한다 — 의도값
+      // 그대로 두면 미러가 stale 거부로 원본 정지를 그려 "뻗는/로딩" 으로 읽힌다
+      // (수홍 실기기 2026-07-30). 거부 계약은 드래그 밖(영속 상태)에서 그대로 산다.
+      const liveCfg = bm.dragging && bm.cfg.anatomy
+        ? { ...bm.cfg, rigid_row: bm.cfg.anatomy.rigid_row, axis_x: bm.cfg.anatomy.axis_x,
+            torso_half: bm.cfg.anatomy.torso_half }
+        : bm.cfg;
+      bctx.drawImage(bm.enabled ? breatheComposeForPreview(base, liveCfg, phase, breatheRef()) : base, 0, 0);
     };
     // 재생 타이밍 = 줄 프리뷰와 동일 계약: 현재 fps × 줄 배속(pv.speed)
     // (수홍 2026-07-18 "배속 해둔 거 확대해서도 배속으로"; fps 는 줄 스텝퍼로 실시간 변경)
