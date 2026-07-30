@@ -507,8 +507,8 @@ def test_retired_split_schema_is_rejected_loudly(retired: dict) -> None:
 
 def test_new_schema_normalizes_within_range() -> None:
     cfg = state_breathe({"states": {"idle": {"breathe": {"depth": 0.08, "breaths": 3}}}}, "idle")
-    assert cfg == {"depth": 0.08, "breaths": 3, "lag": 0.10, "rigid_row": None,
-                   "axis_x": None, "torso_half": None, "anatomy": None}
+    assert cfg == {"depth": 0.08, "depth_x": None, "breaths": 3, "lag": 0.10,
+                   "rigid_row": None, "axis_x": None, "torso_half": None, "anatomy": None}
 
 
 def test_clipping_the_cell_raises_instead_of_cropping_the_head() -> None:
@@ -760,3 +760,68 @@ def test_a_non_integer_breaths_is_refused_not_truncated() -> None:
     # 정수로 표현되는 실수는 받는다 (3.0 == 3)
     assert state_breathe({"states": {"idle": {"breathe": {"depth": 0.06, "breaths": 3.0}}}},
                          "idle")["breaths"] == 3
+
+
+# ── 7. 가로/세로 진폭 분리 + 수동 밴드 보호 앵커 (2026-07-30) ───────
+
+def test_depth_x_absent_is_byte_identical_to_depth_x_equal_depth() -> None:
+    """레거시 계약: depth_x 부재 = depth 따름. 명시 depth_x==depth 와 바이트 동일해야
+    분리 도입이 기존 굽기를 1픽셀도 안 바꿨다는 증명이 된다 (순수 확장)."""
+    src = _dome()
+    base, _ = _frames(src, count=12)
+    explicit, _ = _frames(src, count=12, cfg={**CFG, "depth_x": CFG["depth"]})
+    assert [f.tobytes() for f in base] == [f.tobytes() for f in explicit]
+
+
+def test_depth_x_zero_keeps_horizontal_extent() -> None:
+    """depth_x=0 = 가로 사상 전 위상 항등 — 가로 bbox 가 움직이지 않는다."""
+    src = _dome()
+    x0, _, x1, _ = solid_alpha_bbox(src)
+    frames, _ = _frames(src, count=12, cfg={**CFG, "depth": 0.10, "depth_x": 0.0})
+    for f in frames:
+        b = solid_alpha_bbox(f)
+        assert (b[0], b[2]) == (x0, x1), "가로 항등인데 가로 bbox 가 움직였다"
+    # 대조군: depth_x 가 depth 를 따르면 같은 설정에서 출력이 실제로 달라야 한다
+    moving, _ = _frames(src, count=12, cfg={**CFG, "depth": 0.10})
+    assert any(a.tobytes() != b.tobytes() for a, b in zip(frames, moving)), \
+        "depth_x=0 과 따름이 같은 그림 — 가로 성분이 아예 안 굽는다"
+
+
+def test_manual_band_anchors_protection_to_the_band() -> None:
+    """수동 밴드는 무조건 켜지고 램프가 밴드에 앵커된다 — 블롭에서 밴드 조정이
+    무력했던 버그의 회귀 그물 (실측 2026-07-30 gptaku-pet: 밴드 12→4 무변화)."""
+    from sprite_gen.breathe import protect
+    src = _humanoid()
+    auto = analyze(src)
+    assert not auto.has_appendage, "휴머노이드는 부속이 없어야 한다 (자동 경로 무보호 전제)"
+    assert auto.torso_source == "auto"
+    manual = analyze(src, torso_half=6)
+    assert manual.torso_source == "manual"
+    p = protect(manual)
+    assert p(manual.axis_x) == 0.0, "축은 비보호"
+    assert p(manual.axis_x + 5) == 0.0, "밴드 안(t0 미만)은 비보호"
+    assert p(manual.axis_x + 9) == 1.0, "밴드 밖(t1 초과)은 완전 보호 — 밀리기만 한다"
+    assert protect(auto)(auto.axis_x + 9) == 0.0, "자동 경로(블롭)는 기존 계약 그대로 무보호"
+
+
+def test_manual_band_actually_changes_the_bake() -> None:
+    src = _dome()
+    wide, _ = _frames(src, count=12, cfg={**CFG, "depth": 0.10})
+    narrow, _ = _frames(src, count=12, cfg={**CFG, "depth": 0.10, "torso_half": 6})
+    assert any(a.tobytes() != b.tobytes() for a, b in zip(wide, narrow)), \
+        "수동 밴드 12→6 급 변화가 굽기에 반영되지 않았다"
+
+
+def test_depth_x_schema_bounds() -> None:
+    """depth_x 는 null(따름)과 0(가로 끄기)이 유효하고, 범위 밖은 요란하게 거부."""
+    def cur(dx):
+        return {"states": {"idle": {"breathe": {"depth": 0.06, "breaths": 1,
+                                                "lag": 0.1, "depth_x": dx}}}}
+    assert state_breathe(cur(None), "idle")["depth_x"] is None
+    base = {"states": {"idle": {"breathe": {"depth": 0.06, "breaths": 1, "lag": 0.1}}}}
+    assert state_breathe(base, "idle")["depth_x"] is None
+    assert state_breathe(cur(0), "idle")["depth_x"] == 0.0
+    assert state_breathe(cur(0.12), "idle")["depth_x"] == 0.12
+    for bad in (-0.01, 0.5, "abc"):
+        with pytest.raises(SystemExit):
+            state_breathe(cur(bad), "idle")

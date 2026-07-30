@@ -105,12 +105,23 @@ def envelope(anat: Anatomy, taper: float = TAPER, foot: float = FOOT):
 
 
 def protect(anat: Anatomy):
-    """부속 보호 가중 p(x) — 1 이면 그 열은 가로로 안 늘어난다 (콘텐츠 bbox 상대 x)."""
+    """부속 보호 가중 p(x) — 1 이면 그 열은 가로로 안 늘어난다 (콘텐츠 bbox 상대 x).
+
+    자동 검출 밴드는 부속(날개·긴 팔)이 실재할 때만 켜지고 램프 끝을 max_half 에
+    앵커한다. **수동 밴드(큐레이터 영역 UI)는 무조건 켜지고 램프를 밴드 자체에
+    앵커한다** — 블롭(max_half ≈ torso_half)에서 자동 램프는 몸 끝까지 완만해 밴드를
+    아무리 좁혀도 보호가 1 에 도달하지 못했다 (실측 2026-07-30 gptaku-pet 문어:
+    밴드 12→4 에 출력 차이가 바이트 22개, 수홍 "버그로 보여"). 사람이 밴드를 그렸으면
+    그 밖은 밀리기만 해야 한다."""
+    cx = anat.axis_x
+    if anat.torso_source == "manual":
+        t0 = float(anat.torso_half)
+        t1 = t0 + 2.0
+        return lambda x: smoothstep(t0, t1, abs(x - cx))
     if not anat.has_appendage:
         return lambda x: 0.0
     t0 = anat.torso_half * 1.15
     t1 = max(t0 + 1.0, anat.max_half * 0.95)
-    cx = anat.axis_x
     return lambda x: smoothstep(t0, t1, abs(x - cx))
 
 
@@ -248,12 +259,17 @@ def _thin_outline_pass(out: Image.Image) -> int:
 
 # ── 워프 ────────────────────────────────────────────────────────────
 
-def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float) -> Image.Image:
+def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float,
+          depth_x: float | None = None) -> Image.Image:
     """한 위상 t 의 프레임 — 캔버스 크기 불변, 발바닥 고정.
 
     세로는 행 국소 배율을 누적해 각 원본 행이 출력에서 몇 행을 차지하는지 정하고,
     가로는 행 안에서 위치마다 다른 밀도를 적분해 단조 사상을 만든다. 둘 다 정수
-    연산이라 출력이 정수 도트다."""
+    연산이라 출력이 정수 도트다.
+
+    `depth_x` 는 가로 성분의 독립 진폭이다 (수홍 요청 2026-07-30 — 가로/세로 분리).
+    None 이면 depth 를 따른다(레거시와 바이트 동일), 0 이면 가로 사상이 전 위상
+    항등이다. 파형·봉투·지연은 두 축이 공유한다 — 축마다 다른 건 스칼라뿐이다."""
     box = solid_alpha_bbox(frame)
     if not box:
         return frame.copy()
@@ -267,18 +283,19 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
     env, norm = envelope(anat)
     p_of = protect(anat)
     ru = anat.rigid_u
+    dx_amp = depth if depth_x is None else depth_x
 
-    def gain(u: float) -> float:
+    def gain(u: float, d: float) -> float:
         e = env(u)
         if e <= 0.0:
             return 0.0
-        return depth * norm * wave(t - lag * min(1.0, u / max(1e-6, ru))) * e
+        return d * norm * wave(t - lag * min(1.0, u / max(1e-6, ru))) * e
 
     # 세로 누적 — j=0 이 정수리
     heights: list[float] = []
     acc = 0.0
     for j in range(height):
-        g = gain(1.0 - j / max(1, height - 1))
+        g = gain(1.0 - j / max(1, height - 1), depth)
         acc += 1.0 if g == 0.0 else 1.0 / (1.0 + g)
         heights.append(acc)
     total = max(1, math.floor(acc + 0.5))
@@ -296,7 +313,7 @@ def _warp(frame: Image.Image, anat: Anatomy, depth: float, lag: float, t: float)
         prev = cur
         if reps == 0:
             continue
-        g = gain(u)
+        g = gain(u, dx_amp)                  # 가로 성분 — 독립 진폭 (depth_x)
         if reps != 1:
             deformed = True                  # 행 복제/삭제 = 세로 변형이 실재
         if g == 0.0:
@@ -570,13 +587,18 @@ def phase_frame(frame: Image.Image, cfg: dict, phase: float,
     if anat is None:
         anat = resolve_anatomy(frame, cfg)
     depth = float(cfg.get("depth", DEFAULT_DEPTH))
-    strain = row_strain(anat, depth)
-    if strain > MAX_ROW_STRAIN:
-        raise SystemExit(
-            f"breathe: 행당 변형 {strain:.3f} > 상한 {MAX_ROW_STRAIN} — 변형 구간이 너무 좁다 "
-            f"(강체 경계 {anat.rigid_row}/{anat.height}, 정규화 기준 {anat.basis_row}). "
-            f"depth 를 낮추거나 rigid_row 를 올려라. 조용히 깎지 않는다.")
-    return _warp(frame, anat, depth, float(cfg.get("lag", DEFAULT_LAG)), phase)
+    raw_dx = cfg.get("depth_x")
+    depth_x = None if raw_dx is None else float(raw_dx)
+    for axis, d in (("depth", depth), ("depth_x", depth_x)):
+        if d is None:
+            continue
+        strain = row_strain(anat, d)
+        if strain > MAX_ROW_STRAIN:
+            raise SystemExit(
+                f"breathe: 행당 변형({axis}) {strain:.3f} > 상한 {MAX_ROW_STRAIN} — 변형 구간이 너무 "
+                f"좁다 (강체 경계 {anat.rigid_row}/{anat.height}, 정규화 기준 {anat.basis_row}). "
+                f"{axis} 를 낮추거나 rigid_row 를 올려라. 조용히 깎지 않는다.")
+    return _warp(frame, anat, depth, float(cfg.get("lag", DEFAULT_LAG)), phase, depth_x=depth_x)
 
 
 def bake_breathe_sequence(images: list[Image.Image], cfg: dict) -> tuple[list[Image.Image], list[float]]:

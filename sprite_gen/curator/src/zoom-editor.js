@@ -1150,7 +1150,12 @@ function openZoom(stateName, idx, keepWidth) {
           const sib = run.states
             .map((s) => (s.name !== stateName && entries[s.name] ? entries[s.name].breathe : null))
             .find((b) => b && typeof b.depth === "number");
-          if (sib) { bm.cfg.depth = sib.depth; bm.cfg.breaths = sib.breaths; bm.cfg.lag = sib.lag; }
+          if (sib) {
+            bm.cfg.depth = sib.depth;
+            bm.cfg.depth_x = sib.depth_x == null ? null : sib.depth_x;
+            bm.cfg.breaths = sib.breaths;
+            bm.cfg.lag = sib.lag;
+          }
           if (bm.histPos === 0) bm.hist[0] = { enabled: bm.enabled, cfg: clone(bm.cfg) };
         }
         bm.geomReady = true;
@@ -1278,6 +1283,21 @@ function openZoom(stateName, idx, keepWidth) {
     const depthSel = mkSel([3, 4, 5, 6, 8, 10, 12], Math.round((bm.cfg.depth || 0.06) * 100),
       (v) => `${t("breatheAmp")} ${v}%`,
       (v) => { bm.cfg.depth = (v || 6) / 100; commit(); pushHist(); });
+    // 가로 독립 진폭 (수홍 요청 2026-07-30): "따름" = depth 와 동일(레거시), 0 = 가로 끄기.
+    const depthXSel = document.createElement("select");
+    for (const v of ["follow", 0, 3, 4, 5, 6, 8, 10, 12]) {
+      const o = document.createElement("option");
+      o.value = String(v);
+      o.textContent = v === "follow" ? t("breatheAmpXFollow") : `${t("breatheAmpX")} ${v}%`;
+      depthXSel.appendChild(o);
+    }
+    depthXSel.value = bm.cfg.depth_x == null ? "follow" : String(Math.round(bm.cfg.depth_x * 100));
+    if (depthXSel.selectedIndex < 0) depthXSel.value = "follow"; // 목록 밖 수동값 — 표시만 따름으로
+    depthXSel.addEventListener("change", () => {
+      bm.cfg.depth_x = depthXSel.value === "follow" ? null : Number(depthXSel.value) / 100;
+      commit();
+      pushHist();
+    });
     // 호흡 횟수: 숫자 입력 + −/+ 스텝퍼 (수홍 2026-07-18 — 약수 셀렉트 대신 자유 입력;
     // 나눠떨어지지 않으면 fit_breathe_pattern 이 보정하고 스트립 캡션이 알려준다)
     const breathWrap = document.createElement("span");
@@ -1327,13 +1347,16 @@ function openZoom(stateName, idx, keepWidth) {
     breathWrap.appendChild(plusBtn);
     breathWrap.appendChild(fitBadge);
     bar.appendChild(depthSel);
+    bar.appendChild(depthXSel);
     bar.appendChild(breathWrap);
     toolbar.appendChild(bar);
     function syncBreatheControls() {
       onCheck.checked = bm.enabled;
       const off = !bm.enabled;
-      for (const el of [autoBtn, depthSel, minusBtn, breathInput, plusBtn]) el.disabled = off;
+      for (const el of [autoBtn, depthSel, depthXSel, minusBtn, breathInput, plusBtn]) el.disabled = off;
       depthSel.value = String(Math.round((bm.cfg.depth || 0.06) * 100));
+      depthXSel.value = bm.cfg.depth_x == null ? "follow" : String(Math.round(bm.cfg.depth_x * 100));
+      if (depthXSel.selectedIndex < 0) depthXSel.value = "follow";
       breathInput.value = String(bm.cfg.breaths || 1);
       syncFitBadge();
     }

@@ -5,6 +5,27 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## Unreleased - breathe H/V amplitude split and manual-band-anchored protection
+
+Requested by Soohong (2026-07-30) while reviewing the gptaku-pet octopus: the vertical
+band control did nothing visible on blob characters, and one amplitude scalar coupled
+the vertical bob to the horizontal bulge.
+
+- **`depth_x`** — independent horizontal breathing amplitude in the breathe sidecar.
+  Absent/null follows `depth` (legacy output is byte-identical — locked by a golden
+  test); `0` makes the horizontal mapping an identity at every phase. Range null|0
+  to 0.20, loud-reject outside, mirrored in the webview schema check. The breathe
+  editor gains a second select ("h depth", default "= v").
+- **Manual-band protection anchor** — when a human adjusts the torso band (region UI),
+  the appendage-protection ramp anchors to the band itself (t0 = band, t1 = band + 2)
+  and always activates. The auto-detected path is unchanged (ramp anchored to
+  `max_half`, appendage-only). Fixes: on blobs (`max_half ~ torso_half`) the auto ramp
+  never reached full protection, so narrowing the band changed almost nothing
+  (measured on gptaku-pet: band 12 -> 4 changed 22 bytes). `Anatomy.torso_source`
+  ("auto" | "manual") records which path applies and is frozen into the sidecar.
+- JS preview mirror updated in lockstep; byte-parity suite extended with
+  depth-x-strong / depth-x-zero / manual-band cases.
+
 ## Unreleased - deterministic palette-swap bake and colourway pick in the curation view
 
 Dot art is controlled by its palette, so colour variants are baked into finished sheets

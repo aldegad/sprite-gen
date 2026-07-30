@@ -34,6 +34,16 @@ function breatheRangeProblems(raw) {
     // loud reject 자체가 사라진다 (슉슉이 실측 2026-07-25: breaths 2.7 → 굽기 2 vs 프리뷰 3).
     if (key === "breaths" && !Number.isInteger(v)) bad.push(`${key}=${JSON.stringify(raw[key])} (정수 아님)`);
   }
+  // 가로 독립 진폭 (2026-07-30 가로/세로 분리): null = depth 따름이 정당한 상태라
+  // depth 와 달리 명시적 null 을 허용하고, 0(가로 끄기)도 유효하다 — 파이썬 state_breathe 미러.
+  if (raw.depth_x != null) {
+    if (!isNumericScalar(raw.depth_x)) {
+      bad.push(`depth_x=${JSON.stringify(raw.depth_x)} (수가 아님)`);
+    } else {
+      const dx = Number(raw.depth_x);
+      if (!Number.isFinite(dx) || dx < 0 || dx > 0.20) bad.push(`depth_x=${JSON.stringify(raw.depth_x)}`);
+    }
+  }
   if (raw.rigid_row != null) {
     // `Number("")` 과 `Number([])` 는 **0** 이라 정수 검사만 하면 통과한다 — 그러면 첫
     // autosave 가 사용자 사이드카를 0 으로 덮고 굽기의 loud reject 근거가 사라진다

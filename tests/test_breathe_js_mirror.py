@@ -89,7 +89,13 @@ def _rgba(image):
     # JS 다듬기 미러가 파이썬과 갈라져도 패리티 스위트가 못 잡는다
     # (opus-4.8 validator 지정 2026-07-30: depth 0.08 24위상에서 294바이트 치환 실측).
     (_small_outlined, {"depth": 0.08, "breaths": 3}),
-], ids=["humanoid", "winged", "dome", "small-outlined-thinning"])
+    # 가로/세로 진폭 분리 + 수동 밴드 (2026-07-30): 가로 강함 / 가로 항등 / 밴드 앵커 보호.
+    # 이 케이스들이 없으면 JS 의 depthX 해석·수동 protect 앵커가 파이썬과 갈라져도 못 잡는다.
+    (_dome, {"depth_x": 0.12}),
+    (_dome, {"depth": 0.10, "depth_x": 0.0}),
+    (_dome, {"depth": 0.10, "torso_half": 6}),
+], ids=["humanoid", "winged", "dome", "small-outlined-thinning",
+        "dome-depth-x", "dome-depth-x-zero", "dome-manual-band"])
 def test_curator_mirror_is_byte_identical_to_the_bake(build, overrides, tmp_path):
     src = build()
     cfg = {**CFG, **overrides}
@@ -100,6 +106,8 @@ def test_curator_mirror_is_byte_identical_to_the_bake(build, overrides, tmp_path
         "width": src.width,
         "height": src.height,
         "cfg": {"depth": cfg["depth"], "breaths": cfg["breaths"], "lag": cfg["lag"],
+                **({"depth_x": cfg["depth_x"]} if "depth_x" in cfg else {}),
+                **({"torso_half": cfg["torso_half"]} if "torso_half" in cfg else {}),
                 "anatomy": cfg["anatomy"]},
         "cases": [{"phase": p, "rgba": _rgba(src)} for p in PHASES],
         "out": str(tmp_path / "js.json"),

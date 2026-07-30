@@ -248,8 +248,9 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
 
     호흡은 프레임 선택(깜빡임 등)과 직교하는 변조 레이어다 (수홍 확정 2026-07-18).
     변형 수학은 봉투 기반 스쿼시&스트레치다 (2026-07-25 교체, `sprite_gen.breathe`).
-    반환: {"depth": float, "breaths": int, "lag": float, "rigid_row": int|None,
-           "anatomy": dict|None}
+    반환: {"depth": float, "depth_x": float|None, "breaths": int, "lag": float,
+           "rigid_row": int|None, "anatomy": dict|None}
+    depth_x: 가로 독립 진폭 — None = depth 따름(레거시), 0 = 가로 항등.
     compose/GIF 가 재생 시퀀스 위에 결정론으로 굽는다 — 디스크 프레임 불변."""
     if not curation:
         return None
@@ -270,6 +271,10 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
     # 갈리고, "요청 그대로 적용된다" 는 문서도 거짓이 된다 (슉슉이 실측 2026-07-25).
     try:
         depth = float(raw.get("depth", 0.06))
+        # 가로 독립 진폭 (2026-07-30 가로/세로 분리): None = depth 따름(레거시 동일),
+        # 0 = 가로 사상 항등. depth 와 달리 0 이 유효하다 — "가로만 끄기" 가 정당한 상태다.
+        raw_dx = raw.get("depth_x")
+        depth_x = None if raw_dx is None else float(raw_dx)
         lag = float(raw.get("lag", 0.10))
         breaths = _exact_int("breaths", raw.get("breaths", 1), state)
     except (TypeError, ValueError) as exc:
@@ -282,9 +287,12 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
     # 다른 값을 말하게 됐다 (슉슉이 실측 2026-07-25: breaths 12 를 8 로 깎는데 프리뷰·
     # 필름스트립·WebM 은 12회 숨쉬고 배지는 "적용 12회" 라고 띄웠다). 폐기 키는 요란하게
     # 거부하면서 값 범위만 조용한 것도 계약이 어긋난다.
-    for name, value, lo, hi in (("depth", depth, 0.005, BREATHE_DEPTH_MAX),
-                                ("breaths", breaths, 1, BREATHE_BREATHS_MAX),
-                                ("lag", lag, 0.0, BREATHE_LAG_MAX)):
+    ranged = [("depth", depth, 0.005, BREATHE_DEPTH_MAX),
+              ("breaths", breaths, 1, BREATHE_BREATHS_MAX),
+              ("lag", lag, 0.0, BREATHE_LAG_MAX)]
+    if depth_x is not None:
+        ranged.append(("depth_x", depth_x, 0.0, BREATHE_DEPTH_MAX))
+    for name, value, lo, hi in ranged:
         if not lo <= value <= hi:
             raise SystemExit(
                 f"curation: states.{state}.breathe.{name} = {value!r} 가 범위 [{lo}, {hi}] 밖이다. "
@@ -302,8 +310,8 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
     if torso_half is not None:
         torso_half = _exact_int("torso_half", torso_half, state)
     frozen = raw.get("anatomy")
-    return {"depth": depth, "breaths": breaths, "lag": lag, "rigid_row": rigid_row,
-            "axis_x": axis_x, "torso_half": torso_half,
+    return {"depth": depth, "depth_x": depth_x, "breaths": breaths, "lag": lag,
+            "rigid_row": rigid_row, "axis_x": axis_x, "torso_half": torso_half,
             "anatomy": frozen if isinstance(frozen, dict) else None}
 
 

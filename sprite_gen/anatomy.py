@@ -54,6 +54,7 @@ class Anatomy:
     basis_row: int                    # 진폭 정규화 기준 — 병목이 진짜일 때만 목
     torso_half: int
     max_half: int
+    torso_source: str = "auto"        # "auto" | "manual" — 보호 램프 앵커가 갈린다 (breathe.protect)
     face: tuple[int, int] | None = None
     warnings: tuple[str, ...] = field(default=())
 
@@ -75,7 +76,8 @@ class Anatomy:
                 "neck_row": self.neck_row, "neck_source": self.neck_source,
                 "rigid_row": self.rigid_row, "rigid_source": self.rigid_source,
                 "basis_row": self.basis_row, "torso_half": self.torso_half,
-                "max_half": self.max_half, "face": list(self.face) if self.face else None,
+                "max_half": self.max_half, "torso_source": self.torso_source,
+                "face": list(self.face) if self.face else None,
                 "warnings": list(self.warnings)}
 
 
@@ -309,13 +311,14 @@ def analyze(image: Image.Image, rigid_row: int | None = None,
         warnings.append("face-absent: 대칭 눈쌍을 못 찾아 목만으로 경계를 정했다")
 
     torso, max_half = torso_metrics(image, box, cx, profile, auto_rigid, h)
+    torso_source = "auto"
     if torso_half is not None:
         if not 1 <= torso_half <= w:
             raise SystemExit(f"anatomy: torso_half {torso_half} 가 범위 [1, {w}] 밖이다")
         if torso_half != torso:
             warnings.append(f"torso-half-override: auto {torso} -> manual {torso_half}")
-        torso = int(torso_half)
+        torso, torso_source = int(torso_half), "manual"
     return Anatomy(width=w, height=h, axis_x=cx, neck_row=neck_row, neck_source=neck_source,
                    rigid_row=auto_rigid, rigid_source=rigid_source, basis_row=basis_row,
-                   torso_half=torso, max_half=max_half, face=face,
+                   torso_half=torso, max_half=max_half, torso_source=torso_source, face=face,
                    warnings=tuple(warnings))

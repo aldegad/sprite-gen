@@ -52,7 +52,8 @@ const STR = {
     fpsSet: (s, f) => `${s}: ${f}fps`, fpsFail: "fps change failed: ",
     rowBreathe: "Breathe", tRowBreathe: "breathing is a POST-PROCESS LAYER, orthogonal to frame selection — a blink frame breathes too. Check: turn it on (instant, saved to the sidecar; compose/GIF bake it deterministically). Uncheck: turn it off. Click the label to drag the rigid boundary and tune depth / breaths over the LIVE playing sequence.",
     tRowBreatheEdit: "open the breathing editor — adjustments apply instantly over the playing sequence; Esc restores the previous setting",
-    breatheAmp: "depth", breatheCountLabel: "breaths/loop", breatheFitted: (n) => n === 0 ? "→ no room to breathe" : `→ ${n} applied`,
+    breatheAmp: "v depth", breatheAmpX: "h depth", breatheAmpXFollow: "h depth = v",
+    breatheCountLabel: "breaths/loop", breatheFitted: (n) => n === 0 ? "→ no room to breathe" : `→ ${n} applied`,
     breatheAuto: "auto", tBreatheAuto: "drop the manual boundary and use the detected one (neck bottleneck, or below the face when the face sits on the body)",
     tBreatheFitted: (len) => `the loop is ${len} frames — add frames to the sequence for a smoother breath`, tBreatheCount: "breath count per loop (1-8) — phases are continuous, so the requested count applies exactly",
     
@@ -221,7 +222,8 @@ const STR = {
     fpsSet: (s, f) => `${s}: ${f}fps`, fpsFail: "fps 변경 실패: ",
     rowBreathe: "호흡", tRowBreathe: "호흡은 프레임 선택과 직교하는 후처리 레이어입니다 — 깜빡임 프레임도 그대로 숨쉽니다. 체크: 켜기 (즉시, 사이드카 저장 — 아틀라스/GIF 굽기에 결정론 반영), 해제: 끄기. 라벨 클릭: 실제 재생 위에서 강체 경계·진폭·호흡 횟수 조정.",
     tRowBreatheEdit: "호흡 편집기 열기 — 조정은 재생 중인 시퀀스에 즉시 반영됩니다. Esc = 이전 설정 복원",
-    breatheAmp: "진폭", breatheCountLabel: "호흡/루프", breatheFitted: (n) => n === 0 ? "→ 숨쉴 자리 없음" : `→ 적용 ${n}회`,
+    breatheAmp: "세로 진폭", breatheAmpX: "가로 진폭", breatheAmpXFollow: "가로 진폭 =세로",
+    breatheCountLabel: "호흡/루프", breatheFitted: (n) => n === 0 ? "→ 숨쉴 자리 없음" : `→ 적용 ${n}회`,
     breatheAuto: "자동", tBreatheAuto: "수동 경계를 버리고 검출값을 쓴다 (목 병목, 얼굴이 몸통에 있으면 얼굴 아래)",
     tBreatheFitted: (len) => `루프가 ${len}프레임 — 더 부드럽게 하려면 시퀀스에 프레임을 늘리세요`, tBreatheCount: "루프당 호흡 횟수 (1~8) — 위상이 연속값이라 요청한 횟수가 그대로 적용됩니다",
     

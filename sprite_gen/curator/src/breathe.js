@@ -80,7 +80,14 @@ function breatheEnvelope(anat) {
 }
 
 // 부속 보호 가중 — 1 이면 그 열은 가로로 안 늘어난다 (밀리기만 한다).
+// 수동 밴드(영역 UI)는 무조건 켜지고 램프를 밴드 자체에 앵커한다 — 파이썬 protect 미러
+// (자동 램프는 max_half 앵커라 블롭에서 밴드 조정이 무력했다, 2026-07-30).
 function breatheProtect(anat) {
+  if (anat.torso_source === "manual") {
+    const mt0 = anat.torso_half;
+    const mt1 = mt0 + 2;
+    return (x) => breatheSmoothstep(mt0, mt1, Math.abs(x - anat.axis_x));
+  }
   const hasAppendage = anat.max_half >= 1.3 * anat.torso_half;
   if (!hasAppendage) return () => 0;
   const t0 = anat.torso_half * 1.15;
@@ -276,25 +283,29 @@ function breatheComposite(base, cfg, phase) {
   const { env, ru, norm } = breatheEnvelope(anat);
   const pOf = breatheProtect(anat);
   const depth = cfg.depth || 0.06;
+  // 가로 독립 진폭 — null/undefined 는 depth 따름(레거시 동일), 0 은 가로 항등 (파이썬 미러).
+  const depthX = cfg.depth_x == null ? depth : Number(cfg.depth_x);
   let peak = 0;
   for (let j = 0; j < anat.height; j++) peak = Math.max(peak, env(j / Math.max(1, anat.height - 1)));
-  const strain = depth * norm * peak;
-  if (strain > BREATHE_MAX_ROW_STRAIN) {
-    throw new BreatheRefused(
-      `행당 변형 ${strain.toFixed(3)} > 상한 ${BREATHE_MAX_ROW_STRAIN} — 변형 구간이 너무 좁다 `
-      + `(강체 경계 ${anat.rigid_row}/${anat.height}). depth 를 낮추거나 경계를 올려라.`);
+  for (const [axis, d] of [["depth", depth], ["depth_x", depthX]]) {
+    const strain = d * norm * peak;
+    if (strain > BREATHE_MAX_ROW_STRAIN) {
+      throw new BreatheRefused(
+        `행당 변형(${axis}) ${strain.toFixed(3)} > 상한 ${BREATHE_MAX_ROW_STRAIN} — 변형 구간이 너무 좁다 `
+        + `(강체 경계 ${anat.rigid_row}/${anat.height}). ${axis} 를 낮추거나 경계를 올려라.`);
+    }
   }
   const lag = cfg.lag == null ? 0.1 : cfg.lag;
-  const gain = (u) => {
+  const gain = (u, d) => {
     const e = env(u);
     if (e <= 0) return 0;
-    return depth * norm * breatheWave(phase - lag * Math.min(1, u / Math.max(1e-6, ru))) * e;
+    return d * norm * breatheWave(phase - lag * Math.min(1, u / Math.max(1e-6, ru))) * e;
   };
 
   const heights = [];
   let acc = 0;
   for (let j = 0; j < height; j++) {
-    const g = gain(1 - j / Math.max(1, height - 1));
+    const g = gain(1 - j / Math.max(1, height - 1), depth);
     acc += g === 0 ? 1 : 1 / (1 + g);
     heights.push(acc);
   }
@@ -312,7 +323,7 @@ function breatheComposite(base, cfg, phase) {
     const reps = Math.max(0, cur - prev);
     prev = cur;
     if (reps === 0) continue;
-    const g = gain(u);
+    const g = gain(u, depthX);               // 가로 성분 — 독립 진폭 (depth_x)
     if (reps !== 1) deformed = true;         // 행 복제/삭제 = 세로 변형이 실재
     let rowMap;
     if (g === 0) {
@@ -487,6 +498,7 @@ async function defaultBreatheConfig(stateName) {
   const { anatomy, defaults } = await fetchBreatheAnatomy(stateName);
   return {
     depth: sibling ? sibling.depth : defaults.depth,
+    depth_x: sibling && sibling.depth_x != null ? sibling.depth_x : null,
     breaths: sibling ? sibling.breaths : defaults.breaths,
     lag: sibling ? sibling.lag : defaults.lag,
     rigid_row: null,
