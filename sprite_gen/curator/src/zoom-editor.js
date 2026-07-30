@@ -925,6 +925,7 @@ function openZoom(stateName, idx, keepWidth) {
       // 반영되지 않은 채 낡은 파생값(basis_row·torso_half)이 사이드카에 남는다.
       if (anatomyBusy) { anatomyPending = true; return; }
       anatomyBusy = true;
+      setRecalcBadge(true);
       try {
         const { anatomy } = await fetchBreatheAnatomy(
           stateName, bm.cfg.rigid_row, bm.cfg.axis_x, bm.cfg.torso_half);
@@ -940,7 +941,25 @@ function openZoom(stateName, idx, keepWidth) {
         setStatus(t("breatheFail") + err.message, "err");
       }
       anatomyBusy = false;
-      if (anatomyPending) { anatomyPending = false; await refreshAnatomy(); }
+      if (anatomyPending) { anatomyPending = false; await refreshAnatomy(); return; }
+      setRecalcBadge(false);
+    };
+    // "재계산 중" 배지 — 드래그를 놓고 서버가 해부를 다시 재는 동안 프리뷰는 직전
+    // 값으로 계속 재생하고(위 liveCfg), 이 배지가 재계산 중임을 알린다 (수홍 2026-07-30:
+    // "렌더링 중이면 로딩이라도 돌려줘").
+    let recalcEl = null;
+    const setRecalcBadge = (on) => {
+      if (on) {
+        if (!recalcEl) {
+          recalcEl = document.createElement("div");
+          recalcEl.className = "breathe-recalc";
+          recalcEl.innerHTML = `<span class="breathe-recalc-spin"></span>${t("breatheRecalc")}`;
+          stage.appendChild(recalcEl);
+        }
+        recalcEl.style.display = "";
+      } else if (recalcEl) {
+        recalcEl.style.display = "none";
+      }
     };
     function wireLine(ln, apply) {
       // apply(e2, rect) 가 드래그 좌표를 bm.cfg 의 의도 값으로 바꾼다. 드래그 중에는
@@ -1072,7 +1091,7 @@ function openZoom(stateName, idx, keepWidth) {
       // 드래그 중에는 오버라이드를 직전 해부값으로 중화해 재생을 유지한다 — 의도값
       // 그대로 두면 미러가 stale 거부로 원본 정지를 그려 "뻗는/로딩" 으로 읽힌다
       // (수홍 실기기 2026-07-30). 거부 계약은 드래그 밖(영속 상태)에서 그대로 산다.
-      const liveCfg = bm.dragging && bm.cfg.anatomy
+      const liveCfg = (bm.dragging || anatomyBusy) && bm.cfg.anatomy
         ? { ...bm.cfg, rigid_row: bm.cfg.anatomy.rigid_row, axis_x: bm.cfg.anatomy.axis_x,
             torso_half: bm.cfg.anatomy.torso_half }
         : bm.cfg;

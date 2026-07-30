@@ -57,6 +57,7 @@ const STR = {
     tBreatheFitted: (len) => `the loop is ${len} frames — add frames to the sequence for a smoother breath`, tBreatheCount: "breath count per loop (1-8) — phases are continuous, so the requested count applies exactly",
     
         breatheHint: "drag the rigid boundary — everything above it stays bit-identical, the body below squashes and stretches, and the head follows a beat later. Applies instantly; Cmd/Ctrl+Z steps back/forward, Esc restores.",
+    breatheRecalc: "recalculating\u2026",
     breatheAxisHint: "drag the body axis — the vertical centre column that never moves while breathing. Torso width lines mirror around it.",
     breatheTorsoHint: "drag the torso half-width — outside these lines counts as appendage (arms/wings): pushed sideways, never stretched. Drag inward to protect more.",
     breatheFail: "breathe failed: ",
@@ -225,6 +226,7 @@ const STR = {
     tBreatheFitted: (len) => `루프가 ${len}프레임 — 더 부드럽게 하려면 시퀀스에 프레임을 늘리세요`, tBreatheCount: "루프당 호흡 횟수 (1~8) — 위상이 연속값이라 요청한 횟수가 그대로 적용됩니다",
     
         breatheHint: "강체 경계를 드래그 — 이 위는 도트 단위로 그대로 남고, 아래 몸통이 눌렸다 펴지며 머리가 반 박자 늦게 따라옵니다. 즉시 반영, Cmd/Ctrl+Z 이전/다음, Esc 복원.",
+    breatheRecalc: "재계산 중\u2026",
     breatheAxisHint: "몸통 축을 드래그 — 숨쉴 때 절대 움직이지 않는 세로 중심 열입니다. 몸통 폭 선이 이 축을 기준으로 대칭 이동합니다.",
     breatheTorsoHint: "몸통 반폭을 드래그 — 이 선 바깥은 부속(팔·날개)으로 취급되어 늘어나지 않고 밀리기만 합니다. 안쪽으로 끌수록 보호가 넓어집니다.",
     breatheFail: "호흡 실패: ",

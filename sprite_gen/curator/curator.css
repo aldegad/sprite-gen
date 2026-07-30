@@ -1261,6 +1261,31 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
   height: 100%;
 }
 .breathe-axis { border-left-style: solid; border-left-color: rgba(40, 110, 220, 0.45); }
+.breathe-recalc { /* 해부 재계산 중 배지 (zoom-editor setRecalcBadge) */
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  font-size: 11px;
+  color: #333;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  z-index: 6;
+  pointer-events: none;
+}
+.breathe-recalc-spin {
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(40, 110, 220, 0.25);
+  border-top-color: rgba(40, 110, 220, 0.9);
+  border-radius: 50%;
+  animation: breathe-recalc-rot 0.7s linear infinite;
+}
+@keyframes breathe-recalc-rot { to { transform: rotate(360deg); } }
 .breathe-bar { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
 .breathe-auto { padding: 2px 7px; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .breathe-auto:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }

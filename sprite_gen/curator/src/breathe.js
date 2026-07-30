@@ -387,7 +387,7 @@ function breatheThinOutlinePass(od, w, h) {
   const dk = (x, y) => {
     if (!op(x, y)) return false;
     const i = (y * w + x) * 4;
-    return (0.299 * snap[i] + 0.587 * snap[i + 1] + 0.114 * snap[i + 2]) < 96;
+    return (0.299 * snap[i] + 0.587 * snap[i + 1] + 0.114 * snap[i + 2]) < 60;
   };
   // 후보: "x,y" -> 'v'|'h' (같은 픽셀이 양축 후보면 먼저 등록된 세로가 이긴다 — 파이썬 setdefault)
   const cand = new Map();
