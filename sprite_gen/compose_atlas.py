@@ -15,6 +15,8 @@ from sprite_gen.breathe import anatomy_report, fit_breathe_pattern, phase_frame,
 from sprite_gen.curation import apply_pixel_edits, apply_transform, edit_index, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import heal_run, require_frames_manifest
+from sprite_gen.layers import (has_layer_contract, landmark_map, require_valid_layer_request,
+                               state_track)
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, load_request
 
 
@@ -70,6 +72,10 @@ def _run(args: argparse.Namespace):
         print(f"[heal] re-derived stale rows: {', '.join(heal_report['healed'])}", file=sys.stderr)
     acquire_run_dir_lock(run_dir, "compose_sprite_atlas")
     request = load_request(run_dir)
+    # A run that declares no rig / track / layers is not a layer run and this is a
+    # no-op (docs/layer-tracks.md §1). One that does is checked before any bake
+    # work, so an invalid rig never reaches the manifest as half-declared pivots.
+    require_valid_layer_request(request)
     frames_manifest = require_frames_manifest(run_dir)  # fail loud if absent/corrupt/not-ok
     rows_by_state = {row["state"]: row for row in frames_manifest.get("rows", [])}
 
@@ -222,6 +228,41 @@ def _run(args: argparse.Namespace):
             animation["rows"][state]["breathe"] = anatomy_report(row_source_frames, breathe_cfg) \
                 if row_source_frames else None
 
+    # 레이어 런 확장 (docs/layer-tracks.md §5): rig 를 선언한 런만 매니페스트에
+    # `rig` 블록과 행별 `track` 이 붙는다. 랜드마크는 **아틀라스 절대 정수 좌표**이고
+    # **재생 위치**로 색인된다 — frame_layout.rows.<state> 와 길이·순서가 같아서
+    # 소비자가 rect 와 1:1 로 zip 할 수 있다 (칸 재사용으로 rect 는 반복될 수 있다).
+    # 런타임이 트랙을 실시간으로 합치기 위한 입력이고, 굽힌 조합의 소비가 아니다.
+    rig_block: dict[str, Any] | None = None
+    if has_layer_contract(request):
+        for state in states:
+            animation["rows"][state]["track"] = state_track(request, state)
+        rig = request.get("rig")
+        if isinstance(rig, dict):
+            rig_landmarks: dict[str, Any] = {}
+            for state in states:
+                if not ((rig.get("landmarks") or {}).get(state)):
+                    continue
+                entries = []
+                for (instance, _phase), rect in zip(positions_by_state[state],
+                                                    frame_layout["rows"][state]):
+                    points = landmark_map(request, state, instance)
+                    if points is None:
+                        # 큐레이션 복제 인스턴스는 풀 밖 인덱스라 선언이 없다. 원본
+                        # 프레임의 피벗을 빌려오면 복제 자신의 변형만큼 어긋난 좌표를
+                        # 런타임에 내보내게 된다 — 추정하지 않고 실패한다.
+                        errors.append(
+                            f"{state}: instance {instance} declares no rig landmarks "
+                            f"(a curated clone carries its own transform, so its pivots "
+                            f"cannot be borrowed from the frame it copies)")
+                        entries = None
+                        break
+                    entries.append({name: [rect["x"] + point[0], rect["y"] + point[1]]
+                                    for name, point in points.items()})
+                if entries is not None:
+                    rig_landmarks[state] = entries
+            rig_block = {"profile": rig.get("profile"), "landmarks": rig_landmarks}
+
     # top-level summary: uniform value when every row agrees, else 'mixed'
     # (per-row truth lives in animation.rows.<state>.frame_variant).
     unique_variants = set(variants.values())
@@ -264,6 +305,8 @@ def _run(args: argparse.Namespace):
         "animation": animation,
         "frame_layout": frame_layout,
     }
+    if rig_block is not None:
+        manifest["rig"] = rig_block
     atomic_write_text(run_dir / args.manifest, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps({"ok": True, "atlas": str(atlas_path), "manifest": str(run_dir / args.manifest)}, ensure_ascii=False, indent=2))
     return 0

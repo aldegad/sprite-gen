@@ -30,6 +30,7 @@ canonical files, not hidden imports.
 | Curate (opt) | `sprite-gen curation` (`serve_curation.py`) + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
 | Recolor (opt) | `sprite-gen recolor` / `recolor-palette` (`sprite_gen/recolor.py`) | base sheet (default `sprite-sheet-alpha.png`) + recolor spec | `variants/<name>.png`, optional `variants/<name>.manifest.json`, `variants/recolor.report.json` |
+| Layer bake (opt) | `sprite-gen compose-layers` (`sprite_gen/compose_layers.py`) | `frames/` + `curation.json` + the request's `rig` / `layers` | `layers/<name>.png`, `layers/<name>.manifest.json`, `layers/layers.report.json` (published as one set) |
 | QA | `preview_animation.py` | `frames/` | `qa/<state>-contact.png`, `qa/<state>.gif` |
 | Inspect | `inspect_sprite_run.py` | `sprite-request.json`, `raw/` or `frames/` | `sprite-inspect.report.json` |
 | Score | `score_sprite_run.py` | `sprite-inspect.report.json` | `sprite-score.report.json`, correction hints |
@@ -108,6 +109,12 @@ not restate it elsewhere; point here.
                                      #   passthrough pixels). Adopted pick lives in
                                      #   curation.json.recolor.picked (name-keyed). See
                                      #   docs/recolor.md.
+  layers/                            # only when a rig run bakes composites (compose_layers) —
+                                     #   <name>.png + <name>.manifest.json (runtime shape,
+                                     #   one composite row) + layers.report.json (stack,
+                                     #   source revisions, per-element offsets, clipped
+                                     #   pixels). A composite is NEVER a frames/ row nor a
+                                     #   request state. See docs/layer-tracks.md.
   sprite-inspect.report.json         # inspect_sprite_run.py output (per-state health rows)
   sprite-score.report.json           # score_sprite_run.py output (overall score + correction hints)
   correction-loop/                   # run_correction_loop.py: attempt-N/ (inspect/score/hints) + candidate-N/ regenerated run dirs
@@ -443,6 +450,10 @@ boundary of the run-dir's atomicity and concurrency guarantees. What is **in for
 - **In-process transaction rollback.** The `frames/` + `extract-failure.json` commit (§6) and
   the `--force` re-import publish (§4) roll back on any raised exception, leaving the prior
   generation byte-intact. `atomic_write_text` / `os.replace` make each file write torn-free.
+  `atomic_write_set` extends the same mechanism to a **set** that only means anything
+  together — the layer bake's sheets, manifests and the report naming them: everything is
+  staged before anything is renamed in, so a write error partway through publishes nothing
+  (a `SIGKILL` between renames stays out of scope, below).
 - **Reader isolation.** A publish holds the exclusive `publish_guard` for its swap; a reader
   sees a complete old-or-new snapshot, never a mix (§4). Where advisory locks are unavailable the
   guard **fails loud** (`RWLockUnavailable`), never a silent no-op. Every finished-generation
@@ -488,5 +499,6 @@ service, revisit both here.
 - [`architecture.md`](architecture.md) — how the code realizes these contracts (stage internals, lock, extraction, pixel-unfake path)
 - [`curation.md`](curation.md) — webview interaction model, `curation.json` schema, standalone image-candidate path, multi-agent launch rules
 - [`recolor.md`](recolor.md) — palette-swap bake (`variants/`), report schema, colourway adopt
+- [`layer-tracks.md`](layer-tracks.md) — optional rig / track / composite contract; the `layers/` sibling artifact tree and why a composite is never a `frames/` row or a request state
 - [`pixel-unfake.md`](pixel-unfake.md) — `fit`/`pixel_unfake` behavior + plain-twin bake decision
 - [`directional-anchor-workflow.md`](directional-anchor-workflow.md) — directional/45° anchor chains that name the `raw/` anchors §3 resolves into chips

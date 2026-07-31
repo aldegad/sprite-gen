@@ -12,6 +12,7 @@ from sprite_gen import (
     compose_atlas,
     compose_cycle,
     compose_gif,
+    compose_layers,
     correction_loop,
     cutout,
     export_pngs,
@@ -240,6 +241,13 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         compose_cycle.run,
     ),
     "compose-gif": ("Compose selected sprite frames into a clean transparent GIF.", _add_compose_gif, compose_gif.run),
+    # Same rule as `curation` / `recolor`: the subcommand reuses the module's own
+    # argument declaration, so the three launch forms cannot drift apart.
+    "compose-layers": (
+        "Bake a rig run's declared composite stacks into <run-dir>/layers/.",
+        compose_layers.add_arguments,
+        compose_layers.run,
+    ),
     "unpack-atlas": (
         "Unpack a composed sprite sheet back into a curator-ready run directory.",
         _add_unpack_atlas,

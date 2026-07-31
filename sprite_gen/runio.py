@@ -12,7 +12,9 @@ example Claude Code and the Codex app driving the skill in parallel):
   the holder's pid instead of silently interleaving output files.
 - `atomic_write_text()` / `atomic_save_image()` — temp file in the target dir
   + `os.replace`, so a concurrent reader never observes a half-written
-  atlas/manifest/frame.
+  atlas/manifest/frame. `atomic_write_set()` extends the same mechanism to a
+  set of files that only makes sense published together (a sheet, its manifest,
+  and the report naming it).
 
 `curation.json` is intentionally NOT under this pipeline write lock: the curation
 surface writes it with the same atomic replace, and the compose scripts read one
@@ -266,6 +268,55 @@ def atomic_save_image(image: Image.Image, target: Path) -> None:
         image.save(tmp_name, format=fmt)
 
     _atomic_replace(target, payload)
+
+
+def atomic_write_set(payloads: "dict[Path, bytes | str]") -> None:
+    """Publish a whole set of files: stage every payload first, then rename them in.
+
+    The single-file writers above make each artifact appear whole, which is all a
+    stage that publishes one file needs. A stage that publishes a *set* — a sheet,
+    its manifest, and the report that says which sheets are current — needs the
+    set to appear together: a mid-loop `ENOSPC` on the second sheet would
+    otherwise leave the first one published with no report naming it.
+
+    Phase 1 writes each payload to a temp file beside its target and fsyncs it.
+    That is the phase that allocates, so any failure there has published nothing
+    and removes its own temps. Phase 2 is one `os.replace` per target — a rename
+    inside a directory whose blocks are already allocated.
+
+    This is not a filesystem transaction (POSIX has no multi-file commit): a
+    power loss between two renames can still land a subset. What it removes is
+    the failure this code can actually observe and act on — a write error partway
+    through a publish reporting success over a half-published set.
+
+    Parent directories must already exist; the caller owns the layout.
+    """
+    staged: list[tuple[str, Path]] = []
+    try:
+        for target, payload in payloads.items():
+            data = payload.encode("utf-8") if isinstance(payload, str) else payload
+            fd, tmp_name = tempfile.mkstemp(
+                dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
+            # Tracked before it is written: a failure mid-write must still clean
+            # up this temp, not just the ones that completed.
+            staged.append((tmp_name, target))
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+    except BaseException:
+        for tmp_name, _target in staged:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_name)
+        raise
+    for index, (tmp_name, target) in enumerate(staged):
+        try:
+            os.replace(tmp_name, target)
+        except BaseException:
+            for pending, _target in staged[index:]:
+                with contextlib.suppress(OSError):
+                    os.unlink(pending)
+            raise
 
 
 # --- sprite-request.json 단일 로드 게이트 ------------------------------------
