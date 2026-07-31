@@ -51,6 +51,42 @@ profiles, no CLI flags):
 48 sits below the smallest legitimate production effect frame observed (70px)
 and above typical chroma debris (< 20px).
 
+## Generated with this profile — end-to-end gallery
+
+Six effect concepts designed against the risk axes above and produced entirely
+through the profile — `prepare --subject effect` → `gen` (codex) → `extract` →
+`compose-atlas`, no `--min-used-pixels` anywhere:
+
+<p align="center">
+  <img src="assets/subject-effect-ember.gif" width="72" alt="ember burst" />
+  <img src="assets/subject-effect-venom.gif" width="72" alt="venom orb" />
+  <img src="assets/subject-effect-sigil.gif" width="72" alt="spark sigil" />
+  <img src="assets/subject-effect-wisp.gif" width="72" alt="wisp flame" />
+</p>
+
+![subject-profile effect gallery](assets/subject-effects-gallery.png)
+
+| concept | risk axis exercised | px/frame | verdict |
+|---|---|---|---|
+| ember burst (3f) | size pulsing across frames (outlier warnings) | 1154–1503 | ok |
+| frost shard (2f) | thin elongated geometry | 686–1050 | ok |
+| venom orb (3f) | green subject on magenta key (key-choice rule) | 1410–2117 | ok |
+| spark sigil (3f) | ring with gaps (component fragmentation risk) | 1068–1306 | ok |
+| wisp flame (4f) | wispy edges (soft-alpha unmix) | 1077–1826 | ok |
+| spark mote (3f) | deliberately tiny (aimed at the 48–400 band) | 1018–2000 | ok — but see below |
+
+Two honest observations from the run:
+
+- **The image model resists drawing truly small at 64px cells.** Even a prompt
+  demanding "at most a few pixels across, one fifth of the slot" produced
+  1000+px frames. The 48–400 band — the band the character floor was killing —
+  is where *hand-scaled* production art lives (the seven real fx runs measured
+  70–208px); prompt wording alone does not reach it, which is exactly why the
+  floor must not misjudge it when it arrives.
+- **Row prompts still say "game character".** The prepare prompt template is
+  character-worded; the `--description`/`action` text carries an effect
+  concept fine in practice, but effect-worded templates are an open follow-up.
+
 ## Best practices
 
 - **Declare the subject in the request, not in shell flags.** The request is
