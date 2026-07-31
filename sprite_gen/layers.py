@@ -114,15 +114,34 @@ def state_track(request: dict[str, Any], state: str) -> str:
     return DEFAULT_TRACK if track is None else str(track)
 
 
+def known_profile(profile: Any) -> str | None:
+    """The declared profile this value names, or None for anything else.
+
+    The single answer to "is this a known profile" — the validator and
+    `required_landmarks` must not disagree about it. `isinstance` comes before
+    the membership test on purpose: `rig.profile` is JSON, so it can arrive as a
+    list or an object, and `unhashable in dict` raises. A malformed declaration
+    has to come back as a reported error like every other one, never as a
+    TypeError out of a validator whose whole contract is returning the error list.
+    """
+    return profile if isinstance(profile, str) and profile in PROFILES else None
+
+
 def required_landmarks(profile: Any, track: str) -> tuple[str, ...]:
     """The landmarks every pool frame of a row on this track must declare.
 
-    Profile and track decide it together (`TRACK_PROFILE_OVERRIDE`): an unknown
-    profile requires nothing, because `rig.profile` is already its own error and
-    a second cascade of "missing crown" would bury it.
+    Profile validity is decided FIRST, the track narrowing
+    (`TRACK_PROFILE_OVERRIDE`) only after: an unknown profile requires nothing on
+    ANY track, because `rig.profile` is already its own error and a second
+    cascade of "missing crown" / "missing root" would bury it. Reading the
+    override first would let a `prop_effect` row borrow the `prop` profile out of
+    a run that declared no valid profile at all, so the one unknown-profile run
+    that still got a landmark error was the one with a prop row in it.
     """
-    return tuple(PROFILES.get(TRACK_PROFILE_OVERRIDE.get(track, profile), {})
-                 .get("required", ()))
+    name = known_profile(profile)
+    if name is None:
+        return ()
+    return tuple(PROFILES[TRACK_PROFILE_OVERRIDE.get(track, name)]["required"])
 
 
 def resolve_element(raw: Any) -> dict[str, Any]:
@@ -222,7 +241,7 @@ def _validate_rig(request: dict[str, Any], errors: list[str]) -> None:
         errors.append("rig must be an object")
         return
     profile = rig.get("profile")
-    if profile not in PROFILES:
+    if known_profile(profile) is None:
         errors.append(
             f"rig.profile must be one of {', '.join(sorted(PROFILES))} (got {profile!r})")
     landmarks = rig.get("landmarks", {})

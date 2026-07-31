@@ -179,6 +179,11 @@ geometry: an undeclared landmark is an error, never a guess.
   narrowing is `prop_effect` only — `base`, `action_overlay` and `full_body_override`
   all draw the body and keep the rig profile's full set, so a humanoid run still
   cannot ship a body frame without a crown.
+- **An unknown `rig.profile` requires nothing, on every track.** Profile validity is
+  judged before the `prop_effect` narrowing, so a run that declared no valid profile
+  gets one error — the profile itself — and never a derived "missing `root`" on its
+  prop rows next to it. This holds for any JSON type: a `rig.profile` that is a list
+  or an object is reported like any other unknown value, not raised.
 - The reserved column is a naming recommendation, not a restriction: any name
   matching `^[a-z][a-z0-9_]{0,31}$` is accepted. Whatever is used must be declared on
   **every** frame of that row — a landmark that exists on some frames only is
@@ -361,7 +366,8 @@ consuming a pre-baked combination for every direction × action pair.
 deterministic order; `require_valid_layer_request` raises with all of them at once.
 It is filesystem-free, so it runs before a run dir is touched. Rejections:
 
-- unknown `rig.profile`; malformed `rig` / `rig.landmarks`;
+- unknown `rig.profile` — one error, whatever JSON type it is, and no landmark
+  requirement is derived from it on any track (§3.1); malformed `rig` / `rig.landmarks`;
 - a composite `fps` that is not a positive integer, or a `loop` that is not a boolean;
 - a malformed element `revision` pin (it must be a non-empty list of segment strings);
 - landmarks for an unknown state; a frame key that is not a decimal index; a frame

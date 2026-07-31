@@ -158,8 +158,71 @@ def test_required_landmarks_reads_profile_and_track_together(profile: str) -> No
     for track in layers.TRACKS:
         expected = ("root",) if track == "prop_effect" else layers.PROFILES[profile]["required"]
         assert layers.required_landmarks(profile, track) == expected
-    # An unknown profile requires nothing; `rig.profile` is already its own error.
-    assert layers.required_landmarks("mecha", "base") == ()
+
+
+# An unknown `rig.profile` owns exactly one error. The three tests below pin that
+# from both sides — the helper and the whole validator — because the requirement
+# is an ORDER: profile validity is judged before the track narrowing, so a
+# `prop_effect` row can never borrow the `prop` profile out of a run that
+# declared no valid profile at all.
+
+UNKNOWN_PROFILES = [
+    pytest.param("mecha", id="unknown-string"),
+    pytest.param(None, id="null"),
+    pytest.param(3, id="number"),
+    pytest.param(True, id="bool"),
+    pytest.param(["humanoid_biped"], id="list-unhashable"),
+    pytest.param({"profile": "humanoid_biped"}, id="dict-unhashable"),
+]
+
+
+@pytest.mark.parametrize("profile", UNKNOWN_PROFILES)
+def test_an_unknown_profile_requires_nothing_on_every_track(profile) -> None:
+    """Including `prop_effect`, which is the track that has an override to fall back to.
+
+    A list or an object is a JSON shape `rig.profile` can really arrive as, and
+    an unhashable value must come back as "requires nothing" rather than as a
+    TypeError from the dict lookup.
+    """
+    for track in layers.TRACKS:
+        assert layers.required_landmarks(profile, track) == ()
+    assert layers.known_profile(profile) is None
+
+
+@pytest.mark.parametrize("profile", UNKNOWN_PROFILES)
+def test_an_unknown_profile_is_the_only_error_it_causes(profile) -> None:
+    """The regression: the run's prop row must not also be told it is missing `root`.
+
+    Judging the track override first made `required_landmarks(<unknown>,
+    'prop_effect')` return the `prop` profile's `('root',)`, so an unknown-profile
+    run that happened to contain a prop row got a second, derived error next to
+    the real one — and a malformed (unhashable) profile crashed the validator
+    outright instead of being reported.
+    """
+    request = _request()
+    request["rig"]["profile"] = profile
+    # Strip what a prop row would be held to under the override, so a leaked
+    # requirement shows up as an error instead of being silently satisfied.
+    del request["rig"]["landmarks"]["can"]["0"]["root"]
+
+    errors = layers.validate_layer_request(request)
+    assert [e for e in errors if e.startswith("rig.profile must be one of")], errors
+    assert not [e for e in errors if "required landmark" in e], errors
+
+
+def test_a_valid_profile_still_owns_its_requirements() -> None:
+    """The guard narrows nothing for a declared profile — the §3.1 rules stand."""
+    request = _request()
+    del request["rig"]["landmarks"]["walk"]["0"]["crown"]
+    del request["rig"]["landmarks"]["can"]["0"]["root"]
+
+    errors = layers.validate_layer_request(request)
+    assert not [e for e in errors if e.startswith("rig.profile must be one of")], errors
+    assert any("miss required landmark 'crown'" in e and "rig.landmarks.walk" in e
+               for e in errors), errors
+    assert any("miss required landmark 'root'" in e and "rig.landmarks.can" in e
+               for e in errors), errors
+    assert layers.known_profile("humanoid_biped") == "humanoid_biped"
 
 
 def test_root_is_required_by_every_profile() -> None:
