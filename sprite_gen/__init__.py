@@ -26,6 +26,7 @@ __all__ = [
     "runio",
     "score",
     "slice_sheet",
+    "subject",
     "migrate_breathe",
     "unpack_atlas",
 ]

@@ -5,6 +5,27 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## Unreleased - the sparse-frame floor is declared by the subject, not computed
+
+- **`"subject": "character" | "effect"` in sprite-request.json** (and `prepare --subject`) — the
+  sparse-frame floor exists to catch empty frames and extraction debris, and "how many opaque
+  pixels count as debris" is a property of what the run draws, not of arithmetic. Measured origin:
+  seven real 64px-cell effect runs (bone shard, orb, talisman…) extracted their exact requested
+  frame counts at 70–208 opaque px per frame and were rejected wholesale by the character-tuned
+  400px floor — 400px on a 64px cell demands 9.8% coverage, a solid 20×20 block — then sat
+  abandoned for months while the game shipped procedural placeholders. The assets were fine.
+  `effect` resolves the floor to 48 (below the smallest legitimate production effect frame, 70px;
+  above typical chroma debris, <20px); no field means `character`/400 and legacy runs stay
+  byte-identical (golden extraction suite unchanged). An explicit `--min-used-pixels` always wins,
+  and only explicit flags are stamped into `extract_args` — a profile-derived floor re-resolves
+  from the request on heal, because frames are a derived cache of (raw + request + engine). The
+  rejection message now names the remedy instead of reading as a generation failure: measured on
+  the incident runs, an unexplained "too sparse (91 pixels)" gets a run abandoned, not fixed.
+  Validation battery (synthetic densities 9→784px under both profiles + the 7 real fx runs + dense/
+  sparse character controls) pins the boundary: debris ≤36px still fails under `effect`, the
+  60–300px production band passes, characters are untouched both ways. Best/worst practices:
+  [`docs/subject-profiles.md`](docs/subject-profiles.md).
+
 ## Unreleased - breathe H/V amplitude split and manual-band-anchored protection
 
 Requested by Soohong (2026-07-30) while reviewing the gptaku-pet octopus: the vertical
