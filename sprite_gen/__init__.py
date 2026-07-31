@@ -15,6 +15,7 @@ __all__ = [
     "compose_gif",
     "correction_loop",
     "curation",
+    "export_aseprite",
     "export_pngs",
     "extract",
     "gen",

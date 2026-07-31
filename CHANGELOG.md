@@ -5,6 +5,24 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## Unreleased - the atlas speaks Aseprite JSON, and engines stop writing loaders
+
+- **`sprite-gen export-aseprite`** — the manifest's frame_layout had called itself "Aseprite JSON 과
+  동형 패턴" in a comment since 2026-07-16 while every engine consumer still wrote a custom loader
+  against it. The isomorphism is now a file: `exports/aseprite.json` in Aseprite's `json-array`
+  shape (`frames[]` with filename/frame/rotated/trimmed/spriteSourceSize/sourceSize/duration,
+  `meta.frameTags[]` with name/from/to/direction), paired with the existing atlas PNG. `filename`
+  is the stringified global frame index — the key Phaser's `createFromAseprite` looks frames up by
+  (`frameKey = i.toString()`), so `this.load.aseprite(key, atlas, json)` consumes a run with zero
+  glue. Durations come from `durations_ms` (the timing SSoT), reused atlas cells repeat their rect
+  under a new index, and a manifest whose `frame_layout`/`animation` rows disagree refuses to
+  export rather than emit a half-atlas. The subcommand is the module's own declaration
+  (`export_aseprite.add_arguments`/`run` — the `curation` identity pattern), tests pin the key
+  structure to real Aseprite CLI exports and Phaser's consumed fields
+  (`tests/test_export_aseprite.py`), and the honest limit is written down: this is a structural
+  contract, not an in-browser Phaser load; `loop` stays in `manifest.json` because Aseprite tags
+  cannot carry it. Docs: [`docs/engine-export.md`](docs/engine-export.md).
+
 ## Unreleased - breathe H/V amplitude split and manual-band-anchored protection
 
 Requested by Soohong (2026-07-30) while reviewing the gptaku-pet octopus: the vertical

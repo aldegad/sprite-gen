@@ -38,6 +38,7 @@ canonical files, not hidden imports.
 | Selected cycle | `compose_selected_cycle.py` | `curation.json` / `--frames` | selected-cycle manifest + QA |
 | Inverse / import | `unpack_atlas_run.py` | finished atlas **or** `--pngs-dir` | curator-ready run dir (§4) |
 | Export stills | `export_curated_pngs.py` | curated `frames/` | named PNGs under `curated/` |
+| Engine export | `sprite-gen export-aseprite` | `manifest.json` | `exports/aseprite.json` (Aseprite-compatible atlas JSON, [engine-export.md](engine-export.md)) |
 | Chroma guard | `check_visible_magenta.py` | screenshot | leakage warning |
 
 The happy path is `prepare → gen → extract → (curate) → compose`, with a curation
@@ -117,7 +118,8 @@ not restate it elsewhere; point here.
   qa-notes.md                        # per-state motion verdict + reference-plan notes
   curated/                           # only when export_curated_pngs.py runs — CURATION APPLIED.
                                      #   This is what an external consumer installs (§2-c).
-  exports/                           # only when compose_sprite_gif.py --run-dir runs (per-state GIF + gif-manifest.json)
+  exports/                           # compose_sprite_gif.py --run-dir (per-state GIF + gif-manifest.json)
+  exports/aseprite.json              # sprite-gen export-aseprite: Aseprite-compatible atlas JSON (engine-export.md)
   .sprite-gen.lock                   # single-writer lock (runio.py); a live holder blocks a second writer (§7 guarantee boundary)
   .frames.sg-staging/                # transient: extract builds the new generation here, swapped into frames/ under publish_guard
 ```
