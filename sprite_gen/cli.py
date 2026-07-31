@@ -14,6 +14,7 @@ from sprite_gen import (
     compose_gif,
     correction_loop,
     cutout,
+    export_aseprite,
     export_pngs,
     extract,
     gen,
@@ -246,6 +247,13 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         unpack_atlas.run,
     ),
     "export-pngs": ("Export curated frames back to named PNGs.", _add_export_pngs, export_pngs.run),
+    # Identity, not a copy (the `curation` pattern): the module's own declaration is the
+    # subcommand's, so the two launch forms cannot grow different flags.
+    "export-aseprite": (
+        "Export the runtime manifest as an Aseprite-compatible JSON atlas (Phaser load.aseprite ready).",
+        export_aseprite.add_arguments,
+        export_aseprite.run,
+    ),
     "anchor": (
         "Resolve/bake the direction anchor ref from curated truth (or pin which frame is the anchor).",
         _add_anchor,

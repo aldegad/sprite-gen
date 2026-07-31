@@ -494,6 +494,10 @@ sprite-gen (this SKILL.md = behavior contract + hub)
 │   ├─ docs/gen.md               # sprite-gen gen provider CLI · verified PNG/report · image-gen shuttle
 │   └─ docs/frame-interpolation.md  # generative in-between (codex/grok) → take raw · auth prereqs · RIFE retire rationale
 │
+├─ ENGINE HANDOFF ── "the atlas in a format engines already parse"
+│   └─ docs/engine-export.md     # sprite-gen export-aseprite · manifest → Aseprite JSON mapping ·
+│                                #   Phaser load.aseprite consumption · loop-flag limits
+│
 ├─ CURATION ── "human/agent picks, edits, and downloads via the webview"
 │   └─ docs/curation.md          # webview · curation.json schema (selected/order/transforms/
 │                                #   deleted/clones/revision/recolor.picked) · per-state salvage ·
@@ -524,6 +528,7 @@ Concept taxonomy (which doc owns each term, so agents don't guess):
 - `curation.json` fields (`selected`/`order`/`deleted`/`transforms`/`pixels`/`clones`/`pixel_unfake`/`revision`/`recolor.picked`) → curation.md
 - frame **clones** (duplicate instances, `source_frame_index`) → curation.md + compose consumers
 - `frame_layout`, `manifest.json` runtime contract → run-contract.md + this SKILL.md "Runtime Contract"
+- Aseprite JSON export (`export-aseprite`, `exports/aseprite.json`) → engine-export.md
 - pixel-unfake `fit`, `.plain.png`/`orig/` twins → pixel-unfake.md
 - recolor spec / report / `variants/` bake + colourway adopt → recolor.md
 - webview interactions (title-drag reorder, 넣기/빼기 toggle, 2-tier card, custom `data-tip` tooltip, recolor blink-compare) → `sprite_gen/curator/` (도메인 분할 `src/*.js` — 로드 순서 SSoT 는 index.html — + curator.css), described in curation.md + recolor.md
