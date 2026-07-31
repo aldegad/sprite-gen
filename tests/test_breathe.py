@@ -787,6 +787,25 @@ def test_depth_x_zero_keeps_horizontal_extent() -> None:
         "depth_x=0 과 따름이 같은 그림 — 가로 성분이 아예 안 굽는다"
 
 
+def test_depth_x_does_not_leak_into_the_vertical_axis() -> None:
+    """축 독립: `depth_x` 를 바꿔도 세로 운동(정수리 궤적)은 한 톨도 안 바뀐다.
+
+    분리의 요점은 두 축이 **스칼라만 다르고 나머지를 공유**하는 것이라, 세로 누적에
+    가로 진폭이 섞여도 겉보기 출력은 계속 그럴듯하다 — 변이 검증 2026-07-31 에서
+    세로 누적을 `dx_amp` 로 바꾼 mutant 가 기존 depth_x 그물 3개를 전부 통과했다."""
+    src = _humanoid()
+
+    def top_track(dx):
+        cfg = {**CFG, "depth": 0.10, "depth_x": dx}
+        frames, _ = _frames(src, count=12, cfg=cfg)
+        return [solid_alpha_bbox(f)[1] for f in frames]
+
+    baseline = top_track(0.10)
+    for dx in (0.0, 0.03, 0.12):
+        assert top_track(dx) == baseline, (
+            f"depth_x={dx} 가 세로 궤적을 바꿨다 — 가로 진폭이 세로 축으로 샌다")
+
+
 def test_manual_band_anchors_protection_to_the_band() -> None:
     """수동 밴드는 무조건 켜지고 램프가 밴드에 앵커된다 — 블롭에서 밴드 조정이
     무력했던 버그의 회귀 그물 (실측 2026-07-30 gptaku-pet: 밴드 12→4 무변화)."""
@@ -805,11 +824,31 @@ def test_manual_band_anchors_protection_to_the_band() -> None:
 
 
 def test_manual_band_actually_changes_the_bake() -> None:
-    src = _dome()
-    wide, _ = _frames(src, count=12, cfg={**CFG, "depth": 0.10})
-    narrow, _ = _frames(src, count=12, cfg={**CFG, "depth": 0.10, "torso_half": 6})
-    assert any(a.tobytes() != b.tobytes() for a, b in zip(wide, narrow)), \
-        "수동 밴드 12→6 급 변화가 굽기에 반영되지 않았다"
+    """**부속이 없는** 픽스처로, **폭 변동 크기**로 잰다 — 그게 실제 계약이다.
+
+    두 번의 변이 검증(2026-07-31)이 순진한 그물을 둘 다 통과시켰다:
+    (1) `_dome` 은 부속이 있어서 자동 램프가 이미 켜져 있고,
+    (2) `_humanoid` 이라도 밴드를 좁히면 `has_appendage`(max_half >= 1.3*torso_half)
+        판정이 뒤집혀 자동 램프가 켜지므로, 앵커 수리를 되돌려도 **출력은 어차피
+        달라진다** — "다르다" 단정으로는 회귀를 못 잡는다.
+    실제 계약은 **밴드 밖이 늘어나지 않고 밀리기만 하는 것**이므로, 밴드를 좁힐수록
+    실루엣 폭 변동이 줄어드는지를 잰다 (실측: 수리 3px→1px, mutant 3px→2px).
+    """
+    src = _humanoid()
+    assert not analyze(src).has_appendage, "이 그물은 부속 없는 도형이어야 의미가 있다"
+
+    def width_swing(cfg):
+        frames, _ = _frames(src, count=12, cfg=cfg)
+        spans = [solid_alpha_bbox(f)[2] - solid_alpha_bbox(f)[0] for f in frames]
+        return max(spans) - min(spans)
+
+    wide = width_swing({**CFG, "depth": 0.10})
+    narrow = width_swing({**CFG, "depth": 0.10, "torso_half": 4})
+    assert narrow <= 1, (
+        f"수동 밴드 4 인데 폭이 {narrow}px 흔들린다 — 밴드 밖이 밀리지 않고 늘어났다")
+    assert narrow < wide, (
+        f"밴드를 좁혔는데 폭 변동이 안 줄었다 (auto {wide}px vs 밴드4 {narrow}px) — "
+        f"보호가 밴드에 앵커되지 않았다")
 
 
 def test_depth_x_schema_bounds() -> None:
