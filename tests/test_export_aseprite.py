@@ -21,7 +21,7 @@ from pathlib import Path
 
 from conftest import run_script
 from sprite_gen import cli, export_aseprite
-from sprite_gen.export_aseprite import aseprite_json
+from sprite_gen.export_aseprite import aseprite_json, split_state_jsons
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -125,6 +125,42 @@ def test_cli_subcommand_reuses_the_module_declaration() -> None:
     assert run_fn is export_aseprite.run
 
 
+def test_json_hash_keys_are_the_filenames_in_playback_order() -> None:
+    # Aseprite `json-hash`: filename becomes the map key, entries drop the
+    # filename field, insertion order stays playback order.
+    array = aseprite_json(_manifest())["frames"]
+    hashed = aseprite_json(_manifest(), fmt="json-hash")["frames"]
+
+    assert isinstance(hashed, dict)
+    assert list(hashed) == [e["filename"] for e in array]
+    for entry in hashed.values():
+        assert set(entry) == ASEPRITE_FRAME_KEYS - {"filename"}
+    assert hashed["2"]["frame"] == array[2]["frame"]
+
+
+def test_split_states_match_flame_from_aseprite_data_contract() -> None:
+    """Flame reads `jsonData['frames'] as Map`, per value `frame.{x,y,w,h}` as
+    int and `duration` as int, and NEVER reads meta.frameTags — one file must
+    therefore be exactly one animation (sprite_animation.dart, flame-engine)."""
+    docs = split_state_jsons(_manifest(), fmt="json-hash")
+
+    assert set(docs) == {"idle", "walk"}
+    walk = docs["walk"]["frames"]
+    assert isinstance(walk, dict)
+    # local indices from "0", not global ones — this file IS the animation.
+    assert list(walk) == ["0", "1", "2"]
+    for entry in walk.values():
+        assert all(isinstance(entry["frame"][k], int) for k in ("x", "y", "w", "h"))
+        assert isinstance(entry["duration"], int)
+    # the shared-cell instance repeats its rect under a new local key.
+    assert walk["0"]["frame"] == walk["2"]["frame"]
+    # every split doc points at the same atlas image.
+    assert {doc["meta"]["image"] for doc in docs.values()} == {"sprite-sheet-alpha.png"}
+    assert docs["idle"]["meta"]["frameTags"] == [
+        {"name": "idle", "from": 0, "to": 1, "direction": "forward"},
+    ]
+
+
 def test_export_from_a_real_composed_run(fixture_run_dir: Path) -> None:
     extract = run_script("extract_sprite_row_frames.py", "--run-dir", str(fixture_run_dir))
     assert extract.returncode == 0, extract.stdout + extract.stderr
@@ -156,3 +192,16 @@ def test_export_from_a_real_composed_run(fixture_run_dir: Path) -> None:
         rect = entry["frame"]
         assert 0 <= rect["x"] and rect["x"] + rect["w"] <= exported["meta"]["size"]["w"]
         assert 0 <= rect["y"] and rect["y"] + rect["h"] <= exported["meta"]["size"]["h"]
+
+    # The Flame path from the same composed run: one hash-format file per state.
+    proc = subprocess.run(
+        [sys.executable, "-m", "sprite_gen.export_aseprite", "--run-dir", str(fixture_run_dir),
+         "--format", "json-hash", "--split-states"],
+        capture_output=True, text=True, cwd=ROOT,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    for state, rects in manifest["frame_layout"]["rows"].items():
+        doc = json.loads((fixture_run_dir / "exports" / "aseprite" / f"{state}.json")
+                         .read_text(encoding="utf-8"))
+        assert isinstance(doc["frames"], dict)
+        assert list(doc["frames"]) == [str(i) for i in range(len(rects))]

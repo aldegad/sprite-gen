@@ -7,6 +7,16 @@ All notable changes to `sprite-gen` are recorded here. Versions track the `versi
 
 ## Unreleased - the atlas speaks Aseprite JSON, and engines stop writing loaders
 
+- **Flutter/Flame path: `export-aseprite --format json-hash --split-states`** — Flame core already
+  reads Aseprite JSON (`SpriteAnimation.fromAsepriteData`), but its source pins two constraints the
+  single-file export can't meet: `frames` must be a *map* (`jsonData['frames'] as Map`), and
+  `meta.frameTags` is never read, so one file = one animation and a whole-run file would play every
+  state concatenated. `--format json-hash` (mirroring Aseprite's own flag, filename becomes the map
+  key) plus `--split-states` (one `exports/aseprite/<state>.json` with local indices) produce
+  exactly what that factory consumes, pinned by tests to the fields the Flame source reads.
+  `docs/engine-export.md` also carries the manifest-direct Flame recipe — strictly richer (loop +
+  `durations_ms` per frame + all states in one file) — including the contract detail hand-written
+  loaders get wrong: `durations_ms`, when present, replaces uniform `1/fps` as the timing SSoT.
 - **`sprite-gen export-aseprite`** — the manifest's frame_layout had called itself "Aseprite JSON 과
   동형 패턴" in a comment since 2026-07-16 while every engine consumer still wrote a custom loader
   against it. The isomorphism is now a file: `exports/aseprite.json` in Aseprite's `json-array`
