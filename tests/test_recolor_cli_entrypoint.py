@@ -8,25 +8,12 @@ test on the day it is written and drift on the next option.
 
 from __future__ import annotations
 
-import re
-import subprocess
-import sys
 from pathlib import Path
 
+from conftest import help_options as _help_options
 from sprite_gen import cli, recolor
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _help_options(*argv: str) -> set[str]:
-    proc = subprocess.run(
-        [sys.executable, *argv, "--help"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert proc.returncode == 0, proc.stderr
-    return set(re.findall(r"(?<![\w-])--[a-z][\w-]*", proc.stdout))
 
 
 def test_recolor_subcommand_reuses_module_declaration() -> None:

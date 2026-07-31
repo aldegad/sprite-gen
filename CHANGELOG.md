@@ -121,6 +121,13 @@ The new part, and the reason the three above surfaced:
   move had made false went with it: `SKILL.md` claiming `sprite-gen <tool>` is a CLI module and not a
   console script, a `pyproject.toml` comment introducing `python3 scripts/<tool>.py` as the repo's
   calling form, and `docs/pixel-unfake.md` pointing at the pre-move implementation file.
+- **Flag-parity tests stopped failing on colour.** Under a `FORCE_COLOR` shell, Python 3.14's
+  colorized argparse help wraps every flag in ANSI codes, so the `--help`-parsing regex in the
+  entrypoint tests matched nothing (curation) or a partial set (recolor) — the same vulnerable
+  helper had already propagated by copy into two test files, which is exactly the drift its own
+  docstring warns about. The helper is hoisted once into `conftest.help_options`, which pins
+  `PYTHON_COLORS=0` (outranks `FORCE_COLOR`/`NO_COLOR`/tty in Python's colour spec); both test
+  files now import that one declaration.
 
 ## Unreleased - NumPy is a declared dependency now, and the floor is the one 3.10 can actually install
 
