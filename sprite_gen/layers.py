@@ -54,8 +54,23 @@ PROFILES: dict[str, dict[str, tuple[str, ...]]] = {
 # A row's track kind. `base` is the explicit default for an undeclared state, so
 # a non-layer run reads as an all-`base` run rather than as an unknown state.
 TRACKS = ("base", "action_overlay", "prop_effect", "full_body_override")
+# Which tracks may be a stack's single body element. This is a stack-shape rule,
+# not a "draws the character" rule: an `action_overlay` also draws the body, it
+# just may not be the element everything else is aligned onto.
 BODY_TRACKS = ("base", "full_body_override")
 DEFAULT_TRACK = "base"
+
+# A row's required landmarks come from the profile AND the row's track meaning.
+# `prop_effect` art is a prop or an effect, not the character: a watering can has
+# no 정수리, so holding it to `humanoid_biped`'s `crown` demands a landmark
+# nobody can place, and the only way out is to declare a fake one — which turns a
+# required pivot into noise on the row the composer trusts most. A prop row is
+# therefore held to the `prop` profile (its own `root`, plus whatever
+# self-meaning names like `grip` / `tip` it declares), whatever the run's rig
+# profile is. Every body-bearing row — `base`, `action_overlay`,
+# `full_body_override` — keeps the rig profile's full set, so a humanoid run
+# still cannot ship a body frame without a crown.
+TRACK_PROFILE_OVERRIDE: dict[str, str] = {"prop_effect": "prop"}
 
 LANDMARK_NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 COMPOSITE_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -97,6 +112,17 @@ def state_track(request: dict[str, Any], state: str) -> str:
         return DEFAULT_TRACK
     track = entry.get("track")
     return DEFAULT_TRACK if track is None else str(track)
+
+
+def required_landmarks(profile: Any, track: str) -> tuple[str, ...]:
+    """The landmarks every pool frame of a row on this track must declare.
+
+    Profile and track decide it together (`TRACK_PROFILE_OVERRIDE`): an unknown
+    profile requires nothing, because `rig.profile` is already its own error and
+    a second cascade of "missing crown" would bury it.
+    """
+    return tuple(PROFILES.get(TRACK_PROFILE_OVERRIDE.get(track, profile), {})
+                 .get("required", ()))
 
 
 def resolve_element(raw: Any) -> dict[str, Any]:
@@ -205,16 +231,18 @@ def _validate_rig(request: dict[str, Any], errors: list[str]) -> None:
         return
     states = request.get("states") or {}
     bounds = _cell_bounds(request)
-    required = tuple(PROFILES.get(profile, {}).get("required", ()))
     for state in sorted(landmarks):
         if state not in states:
             errors.append(f"rig.landmarks declares unknown state {state!r}")
             continue
-        _validate_state_landmarks(request, state, landmarks[state], required, bounds, errors)
+        track = state_track(request, state)
+        _validate_state_landmarks(request, state, landmarks[state],
+                                  required_landmarks(profile, track), track, bounds, errors)
 
 
 def _validate_state_landmarks(request: dict[str, Any], state: str, frames: Any,
-                              required: tuple[str, ...], bounds: tuple[int, int] | None,
+                              required: tuple[str, ...], track: str,
+                              bounds: tuple[int, int] | None,
                               errors: list[str]) -> None:
     if not isinstance(frames, dict):
         errors.append(f"rig.landmarks.{state} must be an object keyed by frame index")
@@ -272,8 +300,8 @@ def _validate_state_landmarks(request: dict[str, Any], state: str, frames: Any,
         absent = sorted(i for i, names in per_frame.items() if name not in names)
         if absent:
             errors.append(
-                f"rig.landmarks.{state} frame(s) {absent} miss required landmark {name!r} "
-                f"for this profile")
+                f"rig.landmarks.{state} frame(s) {absent} miss required landmark {name!r} — "
+                f"a {track!r} row requires {', '.join(required)} on every frame")
     if per_frame:
         union: set[str] = set().union(*per_frame.values())
         for name in sorted(union):

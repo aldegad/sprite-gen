@@ -28,7 +28,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _request(**overrides) -> dict:
-    """A minimal humanoid rig request: `walk` (base, 2 frames) + `can` (prop, 1 frame)."""
+    """A minimal humanoid rig request: `walk` (base, 2 frames) + `can` (prop, 1 frame).
+
+    The prop row declares `root` and `grip` and no `crown` — a watering can has no
+    정수리, and the contract judges required landmarks by profile *and* track
+    (§3.1). It is the documented example, so the whole file exercises that rule.
+    """
     request = {
         "version": 1,
         "kind": "sprite-gen-request",
@@ -46,7 +51,7 @@ def _request(**overrides) -> dict:
                     "0": {"root": [32, 40], "crown": [32, 8], "hand_r": [40, 30]},
                     "1": {"root": [32, 41], "crown": [32, 9], "hand_r": [41, 31]},
                 },
-                "can": {"0": {"root": [10, 10], "crown": [10, 2], "grip": [8, 12]}},
+                "can": {"0": {"root": [10, 10], "grip": [8, 12]}},
             },
         },
         "layers": {
@@ -110,6 +115,51 @@ def test_non_humanoid_profiles_do_not_require_crown(profile: str) -> None:
             point_map.pop("crown", None)
 
     assert layers.validate_layer_request(request) == []
+
+
+def test_a_prop_row_in_a_humanoid_run_is_not_held_to_the_body_requirement() -> None:
+    """A watering can has no 정수리 (§3.1).
+
+    The rig profile answers "what is this character", the track answers "what does
+    this row draw" — and `crown` is a body landmark. Requiring it on a
+    `prop_effect` row leaves one way out: declare a fake crown on the can, which
+    puts a made-up coordinate on the row the composer aligns against. The
+    requirement is judged by profile AND track so that way out is never needed.
+    """
+    request = _request()
+    assert "crown" not in request["rig"]["landmarks"]["can"]["0"]
+
+    assert layers.validate_layer_request(request) == []
+
+
+@pytest.mark.parametrize("track", ["base", "action_overlay", "full_body_override"])
+def test_a_body_bearing_row_keeps_the_profile_requirement(track: str) -> None:
+    """The narrowing is `prop_effect` only — every row that draws the body keeps `crown`."""
+    request = _request()
+    request["states"]["can"]["track"] = track
+
+    errors = layers.validate_layer_request(request)
+    assert any("miss required landmark 'crown'" in e and "rig.landmarks.can" in e
+               for e in errors), errors
+
+
+def test_a_prop_row_still_requires_its_own_root() -> None:
+    """Narrowed, not exempt: a prop is held to the `prop` profile, which needs `root`."""
+    request = _request()
+    del request["rig"]["landmarks"]["can"]["0"]["root"]
+
+    errors = layers.validate_layer_request(request)
+    assert any("miss required landmark 'root'" in e and "rig.landmarks.can" in e
+               for e in errors), errors
+
+
+@pytest.mark.parametrize("profile", sorted(layers.PROFILES))
+def test_required_landmarks_reads_profile_and_track_together(profile: str) -> None:
+    for track in layers.TRACKS:
+        expected = ("root",) if track == "prop_effect" else layers.PROFILES[profile]["required"]
+        assert layers.required_landmarks(profile, track) == expected
+    # An unknown profile requires nothing; `rig.profile` is already its own error.
+    assert layers.required_landmarks("mecha", "base") == ()
 
 
 def test_root_is_required_by_every_profile() -> None:
@@ -303,8 +353,7 @@ def test_composite_playback_keys_are_typed(key: str, value) -> None:
 def test_landmark_map_reads_a_whole_frame_and_never_invents_one() -> None:
     request = _request()
 
-    assert layers.landmark_map(request, "can", 0) == {"root": (10, 10), "crown": (10, 2),
-                                                      "grip": (8, 12)}
+    assert layers.landmark_map(request, "can", 0) == {"root": (10, 10), "grip": (8, 12)}
     # A curated clone instance lives outside the declared pool: no map, no guess.
     assert layers.landmark_map(request, "can", 7) is None
 

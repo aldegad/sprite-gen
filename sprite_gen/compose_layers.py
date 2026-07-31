@@ -476,12 +476,30 @@ def _render(run_dir: Path, request: dict[str, Any], curation: dict[str, Any] | N
     }
 
 
+def require_distinct_names(names: list[str], *, origin: str) -> None:
+    """A selection names each composite at most once. The one place that rule lives.
+
+    Both entry forms run it: `parse_names` so a CLI typo is diagnosed before the
+    run dir is touched, and `bake` so a direct `bake(names=[...])` call cannot
+    reach the bake without it. Both ways of passing over a repeat lie about the
+    result — de-duplicating answers a selection nobody asked for, and keeping the
+    repeat writes one sheet while `layers.report.json` counts two composites, so
+    `composite_count` no longer matches the sheets on disk (§5).
+    """
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        raise SystemExit(
+            f"{origin}: composite(s) {repeated} named more than once; a selection "
+            f"names each composite at most once")
+
+
 def bake(run_dir: Path | str, *, names: list[str] | None = None) -> dict[str, Any]:
     """Bake every declared composite (or just `names`) into `<run-dir>/layers/`.
 
-    Returns the report that was written. Raises `SystemExit` listing every
-    violation at once, having written nothing, when any composite cannot be
-    baked as declared.
+    `names`, when given, selects declared composites and names each at most once
+    (`require_distinct_names`). Returns the report that was written. Raises
+    `SystemExit` listing every violation at once, having written nothing, when any
+    composite cannot be baked as declared.
     """
     run_dir = Path(run_dir).expanduser().resolve()
     # Derived-cache self-heal before consuming frames — the same real-time
@@ -507,6 +525,7 @@ def bake(run_dir: Path | str, *, names: list[str] | None = None) -> dict[str, An
     wanted = sorted(declared) if names is None else list(names)
     if not wanted:
         raise SystemExit(f"{run_dir}: no composite selected; declared: {sorted(declared)}")
+    require_distinct_names(wanted, origin=f"{run_dir}: names=")
     unknown = [name for name in wanted if name not in declared]
     if unknown:
         raise SystemExit(
@@ -581,7 +600,9 @@ def parse_names(value: str | None) -> list[str] | None:
     """`--names a,b` -> ["a", "b"]; unset -> None (every declared composite).
 
     An empty entry is a typo (`a,,b`, a trailing comma), never "all": silently
-    dropping it would bake a different set than the one that was asked for.
+    dropping it would bake a different set than the one that was asked for. The
+    repeat rule is `require_distinct_names`, run here so a CLI typo fails before
+    the run dir is touched — `bake` runs the same check for every other caller.
     """
     if value is None:
         return None
@@ -589,6 +610,7 @@ def parse_names(value: str | None) -> list[str] | None:
     if not names or any(not name for name in names):
         raise SystemExit(
             f"--names expects a comma-separated list of composite names (got {value!r})")
+    require_distinct_names(names, origin=f"--names {value!r}")
     return names
 
 

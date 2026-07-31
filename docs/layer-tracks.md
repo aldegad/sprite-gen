@@ -169,6 +169,16 @@ geometry: an undeclared landmark is an error, never a guess.
 - `crown` (정수리) is a **humanoid head landmark for generation and QA framing**, not
   a pivot. It is required only for `humanoid_biped`; forcing a head rule onto an
   octopus or a quadruped is explicitly out of scope.
+- **Required landmarks are judged by profile AND track.** The profile answers *what
+  this character is*; the track answers *what this row draws*. A `prop_effect` row
+  draws a prop or an effect, not the character, so it is held to the `prop` profile's
+  requirement — its own `root`, plus whatever self-meaning names (`grip`, `tip`) it
+  declares — inside a `humanoid_biped` run just the same. A watering can has no
+  정수리: requiring one would leave a single way out, declaring a made-up `crown` on
+  the row the composer aligns against, which turns a required pivot into noise. The
+  narrowing is `prop_effect` only — `base`, `action_overlay` and `full_body_override`
+  all draw the body and keep the rig profile's full set, so a humanoid run still
+  cannot ship a body frame without a crown.
 - The reserved column is a naming recommendation, not a restriction: any name
   matching `^[a-z][a-z0-9_]{0,31}$` is accepted. Whatever is used must be declared on
   **every** frame of that row — a landmark that exists on some frames only is
@@ -194,12 +204,12 @@ geometry: an undeclared landmark is an error, never a guess.
 An undeclared row is `base` — the explicit default, so a legacy run reads as an
 all-`base` run rather than as an unknown kind.
 
-| Track | Draws | Requires | Forbids |
-|---|---|---|---|
-| `base` | the whole body | — | sharing a stack with another body element |
-| `action_overlay` | a partial-body action drawn over the base | a `base` in the stack | coexisting with `full_body_override` |
-| `prop_effect` | a prop or effect placed at a socket landmark | a body element; its `to` landmark declared on that body row | — |
-| `full_body_override` | the whole body, replacing the base | being the only body element | `base` and `action_overlay` in the same stack |
+| Track | Draws | Landmarks required per frame | Requires | Forbids |
+|---|---|---|---|---|
+| `base` | the whole body | the rig profile's set | — | sharing a stack with another body element |
+| `action_overlay` | a partial-body action drawn over the base | the rig profile's set | a `base` in the stack | coexisting with `full_body_override` |
+| `prop_effect` | a prop or effect placed at a socket landmark | the `prop` profile's set (`root`) | a body element; its `to` landmark declared on that body row | — |
+| `full_body_override` | the whole body, replacing the base | the rig profile's set | being the only body element | `base` and `action_overlay` in the same stack |
 
 `full_body_override` is the escape hatch for a motion that cannot be decomposed —
 a two-handed swing owns the whole body, so the contract makes that explicit
@@ -356,8 +366,9 @@ It is filesystem-free, so it runs before a run dir is touched. Rejections:
 - a malformed element `revision` pin (it must be a non-empty list of segment strings);
 - landmarks for an unknown state; a frame key that is not a decimal index; a frame
   index outside the pool; a pool frame with no landmarks at all;
-- a required landmark missing on any frame; a landmark name that does not match the
-  pattern; a landmark declared on part of a row only;
+- a required landmark missing on any frame — required per row by profile **and** track,
+  so a `prop_effect` row is held to the `prop` set (§3.1); a landmark name that does not
+  match the pattern; a landmark declared on part of a row only;
 - a coordinate that is not a pair of integers, or lands outside the cell;
 - an unknown `track` value;
 - a composite name that collides with a request state, or does not match
@@ -410,6 +421,14 @@ The `sprite-gen compose-layers` subcommand, the `-m sprite_gen.compose_layers` m
 form and the `scripts/compose_layers.py` wrapper are three launch forms of one declaration
 (`compose_layers.add_arguments` / `.run`), and `compose_layers.bake(run_dir,
 names=None)` is the library form the three share.
+
+`--names` is a selection, so it is spelled exactly: an empty entry (`a,,b`, a trailing
+comma) is a typo and never "all", and a name listed twice is refused the same way.
+Both ways of passing over a repeat lie about the result — de-duplicating answers a
+selection nobody asked for, and keeping the repeat writes one sheet while
+`layers.report.json` counts two composites. `bake(names=[...])` enforces it too
+(`compose_layers.require_distinct_names`), so the library form cannot reach a bake the
+CLI would have refused.
 
 Order in the run: it consumes the **curated** rows and the same primitives
 `compose-atlas` does, so it belongs after curation, beside step 4 — a composite is

@@ -33,6 +33,8 @@ CELL = 96
 
 # Declared pivots. Values are in-cell integers; the bake never infers one, so the
 # only thing that matters here is that the same names exist on every pool frame.
+# `can` is a `prop_effect` row, so it declares its own `root` / `grip` and no
+# `crown`: required landmarks follow profile AND track (`layer-tracks.md` §3.1).
 LANDMARKS = {
     "walk": {
         "0": {"root": [48, 60], "crown": [48, 30], "hand_r": [60, 50]},
@@ -42,7 +44,7 @@ LANDMARKS = {
         "0": {"root": [48, 60], "crown": [48, 30], "hand_r": [58, 50]},
         "1": {"root": [48, 60], "crown": [48, 30], "hand_r": [58, 50]},
     },
-    "can": {"0": {"root": [48, 72], "crown": [48, 58], "grip": [48, 72]}},
+    "can": {"0": {"root": [48, 72], "grip": [48, 72]}},
 }
 
 
@@ -555,6 +557,22 @@ def test_an_unknown_composite_name_is_refused(tmp_path: Path) -> None:
     assert "no such composite" in str(excinfo.value)
 
 
+def test_a_repeated_name_is_refused_at_the_python_entry_point(tmp_path: Path) -> None:
+    """The CLI string is not the only door into the selection.
+
+    `parse_names` diagnoses a `--names a,a` typo early, but the invariant belongs
+    to the bake: a repeat that got through would write one sheet while the report
+    counted two composites, so `composite_count` and `layers/` would disagree —
+    the same defect, reached by the library form.
+    """
+    run_dir = _build_run(tmp_path)
+
+    with pytest.raises(SystemExit) as excinfo:
+        compose_layers.bake(run_dir, names=["walk_with_can", "walk_with_can"])
+    assert "named more than once" in str(excinfo.value)
+    assert not _layers_dir(run_dir).exists()
+
+
 def test_load_report_distinguishes_absent_from_foreign(tmp_path: Path) -> None:
     run_dir = _build_run(tmp_path)
     assert compose_layers.load_report(run_dir) is None
@@ -638,6 +656,18 @@ def test_the_cli_refuses_a_malformed_names_list(tmp_path: Path, value: str) -> N
 
     assert result.returncode != 0
     assert "--names expects a comma-separated list" in result.stderr
+    assert not _layers_dir(run_dir).exists()
+
+
+@pytest.mark.parametrize("value", ["walk_with_can,walk_with_can", "nope,walk_with_can,nope"])
+def test_the_cli_refuses_a_repeated_name(tmp_path: Path, value: str) -> None:
+    """Same class as an empty entry: the selection is the caller's to fix, not ours to guess."""
+    run_dir = _build_run(tmp_path)
+
+    result = _cli(run_dir, "--names", value)
+
+    assert result.returncode != 0
+    assert "named more than once" in result.stderr
     assert not _layers_dir(run_dir).exists()
 
 
