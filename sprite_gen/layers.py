@@ -62,7 +62,18 @@ COMPOSITE_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 # Stack element defaults. `from` is the element's own landmark, `to` is the
 # landmark on the body element it is placed onto; both default to the pivot.
-ELEMENT_KEYS = ("state", "from", "to", "mask", "allow_clip")
+# `revision` is an optional pin: the source row's `state_revision` segments as
+# they were when the landmarks were declared. The composer checks it (same
+# prefix rule as `curation.anchors`), so a re-rolled row fails the bake instead
+# of aligning new art to old pivots.
+ELEMENT_KEYS = ("state", "from", "to", "mask", "allow_clip", "revision")
+
+# Composite-level keys this contract reads. `stack` is required; `fps` / `loop`
+# default to the body element's state entry. Unknown keys here are still passed
+# over silently — the composite spec's owner boundary lands with the CLI step
+# (`docs/layer-tracks.md` §7), and closing it here without that owner would be a
+# second truth about what a composite may declare.
+COMPOSITE_KEYS = ("stack", "fps", "loop")
 
 
 def has_layer_contract(request: dict[str, Any]) -> bool:
@@ -97,6 +108,7 @@ def resolve_element(raw: Any) -> dict[str, Any]:
         "to": element.get("to", "root"),
         "mask": element.get("mask"),
         "allow_clip": bool(element.get("allow_clip", False)),
+        "revision": element.get("revision"),
     }
 
 
@@ -123,6 +135,26 @@ def _pool_size(request: dict[str, Any], state: str) -> int:
 
 def _landmark_frames(request: dict[str, Any], state: str) -> dict[str, Any]:
     return ((request.get("rig") or {}).get("landmarks") or {}).get(state) or {}
+
+
+def landmark_map(request: dict[str, Any], state: str,
+                 frame: int) -> dict[str, tuple[int, int]] | None:
+    """Every landmark declared on one pool frame, or None when the frame declares none.
+
+    None is the honest answer for an instance index nothing was declared for — a
+    curated clone instance lives outside the pool (`curation.state_clones`), so it
+    has no declaration and the composer fails loud instead of borrowing its
+    source frame's pivots for art the clone's own transform has already moved.
+    """
+    points = _landmark_frames(request, state).get(str(frame))
+    if not isinstance(points, dict):
+        return None
+    resolved = {
+        str(name): (int(value[0]), int(value[1]))
+        for name, value in sorted(points.items())
+        if _is_point(value)
+    }
+    return resolved or None
 
 
 def landmark(request: dict[str, Any], state: str, frame: int, name: str) -> tuple[int, int] | None:
@@ -282,6 +314,14 @@ def _validate_layers(request: dict[str, Any], errors: list[str]) -> None:
         if not isinstance(spec, dict):
             errors.append(f"layers.{name} must be an object")
             continue
+        # `fps` / `loop` reach the composite manifest verbatim, so a string fps
+        # would be baked into a runtime contract. Typed here, where the whole
+        # declaration is checked before a run dir is touched.
+        if "fps" in spec and not (_is_int(spec["fps"]) and spec["fps"] > 0):
+            errors.append(
+                f"layers.{name}.fps must be a positive integer (got {spec['fps']!r})")
+        if "loop" in spec and not isinstance(spec["loop"], bool):
+            errors.append(f"layers.{name}.loop must be true or false (got {spec['loop']!r})")
         stack = spec.get("stack")
         if not isinstance(stack, list) or not stack:
             errors.append(f"layers.{name}.stack must be a non-empty list of elements")
@@ -302,6 +342,13 @@ def _validate_stack(request: dict[str, Any], name: str, stack: list[Any],
             errors.append(
                 f"layers.{name}.stack[{position}] has unknown key(s) {unknown}; "
                 f"allowed: {', '.join(ELEMENT_KEYS)}")
+        pin = raw.get("revision")
+        if pin is not None and not (isinstance(pin, list) and pin
+                                    and all(isinstance(seg, str) for seg in pin)):
+            errors.append(
+                f"layers.{name}.stack[{position}].revision must be a non-empty list of "
+                f"state_revision segment strings (it pins the generation the landmarks "
+                f"were declared against)")
         state = raw.get("state")
         if not isinstance(state, str) or state not in states:
             errors.append(

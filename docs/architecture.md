@@ -51,6 +51,13 @@ block on a running compose. The curation write is, however, serialized against a
 no longer matches is rejected — a stale autosave cannot apply old selections to a
 re-imported run's frames, even when it keeps the same state names (run-contract.md §4).
 
+`compose_layers.py` (the optional composite bake) is another consumer of those same
+shared primitives: it resolves a curated instance exactly as `compose_atlas` does and
+then stacks instances by integer translation, so a composite is a combination of what
+the atlas bakes rather than a second extraction path. Its declaration half,
+`layers.py`, is filesystem-free on purpose — the request is validated before a run dir
+is touched, and both entry points call the same validator (`layer-tracks.md` §6).
+
 The automatic correction loop is intentionally split into three owners:
 `inspect.py` measures deterministic signals (frame count, RGB histogram, dHash,
 motion presence, centroid jitter, existing extraction warnings), `score.py`
@@ -332,6 +339,11 @@ Required fields:
 - `frame_layout` also carries `sheetWidth/sheetHeight/cellWidth/cellHeight`
 - `curation_applied` records whether a sidecar was baked; `frame_variant`
   records which frame variant (canonical / plain) was baked
+- **rig runs only** (`sprite_gen/layers.py`, `compose_layers.py`): `rig.profile` +
+  `rig.landmarks.<state>[i]` — atlas-absolute integer pivots indexed by play
+  position, so they zip 1:1 against `frame_layout.rows.<state>` — and
+  `animation.rows.<state>.track`. A run that declares no rig produces exactly the
+  key set above; `layer-tracks.md` §1 owns that boundary
 
 Static fallback is allowed only as explicit survival output when generation is
 blocked; it must not create `sprite-sheet-alpha.png` and is not a pass.

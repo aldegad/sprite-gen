@@ -53,6 +53,39 @@ carry land with the following steps.
   `states.<state>.takes`) are dropped without a word. The layer keys must be carried
   explicitly and the drop made observable; a canary test fails when that lands.
 
+## Unreleased - deterministic composite bake (`layers/`)
+
+The execution half of the layer contract: a rig run can now bake its declared stacks.
+Composition is integer pivot translation plus alpha compositing over the *curated*
+instances — no resampling, rotation or scale of its own — so a composite is a
+combination of what the atlas bakes, and the same run bakes the same bytes every time.
+
+- **`sprite_gen/compose_layers.py`** — `bake(run_dir, names=None)` writes
+  `layers/<name>.png`, `layers/<name>.manifest.json` (the runtime manifest shape a
+  consumer already reads, plus a `layers` provenance block) and
+  `layers/layers.report.json` (stack, per-row `state_revision`, per-element offsets,
+  clipped-pixel counts). Identical composed cells share one column, exactly like the
+  atlas, so the rect list stays indexed by play position.
+- **Arbitrary alpha masks** — any PNG of the cell's size; `a' = (a * m + 127) // 255`,
+  spelled out rather than delegated to a library blend, because the rounding is a
+  published clause of the contract.
+- **Run-dir diagnostics, all reported at once and all fatal**: a source frame missing
+  from the published generation, a mask that is missing / unreadable / the wrong size /
+  outside the run dir, an element clipped by the cell while `allow_clip` is false (with
+  the pixel count), a curated sequence that does not match the body's, a body row
+  curated down to nothing, a curated clone instance (it has no declared pivots and its
+  own transform, so nothing is borrowed from the frame it copies), and a `revision` pin
+  that no longer matches the row. The bake is all-or-nothing: one violation writes
+  nothing.
+- **`manifest.json` gains `rig` + per-row `track` for a rig run only.** Landmarks reach
+  the runtime as atlas-absolute integers indexed by play position, so they zip 1:1
+  against `frame_layout.rows.<state>` — the input a runtime needs to combine tracks live
+  instead of consuming a pre-baked combination per direction × action.
+- Declaration side: elements accept the documented `revision` pin, composite `fps` /
+  `loop` are typed (they are copied into a runtime manifest), and boolean coordinates
+  are now covered by a test — `bool` is an `int` subclass, so `[true, 8]` had been
+  rejected only by inspection.
+
 ## Unreleased - deterministic palette-swap bake and colourway pick in the curation view
 
 Dot art is controlled by its palette, so colour variants are baked into finished sheets

@@ -30,6 +30,7 @@ canonical files, not hidden imports.
 | Curate (opt) | `sprite-gen curation` (`serve_curation.py`) + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
 | Recolor (opt) | `sprite-gen recolor` / `recolor-palette` (`sprite_gen/recolor.py`) | base sheet (default `sprite-sheet-alpha.png`) + recolor spec | `variants/<name>.png`, optional `variants/<name>.manifest.json`, `variants/recolor.report.json` |
+| Layer bake (opt) | `sprite_gen/compose_layers.py` (`bake()`; no CLI yet) | `frames/` + `curation.json` + the request's `rig` / `layers` | `layers/<name>.png`, `layers/<name>.manifest.json`, `layers/layers.report.json` |
 | QA | `preview_animation.py` | `frames/` | `qa/<state>-contact.png`, `qa/<state>.gif` |
 | Inspect | `inspect_sprite_run.py` | `sprite-request.json`, `raw/` or `frames/` | `sprite-inspect.report.json` |
 | Score | `score_sprite_run.py` | `sprite-inspect.report.json` | `sprite-score.report.json`, correction hints |
@@ -108,6 +109,12 @@ not restate it elsewhere; point here.
                                      #   passthrough pixels). Adopted pick lives in
                                      #   curation.json.recolor.picked (name-keyed). See
                                      #   docs/recolor.md.
+  layers/                            # only when a rig run bakes composites (compose_layers) —
+                                     #   <name>.png + <name>.manifest.json (runtime shape,
+                                     #   one composite row) + layers.report.json (stack,
+                                     #   source revisions, per-element offsets, clipped
+                                     #   pixels). A composite is NEVER a frames/ row nor a
+                                     #   request state. See docs/layer-tracks.md.
   sprite-inspect.report.json         # inspect_sprite_run.py output (per-state health rows)
   sprite-score.report.json           # score_sprite_run.py output (overall score + correction hints)
   correction-loop/                   # run_correction_loop.py: attempt-N/ (inspect/score/hints) + candidate-N/ regenerated run dirs

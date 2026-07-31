@@ -147,6 +147,23 @@ def test_non_integer_and_out_of_cell_landmarks_are_rejected() -> None:
     assert any("outside the 64x64 cell" in e for e in errors)
 
 
+@pytest.mark.parametrize("coordinate", [[True, 8], [32, False]])
+def test_boolean_landmark_coordinates_are_rejected(coordinate: list) -> None:
+    """JSON `true` is not the integer 1 here.
+
+    `bool` is an `int` subclass in Python, so a coordinate check written as
+    `isinstance(value, int)` accepts `[true, 8]` and silently composes at x=1.
+    The contract says integers, never booleans (§3), and this is the test that
+    holds that line — the float and out-of-cell cases cannot, because they fail
+    on a different branch.
+    """
+    request = _request()
+    request["rig"]["landmarks"]["walk"]["0"]["crown"] = coordinate
+
+    errors = layers.validate_layer_request(request)
+    assert any("crown" in e and "integers" in e for e in errors), errors
+
+
 def test_unknown_profile_is_rejected() -> None:
     request = _request()
     request["rig"]["profile"] = "mecha"
@@ -238,8 +255,43 @@ def test_resolved_stack_fills_pivot_defaults() -> None:
     resolved = layers.resolve_stack(_request(), "walk_with_can")
 
     assert resolved[0] == {"state": "walk", "from": "root", "to": "root",
-                           "mask": None, "allow_clip": False}
+                           "mask": None, "allow_clip": False, "revision": None}
     assert resolved[1]["from"] == "grip" and resolved[1]["to"] == "hand_r"
+
+
+def test_an_element_may_pin_the_generation_its_landmarks_were_declared_against() -> None:
+    request = _request()
+    request["layers"]["walk_with_can"]["stack"][1]["revision"] = ["a1b2c3d4e5f6"]
+
+    assert layers.validate_layer_request(request) == []
+    assert layers.resolve_stack(request, "walk_with_can")[1]["revision"] == ["a1b2c3d4e5f6"]
+
+
+@pytest.mark.parametrize("pin", ["a1b2c3d4e5f6", [], [7]])
+def test_a_malformed_revision_pin_is_rejected(pin) -> None:
+    request = _request()
+    request["layers"]["walk_with_can"]["stack"][1]["revision"] = pin
+
+    assert any("revision" in e for e in layers.validate_layer_request(request))
+
+
+@pytest.mark.parametrize("key,value", [("fps", "8"), ("fps", 0), ("fps", True),
+                                       ("loop", "yes"), ("loop", 1)])
+def test_composite_playback_keys_are_typed(key: str, value) -> None:
+    """`fps` / `loop` are copied into the composite manifest, so they are typed here."""
+    request = _request()
+    request["layers"]["walk_with_can"][key] = value
+
+    assert any(f"layers.walk_with_can.{key}" in e for e in layers.validate_layer_request(request))
+
+
+def test_landmark_map_reads_a_whole_frame_and_never_invents_one() -> None:
+    request = _request()
+
+    assert layers.landmark_map(request, "can", 0) == {"root": (10, 10), "crown": (10, 2),
+                                                      "grip": (8, 12)}
+    # A curated clone instance lives outside the declared pool: no map, no guess.
+    assert layers.landmark_map(request, "can", 7) is None
 
 
 # --------------------------------------------------- 2. compatibility pins

@@ -12,7 +12,9 @@
 > stage table, `run-contract.md` still wins.
 >
 > Declaration validation is implemented by [`../sprite_gen/layers.py`](../sprite_gen/layers.py)
-> and pinned by `tests/test_layer_contract.py`.
+> and pinned by `tests/test_layer_contract.py`; the composite bake is
+> [`../sprite_gen/compose_layers.py`](../sprite_gen/compose_layers.py), pinned by
+> `tests/test_layer_compose.py`.
 
 ## 0. One sentence
 
@@ -172,8 +174,20 @@ geometry: an undeclared landmark is an error, never a guess.
   **every** frame of that row — a landmark that exists on some frames only is
   rejected, because a composite would otherwise skip frames.
 - `rig.landmarks.<state>` must cover the row's whole frame pool, `0 .. state_frame_total-1`,
-  takes included (B10).
-- Coordinates are integer cell coordinates of that state's frames, inside the cell.
+  takes included (B10). A state **absent** from `rig.landmarks` is not a violation by
+  itself — a rig run may declare landmarks for the rows it composes and leave the rest
+  alone. It becomes a violation the moment a stack element refers to that row, and the
+  base manifest simply carries no landmark array for it (§5).
+- Coordinates are integer cell coordinates of that state's frames, inside the cell —
+  **the baked instance's coordinates**, i.e. what the curation view shows after the
+  human's transform and pixel edits, which is exactly what a composite draws. Curation
+  therefore comes first and landmarks second; re-transforming a row after declaring its
+  pivots moves the art out from under them, which is what the `revision` pin (§3.3) and
+  the row fingerprints in the bake report are there to make provable.
+- A **curated clone instance** lives outside the pool (its index is `>= state_frame_total`,
+  `curation.state_clones`) and therefore has no declared landmarks. It carries its own
+  transform, so borrowing the pivots of the frame it copies would be a guess: a clone in
+  a layer row fails the bake and the base manifest's `rig` block, loudly, instead.
 
 ### 3.2 Tracks
 
@@ -198,16 +212,23 @@ instead of letting an overlay half-cover a base that is still walking.
 | `state` | required | the row this element draws |
 | `from` | `"root"` | the element's own landmark |
 | `to` | `"root"` | the landmark **on the body element** that `from` is placed onto |
-| `mask` | none | run-relative path to an alpha mask (§4) |
+| `mask` | none | run-relative path to an alpha mask (§4); must stay inside the run dir |
 | `allow_clip` | `false` | permit opaque pixels to fall outside the cell |
+| `revision` | none | pin: the source row's `state_revision` segments as of the landmark declaration (§4) |
 
 The body element is `stack[0]`; every other element is aligned onto it. A stack has
 exactly one body element. A non-body element's row has either the same pool size as
 the body row, or exactly one frame (a held pose).
 
+A **held pose is a pool of one**, not a row that curation happened to shorten. An
+element whose pool matches the body plays the body's curated sequence position for
+position; if curation leaves the two sequences different lengths, the bake fails
+rather than choosing which body frames go unaccompanied.
+
 ## 4. Composition contract (deterministic)
 
-The composer (implemented in the next step) bakes output frame `i` as:
+The composer ([`../sprite_gen/compose_layers.py`](../sprite_gen/compose_layers.py),
+`compose_layers.bake(run_dir, names=None)`) bakes output frame `i` as:
 
 1. Start from a fully transparent cell of the run's `cell` geometry.
 2. For each element in stack order (bottom first):
@@ -229,15 +250,34 @@ plus alpha compositing, which is why the same input produces the same bytes — 
 verification is composing twice and comparing SHA-256 of the atlas and the manifest.
 Rotation and scale remain curation's job, already baked into the source instance.
 
+Two more properties of that loop, both load-bearing:
+
+- The source instance is the **curated** one — the human's pick order, transform, pixel
+  edits and breathe phase are already inside it, assembled from the same primitives
+  `compose_atlas` uses. A composite is therefore a combination of what the atlas bakes,
+  never of the raw extractor output.
+- Identical composed cells **share one column**, exactly like the atlas (B7): the rect
+  list in the composite manifest is indexed by play position and may repeat.
+
 Failure diagnostics the composer owns (everything that needs the run dir):
 
 - a declared source frame missing from the published generation;
-- a mask file missing, unreadable, or not the cell's size;
-- an opaque pixel translated outside the cell while `allow_clip` is false — reported
-  with the clipped pixel count and failed, never silently cropped;
+- a mask file missing, unreadable, not the cell's size, or resolving outside the run dir;
+- an art pixel translated outside the cell while `allow_clip` is false — reported with
+  the clipped pixel count and failed, never silently cropped. "Art" is alpha > 8, the
+  same floor `recolor` and the GIF export already use, so a soft key's sub-threshold
+  edge bleed is not a clip;
+- an element whose curated sequence does not match the body's (§3.3), and a body row
+  curated down to no frames at all;
+- an instance with no declared landmarks — a curated clone (§3.1);
 - a declared landmark whose row was regenerated: the bake report records each source
   row's `state_revision`, and an element may declare `revision` to be checked, in
-  which case a mismatch fails loud (same mechanism as `curation.anchors`).
+  which case a mismatch fails loud (same mechanism as `curation.anchors`: the stored
+  segments must be a prefix of the current ones).
+
+The bake is **all-or-nothing**. Every composite is composed in memory first; one
+violation anywhere fails the call with the complete diagnostic list and writes nothing,
+so `layers/` never holds a partially valid set.
 
 ## 5. Output and manifest extension
 
@@ -255,7 +295,16 @@ precedent `variants/` already set:
 `layers/<name>.manifest.json` keeps the runtime shape a consumer already reads
 (`game_input`, `degraded_static_fallback`, `animation.rows`, `frame_layout` with
 absolute rects), so a runtime needs no new code path, and adds a `layers` block
-recording the stack it came from.
+recording the stack it came from. Concretely its key set is the base manifest's
+minus `rig`, plus `layers`; its single row is named after the composite and carries
+`track: "composite"`, because what it plays is a combination and not one of the four
+declarable row kinds. `fps` / `loop` come from the composite spec, defaulting to the
+body element's state entry.
+
+A bake replaces the composites it produced and leaves everything else in `layers/`
+alone — the same rule `variants/` follows, and the only one compatible with baking a
+subset by name. `layers/layers.report.json` is the record of what the last bake
+produced, so a sheet that is not in it is a leftover, not a current output.
 
 The base run's `manifest.json` gains, **only for a rig run**:
 
@@ -286,6 +335,8 @@ deterministic order; `require_valid_layer_request` raises with all of them at on
 It is filesystem-free, so it runs before a run dir is touched. Rejections:
 
 - unknown `rig.profile`; malformed `rig` / `rig.landmarks`;
+- a composite `fps` that is not a positive integer, or a `loop` that is not a boolean;
+- a malformed element `revision` pin (it must be a non-empty list of segment strings);
 - landmarks for an unknown state; a frame key that is not a decimal index; a frame
   index outside the pool; a pool frame with no landmarks at all;
 - a required landmark missing on any frame; a landmark name that does not match the
@@ -308,8 +359,10 @@ It is filesystem-free, so it runs before a run dir is touched. Rejections:
   `takes` class of silent loss stops with this feature instead of gaining a third
   instance. `test_prepare_does_not_carry_layer_keys_yet` is the canary that fails
   when this lands.
-- **Composer + run-dir diagnostics** (§4) and the `layers/` writer (§5).
-- **CLI surface** for the bake, plus the double-bake SHA-256 determinism regression.
+- **CLI surface** for the bake (`compose_layers.bake` is library-only today), plus the
+  composite-spec ownership boundary: `layers.<name>` still passes over an unknown
+  top-level key in silence, while a stack element rejects one. That asymmetry closes
+  when the CLI gives the composite spec an owner.
 - **`unpack_atlas` / import runs** are untouched by this contract for now: an
   imported run has no rig, so it stays a non-layer run.
 
