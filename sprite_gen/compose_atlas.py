@@ -16,6 +16,7 @@ from sprite_gen.curation import apply_pixel_edits, apply_transform, edit_index, 
 from sprite_gen.layout import row_frame_rel, state_frame_total
 from sprite_gen.extract import heal_run, require_frames_manifest
 from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, load_request
+from sprite_gen.subject import default_min_used_pixels
 
 
 def alpha_nonzero_count(image: Image.Image) -> int:
@@ -36,7 +37,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--atlas", default="sprite-sheet-alpha.png")
     parser.add_argument("--manifest", default="manifest.json")
     parser.add_argument("--report", default="sprite-sheet-alpha.report.json")
-    parser.add_argument("--min-used-pixels", type=int, default=400)
+    # None = resolve from the request's subject profile (character 400 /
+    # effect 48 — sprite_gen.subject); the flag is an explicit override only.
+    parser.add_argument("--min-used-pixels", type=int, default=None)
     return parser
 
 
@@ -70,6 +73,8 @@ def _run(args: argparse.Namespace):
         print(f"[heal] re-derived stale rows: {', '.join(heal_report['healed'])}", file=sys.stderr)
     acquire_run_dir_lock(run_dir, "compose_sprite_atlas")
     request = load_request(run_dir)
+    if args.min_used_pixels is None:
+        args.min_used_pixels = default_min_used_pixels(request)
     frames_manifest = require_frames_manifest(run_dir)  # fail loud if absent/corrupt/not-ok
     rows_by_state = {row["state"]: row for row in frames_manifest.get("rows", [])}
 

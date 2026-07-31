@@ -22,6 +22,7 @@ from PIL import Image, ImageDraw
 from sprite_gen.anchor import anchor_ref_rel
 from sprite_gen.extract import color_distance
 from sprite_gen.layout import TAXONOMY, guide_rel, prompt_rel, raw_rel
+from sprite_gen.subject import SUBJECTS
 
 
 # Default safe margin is proportional to the cell dimension (floored), not a fixed
@@ -962,6 +963,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-image", type=Path)
     parser.add_argument("--description", default="")
     parser.add_argument("--style", default=STYLE_DEFAULT)
+    parser.add_argument("--subject", choices=SUBJECTS, default=None,
+                        help="what the run draws: character (default) or effect — "
+                             "sets validation defaults like the sparse-frame floor")
     parser.add_argument("--cell-size", type=int, default=256)
     parser.add_argument("--cell-width", type=int)
     parser.add_argument("--cell-height", type=int)
@@ -1061,6 +1065,14 @@ def _run(args: argparse.Namespace):
         "style": raw_request.get("style", args.style),
         "motion_phase_guides": bool(raw_request.get("motion_phase_guides", args.motion_phase_guides)),
     }
+    # Subject profile: CLI wins over --request-json; absent = character (legacy,
+    # field omitted so old runs stay byte-identical). Downstream validation
+    # defaults resolve from this via sprite_gen.subject.
+    subject = args.subject or raw_request.get("subject")
+    if subject is not None:
+        if subject not in SUBJECTS:
+            raise SystemExit(f"unknown subject kind: {subject!r} (expected one of {', '.join(SUBJECTS)})")
+        request["subject"] = subject
     if directions:
         request["directions"] = directions
     # 파일 택소노미 계약: 신규 런 기본. 방향 계약과 결합 시 raw/frames/guides/prompts

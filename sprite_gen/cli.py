@@ -28,6 +28,7 @@ from sprite_gen import (
     unpack_atlas,
 )
 from sprite_gen.prepare import STYLE_DEFAULT, _outline_config
+from sprite_gen.subject import SUBJECTS
 
 
 def _parse_frames(value: str) -> list[int]:
@@ -59,6 +60,9 @@ def _add_prepare(p: argparse.ArgumentParser) -> None:
     p.add_argument("--base-image", type=Path)
     p.add_argument("--description", default="")
     p.add_argument("--style", default=STYLE_DEFAULT)
+    p.add_argument("--subject", choices=SUBJECTS, default=None,
+                   help="what the run draws: character (default) or effect — "
+                        "sets validation defaults like the sparse-frame floor")
     p.add_argument("--cell-size", type=int, default=256)
     p.add_argument("--cell-width", type=int)
     p.add_argument("--cell-height", type=int)

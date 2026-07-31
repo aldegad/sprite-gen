@@ -487,6 +487,8 @@ sprite-gen (this SKILL.md = behavior contract + hub)
 │
 ├─ REQUEST AUTHORING ── "fill sprite-request.json before generating"
 │   ├─ docs/states-and-frames.md # which states · frame counts (4/5/6/8/9/12) · Quick Path JSON
+│   ├─ docs/subject-profiles.md  # "subject": character|effect · sparse-floor 프로필 ·
+│   │                            #   이펙트 베스트/워스트 프랙티스 (실측 배터리 근거)
 │   ├─ docs/pixel-unfake.md     # fit / pixel_unfake params · plain-twin curator toggle · density refs
 │   └─ docs/chroma-alpha.md      # chroma key branch table · --chroma-key auto · alpha cleanup
 │

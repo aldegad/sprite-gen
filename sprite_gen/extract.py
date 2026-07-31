@@ -25,6 +25,7 @@ from sprite_gen.runio import (REQUEST_FILENAME, acquire_run_dir_lock, atomic_sav
                               atomic_write_text, load_request, publish_guard, relative_posix,
                               release_run_dir_lock)
 from sprite_gen.segment import separate_fused_poses
+from sprite_gen.subject import SUBJECT_DEFAULT, default_min_used_pixels, sparse_frame_error, subject_kind
 
 
 def color_distance(left: tuple[int, int, int], right: tuple[int, int, int]) -> float:
@@ -2178,7 +2179,8 @@ def inspect_frames(frames: list[Image.Image], chroma_key: tuple[int, int, int], 
             }
         )
         if nontransparent < args.min_used_pixels:
-            errors.append(f"frame {index:02d} is empty or too sparse ({nontransparent} pixels)")
+            errors.append(sparse_frame_error(index, nontransparent, args.min_used_pixels,
+                                             getattr(args, "_subject_kind", SUBJECT_DEFAULT)))
         if edge > args.edge_pixel_threshold:
             warnings.append(f"frame {index:02d} has {edge} non-transparent edge pixels")
         if adjacent > args.chroma_adjacent_pixel_threshold:
@@ -2231,7 +2233,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-slot-fallback", action="store_true")
     parser.add_argument("--repalette", action="store_true",
                         help="고정 팔레트(palette.lock.json)를 무시하고 재산출·재고정")
-    parser.add_argument("--min-used-pixels", type=int, default=400)
+    # Default is None on purpose: the floor's SSoT is the request's subject
+    # profile (character 400 / effect 48 — sprite_gen.subject); the CLI is an
+    # explicit override only, same rule as the chroma tunables below.
+    parser.add_argument("--min-used-pixels", type=int, default=None)
     parser.add_argument("--edge-margin", type=int, default=2)
     parser.add_argument("--edge-pixel-threshold", type=int, default=24)
     parser.add_argument("--chroma-adjacent-threshold", type=float, default=150.0)
@@ -2555,6 +2560,14 @@ def _run(args: argparse.Namespace):
 
 def _run_locked(args: argparse.Namespace, run_dir: Path):
     request = load_request(run_dir)
+    # Sparse-floor SSoT is the request's subject profile; the CLI flag is an
+    # explicit override only. Profile-derived values are NOT stamped into
+    # extract_args (frames are a derived cache of raw + request + engine, so a
+    # later subject change must re-resolve on heal); explicit flags are.
+    args._subject_kind = subject_kind(request)
+    args._min_used_pixels_explicit = args.min_used_pixels is not None
+    if args.min_used_pixels is None:
+        args.min_used_pixels = default_min_used_pixels(request)
     # 크로마 튜너블의 SSoT 는 request JSON `chroma` — CLI 는 명시 override 만.
     # 실제 적용값은 request 에 되써서 런이 스스로 재현 가능하게 남긴다.
     chroma_config = dict(request.get("chroma") or {})
@@ -3141,6 +3154,8 @@ def _nondefault_args(args: argparse.Namespace) -> dict[str, Any]:
         dest = action.dest
         if dest in ("help", "run_dir", "states"):
             continue
+        if dest == "min_used_pixels" and not getattr(args, "_min_used_pixels_explicit", True):
+            continue  # 프로필 유래값 — heal 은 request 의 subject 에서 재해소한다
         value = getattr(args, dest, None)
         if value != action.default:
             diff[dest] = value
