@@ -488,5 +488,6 @@ service, revisit both here.
 - [`architecture.md`](architecture.md) — how the code realizes these contracts (stage internals, lock, extraction, pixel-unfake path)
 - [`curation.md`](curation.md) — webview interaction model, `curation.json` schema, standalone image-candidate path, multi-agent launch rules
 - [`recolor.md`](recolor.md) — palette-swap bake (`variants/`), report schema, colourway adopt
+- [`layer-tracks.md`](layer-tracks.md) — optional rig / track / composite contract; the `layers/` sibling artifact tree and why a composite is never a `frames/` row or a request state
 - [`pixel-unfake.md`](pixel-unfake.md) — `fit`/`pixel_unfake` behavior + plain-twin bake decision
 - [`directional-anchor-workflow.md`](directional-anchor-workflow.md) — directional/45° anchor chains that name the `raw/` anchors §3 resolves into chips

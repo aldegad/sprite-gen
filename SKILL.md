@@ -504,6 +504,11 @@ sprite-gen (this SKILL.md = behavior contract + hub)
 │   └─ docs/recolor.md           # recolor / recolor-palette CLI · spec + report schema · exact vs
 │                                #   tolerance match · variants/ layout · curation blink-compare + adopt
 │
+├─ LAYER TRACKS ── "compose rows onto each other instead of generating every combination"
+│   └─ docs/layer-tracks.md      # rig profiles + integer landmarks · track kinds (base /
+│                                #   action_overlay / prop_effect / full_body_override) ·
+│                                #   composite stack · manifest rig block · layers/ artifact tree
+│
 ├─ SPECIALIZED INPUTS ── "not the plain animation-row path"
 │   ├─ docs/directional-anchor-workflow.md  # directional / 45° anchor chains · hatch-pet locomotion
 │   └─ docs/sheet-slicing.md     # multi-figure variant sheet → per-cell standing cuts (立ち絵, not rows)
@@ -526,4 +531,5 @@ Concept taxonomy (which doc owns each term, so agents don't guess):
 - `frame_layout`, `manifest.json` runtime contract → run-contract.md + this SKILL.md "Runtime Contract"
 - pixel-unfake `fit`, `.plain.png`/`orig/` twins → pixel-unfake.md
 - recolor spec / report / `variants/` bake + colourway adopt → recolor.md
+- `rig` profiles / landmarks, row `track` kinds, composite `layers` stack + `layers/` bake → [`docs/layer-tracks.md`](docs/layer-tracks.md) (`sprite_gen/layers.py` validates the declaration)
 - webview interactions (title-drag reorder, 넣기/빼기 toggle, 2-tier card, custom `data-tip` tooltip, recolor blink-compare) → `sprite_gen/curator/` (도메인 분할 `src/*.js` — 로드 순서 SSoT 는 index.html — + curator.css), described in curation.md + recolor.md

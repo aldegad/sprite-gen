@@ -26,6 +26,33 @@ the vertical bob to the horizontal bulge.
 - JS preview mirror updated in lockstep; byte-parity suite extended with
   depth-x-strong / depth-x-zero / manual-band cases.
 
+## Unreleased - layer-track contract (rig profiles, row tracks, composite stacks)
+
+Generating every direction × action combination as its own row does not scale, so a run
+may now declare a character rig and compose rows onto each other instead. This entry
+covers the contract and its validator only; the composer, the CLI, and the `prepare`
+carry land with the following steps.
+
+- **`docs/layer-tracks.md`** — new normative contract: rig profiles
+  (`humanoid_biped` / `quadruped` / `blob_or_tentacle` / `prop`) with declared integer
+  landmarks, row track kinds (`base` / `action_overlay` / `prop_effect` /
+  `full_body_override`), composite stacks, the deterministic composition rule (integer
+  pivot translation + arbitrary alpha masks, no resampling), and the manifest / artifact
+  extensions. Includes the ownership audit the contract rests on — why a composite can
+  never be a `frames/` row or a request state, and why layer data never enters
+  `curation.json`.
+- **`sprite_gen/layers.py`** — filesystem-free validator for the declaration: reports
+  every violation at once and in a stable order, so a bad rig fails before a run dir is
+  touched. `root` is the pivot for every profile and nothing is inferred from geometry;
+  `crown` is required for `humanoid_biped` only.
+- **Compatibility is pinned, not promised** — a request that declares none of the three
+  keys is not a layer run: the non-layer request and manifest key sets, and the
+  curation sidecar surface, are asserted by `tests/test_layer_contract.py`.
+- Audit finding recorded on the way: `prepare` rebuilds the request from a whitelist, so
+  unknown top-level keys and unknown per-state keys (including the documented
+  `states.<state>.takes`) are dropped without a word. The layer keys must be carried
+  explicitly and the drop made observable; a canary test fails when that lands.
+
 ## Unreleased - deterministic palette-swap bake and colourway pick in the curation view
 
 Dot art is controlled by its palette, so colour variants are baked into finished sheets

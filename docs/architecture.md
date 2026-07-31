@@ -381,5 +381,6 @@ whole atlas in a single generation.
 - [`curation.md`](curation.md) — webview usage + `curation.json` field semantics
 - [`chroma-alpha.md`](chroma-alpha.md) — chroma key selection + alpha cleanup contract
 - [`gen.md`](gen.md) — provider CLI, verified PNG/report contract, and `image-gen` shuttle boundary
+- [`layer-tracks.md`](layer-tracks.md) — optional rig profiles, row track kinds, deterministic composite stacks
 - [`directional-anchor-workflow.md`](directional-anchor-workflow.md) — 방향성/45도 앵커 체인
 - [`locomotion-curation.md`](locomotion-curation.md) — selected-cycle + clean GIF export
