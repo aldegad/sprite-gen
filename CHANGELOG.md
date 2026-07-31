@@ -86,6 +86,45 @@ combination of what the atlas bakes, and the same run bakes the same bytes every
   are now covered by a test — `bool` is an `int` subclass, so `[true, 8]` had been
   rejected only by inspection.
 
+## Unreleased - `sprite-gen compose-layers`, the layer keys through `prepare`, and a transactional publish
+
+The layer feature becomes a command. This is also where the three boundaries the earlier
+steps deliberately left open are closed — a feature without an owning entry point cannot
+say who owns the composite spec, and a bake nobody can run cannot be held to a publish
+contract.
+
+- **`sprite-gen compose-layers --run-dir <run> [--names a,b]`** — bakes a rig run's
+  declared stacks into `layers/`. Three launch forms (console subcommand,
+  `-m sprite_gen.compose_layers`, `scripts/compose_layers.py`) reach one declaration, so
+  a new option cannot land on one and miss another. Prints a JSON summary (sheet,
+  manifest, frame/cell counts, clipped-pixel total); the full record stays
+  `layers/layers.report.json`. A malformed `--names` entry is a typo, never "all".
+- **`prepare` carries the layer keys** — `rig`, `layers` and `states.<state>.track` reach
+  `sprite-request.json` by name, and are validated before the run dir is created, so a bad
+  rig fails with every violation at once instead of scaffolding a run whose first bake is
+  what reports it. An undeclared row still writes no `track` (an undeclared row *is*
+  `base`; writing the default would make every new run a layer run).
+- **The whitelist drop is observable.** `prepare` re-emits the request from a whitelist, so
+  anything outside it is dropped — silently, until now. Every dropped top-level key, every
+  ignored regenerated key, and every dropped per-state key is named on stderr. This is what
+  ends the `states.<state>.takes` class of silent loss: a documented first-class key that
+  had to be hand-written back into `sprite-request.json` and said nothing about it.
+- **An unknown composite key is rejected.** `layers.<name>` used to pass over an unknown
+  top-level key while a stack element rejected one; the composite spec now has an owner, so
+  `loops: false` fails instead of shipping a composite that loops because nothing read the
+  key.
+- **Publishing is one transaction** (`runio.atomic_write_set`). Sheets, manifests and the
+  report are rendered in memory, staged beside their targets, and only then renamed in — an
+  `ENOSPC` on the second composite leaves the first exactly as it was, and the report never
+  names a sheet that failed to land. (A crash between renames can still land a subset; that
+  is documented, not claimed away.)
+- **`sprite_sheet_alpha_report` is `null` in a composite manifest.** It names the alpha
+  report *of that sheet*, and a composite has none — it is stacked from rows that were
+  already extracted and keyed. The key stays (key-set parity with the base manifest) and
+  states the absence instead of pointing at `layers.report.json`, which is the bake's
+  provenance record for every composite and a different kind of document; that pointer is
+  now `layers.report` inside the `layers` block.
+
 ## Unreleased - deterministic palette-swap bake and colourway pick in the curation view
 
 Dot art is controlled by its palette, so colour variants are baked into finished sheets

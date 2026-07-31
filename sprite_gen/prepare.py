@@ -21,6 +21,7 @@ from PIL import Image, ImageDraw
 
 from sprite_gen.anchor import anchor_ref_rel
 from sprite_gen.extract import color_distance
+from sprite_gen.layers import require_valid_layer_request
 from sprite_gen.layout import TAXONOMY, guide_rel, prompt_rel, raw_rel
 
 
@@ -509,7 +510,62 @@ def normalize_states(raw: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
             "loop": bool(entry.get("loop", True)),
             "action": str(entry.get("action", DEFAULT_STATES.get(state, {}).get("action", state))),
         }
+        # A row's track kind is request truth (docs/layer-tracks.md §3.2) and is
+        # carried only when declared: an undeclared row IS `base`, and writing
+        # that default into every request would turn every new run into a layer
+        # run (`has_layer_contract`).
+        if entry.get("track") is not None:
+            normalized[state]["track"] = entry["track"]
     return normalized
+
+
+# What `prepare` does with an incoming `--request` / `--request-json`. It re-emits
+# `sprite-request.json` from these lists rather than passing the request through,
+# so anything outside them is dropped — which is how `states.<state>.takes`, a
+# documented first-class key, ended up having to be hand-written into the file
+# after the fact (docs/layer-tracks.md §2 B1). The lists are the one place that
+# rule is written down, and `dropped_key_notes` makes every drop observable
+# instead of silent.
+REQUEST_KEYS_CARRIED = ("cell", "states", "style", "motion_phase_guides",
+                        "directions", "fit", "rig", "layers")
+# Written by prepare itself, from CLI flags and from measuring the base image. An
+# incoming copy is not carried either, but it is restated rather than lost, so the
+# note names it separately: `character` comes from --character-id/--description/
+# --base-image, `chroma_key` from --chroma-key + the base image.
+REQUEST_KEYS_REGENERATED = ("version", "kind", "engine", "character", "chroma_key", "layout")
+STATE_KEYS_CARRIED = ("frames", "fps", "loop", "action", "track")
+
+
+def dropped_key_notes(raw_request: dict[str, Any]) -> list[str]:
+    """Every key of an incoming request whose value does not reach the run.
+
+    Deterministic order, one note per class. Silence here means the request was
+    carried whole — that is the point: a dropped key that says nothing looks
+    exactly like a key that was honoured.
+    """
+    notes: list[str] = []
+    dropped = sorted(set(raw_request) - set(REQUEST_KEYS_CARRIED) - set(REQUEST_KEYS_REGENERATED))
+    if dropped:
+        notes.append(
+            f"dropped top-level request key(s) {dropped}: prepare re-emits "
+            f"sprite-request.json from {list(REQUEST_KEYS_CARRIED)} and does not carry "
+            f"anything else — write them into sprite-request.json after this run if the "
+            f"pipeline is documented to read them")
+    restated = sorted(set(raw_request) & set(REQUEST_KEYS_REGENERATED))
+    if restated:
+        notes.append(
+            f"ignored incoming {restated}: prepare writes these itself (identity from "
+            f"--character-id/--description/--base-image, chroma from --chroma-key)")
+    for state in sorted(raw_request.get("states") or {}):
+        entry = (raw_request["states"] or {})[state]
+        if not isinstance(entry, dict):
+            continue
+        extra = sorted(set(entry) - set(STATE_KEYS_CARRIED))
+        if extra:
+            notes.append(
+                f"dropped states.{state} key(s) {extra}: a state entry is rebuilt as "
+                f"{list(STATE_KEYS_CARRIED)}")
+    return notes
 
 
 def normalize_cell(raw_cell: dict[str, Any], size: int, safe_margin: int | None) -> dict[str, Any]:
@@ -1036,6 +1092,16 @@ def _run(args: argparse.Namespace):
         raw_cell["height"] = args.cell_height
     cell = normalize_cell(raw_cell, args.cell_size, args.safe_margin)
 
+    # Layer keys are carried explicitly (docs/layer-tracks.md §7) and validated
+    # before the run dir is touched: the layer validator is filesystem-free, so a
+    # malformed rig fails with every violation at once instead of leaving a
+    # scaffolded run whose first bake is the thing that reports it.
+    layer_keys = {key: raw_request[key] for key in ("rig", "layers")
+                  if raw_request.get(key) is not None}
+    require_valid_layer_request({"cell": cell, "states": states, **layer_keys})
+    for note in dropped_key_notes(raw_request):
+        print(f"[prepare] {note}", file=sys.stderr)
+
     out_dir.mkdir(parents=True, exist_ok=True)
     base_dest = None
     if args.base_image:
@@ -1083,6 +1149,9 @@ def _run(args: argparse.Namespace):
             fit[key] = value
     if fit:
         request["fit"] = fit
+    # Optional layer declaration, validated above. Absent = a non-layer run whose
+    # emitted key set is exactly what it was before the feature existed.
+    request.update(layer_keys)
 
     for directory in (out_dir / "references" / "layout-guides", out_dir / "prompts",
                       out_dir / "raw", out_dir / "frames"):

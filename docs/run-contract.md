@@ -30,7 +30,7 @@ canonical files, not hidden imports.
 | Curate (opt) | `sprite-gen curation` (`serve_curation.py`) + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
 | Recolor (opt) | `sprite-gen recolor` / `recolor-palette` (`sprite_gen/recolor.py`) | base sheet (default `sprite-sheet-alpha.png`) + recolor spec | `variants/<name>.png`, optional `variants/<name>.manifest.json`, `variants/recolor.report.json` |
-| Layer bake (opt) | `sprite_gen/compose_layers.py` (`bake()`; no CLI yet) | `frames/` + `curation.json` + the request's `rig` / `layers` | `layers/<name>.png`, `layers/<name>.manifest.json`, `layers/layers.report.json` |
+| Layer bake (opt) | `sprite-gen compose-layers` (`sprite_gen/compose_layers.py`) | `frames/` + `curation.json` + the request's `rig` / `layers` | `layers/<name>.png`, `layers/<name>.manifest.json`, `layers/layers.report.json` (published as one set) |
 | QA | `preview_animation.py` | `frames/` | `qa/<state>-contact.png`, `qa/<state>.gif` |
 | Inspect | `inspect_sprite_run.py` | `sprite-request.json`, `raw/` or `frames/` | `sprite-inspect.report.json` |
 | Score | `score_sprite_run.py` | `sprite-inspect.report.json` | `sprite-score.report.json`, correction hints |
@@ -450,6 +450,10 @@ boundary of the run-dir's atomicity and concurrency guarantees. What is **in for
 - **In-process transaction rollback.** The `frames/` + `extract-failure.json` commit (§6) and
   the `--force` re-import publish (§4) roll back on any raised exception, leaving the prior
   generation byte-intact. `atomic_write_text` / `os.replace` make each file write torn-free.
+  `atomic_write_set` extends the same mechanism to a **set** that only means anything
+  together — the layer bake's sheets, manifests and the report naming them: everything is
+  staged before anything is renamed in, so a write error partway through publishes nothing
+  (a `SIGKILL` between renames stays out of scope, below).
 - **Reader isolation.** A publish holds the exclusive `publish_guard` for its swap; a reader
   sees a complete old-or-new snapshot, never a mix (§4). Where advisory locks are unavailable the
   guard **fails loud** (`RWLockUnavailable`), never a silent no-op. Every finished-generation

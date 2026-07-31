@@ -68,11 +68,11 @@ COMPOSITE_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 # of aligning new art to old pivots.
 ELEMENT_KEYS = ("state", "from", "to", "mask", "allow_clip", "revision")
 
-# Composite-level keys this contract reads. `stack` is required; `fps` / `loop`
-# default to the body element's state entry. Unknown keys here are still passed
-# over silently — the composite spec's owner boundary lands with the CLI step
-# (`docs/layer-tracks.md` §7), and closing it here without that owner would be a
-# second truth about what a composite may declare.
+# Composite-level keys this contract reads, and the complete set a composite may
+# declare. `stack` is required; `fps` / `loop` default to the body element's state
+# entry. An unknown key is rejected exactly like an unknown stack-element key: the
+# composite spec reaches a runtime manifest, so a typo'd `loops` that is passed
+# over silently ships a composite that plays by defaults nobody asked for.
 COMPOSITE_KEYS = ("stack", "fps", "loop")
 
 
@@ -314,6 +314,11 @@ def _validate_layers(request: dict[str, Any], errors: list[str]) -> None:
         if not isinstance(spec, dict):
             errors.append(f"layers.{name} must be an object")
             continue
+        unknown = sorted(set(spec) - set(COMPOSITE_KEYS))
+        if unknown:
+            errors.append(
+                f"layers.{name} has unknown key(s) {unknown}; "
+                f"allowed: {', '.join(COMPOSITE_KEYS)}")
         # `fps` / `loop` reach the composite manifest verbatim, so a string fps
         # would be baked into a runtime contract. Typed here, where the whole
         # declaration is checked before a run dir is touched.

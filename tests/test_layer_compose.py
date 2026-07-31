@@ -9,7 +9,9 @@ the run dir can answer (`docs/layer-tracks.md` §4/§5):
 2. the diagnostics — a missing frame, an unusable mask, a clipped element, a
    re-rolled source row, a curated clone with no declared pivot;
 3. the boundaries — nothing is written when a bake fails, and a non-layer run is
-   refused rather than half-composed.
+   refused rather than half-composed;
+4. the published CLI (`sprite-gen compose-layers`, §7) — exit code, summary, and
+   the same guarantees across a process boundary.
 """
 
 from __future__ import annotations
@@ -273,6 +275,70 @@ def test_composite_manifest_keeps_the_runtime_manifest_shape(tmp_path: Path) -> 
     assert manifest["layers"]["stack"][1]["track"] == "prop_effect"
 
 
+def test_a_composite_states_it_has_no_alpha_report_instead_of_naming_another_kind(
+        tmp_path: Path) -> None:
+    """`sprite_sheet_alpha_report` names THIS sheet's alpha report — a composite has none.
+
+    The key stays (key-set parity above) but resolves to nothing, because
+    `layers.report.json` is the bake's provenance record for every composite and
+    not this sheet's alpha report: a consumer that opened it through this field
+    would be reading a different kind of document. The provenance pointer has its
+    own name inside the `layers` block (`docs/layer-tracks.md` §5).
+    """
+    run_dir = _build_run(tmp_path)
+    assert run_script("compose_sprite_atlas.py", "--run-dir", str(run_dir)).returncode == 0
+    base = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    base_report = json.loads(
+        (run_dir / base["sprite_sheet_alpha_report"]).read_text(encoding="utf-8"))
+
+    compose_layers.bake(run_dir)
+    manifest = json.loads(
+        (_layers_dir(run_dir) / "walk_with_can.manifest.json").read_text(encoding="utf-8"))
+    provenance = json.loads(
+        (_layers_dir(run_dir) / manifest["layers"]["report"]).read_text(encoding="utf-8"))
+
+    assert manifest["sprite_sheet_alpha_report"] is None
+    assert manifest["layers"]["report"] == compose_layers.REPORT_NAME
+    assert provenance["kind"] == compose_layers.REPORT_KIND
+    # The two documents are not interchangeable, which is the whole reason the
+    # field could not keep pointing at the provenance record.
+    assert "kind" not in base_report
+    assert set(provenance) != set(base_report)
+
+
+def test_a_bake_publishes_its_whole_set_in_one_transaction(tmp_path: Path,
+                                                           monkeypatch) -> None:
+    """Sheets, manifests and the report land together or not at all (§5).
+
+    A write that fails partway through must not leave a sheet published with no
+    report naming it, so the bake hands every payload to one publish call. Here
+    that call fails: the previous bake's bytes must still be exactly what is on
+    disk, and the second composite must not exist at all.
+    """
+    request = _request()
+    request["layers"]["walk_alone"] = {"stack": [{"state": "walk"}]}
+    run_dir = _build_run(tmp_path, request)
+
+    compose_layers.bake(run_dir, names=["walk_with_can"])
+    before = {path.name: _digest(path) for path in sorted(_layers_dir(run_dir).iterdir())}
+
+    seen: list[list[str]] = []
+
+    def explode(payloads):
+        seen.append([path.name for path in payloads])
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(compose_layers, "atomic_write_set", explode)
+    with pytest.raises(OSError):
+        compose_layers.bake(run_dir)
+
+    assert seen == [["walk_alone.png", "walk_alone.manifest.json",
+                     "walk_with_can.png", "walk_with_can.manifest.json",
+                     "layers.report.json"]], "the bake published in more than one call"
+    after = {path.name: _digest(path) for path in sorted(_layers_dir(run_dir).iterdir())}
+    assert after == before
+
+
 def test_base_manifest_gains_rig_and_track_only_for_a_rig_run(tmp_path: Path) -> None:
     """Landmarks reach the runtime as atlas-absolute integers, one per play position."""
     run_dir = _build_run(tmp_path)
@@ -500,3 +566,106 @@ def test_load_report_distinguishes_absent_from_foreign(tmp_path: Path) -> None:
     path.write_text(json.dumps({"kind": "sprite-gen-recolor-report"}), encoding="utf-8")
     with pytest.raises(SystemExit):
         compose_layers.load_report(run_dir)
+
+
+# ------------------------------------------------------------------- 4. the CLI
+#
+# The library form is covered above; these run the published command as an agent
+# runs it, so the process boundary (exit code, stdout summary, stderr diagnostic)
+# is part of the contract and not an implementation detail.
+
+
+def _cli(run_dir: Path, *args: str):
+    return run_script("compose_layers.py", "--run-dir", str(run_dir), *args)
+
+
+def test_the_cli_bakes_and_summarizes_the_declared_composites(tmp_path: Path) -> None:
+    run_dir = _build_run(tmp_path)
+
+    result = _cli(run_dir)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["ok"] is True
+    assert summary["rig_profile"] == "humanoid_biped"
+    assert summary["report"] == "layers/layers.report.json"
+    assert summary["composites"] == [{
+        "name": "walk_with_can",
+        "sheet": "layers/walk_with_can.png",
+        "manifest": "layers/walk_with_can.manifest.json",
+        "frames": 2,
+        "cells": 2,
+        "clipped_pixels": 0,
+    }]
+    for rel in (entry for composite in summary["composites"]
+                for entry in (composite["sheet"], composite["manifest"])):
+        assert (run_dir / rel).is_file(), rel
+
+
+def test_two_cli_bakes_in_separate_processes_are_byte_identical(tmp_path: Path) -> None:
+    """Determinism across the process boundary, not just inside one interpreter."""
+    run_dir = _build_run(tmp_path)
+
+    assert _cli(run_dir).returncode == 0
+    first = {path.name: _digest(path) for path in sorted(_layers_dir(run_dir).iterdir())}
+    assert _cli(run_dir).returncode == 0
+    second = {path.name: _digest(path) for path in sorted(_layers_dir(run_dir).iterdir())}
+
+    assert first == second
+
+
+def test_the_cli_bakes_only_the_named_composites(tmp_path: Path) -> None:
+    request = _request()
+    request["layers"]["walk_alone"] = {"stack": [{"state": "walk"}]}
+    run_dir = _build_run(tmp_path, request)
+
+    assert _cli(run_dir).returncode == 0
+    assert _cli(run_dir, "--names", "walk_alone").returncode == 0
+
+    # The other sheet stays (a subset bake leaves it alone), but the report — the
+    # record of what the last bake produced — names only what was baked (§5).
+    assert (_layers_dir(run_dir) / "walk_with_can.png").is_file()
+    report = compose_layers.load_report(run_dir)
+    assert [entry["name"] for entry in report["composites"]] == ["walk_alone"]
+
+
+@pytest.mark.parametrize("value", ["", "walk_with_can,", "a,,b", " "])
+def test_the_cli_refuses_a_malformed_names_list(tmp_path: Path, value: str) -> None:
+    """An empty entry is a typo, never "all" — silently dropping it bakes another set."""
+    run_dir = _build_run(tmp_path)
+
+    result = _cli(run_dir, "--names", value)
+
+    assert result.returncode != 0
+    assert "--names expects a comma-separated list" in result.stderr
+    assert not _layers_dir(run_dir).exists()
+
+
+def test_the_cli_reports_every_violation_at_once_and_writes_nothing(tmp_path: Path) -> None:
+    request = _request()
+    request["rig"]["landmarks"]["walk"]["1"].pop("crown")
+    request["layers"]["walk_with_can"]["fps"] = "8"
+    run_dir = _build_run(tmp_path, request)
+
+    result = _cli(run_dir)
+
+    assert result.returncode != 0
+    assert "miss required landmark 'crown'" in result.stderr
+    assert "layers.walk_with_can.fps must be a positive integer" in result.stderr
+    assert not _layers_dir(run_dir).exists()
+
+
+def test_the_cli_refuses_a_non_layer_run_by_name(tmp_path: Path) -> None:
+    """"Not a layer run" and "nothing to compose" are different answers."""
+    request = _request()
+    del request["rig"]
+    del request["layers"]
+    for entry in request["states"].values():
+        entry.pop("track")
+    run_dir = _build_run(tmp_path, request)
+
+    result = _cli(run_dir)
+
+    assert result.returncode != 0
+    assert "not a layer run" in result.stderr
+    assert not _layers_dir(run_dir).exists()

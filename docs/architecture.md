@@ -56,7 +56,11 @@ shared primitives: it resolves a curated instance exactly as `compose_atlas` doe
 then stacks instances by integer translation, so a composite is a combination of what
 the atlas bakes rather than a second extraction path. Its declaration half,
 `layers.py`, is filesystem-free on purpose — the request is validated before a run dir
-is touched, and both entry points call the same validator (`layer-tracks.md` §6).
+is touched, and every entry point calls that one validator (`layer-tracks.md` §6):
+`prepare` when it carries the declared layer keys into `sprite-request.json`,
+`compose_atlas` before it publishes a rig block, and `compose_layers` before it bakes.
+The bake publishes its sheets, manifests and report through a single
+`runio.atomic_write_set`, so the set that only means anything together lands together.
 
 The automatic correction loop is intentionally split into three owners:
 `inspect.py` measures deterministic signals (frame count, RGB histogram, dHash,

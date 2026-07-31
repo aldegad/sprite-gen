@@ -28,11 +28,16 @@ for its own output.
 Atomicity: every composite is baked in memory first. One violation anywhere
 fails the whole call with the complete diagnostic list and writes nothing, so
 `layers/` never holds a half-baked set (No Silent Fallback: no composite is
-skipped quietly, none is written from partly-valid input).
+skipped quietly, none is written from partly-valid input). The write is held to
+the same rule — sheets, manifests and the report go out through one
+`runio.atomic_write_set`, so an IO failure partway through cannot leave a
+published sheet that no report names.
 """
 
 from __future__ import annotations
 
+import argparse
+import io
 import json
 import sys
 from dataclasses import dataclass, field
@@ -51,7 +56,7 @@ from sprite_gen.extract import heal_run, require_frames_manifest
 from sprite_gen.layers import (has_layer_contract, landmark_map, require_valid_layer_request,
                                resolve_stack, state_track)
 from sprite_gen.layout import row_frame_rel, state_frame_total
-from sprite_gen.runio import acquire_run_dir_lock, atomic_save_image, atomic_write_text, load_request
+from sprite_gen.runio import acquire_run_dir_lock, atomic_write_set, load_request
 
 # Where a composite bake puts its output and what it names the report. The one
 # place these strings live (`docs/layer-tracks.md` §5 documents the same tree;
@@ -369,9 +374,14 @@ def _compose_one(run_dir: Path, request: dict[str, Any], curation: dict[str, Any
     }
 
 
-def _publish(run_dir: Path, request: dict[str, Any], curation: dict[str, Any] | None,
-             composed: dict[str, Any], cell_size: tuple[int, int]) -> dict[str, Any]:
-    """Write one composite's sheet + manifest. Report entry is the return value."""
+def _render(run_dir: Path, request: dict[str, Any], curation: dict[str, Any] | None,
+            composed: dict[str, Any], cell_size: tuple[int, int]) -> dict[str, Any]:
+    """One composite's payloads + its report entry — rendered, not yet published.
+
+    Nothing here touches the run dir: the caller collects every composite's
+    payloads and publishes them as one set, so a bake either replaces all the
+    sheets it named or none of them.
+    """
     name = composed["name"]
     cell_w, cell_h = cell_size
     unique, order = composed["cells"], composed["order"]
@@ -390,8 +400,6 @@ def _publish(run_dir: Path, request: dict[str, Any], curation: dict[str, Any] | 
     sheet_name = f"{name}.png"
     manifest_name = f"{name}.manifest.json"
     out_dir = run_dir / LAYERS_DIRNAME
-    out_dir.mkdir(parents=True, exist_ok=True)
-    atomic_save_image(sheet, out_dir / sheet_name)
 
     frame_layout = {
         "sheetWidth": sheet.width,
@@ -409,7 +417,13 @@ def _publish(run_dir: Path, request: dict[str, Any], curation: dict[str, Any] | 
         "curation_applied": curation is not None,
         "frame_variant": variant_summary,
         "sprite_sheet_alpha": sheet_name,
-        "sprite_sheet_alpha_report": REPORT_NAME,
+        # The alpha/extraction report of THIS sheet — and a composite has none.
+        # The field keeps the base manifest's key set (§5) and states the absence
+        # rather than pointing at a document of another kind: `layers.report.json`
+        # is the bake's provenance record for every composite, not this sheet's
+        # alpha report, so a consumer resolving this field would open the wrong
+        # document. The provenance pointer lives in the `layers` block below.
+        "sprite_sheet_alpha_report": None,
         "base_image": request["character"].get("base_image"),
         "cell": request["cell"],
         "chroma_key": request.get("chroma_key"),
@@ -432,25 +446,33 @@ def _publish(run_dir: Path, request: dict[str, Any], curation: dict[str, Any] | 
         # combination of. The runtime still plays it as an ordinary one-row atlas.
         "layers": {
             "name": name,
+            "report": REPORT_NAME,
             "stack": [{k: element[k] for k in ("state", "track", "from", "to", "mask",
                                                "allow_clip", "state_revision")}
                       for element in composed["elements"]],
         },
     }
-    atomic_write_text(out_dir / manifest_name,
-                      json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+
+    buffer = io.BytesIO()
+    sheet.save(buffer, format="PNG")
     return {
-        "name": name,
-        "sheet": sheet_name,
-        "manifest": manifest_name,
-        "frames": len(order),
-        "cells": len(unique),
-        "fps": fps,
-        "loop": loop,
-        "frame_variant": variant_summary,
-        "body": composed["body"].state,
-        "elements": composed["elements"],
-        "frame_cells": order,
+        "payloads": {
+            out_dir / sheet_name: buffer.getvalue(),
+            out_dir / manifest_name: json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        },
+        "entry": {
+            "name": name,
+            "sheet": sheet_name,
+            "manifest": manifest_name,
+            "frames": len(order),
+            "cells": len(unique),
+            "fps": fps,
+            "loop": loop,
+            "frame_variant": variant_summary,
+            "body": composed["body"].state,
+            "elements": composed["elements"],
+            "frame_cells": order,
+        },
     }
 
 
@@ -508,7 +530,7 @@ def bake(run_dir: Path | str, *, names: list[str] | None = None) -> dict[str, An
             f"layer composition failed in {run_dir} (nothing written):\n  - "
             + "\n  - ".join(errors))
 
-    entries = [_publish(run_dir, request, curation, result, cell_size) for result in composed]
+    rendered = [_render(run_dir, request, curation, result, cell_size) for result in composed]
     report = {
         "ok": True,
         "kind": REPORT_KIND,
@@ -516,11 +538,19 @@ def bake(run_dir: Path | str, *, names: list[str] | None = None) -> dict[str, An
         "curation_applied": curation is not None,
         "cell": request["cell"],
         "rig_profile": (request.get("rig") or {}).get("profile"),
-        "composite_count": len(entries),
-        "composites": entries,
+        "composite_count": len(rendered),
+        "composites": [item["entry"] for item in rendered],
     }
-    atomic_write_text(run_dir / LAYERS_DIRNAME / REPORT_NAME,
-                      json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    # One publish for the whole bake. The report is what says which sheets are
+    # current (§5), so it lands with them or not at all — a sheet on disk that no
+    # report names is exactly the leftover state this transaction prevents.
+    payloads: dict[Path, bytes | str] = {}
+    for item in rendered:
+        payloads.update(item["payloads"])
+    payloads[run_dir / LAYERS_DIRNAME / REPORT_NAME] = (
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    (run_dir / LAYERS_DIRNAME).mkdir(parents=True, exist_ok=True)
+    atomic_write_set(payloads)
     return report
 
 
@@ -538,3 +568,62 @@ def load_report(run_dir: Path | str) -> dict[str, Any] | None:
     if report.get("kind") != REPORT_KIND:
         raise SystemExit(f"{path} is not a {REPORT_KIND} ({report.get('kind')!r})")
     return report
+
+
+# --- CLI -------------------------------------------------------------------
+# `sprite-gen compose-layers`, `python -m sprite_gen.compose_layers` and
+# `scripts/compose_layers.py` are three entry forms of ONE declaration: the CLI
+# table points at `add_arguments` / `run` below rather than restating the flags,
+# so a new option cannot reach one launch form and miss another.
+
+
+def parse_names(value: str | None) -> list[str] | None:
+    """`--names a,b` -> ["a", "b"]; unset -> None (every declared composite).
+
+    An empty entry is a typo (`a,,b`, a trailing comma), never "all": silently
+    dropping it would bake a different set than the one that was asked for.
+    """
+    if value is None:
+        return None
+    names = [part.strip() for part in value.split(",")]
+    if not names or any(not name for name in names):
+        raise SystemExit(
+            f"--names expects a comma-separated list of composite names (got {value!r})")
+    return names
+
+
+def add_arguments(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--run-dir", required=True, type=Path,
+                   help="run dir whose sprite-request.json declares rig / track / layers")
+    p.add_argument("--names",
+                   help="comma-separated composite names to bake (default: every declared one)")
+
+
+def run(*, run_dir: Path, names: str | None = None) -> int:
+    report = bake(run_dir, names=parse_names(names))
+    print(json.dumps({
+        "ok": report["ok"],
+        "run_dir": str(Path(run_dir).expanduser().resolve()),
+        "rig_profile": report["rig_profile"],
+        "composites": [{
+            "name": entry["name"],
+            "sheet": f"{LAYERS_DIRNAME}/{entry['sheet']}",
+            "manifest": f"{LAYERS_DIRNAME}/{entry['manifest']}",
+            "frames": entry["frames"],
+            "cells": entry["cells"],
+            "clipped_pixels": sum(element["clipped_pixels"] for element in entry["elements"]),
+        } for entry in report["composites"]],
+        "report": f"{LAYERS_DIRNAME}/{REPORT_NAME}",
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Bake a rig run's declared composite stacks into <run-dir>/layers/.")
+    add_arguments(parser)
+    return run(**vars(parser.parse_args(argv)))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -301,10 +301,27 @@ minus `rig`, plus `layers`; its single row is named after the composite and carr
 declarable row kinds. `fps` / `loop` come from the composite spec, defaulting to the
 body element's state entry.
 
+`sprite_sheet_alpha_report` is **`null`** in a composite manifest. That field names
+the alpha/extraction report *of this sheet*, and a composite has none: it is stacked
+from rows that were already extracted and keyed, so no alpha report was ever produced
+for it. The key stays (key-set parity above) and states the absence instead of
+pointing at a document of another kind — `layers/layers.report.json` is the bake's
+provenance record for **every** composite (`kind: "sprite-gen-layers-report"`), not
+this sheet's alpha report, so a consumer that resolved the field would open the wrong
+document. The provenance pointer is `layers.report` inside the `layers` block.
+
 A bake replaces the composites it produced and leaves everything else in `layers/`
 alone — the same rule `variants/` follows, and the only one compatible with baking a
 subset by name. `layers/layers.report.json` is the record of what the last bake
 produced, so a sheet that is not in it is a leftover, not a current output.
+
+**Publishing is one transaction.** §4's all-or-nothing rule covers declaration and
+composition; the write is held to the same rule. Every sheet, every manifest and the
+report are rendered in memory, staged as temp files beside their targets, and only
+then renamed in — so an `ENOSPC` on the second composite's sheet leaves the first
+one exactly as it was, and the report never names a sheet that failed to land.
+(A power loss between two renames can still land a subset; what this removes is the
+failure the process can observe — reporting success over a half-written publish.)
 
 The base run's `manifest.json` gains, **only for a rig run**:
 
@@ -344,27 +361,75 @@ It is filesystem-free, so it runs before a run dir is touched. Rejections:
 - a coordinate that is not a pair of integers, or lands outside the cell;
 - an unknown `track` value;
 - a composite name that collides with a request state, or does not match
-  `^[a-z][a-z0-9_]{0,63}$`; an empty stack; an unknown stack-element key;
+  `^[a-z][a-z0-9_]{0,63}$`; an empty stack; an unknown composite key
+  (`stack` / `fps` / `loop` is the whole vocabulary); an unknown stack-element key;
 - zero or several body elements; a body element that is not `stack[0]`;
 - `action_overlay` under a `full_body_override`;
 - an element whose pool size is neither the body's nor 1;
 - `from` / `to` not declared on every frame of the row it refers to;
 - a stack with no `rig` at all.
 
-## 7. Open work carried by the later steps
+## 7. Using it — the CLI and where it sits in the run
 
-- **Carry the layer keys through `prepare`** (B1): add `rig` and `layers` to the
-  emitted request and `track` to `normalize_states`, and make the whitelist drop
-  observable — a stderr note naming dropped top-level and per-state keys, so the
-  `takes` class of silent loss stops with this feature instead of gaining a third
-  instance. `test_prepare_does_not_carry_layer_keys_yet` is the canary that fails
-  when this lands.
-- **CLI surface** for the bake (`compose_layers.bake` is library-only today), plus the
-  composite-spec ownership boundary: `layers.<name>` still passes over an unknown
-  top-level key in silence, while a stack element rejects one. That asymmetry closes
-  when the CLI gives the composite spec an owner.
-- **`unpack_atlas` / import runs** are untouched by this contract for now: an
-  imported run has no rig, so it stays a non-layer run.
+### 7.1 Declaring
+
+`prepare` carries `rig`, `layers` and `states.<state>.track` from `--request` /
+`--request-json` into `sprite-request.json`, and validates them (§6) before it
+creates the run dir — a malformed rig fails with every violation at once instead of
+scaffolding a run whose first bake is what reports it.
+
+Of the layer vocabulary it carries exactly those three keys and nothing else.
+`prepare` re-emits the whole request from a whitelist (B1), so any key outside that
+list is dropped — and every drop is now named on stderr:
+
+```text
+[prepare] dropped top-level request key(s) ['notes']: prepare re-emits sprite-request.json from …
+[prepare] dropped states.idle key(s) ['takes']: a state entry is rebuilt as ['frames', 'fps', 'loop', 'action', 'track']
+```
+
+That note is the contract, not a courtesy: `states.<state>.takes` is a documented
+first-class key (`run-contract.md` §2) that has to be written into
+`sprite-request.json` after `prepare` runs, and it went missing silently for as long
+as the whitelist said nothing. Landmarks are usually declared the same way — after
+curation, since coordinates are the *baked instance's* (§3.1) — by editing
+`sprite-request.json` directly.
+
+### 7.2 Baking
+
+```bash
+# every declared composite
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen compose-layers \
+  --run-dir <target>/assets/generated/sprites/<character-id>
+
+# just the ones named (the rest of layers/ is left alone)
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen compose-layers \
+  --run-dir <run> --names down_walk_watering,down_idle_watering
+```
+
+The `sprite-gen compose-layers` subcommand, the `-m sprite_gen.compose_layers` module
+form and the `scripts/compose_layers.py` wrapper are three launch forms of one declaration
+(`compose_layers.add_arguments` / `.run`), and `compose_layers.bake(run_dir,
+names=None)` is the library form the three share.
+
+Order in the run: it consumes the **curated** rows and the same primitives
+`compose-atlas` does, so it belongs after curation, beside step 4 — a composite is
+a combination of what the atlas bakes. It self-heals the derived frame cache first
+(same rule as `compose-atlas`), takes the run-dir write lock, and prints a JSON
+summary naming each sheet, its manifest, its frame/cell counts and clipped-pixel
+total; the full record is `layers/layers.report.json`.
+
+Exit codes are the pipeline's: `0` with the summary, or a non-zero failure listing
+**every** violation at once, having written nothing (§4). A run that declares no rig
+is refused by name rather than treated as an empty bake — "nothing to compose" and
+"this is not a layer run" are different answers.
+
+## 8. Out of scope
+
+- **`unpack_atlas` / import runs** are untouched by this contract: an imported run
+  has no rig, so it stays a non-layer run.
+- **Runtime track combination.** The manifest carries atlas-absolute landmarks per
+  play position (§5) precisely so a runtime *can* combine tracks live; doing so is
+  the consumer's job, not this pipeline's.
 
 ## Related
 

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from sprite_gen import layers
+from sprite_gen import layers, prepare
 from sprite_gen.curation import empty_curation
 
 from conftest import run_script
@@ -224,6 +224,21 @@ def test_unknown_stack_element_key_is_rejected() -> None:
     assert any("unknown key(s) ['rotate']" in e for e in errors)
 
 
+def test_unknown_composite_key_is_rejected() -> None:
+    """The composite spec has an owner, so a typo is a violation and not a silent default.
+
+    `layers.<name>` used to pass over an unknown top-level key while a stack
+    element rejected one — the asymmetry the CLI step closes. `loops: false` must
+    not ship a composite that loops because nothing read the key.
+    """
+    request = _request()
+    request["layers"]["walk_with_can"]["loops"] = False
+
+    errors = layers.validate_layer_request(request)
+    assert any("layers.walk_with_can has unknown key(s) ['loops']" in e for e in errors)
+    assert any("allowed: stack, fps, loop" in e for e in errors)
+
+
 def test_composite_name_must_not_collide_with_a_request_state() -> None:
     request = _request()
     request["layers"]["walk"] = request["layers"].pop("walk_with_can")
@@ -321,27 +336,99 @@ def test_prepare_emits_the_documented_non_layer_request_surface(tmp_path: Path) 
     assert layers.has_layer_contract(request) is False
 
 
-def test_prepare_does_not_carry_layer_keys_yet(tmp_path: Path) -> None:
-    """Canary for the audit finding that motivates the explicit-carry rule.
-
-    `prepare` rebuilds the request from a whitelist, so a `rig` / `track` key
-    passed through `--request-json` is dropped without a word (the same reason
-    `states.<state>.takes` must be hand-written today). The layer CLI step has to
-    add both to the carried set; when it does, this test fails and is replaced by
-    the positive assertion. Contract: `docs/layer-tracks.md` §7.
-    """
+def _prepare(tmp_path: Path, request: dict, *args: str):
     out_dir = tmp_path / "run"
-    inline = json.dumps({
-        "rig": {"profile": "humanoid_biped", "landmarks": {}},
+    result = run_script("prepare_sprite_run.py", "--out-dir", str(out_dir),
+                        "--character-id", "rigbot", "--request-json", json.dumps(request), *args)
+    return out_dir, result
+
+
+def test_prepare_carries_the_layer_keys_into_the_request(tmp_path: Path) -> None:
+    """The explicit-carry rule (`docs/layer-tracks.md` §7), formerly a canary.
+
+    `prepare` rebuilds the request from a whitelist, so `rig` / `layers` /
+    `states.<state>.track` reach `sprite-request.json` only because they are in
+    the carried set by name — never by passthrough.
+    """
+    rig = {"profile": "humanoid_biped",
+           "landmarks": {"idle": {"0": {"root": [10, 20], "crown": [10, 4]},
+                                  "1": {"root": [11, 20], "crown": [11, 4]}}}}
+    composites = {"idle_only": {"stack": [{"state": "idle"}], "fps": 8, "loop": True}}
+    out_dir, result = _prepare(tmp_path, {
+        "rig": rig,
+        "layers": composites,
+        "cell": {"width": 64, "height": 64},
         "states": {"idle": {"frames": 2, "track": "base"}},
     })
-    result = run_script("prepare_sprite_run.py", "--out-dir", str(out_dir),
-                        "--character-id", "rigbot", "--request-json", inline)
     assert result.returncode == 0, result.stdout + result.stderr
 
     request = json.loads((out_dir / "sprite-request.json").read_text(encoding="utf-8"))
-    assert "rig" not in request
+    assert request["rig"] == rig
+    assert request["layers"] == composites
+    assert request["states"]["idle"]["track"] == "base"
+    assert layers.has_layer_contract(request) is True
+    assert layers.validate_layer_request(request) == []
+
+
+def test_prepare_writes_no_track_for_an_undeclared_row(tmp_path: Path) -> None:
+    """An undeclared row IS `base`; writing that default would make every run a layer run."""
+    out_dir, result = _prepare(tmp_path, {"states": {"idle": {"frames": 2}}})
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    request = json.loads((out_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    assert set(request) == NON_LAYER_REQUEST_KEYS
     assert "track" not in request["states"]["idle"]
+    assert layers.has_layer_contract(request) is False
+
+
+def test_prepare_names_every_key_it_drops(tmp_path: Path) -> None:
+    """The whitelist drop is observable — that is what ends the `takes` class of loss.
+
+    `states.<state>.takes` is a documented first-class key (`run-contract.md` §2)
+    that has to be written into `sprite-request.json` after the fact; it went
+    missing without a word for as long as `prepare` said nothing about it.
+    """
+    out_dir, result = _prepare(tmp_path, {
+        "states": {"idle": {"frames": 2, "takes": [{"label": "blink", "frames": 1}],
+                            "breathe": {"depth": 0.06}}},
+        "notes": "hand-written",
+        "character": {"id": "someone-else"},
+    })
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    assert "dropped top-level request key(s) ['notes']" in result.stderr
+    assert "ignored incoming ['character']" in result.stderr
+    assert "dropped states.idle key(s) ['breathe', 'takes']" in result.stderr
+    request = json.loads((out_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    assert "takes" not in request["states"]["idle"]
+    assert request["character"]["id"] == "rigbot"
+
+
+def test_prepare_says_nothing_when_the_request_is_carried_whole(tmp_path: Path) -> None:
+    """A note that fires on every run is a note nobody reads."""
+    _out_dir, result = _prepare(tmp_path, {
+        "cell": {"width": 64, "height": 64},
+        "states": {"idle": {"frames": 2, "fps": 4, "loop": True, "action": "idle"}},
+        "style": "flat",
+    })
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[prepare]" not in result.stderr
+
+
+def test_prepare_rejects_an_invalid_rig_before_scaffolding_the_run(tmp_path: Path) -> None:
+    """Filesystem-free validation, so a bad declaration never leaves a half-made run."""
+    out_dir, result = _prepare(tmp_path, {
+        "cell": {"width": 64, "height": 64},
+        "states": {"idle": {"frames": 2, "track": "hover"}},
+        "rig": {"profile": "mecha", "landmarks": {"idle": {"0": {"root": [10, 20]}}}},
+    })
+
+    assert result.returncode != 0
+    assert "invalid layer contract" in result.stderr
+    assert "rig.profile must be one of" in result.stderr
+    assert "states.idle.track must be one of" in result.stderr
+    assert not out_dir.exists()
 
 
 def test_non_layer_run_manifest_surface_is_unchanged(fixture_run_dir: Path) -> None:
@@ -404,3 +491,27 @@ def test_layer_doc_is_linked_from_the_hub_and_the_contracts() -> None:
     assert "docs/layer-tracks.md" in _read("SKILL.md")
     assert "layer-tracks.md" in _read("docs/run-contract.md")
     assert "layer-tracks.md" in _read("docs/architecture.md")
+
+
+def test_the_bake_command_is_documented_where_an_agent_looks() -> None:
+    """A CLI nobody can find is a library. The hub names it; the doc explains it."""
+    skill = _read("SKILL.md")
+    doc = _read("docs/layer-tracks.md")
+
+    assert "sprite-gen compose-layers" in skill
+    assert "scripts/compose_layers.py" in skill, "the script map's required_scripts list"
+    for clause in ("sprite-gen compose-layers", "--names", "sprite_gen/compose_layers.py"):
+        assert clause in doc, f"docs/layer-tracks.md does not document {clause}"
+
+
+def test_the_doc_owns_the_prepare_carry_and_drop_rule() -> None:
+    """The whitelist and its stderr note are contract text, not an implementation detail."""
+    doc = _read("docs/layer-tracks.md")
+
+    assert "[prepare] dropped" in doc
+    assert "states.<state>.takes" in doc
+    for key in ("rig", "layers", "track"):
+        assert key in doc, f"docs/layer-tracks.md does not name carried key {key}"
+    # The per-state rebuild list is quoted in the doc's example note; a change to
+    # the carried set has to reach the doc, not just the code.
+    assert str(list(prepare.STATE_KEYS_CARRIED)) in doc

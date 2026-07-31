@@ -29,6 +29,7 @@ depends_on:
     - scripts/unpack_atlas_run.py
     - scripts/export_curated_pngs.py
     - scripts/recolor.py
+    - scripts/compose_layers.py
 modes:
   default: component-row
 ---
@@ -190,6 +191,7 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 - `runio.py` — safe run-dir IO: single-writer lock (`.sprite-gen.lock`) + atomic writes for the extract/compose/export/unpack writers, so parallel agents cannot interleave writes into one character folder.
 - `sprite_gen/serve_curation.py` (`sprite-gen curation`) — standalone curation webview for one run dir (works from Claude Code Desktop, the Codex app, or any host with the skill). The `-m sprite_gen.serve_curation` module form and the `scripts/serve_curation.py` wrapper reach the same declaration and the same implementation — three live entry forms, one program (launch forms: [`docs/curation.md`](docs/curation.md)). When `<run-dir>/variants/recolor.report.json` is present, the view also blink-compares baked colourways and records the adopted name in `curation.json.recolor.picked` (detail: [`docs/recolor.md`](docs/recolor.md)).
 - `sprite_gen/recolor.py` (`sprite-gen recolor` / `sprite-gen recolor-palette`) — deterministic palette-swap bake. `recolor-palette` drafts a frequency-ordered palette map from a base sheet; `recolor` takes `base sheet + recolor spec` and bakes N variant sheets + a per-variant substitution report into `<run-dir>/variants/` (or an explicit `--out-dir`). Exact RGB match by default (dot-art safe); opt-in Chebyshev tolerance for soft edges. Alpha preserved, geometry untouched — a base manifest describes every variant. No Silent Fallback: unused map sources and unmapped passthrough colours are named and counted in `recolor.report.json`. Detail: [`docs/recolor.md`](docs/recolor.md).
+- `sprite_gen/compose_layers.py` (`sprite-gen compose-layers`) — deterministic composite bake for a run that declares a **rig**. Stacks curated rows onto each other by integer pivot translation + arbitrary alpha masks (no resampling, rotation or scale of its own) into `<run-dir>/layers/<name>.png` + `<name>.manifest.json` + `layers.report.json`. Optional and opt-in: a request with no `rig` / `track` / `layers` is not a layer run and is refused by name rather than composed. All-or-nothing — declaration, composition **and** publish: one violation reports every violation and writes nothing. Declaration schema, CLI usage, and what `prepare` carries: [`docs/layer-tracks.md`](docs/layer-tracks.md).
 - `unpack_atlas_run.py` — inverse of compose: rebuild a curator-ready run dir from a finished sheet (`--grid` > `--manifest` > auto-detect) or import a PNG folder (`--pngs-dir`, with sibling `meta.json` labels/iso grid).
 - `export_curated_pngs.py` — export curated frames back to named PNGs with the transform baked in, into `<run-dir>/curated/`; the deliverable for imported still sets.
 - `cutout.py` (`sprite-gen cutout`) — background remover for **imported** images (not pipeline output, which is already keyed). Routes on the corner background colour (`--key auto|white|magenta|green`): **white/ivory** → position matte (corner flood-fill keeps interior highlights unholed → decontaminated soft-alpha border + soft erode); **magenta/green key** → reuse the verified `extract.remove_chroma_background` engine as-is (no drift — key colours are absent from objects so its colour-only cut is safe there). `--white-check` writes cyan/magenta/yellow verification composites. No Silent Fallback (leftover non-zero RGB under transparency raises).
@@ -316,6 +318,15 @@ $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen recolor \
 ```
 
 Exact RGB match by default (dot art); opt-in `match: "tolerance"` for soft edges. Same input → same output bytes. The report names every unused map source and every unmapped passthrough colour — nothing outside the map vanishes quietly. Spec schema, report fields, and curation-view adopt flow: [`docs/recolor.md`](docs/recolor.md).
+
+4.6. (Optional, rig runs only) Bake the declared composite stacks:
+
+```bash
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen compose-layers \
+  --run-dir <target>/assets/generated/sprites/<character-id>
+```
+
+Only for a run whose `sprite-request.json` declares `rig` / `states.<state>.track` / `layers` — every other run is untouched by this feature and this step is skipped. It stacks the **curated** rows (integer pivot translation + alpha masks, no resampling) into `<run>/layers/<name>.png` + `<name>.manifest.json` + `layers.report.json`, so the same run bakes the same bytes every time. `--names a,b` bakes a subset and leaves the rest of `layers/` alone. Declaration schema, landmark rules, track kinds, and what `prepare` carries: [`docs/layer-tracks.md`](docs/layer-tracks.md).
 
 5. Launch the curation webview automatically (default closing step):
 
@@ -507,7 +518,8 @@ sprite-gen (this SKILL.md = behavior contract + hub)
 ├─ LAYER TRACKS ── "compose rows onto each other instead of generating every combination"
 │   └─ docs/layer-tracks.md      # rig profiles + integer landmarks · track kinds (base /
 │                                #   action_overlay / prop_effect / full_body_override) ·
-│                                #   composite stack · manifest rig block · layers/ artifact tree
+│                                #   composite stack · manifest rig block · layers/ artifact tree ·
+│                                #   compose-layers CLI + prepare 의 레이어 키 반입/드롭 고지
 │
 ├─ SPECIALIZED INPUTS ── "not the plain animation-row path"
 │   ├─ docs/directional-anchor-workflow.md  # directional / 45° anchor chains · hatch-pet locomotion
@@ -531,5 +543,5 @@ Concept taxonomy (which doc owns each term, so agents don't guess):
 - `frame_layout`, `manifest.json` runtime contract → run-contract.md + this SKILL.md "Runtime Contract"
 - pixel-unfake `fit`, `.plain.png`/`orig/` twins → pixel-unfake.md
 - recolor spec / report / `variants/` bake + colourway adopt → recolor.md
-- `rig` profiles / landmarks, row `track` kinds, composite `layers` stack + `layers/` bake → [`docs/layer-tracks.md`](docs/layer-tracks.md) (`sprite_gen/layers.py` validates the declaration)
+- `rig` profiles / landmarks, row `track` kinds, composite `layers` stack + `layers/` bake (`sprite-gen compose-layers`) → [`docs/layer-tracks.md`](docs/layer-tracks.md) (`sprite_gen/layers.py` validates the declaration, `sprite_gen/compose_layers.py` bakes it)
 - webview interactions (title-drag reorder, 넣기/빼기 toggle, 2-tier card, custom `data-tip` tooltip, recolor blink-compare) → `sprite_gen/curator/` (도메인 분할 `src/*.js` — 로드 순서 SSoT 는 index.html — + curator.css), described in curation.md + recolor.md
