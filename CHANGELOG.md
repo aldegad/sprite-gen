@@ -44,7 +44,7 @@ carry land with the following steps.
 - **`sprite_gen/layers.py`** — filesystem-free validator for the declaration: reports
   every violation at once and in a stable order, so a bad rig fails before a run dir is
   touched. `root` is the pivot for every profile and nothing is inferred from geometry;
-  `crown` is required for `humanoid_biped` only.
+  `crown` is required for `humanoid_biped` body tracks only; `prop_effect` rows use the `prop` profile requirement (`root`) even inside a humanoid run.
 - **Compatibility is pinned, not promised** — a request that declares none of the three
   keys is not a layer run: the non-layer request and manifest key sets, and the
   curation sidecar surface, are asserted by `tests/test_layer_contract.py`.
