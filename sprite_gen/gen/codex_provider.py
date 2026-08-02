@@ -10,7 +10,7 @@ base64 deterministically. The model-reported path is never trusted.
 
 Decisive flags (each verified in the image-gen skill):
 - `--sandbox workspace-write`  image_gen needs write access, else the tool never registers.
-- `--add-dir ~/.codex/generated_images`  not in the default writable set; missing it silently fails.
+- `--add-dir <Codex state root>/generated_images`  not in the default writable set; the root is `CODEX_HOME` when set and `~/.codex` otherwise.
 - `--skip-git-repo-check`  the sandbox dir is not a git repo.
 - NO `--ephemeral`  the session jsonl must survive on disk so we can extract from it.
 """
