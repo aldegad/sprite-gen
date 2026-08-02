@@ -61,7 +61,7 @@ from sprite_gen.curation import (CURATION_FILENAME, SCHEMA_VERSION, effective_lo
                                  recolor_pick, run_revision, write_curation_atomic)
 from sprite_gen.extract import heal_run, load_consistent_frames_manifest
 from sprite_gen.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel, state_frame_total
-from sprite_gen.runio import REQUEST_FILENAME, load_request, publish_guard, read_guard
+from sprite_gen.runio import load_request, publish_guard, read_guard, write_request
 
 # The SPA assets are package data (declared in pyproject's `package-data`), so the one
 # path that finds them is relative to this module — the same place in a repo checkout and
@@ -576,10 +576,10 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         "anchorFiles": anchor_files,
         "states": states,
         "curation": curation,
-        # 세대 불일치로 이번 로드에서 무효화(드롭)된 행 + 원문 백업 파일명 — 뷰가
-        # 배너로 알린다 (stderr 만으로는 사용자가 못 본다; 조용한 소실 금지).
+        # 세대 불일치로 이번 로드에서 무효화(드롭)된 행 — 뷰가 배너로 알린다 (stderr 만으로는
+        # 사용자가 못 본다; 조용한 소실 금지). 백업 파일명은 싣지 않는다: 로드는 아무것도
+        # 쓰지 않고, 원문은 덮이는 순간 writer 가 백업한다 (`write_curation_atomic`).
         "curationDropped": curation_report["dropped"],
-        "curationBackup": curation_report["backup"],
         "iso": request.get("iso"),
         "lang": CurationHandler.lang,
         "hasAtlas": (run_dir / "sprite-sheet-alpha.png").is_file(),
@@ -1466,16 +1466,14 @@ class CurationHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"fps must be 1..30: {fps}"}, 400)
                     return
                 with publish_guard(self.run_dir):
-                    # 게이트 경유 (락 안이어도 안전 — 게이트가 락 보유 시 재기록을 미룬다)
-                    request_path = self.run_dir / REQUEST_FILENAME
+                    # 게이트 경유 (락 안이어도 안전 — 게이트는 읽기만 한다)
                     request = load_request(self.run_dir)
                     if state not in request.get("states", {}):
                         self._send_json({"error": f"unknown state: {state}"}, 400)
                         return
                     request["states"][state]["fps"] = fps
-                    from sprite_gen.runio import atomic_write_text
-                    atomic_write_text(request_path,
-                                      json.dumps(request, ensure_ascii=False, indent=2) + "\n")
+                    # 쓰기도 게이트 경유 — fps 편집이 디스크 스키마를 바꾸지 않는다.
+                    write_request(self.run_dir, request)
                 self._send_json({"ok": True, "state": state, "fps": fps})
                 return
             if path == "/api/interpolate":

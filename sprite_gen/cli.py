@@ -26,6 +26,7 @@ from sprite_gen import (
     serve_curation,
     slice_sheet,
     migrate_breathe,
+    migrate_request,
     unpack_atlas,
 )
 from sprite_gen.prepare import STYLE_DEFAULT, _outline_config
@@ -263,6 +264,14 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Migrate a run's retired split-line breathe sidecar to the envelope schema.",
         migrate_breathe.add_arguments,
         migrate_breathe.run,
+    ),
+    # The only writer that changes the request schema on disk. Reads (`runio.load_request`
+    # and everything through it) normalize retired keys in memory and leave the file byte
+    # for byte — a query must never rewrite a canonical run.
+    "migrate-request": (
+        "Migrate a run's retired sprite-request fit keys to the current schema.",
+        migrate_request.add_arguments,
+        migrate_request.run,
     ),
     "slice-sheet": (
         "Slice a multi-figure grid sheet into per-cell standing cuts (tachi-e).",

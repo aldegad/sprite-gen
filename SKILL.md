@@ -144,7 +144,7 @@ $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python <script.py> ...
   즉 부모를 옳은 인터프리터로 띄우면 그 아래는 자동으로 옳고, 반대로 큐레이션 서버를 전역 `python3` 로
   띄우면 그 서버가 부르는 재추출·compose 가 전부 같이 틀린다. 고칠 곳은 **띄우는 순간 한 곳**이다.
 - **`sprite-gen <tool>` 은 실재하는 콘솔 스크립트다** (`anchor`, `cutout`, `curation`,
-  `recolor`, `recolor-palette`, `migrate-breathe` …). `pip install` 이 venv 의 `bin/` 에 써 넣고 그 shebang 이 **바로 그 venv 의
+  `recolor`, `recolor-palette`, `migrate-breathe`, `migrate-request` …). `pip install` 이 venv 의 `bin/` 에 써 넣고 그 shebang 이 **바로 그 venv 의
   인터프리터**를 가리키므로, 이 형식은 인터프리터를 고르는 문제 자체가 없다:
 
   ```bash

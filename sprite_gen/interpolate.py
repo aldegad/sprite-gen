@@ -47,7 +47,7 @@ from PIL import Image
 from .extract import (extract_component_images, register_row_frames,
                       remove_chroma_background_ycbcr, tighten_components)
 from .layout import raw_rel, take_raw_rel
-from .runio import REQUEST_FILENAME, load_request
+from .runio import load_request, write_request
 
 PROVIDERS = ("codex", "grok")
 
@@ -188,10 +188,9 @@ def write_take(run_dir: Path, request: dict[str, Any], state: str, label: str,
     target = run_dir / rel
     target.parent.mkdir(parents=True, exist_ok=True)
     image.save(target)
-    request_path = run_dir / REQUEST_FILENAME
     with publish_guard(run_dir):
         # 락 안 fresh 재독도 게이트 경유 — 이관 판정·두 키 hard fail 이 한 곳에만 있어야 한다
-        # (게이트는 락 보유를 감지하면 재기록을 미룬다).
+        # (게이트는 읽기만 한다).
         fresh = load_request(run_dir)
         takes = fresh["states"][state].setdefault("takes", [])
         entry = next((t for t in takes if t.get("label") == label), None)
@@ -199,8 +198,8 @@ def write_take(run_dir: Path, request: dict[str, Any], state: str, label: str,
             takes.append({"label": label, "frames": 1})
         else:
             entry["frames"] = 1
-        request_path.write_text(
-            json.dumps(fresh, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        # 쓰기도 게이트 경유 — 테이크 기록이 디스크 스키마를 바꾸지 않는다 (reroll 과 동일).
+        write_request(run_dir, fresh)
     return target
 
 

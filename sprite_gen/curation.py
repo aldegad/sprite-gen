@@ -122,11 +122,13 @@ Defaults when absent (explicit, not a silent fallback):
 - no `curation.json`           -> every state uses all extracted frames in order, identity transform.
 - mismatched `run_revision`    -> per-state salvage: each state entry whose `revision` stamp is a
                                    prefix of the current state_revision segments is KEPT; entries
-                                   without a valid stamp are dropped. Before anything is dropped the
-                                   whole original file is backed up to `curation.stale-<hash>.json`
-                                   (idempotent content-hash name) and the drop is reported on stderr
+                                   without a valid stamp are dropped. The drop is reported on stderr
                                    and to the webview (load_curation_report) — stale edits are never
-                                   silently applied, and never silently destroyed either.
+                                   silently applied. The load itself writes nothing: `curation.json`
+                                   stays on disk untouched, and the copy to
+                                   `curation.stale-<hash>.json` (idempotent content-hash name) is
+                                   made by the writer that actually overwrites it
+                                   (`write_curation_atomic`) — never silently destroyed either.
 - `anchors` missing/direction absent -> that direction's anchor is the anchor row's curated
                                    sequence head (`sprite_gen.anchor.resolve_anchor`).
 - pinned row regenerated       -> the pin is KEPT and marked `stale` by the load gate (reported in
@@ -532,11 +534,18 @@ def state_revision(run_dir: Path, state: str, request: dict[str, Any] | None = N
 
 
 def backup_stale_curation(run_dir: Path, raw_text: str) -> str:
-    """무효화로 버려질(또는 덮일) 큐레이션 원문을 `curation.stale-<hash>.json` 으로 보존.
+    """덮여 사라질 큐레이션 원문을 `curation.stale-<hash>.json` 으로 보존 — **writer 전용**.
 
     파일명이 내용 해시라 멱등 — 같은 원문은 한 번만 남고, 정상 편집 흐름에서는 절대
     생기지 않는다. 사람이 나중에 열어 selected/transforms 를 수동 복원할 수 있는
-    관측 가능한 안전망이다 (백업 없는 원자 덮어쓰기 금지)."""
+    관측 가능한 안전망이다 (백업 없는 원자 덮어쓰기 금지).
+
+    **조회 경로는 이걸 부르지 않는다.** 예전엔 `load_curation_report` 가 세대 불일치로 행을
+    드롭할 때 여기서 백업을 썼다 — 읽기만 해도 런 디렉터리에 새 파일이 생겼다는 뜻이고,
+    그건 이 플랜이 request 로더에서 잡은 것과 같은 계열의 "조회가 런에 쓴다" 였다. 드롭은
+    메모리 판정일 뿐 그 시점에 사라지는 것은 없다 (`curation.json` 은 디스크에 그대로다).
+    실제로 원문이 사라지는 순간은 `write_curation_atomic` 의 덮어쓰기 하나뿐이고, 백업은
+    그 writer 한 곳에서만 일어난다."""
     digest = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()[:8]
     name = f"curation.stale-{digest}.json"
     path = run_dir / name
@@ -582,17 +591,23 @@ def _report_stale_anchors(run_dir: Path, report: dict[str, Any]) -> None:
 
 
 def load_curation_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    """사이드카 로드 + 세대 검증 보고. Returns (doc|None, report).
+    """사이드카 로드 + 세대 검증 보고 — **읽기만 한다** (run dir 바이트 불변). Returns (doc|None, report).
 
-    report = {"dropped": [state...], "backup": filename|None, "anchors_stale": [direction...]}. 규칙:
+    report = {"dropped": [state...], "anchors_stale": [direction...]}. 규칙:
     - run_revision 이 현재와 일치 → 문서 전체 유효 (fast path, dropped 없음).
     - 불일치 → 행 단위 구제: `revision` 스탬프가 현재 state_revision 의 접두인 행만
-      유지, 나머지는 드롭. 드롭이 하나라도 있으면 원문을 먼저 백업하고 stderr 로
-      보고한다. 전 행이 드롭되면 doc 은 None (전량 기본값).
+      유지, 나머지는 드롭. 드롭이 하나라도 있으면 stderr 로 보고한다. 전 행이 드롭되면
+      doc 은 None (전량 기본값).
     스탬프 없는 행(레거시/수동 편집)은 불일치 세대에서 검증 불가 → 드롭 (No Silent
-    Fallback — 증명 없는 선택을 새 프레임에 적용하지 않는다)."""
+    Fallback — 증명 없는 선택을 새 프레임에 적용하지 않는다).
+
+    드롭은 **이 로드가 무엇을 적용하지 않을지**에 대한 판정이지 파일 삭제가 아니다:
+    `curation.json` 은 그대로 남아 있고, 실제로 덮이는 순간 `write_curation_atomic` 이
+    `curation.stale-<hash>.json` 백업을 남긴다. 그래서 조회는 백업을 쓰지 않는다 — 조회가
+    런 디렉터리에 파일을 만들면 그것도 "조회가 런에 쓴다" 다
+    (plan sprite-gen/state-revision-read-mutation)."""
     path = curation_path(run_dir)
-    report: dict[str, Any] = {"dropped": [], "backup": None, "anchors_stale": []}
+    report: dict[str, Any] = {"dropped": [], "anchors_stale": []}
     if not path.is_file():
         return None, report
     raw_text = path.read_text(encoding="utf-8")
@@ -630,9 +645,9 @@ def load_curation_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str
         # 런 세대 지문은 바뀌었지만 (예: request 메타 편집) 전 행이 개별 검증을 통과.
         return {**data, "states": kept, **({"anchors": anchors_out} if anchors_out else {})}, report
     if report["dropped"]:
-        report["backup"] = backup_stale_curation(run_dir, raw_text)
         print(f"[curation] frames regenerated under {CURATION_FILENAME}: dropped "
-              f"{', '.join(report['dropped'])} (kept {len(kept)}), backup {report['backup']}: {run_dir}",
+              f"{', '.join(report['dropped'])} (kept {len(kept)}); the file itself is unchanged "
+              f"until the next save, which backs it up to curation.stale-<hash>.json: {run_dir}",
               file=sys.stderr)
     _report_stale_anchors(run_dir, report)
     if not kept and not anchors_out:
@@ -871,7 +886,7 @@ def _carry_anchor_provenance(run_dir: Path, payload: dict[str, Any]) -> dict[str
     return payload
 
 
-def write_curation_atomic(run_dir: Path, payload: dict[str, Any]) -> None:
+def write_curation_atomic(run_dir: Path, payload: dict[str, Any]) -> str | None:
     """Atomically replace curation.json (temp file in the same dir + os.replace). Stamps the
     sidecar with the current run generation (`run_revision`) AND per-state `revision`
     segment fingerprints (stamp_curation), so a later regeneration invalidates only the
@@ -881,11 +896,20 @@ def write_curation_atomic(run_dir: Path, payload: dict[str, Any]) -> None:
     autosave can never permanently destroy selections without an observable copy.
     `runRevision` is a transport-only echo field and is not stored.
 
+    Returns the backup filename when one was written, else None — this is the **single
+    place** a stale backup is created, so it is also the single place that can report one.
+    The load gate deliberately does not back up: a generation-mismatched read drops rows
+    from *this load*, but nothing is lost until an overwrite, and a read that creates a
+    file in the run dir is itself a read-that-writes
+    (plan sprite-gen/state-revision-read-mutation).
+
     Sidecar write semantics live with the sidecar schema (this module) so every writer —
     the webview POST and the `sprite-gen anchor --pick` CLI — stamps and backs up
     identically. Callers own the run-dir lock (publish_guard)."""
     import os
     import tempfile
+
+    backup: str | None = None
 
     if payload.get("kind") != "sprite-gen-curation":
         raise ValueError("payload is not a sprite-gen-curation document")
@@ -910,7 +934,7 @@ def write_curation_atomic(run_dir: Path, payload: dict[str, Any]) -> None:
             # 아니므로 정상 편집마다 백업 파일이 쌓이지 않는다.
             new_anchors = anchor_choices(payload)
             if any(d not in new_anchors for d in anchor_choices(old)):
-                backup_stale_curation(run_dir, old_text)
+                backup = backup_stale_curation(run_dir, old_text)
             new_states = payload.get("states") or {}
             same_generation = old.get("run_revision") == payload.get("run_revision")
             for name, old_entry in (old.get("states") or {}).items():
@@ -927,7 +951,7 @@ def write_curation_atomic(run_dir: Path, payload: dict[str, Any]) -> None:
                         # 레거시 스탬프 없는 항목: 같은 런 세대의 정상 편집이면 호환
                         lost = not same_generation
                 if lost:
-                    backup_stale_curation(run_dir, old_text)
+                    backup = backup_stale_curation(run_dir, old_text)
                     break
     text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     fd, tmp_name = tempfile.mkstemp(dir=str(run_dir), prefix=".curation-", suffix=".tmp")
@@ -939,6 +963,11 @@ def write_curation_atomic(run_dir: Path, payload: dict[str, Any]) -> None:
         if os.path.exists(tmp_name):
             os.unlink(tmp_name)
         raise
+    if backup:
+        # 원문이 실제로 덮인 순간에만 나는 줄이다 — 백업이 조용히 쌓이지 않게 관측 가능히.
+        print(f"[curation] this save overwrote selections {CURATION_FILENAME} still held; "
+              f"the previous file is preserved as {backup}: {run_dir}", file=sys.stderr)
+    return backup
 
 
 def transform_matrix(t: dict[str, float]) -> tuple[float, float, float, float]:

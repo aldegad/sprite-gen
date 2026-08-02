@@ -167,6 +167,58 @@ The runtime `manifest.json.frame_layout` contract (absolute rects, no runtime
 alpha-recovery, `degraded_static_fallback: false`) is owned by
 [`../SKILL.md`](../SKILL.md) "Runtime Contract" and is out of scope here.
 
+## 2-b-2. Reading a run never writes to it
+
+`sprite-request.json` has exactly one read gate (`runio.load_request`) and exactly one
+schema writer (`runio.migrate_request_file`, exposed as `sprite-gen migrate-request
+<run-dir> --apply`). They are separate on purpose.
+
+- **Reads are byte-stable.** `load_request`, and everything that goes through it
+  (`state_revision`, `run_revision`, `load_curation`, the view's snapshot endpoints),
+  leave the run directory byte for byte identical. A retired key (`fit.pixel_perfect`)
+  is normalized to the current key (`fit.pixel_unfake`) **in memory only**, so an old
+  approved run keeps working without its file being touched. Both keys present is still
+  a hard fail — code cannot pick which of two truths is real.
+  The curation sidecar reads the same way: a generation-mismatched `curation.json` is
+  salvaged row by row **in memory** and the file itself is left alone — the load gate
+  writes no backup copy (see the bullet below).
+- **Schema migration is an explicit command.** It is a dry run unless `--apply` is passed.
+  The write takes the **publish rwlock** (`runio.publish_guard`) — the same exclusive lock
+  the request editors take — re-reads the document *after* acquiring it, and replaces the
+  file atomically. It deliberately does not take the pipeline `.sprite-gen.lock`: that lock
+  guards stage outputs (frames, atlas), and extraction/compose never write the request, so
+  holding it would look like protection while the actual competitors (reroll, interpolate,
+  the view's fps edit) walked straight past it. One resource, one isolation domain.
+- **Every request read-modify-write shares that one domain.** Migration, take recording
+  (`reroll.record_take`, `interpolate.write_take`) and the view's fps POST all do
+  *acquire → fresh re-read → atomic replace* inside `publish_guard`, so no pair of them can
+  lose the other's write. Locked by named race tests plus a structural assertion that no
+  production request write sits outside the guard
+  (`tests/test_request_write_isolation.py`).
+- **A stale backup is written by the writer, never by a read.** `curation.stale-<hash>.json`
+  is created only by `curation.write_curation_atomic`, at the moment an overwrite would
+  actually lose rows. The load gate used to write it while merely *judging* a
+  generation-mismatched sidecar — a read that created a file in the run dir, the same class
+  of defect as the incident below. Nothing is lost at drop time: `curation.json` is still
+  on disk, untouched.
+- **Unrelated edits preserve the on-disk key form.** Take recording (reroll / interpolate)
+  and the view's fps edit reload the whole document through the gate and write it back, so
+  they go out through `runio.write_request`, which folds a normalized key back to whatever
+  the file actually carries. Otherwise changing one fps value would migrate the schema as a
+  side effect, and "only the explicit command changes the schema" would be false the moment
+  anyone edited anything.
+
+**Real incident 2026-08-02** (`solvell`, founder v8 succession): the gate used to rewrite
+the file as soon as it normalized a retired key, so calling `state_revision()` on an
+approved `founder_v7` run mutated that run's `sprite-request.json`. Because `run_revision`
+hashes the request bytes, one *query* moved the run's generation fingerprint and knocked
+its curation sidecar stale. A query has no business changing what it is reporting on.
+
+Migration does change the file bytes, so it does move `run_revision`. The curation sidecar
+survives it through per-row `revision` salvage (§ `curation.load_curation_report`); rows
+with no stamp are dropped as usual, and `migrate-request` prints which rows those are
+*before* it writes.
+
 ## 2-c. External consumers install from `curated/`, never from `frames/`
 
 `frames/` is the extractor's own output. Everything a human does in the curation view —
@@ -352,9 +404,10 @@ throughout, so a concurrent **writer** cannot preempt (writer Isolation).
 >
 > **Load** 쪽은 행 단위다: `run_revision` 이 어긋나도 각 행의 `revision`(원료 세그먼트
 > 지문, `curation.state_revision`)이 현재의 접두면 그 행 큐레이션은 유지된다 — 같은 raw
-> 를 새 엔진이 재유도(heal)해도 선택이 살아남는다. 드롭되는 행이 생기면 원문이
-> `curation.stale-<hash>.json` 으로 먼저 백업되고 `/api/run` 의
-> `curationDropped`/`curationBackup` 으로 웹뷰 배너에 보고된다 (조용한 소실 금지).
+> 를 새 엔진이 재유도(heal)해도 선택이 살아남는다. 드롭되는 행이 생기면 `/api/run` 의
+> `curationDropped` 로 웹뷰 배너에 보고된다 (조용한 소실 금지). 로드는 아무것도 쓰지
+> 않는다 — 원문은 그대로 남아 있고, 실제로 덮이는 순간 writer 가
+> `curation.stale-<hash>.json` 으로 보존한다.
 > 스키마/규칙 상세: [`curation.md`](curation.md).
 
 ## 5. Conformance status

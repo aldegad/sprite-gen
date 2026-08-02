@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from .anchor import identity_ref
-from .runio import REQUEST_FILENAME, load_request
+from .runio import load_request, write_request
 from .gen import PROVIDERS, generate_image
 from .layout import guide_rel, prompt_rel, take_raw_rel
 
@@ -51,10 +51,9 @@ def record_take(run_dir: Path, state: str, label: str, frames: int) -> None:
     배타락 안에서 **fresh 재독 → 갱신 → 원자 쓰기** 로만 기록한다."""
     from .runio import publish_guard
 
-    request_path = run_dir / REQUEST_FILENAME
     with publish_guard(run_dir):
         # 락 안 fresh 재독도 게이트를 통과한다 — 이관 판정·두 키 hard fail 이 한 곳에만 있어야
-        # 한다. 게이트는 락 보유를 감지하면 재기록을 미루므로 이 안에서 안전하다.
+        # 한다. 게이트는 읽기만 하므로 락 안에서도 안전하다.
         fresh = load_request(run_dir)
         takes = fresh["states"][state].setdefault("takes", [])
         entry = next((t for t in takes if t.get("label") == label), None)
@@ -62,15 +61,15 @@ def record_take(run_dir: Path, state: str, label: str, frames: int) -> None:
             takes.append({"label": label, "frames": frames})
         else:
             entry["frames"] = frames
-        request_path.write_text(
-            json.dumps(fresh, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        # 쓰기도 게이트 경유 (`write_request`): 테이크 기록은 스키마와 무관한 편집이라
+        # 디스크의 키 형태를 그대로 둔다 (스키마 이관은 `sprite-gen migrate-request` 만).
+        write_request(run_dir, fresh)
 
 
 def reroll_state(run_dir: Path | str, state: str, provider: str = "codex",
                  label: str | None = None) -> Path:
     """행 리롤 한 번: 테이크 raw 생성 + request takes 기록. 반환 = 테이크 raw 경로."""
     run_dir = Path(run_dir)
-    request_path = run_dir / REQUEST_FILENAME
     # 읽기는 **게이트만** 쓴다 (`load_request`): 여기서 raw 로 읽으면 아직 이관되지 않은
     # 레거시 런에서 아래 `fit.pixel_unfake` 검사가 항상 False 가 되어, 언페이크가 켜진 런의
     # 리롤을 "켜져 있지 않다" 며 거부한다 (젯비 검증 2026-07-26 R1 재현). 리롤은 뷰가 **별도
