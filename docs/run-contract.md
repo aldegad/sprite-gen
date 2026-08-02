@@ -167,6 +167,39 @@ The runtime `manifest.json.frame_layout` contract (absolute rects, no runtime
 alpha-recovery, `degraded_static_fallback: false`) is owned by
 [`../SKILL.md`](../SKILL.md) "Runtime Contract" and is out of scope here.
 
+## 2-b-2. Reading a run never writes to it
+
+`sprite-request.json` has exactly one read gate (`runio.load_request`) and exactly one
+schema writer (`runio.migrate_request_file`, exposed as `sprite-gen migrate-request
+<run-dir> --apply`). They are separate on purpose.
+
+- **Reads are byte-stable.** `load_request`, and everything that goes through it
+  (`state_revision`, `run_revision`, `load_curation`, the view's snapshot endpoints),
+  leave the run directory byte for byte identical. A retired key (`fit.pixel_perfect`)
+  is normalized to the current key (`fit.pixel_unfake`) **in memory only**, so an old
+  approved run keeps working without its file being touched. Both keys present is still
+  a hard fail — code cannot pick which of two truths is real.
+- **Schema migration is an explicit command.** It takes the run-dir writer lock, writes
+  atomically, and refuses loudly if another pipeline process holds that lock. It is a
+  dry run unless `--apply` is passed.
+- **Unrelated edits preserve the on-disk key form.** Take recording (reroll / interpolate)
+  and the view's fps edit reload the whole document through the gate and write it back, so
+  they go out through `runio.write_request`, which folds a normalized key back to whatever
+  the file actually carries. Otherwise changing one fps value would migrate the schema as a
+  side effect, and "only the explicit command changes the schema" would be false the moment
+  anyone edited anything.
+
+**Real incident 2026-08-02** (`solvell`, founder v8 succession): the gate used to rewrite
+the file as soon as it normalized a retired key, so calling `state_revision()` on an
+approved `founder_v7` run mutated that run's `sprite-request.json`. Because `run_revision`
+hashes the request bytes, one *query* moved the run's generation fingerprint and knocked
+its curation sidecar stale. A query has no business changing what it is reporting on.
+
+Migration does change the file bytes, so it does move `run_revision`. The curation sidecar
+survives it through per-row `revision` salvage (§ `curation.load_curation_report`); rows
+with no stamp are dropped as usual, and `migrate-request` prints which rows those are
+*before* it writes.
+
 ## 2-c. External consumers install from `curated/`, never from `frames/`
 
 `frames/` is the extractor's own output. Everything a human does in the curation view —

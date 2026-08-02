@@ -33,6 +33,7 @@ import atexit
 import contextlib
 import json
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path, PurePath
@@ -333,11 +334,13 @@ REQUEST_FILENAME = "sprite-request.json"
 LEGACY_FIT_KEYS = {"pixel_perfect": "pixel_unfake"}
 
 
-def _migrate_fit_keys(request: dict, run_dir: Path) -> bool:
-    """은퇴 키를 현행 키로 옮긴다 (in-place). 옮겼으면 True.
+def normalize_retired_fit_keys(request: dict, where: str) -> bool:
+    """은퇴 키를 현행 키로 옮긴다 (**메모리 in-place**, 디스크는 손대지 않는다). 옮겼으면 True.
 
     두 키가 동시에 있으면 **hard fail** — 어느 쪽이 진실인지 코드가 고를 수 없고, 고르는
-    순간 그게 조용한 폴백이다."""
+    순간 그게 조용한 폴백이다. 이건 읽기 정규화이지 이관이 아니다: 디스크 스키마를 바꾸는
+    쪽은 `migrate_request_file` 하나뿐이고, 이 함수는 그 writer 도 같이 쓴다 (키 매핑이
+    두 벌 생기지 않게)."""
     fit = request.get("fit")
     if not isinstance(fit, dict):
         return False
@@ -347,7 +350,7 @@ def _migrate_fit_keys(request: dict, run_dir: Path) -> bool:
             continue
         if current in fit:
             raise SystemExit(
-                f"{run_dir / REQUEST_FILENAME}: both `fit.{legacy}` (retired) and "
+                f"{where}: both `fit.{legacy}` (retired) and "
                 f"`fit.{current}` are present — two truths for one setting. Delete the "
                 f"`fit.{legacy}` line (its value was {fit[legacy]!r}); the current key is "
                 f"`fit.{current}` = {fit[current]!r}.")
@@ -356,33 +359,95 @@ def _migrate_fit_keys(request: dict, run_dir: Path) -> bool:
     return moved
 
 
-def load_request(run_dir: Path, *, migrate: bool = True) -> dict:
-    """런의 numeric SSoT (`sprite-request.json`) 를 읽는 **유일한 게이트**.
+# 은퇴 키를 안은 런을 한 프로세스에서 처음 읽을 때만 이관 안내를 낸다. `state_revision`
+# 이 뷰 요청마다 로더를 부르므로 매번 찍으면 로그가 안내가 아니라 소음이 된다. 로그
+# 중복 억제이지 진실 저장소가 아니다 — 여기 무엇이 들어 있든 판독 결과는 같다.
+_RETIRED_KEY_NOTICED: set[str] = set()
 
-    은퇴한 키(`fit.pixel_perfect`)를 현행 키(`fit.pixel_unfake`)로 이관하고 파일을 한 번
-    다시 쓴다 — 읽고 메모리에서만 바꾸면 디스크에 구키가 영원히 남아 SSoT 가 둘이 된다
-    (이관이지 폴백이 아니다: 관측 가능한 1회 재기록이고, 두 키 동시 존재는 hard fail).
 
-    재기록은 rwlock(`publish_guard`)을 잡지 않는다. 이유가 두 개다: (1) 이 함수는
-    `read_guard` 안에서도 불리고(뷰 스냅샷), 같은 프로세스가 자기 shared lock 위에서
-    exclusive 를 요구하면 flock 이 자기 자신에 막힌다 (2) 단일 파일 원자 교체는 rwlock 이
-    지키는 대상(프레임 트리 content swap)이 아니다 — 리더는 항상 완전한 옛/새 파일 하나를
-    본다. 다만 파이프라인 writer 가 락을 쥐고 있으면(`.sprite-gen.lock`) 재기록을 미룬다:
-    그 시점의 run dir 는 스왑 중일 수 있고, 이관은 다음 로드에서 하면 된다 (메모리 값은
-    이미 현행 키라 호출부 동작은 지금도 정상)."""
+def _read_request_document(run_dir: Path) -> tuple[Path, dict, bool]:
+    """`sprite-request.json` 을 읽어 (경로, 정규화된 문서, 은퇴 키가 있었나) 를 돌려준다.
+
+    request 파일을 실제로 여는 곳은 여기 하나다 — 읽기 게이트와 이관 writer 가 같은 판독
+    (두 키 hard fail 포함)을 쓰게 하려면 파싱이 한 벌이어야 한다."""
     path = Path(run_dir) / REQUEST_FILENAME
     if not path.is_file():
         raise SystemExit(f"not a sprite-gen run dir (no {REQUEST_FILENAME}): {run_dir}")
     request = json.loads(path.read_text(encoding="utf-8"))
-    if not _migrate_fit_keys(request, Path(run_dir)):
-        return request
-    if not migrate:
-        return request
-    if (Path(run_dir) / LOCK_FILENAME).exists():
-        print(f"[request] retired fit key migrated in memory only — a pipeline writer holds "
-              f"{LOCK_FILENAME}; the file is rewritten on the next load: {path}")
-        return request
-    atomic_write_text(path, json.dumps(request, ensure_ascii=False, indent=2) + "\n")
-    print(f"[request] migrated retired fit key(s) "
-          f"{', '.join(f'{k} -> {v}' for k, v in LEGACY_FIT_KEYS.items())} in {path}")
+    return path, request, normalize_retired_fit_keys(request, str(path))
+
+
+def load_request(run_dir: Path) -> dict:
+    """런의 numeric SSoT (`sprite-request.json`) 를 읽는 **유일한 게이트**. 읽기만 한다.
+
+    은퇴한 키(`fit.pixel_perfect`)는 현행 키(`fit.pixel_unfake`)로 **메모리에서만** 정규화
+    되고 파일은 바이트 그대로 남는다. 두 키가 동시에 있으면 hard fail.
+
+    예전엔 이 함수가 정규화한 문서를 곧바로 디스크에 다시 썼다. 그건 SRP 위반이었고 실제로
+    터졌다: founder v8 승계 작업 중 승인된 founder_v7 런에 `state_revision()` 을 부른 것만
+    으로 그 런의 `sprite-request.json` 이 재기록됐다. `run_revision` 이 request 바이트를
+    해싱하므로 조회 한 번이 세대 지문까지 움직여 큐레이션 사이드카를 stale 로 떨어뜨렸다
+    (plan sprite-gen/state-revision-read-mutation).
+
+    디스크 스키마 이관은 사용자가 명시적으로 부르는 단일 writer 에서만 원자적으로 한다:
+    `migrate_request_file()` / `sprite-gen migrate-request <run-dir> --apply`."""
+    path, request, had_retired = _read_request_document(run_dir)
+    if had_retired and str(path) not in _RETIRED_KEY_NOTICED:
+        _RETIRED_KEY_NOTICED.add(str(path))
+        print(f"[request] retired fit key(s) "
+              f"{', '.join(f'{k} -> {v}' for k, v in LEGACY_FIT_KEYS.items())} read as the "
+              f"current key(s); the file is unchanged. Run `sprite-gen migrate-request "
+              f"{run_dir} --apply` to move the schema on disk: {path}", file=sys.stderr)
     return request
+
+
+def migrate_request_file(run_dir: Path, *, apply: bool = False) -> bool:
+    """은퇴한 `fit` 키를 디스크에서 현행 키로 옮긴다 — request 스키마의 **유일한 이관 writer**.
+
+    Returns True 면 옮길 것이 있었다는 뜻이다 (`apply=False` 인 dry run 에서도 True).
+    이미 현행 키뿐이면 False (멱등 — 두 번째 실행은 아무것도 쓰지 않는다).
+
+    writer 라서 writer 규율을 따른다: run-dir 단일 writer 락을 잡고(다른 파이프라인
+    프로세스가 쓰는 중이면 조용히 미루는 게 아니라 요란하게 거부한다), 원자 교체로 쓰고,
+    작업이 끝나면 락을 놓는다. 조회 경로가 락 유무에 따라 쓰거나 안 쓰던 예전 구조와의
+    차이가 여기다 — 쓰기는 이제 사용자가 부른 명령 안에서만 일어나므로 거부해도 될 자리다.
+    """
+    path, request, had_retired = _read_request_document(run_dir)
+    if not had_retired:
+        return False
+    if not apply:
+        return True
+    acquire_run_dir_lock(Path(run_dir), "migrate-request")
+    try:
+        atomic_write_text(path, json.dumps(request, ensure_ascii=False, indent=2) + "\n")
+    finally:
+        release_run_dir_lock(Path(run_dir))
+    _RETIRED_KEY_NOTICED.discard(str(path))
+    return True
+
+
+def write_request(run_dir: Path, request: dict) -> None:
+    """편집한 request 를 원자적으로 다시 쓴다 — **디스크의 키 형태를 보존한다**.
+
+    take 기록·fps 편집처럼 스키마와 무관한 편집도 로더가 정규화해 준 문서를 통째로 되쓴다.
+    그대로 쓰면 그 편집이 은퇴 키를 조용히 현행 키로 바꿔, 스키마 이관이 다시 "아무 명령이나
+    하는 김에 하는 일" 이 된다. 로더가 메모리에서 편 것을 쓰기 직전에 되접으면, 디스크
+    스키마를 바꾸는 곳은 `migrate_request_file` 하나로 남는다.
+
+    호출부의 dict 는 건드리지 않는다 (쓴 뒤에도 현행 키로 계속 쓰인다)."""
+    path = Path(run_dir) / REQUEST_FILENAME
+    on_disk_fit: dict = {}
+    try:
+        on_disk = json.loads(path.read_text(encoding="utf-8"))
+        on_disk_fit = on_disk.get("fit") if isinstance(on_disk.get("fit"), dict) else {}
+    except (OSError, ValueError):
+        on_disk_fit = {}   # 첫 발행이거나 읽을 수 없다 — 되접을 형태가 없으니 그대로 쓴다
+    fit = request.get("fit")
+    if isinstance(fit, dict):
+        restore = {current: legacy for legacy, current in LEGACY_FIT_KEYS.items()
+                   if legacy in on_disk_fit and current in fit}
+        if restore:
+            # 키 순서를 유지한 채 이름만 되돌린다 — 편집 diff 가 편집한 줄만 보이게.
+            request = {**request, "fit": {restore.get(key, key): value
+                                          for key, value in fit.items()}}
+    atomic_write_text(path, json.dumps(request, ensure_ascii=False, indent=2) + "\n")

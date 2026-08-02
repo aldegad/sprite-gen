@@ -27,5 +27,6 @@ __all__ = [
     "score",
     "slice_sheet",
     "migrate_breathe",
+    "migrate_request",
     "unpack_atlas",
 ]

@@ -70,8 +70,8 @@ boundary instead of a memory.
   request passthrough. `rig`, `states.<state>.track` and `layers` must be added to
   the carried set explicitly, and the drop must become observable (§7).
 - **B2 — there is no central request schema.** Every stage reads the keys it wants
-  (`request.get("fit")`, `request["cell"]`, …); `runio.load_request` only migrates
-  retired keys. **Consequence:** layer validation lives in exactly one module
+  (`request.get("fit")`, `request["cell"]`, …); `runio.load_request` only normalizes
+  retired keys in memory (it never writes — `run-contract.md` §2-b-2). **Consequence:** layer validation lives in exactly one module
   (`sprite_gen/layers.py`) that every layer-aware entry point calls, instead of
   per-stage key checks that drift.
 - **B3 — `frames/` is a derived cache with one writer.** `heal_run` re-derives a row

@@ -5,6 +5,34 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## Unreleased - reading a run no longer writes to it (request loader / migration writer split)
+
+Calling `state_revision()` on an approved run rewrote that run's `sprite-request.json`.
+The request gate migrated a retired `fit` key and immediately persisted the result, so a
+*query* mutated canonical bytes — and because `run_revision` hashes those bytes, it also
+moved the run's generation fingerprint and knocked its curation sidecar stale. Measured
+live on a `founder_v7` run during founder v8 succession (2026-08-02).
+
+- **`runio.load_request` is read-only.** A retired key (`fit.pixel_perfect`) is
+  normalized to the current key (`fit.pixel_unfake`) in memory, and the file is left byte
+  for byte identical. Both keys present is still a hard fail. Reading a run with a retired
+  key prints a one-time-per-process notice naming the migration command, on stderr.
+- **`sprite-gen migrate-request <run-dir> [--apply]`** — the only writer that changes the
+  request schema on disk (`runio.migrate_request_file`). Dry run by default; takes the
+  run-dir writer lock, writes atomically, refuses loudly when another pipeline process
+  holds that lock, and reports which curation rows the resulting `run_revision` move would
+  drop *before* writing. Idempotent.
+- **`runio.write_request`** — the single write gate for an edited request. Take recording
+  (reroll / interpolate) and the view's fps edit rewrite the whole document, so they now
+  fold a normalized key back to the form the file actually carries: changing an fps value
+  must not migrate the schema as a side effect. Those two take paths also gain atomic
+  replacement (they used a plain `write_text` before).
+- The loader no longer branches on `.sprite-gen.lock`: reads have no side effect to defer.
+- Locked by `tests/test_request_read_no_mutation.py` — sha256 invariance across the read
+  API surface on a `founder_v7`-shaped fixture, generation-fingerprint stability, retired-key
+  read compatibility, and an AST assertion that no writer call exists in the read path.
+- Contract SSoT: `docs/run-contract.md` §2-b-2; migration usage: `docs/pixel-unfake.md`.
+
 ## Unreleased - breathe H/V amplitude split and manual-band-anchored protection
 
 Requested by Soohong (2026-07-30) while reviewing the gptaku-pet octopus: the vertical
