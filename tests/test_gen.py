@@ -156,6 +156,103 @@ def test_codex_parse_session_id_json_and_legacy() -> None:
     assert codex_provider._parse_session_id("no id here") is None
 
 
+def test_codex_prompt_carries_official_imagegen_skill_trigger() -> None:
+    # Image generation lives in codex's bundled `imagegen` system skill, and the
+    # official way to invoke a skill explicitly is the `$<skill>` prompt mention
+    # (skills/.system/imagegen/agents/openai.yaml ships `default_prompt: "Use
+    # $imagegen to make or edit an image for this project."`). This locks the
+    # transport prompt to that contract; if the implicit prose phrasing comes
+    # back, this goes red.
+    #
+    # Scope note: the trigger is a contract alignment, not a tool-exposure fix.
+    # Built-in image generation is an account capability of the active Codex state
+    # root — see codex_provider._no_image_records_message. Do not let this test's
+    # name imply that the trigger is what makes image_gen available.
+    user_prompt = "a mushroom sprite row on a #00FF00 background"
+    prompt = codex_provider._build_prompt(user_prompt)
+
+    assert codex_provider._SKILL_TRIGGER == "$imagegen"
+    assert "$imagegen" in prompt, "the official skill trigger must be in the transport prompt"
+    # It must lead the instruction, not trail the user's prompt as an aside.
+    assert prompt.startswith("$imagegen "), prompt
+    # The caller's sprite-request prompt is the SSoT — passed through verbatim.
+    assert user_prompt in prompt
+    # The rest of the transport contract survives the trigger.
+    assert "정확히 1번" in prompt
+    assert "금지" in prompt
+
+
+def test_codex_empty_rollout_fails_loud_on_tool_non_exposure(tmp_path: Path, monkeypatch) -> None:
+    # An empty rollout is the tool-non-exposure signature. It must fail loudly, name
+    # the account capability behind the active Codex state root as the thing that is
+    # missing, and point at the one real remedy — never fall back to another
+    # provider on its own, never trust a model-reported path, and never send the
+    # reader off to hunt for a config toggle.
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    rollout = tmp_path / "rollout-empty.jsonl"
+
+    class _Completed:
+        returncode = 0
+        stdout = '{"type":"thread.started","thread_id":"aaaa-bbbb"}\n'
+        stderr = ""
+
+    monkeypatch.setattr(codex_provider.subprocess, "run", lambda cmd, **kwargs: _Completed())
+    monkeypatch.setattr(
+        codex_provider,
+        "_resolve_rollout",
+        lambda sid, sessions_root, *, preexisting: rollout,
+    )
+    monkeypatch.setattr(codex_provider, "_collect_inline_results", lambda path: [])
+
+    with pytest.raises(SystemExit) as excinfo:
+        codex_provider.CodexProvider(keep_session=True).generate(
+            GenRequest(prompt="a mushroom", raw=tmp_path / "raw.png"), tmp_path
+        )
+
+    message = str(excinfo.value)
+    assert "image_gen tool never ran" in message
+    assert "$imagegen" in message
+    assert str(rollout) in message
+    # The message must name the missing capability and the state root that lacks
+    # it, and must close off the config-toggle detour.
+    assert "capability" in message
+    assert str(tmp_path) in message, "the failing Codex state root must be named"
+    assert "does not grant it" in message
+    assert not (tmp_path / "raw.png").exists(), "a failed run must not leave a raw PNG"
+
+
+def test_codex_prompt_reaches_the_child_process(tmp_path: Path, monkeypatch) -> None:
+    # The trigger is only real if it survives into codex exec's stdin — assert the
+    # transport prompt is what the child actually receives, not just what we build.
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    seen: dict[str, str] = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = '{"type":"thread.started","thread_id":"aaaa-bbbb"}\n'
+        stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        seen["input"] = kwargs.get("input", "")
+        return _Completed()
+
+    monkeypatch.setattr(codex_provider.subprocess, "run", _fake_run)
+    monkeypatch.setattr(
+        codex_provider,
+        "_resolve_rollout",
+        lambda sid, sessions_root, *, preexisting: tmp_path / "x.jsonl",
+    )
+    b64 = base64.b64encode(_png_bytes()).decode()
+    monkeypatch.setattr(codex_provider, "_collect_inline_results", lambda path: [b64])
+
+    codex_provider.CodexProvider(keep_session=True).generate(
+        GenRequest(prompt="a mushroom", raw=tmp_path / "raw.png"), tmp_path
+    )
+
+    assert seen["input"].startswith("$imagegen ")
+    assert "a mushroom" in seen["input"]
+
+
 def test_grok_prompt_switches_on_refs(tmp_path: Path) -> None:
     from sprite_gen.gen import grok_provider
 

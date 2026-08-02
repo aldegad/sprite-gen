@@ -36,6 +36,19 @@ _RESULT_TYPES = ("image_generation_call", "image_generation_end")
 # it as `{"type":"thread.started","thread_id":"<uuid>"}` on stdout; older codex
 # printed a `session id: <uuid>` text line. Both are canonical per version.
 _SID_RE = re.compile(r"session id: ([0-9a-f-]+)")
+# The official way to invoke a codex skill explicitly is the `$<skill>` prompt
+# mention, and image generation lives in the bundled `imagegen` system skill
+# (`<Codex state root>/skills/.system/imagegen/agents/openai.yaml` ships
+# `default_prompt: "Use $imagegen to make or edit an image for this project."`).
+# We state the trigger rather than describing the tool in prose so the invocation
+# contract is explicit and single-owned here.
+#
+# Scope of the trigger: naming the skill does not create the tool. Whether the
+# built-in `image_gen` tool is offered to the session at all is a capability of
+# the account behind the active Codex state root (see `_no_image_records_message`),
+# so this trigger is an alignment with the official invocation contract, not a fix
+# for a session that is never offered the tool.
+_SKILL_TRIGGER = "$imagegen"
 
 
 def _parse_session_id(stdout: str) -> str | None:
@@ -176,11 +189,39 @@ def _decode_png(b64: str, dest: Path) -> None:
 
 
 def _build_prompt(user_prompt: str) -> str:
+    """Wrap the caller's prompt in the transport-level skill trigger.
+
+    The sprite-request prompt is the caller's SSoT and is passed through verbatim;
+    this adapter is the one place that owns the codex invocation contract.
+    """
     return (
-        "image_gen 도구를 정확히 1번 호출해서 다음 프롬프트의 이미지 1장만 생성해줘.\n"
-        "파일 저장·셸 명령·코드 작성·경로 보고 전부 금지. 생성만 하고 끝.\n\n"
+        f"{_SKILL_TRIGGER} 스킬로 built-in image_gen 도구를 정확히 1번 호출해서 "
+        "다음 프롬프트의 이미지 1장만 생성해줘.\n"
+        "미리보기 전용이라 생성된 파일은 기본 경로에 그대로 두면 된다.\n"
+        "파일 저장·이동·복사·셸 명령·코드 작성·경로 보고 전부 금지. 생성만 하고 끝.\n\n"
         "프롬프트:\n"
         f"{user_prompt}\n"
+    )
+
+
+def _no_image_records_message(rollout: Path, codex_home: Path) -> str:
+    """State an empty rollout as a capability failure, not a list of guesses.
+
+    Built-in image generation is a capability of the account behind the active
+    Codex state root. When the session is not offered the tool, it cannot be
+    talked into it: not by the prompt, not by the model, and not by a config
+    toggle. The only remedy is to run against a state root whose account provides
+    it, so that is what this message says.
+    """
+    return (
+        "codex-gen: the built-in image_gen tool never ran in this codex session — "
+        f"zero {' / '.join(_RESULT_TYPES)} records in {rollout}\n"
+        f"  the prompt carries the official {_SKILL_TRIGGER} skill trigger, so the tool was "
+        "not offered to the session rather than merely not chosen.\n"
+        f"  the account behind this Codex state root ({codex_home}) does not provide the "
+        "built-in image_gen capability.\n"
+        "  select a Codex state root whose account provides it (`codex login status`), or "
+        "generate with another provider. A config feature toggle does not grant it."
     )
 
 
@@ -266,10 +307,7 @@ class CodexProvider:
         )
         results = _collect_inline_results(rollout)
         if not results:
-            raise SystemExit(
-                f"codex-gen: no {' / '.join(_RESULT_TYPES)} inline result in {rollout}\n"
-                "  image_gen may not have been called, or codex changed its session format."
-            )
+            raise SystemExit(_no_image_records_message(rollout, codex_home))
         _decode_png(results[-1], request.raw)
 
         if not self.keep_session:
