@@ -98,6 +98,21 @@ Backward-compatible wrapper: `$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $
   The adapter and child process share one Codex state root: when `CODEX_HOME` is set they use only that directory; when it is unset they use Codex's `~/.codex` default.
   Rollouts are selected by an exact session-id filename suffix.
   Missing, duplicate, or pre-existing stale matches fail rather than falling back to another root or choosing by modification time.
+  The transport prompt names the skill with codex's official `$imagegen` mention, which is how a codex skill is invoked explicitly. The adapter owns that trigger alone; the caller's sprite-request prompt is passed through verbatim.
+
+### When codex produces no image at all
+
+A run that reaches a rollout but finds zero `image_generation_call` /
+`image_generation_end` records means the built-in `image_gen` tool was never
+offered to the session, not that the model declined to use it. Built-in image
+generation is a **capability of the account behind the active Codex state root**.
+
+A session that is not offered the tool cannot be talked into it. The `$imagegen`
+mention names the skill, it does not create the tool; the model choice does not
+change it; and no `config.toml` feature toggle grants it. The remedy is to point
+`CODEX_HOME` at a Codex state root whose account provides image generation
+(`codex login status`), or to use `--provider grok`. The adapter fails loudly with
+exactly that, rather than falling back on its own.
 - **grok** — runs `grok -p … --sandbox workspace --always-approve` (media/shell must be
   auto-approved; plain acceptEdits blocks tool execution and returns an empty answer).
   grok is instructed to write the final PNG to an exact absolute path; we then verify
