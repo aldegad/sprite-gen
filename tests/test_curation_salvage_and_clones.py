@@ -9,10 +9,11 @@
 - state_revision = 원료(raw/테이크, 임포트 행은 프레임 내용) 기반 세그먼트 지문 —
   frames 캐시 mtime 과 엔진 리비전은 지문에 들어가지 않는다.
 - 같은 raw 의 재추출(엔진 업그레이드 heal)은 행 큐레이션을 유지한다.
-- raw 리롤은 그 행만 드롭한다. 드롭 전 원문 전체가 curation.stale-<hash>.json 으로
-  백업되고 report 에 관측된다.
-- 스탬프 없는 레거시 사이드카는 세대가 어긋나면 전량 드롭 + 백업 (증명 없는 선택을
-  새 프레임에 적용하지 않는다).
+- raw 리롤은 그 행만 드롭한다. 드롭은 **로드 판정**이라 그 시점엔 파일이 그대로고
+  (조회는 런에 쓰지 않는다), 원문 전체가 curation.stale-<hash>.json 으로 보존되는 것은
+  실제로 덮는 writer (`write_curation_atomic`) 한 곳뿐이다.
+- 스탬프 없는 레거시 사이드카는 세대가 어긋나면 전량 드롭 (증명 없는 선택을 새 프레임에
+  적용하지 않는다) — 백업은 역시 덮는 시점에 난다.
 - clones: 복제 인스턴스는 사이드카 소유(파생 캐시에 파일을 만들지 않음), 자기
   변형을 갖고, 굽기 때 원본 프레임 파일을 읽는다.
 """
@@ -31,7 +32,12 @@ from sprite_gen.curation import (
     stamp_curation,
     state_plan,
     state_revision,
+    write_curation_atomic,
 )
+
+
+def _stale_backups(run: Path) -> list[Path]:
+    return sorted(run.glob("curation.stale-*.json"))
 
 
 def _extract(run: Path) -> None:
@@ -70,14 +76,20 @@ def test_reextract_same_raw_keeps_curation(fixture_run_dir: Path) -> None:
 
     doc, report = load_curation_report(run)
     assert report["dropped"] == []
-    assert report["backup"] is None
+    assert _stale_backups(run) == []
     assert doc is not None
     assert doc["states"]["idle"]["selected"] == [2, 0]
     assert doc["states"]["idle"]["deleted"] == [3]
     assert doc["states"]["walk"]["selected"] == [1]
 
 
-def test_reroll_drops_only_that_state_with_backup(fixture_run_dir: Path) -> None:
+def test_reroll_drops_only_that_state_and_the_save_backs_it_up(fixture_run_dir: Path) -> None:
+    """드롭은 로드 판정, 백업은 덮는 writer — 두 책임이 나뉘어 있다.
+
+    예전엔 `load_curation_report` 가 드롭을 판정하면서 그 자리에서 백업 파일을 썼다. 조회가
+    런 디렉터리에 파일을 만든다는 뜻이고, 그건 이 플랜이 request 로더에서 잡은 것과 같은
+    계열이다. 드롭 시점엔 아직 잃은 것이 없다 (`curation.json` 은 디스크에 그대로다) — 실제로
+    원문이 사라지는 순간은 저장 한 번뿐이고, 백업은 거기서 난다."""
     run = fixture_run_dir
     _extract(run)
     _write_stamped(run, {
@@ -91,30 +103,41 @@ def test_reroll_drops_only_that_state_with_backup(fixture_run_dir: Path) -> None
 
     doc, report = load_curation_report(run)
     assert report["dropped"] == ["walk"]
-    assert report["backup"] and (run / report["backup"]).is_file()
-    assert (run / report["backup"]).read_text(encoding="utf-8") == original_text
+    # 조회는 아무것도 쓰지 않는다 — 백업 파일도, 사이드카 자체도
+    assert _stale_backups(run) == []
+    assert (run / "curation.json").read_text(encoding="utf-8") == original_text
     assert doc is not None and "walk" not in doc["states"]
     assert doc["states"]["idle"]["selected"] == [2, 0]
     # load_curation 은 같은 게이트의 thin wrapper
     assert "walk" not in (load_curation(run) or {}).get("states", {})
 
+    # 뷰가 구제된 문서를 저장하는 순간 = 원문이 덮이는 순간. 백업은 여기서 난다.
+    backup = write_curation_atomic(run, doc)
+    assert backup and (run / backup).is_file()
+    assert (run / backup).read_text(encoding="utf-8") == original_text
 
-def test_legacy_unstamped_sidecar_drops_all_with_backup(fixture_run_dir: Path) -> None:
+
+def test_legacy_unstamped_sidecar_drops_all_and_the_save_backs_it_up(fixture_run_dir: Path) -> None:
     run = fixture_run_dir
     _extract(run)
     legacy = {"version": 1, "kind": "sprite-gen-curation",
               "run_revision": run_revision(run),
               "states": {"idle": {"selected": [1]}}}
     (run / "curation.json").write_text(json.dumps(legacy), encoding="utf-8")
+    original_text = (run / "curation.json").read_text(encoding="utf-8")
     # 같은 세대인 동안은 fast path 로 그대로 적용된다
     doc, report = load_curation_report(run)
     assert doc is not None and report["dropped"] == []
 
-    _extract(run)  # 세대가 어긋나면 스탬프 없는 행은 검증 불가 → 드롭 + 백업
+    _extract(run)  # 세대가 어긋나면 스탬프 없는 행은 검증 불가 → 드롭
     doc, report = load_curation_report(run)
     assert doc is None
     assert report["dropped"] == ["idle"]
-    assert report["backup"] and (run / report["backup"]).is_file()
+    assert _stale_backups(run) == []          # 드롭 판정은 쓰지 않는다
+
+    # 전량 드롭 뒤 뷰가 기본값을 저장하면 그때 원문이 덮이고, 그때 백업된다
+    backup = write_curation_atomic(run, {"version": 1, "kind": "sprite-gen-curation", "states": {}})
+    assert backup and (run / backup).read_text(encoding="utf-8") == original_text
 
 
 def test_take_append_prefix_rule(tmp_path: Path) -> None:

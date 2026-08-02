@@ -576,10 +576,10 @@ def _build_run_state_impl(run_dir: Path) -> dict:
         "anchorFiles": anchor_files,
         "states": states,
         "curation": curation,
-        # 세대 불일치로 이번 로드에서 무효화(드롭)된 행 + 원문 백업 파일명 — 뷰가
-        # 배너로 알린다 (stderr 만으로는 사용자가 못 본다; 조용한 소실 금지).
+        # 세대 불일치로 이번 로드에서 무효화(드롭)된 행 — 뷰가 배너로 알린다 (stderr 만으로는
+        # 사용자가 못 본다; 조용한 소실 금지). 백업 파일명은 싣지 않는다: 로드는 아무것도
+        # 쓰지 않고, 원문은 덮이는 순간 writer 가 백업한다 (`write_curation_atomic`).
         "curationDropped": curation_report["dropped"],
-        "curationBackup": curation_report["backup"],
         "iso": request.get("iso"),
         "lang": CurationHandler.lang,
         "hasAtlas": (run_dir / "sprite-sheet-alpha.png").is_file(),

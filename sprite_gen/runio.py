@@ -407,21 +407,32 @@ def migrate_request_file(run_dir: Path, *, apply: bool = False) -> bool:
     Returns True 면 옮길 것이 있었다는 뜻이다 (`apply=False` 인 dry run 에서도 True).
     이미 현행 키뿐이면 False (멱등 — 두 번째 실행은 아무것도 쓰지 않는다).
 
-    writer 라서 writer 규율을 따른다: run-dir 단일 writer 락을 잡고(다른 파이프라인
-    프로세스가 쓰는 중이면 조용히 미루는 게 아니라 요란하게 거부한다), 원자 교체로 쓰고,
-    작업이 끝나면 락을 놓는다. 조회 경로가 락 유무에 따라 쓰거나 안 쓰던 예전 구조와의
-    차이가 여기다 — 쓰기는 이제 사용자가 부른 명령 안에서만 일어나므로 거부해도 될 자리다.
+    Isolation: `sprite-request.json` 의 read-modify-write 는 **편집 writer 와 같은 격리
+    도메인**(`publish_guard` 배타락) 안에서만 일어난다 — 락 획득 **후** fresh 재독하고
+    원자 교체한다. 예전엔 락 **밖에서** 문서를 읽고 나서 `.sprite-gen.lock`(파이프라인 단계용
+    단일 writer 락)을 잡았다. 그건 두 가지가 동시에 틀렸다: (a) read-then-lock 이라 읽은
+    뒤 잡기 전 사이의 편집을 stale 문서로 덮고, (b) 편집 writer(`reroll.record_take` ·
+    `interpolate.write_take` · 뷰 fps POST)는 `publish_guard` 를 쓰므로 **서로 배제하지 않는
+    두 도메인**이었다 — 리롤이 기록한 테이크를 이관이 통째로 잃거나(반대 방향이면 이관이
+    조용히 되돌아간다) 하는 lost update 가 가능했다. 한 자원에 격리 도메인은 하나다.
+
+    파이프라인 락(`.sprite-gen.lock`)은 잡지 않는다: 그 락이 지키는 것은 프레임·아틀라스
+    같은 파이프라인 산출물이고 request 파일이 아니다 (추출·굽기는 request 를 쓰지 않는다).
+    안 만지는 자원의 락을 잡으면 보호받는다는 착시만 남고 실제 경쟁자는 그대로다.
+
+    dry run(`apply=False`)은 판정만 하는 읽기라 락을 잡지 않는다 — 조회가 편집을 막지
+    않아야 한다 (`load_request` 가 락을 안 보는 것과 같은 이유).
     """
-    path, request, had_retired = _read_request_document(run_dir)
-    if not had_retired:
-        return False
+    run_dir = Path(run_dir)
     if not apply:
-        return True
-    acquire_run_dir_lock(Path(run_dir), "migrate-request")
-    try:
+        return _read_request_document(run_dir)[2]
+    with publish_guard(run_dir):
+        # 락 안 fresh 재독 — 여기서 읽은 문서와 아래 원자 교체 사이에 다른 writer 가 낄 수
+        # 없다는 것이 이 함수의 lost-update 계약이다 (편집 writer 와 같은 배타락).
+        path, request, had_retired = _read_request_document(run_dir)
+        if not had_retired:
+            return False
         atomic_write_text(path, json.dumps(request, ensure_ascii=False, indent=2) + "\n")
-    finally:
-        release_run_dir_lock(Path(run_dir))
     _RETIRED_KEY_NOTICED.discard(str(path))
     return True
 
@@ -447,7 +458,10 @@ def write_request(run_dir: Path, request: dict) -> None:
         restore = {current: legacy for legacy, current in LEGACY_FIT_KEYS.items()
                    if legacy in on_disk_fit and current in fit}
         if restore:
-            # 키 순서를 유지한 채 이름만 되돌린다 — 편집 diff 가 편집한 줄만 보이게.
+            # 되접는 것은 **키 이름뿐**이고, 순서는 로더가 정규화해 준 dict 의 순서를 그대로
+            # 따른다 — 디스크의 원래 순서와 다를 수 있다. 정규화가 은퇴 키를 pop 해서 현행
+            # 키로 다시 넣기 때문이다: 디스크 `{pixel_perfect, logical_height}` 는 편집 후
+            # `{logical_height, pixel_perfect}` 로 쓰인다 (이름은 보존, 자리는 이동).
             request = {**request, "fit": {restore.get(key, key): value
                                           for key, value in fit.items()}}
     atomic_write_text(path, json.dumps(request, ensure_ascii=False, indent=2) + "\n")

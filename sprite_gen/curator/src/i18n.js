@@ -165,9 +165,9 @@ const STR = {
     tDupBtn: "duplicate this frame — a new card with its own transform (bakes the same source image)",
     cloneBadge: (name) => `${name} copy`,
     tCloneBadge: "duplicated instance — reads the source frame's image; its transform/pixel edits are its own. The archive button removes the copy entirely.",
-    curationDropped: (states, backup) =>
+    curationDropped: (states) =>
       `frames were regenerated — previous curation for ${states.join(", ")} no longer applies and was reset. ` +
-      (backup ? `The old selections are preserved in ${backup}.` : ""),
+      `curation.json on disk is untouched; the next save preserves it as curation.stale-<hash>.json.`,
     tTreeNode: "click to scroll to this row",
     hints: ["drag card header = reorder / move row", "drag pool→sequence to add", "hover a frame -> bottom-right magnifier = scale", "top handle = rotate", "click card = sequence ⇄ pool", "saved automatically"],
     exportDone: () => "PNGs downloaded",
@@ -335,9 +335,9 @@ const STR = {
     tDupBtn: "이 프레임 복제 — 자기 변형을 따로 갖는 새 카드 (같은 원본 이미지를 굽는다)",
     cloneBadge: (name) => `${name} 복제`,
     tCloneBadge: "복제 인스턴스 — 원본 프레임 이미지를 읽고, 변형/픽셀편집은 이 카드 것. 보관 버튼은 복제를 완전히 제거한다.",
-    curationDropped: (states, backup) =>
+    curationDropped: (states) =>
       `프레임이 재생성돼 ${states.join(", ")} 의 이전 큐레이션이 더 이상 맞지 않아 초기화됐어. ` +
-      (backup ? `이전 선택은 ${backup} 에 백업돼 있어.` : ""),
+      `디스크의 curation.json 은 그대로고, 다음 저장 때 curation.stale-<hash>.json 으로 백업돼.`,
     tTreeNode: "클릭하면 해당 줄로 이동",
     hints: ["타이틀 드래그 = 순서변경 / 시퀀스↔풀 이동", "넣기·빼기 버튼으로 토글 (클릭만으론 안 빠짐)", "제목 호버 = 풀네임 복사", "우하단 돋보기 = 크기 · 상단 핸들 = 회전", "복제 = 헤더 ⧉ 버튼", "자동 저장"],
     exportDone: () => "PNG 다운로드 완료",

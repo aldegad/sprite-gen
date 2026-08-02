@@ -166,11 +166,12 @@ async function boot() {
     }
   }
   // 세대 불일치로 서버가 이번 로드에서 무효화한 행 알림 — 조용한 소실 금지.
-  // 백업 파일명을 함께 보여줘 수동 복원 경로를 남긴다 (load_curation_report 계약).
+  // 로드는 아무것도 쓰지 않으므로 이 시점엔 아직 잃은 것이 없다. 원문이 실제로 덮이는
+  // 순간(다음 저장) writer 가 curation.stale-<hash>.json 을 남긴다 — 복원 경로는 그거다.
   if (run.curationDropped && run.curationDropped.length) {
     const note = document.createElement("div");
     note.id = "curation-dropped-note";
-    note.textContent = STR[lang].curationDropped(run.curationDropped, run.curationBackup);
+    note.textContent = STR[lang].curationDropped(run.curationDropped);
     const dismiss = document.createElement("button");
     dismiss.type = "button";
     dismiss.className = "ghost";

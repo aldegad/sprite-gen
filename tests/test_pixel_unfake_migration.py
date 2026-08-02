@@ -10,14 +10,14 @@
 스키마 이관은 명시 writer (`migrate_request_file` / `sprite-gen migrate-request --apply`)
 에서만 원자적으로 · 두 키 동시 = hard fail · 신키만 있으면 무동작 (멱등).
 
-읽기/쓰기 분리의 근거와 조회 바이트 불변 계약은 `test_request_read_no_mutation.py` 가 소유
-한다 (plan sprite-gen/state-revision-read-mutation).
+읽기/쓰기 분리의 근거와 조회 바이트 불변 계약은 `test_request_read_no_mutation.py` 가, 이관
+writer 와 편집 writer 사이의 격리(같은 `publish_guard`, 락 획득 후 fresh 재독)는
+`test_request_write_isolation.py` 가 소유한다 (plan sprite-gen/state-revision-read-mutation).
 """
 
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
@@ -66,38 +66,6 @@ def test_explicit_migration_rewrites_the_request(tmp_path, capsys) -> None:
     assert on_disk["fit"] == {"pixel_unfake": True, "logical_height": 48}
     # 멱등: 두 번째 이관은 옮길 것이 없다
     assert migrate_request_file(run_dir, apply=True) is False
-
-
-def test_migration_releases_the_writer_lock(tmp_path) -> None:
-    """이관은 writer 라서 writer 락을 잡고, 끝나면 놓는다 — 락을 쥔 채 남으면 다음
-    파이프라인 단계(추출·굽기)가 산 pid 락에 막힌다."""
-    from sprite_gen.runio import LOCK_FILENAME
-
-    run_dir = tmp_path / "run"
-    _write_request(run_dir, {"pixel_perfect": True})
-    migrate_request_file(run_dir, apply=True)
-    assert not (run_dir / LOCK_FILENAME).exists()
-
-
-def test_migration_refuses_while_another_process_holds_the_writer_lock(tmp_path) -> None:
-    """다른 파이프라인 프로세스가 쓰는 중이면 요란하게 거부한다 — 조용히 미루지 않는다.
-
-    예전 로더는 락이 보이면 재기록을 미뤘다. 조회 경로에선 미루는 것 말고 선택지가 없었지만
-    (조회가 실패하면 안 되니까), 이관은 사용자가 부른 명령이라 거부할 수 있는 자리다."""
-    from sprite_gen.runio import LOCK_FILENAME
-
-    run_dir = tmp_path / "run"
-    _write_request(run_dir, {"pixel_perfect": True})
-    # pid 1 (launchd/init) 은 항상 살아 있고 우리가 아니다 — "다른 살아있는 홀더" 의 최소 모형
-    (run_dir / LOCK_FILENAME).write_text(
-        json.dumps({"owner": "extract", "pid": 1, "started": 0}), encoding="utf-8")
-    assert os.getpid() != 1
-
-    with pytest.raises(SystemExit) as excinfo:
-        migrate_request_file(run_dir, apply=True)
-    assert "locked by extract" in str(excinfo.value)
-    assert "pixel_perfect" in json.loads(
-        (run_dir / "sprite-request.json").read_text(encoding="utf-8"))["fit"]
 
 
 def test_both_request_keys_present_fails_loud(tmp_path) -> None:

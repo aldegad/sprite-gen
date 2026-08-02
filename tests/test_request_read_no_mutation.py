@@ -87,26 +87,58 @@ def test_state_revision_does_not_move_the_generation_fingerprint(founder_v7_run:
     assert curation_mod.run_revision(founder_v7_run) == before
 
 
+def read_everything(run_dir: Path) -> None:
+    """조회 API 전수 — 어느 진입점으로 읽어도 런 디렉터리는 바이트 불변이어야 한다."""
+    from sprite_gen import anchor as anchor_mod
+    from sprite_gen.curation import load_curation, load_curation_report
+
+    load_request(run_dir)
+    anchor_mod.load_request(run_dir)
+    state_revision(run_dir, "walk")
+    curation_mod.run_revision(run_dir)
+    load_curation(run_dir)
+    load_curation_report(run_dir)
+
+
+def run_dir_sha256(run_dir: Path) -> dict[str, str]:
+    return {str(p.relative_to(run_dir)): sha256_of(p)
+            for p in sorted(run_dir.rglob("*")) if p.is_file()}
+
+
 def test_read_api_surface_is_byte_stable(founder_v7_run: Path) -> None:
     """조회 API 전수: 어느 진입점으로 읽어도 런 디렉터리 바이트가 불변이다.
 
     한 진입점만 잠그면 다음 진입점이 같은 병을 다시 만든다 — 계약은 "이 함수" 가 아니라
     "읽는 쪽" 전체다."""
-    from sprite_gen import anchor as anchor_mod
-    from sprite_gen.curation import load_curation, load_curation_report
+    before = run_dir_sha256(founder_v7_run)
+    read_everything(founder_v7_run)
+    assert run_dir_sha256(founder_v7_run) == before
 
-    def snapshot() -> dict[str, str]:
-        return {str(p.relative_to(founder_v7_run)): sha256_of(p)
-                for p in sorted(founder_v7_run.rglob("*")) if p.is_file()}
 
-    before = snapshot()
-    load_request(founder_v7_run)
-    anchor_mod.load_request(founder_v7_run)
-    state_revision(founder_v7_run, "walk")
-    curation_mod.run_revision(founder_v7_run)
-    load_curation(founder_v7_run)
-    load_curation_report(founder_v7_run)
-    assert snapshot() == before
+def test_read_api_surface_is_byte_stable_when_the_sidecar_is_stale(founder_v7_run: Path) -> None:
+    """세대가 어긋난 큐레이션 사이드카를 읽어도 런 디렉터리에 파일이 생기지 않는다.
+
+    `load_curation_report` 는 드롭을 판정하면서 원문을 `curation.stale-<hash>.json` 으로
+    써 뒀다 — 조회만 했는데 런 디렉터리에 새 파일이 생겼다는 뜻이고, 이 플랜이 request
+    로더에서 잡은 것과 같은 계열이다 (노을이 검수 Scope 밖 관찰, 2026-08-02). 드롭 시점엔
+    아직 잃은 것이 없다: `curation.json` 은 그대로고, 백업은 실제로 덮는 writer
+    (`write_curation_atomic`) 한 곳에서만 난다."""
+    from sprite_gen.curation import CURATION_FILENAME
+
+    (founder_v7_run / CURATION_FILENAME).write_text(json.dumps({
+        "version": 1, "kind": "sprite-gen-curation",
+        "run_revision": "0" * 12,                    # 현재 세대와 어긋난다 → 행 단위 구제 경로
+        "states": {"walk": {"selected": [1]}},       # 행 스탬프 없음 → 드롭 대상
+    }), encoding="utf-8")
+    before = run_dir_sha256(founder_v7_run)
+
+    doc, report = curation_mod.load_curation_report(founder_v7_run)
+    assert doc is None and report["dropped"] == ["walk"], "드롭 경로를 실제로 밟아야 한다"
+    read_everything(founder_v7_run)
+
+    assert run_dir_sha256(founder_v7_run) == before, (
+        "조회가 런 디렉터리에 썼다 — 세대 불일치 사이드카를 읽는 것만으로 파일이 생기거나 바뀐다")
+    assert not list(founder_v7_run.glob("curation.stale-*.json"))
 
 
 def test_retired_key_still_reads_as_the_current_key(founder_v7_run: Path) -> None:

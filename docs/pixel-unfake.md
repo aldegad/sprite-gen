@@ -113,7 +113,7 @@ AI 개입은 **raw 생성 한 곳뿐**이다 (`SKILL.md` 필수 게이트). 픽�
   $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen migrate-request <run-dir> --apply  # 실제 쓰기
   ```
 
-  writer 락을 잡고 원자 교체로 쓰며, 다른 파이프라인 프로세스가 그 런을 쓰고 있으면 요란하게 거부한다. 값·의미는 그대로고 키 이름만 옮긴다.
+  request 편집 writer(리롤·트윈 테이크 기록, 뷰 fps 편집)와 **같은 배타락**(`runio.publish_guard`)을 잡고, 락 획득 후 문서를 fresh 재독한 뒤 원자 교체한다 — 그래서 이관과 편집이 서로의 쓰기를 잃을 수 없다. 값·의미는 그대로고 키 이름만 옮긴다.
 
 이관은 **선택**이다 — 안 해도 파이프라인은 정상 동작한다. 조회가 파일을 바꾸지 않는 이유와 사고 기록은 [`run-contract.md`](run-contract.md) §2-b-2 가 소유한다.
 

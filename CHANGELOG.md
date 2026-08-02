@@ -18,19 +18,38 @@ live on a `founder_v7` run during founder v8 succession (2026-08-02).
   for byte identical. Both keys present is still a hard fail. Reading a run with a retired
   key prints a one-time-per-process notice naming the migration command, on stderr.
 - **`sprite-gen migrate-request <run-dir> [--apply]`** — the only writer that changes the
-  request schema on disk (`runio.migrate_request_file`). Dry run by default; takes the
-  run-dir writer lock, writes atomically, refuses loudly when another pipeline process
-  holds that lock, and reports which curation rows the resulting `run_revision` move would
-  drop *before* writing. Idempotent.
+  request schema on disk (`runio.migrate_request_file`). Dry run by default; writes
+  atomically, and reports which curation rows the resulting `run_revision` move would drop
+  *before* writing. Idempotent.
 - **`runio.write_request`** — the single write gate for an edited request. Take recording
   (reroll / interpolate) and the view's fps edit rewrite the whole document, so they now
   fold a normalized key back to the form the file actually carries: changing an fps value
   must not migrate the schema as a side effect. Those two take paths also gain atomic
   replacement (they used a plain `write_text` before).
 - The loader no longer branches on `.sprite-gen.lock`: reads have no side effect to defer.
+- **One isolation domain for the request file.** The migration writer used to read the
+  document *outside* any lock and then take `.sprite-gen.lock`, while the request editors
+  (`reroll.record_take`, `interpolate.write_take`, the view's fps POST) take
+  `runio.publish_guard` — two domains that did not exclude each other, so a take recorded
+  between migration's read and its write vanished under the stale replace (and the reverse
+  order silently un-migrated the schema). Migration now does *acquire `publish_guard` →
+  fresh re-read → atomic replace*, the same shape as every editor, and no longer takes the
+  pipeline lock at all: that lock guards stage outputs (frames, atlas), which is not the
+  resource being written. Reported by the plan validator (2026-08-02).
+- **A read never creates a stale backup.** `curation.load_curation_report` wrote
+  `curation.stale-<hash>.json` while judging a generation-mismatched sidecar — a *read*
+  that created a file in the run dir, the same class as the incident above. The backup now
+  happens only in `curation.write_curation_atomic`, at the moment an overwrite would
+  actually lose rows; it returns the filename and reports it on stderr. Nothing is lost at
+  drop time (`curation.json` stays on disk untouched), so `/api/run` no longer carries
+  `curationBackup` and the webview banner names the mechanism instead of a file.
 - Locked by `tests/test_request_read_no_mutation.py` — sha256 invariance across the read
-  API surface on a `founder_v7`-shaped fixture, generation-fingerprint stability, retired-key
-  read compatibility, and an AST assertion that no writer call exists in the read path.
+  API surface on a `founder_v7`-shaped fixture (with and without a stale curation sidecar),
+  generation-fingerprint stability, retired-key read compatibility, and an AST assertion
+  that no writer call exists in the read path — and by
+  `tests/test_request_write_isolation.py` — named migration-vs-reroll and
+  migration-vs-interpolate race tests plus an AST assertion that every production request
+  write sits inside a `publish_guard` block.
 - Contract SSoT: `docs/run-contract.md` §2-b-2; migration usage: `docs/pixel-unfake.md`.
 
 ## Unreleased - breathe H/V amplitude split and manual-band-anchored protection
