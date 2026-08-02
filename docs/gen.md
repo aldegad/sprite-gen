@@ -87,7 +87,7 @@ Backward-compatible wrapper: `$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $
 ## How each provider works
 
 - **codex** — spawns a fresh `codex exec --json` in an empty sandbox
-  (`--sandbox workspace-write`, `--add-dir ~/.codex/generated_images`,
+  (`--sandbox workspace-write`, `--add-dir <Codex state root>/generated_images`,
   `--skip-git-repo-check`, no `--ephemeral`). A fresh session breaks OpenAI's prompt
   cache so repeat prompts don't drag in a prior image. The session id comes from the
   `thread.started` event (older codex: a `session id:` text line — both supported); the
@@ -95,6 +95,9 @@ Backward-compatible wrapper: `$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $
   `image_generation_end` records — both supported). The model-reported path is never
   trusted. The rollout jsonl (which holds the ~1–1.5 MB inline image) is deleted after
   extraction unless `--keep-session`.
+  The adapter and child process share one Codex state root: when `CODEX_HOME` is set they use only that directory; when it is unset they use Codex's `~/.codex` default.
+  Rollouts are selected by an exact session-id filename suffix.
+  Missing, duplicate, or pre-existing stale matches fail rather than falling back to another root or choosing by modification time.
 - **grok** — runs `grok -p … --sandbox workspace --always-approve` (media/shell must be
   auto-approved; plain acceptEdits blocks tool execution and returns an empty answer).
   grok is instructed to write the final PNG to an exact absolute path; we then verify

@@ -80,11 +80,15 @@ def test_provider_run_uses_scrubbed_env(tmp_path: Path, monkeypatch) -> None:
 
     # Short-circuit codex's post-run rollout parsing — we only assert the env.
     monkeypatch.setattr(codex_provider.subprocess, "run", _fake_codex_run)
-    monkeypatch.setattr(codex_provider, "_resolve_rollout", lambda sid: tmp_path / "x.jsonl")
+    monkeypatch.setattr(
+        codex_provider,
+        "_resolve_rollout",
+        lambda sid, sessions_root, *, preexisting: tmp_path / "x.jsonl",
+    )
     b64 = base64.b64encode(_png_bytes()).decode()
     monkeypatch.setattr(codex_provider, "_collect_inline_results", lambda rollout: [b64])
     monkeypatch.setenv("KUMA_RUNTIME_ENDPOINT_ID", "ep:leaky")
-    codex_provider.CodexProvider().generate(
+    codex_provider.CodexProvider(keep_session=True).generate(
         GenRequest(prompt="a mushroom", raw=tmp_path / "raw.png"), tmp_path
     )
     assert seen["codex"] is not None
