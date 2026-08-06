@@ -136,6 +136,26 @@ def _build_groups(rows: list[dict], mount_root: Path) -> list[dict]:
     return groups
 
 
+def native_pick_folder() -> dict:
+    """Pop the OS folder chooser and return {"dir": <abs path>} or {"cancelled": True}.
+
+    The browser cannot hand a script an absolute filesystem path, but this server
+    runs locally, so it asks the OS directly. macOS uses `osascript`; other
+    platforms raise NotImplementedError so the caller can fall back explicitly
+    (no silent degradation). Cancel is a normal outcome, not an error — osascript
+    reports it as "User canceled. (-128)"."""
+    if sys.platform != "darwin":
+        raise NotImplementedError("native folder picker is macOS-only")
+    script = 'POSIX path of (choose folder with prompt "Open a folder of images")'
+    proc = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    if proc.returncode != 0:
+        if "-128" in (proc.stderr or ""):
+            return {"cancelled": True}
+        raise RuntimeError(proc.stderr.strip() or "osascript failed")
+    picked = proc.stdout.strip()
+    return {"dir": picked} if picked else {"cancelled": True}
+
+
 def _free_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
@@ -264,6 +284,14 @@ class ComposeHandler(BaseHTTPRequestHandler):
                 return
             ComposeHandler.mount_root = candidate
             self._send_json({"mount": str(candidate), **_list_dir(candidate, candidate)})
+            return
+        if path == "/api/pick-folder":
+            try:
+                self._send_json(native_pick_folder())
+            except NotImplementedError as exc:
+                self._send_json({"error": str(exc), "code": "unsupported-platform"}, 501)
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 500)
             return
         if path == "/api/build":
             # Materialize the virtual session into a real run dir via the SSoT

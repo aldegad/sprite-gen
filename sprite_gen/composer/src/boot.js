@@ -21,12 +21,33 @@ function applyStaticLang() {
   mountLabel.textContent = session.mount || t("noMount");
 }
 
+async function resolveFolder() {
+  // Prefer the native OS folder chooser; fall back to a path prompt only where
+  // the native dialog is unavailable (non-macOS) — an explicit, observable path.
+  try {
+    const picked = await apiPickFolder();
+    if (picked.cancelled) return null;
+    return picked.dir;
+  } catch (e) {
+    if (e.code === "unsupported-platform") {
+      const typed = window.prompt(t("mountPrompt"), session.mount || "");
+      return typed ? typed.trim() : null;
+    }
+    throw e;
+  }
+}
+
 async function doMount() {
-  const guess = session.mount || "";
-  const dir = window.prompt(t("mountPrompt"), guess);
+  let dir;
+  try {
+    dir = await resolveFolder();
+  } catch (e) {
+    setStatus(t("mountFail", e.message), "err");
+    return;
+  }
   if (!dir) return;
   try {
-    const data = await apiMount(dir.trim());
+    const data = await apiMount(dir);
     session.mount = data.mount;
     applyStaticLang();
     refreshCanvasChrome();
