@@ -23,6 +23,7 @@ from sprite_gen import (
     preview,
     recolor,
     score,
+    serve_compose,
     serve_curation,
     slice_sheet,
     migrate_breathe,
@@ -295,6 +296,15 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Serve the curation webview for one run directory.",
         serve_curation.add_arguments,
         serve_curation.run,
+    ),
+    # The pre-run half of curation: a blank-screen assembly canvas where a human
+    # mounts a folder and drags files onto rows to compose a sprite, instead of
+    # an agent arranging a --pngs-dir folder by hand. Same declaration-once rule
+    # as `curation` — the subcommand reuses the module's own add_arguments/run.
+    "compose": (
+        "Serve the composition canvas — mount a folder and assemble sprite rows.",
+        serve_compose.add_arguments,
+        serve_compose.run,
     ),
     "recolor": (
         "Bake deterministic palette-swap variant sheets from a base sheet + recolor spec.",
