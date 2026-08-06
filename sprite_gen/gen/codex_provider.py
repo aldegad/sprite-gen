@@ -10,7 +10,7 @@ base64 deterministically. The model-reported path is never trusted.
 
 Decisive flags (each verified in the image-gen skill):
 - `--sandbox workspace-write`  image_gen needs write access, else the tool never registers.
-- `--add-dir ~/.codex/generated_images`  not in the default writable set; missing it silently fails.
+- `--add-dir <Codex state root>/generated_images`  not in the default writable set; the root is `CODEX_HOME` when set and `~/.codex` otherwise.
 - `--skip-git-repo-check`  the sandbox dir is not a git repo.
 - NO `--ephemeral`  the session jsonl must survive on disk so we can extract from it.
 """
@@ -18,7 +18,6 @@ Decisive flags (each verified in the image-gen skill):
 from __future__ import annotations
 
 import base64
-import glob
 import json
 import os
 import re
@@ -37,6 +36,19 @@ _RESULT_TYPES = ("image_generation_call", "image_generation_end")
 # it as `{"type":"thread.started","thread_id":"<uuid>"}` on stdout; older codex
 # printed a `session id: <uuid>` text line. Both are canonical per version.
 _SID_RE = re.compile(r"session id: ([0-9a-f-]+)")
+# The official way to invoke a codex skill explicitly is the `$<skill>` prompt
+# mention, and image generation lives in the bundled `imagegen` system skill
+# (`<Codex state root>/skills/.system/imagegen/agents/openai.yaml` ships
+# `default_prompt: "Use $imagegen to make or edit an image for this project."`).
+# We state the trigger rather than describing the tool in prose so the invocation
+# contract is explicit and single-owned here.
+#
+# Scope of the trigger: naming the skill does not create the tool. Whether the
+# built-in `image_gen` tool is offered to the session at all is a capability of
+# the account behind the active Codex state root (see `_no_image_records_message`),
+# so this trigger is an alignment with the official invocation contract, not a fix
+# for a session that is never offered the tool.
+_SKILL_TRIGGER = "$imagegen"
 
 
 def _parse_session_id(stdout: str) -> str | None:
@@ -93,13 +105,59 @@ def _extract_stream_errors(stdout: str) -> list[str]:
     return msgs
 
 
-def _resolve_rollout(session_id: str) -> Path:
-    home = os.path.expanduser("~/.codex/sessions")
-    hits = glob.glob(f"{home}/**/rollout-*{session_id}*.jsonl", recursive=True)
+def _resolve_codex_home() -> Path:
+    """Return the one state root used by both the Codex child and this adapter."""
+    configured = os.environ.get("CODEX_HOME")
+    if configured is None:
+        return Path.home() / ".codex"
+    if not configured.strip():
+        raise SystemExit("codex-gen: CODEX_HOME is set but empty; refusing to use the default root")
+    return Path(configured).expanduser().resolve()
+
+
+def _rollout_files(sessions_root: Path) -> tuple[Path, ...]:
+    """List rollout files deterministically without following a second state root."""
+    if not sessions_root.exists():
+        return ()
+    if not sessions_root.is_dir():
+        raise SystemExit(f"codex-gen: Codex sessions root is not a directory: {sessions_root}")
+    try:
+        return tuple(
+            sorted(
+                (path.resolve() for path in sessions_root.rglob("rollout-*.jsonl") if path.is_file()),
+                key=lambda path: str(path),
+            )
+        )
+    except OSError as exc:
+        raise SystemExit(f"codex-gen: cannot scan Codex sessions root {sessions_root}: {exc}") from exc
+
+
+def _resolve_rollout(
+    session_id: str,
+    sessions_root: Path,
+    *,
+    preexisting: set[Path] | frozenset[Path] | None = None,
+) -> Path:
+    """Resolve exactly one newly-created rollout for one Codex session."""
+    suffix = f"-{session_id}.jsonl"
+    hits = [path for path in _rollout_files(sessions_root) if path.name.endswith(suffix)]
     if not hits:
-        raise SystemExit(f"codex-gen: no rollout jsonl for session {session_id!r} under {home}")
-    hits.sort(key=os.path.getmtime, reverse=True)
-    return Path(hits[0])
+        raise SystemExit(
+            f"codex-gen: no rollout jsonl for session {session_id!r} under {sessions_root}"
+        )
+    if len(hits) > 1:
+        rendered = "\n".join(f"  - {path}" for path in hits)
+        raise SystemExit(
+            f"codex-gen: multiple rollout jsonl files for session {session_id!r} under "
+            f"{sessions_root}; refusing to choose by mtime:\n{rendered}"
+        )
+    rollout = hits[0]
+    stale = {path.resolve() for path in (preexisting or ())}
+    if rollout in stale:
+        raise SystemExit(
+            f"codex-gen: pre-existing stale rollout for session {session_id!r}: {rollout}"
+        )
+    return rollout
 
 
 def _collect_inline_results(rollout: Path) -> list[str]:
@@ -131,11 +189,39 @@ def _decode_png(b64: str, dest: Path) -> None:
 
 
 def _build_prompt(user_prompt: str) -> str:
+    """Wrap the caller's prompt in the transport-level skill trigger.
+
+    The sprite-request prompt is the caller's SSoT and is passed through verbatim;
+    this adapter is the one place that owns the codex invocation contract.
+    """
     return (
-        "image_gen 도구를 정확히 1번 호출해서 다음 프롬프트의 이미지 1장만 생성해줘.\n"
-        "파일 저장·셸 명령·코드 작성·경로 보고 전부 금지. 생성만 하고 끝.\n\n"
+        f"{_SKILL_TRIGGER} 스킬로 built-in image_gen 도구를 정확히 1번 호출해서 "
+        "다음 프롬프트의 이미지 1장만 생성해줘.\n"
+        "미리보기 전용이라 생성된 파일은 기본 경로에 그대로 두면 된다.\n"
+        "파일 저장·이동·복사·셸 명령·코드 작성·경로 보고 전부 금지. 생성만 하고 끝.\n\n"
         "프롬프트:\n"
         f"{user_prompt}\n"
+    )
+
+
+def _no_image_records_message(rollout: Path, codex_home: Path) -> str:
+    """State an empty rollout as a capability failure, not a list of guesses.
+
+    Built-in image generation is a capability of the account behind the active
+    Codex state root. When the session is not offered the tool, it cannot be
+    talked into it: not by the prompt, not by the model, and not by a config
+    toggle. The only remedy is to run against a state root whose account provides
+    it, so that is what this message says.
+    """
+    return (
+        "codex-gen: the built-in image_gen tool never ran in this codex session — "
+        f"zero {' / '.join(_RESULT_TYPES)} records in {rollout}\n"
+        f"  the prompt carries the official {_SKILL_TRIGGER} skill trigger, so the tool was "
+        "not offered to the session rather than merely not chosen.\n"
+        f"  the account behind this Codex state root ({codex_home}) does not provide the "
+        "built-in image_gen capability.\n"
+        "  select a Codex state root whose account provides it (`codex login status`), or "
+        "generate with another provider. A config feature toggle does not grant it."
     )
 
 
@@ -148,7 +234,18 @@ class CodexProvider:
         self.keep_session = keep_session
 
     def generate(self, request: GenRequest, workdir: Path) -> ProviderRun:
-        gen_dir = os.path.expanduser("~/.codex/generated_images")
+        codex_home = _resolve_codex_home()
+        if not codex_home.is_dir():
+            raise SystemExit(
+                f"codex-gen: Codex state root does not exist or is not a directory: {codex_home}"
+            )
+        sessions_root = codex_home / "sessions"
+        preexisting_rollouts = set(_rollout_files(sessions_root))
+        gen_dir = codex_home / "generated_images"
+        try:
+            gen_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise SystemExit(f"codex-gen: cannot create Codex generated-images dir {gen_dir}: {exc}") from exc
         cmd = [
             "codex",
             "exec",
@@ -159,7 +256,7 @@ class CodexProvider:
             "--color",
             "never",
             "--add-dir",
-            gen_dir,
+            str(gen_dir),
             "-C",
             str(workdir),
         ]
@@ -171,13 +268,16 @@ class CodexProvider:
 
         prompt = _build_prompt(request.prompt)
         started = time.monotonic()
+        child_env = provider_subprocess_env()
+        if "CODEX_HOME" in os.environ:
+            child_env["CODEX_HOME"] = str(codex_home)
         # env: parent minus orchestrator session env — a headless generation
         # `codex exec` must not inherit the spawning agent's session identity,
         # or codex's own Kuma hooks broadcast this prompt to that worker's Discord
         # channel (see base.provider_subprocess_env).
         try:
             completed = subprocess.run(
-                cmd, input=prompt, capture_output=True, text=True, env=provider_subprocess_env(),
+                cmd, input=prompt, capture_output=True, text=True, env=child_env,
                 timeout=GEN_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:
@@ -200,20 +300,21 @@ class CodexProvider:
                 "codex-gen: no thread/session id in codex stdout — image_gen was not reached.\n"
                 "  check `codex login status` and `--sandbox workspace-write`."
             )
-        rollout = _resolve_rollout(session_id)
+        rollout = _resolve_rollout(
+            session_id,
+            sessions_root,
+            preexisting=preexisting_rollouts,
+        )
         results = _collect_inline_results(rollout)
         if not results:
-            raise SystemExit(
-                f"codex-gen: no {' / '.join(_RESULT_TYPES)} inline result in {rollout}\n"
-                "  image_gen may not have been called, or codex changed its session format."
-            )
+            raise SystemExit(_no_image_records_message(rollout, codex_home))
         _decode_png(results[-1], request.raw)
 
         if not self.keep_session:
             try:
                 rollout.unlink()
-            except OSError:
-                pass
+            except OSError as exc:
+                raise SystemExit(f"codex-gen: failed to remove consumed rollout {rollout}: {exc}") from exc
 
         return ProviderRun(
             provider=self.name,

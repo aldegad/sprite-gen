@@ -50,9 +50,9 @@ Pipeline (unfake.js/pixeldetector-style): 포즈 컴포넌트를 먼저 분리�
 (칸이 클수록 칸 안이 균일해지는 자명한 편향)은 이 판정에 개입하지 않는다.
 
 **이 정책의 범위는 추출 스냅 경로다.** 큐레이터의 베이스 격자(`/api/base-grid`,
-`sprite_gen/serve_curation.py`)는 여전히 `detect_pixel_grid` 가 돌려주는 히스토그램 위상으로
+`sprite_gen/serve/serve_curation.py`)는 여전히 `detect_pixel_grid` 가 돌려주는 히스토그램 위상으로
 절단선을 만든다. 그 절단선은 **표시용 오버레이 선 그리기에 그치지 않는다** — 베이스 편집기가
-각 블록의 중심 픽셀을 raw 에서 샘플해 논리 편집 캔버스를 만들고(`sprite_gen/curator/src/base-editor.js`),
+각 블록의 중심 픽셀을 raw 에서 샘플해 논리 편집 캔버스를 만들고(`sprite_gen/serve/curator/src/base-editor.js`),
 논리 좌표 편집을 되돌릴 때 같은 절단선으로 raw 블록 전체를 채워 `base-source` 파일에 굽는다
 (`space: "logical"` ops). 즉 여기서도 위상이 밀리면 중심 샘플이 이웃 블록으로 넘어가고,
 칠한 칸이 실제 블록 경계를 가로질러 굳는다 — **추출 스냅에서 잡은 것과 같은 실패 계열**이다.
@@ -100,6 +100,22 @@ AI 개입은 **raw 생성 한 곳뿐**이다 (`SKILL.md` 필수 게이트). 픽�
 **변형 굽기도 격자를 지킨다**: 픽셀 변형을 굽는 줄의 큐레이션 변형(이동/확대/회전/기울이기/반전)은 BICUBIC 이 아니라 **NEAREST 샘플 + 셀 고정 논리 격자 재양자화**(`apply_transform(snap_scale=…)`, 스케일 SSoT = `curation.pixel_snap_scale`)로 굽는다 — 어떤 변형도 픽셀 격자를 뭉갤 수 없다. 큐레이션 웹뷰는 같은 양자화를 캔버스로 미러링해(`drawFrameInto`) **드래그하는 동안에도 스프라이트가 고정 격자에 실시간 스냅되어 보인다** (격자는 셀에 고정, 그림이 격자 단위로 이동). plain 변형을 굽는 줄은 격자 예술이 아니므로 기존 BICUBIC 유지.
 
 토글은 **줄(state) 단위**다: 쌍둥이가 실재하는 각 줄의 "생성 재료" 줄 우측(프레임 이미지 바로 위)에 **줄별 "픽셀 언페이크" 체크박스**가 뜨고, 우측 상단 체크박스는 **전체 토글**(모든 줄을 한번에 설정; 줄별 값이 섞이면 indeterminate 표시)이다. 픽셀 격자 오버레이도 같은 모양이다 — 격자를 아는 줄마다 줄별 "픽셀 격자" 체크박스 + 상단 "픽셀 격자 전체" 토글(표시 전용, 저장 안 함). 각 토글이 그 줄의 **표시와 굽기를 함께 결정**한다(별도 보기 토글 없음; curator `src/display.js`·`src/row-controls.js`, run-contract §3 원본화질 토글 행과 일치). 켠 줄은 canonical `frame-N.png`(픽셀 언페이크)를 표시·굽고, 끈 줄은 표시는 `orig/` 고해상본 우선(없으면 `.plain.png`)·굽기는 셀 크기 `.plain.png` 변형으로 전환하며(끈 줄은 스냅 격자가 아니므로 픽셀 격자 오버레이도 숨긴다) `curation.json` 의 `states.<state>.pixel_unfake`(줄별) + top-level `pixel_unfake`(전줄 균일할 때만 기록되는 런 기본값)에 저장된다. 해석 순서(줄별 > top-level > 기본 on)의 SSoT 는 `curation.frame_variant(curation, state)` 이고 compose·GIF·PNG export 전부 이 리졸버를 쓴다. 끈 줄의 plain 파일이 없으면 조용한 폴백 없이 에러다. report/manifest 에는 줄별 `animation.rows.<state>.frame_variant` 와 top-level 요약(`pixel`/`plain`/`mixed`)이 기록된다. 표시 계약 SSoT 는 [`run-contract.md`](run-contract.md) §3.
+
+## 은퇴 키 (`fit.pixel_perfect`) 와 이관
+
+`fit.pixel_perfect` 는 2026-07-25 에 `fit.pixel_unfake` 로 교체됐다. 기존 런은 무손실로 계속 돈다:
+
+- **읽기** — 로더(`runio.load_request`)가 은퇴 키를 현행 키로 **메모리에서만** 정규화한다. 런 파일은 바이트 그대로 남는다. 두 키가 동시에 있으면 hard fail (어느 쪽이 진실인지 코드가 고를 수 없다).
+- **디스크 이관** — 사용자가 명시적으로 부르는 단일 writer 에서만 한다:
+
+  ```bash
+  $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen migrate-request <run-dir>          # dry run
+  $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen migrate-request <run-dir> --apply  # 실제 쓰기
+  ```
+
+  request 편집 writer(리롤·트윈 테이크 기록, 뷰 fps 편집)와 **같은 배타락**(`runio.publish_guard`)을 잡고, 락 획득 후 문서를 fresh 재독한 뒤 원자 교체한다 — 그래서 이관과 편집이 서로의 쓰기를 잃을 수 없다. 값·의미는 그대로고 키 이름만 옮긴다.
+
+이관은 **선택**이다 — 안 해도 파이프라인은 정상 동작한다. 조회가 파일을 바꾸지 않는 이유와 사고 기록은 [`run-contract.md`](run-contract.md) §2-b-2 가 소유한다.
 
 ## Related
 

@@ -7,27 +7,16 @@ import argparse
 from pathlib import Path
 from typing import Callable
 
-from sprite_gen import (
-    anchor,
-    compose_atlas,
-    compose_cycle,
-    compose_gif,
-    correction_loop,
-    cutout,
-    export_pngs,
-    extract,
-    gen,
-    inspect,
-    prepare,
-    preview,
-    recolor,
-    score,
-    serve_curation,
-    slice_sheet,
-    migrate_breathe,
-    unpack_atlas,
-)
-from sprite_gen.prepare import STYLE_DEFAULT, _outline_config
+from sprite_gen import gen
+from sprite_gen.curate import anchor
+from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, compose_layers, export_pngs
+from sprite_gen.qa import correction_loop, inspect, preview, score
+from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
+from sprite_gen.gen import prepare
+from sprite_gen.effects import recolor
+from sprite_gen.serve import serve_compose, serve_curation
+from sprite_gen.spec import migrate_breathe, migrate_request
+from sprite_gen.gen.prepare import STYLE_DEFAULT, _outline_config
 
 
 def _parse_frames(value: str) -> list[int]:
@@ -240,6 +229,13 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         compose_cycle.run,
     ),
     "compose-gif": ("Compose selected sprite frames into a clean transparent GIF.", _add_compose_gif, compose_gif.run),
+    # Same rule as `curation` / `recolor`: the subcommand reuses the module's own
+    # argument declaration, so the three launch forms cannot drift apart.
+    "compose-layers": (
+        "Bake a rig run's declared composite stacks into <run-dir>/layers/.",
+        compose_layers.add_arguments,
+        compose_layers.run,
+    ),
     "unpack-atlas": (
         "Unpack a composed sprite sheet back into a curator-ready run directory.",
         _add_unpack_atlas,
@@ -255,6 +251,14 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Migrate a run's retired split-line breathe sidecar to the envelope schema.",
         migrate_breathe.add_arguments,
         migrate_breathe.run,
+    ),
+    # The only writer that changes the request schema on disk. Reads (`runio.load_request`
+    # and everything through it) normalize retired keys in memory and leave the file byte
+    # for byte — a query must never rewrite a canonical run.
+    "migrate-request": (
+        "Migrate a run's retired sprite-request fit keys to the current schema.",
+        migrate_request.add_arguments,
+        migrate_request.run,
     ),
     "slice-sheet": (
         "Slice a multi-figure grid sheet into per-cell standing cuts (tachi-e).",
@@ -278,6 +282,15 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Serve the curation webview for one run directory.",
         serve_curation.add_arguments,
         serve_curation.run,
+    ),
+    # The pre-run half of curation: a blank-screen assembly canvas where a human
+    # mounts a folder and drags files onto rows to compose a sprite, instead of
+    # an agent arranging a --pngs-dir folder by hand. Same declaration-once rule
+    # as `curation` — the subcommand reuses the module's own add_arguments/run.
+    "compose": (
+        "Serve the composition canvas — mount a folder and assemble sprite rows.",
+        serve_compose.add_arguments,
+        serve_compose.run,
     ),
     "recolor": (
         "Bake deterministic palette-swap variant sheets from a base sheet + recolor spec.",
@@ -312,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if getattr(args, "_retired_pp", False):
-        from sprite_gen.prepare import RETIRED_PP_MESSAGE
+        from sprite_gen.gen.prepare import RETIRED_PP_MESSAGE
 
         raise SystemExit(RETIRED_PP_MESSAGE)
     kwargs = vars(args).copy()

@@ -29,7 +29,8 @@ canonical files, not hidden imports.
 | Extract | `extract_sprite_row_frames.py` | `raw/<state>.png` | on success: `frames/<state>/frame-N.png` (+ `.plain.png` twin on pixel-unfake runs), `frames/frames-manifest.json`; on failure: nothing in `frames/`, `extract-failure.json` instead (§6) |
 | Curate (opt) | `sprite-gen curation` (`serve_curation.py`) + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
-| Recolor (opt) | `sprite-gen recolor` / `recolor-palette` (`sprite_gen/recolor.py`) | base sheet (default `sprite-sheet-alpha.png`) + recolor spec | `variants/<name>.png`, optional `variants/<name>.manifest.json`, `variants/recolor.report.json` |
+| Recolor (opt) | `sprite-gen recolor` / `recolor-palette` (`sprite_gen/effects/recolor.py`) | base sheet (default `sprite-sheet-alpha.png`) + recolor spec | `variants/<name>.png`, optional `variants/<name>.manifest.json`, `variants/recolor.report.json` |
+| Layer bake (opt) | `sprite-gen compose-layers` (`sprite_gen/compose/compose_layers.py`) | `frames/` + `curation.json` + the request's `rig` / `layers` | `layers/<name>.png`, `layers/<name>.manifest.json`, `layers/layers.report.json` (published as one set) |
 | QA | `preview_animation.py` | `frames/` | `qa/<state>-contact.png`, `qa/<state>.gif` |
 | Inspect | `inspect_sprite_run.py` | `sprite-request.json`, `raw/` or `frames/` | `sprite-inspect.report.json` |
 | Score | `score_sprite_run.py` | `sprite-inspect.report.json` | `sprite-score.report.json`, correction hints |
@@ -59,7 +60,7 @@ not restate it elsewhere; point here.
   references/layout-guides/<state>.png   # per-state layout guide (motion only)
   references/anchors/<dir>-anchor-x8.png # DERIVED CACHE: the curated direction-anchor frame, baked
                                          #   ×8 NEAREST for row generation. `sprite-gen anchor`
-                                         #   (SSoT sprite_gen/anchor.py) rewrites it on demand —
+                                         #   (SSoT sprite_gen/curate/anchor.py) rewrites it on demand —
                                          #   never hand-edit it and never treat it as truth.
   references/imported/<group>/           # imported-run generation material → chips (§4); real runs use raw/ anchors instead
   prompts/<state>.txt                # generated row prompt (frame count, safe margin, anchor lock)
@@ -72,7 +73,7 @@ not restate it elsewhere; point here.
                                      #   silently ships the un-edited image (see §2-c).
   # ── 파일 택소노미 (layout: taxonomy/v1 — 신규 런 기본, 수홍 확정 2026-07-14) ──
   # 방향 계약(directions) 런은 위 두 경로가 방향/자세 폴더로 나뉜다. 상태 ID 는 그대로
-  # <direction>_<pose>, 파일 경로만 분리. 리졸버 SSoT = sprite_gen/layout.py.
+  # <direction>_<pose>, 파일 경로만 분리. 리졸버 SSoT = sprite_gen/spec/layout.py.
   # 이미 추출된 프레임을 읽는 소비자는 frames-manifest 의 row.files 경로를 따른다
   # (row_frame_rel) — 패턴 조립 금지. layout 필드 없는 legacy 런은 flat 유지.
   # 프로젝트별 정비 방식이 지침으로 오면 지침이 우선한다.
@@ -108,6 +109,12 @@ not restate it elsewhere; point here.
                                      #   passthrough pixels). Adopted pick lives in
                                      #   curation.json.recolor.picked (name-keyed). See
                                      #   docs/recolor.md.
+  layers/                            # only when a rig run bakes composites (compose_layers) —
+                                     #   <name>.png + <name>.manifest.json (runtime shape,
+                                     #   one composite row) + layers.report.json (stack,
+                                     #   source revisions, per-element offsets, clipped
+                                     #   pixels). A composite is NEVER a frames/ row nor a
+                                     #   request state. See docs/layer-tracks.md.
   sprite-inspect.report.json         # inspect_sprite_run.py output (per-state health rows)
   sprite-score.report.json           # score_sprite_run.py output (overall score + correction hints)
   correction-loop/                   # run_correction_loop.py: attempt-N/ (inspect/score/hints) + candidate-N/ regenerated run dirs
@@ -160,6 +167,58 @@ The runtime `manifest.json.frame_layout` contract (absolute rects, no runtime
 alpha-recovery, `degraded_static_fallback: false`) is owned by
 [`../SKILL.md`](../SKILL.md) "Runtime Contract" and is out of scope here.
 
+## 2-b-2. Reading a run never writes to it
+
+`sprite-request.json` has exactly one read gate (`runio.load_request`) and exactly one
+schema writer (`runio.migrate_request_file`, exposed as `sprite-gen migrate-request
+<run-dir> --apply`). They are separate on purpose.
+
+- **Reads are byte-stable.** `load_request`, and everything that goes through it
+  (`state_revision`, `run_revision`, `load_curation`, the view's snapshot endpoints),
+  leave the run directory byte for byte identical. A retired key (`fit.pixel_perfect`)
+  is normalized to the current key (`fit.pixel_unfake`) **in memory only**, so an old
+  approved run keeps working without its file being touched. Both keys present is still
+  a hard fail — code cannot pick which of two truths is real.
+  The curation sidecar reads the same way: a generation-mismatched `curation.json` is
+  salvaged row by row **in memory** and the file itself is left alone — the load gate
+  writes no backup copy (see the bullet below).
+- **Schema migration is an explicit command.** It is a dry run unless `--apply` is passed.
+  The write takes the **publish rwlock** (`runio.publish_guard`) — the same exclusive lock
+  the request editors take — re-reads the document *after* acquiring it, and replaces the
+  file atomically. It deliberately does not take the pipeline `.sprite-gen.lock`: that lock
+  guards stage outputs (frames, atlas), and extraction/compose never write the request, so
+  holding it would look like protection while the actual competitors (reroll, interpolate,
+  the view's fps edit) walked straight past it. One resource, one isolation domain.
+- **Every request read-modify-write shares that one domain.** Migration, take recording
+  (`reroll.record_take`, `interpolate.write_take`) and the view's fps POST all do
+  *acquire → fresh re-read → atomic replace* inside `publish_guard`, so no pair of them can
+  lose the other's write. Locked by named race tests plus a structural assertion that no
+  production request write sits outside the guard
+  (`tests/test_request_write_isolation.py`).
+- **A stale backup is written by the writer, never by a read.** `curation.stale-<hash>.json`
+  is created only by `curation.write_curation_atomic`, at the moment an overwrite would
+  actually lose rows. The load gate used to write it while merely *judging* a
+  generation-mismatched sidecar — a read that created a file in the run dir, the same class
+  of defect as the incident below. Nothing is lost at drop time: `curation.json` is still
+  on disk, untouched.
+- **Unrelated edits preserve the on-disk key form.** Take recording (reroll / interpolate)
+  and the view's fps edit reload the whole document through the gate and write it back, so
+  they go out through `runio.write_request`, which folds a normalized key back to whatever
+  the file actually carries. Otherwise changing one fps value would migrate the schema as a
+  side effect, and "only the explicit command changes the schema" would be false the moment
+  anyone edited anything.
+
+**Real incident 2026-08-02** (`solvell`, founder v8 succession): the gate used to rewrite
+the file as soon as it normalized a retired key, so calling `state_revision()` on an
+approved `founder_v7` run mutated that run's `sprite-request.json`. Because `run_revision`
+hashes the request bytes, one *query* moved the run's generation fingerprint and knocked
+its curation sidecar stale. A query has no business changing what it is reporting on.
+
+Migration does change the file bytes, so it does move `run_revision`. The curation sidecar
+survives it through per-row `revision` salvage (§ `curation.load_curation_report`); rows
+with no stamp are dropped as usual, and `migrate-request` prints which rows those are
+*before* it writes.
+
 ## 2-c. External consumers install from `curated/`, never from `frames/`
 
 `frames/` is the extractor's own output. Everything a human does in the curation view —
@@ -191,7 +250,7 @@ Inside this repo the compose/GIF/atlas paths already read `frames/` *together wi
 ## 3. Curation-view display contract
 
 `serve_curation.py` serves one run dir and returns the run snapshot at `GET /api/run`.
-The webview (`sprite_gen/curator/*`) renders exactly four contract elements from that
+The webview (`sprite_gen/serve/curator/*`) renders exactly four contract elements from that
 payload. **A view that omits any element it has the data for is a broken view** — the
 whole point is that the experience does not vary by who launched it.
 
@@ -199,7 +258,7 @@ whole point is that the experience does not vary by who launched it.
 |---|---|---|---|
 | **Base reference row** | `base-source.*` exists | `baseUrl` (null if absent) | Top row, pure image — no preview/select UI. Identity truth, always visible. |
 | **Generation-material chips** | the state has resolvable material | `states[].refs[]` — each `{role, name, url}` | Per-state header shows *what generated this row*. `role ∈ {anchor, basis, guide}`, labelled `방향 앵커` / `basis row` / `레이아웃 가이드` (i18n key `ref_<role>`). Only run-dir files that actually exist appear — **except the anchor chip** (`anchorFrame: true`), which is a live bake (`/api/anchor?direction=<dir>`) named `<state>#<index>`, because the on-disk `references/anchors/*.png` is a derived cache that goes stale the moment the user edits the anchor frame. |
-| **Anchor frame** | request has a `directions` block | `directionGroups[].anchorFrame` `{state, index, source}` + `anchorError`/`anchorErrorCode`/`anchorPending`/`anchorUrl` · `curation.anchors` | The one curated instance that is this direction's identity for generating its other rows. `source: "picked"` = pinned by the human (frame card pin button → `curation.anchors.<dir>`), `"default"` = the anchor row's sequence head. The anchor card carries an `앵커` badge (tinted when pinned); an unresolvable pin surfaces `anchorError` in the status bar instead of silently reverting — archived frame (`pick-missing`) or **regenerated row** (`pick-stale-generation`: the pin carries the pinned row's `state_revision`, so a re-derived row makes the pin stale rather than silently pointing it at a different image). **`anchorPending: true` is not an error** — the anchor row is not generated yet (the normal mid-work state), so the view must not colour it as a failure. Resolution SSoT = `sprite_gen/anchor.py`. |
+| **Anchor frame** | request has a `directions` block | `directionGroups[].anchorFrame` `{state, index, source}` + `anchorError`/`anchorErrorCode`/`anchorPending`/`anchorUrl` · `curation.anchors` | The one curated instance that is this direction's identity for generating its other rows. `source: "picked"` = pinned by the human (frame card pin button → `curation.anchors.<dir>`), `"default"` = the anchor row's sequence head. The anchor card carries an `앵커` badge (tinted when pinned); an unresolvable pin surfaces `anchorError` in the status bar instead of silently reverting — archived frame (`pick-missing`) or **regenerated row** (`pick-stale-generation`: the pin carries the pinned row's `state_revision`, so a re-derived row makes the pin stale rather than silently pointing it at a different image). **`anchorPending: true` is not an error** — the anchor row is not generated yet (the normal mid-work state), so the view must not colour it as a failure. Resolution SSoT = `sprite_gen/curate/anchor.py`. |
 | **Pixel grid** | **always** — the measurement cannot fail | `states[].pixelScale` (≥1, never null) + `pixelUnfake{label,scale}` + `states[].frames[].contentBox` | **Per-state** checkbox on every row's refs strip; the top checkbox is a **toggle-all** (indeterminate when mixed). Display only, never persisted. `pixelScale` is an exact test (largest k where the frame is only uniform k×k blocks; k=1 is trivially true — identity), so "unknown grid" does not exist and nothing gates on it. On the pixel-unfake view: the output raster (request scale on `fit.pixel_unfake` runs, measured k labelled `auto` otherwise). On the original (plain) view: the **final correspondence grid** — green, one cell = one result pixel. (The stage-1 cut lattice in `frames-manifest input_grids` stays diagnostic-only.) An identity grid (k=1) is a true grid, not a missing one — density is a property of the fact, not a reason to hide the control. |
 | **Direction groups** | request has a `directions` block | `directionGroups[]` — `{direction, anchor, states, anchorFrame, anchorError}` + mirror entries `{direction, mirrorOf}` | States render grouped per direction with the direction anchor first (badge `방향 앵커`); mirrored directions render as an informational strip (`<src> 런타임 미러 — 생성 없음`), never as silently missing rows. Runs without the block keep the flat request order. |
 | **Original-quality toggle** | **always** — every row has the control | `states[].frames[].plainUrl` + `fitPixelUnfake` | **Per-state** checkbox on every row's refs strip + zoom modal (same contract, no per-surface gating). Twin rows: on = canonical `frame-N.png`, off = `plainUrl` (hi-res `orig/` else `.plain.png`) — a **source** switch, persisted per state. Twin-less rows: on = the display renderer re-quantizes by the measured grid `pixelScale` (the same k the grid overlay draws — grid-based pixel-unfake; k=1 is identity), a **display lens**, never persisted (persisting would make the bake resolver demand a `.plain` variant that does not exist). The top-right checkbox is a toggle-all (indeterminate when mixed). |
@@ -345,9 +404,10 @@ throughout, so a concurrent **writer** cannot preempt (writer Isolation).
 >
 > **Load** 쪽은 행 단위다: `run_revision` 이 어긋나도 각 행의 `revision`(원료 세그먼트
 > 지문, `curation.state_revision`)이 현재의 접두면 그 행 큐레이션은 유지된다 — 같은 raw
-> 를 새 엔진이 재유도(heal)해도 선택이 살아남는다. 드롭되는 행이 생기면 원문이
-> `curation.stale-<hash>.json` 으로 먼저 백업되고 `/api/run` 의
-> `curationDropped`/`curationBackup` 으로 웹뷰 배너에 보고된다 (조용한 소실 금지).
+> 를 새 엔진이 재유도(heal)해도 선택이 살아남는다. 드롭되는 행이 생기면 `/api/run` 의
+> `curationDropped` 로 웹뷰 배너에 보고된다 (조용한 소실 금지). 로드는 아무것도 쓰지
+> 않는다 — 원문은 그대로 남아 있고, 실제로 덮이는 순간 writer 가
+> `curation.stale-<hash>.json` 으로 보존한다.
 > 스키마/규칙 상세: [`curation.md`](curation.md).
 
 ## 5. Conformance status
@@ -443,6 +503,10 @@ boundary of the run-dir's atomicity and concurrency guarantees. What is **in for
 - **In-process transaction rollback.** The `frames/` + `extract-failure.json` commit (§6) and
   the `--force` re-import publish (§4) roll back on any raised exception, leaving the prior
   generation byte-intact. `atomic_write_text` / `os.replace` make each file write torn-free.
+  `atomic_write_set` extends the same mechanism to a **set** that only means anything
+  together — the layer bake's sheets, manifests and the report naming them: everything is
+  staged before anything is renamed in, so a write error partway through publishes nothing
+  (a `SIGKILL` between renames stays out of scope, below).
 - **Reader isolation.** A publish holds the exclusive `publish_guard` for its swap; a reader
   sees a complete old-or-new snapshot, never a mix (§4). Where advisory locks are unavailable the
   guard **fails loud** (`RWLockUnavailable`), never a silent no-op. Every finished-generation
@@ -488,5 +552,6 @@ service, revisit both here.
 - [`architecture.md`](architecture.md) — how the code realizes these contracts (stage internals, lock, extraction, pixel-unfake path)
 - [`curation.md`](curation.md) — webview interaction model, `curation.json` schema, standalone image-candidate path, multi-agent launch rules
 - [`recolor.md`](recolor.md) — palette-swap bake (`variants/`), report schema, colourway adopt
+- [`layer-tracks.md`](layer-tracks.md) — optional rig / track / composite contract; the `layers/` sibling artifact tree and why a composite is never a `frames/` row or a request state
 - [`pixel-unfake.md`](pixel-unfake.md) — `fit`/`pixel_unfake` behavior + plain-twin bake decision
 - [`directional-anchor-workflow.md`](directional-anchor-workflow.md) — directional/45° anchor chains that name the `raw/` anchors §3 resolves into chips

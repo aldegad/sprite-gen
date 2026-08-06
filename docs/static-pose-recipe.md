@@ -15,14 +15,14 @@
    (사람 검수 대상; 기본 후보 frame 0), 나머지 시퀀스는 전부 그 프레임의
    **링크 복제**로 채운다 — 편집 truth 1곳, 아틀라스 셀 공유(무비용).
 2. **길이 = 호흡당 최소 프레임 확보** @ 4fps. 시퀀스 길이는
-   `sprite_gen/breathe.py` `recommended_breathe_frames(breathe)` 로 정한다
+   `sprite_gen/effects/breathe.py` `recommended_breathe_frames(breathe)` 로 정한다
    (호흡당 `SMOOTH_CYCLE_FRAMES`=6 프레임): 기본 `breaths: 3` → **18컷**
    (~4.5s 루프, 호흡당 1.5s). **옛 11컷은 사이클당 ~3.7프레임이라 1px 위상이
    거의 매 프레임 토글해 호흡이 아니라 진동으로 읽혔다** (수홍 2026-07-24,
    hero_v8 실측); 이 게이트가 그 원인을 막는다. 깜빡임 프레임은 이 길이에
    포함되며 별도로 +하지 않는다 (아래 4).
 3. **호흡 레이어**: `breathe = {depth: 0.06, breaths: 3, lag: 0.1}` 만 쓴다.
-   **강체 경계는 선언하지 않는다** — `sprite_gen/anatomy.py` 가 목 병목(없으면 대칭
+   **강체 경계는 선언하지 않는다** — `sprite_gen/effects/anatomy.py` 가 목 병목(없으면 대칭
    눈쌍 아래, 그것도 없으면 어깨-기울기)으로 검출해 사이드카 `anatomy` 에 채운다.
    **굽기는 그 값을 캐시로만 본다** — 매번 자기 기준 프레임에서 다시 재고, 사이드카와
    어긋나면 manifest 의 `sidecar_drift` 로 값을 실어 보고한다. 사이드카의 `anatomy` 는

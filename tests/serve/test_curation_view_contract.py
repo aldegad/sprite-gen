@@ -1,0 +1,674 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Curation-view display contract (run-contract.md §3/§4): imported `_base`/`_refs`
+sources surface as the base row + generation-material chips, the self-report `contract`
+field is populated, and filenames with URL-special characters are percent-encoded so
+they actually serve (regression: an unencoded `#` in a ref filename became a URL
+fragment → 404)."""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+import threading
+import urllib.request
+from functools import partial
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+
+import pytest
+from PIL import Image
+
+ROOT = Path(__file__).resolve().parents[2]
+
+from sprite_gen.serve.serve_curation import CurationHandler, _url, build_run_state  # noqa: E402
+from sprite_gen.frames.unpack_atlas import import_png_groups  # noqa: E402
+
+
+def _png(path: Path, color=(80, 80, 80, 255), size=(48, 48)) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGBA", size, color).save(path)
+
+
+def _build_import(tmp_path: Path, ref_names, with_base=True) -> Path:
+    pngs = tmp_path / "pngs"
+    if with_base:
+        _png(pngs / "_base" / "hero.png", size=(96, 96))
+    _png(pngs / "items" / "1-a.png")
+    _png(pngs / "items" / "2-b.png")
+    for name in ref_names:
+        _png(pngs / "items" / "_refs" / name)
+    out = tmp_path / "run"
+    import_png_groups(
+        out,
+        [{
+            "name": "items",
+            "paths": sorted((pngs / "items").glob("*.png")),
+            "labels": [],
+            "refs": sorted((pngs / "items" / "_refs").glob("*.png")),
+        }],
+        base_src=(pngs / "_base" / "hero.png") if with_base else None,
+    )
+    return out
+
+
+def _serve_status(run: Path, url: str) -> int:
+    CurationHandler.run_dir = run
+    CurationHandler.lang = "en"
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), partial(CurationHandler))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        return urllib.request.urlopen(f"http://127.0.0.1:{srv.server_address[1]}{url}").status
+    finally:
+        srv.shutdown()
+
+
+def test_imported_sources_expose_base_row_and_chips(tmp_path):
+    run = _build_import(tmp_path, ["anchor-idle.png", "guide-walk.png"])
+    st = build_run_state(run)
+    assert st["baseUrl"] == "/run/base-source.png"
+    roles = {(r["role"], r["name"]) for r in st["states"][0]["refs"]}
+    assert ("anchor", "anchor-idle.png") in roles
+    assert ("guide", "guide-walk.png") in roles
+    assert st["contract"] == {"base": True, "refs": True, "refsStates": 1, "grid": True, "sourceless": False}
+
+
+def test_sourceless_import_is_reported(tmp_path):
+    run = _build_import(tmp_path, [], with_base=False)
+    st = build_run_state(run)
+    assert st["baseUrl"] is None
+    assert st["states"][0]["refs"] == []
+    assert st["contract"]["sourceless"] is True
+
+
+def _checker_png(path: Path, pitch: int = 4, size: int = 48) -> None:
+    """A checkerboard PNG with a `pitch`-px block size so detect_pixel_pitch finds a grid."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 255))
+    px = im.load()
+    for y in range(size):
+        for x in range(size):
+            if ((x // pitch) + (y // pitch)) % 2 == 0:
+                px[x, y] = (240, 240, 240, 255)
+    im.save(path)
+
+
+def test_special_char_state_name_keeps_pixel_grid(tmp_path):
+    """A special-char group/state name must not break auto pixel-grid measurement. The
+    frame url is percent-encoded for HTTP, but pixelScale is measured from the real
+    decoded file path (regression: measuring off the encoded url silently null-ed the
+    grid + reported contract.grid=false for special-char imports)."""
+    pngs = tmp_path / "pngs"
+    _checker_png(pngs / "walk" / "1-a.png")
+    _checker_png(pngs / "walk #한글 %" / "1-a.png")  # same image, special-char group name
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+    st = build_run_state(out)
+    plain = next(s for s in st["states"] if s["name"] == "walk")
+    special = next(s for s in st["states"] if s["name"] == "walk #한글 %")
+    assert plain["pixelScale"] is not None
+    assert special["pixelScale"] == plain["pixelScale"]  # measured, not silently null
+    assert st["contract"]["grid"] is True
+    url = special["frames"][0]["url"]  # frame url still percent-encoded + serves
+    assert "#" not in url and " " not in url
+    assert _serve_status(out, url) == 200
+
+
+@pytest.mark.parametrize("name", ["guide-a#b.png", "anchor-c d.png", "basis-100%done.png", "guide-café.png"])
+def test_special_char_ref_filename_is_url_encoded_and_serves(tmp_path, name):
+    run = _build_import(tmp_path, [name])
+    url = build_run_state(run)["states"][0]["refs"][0]["url"]
+    # nothing that breaks a URL (# → fragment) or an HTML attribute may survive raw
+    assert not any(c in url for c in '# "\'<>')
+    assert _serve_status(run, url) == 200
+
+
+def test_url_helper_encodes_only_unsafe_segments():
+    assert _url("run", "raw", "down_idle.png") == "/run/raw/down_idle.png"  # unreserved unchanged
+    assert _url("run", "a b#c.png") == "/run/a%20b%23c.png"
+    assert _url("frames", "down_walk", "frame-0.png") == "/frames/down_walk/frame-0.png"
+
+
+def _run_import(pngs: Path, out: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "unpack_atlas_run.py"),
+         "--pngs-dir", str(pngs), "--out-dir", str(out), *extra],
+        capture_output=True, text=True,
+    )
+
+
+def test_force_reimport_is_a_clean_rebuild(tmp_path):
+    """--force re-import must not leave stale source truth (Idempotency/SSoT)."""
+    pngs = tmp_path / "pngs"
+    _png(pngs / "_base" / "b.png", size=(96, 96))
+    _png(pngs / "items" / "1-a.png")
+    _png(pngs / "items" / "_refs" / "anchor-x.png")
+    out = tmp_path / "run"
+    r1 = _run_import(pngs, out, "--force")
+    assert r1.returncode == 0, r1.stderr
+    assert (out / "base-source.png").is_file()
+    assert (out / "references" / "imported" / "items" / "anchor-x.png").is_file()
+    # remove both sources from the input, re-import into the SAME out-dir
+    shutil.rmtree(pngs / "_base")
+    shutil.rmtree(pngs / "items" / "_refs")
+    r2 = _run_import(pngs, out, "--force")
+    assert r2.returncode == 0, r2.stderr
+    assert not (out / "base-source.png").exists()          # stale base gone
+    assert not (out / "references" / "imported").exists()  # stale refs gone
+    prov = json.loads((out / "unpack-source.json").read_text())
+    assert prov["base_source"] is None and prov["imported_refs"] == {}
+    st = build_run_state(out)
+    assert st["baseUrl"] is None and st["contract"]["sourceless"] is True
+
+
+def test_unknown_ref_role_fails_loud(tmp_path):
+    """A _refs file with an unknown role prefix is rejected, not relabeled to guide."""
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    _png(pngs / "items" / "_refs" / "mystery-source.png")
+    out = tmp_path / "run"
+    r = _run_import(pngs, out, "--force")
+    assert r.returncode != 0
+    combined = r.stderr + r.stdout
+    assert "mystery-source.png" in combined
+    assert "anchor-/basis-/guide-" in combined
+    assert not out.exists() or not (out / "references" / "imported").exists()
+
+
+def _snapshot(run: Path) -> dict:
+    return {p.relative_to(run): p.read_bytes()
+            for p in run.rglob("*") if p.is_file() and p.name != ".sprite-gen.lock"}
+
+
+def test_force_reimport_failure_preserves_prior_run(tmp_path):
+    """A failed --force re-import must leave the prior valid run byte-intact (Atomicity:
+    a rebuild fully succeeds or rolls back — never clear-then-fail)."""
+    pngs = tmp_path / "pngs"
+    _png(pngs / "_base" / "b.png", size=(96, 96))
+    _png(pngs / "items" / "1-a.png")
+    _png(pngs / "items" / "_refs" / "anchor-x.png")
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+    before = _snapshot(out)
+    assert (out / "base-source.png").is_file() and before  # a real prior run exists
+    # make the next import invalid (unknown role) and re-run --force → must fail...
+    _png(pngs / "items" / "_refs" / "mystery-source.png")
+    r = _run_import(pngs, out, "--force")
+    assert r.returncode != 0
+    # ...and the prior run must be untouched (not destroyed / emptied), no staging leak
+    assert _snapshot(out) == before
+    assert not (out.parent / f".{out.name}.sg-staging").exists()
+
+
+def test_publish_phase_failure_rolls_back(tmp_path, monkeypatch):
+    """If a publish move fails mid-swap, the prior run is rolled back byte-intact, no
+    partial new run is exposed, and staging/backup are cleaned."""
+    import pathlib
+
+    from sprite_gen.frames import unpack_atlas as ua
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+    before = _snapshot(out)
+    _png(pngs / "items" / "2-b.png")  # a real change the re-import would publish
+
+    orig_rename = pathlib.Path.rename
+
+    def flaky(self, target):
+        if ".sg-staging" in str(self):  # moving new content out of staging into out_dir
+            raise OSError("injected publish failure")
+        return orig_rename(self, target)
+
+    monkeypatch.setattr(pathlib.Path, "rename", flaky)
+    with pytest.raises((OSError, SystemExit)):
+        ua.run(pngs_dir=pngs, out_dir=out, force=True)
+    assert _snapshot(out) == before                             # prior run byte-intact
+    assert not (out.parent / f".{out.name}.sg-staging").exists()  # staging cleaned
+    assert not (out / ".sg-backup").exists()                    # in-place backup cleaned
+
+
+def test_publish_never_removes_out_dir(tmp_path, monkeypatch):
+    """out_dir (and the lock inside it) must never disappear during publish, so a
+    concurrent writer cannot mkdir+lock the run path mid-swap (Isolation)."""
+    import pathlib
+
+    from sprite_gen.frames import unpack_atlas as ua
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+    from sprite_gen.spec.runio import LOCK_FILENAME
+    _png(pngs / "items" / "2-b.png")
+
+    orig_rename = pathlib.Path.rename
+    vanished = {"path": False, "lock": False}
+
+    def watch(self, target):
+        # check both before and after every rename that happens during the publish
+        for _ in range(1):
+            if not out.exists():
+                vanished["path"] = True
+            elif not (out / LOCK_FILENAME).exists():
+                vanished["lock"] = True
+        r = orig_rename(self, target)
+        if not out.exists():
+            vanished["path"] = True
+        elif not (out / LOCK_FILENAME).exists():
+            vanished["lock"] = True
+        return r
+
+    monkeypatch.setattr(pathlib.Path, "rename", watch)
+    assert ua.run(pngs_dir=pngs, out_dir=out, force=True) == 0
+    assert not vanished["path"], "out_dir vanished during publish (isolation window)"
+    assert not vanished["lock"], "run-dir lock vanished during publish (isolation window)"
+    # the new run published cleanly
+    assert (out / "frames" / "items" / "frame-1.png").is_file()
+
+
+def test_api_run_reader_isolated_from_concurrent_publish(tmp_path):
+    """build_run_state reads under read_guard, so it blocks while a publish holds the
+    exclusive publish_guard and returns a COMPLETE snapshot — never a mid-publish 500 or
+    old/new mix (reader isolation)."""
+    import threading
+    import time
+
+    from sprite_gen.serve.serve_curation import build_run_state
+    from sprite_gen.spec import runio
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    run = tmp_path / "run"
+    assert _run_import(pngs, run, "--force").returncode == 0
+
+    outcome: dict = {}
+    ready = threading.Event()
+
+    def reader():
+        ready.wait()
+        try:
+            st = build_run_state(run)  # read_guard SH -> blocks under the publish EX lock
+            outcome["states"] = len(st["states"])
+        except Exception as exc:  # a mid-publish read would raise / 500
+            outcome["err"] = repr(exc)
+        outcome["at"] = time.monotonic()
+
+    th = threading.Thread(target=reader)
+    th.start()
+    with runio.publish_guard(run):          # simulate a publish holding the exclusive lock
+        ready.set()
+        time.sleep(0.25)                     # reader must be blocked for this whole window
+        assert "at" not in outcome, "reader was not blocked by publish_guard (no isolation)"
+        released_at = time.monotonic()
+    th.join(3)
+    assert "err" not in outcome, outcome.get("err")
+    assert outcome.get("states"), "reader got no complete snapshot"
+    assert outcome["at"] >= released_at, "reader returned before the publish released"
+
+
+def test_serve_fails_loud_on_orphan_frames(fixture_run_dir):
+    """serve serves a scaffold only for a genuinely ungenerated run. Physical frames with NO
+    manifest are an orphan/stale generation, not a fresh scaffold — build_run_state must fail loud
+    (HTTP 500 in do_GET), never expose stale frames as present (No Silent Fallback / Consistency)."""
+    from conftest import run_script
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "frames" / "frames-manifest.json").unlink()               # orphan: frames, no manifest
+    with pytest.raises(SystemExit):
+        build_run_state(run)
+
+
+def test_import_fails_loud_on_multiple_base_images(tmp_path):
+    """`_base/` is the run's single identity image; multiple images must fail loud, not silently
+    pick the first (identity SSoT / No Silent Fallback)."""
+    from conftest import run_script  # noqa: F401  (ensures scripts path is set up like siblings)
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "_base" / "a.png")
+    _png(pngs / "_base" / "b.png")
+    _png(pngs / "items" / "1-x.png")
+
+    r = _run_import(pngs, tmp_path / "run", "--force")
+    assert r.returncode != 0, "import silently picked one of several _base images"
+    assert "_base" in (r.stdout + r.stderr).lower()
+
+
+def test_serve_run_state_scaffolds_absent_but_fails_loud_on_broken_manifest(fixture_run_dir):
+    """serve build_run_state serves the request/state scaffold when the manifest is ABSENT (a run
+    with no generation yet — legitimate), but a present-but-broken `{}` manifest fails loud
+    (surfaces as HTTP 500 in do_GET), never a silent empty-rows view (No Silent Fallback)."""
+    from conftest import run_script
+
+    run = fixture_run_dir
+    st = build_run_state(run)                     # absent manifest -> scaffold from request states
+    assert st["states"], "scaffold should list the run's states even before extraction"
+
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    (run / "frames" / "frames-manifest.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(SystemExit):               # present-but-broken -> fail loud (do_GET -> 500)
+        build_run_state(run)
+
+
+@pytest.mark.parametrize("modname,kwargs", [
+    ("preview", {}),
+    ("compose_gif", {}),
+    ("compose_cycle", {"state": "walk", "name": "cyc"}),
+])
+def test_finished_consumer_reader_isolated_from_concurrent_publish(fixture_run_dir, modname, kwargs):
+    """preview / run-dir compose_gif / compose_cycle read the manifest + curation + frame tree under
+    one shared read_guard, so they block during a concurrent publish swap and never observe a
+    mid-swap (missing/partial) generation — same reader-isolation contract as serve/inspect."""
+    import importlib
+    import threading
+    import time
+
+    from conftest import run_script
+    from sprite_gen.spec import runio
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+    mod = importlib.import_module(f"sprite_gen.{modname}")
+
+    outcome: dict = {}
+    ready = threading.Event()
+
+    def reader():
+        ready.wait()
+        try:
+            mod.run(run_dir=run, **kwargs)   # read_guard SH -> blocks under the publish EX lock
+            outcome["ok"] = True
+        except Exception as exc:  # a mid-swap read would raise
+            outcome["err"] = repr(exc)
+        outcome["at"] = time.monotonic()
+
+    th = threading.Thread(target=reader)
+    th.start()
+    with runio.publish_guard(run):           # model an extract commit holding the exclusive lock
+        ready.set()
+        time.sleep(0.25)
+        assert "at" not in outcome, f"{modname} did not block on read_guard during a publish"
+        released_at = time.monotonic()
+    th.join(20)
+    assert "err" not in outcome, outcome.get("err")
+    assert outcome.get("ok"), f"{modname} did not complete after the publish released"
+    assert outcome["at"] >= released_at, f"{modname} returned before the publish released"
+
+
+def test_inspect_reader_isolated_from_concurrent_commit(fixture_run_dir):
+    """inspect_run reads frames-manifest.json + extract-failure.json together under read_guard,
+    so it blocks while an extract commit holds the exclusive publish_guard and never observes a
+    newly-swapped frames generation beside a stale failure record (the correction loop reads
+    through inspect_run, so its diagnostics stay isolated from a concurrent commit)."""
+    import threading
+    import time
+
+    from conftest import run_script
+    from sprite_gen.spec import runio
+    from sprite_gen.qa.inspect import inspect_run
+
+    run = fixture_run_dir
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(run)).returncode == 0
+
+    outcome: dict = {}
+    ready = threading.Event()
+
+    def reader():
+        ready.wait()
+        try:
+            rep = inspect_run(run, states="all")  # read_guard SH -> blocks under the publish EX lock
+            outcome["states"] = len(rep["rows"])
+        except Exception as exc:  # a mid-commit read would raise / see a torn snapshot
+            outcome["err"] = repr(exc)
+        outcome["at"] = time.monotonic()
+
+    th = threading.Thread(target=reader)
+    th.start()
+    with runio.publish_guard(run):            # simulate an extract commit holding the exclusive lock
+        ready.set()
+        time.sleep(0.25)
+        assert "at" not in outcome, "inspect reader was not blocked by publish_guard (no isolation)"
+        released_at = time.monotonic()
+    th.join(5)
+    assert "err" not in outcome, outcome.get("err")
+    assert outcome.get("states"), "inspect reader got no snapshot"
+    assert outcome["at"] >= released_at, "inspect returned before the commit released"
+
+
+def test_publish_guards_fail_loud_without_fcntl(tmp_path, monkeypatch):
+    """Where advisory locks can't be established (no fcntl), read_guard/publish_guard must
+    RAISE, not degrade to a no-op. A no-op guard is a failover that changes canonical truth
+    (a reader could see a half-published run), which the isolation contract forbids — so the
+    guarded code refuses to run rather than serve/publish a partial run."""
+    from sprite_gen.spec import runio
+
+    run = tmp_path / "run"
+    run.mkdir()
+    monkeypatch.setattr(runio, "fcntl", None)
+
+    for guard in (runio.read_guard, runio.publish_guard):
+        with pytest.raises(runio.RWLockUnavailable):
+            with guard(run):
+                pass  # pragma: no cover - the guard must raise before yielding
+
+
+def test_stale_curation_post_rejected_across_run_generations(tmp_path):
+    """A curation autosave must echo the runRevision it was loaded with. A `--force`
+    re-import — even one keeping the SAME state name but swapping the candidate images —
+    changes the run generation, so an old-session POST is rejected (409) and never applied;
+    a POST echoing the current revision saves (200) (Consistency: run identity, not just
+    state membership; observable, not a silent overwrite)."""
+    import json as _json
+    import threading
+    import urllib.error
+    import urllib.request
+    from functools import partial
+    from http.server import ThreadingHTTPServer
+
+    from sprite_gen.serve.serve_curation import CurationHandler
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png", color=(200, 0, 0, 255))
+    _png(pngs / "items" / "2-b.png", color=(0, 200, 0, 255))
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+
+    CurationHandler.run_dir = out
+    CurationHandler.lang = "en"
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), partial(CurationHandler))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+
+    def get_revision():
+        return _json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/run").read())["runRevision"]
+
+    def post(revision):
+        body = _json.dumps({"version": 1, "kind": "sprite-gen-curation", "runRevision": revision,
+                            "states": {"items": {"selected": [1], "transforms": {"1": {"dx": 9}}}}}).encode()
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/curation", data=body, method="POST")
+        try:
+            return urllib.request.urlopen(req).status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+
+    try:
+        old_rev = get_revision()                          # the webview loads generation 1
+        # re-import the SAME state name with DIFFERENT images (new candidates)
+        shutil.rmtree(pngs)
+        _png(pngs / "items" / "1-a.png", color=(0, 0, 200, 255))
+        _png(pngs / "items" / "2-b.png", color=(200, 200, 0, 255))
+        assert _run_import(pngs, out, "--force").returncode == 0
+        new_rev = get_revision()
+        assert new_rev != old_rev, "run generation did not change on same-state re-import"
+        # the old session autosaves against the stale generation -> rejected, not applied
+        assert post(old_rev) == 409
+        assert not (out / "curation.json").exists(), "stale curation applied to the new run"
+        # a POST echoing the current generation saves
+        assert post(new_rev) == 200
+        assert (out / "curation.json").is_file()
+    finally:
+        srv.shutdown()
+
+
+def test_stored_curation_ignored_after_frame_regeneration(tmp_path):
+    """A saved curation.json is ignored once the frames are regenerated under it (re-extract
+    or re-import): load_curation returns None, so the server, compose, and export all fall
+    back to the all-frames default — stale selections/transforms never apply to new frames.
+    This is the single load_curation gate every consumer passes through."""
+    import time
+
+    from sprite_gen.serve.serve_curation import build_run_state, write_curation_atomic
+    from sprite_gen.curate import curation as cur
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    _png(pngs / "items" / "2-b.png")
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+
+    # save a curation stamped for the current generation (a selection + a transform)
+    write_curation_atomic(out, {"version": 1, "kind": "sprite-gen-curation",
+                                "states": {"items": {"selected": [1], "transforms": {"1": {"dx": 9}}}}})
+    assert cur.load_curation(out) is not None            # applies now (same generation)
+    rev_before = cur.run_revision(out)
+
+    time.sleep(0.01)
+    _png(out / "frames" / "items" / "frame-0.png", color=(1, 2, 3, 255))  # a re-extract-style frame rewrite
+    assert cur.run_revision(out) != rev_before          # the run generation changed
+
+    assert cur.load_curation(out) is None                # stale sidecar ignored at the single gate
+    st = build_run_state(out)
+    assert st["curation"]["states"] == {}                # server serves no stale curation
+
+
+def test_unstamped_curation_ignored(tmp_path):
+    """A curation.json with no run_revision (legacy / hand-written / copied from a doc example)
+    is unverifiable against the current frames, so load_curation ignores it (all-frames default)
+    rather than silently applying stale selections/transforms — the single gate has no bypass."""
+    import json as _json
+
+    from sprite_gen.serve.serve_curation import build_run_state
+    from sprite_gen.curate import curation as cur
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png")
+    _png(pngs / "items" / "2-b.png")
+    out = tmp_path / "run"
+    assert _run_import(pngs, out, "--force").returncode == 0
+
+    # an UNSTAMPED sidecar written directly, as a legacy/manual file would be
+    (out / "curation.json").write_text(_json.dumps({
+        "version": 1, "kind": "sprite-gen-curation",
+        "states": {"items": {"selected": [1], "transforms": {"1": {"dx": 9}}}}}))
+    assert cur.load_curation(out) is None                 # unstamped -> ignored, not applied
+    assert build_run_state(out)["curation"]["states"] == {}
+    # a valid save (via the stamping writer) then applies for the matching generation
+    from sprite_gen.serve.serve_curation import write_curation_atomic
+    write_curation_atomic(out, {"version": 1, "kind": "sprite-gen-curation",
+                                "states": {"items": {"selected": [0]}}})
+    assert cur.load_curation(out) is not None
+
+
+def test_extract_frame_publish_holds_publish_guard(tmp_path):
+    """extract advances frames/ + extract-failure.json as one generation via _commit_generation,
+    which holds publish_guard for the whole transaction — so it serializes with a curation reader
+    (read_guard) and the reader never observes a half-swapped frames dir or a new generation
+    beside a stale failure record."""
+    import threading
+
+    from sprite_gen.spec import runio
+    from sprite_gen.frames.extract import _commit_generation
+
+    run = tmp_path / "run"
+    (run / "frames" / "items").mkdir(parents=True)
+    (run / "frames" / "items" / "frame-0.png").write_bytes(b"OLD")
+    staging = run / ".frames.sg-staging"
+    (staging / "items").mkdir(parents=True)
+    (staging / "items" / "frame-0.png").write_bytes(b"NEW")
+    result = {"ok": True, "errors": [], "warnings": [], "rows": []}
+
+    reader_holding = threading.Event()
+    release_reader = threading.Event()
+
+    def reader():
+        with runio.read_guard(run):
+            reader_holding.set()
+            release_reader.wait(3)
+
+    threading.Thread(target=reader).start()
+    reader_holding.wait(3)
+
+    published = threading.Event()
+
+    def publisher():
+        _commit_generation(run, staging, result, {"items"}, {"items"})
+        published.set()
+
+    threading.Thread(target=publisher).start()
+    assert not published.wait(0.3), "extract commit did not block on the reader (no isolation)"
+    release_reader.set()
+    published.wait(3)
+    assert published.is_set()
+    assert (run / "frames" / "items" / "frame-0.png").read_bytes() == b"NEW"
+    assert (run / "frames" / "items" / "frame-0.png").read_bytes() == b"NEW"  # single new generation
+    assert not staging.exists()
+
+
+@pytest.mark.parametrize("field,where", [
+    ("run-wide", "top"),
+    ("per-state", "state"),
+])
+def test_autosave_preserves_pixel_perfect_the_view_does_not_author(tmp_path, field, where):
+    """뷰가 **authoring 하지 않는** `pixel_perfect` 선언은 autosave 가 지우면 안 된다.
+
+    `buildPayload` 는 이 필드를 조건부로만 싣는다: per-state 는 트윈이 있는 줄만, 런 전역은
+    트윈 줄이 전부 같을 때만. 생략은 "안 건드림" 이지 삭제가 아니다 — 삭제로 받으면
+    **굽기가 읽는 변종이 바뀐다**(`frame_variant`). `.plain.png` 가 없는 줄이 `plain` 으로
+    뒤집히면 `row_frame_rel(row, i, "plain")` 이 없는 파일을 가리켜 굽기가 죽는데, 사용자는
+    큐레이터를 한 번 열었을 뿐이고 화면에는 아무 알림도 없다 (슉슉이 실측 2026-07-26).
+
+    `anchors`·`frozen` 과 같은 이월 계약이다. 이 그물이 없는 동안 이월 두 줄을 지워도
+    전체 스위트가 513 passed 로 통과했다 — round-9 R2 가 `bakeFrameUrl` 에 대해 기각한
+    것과 같은 상태였다."""
+    from sprite_gen.curate.curation import frame_variant, stamp_curation
+
+    pngs = tmp_path / "pngs"
+    _png(pngs / "items" / "1-a.png", color=(200, 0, 0, 255))
+    _png(pngs / "items" / "2-b.png", color=(0, 200, 0, 255))
+    out = tmp_path / "run"
+    assert _run_import(pngs, out).returncode == 0
+
+    curation = {"version": 1, "kind": "sprite-gen-curation", "states": {"items": {}}}
+    if where == "top":
+        curation["pixel_unfake"] = False
+    else:
+        curation["states"]["items"]["pixel_unfake"] = True
+        curation["pixel_unfake"] = False          # per-state 가 이기는지도 같이 본다
+    (out / "curation.json").write_text(json.dumps(stamp_curation(out, curation)), encoding="utf-8")
+    before = frame_variant(json.loads((out / "curation.json").read_text(encoding="utf-8")), "items")
+
+    CurationHandler.run_dir = out
+    CurationHandler.lang = "en"
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), partial(CurationHandler))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+    try:
+        revision = json.loads(
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/api/run").read())["runRevision"]
+        # 뷰가 authoring 하지 않은 저장 — `pixel_perfect` 키가 어디에도 없다
+        body = json.dumps({"version": 1, "kind": "sprite-gen-curation", "runRevision": revision,
+                           "states": {"items": {"selected": [0, 1]}}}).encode()
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/curation",
+                                     data=body, method="POST")
+        assert urllib.request.urlopen(req).status == 200
+    finally:
+        srv.shutdown()
+
+    saved = json.loads((out / "curation.json").read_text(encoding="utf-8"))
+    after = frame_variant(saved, "items")
+    assert after == before, (
+        f"{field} 선언이 autosave 에 사라져 굽기 변종이 {before} -> {after} 로 바뀌었다\n"
+        f"  저장된 사이드카: {saved}")

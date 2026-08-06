@@ -14,7 +14,7 @@ variant sheets.
 
 ## Alpha ownership
 
-Alpha truth is `sprite_gen.extract.remove_chroma_background` — the same
+Alpha truth is `sprite_gen.frames.extract.remove_chroma_background` — the same
 v1.13 4-pass chain the row pipeline uses (hard key cut → key-depth in-band
 unmix → soft-alpha unmix → trapped-spill despill). `slice-sheet` owns only
 cell geometry. Generate sheets on a chroma background chosen by the

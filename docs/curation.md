@@ -53,7 +53,7 @@ $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen curation \
 있는 호출자를 위한 래퍼:
 
 ```bash
-$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python -m sprite_gen.serve_curation --run-dir <run-dir>
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python -m sprite_gen.serve.serve_curation --run-dir <run-dir>
 $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py --run-dir <run-dir>
 ```
 
@@ -143,7 +143,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
 
 ## Curation Sidecar (`curation.json`)
 
-`curation.json` is an optional, non-destructive sidecar written by the curation webview (`sprite_gen/serve_curation.py`) and consumed by `compose_sprite_atlas.py` and `compose_selected_cycle.py`. It records a human selection plus a per-frame affine transform; the original frame PNGs are never modified.
+`curation.json` is an optional, non-destructive sidecar written by the curation webview (`sprite_gen/serve/serve_curation.py`) and consumed by `compose_sprite_atlas.py` and `compose_selected_cycle.py`. It records a human selection plus a per-frame affine transform; the original frame PNGs are never modified.
 
 ```json
 {
@@ -178,11 +178,13 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   행은 프레임 파일 내용) 다이제스트의 순서 리스트. frames/ 캐시의 mtime 과 엔진 리비전은
   입력이 아니다. top-level `run_revision` 이 어긋나면(재추출·heal·재임포트) 행별 구제로
   넘어간다: 저장된 리스트가 현재 리스트의 **접두(prefix)** 인 행만 유지(테이크 append 는
-  인덱스 공간을 밀지 않으므로 유효), 나머지 행과 스탬프 없는 레거시 행은 드롭. **드롭이
-  생기면 원문 전체가 `curation.stale-<hash>.json` 으로 먼저 백업**되고(내용 해시 파일명,
-  멱등) stderr + 웹뷰 배너(`/api/run` 의 `curationDropped`/`curationBackup`)로 보고된다 —
-  같은 raw 의 엔진 업그레이드 재유도에는 선택이 살아남고, raw 리롤은 그 행만 리셋되며,
-  무엇도 조용히 소실되지 않는다. 다이제스트의 기하 세그먼트는 셀 크기 + `pixel_unfake` +
+  인덱스 공간을 밀지 않으므로 유효), 나머지 행과 스탬프 없는 레거시 행은 드롭. 드롭은
+  stderr + 웹뷰 배너(`/api/run` 의 `curationDropped`)로 보고된다. **로드는 아무것도 쓰지
+  않는다** — 드롭은 "이번 로드가 무엇을 적용하지 않는가" 이지 파일 삭제가 아니고,
+  `curation.json` 은 디스크에 그대로 남는다. 원문이 실제로 덮이는 순간(`write_curation_atomic`)
+  에만 `curation.stale-<hash>.json` 백업이 난다(내용 해시 파일명, 멱등). 같은 raw 의 엔진
+  업그레이드 재유도에는 선택이 살아남고, raw 리롤은 그 행만 리셋되며, 무엇도 조용히
+  소실되지 않는다. 다이제스트의 기하 세그먼트는 셀 크기 + `pixel_unfake` +
   **파생 격자 배율**(`pixel_snap_scale`)이다 — `fit.logical_height` 선언값 자체가 아니다.
   출력이 한 픽셀도 안 바뀌는 선언 편집(무효값 제거 등)이 전 행을 무효화하지 않게 하기 위해서다
   (실사고 hero founder_v8 2026-07-25, 계약 = `tests/test_logical_height_contract.py`).
@@ -203,7 +205,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   되므로 조용히 따라가지 않고, 지정을 지워 기본값으로 되돌리지도 않는다. 그 상태의 생성은
   `pick-stale-generation` 으로 fail-loud 하고 뷰가 이유를 띄운다(재지정 한 번으로 풀린다).
   전 행이 드롭돼도 지정은 남는다 — 남아 있어야 오류를 낼 수 있다.
-  해석·베이크 SSoT 는 `sprite_gen/anchor.py`, 생성에 붙는 파일은 그 함수가 매번 다시 굽는
+  해석·베이크 SSoT 는 `sprite_gen/curate/anchor.py`, 생성에 붙는 파일은 그 함수가 매번 다시 굽는
   파생 캐시 `references/anchors/<dir>-anchor-x8.png` 이고, 뷰의 앵커 칩은 낡을 수 없게
   `GET /api/anchor?direction=<dir>` 라이브 베이크를 본다. 사라진 인스턴스를 가리키는 지정은
   생성 시 fail-loud (조용한 기본값 복귀 금지) — 뷰는 로드 시 그 이유를 상태줄에 띄운다.

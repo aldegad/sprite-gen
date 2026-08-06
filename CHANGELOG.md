@@ -5,6 +5,76 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
+## v1.58.0 - compose assembly canvas + domain-topology package reorg
+
+A human can now assemble a sprite from a folder, not just an agent. Every existing feature
+behaves exactly as before; the package internals were reorganized by domain so code and
+tests can be found and run per-domain.
+
+- **`sprite-gen compose`** — a blank-screen assembly canvas. Open a folder (or open image
+  files directly, which mounts their containing folder) through a native OS chooser, drag
+  files onto named rows (held as references — the originals are never copied or changed),
+  then **Build sprite** materializes the composition into a run dir via the existing
+  `import_png_groups`, and **Open curation view** hands off to the curation webview. This
+  is the pre-run half of curation that until now only an agent could do by arranging a
+  `unpack_atlas_run --pngs-dir` folder.
+- **Package reorganized by domain.** The flat `sprite_gen/` (34 modules) is now domain
+  subpackages: `spec` · `gen` · `frames` · `curate` · `compose` · `effects` · `qa` ·
+  `serve` · `util`. Tests split into `tests/<domain>/` so a domain runs alone
+  (`pytest tests/effects`). The CLI (`sprite-gen <cmd>`) and `scripts/` wrappers keep their
+  external surface — only Python import paths change (e.g. `sprite_gen.extract` →
+  `sprite_gen.frames.extract`). The module→domain map SSoT is `sprite_gen/_modules.py`.
+- The composer webview is built from a shared button component so two controls cannot
+  diverge in size, and `pytest-timeout` (signal method) now turns a hung subprocess test
+  into a named failure instead of a silent stall.
+
+### reading a run no longer writes to it (request loader / migration writer split)
+
+Calling `state_revision()` on an approved run rewrote that run's `sprite-request.json`.
+The request gate migrated a retired `fit` key and immediately persisted the result, so a
+*query* mutated canonical bytes — and because `run_revision` hashes those bytes, it also
+moved the run's generation fingerprint and knocked its curation sidecar stale. Measured
+live on a `founder_v7` run during founder v8 succession (2026-08-02).
+
+- **`runio.load_request` is read-only.** A retired key (`fit.pixel_perfect`) is
+  normalized to the current key (`fit.pixel_unfake`) in memory, and the file is left byte
+  for byte identical. Both keys present is still a hard fail. Reading a run with a retired
+  key prints a one-time-per-process notice naming the migration command, on stderr.
+- **`sprite-gen migrate-request <run-dir> [--apply]`** — the only writer that changes the
+  request schema on disk (`runio.migrate_request_file`). Dry run by default; writes
+  atomically, and reports which curation rows the resulting `run_revision` move would drop
+  *before* writing. Idempotent.
+- **`runio.write_request`** — the single write gate for an edited request. Take recording
+  (reroll / interpolate) and the view's fps edit rewrite the whole document, so they now
+  fold a normalized key back to the form the file actually carries: changing an fps value
+  must not migrate the schema as a side effect. Those two take paths also gain atomic
+  replacement (they used a plain `write_text` before).
+- The loader no longer branches on `.sprite-gen.lock`: reads have no side effect to defer.
+- **One isolation domain for the request file.** The migration writer used to read the
+  document *outside* any lock and then take `.sprite-gen.lock`, while the request editors
+  (`reroll.record_take`, `interpolate.write_take`, the view's fps POST) take
+  `runio.publish_guard` — two domains that did not exclude each other, so a take recorded
+  between migration's read and its write vanished under the stale replace (and the reverse
+  order silently un-migrated the schema). Migration now does *acquire `publish_guard` →
+  fresh re-read → atomic replace*, the same shape as every editor, and no longer takes the
+  pipeline lock at all: that lock guards stage outputs (frames, atlas), which is not the
+  resource being written. Reported by the plan validator (2026-08-02).
+- **A read never creates a stale backup.** `curation.load_curation_report` wrote
+  `curation.stale-<hash>.json` while judging a generation-mismatched sidecar — a *read*
+  that created a file in the run dir, the same class as the incident above. The backup now
+  happens only in `curation.write_curation_atomic`, at the moment an overwrite would
+  actually lose rows; it returns the filename and reports it on stderr. Nothing is lost at
+  drop time (`curation.json` stays on disk untouched), so `/api/run` no longer carries
+  `curationBackup` and the webview banner names the mechanism instead of a file.
+- Locked by `tests/test_request_read_no_mutation.py` — sha256 invariance across the read
+  API surface on a `founder_v7`-shaped fixture (with and without a stale curation sidecar),
+  generation-fingerprint stability, retired-key read compatibility, and an AST assertion
+  that no writer call exists in the read path — and by
+  `tests/test_request_write_isolation.py` — named migration-vs-reroll and
+  migration-vs-interpolate race tests plus an AST assertion that every production request
+  write sits inside a `publish_guard` block.
+- Contract SSoT: `docs/run-contract.md` §2-b-2; migration usage: `docs/pixel-unfake.md`.
+
 ## Unreleased - breathe H/V amplitude split and manual-band-anchored protection
 
 Requested by Soohong (2026-07-30) while reviewing the gptaku-pet octopus: the vertical
@@ -25,6 +95,105 @@ the vertical bob to the horizontal bulge.
   ("auto" | "manual") records which path applies and is frozen into the sidecar.
 - JS preview mirror updated in lockstep; byte-parity suite extended with
   depth-x-strong / depth-x-zero / manual-band cases.
+
+## Unreleased - layer-track contract (rig profiles, row tracks, composite stacks)
+
+Generating every direction × action combination as its own row does not scale, so a run
+may now declare a character rig and compose rows onto each other instead. This entry
+covers the contract and its validator only; the composer, the CLI, and the `prepare`
+carry land with the following steps.
+
+- **`docs/layer-tracks.md`** — new normative contract: rig profiles
+  (`humanoid_biped` / `quadruped` / `blob_or_tentacle` / `prop`) with declared integer
+  landmarks, row track kinds (`base` / `action_overlay` / `prop_effect` /
+  `full_body_override`), composite stacks, the deterministic composition rule (integer
+  pivot translation + arbitrary alpha masks, no resampling), and the manifest / artifact
+  extensions. Includes the ownership audit the contract rests on — why a composite can
+  never be a `frames/` row or a request state, and why layer data never enters
+  `curation.json`.
+- **`sprite_gen/layers.py`** — filesystem-free validator for the declaration: reports
+  every violation at once and in a stable order, so a bad rig fails before a run dir is
+  touched. `root` is the pivot for every profile and nothing is inferred from geometry;
+  `crown` is required for `humanoid_biped` body tracks only; `prop_effect` rows use the `prop` profile requirement (`root`) even inside a humanoid run.
+- **Compatibility is pinned, not promised** — a request that declares none of the three
+  keys is not a layer run: the non-layer request and manifest key sets, and the
+  curation sidecar surface, are asserted by `tests/test_layer_contract.py`.
+- Audit finding recorded on the way: `prepare` rebuilds the request from a whitelist, so
+  unknown top-level keys and unknown per-state keys (including the documented
+  `states.<state>.takes`) are dropped without a word. The layer keys must be carried
+  explicitly and the drop made observable; a canary test fails when that lands.
+
+## Unreleased - deterministic composite bake (`layers/`)
+
+The execution half of the layer contract: a rig run can now bake its declared stacks.
+Composition is integer pivot translation plus alpha compositing over the *curated*
+instances — no resampling, rotation or scale of its own — so a composite is a
+combination of what the atlas bakes, and the same run bakes the same bytes every time.
+
+- **`sprite_gen/compose_layers.py`** — `bake(run_dir, names=None)` writes
+  `layers/<name>.png`, `layers/<name>.manifest.json` (the runtime manifest shape a
+  consumer already reads, plus a `layers` provenance block) and
+  `layers/layers.report.json` (stack, per-row `state_revision`, per-element offsets,
+  clipped-pixel counts). Identical composed cells share one column, exactly like the
+  atlas, so the rect list stays indexed by play position.
+- **Arbitrary alpha masks** — any PNG of the cell's size; `a' = (a * m + 127) // 255`,
+  spelled out rather than delegated to a library blend, because the rounding is a
+  published clause of the contract.
+- **Run-dir diagnostics, all reported at once and all fatal**: a source frame missing
+  from the published generation, a mask that is missing / unreadable / the wrong size /
+  outside the run dir, an element clipped by the cell while `allow_clip` is false (with
+  the pixel count), a curated sequence that does not match the body's, a body row
+  curated down to nothing, a curated clone instance (it has no declared pivots and its
+  own transform, so nothing is borrowed from the frame it copies), and a `revision` pin
+  that no longer matches the row. The bake is all-or-nothing: one violation writes
+  nothing.
+- **`manifest.json` gains `rig` + per-row `track` for a rig run only.** Landmarks reach
+  the runtime as atlas-absolute integers indexed by play position, so they zip 1:1
+  against `frame_layout.rows.<state>` — the input a runtime needs to combine tracks live
+  instead of consuming a pre-baked combination per direction × action.
+- Declaration side: elements accept the documented `revision` pin, composite `fps` /
+  `loop` are typed (they are copied into a runtime manifest), and boolean coordinates
+  are now covered by a test — `bool` is an `int` subclass, so `[true, 8]` had been
+  rejected only by inspection.
+
+## Unreleased - `sprite-gen compose-layers`, the layer keys through `prepare`, and a transactional publish
+
+The layer feature becomes a command. This is also where the three boundaries the earlier
+steps deliberately left open are closed — a feature without an owning entry point cannot
+say who owns the composite spec, and a bake nobody can run cannot be held to a publish
+contract.
+
+- **`sprite-gen compose-layers --run-dir <run> [--names a,b]`** — bakes a rig run's
+  declared stacks into `layers/`. Three launch forms (console subcommand,
+  `-m sprite_gen.compose_layers`, `scripts/compose_layers.py`) reach one declaration, so
+  a new option cannot land on one and miss another. Prints a JSON summary (sheet,
+  manifest, frame/cell counts, clipped-pixel total); the full record stays
+  `layers/layers.report.json`. A malformed `--names` entry is a typo, never "all".
+- **`prepare` carries the layer keys** — `rig`, `layers` and `states.<state>.track` reach
+  `sprite-request.json` by name, and are validated before the run dir is created, so a bad
+  rig fails with every violation at once instead of scaffolding a run whose first bake is
+  what reports it. An undeclared row still writes no `track` (an undeclared row *is*
+  `base`; writing the default would make every new run a layer run).
+- **The whitelist drop is observable.** `prepare` re-emits the request from a whitelist, so
+  anything outside it is dropped — silently, until now. Every dropped top-level key, every
+  ignored regenerated key, and every dropped per-state key is named on stderr. This is what
+  ends the `states.<state>.takes` class of silent loss: a documented first-class key that
+  had to be hand-written back into `sprite-request.json` and said nothing about it.
+- **An unknown composite key is rejected.** `layers.<name>` used to pass over an unknown
+  top-level key while a stack element rejected one; the composite spec now has an owner, so
+  `loops: false` fails instead of shipping a composite that loops because nothing read the
+  key.
+- **Publishing is one transaction** (`runio.atomic_write_set`). Sheets, manifests and the
+  report are rendered in memory, staged beside their targets, and only then renamed in — an
+  `ENOSPC` on the second composite leaves the first exactly as it was, and the report never
+  names a sheet that failed to land. (A crash between renames can still land a subset; that
+  is documented, not claimed away.)
+- **`sprite_sheet_alpha_report` is `null` in a composite manifest.** It names the alpha
+  report *of that sheet*, and a composite has none — it is stacked from rows that were
+  already extracted and keyed. The key stays (key-set parity with the base manifest) and
+  states the absence instead of pointing at `layers.report.json`, which is the bake's
+  provenance record for every composite and a different kind of document; that pointer is
+  now `layers.report` inside the `layers` block.
 
 ## Unreleased - deterministic palette-swap bake and colourway pick in the curation view
 

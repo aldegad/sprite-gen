@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sprite-gen compose</title>
+    <link rel="stylesheet" href="/composer.css" />
+  </head>
+  <body>
+    <!-- Skeleton only: interactive controls are rendered into the mount points
+         (#toolbar, #empty-actions, #canvas-actions, #build-bar) by controls.js,
+         so a control is defined once and never duplicated as markup. -->
+    <header class="topbar">
+      <div class="title">
+        <strong>sprite-gen</strong> <span id="t-title"></span>
+        <span id="mount-label" class="muted"></span>
+      </div>
+      <div class="actions" id="toolbar">
+        <span id="status" class="status"></span>
+      </div>
+    </header>
+
+    <div id="layout">
+      <aside id="sidebar">
+        <div id="tree-head" class="panel-head"></div>
+        <div id="tree"></div>
+      </aside>
+      <main id="canvas">
+        <div id="empty" class="empty" hidden>
+          <svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true">
+            <rect x="6" y="10" width="36" height="28" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
+            <path d="M6 16 L20 16 L23 12 L6 12 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M18 27 L24 27 M21 24 L21 30" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <div id="empty-title" class="empty-title"></div>
+          <div id="empty-sub" class="empty-sub"></div>
+          <div class="empty-actions" id="empty-actions"></div>
+        </div>
+        <div id="rows"></div>
+        <div id="canvas-actions"></div>
+        <div id="build-bar" hidden></div>
+      </main>
+    </div>
+
+    <footer class="hintbar" id="hintbar"></footer>
+
+    <!-- Load order = dependency order (classic scripts share globals):
+         strings -> ui -> api -> session -> library/canvas -> controls -> boot -->
+    <script src="/src/i18n.js"></script>
+    <script src="/src/ui.js"></script>
+    <script src="/src/api.js"></script>
+    <script src="/src/session.js"></script>
+    <script src="/src/library.js"></script>
+    <script src="/src/canvas.js"></script>
+    <script src="/src/controls.js"></script>
+    <script src="/src/boot.js"></script>
+  </body>
+</html>

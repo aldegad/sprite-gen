@@ -1,0 +1,291 @@
+"""detect_pixel_pitch 를 합성 정답 데이터로 고정한다.
+
+논리 픽셀아트를 정수 배율 k 로 NEAREST 업스케일하면 참 피치는 정확히 k 다.
+예전 구현은 `w = 1 if p >= 8 else 0` 때문에 k=8,10,12,14 에서 약수 k/2 를
+반환했다 (창이 열린 참 피치의 우연 기대치가 3/p 로 부풀어, 창이 닫힌 약수에
+졌다). 이 테스트가 그 회귀를 막는다.
+"""
+import random
+
+import pytest
+from PIL import Image
+
+from sprite_gen.frames.extract import (
+    _best_phase,
+    detect_pixel_grid,
+    detect_pixel_pitch,
+    grid_snap_downscale,
+    _grid_edges,
+    _grid_phase,
+)
+
+PALETTE = [
+    (240, 210, 175),
+    (60, 40, 30),
+    (40, 90, 180),
+    (230, 225, 200),
+    (150, 90, 50),
+    (20, 20, 20),
+]
+
+
+def _logical_art(width: int = 24, height: int = 40, seed: int = 11) -> Image.Image:
+    """비주기 무작위 도트. 주기적 패턴이면 약수도 '진짜' 격자가 되어 테스트가 무의미해진다."""
+    rng = random.Random(seed)
+    img = Image.new("RGB", (width, height))
+    px = img.load()
+    for y in range(height):
+        for x in range(width):
+            px[x, y] = rng.choice(PALETTE)
+    return img
+
+
+def test_integer_pitch_is_detected_exactly():
+    art = _logical_art()
+    for k in (4, 6, 8, 10, 12, 14, 16, 17, 20, 24, 32):
+        upscaled = art.resize((art.width * k, art.height * k), Image.NEAREST)
+        assert detect_pixel_pitch(upscaled) == k, f"pitch {k} misdetected"
+
+
+def test_divisor_is_not_preferred_over_true_pitch():
+    """k=12 에서 6 을 반환하던 회귀의 최소 재현."""
+    art = _logical_art()
+    upscaled = art.resize((art.width * 12, art.height * 12), Image.NEAREST)
+    assert detect_pixel_pitch(upscaled) == 12
+
+
+def test_phase_follows_crop_offset():
+    art = _logical_art()
+    k = 16
+    upscaled = art.resize((art.width * k, art.height * k), Image.NEAREST)
+    for offset in (0, 3, 7, 11):
+        cropped = upscaled.crop((offset, offset, upscaled.width, upscaled.height))
+        assert detect_pixel_pitch(cropped) == k
+        assert _grid_phase(cropped.convert("RGBA"), k)[0] == (-offset) % k
+
+
+def test_no_grid_falls_back_to_one():
+    """격자가 없는 사진 같은 입력은 1(스냅 안 함)로 관측 가능하게 떨어진다."""
+    rng = random.Random(3)
+    noise = Image.new("RGB", (200, 200))
+    px = noise.load()
+    for y in range(200):
+        for x in range(200):
+            px[x, y] = (rng.randrange(256), rng.randrange(256), rng.randrange(256))
+    assert detect_pixel_pitch(noise) == 1
+
+
+def _upscaled(art: Image.Image, scale: float) -> Image.Image:
+    """AI 도트처럼 블록 폭이 정수로 안 떨어지는 판을 만든다 (NEAREST 라 색은 원본 그대로)."""
+    big = art.resize((art.width * 64, art.height * 64), Image.NEAREST)
+    return big.resize((round(art.width * scale), round(art.height * scale)), Image.NEAREST)
+
+
+def _mismatch(a: Image.Image, b: Image.Image) -> int:
+    pa, pb = a.convert("RGB").load(), b.convert("RGB").load()
+    return sum(1 for y in range(a.height) for x in range(a.width) if pa[x, y] != pb[x, y])
+
+
+@pytest.mark.parametrize("scale", [12.0, 14.35, 16.0, 16.2, 17.24, 20.0, 23.7])
+def test_fractional_pitch_roundtrips_to_the_original_logical_art(scale):
+    """소수 배율로 늘린 도트를 스냅하면 원본 논리 픽셀이 그대로 돌아와야 한다.
+
+    정수 피치만 보던 예전에는 배율 16.2 / 17.24 에서 셀이 밀려 크기부터 틀렸다
+    (25x41 등). 측정은 소수, 격자선은 길이 등분 -> 결과는 항상 정수 격자다.
+    """
+    art = _logical_art()
+    upscaled = _upscaled(art, scale)
+    pitch, phase = detect_pixel_grid(upscaled)
+    snapped = grid_snap_downscale(upscaled, pitch, phase=phase)
+
+    assert snapped.size == art.size, f"scale {scale}: {snapped.size} != {art.size}"
+    assert abs(pitch[0] - scale) < 0.1, f"scale {scale}: detected {pitch[0]:.3f}"
+    assert abs(pitch[1] - scale) < 0.1, f"scale {scale}: detected {pitch[1]:.3f}"
+    # 소수 배율은 블록 경계가 화면 픽셀 중간에 걸리므로 1% 이내의 색 불일치는 허용한다.
+    assert _mismatch(snapped, art) <= art.width * art.height // 100
+
+
+def test_integer_pitch_still_snaps_exactly():
+    art = _logical_art()
+    for scale in (12, 16, 20):
+        upscaled = _upscaled(art, float(scale))
+        pitch, phase = detect_pixel_grid(upscaled)
+        snapped = grid_snap_downscale(upscaled, pitch, phase=phase)
+        assert snapped.size == art.size
+        assert _mismatch(snapped, art) == 0
+
+
+@pytest.mark.parametrize("fringe", [1, 7, 14, 20])
+def test_non_integer_bbox_does_not_stretch_the_grid(fringe):
+    """bbox 가 블록의 정수배가 아니어도 셀 폭은 참 피치를 지켜야 한다.
+
+    v1.56.2 회귀: `_grid_edges` 가 length 를 셀 개수로 등분했다. AA 프린지 때문에 bbox 가
+    27.46 블록이면 셀이 31.44px 로 늘어나(참 블록 30.92px) 칸마다 0.52px 씩 어긋났고,
+    오른쪽 끝에서 반 블록이 밀려 스냅 결과의 얼굴이 부서졌다 (주인공 chibi-8).
+    """
+    art = _logical_art(width=24, height=30)
+    k = 31
+    upscaled = art.resize((art.width * k, art.height * k), Image.NEAREST)
+    # 오른쪽에 블록의 정수배가 아닌 자투리를 붙인다 (AA 프린지 흉내)
+    padded = Image.new("RGB", (upscaled.width + fringe, upscaled.height), (20, 20, 20))
+    padded.paste(upscaled, (0, 0))
+
+    pitch, phase = detect_pixel_grid(padded)
+    edges = _grid_edges(padded.width, pitch[0], phase[0])
+    widths = [edges[i + 1] - edges[i] for i in range(len(edges) - 1)]
+
+    # 마지막 셀만 자투리를 흡수한다. 나머지는 전부 참 피치 ±1px.
+    for w in widths[:-1]:
+        assert abs(w - k) <= 1, f"cell width {w} drifted from pitch {k} (widths={widths})"
+
+
+def test_pitch_is_detected_per_axis():
+    """가로/세로 블록 크기가 다르면 축별로 따로 잡아야 한다.
+
+    비균등 리스케일된 생성물은 가로 블록과 세로 블록이 어긋난다 (chibi 베이스:
+    가로 30.38 / 세로 30.92). 한 피치를 두 축에 강제하면 한 축이 통째로 미끄러졌다
+    — 실측 가로 정렬률 11.7%.
+    """
+    art = _logical_art(width=20, height=24)
+    upscaled = art.resize((art.width * 24, art.height * 30), Image.NEAREST)
+
+    (pitch_x, pitch_y), _ = detect_pixel_grid(upscaled)
+
+    assert abs(pitch_x - 24) < 0.6, f"x pitch {pitch_x:.2f} != 24"
+    assert abs(pitch_y - 30) < 0.6, f"y pitch {pitch_y:.2f} != 30"
+
+
+def test_non_square_pitch_roundtrips():
+    art = _logical_art(width=20, height=24)
+    upscaled = art.resize((art.width * 24, art.height * 30), Image.NEAREST)
+    pitch, phase = detect_pixel_grid(upscaled)
+    snapped = grid_snap_downscale(upscaled, pitch, phase=phase)
+    assert snapped.size == art.size
+    assert _mismatch(snapped, art) == 0
+
+
+def test_wildly_disagreeing_axes_fall_back_to_the_trusted_axis():
+    """한 축의 검출이 무너지면(참 피치의 약수) 엣지가 많은 축의 피치를 쓴다.
+
+    down_carry_walk 실사고: 팔을 위로 든 포즈는 세로로 균일한 막대가 많아 세로 엣지가
+    적고, 그 축에서 참 피치 9 대신 약수 3 이 이겼다 (가로 9 / 세로 3). 스냅 결과가 짓눌렸다.
+    축별 피치가 1.5배 넘게 벌어지는 것은 물리적으로 불가능하다 — 비균등 리스케일도 2% 수준이다.
+    """
+    art = _logical_art(width=20, height=30)
+    upscaled = art.resize((art.width * 12, art.height * 12), Image.NEAREST)
+    # 아래쪽 절반을 단색으로 덮어 세로 엣지를 고갈시킨다 (긴 균일 막대 흉내)
+    flat = Image.new("RGB", (upscaled.width, upscaled.height // 2), (40, 90, 180))
+    upscaled.paste(flat, (0, upscaled.height // 2))
+
+    (pitch_x, pitch_y), _ = detect_pixel_grid(upscaled)
+
+    assert max(pitch_x, pitch_y) / min(pitch_x, pitch_y) <= 1.5, (
+        f"axes disagree wildly: {pitch_x:.2f} vs {pitch_y:.2f}"
+    )
+
+
+def test_synthetic_axis_collapse_is_repaired():
+    """한 축 피치를 인위로 약수까지 끌어내려도 최종 반환은 두 축이 붙어 있어야 한다."""
+    art = _logical_art(width=24, height=24)
+    upscaled = art.resize((art.width * 9, art.height * 9), Image.NEAREST)
+    (px, py), _ = detect_pixel_grid(upscaled)
+    assert abs(px - py) < 1.0, f"{px:.2f} vs {py:.2f}"
+    assert px > 5.0 and py > 5.0, "collapsed to a divisor"
+
+
+# --- 피치 패밀리 가드 (resolve_frame_pitch) -------------------------------
+#
+# per-frame own 피치는 합의 '패밀리'(비율 1.1) 이내에서만 진실이다. 하모닉/붕괴
+# 오검출을 own 으로 믿으면 한 프레임의 거대 native 가 conform_row_logical 의
+# 행 일관 배율을 끌어내려 행 전체가 붕괴한다 (실사고 hero_v7 up_run,
+# 2026-07-22 — resolve_frame_pitch docstring).
+
+def _resolve(own, consensus):
+    from sprite_gen.frames.extract import resolve_frame_pitch
+    return resolve_frame_pitch(own, consensus)
+
+
+def test_in_family_deviation_keeps_own_pitch():
+    # down_jump frame-0 실사고 (합의 13.00 vs 자체 12.50, 4%): own 이 진실
+    use, outlier = _resolve((12.5, 12.5), (13.0, 13.0))
+    assert use == (12.5, 12.5) and not outlier
+
+
+def test_collapsed_divisor_falls_back_to_consensus():
+    # up_run frame-2 실사고: own 3.00x3.00 은 참 피치의 붕괴 약수
+    use, outlier = _resolve((3.0, 3.0), (7.0, 8.86))
+    assert use == (7.0, 8.86) and outlier
+
+
+def test_harmonic_multiple_falls_back_to_consensus():
+    # up_run frame-0 실사고: own 9.00x8.70 — x 축이 패밀리 밖 (9/7 = 1.29)
+    use, outlier = _resolve((9.0, 8.7), (7.0, 8.86))
+    assert use == (7.0, 8.86) and outlier
+
+
+def test_single_axis_drift_beyond_family_falls_back():
+    # up_run frame-3 실사고: own y 8.00 vs 합의 8.86 (10.7%) — native 캡 초과로
+    # 행 전체 5% 축소를 유발했다. 한 축만 밖이어도 폴백한다.
+    use, outlier = _resolve((7.0, 8.0), (7.0, 8.86))
+    assert use == (7.0, 8.86) and outlier
+
+
+def test_inconclusive_consensus_keeps_own_pitch():
+    # 합의가 무근거(<2.0)면 own 이 유일한 측정이다 — 가드는 발동하지 않는다
+    use, outlier = _resolve((9.0, 9.0), (1.0, 1.0))
+    assert use == (9.0, 9.0) and not outlier
+
+
+@pytest.mark.parametrize("offset", [3, 11])
+def test_measured_phase_survives_an_offset_grid_where_the_histogram_phase_does_not(offset):
+    """참 위상이 비영인 판에서, 실측 위상만 논리 픽셀을 지켜낸다.
+
+    실사고 (수홍 2026-07-25, founder_v8 down_jump frame-0): 히스토그램 위상이 참 위상에서
+    pitch/2 까지 밀려 눈 4행이 3행으로 병합됐다(8칸→7칸). 여기서는 업스케일한 판을
+    잘라 참 위상을 강제로 비영으로 만든 뒤 두 위상을 나란히 돌린다 — 실측(k=13):
+
+      offset 3  → 히스토그램 위상은 불일치 377픽셀, 실측 위상은 0
+      offset 11 → 히스토그램 위상은 논리 크기가 23x39 로 **한 칸을 잃고**, 실측은 24x40 유지
+
+    앞의 라운드트립 테스트(오프셋 0)는 `_best_phase` 가 전 케이스 (0,0) 을 돌려주는 탓에
+    위상 오검출을 못 잡았다. 이 테스트가 그 구멍을 메운다.
+    """
+    art = _logical_art()
+    k = 13
+    upscaled = art.resize((art.width * k, art.height * k), Image.NEAREST)
+    cropped = upscaled.crop((offset, offset, upscaled.width, upscaled.height))
+
+    pitch, _histogram_phase = detect_pixel_grid(cropped)
+    measured = _best_phase(cropped.convert("RGBA"), pitch)
+    snapped = grid_snap_downscale(cropped, pitch, phase=measured)
+
+    # 논리 격자 칸 수는 잘린 첫 칸까지 세어 원본과 같아야 한다 — 한 칸이라도 잃으면
+    # 그 행/열의 디테일(눈 같은 2x4 덩어리)이 이웃 칸에 병합된 것이다.
+    # (offset 11 에서 히스토그램 위상은 23x39 로 한 칸을 잃는다.)
+    assert snapped.size == art.size, f"offset {offset}: {snapped.size} != {art.size}"
+    if offset == 3:
+        # 크기만으로는 offset 3 을 못 가른다(양쪽 다 24x40). 픽셀로 가른다 —
+        # 실측 위상 0 vs 히스토그램 위상 377 이 판별선이다.
+        assert _mismatch(snapped, art) == 0, (
+            f"offset {offset}: 실측 위상인데 픽셀이 어긋난다 ({_mismatch(snapped, art)})")
+
+
+@pytest.mark.parametrize("scale", [12.0, 14.35, 16.0, 17.24, 20.0])
+def test_measured_phase_roundtrips_like_the_detected_phase(scale):
+    """스냅 경로가 쓰는 위상(`_best_phase`)도 원본 논리 픽셀을 되돌려야 한다.
+
+    실사고 (수홍 2026-07-25, founder_v8 down_jump frame-0): 엣지 히스토그램이 낸
+    위상이 참 위상에서 pitch/2 만큼 밀려(13.00 에서 2.02 vs 8.12) 눈 4행이 3행으로
+    병합됐다. `refine_edges_to_boundaries` 는 ±pitch/3 안에서만 절단선을 당기므로
+    그 크기의 위상 오차는 복구되지 않는다. 그래서 스냅 루프는 위상을 실측
+    (`_best_phase`, 셀 균일도)으로 다시 고른다 — 이 테스트는 그 경로가 기존
+    라운드트립 보장을 깨지 않음을 고정한다.
+    """
+    art = _logical_art()
+    upscaled = _upscaled(art, scale)
+    pitch, _ = detect_pixel_grid(upscaled)
+    phase = _best_phase(upscaled.convert("RGBA"), pitch)
+    snapped = grid_snap_downscale(upscaled, pitch, phase=phase)
+
+    assert snapped.size == art.size, f"scale {scale}: {snapped.size} != {art.size}"
+    assert _mismatch(snapped, art) <= art.width * art.height // 100

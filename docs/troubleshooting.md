@@ -11,7 +11,7 @@
   재추출로 런 세대가 바뀐 뒤 도장 없이 raw JSON 을 직접 쓰면, 로더가 "재생성
   이전의 낡은 항목"으로 판정해 드랍한다 (per-state salvage — 의도된 방어).
 - **대처**: 에이전트 쓰기는 반드시 정식 경로로 —
-  `sprite_gen.curation.load_curation(run_dir)` 로 읽고 수정한 뒤
+  `sprite_gen.curate.curation.load_curation(run_dir)` 로 읽고 수정한 뒤
   `stamp_curation(run_dir, payload)` 를 거쳐 저장한다. 웹뷰 API(`/api/curation`)를
   쓰면 서버가 도장을 찍는다.
 

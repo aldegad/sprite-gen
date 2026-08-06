@@ -25,7 +25,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from sprite_gen.runio import atomic_write_text
+from sprite_gen.spec.runio import atomic_write_text
 
 from . import chroma as chroma_mod
 from .base import GenRequest, GenResult, verify_png, GenTimeoutError
