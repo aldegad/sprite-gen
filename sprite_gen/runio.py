@@ -37,10 +37,87 @@ from pathlib import Path, PurePath
 
 from PIL import Image
 
-try:  # Unix advisory locks; on a platform without fcntl the guards no-op (best-effort).
+try:  # Unix advisory locks. On a platform without fcntl we fall through to LockFileEx.
     import fcntl
 except ImportError:  # pragma: no cover - non-Unix
     fcntl = None
+
+
+# ── publish rwlock backend ───────────────────────────────────────────────
+# The rwlock needs one thing POSIX `flock` gives us: a cross-process lock with a
+# *shared* mode, so many readers coexist while one publisher excludes them all.
+# On Windows `fcntl` does not exist and `msvcrt.locking` is exclusive-only, so it
+# cannot express `LOCK_SH` at all — reader isolation would silently become mutual
+# exclusion between readers. `LockFileEx` is the one that maps: omit
+# LOCKFILE_EXCLUSIVE_LOCK for a shared lock, set it for an exclusive one, and both
+# block until granted, exactly like `flock` without LOCK_NB. Locks are per-handle
+# and per-byte-range, and each guard opens its own fd, so two guards on one run dir
+# contend the same way they do under flock — including between threads of one
+# process, which is how the existing isolation tests drive them.
+#
+# `_LOCK_IMPL` is the single availability switch both guards read. When it is None
+# there is no way to establish the lock and the guards must raise (see
+# `_rwlock_unavailable`) rather than degrade to a no-op.
+_LOCK_IMPL: str | None = "fcntl" if fcntl is not None else None
+
+if fcntl is None and os.name == "nt":  # pragma: no cover - exercised only on Windows
+    try:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        _LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
+
+        class _OVERLAPPED(ctypes.Structure):
+            _fields_ = [
+                ("Internal", wintypes.LPVOID),
+                ("InternalHigh", wintypes.LPVOID),
+                ("Offset", wintypes.DWORD),
+                ("OffsetHigh", wintypes.DWORD),
+                ("hEvent", wintypes.HANDLE),
+            ]
+
+        _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        _LockFileEx = _kernel32.LockFileEx
+        _LockFileEx.restype = wintypes.BOOL
+        _LockFileEx.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                                wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(_OVERLAPPED)]
+        _UnlockFileEx = _kernel32.UnlockFileEx
+        _UnlockFileEx.restype = wintypes.BOOL
+        # UnlockFileEx has no dwFlags — 5 params to LockFileEx's 6.
+        _UnlockFileEx.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.DWORD, ctypes.POINTER(_OVERLAPPED)]
+        _LOCK_IMPL = "LockFileEx"
+    except (ImportError, OSError, AttributeError):  # pragma: no cover - no usable kernel32
+        _LOCK_IMPL = None
+
+
+# One byte at offset 0. The sidecar carries no data — it is a lock token only — so the
+# range is arbitrary, but lock and unlock must name the identical range or UnlockFileEx
+# fails. Locking past EOF is legal on Windows, which matters: the sidecar is 0 bytes.
+_WIN_LOCK_BYTES = 1
+
+
+def _lock_fd(fd: int, *, exclusive: bool) -> None:
+    """Block until the shared/exclusive lock on `fd` is granted."""
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        return
+    overlapped = _OVERLAPPED()
+    flags = _LOCKFILE_EXCLUSIVE_LOCK if exclusive else 0
+    if not _LockFileEx(msvcrt.get_osfhandle(fd), flags, 0, _WIN_LOCK_BYTES, 0,
+                       ctypes.byref(overlapped)):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _unlock_fd(fd: int) -> None:
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return
+    overlapped = _OVERLAPPED()
+    if not _UnlockFileEx(msvcrt.get_osfhandle(fd), 0, _WIN_LOCK_BYTES, 0,
+                         ctypes.byref(overlapped)):
+        raise ctypes.WinError(ctypes.get_last_error())
 
 LOCK_FILENAME = ".sprite-gen.lock"
 # Sidecar (beside the run dir) reader/writer coordination lock for the publish swap.
@@ -181,8 +258,8 @@ def _rwlock_unavailable(run_dir: Path, why: str) -> "RWLockUnavailable":
         f"publish reader/writer isolation unavailable ({why}) for {run_dir}: cannot "
         f"guarantee a reader the complete old-or-new snapshot across a --force re-import / "
         f"re-extract swap. Refusing to proceed rather than expose a partial run (a failover "
-        f"must not change canonical truth). Run on a platform with fcntl advisory locks "
-        f"(macOS/Linux) and ensure the run dir's parent is writable for the "
+        f"must not change canonical truth). Locks use fcntl on macOS/Linux and LockFileEx on "
+        f"Windows; ensure the run dir's parent is writable for the "
         f".<name>{RWLOCK_SUFFIX} sidecar."
     )
 
@@ -192,22 +269,22 @@ def read_guard(run_dir: Path):
     """Shared (reader) lock on the run dir's publish rwlock. While a publish holds the
     exclusive lock for its content swap, a reader inside this guard blocks — so it never
     observes a half-published run (no old/new file mix, no missing file). Advisory
-    cross-process flock. If the platform has no fcntl or the sidecar can't be created, the
-    guard **fails loud** (`RWLockUnavailable`) rather than degrading to a no-op: a no-op
-    would let canonical truth change inside the read transaction, which the isolation
-    contract forbids."""
-    if fcntl is None:
-        raise _rwlock_unavailable(run_dir, "fcntl unavailable")
+    cross-process lock (flock / LockFileEx). If the platform has no lock backend or the
+    sidecar can't be created, the guard **fails loud** (`RWLockUnavailable`) rather than
+    degrading to a no-op: a no-op would let canonical truth change inside the read
+    transaction, which the isolation contract forbids."""
+    if _LOCK_IMPL is None:
+        raise _rwlock_unavailable(run_dir, "no file-lock backend")
     try:
         fd = os.open(_rwlock_path(run_dir), os.O_RDWR | os.O_CREAT, 0o644)
     except OSError as exc:
         raise _rwlock_unavailable(run_dir, f"cannot create rwlock sidecar: {exc}") from exc
     try:
-        fcntl.flock(fd, fcntl.LOCK_SH)
+        _lock_fd(fd, exclusive=False)
         try:
             yield
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            _unlock_fd(fd)
     finally:
         os.close(fd)
 
@@ -217,20 +294,20 @@ def publish_guard(run_dir: Path):
     """Exclusive (writer) lock on the run dir's publish rwlock — held only around the
     content swap so concurrent readers block briefly and never see a partial publish.
     Same sidecar file as read_guard. **Fails loud** (`RWLockUnavailable`, see read_guard)
-    if fcntl is unavailable or the sidecar can't be created — never a no-op, because a
-    no-op publish would swap canonical frames while readers are unguarded."""
-    if fcntl is None:
-        raise _rwlock_unavailable(run_dir, "fcntl unavailable")
+    if no lock backend is available or the sidecar can't be created — never a no-op, because
+    a no-op publish would swap canonical frames while readers are unguarded."""
+    if _LOCK_IMPL is None:
+        raise _rwlock_unavailable(run_dir, "no file-lock backend")
     try:
         fd = os.open(_rwlock_path(run_dir), os.O_RDWR | os.O_CREAT, 0o644)
     except OSError as exc:
         raise _rwlock_unavailable(run_dir, f"cannot create rwlock sidecar: {exc}") from exc
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        _lock_fd(fd, exclusive=True)
         try:
             yield
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            _unlock_fd(fd)
     finally:
         os.close(fd)
 
