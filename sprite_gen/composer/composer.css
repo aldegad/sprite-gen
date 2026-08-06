@@ -45,22 +45,29 @@ body {
 .status.ok { color: #16a34a; }
 .status.err { color: var(--danger); }
 
-button {
-  background: var(--panel);
-  color: var(--text);
+/* ── buttons: one component, variants change colour only (never size) ──
+   .btn is the single source for button shape — padding/height live here, so
+   no two buttons can diverge. --ghost/--accent/--dashed change colour/border
+   only. (This is the structural fix for the divergent-height defect.) */
+button { font: inherit; cursor: pointer; }  /* reset (also covers icon buttons) */
+
+.btn {
+  padding: 7px 14px;
+  font-size: 13px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 7px 14px;
-  cursor: pointer;
-  font-size: 13px;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  background: var(--panel);
+  color: var(--text);
   white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
-button:hover { background: var(--panel-2); border-color: #d3d8e0; }
-button.ghost { background: transparent; padding: 3px 8px; font-size: 12px; box-shadow: none; }
-button.ghost:hover { background: var(--panel-2); }
-button.accent { background: var(--accent); color: #fff; border-color: var(--accent); }
-button.accent:hover { background: #1d55d0; border-color: #1d55d0; }
+.btn:hover { background: var(--panel-2); border-color: #d3d8e0; }
+.btn--ghost { background: transparent; box-shadow: none; }
+.btn--ghost:hover { background: var(--panel-2); }
+.btn--accent { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn--accent:hover { background: #1d55d0; border-color: #1d55d0; }
+.btn--dashed { display: block; width: 100%; border-style: dashed; color: var(--muted); background: transparent; box-shadow: none; }
+.btn--dashed:hover { background: var(--panel-2); color: var(--text); }
 
 /* ── layout ─────────────────────────────────────────────────────── */
 #layout {
@@ -247,7 +254,7 @@ button.accent:hover { background: #1d55d0; border-color: #1d55d0; }
 .cell:hover .cell-del { display: block; }
 .cell .cell-del:hover { color: var(--danger); }
 
-#add-row { display: block; width: 100%; border-style: dashed; color: var(--muted); }
+#canvas-actions { margin-top: 2px; }
 
 #build-bar {
   display: flex;

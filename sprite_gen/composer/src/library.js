@@ -1,23 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-// composer/tree.js — the read-only library file tree (left sidebar).
+// composer/library.js — the read-only library file tree (left sidebar).
 //
-// Lazy: a folder's children are fetched only when it is first expanded. Image
-// rows are drag sources; the drag payload is the file's absolute path + name,
-// which a canvas row consumes as a reference (state.js addCell). The tree never
-// mutates the folder — it only reads.
-
-function twistSvg() {
-  return '<svg class="twist" viewBox="0 0 16 16" aria-hidden="true">'
-    + '<path d="M6 4l5 4-5 4" fill="none" stroke="currentColor" stroke-width="1.8" '
-    + 'stroke-linecap="round" stroke-linejoin="round"/></svg>';
-}
+// Lazy: a folder's children are fetched only when first expanded. Image rows are
+// drag sources; the payload is the file's absolute path + name, which a canvas row
+// consumes as a reference. The library never mutates the folder — it only reads.
 
 function makeDirNode(entry) {
   const node = document.createElement("div");
   node.className = "tree-node";
   const row = document.createElement("div");
   row.className = "tree-row dir";
-  row.innerHTML = twistSvg() + `<span class="name"></span>`;
+  row.innerHTML = icon("twist") + `<span class="name"></span>`;
   row.querySelector(".name").textContent = entry.name;
   const children = document.createElement("div");
   children.className = "tree-children";
@@ -25,7 +18,7 @@ function makeDirNode(entry) {
   let loaded = false;
 
   row.addEventListener("click", async () => {
-    const open = !children.hidden ? false : true;
+    const open = children.hidden;
     if (open && !loaded) {
       try {
         const data = await apiBrowse(entry.path);
