@@ -19,7 +19,15 @@ import subprocess
 import time
 from pathlib import Path
 
-from .base import GEN_TIMEOUT_SECONDS, GenRequest, GenTimeoutError, ProviderRun, provider_subprocess_env, verify_png
+from .base import (
+    GEN_TIMEOUT_SECONDS,
+    GenRequest,
+    GenTimeoutError,
+    ProviderRun,
+    provider_binary,
+    provider_subprocess_env,
+    verify_png,
+)
 
 
 def _build_prompt(request: GenRequest) -> str:
@@ -59,7 +67,7 @@ class GrokProvider:
     def generate(self, request: GenRequest, workdir: Path) -> ProviderRun:
         request.raw.parent.mkdir(parents=True, exist_ok=True)
         cmd = [
-            "grok",
+            provider_binary("grok"),
             "-p",
             _build_prompt(request),
             "--output-format",
@@ -80,6 +88,7 @@ class GrokProvider:
         # identity regardless of the engine's current hook config.
         try:
             completed = subprocess.run(cmd, capture_output=True, text=True,
+                                       encoding="utf-8", errors="replace",
                                        env=provider_subprocess_env(), timeout=GEN_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
             raise GenTimeoutError(

@@ -26,7 +26,15 @@ import subprocess
 import time
 from pathlib import Path
 
-from .base import GEN_TIMEOUT_SECONDS, GenRequest, GenTimeoutError, ProviderRun, provider_subprocess_env, verify_png
+from .base import (
+    GEN_TIMEOUT_SECONDS,
+    GenRequest,
+    GenTimeoutError,
+    ProviderRun,
+    provider_binary,
+    provider_subprocess_env,
+    verify_png,
+)
 
 # codex carries the inline base64 on a version-specific record. Both are
 # first-class canonical records (not a fallback) — read whichever the running
@@ -150,7 +158,7 @@ class CodexProvider:
     def generate(self, request: GenRequest, workdir: Path) -> ProviderRun:
         gen_dir = os.path.expanduser("~/.codex/generated_images")
         cmd = [
-            "codex",
+            provider_binary("codex"),
             "exec",
             "--json",
             "--sandbox",
@@ -177,7 +185,8 @@ class CodexProvider:
         # channel (see base.provider_subprocess_env).
         try:
             completed = subprocess.run(
-                cmd, input=prompt, capture_output=True, text=True, env=provider_subprocess_env(),
+                cmd, input=prompt, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", env=provider_subprocess_env(),
                 timeout=GEN_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:

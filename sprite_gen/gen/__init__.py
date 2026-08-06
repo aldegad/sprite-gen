@@ -28,7 +28,7 @@ from typing import Any
 from sprite_gen.runio import atomic_write_text
 
 from . import chroma as chroma_mod
-from .base import GenRequest, GenResult, verify_png, GenTimeoutError
+from .base import GenRequest, GenResult, verify_png, GenTimeoutError, provider_binary
 from .codex_provider import CodexProvider
 from .grok_provider import GrokProvider
 
@@ -65,9 +65,11 @@ def _codex_available() -> tuple[bool, str]:
         return False, "codex CLI not found on PATH"
     try:
         completed = subprocess.run(
-            ["codex", "login", "status"],
+            [provider_binary("codex"), "login", "status"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_CODEX_PROBE_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.SubprocessError) as exc:

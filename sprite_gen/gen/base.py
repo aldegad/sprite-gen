@@ -11,6 +11,7 @@ path or a "done" string (No Silent Fallback).
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -53,6 +54,22 @@ def provider_subprocess_env() -> dict[str, str]:
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(_ORCHESTRATOR_SESSION_ENV_PREFIXES)}
     return env
+
+
+def provider_binary(name: str) -> str:
+    """Resolve a provider CLI name to an executable path for `subprocess.run`.
+
+    POSIX resolves a bare `codex` from PATH inside the exec call, so providers
+    could pass the bare name. Windows cannot: `CreateProcess` appends only `.exe`,
+    never the `.cmd`/`.bat` shims that npm installs (`codex.CMD`), so a bare name
+    dies with `FileNotFoundError: [WinError 2]` before the engine is ever reached.
+    `shutil.which` honours PATHEXT on Windows and returns the absolute path on
+    POSIX, so this is the single resolution point for both.
+
+    Falls back to the bare name when nothing is found, leaving the spawn to fail
+    with the provider's own "not on PATH" reason rather than a resolver error.
+    """
+    return shutil.which(name) or name
 
 
 def verify_png(path: Path) -> int:
