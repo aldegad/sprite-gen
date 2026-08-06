@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // composer/canvas.js — the row composition canvas (right main).
 //
-// Each row maps 1:1 to a run-dir state. Files dropped from the tree become
-// reference cells (state.js). Rendering is straightforward re-draw from the
-// session; nothing here writes to disk.
-
-function delSvg() {
-  return '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">'
-    + '<path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" '
-    + 'stroke-width="1.8" stroke-linecap="round"/></svg>';
-}
+// Each row maps 1:1 to a run-dir state. Files dropped from the library become
+// reference cells (session.js). Rendering is a straightforward re-draw from the
+// session; nothing here writes to disk. Controls come from ui.js (icon buttons).
 
 function makeCell(row, cell) {
   const el = document.createElement("div");
@@ -22,13 +16,10 @@ function makeCell(row, cell) {
   cap.className = "cap";
   cap.textContent = cell.name;
   cap.title = cell.path;
-  const del = document.createElement("button");
-  del.className = "cell-del";
-  del.type = "button";
-  del.innerHTML = delSvg();
-  del.addEventListener("click", () => {
-    removeCell(row.id, cell.path);
-    renderRows();
+  const del = iconButton({
+    name: "close",
+    cls: "cell-del",
+    onClick: () => { removeCell(row.id, cell.path); renderRows(); },
   });
   el.appendChild(img);
   el.appendChild(cap);
@@ -56,14 +47,11 @@ function makeRow(row) {
   count.textContent = t("frames", row.cells.length);
   const spacer = document.createElement("span");
   spacer.className = "spacer";
-  const del = document.createElement("button");
-  del.className = "row-del";
-  del.type = "button";
-  del.title = t("deleteRow");
-  del.innerHTML = delSvg();
-  del.addEventListener("click", () => {
-    deleteRow(row.id);
-    renderRows();
+  const del = iconButton({
+    name: "close",
+    cls: "row-del",
+    title: t("deleteRow"),
+    onClick: () => { deleteRow(row.id); renderRows(); },
   });
   head.appendChild(nameInput);
   head.appendChild(count);
@@ -120,15 +108,15 @@ function renderRows() {
 // hiding the "open curation" button here retires a stale build: after an edit
 // the last run dir is superseded, and doBuild() re-shows the button on success.
 function updateBuildBar() {
-  const hasFrames = session.rows.some((r) => r.cells.length > 0);
-  document.getElementById("build-bar").hidden = !(session.mount && hasFrames);
+  document.getElementById("build-bar").hidden = !(session.mount && sessionHasFrames());
   document.getElementById("open-cur-btn").hidden = true;
   document.getElementById("build-result").textContent = "";
 }
 
+// Toggle the blank/mounted view. The add-row button's visibility is owned by
+// controls.renderCanvasActions (it renders it hidden until a folder is open).
 function refreshCanvasChrome() {
   const mounted = !!session.mount;
   document.getElementById("empty").hidden = mounted;
-  document.getElementById("add-row").hidden = !mounted;
   document.getElementById("rows").hidden = !mounted;
 }

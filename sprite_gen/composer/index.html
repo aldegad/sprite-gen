@@ -8,16 +8,16 @@
     <link rel="stylesheet" href="/composer.css" />
   </head>
   <body>
+    <!-- Skeleton only: interactive controls are rendered into the mount points
+         (#toolbar, #empty-actions, #canvas-actions, #build-bar) by controls.js,
+         so a control is defined once and never duplicated as markup. -->
     <header class="topbar">
       <div class="title">
         <strong>sprite-gen</strong> <span id="t-title"></span>
         <span id="mount-label" class="muted"></span>
       </div>
-      <div class="actions">
+      <div class="actions" id="toolbar">
         <span id="status" class="status"></span>
-        <button id="mount-img-btn" type="button"></button>
-        <button id="mount-btn" type="button"></button>
-        <button id="lang-toggle" type="button" class="ghost"></button>
       </div>
     </header>
 
@@ -35,27 +35,25 @@
           </svg>
           <div id="empty-title" class="empty-title"></div>
           <div id="empty-sub" class="empty-sub"></div>
-          <div class="empty-actions">
-            <button id="empty-mount" type="button"></button>
-            <button id="empty-mount-img" type="button" class="ghost"></button>
-          </div>
+          <div class="empty-actions" id="empty-actions"></div>
         </div>
         <div id="rows"></div>
-        <button id="add-row" type="button" hidden></button>
-        <div id="build-bar" hidden>
-          <button id="build-btn" class="accent" type="button"></button>
-          <button id="open-cur-btn" type="button" hidden></button>
-          <span id="build-result" class="build-result"></span>
-        </div>
+        <div id="canvas-actions"></div>
+        <div id="build-bar" hidden></div>
       </main>
     </div>
 
     <footer class="hintbar" id="hintbar"></footer>
 
+    <!-- Load order = dependency order (classic scripts share globals):
+         strings -> ui -> api -> session -> library/canvas -> controls -> boot -->
     <script src="/src/i18n.js"></script>
-    <script src="/src/state.js"></script>
-    <script src="/src/tree.js"></script>
+    <script src="/src/ui.js"></script>
+    <script src="/src/api.js"></script>
+    <script src="/src/session.js"></script>
+    <script src="/src/library.js"></script>
     <script src="/src/canvas.js"></script>
+    <script src="/src/controls.js"></script>
     <script src="/src/boot.js"></script>
   </body>
 </html>
