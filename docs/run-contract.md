@@ -29,8 +29,8 @@ canonical files, not hidden imports.
 | Extract | `extract_sprite_row_frames.py` | `raw/<state>.png` | on success: `frames/<state>/frame-N.png` (+ `.plain.png` twin on pixel-unfake runs), `frames/frames-manifest.json`; on failure: nothing in `frames/`, `extract-failure.json` instead (§6) |
 | Curate (opt) | `sprite-gen curation` (`serve_curation.py`) + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
-| Recolor (opt) | `sprite-gen recolor` / `recolor-palette` (`sprite_gen/recolor.py`) | base sheet (default `sprite-sheet-alpha.png`) + recolor spec | `variants/<name>.png`, optional `variants/<name>.manifest.json`, `variants/recolor.report.json` |
-| Layer bake (opt) | `sprite-gen compose-layers` (`sprite_gen/compose_layers.py`) | `frames/` + `curation.json` + the request's `rig` / `layers` | `layers/<name>.png`, `layers/<name>.manifest.json`, `layers/layers.report.json` (published as one set) |
+| Recolor (opt) | `sprite-gen recolor` / `recolor-palette` (`sprite_gen/effects/recolor.py`) | base sheet (default `sprite-sheet-alpha.png`) + recolor spec | `variants/<name>.png`, optional `variants/<name>.manifest.json`, `variants/recolor.report.json` |
+| Layer bake (opt) | `sprite-gen compose-layers` (`sprite_gen/compose/compose_layers.py`) | `frames/` + `curation.json` + the request's `rig` / `layers` | `layers/<name>.png`, `layers/<name>.manifest.json`, `layers/layers.report.json` (published as one set) |
 | QA | `preview_animation.py` | `frames/` | `qa/<state>-contact.png`, `qa/<state>.gif` |
 | Inspect | `inspect_sprite_run.py` | `sprite-request.json`, `raw/` or `frames/` | `sprite-inspect.report.json` |
 | Score | `score_sprite_run.py` | `sprite-inspect.report.json` | `sprite-score.report.json`, correction hints |
@@ -60,7 +60,7 @@ not restate it elsewhere; point here.
   references/layout-guides/<state>.png   # per-state layout guide (motion only)
   references/anchors/<dir>-anchor-x8.png # DERIVED CACHE: the curated direction-anchor frame, baked
                                          #   ×8 NEAREST for row generation. `sprite-gen anchor`
-                                         #   (SSoT sprite_gen/anchor.py) rewrites it on demand —
+                                         #   (SSoT sprite_gen/curate/anchor.py) rewrites it on demand —
                                          #   never hand-edit it and never treat it as truth.
   references/imported/<group>/           # imported-run generation material → chips (§4); real runs use raw/ anchors instead
   prompts/<state>.txt                # generated row prompt (frame count, safe margin, anchor lock)
@@ -73,7 +73,7 @@ not restate it elsewhere; point here.
                                      #   silently ships the un-edited image (see §2-c).
   # ── 파일 택소노미 (layout: taxonomy/v1 — 신규 런 기본, 수홍 확정 2026-07-14) ──
   # 방향 계약(directions) 런은 위 두 경로가 방향/자세 폴더로 나뉜다. 상태 ID 는 그대로
-  # <direction>_<pose>, 파일 경로만 분리. 리졸버 SSoT = sprite_gen/layout.py.
+  # <direction>_<pose>, 파일 경로만 분리. 리졸버 SSoT = sprite_gen/spec/layout.py.
   # 이미 추출된 프레임을 읽는 소비자는 frames-manifest 의 row.files 경로를 따른다
   # (row_frame_rel) — 패턴 조립 금지. layout 필드 없는 legacy 런은 flat 유지.
   # 프로젝트별 정비 방식이 지침으로 오면 지침이 우선한다.
@@ -250,7 +250,7 @@ Inside this repo the compose/GIF/atlas paths already read `frames/` *together wi
 ## 3. Curation-view display contract
 
 `serve_curation.py` serves one run dir and returns the run snapshot at `GET /api/run`.
-The webview (`sprite_gen/curator/*`) renders exactly four contract elements from that
+The webview (`sprite_gen/serve/curator/*`) renders exactly four contract elements from that
 payload. **A view that omits any element it has the data for is a broken view** — the
 whole point is that the experience does not vary by who launched it.
 
@@ -258,7 +258,7 @@ whole point is that the experience does not vary by who launched it.
 |---|---|---|---|
 | **Base reference row** | `base-source.*` exists | `baseUrl` (null if absent) | Top row, pure image — no preview/select UI. Identity truth, always visible. |
 | **Generation-material chips** | the state has resolvable material | `states[].refs[]` — each `{role, name, url}` | Per-state header shows *what generated this row*. `role ∈ {anchor, basis, guide}`, labelled `방향 앵커` / `basis row` / `레이아웃 가이드` (i18n key `ref_<role>`). Only run-dir files that actually exist appear — **except the anchor chip** (`anchorFrame: true`), which is a live bake (`/api/anchor?direction=<dir>`) named `<state>#<index>`, because the on-disk `references/anchors/*.png` is a derived cache that goes stale the moment the user edits the anchor frame. |
-| **Anchor frame** | request has a `directions` block | `directionGroups[].anchorFrame` `{state, index, source}` + `anchorError`/`anchorErrorCode`/`anchorPending`/`anchorUrl` · `curation.anchors` | The one curated instance that is this direction's identity for generating its other rows. `source: "picked"` = pinned by the human (frame card pin button → `curation.anchors.<dir>`), `"default"` = the anchor row's sequence head. The anchor card carries an `앵커` badge (tinted when pinned); an unresolvable pin surfaces `anchorError` in the status bar instead of silently reverting — archived frame (`pick-missing`) or **regenerated row** (`pick-stale-generation`: the pin carries the pinned row's `state_revision`, so a re-derived row makes the pin stale rather than silently pointing it at a different image). **`anchorPending: true` is not an error** — the anchor row is not generated yet (the normal mid-work state), so the view must not colour it as a failure. Resolution SSoT = `sprite_gen/anchor.py`. |
+| **Anchor frame** | request has a `directions` block | `directionGroups[].anchorFrame` `{state, index, source}` + `anchorError`/`anchorErrorCode`/`anchorPending`/`anchorUrl` · `curation.anchors` | The one curated instance that is this direction's identity for generating its other rows. `source: "picked"` = pinned by the human (frame card pin button → `curation.anchors.<dir>`), `"default"` = the anchor row's sequence head. The anchor card carries an `앵커` badge (tinted when pinned); an unresolvable pin surfaces `anchorError` in the status bar instead of silently reverting — archived frame (`pick-missing`) or **regenerated row** (`pick-stale-generation`: the pin carries the pinned row's `state_revision`, so a re-derived row makes the pin stale rather than silently pointing it at a different image). **`anchorPending: true` is not an error** — the anchor row is not generated yet (the normal mid-work state), so the view must not colour it as a failure. Resolution SSoT = `sprite_gen/curate/anchor.py`. |
 | **Pixel grid** | **always** — the measurement cannot fail | `states[].pixelScale` (≥1, never null) + `pixelUnfake{label,scale}` + `states[].frames[].contentBox` | **Per-state** checkbox on every row's refs strip; the top checkbox is a **toggle-all** (indeterminate when mixed). Display only, never persisted. `pixelScale` is an exact test (largest k where the frame is only uniform k×k blocks; k=1 is trivially true — identity), so "unknown grid" does not exist and nothing gates on it. On the pixel-unfake view: the output raster (request scale on `fit.pixel_unfake` runs, measured k labelled `auto` otherwise). On the original (plain) view: the **final correspondence grid** — green, one cell = one result pixel. (The stage-1 cut lattice in `frames-manifest input_grids` stays diagnostic-only.) An identity grid (k=1) is a true grid, not a missing one — density is a property of the fact, not a reason to hide the control. |
 | **Direction groups** | request has a `directions` block | `directionGroups[]` — `{direction, anchor, states, anchorFrame, anchorError}` + mirror entries `{direction, mirrorOf}` | States render grouped per direction with the direction anchor first (badge `방향 앵커`); mirrored directions render as an informational strip (`<src> 런타임 미러 — 생성 없음`), never as silently missing rows. Runs without the block keep the flat request order. |
 | **Original-quality toggle** | **always** — every row has the control | `states[].frames[].plainUrl` + `fitPixelUnfake` | **Per-state** checkbox on every row's refs strip + zoom modal (same contract, no per-surface gating). Twin rows: on = canonical `frame-N.png`, off = `plainUrl` (hi-res `orig/` else `.plain.png`) — a **source** switch, persisted per state. Twin-less rows: on = the display renderer re-quantizes by the measured grid `pixelScale` (the same k the grid overlay draws — grid-based pixel-unfake; k=1 is identity), a **display lens**, never persisted (persisting would make the bake resolver demand a `.plain` variant that does not exist). The top-right checkbox is a toggle-all (indeterminate when mixed). |

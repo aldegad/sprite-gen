@@ -40,6 +40,12 @@ dev = [
     # importable in the test environment — build isolation puts it somewhere the tests cannot
     # see, and a modern `python -m venv` no longer provides it. Same floor as build-system.
     "setuptools>=77",
+    # Many tests shell out to a pipeline step as a subprocess; a wrong path or a
+    # server that never returns would otherwise hang the whole suite silently.
+    # A per-test timeout turns that into a named failure. `signal` method (below)
+    # is required — the default `thread` method cannot interrupt a blocked
+    # subprocess.wait(), which is exactly the case that hangs here.
+    "pytest-timeout>=2.3",
 ]
 
 # The console script is what removes the "which python?" question: pip writes it
@@ -55,6 +61,16 @@ Repository = "https://github.com/aldegad/sprite-gen"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Tests are grouped into per-domain folders (tests/<domain>/) so a domain can be
+# run alone (`pytest tests/effects`). conftest.py stays at the tests/ root and is
+# imported by name (`from conftest import run_script`) from every subfolder, so the
+# tests/ dir must be on sys.path.
+pythonpath = ["tests"]
+# A hung subprocess test must become a named failure, not a silent stall. signal
+# method (SIGALRM) is required — thread method cannot interrupt a blocked
+# subprocess.wait(). 120s is generous for the extract/compose subprocess tests.
+timeout = 120
+timeout_method = "signal"
 
 # The pipeline ships an importable sprite_gen package. The canonical invocation is the
 # console script declared above (`sprite-gen <tool>`); `scripts/<tool>.py` survives as a
@@ -80,4 +96,4 @@ include = ["sprite_gen*"]
 # not feared: adding curator/src/deep/new.js under the old patterns built a wheel without it.
 # `curator/**/*` derives the answer from the filesystem, the same fix as packages.find above.
 [tool.setuptools.package-data]
-sprite_gen = ["curator/**/*", "composer/**/*"]
+sprite_gen = ["serve/curator/**/*", "serve/composer/**/*"]

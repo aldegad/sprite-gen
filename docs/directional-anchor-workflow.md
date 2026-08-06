@@ -115,7 +115,7 @@ in one image.
    leaks the pre-approval look into every downstream row. (수홍 확정 2026-07-19,
    결정론 커맨드화 2026-07-25.)
 
-   **Which frame is the anchor** (`sprite_gen/anchor.py` owns the rule):
+   **Which frame is the anchor** (`sprite_gen/curate/anchor.py` owns the rule):
 
    - default: the **curated sequence head** of `<dir>_<anchor_suffix>` — the
      first frame of the played sequence, *not* index 0. Deleting/reordering

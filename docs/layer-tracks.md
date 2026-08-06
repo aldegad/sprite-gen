@@ -11,9 +11,9 @@
 > the layer vocabulary and its boundaries; where it touches the run-dir tree or the
 > stage table, `run-contract.md` still wins.
 >
-> Declaration validation is implemented by [`../sprite_gen/layers.py`](../sprite_gen/layers.py)
+> Declaration validation is implemented by [`../sprite_gen/compose/layers.py`](../sprite_gen/compose/layers.py)
 > and pinned by `tests/test_layer_contract.py`; the composite bake is
-> [`../sprite_gen/compose_layers.py`](../sprite_gen/compose_layers.py), pinned by
+> [`../sprite_gen/compose/compose_layers.py`](../sprite_gen/compose/compose_layers.py), pinned by
 > `tests/test_layer_compose.py`.
 
 ## 0. One sentence
@@ -72,7 +72,7 @@ boundary instead of a memory.
 - **B2 — there is no central request schema.** Every stage reads the keys it wants
   (`request.get("fit")`, `request["cell"]`, …); `runio.load_request` only normalizes
   retired keys in memory (it never writes — `run-contract.md` §2-b-2). **Consequence:** layer validation lives in exactly one module
-  (`sprite_gen/layers.py`) that every layer-aware entry point calls, instead of
+  (`sprite_gen/compose/layers.py`) that every layer-aware entry point calls, instead of
   per-stage key checks that drift.
 - **B3 — `frames/` is a derived cache with one writer.** `heal_run` re-derives a row
   from `raw/` whenever the engine revision moves, and a row with no `raw/` is kept
@@ -242,7 +242,7 @@ rather than choosing which body frames go unaccompanied.
 
 ## 4. Composition contract (deterministic)
 
-The composer ([`../sprite_gen/compose_layers.py`](../sprite_gen/compose_layers.py),
+The composer ([`../sprite_gen/compose/compose_layers.py`](../sprite_gen/compose/compose_layers.py),
 `compose_layers.bake(run_dir, names=None)`) bakes output frame `i` as:
 
 1. Start from a fully transparent cell of the run's `cell` geometry.
@@ -362,7 +362,7 @@ consuming a pre-baked combination for every direction × action pair.
 
 ## 6. Validation contract
 
-`sprite_gen.layers.validate_layer_request(request)` returns **every** violation, in a
+`sprite_gen.compose.layers.validate_layer_request(request)` returns **every** violation, in a
 deterministic order; `require_valid_layer_request` raises with all of them at once.
 It is filesystem-free, so it runs before a run dir is touched. Rejections:
 
@@ -423,7 +423,7 @@ $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen compose-layers \
   --run-dir <run> --names down_walk_watering,down_idle_watering
 ```
 
-The `sprite-gen compose-layers` subcommand, the `-m sprite_gen.compose_layers` module
+The `sprite-gen compose-layers` subcommand, the `-m sprite_gen.compose.compose_layers` module
 form and the `scripts/compose_layers.py` wrapper are three launch forms of one declaration
 (`compose_layers.add_arguments` / `.run`), and `compose_layers.bake(run_dir,
 names=None)` is the library form the three share.

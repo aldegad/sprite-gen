@@ -53,7 +53,7 @@ $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/sprite-gen curation \
 있는 호출자를 위한 래퍼:
 
 ```bash
-$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python -m sprite_gen.serve_curation --run-dir <run-dir>
+$ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python -m sprite_gen.serve.serve_curation --run-dir <run-dir>
 $ALEX_EXTENSIONS_DIR/sprite-gen/.venv/bin/python $ALEX_EXTENSIONS_DIR/sprite-gen/scripts/serve_curation.py --run-dir <run-dir>
 ```
 
@@ -143,7 +143,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
 
 ## Curation Sidecar (`curation.json`)
 
-`curation.json` is an optional, non-destructive sidecar written by the curation webview (`sprite_gen/serve_curation.py`) and consumed by `compose_sprite_atlas.py` and `compose_selected_cycle.py`. It records a human selection plus a per-frame affine transform; the original frame PNGs are never modified.
+`curation.json` is an optional, non-destructive sidecar written by the curation webview (`sprite_gen/serve/serve_curation.py`) and consumed by `compose_sprite_atlas.py` and `compose_selected_cycle.py`. It records a human selection plus a per-frame affine transform; the original frame PNGs are never modified.
 
 ```json
 {
@@ -205,7 +205,7 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
   되므로 조용히 따라가지 않고, 지정을 지워 기본값으로 되돌리지도 않는다. 그 상태의 생성은
   `pick-stale-generation` 으로 fail-loud 하고 뷰가 이유를 띄운다(재지정 한 번으로 풀린다).
   전 행이 드롭돼도 지정은 남는다 — 남아 있어야 오류를 낼 수 있다.
-  해석·베이크 SSoT 는 `sprite_gen/anchor.py`, 생성에 붙는 파일은 그 함수가 매번 다시 굽는
+  해석·베이크 SSoT 는 `sprite_gen/curate/anchor.py`, 생성에 붙는 파일은 그 함수가 매번 다시 굽는
   파생 캐시 `references/anchors/<dir>-anchor-x8.png` 이고, 뷰의 앵커 칩은 낡을 수 없게
   `GET /api/anchor?direction=<dir>` 라이브 베이크를 본다. 사라진 인스턴스를 가리키는 지정은
   생성 시 fail-loud (조용한 기본값 복귀 금지) — 뷰는 로드 시 그 이유를 상태줄에 띄운다.

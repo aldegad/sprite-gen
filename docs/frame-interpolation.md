@@ -1,6 +1,6 @@
 # AI Frame Interpolation (in-betweens)
 
-`sprite_gen/interpolate.py` (`scripts/interpolate_frames.py`) makes an **in-between
+`sprite_gen/effects/interpolate.py` (`scripts/interpolate_frames.py`) makes an **in-between
 frame** between two frames of one state — a half-closed eyelid between open/closed
 idle frames, a mid-swing arm between windup and strike.
 
