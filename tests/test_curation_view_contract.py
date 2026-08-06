@@ -438,16 +438,21 @@ def test_inspect_reader_isolated_from_concurrent_commit(fixture_run_dir):
     assert outcome["at"] >= released_at, "inspect returned before the commit released"
 
 
-def test_publish_guards_fail_loud_without_fcntl(tmp_path, monkeypatch):
-    """Where advisory locks can't be established (no fcntl), read_guard/publish_guard must
-    RAISE, not degrade to a no-op. A no-op guard is a failover that changes canonical truth
-    (a reader could see a half-published run), which the isolation contract forbids — so the
-    guarded code refuses to run rather than serve/publish a partial run."""
+def test_publish_guards_fail_loud_without_a_lock_backend(tmp_path, monkeypatch):
+    """Where advisory locks can't be established (no fcntl and no LockFileEx),
+    read_guard/publish_guard must RAISE, not degrade to a no-op. A no-op guard is a failover
+    that changes canonical truth (a reader could see a half-published run), which the
+    isolation contract forbids — so the guarded code refuses to run rather than serve/publish
+    a partial run.
+
+    Patches `_LOCK_IMPL`, the single availability switch, rather than `fcntl`: on Windows
+    `fcntl` is *expected* to be absent while locking still works through LockFileEx, so
+    clearing `fcntl` alone no longer models 'no isolation available'."""
     from sprite_gen import runio
 
     run = tmp_path / "run"
     run.mkdir()
-    monkeypatch.setattr(runio, "fcntl", None)
+    monkeypatch.setattr(runio, "_LOCK_IMPL", None)
 
     for guard in (runio.read_guard, runio.publish_guard):
         with pytest.raises(runio.RWLockUnavailable):
