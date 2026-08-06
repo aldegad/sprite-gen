@@ -249,6 +249,18 @@ button.accent:hover { background: #1d55d0; border-color: #1d55d0; }
 
 #add-row { display: block; width: 100%; border-style: dashed; color: var(--muted); }
 
+#build-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.build-result { font-size: 12.5px; color: var(--muted); }
+.build-result.ok { color: #16a34a; }
+.build-result.err { color: var(--danger); }
+
 .hintbar {
   height: 34px;
   display: flex;

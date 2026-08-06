@@ -34,11 +34,19 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import re
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
 import webbrowser
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
+
+from sprite_gen.unpack_atlas import import_png_groups
 
 # The SPA assets are package data (declared in pyproject's `package-data`), so the one
 # path that finds them is relative to this module — the same place in a repo checkout
@@ -90,6 +98,62 @@ def _list_dir(directory: Path, root: Path) -> dict:
         except OSError:
             continue
     return {"dir": str(directory), "entries": dirs + images}
+
+
+def _sanitize_state(name: str) -> str:
+    """A row name becomes a `frames/<state>` directory, so it must be a safe path
+    segment — no slashes (escape), no spaces. Non `[A-Za-z0-9_-]` runs collapse to
+    a single hyphen; an empty result falls back to `state`."""
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", name.strip()).strip("-")
+    return slug or "state"
+
+
+def _build_groups(rows: list[dict], mount_root: Path) -> list[dict]:
+    """Turn the session's rows into `import_png_groups` groups. Empty rows are
+    skipped; every referenced file is re-confirmed under the mounted root (the
+    client names the paths). Sanitized names are de-duplicated so two rows cannot
+    collide onto one frames/<state> directory."""
+    groups: list[dict] = []
+    used: set[str] = set()
+    for row in rows:
+        cells = row.get("cells") or []
+        if not cells:
+            continue
+        paths = []
+        for cell in cells:
+            p = Path(str(cell.get("path", ""))).resolve()
+            if not _is_under(p, mount_root):
+                raise PermissionError(f"outside mounted root: {p}")
+            if p.suffix.lower() not in IMAGE_SUFFIXES or not p.is_file():
+                raise FileNotFoundError(f"not an image file: {p}")
+            paths.append(p)
+        name = _sanitize_state(str(row.get("name", "")))
+        base, n = name, 2
+        while name in used:
+            name, n = f"{base}-{n}", n + 1
+        used.add(name)
+        groups.append({"name": name, "paths": paths, "labels": [p.name for p in paths]})
+    return groups
+
+
+def _free_port() -> int:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def _wait_ready(port: int, timeout: float = 12.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1) as r:
+                if r.status == 200:
+                    return True
+        except Exception:
+            time.sleep(0.25)
+    return False
 
 
 class ComposeHandler(BaseHTTPRequestHandler):
@@ -200,6 +264,73 @@ class ComposeHandler(BaseHTTPRequestHandler):
                 return
             ComposeHandler.mount_root = candidate
             self._send_json({"mount": str(candidate), **_list_dir(candidate, candidate)})
+            return
+        if path == "/api/build":
+            # Materialize the virtual session into a real run dir via the SSoT
+            # importer (import_png_groups). The session is the unsaved buffer; this
+            # is the one place references become bytes on disk.
+            if self.mount_root is None:
+                self._send_json({"error": "no folder open"}, 409)
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                self._send_json({"error": "invalid JSON body"}, 400)
+                return
+            raw_out = (payload.get("outDir") or "").strip()
+            if not raw_out:
+                self._send_json({"error": "outDir required"}, 400)
+                return
+            out_dir = Path(raw_out).expanduser().resolve()
+            if out_dir.exists() and any(out_dir.iterdir()):
+                self._send_json({"error": f"output dir exists and is not empty: {out_dir}",
+                                 "code": "out-dir-not-empty"}, 409)
+                return
+            try:
+                groups = _build_groups(payload.get("rows") or [], self.mount_root)
+            except PermissionError as exc:
+                self._send_json({"error": str(exc)}, 403)
+                return
+            except FileNotFoundError as exc:
+                self._send_json({"error": str(exc)}, 404)
+                return
+            if not groups:
+                self._send_json({"error": "no rows with files to build"}, 400)
+                return
+            out_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                summary = import_png_groups(out_dir, groups)
+            except Exception as exc:  # surface the importer's failure, do not swallow
+                self._send_json({"error": f"build failed: {exc}"}, 500)
+                return
+            self._send_json({"runDir": str(out_dir), "states": summary.get("states", []),
+                             "frames": summary.get("frames", 0), "cell": summary.get("cell")})
+            return
+        if path == "/api/open-curation":
+            # Hand off to the curation view: launch a serve_curation process on the
+            # built run dir and return its URL. A curation server is a legitimate
+            # long-lived per-run-dir surface, not a workaround.
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                self._send_json({"error": "invalid JSON body"}, 400)
+                return
+            run_dir = Path(str(payload.get("runDir", ""))).expanduser().resolve()
+            if not (run_dir / "sprite-request.json").is_file():
+                self._send_json({"error": f"not a run dir (no sprite-request.json): {run_dir}"}, 404)
+                return
+            port = _free_port()
+            subprocess.Popen(
+                [sys.executable, "-m", "sprite_gen.serve_curation",
+                 "--run-dir", str(run_dir), "--port", str(port), "--no-open"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            if not _wait_ready(port):
+                self._send_json({"error": "curation server did not become ready"}, 504)
+                return
+            self._send_json({"url": f"http://127.0.0.1:{port}/"})
             return
         self._send_json({"error": "not found", "path": path}, 404)
 

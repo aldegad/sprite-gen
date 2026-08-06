@@ -112,6 +112,18 @@ function renderRows() {
   const rowsEl = document.getElementById("rows");
   rowsEl.innerHTML = "";
   for (const row of session.rows) rowsEl.appendChild(makeRow(row));
+  updateBuildBar();
+}
+
+// The build bar appears once at least one row holds a file — a build with no
+// frames is not a build. renderRows() runs on every composition mutation, so
+// hiding the "open curation" button here retires a stale build: after an edit
+// the last run dir is superseded, and doBuild() re-shows the button on success.
+function updateBuildBar() {
+  const hasFrames = session.rows.some((r) => r.cells.length > 0);
+  document.getElementById("build-bar").hidden = !(session.mount && hasFrames);
+  document.getElementById("open-cur-btn").hidden = true;
+  document.getElementById("build-result").textContent = "";
 }
 
 function refreshCanvasChrome() {

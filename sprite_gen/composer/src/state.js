@@ -76,6 +76,31 @@ function imgUrl(path) {
   return `/api/browse-img?path=${encodeURIComponent(path)}`;
 }
 
+async function apiBuild(outDir) {
+  const rows = session.rows
+    .filter((r) => r.cells.length)
+    .map((r) => ({ name: r.name, cells: r.cells.map((c) => ({ path: c.path, name: c.name })) }));
+  const res = await fetch("/api/build", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ outDir, rows }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data; // { runDir, states, frames, cell }
+}
+
+async function apiOpenCuration(runDir) {
+  const res = await fetch("/api/open-curation", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ runDir }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data; // { url }
+}
+
 function setStatus(msg, kind) {
   const el = document.getElementById("status");
   el.textContent = msg || "";

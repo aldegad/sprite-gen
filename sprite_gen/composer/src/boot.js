@@ -11,6 +11,8 @@ function applyStaticLang() {
   document.getElementById("empty-sub").textContent = t("emptySub");
   document.getElementById("empty-mount").textContent = t("emptyMount");
   document.getElementById("add-row").textContent = t("addRow");
+  document.getElementById("build-btn").textContent = t("build");
+  document.getElementById("open-cur-btn").textContent = t("openCuration");
   document.getElementById("lang-toggle").textContent = t("langLabel");
   document.getElementById("hintbar").textContent = t("emptySub");
   const mountBtn = document.getElementById("mount-btn");
@@ -38,6 +40,58 @@ async function doMount() {
   }
 }
 
+function suggestOutDir() {
+  // A sibling of the opened folder, named after it — easy to find, does not
+  // write inside the read-only library.
+  const m = (session.mount || "").replace(/\/+$/, "");
+  return m ? `${m}-sprite` : "";
+}
+
+async function doBuild() {
+  const hasFrames = session.rows.some((r) => r.cells.length > 0);
+  if (!hasFrames) {
+    setStatus(t("needRows"), "err");
+    return;
+  }
+  const outDir = window.prompt(t("buildPrompt"), suggestOutDir());
+  if (!outDir) return;
+  const result = document.getElementById("build-result");
+  const buildBtn = document.getElementById("build-btn");
+  const openBtn = document.getElementById("open-cur-btn");
+  buildBtn.disabled = true;
+  result.className = "build-result";
+  result.textContent = t("building");
+  try {
+    const data = await apiBuild(outDir.trim());
+    result.className = "build-result ok";
+    result.textContent = t("buildDone", data.states.length, data.frames) + " · " + data.runDir;
+    openBtn.hidden = false;
+    openBtn.onclick = () => doOpenCuration(data.runDir);
+    setStatus(t("ready"), "ok");
+  } catch (e) {
+    result.className = "build-result err";
+    result.textContent = t("buildFail", e.message);
+    setStatus(t("buildFail", e.message), "err");
+  } finally {
+    buildBtn.disabled = false;
+  }
+}
+
+async function doOpenCuration(runDir) {
+  const openBtn = document.getElementById("open-cur-btn");
+  openBtn.disabled = true;
+  setStatus(t("opening"));
+  try {
+    const data = await apiOpenCuration(runDir);
+    window.open(data.url, "_blank");
+    setStatus(t("ready"), "ok");
+  } catch (e) {
+    setStatus(t("openFail", e.message), "err");
+  } finally {
+    openBtn.disabled = false;
+  }
+}
+
 async function boot() {
   let state = {};
   try { state = await apiGetState(); } catch (_) { /* serve blank */ }
@@ -53,6 +107,7 @@ async function boot() {
     addRow();
     renderRows();
   });
+  document.getElementById("build-btn").addEventListener("click", doBuild);
   document.getElementById("lang-toggle").addEventListener("click", () => {
     lang = lang === "en" ? "ko" : "en";
     const url = new URL(location.href);
