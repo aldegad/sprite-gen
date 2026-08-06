@@ -5,7 +5,30 @@
 
 All notable changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md`.
 
-## Unreleased - reading a run no longer writes to it (request loader / migration writer split)
+## v1.58.0 - compose assembly canvas + domain-topology package reorg
+
+A human can now assemble a sprite from a folder, not just an agent. Every existing feature
+behaves exactly as before; the package internals were reorganized by domain so code and
+tests can be found and run per-domain.
+
+- **`sprite-gen compose`** — a blank-screen assembly canvas. Open a folder (or open image
+  files directly, which mounts their containing folder) through a native OS chooser, drag
+  files onto named rows (held as references — the originals are never copied or changed),
+  then **Build sprite** materializes the composition into a run dir via the existing
+  `import_png_groups`, and **Open curation view** hands off to the curation webview. This
+  is the pre-run half of curation that until now only an agent could do by arranging a
+  `unpack_atlas_run --pngs-dir` folder.
+- **Package reorganized by domain.** The flat `sprite_gen/` (34 modules) is now domain
+  subpackages: `spec` · `gen` · `frames` · `curate` · `compose` · `effects` · `qa` ·
+  `serve` · `util`. Tests split into `tests/<domain>/` so a domain runs alone
+  (`pytest tests/effects`). The CLI (`sprite-gen <cmd>`) and `scripts/` wrappers keep their
+  external surface — only Python import paths change (e.g. `sprite_gen.extract` →
+  `sprite_gen.frames.extract`). The module→domain map SSoT is `sprite_gen/_modules.py`.
+- The composer webview is built from a shared button component so two controls cannot
+  diverge in size, and `pytest-timeout` (signal method) now turns a hung subprocess test
+  into a named failure instead of a silent stall.
+
+### reading a run no longer writes to it (request loader / migration writer split)
 
 Calling `state_revision()` on an approved run rewrote that run's `sprite-request.json`.
 The request gate migrated a retired `fit` key and immediately persisted the result, so a
