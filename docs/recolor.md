@@ -3,7 +3,7 @@
 > Split out of the `SKILL.md` hub. Follow this doc when you need to bake N colour
 > variants of one base sheet from a palette map, or when the curation webview is
 > comparing and adopting those baked colourways. Implementation:
-> `sprite_gen/recolor.py`. View surface: `sprite_gen/curator/src/recolor.js` +
+> `sprite_gen/effects/recolor.py`. View surface: `sprite_gen/serve/curator/src/recolor.js` +
 > `serve_curation._recolor_info`.
 
 ## Why bake, not tint at runtime
@@ -162,7 +162,7 @@ what the bake did. Per variant it records:
 
 A colour outside the map is never quietly left behind without a name. The
 curation view prints these numbers from the report — it does not re-count
-pixels. Reader: `sprite_gen.recolor.load_report(run_dir)`.
+pixels. Reader: `sprite_gen.effects.recolor.load_report(run_dir)`.
 
 - No report file → `None` ("this run has no variants").
 - A file at the report path with a foreign `kind` → fail loud. Reading it as

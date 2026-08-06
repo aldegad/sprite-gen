@@ -7,30 +7,16 @@ import argparse
 from pathlib import Path
 from typing import Callable
 
-from sprite_gen import (
-    anchor,
-    compose_atlas,
-    compose_cycle,
-    compose_gif,
-    compose_layers,
-    correction_loop,
-    cutout,
-    export_pngs,
-    extract,
-    gen,
-    inspect,
-    prepare,
-    preview,
-    recolor,
-    score,
-    serve_compose,
-    serve_curation,
-    slice_sheet,
-    migrate_breathe,
-    migrate_request,
-    unpack_atlas,
-)
-from sprite_gen.prepare import STYLE_DEFAULT, _outline_config
+from sprite_gen import gen
+from sprite_gen.curate import anchor
+from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, compose_layers, export_pngs
+from sprite_gen.qa import correction_loop, inspect, preview, score
+from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
+from sprite_gen.gen import prepare
+from sprite_gen.effects import recolor
+from sprite_gen.serve import serve_compose, serve_curation
+from sprite_gen.spec import migrate_breathe, migrate_request
+from sprite_gen.gen.prepare import STYLE_DEFAULT, _outline_config
 
 
 def _parse_frames(value: str) -> list[int]:
@@ -339,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if getattr(args, "_retired_pp", False):
-        from sprite_gen.prepare import RETIRED_PP_MESSAGE
+        from sprite_gen.gen.prepare import RETIRED_PP_MESSAGE
 
         raise SystemExit(RETIRED_PP_MESSAGE)
     kwargs = vars(args).copy()

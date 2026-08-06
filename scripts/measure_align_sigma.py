@@ -28,8 +28,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PIL import Image
 
-import sprite_gen.extract as extract
-from sprite_gen.runio import load_request
+import sprite_gen.frames.extract as extract
+from sprite_gen.spec.runio import load_request
 
 
 def _prepare_work_dir(source: Path, work: Path, states: list[str], align_x: str) -> None:

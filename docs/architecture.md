@@ -182,7 +182,7 @@ flowchart TD
 
 - The prompt text in `row_prompt()` enforces this ("Anchor lock" block):
   identity comes from the anchor, the row owns motion only.
-- **Which image is "the accepted anchor" is code, not judgment** (`sprite_gen/anchor.py`,
+- **Which image is "the accepted anchor" is code, not judgment** (`sprite_gen/curate/anchor.py`,
   `sprite-gen anchor`): it resolves the human's pin (`curation.json` `anchors.<direction>`)
   or, absent one, the anchor row's curated sequence head; bakes that instance with the
   same primitives compose/export use (clone → pixel edits → transform → pixel-unfake
@@ -343,7 +343,7 @@ Required fields:
 - `frame_layout` also carries `sheetWidth/sheetHeight/cellWidth/cellHeight`
 - `curation_applied` records whether a sidecar was baked; `frame_variant`
   records which frame variant (canonical / plain) was baked
-- **rig runs only** (`sprite_gen/layers.py`, `compose_layers.py`): `rig.profile` +
+- **rig runs only** (`sprite_gen/compose/layers.py`, `compose_layers.py`): `rig.profile` +
   `rig.landmarks.<state>[i]` — atlas-absolute integer pivots indexed by play
   position, so they zip 1:1 against `frame_layout.rows.<state>` — and
   `animation.rows.<state>.track`. A run that declares no rig produces exactly the

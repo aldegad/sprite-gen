@@ -1,0 +1,296 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Compose selected sprite frames into a clean transparent GIF.
+
+This is the reusable sprite-gen GIF exporter. It is intentionally small:
+source frame PNGs remain the SSoT, while this script only chooses order and
+timing for preview/runtime GIFs.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+
+from sprite_gen.effects.breathe import anatomy_report, bake_breathe_sequence
+from sprite_gen.curate.curation import apply_pixel_edits, apply_transform, edit_index, frame_variant, load_curation, pixel_snap_scale, source_frame_index, state_breathe, state_pixel_ops, state_plan
+from sprite_gen.spec.layout import row_frame_rel, state_frame_total
+from sprite_gen.frames.extract import require_frames_manifest
+from sprite_gen.spec.runio import read_guard, load_request
+from sprite_gen.util.gif_utils import delay_ticks_to_duration_ms, gif_report, save_clean_gif
+
+
+def parse_frame_order(value: str) -> list[int]:
+    frames = [int(part.strip()) for part in value.split(",") if part.strip()]
+    if not frames:
+        raise argparse.ArgumentTypeError("frame order must contain at least one frame")
+    if any(frame <= 0 for frame in frames):
+        raise argparse.ArgumentTypeError("frame order is 1-based and must be positive")
+    return frames
+
+
+def checker(size: tuple[int, int], square: int = 16) -> Image.Image:
+    width, height = size
+    image = Image.new("RGBA", size, (210, 210, 210, 255))
+    pixels = image.load()
+    for y in range(height):
+        for x in range(width):
+            if ((x // square) + (y // square)) % 2 == 0:
+                pixels[x, y] = (235, 235, 235, 255)
+    return image
+
+
+def flatten(frame: Image.Image) -> Image.Image:
+    base = checker(frame.size)
+    base.alpha_composite(frame.convert("RGBA"))
+    return base.convert("RGB")
+
+
+def load_frames(args: argparse.Namespace) -> list[tuple[int, Path, Image.Image]]:
+    if args.frame_dir:
+        frame_dir = args.frame_dir.expanduser().resolve()
+        order = args.frame_order
+        frames = []
+        for user_frame in order:
+            path = frame_dir / f"frame-{user_frame - 1}.png"
+            if not path.is_file():
+                raise SystemExit(f"missing frame {user_frame}: {path}")
+            frames.append((user_frame, path, Image.open(path).convert("RGBA")))
+        return frames
+
+    if args.inputs:
+        frames = []
+        for index, path in enumerate(args.inputs, start=1):
+            resolved = path.expanduser().resolve()
+            if not resolved.is_file():
+                raise SystemExit(f"missing input frame: {resolved}")
+            frames.append((index, resolved, Image.open(resolved).convert("RGBA")))
+        return frames
+
+    raise SystemExit("provide either --frame-dir with --frame-order, or input frame files")
+
+
+def contact_sheet(frames: list[tuple[int, Path, Image.Image]], gap: int = 4, label_height: int = 24) -> Image.Image:
+    cell_width = max(frame.width for _number, _path, frame in frames)
+    cell_height = max(frame.height for _number, _path, frame in frames)
+    width = len(frames) * cell_width + (len(frames) + 1) * gap
+    height = cell_height + label_height + gap * 2
+    sheet = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(sheet)
+    x = gap
+    for number, _path, frame in frames:
+        draw.rectangle((x, gap, x + cell_width - 1, gap + label_height - 1), fill=(24, 24, 24))
+        draw.text((x + 6, gap + 5), f"frame {number}", fill=(255, 255, 255))
+        sheet.paste(flatten(frame), (x, gap + label_height))
+        x += cell_width + gap
+    return sheet
+
+
+def run_dir_mode(args: argparse.Namespace) -> int:
+    """Export one clean GIF per state from a finished run dir.
+
+    Reads `sprite-request.json` (per-state frames + fps), applies the
+    `curation.json` selection/order/transform via the shared `curation` module
+    (SSoT with the atlas compose), and writes `<out-dir>/<state>.gif` plus a
+    `gif-manifest.json`. This is the path both the v1 webview server and the v2
+    desktop app call so they never reimplement frame selection.
+    """
+    run_dir = args.run_dir.expanduser().resolve()
+    # Reader isolation: read manifest + request + curation + frame tree under one shared read_guard
+    # so a concurrent publish swap never yields a mid-swap/partial read (runio.read_guard ↔ publish_guard).
+    with read_guard(run_dir):
+        return _run_dir_mode_guarded(args, run_dir)
+
+
+def _run_dir_mode_guarded(args, run_dir):
+    frames_manifest = require_frames_manifest(run_dir)  # fail loud if this generation's manifest is absent/corrupt
+    rows_by_state = {row["state"]: row for row in frames_manifest.get("rows", [])}
+    request = load_request(run_dir)
+    cell = request.get("cell", {})
+    cell_w = int(cell.get("width") or cell.get("size") or 0)
+    cell_h = int(cell.get("height") or cell.get("size") or 0)
+    states = request.get("states", {})
+    if getattr(args, "state", None):
+        if args.state not in states:
+            raise SystemExit(f"unknown state '{args.state}' — request states: {', '.join(states)}")
+        states = {args.state: states[args.state]}
+    curation = load_curation(run_dir)
+    out_root = (args.out_dir.expanduser().resolve() if args.out_dir else run_dir / "exports")
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    exports: list[dict] = []
+    for state, spec in states.items():
+        count = state_frame_total(request, state)
+        if count <= 0:
+            continue
+        fps = float(spec.get("fps", 8)) or 8.0
+        ordered, transforms = state_plan(curation, state, count)
+        variant = frame_variant(curation, state)
+        images: list[Image.Image] = []
+        for index in ordered:
+            # 복제 인스턴스는 원본 프레임 파일을 읽는다 (변형/픽셀편집은 인스턴스 인덱스).
+            path = run_dir / row_frame_rel(rows_by_state[state], source_frame_index(curation, state, index, count), variant)
+            if not path.is_file():
+                raise SystemExit(
+                    f"selected frame {path} is missing — the generation is incomplete or the "
+                    f"'{variant}' variant was not baked (re-extract before composing); "
+                    f"skipping it would silently produce a shorter GIF."
+                )
+            edit_idx = edit_index(curation, state, index)  # 링크 복제 = 원본 편집 truth
+            frame = apply_pixel_edits(Image.open(path).convert("RGBA"), state_pixel_ops(curation, state).get(edit_idx))
+            if cell_w and cell_h:
+                frame = apply_transform(frame, transforms.get(edit_idx), (cell_w, cell_h),
+                                        snap_scale=pixel_snap_scale(request) if variant == "pixel" else None)
+            images.append(frame)
+        if not images:
+            continue
+        # 호흡 후처리 레이어 (사이드카) — 재생 시퀀스 위에 결정론으로 굽는다.
+        # 깜빡임 프레임도 같은 위상 변조를 받는다 (직교 레이어, 수홍 2026-07-18).
+        breathe_cfg = state_breathe(curation, state)
+        baked_phases: list[float] | None = None
+        breathe_anatomy: dict | None = None
+        if breathe_cfg:
+            # 굽기가 실제로 쓴 해부를 먼저 확정해 manifest 에 싣는다 — 지문 불일치로
+            # 자가 복구가 돌면 사이드카 숫자와 구운 숫자가 다르고, 그게 안 보이면 안 된다.
+            breathe_anatomy = anatomy_report(images, breathe_cfg)
+            images, baked_phases = bake_breathe_sequence(images, breathe_cfg)
+        scale = max(1, int(getattr(args, "scale", 1) or 1))
+        if scale > 1:
+            # 니어리스트 정수배 — 픽셀 데이터는 그대로, 뷰어가 확대 보간으로 뭉개는 것만 막는다
+            images = [im.resize((im.width * scale, im.height * scale), Image.Resampling.NEAREST)
+                      for im in images]
+        out_path = out_root / f"{state}.gif"
+        duration_ms = max(1, round(1000.0 / fps))
+        save_clean_gif(images, out_path, duration_ms=duration_ms, loop=args.loop_count, alpha_threshold=args.alpha_threshold)
+        export_entry = {
+            "state": state,
+            "output": str(out_path),
+            "frames": len(images),
+            "fps": fps,
+            "loop": bool(spec.get("loop", True)),
+            "gif_report": gif_report(out_path),
+        }
+        if baked_phases is not None:
+            export_entry["breathe"] = {"config": breathe_cfg, "phases": baked_phases,
+                                       "resolved": breathe_anatomy}
+        exports.append(export_entry)
+
+    if getattr(args, "state", None):
+        # 단건(--state) 내보내기는 전체 manifest 를 한 상태로 갈아치우지 않는다 —
+        # 기존 exports 에서 그 상태 항목만 교체/추가한다 (Consistency).
+        manifest_path = out_root / "gif-manifest.json"
+        prior: list[dict] = []
+        if manifest_path.is_file():
+            try:
+                prior = json.loads(manifest_path.read_text(encoding="utf-8")).get("exports", [])
+            except ValueError:
+                prior = []
+        merged = [e for e in prior if e.get("state") not in {x["state"] for x in exports}]
+        exports = merged + exports
+    manifest = {"version": 1, "kind": "sprite-gen-gif-run", "run_dir": str(run_dir), "exports": exports}
+    (out_root / "gif-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"ok": True, **manifest}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("inputs", nargs="*", type=Path, help="ordered frame PNG files")
+    parser.add_argument("--frame-dir", type=Path, help="directory containing frame-0.png, frame-1.png, ...")
+    parser.add_argument("--frame-order", type=parse_frame_order, help="1-based order, for example 2,1,5,3")
+    parser.add_argument("--run-dir", type=Path, help="run dir: export one GIF per state from sprite-request + curation")
+    parser.add_argument("--state", help="run-dir mode: export only this state (default: all states)")
+    parser.add_argument("--scale", type=int, default=1,
+                        help="integer NEAREST upscale baked into the GIF (review/share crispness; "
+                        "the pixel data is unchanged, viewers just stop blurring the upscale)")
+    parser.add_argument("--out-dir", type=Path, help="output dir for --run-dir mode (default <run-dir>/exports)")
+    parser.add_argument("--output", type=Path, help="output GIF (required unless --run-dir)")
+    parser.add_argument("--delay-ticks", type=int, default=17, help="GIF delay in 1/100 second ticks")
+    parser.add_argument("--loop-count", type=int, default=0, help="0 means infinite loop")
+    parser.add_argument("--contact-output", type=Path)
+    parser.add_argument("--manifest-output", type=Path)
+    parser.add_argument("--alpha-threshold", type=int, default=8)
+    return parser
+
+
+def _namespace_from_kwargs(**kwargs: object) -> argparse.Namespace:
+    parser = _build_parser()
+    values: dict[str, object] = {}
+    remaining = dict(kwargs)
+    for action in parser._actions:
+        if action.dest == "help":
+            continue
+        default = [] if action.nargs == "*" else action.default
+        if default is argparse.SUPPRESS:
+            default = None
+        value = remaining.pop(action.dest, default)
+        if getattr(action, "required", False) and value is None:
+            raise TypeError(f"missing required argument: {action.dest}")
+        values[action.dest] = value
+    if remaining:
+        names = ", ".join(sorted(remaining))
+        raise TypeError(f"unexpected keyword argument(s): {names}")
+    return argparse.Namespace(**values)
+def _run(args: argparse.Namespace):
+
+    if args.run_dir:
+        return run_dir_mode(args)
+
+    if not args.output:
+        raise SystemExit("--output is required unless --run-dir is used")
+
+    if bool(args.frame_dir) != bool(args.frame_order):
+        raise SystemExit("--frame-dir and --frame-order must be used together")
+
+    frames = load_frames(args)
+    output = args.output.expanduser().resolve()
+    duration_ms = delay_ticks_to_duration_ms(args.delay_ticks)
+    save_clean_gif(
+        [frame for _number, _path, frame in frames],
+        output,
+        duration_ms=duration_ms,
+        loop=args.loop_count,
+        alpha_threshold=args.alpha_threshold,
+    )
+
+    contact_path = args.contact_output.expanduser().resolve() if args.contact_output else None
+    if contact_path:
+        contact_path.parent.mkdir(parents=True, exist_ok=True)
+        contact_sheet(frames).save(contact_path)
+
+    manifest = {
+        "version": 1,
+        "kind": "sprite-gen-gif",
+        "output": str(output),
+        "delay_ticks": args.delay_ticks,
+        "duration_ms": duration_ms,
+        "loop_count": args.loop_count,
+        "selected_user_frames": [number for number, _path, _frame in frames],
+        "source_frames": [str(path) for _number, path, _frame in frames],
+        "contact": str(contact_path) if contact_path else None,
+        "gif_report": gif_report(output),
+    }
+
+    manifest_path = args.manifest_output.expanduser().resolve() if args.manifest_output else None
+    if manifest_path:
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    print(json.dumps({"ok": True, **manifest}, ensure_ascii=False, indent=2))
+    return 0
+
+
+
+def run(**kwargs: object):
+    return _run(_namespace_from_kwargs(**kwargs))
+
+def main() -> int:
+    parser = _build_parser()
+    args = parser.parse_args()
+    return _run(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
