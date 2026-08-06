@@ -10,6 +10,8 @@ function applyStaticLang() {
   document.getElementById("empty-title").textContent = t("emptyTitle");
   document.getElementById("empty-sub").textContent = t("emptySub");
   document.getElementById("empty-mount").textContent = t("emptyMount");
+  document.getElementById("empty-mount-img").textContent = t("openImage");
+  document.getElementById("mount-img-btn").textContent = t("openImage");
   document.getElementById("add-row").textContent = t("addRow");
   document.getElementById("build-btn").textContent = t("build");
   document.getElementById("open-cur-btn").textContent = t("openCuration");
@@ -21,11 +23,12 @@ function applyStaticLang() {
   mountLabel.textContent = session.mount || t("noMount");
 }
 
-async function resolveFolder() {
-  // Prefer the native OS folder chooser; fall back to a path prompt only where
-  // the native dialog is unavailable (non-macOS) — an explicit, observable path.
+async function resolveFolder(kind) {
+  // Prefer the native OS chooser; fall back to a path prompt only where the native
+  // dialog is unavailable (non-macOS) — an explicit, observable path. For kind
+  // "image" the server returns the picked image's parent folder as `dir`.
   try {
-    const picked = await apiPickFolder();
+    const picked = await apiPick(kind);
     if (picked.cancelled) return null;
     return picked.dir;
   } catch (e) {
@@ -37,10 +40,10 @@ async function resolveFolder() {
   }
 }
 
-async function doMount() {
+async function doMount(kind = "folder") {
   let dir;
   try {
-    dir = await resolveFolder();
+    dir = await resolveFolder(kind);
   } catch (e) {
     setStatus(t("mountFail", e.message), "err");
     return;
@@ -122,8 +125,10 @@ async function boot() {
   applyStaticLang();
   refreshCanvasChrome();
 
-  document.getElementById("mount-btn").addEventListener("click", doMount);
-  document.getElementById("empty-mount").addEventListener("click", doMount);
+  document.getElementById("mount-btn").addEventListener("click", () => doMount("folder"));
+  document.getElementById("empty-mount").addEventListener("click", () => doMount("folder"));
+  document.getElementById("mount-img-btn").addEventListener("click", () => doMount("image"));
+  document.getElementById("empty-mount-img").addEventListener("click", () => doMount("image"));
   document.getElementById("add-row").addEventListener("click", () => {
     addRow();
     renderRows();

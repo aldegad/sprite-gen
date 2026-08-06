@@ -136,24 +136,51 @@ def _build_groups(rows: list[dict], mount_root: Path) -> list[dict]:
     return groups
 
 
-def native_pick_folder() -> dict:
-    """Pop the OS folder chooser and return {"dir": <abs path>} or {"cancelled": True}.
+# One osascript per kind — `choose folder` and `choose file` are distinct macOS
+# primitives, and a single dialog that reliably selects both files and folders is
+# not available, so the two entry points map one-to-one instead. `choose file` for
+# images returns a newline-joined list of POSIX paths (multiple selections allowed).
+_PICK_SCRIPTS = {
+    "folder": 'POSIX path of (choose folder with prompt "Open a folder of images")',
+    "image": (
+        'set picks to (choose file of type {"public.image"} '
+        'with prompt "Open image(s)" with multiple selections allowed)\n'
+        'set out to ""\n'
+        'repeat with f in picks\n'
+        '  set out to out & POSIX path of f & linefeed\n'
+        'end repeat\n'
+        'return out'
+    ),
+}
 
-    The browser cannot hand a script an absolute filesystem path, but this server
-    runs locally, so it asks the OS directly. macOS uses `osascript`; other
-    platforms raise NotImplementedError so the caller can fall back explicitly
-    (no silent degradation). Cancel is a normal outcome, not an error — osascript
-    reports it as "User canceled. (-128)"."""
+
+def native_pick(kind: str = "folder") -> dict:
+    """Pop the OS chooser and return a folder to mount.
+
+    kind="folder" -> {"dir": <abs path>}; kind="image" -> the picked image(s)'
+    parent folder {"dir": <parent>, "files": [<abs image paths>]} ("grab the
+    image's folder"). Cancel -> {"cancelled": True}. The browser cannot hand a
+    script an absolute path, but this server is local, so it asks the OS. Non-macOS
+    raises NotImplementedError so the caller can fall back explicitly (no silent
+    degradation)."""
     if sys.platform != "darwin":
-        raise NotImplementedError("native folder picker is macOS-only")
-    script = 'POSIX path of (choose folder with prompt "Open a folder of images")'
+        raise NotImplementedError("native picker is macOS-only")
+    script = _PICK_SCRIPTS.get(kind)
+    if script is None:
+        raise ValueError(f"unknown pick kind: {kind}")
     proc = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
     if proc.returncode != 0:
-        if "-128" in (proc.stderr or ""):
+        if "-128" in (proc.stderr or ""):  # user canceled
             return {"cancelled": True}
         raise RuntimeError(proc.stderr.strip() or "osascript failed")
-    picked = proc.stdout.strip()
-    return {"dir": picked} if picked else {"cancelled": True}
+    if kind == "folder":
+        picked = proc.stdout.strip()
+        return {"dir": picked} if picked else {"cancelled": True}
+    files = [line for line in proc.stdout.splitlines() if line.strip()]
+    if not files:
+        return {"cancelled": True}
+    # Mount the image's containing folder; multiple picks are assumed to share one.
+    return {"dir": str(Path(files[0]).parent), "files": files}
 
 
 def _free_port() -> int:
@@ -285,11 +312,14 @@ class ComposeHandler(BaseHTTPRequestHandler):
             ComposeHandler.mount_root = candidate
             self._send_json({"mount": str(candidate), **_list_dir(candidate, candidate)})
             return
-        if path == "/api/pick-folder":
+        if path == "/api/pick":
+            kind = parse_qs(urlparse(self.path).query).get("kind", ["folder"])[0]
             try:
-                self._send_json(native_pick_folder())
+                self._send_json(native_pick(kind))
             except NotImplementedError as exc:
                 self._send_json({"error": str(exc), "code": "unsupported-platform"}, 501)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
             except RuntimeError as exc:
                 self._send_json({"error": str(exc)}, 500)
             return

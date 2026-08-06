@@ -146,7 +146,7 @@ button.accent:hover { background: #1d55d0; border-color: #1d55d0; }
 .empty svg { color: #c4c9d2; }
 .empty-title { font-size: 16px; color: var(--text); font-weight: 600; }
 .empty-sub { font-size: 13px; max-width: 380px; line-height: 1.6; }
-.empty button { margin-top: 6px; }
+.empty-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 
 /* ── rows (composition canvas) ──────────────────────────────────── */
 .row {
