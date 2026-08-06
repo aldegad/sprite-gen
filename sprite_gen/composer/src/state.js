@@ -64,11 +64,12 @@ async function apiMount(dir) {
   return data; // { mount, dir, entries }
 }
 
-// Pop the native OS folder chooser (server-side). Returns { dir } on pick,
-// { cancelled: true } if the user dismissed it, or throws with code
-// "unsupported-platform" (501) off macOS so the UI can fall back to a path prompt.
-async function apiPickFolder() {
-  const res = await fetch("/api/pick-folder", { method: "POST" });
+// Pop the native OS chooser (server-side). kind "folder" -> { dir }; kind "image"
+// -> { dir: <parent>, files } (the image's folder). { cancelled: true } if
+// dismissed; throws with code "unsupported-platform" (501) off macOS so the UI can
+// fall back to a path prompt.
+async function apiPick(kind) {
+  const res = await fetch(`/api/pick?kind=${encodeURIComponent(kind)}`, { method: "POST" });
   const data = await res.json();
   if (res.status === 501) {
     const err = new Error(data.error || "unsupported");
@@ -76,7 +77,7 @@ async function apiPickFolder() {
     throw err;
   }
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data; // { dir } | { cancelled: true }
+  return data; // { dir } | { dir, files } | { cancelled: true }
 }
 
 async function apiBrowse(dir) {
