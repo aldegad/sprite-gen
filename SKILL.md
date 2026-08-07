@@ -503,7 +503,8 @@ sprite-gen (this SKILL.md = behavior contract + hub)
 │
 ├─ GENERATION ── "raw/<state>.png from prompts (the one AI step)"
 │   ├─ docs/gen.md               # sprite-gen gen provider CLI · verified PNG/report · image-gen shuttle
-│   └─ docs/frame-interpolation.md  # generative in-between (codex/grok) → take raw · auth prereqs · RIFE retire rationale
+│   ├─ docs/frame-interpolation.md  # generative in-between (codex/grok) → take raw · auth prereqs · RIFE retire rationale
+│   └─ docs/seamless-video-loop.md  # non-looping AI video clip → seamless loop: flow-matched cut + RIFE seam bridge
 │
 ├─ CURATION ── "human/agent picks, edits, and downloads via the webview"
 │   └─ docs/curation.md          # webview · curation.json schema (selected/order/transforms/
