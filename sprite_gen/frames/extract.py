@@ -1860,6 +1860,24 @@ def register_row_frames(frames: list, slack_x: int = 8, slack_y: int = 3) -> lis
     return registered
 
 
+def _content_band(sprite: Image.Image) -> tuple[int, int]:
+    """콘텐츠의 (위, 높이). 빈 이미지는 이미지 전체로 본다."""
+    bbox = sprite.getbbox()
+    if bbox is None:
+        return 0, sprite.height
+    return bbox[1], bbox[3] - bbox[1]
+
+
+def _center_top(sprite: Image.Image, cell_height: int) -> int:
+    """콘텐츠 중심을 셀 세로 한가운데에 두는 top 오프셋.
+
+    바닥 접지(`align_y="bottom"`)와 달리 safe_margin_y 를 빼지 않는다 —
+    가운데 정렬에는 기준선이 없으므로 여백은 위아래로 저절로 갈린다.
+    """
+    content_top, content_height = _content_band(sprite)
+    return round((cell_height - content_height) / 2) - content_top
+
+
 def row_placement(frames: list, cell_width: int, cell_height: int, safe_margin_y: int, scale: int, fit: dict[str, Any]) -> tuple[int, int]:
     # 가로 배치 오프셋은 행 union 기준으로 1회 계산해 전 프레임에 동일 적용한다
     # (플립 대칭·수평 안정). 세로는 place_row_frame 이 프레임별로 접지한다.
@@ -1880,27 +1898,40 @@ def row_placement(frames: list, cell_width: int, cell_height: int, safe_margin_y
         left = (cell_width - sprite.width) // 2
     left = max(0, min(cell_width - sprite.width, left))
     left -= left % scale
+    # align_y "center" 는 접지선이 아니라 콘텐츠 중심을 셀 한가운데 둔다.
+    # 발이 땅에 닿지 않는 피사체(폭발·마법진·투사체)는 바닥에 붙이면 커질수록
+    # 위로 자라서, 재생하면 솟구쳤다 내려온다.
+    if str(fit.get("align_y", "bottom")).lower() == "center":
+        return left, _center_top(sprite, cell_height)
     bbox = sprite.getbbox()
     content_bottom = bbox[3] if bbox else sprite.height
     top = max(0, cell_height - safe_margin_y - content_bottom)
     return left, top
 
 
-def place_row_frame(frame: Image.Image, cell_width: int, cell_height: int, scale: int, left: int, top: int, safe_margin_y: int | None = None, ground: bool = True) -> Image.Image:
+def place_row_frame(frame: Image.Image, cell_width: int, cell_height: int, scale: int, left: int, top: int, safe_margin_y: int | None = None, ground: bool = True, align_y: str = "bottom") -> Image.Image:
     # 2026-07-04 (알렉스): 세로는 프레임마다 콘텐츠 바닥을 공유 기준선에 접지한다 —
     # 행 union 공동 top 만 쓰면 소스 스트립의 상하 요동이 이동으로 남아 프레임 간
     # "무게감"(발밑 높이)이 들쭉해진다. perfectpixel-studio 의 프레임별 알파 가중
     # 정렬과 같은 원리의 세로축 버전. 점프 같은 의도적 오프셋은 fit.ground_frames
     # = false 로 끌 수 있다 (row_placement 의 공동 top 사용).
+    #
+    # align_y="center" 는 그 기준선을 **중심선**으로 바꾼다. ground 의 뜻은 그대로다
+    # — 켜져 있으면 프레임마다, 꺼져 있으면 행 union 한 번. 접지가 프레임마다
+    # 바닥을 맞추듯, 가운데 정렬은 프레임마다 중심을 맞춘다.
     target = Image.new("RGBA", (cell_width, cell_height), (0, 0, 0, 0))
     if frame.getbbox() is None:
         return target
     sprite = frame.resize((frame.width * scale, frame.height * scale), Image.Resampling.NEAREST)
     frame_top = top
-    if ground and safe_margin_y is not None:
-        bbox = sprite.getbbox()
-        content_bottom = bbox[3] if bbox else sprite.height
-        frame_top = max(0, cell_height - safe_margin_y - content_bottom)
+    centered = str(align_y).lower() == "center"
+    if ground and (centered or safe_margin_y is not None):
+        if centered:
+            frame_top = _center_top(sprite, cell_height)
+        else:
+            bbox = sprite.getbbox()
+            content_bottom = bbox[3] if bbox else sprite.height
+            frame_top = max(0, cell_height - safe_margin_y - content_bottom)
     target.alpha_composite(sprite, (left, frame_top))
     return target
 
@@ -3044,11 +3075,12 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
             # alpha-centroid 는 프레임별 가로 배치 — 행 union 공동 left 로는
             # register_row_frames 의 정합 잔차가 지터로 남는다.
             per_frame_centroid = str(fit_config.get("align_x", "foot-centroid")).lower() == "alpha-centroid"
+            align_y = str(fit_config.get("align_y", "bottom")).lower()
             frames = [
                 place_row_frame(
                     frame, cell_width, cell_height, pp_scale,
                     _alpha_centroid_row_left(frame, cell_width, pp_scale) if per_frame_centroid else left,
-                    top, safe_margin_y, ground_frames)
+                    top, safe_margin_y, ground_frames, align_y)
                 for frame in quantized
             ]
             # 전/후 비교 쌍둥이: 픽셀 언페이크 프레임의 최종 콘텐츠 bbox 와 같은 풋프린트에

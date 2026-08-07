@@ -1025,7 +1025,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chroma-key", default="auto", help="auto or #RRGGBB")
     parser.add_argument("--fit-resample", choices=["lanczos", "nearest", "kcentroid"], default=None, help="frame downscale filter; nearest keeps pixel-art edges crisp, kcentroid keeps 1px outlines readable")
     parser.add_argument("--fit-align-x", choices=["bbox-center", "centroid", "foot-centroid", "alpha-centroid"], default=None, help="horizontal frame anchor; centroid stabilizes body position across variable-width poses, foot-centroid anchors on the bottom-20%% alpha (legs), alpha-centroid is the perfectpixel-studio per-frame alpha-weighted centroid (fringe-insensitive, per-frame in the pixel unfake row path)")
-    parser.add_argument("--fit-align-y", choices=["center", "bottom"], default=None, help="vertical frame anchor; bottom pins feet to a shared baseline")
+    parser.add_argument("--fit-align-y", choices=["center", "bottom"], default=None, help="vertical frame anchor; bottom pins feet to a shared baseline, center pins the content centre to the cell centre (effects, projectiles, and anything that never touches the ground)")
+    parser.add_argument("--fit-ground-frames", action=argparse.BooleanOptionalAction, default=None, help="re-anchor every frame to the shared vertical line (default on); --no-fit-ground-frames keeps the row-union offset so deliberate vertical travel (jump arcs) survives")
     parser.add_argument("--fit-pixel-unfake", action=argparse.BooleanOptionalAction, default=None, help="unfake the AI dots: pitch detection -> grid snap -> kCentroid -> shared palette -> integer NEAREST (see docs/pixel-unfake.md)")
     # 은퇴한 이름 (조용한 별칭 금지 — 두 이름이 공존하면 문서·스크립트가 갈라진다)
     parser.add_argument("--fit-pixel-perfect", "--no-fit-pixel-perfect", dest="_retired_pp",
@@ -1137,6 +1138,7 @@ def _run(args: argparse.Namespace):
         "resample": args.fit_resample,
         "align_x": args.fit_align_x,
         "align_y": args.fit_align_y,
+        "ground_frames": args.fit_ground_frames,
         "pixel_unfake": args.fit_pixel_unfake,
         "logical_height": args.fit_logical_height,
         "palette_size": args.fit_palette_size,
