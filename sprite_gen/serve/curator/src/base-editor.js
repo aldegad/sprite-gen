@@ -230,15 +230,20 @@ async function applyGridEdges(stateName, edges) {
 }
 
 // 서버가 프레임을 다시 구웠으니 화면의 그 이미지들을 새로 받는다 (캐시 무력화).
-function refreshFrameImages(stateName) {
-  const bust = "regrid=" + Date.now();
-  document.querySelectorAll(`#zoom-modal .stage img, .card[data-state="${CSS.escape(stateName)}"] .stage img`)
-    .forEach((img) => {
-      const src = img.getAttribute("src") || "";
-      if (!src || src.startsWith("data:")) return;
-      img.src = src.split("#")[0].replace(/([?&])regrid=\d+/, "$1") +
-        (src.includes("?") ? "&" : "?") + bust;
-    });
+// 다시 구운 프레임을 화면에 반영한다 — URL 은 `frameUrl` 이 만든다(캐시 토큰 포함).
+// 문자열을 손으로 만지지 않는 이유: 표시 URL 규칙(pp 토글에 따라 twin/결과)이 거기
+// 하나에만 있어야 두 곳이 갈리지 않는다.
+function refreshFrameImages(stateName, index) {
+  const frame = frameOf(stateName, index);
+  if (!frame) return;
+  const url = frameUrl(stateName, frame);
+  const zoomImg = document.querySelector("#zoom-modal .stage img");
+  if (zoomImg) zoomImg.src = url;
+  document.querySelectorAll(`.card[data-state="${CSS.escape(stateName)}"]`).forEach((card) => {
+    if (Number(card.dataset.idx) !== index) return;
+    const img = card.querySelector(".stage img");
+    if (img) img.src = url;
+  });
 }
 
 function syncCellCountInputs() {
@@ -560,7 +565,12 @@ function injectBasePitchControls(stateName) {
       // 선 단위로 잡은 격자는 **절단선 그대로** 저장한다 — 평균 피치로 접으면 사람이
       // 맞춘 불균일 칸이 사라진다. 균일 격자면 기존 피치 SSoT 를 쓴다.
       const view = gridFitTarget(pitchState);
-      if (basePitchSource === "edges" && pitchState !== BASE_STATE && view) {
+      // 프레임에서 "격자 저장" 은 **언제나** 지금 화면의 절단선을 그 프레임에 확정한다.
+      // 예전엔 손으로 끌었을 때(source=edges)만 그랬고, 숫자·칸수로 만든 균일 격자는
+      // 런 전체 피치로 새서 그 프레임엔 아무 일도 안 일어났다 — 사용자에겐 "저장했는데
+      // 결과가 그대로" 로 보인다 (수홍 실측 2026-08-08). 화면에 보이는 격자가 곧
+      // 저장되는 격자다.
+      if (pitchState !== BASE_STATE && view) {
         // 프레임 격자는 프레임별 SSoT(`fit.frame_grid_manual[state][index]`)에 저장하고,
         // 서버가 그 절단선으로 픽셀 언페이크 프레임을 다시 굽는다 — 저장하면 언페이크가
         // 그 격자대로 나온다 (수홍 2026-08-08).
@@ -575,9 +585,11 @@ function injectBasePitchControls(stateName) {
         // 다시 구운 프레임 = 새 프레임 세대. 내가 시킨 변경이므로 뷰의 세대를 그 자리에서
         // 맞춰 준다 — 안 맞추면 이후 자동저장이 "다른 런 세대" 로 막힌다.
         if (d1.runRevision) run.runRevision = d1.runRevision;
+        // 같은 URL 의 내용이 바뀌었으니 그 프레임만 캐시를 무력화하고 다시 그린다.
+        markFrameRegridded(pitchState, zoomView ? zoomView.idx : 0);
         wrap.classList.add("is-manual");
         setStatus(t("basePitchSaved"), "ok");
-        refreshFrameImages(pitchState);
+        refreshFrameImages(pitchState, zoomView ? zoomView.idx : 0);
         btn.disabled = false;
         return;
       }

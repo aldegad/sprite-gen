@@ -222,9 +222,21 @@ function unfakeOn(stateName) {
 // (snapScaleFor 의 측정 k) — 구 서버 추정 스냅 프리뷰 레거시는
 // 표시 격자와 다른 검출기로 스냅해 "격자 기준 퍼펙" 을 깨뜨려서 폐기했다
 // (수홍 2026-07-24, plan curator-single-display-pipeline).
+// 사람이 격자를 확정해 서버가 그 프레임을 다시 구운 경우의 캐시 무력화 토큰.
+// `${state}#${index}` -> 토큰. 재굽기는 **같은 URL 의 내용**을 바꾸므로 토큰이 없으면
+// 브라우저가 예전 그림을 계속 보여준다 — "저장했는데 언페이크가 그대로" 의 정체다
+// (수홍 실측 2026-08-08). 재굽은 프레임에만 붙여서 다른 URL 지문 계약은 안 건드린다.
+const regridBust = {};
+
+function markFrameRegridded(stateName, index) {
+  regridBust[`${stateName}#${index}`] = Date.now();
+}
+
 function frameUrl(stateName, frame) {
-  if (frame.plainUrl) return !unfakeOn(stateName) ? frame.plainUrl : frame.url;
-  return frame.url;
+  const base = frame.plainUrl ? (!unfakeOn(stateName) ? frame.plainUrl : frame.url) : frame.url;
+  const token = regridBust[`${stateName}#${frame.index}`];
+  if (!token) return base;
+  return base + (base.includes("?") ? "&" : "?") + "regrid=" + token;
 }
 
 // **굽기가 읽는 파일** — 파이썬 `frame_variant` + `row_frame_rel` 미러.
