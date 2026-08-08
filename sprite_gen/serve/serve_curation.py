@@ -341,10 +341,10 @@ def _recorded_frame_edges(run_dir: Path, state: str, index: int, twin_size: tupl
     조정 탓으로 오해한다 (수홍 실측 2026-08-08 "23칸인데 언페이크는 22칸"). 기록을
     보여주면 조정의 출발점이 **진실**이 되고, 사람의 보정값과 자동 검출값이 같은
     좌표계에 놓여 비교·튜닝이 가능해진다."""
-    try:
-        manifest = load_consistent_frames_manifest(run_dir, allow_pending_states=True) or {}
-    except SystemExit:
-        return None      # 손상/고아 매니페스트는 이 경로가 판정할 문제가 아니다
+    # 손상·고아 매니페스트는 **삼키지 않는다**. 여기서 조용히 검출로 폴백하면 기록이
+    # 깨졌다는 사실이 "검출 격자" 로 위장돼 사라진다 (원칙 6). 라우트가 이 예외를
+    # 500 + 사유로 낸다.
+    manifest = load_consistent_frames_manifest(run_dir, allow_pending_states=True) or {}
     row = next((r for r in manifest.get("rows", []) if r.get("state") == state), None)
     if not row:
         return None
