@@ -406,3 +406,32 @@ def test_rebake_keeps_every_logical_column(fixture_run_dir):
     reds = {px[0] for px in baked.getdata() if px[3] > 0}
     expected = {10 + i * 25 for i in range(len(x_edges) - 1)}
     assert expected <= reds, f"논리 칸이 결과에서 사라졌다 — 빠진 칸: {sorted(expected - reds)}"
+
+
+def test_rebake_logical_pixels_are_uniform(fixture_run_dir):
+    """다시 구운 프레임의 논리 픽셀은 **균일**하다 — 칸 하나 = 출력 픽셀 하나(정수 배율).
+
+    수홍 실측 2026-08-08: "가로가 23칸이었는데 왜 언페이크 누르면 22칸이 되냐". 굽기가
+    논리 폭을 트윈 발자국으로 늘려 칸당 1.91px 이 됐고, 어떤 칸은 1px 어떤 칸은 2px 라
+    얇은 칸이 이웃과 붙어 보였다. 배치는 추출과 같은 `fit_to_cell` 이 해야 하고, 그러면
+    콘텐츠 크기가 논리 크기의 정수배로 떨어진다.
+    """
+    from sprite_gen.serve.serve_curation import (_frame_plain_path,  # noqa: PLC0415
+                                                 _rebake_frame_from_edges)
+    run = _extract_run(fixture_run_dir)
+    state = next(iter(load_request(run)["states"]))
+    twin_path = _frame_plain_path(run, state, 0)
+    with Image.open(twin_path) as opened:
+        w, h = opened.size
+    cols, rows = 7, 9
+    x_edges = [round(i * w / cols) for i in range(cols + 1)]
+    y_edges = [round(i * h / rows) for i in range(rows + 1)]
+    # 모든 칸이 불투명해야 칸이 투명으로 떨어지지 않는다(그건 별개 규칙).
+    Image.new("RGBA", (w, h), (200, 40, 40, 255)).save(twin_path)
+    assert "error" not in _rebake_frame_from_edges(run, state, 0, twin_path, x_edges, y_edges)
+    with Image.open(run / "frames" / state / "frame-0.png") as opened:
+        box = opened.convert("RGBA").getbbox()
+    width, height = box[2] - box[0], box[3] - box[1]
+    assert width % cols == 0 and height % rows == 0, (
+        f"논리 픽셀이 균일하지 않다 — {width}x{height} 안에 {cols}x{rows} 칸이면 "
+        f"칸마다 폭이 달라진다")
