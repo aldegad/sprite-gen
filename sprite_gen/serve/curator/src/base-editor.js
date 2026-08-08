@@ -379,7 +379,10 @@ function renderGridFit(stage, stateName) {
   const y1 = edges.yEdges[edges.yEdges.length - 1] * sy;
   const x0 = edges.xEdges[0] * sx;
   const x1 = edges.xEdges[edges.xEdges.length - 1] * sx;
-  const held = gridFitDrag && gridFitDrag.preview ? gridFitDrag : null;
+  // 지금 잡은 선 = 노랑. 드래그 중이 아니어도 **커서가 얹힌 선**을 노랑으로 표시해
+  // 무엇을 잡거나 지울지 미리 보인다 (수홍 2026-08-08 "선 클릭하면 노란색으로 하이라이트").
+  const held = (gridFitDrag && gridFitDrag.preview) ? gridFitDrag
+    : (gridFitHover && gridFitHover.state === state ? gridFitHover : null);
   edges.xEdges.forEach((e, i) => {
     const x = Math.round(e * sx) + 0.5;
     const isHeld = held && held.axis === "x" && held.index === i;
@@ -400,6 +403,8 @@ function renderGridFit(stage, stateName) {
 
 // 드래그 상태: {axis:"x"|"y", index, origin, preview:{xEdges,yEdges}}
 let gridFitDrag = null;
+// 커서가 얹힌 격자선 {axis, index, state} — 노랑 하이라이트용 (드래그 아님).
+let gridFitHover = null;
 
 // 균일 격자 미리보기 — 서버의 `_grid_edges` 를 흉내낸 **드래그 중 임시 표시**다.
 // 확정 값은 pointerup 에서 서버에 다시 물어 받는다 (서버가 절단선 SSoT).
@@ -453,8 +458,21 @@ function wireGridFitDrag(stage, stateName) {
   // 커서로 "잡을 수 있다" 를 알린다 — 잡을 게 없으면 편집 도구가 그대로 쓰인다
   canvas.addEventListener("pointermove", (ev) => {
     if (gridFitDrag) return;
-    canvas.style.cursor = near(ev) ? (near(ev).axis === "x" ? "ew-resize" : "ns-resize") : "";
+    const hit = near(ev);
+    canvas.style.cursor = hit ? (hit.axis === "x" ? "ew-resize" : "ns-resize") : "";
     canvas.style.pointerEvents = "auto";
+    const now = hit ? { axis: hit.axis, index: hit.index, state } : null;
+    const same = (!now && !gridFitHover)
+      || (now && gridFitHover && gridFitHover.axis === now.axis
+          && gridFitHover.index === now.index && gridFitHover.state === now.state);
+    if (same) return;                    // 같은 선 위에서는 다시 안 그린다
+    gridFitHover = now;
+    renderGridFit(stage, state);
+  });
+  canvas.addEventListener("pointerleave", () => {
+    if (gridFitDrag || !gridFitHover) return;
+    gridFitHover = null;
+    renderGridFit(stage, state);
   });
   // 선 위에서 더블클릭 = **그 선만 삭제** (나머지는 불변). 두 칸이 하나로 합쳐진다.
   canvas.addEventListener("dblclick", async (ev) => {
