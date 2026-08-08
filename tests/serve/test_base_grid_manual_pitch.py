@@ -423,15 +423,44 @@ def test_rebake_logical_pixels_are_uniform(fixture_run_dir):
     twin_path = _frame_plain_path(run, state, 0)
     with Image.open(twin_path) as opened:
         w, h = opened.size
+    # 이 계약은 픽셀 언페이크 런의 것이다 — 그 런이 정수배 배치를 쓴다.
+    request = load_request(run)
+    request.setdefault("fit", {})["pixel_unfake"] = True
+    request["fit"]["logical_height"] = 32
+    write_request(run, request)
     cols, rows = 7, 9
     x_edges = [round(i * w / cols) for i in range(cols + 1)]
     y_edges = [round(i * h / rows) for i in range(rows + 1)]
+    # 칸마다 색을 달리한다 — 단색이면 전체가 한 런으로 뭉쳐 배율을 못 잰다.
     # 모든 칸이 불투명해야 칸이 투명으로 떨어지지 않는다(그건 별개 규칙).
-    Image.new("RGBA", (w, h), (200, 40, 40, 255)).save(twin_path)
+    painted = Image.new("RGBA", (w, h), (0, 0, 0, 255))
+    for i in range(cols):
+        for x in range(x_edges[i], x_edges[i + 1]):
+            for y in range(h):
+                painted.putpixel((x, y), (20 + i * 30, 40, 60, 255))
+    painted.save(twin_path)
     assert "error" not in _rebake_frame_from_edges(run, state, 0, twin_path, x_edges, y_edges)
     with Image.open(run / "frames" / state / "frame-0.png") as opened:
-        box = opened.convert("RGBA").getbbox()
-    width, height = box[2] - box[0], box[3] - box[1]
-    assert width % cols == 0 and height % rows == 0, (
-        f"논리 픽셀이 균일하지 않다 — {width}x{height} 안에 {cols}x{rows} 칸이면 "
-        f"칸마다 폭이 달라진다")
+        baked = opened.convert("RGBA")
+    box = baked.getbbox()
+    # 균일 = 같은 색 열이 이어지는 런 길이가 **한 값**뿐 (= 정수 배율).
+    runs, prev, count = [], None, 0
+    for x in range(box[0], box[2]):
+        col = tuple(baked.getpixel((x, y)) for y in range(box[1], box[3]))
+        if col == prev:
+            count += 1
+        else:
+            if prev is not None:
+                runs.append(count)
+            prev, count = col, 1
+    runs.append(count)
+    assert len(set(runs)) == 1, (
+        f"논리 픽셀이 균일하지 않다 — 열 런 길이가 섞였다: {sorted(set(runs))}")
+    # 균일한 것만으로는 부족하다: **배율이 자동 경로와 같아야** 한다. 배율 SSoT 는
+    # `pixel_snap_scale` 이고, 그걸 안 쓰고 `fit_to_cell` 로 앉히면 상한 1.0 에 걸려
+    # 1x 가 된다 — 스프라이트가 갑자기 반으로 쪼그라든다(수홍 실측 2026-08-08).
+    from sprite_gen.curate.curation import pixel_snap_scale  # noqa: PLC0415
+    scale = pixel_snap_scale(load_request(run))
+    assert scale, "이 픽스처는 픽셀 언페이크 런이어야 이 계약을 검사할 수 있다"
+    assert runs[0] == scale, f"재굽기 배율이 자동 경로({scale}x)와 다르다: {runs[0]}x"
+    assert box[2] - box[0] == cols * scale, "콘텐츠 폭 = 칸 수 x 배율 이어야 한다"

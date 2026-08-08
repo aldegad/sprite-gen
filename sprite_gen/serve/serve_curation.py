@@ -375,21 +375,26 @@ def _rebake_frame_from_edges(run_dir: Path, state: str, index: int, twin_path: P
     기존 계약을 지킨다.
 
     원본은 최초 1회 `<frame>.pregrid.png` 로 백업한다 (관측 가능, 덮어쓰지 않음)."""
-    from sprite_gen.frames.extract import fit_to_cell, snap_by_edges
+    from sprite_gen.curate.curation import pixel_snap_scale
+    from sprite_gen.frames.extract import fit_pixel_unfake, fit_to_cell, snap_by_edges
     frame_path = run_dir / "frames" / state / f"frame-{index}.png"
     if not frame_path.is_file():
         return {"error": f"no frame image: {frame_path.name}"}
     with Image.open(twin_path) as opened:
         twin = opened.convert("RGBA")
     logical = snap_by_edges(twin, x_edges, y_edges)
-    # 논리 이미지를 셀에 앉히는 일은 **추출과 같은 함수**(`fit_to_cell`)에 맡긴다.
+    # 논리 이미지를 셀에 앉히는 일은 **추출이 쓰는 그 함수**에 맡긴다. 두 경로가 있고
+    # 서로 다른 함수다 — 픽셀 언페이크 런은 `fit_pixel_unfake`(정수배 NEAREST 업스케일),
+    # 그 외는 `fit_to_cell`(축소 위주, 배율 상한 1.0). 배율의 SSoT 는 `pixel_snap_scale`
+    # 이고 그 docstring 이 "every consumer calls this instead of re-deriving the formula
+    # (hand copies drifted)" 라고 못박아 뒀다.
     #
-    # 직접 배치 수학을 쓰다가 실제로 틀렸다: 논리 폭을 트윈 발자국(예: 44px)으로 늘렸는데
-    # 논리 칸이 23개라 칸당 1.91px 이 되어 어떤 칸은 1px, 어떤 칸은 2px 로 나갔다. 그래서
-    # 얇은 칸이 이웃과 붙어 보이고 사람이 세면 22칸이 됐다 (수홍 실측 2026-08-08
-    # "가로가 23칸이었는데 왜 언페이크 누르면 22칸이 되냐"). 픽셀아트는 논리 픽셀이
-    # **균일**해야 하고, 그 규칙(정수 배율 · foot-centroid · bottom 정렬 · safe margin)은
-    # 이미 `fit_to_cell` 이 소유한다. 사본을 만들면 이렇게 갈린다.
+    # 여기서 두 번 틀렸고 둘 다 손으로 다시 만든 탓이다 (수홍 실측 2026-08-08):
+    #   ① 논리 폭을 트윈 발자국(44px)으로 늘려 칸당 1.91px → 어떤 칸 1px, 어떤 칸 2px.
+    #      얇은 칸이 이웃과 붙어 보여 23칸이 22칸으로 세어졌다.
+    #   ② 그 다음 `fit_to_cell` 로 바꿨더니 배율 상한 1.0 에 걸려 1× 로 앉았다 —
+    #      자동 경로는 정수 2× 라 스프라이트가 갑자기 반으로 쪼그라든다.
+    # 규칙을 베끼지 말고 소유자를 호출한다.
     request = load_request(run_dir)
     fit_config = request.get("fit") or {}
     cell = request.get("cell") or {}
@@ -400,7 +405,11 @@ def _rebake_frame_from_edges(run_dir: Path, state: str, index: int, twin_path: P
             cell_w, cell_h = opened.convert("RGBA").size
     margin_x = int(cell.get("safe_margin_x", cell.get("safe_margin", 0)) or 0)
     margin_y = int(cell.get("safe_margin_y", cell.get("safe_margin", 0)) or 0)
-    canvas = fit_to_cell(logical, cell_w, cell_h, margin_x, margin_y, fit_config)
+    pp_scale = pixel_snap_scale(request)
+    if pp_scale:
+        canvas = fit_pixel_unfake(logical, cell_w, cell_h, margin_x, margin_y, pp_scale, fit_config)
+    else:
+        canvas = fit_to_cell(logical, cell_w, cell_h, margin_x, margin_y, fit_config)
     cell_size = (cell_w, cell_h)
     backup = _pregrid_backup_path(run_dir, state, index)
     if not backup.exists():
