@@ -258,6 +258,62 @@ def _base_grid_response(run_dir: Path, base_path: Path,
     return result
 
 
+def _frame_plain_path(run_dir: Path, state: str, index: int):
+    """프레임의 플레인 트윈 파일. 표시 우선순위는 `build_run_state` 의 `plainUrl` 과
+    같다 — `orig/` 고해상본 우선, 없으면 셀 크기 `.plain.png`, 그것도 없으면 프레임
+    자신. 두 곳이 다른 파일을 고르면 화면과 격자가 갈리므로 순서를 맞춘다."""
+    base = run_dir / "frames" / state
+    stem = f"frame-{index}"
+    for candidate in (base / "orig" / f"{stem}.png",
+                      base / f"{stem}.plain.png",
+                      base / f"{stem}.png"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _frame_grid_response(run_dir: Path, image_path: Path,
+                         override_pitch: tuple | None = None) -> dict:
+    """프레임 플레인 트윈의 **후보** 격자 — 베이스와 같은 우선순위·같은 절단선 함수.
+
+    베이스와 갈리는 점 하나: 프레임의 초록 격자(`inputGrid`)는 **지난 추출이 실제로
+    자른 선의 기록**이라 피치를 바꿔도 재추출 전에는 안 변한다. 그래서 이 응답은
+    "이 피치로 자르면 이렇게 된다" 를 미리 보여주는 후보 격자이고, 확정하려면
+    `fit.pitch_manual` 로 저장한 뒤 재추출해야 한다 (No Silent Fallback — 화면이
+    이미 그렇게 잘린 것처럼 굴지 않는다).
+
+    프레임 트윈은 이미 알파로 잘려 있으므로 크로마 제거 없이 알파 bbox 를 쓴다."""
+    from sprite_gen.frames.extract import (_axis_refine, _edge_histograms, _grid_edges,
+                                    _manual_pitch_from_fit, detect_pixel_grid,
+                                    solid_alpha_bbox)
+    request = load_request(run_dir)
+    fit = request.get("fit") or {}
+    manual = override_pitch if override_pitch is not None else _manual_pitch_from_fit(fit)
+    with Image.open(image_path) as opened:
+        image = opened.convert("RGBA")
+    box = solid_alpha_bbox(image) or image.getbbox()
+    if not box:
+        return {"grid": None, "note": "frame has no content to detect a grid on"}
+    tight = image.crop(box)
+    if manual is not None:
+        pitch_x, pitch_y = manual
+        col_edges, row_edges, _, _ = _edge_histograms(tight)
+        _sx, phase_x = _axis_refine(col_edges, pitch_x)
+        _sy, phase_y = _axis_refine(row_edges, pitch_y)
+    else:
+        (pitch_x, pitch_y), (phase_x, phase_y) = detect_pixel_grid(tight)
+    if min(pitch_x, pitch_y) < 2.0:
+        return {"grid": None, "note": "no confident pixel grid detected"}
+    return {"grid": {
+        "xEdges": [box[0] + e for e in _grid_edges(tight.width, pitch_x, phase_x)],
+        "yEdges": [box[1] + e for e in _grid_edges(tight.height, pitch_y, phase_y)],
+        "pitch": [round(pitch_x, 2), round(pitch_y, 2)],
+        "imageSize": [image.width, image.height],
+        "source": "manual" if manual is not None else "detected",
+        # 화면이 "이미 이렇게 잘렸다" 로 오독되지 않게 상태를 함께 낸다.
+        "candidate": True}}
+
+
 def _uniform_blocks(px, w, h, k):
     """이미지가 k×k 단색 블록으로만 이루어졌는가 (정확 판정)."""
     for by in range(0, h, k):
@@ -1176,6 +1232,26 @@ class CurationHandler(BaseHTTPRequestHandler):
                                   if override_pitch is not None else None)
                 self._send_json(_base_grid_response(self.run_dir, base_path,
                                                     override_pitch, override_phase))
+            except (Exception, SystemExit) as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+        if path == "/api/frame-grid":
+            # 프레임 플레인 트윈의 후보 격자 (베이스와 대칭). `?state=&index=` 필수,
+            # `?pitchX&pitchY` 는 라이브 프리뷰 override.
+            try:
+                query = parse_qs(urlparse(self.path).query)
+                state = (query.get("state") or [""])[0]
+                try:
+                    index = int((query.get("index") or ["0"])[0])
+                except (TypeError, ValueError):
+                    self._send_json({"error": "index:int required"}, 400)
+                    return
+                target = _frame_plain_path(self.run_dir, state, index)
+                if target is None:
+                    self._send_json({"error": f"no plain twin for {state}#{index}"}, 404)
+                    return
+                override_pitch = _query_pitch_pair(query, "pitchX", "pitchY")
+                self._send_json(_frame_grid_response(self.run_dir, target, override_pitch))
             except (Exception, SystemExit) as exc:
                 self._send_json({"error": str(exc)}, 500)
             return

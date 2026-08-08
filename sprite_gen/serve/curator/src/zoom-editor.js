@@ -344,6 +344,16 @@ function openZoom(stateName, idx, keepWidth) {
   centerView(viewport, stage);
   syncViewLabels();
 
+  // 프레임에도 격자 피치 컨트롤 + raw 위 격자 맞추기 (수홍 확정 2026-08-08 "둘다 넣자").
+  // 베이스는 openBaseEditor 가 자기 격자를 이미 들고 열므로 거기서 붙인다.
+  if (!isBase) {
+    wireGridFitDrag(stage, stateName);
+    loadFrameGrid(stateName, idx).then((view) => {
+      if (!view || !zoomView || zoomView.stateName !== stateName) return;
+      injectBasePitchControls(stateName);
+      renderGridFit(stage, stateName);
+    });
+  }
   const handBtn = toolbar.querySelector(".et-hand");
   handBtn.addEventListener("click", () => {
     panTool = !panTool;

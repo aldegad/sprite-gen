@@ -258,7 +258,7 @@ function updateCardGrid(card) {
   }
   // 베이스 격자 맞추기 오버레이(raw 위 드래그 정렬)도 같은 토글에 붙는다 —
   // 격자/픽셀 언페이크 체크박스가 이 함수를 부르므로 재렌더 훅이 하나로 남는다.
-  if (isBaseCard && stage && typeof renderGridFit === "function") renderGridFit(stage);
+  if (stage && typeof renderGridFit === "function") renderGridFit(stage, cardState);
   const step = on && !useFinal && !plainShown ? scale : null;
   if (!overlay) return;
   if (!step || !stage) { overlay.style.display = "none"; return; }
