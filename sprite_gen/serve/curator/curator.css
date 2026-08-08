@@ -899,6 +899,14 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .swatch { width: 18px; height: 18px; padding: 0; border: 1px solid rgba(0, 0, 0, 0.18); border-radius: 4px; cursor: pointer; box-shadow: none; }
 .et-color { width: 26px; height: 22px; padding: 0 1px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); cursor: pointer; }
 .et-note { font-size: 11px; }
+/* 베이스 픽셀 격자 피치 조정 위젯 (수동 격자) */
+.et-pitch { display: inline-flex; align-items: center; gap: 3px; padding-left: 8px; margin-left: 4px; border-left: 1px solid var(--line); }
+.et-pitch-label { font-size: 11px; color: var(--muted, #64748b); margin-right: 2px; }
+.et-pitch-x-glyph { font-size: 11px; color: var(--muted, #64748b); }
+.et-pitch input[type="number"] { width: 46px; height: 22px; padding: 0 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); font-size: 12px; }
+.et-pitch .et-pitch-inc, .et-pitch .et-pitch-dec { min-width: 20px; justify-content: center; padding: 0 4px; }
+.et-pitch .et-pitch-save { border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
+.et-pitch.is-manual .et-pitch-save { background: var(--accent, #0ea5e9); color: #fff; border-color: transparent; }
 .stage.pixel-editing { cursor: crosshair; }
 /* 스포이드 모드 = 색 집기 커서 (copy) 로 구분 */
 .stage.pixel-editing.picking { cursor: copy; }

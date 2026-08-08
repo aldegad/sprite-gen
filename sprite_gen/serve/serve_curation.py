@@ -167,17 +167,56 @@ def _find_base_path(run_dir: Path):
     return None
 
 
-def _base_grid_response(run_dir: Path, base_path: Path) -> dict:
-    """베이스 검출 격자 응답 (mtime 키 캐시). GET /api/base-grid 와 base-edit 의
-    논리→raw 확장이 같은 절단선을 쓴다 (SSoT — 클라와 서버가 다른 격자를 보면 안 됨)."""
-    cache_key = (str(base_path), base_path.stat().st_mtime_ns)
+def _query_pitch_pair(query: dict, key_x: str, key_y: str,
+                      validate: bool = True) -> tuple | None:
+    """`?pitchX&pitchY` 같은 쿼리 쌍을 (x, y) 실수 튜플로 파싱한다. 하나라도 없거나
+    비수치면 None (다음 격자 소스로 폴백 — 조용한 쓰레기 격자 금지, `_manual_pitch_from_fit`
+    가드와 동형). `validate=True` 면 피치처럼 ≥2px 를 요구한다."""
+    raw_x = (query.get(key_x) or [None])[0]
+    raw_y = (query.get(key_y) or [None])[0]
+    if raw_x is None or raw_y is None:
+        return None
+    try:
+        vx, vy = float(raw_x), float(raw_y)
+    except (TypeError, ValueError):
+        return None
+    if validate and (vx < 2.0 or vy < 2.0):
+        return None
+    return vx, vy
+
+
+def _base_grid_response(run_dir: Path, base_path: Path,
+                        override_pitch: tuple | None = None,
+                        override_phase: tuple | None = None) -> dict:
+    """베이스 격자 응답 (mtime + 소스 키 캐시). GET /api/base-grid 와 base-edit 의
+    논리→raw 확장이 같은 절단선을 쓴다 (SSoT — 클라와 서버가 다른 격자를 보면 안 됨).
+
+    격자 소스 우선순위:
+      1) `override_pitch` — 큐레이션뷰의 **라이브 프리뷰** 쿼리(`?pitchX&pitchY`). 저장 전
+         미리보기 전용이라 디스크를 바꾸지 않는다.
+      2) `fit.pitch_manual` — 사람이 "이 격자로 저장" 으로 확정한 저장 SSoT(피치-only).
+         `extract.py` 의 추출도 같은 값을 읽으므로 표시·base-edit 굽기·추출이 한 진실을 본다.
+      3) `detect_pixel_grid` — 자동 검출(기존 경로). 위 둘이 없을 때만.
+
+    수동 피치는 위상을 담지 않는다(SSoT 계약). 컴포넌트는 bbox 로 잘려 블록 경계에서
+    시작하므로 위상 기본값은 블록정렬 0 이고, 라이브 프리뷰가 `?phaseX&phaseY` 를 주면
+    그때만 override 한다. 자동 검출 경로는 예전 그대로 히스토그램 위상을 쓴다(골든 유지)."""
+    from sprite_gen.frames.extract import (_grid_edges, _manual_pitch_from_fit,
+                                    detect_pixel_grid,
+                                    remove_chroma_background_ycbcr, solid_alpha_bbox)
+    request = load_request(run_dir)
+    fit = request.get("fit") or {}
+    # 우선순위: 쿼리 override > 저장 fit.pitch_manual > 검출.
+    manual = override_pitch if override_pitch is not None else _manual_pitch_from_fit(fit)
+    # 위상 override 는 라이브 프리뷰(override_pitch)일 때만 의미가 있다. 저장 수동 피치엔
+    # 위상이 없으니 블록정렬 0 으로 떨어뜨린다.
+    manual_phase = override_phase if (override_pitch is not None and override_phase is not None) else None
+    # 캐시 키에 유효 소스를 포함 — override 나 fit.pitch_manual 변경이 stale 캐시에 가리지 않게.
+    cache_key = (str(base_path), base_path.stat().st_mtime_ns, manual, manual_phase)
     cached = _BASE_GRID_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    request = load_request(run_dir)
     chroma = tuple(request.get("chroma_key", {}).get("rgb") or (255, 0, 255))
-    from sprite_gen.frames.extract import (_grid_edges, detect_pixel_grid,
-                                    remove_chroma_background_ycbcr, solid_alpha_bbox)
     with Image.open(base_path) as opened:
         cleaned = remove_chroma_background_ycbcr(opened.convert("RGBA"), chroma)
     box = solid_alpha_bbox(cleaned) or cleaned.getbbox()
@@ -185,22 +224,25 @@ def _base_grid_response(run_dir: Path, base_path: Path) -> dict:
         result = {"grid": None, "note": "base has no content to detect a grid on"}
     else:
         tight = cleaned.crop(box)
-        # 여기서 쓰는 위상은 `detect_pixel_grid` 의 히스토그램 위상이고, 추출 스냅이 쓰는
-        # 실측 위상(`_best_phase`)이 아니다. 이 절단선은 표시용이 아니라 **편집기의
-        # 샘플링·역기록 격자**를 겸한다 (위 docstring 의 SSoT 계약): base-editor.js 가
-        # 블록 중심을 raw 에서 샘플해 논리 캔버스를 만들고, space:"logical" ops 가 같은
-        # 절단선으로 raw 블록을 채워 base-source 에 굽는다. 즉 위상이 밀리면 추출 스냅과
-        # 같은 계열의 오배치가 난다. 그럼에도 추출 정책을 강제하지 않는 이유는 대상이
-        # 별개 이미지(base-source)이고 사람이 보며 편집하는 경로이기 때문이며, 이 경로의
-        # 위상 정확도는 별건이다 (docs/pixel-unfake.md "위상은 근사가 아니라 실측으로 고른다").
-        (pitch_x, pitch_y), (phase_x, phase_y) = detect_pixel_grid(tight)
+        if manual is not None:
+            # 사람이 확정/미리보기한 피치. 위상은 override 있으면 그 값, 없으면 블록정렬 0.
+            pitch_x, pitch_y = manual
+            phase_x, phase_y = manual_phase if manual_phase is not None else (0.0, 0.0)
+        else:
+            # 자동 검출 (기존 경로). 여기서 쓰는 위상은 `detect_pixel_grid` 의 히스토그램
+            # 위상이고, 추출 스냅이 쓰는 실측 위상(`_best_phase`)이 아니다. 이 절단선은
+            # 표시용이 아니라 **편집기의 샘플링·역기록 격자**를 겸한다 (위 docstring 의 SSoT
+            # 계약): base-editor.js 가 블록 중심을 raw 에서 샘플해 논리 캔버스를 만들고,
+            # space:"logical" ops 가 같은 절단선으로 raw 블록을 채워 base-source 에 굽는다.
+            (pitch_x, pitch_y), (phase_x, phase_y) = detect_pixel_grid(tight)
         if min(pitch_x, pitch_y) < 2.0:
             result = {"grid": None, "note": "no confident pixel grid detected"}
         else:
             x_edges = [box[0] + e for e in _grid_edges(tight.width, pitch_x, phase_x)]
             y_edges = [box[1] + e for e in _grid_edges(tight.height, pitch_y, phase_y)]
             result = {"grid": {"xEdges": x_edges, "yEdges": y_edges,
-                               "pitch": [round(pitch_x, 2), round(pitch_y, 2)]}}
+                               "pitch": [round(pitch_x, 2), round(pitch_y, 2)],
+                               "source": "manual" if manual is not None else "detected"}}
     _BASE_GRID_CACHE.clear()  # 베이스는 런당 1개 — 이전 세대 항목만 치움
     _BASE_GRID_CACHE[cache_key] = result
     return result
@@ -1108,14 +1150,22 @@ class CurationHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 500)
             return
         if path == "/api/base-grid":
-            # 베이스의 검출 픽셀 격자 — 편집기(줌 모달)의 논리 해상도와 base-edit 의
-            # 논리→raw 확장이 같은 절단선을 쓴다 (_base_grid_response, mtime 캐시).
+            # 베이스의 픽셀 격자 — 편집기(줌 모달)의 논리 해상도와 base-edit 의
+            # 논리→raw 확장이 같은 절단선을 쓴다 (_base_grid_response).
+            # `?pitchX&pitchY[&phaseX&phaseY]` 는 큐레이션뷰의 라이브 프리뷰 override 다
+            # (저장 전 미리보기, 디스크 미변경). 잘못된 값은 무시하고 다음 소스로 폴백한다.
             try:
                 base_path = _find_base_path(self.run_dir)
                 if base_path is None:
                     self._send_json({"error": "no base-source image in this run"}, 404)
                     return
-                self._send_json(_base_grid_response(self.run_dir, base_path))
+                query = parse_qs(urlparse(self.path).query)
+                override_pitch = _query_pitch_pair(query, "pitchX", "pitchY")
+                override_phase = (_query_pitch_pair(query, "phaseX", "phaseY",
+                                                    validate=False)
+                                  if override_pitch is not None else None)
+                self._send_json(_base_grid_response(self.run_dir, base_path,
+                                                    override_pitch, override_phase))
             except (Exception, SystemExit) as exc:
                 self._send_json({"error": str(exc)}, 500)
             return
@@ -1476,6 +1526,41 @@ class CurationHandler(BaseHTTPRequestHandler):
                     # 쓰기도 게이트 경유 — fps 편집이 디스크 스키마를 바꾸지 않는다.
                     write_request(self.run_dir, request)
                 self._send_json({"ok": True, "state": state, "fps": fps})
+                return
+            if path == "/api/base-pitch":
+                # 사람이 확정한 베이스 픽셀 격자 피치 → sprite-request.json 의
+                # `fit.pitch_manual = [x, y]` (SSoT). 이 값이 있으면 표시·base-edit 굽기·
+                # 추출이 모두 이 한 진실을 읽는다 (extract.py `_manual_pitch_from_fit`).
+                # body `{pitchX, pitchY}` 저장, 비었으면(둘 다 null/부재) 키를 지워 자동
+                # 검출로 복귀한다. state-fps 와 같은 도장 경로 (publish_guard + write_request).
+                payload = self._read_body()
+                raw_x = payload.get("pitchX")
+                raw_y = payload.get("pitchY")
+                clear = raw_x is None and raw_y is None
+                pitch = None
+                if not clear:
+                    try:
+                        px, py = float(raw_x), float(raw_y)
+                    except (TypeError, ValueError):
+                        self._send_json({"error": "pitchX/pitchY must be numbers, or omit both to clear"}, 400)
+                        return
+                    if px < 2.0 or py < 2.0:
+                        self._send_json({"error": f"pitch must be >= 2px: [{px}, {py}]"}, 400)
+                        return
+                    pitch = [px, py]
+                with publish_guard(self.run_dir):
+                    request = load_request(self.run_dir)
+                    fit = request.get("fit")
+                    if not isinstance(fit, dict):
+                        fit = {}
+                        request["fit"] = fit
+                    if clear:
+                        fit.pop("pitch_manual", None)
+                    else:
+                        fit["pitch_manual"] = pitch
+                    write_request(self.run_dir, request)
+                _BASE_GRID_CACHE.clear()  # 저장된 격자가 바뀌었다 — stale 표시 격자 제거
+                self._send_json({"ok": True, "pitch_manual": pitch})
                 return
             if path == "/api/interpolate":
                 payload = self._read_body()
