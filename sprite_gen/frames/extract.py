@@ -1487,6 +1487,26 @@ def resolve_frame_pitch(own: tuple[float, float], consensus: tuple[float, float]
     return own, False
 
 
+def _manual_pitch_from_fit(fit_config: dict) -> tuple[float, float] | None:
+    """사람이 확정한 축별 픽셀 격자 피치. SSoT 는 sprite-request.json 의
+    `fit.pitch_manual` = [x, y] (px, 소수 허용).
+
+    자동 검출(`detect_pixel_grid`)이 틀렸을 때 큐레이션뷰에서 사람이 맞춘 값이며,
+    있으면 검출을 이긴다. 2px 미만이거나 형식이 어긋나면 없는 것으로 본다 —
+    쓰레기 값으로 조용히 격자를 망가뜨리지 않는다.
+    """
+    raw = fit_config.get("pitch_manual")
+    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+        return None
+    try:
+        px, py = float(raw[0]), float(raw[1])
+    except (TypeError, ValueError):
+        return None
+    if px < 2.0 or py < 2.0:
+        return None
+    return px, py
+
+
 def _grid_edges(length: int, pitch: float, offset: float) -> list[int]:
     """소수 피치를 정수 픽셀 경계로 확정한다.
 
@@ -2796,6 +2816,11 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         # 정수로 반올림하면 그 오차가 폭 전체에 누적돼 셀 경계가 블록 한가운데를 지난다.
         # 측정은 소수·축별로 하고, 격자선은 `_grid_edges` 가 정수로 확정한다.
         hint = int(fit_config.get("pitch_hint", 0))
+        # 사람이 확정한 격자(축별). `pitch_hint` 와는 다른 축이다 — hint 는 검출이 전부
+        # 실패했을 때의 fallback 이고, 이것은 검출을 **이기는** override 다. 자동 검출이
+        # 틀린 것을 눈으로 본 사람이 큐레이션뷰에서 폭·높이를 직접 맞춘 값이라,
+        # 측정보다 사람의 판정이 우선한다. 비어 있으면 예전 그대로 자동 검출.
+        manual_pitch = _manual_pitch_from_fit(fit_config)
         grids = [detect_pixel_grid(component) for component in images]
 
         def _consensus(axis: int) -> float:
@@ -2847,6 +2872,15 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         (consensus_x, consensus_y), _pitch_src = arbitrate_pitch(
             images, (consensus_x, consensus_y),
             (_runlen_consensus(0), _runlen_consensus(1)), tag, all_warnings)
+        # 사람이 확정한 격자가 있으면 여기서 측정을 덮는다. 중재까지 끝난 뒤에 덮는 이유는
+        # 교차검증 경고(검출이 무엇을 봤는지)를 그대로 남겨 두기 위해서다 - 사람 값으로
+        # 갈아탄 사실도 경고로 관측된다 (No Silent Fallback).
+        if manual_pitch is not None:
+            all_warnings.append(
+                f"{tag}: manual pitch {manual_pitch[0]:.2f}x{manual_pitch[1]:.2f} from "
+                f"fit.pitch_manual overrides detection "
+                f"({consensus_x:.2f}x{consensus_y:.2f})")
+            consensus_x, consensus_y = manual_pitch
         # 프레임 자체 검출 격자가 1순위 진실이다 (수홍 2026-07-20, plan
         # sprite-gen/per-frame-pixel-grid): 합의 피치를 프레임에 강제하면 측정차
         # (0.5px/셀 수준)가 폭 전체에 누적돼 경계가 블록 중앙을 지난다 (실사고
@@ -2863,7 +2897,11 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         cut_edges: list[tuple[list[int], list[int]] | None] = []
         used_pitches: list[tuple[float, float]] = []
         for index, (component, ((own_x, own_y), _own_phase)) in enumerate(zip(images, grids)):
-            if min(own_x, own_y) >= 2.0:
+            if manual_pitch is not None:
+                # 사람이 확정한 격자는 프레임 자체 검출도 이긴다. 여기서 안 막으면
+                # own pitch 가 프레임마다 다시 이겨 손으로 맞춘 격자가 무시된다.
+                use_x, use_y = manual_pitch
+            elif min(own_x, own_y) >= 2.0:
                 (use_x, use_y), outlier = resolve_frame_pitch(
                     (own_x, own_y), (consensus_x, consensus_y))
                 if outlier:
