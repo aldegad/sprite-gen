@@ -328,6 +328,45 @@ def _frame_edges_from_fit(fit_config: dict, state: str, index: int):
     return x_edges, y_edges
 
 
+def _recorded_frame_edges(run_dir: Path, state: str, index: int, twin_size: tuple):
+    """추출이 **실제로 자른** 절단선을 트윈 좌표로 돌려준다.
+
+    `frames-manifest.json` 의 `input_grids` 가 그 기록이며 **셀 좌표**(예: 64×64)에
+    들어 있다. 오버레이는 플레인 트윈(`orig/`, 예: 1216×1216) 위에 그리므로 배율만
+    맞춰 옮긴다.
+
+    왜 검출보다 이걸 먼저 쓰나: 오버레이가 트윈을 새로 검출하면 추출이 쓴 격자와
+    다른 답이 나올 수 있다 — 두 검출이 서로 다른 이미지(컴포넌트 vs 트윈)를 재기
+    때문이다. 그러면 화면의 격자와 언페이크 결과가 갈리고, 사람이 그 차이를 자기
+    조정 탓으로 오해한다 (수홍 실측 2026-08-08 "23칸인데 언페이크는 22칸"). 기록을
+    보여주면 조정의 출발점이 **진실**이 되고, 사람의 보정값과 자동 검출값이 같은
+    좌표계에 놓여 비교·튜닝이 가능해진다."""
+    try:
+        manifest = load_consistent_frames_manifest(run_dir, allow_pending_states=True) or {}
+    except SystemExit:
+        return None      # 손상/고아 매니페스트는 이 경로가 판정할 문제가 아니다
+    row = next((r for r in manifest.get("rows", []) if r.get("state") == state), None)
+    if not row:
+        return None
+    grids = row.get("input_grids") or []
+    if index >= len(grids) or not isinstance(grids[index], dict):
+        return None
+    grid = grids[index]
+    # `cell` 은 행이 아니라 매니페스트 최상단에 있다 (실측: row 키에 없음).
+    cell = manifest.get("cell") or {}
+    cell_w = int(cell.get("width") or cell.get("size") or 0)
+    cell_h = int(cell.get("height") or cell.get("size") or 0)
+    if not cell_w or not cell_h:
+        return None
+    scale_x = twin_size[0] / cell_w
+    scale_y = twin_size[1] / cell_h
+    x_edges = _sane_edges([round(v * scale_x) for v in grid.get("x") or []])
+    y_edges = _sane_edges([round(v * scale_y) for v in grid.get("y") or []])
+    if x_edges is None or y_edges is None:
+        return None
+    return x_edges, y_edges
+
+
 def _frame_plain_path(run_dir: Path, state: str, index: int):
     """프레임의 플레인 트윈 파일. 표시 우선순위는 `build_run_state` 의 `plainUrl` 과
     같다 — `orig/` 고해상본 우선, 없으면 셀 크기 `.plain.png`, 그것도 없으면 프레임
@@ -449,6 +488,16 @@ def _frame_grid_response(run_dir: Path, image_path: Path,
                                    round((y_edges[-1] - y_edges[0]) / max(1, len(y_edges) - 1), 2)],
                          "imageSize": [image.width, image.height],
                          "source": "edges", "candidate": False}}
+    # 사람 저장값이 없으면 **추출이 실제로 쓴 절단선**이 다음 진실이다 (새 검출보다 먼저).
+    if override_pitch is None:
+        recorded = _recorded_frame_edges(run_dir, state, index, image.size)
+        if recorded is not None:
+            x_edges, y_edges = recorded
+            return {"grid": {"xEdges": x_edges, "yEdges": y_edges,
+                             "pitch": [round((x_edges[-1] - x_edges[0]) / max(1, len(x_edges) - 1), 2),
+                                       round((y_edges[-1] - y_edges[0]) / max(1, len(y_edges) - 1), 2)],
+                             "imageSize": [image.width, image.height],
+                             "source": "recorded", "candidate": False}}
     box = solid_alpha_bbox(image) or image.getbbox()
     if not box:
         return {"grid": None, "note": "frame has no content to detect a grid on"}

@@ -464,3 +464,53 @@ def test_rebake_logical_pixels_are_uniform(fixture_run_dir):
     assert scale, "이 픽스처는 픽셀 언페이크 런이어야 이 계약을 검사할 수 있다"
     assert runs[0] == scale, f"재굽기 배율이 자동 경로({scale}x)와 다르다: {runs[0]}x"
     assert box[2] - box[0] == cols * scale, "콘텐츠 폭 = 칸 수 x 배율 이어야 한다"
+
+
+def test_frame_overlay_shows_the_recorded_extraction_grid(fixture_run_dir):
+    """프레임 오버레이는 **추출이 실제로 자른 절단선**을 보여준다 (새 검출보다 먼저).
+
+    수홍 실측 2026-08-08 "23칸인데 언페이크는 22칸": 오버레이가 트윈을 새로 검출하면
+    추출이 쓴 격자(컴포넌트 검출)와 다른 답이 나올 수 있고, 그러면 화면의 격자와 결과가
+    갈려 사람이 그 차이를 자기 조정 탓으로 오해한다. 기록(`input_grids`)을 먼저 쓰면
+    조정의 출발점이 진실이 되고, 사람 보정값과 자동값이 같은 좌표계에 놓여 비교가 된다.
+
+    기록은 **셀 좌표**이고 오버레이는 **트윈** 위에 그리므로 배율 환산이 필요하다.
+    그 환산에서 실제로 틀렸다(매니페스트의 `cell` 을 행에서 찾았는데 최상단에 있다),
+    그래서 여기서 환산까지 대조한다.
+    """
+    run = _extract_run(fixture_run_dir)
+    state = next(iter(load_request(run)["states"]))
+    manifest_path = run / "frames" / "frames-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    row = next(r for r in manifest["rows"] if r["state"] == state)
+    cell_w = manifest["cell"]["width"]
+    cell_h = manifest["cell"]["height"]
+    # 추출이 이 절단선으로 잘랐다고 기록한다 (셀 좌표, 폭이 제각각인 5칸).
+    recorded_x = [4, 10, 22, 30, 44, cell_w - 4]
+    recorded_y = [2, 12, 28, 40, cell_h - 2]
+    row["input_grids"] = [{"x": [float(v) for v in recorded_x],
+                           "y": [float(v) for v in recorded_y]}]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    srv = _serve(run)
+    port = srv.server_address[1]
+    try:
+        grid = _get(port, f"/api/frame-grid?state={state}&index=0")["grid"]
+        assert grid is not None and grid["source"] == "recorded"
+        assert grid["candidate"] is False, "기록은 후보가 아니라 실제로 쓰인 값이다"
+        # 배율 환산 대조: 트윈/셀 비율만큼 옮겨졌는가.
+        scale = grid["imageSize"][0] / cell_w
+        assert grid["xEdges"] == [round(v * scale) for v in recorded_x]
+        scale_y = grid["imageSize"][1] / cell_h
+        assert grid["yEdges"] == [round(v * scale_y) for v in recorded_y]
+        # 사람 저장값은 기록보다도 강하다.
+        mine = [v + 1 for v in grid["xEdges"]]
+        _post(port, "/api/frame-grid-edges",
+              {"state": state, "index": 0, "x": mine, "y": grid["yEdges"]})
+        after = _get(port, f"/api/frame-grid?state={state}&index=0")["grid"]
+        assert after["source"] == "edges" and after["xEdges"] == mine
+        # 비우면 검출이 아니라 **기록**으로 돌아간다.
+        _post(port, "/api/frame-grid-edges", {"state": state, "index": 0})
+        assert _get(port, f"/api/frame-grid?state={state}&index=0")["grid"]["source"] == "recorded"
+    finally:
+        srv.shutdown()
