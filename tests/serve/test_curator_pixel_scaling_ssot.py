@@ -144,6 +144,7 @@ CANVAS_BUFFER_SITES = {
     ("display.js", "canvas"): "rect",          # 격자 오버레이 — stage 실측 크기
     ("base-editor.js", "probe"): "offscreen",
     ("base-editor.js", "logical"): "offscreen",
+    ("base-editor.js", "canvas"): "rect",      # 격자 맞추기 오버레이 — stage 실측 크기
     ("transforms.js", "canvas"): "display",    # snap-canvas (소스/양자화 모드)
     ("zoom-editor.js", "zoomView"): "not-canvas",
     ("zoom-editor.js", "c"): "offscreen",

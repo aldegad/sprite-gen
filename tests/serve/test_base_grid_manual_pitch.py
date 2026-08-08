@@ -115,6 +115,40 @@ def test_display_edges_equal_sampling_edges(fixture_run_dir):
     assert [box0_y + e for e in _grid_edges(height, 10.0, 0.0)] == grid["yEdges"]
 
 
+def _write_half_lead_base(run_dir, pitch=8, cells=6, margin=6, lead=4):
+    """왼쪽·위쪽 첫 칸이 반 블록(lead)인 베이스. 콘텐츠 bbox 가 블록 경계가 아니라
+    블록 **중간**에서 시작하므로, 그 피치의 최적 위상은 0 이 아니라 lead 다."""
+    side = lead + cells * pitch
+    img = Image.new("RGBA", (side + margin * 2, side + margin * 2), CHROMA + (255,))
+    xs = [0] + [lead + i * pitch for i in range(cells + 1)]
+    for by in range(len(xs) - 1):
+        for bx in range(len(xs) - 1):
+            color = _PALETTE[(bx + by * 2) % len(_PALETTE)] + (255,)
+            for y in range(xs[by], xs[by + 1]):
+                for x in range(xs[bx], xs[bx + 1]):
+                    img.putpixel((margin + x, margin + y), color)
+    path = run_dir / "base-source.png"
+    img.save(path)
+    return path
+
+
+def test_manual_pitch_measures_phase_not_zero(fixture_run_dir):
+    """수동 피치의 위상은 **실측**이다 — 0 으로 강제하면 격자가 통째로 밀린다.
+
+    회귀 근거(수홍 발견 2026-08-08, 커서 베이스): 수동 피치일 때 위상을 0 으로 두던
+    구현에서 실측 최적 위상이 x=18.25 y=24.44 였고, 그만큼 어긋나 "픽셀 끝단이 안
+    맞는" 증상이 났다. 여기서는 첫 칸이 반 블록인 합성 베이스로 그 성질을 고정한다:
+    위상을 재면 선행 칸이 lead 폭으로 잡히고, 0 으로 강제하면 그 칸이 사라진다.
+    """
+    base = _write_half_lead_base(fixture_run_dir, pitch=8, lead=4)
+    grid = _base_grid_response(fixture_run_dir, base, override_pitch=(8.0, 8.0))["grid"]
+    assert grid["source"] == "manual"
+    lead_x = grid["xEdges"][1] - grid["xEdges"][0]
+    lead_y = grid["yEdges"][1] - grid["yEdges"][0]
+    assert lead_x == 4, f"선행 칸이 실측 위상(4)이어야 한다 — 위상 0 강제면 8 이 된다: {lead_x}"
+    assert lead_y == 4, f"세로도 마찬가지: {lead_y}"
+
+
 def test_query_override_beats_saved_manual(fixture_run_dir):
     """라이브 프리뷰 쿼리 override 는 저장된 fit.pitch_manual 보다도 우선한다."""
     base = _write_base(fixture_run_dir)
@@ -211,16 +245,18 @@ def test_route_base_edit_logical_honors_preview_pitch(fixture_run_dir):
     srv = _serve(fixture_run_dir)
     port = srv.server_address[1]
     try:
-        # 검출 격자(override 없음)로 논리 (0,0) 을 빨강 → ~8px 셀.
+        # 논리 (1,1) 을 칠한다 — (0,0) 은 위상 실측이 만드는 **선행 부분셀**일 수 있어
+        # 두 격자에서 우연히 같은 크기가 나온다(실측 2026-08-08). 안쪽 셀은 온전한
+        # 피치 크기라 격자 차이가 그대로 면적 차이로 드러난다.
         status, data = _post(port, "/api/base-edit",
-                             {"ops": {"0,0": "#ff0000"}, "space": "logical"})
+                             {"ops": {"1,1": "#ff0000"}, "space": "logical"})
         assert status == 200 and data.get("ok")
         detected_red = _red_pixels(base)
         # 원본 복원 후 프리뷰 override 16px 로 같은 논리 셀 → ~16px 셀 (더 넓다).
         import shutil
         shutil.copyfile(base.with_name(base.name + ".orig"), base)
         status, data = _post(port, "/api/base-edit",
-                             {"ops": {"0,0": "#ff0000"}, "space": "logical",
+                             {"ops": {"1,1": "#ff0000"}, "space": "logical",
                               "pitchX": 16, "pitchY": 16})
         assert status == 200 and data.get("ok")
         override_red = _red_pixels(base)

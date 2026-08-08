@@ -749,6 +749,17 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 }
 
 /* 검출된 입력 격자 오버레이 (원본 표시 줄 전용) — 추출이 실제로 자른 절단선, 초록 */
+/* 격자 맞추기 오버레이 — raw 위 초록 격자, 선을 잡아 끌면 피치가 맞춰진다.
+   pointer-events 는 JS 가 격자선 근처에서만 auto 로 올린다 (아니면 아래 편집 도구). */
+.stage .gridfit {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+  display: none;
+}
 .stage .ingrid {
   position: absolute;
   inset: 0;

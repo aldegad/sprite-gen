@@ -198,11 +198,15 @@ def _base_grid_response(run_dir: Path, base_path: Path,
          `extract.py` 의 추출도 같은 값을 읽으므로 표시·base-edit 굽기·추출이 한 진실을 본다.
       3) `detect_pixel_grid` — 자동 검출(기존 경로). 위 둘이 없을 때만.
 
-    수동 피치는 위상을 담지 않는다(SSoT 계약). 컴포넌트는 bbox 로 잘려 블록 경계에서
-    시작하므로 위상 기본값은 블록정렬 0 이고, 라이브 프리뷰가 `?phaseX&phaseY` 를 주면
-    그때만 override 한다. 자동 검출 경로는 예전 그대로 히스토그램 위상을 쓴다(골든 유지)."""
-    from sprite_gen.frames.extract import (_grid_edges, _manual_pitch_from_fit,
-                                    detect_pixel_grid,
+    수동 피치는 위상을 담지 않는다(SSoT 계약) — **위상은 사람이 정하는 값이 아니라
+    그 피치에서 실측되는 값이다.** 그래서 수동 피치를 받으면 위상을 0 으로 두지 않고
+    `_axis_refine` 으로 그 피치의 최적 위상을 다시 잰다. 0 으로 두면 격자 전체가 반
+    블록까지 밀려 "끝단이 안 맞는" 증상이 난다 (실측 2026-08-08 커서 베이스: 최적
+    위상 x=18.25 y=24.44 인데 0 을 쓰면 그만큼 어긋난다 — 수홍 발견).
+    라이브 프리뷰가 `?phaseX&phaseY` 를 주면 그때만 실측 대신 그 값을 쓴다.
+    자동 검출 경로는 예전 그대로 히스토그램 위상을 쓴다(골든 유지)."""
+    from sprite_gen.frames.extract import (_axis_refine, _edge_histograms, _grid_edges,
+                                    _manual_pitch_from_fit, detect_pixel_grid,
                                     remove_chroma_background_ycbcr, solid_alpha_bbox)
     request = load_request(run_dir)
     fit = request.get("fit") or {}
@@ -225,9 +229,15 @@ def _base_grid_response(run_dir: Path, base_path: Path,
     else:
         tight = cleaned.crop(box)
         if manual is not None:
-            # 사람이 확정/미리보기한 피치. 위상은 override 있으면 그 값, 없으면 블록정렬 0.
+            # 사람이 확정/미리보기한 피치. 위상은 **그 피치에서 실측**한다 (0 으로 두면
+            # 격자가 통째로 밀린다 — 위 docstring 의 실측 근거). 명시 override 만 이긴다.
             pitch_x, pitch_y = manual
-            phase_x, phase_y = manual_phase if manual_phase is not None else (0.0, 0.0)
+            if manual_phase is not None:
+                phase_x, phase_y = manual_phase
+            else:
+                col_edges, row_edges, _, _ = _edge_histograms(tight)
+                _score_x, phase_x = _axis_refine(col_edges, pitch_x)
+                _score_y, phase_y = _axis_refine(row_edges, pitch_y)
         else:
             # 자동 검출 (기존 경로). 여기서 쓰는 위상은 `detect_pixel_grid` 의 히스토그램
             # 위상이고, 추출 스냅이 쓰는 실측 위상(`_best_phase`)이 아니다. 이 절단선은

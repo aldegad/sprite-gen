@@ -97,7 +97,10 @@ async function openBaseEditor(overridePitch) {
   }
   lc.putImageData(out, 0, 0);
   baseView = { cols, rows, xEdges: grid.xEdges, yEdges: grid.yEdges,
-               url: logical.toDataURL("image/png"), rawUrl };
+               url: logical.toDataURL("image/png"), rawUrl,
+               // raw 픽셀 치수 — 격자 맞추기 오버레이가 raw 좌표를 화면 좌표로
+               // 옮길 때 쓴다 (raw 전체가 스테이지에 선형 대응: 실측 확인).
+               rawW: rawImg.naturalWidth, rawH: rawImg.naturalHeight };
   baseLogicalImg = new Image();
   baseLogicalImg.src = baseView.url;
   await new Promise((ok) => { baseLogicalImg.onload = ok; });
@@ -107,6 +110,149 @@ async function openBaseEditor(overridePitch) {
   }
   openZoom(BASE_STATE, 0);
   injectBasePitchControls();
+  const stage = document.querySelector("#zoom-modal .stage");
+  if (stage) {
+    wireGridFitDrag(stage);
+    renderGridFit(stage);
+  }
+}
+
+// ── 격자 맞추기 오버레이 (raw 위) ────────────────────────────────────────
+// 왜 raw 위인가: 픽셀 언페이크 ON 은 이미 그 격자로 스냅된 논리 이미지라 격자가
+// 언제나 균일하게 보인다 — 어긋남을 볼 수 없다. 어긋남은 raw 블록 경계와 후보
+// 절단선을 나란히 놓을 때만 보이므로, 이 오버레이는 pp OFF(raw 표시)에서만 그린다.
+// 좌표: 격자선은 raw 픽셀 좌표이고 raw 전체가 스테이지에 선형 대응한다(실측:
+// raw 1254×1254 → stage 553×704, img/snap-canvas rect 동일).
+function renderGridFit(stage) {
+  const canvas = stage && stage.querySelector(".gridfit");
+  if (!canvas || !baseView || !baseView.rawW) return;
+  const show = !!gridStates[BASE_STATE] && !unfakeOn(BASE_STATE);
+  if (!show) { canvas.style.display = "none"; return; }
+  const w = Math.max(1, Math.round(stage.clientWidth));
+  const h = Math.max(1, Math.round(stage.clientHeight));
+  canvas.width = w;
+  canvas.height = h;
+  canvas.style.display = "block";
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  const edges = gridFitDrag && gridFitDrag.preview ? gridFitDrag.preview : baseView;
+  const sx = w / baseView.rawW;
+  const sy = h / baseView.rawH;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(21, 200, 90, 0.95)";
+  const y0 = edges.yEdges[0] * sy;
+  const y1 = edges.yEdges[edges.yEdges.length - 1] * sy;
+  const x0 = edges.xEdges[0] * sx;
+  const x1 = edges.xEdges[edges.xEdges.length - 1] * sx;
+  edges.xEdges.forEach((e, i) => {
+    const x = Math.round(e * sx) + 0.5;
+    // 끝선(첫/마지막)은 굵게 — 정렬 기준선이 어디인지 눈에 띄게
+    ctx.lineWidth = (i === 0 || i === edges.xEdges.length - 1) ? 2 : 1;
+    ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke();
+  });
+  edges.yEdges.forEach((e, i) => {
+    const y = Math.round(e * sy) + 0.5;
+    ctx.lineWidth = (i === 0 || i === edges.yEdges.length - 1) ? 2 : 1;
+    ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+  });
+}
+
+// 드래그 상태: {axis:"x"|"y", index, origin, preview:{xEdges,yEdges}}
+let gridFitDrag = null;
+
+// 균일 격자 미리보기 — 서버의 `_grid_edges` 를 흉내낸 **드래그 중 임시 표시**다.
+// 확정 값은 pointerup 에서 서버에 다시 물어 받는다 (서버가 절단선 SSoT).
+function previewEdges(origin, pitch, end) {
+  const out = [];
+  for (let i = 0; ; i++) {
+    const v = origin + i * pitch;
+    if (v > end + pitch * 0.5) break;
+    out.push(Math.round(v));
+    if (out.length > 4096) break;
+  }
+  return out.length > 1 ? out : [origin, end];
+}
+
+// 격자선을 잡아 블록 경계로 끌면 피치가 재계산된다. i 번째 선을 raw 좌표 r 로
+// 옮기면 pitch = (r - origin) / i — 즉 "먼 선을 실제 블록 경계에 맞추면 간격이
+// 그에 맞게 정해진다". 원점(첫 선)은 콘텐츠 bbox 라 고정한다(위상 조정은 추출
+// 백엔드가 프레임별 실측 위상을 쓰므로 별도 작업 — 여기서 열면 화면과 추출이
+// 갈린다, No Silent Fallback).
+function wireGridFitDrag(stage) {
+  const canvas = stage && stage.querySelector(".gridfit");
+  if (!canvas) return;
+  const near = (ev) => {
+    if (!baseView || !baseView.rawW) return null;
+    const r = stage.getBoundingClientRect();
+    const rx = ((ev.clientX - r.left) / r.width) * baseView.rawW;
+    const ry = ((ev.clientY - r.top) / r.height) * baseView.rawH;
+    const tolX = (baseView.rawW / r.width) * 7;   // 화면 7px 를 raw 로 환산
+    const tolY = (baseView.rawH / r.height) * 7;
+    let best = null;
+    baseView.xEdges.forEach((e, i) => {
+      if (i === 0) return;                        // 원점선은 잡지 않는다
+      const d = Math.abs(e - rx);
+      if (d <= tolX && (!best || d < best.d)) best = { axis: "x", index: i, d };
+    });
+    baseView.yEdges.forEach((e, i) => {
+      if (i === 0) return;
+      const d = Math.abs(e - ry);
+      if (d <= tolY && (!best || d < best.d)) best = { axis: "y", index: i, d };
+    });
+    return best;
+  };
+  // 커서로 "잡을 수 있다" 를 알린다 — 잡을 게 없으면 편집 도구가 그대로 쓰인다
+  canvas.addEventListener("pointermove", (ev) => {
+    if (gridFitDrag) return;
+    canvas.style.cursor = near(ev) ? (near(ev).axis === "x" ? "ew-resize" : "ns-resize") : "";
+    canvas.style.pointerEvents = "auto";
+  });
+  canvas.addEventListener("pointerdown", (ev) => {
+    const hit = near(ev);
+    if (!hit) return;                             // 격자선이 아니면 아래 도구로 흘린다
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    try { canvas.setPointerCapture(ev.pointerId); } catch { /* no-op */ }
+    const axis = hit.axis;
+    const origin = axis === "x" ? baseView.xEdges[0] : baseView.yEdges[0];
+    const end = axis === "x" ? baseView.xEdges[baseView.xEdges.length - 1]
+                             : baseView.yEdges[baseView.yEdges.length - 1];
+    const other = axis === "x" ? baseView.yEdges : baseView.xEdges;
+    gridFitDrag = { axis, index: hit.index, origin, end, other, pitch: null };
+    const onMove = (e2) => {
+      const r = stage.getBoundingClientRect();
+      const raw = axis === "x"
+        ? ((e2.clientX - r.left) / r.width) * baseView.rawW
+        : ((e2.clientY - r.top) / r.height) * baseView.rawH;
+      const pitch = Math.max(2, (raw - origin) / gridFitDrag.index);
+      gridFitDrag.pitch = pitch;
+      const line = previewEdges(origin, pitch, end);
+      gridFitDrag.preview = axis === "x" ? { xEdges: line, yEdges: other }
+                                         : { xEdges: other, yEdges: line };
+      // 숫자 입력도 같이 움직인다 — 두 컨트롤이 한 값의 두 표시다
+      const input = document.querySelector(axis === "x" ? "#zoom-modal .et-pitch-x" : "#zoom-modal .et-pitch-y");
+      if (input) input.value = Math.round(pitch * 100) / 100;
+      renderGridFit(stage);
+    };
+    const onUp = async () => {
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      try { canvas.releasePointerCapture(ev.pointerId); } catch { /* no-op */ }
+      const pitch = gridFitDrag && gridFitDrag.pitch;
+      gridFitDrag = null;
+      if (!pitch) { renderGridFit(stage); return; }
+      // 확정은 서버에 다시 물어 받는다 — 절단선 SSoT 는 `_base_grid_response`.
+      const xIn = document.querySelector("#zoom-modal .et-pitch-x");
+      const yIn = document.querySelector("#zoom-modal .et-pitch-y");
+      const pair = [parseFloat(xIn && xIn.value), parseFloat(yIn && yIn.value)];
+      if (pair.every((v) => Number.isFinite(v) && v >= 2)) {
+        delete entries[BASE_STATE];
+        await openBaseEditor(pair);
+      }
+    };
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerup", onUp);
+  });
 }
 
 // 베이스 줌 모달 툴바에 픽셀 격자 피치 조정 위젯을 붙인다. 값을 바꾸면 그 피치로

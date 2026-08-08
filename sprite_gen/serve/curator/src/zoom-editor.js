@@ -148,6 +148,9 @@ function openZoom(stateName, idx, keepWidth) {
     `<div class="stage" data-tip="${t("tZoomStage")}">` +
     `<div class="pxgrid"></div>` +
     `<canvas class="ingrid"></canvas>` +
+    // 격자 맞추기 오버레이 (베이스 raw 위 — 드래그로 피치 정렬). 잡을 격자선이
+    // 없으면 pointer-events 를 흘려 아래 편집 도구가 그대로 동작한다.
+    `<canvas class="gridfit"></canvas>` +
     `<img src="${escapeHtml(frameUrl(stateName, frame))}" alt="frame ${idx}" draggable="false" />` +
     `<canvas class="snap-canvas"></canvas>` +
     `<div class="rotate-handle" data-tip="${t("tRotate")}"></div>` +
