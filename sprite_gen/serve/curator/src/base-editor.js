@@ -254,17 +254,41 @@ function syncCellCountInputs() {
   if (view && cy) cy.value = view.yEdges.length - 1;
 }
 
-// 칸 수를 바꾸면 현재 격자의 바깥 경계(첫·마지막 선)를 유지한 채 그 개수로 균등 분할한다
-// — 출발점을 주는 것이고, 그 뒤 한 줄씩 손으로 맞추는 것이 이 도구의 사용법이다.
+// 칸 수를 바꿔도 **이미 맞춰 둔 선은 그대로 둔다** (수홍 2026-08-08 "선 갯수 달라져서
+// 처음으로 돌아가니까 개빡침"). 예전엔 바깥 경계만 남기고 전부 균등 재분할해서, 한 줄씩
+// 공들여 맞춘 결과가 칸 수 한 번 건드리면 통째로 날아갔다.
+//
+// 늘릴 때: **가장 넓은 칸**을 반으로 쪼갠다 (다른 선은 불변).
+// 줄일 때: **가장 좁은 칸에 붙은 안쪽 선**을 지운다 (다른 선은 불변). 끝선은 안 지운다.
+function resizeEdgesPreserving(edges, target) {
+  const out = edges.slice();
+  let guard = 4096;
+  while (out.length - 1 > target && out.length > 2 && guard-- > 0) {
+    let victim = -1;
+    let narrowest = Infinity;
+    for (let i = 1; i < out.length - 1; i++) {
+      const gap = Math.min(out[i] - out[i - 1], out[i + 1] - out[i]);
+      if (gap < narrowest) { narrowest = gap; victim = i; }
+    }
+    if (victim < 0) break;
+    out.splice(victim, 1);
+  }
+  while (out.length - 1 < target && guard-- > 0) {
+    let widest = -1;
+    let span = -1;
+    for (let i = 0; i < out.length - 1; i++) {
+      const gap = out[i + 1] - out[i];
+      if (gap > span) { span = gap; widest = i; }
+    }
+    if (widest < 0 || span < 2) break;          // 더 쪼갤 수 없으면 멈춘다 (조용한 중복선 금지)
+    out.splice(widest + 1, 0, Math.round((out[widest] + out[widest + 1]) / 2));
+  }
+  return out;
+}
+
 function edgesForCellCount(view, colsX, rowsY) {
-  const span = (arr, n) => {
-    const a = arr[0];
-    const b = arr[arr.length - 1];
-    const out = [];
-    for (let i = 0; i <= n; i++) out.push(Math.round(a + ((b - a) * i) / n));
-    return out;
-  };
-  return { x: span(view.xEdges, colsX), y: span(view.yEdges, rowsY) };
+  return { x: resizeEdgesPreserving(view.xEdges, colsX),
+           y: resizeEdgesPreserving(view.yEdges, rowsY) };
 }
 
 // 조정 1회 = 되돌리기 1단계. 조정 경로(숫자·±·드래그)는 전부 여기를 지난다.
@@ -431,6 +455,24 @@ function wireGridFitDrag(stage, stateName) {
     if (gridFitDrag) return;
     canvas.style.cursor = near(ev) ? (near(ev).axis === "x" ? "ew-resize" : "ns-resize") : "";
     canvas.style.pointerEvents = "auto";
+  });
+  // 선 위에서 더블클릭 = **그 선만 삭제** (나머지는 불변). 두 칸이 하나로 합쳐진다.
+  canvas.addEventListener("dblclick", async (ev) => {
+    const hit = near(ev);
+    const view = viewOf();
+    if (!hit || !view) return;
+    const axis = hit.axis;
+    const edges = axis === "x" ? view.xEdges : view.yEdges;
+    if (hit.index === 0 || hit.index === edges.length - 1) return;   // 끝선은 안 지운다
+    if (edges.length <= 3) return;                                   // 칸이 하나만 남으면 의미 없다
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    const before = { x: view.xEdges.slice(), y: view.yEdges.slice() };
+    const kept = edges.slice();
+    kept.splice(hit.index, 1);
+    const next = axis === "x" ? { x: kept, y: view.yEdges.slice() }
+                              : { x: view.xEdges.slice(), y: kept };
+    await setGridEdges(state, next, before);      // 삭제도 Cmd+Z 1단계
   });
   canvas.addEventListener("pointerdown", (ev) => {
     const hit = near(ev);
