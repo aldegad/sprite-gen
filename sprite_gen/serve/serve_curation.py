@@ -167,6 +167,36 @@ def _find_base_path(run_dir: Path):
     return None
 
 
+def _sane_edges(raw) -> list | None:
+    """격자 절단선 한 축 — 정수 오름차순 ≥2개. 아니면 None (조용히 고치지 않는다)."""
+    if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+        return None
+    try:
+        edges = [int(round(float(v))) for v in raw]
+    except (TypeError, ValueError):
+        return None
+    if any(b <= a for a, b in zip(edges, edges[1:])):
+        return None
+    return edges
+
+
+def _manual_edges_from_fit(fit_config: dict):
+    """사람이 선 단위로 잡은 베이스 격자. SSoT 는 `fit.base_grid_manual = {x: [...], y: [...]}`
+    (base-source 의 raw 픽셀 좌표).
+
+    `pitch_manual`(균일 간격)과 다른 축이다 — 이쪽은 **칸마다 폭이 달라도 되는** 명시
+    절단선이라, AI 생성물처럼 블록이 고르지 않은 그림을 사람이 눈으로 맞춘 결과를 담는다.
+    형식이 어긋나면 없는 것으로 본다."""
+    raw = fit_config.get("base_grid_manual")
+    if not isinstance(raw, dict):
+        return None
+    x_edges = _sane_edges(raw.get("x"))
+    y_edges = _sane_edges(raw.get("y"))
+    if x_edges is None or y_edges is None:
+        return None
+    return x_edges, y_edges
+
+
 def _query_pitch_pair(query: dict, key_x: str, key_y: str,
                       validate: bool = True) -> tuple | None:
     """`?pitchX&pitchY` 같은 쿼리 쌍을 (x, y) 실수 튜플로 파싱한다. 하나라도 없거나
@@ -210,6 +240,21 @@ def _base_grid_response(run_dir: Path, base_path: Path,
                                     remove_chroma_background_ycbcr, solid_alpha_bbox)
     request = load_request(run_dir)
     fit = request.get("fit") or {}
+    # 사람이 **선 하나하나** 잡아 확정한 격자가 있으면 그것이 가장 강하다 — 균일 피치로는
+    # 표현할 수 없는 격자(칸마다 폭이 다른 AI 생성물)를 담기 때문이다. 라이브 프리뷰
+    # override(쿼리 피치)가 올 때만 비켜준다: 그건 사람이 지금 다른 값을 보고 있다는 뜻.
+    saved_edges = _manual_edges_from_fit(fit)
+    if saved_edges is not None and override_pitch is None:
+        x_edges, y_edges = saved_edges
+        result = {"grid": {"xEdges": x_edges, "yEdges": y_edges,
+                           "pitch": [round((x_edges[-1] - x_edges[0]) / max(1, len(x_edges) - 1), 2),
+                                     round((y_edges[-1] - y_edges[0]) / max(1, len(y_edges) - 1), 2)],
+                           "source": "edges"}}
+        cache_key = (str(base_path), base_path.stat().st_mtime_ns, "edges",
+                     len(x_edges), len(y_edges), x_edges[0], y_edges[0], x_edges[-1], y_edges[-1])
+        _BASE_GRID_CACHE.clear()
+        _BASE_GRID_CACHE[cache_key] = result
+        return result
     # 우선순위: 쿼리 override > 저장 fit.pitch_manual > 검출.
     manual = override_pitch if override_pitch is not None else _manual_pitch_from_fit(fit)
     # 위상 override 는 라이브 프리뷰(override_pitch)일 때만 의미가 있다. 저장 수동 피치엔
@@ -1529,11 +1574,23 @@ class CurationHandler(BaseHTTPRequestHandler):
                     # 함께 보내, 굽기가 **화면과 같은 격자**로 확장한다 (표시 격자 = 샘플링
                     # 진실). 저장된 fit.pitch_manual·자동 검출은 override 없이도 표시와 같은
                     # 절단선이라 그대로 둔다.
-                    override_pitch = _query_pitch_pair(
-                        {"pitchX": [payload.get("pitchX")], "pitchY": [payload.get("pitchY")]},
-                        "pitchX", "pitchY") if payload.get("pitchX") is not None else None
-                    grid = _base_grid_response(self.run_dir, base_path,
-                                               override_pitch=override_pitch).get("grid")
+                    # 클라가 선 단위로 잡은 격자를 그대로 보내면 그것으로 굽는다 — 화면이
+                    # 그 절단선으로 논리 이미지를 만들었으므로 굽기도 같아야 한다.
+                    body_edges = payload.get("edges")
+                    grid = None
+                    if isinstance(body_edges, dict):
+                        x_edges = _sane_edges(body_edges.get("x"))
+                        y_edges = _sane_edges(body_edges.get("y"))
+                        if x_edges is None or y_edges is None:
+                            self._send_json({"error": "edges.x/edges.y must be >=2 increasing"}, 400)
+                            return
+                        grid = {"xEdges": x_edges, "yEdges": y_edges}
+                    if grid is None:
+                        override_pitch = _query_pitch_pair(
+                            {"pitchX": [payload.get("pitchX")], "pitchY": [payload.get("pitchY")]},
+                            "pitchX", "pitchY") if payload.get("pitchX") is not None else None
+                        grid = _base_grid_response(self.run_dir, base_path,
+                                                   override_pitch=override_pitch).get("grid")
                     if not grid:
                         self._send_json({"error": "logical ops need a detected base grid"}, 422)
                         return
@@ -1655,6 +1712,34 @@ class CurationHandler(BaseHTTPRequestHandler):
                     write_request(self.run_dir, request)
                 _BASE_GRID_CACHE.clear()  # 저장된 격자가 바뀌었다 — stale 표시 격자 제거
                 self._send_json({"ok": True, "pitch_manual": pitch})
+                return
+            if path == "/api/base-grid-edges":
+                # 사람이 선 단위로 잡은 베이스 격자 → fit.base_grid_manual (raw 좌표).
+                # body {x:[...], y:[...]} 저장, 비었으면 키 제거로 자동/피치 경로 복귀.
+                payload = self._read_body()
+                clear = not payload.get("x") and not payload.get("y")
+                edges = None
+                if not clear:
+                    x_edges = _sane_edges(payload.get("x"))
+                    y_edges = _sane_edges(payload.get("y"))
+                    if x_edges is None or y_edges is None:
+                        self._send_json(
+                            {"error": "x/y must each be >=2 strictly increasing numbers"}, 400)
+                        return
+                    edges = {"x": x_edges, "y": y_edges}
+                with publish_guard(self.run_dir):
+                    request = load_request(self.run_dir)
+                    fit = request.get("fit")
+                    if not isinstance(fit, dict):
+                        fit = {}
+                        request["fit"] = fit
+                    if clear:
+                        fit.pop("base_grid_manual", None)
+                    else:
+                        fit["base_grid_manual"] = edges
+                    write_request(self.run_dir, request)
+                _BASE_GRID_CACHE.clear()
+                self._send_json({"ok": True, "base_grid_manual": edges})
                 return
             if path == "/api/interpolate":
                 payload = self._read_body()

@@ -276,3 +276,42 @@ def test_query_pitch_pair_rejects_garbage():
     assert _query_pitch_pair({}, "pitchX", "pitchY") is None
     # phase 는 validate=False — 2 미만도 허용 (위상은 오프셋이라 크기 제약이 없다).
     assert _query_pitch_pair({"phaseX": ["0"], "phaseY": ["1"]}, "phaseX", "phaseY", validate=False) == (0.0, 1.0)
+
+
+def test_hand_placed_edges_win_and_survive_roundtrip(fixture_run_dir):
+    """사람이 선 단위로 잡은 격자(`fit.base_grid_manual`)가 피치·검출을 모두 이긴다.
+
+    이 축이 따로 있는 이유: 균일 피치로는 **칸마다 폭이 다른 격자**를 담을 수 없다.
+    AI 생성물은 블록이 고르지 않아 사람이 한 줄씩 맞추게 되는데, 그 결과를 평균 피치로
+    접으면 맞춰 놓은 불균일이 사라진다 (수홍 2026-08-08 "손으로 한줄한줄").
+    """
+    base = _write_base(fixture_run_dir)
+    srv = _serve(fixture_run_dir)
+    port = srv.server_address[1]
+    try:
+        auto = _get(port, "/api/base-grid")["grid"]
+        # 일부러 **불균일**한 절단선 — 균일 피치로는 표현 불가능한 격자.
+        x_edges = [10, 18, 40, 47, 80]
+        y_edges = [12, 30, 33, 70]
+        status, data = _post(port, "/api/base-grid-edges", {"x": x_edges, "y": y_edges})
+        assert status == 200 and data["ok"]
+        grid = _get(port, "/api/base-grid")["grid"]
+        assert grid["source"] == "edges"
+        assert grid["xEdges"] == x_edges, "사람이 잡은 절단선이 그대로 나와야 한다"
+        assert grid["yEdges"] == y_edges
+        assert grid["xEdges"] != auto["xEdges"]
+        # 저장된 피치가 있어도 선 단위 격자가 이긴다.
+        _post(port, "/api/base-pitch", {"pitchX": 9, "pitchY": 9})
+        assert _get(port, "/api/base-grid")["grid"]["xEdges"] == x_edges
+        # 비우면 피치/검출 경로로 돌아간다.
+        _post(port, "/api/base-grid-edges", {})
+        assert _get(port, "/api/base-grid")["grid"]["source"] != "edges"
+        # 쓰레기(내림차순·1개)는 400 — 조용히 고치지 않는다.
+        for bad in ({"x": [5, 3], "y": y_edges}, {"x": [5], "y": y_edges}):
+            try:
+                _post(port, "/api/base-grid-edges", bad)
+                assert False, f"expected 400 for {bad}"
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 400
+    finally:
+        srv.shutdown()

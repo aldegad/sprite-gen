@@ -915,6 +915,7 @@ body.show-grid .stage { background-image: none; background-color: #eef0f3; }
 .et-pitch-label { font-size: 11px; color: var(--muted, #64748b); margin-right: 2px; }
 .et-pitch-x-glyph { font-size: 11px; color: var(--muted, #64748b); }
 .et-pitch input[type="number"] { width: 46px; height: 22px; padding: 0 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); font-size: 12px; }
+.et-pitch input.et-cells-x, .et-pitch input.et-cells-y { width: 40px; }
 .et-pitch .et-pitch-inc, .et-pitch .et-pitch-dec { min-width: 20px; justify-content: center; padding: 0 4px; }
 .et-pitch .et-pitch-save { border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
 .et-pitch.is-manual .et-pitch-save { background: var(--accent, #0ea5e9); color: #fff; border-color: transparent; }

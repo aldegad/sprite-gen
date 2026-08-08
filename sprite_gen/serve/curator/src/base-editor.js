@@ -48,15 +48,23 @@ let basePitchOverride = null;
 //
 // overridePitch = [x, y] 면 그 피치로 /api/base-grid 를 라이브 프리뷰한다(저장 전,
 // 디스크 미변경). 없으면 서버가 저장된 fit.pitch_manual > 자동 검출 순으로 격자를 준다.
-async function openBaseEditor(overridePitch) {
-  let url = "/api/base-grid";
-  if (Array.isArray(overridePitch)) {
-    url += `?pitchX=${encodeURIComponent(overridePitch[0])}&pitchY=${encodeURIComponent(overridePitch[1])}`;
-  }
+async function openBaseEditor(overridePitch, explicitEdges) {
   let grid = null;
-  try {
-    grid = (await (await fetch(url)).json()).grid || null;
-  } catch { grid = null; }
+  if (explicitEdges && explicitEdges.x && explicitEdges.y) {
+    // 사람이 선 단위로 잡은 격자 — 서버에 묻지 않는다(이게 진실이고, 굽기에도 같은
+    // 절단선을 실어 보낸다). 표시 격자 = 샘플링 진실 계약은 그대로다.
+    const avg = (a) => Math.round(((a[a.length - 1] - a[0]) / Math.max(1, a.length - 1)) * 100) / 100;
+    grid = { xEdges: explicitEdges.x.slice(), yEdges: explicitEdges.y.slice(), source: "edges",
+             pitch: [avg(explicitEdges.x), avg(explicitEdges.y)] };   // 표시용 평균 간격
+  } else {
+    let url = "/api/base-grid";
+    if (Array.isArray(overridePitch)) {
+      url += `?pitchX=${encodeURIComponent(overridePitch[0])}&pitchY=${encodeURIComponent(overridePitch[1])}`;
+    }
+    try {
+      grid = (await (await fetch(url)).json()).grid || null;
+    } catch { grid = null; }
+  }
   if (!grid) {
     setStatus(t("baseEditFail") + "no confident pixel grid on the base", "err");
     return;
@@ -189,6 +197,59 @@ function syncPitchInputs() {
   if (yIn && basePitch) yIn.value = Math.round(basePitch[1] * 100) / 100;
 }
 
+// 선 단위 격자 편집 = 되돌리기 1단계. 드래그·칸수 변경이 여기를 지난다.
+// 격자를 **명시 절단선**으로 다루므로 칸마다 폭이 달라도 된다 — 균일 피치로는 담을 수
+// 없는 격자(AI 생성물)를 사람이 눈으로 맞춘 결과가 이 형태다.
+async function setGridEdges(stateName, edges, beforeEdges) {
+  const before = beforeEdges
+    || (gridFitTarget(stateName)
+        ? { x: gridFitTarget(stateName).xEdges.slice(), y: gridFitTarget(stateName).yEdges.slice() }
+        : null);
+  const journalLen = gridPitchJournalLen();
+  await applyGridEdges(stateName, edges);
+  gridPitchUndo.push({ state: stateName, kind: "edges", beforeEdges: before,
+                       afterEdges: { x: edges.x.slice(), y: edges.y.slice() }, journalLen });
+  gridPitchRedo.length = 0;
+}
+
+// 명시 절단선을 화면에 반영한다 (기록 없음 — 되돌리기 자신이 쓰는 경로).
+async function applyGridEdges(stateName, edges) {
+  if (stateName === BASE_STATE) {
+    delete entries[BASE_STATE];
+    await openBaseEditor(null, edges);
+    return;
+  }
+  if (gridFitView) {
+    gridFitView.xEdges = edges.x.slice();
+    gridFitView.yEdges = edges.y.slice();
+  }
+  basePitchSource = "edges";
+  const stage = document.querySelector("#zoom-modal .stage");
+  if (stage) renderGridFit(stage, stateName);
+  syncCellCountInputs();
+}
+
+function syncCellCountInputs() {
+  const view = gridFitTarget((zoomView && zoomView.stateName) || BASE_STATE);
+  const cx = document.querySelector("#zoom-modal .et-cells-x");
+  const cy = document.querySelector("#zoom-modal .et-cells-y");
+  if (view && cx) cx.value = view.xEdges.length - 1;
+  if (view && cy) cy.value = view.yEdges.length - 1;
+}
+
+// 칸 수를 바꾸면 현재 격자의 바깥 경계(첫·마지막 선)를 유지한 채 그 개수로 균등 분할한다
+// — 출발점을 주는 것이고, 그 뒤 한 줄씩 손으로 맞추는 것이 이 도구의 사용법이다.
+function edgesForCellCount(view, colsX, rowsY) {
+  const span = (arr, n) => {
+    const a = arr[0];
+    const b = arr[arr.length - 1];
+    const out = [];
+    for (let i = 0; i <= n; i++) out.push(Math.round(a + ((b - a) * i) / n));
+    return out;
+  };
+  return { x: span(view.xEdges, colsX), y: span(view.yEdges, rowsY) };
+}
+
 // 조정 1회 = 되돌리기 1단계. 조정 경로(숫자·±·드래그)는 전부 여기를 지난다.
 async function setGridPitch(stateName, pair) {
   const before = basePitchOverride ? basePitchOverride.slice() : null;
@@ -201,14 +262,16 @@ async function setGridPitch(stateName, pair) {
 async function gridPitchUndoStep() {
   const item = gridPitchUndo.pop();
   if (!item) return;
-  await applyGridPitch(item.state, item.before);
+  if (item.kind === "edges") await applyGridEdges(item.state, item.beforeEdges);
+  else await applyGridPitch(item.state, item.before);
   gridPitchRedo.push({ ...item, journalLen: gridPitchJournalLen() });
 }
 
 async function gridPitchRedoStep() {
   const item = gridPitchRedo.pop();
   if (!item) return;
-  await applyGridPitch(item.state, item.after);
+  if (item.kind === "edges") await applyGridEdges(item.state, item.afterEdges);
+  else await applyGridPitch(item.state, item.after);
   gridPitchUndo.push({ ...item, journalLen: gridPitchJournalLen() });
 }
 
@@ -246,6 +309,11 @@ function renderGridFit(stage, stateName) {
   if (!canvas || !view || !view.rawW) return;
   const show = !!gridStates[state] && !unfakeOn(state);
   if (!show) { canvas.style.display = "none"; return; }
+  // 격자는 한 번에 하나만 보인다. 프레임에는 이미 "지난 추출이 자른 선"(.ingrid)이
+  // 그려지는데, 후보 격자까지 같이 켜면 초록선이 두 겹으로 보인다 (수홍 신고
+  // 2026-08-08 "초록선이 두개"). 조정용 오버레이가 떠 있는 동안은 기록 격자를 숨긴다.
+  const recorded = stage.querySelector(".ingrid");
+  if (recorded) recorded.style.display = "none";
   const w = Math.max(1, Math.round(stage.clientWidth));
   const h = Math.max(1, Math.round(stage.clientHeight));
   canvas.width = w;
@@ -260,21 +328,31 @@ function renderGridFit(stage, stateName) {
   // 검출 격자와 사람이 잡은 격자를 **색으로** 가른다 (수홍 2026-08-08 "색이 너무 비슷해
   // 알아보기 어렵다"). 초록 = 자동 검출, 파랑 = 사람이 조정/저장한 값. 드래그 중에도
   // 파랑이라 "지금 내가 만지는 선" 이 검출선과 헷갈리지 않는다.
-  const manualNow = basePitchSource === "manual" || !!(gridFitDrag && gridFitDrag.preview);
-  ctx.strokeStyle = manualNow ? "rgba(40, 130, 255, 0.98)" : "rgba(21, 200, 90, 0.95)";
+  const manualNow = basePitchSource !== "detected" || !!(gridFitDrag && gridFitDrag.preview);
+  // 사람이 잡은 격자는 **더 굵고 더 진하게** (수홍 2026-08-08 "인간이 한거 좀 더 두껍고
+  // 잘보이게"). 검출 격자는 참고선이라 얇게 둔다.
+  const base = manualNow ? 2 : 1;
+  const strong = manualNow ? 3 : 2;
+  ctx.strokeStyle = manualNow ? "rgba(35, 125, 255, 1)" : "rgba(21, 200, 90, 0.9)";
   const y0 = edges.yEdges[0] * sy;
   const y1 = edges.yEdges[edges.yEdges.length - 1] * sy;
   const x0 = edges.xEdges[0] * sx;
   const x1 = edges.xEdges[edges.xEdges.length - 1] * sx;
+  const held = gridFitDrag && gridFitDrag.preview ? gridFitDrag : null;
   edges.xEdges.forEach((e, i) => {
     const x = Math.round(e * sx) + 0.5;
-    // 끝선(첫/마지막)은 굵게 — 정렬 기준선이 어디인지 눈에 띄게
-    ctx.lineWidth = (i === 0 || i === edges.xEdges.length - 1) ? 2 : 1;
+    const isHeld = held && held.axis === "x" && held.index === i;
+    ctx.lineWidth = isHeld ? strong + 1 : (i === 0 || i === edges.xEdges.length - 1) ? strong : base;
+    ctx.strokeStyle = isHeld ? "rgba(255, 190, 0, 1)"   // 지금 잡은 선은 노랑
+      : manualNow ? "rgba(35, 125, 255, 1)" : "rgba(21, 200, 90, 0.9)";
     ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke();
   });
   edges.yEdges.forEach((e, i) => {
     const y = Math.round(e * sy) + 0.5;
-    ctx.lineWidth = (i === 0 || i === edges.yEdges.length - 1) ? 2 : 1;
+    const isHeld = held && held.axis === "y" && held.index === i;
+    ctx.lineWidth = isHeld ? strong + 1 : (i === 0 || i === edges.yEdges.length - 1) ? strong : base;
+    ctx.strokeStyle = isHeld ? "rgba(255, 190, 0, 1)"
+      : manualNow ? "rgba(35, 125, 255, 1)" : "rgba(21, 200, 90, 0.9)";
     ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
   });
 }
@@ -347,14 +425,11 @@ function wireGridFitDrag(stage, stateName) {
     const end = axis === "x" ? view.xEdges[view.xEdges.length - 1]
                              : view.yEdges[view.yEdges.length - 1];
     const other = axis === "x" ? view.yEdges : view.xEdges;
-    const edgesAxis = axis === "x" ? view.xEdges : view.yEdges;
-    const startPitch = (basePitch && basePitch[axis === "x" ? 0 : 1])
-      || (edgesAxis[2] - edgesAxis[1]) || 2;
-    // 첫 칸이 피치와 다르면 선행 부분셀이다 (서버 `_grid_edges` 의 lead).
-    const lead = edgesAxis[1] - edgesAxis[0];
-    const hasLead = Math.abs(lead - startPitch) > 0.5;
-    gridFitDrag = { axis, index: hit.index, origin, end, other, pitch: null,
-                    startPitch, lead: hasLead ? lead : 0, hasLead };
+    const edgesAxis = (axis === "x" ? view.xEdges : view.yEdges).slice();
+    const startEdge = edgesAxis[hit.index];
+    // 조정 전 격자 전체 스냅샷 — 되돌리기 1단계의 "이전 상태".
+    const beforeEdges = { x: view.xEdges.slice(), y: view.yEdges.slice() };
+    gridFitDrag = { axis, index: hit.index, origin, end, other, beforeEdges, moved: false };
     // 드래그 시작 지점 — 감쇠는 "시작점 대비 이동량" 에 건다.
     const startRaw = axis === "x"
       ? ((ev.clientX - stage.getBoundingClientRect().left) / stage.getBoundingClientRect().width) * view.rawW
@@ -364,38 +439,31 @@ function wireGridFitDrag(stage, stateName) {
       const rawNow = axis === "x"
         ? ((e2.clientX - r.left) / r.width) * view.rawW
         : ((e2.clientY - r.top) / r.height) * view.rawH;
-      // 감도 1/5 (수홍 2026-08-08 "너무 민감해"): 격자선은 손이 움직인 거리의 1/5 만
-      // 따라간다. 피치는 (선 - 원점)/index 라 한 칸 폭 오차가 index 배로 증폭되므로,
-      // 화면에서 크게 움직여 미세하게 맞추는 편이 실제로 맞출 수 있다.
+      // 감도 (수홍 2026-08-08 "너무 민감해"): 손이 움직인 거리의 GRID_DRAG_GAIN 만 따라간다.
       const raw = startRaw + (rawNow - startRaw) * GRID_DRAG_GAIN;
-      // 시작 피치 기준의 **증분**으로 계산한다. 예전엔 (선-원점)/index 로 절대 계산했는데,
-      // 그 식은 선행 부분셀(lead)을 안 세서 선을 **잡기만 해도** 피치가 튀었다 (실측:
-      // 36 → 34.2). 증분식은 안 움직이면 안 바뀐다.
-      // n = 원점에서 그 선까지의 온전한 칸 수 (lead 가 있으면 첫 칸은 부분셀이라 뺀다).
-      const n = Math.max(1, gridFitDrag.index - (gridFitDrag.hasLead ? 1 : 0));
-      const pitch = Math.max(2, gridFitDrag.startPitch + (raw - startRaw) / n);
-      gridFitDrag.pitch = pitch;
-      const line = previewEdges(origin, pitch, end, gridFitDrag.lead);
-      gridFitDrag.preview = axis === "x" ? { xEdges: line, yEdges: other }
-                                         : { xEdges: other, yEdges: line };
-      // 숫자 입력도 같이 움직인다 — 두 컨트롤이 한 값의 두 표시다
-      const input = document.querySelector(axis === "x" ? "#zoom-modal .et-pitch-x" : "#zoom-modal .et-pitch-y");
-      if (input) input.value = Math.round(pitch * 100) / 100;
+      // **그 선 하나만 움직인다** (수홍 2026-08-08 "손으로 한줄한줄"). 예전엔 피치를 다시
+      // 계산해 격자 전체가 재배치됐고, 그래서 한 줄을 맞추면 다른 줄이 어긋나 "내 맘대로
+      // 안 되는" 격자가 됐다. 이제 이웃 선 사이로만 제한해 그 선만 옮긴다.
+      const lo = (edgesAxis[hit.index - 1] === undefined ? -Infinity : edgesAxis[hit.index - 1]) + 1;
+      const hi = (edgesAxis[hit.index + 1] === undefined ? Infinity : edgesAxis[hit.index + 1]) - 1;
+      const next = edgesAxis.slice();
+      next[hit.index] = Math.round(Math.min(hi, Math.max(lo, raw)));
+      gridFitDrag.moved = next[hit.index] !== startEdge;
+      gridFitDrag.nextEdges = next;
+      gridFitDrag.preview = axis === "x" ? { xEdges: next, yEdges: other }
+                                         : { xEdges: other, yEdges: next };
       renderGridFit(stage, state);
     };
     const onUp = async () => {
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
       try { canvas.releasePointerCapture(ev.pointerId); } catch { /* no-op */ }
-      const pitch = gridFitDrag && gridFitDrag.pitch;
+      const drag = gridFitDrag;
       gridFitDrag = null;
-      if (!pitch) { renderGridFit(stage, state); return; }
-      // 확정은 서버에 다시 물어 받는다 — 절단선 SSoT 는 서버 격자 응답이다.
-      const xIn = document.querySelector("#zoom-modal .et-pitch-x");
-      const yIn = document.querySelector("#zoom-modal .et-pitch-y");
-      const pair = [parseFloat(xIn && xIn.value), parseFloat(yIn && yIn.value)];
-      if (!pair.every((v) => Number.isFinite(v) && v >= 2)) return;
-      await setGridPitch(state, pair);   // 드래그 1회 = Cmd+Z 1단계
+      if (!drag || !drag.moved || !drag.nextEdges) { renderGridFit(stage, state); return; }
+      const next = axis === "x" ? { x: drag.nextEdges, y: other.slice() }
+                                : { x: other.slice(), y: drag.nextEdges };
+      await setGridEdges(state, next, drag.beforeEdges);   // 드래그 1회 = Cmd+Z 1단계
     };
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
@@ -422,6 +490,10 @@ function injectBasePitchControls(stateName) {
     `<button type="button" class="ghost et-pitch-dec" data-axis="y" aria-label="pitch y -">−</button>` +
     `<input type="number" class="et-pitch-y" step="0.5" min="2" value="${fmt(basePitch[1])}" />` +
     `<button type="button" class="ghost et-pitch-inc" data-axis="y" aria-label="pitch y +">+</button>` +
+    `<span class="et-pitch-label">${t("baseCellsLabel")}</span>` +
+    `<input type="number" class="et-cells-x" step="1" min="1" data-tip="${t("tBaseCells")}" />` +
+    `<span class="et-pitch-x-glyph">×</span>` +
+    `<input type="number" class="et-cells-y" step="1" min="1" data-tip="${t("tBaseCells")}" />` +
     `<button type="button" class="et-pitch-save" data-tip="${t("tBasePitchSave")}">${t("basePitchSave")}</button>` +
     `<button type="button" class="ghost et-pitch-auto" data-tip="${t("tBasePitchAuto")}">${t("basePitchAuto")}</button>`;
   const xInput = wrap.querySelector(".et-pitch-x");
@@ -447,12 +519,47 @@ function injectBasePitchControls(stateName) {
   });
   xInput.addEventListener("change", () => preview(readPair()));
   yInput.addEventListener("change", () => preview(readPair()));
+  // 칸 수 — 바깥 경계를 유지한 채 그 개수로 균등 분할한다 (출발점; 이후 한 줄씩 손으로).
+  const cellsX = wrap.querySelector(".et-cells-x");
+  const cellsY = wrap.querySelector(".et-cells-y");
+  const applyCells = async () => {
+    const view = gridFitTarget(pitchState);
+    if (!view) return;
+    const nx = Math.max(1, Math.round(parseFloat(cellsX.value) || 0));
+    const ny = Math.max(1, Math.round(parseFloat(cellsY.value) || 0));
+    if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
+    if (nx === view.xEdges.length - 1 && ny === view.yEdges.length - 1) return;
+    await setGridEdges(pitchState, edgesForCellCount(view, nx, ny));
+  };
+  cellsX.addEventListener("change", applyCells);
+  cellsY.addEventListener("change", applyCells);
+  // 값은 여기서 직접 넣는다 — `wrap` 은 아직 DOM 에 붙기 전이라 document 질의로는 못 찾는다.
+  const viewNow = gridFitTarget(pitchState);
+  if (viewNow) {
+    cellsX.value = viewNow.xEdges.length - 1;
+    cellsY.value = viewNow.yEdges.length - 1;
+  }
   wrap.querySelector(".et-pitch-save").addEventListener("click", async (ev) => {
     const pair = readPair();
     if (!valid(pair)) { setStatus(t("basePitchFail") + "pitch must be >= 2px", "err"); return; }
     const btn = ev.currentTarget;
     btn.disabled = true;
     try {
+      // 선 단위로 잡은 격자는 **절단선 그대로** 저장한다 — 평균 피치로 접으면 사람이
+      // 맞춘 불균일 칸이 사라진다. 균일 격자면 기존 피치 SSoT 를 쓴다.
+      const view = gridFitTarget(pitchState);
+      if (basePitchSource === "edges" && view) {
+        const res0 = await fetch("/api/base-grid-edges", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ x: view.xEdges, y: view.yEdges }),
+        });
+        const d0 = await res0.json();
+        if (!res0.ok || !d0.ok) throw new Error(d0.error || res0.status);
+        wrap.classList.add("is-manual");
+        setStatus(t("basePitchSaved"), "ok");
+        btn.disabled = false;
+        return;
+      }
       const res = await fetch("/api/base-pitch", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pitchX: pair[0], pitchY: pair[1] }),
@@ -473,6 +580,10 @@ function injectBasePitchControls(stateName) {
     const btn = ev.currentTarget;
     btn.disabled = true;
     try {
+      await fetch("/api/base-grid-edges", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),   // 선 단위 격자도 함께 비운다
+      });
       const res = await fetch("/api/base-pitch", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),  // 비움 = fit.pitch_manual 제거 → 자동 검출 복귀

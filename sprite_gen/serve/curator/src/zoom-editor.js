@@ -235,12 +235,18 @@ function openZoom(stateName, idx, keepWidth) {
         // 격자로 확장하게 한다 (표시 격자 = 샘플링 진실). 저장·자동복귀 상태면 null.
         const previewPitch = (typeof basePitchOverride !== "undefined" && Array.isArray(basePitchOverride))
           ? basePitchOverride : null;
+        // 사람이 선 단위로 잡은 격자면 그 절단선 자체를 보낸다 — 평균 피치로 접으면
+        // 불균일 칸이 사라져 화면과 다른 격자로 굽게 된다.
+        const handEdges = (typeof basePitchSource !== "undefined" && basePitchSource === "edges"
+                           && typeof baseView !== "undefined" && baseView)
+          ? { x: baseView.xEdges, y: baseView.yEdges } : null;
         const res = await fetch("/api/base-edit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             ops, space: "logical", transform: trDirty ? tr : null,
-            ...(previewPitch ? { pitchX: previewPitch[0], pitchY: previewPitch[1] } : {}),
+            ...(handEdges ? { edges: handEdges }
+              : previewPitch ? { pitchX: previewPitch[0], pitchY: previewPitch[1] } : {}),
           }),
         });
         const data = await res.json();
