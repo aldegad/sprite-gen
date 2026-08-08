@@ -347,6 +347,10 @@ function openZoom(stateName, idx, keepWidth) {
   // 프레임에도 격자 피치 컨트롤 + raw 위 격자 맞추기 (수홍 확정 2026-08-08 "둘다 넣자").
   // 베이스는 openBaseEditor 가 자기 격자를 이미 들고 열므로 거기서 붙인다.
   if (!isBase) {
+    // 프레임 줌을 새로 여는 것 = 새 되돌리기 타임라인 (프레임은 피치 변경이 모달을
+    // 다시 열지 않으므로 여기서 한 번만 비운다).
+    gridPitchUndo = [];
+    gridPitchRedo = [];
     wireGridFitDrag(stage, stateName);
     loadFrameGrid(stateName, idx).then((view) => {
       if (!view || !zoomView || zoomView.stateName !== stateName) return;
@@ -435,6 +439,12 @@ function openZoom(stateName, idx, keepWidth) {
   // 저널은 스트로크(액션) 단위 {sets: [{key, had, prev, value}]} — undo 는 통째로
   // 되돌리고 redo 스택에 쌓는다. 새 액션이 생기면 redo 는 비운다 (표준 편집기 계약).
   const undoPixel = () => {
+    // 격자 피치 조정도 같은 Cmd+Z 타임라인에 있다 (수홍 2026-08-08). 피치 이후에 픽셀
+    // 편집이 없었으면 피치를 되돌린다 — 판정은 base-editor.js 가 저널 길이로 한다.
+    if (typeof gridPitchShouldUndo === "function" && gridPitchShouldUndo()) {
+      gridPitchUndoStep();
+      return;
+    }
     if (!pixelEdit || !pixelEdit.journal.length) return;
     const j = pixelEdit.journal.pop();
     const e = entries[stateName];
@@ -453,6 +463,10 @@ function openZoom(stateName, idx, keepWidth) {
     buildPalette();
   };
   const redoPixel = () => {
+    if (typeof gridPitchShouldRedo === "function" && gridPitchShouldRedo()) {
+      gridPitchRedoStep();
+      return;
+    }
     if (!pixelEdit || !pixelEdit.redo.length) return;
     const j = pixelEdit.redo.pop();
     const e = entries[stateName];
