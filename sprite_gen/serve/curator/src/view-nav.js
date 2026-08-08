@@ -36,8 +36,22 @@ document.addEventListener("keydown", (ev) => {
   if (ev.code !== "Space") return;
   if (!document.getElementById("zoom-modal") && !document.getElementById("compare-modal")) return;
   // 버튼은 가드에서 제외 — 마지막 클릭한 버튼에 포커스가 남아도 Space=팬이 이긴다
-  // (포토샵 계약; 버튼 재발동 사고도 같이 막힘). 타이핑 필드만 존중.
-  if (ev.target && ev.target.closest && ev.target.closest("input, textarea, select")) return;
+  // (포토샵 계약; 버튼 재발동 사고도 같이 막힘). **타이핑 필드만** 존중한다.
+  //
+  // 예전엔 `input` 전체를 제외해서 체크박스(격자/언페이크 토글)와 숫자 입력(피치·칸수)에
+  // 포커스가 남아 있으면 Space 팬이 통째로 막혔다 — 그 컨트롤들을 만지고 나면 화면을 못
+  // 옮긴다 (수홍 2026-08-08 "체크박스나 인풋창 포커스땜에 막혀"). 체크박스·라디오·숫자는
+  // 타이핑 필드가 아니므로 Space 는 팬이 이기고, 그 컨트롤이 Space 를 먹지 않도록
+  // 포커스를 놓아 준다 (안 그러면 체크박스가 토글된다).
+  const field = ev.target && ev.target.closest && ev.target.closest("input, textarea, select");
+  if (field) {
+    const typing = field.tagName === "TEXTAREA"
+      || (field.tagName === "INPUT"
+          && ["text", "search", "url", "email", "password", "tel"].includes(
+            (field.getAttribute("type") || "text").toLowerCase()));
+    if (typing) return;
+    field.blur();
+  }
   panSpaceHeld = true;
   document.body.classList.add("pan-space");
   ev.preventDefault();
