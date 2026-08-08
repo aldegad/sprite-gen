@@ -421,7 +421,9 @@ def _rebake_frame_from_edges(run_dir: Path, state: str, index: int, twin_path: P
         return {"error": f"no frame image: {frame_path.name}"}
     with Image.open(twin_path) as opened:
         twin = opened.convert("RGBA")
-    logical = snap_by_edges(twin, x_edges, y_edges)
+    # 사람이 그은 칸은 절반 이하만 덮였어도 버리지 않는다 (수홍 확정 2026-08-08 "B지").
+    # 완전히 빈 칸은 여전히 투명이라 배경까지 칠하지는 않는다.
+    logical = snap_by_edges(twin, x_edges, y_edges, min_opaque_ratio=0.0)
     # 논리 이미지를 셀에 앉히는 일은 **추출이 쓰는 그 함수**에 맡긴다. 두 경로가 있고
     # 서로 다른 함수다 — 픽셀 언페이크 런은 `fit_pixel_unfake`(정수배 NEAREST 업스케일),
     # 그 외는 `fit_to_cell`(축소 위주, 배율 상한 1.0). 배율의 SSoT 는 `pixel_snap_scale`

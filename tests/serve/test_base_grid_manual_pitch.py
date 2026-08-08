@@ -514,3 +514,36 @@ def test_frame_overlay_shows_the_recorded_extraction_grid(fixture_run_dir):
         assert _get(port, f"/api/frame-grid?state={state}&index=0")["grid"]["source"] == "recorded"
     finally:
         srv.shutdown()
+
+
+def test_hand_drawn_cell_survives_partial_coverage(fixture_run_dir):
+    """사람이 그은 칸은 **절반 이하만 덮였어도** 살아남는다 (완전히 빈 칸만 투명).
+
+    수홍 확정 2026-08-08 "B지. 이게 안되면 의미가 없지 않냐": 자동 경로는 반 칸 이하만
+    걸친 가장자리를 배경으로 남긴다(그게 맞다 — 검출 격자는 사람 의도가 아니다). 그런데
+    사람이 칸을 그었다는 것은 그 칸을 원한다는 뜻이라, 40% 만 덮였다고 조용히 버리면
+    "내가 친 격자대로 안 나온다" 가 된다. 자동 경로의 기본값(0.5)은 그대로 둔다.
+    """
+    from sprite_gen.frames.extract import snap_by_edges  # noqa: PLC0415
+    from sprite_gen.serve.serve_curation import (_frame_plain_path,  # noqa: PLC0415
+                                                 _rebake_frame_from_edges)
+    run = _extract_run(fixture_run_dir)
+    state = next(iter(load_request(run)["states"]))
+    twin_path = _frame_plain_path(run, state, 0)
+    with Image.open(twin_path) as opened:
+        w, h = opened.size
+    # 두 칸: 왼쪽은 30% 만 불투명, 오른쪽은 완전히 빈 칸.
+    twin = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    for x in range(0, int(w * 0.5 * 0.3)):
+        for y in range(h):
+            twin.putpixel((x, y), (200, 40, 40, 255))
+    twin.save(twin_path)
+    x_edges, y_edges = [0, w // 2, w], [0, h]
+    # 자동 기본값(0.5)은 30% 칸을 버린다 — 그 동작은 유지된다.
+    auto = snap_by_edges(twin, x_edges, y_edges)
+    assert auto.getpixel((0, 0))[3] == 0, "자동 경로는 반 칸 이하를 배경으로 남겨야 한다"
+    # 사람 경로(재굽기)는 그 칸을 살린다.
+    assert "error" not in _rebake_frame_from_edges(run, state, 0, twin_path, x_edges, y_edges)
+    hand = snap_by_edges(twin, x_edges, y_edges, min_opaque_ratio=0.0)
+    assert hand.getpixel((0, 0))[3] == 255, "사람이 그은 30% 칸은 살아야 한다"
+    assert hand.getpixel((1, 0))[3] == 0, "완전히 빈 칸은 여전히 투명이어야 한다"

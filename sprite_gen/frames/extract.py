@@ -1723,8 +1723,18 @@ def refine_edges_to_boundaries(component: Image.Image, x_edges: list[int], y_edg
 
 
 def snap_by_edges(image: Image.Image, x_edges: list[int], y_edges: list[int],
-                  detail_bias: bool = False) -> Image.Image:
-    """명시 절단선으로 블록 샘플링 (grid_snap_downscale 의 코어 — 비등간격 지원)."""
+                  detail_bias: bool = False,
+                  min_opaque_ratio: float = 0.5) -> Image.Image:
+    """명시 절단선으로 블록 샘플링 (grid_snap_downscale 의 코어 — 비등간격 지원).
+
+    `min_opaque_ratio` = 그 칸을 채우기 위해 필요한 불투명 픽셀 비율. 기본 0.5 는 자동
+    경로의 기존 동작이다 (반 칸 이하만 걸친 가장자리는 배경으로 남긴다).
+
+    **사람이 격자를 직접 그린 경로는 0 을 넘긴다** (수홍 확정 2026-08-08 "B지. 이게
+    안되면 의미가 없지 않냐"): 사람이 칸을 그었다는 것은 그 칸을 원한다는 뜻이므로,
+    40% 만 덮였다고 그 칸을 조용히 버리면 "내가 친 격자대로 안 나온다" 가 된다. 0 이면
+    불투명 픽셀이 하나라도 있는 칸은 채우고, **완전히 빈 칸은 여전히 투명**이다 —
+    배경까지 칠하지는 않는다."""
     source = image.convert("RGBA")
     pixels = source.load()
     output = Image.new("RGBA", (len(x_edges) - 1, len(y_edges) - 1), (0, 0, 0, 0))
@@ -1737,7 +1747,7 @@ def snap_by_edges(image: Image.Image, x_edges: list[int], y_edges: list[int],
                 for x in range(x_edges[ox], x_edges[ox + 1])
             ]
             opaque = [p for p in block if p[3] >= 128]
-            if len(opaque) * 2 < len(block):
+            if not opaque or len(opaque) < len(block) * min_opaque_ratio:
                 continue
             color = _dominant_block_color(opaque, detail_bias)
             out[ox, oy] = (color[0], color[1], color[2], 255)
