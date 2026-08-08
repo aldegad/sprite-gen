@@ -412,13 +412,15 @@ function wireGridFitDrag(stage, stateName) {
     const tolX = (view.rawW / r.width) * 7;   // 화면 7px 를 raw 로 환산
     const tolY = (view.rawH / r.height) * 7;
     let best = null;
+    // **첫 선(왼쪽·위쪽 끝)도 잡힌다.** 예전엔 원점을 고정해 뒀는데(균일 피치 모델의
+    // 잔재 — 원점은 콘텐츠 bbox 라는 전제) 명시 절단선 모델에서는 모든 선이 독립이고,
+    // 끝단을 못 옮기면 그 칸만 영원히 어긋난다 (수홍 실측 2026-08-08 "좌측이랑 상단
+    // 가장끝 그리드를 이동할 수 없더라").
     view.xEdges.forEach((e, i) => {
-      if (i === 0) return;                    // 원점선은 잡지 않는다
       const d = Math.abs(e - rx);
       if (d <= tolX && (!best || d < best.d)) best = { axis: "x", index: i, d };
     });
     view.yEdges.forEach((e, i) => {
-      if (i === 0) return;
       const d = Math.abs(e - ry);
       if (d <= tolY && (!best || d < best.d)) best = { axis: "y", index: i, d };
     });
@@ -461,8 +463,12 @@ function wireGridFitDrag(stage, stateName) {
       // **그 선 하나만 움직인다** (수홍 2026-08-08 "손으로 한줄한줄"). 예전엔 피치를 다시
       // 계산해 격자 전체가 재배치됐고, 그래서 한 줄을 맞추면 다른 줄이 어긋나 "내 맘대로
       // 안 되는" 격자가 됐다. 이제 이웃 선 사이로만 제한해 그 선만 옮긴다.
-      const lo = (edgesAxis[hit.index - 1] === undefined ? -Infinity : edgesAxis[hit.index - 1]) + 1;
-      const hi = (edgesAxis[hit.index + 1] === undefined ? Infinity : edgesAxis[hit.index + 1]) - 1;
+      // 이웃 선 사이로 제한하고, 끝단은 이미지 경계까지만 (첫 선은 0, 마지막 선은 폭/높이).
+      const span = axis === "x" ? view.rawW : view.rawH;
+      const prevEdge = edgesAxis[hit.index - 1];
+      const nextEdge = edgesAxis[hit.index + 1];
+      const lo = prevEdge === undefined ? 0 : prevEdge + 1;
+      const hi = nextEdge === undefined ? span : nextEdge - 1;
       const next = edgesAxis.slice();
       next[hit.index] = Math.round(Math.min(hi, Math.max(lo, raw)));
       gridFitDrag.moved = next[hit.index] !== startEdge;
