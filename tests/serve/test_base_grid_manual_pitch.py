@@ -315,3 +315,60 @@ def test_hand_placed_edges_win_and_survive_roundtrip(fixture_run_dir):
                 assert exc.code == 400
     finally:
         srv.shutdown()
+
+
+def _extract_run(fixture_run_dir):
+    """픽셀 프레임이 실제로 뽑힌 런 — 프레임 격자 계약을 프레임 위에서 검사하려면 필요."""
+    from conftest import run_script
+    assert run_script("extract_sprite_row_frames.py", "--run-dir", str(fixture_run_dir)).returncode == 0
+    return fixture_run_dir
+
+
+def test_frame_grid_saves_per_frame_and_rebakes(fixture_run_dir):
+    """프레임별 격자는 프레임별로 저장되고, 저장이 그 프레임을 다시 굽는다.
+
+    수홍 2026-08-08 "일단 저장되게 해줘. 그 상태에서 언페이크 누르면 그 격자에 맞게
+    깨끗하게". 백업은 **프레임 트리 밖**에 둔다 — 안에 두면 정식 프레임으로 세어져
+    매니페스트 무결성 검사가 깨진다(실측으로 잡힌 결함).
+    """
+    run = _extract_run(fixture_run_dir)
+    state = next(iter(load_request(run)["states"]))
+    srv = _serve(run)
+    port = srv.server_address[1]
+    try:
+        before = (run / "frames" / state / "frame-0.png").read_bytes()
+        # 저장 전에는 후보(또는 검출 실패)다 — 어느 쪽이든 "저장된 격자" 는 아니다.
+        pre = _get(port, f"/api/frame-grid?state={state}&index=0")["grid"]
+        assert pre is None or pre["candidate"] is True
+        # 절단선은 트윈 픽셀 좌표다. 크기는 파일에서 직접 읽는다(검출에 의존하지 않게).
+        from sprite_gen.serve.serve_curation import _frame_plain_path  # noqa: PLC0415
+        with Image.open(_frame_plain_path(run, state, 0)) as opened:
+            w, h = opened.size
+        x_edges = [1, w // 3, (2 * w) // 3, w - 1]
+        y_edges = [1, h // 3, (2 * h) // 3, h - 1]
+        status, data = _post(port, "/api/frame-grid-edges",
+                             {"state": state, "index": 0, "x": x_edges, "y": y_edges})
+        assert status == 200 and data["ok"]
+        assert data["rebaked"]["logical"] == [3, 3], "잡은 절단선대로 3x3 논리로 잘려야 한다"
+        # 프레임별 SSoT 에 그 프레임만 담긴다.
+        table = load_request(run)["fit"]["frame_grid_manual"]
+        assert list(table[state].keys()) == ["0"]
+        # 저장된 격자가 응답을 지배하고, 더는 후보가 아니다.
+        saved = _get(port, f"/api/frame-grid?state={state}&index=0")["grid"]
+        assert saved["source"] == "edges" and saved["candidate"] is False
+        assert saved["xEdges"] == x_edges
+        # 언페이크 프레임이 실제로 다시 구워졌다.
+        assert (run / "frames" / state / "frame-0.png").read_bytes() != before
+        # 백업은 프레임 트리 밖 — 정식 프레임 개수를 오염시키지 않는다.
+        leaked = sorted(p.name for p in (run / "frames" / state).glob("*pregrid*"))
+        assert not leaked, f"백업이 프레임 트리에 샜다 — 매니페스트 무결성이 깨진다: {leaked}"
+        assert (run / ".pregrid" / state / "frame-0.png").is_file()
+        # 비우면 격자도 이미지도 원래대로.
+        status, data = _post(port, "/api/frame-grid-edges", {"state": state, "index": 0})
+        assert status == 200 and data["rebaked"]["restored"] is True
+        assert "frame_grid_manual" not in (load_request(run).get("fit") or {})
+        assert (run / "frames" / state / "frame-0.png").read_bytes() == before
+        post = _get(port, f"/api/frame-grid?state={state}&index=0")["grid"]
+        assert post is None or post["candidate"] is True
+    finally:
+        srv.shutdown()

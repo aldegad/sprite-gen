@@ -229,6 +229,18 @@ async function applyGridEdges(stateName, edges) {
   syncCellCountInputs();
 }
 
+// 서버가 프레임을 다시 구웠으니 화면의 그 이미지들을 새로 받는다 (캐시 무력화).
+function refreshFrameImages(stateName) {
+  const bust = "regrid=" + Date.now();
+  document.querySelectorAll(`#zoom-modal .stage img, .card[data-state="${CSS.escape(stateName)}"] .stage img`)
+    .forEach((img) => {
+      const src = img.getAttribute("src") || "";
+      if (!src || src.startsWith("data:")) return;
+      img.src = src.split("#")[0].replace(/([?&])regrid=\d+/, "$1") +
+        (src.includes("?") ? "&" : "?") + bust;
+    });
+}
+
 function syncCellCountInputs() {
   const view = gridFitTarget((zoomView && zoomView.stateName) || BASE_STATE);
   const cx = document.querySelector("#zoom-modal .et-cells-x");
@@ -548,11 +560,20 @@ function injectBasePitchControls(stateName) {
       // 선 단위로 잡은 격자는 **절단선 그대로** 저장한다 — 평균 피치로 접으면 사람이
       // 맞춘 불균일 칸이 사라진다. 균일 격자면 기존 피치 SSoT 를 쓴다.
       const view = gridFitTarget(pitchState);
-      if (basePitchSource === "edges" && pitchState !== BASE_STATE) {
-        // `fit.base_grid_manual` 은 **베이스 이미지의** raw 좌표 절단선이다. 프레임에서
-        // 손으로 잡은 선을 거기에 쓰면 다른 이미지의 격자를 덮어쓴다 — 조용히 틀린 곳에
-        // 저장하느니 거부하고 말한다 (No Silent Fallback). 프레임 격자는 아직 후보 전용.
-        setStatus(t("frameEdgesNoSave"), "err");
+      if (basePitchSource === "edges" && pitchState !== BASE_STATE && view) {
+        // 프레임 격자는 프레임별 SSoT(`fit.frame_grid_manual[state][index]`)에 저장하고,
+        // 서버가 그 절단선으로 픽셀 언페이크 프레임을 다시 굽는다 — 저장하면 언페이크가
+        // 그 격자대로 나온다 (수홍 2026-08-08).
+        const res1 = await fetch("/api/frame-grid-edges", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state: pitchState, index: zoomView ? zoomView.idx : 0,
+                                 x: view.xEdges, y: view.yEdges }),
+        });
+        const d1 = await res1.json();
+        if (!res1.ok || !d1.ok) throw new Error(d1.error || res1.status);
+        wrap.classList.add("is-manual");
+        setStatus(t("basePitchSaved"), "ok");
+        refreshFrameImages(pitchState);
         btn.disabled = false;
         return;
       }

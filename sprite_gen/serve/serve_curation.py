@@ -61,7 +61,8 @@ from sprite_gen.curate.curation import (CURATION_FILENAME, SCHEMA_VERSION, effec
                                  recolor_pick, run_revision, write_curation_atomic)
 from sprite_gen.frames.extract import heal_run, load_consistent_frames_manifest
 from sprite_gen.spec.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel, state_frame_total
-from sprite_gen.spec.runio import load_request, publish_guard, read_guard, write_request
+from sprite_gen.spec.runio import (atomic_save_image, load_request, publish_guard,
+                                   read_guard, write_request)
 from sprite_gen._modules import qualified
 
 # The SPA assets are package data (declared in pyproject's `package-data`), so the one
@@ -303,6 +304,30 @@ def _base_grid_response(run_dir: Path, base_path: Path,
     return result
 
 
+def _frame_edges_from_fit(fit_config: dict, state: str, index: int):
+    """사람이 프레임 하나에 대해 잡은 절단선. SSoT 는
+    `fit.frame_grid_manual["<state>"]["<index>"] = {x: [...], y: [...]}`.
+
+    좌표계는 **그 프레임의 플레인 트윈 픽셀**이다 — 사람이 화면에서 보고 잡은 바로 그
+    이미지. 컴포넌트 좌표로 저장하지 않는 이유: 컴포넌트는 디스크에 없고(추출 중
+    메모리), 트윈→컴포넌트 매핑은 스냅 **결과**의 bbox 에 의존해 순환이 된다. 트윈
+    좌표로 두면 "보이는 그 선이 곧 자르는 선" 이 그대로 성립한다."""
+    table = fit_config.get("frame_grid_manual")
+    if not isinstance(table, dict):
+        return None
+    per_state = table.get(state)
+    if not isinstance(per_state, dict):
+        return None
+    entry = per_state.get(str(index))
+    if not isinstance(entry, dict):
+        return None
+    x_edges = _sane_edges(entry.get("x"))
+    y_edges = _sane_edges(entry.get("y"))
+    if x_edges is None or y_edges is None:
+        return None
+    return x_edges, y_edges
+
+
 def _frame_plain_path(run_dir: Path, state: str, index: int):
     """프레임의 플레인 트윈 파일. 표시 우선순위는 `build_run_state` 의 `plainUrl` 과
     같다 — `orig/` 고해상본 우선, 없으면 셀 크기 `.plain.png`, 그것도 없으면 프레임
@@ -317,8 +342,67 @@ def _frame_plain_path(run_dir: Path, state: str, index: int):
     return None
 
 
+def _pregrid_backup_path(run_dir: Path, state: str, index: int) -> Path:
+    """사람 격자로 굽기 전 프레임의 백업 자리 — **프레임 트리 밖**이다.
+
+    `frames/<state>/` 안에 두면 정식 프레임으로 세어져 매니페스트 무결성 검사가
+    깨진다(실측 2026-08-08: "row 'idle' files != physical canonical frames").
+    `.plain.png`·`orig/` 처럼 스캐너마다 예외를 늘리는 대신 트리 밖에 둔다 —
+    프레임을 세는 곳이 여러 군데라 예외 목록은 갈라지기 쉽다."""
+    return run_dir / ".pregrid" / state / f"frame-{index}.png"
+
+
+def _restore_frame_pregrid(run_dir: Path, state: str, index: int) -> dict:
+    """사람 격자로 굽기 **전**의 프레임을 되돌린다.
+    백업이 없으면 원래 구운 적이 없다는 뜻이라 그대로 둔다 — 없는 것을 지어내지 않는다."""
+    frame_path = run_dir / "frames" / state / f"frame-{index}.png"
+    backup = _pregrid_backup_path(run_dir, state, index)
+    if not backup.is_file():
+        return {"restored": False, "note": "no pre-grid backup — frame was never re-baked"}
+    with Image.open(backup) as opened:
+        atomic_save_image(opened.convert("RGBA"), frame_path)
+    backup.unlink(missing_ok=True)
+    return {"restored": True}
+
+
+def _rebake_frame_from_edges(run_dir: Path, state: str, index: int, twin_path: Path,
+                             x_edges: list, y_edges: list) -> dict:
+    """사람이 잡은 절단선으로 그 프레임의 픽셀 언페이크 결과를 다시 굽는다.
+
+    보이는 트윈을 그 선으로 그대로 샘플링하므로 **화면의 선 = 자른 선**이다. 논리 픽셀을
+    원래 차지하던 자리(절단선이 덮는 사각형)에 최근접 확대로 되돌려 놓아 프레임의 발자국
+    (크기·위치)이 안 바뀐다 — 픽셀 언페이크 토글이 크기 변화 없이 품질만 비교한다는
+    기존 계약을 지킨다.
+
+    원본은 최초 1회 `<frame>.pregrid.png` 로 백업한다 (관측 가능, 덮어쓰지 않음)."""
+    from sprite_gen.frames.extract import snap_by_edges
+    frame_path = run_dir / "frames" / state / f"frame-{index}.png"
+    if not frame_path.is_file():
+        return {"error": f"no frame image: {frame_path.name}"}
+    with Image.open(twin_path) as opened:
+        twin = opened.convert("RGBA")
+    logical = snap_by_edges(twin, x_edges, y_edges)
+    span_w = max(1, x_edges[-1] - x_edges[0])
+    span_h = max(1, y_edges[-1] - y_edges[0])
+    blown = logical.resize((span_w, span_h), Image.NEAREST)
+    canvas = Image.new("RGBA", twin.size, (0, 0, 0, 0))
+    canvas.paste(blown, (x_edges[0], y_edges[0]))
+    with Image.open(frame_path) as opened:
+        cell_size = opened.convert("RGBA").size
+    if canvas.size != cell_size:
+        canvas = canvas.resize(cell_size, Image.NEAREST)
+    backup = _pregrid_backup_path(run_dir, state, index)
+    if not backup.exists():
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        import shutil as _shutil
+        _shutil.copyfile(frame_path, backup)
+    atomic_save_image(canvas, frame_path)
+    return {"logical": list(logical.size), "cell": list(cell_size)}
+
+
 def _frame_grid_response(run_dir: Path, image_path: Path,
-                         override_pitch: tuple | None = None) -> dict:
+                         override_pitch: tuple | None = None,
+                         state: str = "", index: int = 0) -> dict:
     """프레임 플레인 트윈의 **후보** 격자 — 베이스와 같은 우선순위·같은 절단선 함수.
 
     베이스와 갈리는 점 하나: 프레임의 초록 격자(`inputGrid`)는 **지난 추출이 실제로
@@ -336,6 +420,15 @@ def _frame_grid_response(run_dir: Path, image_path: Path,
     manual = override_pitch if override_pitch is not None else _manual_pitch_from_fit(fit)
     with Image.open(image_path) as opened:
         image = opened.convert("RGBA")
+    # 사람이 이 프레임에 대해 잡아 둔 절단선이 가장 강하다 (라이브 프리뷰 override 만 예외).
+    saved = _frame_edges_from_fit(fit, state, index) if override_pitch is None else None
+    if saved is not None:
+        x_edges, y_edges = saved
+        return {"grid": {"xEdges": x_edges, "yEdges": y_edges,
+                         "pitch": [round((x_edges[-1] - x_edges[0]) / max(1, len(x_edges) - 1), 2),
+                                   round((y_edges[-1] - y_edges[0]) / max(1, len(y_edges) - 1), 2)],
+                         "imageSize": [image.width, image.height],
+                         "source": "edges", "candidate": False}}
     box = solid_alpha_bbox(image) or image.getbbox()
     if not box:
         return {"grid": None, "note": "frame has no content to detect a grid on"}
@@ -1296,7 +1389,8 @@ class CurationHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"no plain twin for {state}#{index}"}, 404)
                     return
                 override_pitch = _query_pitch_pair(query, "pitchX", "pitchY")
-                self._send_json(_frame_grid_response(self.run_dir, target, override_pitch))
+                self._send_json(_frame_grid_response(self.run_dir, target, override_pitch,
+                                                     state=state, index=index))
             except (Exception, SystemExit) as exc:
                 self._send_json({"error": str(exc)}, 500)
             return
@@ -1712,6 +1806,67 @@ class CurationHandler(BaseHTTPRequestHandler):
                     write_request(self.run_dir, request)
                 _BASE_GRID_CACHE.clear()  # 저장된 격자가 바뀌었다 — stale 표시 격자 제거
                 self._send_json({"ok": True, "pitch_manual": pitch})
+                return
+            if path == "/api/frame-grid-edges":
+                # 프레임 하나의 절단선을 저장하고, 그 격자로 픽셀 언페이크 프레임을 다시
+                # 굽는다 — "저장하면 언페이크도 그 격자대로 깨끗하게" (수홍 2026-08-08).
+                # 좌표계는 플레인 트윈 픽셀이라 보이는 선이 곧 자르는 선이다.
+                payload = self._read_body()
+                state = str(payload.get("state") or "")
+                try:
+                    index = int(payload.get("index"))
+                except (TypeError, ValueError):
+                    self._send_json({"error": "index:int required"}, 400)
+                    return
+                clear = not payload.get("x") and not payload.get("y")
+                x_edges = y_edges = None
+                if not clear:
+                    x_edges = _sane_edges(payload.get("x"))
+                    y_edges = _sane_edges(payload.get("y"))
+                    if x_edges is None or y_edges is None:
+                        self._send_json(
+                            {"error": "x/y must each be >=2 strictly increasing numbers"}, 400)
+                        return
+                twin = _frame_plain_path(self.run_dir, state, index)
+                if twin is None:
+                    self._send_json({"error": f"no plain twin for {state}#{index}"}, 404)
+                    return
+                with publish_guard(self.run_dir):
+                    request = load_request(self.run_dir)
+                    fit = request.get("fit")
+                    if not isinstance(fit, dict):
+                        fit = {}
+                        request["fit"] = fit
+                    table = fit.get("frame_grid_manual")
+                    if not isinstance(table, dict):
+                        table = {}
+                    per_state = table.get(state)
+                    if not isinstance(per_state, dict):
+                        per_state = {}
+                    if clear:
+                        per_state.pop(str(index), None)
+                    else:
+                        per_state[str(index)] = {"x": x_edges, "y": y_edges}
+                    if per_state:
+                        table[state] = per_state
+                    else:
+                        table.pop(state, None)
+                    if table:
+                        fit["frame_grid_manual"] = table
+                    else:
+                        fit.pop("frame_grid_manual", None)
+                    write_request(self.run_dir, request)
+                    rebaked = None
+                    if clear:
+                        # 격자를 비우면 구워둔 프레임도 원래대로 — 안 되돌리면 격자는
+                        # 자동인데 이미지는 사람 격자로 구워진 채라 둘이 갈린다.
+                        rebaked = _restore_frame_pregrid(self.run_dir, state, index)
+                    else:
+                        rebaked = _rebake_frame_from_edges(self.run_dir, state, index,
+                                                            twin, x_edges, y_edges)
+                self._send_json({"ok": True, "state": state, "index": index,
+                                 "edges": None if clear else {"x": x_edges, "y": y_edges},
+                                 "rebaked": rebaked})
                 return
             if path == "/api/base-grid-edges":
                 # 사람이 선 단위로 잡은 베이스 격자 → fit.base_grid_manual (raw 좌표).
