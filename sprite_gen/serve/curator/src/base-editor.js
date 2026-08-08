@@ -508,7 +508,9 @@ function wireGridFitDrag(stage, stateName) {
     const startEdge = edgesAxis[hit.index];
     // 조정 전 격자 전체 스냅샷 — 되돌리기 1단계의 "이전 상태".
     const beforeEdges = { x: view.xEdges.slice(), y: view.yEdges.slice() };
-    gridFitDrag = { axis, index: hit.index, origin, end, other, beforeEdges, moved: false };
+    // 끄는 선을 뺀 나머지 — 매 프레임 이 목록에 끄는 위치를 넣고 정렬한다(선끼리 통과).
+    const others = edgesAxis.filter((_, i) => i !== hit.index);
+    gridFitDrag = { axis, index: hit.index, origin, end, other, others, beforeEdges, moved: false };
     // 드래그 시작 지점 — 감쇠는 "시작점 대비 이동량" 에 건다.
     const startRaw = axis === "x"
       ? ((ev.clientX - stage.getBoundingClientRect().left) / stage.getBoundingClientRect().width) * view.rawW
@@ -523,15 +525,16 @@ function wireGridFitDrag(stage, stateName) {
       // **그 선 하나만 움직인다** (수홍 2026-08-08 "손으로 한줄한줄"). 예전엔 피치를 다시
       // 계산해 격자 전체가 재배치됐고, 그래서 한 줄을 맞추면 다른 줄이 어긋나 "내 맘대로
       // 안 되는" 격자가 됐다. 이제 이웃 선 사이로만 제한해 그 선만 옮긴다.
-      // 이웃 선 사이로 제한하고, 끝단은 이미지 경계까지만 (첫 선은 0, 마지막 선은 폭/높이).
+      // **선끼리 지나갈 수 있다** (수홍 2026-08-08 "3번격자가 2번격자를 쓱 지날 수
+      // 있어야할듯"). 예전엔 이웃 사이로 가둬서, 한 선을 이전 칸으로 넘겨야 하는 배치를
+      // 아예 만들 수 없었다. 격자선은 순서를 가진 목록이 아니라 그냥 선이므로, 끄는 선은
+      // 이미지 경계 안에서 자유롭게 두고 **나머지와 합쳐 정렬**한다 — 위치가 곧 순서다.
+      // (오름차순은 아래 소비자 전부가 요구하는 불변식이라 유지하되, 사람이 지킬 것이
+      // 아니라 여기서 자동으로 맞춘다.)
       const span = axis === "x" ? view.rawW : view.rawH;
-      const prevEdge = edgesAxis[hit.index - 1];
-      const nextEdge = edgesAxis[hit.index + 1];
-      const lo = prevEdge === undefined ? 0 : prevEdge + 1;
-      const hi = nextEdge === undefined ? span : nextEdge - 1;
-      const next = edgesAxis.slice();
-      next[hit.index] = Math.round(Math.min(hi, Math.max(lo, raw)));
-      gridFitDrag.moved = next[hit.index] !== startEdge;
+      const pos = Math.round(Math.min(span, Math.max(0, raw)));
+      const next = [...gridFitDrag.others, pos].sort((a, b) => a - b);
+      gridFitDrag.moved = pos !== startEdge;
       gridFitDrag.nextEdges = next;
       gridFitDrag.preview = axis === "x" ? { xEdges: next, yEdges: other }
                                          : { xEdges: other, yEdges: next };
