@@ -14,12 +14,19 @@ base-edit 굽기·추출이 모두 그 한 값을 읽어야 한다 ("표시 격�
 """
 from __future__ import annotations
 
+import json
+import threading
+import urllib.error
+import urllib.request
+from functools import partial
+from http.server import ThreadingHTTPServer
+
 from PIL import Image
 
 from sprite_gen.frames.extract import (_grid_edges, detect_pixel_grid,
                                        remove_chroma_background_ycbcr,
                                        solid_alpha_bbox)
-from sprite_gen.serve.serve_curation import (_base_grid_response,
+from sprite_gen.serve.serve_curation import (CurationHandler, _base_grid_response,
                                              _query_pitch_pair)
 from sprite_gen.spec.runio import load_request, write_request
 
@@ -128,6 +135,100 @@ def test_clear_manual_reverts_to_auto(fixture_run_dir):
     reverted = _base_grid_response(fixture_run_dir, base)["grid"]
     assert reverted["source"] == "detected"
     assert reverted["xEdges"] == auto["xEdges"]  # 자동 검출 격자로 정확히 복귀
+
+
+def _serve(run):
+    CurationHandler.run_dir = run
+    CurationHandler.lang = "en"
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), partial(CurationHandler))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def _get(port, path):
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}") as res:
+        return json.loads(res.read())
+
+
+def _post(port, path, body):
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
+                                 data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req) as res:
+        return res.status, json.loads(res.read())
+
+
+def test_route_base_grid_query_override(fixture_run_dir):
+    """GET /api/base-grid?pitchX&pitchY 가 그 피치의 격자를 응답한다 (라우트 e2e)."""
+    _write_base(fixture_run_dir)
+    srv = _serve(fixture_run_dir)
+    port = srv.server_address[1]
+    try:
+        grid = _get(port, "/api/base-grid?pitchX=12&pitchY=12")["grid"]
+        assert grid["source"] == "manual"
+        assert grid["pitch"] == [12.0, 12.0]
+        # 쓰레기 값은 폴백 — 자동 검출로.
+        assert _get(port, "/api/base-grid?pitchX=1&pitchY=12")["grid"]["source"] == "detected"
+    finally:
+        srv.shutdown()
+
+
+def test_route_base_pitch_save_and_clear(fixture_run_dir):
+    """POST /api/base-pitch 가 fit.pitch_manual 을 켜고(저장) 끈다(비움→자동 복귀)."""
+    _write_base(fixture_run_dir)
+    srv = _serve(fixture_run_dir)
+    port = srv.server_address[1]
+    try:
+        status, data = _post(port, "/api/base-pitch", {"pitchX": 14, "pitchY": 14})
+        assert status == 200 and data["pitch_manual"] == [14.0, 14.0]
+        assert load_request(fixture_run_dir)["fit"]["pitch_manual"] == [14.0, 14.0]
+        # 저장된 값이 표시 격자를 지배한다 (override 쿼리 없이도).
+        assert _get(port, "/api/base-grid")["grid"]["pitch"] == [14.0, 14.0]
+        # 비움 저장 → 키 제거 → 자동 복귀.
+        _post(port, "/api/base-pitch", {})
+        assert "pitch_manual" not in (load_request(fixture_run_dir).get("fit") or {})
+        assert _get(port, "/api/base-grid")["grid"]["source"] == "detected"
+        # <2 는 400 거부 (조용한 쓰레기 저장 금지).
+        try:
+            _post(port, "/api/base-pitch", {"pitchX": 1, "pitchY": 8})
+            assert False, "expected 400"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+    finally:
+        srv.shutdown()
+
+
+def _red_pixels(path):
+    with Image.open(path) as im:
+        px = im.convert("RGBA").getdata()
+    return sum(1 for r, g, b, a in px if a > 128 and r > 180 and g < 80 and b < 80)
+
+
+def test_route_base_edit_logical_honors_preview_pitch(fixture_run_dir):
+    """base-edit(space=logical)가 프리뷰 override 피치를 받으면 화면과 같은 격자로
+    굽는다 — 표시 격자 = 샘플링 진실. 큰 피치 셀이 작은 검출 셀보다 넓게 칠해진다."""
+    base = _write_base(fixture_run_dir)  # 검출 피치 ~8px
+    srv = _serve(fixture_run_dir)
+    port = srv.server_address[1]
+    try:
+        # 검출 격자(override 없음)로 논리 (0,0) 을 빨강 → ~8px 셀.
+        status, data = _post(port, "/api/base-edit",
+                             {"ops": {"0,0": "#ff0000"}, "space": "logical"})
+        assert status == 200 and data.get("ok")
+        detected_red = _red_pixels(base)
+        # 원본 복원 후 프리뷰 override 16px 로 같은 논리 셀 → ~16px 셀 (더 넓다).
+        import shutil
+        shutil.copyfile(base.with_name(base.name + ".orig"), base)
+        status, data = _post(port, "/api/base-edit",
+                             {"ops": {"0,0": "#ff0000"}, "space": "logical",
+                              "pitchX": 16, "pitchY": 16})
+        assert status == 200 and data.get("ok")
+        override_red = _red_pixels(base)
+        # override 를 무시했다면 두 값이 같다(둘 다 검출 격자). 더 넓다 = override 격자로 구웠다.
+        assert override_red > detected_red, (
+            f"override 16px 셀({override_red})이 검출 ~8px 셀({detected_red})보다 넓어야 한다")
+    finally:
+        srv.shutdown()
 
 
 def test_query_pitch_pair_rejects_garbage():

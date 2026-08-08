@@ -34,6 +34,9 @@ function renderBaseRow() {
 // sprite-request.json 의 fit.pitch_manual 로 확정한다.
 let basePitch = null;
 let basePitchSource = null;
+// 저장 전 라이브 프리뷰 override 피치([x,y]). 저장/자동복귀/detected·saved 표시 중엔 null.
+// 이게 set 이면 base-edit 굽기에 이 피치를 함께 보내 화면과 같은 격자로 확장한다.
+let basePitchOverride = null;
 
 // ── 베이스 편집 = 줌 모달과 같은 컴포넌트 (수홍 지시 2026-07-17 "같은 컴포넌트를
 // 쓰라" — 별도 모달 구현은 폐기). 검출 격자의 논리 해상도로 가상 상태 "__base__" 를
@@ -56,6 +59,8 @@ async function openBaseEditor(overridePitch) {
   }
   basePitch = Array.isArray(grid.pitch) ? grid.pitch.slice() : null;
   basePitchSource = grid.source || null;
+  // 프리뷰 override 로 연 경우에만 마커를 세운다 (저장/자동복귀는 override 없이 재열림).
+  basePitchOverride = Array.isArray(overridePitch) ? overridePitch.slice() : null;
   const rawUrl = run.baseUrl + (run.baseUrl.includes("?") ? "&" : "?") + "edit=" + Date.now();
   // 진짜 격자 기반 논리 이미지 (수홍 지적 2026-07-17: 균일 등분 격자는 이미지와
   // 어긋난다): 검출 절단선(xEdges/yEdges)의 블록 "중심"을 raw 에서 샘플해 논리
@@ -160,6 +165,7 @@ function injectBasePitchControls() {
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
       basePitchSource = "manual";
+      basePitchOverride = null;  // 이제 fit.pitch_manual 로 저장됨 — 굽기가 그걸 읽는다
       wrap.classList.add("is-manual");
       setStatus(t("basePitchSaved"), "ok");
     } catch (e) {

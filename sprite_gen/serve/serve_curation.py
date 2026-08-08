@@ -1437,9 +1437,17 @@ class CurationHandler(BaseHTTPRequestHandler):
                 space = str(payload.get("space") or "raw")
                 grid = None
                 if space == "logical":
-                    # 논리 셀 좌표 (줌 모달 편집 공간) — 검출 격자로 raw 블록에 확장.
+                    # 논리 셀 좌표 (줌 모달 편집 공간) — 격자로 raw 블록에 확장.
                     # 격자 SSoT = _base_grid_response (클라 표시와 동일 절단선).
-                    grid = _base_grid_response(self.run_dir, base_path).get("grid")
+                    # 클라가 라이브 프리뷰 피치로 편집 중이면(저장 전 override) 그 피치를
+                    # 함께 보내, 굽기가 **화면과 같은 격자**로 확장한다 (표시 격자 = 샘플링
+                    # 진실). 저장된 fit.pitch_manual·자동 검출은 override 없이도 표시와 같은
+                    # 절단선이라 그대로 둔다.
+                    override_pitch = _query_pitch_pair(
+                        {"pitchX": [payload.get("pitchX")], "pitchY": [payload.get("pitchY")]},
+                        "pitchX", "pitchY") if payload.get("pitchX") is not None else None
+                    grid = _base_grid_response(self.run_dir, base_path,
+                                               override_pitch=override_pitch).get("grid")
                     if not grid:
                         self._send_json({"error": "logical ops need a detected base grid"}, 422)
                         return

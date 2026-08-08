@@ -228,10 +228,17 @@ function openZoom(stateName, idx, keepWidth) {
       if (!Object.keys(ops).length && !trDirty) { closeZoom(); return; }
       saveBtn.disabled = true;
       try {
+        // 저장 전 프리뷰 피치로 편집 중이면 그 피치를 함께 보내 굽기가 화면과 같은
+        // 격자로 확장하게 한다 (표시 격자 = 샘플링 진실). 저장·자동복귀 상태면 null.
+        const previewPitch = (typeof basePitchOverride !== "undefined" && Array.isArray(basePitchOverride))
+          ? basePitchOverride : null;
         const res = await fetch("/api/base-edit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ops, space: "logical", transform: trDirty ? tr : null }),
+          body: JSON.stringify({
+            ops, space: "logical", transform: trDirty ? tr : null,
+            ...(previewPitch ? { pitchX: previewPitch[0], pitchY: previewPitch[1] } : {}),
+          }),
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || res.status);
