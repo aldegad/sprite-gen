@@ -548,6 +548,14 @@ function injectBasePitchControls(stateName) {
       // 선 단위로 잡은 격자는 **절단선 그대로** 저장한다 — 평균 피치로 접으면 사람이
       // 맞춘 불균일 칸이 사라진다. 균일 격자면 기존 피치 SSoT 를 쓴다.
       const view = gridFitTarget(pitchState);
+      if (basePitchSource === "edges" && pitchState !== BASE_STATE) {
+        // `fit.base_grid_manual` 은 **베이스 이미지의** raw 좌표 절단선이다. 프레임에서
+        // 손으로 잡은 선을 거기에 쓰면 다른 이미지의 격자를 덮어쓴다 — 조용히 틀린 곳에
+        // 저장하느니 거부하고 말한다 (No Silent Fallback). 프레임 격자는 아직 후보 전용.
+        setStatus(t("frameEdgesNoSave"), "err");
+        btn.disabled = false;
+        return;
+      }
       if (basePitchSource === "edges" && view) {
         const res0 = await fetch("/api/base-grid-edges", {
           method: "POST", headers: { "Content-Type": "application/json" },
