@@ -382,6 +382,7 @@ function renderGridFit(stage, stateName) {
   // 지금 잡은 선 = 노랑. 드래그 중이 아니어도 **커서가 얹힌 선**을 노랑으로 표시해
   // 무엇을 잡거나 지울지 미리 보인다 (수홍 2026-08-08 "선 클릭하면 노란색으로 하이라이트").
   const held = (gridFitDrag && gridFitDrag.preview) ? gridFitDrag
+    : (gridFitSelected && gridFitSelected.state === state) ? gridFitSelected
     : (gridFitHover && gridFitHover.state === state ? gridFitHover : null);
   edges.xEdges.forEach((e, i) => {
     const x = Math.round(e * sx) + 0.5;
@@ -405,6 +406,36 @@ function renderGridFit(stage, stateName) {
 let gridFitDrag = null;
 // 커서가 얹힌 격자선 {axis, index, state} — 노랑 하이라이트용 (드래그 아님).
 let gridFitHover = null;
+// 클릭으로 고른 격자선 {axis, index, state} — Delete/Backspace 로 지운다.
+let gridFitSelected = null;
+
+// 고른 격자선 삭제 (끝선은 안 지운다 — 격자의 바깥 경계다).
+async function deleteSelectedGridLine() {
+  const sel = gridFitSelected;
+  if (!sel) return false;
+  const view = gridFitTarget(sel.state);
+  if (!view) return false;
+  const edges = sel.axis === "x" ? view.xEdges : view.yEdges;
+  if (sel.index === 0 || sel.index === edges.length - 1 || edges.length <= 3) return false;
+  const before = { x: view.xEdges.slice(), y: view.yEdges.slice() };
+  const kept = edges.slice();
+  kept.splice(sel.index, 1);
+  const next = sel.axis === "x" ? { x: kept, y: view.yEdges.slice() }
+                                : { x: view.xEdges.slice(), y: kept };
+  gridFitSelected = null;
+  await setGridEdges(sel.state, next, before);   // 삭제도 Cmd+Z 1단계
+  return true;
+}
+
+// Delete/Backspace = 고른 선 삭제. 타이핑 중인 필드에서는 양보한다(그건 글자 지우기다).
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Delete" && ev.key !== "Backspace") return;
+  if (!gridFitSelected) return;
+  const el = ev.target;
+  if (el && el.closest && el.closest("input, textarea, select")) return;
+  ev.preventDefault();
+  deleteSelectedGridLine();
+});
 
 // 균일 격자 미리보기 — 서버의 `_grid_edges` 를 흉내낸 **드래그 중 임시 표시**다.
 // 확정 값은 pointerup 에서 서버에 다시 물어 받는다 (서버가 절단선 SSoT).
@@ -493,8 +524,15 @@ function wireGridFitDrag(stage, stateName) {
     await setGridEdges(state, next, before);      // 삭제도 Cmd+Z 1단계
   });
   canvas.addEventListener("pointerdown", (ev) => {
+    // **캔버스를 누르면 포커스를 놓는다.** 안 그러면 피치·칸수 인풋이 포커스를 쥔 채
+    // 남아서 Delete 같은 키를 그 인풋이 먹는다 — 실사고 2026-08-08: 선을 고르고 Delete 를
+    // 눌렀더니 칸수 입력이 지워져 격자가 20칸에서 2칸이 됐다 (수홍 실측). 파괴적이라
+    // 클릭 시점에 끊는다.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     const hit = near(ev);
-    if (!hit) return;                             // 격자선이 아니면 아래 도구로 흘린다
+    if (!hit) { gridFitSelected = null; renderGridFit(stage, state); return; }
+    // 고른 선 — Delete/Backspace 로 지운다 (노랑 표시는 renderGridFit 이 한다).
+    gridFitSelected = { axis: hit.axis, index: hit.index, state };
     ev.preventDefault();
     ev.stopImmediatePropagation();
     try { canvas.setPointerCapture(ev.pointerId); } catch { /* no-op */ }
