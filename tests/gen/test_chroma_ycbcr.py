@@ -213,3 +213,43 @@ def test_default_mode_stays_rgb(fixture_run_dir: Path):
     assert result.returncode == 0, result.stderr
     request = json.loads((fixture_run_dir / "sprite-request.json").read_text())
     assert request["chroma"]["mode"] == "rgb"
+
+
+def test_gen_transparent_unmixes_key_blended_edges():
+    """`gen --transparent` 경로가 키와 섞인 가장자리를 **풀어서 부분 알파로** 만든다.
+
+    수홍 2026-08-08 "크로마키에 '약한 경로' 가 있니?": 이 경로의 fringe 보정은
+    `a <= fringe_alpha_max(239)` 인 픽셀만 건드렸는데 생성 PNG 는 전부 불투명(a=255)이라
+    한 번도 돌지 않았다. 그래서 잔머리처럼 키와 40% 섞인 픽셀이 이진 판정의 "키 아님" 에
+    걸려 불투명한 채 초록을 남겼다. 추출과 같은 프리미티브(`unmix_key_blend`)로 despill +
+    부분 알파를 만든다.
+
+    시트 레벨 매팅을 통째로 가져오면 안 된다는 것도 함께 고정한다 — 그건 경계 flood fill
+    이 큰 시트를 전제해서 작은 이미지의 **진짜 피사체 픽셀까지 지운다**(실측).
+    """
+    import tempfile
+
+    from sprite_gen.gen import chroma as chroma_mod
+    green, hair = (0, 255, 0), (60, 40, 30)
+    tmp = Path(tempfile.mkdtemp())
+    img = Image.new("RGBA", (64, 64), green + (255,))
+    for y in range(16, 48):
+        for x in range(20, 34):
+            img.putpixel((x, y), hair + (255,))
+    # 초록 40% 섞인 잔머리 열 — 예전에는 여기가 불투명 초록으로 남았다.
+    blend = tuple(round(hair[c] * 0.6 + green[c] * 0.4) for c in range(3))
+    for y in range(16, 48):
+        img.putpixel((34, y), blend + (255,))
+    src = tmp / "raw.png"
+    img.save(src)
+    out = tmp / "keyed.png"
+    chroma_mod.key_transparent(src, out, key="green")
+    result = Image.open(out).convert("RGBA")
+
+    r, g, b, a = result.getpixel((34, 32))
+    assert 0 < a < 255, f"블렌드 가장자리는 부분 알파가 되어야 한다: a={a}"
+    assert not (g > r + 8 and g > b + 8), f"초록이 남았다: ({r},{g},{b})"
+    for channel, want in enumerate(hair):
+        assert abs((r, g, b)[channel] - want) <= 8, f"despill 색이 머리색과 다르다: ({r},{g},{b})"
+    # 내부 피사체는 건드리지 않는다.
+    assert result.getpixel((25, 32)) == hair + (255,)
