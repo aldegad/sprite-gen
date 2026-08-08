@@ -382,15 +382,31 @@ def _rebake_frame_from_edges(run_dir: Path, state: str, index: int, twin_path: P
     with Image.open(twin_path) as opened:
         twin = opened.convert("RGBA")
     logical = snap_by_edges(twin, x_edges, y_edges)
-    span_w = max(1, x_edges[-1] - x_edges[0])
-    span_h = max(1, y_edges[-1] - y_edges[0])
-    blown = logical.resize((span_w, span_h), Image.NEAREST)
-    canvas = Image.new("RGBA", twin.size, (0, 0, 0, 0))
-    canvas.paste(blown, (x_edges[0], y_edges[0]))
     with Image.open(frame_path) as opened:
         cell_size = opened.convert("RGBA").size
-    if canvas.size != cell_size:
-        canvas = canvas.resize(cell_size, Image.NEAREST)
+    # 논리 이미지를 **한 번에** 셀 좌표의 발자국으로 보낸다.
+    #
+    # 예전엔 트윈 크기로 확대한 뒤 셀 크기로 다시 축소했는데, 그 축소가 NEAREST 라
+    # 논리 칸 하나를 통째로 건너뛰었다 — 사람이 그린 격자의 6번째 칸이 결과에서 사라졌다
+    # (수홍 실측 2026-08-08 "세로줄 하나가 통째로 빠져버린다"). 축소 표본이 좁은 칸을
+    # 그냥 지나칠 수 있기 때문이라 구조적 결함이고, 중간 확대를 없애면 사라진다:
+    # 논리 폭(칸 수)에서 목표 폭으로 한 번만 확대하므로 어떤 칸도 표본에서 빠지지 않는다.
+    #
+    # 출력은 칸마다 같은 폭이다. 사람이 잡은 절단선은 **원본을 어디서 자를지**의 진실이고,
+    # 잘라낸 논리 픽셀은 픽셀아트로서 균일해야 한다 — 칸 i 가 출력 열 i 에 1:1 대응한다.
+    ratio_x = cell_size[0] / twin.width
+    ratio_y = cell_size[1] / twin.height
+    left = int(round(x_edges[0] * ratio_x))
+    top = int(round(y_edges[0] * ratio_y))
+    width = max(logical.width, int(round((x_edges[-1] - x_edges[0]) * ratio_x)))
+    height = max(logical.height, int(round((y_edges[-1] - y_edges[0]) * ratio_y)))
+    width = min(width, cell_size[0] - left)
+    height = min(height, cell_size[1] - top)
+    if width < logical.width or height < logical.height:
+        return {"error": f"grid has more cells ({logical.width}x{logical.height}) than the "
+                         f"cell footprint can hold ({width}x{height}) — use fewer cells"}
+    canvas = Image.new("RGBA", cell_size, (0, 0, 0, 0))
+    canvas.paste(logical.resize((width, height), Image.NEAREST), (left, top))
     backup = _pregrid_backup_path(run_dir, state, index)
     if not backup.exists():
         backup.parent.mkdir(parents=True, exist_ok=True)
@@ -1864,9 +1880,14 @@ class CurationHandler(BaseHTTPRequestHandler):
                     else:
                         rebaked = _rebake_frame_from_edges(self.run_dir, state, index,
                                                             twin, x_edges, y_edges)
+                # 프레임을 다시 구우면 프레임 지문(run_revision)이 회전한다. 열려 있는
+                # 뷰가 옛 세대를 들고 있으면 이후 자동저장이 409 로 막히고 "다른 런
+                # 세대" 경고가 뜬다 — 사용자가 방금 스스로 시킨 변경인데도 (수홍 실측
+                # 2026-08-08). 새 세대를 함께 돌려줘 뷰가 그 자리에서 맞추게 한다.
                 self._send_json({"ok": True, "state": state, "index": index,
                                  "edges": None if clear else {"x": x_edges, "y": y_edges},
-                                 "rebaked": rebaked})
+                                 "rebaked": rebaked,
+                                 "runRevision": run_revision(self.run_dir)})
                 return
             if path == "/api/base-grid-edges":
                 # 사람이 선 단위로 잡은 베이스 격자 → fit.base_grid_manual (raw 좌표).

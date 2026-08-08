@@ -571,6 +571,10 @@ function injectBasePitchControls(stateName) {
         });
         const d1 = await res1.json();
         if (!res1.ok || !d1.ok) throw new Error(d1.error || res1.status);
+        if (d1.rebaked && d1.rebaked.error) throw new Error(d1.rebaked.error);
+        // 다시 구운 프레임 = 새 프레임 세대. 내가 시킨 변경이므로 뷰의 세대를 그 자리에서
+        // 맞춰 준다 — 안 맞추면 이후 자동저장이 "다른 런 세대" 로 막힌다.
+        if (d1.runRevision) run.runRevision = d1.runRevision;
         wrap.classList.add("is-manual");
         setStatus(t("basePitchSaved"), "ok");
         refreshFrameImages(pitchState);

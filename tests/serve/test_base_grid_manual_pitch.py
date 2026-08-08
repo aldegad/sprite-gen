@@ -372,3 +372,37 @@ def test_frame_grid_saves_per_frame_and_rebakes(fixture_run_dir):
         assert post is None or post["candidate"] is True
     finally:
         srv.shutdown()
+
+
+def test_rebake_keeps_every_logical_column(fixture_run_dir):
+    """다시 구운 프레임은 논리 칸을 **하나도 빠뜨리지 않는다**.
+
+    수홍 실측 2026-08-08: "세로줄 하나가 통째로 빠져버린다 — 왼쪽부터 6번째 칸".
+    원인은 논리→트윈 확대 뒤 트윈→셀 축소라는 2단 리사이즈였다. NEAREST 축소는 좁은
+    칸을 표본에서 그냥 지나칠 수 있어 칸이 사라진다. 논리에서 목표 발자국으로 **한 번만**
+    확대하면 구조적으로 빠질 수 없다. 여기서는 칸마다 색이 다른 트윈을 만들어 굽고,
+    결과에 그 색이 전부 남아 있는지로 고정한다.
+    """
+    from sprite_gen.serve.serve_curation import (_frame_plain_path,  # noqa: PLC0415
+                                                 _rebake_frame_from_edges)
+    run = _extract_run(fixture_run_dir)
+    state = next(iter(load_request(run)["states"]))
+    twin_path = _frame_plain_path(run, state, 0)
+    with Image.open(twin_path) as opened:
+        w, h = opened.size
+    # 폭이 제각각인 9칸 — 좁은 칸이 축소 표본에서 빠지던 바로 그 형태.
+    x_edges = [0, w // 40, w // 16, w // 8, w // 5, w // 3, w // 2, (2 * w) // 3, (5 * w) // 6, w]
+    y_edges = [0, h // 2, h]
+    painted = Image.new("RGBA", (w, h), (0, 0, 0, 255))
+    for i in range(len(x_edges) - 1):
+        for x in range(x_edges[i], x_edges[i + 1]):
+            for y in range(h):
+                painted.putpixel((x, y), (10 + i * 25, 40, 60, 255))
+    painted.save(twin_path)
+    result = _rebake_frame_from_edges(run, state, 0, twin_path, x_edges, y_edges)
+    assert "error" not in result, result
+    with Image.open(run / "frames" / state / "frame-0.png") as opened:
+        baked = opened.convert("RGBA")
+    reds = {px[0] for px in baked.getdata() if px[3] > 0}
+    expected = {10 + i * 25 for i in range(len(x_edges) - 1)}
+    assert expected <= reds, f"논리 칸이 결과에서 사라졌다 — 빠진 칸: {sorted(expected - reds)}"
