@@ -65,8 +65,8 @@ Concept taxonomy (which doc owns each term, so agents don't guess):
 - `curation.json` fields (`selected`/`order`/`deleted`/`transforms`/`pixels`/`clones`/`pixel_unfake`/`revision`/`recolor.picked`) → curation.md
 - frame **clones** (duplicate instances, `source_frame_index`) → curation.md + compose consumers
 - `frame_layout`, `manifest.json` runtime contract → run-contract.md + this SKILL.md "Runtime Contract"
-- Aseprite-compatible Phaser / Flame JSON export → [`docs/engine-export.md`](docs/engine-export.md)
+- Aseprite-compatible Phaser / Flame JSON export → [`docs/engine-export.md`](engine-export.md)
 - pixel-unfake `fit`, `.plain.png`/`orig/` twins → pixel-unfake.md
 - recolor spec / report / `variants/` bake + colourway adopt → recolor.md
-- `rig` profiles / landmarks, row `track` kinds, composite `layers` stack + `layers/` bake (`sprite-gen compose-layers`) → [`docs/layer-tracks.md`](docs/layer-tracks.md) (`sprite_gen/compose/layers.py` validates the declaration, `sprite_gen/compose/compose_layers.py` bakes it)
+- `rig` profiles / landmarks, row `track` kinds, composite `layers` stack + `layers/` bake (`sprite-gen compose-layers`) → [`docs/layer-tracks.md`](layer-tracks.md) (`sprite_gen/compose/layers.py` validates the declaration, `sprite_gen/compose/compose_layers.py` bakes it)
 - webview interactions (title-drag reorder, 넣기/빼기 toggle, 2-tier card, custom `data-tip` tooltip, recolor blink-compare) → `sprite_gen/curator/` (도메인 분할 `src/*.js` — 로드 순서 SSoT 는 index.html — + curator.css), described in curation.md + recolor.md
