@@ -103,7 +103,7 @@ Backward-compatible wrapper: `$SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT
 ### When codex produces no image at all
 
 A run that reaches a rollout but finds zero `image_generation_call` /
-`image_generation_end` records means the built-in `image_gen` tool was never
+`image_generation_end` / `custom_tool_call_output` `input_image` (codex 0.149.0 `exec` path) records means the built-in `image_gen` tool was never
 offered to the session, not that the model declined to use it. Built-in image
 generation is a **capability of the account behind the active Codex state root**.
 

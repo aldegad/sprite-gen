@@ -31,7 +31,28 @@ from .base import GEN_TIMEOUT_SECONDS, GenRequest, GenTimeoutError, ProviderRun,
 # first-class canonical records (not a fallback) — read whichever the running
 # codex emits. v0.140.0: response_item `image_generation_call`. v0.144.1:
 # event_msg `image_generation_end` (+status, saved_path — saved_path untrusted).
+# v0.149.0: the model calls image_gen from inside the `exec` custom tool
+# (`tools.image_gen__imagegen(...)`) and the PNG comes back as a
+# `custom_tool_call_output` whose `output` list carries an `input_image`
+# item with a `data:image/png;base64,...` URL.
 _RESULT_TYPES = ("image_generation_call", "image_generation_end")
+_EXEC_OUTPUT_TYPE = "custom_tool_call_output"
+_DATA_URL_RE = re.compile(r"^data:image/png;base64,(?P<b64>[A-Za-z0-9+/=]+)$")
+
+
+def _exec_output_images(payload: dict) -> list[str]:
+    """Inline PNGs carried by a v0.149.0 `exec` tool output record."""
+    output = payload.get("output")
+    if not isinstance(output, list):
+        return []
+    found: list[str] = []
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "input_image":
+            continue
+        match = _DATA_URL_RE.match(str(item.get("image_url", "")))
+        if match:
+            found.append(match.group("b64"))
+    return found
 # The session id that names the rollout jsonl. v0.144.1 `codex exec --json` emits
 # it as `{"type":"thread.started","thread_id":"<uuid>"}` on stdout; older codex
 # printed a `session id: <uuid>` text line. Both are canonical per version.
@@ -172,6 +193,9 @@ def _collect_inline_results(rollout: Path) -> list[str]:
             except json.JSONDecodeError:
                 continue
             payload = record.get("payload", {}) or {}
+            if payload.get("type") == _EXEC_OUTPUT_TYPE:
+                results.extend(_exec_output_images(payload))
+                continue
             if payload.get("type") not in _RESULT_TYPES or not payload.get("result"):
                 continue
             status = payload.get("status")

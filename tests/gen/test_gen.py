@@ -531,3 +531,18 @@ def test_codex_stream_errors_surface_the_real_cause() -> None:
 def test_codex_stream_errors_empty_when_no_failure() -> None:
     stream = '{"type":"thread.started","thread_id":"abc"}\n{"type":"turn.completed"}'
     assert codex_provider._extract_stream_errors(stream) == []
+
+
+def test_collect_inline_results_reads_exec_custom_tool_output(tmp_path):
+    """codex 0.149.0 emits the PNG inside a custom_tool_call_output input_image data URL."""
+    b64 = base64.b64encode(_png_bytes()).decode()
+    rollout = tmp_path / "rollout.jsonl"
+    rollout.write_text(
+        json.dumps({"payload": {"type": "custom_tool_call", "name": "exec", "input": "tools.image_gen__imagegen(...)"}}) + "\n"
+        + json.dumps({"payload": {"type": "custom_tool_call_output", "output": [
+            {"type": "input_text", "text": "Script completed\nWall time 19.1 seconds\nOutput:\n"},
+            {"type": "input_image", "image_url": "data:image/png;base64," + b64},
+        ]}}) + "\n",
+        encoding="utf-8",
+    )
+    assert codex_provider._collect_inline_results(rollout) == [b64]
