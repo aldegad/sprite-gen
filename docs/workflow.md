@@ -51,12 +51,12 @@ $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/generate_sprite_image
 
 Use `prompts/<state>.txt` as the prompt; save the selected image as `raw/<state>.png`. `--provider` is optional — the default is **codex** (`SPRITE_GEN_DEFAULT_PROVIDER` env overrides it; an observable grok fallback kicks in only if codex is unavailable). Pass `--provider grok` explicitly for the faster backend; codex adheres tighter to negative constraints. Default policy: [`docs/gen.md`](gen.md#default-provider-selection). Keep the request chroma key on the background (extraction removes it). Reference attachment rules:
 
-**생성 동시성 (maintainer 확정 2026-07-19)**: 여러 행을 뽑는 배치는 **4동시**로 돌린다 —
-`sprite-gen gen` 호출을 최대 4개 병렬 (codex 실측 4병렬까지 스로틀 없음; grok 도 4,
-사용자 관측상 6까지 가능하나 기본은 4). 1개씩 직렬은 멀티-행 배치에서 안티패턴.
+**생성 동시성 (maintainer 확정 2026-07-19, 2026-08-22 6으로 상향)**: 여러 행을 뽑는 배치는 **6동시**로 돌린다 —
+`sprite-gen gen` 호출을 최대 6개 병렬 (codex·grok 모두 사용자 실측 6병렬까지 스로틀 없음).
+1개씩 직렬은 멀티-행 배치에서 안티패턴.
 run-dir 쓰기는 `runio.py` 락이 지키므로 생성(각자 다른 `raw/<state>.png` 출력)은
 안전하게 병렬화된다. 이 규칙은 지침이다 — 오케스트레이션 스크립트를 짤 때
-`ThreadPoolExecutor(max_workers=4)` 급으로 반영하라.
+`ThreadPoolExecutor(max_workers=6)` 급으로 반영하라.
 
 Generation providers are **engine backends**, not user-facing agents. Selecting
 `grok` launches a headless `grok -p` process owned by `GrokProvider`; it does not
