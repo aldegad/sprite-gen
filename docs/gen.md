@@ -74,10 +74,12 @@ sprite-gen gen \
 Backward-compatible wrapper: `$SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/generate_sprite_image.py …` (same args).
 
 - **Non-transparent**: the raw PNG (chroma background included) is copied to `--out`.
-- **`--transparent`**: the raw is keyed to clean RGBA via the ported transparent
-  contract (`sprite_gen/gen/chroma.py`). Generate on a solid `#FF00FF` (or `#00FF00`)
-  background — pick the key by subject colour (magenta subjects → green key). Any
-  transparent pixel that still carries non-zero RGB **fails loudly** (No Silent Fallback).
+- **`--transparent`**: the raw is keyed to clean RGBA through the frame extractor's
+  canonical YCbCr matte (`remove_chroma_background_ycbcr`). Generate on a `#FF00FF`
+  (or `#00FF00`) background — pick the key by subject colour (magenta subjects →
+  green key). Gradients and texture within that chroma family are supported. A result
+  with `alpha_zero_pct: 0.0`, or any transparent pixel that still carries non-zero
+  RGB, **fails loudly before the output or success report is published** (No Silent Fallback).
 - The pre-chroma raw is preserved next to the destination as `<out>.raw.png` for audit.
 - `--report` writes a `sprite-gen-image-report` JSON: provider, prompt, out/raw paths,
   `raw_bytes`, `elapsed_seconds`, `session_id` (codex), the chroma stats, and the
