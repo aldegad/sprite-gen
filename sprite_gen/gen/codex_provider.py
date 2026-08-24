@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Codex `image_gen` provider (ChatGPT OAuth, no API key).
 
-Ported from the standalone `image-gen` skill (MIT, aldegad/image-gen). codex
-does not persist a discrete file; `image_gen` returns the PNG **inline as base64**
-inside the session rollout jsonl. We spawn a fresh `codex exec` in an empty
-sandbox (fresh session breaks OpenAI's prompt cache so repeat prompts don't drag
-in a previous image), parse the session id from stdout, then decode the inline
-base64 deterministically. The model-reported path is never trusted.
+Ported from the standalone `image-gen` skill (MIT, aldegad/image-gen). Official
+`codex exec` writes the PNG under `<Codex state root>/generated_images/<session-id>/exec-*.png`
+and prints `session id:` on stderr (stdout when `--json` emits `thread.started`).
+Older CLIs also inlined base64 in the rollout jsonl. We spawn a fresh `codex exec`
+in an empty sandbox (fresh session breaks OpenAI's prompt cache so repeat prompts
+don't drag in a previous image), parse the session id from stdout **and** stderr,
+copy the disk PNG when present, else decode inline base64. The model-reported path
+is never trusted. Empty jsonl records are not proof the account lacks the tool.
 
 Decisive flags (each verified in the image-gen skill):
 - `--sandbox workspace-write`  image_gen needs write access, else the tool never registers.
@@ -21,6 +23,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -64,11 +67,13 @@ _SID_RE = re.compile(r"session id: ([0-9a-f-]+)")
 # We state the trigger rather than describing the tool in prose so the invocation
 # contract is explicit and single-owned here.
 #
-# Scope of the trigger: naming the skill does not create the tool. Whether the
-# built-in `image_gen` tool is offered to the session at all is a capability of
-# the account behind the active Codex state root (see `_no_image_records_message`),
-# so this trigger is an alignment with the official invocation contract, not a fix
-# for a session that is never offered the tool.
+# Official CLI docs (learn.chatgpt.com/docs/image-generation, CLI surface):
+# include `$imagegen` to invoke the skill explicitly; attach refs with `-i`.
+# `codex exec` without `--json` writes the PNG under
+# `<Codex state root>/generated_images/<session-id>/exec-*.png` and prints
+# `session id: <uuid>` on stderr. Missing inline jsonl records is not proof
+# the account lacks image generation (`codex features list` can show
+# `image_generation` stable/true while this adapter used to claim otherwise).
 _SKILL_TRIGGER = "$imagegen"
 
 
@@ -213,39 +218,35 @@ def _decode_png(b64: str, dest: Path) -> None:
 
 
 def _build_prompt(user_prompt: str) -> str:
-    """Wrap the caller's prompt in the transport-level skill trigger.
+    """Official CLI invocation: `$imagegen` then the caller's prompt verbatim.
 
-    The sprite-request prompt is the caller's SSoT and is passed through verbatim;
-    this adapter is the one place that owns the codex invocation contract.
+    learn.chatgpt.com/docs/image-generation (CLI): include `$imagegen` to invoke
+    the image generation skill explicitly. Extra wrapping is not in that contract
+    and used to hide a finished PNG that Codex already wrote to disk.
     """
+    return f"{_SKILL_TRIGGER}\n{user_prompt}\n"
+
+
+def _session_image_dir(codex_home: Path, session_id: str) -> Path:
+    return codex_home / "generated_images" / session_id
+
+
+def _collect_disk_pngs(folder: Path) -> list[Path]:
+    """PNGs Codex exec writes under generated_images/<session-id>/."""
+    if not folder.is_dir():
+        return []
+    return sorted(path for path in folder.iterdir() if path.is_file() and path.suffix.lower() == ".png")
+
+
+def _no_image_records_message(rollout: Path, image_dir: Path) -> str:
+    """Empty inline records is not proof the account lacks image generation."""
     return (
-        f"{_SKILL_TRIGGER} 스킬로 built-in image_gen 도구를 정확히 1번 호출해서 "
-        "다음 프롬프트의 이미지 1장만 생성해줘.\n"
-        "미리보기 전용이라 생성된 파일은 기본 경로에 그대로 두면 된다.\n"
-        "파일 저장·이동·복사·셸 명령·코드 작성·경로 보고 전부 금지. 생성만 하고 끝.\n\n"
-        "프롬프트:\n"
-        f"{user_prompt}\n"
-    )
-
-
-def _no_image_records_message(rollout: Path, codex_home: Path) -> str:
-    """State an empty rollout as a capability failure, not a list of guesses.
-
-    Built-in image generation is a capability of the account behind the active
-    Codex state root. When the session is not offered the tool, it cannot be
-    talked into it: not by the prompt, not by the model, and not by a config
-    toggle. The only remedy is to run against a state root whose account provides
-    it, so that is what this message says.
-    """
-    return (
-        "codex-gen: the built-in image_gen tool never ran in this codex session — "
-        f"zero {' / '.join(_RESULT_TYPES)} records in {rollout}\n"
-        f"  the prompt carries the official {_SKILL_TRIGGER} skill trigger, so the tool was "
-        "not offered to the session rather than merely not chosen.\n"
-        f"  the account behind this Codex state root ({codex_home}) does not provide the "
-        "built-in image_gen capability.\n"
-        "  select a Codex state root whose account provides it (`codex login status`), or "
-        "generate with another provider. A config feature toggle does not grant it."
+        "codex-gen: no PNG after `codex exec`.\n"
+        f"  looked for files under {image_dir} (official CLI writes exec-*.png here)\n"
+        f"  and inline {' / '.join(_RESULT_TYPES)} / {_EXEC_OUTPUT_TYPE} records in {rollout}\n"
+        f"  the prompt starts with official {_SKILL_TRIGGER}. Missing jsonl records are not "
+        "a login diagnosis — check that directory and `codex features list` "
+        "(image_generation) before blaming the ChatGPT OAuth account."
     )
 
 
@@ -308,18 +309,21 @@ class CodexProvider:
                 "provider stream stalled; child killed (gen-timeout)")
         elapsed = time.monotonic() - started
         stdout = completed.stdout or ""
+        stderr = completed.stderr or ""
         if completed.returncode != 0:
             stream_errors = _extract_stream_errors(stdout)
-            tail = (completed.stderr or "").strip().splitlines()[-20:]
+            tail = stderr.strip().splitlines()[-20:]
             detail = "\n".join(stream_errors + tail).strip() or "(no error detail on stdout/stderr)"
             raise SystemExit(
                 f"codex-gen: codex exec exited {completed.returncode}\n{detail}"
             )
 
-        session_id = _parse_session_id(stdout)
+        # Official CLI prints `session id:` on stderr; `--json` also emits
+        # `thread.started` on stdout. Both are canonical, not a fallback.
+        session_id = _parse_session_id(stdout) or _parse_session_id(stderr)
         if not session_id:
             raise SystemExit(
-                "codex-gen: no thread/session id in codex stdout — image_gen was not reached.\n"
+                "codex-gen: no thread/session id in codex stdout/stderr — image_gen was not reached.\n"
                 "  check `codex login status` and `--sandbox workspace-write`."
             )
         rollout = _resolve_rollout(
@@ -327,10 +331,22 @@ class CodexProvider:
             sessions_root,
             preexisting=preexisting_rollouts,
         )
-        results = _collect_inline_results(rollout)
-        if not results:
-            raise SystemExit(_no_image_records_message(rollout, codex_home))
-        _decode_png(results[-1], request.raw)
+        image_dir = _session_image_dir(codex_home, session_id)
+        disk_pngs = _collect_disk_pngs(image_dir)
+        extra: dict[str, object] = {"rollout_cleaned": not self.keep_session}
+        if disk_pngs:
+            request.raw.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(disk_pngs[-1], request.raw)
+            verify_png(request.raw)
+            extra["png_source"] = "disk"
+            extra["disk_pngs"] = len(disk_pngs)
+        else:
+            results = _collect_inline_results(rollout)
+            extra["inline_results"] = len(results)
+            if not results:
+                raise SystemExit(_no_image_records_message(rollout, image_dir))
+            _decode_png(results[-1], request.raw)
+            extra["png_source"] = "inline"
 
         if not self.keep_session:
             try:
@@ -343,5 +359,5 @@ class CodexProvider:
             elapsed_seconds=elapsed,
             model=request.model,
             session_id=session_id,
-            extra={"inline_results": len(results), "rollout_cleaned": not self.keep_session},
+            extra=extra,
         )

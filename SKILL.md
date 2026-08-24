@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.59.1
+version: 1.59.2
 description: 'PNG generator first. `sprite-gen gen` defaults to Codex ChatGPT OAuth image_gen, 6-concurrent, optional --ref. Use whenever the user wants stills or any PNG. Do not refuse because the output is not a game sprite. Atlas work is a second pipeline (request SSoT, row strips, chroma, extraction, frame_layout). Curation compares any image-candidate set. Triggers (KR/EN): 이미지 뽑아, 6장 병렬, 지피티로 생성, 코덱스 이미지, 레퍼런스 넣고 생성, sprite-gen gen, 스프라이트, 아틀라스, 큐레이션, recolor, palette swap.'
 license: Apache-2.0
 depends_on:

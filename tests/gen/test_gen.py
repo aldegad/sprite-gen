@@ -242,22 +242,24 @@ def test_codex_prompt_carries_official_imagegen_skill_trigger() -> None:
     assert codex_provider._SKILL_TRIGGER == "$imagegen"
     assert "$imagegen" in prompt, "the official skill trigger must be in the transport prompt"
     # It must lead the instruction, not trail the user's prompt as an aside.
-    assert prompt.startswith("$imagegen "), prompt
+    assert prompt.startswith("$imagegen\n"), prompt
     # The caller's sprite-request prompt is the SSoT — passed through verbatim.
     assert user_prompt in prompt
-    # The rest of the transport contract survives the trigger.
-    assert "정확히 1번" in prompt
-    assert "금지" in prompt
+    # Official CLI wrapping is the trigger plus the caller prompt; extra
+    # Korean instruction layers are not in that contract.
+    assert "정확히 1번" not in prompt
+    assert prompt == "$imagegen\n" + user_prompt + "\n"
 
 
-def test_codex_empty_rollout_fails_loud_on_tool_non_exposure(tmp_path: Path, monkeypatch) -> None:
-    # An empty rollout is the tool-non-exposure signature. It must fail loudly, name
-    # the account capability behind the active Codex state root as the thing that is
-    # missing, and point at the one real remedy — never fall back to another
-    # provider on its own, never trust a model-reported path, and never send the
-    # reader off to hunt for a config toggle.
+def test_codex_empty_rollout_fails_loud_without_blaming_account_capability(tmp_path: Path, monkeypatch) -> None:
+    # Empty inline records used to be misread as "this ChatGPT login has no
+    # image_gen". Official CLI still writes exec-*.png on disk while jsonl can
+    # stay empty of image records. Fail loud, name both places we looked, and
+    # refuse to diagnose a missing account capability from that absence.
     monkeypatch.setenv("CODEX_HOME", str(tmp_path))
     rollout = tmp_path / "rollout-empty.jsonl"
+    session_id = "aaaa-bbbb"
+    image_dir = tmp_path / "generated_images" / session_id
 
     class _Completed:
         returncode = 0
@@ -278,14 +280,13 @@ def test_codex_empty_rollout_fails_loud_on_tool_non_exposure(tmp_path: Path, mon
         )
 
     message = str(excinfo.value)
-    assert "image_gen tool never ran" in message
+    assert "no PNG after `codex exec`" in message
     assert "$imagegen" in message
     assert str(rollout) in message
-    # The message must name the missing capability and the state root that lacks
-    # it, and must close off the config-toggle detour.
-    assert "capability" in message
-    assert str(tmp_path) in message, "the failing Codex state root must be named"
-    assert "does not grant it" in message
+    assert str(image_dir) in message
+    assert "not a login diagnosis" in message
+    assert "does not grant it" not in message
+    assert "account lacks" not in message
     assert not (tmp_path / "raw.png").exists(), "a failed run must not leave a raw PNG"
 
 
@@ -317,8 +318,70 @@ def test_codex_prompt_reaches_the_child_process(tmp_path: Path, monkeypatch) -> 
         GenRequest(prompt="a mushroom", raw=tmp_path / "raw.png"), tmp_path
     )
 
-    assert seen["input"].startswith("$imagegen ")
+    assert seen["input"].startswith("$imagegen\n")
     assert "a mushroom" in seen["input"]
+
+
+def test_codex_disk_png_is_preferred_over_empty_inline(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    session_id = "aaaa-bbbb"
+    image_dir = tmp_path / "generated_images" / session_id
+    image_dir.mkdir(parents=True)
+    disk_png = image_dir / "exec-11111111-2222-3333-4444-555555555555.png"
+    disk_png.write_bytes(_png_bytes((0, 255, 0, 255)))
+    rollout = tmp_path / "rollout-empty.jsonl"
+    raw = tmp_path / "work" / "raw.png"
+
+    class _Completed:
+        returncode = 0
+        stdout = '{"type":"thread.started","thread_id":"aaaa-bbbb"}\n'
+        stderr = ""
+
+    monkeypatch.setattr(codex_provider.subprocess, "run", lambda cmd, **kwargs: _Completed())
+    monkeypatch.setattr(
+        codex_provider,
+        "_resolve_rollout",
+        lambda sid, sessions_root, *, preexisting: rollout,
+    )
+    monkeypatch.setattr(codex_provider, "_collect_inline_results", lambda path: [])
+
+    run = codex_provider.CodexProvider(keep_session=True).generate(
+        GenRequest(prompt="a mushroom", raw=raw), tmp_path
+    )
+
+    assert run.extra["png_source"] == "disk"
+    assert raw.read_bytes() == disk_png.read_bytes()
+
+
+def test_codex_session_id_from_stderr_when_stdout_has_none(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    session_id = "01a03187-f3bb-77b0-b99c-cbb6319e9fa2"
+    image_dir = tmp_path / "generated_images" / session_id
+    image_dir.mkdir(parents=True)
+    disk_png = image_dir / "exec-5b844d43-ceb8-4cfb-802d-273325fa62c3.png"
+    disk_png.write_bytes(_png_bytes())
+    rollout = tmp_path / f"rollout-{session_id}.jsonl"
+    raw = tmp_path / "raw.png"
+
+    class _Completed:
+        returncode = 0
+        stdout = ""
+        stderr = f"session id: {session_id}\n"
+
+    monkeypatch.setattr(codex_provider.subprocess, "run", lambda cmd, **kwargs: _Completed())
+    monkeypatch.setattr(
+        codex_provider,
+        "_resolve_rollout",
+        lambda sid, sessions_root, *, preexisting: rollout,
+    )
+
+    run = codex_provider.CodexProvider(keep_session=True).generate(
+        GenRequest(prompt="a red apple", raw=raw), tmp_path
+    )
+
+    assert run.session_id == session_id
+    assert run.extra["png_source"] == "disk"
+    assert raw.exists()
 
 
 def test_grok_prompt_switches_on_refs(tmp_path: Path) -> None:

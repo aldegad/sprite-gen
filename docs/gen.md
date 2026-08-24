@@ -90,29 +90,33 @@ Backward-compatible wrapper: `$SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT
   (`--sandbox workspace-write`, `--add-dir <Codex state root>/generated_images`,
   `--skip-git-repo-check`, no `--ephemeral`). A fresh session breaks OpenAI's prompt
   cache so repeat prompts don't drag in a prior image. The session id comes from the
-  `thread.started` event (older codex: a `session id:` text line — both supported); the
-  inline base64 is decoded from the rollout jsonl (`image_generation_call` /
-  `image_generation_end` records — both supported). The model-reported path is never
-  trusted. The rollout jsonl (which holds the ~1–1.5 MB inline image) is deleted after
-  extraction unless `--keep-session`.
+  `thread.started` event on stdout **or** a `session id:` text line on stderr
+  (official CLI prints the latter; both are canonical). The PNG is copied from
+  `<Codex state root>/generated_images/<session-id>/exec-*.png` when that file
+  exists. If the directory is empty, inline base64 is decoded from the rollout
+  jsonl (`image_generation_call` / `image_generation_end` /
+  `custom_tool_call_output` `input_image` — all supported). The model-reported
+  path is never trusted. The rollout jsonl is deleted after extraction unless
+  `--keep-session`.
   The adapter and child process share one Codex state root: when `CODEX_HOME` is set they use only that directory; when it is unset they use Codex's `~/.codex` default.
   Rollouts are selected by an exact session-id filename suffix.
   Missing, duplicate, or pre-existing stale matches fail rather than falling back to another root or choosing by modification time.
-  The transport prompt names the skill with codex's official `$imagegen` mention, which is how a codex skill is invoked explicitly. The adapter owns that trigger alone; the caller's sprite-request prompt is passed through verbatim.
+  The transport prompt is official CLI form: `$imagegen` on its own line, then the caller's prompt verbatim. The adapter owns that trigger alone.
 
 ### When codex produces no image at all
 
-A run that reaches a rollout but finds zero `image_generation_call` /
-`image_generation_end` / `custom_tool_call_output` `input_image` (codex 0.149.0 `exec` path) records means the built-in `image_gen` tool was never
-offered to the session, not that the model declined to use it. Built-in image
-generation is a **capability of the account behind the active Codex state root**.
+A run that reaches a session id but finds neither a disk PNG under
+`generated_images/<session-id>/` nor inline jsonl records (`image_generation_call` /
+`image_generation_end` / `custom_tool_call_output` `input_image`) failed to
+materialize a PNG. That absence is **not** proof the ChatGPT OAuth account lacks
+image generation. Official `codex exec` writes the file on disk even when jsonl
+has no image records; `codex features list` can show `image_generation` stable/true
+while this adapter used to claim the login could not generate.
 
-A session that is not offered the tool cannot be talked into it. The `$imagegen`
-mention names the skill, it does not create the tool; the model choice does not
-change it; and no `config.toml` feature toggle grants it. The remedy is to point
-`CODEX_HOME` at a Codex state root whose account provides image generation
-(`codex login status`), or to use `--provider grok`. The adapter fails loudly with
-exactly that, rather than falling back on its own.
+The `$imagegen` mention is the official skill trigger. Check the session image
+directory and `codex features list` before blaming the login. The adapter fails
+loudly with both paths it looked at, rather than falling back on its own. Use
+`--provider grok` only as an explicit caller choice.
 - **grok** — runs `grok -p … --sandbox workspace --always-approve` (media/shell must be
   auto-approved; plain acceptEdits blocks tool execution and returns an empty answer).
   grok is instructed to write the final PNG to an exact absolute path; we then verify
