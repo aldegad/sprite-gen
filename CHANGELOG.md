@@ -8,7 +8,7 @@ All notable public changes to `sprite-gen` are recorded here. Versions track the
 
 ## v1.59.1 - Gen is the default image path
 
-- Frontmatter `description` and hub intro now lead with `sprite-gen gen`: Codex ChatGPT OAuth by default, 6-concurrent batches, optional `--ref`, not sprite-only. Atlas pipeline stays the second job. The blocking "AI raw is not the final asset" gate is scoped to atlas/pipeline outputs so a still PNG is not rejected as an incomplete sprite.
+- Frontmatter `description` and hub intro now lead with `sprite-gen gen`: Codex ChatGPT OAuth by default, 6-concurrent batches, optional `--ref`, not sprite-only. Atlas pipeline stays the second job. The blocking "AI raw is not the final asset" gate is scoped to atlas/pipeline outputs so a still PNG is not rejected as an incomplete sprite. A route-first table at the top of the hub stops agents from treating still generation as an atlas job.
 
 ## v1.59.0 - Contributor Collection
 

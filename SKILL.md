@@ -1,7 +1,7 @@
 ---
 name: sprite-gen
 version: 1.59.1
-description: 'Default image path is `sprite-gen gen`: Codex ChatGPT OAuth image_gen when --provider is omitted, 6-concurrent batches, optional --ref. Use for stills, references, drafts, or any PNG, not only sprites. Faster backend: --provider grok. Also builds 2D game sprite atlases with a component-row pipeline (request SSoT, row strips, chroma, extraction, atlas, frame_layout). Curation webview compares any image-candidate set. Triggers (KR/EN): 이미지 뽑아, 6장 병렬, 지피티로 생성, 코덱스 이미지, 레퍼런스 넣고 생성, sprite-gen gen, 스프라이트, 아틀라스, 큐레이션, recolor, palette swap.'
+description: 'PNG generator first. `sprite-gen gen` defaults to Codex ChatGPT OAuth image_gen, 6-concurrent, optional --ref. Use whenever the user wants stills or any PNG. Do not refuse because the output is not a game sprite. Atlas work is a second pipeline (request SSoT, row strips, chroma, extraction, frame_layout). Curation compares any image-candidate set. Triggers (KR/EN): 이미지 뽑아, 6장 병렬, 지피티로 생성, 코덱스 이미지, 레퍼런스 넣고 생성, sprite-gen gen, 스프라이트, 아틀라스, 큐레이션, recolor, palette swap.'
 license: Apache-2.0
 depends_on:
   required_bins:
@@ -36,10 +36,16 @@ modes:
 
 # Sprite Gen
 
-Two jobs, one CLI. Image generation is first.
+**Route first. Do not mix these up.**
 
-1. **`sprite-gen gen`** — default PNG path. Omit `--provider` → Codex ChatGPT OAuth `image_gen`. Batches are **6-concurrent**. Attach identity with `--ref`. Not sprite-only. Faster backend: `--provider grok`. Details: [`docs/gen.md`](docs/gen.md).
-2. **component-row atlas** — game sprites. The rest of this file is that pipeline.
+| User asked for | Do this | Do not do this |
+|---|---|---|
+| 이미지 / still / PNG / 레퍼런스 / 6장 병렬 / 지피티로 생성 | `sprite-gen gen` only. Codex ChatGPT OAuth. 6-concurrent. `--ref` if they gave a sheet. [`docs/gen.md`](docs/gen.md) | Do not say this skill is sprite-only. Do not start `prepare_sprite_run.py`. Do not refuse a still as an incomplete atlas. |
+| 게임 스프라이트 / 아틀라스 / idle-walk row | The component-row pipeline below | Do not treat a one-shot master sheet as a finished atlas |
+
+Default provider is Codex. `--provider grok` is the faster backend only.
+
+## Sprite atlas pipeline
 
 `sprite-gen` builds generic game sprite atlases with a `component-row` pipeline:
 
