@@ -1,7 +1,7 @@
 ---
 name: sprite-gen
-version: 1.59.0
-description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Palette-swap bake (`sprite-gen recolor`) turns a base sheet + palette map into N colourway sheets; the curation view blink-compares and adopts a pick into curation.json.recolor.picked. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick. Recolor triggers (KR/EN): 팔레트 스왑, 팔레트 베이크, 리컬러, 색깔 바꾸기, 컬러웨이, 색 변형, 팔레트 맵, 색갈이, palette swap, recolor, colourway, colorway, bake variants, palette map."
+version: 1.59.1
+description: 'Default image path is `sprite-gen gen`: Codex ChatGPT OAuth image_gen when --provider is omitted, 6-concurrent batches, optional --ref. Use for stills, references, drafts, or any PNG, not only sprites. Faster backend: --provider grok. Also builds 2D game sprite atlases with a component-row pipeline (request SSoT, row strips, chroma, extraction, atlas, frame_layout). Curation webview compares any image-candidate set. Triggers (KR/EN): 이미지 뽑아, 6장 병렬, 지피티로 생성, 코덱스 이미지, 레퍼런스 넣고 생성, sprite-gen gen, 스프라이트, 아틀라스, 큐레이션, recolor, palette swap.'
 license: Apache-2.0
 depends_on:
   required_bins:
@@ -36,6 +36,11 @@ modes:
 
 # Sprite Gen
 
+Two jobs, one CLI. Image generation is first.
+
+1. **`sprite-gen gen`** — default PNG path. Omit `--provider` → Codex ChatGPT OAuth `image_gen`. Batches are **6-concurrent**. Attach identity with `--ref`. Not sprite-only. Faster backend: `--provider grok`. Details: [`docs/gen.md`](docs/gen.md).
+2. **component-row atlas** — game sprites. The rest of this file is that pipeline.
+
 `sprite-gen` builds generic game sprite atlases with a `component-row` pipeline:
 
 ```text
@@ -44,11 +49,11 @@ sprite-request.json -> layout guides + prompts -> image-gen state rows
 -> sprite-sheet-alpha.png + manifest.json.frame_layout
 ```
 
-Use only the `component-row` pipeline. Do not treat one-shot master sheets, fixed-grid atlas cutting, local drawing, or static fallback as a successful sprite result.
+For **sprite atlas results**, use only the `component-row` pipeline. Do not treat one-shot master sheets, fixed-grid atlas cutting, local drawing, or static fallback as a successful sprite result. A `sprite-gen gen` still is a PNG, not an atlas, and does not have to pass the atlas pipeline.
 
-## 필수 게이트 — AI raw 는 최종 에셋이 아니다 (BLOCKING)
+## 필수 게이트 — AI raw 는 최종 스프라이트 에셋이 아니다 (BLOCKING)
 
-이 스킬의 모든 산출물은 아래 체크리스트를 통과해야 한다. 하나라도 어기면 그 결과물은 실패로 보고한다:
+이 체크리스트는 **스프라이트 아틀라스/파이프라인 산출물**에 적용한다. `sprite-gen gen` 낱장 PNG 는 해당 변환 경로를 타지 않는다. 아틀라스 산출이 하나라도 어기면 그 결과물은 실패로 보고한다:
 
 - [ ] **AI 개입은 raw 생성 한 곳뿐이다.** `raw/<state>.png` 는 중간 산출물이며, 최종 에셋은 반드시 결정론 변환 — `extract_sprite_row_frames.py`(크로마 제거 → 컴포넌트 분리 → 피치 검출/그리드 스냅 → kCentroid → 공유 팔레트 → 셀 배치) — 를 거친다. 같은 입력이면 항상 같은 출력이 나오는 코드 경로만 픽셀 언페이크다.
 - [ ] **단순 다운스케일 쇼트컷 금지.** raw 를 PIL `resize()` 한 줄로 줄여 최종 경로에 놓는 것은 픽셀 언페이크 변환이 아니다 — AA 가장자리 열화와 그리드 미정렬이 그대로 남는다. "이번 한 번만 빠르게" 도 금지. 파이프라인 없이 낱장만 변환할 때도 run dir 를 만들어 같은 추출 경로를 태운다.

@@ -4,7 +4,11 @@ All notable public changes to `sprite-gen` are recorded here. Versions track the
 
 ## Unreleased
 
-- `SKILL.md` 48.2KB → 24.0KB. The hub had absorbed per-feature procedure and rationale; both now live one link deep, and the hub keeps the blocking gates, the script map, the step index, and the contracts. New leaf docs: `docs/workflow.md` (each step's exact command and reference-attachment rules), `docs/breathe.md` (sidecar contract, rigid-boundary detection, curation editor), `docs/interpreter.md` (why the venv interpreter is the only register), `docs/rename-gate.md` (the vocabulary-rename order and its six checks), `docs/README.md` (docs topology tree + concept→owner taxonomy). No rule was deleted and no moved line survives in two places; the frontmatter `description` is unchanged.
+- `SKILL.md` 48.2KB → 24.0KB. The hub had absorbed per-feature procedure and rationale; both now live one link deep, and the hub keeps the blocking gates, the script map, the step index, and the contracts. New leaf docs: `docs/workflow.md` (each step's exact command and reference-attachment rules), `docs/breathe.md` (sidecar contract, rigid-boundary detection, curation editor), `docs/interpreter.md` (why the venv interpreter is the only register), `docs/rename-gate.md` (the vocabulary-rename order and its six checks), `docs/README.md` (docs topology tree + concept→owner taxonomy). No rule was deleted and no moved line survives in two places.
+
+## v1.59.1 - Gen is the default image path
+
+- Frontmatter `description` and hub intro now lead with `sprite-gen gen`: Codex ChatGPT OAuth by default, 6-concurrent batches, optional `--ref`, not sprite-only. Atlas pipeline stays the second job. The blocking "AI raw is not the final asset" gate is scoped to atlas/pipeline outputs so a still PNG is not rejected as an incomplete sprite.
 
 ## v1.59.0 - Contributor Collection
 

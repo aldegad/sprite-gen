@@ -12,8 +12,8 @@ build-backend = "setuptools.build_meta"
 name = "sprite-gen"
 # Release discipline: keep this package metadata version synchronized with
 # SKILL.md's `version:` field in the same release commit.
-version = "1.59.0"
-description = "Component-row pipeline for clean 2D game sprites and animation atlases"
+version = "1.59.1"
+description = "PNG generation via Codex OAuth (sprite-gen gen, 6-concurrent) plus a component-row sprite atlas pipeline"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
