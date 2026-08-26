@@ -27,11 +27,14 @@ from pathlib import Path
 
 from .base import GEN_TIMEOUT_SECONDS, GenRequest, GenTimeoutError, ProviderRun, provider_binary, provider_subprocess_env, verify_png
 
-# codex carries the inline base64 on a version-specific record. Both are
-# first-class canonical records (not a fallback) — read whichever the running
+# codex carries the inline base64 on a version-specific record. All are
+# first-class canonical records (not fallbacks) — read whichever the running
 # codex emits. v0.140.0: response_item `image_generation_call`. v0.144.1:
 # event_msg `image_generation_end` (+status, saved_path — saved_path untrusted).
+# v0.149.1: event_msg `item_completed` wrapping an Extension item with kind
+# `image_gen.generation`.
 _RESULT_TYPES = ("image_generation_call", "image_generation_end")
+_IMAGE_GEN_EXTENSION_KIND = "image_gen.generation"
 # The session id that names the rollout jsonl. v0.144.1 `codex exec --json` emits
 # it as `{"type":"thread.started","thread_id":"<uuid>"}` on stdout; older codex
 # printed a `session id: <uuid>` text line. Both are canonical per version.
@@ -172,6 +175,16 @@ def _collect_inline_results(rollout: Path) -> list[str]:
             except json.JSONDecodeError:
                 continue
             payload = record.get("payload", {}) or {}
+            if payload.get("type") == "item_completed":
+                item = payload.get("item", {}) or {}
+                if (
+                    item.get("type") == "Extension"
+                    and item.get("kind") == _IMAGE_GEN_EXTENSION_KIND
+                    and item.get("status") == "completed"
+                    and item.get("result")
+                ):
+                    results.append(item["result"])
+                continue
             if payload.get("type") not in _RESULT_TYPES or not payload.get("result"):
                 continue
             status = payload.get("status")
@@ -215,7 +228,7 @@ def _no_image_records_message(rollout: Path, codex_home: Path) -> str:
     """
     return (
         "codex-gen: the built-in image_gen tool never ran in this codex session — "
-        f"zero {' / '.join(_RESULT_TYPES)} records in {rollout}\n"
+        f"zero {' / '.join((*_RESULT_TYPES, _IMAGE_GEN_EXTENSION_KIND))} records in {rollout}\n"
         f"  the prompt carries the official {_SKILL_TRIGGER} skill trigger, so the tool was "
         "not offered to the session rather than merely not chosen.\n"
         f"  the account behind this Codex state root ({codex_home}) does not provide the "

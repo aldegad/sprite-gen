@@ -200,6 +200,51 @@ def test_codex_inline_extraction_reads_both_record_types(tmp_path: Path) -> None
     assert gen_base.verify_png(dest) > 0
 
 
+def test_codex_inline_extraction_reads_0149_imagegen_extension(tmp_path: Path) -> None:
+    b64 = base64.b64encode(_png_bytes()).decode()
+    rollout = tmp_path / "rollout-codex-0149.jsonl"
+    lines = [
+        {
+            "payload": {
+                "type": "item_completed",
+                "item": {
+                    "type": "Extension",
+                    "kind": "other.extension",
+                    "status": "completed",
+                    "result": b64,
+                },
+            }
+        },
+        {
+            "payload": {
+                "type": "item_completed",
+                "item": {
+                    "type": "Extension",
+                    "kind": "image_gen.generation",
+                    "status": "failed",
+                    "result": b64,
+                },
+            }
+        },
+        {
+            "payload": {
+                "type": "item_completed",
+                "item": {
+                    "type": "Extension",
+                    "kind": "image_gen.generation",
+                    "status": "completed",
+                    "result": b64,
+                },
+            }
+        },
+    ]
+    rollout.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
+
+    results = codex_provider._collect_inline_results(rollout)
+
+    assert results == [b64]
+
+
 def test_codex_inline_extraction_rejects_failed_status(tmp_path: Path) -> None:
     b64 = base64.b64encode(_png_bytes()).decode()
     rollout = tmp_path / "rollout-fail.jsonl"
