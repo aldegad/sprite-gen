@@ -29,4 +29,8 @@ The following external contributors have work that is incorporated into, or mate
 
 - [PR #3](https://github.com/aldegad/sprite-gen/pull/3): proposed lowering the default chroma key threshold from `96` to `80` after a 705-case offline sweep. The PR was not merged, but its benchmark prompted a real-pipeline comparison that confirmed `96` as the canonical default.
 
+## [@smnchoi](https://github.com/smnchoi)
+
+- [Issue #15](https://github.com/aldegad/sprite-gen/issues/15): reproduced the root-skill installer failure and identified the explicit `--name sprite-gen` argument required for the documented Codex installation command.
+
 Thank you for testing the project in real environments, documenting failures clearly, and contributing fixes or experiments that inform `sprite-gen`.
