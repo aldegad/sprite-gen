@@ -33,4 +33,8 @@ The following external contributors have work that is incorporated into, or mate
 
 - [Issue #15](https://github.com/aldegad/sprite-gen/issues/15): reproduced the root-skill installer failure and identified the explicit `--name sprite-gen` argument required for the documented Codex installation command.
 
+## [@StreetJammer](https://github.com/StreetJammer)
+
+- [PR #16](https://github.com/aldegad/sprite-gen/pull/16): added support for Codex `image_gen.generation` Extension result records while preserving the existing inline PNG verification path.
+
 Thank you for testing the project in real environments, documenting failures clearly, and contributing fixes or experiments that inform `sprite-gen`.
