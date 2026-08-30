@@ -407,18 +407,81 @@ def test_grok_prompt_switches_on_refs(tmp_path: Path) -> None:
 def test_chroma_key_transparent_clears_magenta(tmp_path: Path) -> None:
     src = tmp_path / "src.png"
     img = Image.new("RGBA", (6, 6), (255, 0, 255, 255))
-    img.putpixel((2, 2), (10, 20, 30, 255))  # a real subject pixel
+    for y in range(2, 4):
+        for x in range(2, 4):
+            img.putpixel((x, y), (245, 245, 245, 255))
     img.save(src)
 
     out = tmp_path / "out.png"
     stats = chroma_mod.key_transparent(src, out, key="magenta", white_check=tmp_path / "check.png")
     assert stats["mode"] == "RGBA"
     assert stats["stale_transparent_rgb_pixels"] == 0
-    assert stats["keyed_pixels"] == 35  # 36 - 1 subject pixel
+    assert stats["keyed_pixels"] == 32
 
     keyed = Image.open(out).convert("RGBA")
     assert keyed.getpixel((0, 0))[3] == 0
     assert keyed.getpixel((2, 2))[3] == 255
+
+
+@pytest.mark.parametrize(
+    ("key", "background", "subject"),
+    [
+        (
+            "magenta",
+            lambda x, y: (238 - (x % 7), 124 + ((x + y) % 31), 229 - (y % 5), 255),
+            (20, 220, 60, 255),
+        ),
+        (
+            "green",
+            lambda x, y: (124 + ((x + y) % 31), 238 - (x % 7), 129 + (y % 5), 255),
+            (220, 20, 200, 255),
+        ),
+    ],
+)
+def test_chroma_key_transparent_removes_textured_gradient_background(
+    tmp_path: Path,
+    key: str,
+    background,
+    subject: tuple[int, int, int, int],
+) -> None:
+    src = tmp_path / f"{key}-gradient.png"
+    image = Image.new("RGBA", (96, 64))
+    pixels = image.load()
+    for y in range(image.height):
+        for x in range(image.width):
+            pixels[x, y] = background(x, y)
+    for y in range(20, 44):
+        for x in range(32, 64):
+            pixels[x, y] = subject
+    image.save(src)
+
+    out = tmp_path / f"{key}-out.png"
+    stats = chroma_mod.key_transparent(src, out, key=key)
+
+    keyed = Image.open(out).convert("RGBA")
+    assert stats["alpha_zero_pct"] > 50.0
+    assert keyed.getpixel((0, 0))[3] == 0
+    assert keyed.getpixel((48, 32))[3] == 255
+
+
+def test_chroma_key_transparent_rejects_zero_percent_alpha(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    src = tmp_path / "src.png"
+    Image.new("RGBA", (512, 512), (20, 30, 40, 255)).save(src)
+
+    def ineffective_matte(image, chroma_key, warnings):
+        result = image.convert("RGBA")
+        result.putpixel((0, 0), (0, 0, 0, 0))
+        return result
+
+    monkeypatch.setattr(chroma_mod, "remove_chroma_background_ycbcr", ineffective_matte)
+
+    out = tmp_path / "out.png"
+    with pytest.raises(SystemExit, match=r"0\.0% transparent pixels"):
+        chroma_mod.key_transparent(src, out, key="magenta")
+    assert not out.exists()
 
 
 class _FakeProvider:
@@ -431,6 +494,41 @@ class _FakeProvider:
         self.calls += 1
         Image.new("RGBA", (8, 8), (255, 0, 255, 255)).save(request.raw)
         return gen_base.ProviderRun(provider=self.name, elapsed_seconds=1.23, model=request.model)
+
+
+def test_generate_image_zero_percent_alpha_fails_without_success_report(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fake = _FakeProvider()
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    monkeypatch.setattr(
+        chroma_mod,
+        "remove_chroma_background_ycbcr",
+        lambda image, chroma_key, warnings: image.convert("RGBA"),
+    )
+
+    out = tmp_path / "asset.png"
+    report = tmp_path / "report.json"
+    with pytest.raises(SystemExit, match=r"0\.0% transparent pixels"):
+        gen.run(
+            provider="fake",
+            prompt="a mushroom",
+            out=out,
+            ref=[],
+            model=None,
+            aspect_ratio=None,
+            transparent=True,
+            chroma_key="magenta",
+            white_check=None,
+            keep_session=False,
+            report=report,
+            prompt_file=None,
+            workdir=None,
+        )
+
+    assert not out.exists()
+    assert not report.exists()
 
 
 def test_generate_image_orchestrates_report_and_raw_keep(tmp_path: Path, monkeypatch) -> None:
@@ -461,6 +559,7 @@ def test_generate_image_orchestrates_report_and_raw_keep(tmp_path: Path, monkeyp
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["provider"] == "fake"
     assert payload["transparent"] is True
+    assert payload["chroma"]["method"] == "ycbcr"
     assert payload["chroma"]["stale_transparent_rgb_pixels"] == 0
     assert payload["elapsed_seconds"] == 1.23
 

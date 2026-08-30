@@ -231,7 +231,7 @@ From Codex skill installer workflows, install this repository as a root skill:
 
 ```bash
 python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo aldegad/sprite-gen --path .
+  --repo aldegad/sprite-gen --path . --name sprite-gen
 ```
 
 ### Image generation ownership
