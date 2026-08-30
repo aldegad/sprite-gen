@@ -15,7 +15,7 @@ This release incorporates accepted work from eight community pull requests. Than
 ## v1.58.0 - Compose canvas and domain package layout
 
 - Added the human-facing `sprite-gen compose` assembly canvas and handoff to the curation view.
-- Reorganized the Python package and tests into domain subpackages while preserving CLI and script entrypoints.
+- Reorganized the Python package and tests into domain subpackages. CLI and script entrypoints remain stable; Python imports intentionally use `sprite_gen.<domain>.<module>` paths derived from `sprite_gen._modules`.
 - Split request loading from schema migration so reads no longer mutate run state.
 
 ## v1.57.0 - First Pixel Breath
