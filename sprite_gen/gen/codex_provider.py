@@ -177,13 +177,19 @@ def _collect_inline_results(rollout: Path) -> list[str]:
             payload = record.get("payload", {}) or {}
             if payload.get("type") == "item_completed":
                 item = payload.get("item", {}) or {}
-                if (
-                    item.get("type") == "Extension"
-                    and item.get("kind") == _IMAGE_GEN_EXTENSION_KIND
-                    and item.get("status") == "completed"
-                    and item.get("result")
-                ):
-                    results.append(item["result"])
+                if item.get("type") != "Extension" or item.get("kind") != _IMAGE_GEN_EXTENSION_KIND:
+                    continue
+                status = item.get("status")
+                if status != "completed":
+                    raise SystemExit(
+                        f"codex-gen: image_gen call ended with status={status!r} in {rollout}"
+                    )
+                result = item.get("result")
+                if not result:
+                    raise SystemExit(
+                        f"codex-gen: completed image_gen call has no result in {rollout}"
+                    )
+                results.append(result)
                 continue
             if payload.get("type") not in _RESULT_TYPES or not payload.get("result"):
                 continue
