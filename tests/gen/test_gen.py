@@ -200,6 +200,76 @@ def test_codex_inline_extraction_reads_both_record_types(tmp_path: Path) -> None
     assert gen_base.verify_png(dest) > 0
 
 
+def test_codex_inline_extraction_reads_0149_imagegen_extension(tmp_path: Path) -> None:
+    b64 = base64.b64encode(_png_bytes()).decode()
+    rollout = tmp_path / "rollout-codex-0149.jsonl"
+    lines = [
+        {
+            "payload": {
+                "type": "item_completed",
+                "item": {
+                    "type": "Extension",
+                    "kind": "other.extension",
+                    "status": "completed",
+                    "result": b64,
+                },
+            }
+        },
+        {
+            "payload": {
+                "type": "item_completed",
+                "item": {
+                    "type": "Extension",
+                    "kind": "image_gen.generation",
+                    "status": "completed",
+                    "result": b64,
+                },
+            }
+        },
+    ]
+    rollout.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
+
+    results = codex_provider._collect_inline_results(rollout)
+
+    assert results == [b64]
+
+
+@pytest.mark.parametrize(
+    ("status", "result", "expected_message"),
+    [
+        ("failed", "failure details", "status='failed'"),
+        ("completed", None, "completed image_gen call has no result"),
+    ],
+)
+def test_codex_inline_extraction_rejects_failed_or_empty_0149_imagegen_extension(
+    tmp_path: Path,
+    status: str,
+    result: str | None,
+    expected_message: str,
+) -> None:
+    rollout = tmp_path / "rollout-codex-0149-invalid.jsonl"
+    rollout.write_text(
+        json.dumps(
+            {
+                "payload": {
+                    "type": "item_completed",
+                    "item": {
+                        "type": "Extension",
+                        "kind": "image_gen.generation",
+                        "status": status,
+                        "result": result,
+                    },
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit, match=expected_message):
+        codex_provider._collect_inline_results(rollout)
+
+
 def test_codex_inline_extraction_rejects_failed_status(tmp_path: Path) -> None:
     b64 = base64.b64encode(_png_bytes()).decode()
     rollout = tmp_path / "rollout-fail.jsonl"
