@@ -8,6 +8,14 @@
 
 </p>
 
+<p align="center">
+  <img src="docs/assets/gptaku-idle.gif" width="170" alt="gptaku octopus idle, breathing" />
+  <img src="docs/assets/gptaku-jump.gif" width="170" alt="gptaku octopus jump" />
+  <img src="docs/assets/gptaku-flail.gif" width="170" alt="gptaku octopus flail" />
+</p>
+
+<p align="center"><sub>gptaku, a 32×32 pixel-perfect octopus from <i>Cinderisle</i>. The idle on the left is <b>one still frame</b> - the breathing is baked by the engine.</sub></p>
+
 ---
 
 ## Breathe
