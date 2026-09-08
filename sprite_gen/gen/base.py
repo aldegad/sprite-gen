@@ -18,6 +18,17 @@ from typing import Any, Protocol
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
+# Transparency strategy — a capability each provider declares exactly once
+# (`Provider.transparency`). The orchestrator reads it; nothing else decides.
+#   native — the model returns a genuinely transparent PNG (alpha channel) when
+#            the prompt asks for a transparent background; the raw alpha is
+#            measured and published (codex `image_gen`, 2026-09-08 실측).
+#   chroma — the model cannot return alpha; generate on a chroma key and key it
+#            out deterministically downstream (grok Imagine: API/CLI 모두 JPEG).
+TRANSPARENCY_NATIVE = "native"
+TRANSPARENCY_CHROMA = "chroma"
+TRANSPARENCY_STRATEGIES = (TRANSPARENCY_NATIVE, TRANSPARENCY_CHROMA)
+
 # Child provider processes are independent execution contexts. They must not
 # inherit parent orchestration identity or lifecycle controls, while ordinary
 # variables such as PATH remain available. Suffix matching keeps the contract
@@ -89,6 +100,10 @@ class GenRequest:
     refs: list[Path] = field(default_factory=list)
     model: str | None = None
     aspect_ratio: str | None = None  # grok honours this; codex ignores it
+    # Ask the model for a genuinely transparent background (alpha channel). Only
+    # legal for a provider whose `transparency` is `native`; the orchestrator gates
+    # it and the provider carries the request into its transport prompt.
+    native_alpha: bool = False
 
 
 @dataclass
@@ -106,6 +121,7 @@ class Provider(Protocol):
     """A generation backend. `generate` must write a verified PNG to `request.raw`."""
 
     name: str
+    transparency: str  # one of TRANSPARENCY_STRATEGIES — declared once per provider
 
     def generate(self, request: GenRequest, workdir: Path) -> ProviderRun: ...
 
@@ -124,6 +140,11 @@ class GenResult:
     session_id: str | None = None
     refs: list[Path] = field(default_factory=list)
     transparent: bool = False
+    # Which transparency strategy produced `out` plus its measured stats
+    # ({"strategy": "native"|"chroma", ...stats}); None when not transparent.
+    alpha: dict[str, Any] | None = None
+    # Chroma-key stats — populated only when the strategy was `chroma` (kept as
+    # its own field so existing report readers keep working).
     chroma: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -140,6 +161,7 @@ class GenResult:
             "session_id": self.session_id,
             "refs": [str(ref) for ref in self.refs],
             "transparent": self.transparent,
+            "alpha": self.alpha,
             "chroma": self.chroma,
             **({"extra": self.extra} if self.extra else {}),
         }

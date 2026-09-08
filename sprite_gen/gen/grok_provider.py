@@ -19,7 +19,16 @@ import subprocess
 import time
 from pathlib import Path
 
-from .base import GEN_TIMEOUT_SECONDS, GenRequest, GenTimeoutError, ProviderRun, provider_binary, provider_subprocess_env, verify_png
+from .base import (
+    GEN_TIMEOUT_SECONDS,
+    TRANSPARENCY_CHROMA,
+    GenRequest,
+    GenTimeoutError,
+    ProviderRun,
+    provider_binary,
+    provider_subprocess_env,
+    verify_png,
+)
 
 
 def _build_prompt(request: GenRequest) -> str:
@@ -55,8 +64,17 @@ class GrokProvider:
     """Generate one image through grok Imagine `image_gen` / `image_edit`."""
 
     name = "grok"
+    # Grok Imagine Image 2.0 returns image/jpeg from both the API and the CLI
+    # tools (2026-09-08 실측, 4/4 drawn checkerboards) — no alpha path exists.
+    transparency = TRANSPARENCY_CHROMA
 
     def generate(self, request: GenRequest, workdir: Path) -> ProviderRun:
+        if request.native_alpha:
+            raise SystemExit(
+                "grok-gen: native alpha was requested but grok Imagine cannot return an "
+                f"alpha channel (transparency strategy is {self.transparency!r}); "
+                "generate on a chroma key instead"
+            )
         request.raw.parent.mkdir(parents=True, exist_ok=True)
         cmd = [
             provider_binary("grok"),
