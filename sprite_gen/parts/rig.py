@@ -178,6 +178,9 @@ def render_keys_js(keys: dict[str, Any], *, prefix: str = "rig") -> str:
         names = json.dumps(track["variants"])
         for k in track["keys"]:
             out.append(f"  show({json.dumps(track['part'])}, {json.dumps(k['variant'])}, {names}, {k['t']});")
+            if track.get("eye_part"):
+                visible = 0 if k["variant"] == "closed" else 1
+                out.append(f"  tl.set('#' + P + '-' + {json.dumps(track['eye_part'])}, {{ opacity: {visible} }}, start + {k['t']});")
     for track in keys["sway"]:
         for k in track["keys"]:
             out.append(f"  tl.set({json.dumps('#' + prefix + ' [data-rig-group=' + chr(34) + track['group'] + chr(34) + ']')}, {{ rotation: {k['rotation']} }}, start + {k['t']});")
@@ -202,7 +205,9 @@ def build_keys(rig: dict[str, Any], *, audio: Path | None, fps: int, duration: f
     seed = f"{audio.name if audio else ''}:{duration:.3f}"
     for eyelid in eyelid_parts:
         if eyelid in parts and {"open", "half", "closed"} <= set(parts[eyelid]["variants"]):
+            eye = eyelid.replace("eyelid_", "eye_", 1)
             keys["blink"].append({"part": eyelid, "variants": sorted(parts[eyelid]["variants"]),
+                                  "eye_part": eye if eye in parts else None,
                                   "keys": blink_keys(duration, start=start, seed=seed)})
     if head_group in rig["groups"]:
         keys["sway"].append({"group": head_group, "keys": sway_keys(duration, start=start)})

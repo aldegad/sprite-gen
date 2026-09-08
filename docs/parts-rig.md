@@ -128,7 +128,8 @@ Refuses a match report that is not `ok` or a missing placed layer. Writes:
   calls on a paused timeline: mouth variant per frame from the audio's RMS envelope
   (ffmpeg → 16 kHz mono → per-frame RMS using exact sample boundaries without cumulative rounding drift, normalized to the clip peak, thresholds
   0.12 / 0.38 / 0.70 → closed / half / open / o), fixed-cadence blinks (3.4 s + phase
-  seeded from the clip length), and a slow sine sway on the `head` group (±1.2°).
+  seeded from the clip length), closed blinks also hide the corresponding `eye_l` / `eye_r` default layer,
+  and a slow sine sway on the `head` group (±1.2°).
   Same inputs → byte-identical outputs (pinned by test).
 
 HyperFrames usage: paste `rig.html` inside a scene, load `rig-keys.js`, and call

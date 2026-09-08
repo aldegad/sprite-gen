@@ -241,3 +241,18 @@ def test_rig_refuses_deleted_placed_layer(workspace: Path) -> None:
     (workspace / "parts" / "placed" / "mouth__open.png").unlink()
     with pytest.raises(SystemExit, match="missing placed layer: mouth__open"):
         rig.build_rig(workspace / "catalog.json", workspace / "parts")
+
+
+def test_closed_blink_hides_the_underlying_eye() -> None:
+    model = {"groups": {}, "parts": [
+        {"id": "eye_l", "variants": {"default": "eye.png"}},
+        {"id": "eyelid_l", "variants": dict.fromkeys(["default", "open", "half", "closed"], "lid.png")},
+    ]}
+    keys = rig.build_keys(model, audio=None, fps=30, duration=5)
+    track = keys["blink"][0]
+    assert track["eye_part"] == "eye_l"
+    js = rig.render_keys_js(keys)
+    closed = next(k for k in track["keys"] if k["variant"] == "closed")
+    opened = next(k for k in track["keys"] if k["variant"] == "open")
+    assert f'"eye_l", {{ opacity: 0 }}, start + {closed["t"]}' in js
+    assert f'"eye_l", {{ opacity: 1 }}, start + {opened["t"]}' in js
