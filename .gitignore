@@ -16,3 +16,10 @@ uv.lock
 
 # transient validator reply scratch (never track)
 .validator-reply-*
+
+# 에이전트 작업 지침 — 로컬 전용 (운영 맥락이라 공개 레포에 두지 않는다)
+CLAUDE.md
+
+# local kuma tooling / wrangler cache (never track)
+.kuma/
+.wrangler/
