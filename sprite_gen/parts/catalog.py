@@ -23,6 +23,7 @@ VERSION = 1
 PART_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 DEFAULT_VARIANT = "default"
 DEFAULT_TOLERANCE = 0.06
+DEFAULT_AGREE_FLOOR = 0.85
 DEFAULT_GROUP = "none"
 
 # Known variant vocabularies are documentation, not a restriction: any id that
@@ -132,6 +133,9 @@ def validate_catalog(catalog: Any) -> list[str]:
         tolerance = part.get("tolerance", DEFAULT_TOLERANCE)
         if isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)) or not (0 < tolerance < 1):
             errors.append(f"{where}.tolerance: must be a number in (0, 1)")
+        floor = part.get("agree_floor", DEFAULT_AGREE_FLOOR)
+        if isinstance(floor, bool) or not isinstance(floor, (int, float)) or not (0 < floor <= 1):
+            errors.append(f"{where}.agree_floor: must be a number in (0, 1]")
     return errors
 
 

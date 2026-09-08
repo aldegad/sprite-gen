@@ -26,6 +26,8 @@ from typing import Any
 
 from PIL import Image
 
+from sprite_gen._deps import np
+
 from sprite_gen.gen import generate_image
 from sprite_gen.parts.catalog import job_name, jobs, load_catalog
 
@@ -59,6 +61,28 @@ def flatten_on_chroma(image: Image.Image, hex_color: str) -> Image.Image:
     return out.convert("RGB")
 
 
+def despill(path: Path, chroma: str) -> int:
+    """Remove the key hue that survives keying along antialiased edges: a pixel whose key
+    channel exceeds the other two is clamped to their max. Returns the pixel count touched.
+    Safe for these subjects because a green (or magenta) cast is never native art here."""
+    image = Image.open(path).convert("RGBA")
+    data = np.asarray(image, dtype=np.int16).copy()
+    r, g, b, a = data[..., 0], data[..., 1], data[..., 2], data[..., 3]
+    if chroma == "green":
+        limit = np.maximum(r, b)
+        mask = (a > 0) & (g > limit + 6)
+        data[..., 1] = np.where(mask, limit, g)
+    else:  # magenta: R and B high, G low
+        limit = g
+        mask = (a > 0) & (np.minimum(r, b) > limit + 6)
+        data[..., 0] = np.where(mask, np.minimum(r, limit + (r - limit) // 2), r)
+        data[..., 2] = np.where(mask, np.minimum(b, limit + (b - limit) // 2), b)
+    touched = int(mask.sum())
+    if touched:
+        Image.fromarray(data.astype("uint8"), "RGBA").save(path)
+    return touched
+
+
 def alpha_stats(path: Path) -> dict[str, float]:
     image = Image.open(path)
     if image.mode != "RGBA":
@@ -84,9 +108,10 @@ def _one(job: dict[str, Any], *, provider: str, base_path: Path, base: Image.Ima
         out = out_dir / f"{name}.png"
         result = generate_image(provider, prompt, out, refs=[base_ref, crop_path], transparent=True,
                                 chroma_key=chroma, workdir=ref_dir / "gen")
+        despilled = despill(out, chroma)
         stats = alpha_stats(out)
         record.update({"ok": True, "out": str(out), "raw": str(result.raw), "elapsed_seconds": result.elapsed_seconds,
-                       "provider": result.provider, "alpha": stats})
+                       "provider": result.provider, "alpha": stats, "despilled_pixels": despilled})
         if stats["mode"] != "RGBA" or stats["alpha_zero_pct"] <= 0.0:
             record.update({"ok": False, "error": "generated part has no transparent pixels after keying"})
     except SystemExit as exc:  # generate_image fails loud with SystemExit
