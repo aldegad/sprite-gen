@@ -109,15 +109,10 @@ are idempotent (an existing clip is reused unless `--force`); one failure stops 
 its item and is listed in `table.md` with its stage and error. Exit code is non-zero
 when any item failed.
 
-## Measured on 2026-09-08 (claudecy SD paladin, 15 loops)
+## What the rules were measured on
 
-| Direction | State | Period (frames) | Loop seam | Notes |
-|---|---|---|---|---|
-| side | walk | 28 | 0.81 | first pass picked 39 (1.4 cycles) |
-| side | run | 17 | 0.84 | first pass picked 25 (1.5 cycles) |
-| side | jump | 61 | 0.88 | tall canvas; square clip clipped the hair |
-| side | attack | 25 | 1.72 | return pose varies — the weakest state |
-| front | idle | 134 | 0.25 | long window |
-| back | jump | 43 | 0.67 | first tall clip jumped out of frame; "modest hop" prompt |
-
-All 15 passed the 2.0 seam gate; every GIF/WebP verified transparent with `loop=0`.
+Every threshold above (the 15 % period tolerance, the 2.0 seam gate, the 0.15
+periodicity floor, the state windows, the tall/wide canvas rooms, the 2 s stagger) was
+set on one hand-run set of 15 loops (3 directions × 5 states) on 2026-09-08 and every
+loop of that set passed the gates as written. The set itself is operator data and is
+not in this repository; the synthetic fixtures under `tests/video/` pin the same rules.

@@ -194,7 +194,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--base", action="append", default=[], help="direction=still.png (repeatable: side=..., front=..., back=...)")
     parser.add_argument("--states", default="idle,walk,run,jump,attack", help="comma list of motion states")
     parser.add_argument("--out-dir", required=True, type=Path, help="batch root; one folder per direction-state")
-    parser.add_argument("--character", help="short subject phrase used in the prompts (e.g. 'The chibi paladin girl')")
+    parser.add_argument("--character", help="short subject phrase used in the prompts (e.g. 'The armored knight')")
     parser.add_argument("--duration", type=int, default=6)
     parser.add_argument("--resolution", default="720p")
     parser.add_argument("--key", choices=("auto", "green", "magenta", "white"), default="auto")
