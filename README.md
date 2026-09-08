@@ -247,8 +247,10 @@ python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-githu
 Provider-backed generation is part of this engine (`sprite_gen.gen`), with
 `codex` and `grok` as the supported providers. The general `image-gen` skill is
 only a thin shuttle to the same command, so it does not need a second provider
-implementation. See [`docs/gen.md`](docs/gen.md) for the CLI and verification
-contract.
+implementation. Transparent stills follow a per-provider strategy: `codex` asks
+`image_gen` for a real alpha channel (native, first choice) and the measured alpha
+is published; `grok` is keyed out of a chroma background. See
+[`docs/gen.md`](docs/gen.md) for the CLI and verification contract.
 
 ## Attribution
 

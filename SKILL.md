@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.59.0
+version: 1.60.0
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Palette-swap bake (`sprite-gen recolor`) turns a base sheet + palette map into N colourway sheets; the curation view blink-compares and adopts a pick into curation.json.recolor.picked. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick. Recolor triggers (KR/EN): 팔레트 스왑, 팔레트 베이크, 리컬러, 색깔 바꾸기, 컬러웨이, 색 변형, 팔레트 맵, 색갈이, palette swap, recolor, colourway, colorway, bake variants, palette map."
 license: Apache-2.0
 depends_on:
@@ -245,7 +245,7 @@ $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/generate_sprite_image
   --ref <run>/base-source.<ext> --ref <run>/references/layout-guides/<state>.png
 ```
 
-Use `prompts/<state>.txt` as the prompt; save the selected image as `raw/<state>.png`. `--provider` is optional — the default is **codex** (`SPRITE_GEN_DEFAULT_PROVIDER` env overrides it; an observable grok fallback kicks in only if codex is unavailable). Pass `--provider grok` explicitly for the faster backend; codex adheres tighter to negative constraints. Default policy: [`docs/gen.md`](docs/gen.md#default-provider-selection). Keep the request chroma key on the background (extraction removes it). Reference attachment rules:
+Use `prompts/<state>.txt` as the prompt; save the selected image as `raw/<state>.png`. `--provider` is optional — the default is **codex** (`SPRITE_GEN_DEFAULT_PROVIDER` env overrides it; an observable grok fallback kicks in only if codex is unavailable). Pass `--provider grok` explicitly for the faster backend; codex adheres tighter to negative constraints. Default policy: [`docs/gen.md`](docs/gen.md#default-provider-selection). Keep the request chroma key on the background (extraction removes it) — rows are generated without `--transparent`. For **standalone stills** (`--transparent`), transparency is a per-provider strategy: **codex asks image_gen for real alpha (native, first choice)** and the measured alpha is published; grok is keyed out of a chroma background; `--alpha-mode chroma` forces keying on codex for prompts that already carry a key. Contract: [`docs/gen.md`](docs/gen.md#transparent-output--strategy-per-provider). Reference attachment rules:
 
 **생성 동시성 (maintainer 확정 2026-07-19)**: 여러 행을 뽑는 배치는 **4동시**로 돌린다 —
 `sprite-gen gen` 호출을 최대 4개 병렬 (codex 실측 4병렬까지 스로틀 없음; grok 도 4,
