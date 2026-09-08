@@ -67,6 +67,14 @@ def validate_catalog(catalog: Any) -> list[str]:
     chroma = catalog.get("chroma_key")
     if chroma is not None and not (isinstance(chroma, str) and chroma in ("green", "magenta")):
         errors.append("chroma_key must be 'green' or 'magenta' when declared")
+    composite = catalog.get("composite", {})
+    if not isinstance(composite, dict):
+        errors.append("composite must be an object {tolerance, coverage}")
+    else:
+        for key, lo, hi in (("tolerance", 0.0, 1.0), ("coverage", 0.0, 1.0)):
+            value = composite.get(key)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not (lo < value <= hi)):
+                errors.append(f"composite.{key}: must be a number in ({lo}, {hi}]")
     groups = catalog.get("groups", {})
     if not isinstance(groups, dict):
         errors.append("groups must be an object")

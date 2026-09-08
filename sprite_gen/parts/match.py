@@ -33,10 +33,9 @@ from PIL import Image
 from sprite_gen._deps import np
 from sprite_gen.parts.catalog import DEFAULT_AGREE_FLOOR, DEFAULT_VARIANT, job_name, jobs, load_catalog, parts_by_z
 
-SCALE_STEPS = (0.6, 0.7, 0.8, 0.88, 0.94, 1.0, 1.06)
 COMPOSITE_TOLERANCE = 0.05
+COMPOSITE_COVERAGE = 0.97
 DEFAULT_OFFSET_REACH = 0.08  # fraction of the bbox size searched around the catalog placement
-COARSE_STEP = 4
 
 
 def trim_to_alpha(image: Image.Image) -> tuple[Image.Image, tuple[int, int, int, int]]:
@@ -123,95 +122,73 @@ def score_placement(layer: np.ndarray, base: np.ndarray, free: np.ndarray, area:
     return float(objective), colour, float(agreeing / weight)
 
 
-def _offsets(reach: int, step: int) -> list[int]:
-    """Symmetric coarse grid that always contains 0 (the catalog placement itself)."""
-    return sorted({0, *range(step, reach + 1, step), *range(-step, -reach - 1, -step), reach, -reach})
-
-
-def _pyramid_factor(bbox: list[int], target: int = 96) -> int:
-    """Downscale factor for the coarse pass so the part is at most ~target px on its long side."""
-    return max(1, int(math.ceil(max(bbox[2], bbox[3]) / target)))
-
-
-def _downscale(arr: np.ndarray, factor: int) -> np.ndarray:
-    if factor == 1:
-        return arr
-    h, w = arr.shape[:2]
-    h2, w2 = h // factor, w // factor
-    trimmed = arr[:h2 * factor, :w2 * factor]
-    if arr.ndim == 3:
-        return trimmed.reshape(h2, factor, w2, factor, arr.shape[2]).mean(axis=(1, 3))
-    return trimmed.reshape(h2, factor, w2, factor).mean(axis=(1, 3))
+DENSE_SCALES = tuple(round(0.5 + 0.02 * i, 2) for i in range(31))  # 0.50 … 1.10
 
 
 def register(part: Image.Image, base: np.ndarray, free: np.ndarray, bbox: list[int],
-             *, reach: float = DEFAULT_OFFSET_REACH) -> dict[str, Any]:
-    """Coarse-to-fine search of scale × integer offset around the catalog bbox. Deterministic.
+             *, reach: float = DEFAULT_OFFSET_REACH, scales: tuple[float, ...] = DENSE_SCALES) -> dict[str, Any]:
+    """FFT template registration: every offset of every scale, deterministic argmin.
 
-    Coarse pass on a downscaled pyramid level (part and base window both reduced by the
-    same integer factor, so a 900 px hair mass is searched at ~96 px), then a fine pass at
-    full resolution around the coarse winner. Each candidate size is resampled once.
+    The candidate is trimmed to its alpha box and contain-fitted into bbox x scale (never
+    stretched); for each scale one masked-SSD cost map over the search window (bbox grown
+    by `reach` and by the largest scale) is computed with FFT correlations
+    (`register_fft.cost_map`), so cost is a few FFTs per scale regardless of how many offsets
+    exist. The winner is re-scored at full precision for the gate (colour, agree).
     """
+    from sprite_gen.parts.register_fft import best_offset, cost_map
+
     trimmed, _ = trim_to_alpha(part)
     bx, by, bw, bh = bbox
     H, W = base.shape[:2]
     rx, ry = max(2, int(round(bw * reach))), max(2, int(round(bh * reach)))
-    grow = int(math.ceil(max(bw, bh) * (max(SCALE_STEPS) - 1.0))) + COARSE_STEP
+    grow = int(math.ceil(max(bw, bh) * (max(scales) - 1.0))) + 2
     wx0, wy0 = max(0, bx - rx - grow), max(0, by - ry - grow)
     wx1, wy1 = min(W, bx + bw + rx + grow), min(H, by + bh + ry + grow)
     base_w, free_w = base[wy0:wy1, wx0:wx1], free[wy0:wy1, wx0:wx1]
     window = (wx1 - wx0, wy1 - wy0)
     area = float(bw * bh)
     region_w = owned_region(base, free, bbox, palette_mask(trimmed))[wy0:wy1, wx0:wx1]
-    f = _pyramid_factor(bbox)
-    base_c, free_c, region_c = _downscale(base_w, f), _downscale(free_w, f), _downscale(region_w, f)
-    window_c = (base_c.shape[1], base_c.shape[0])
-
-    def place_full(x: int, y: int, resampled: Image.Image) -> np.ndarray:
+    base_rgb, base_alpha = base_w[..., :3], base_w[..., 3]
+    # Stage 1 (FFT): per scale, shortlist the offsets that minimise the masked-SSD cost and the
+    # pure colour error. Stage 2 (exact): re-score every shortlisted placement with the agreement
+    # objective (agree - 2 x disagree - miss), which is robust to textured parts where a squared
+    # error alone still rewards shrinking.
+    candidates: list[tuple[float, float, int, int, int, int, Image.Image]] = []
+    for scale in scales:
+        w, h = contain(trimmed.size, (max(1, int(round(bw * scale))), max(1, int(round(bh * scale)))))
+        if w > window[0] or h > window[1]:
+            continue
+        resampled = trimmed.resize((w, h), Image.Resampling.LANCZOS)
+        arr = np.asarray(resampled, dtype=np.float32)
+        cost, ssd, Wm = cost_map(arr[..., :3], arr[..., 3], base_rgb, base_alpha, free_w, region_w, area)
+        picks = {best_offset(cost)[:2]}
+        colour_only = np.where(Wm > 0.25 * float(Wm.max() or 1.0), ssd / np.maximum(Wm, 1e-6), np.inf)
+        picks.add(best_offset(colour_only)[:2])
+        for u, v in picks:
+            candidates.append((scale, 0.0, wx0 + v, wy0 + u, w, h, resampled))
+    if not candidates:
+        raise ValueError("part does not fit inside its search window at any scale")
+    winner: dict[str, Any] | None = None
+    for scale, _c, x, y, w, h, resampled in candidates:
         layer = Image.new("RGBA", window, (0, 0, 0, 0))
         layer.paste(resampled, (x - wx0, y - wy0), resampled)
-        return np.asarray(layer, dtype=np.float32)
-
-    def place_coarse(x: int, y: int, resampled_c: Image.Image) -> np.ndarray:
-        layer = Image.new("RGBA", window_c, (0, 0, 0, 0))
-        layer.paste(resampled_c, ((x - wx0) // f, (y - wy0) // f), resampled_c)
-        return np.asarray(layer, dtype=np.float32)
-
-    per_scale: list[dict[str, Any]] = []
-    for scale in SCALE_STEPS:
-        w, h = contain(trimmed.size, (max(1, int(round(bw * scale))), max(1, int(round(bh * scale)))))
-        cx, cy = bx + (bw - w) // 2, by + (bh - h) // 2
-        resampled = trimmed.resize((w, h), Image.Resampling.LANCZOS)
-        resampled_c = resampled.resize((max(1, w // f), max(1, h // f)), Image.Resampling.BOX) if f > 1 else resampled
-        step = max(COARSE_STEP, f)
-        best: dict[str, Any] | None = None
-        for dy in _offsets(ry, step):
-            for dx in _offsets(rx, step):
-                obj, colour, agree = score_placement(place_coarse(cx + dx, cy + dy, resampled_c), base_c, free_c, area / (f * f), region_c)
-                if best is None or obj < best["objective"]:
-                    best = {"objective": obj, "score": colour, "agree": agree, "scale": scale,
-                            "x": cx + dx, "y": cy + dy, "w": w, "h": h}
-        assert best is not None
-        # fine pass at full resolution around the coarse winner
-        fine = max(step, 2)
-        fx, fy = best["x"], best["y"]
-        best["objective"] = None  # re-scored at full resolution below
-        for dy in range(-fine, fine + 1):
-            for dx in range(-fine, fine + 1):
-                obj, colour, agree = score_placement(place_full(fx + dx, fy + dy, resampled), base_w, free_w, area, region_w)
-                if best["objective"] is None or obj < best["objective"]:
-                    best = {**best, "objective": obj, "score": colour, "agree": agree, "x": fx + dx, "y": fy + dy}
-        per_scale.append(best)
-    winner = min(per_scale, key=lambda b: (b["objective"], abs(b["scale"] - 1.0)))
-    winner["score"] = round(winner["score"], 4)
-    winner["agree"] = round(winner["agree"], 4)
-    winner["objective"] = round(winner["objective"], 4)
+        obj, colour, agree = score_placement(np.asarray(layer, dtype=np.float32), base_w, free_w, area, region_w)
+        if winner is None or obj < winner["objective"] or (obj == winner["objective"] and abs(scale - 1.0) < abs(winner["scale"] - 1.0)):
+            winner = {"objective": obj, "scale": scale, "x": x, "y": y, "w": w, "h": h, "_img": resampled,
+                      "score": colour, "agree": agree}
+    winner.pop("_img")
+    winner.update({"score": round(winner["score"], 4), "agree": round(winner["agree"], 4),
+                   "objective": round(float(winner["objective"]), 4)})
     return winner
 
 
 def match_parts(catalog_path: Path, parts_dir: Path, out_dir: Path | None = None,
-                *, composite_tolerance: float = COMPOSITE_TOLERANCE) -> dict[str, Any]:
+                *, composite_tolerance: float | None = None) -> dict[str, Any]:
     catalog = load_catalog(catalog_path)
+    declared = catalog.get("composite", {})
+    if composite_tolerance is None:
+        composite_tolerance = float(declared.get("tolerance", COMPOSITE_TOLERANCE))
+    composite_coverage = float(declared.get("coverage", COMPOSITE_COVERAGE))
     base_img = Image.open((catalog_path.parent / catalog["base"]).resolve()).convert("RGBA")
     base = np.asarray(base_img, dtype=np.float32)
     canvas = (base_img.width, base_img.height)
@@ -280,11 +257,11 @@ def match_parts(catalog_path: Path, parts_dir: Path, out_dir: Path | None = None
     composite_score = round(float((diff * cover).sum() / max(cover.sum(), 1.0)), 4)
     base_alpha = base[..., 3] / 255.0
     coverage = round(float((np.minimum(comp[..., 3] / 255.0, base_alpha)).sum() / max(base_alpha.sum(), 1.0)), 4)
-    composite_ok = bool(composite_score <= composite_tolerance and coverage >= 0.97)
+    composite_ok = bool(composite_score <= composite_tolerance and coverage >= composite_coverage)
     report = {"kind": "sprite-gen-parts-match-report", "version": 1, "catalog": str(catalog_path.resolve()),
               "parts_dir": str(parts_dir.resolve()), "parts": records,
               "composite": {"score": composite_score, "coverage": coverage, "tolerance": composite_tolerance,
-                            "ok": composite_ok, "path": str(out_dir / "composite.png")},
+                            "coverage_floor": composite_coverage, "ok": composite_ok, "path": str(out_dir / "composite.png")},
               "ok": composite_ok and all(r["ok"] for r in records),
               "failed": [r["job"] for r in records if not r["ok"]] + ([] if composite_ok else ["composite"])}
     (out_dir / "parts-match.report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -295,11 +272,11 @@ def add_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--catalog", required=True, type=Path)
     p.add_argument("--parts-dir", required=True, type=Path, help="output dir of `parts gen`")
     p.add_argument("--out-dir", type=Path, default=None, help="default: --parts-dir")
-    p.add_argument("--composite-tolerance", type=float, default=COMPOSITE_TOLERANCE)
+    p.add_argument("--composite-tolerance", type=float, default=None, help="override the catalog's composite.tolerance")
 
 
 def run(*, catalog: Path, parts_dir: Path, out_dir: Path | None = None,
-        composite_tolerance: float = COMPOSITE_TOLERANCE) -> int:
+        composite_tolerance: float | None = None) -> int:
     report = match_parts(Path(catalog), Path(parts_dir), Path(out_dir) if out_dir else None,
                          composite_tolerance=composite_tolerance)
     print(json.dumps({"ok": report["ok"], "failed": report["failed"], "composite": report["composite"]}, ensure_ascii=False))
