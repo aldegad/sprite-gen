@@ -66,12 +66,47 @@ def _place(part: Image.Image, canvas: tuple[int, int], x: int, y: int, w: int, h
 AGREE_DIFF = 0.12      # per-pixel mean RGB distance (0..1) under which a pixel "agrees" with the base
 
 
-def score_placement(layer: np.ndarray, base: np.ndarray, free: np.ndarray, area: float) -> tuple[float, float, float]:
+MISS_WEIGHT = 1.5
+PALETTE_BITS = 5
+PALETTE_MIN_MASS = 0.002
+
+
+def palette_mask(part: Image.Image) -> np.ndarray:
+    """Boolean lookup over quantized RGB (PALETTE_BITS per channel): which colours the part contains
+    with at least PALETTE_MIN_MASS of its opaque pixels. Used to decide whether an uncovered base
+    pixel "belongs" to this part (a hair part owes red pixels, a shirt part does not)."""
+    data = np.asarray(part.convert("RGBA"), dtype=np.uint8)
+    opaque = data[..., 3] > 127
+    if not opaque.any():
+        return np.zeros((1 << PALETTE_BITS,) * 3, dtype=bool)
+    q = data[..., :3][opaque] >> (8 - PALETTE_BITS)
+    idx = (q[:, 0].astype(np.int64) << (2 * PALETTE_BITS)) | (q[:, 1].astype(np.int64) << PALETTE_BITS) | q[:, 2]
+    counts = np.bincount(idx, minlength=1 << (3 * PALETTE_BITS))
+    mask = counts >= max(1, int(PALETTE_MIN_MASS * opaque.sum()))
+    return mask.reshape((1 << PALETTE_BITS,) * 3)
+
+
+def owned_region(base: np.ndarray, free: np.ndarray, bbox: list[int], palette: np.ndarray) -> np.ndarray:
+    """Base pixels inside the bbox, unclaimed, whose colour is in the part's palette: what the part
+    is expected to cover. Leaving them uncovered is the "miss" cost that stops a part shrinking."""
+    x, y, w, h = bbox
+    region = np.zeros(base.shape[:2], dtype=np.float32)
+    sub = base[y:y + h, x:x + w]
+    q = (sub[..., :3].astype(np.int64) >> (8 - PALETTE_BITS))
+    inpal = palette[q[..., 0], q[..., 1], q[..., 2]]
+    region[y:y + h, x:x + w] = (sub[..., 3] / 255.0) * free[y:y + h, x:x + w] * inpal
+    return region
+
+
+def score_placement(layer: np.ndarray, base: np.ndarray, free: np.ndarray, area: float,
+                    region: np.ndarray | None = None) -> tuple[float, float, float]:
     """(objective, colour, agree) for one placement.
 
-    objective (minimize) = -(agreeing pixels - 2 x disagreeing pixels) / bbox area — a shrunken
-    part covers fewer agreeing pixels and an oversized one pays for every pixel it spills onto
-    something else, so the optimum is the placement that reproduces the most base pixels.
+    objective (minimize) = -(agreeing - 2 x disagreeing - MISS_WEIGHT x missed) / bbox area, where
+    a visible part pixel *agrees* when its mean RGB distance to the base is <= AGREE_DIFF, and
+    *missed* counts owned-region pixels (base pixels of the part's own colours inside its box) the
+    placement leaves uncovered. Shrinking loses agreeing pixels and gains misses; oversizing pays
+    for every pixel spilled onto something else — the optimum reproduces the most base pixels.
     colour = alpha-weighted mean RGB distance over the part's visible, unclaimed pixels (the gate).
     agree = fraction of those pixels within AGREE_DIFF of the base.
     """
@@ -83,16 +118,9 @@ def score_placement(layer: np.ndarray, base: np.ndarray, free: np.ndarray, area:
     colour = float((diff * alpha).sum() / weight)
     agreeing = float((alpha * (diff <= AGREE_DIFF)).sum())
     disagreeing = float(weight - agreeing)
-    objective = -(agreeing - 2.0 * disagreeing) / max(area, 1.0)
+    missed = float((region * (1.0 - layer[..., 3] / 255.0)).sum()) if region is not None else 0.0
+    objective = -(agreeing - 2.0 * disagreeing - MISS_WEIGHT * missed) / max(area, 1.0)
     return float(objective), colour, float(agreeing / weight)
-
-
-def expected_region(base: np.ndarray, free: np.ndarray, bbox: list[int]) -> np.ndarray:
-    """Base pixels the part is expected to own: visible base alpha inside its bbox, not yet claimed."""
-    region = np.zeros(base.shape[:2], dtype=np.float32)
-    x, y, w, h = bbox
-    region[y:y + h, x:x + w] = (base[y:y + h, x:x + w, 3] / 255.0) * free[y:y + h, x:x + w]
-    return region
 
 
 def _offsets(reach: int, step: int) -> list[int]:
@@ -134,8 +162,9 @@ def register(part: Image.Image, base: np.ndarray, free: np.ndarray, bbox: list[i
     base_w, free_w = base[wy0:wy1, wx0:wx1], free[wy0:wy1, wx0:wx1]
     window = (wx1 - wx0, wy1 - wy0)
     area = float(bw * bh)
+    region_w = owned_region(base, free, bbox, palette_mask(trimmed))[wy0:wy1, wx0:wx1]
     f = _pyramid_factor(bbox)
-    base_c, free_c = _downscale(base_w, f), _downscale(free_w, f)
+    base_c, free_c, region_c = _downscale(base_w, f), _downscale(free_w, f), _downscale(region_w, f)
     window_c = (base_c.shape[1], base_c.shape[0])
 
     def place_full(x: int, y: int, resampled: Image.Image) -> np.ndarray:
@@ -158,7 +187,7 @@ def register(part: Image.Image, base: np.ndarray, free: np.ndarray, bbox: list[i
         best: dict[str, Any] | None = None
         for dy in _offsets(ry, step):
             for dx in _offsets(rx, step):
-                obj, colour, agree = score_placement(place_coarse(cx + dx, cy + dy, resampled_c), base_c, free_c, area / (f * f))
+                obj, colour, agree = score_placement(place_coarse(cx + dx, cy + dy, resampled_c), base_c, free_c, area / (f * f), region_c)
                 if best is None or obj < best["objective"]:
                     best = {"objective": obj, "score": colour, "agree": agree, "scale": scale,
                             "x": cx + dx, "y": cy + dy, "w": w, "h": h}
@@ -169,7 +198,7 @@ def register(part: Image.Image, base: np.ndarray, free: np.ndarray, bbox: list[i
         best["objective"] = None  # re-scored at full resolution below
         for dy in range(-fine, fine + 1):
             for dx in range(-fine, fine + 1):
-                obj, colour, agree = score_placement(place_full(fx + dx, fy + dy, resampled), base_w, free_w, area)
+                obj, colour, agree = score_placement(place_full(fx + dx, fy + dy, resampled), base_w, free_w, area, region_w)
                 if best["objective"] is None or obj < best["objective"]:
                     best = {**best, "objective": obj, "score": colour, "agree": agree, "x": fx + dx, "y": fy + dy}
         per_scale.append(best)

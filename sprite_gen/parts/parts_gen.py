@@ -144,10 +144,24 @@ def generate_parts(catalog_path: Path, out_dir: Path, *, provider: str = "codex"
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         records = list(pool.map(lambda job: _one(job, provider=provider, base_path=base_path, base=base, chroma=chroma,
                                                  out_dir=out_dir, workdir=workdir), todo))
+    # A partial (`--only`) run merges into the previous report so the file always
+    # describes every job that exists on disk, never just the last invocation.
+    report_path = out_dir / "parts-gen.report.json"
+    merged: dict[str, dict[str, Any]] = {}
+    if only and report_path.is_file():
+        try:
+            for old in json.loads(report_path.read_text(encoding="utf-8")).get("jobs", []):
+                merged[old["job"]] = old
+        except (OSError, ValueError):
+            merged = {}
+    for record in records:
+        merged[record["job"]] = record
+    ordered = [merged[job_name(j["part"], j["variant"])] for j in jobs(catalog) if job_name(j["part"], j["variant"]) in merged]
     report = {"kind": "sprite-gen-parts-gen-report", "version": 1, "catalog": str(catalog_path.resolve()),
-              "base": str(base_path), "provider": provider, "chroma_key": chroma, "jobs": records,
+              "base": str(base_path), "provider": provider, "chroma_key": chroma, "jobs": ordered,
+              "ran": [r["job"] for r in records],
               "ok": all(r["ok"] for r in records), "failed": [r["job"] for r in records if not r["ok"]]}
-    (out_dir / "parts-gen.report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return report
 
 
