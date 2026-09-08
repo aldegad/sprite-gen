@@ -54,7 +54,8 @@ Rules (validated by `catalog.validate_catalog`, every violation listed, in order
 - `group` names a declared group or is omitted (`none`). Groups carry a `pivot`.
 - `variants` is an object `variant -> prompt suffix` and must contain `default` (its suffix may be empty).
   The runtime recognises `mouth` variants `closed | half | open | o` and eyelid variants `open | half | closed` by name; anything else is a plain swap.
-- `tolerance` (0..1, default 0.06) is the part's colour gate in `match`.
+- `tolerance` (0..1, default 0.06) is the part's colour gate in `match`; `agree_floor` (0..1], default 0.85) its agreement gate.
+- Top-level `composite: {tolerance, coverage}` declares the whole-composite gate (defaults 0.05 / 0.97).
 - Coordinates are integers, never floats or booleans. Nothing is inferred from pixels.
 
 Adding a part or a variant is one catalog entry; `gen`, `match` and `rig` enumerate it.
@@ -72,26 +73,40 @@ is recorded as a failure. Writes `<job>.png` (+ `.raw.png`) and `parts-gen.repor
 
 ## 4. `sprite-gen parts-match` — the gate
 
-`--catalog <json> --parts-dir <gen out> [--out-dir] [--composite-tolerance 0.05]`
+`--catalog <json> --parts-dir <gen out> [--out-dir] [--composite-tolerance <override>]`
 
-Top-most part first: the candidate is trimmed to its alpha box and searched over
-scales `0.94…1.06` × integer offsets (±8% of the bbox, coarse 4px then fine 1px)
-inside a window around the bbox. Pixels already claimed by a higher part are excluded
-(`free` mask), so a face is compared only where the bangs do not cover it.
+Top-most part first: the candidate is trimmed to its alpha box and **contain-fitted**
+(its own aspect ratio, never stretched) into `bbox × scale` for scales `0.50 … 1.10`
+in steps of 0.02, inside a window around the bbox (grown by ±8% and by the largest
+scale). Pixels already claimed by a higher part are excluded (`free` mask), so a face
+is compared only where the bangs do not cover it.
 
-Placement objective (minimized): `-(agreeing − 2·disagreeing) / bbox area`, where a
-visible part pixel *agrees* when its mean RGB distance to the base is ≤ 0.12. A
-shrunken part covers fewer agreeing pixels; an oversized one pays for every pixel it
-spills onto something else. Reported per part: `score` (alpha-weighted mean RGB
-distance, the tolerance gate), `agree` (fraction agreeing, floor 0.85), `scale`, `x`,
-`y`, `w`, `h`.
+Two stages per part:
 
-Variants inherit their default's placement. The defaults are then stacked bottom-first
-into `composite.png`; `composite.score` (mean RGB distance where both are opaque) must
-be ≤ the composite tolerance and `coverage` (base alpha reproduced) ≥ 0.97. Any part
-below its gate, any missing candidate, or a failing composite makes `ok: false` and is
-named in `failed[]` — the fix is to regenerate that part, never to relax the gate
-silently. Outputs `placed/<job>.png` (canvas-sized layers) and `parts-match.report.json`.
+1. **FFT shortlist** (`register_fft.cost_map`) — for every scale, one masked-SSD cost map
+   over every offset via FFT correlations (`SSD/(3·255²) − reward·W + miss`), plus the
+   pure colour-error argmin. A few FFTs per scale regardless of offset count.
+2. **Exact rescoring** — each shortlisted placement is scored with the agreement objective
+   `−(agreeing − 2·disagreeing − 1.5·missed) / bbox area`, where a visible part pixel
+   *agrees* when its mean RGB distance to the base is ≤ 0.12 and *missed* counts owned
+   pixels left uncovered. An **owned** pixel is a base pixel inside the bbox, unclaimed,
+   whose quantized colour (5 bits/channel) the part itself contains — a hair part owes
+   red pixels, a shirt part does not. Shrinking loses agreement and gains misses;
+   oversizing pays for every pixel spilled onto something else.
+
+Reported per part: `score` (alpha-weighted mean RGB distance, gated by the part's
+`tolerance`), `agree` (fraction agreeing, gated by the part's `agree_floor`, default
+0.85), `scale`, `x`, `y`, `w`, `h`. Variants inherit their default's placement.
+
+The defaults are stacked bottom-first into `composite.png`; `composite.score` (mean RGB
+distance where both are opaque) must be ≤ `catalog.composite.tolerance` (default 0.05)
+and `coverage` (base alpha reproduced) ≥ `catalog.composite.coverage` (default 0.97).
+Real characters declare looser values than synthetic shapes (a generated hair mass
+never reproduces strands pixel-for-pixel); the declaration is the gate, and loosening
+it is a visible catalog edit, never a runtime fallback. Any part below its gate, any
+missing candidate, or a failing composite makes `ok: false` and is named in `failed[]`.
+Outputs `placed/<job>.png` (canvas-sized layers) and `parts-match.report.json`.
+Measured 2026-09-08: a 14-part 1024×1536 character registers in ~25 s.
 
 ## 5. `sprite-gen parts-rig`
 
