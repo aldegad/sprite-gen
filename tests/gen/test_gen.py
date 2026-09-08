@@ -581,6 +581,7 @@ def test_native_strategy_publishes_measured_alpha_and_asks_provider_for_it(
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["transparent"] is True
     assert payload["alpha"]["strategy"] == "native"
+    assert payload["alpha"]["strategy_source"] == "provider-default"
     assert payload["alpha"]["method"] == "native"
     assert payload["alpha"]["alpha_zero_pct"] == 75.0
     assert payload["alpha"]["partial_alpha_pct"] == 25.0
@@ -651,6 +652,42 @@ def test_alpha_mode_chroma_forces_keying_on_a_native_provider(tmp_path: Path, mo
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["alpha"]["strategy"] == "chroma"
     assert payload["chroma"]["key"] == "magenta"
+
+
+def test_auto_steps_down_to_chroma_when_refs_are_attached(tmp_path: Path, monkeypatch, capsys) -> None:
+    # 2026-09-08 실측: codex native alpha with --ref drew checkerboards 5/6, chroma 6/6.
+    # `auto` therefore keys a ref run instead of gambling on native — decided before
+    # the model call, printed, and recorded in the report.
+    fake = _FakeNativeProvider(Image.new("RGBA", (8, 8), (255, 0, 255, 255)))
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(_png_bytes())
+    out = tmp_path / "asset.png"
+    report = tmp_path / "report.json"
+
+    assert gen.run(**_gen_kwargs(out, report, ref=[ref])) == 0
+
+    assert fake.requests[0].native_alpha is False
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["alpha"]["strategy"] == "chroma"
+    assert payload["alpha"]["strategy_source"] == "refs-attached"
+    assert "reference image(s) attached" in capsys.readouterr().err
+
+
+def test_explicit_native_still_runs_with_refs(tmp_path: Path, monkeypatch) -> None:
+    fake = _FakeNativeProvider()
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(_png_bytes())
+    out = tmp_path / "asset.png"
+    report = tmp_path / "report.json"
+
+    assert gen.run(**_gen_kwargs(out, report, ref=[ref], alpha_mode="native")) == 0
+
+    assert fake.requests[0].native_alpha is True
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["alpha"]["strategy"] == "native"
+    assert payload["alpha"]["strategy_source"] == "explicit"
 
 
 def test_provider_without_a_declared_strategy_fails_loud(tmp_path: Path, monkeypatch) -> None:

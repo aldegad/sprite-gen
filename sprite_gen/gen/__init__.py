@@ -74,12 +74,26 @@ def _make_provider(name: str, *, keep_session: bool):
     raise SystemExit(f"gen: unknown provider {name!r}; expected one of {', '.join(PROVIDERS)}")
 
 
-def resolve_transparency_strategy(backend, alpha_mode: str) -> str:
+# Why `auto` steps down to chroma when reference images are attached (2026-09-08
+# 실측, plan sprite-gen/parts-rig): codex image_gen with `--ref` returned real
+# alpha in 1/6 runs and drew a checkerboard (RGB) in 5/6, while the same prompts
+# on a #00FF00 key + chroma keying succeeded 6/6. The edit path is not a reliable
+# alpha source, so `auto` does not gamble on it — the decision is made before the
+# model runs, printed, and recorded in the report (`alpha.strategy_source`).
+# An explicit `--alpha-mode native` still forces it (and fails loud on RGB).
+STRATEGY_SOURCE_PROVIDER = "provider-default"
+STRATEGY_SOURCE_REFS = "refs-attached"
+STRATEGY_SOURCE_EXPLICIT = "explicit"
+
+
+def resolve_transparency_strategy(backend, alpha_mode: str, *, refs: list[Path] | None = None) -> tuple[str, str]:
     """Decide which transparency strategy this generation runs.
 
-    The provider's declared `transparency` is the only source of what it can do;
-    `alpha_mode` may pick `chroma` on a native provider (the prompt already carries
-    a key background) but can never pick `native` on a chroma-only provider.
+    Returns (strategy, source). The provider's declared `transparency` is the
+    only source of what it can do; `alpha_mode` may pick `chroma` on a native
+    provider (the prompt already carries a key background) but can never pick
+    `native` on a chroma-only provider. `auto` on a native provider steps down to
+    `chroma` when reference images are attached (see STRATEGY_SOURCE_REFS).
     """
     if alpha_mode not in ALPHA_MODES:
         raise SystemExit(f"gen: unknown --alpha-mode {alpha_mode!r}; expected one of {', '.join(ALPHA_MODES)}")
@@ -90,13 +104,15 @@ def resolve_transparency_strategy(backend, alpha_mode: str) -> str:
             f"strategy (got {declared!r}); expected one of {', '.join(TRANSPARENCY_STRATEGIES)}"
         )
     if alpha_mode == ALPHA_MODE_AUTO:
-        return declared
+        if declared == TRANSPARENCY_NATIVE and refs:
+            return TRANSPARENCY_CHROMA, STRATEGY_SOURCE_REFS
+        return declared, STRATEGY_SOURCE_PROVIDER
     if alpha_mode == TRANSPARENCY_NATIVE and declared != TRANSPARENCY_NATIVE:
         raise SystemExit(
             f"gen: --alpha-mode native is not a capability of provider {backend.name!r} "
             f"(its transparency strategy is {declared!r}); use --alpha-mode chroma or another provider"
         )
-    return alpha_mode
+    return alpha_mode, STRATEGY_SOURCE_EXPLICIT
 
 
 def _codex_available() -> tuple[bool, str]:
@@ -188,7 +204,17 @@ def generate_image(
     backend = _make_provider(provider, keep_session=keep_session)
     # Decided before the model runs: the strategy shapes the transport prompt
     # (native asks for alpha) and the post-process (chroma keys it out).
-    strategy = resolve_transparency_strategy(backend, alpha_mode) if transparent else None
+    strategy: str | None = None
+    strategy_source: str | None = None
+    if transparent:
+        strategy, strategy_source = resolve_transparency_strategy(backend, alpha_mode, refs=refs)
+        if strategy_source == STRATEGY_SOURCE_REFS:
+            print(
+                f"[gen] {len(refs)} reference image(s) attached — using chroma keying instead of "
+                f"{backend.name}'s native alpha (native output with refs is unstable, 2026-09-08). "
+                "Pass --alpha-mode native to force it.",
+                file=sys.stderr,
+            )
     owns_workdir = workdir is None
     workdir = Path(workdir).expanduser().resolve() if workdir else Path(tempfile.mkdtemp(prefix="sprite-gen-gen-"))
     workdir.mkdir(parents=True, exist_ok=True)
@@ -218,11 +244,12 @@ def generate_image(
         if strategy == TRANSPARENCY_NATIVE:
             alpha_stats = {
                 "strategy": TRANSPARENCY_NATIVE,
+                "strategy_source": strategy_source,
                 **chroma_mod.verify_native_alpha(raw, out, white_check=white_check),
             }
         elif strategy == TRANSPARENCY_CHROMA:
             chroma_stats = chroma_mod.key_transparent(raw, out, key=chroma_key, white_check=white_check)
-            alpha_stats = {"strategy": TRANSPARENCY_CHROMA, **chroma_stats}
+            alpha_stats = {"strategy": TRANSPARENCY_CHROMA, "strategy_source": strategy_source, **chroma_stats}
         else:
             shutil.copyfile(raw, out)
         verify_png(out)
@@ -358,9 +385,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         choices=ALPHA_MODES,
         default=ALPHA_MODE_AUTO,
         help=(
-            "transparency strategy for --transparent: auto = the provider's declared strategy; "
+            "transparency strategy for --transparent: auto = the provider's declared strategy "
+            "(native on codex, but chroma whenever --ref is attached — native alpha with refs is unstable); "
             "chroma forces chroma keying (e.g. a codex prompt that already carries a key background); "
-            "native is refused on a provider that cannot return alpha"
+            "native forces native alpha and is refused on a provider that cannot return alpha"
         ),
     )
     parser.add_argument("--chroma-key", choices=sorted(chroma_mod.KEYS), default="magenta")

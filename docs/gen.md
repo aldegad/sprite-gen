@@ -100,6 +100,14 @@ strategy it can execute, and `--alpha-mode auto` (the default) follows it:
 | `native` | `codex` (**first choice**, 2026-09-08) | The transport prompt asks image_gen for a genuinely transparent background (the bundled `imagegen` skill honours "transparent background" and keeps the generated alpha; codex reports `transparentBackground: true` on the completed item). The decoded PNG's alpha is **measured**: no alpha band or `alpha_zero_pct: 0.0` refuses to publish, RGB under alpha 0 is scrubbed, partial alpha (1–254) is left as produced and reported as `partial_alpha_pct`. | The model drew a checkerboard / flat background (RGB image) — nothing can recover alpha from that, so the run fails instead of silently keying. |
 | `chroma` | `grok` (only option), `codex` with `--alpha-mode chroma` | Generate on a `#FF00FF` (or `#00FF00`) background — pick the key by subject colour (magenta subjects → green key) — and matte it out through the frame extractor's canonical YCbCr matte (`remove_chroma_background_ycbcr`). Gradients and texture within that chroma family are supported. | `alpha_zero_pct: 0.0` after keying, or stale RGB under alpha 0. |
 
+- **`auto` steps down to `chroma` when `--ref` is attached**, even on codex. Measured
+  2026-09-08 (plan `sprite-gen/parts-rig`): codex `image_gen` with reference images
+  returned real alpha in 1/6 runs and drew a checkerboard (RGB) in 5/6, while the same
+  prompts on a `#00FF00` key + chroma keying succeeded 6/6. The decision is made before
+  the model runs, printed to stderr, and recorded as `alpha.strategy_source:
+  "refs-attached"` (`provider-default` / `explicit` otherwise). `--alpha-mode native`
+  still forces native alpha with refs — and fails loud on an RGB result. So a ref run's
+  prompt must carry the chroma key, exactly as the sprite-row pipeline already does.
 - `--alpha-mode chroma` on codex is for prompts that already carry a key background
   (the sprite-row pipeline today): the native request is **not** added to the prompt
   and the raw is keyed like a grok run.
