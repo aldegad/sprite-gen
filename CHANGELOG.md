@@ -2,6 +2,16 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## Unreleased
+
+- Added catalog-driven `parts-gen`, `parts-match` and `parts-rig` commands for
+  illustrated character layers, using parallel generation, measured chroma alpha,
+  FFT registration and explicit part/composite acceptance gates.
+- Exported JSON rigs, HTML layers and deterministic audio RMS lip-sync, blink and
+  head sway keys for HyperFrames. Interleaved groups preserve global draw order.
+- Added synthetic regression coverage for registration failures, generation report
+  merging, missing layers, long-audio frame timing and deterministic rig export.
+
 ## v1.60.0 - Native Alpha
 
 - `sprite-gen gen --transparent` now follows a per-provider transparency strategy declared once on each adapter (`Provider.transparency`). `codex` asks `image_gen` for a genuinely transparent background and publishes the measured alpha (`native`, first choice); `grok` keeps deterministic chroma keying because Grok Imagine returns JPEG only.

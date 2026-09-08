@@ -164,6 +164,25 @@ $SPRITE_GEN_ROOT/.venv/bin/python <script.py> ...
   않는다** — 위 venv 절대경로 형식 하나만 쓴다. (`tests/test_entrypoint_interpreter.py` 가 이 두 파일군에
   대해 잠근다.)
 
+## Parts rig (illustrated character layers)
+
+For a generated character split into independently movable body parts, use the
+catalog-based parts workflow in [`docs/parts-rig.md`](docs/parts-rig.md). This is
+separate from the component-row pixel-art atlas pipeline and its pixel-unfake gates.
+
+1. Declare the base image, canvas, part boxes, pivots, draw order, groups and variants.
+2. `$SPRITE_GEN_ROOT/.venv/bin/python -m sprite_gen.cli parts-gen --catalog catalog.json --out-dir parts`
+   generates each part from full and cropped references, then keys to measured RGBA.
+3. `$SPRITE_GEN_ROOT/.venv/bin/python -m sprite_gen.cli parts-match --catalog catalog.json --parts-dir parts`
+   registers candidates with FFT template search and gates part agreement and composite coverage.
+4. `$SPRITE_GEN_ROOT/.venv/bin/python -m sprite_gen.cli parts-rig --catalog catalog.json --match-dir parts --audio narration.wav`
+   exports JSON, layer HTML and deterministic lip-sync, blink and sway keys.
+
+Review both the composite and animation. A declared numeric gate passing does not
+prove identity or expression fidelity. Report any relaxed thresholds explicitly.
+Keep real character images and catalogs in the character's repository; public
+fixtures must be synthetic.
+
 ## Script Map
 
 Scripts are explicit pipeline commands, not hidden imports. One job each (stage detail: [`docs/architecture.md`](docs/architecture.md) §2):

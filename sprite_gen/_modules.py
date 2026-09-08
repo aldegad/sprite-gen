@@ -39,6 +39,10 @@ MODULE_DOMAIN = {
     'serve_curation': 'serve',
     'serve_compose': 'serve',
     'gif_utils': 'util',
+    'catalog': 'parts',
+    'parts_gen': 'parts',
+    'match': 'parts',
+    'rig': 'parts',
 }
 
 
