@@ -2,6 +2,14 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## v1.60.0 - Native Alpha
+
+- `sprite-gen gen --transparent` now follows a per-provider transparency strategy declared once on each adapter (`Provider.transparency`). `codex` asks `image_gen` for a genuinely transparent background and publishes the measured alpha (`native`, first choice); `grok` keeps deterministic chroma keying because Grok Imagine returns JPEG only.
+- Added `--alpha-mode auto|native|chroma`. `auto` reads the provider's strategy, `chroma` forces keying on codex for prompts that already carry a key background, and `native` on a chroma-only provider fails before any model call. With `--ref` attached, `auto` keys instead of asking codex for native alpha (measured 1/6 real alpha with references vs 6/6 chroma); the report records why under `alpha.strategy_source`.
+- Native output is verified before publishing: no alpha channel or 0% transparent pixels refuses the run (a drawn checkerboard is never keyed silently), RGB under alpha 0 is scrubbed, and partial alpha is reported untouched.
+- Reports carry an `alpha` block (`strategy` plus stats) next to the existing `chroma` stats, and codex's own `transparentBackground` claim under `extra.transparent_background_reported`.
+- Sprite-row generation is unchanged: rows still carry the request chroma key and are keyed at extraction.
+
 ## v1.59.0 - Contributor Collection
 
 This release incorporates accepted work from eight community pull requests. Thanks to [@devswha](https://github.com/devswha) for chroma color preservation, [@bokjk](https://github.com/bokjk) for portable manifest paths, [@Dongkyu-ES](https://github.com/Dongkyu-ES) for deterministic CLI tests, engine export, and subject-aware sparse-frame handling, [@napkn34](https://github.com/napkn34) for the Windows provider and publish-lock fixes, and [@monibu1548](https://github.com/monibu1548) for pixel-unfake vertical centering and grounding controls.

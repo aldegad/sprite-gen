@@ -2,15 +2,20 @@
 
 Generation is a first-class engine module (`sprite_gen/gen/`), not an external
 skill. One call = a prompt (+ optional reference images) → one **verified** PNG on
-disk, with an optional deterministic transparent-chroma post-process. The general
-`image-gen` skill is a thin shuttle over this command.
+disk, with an optional transparent output whose strategy is decided per provider
+(native alpha or deterministic chroma keying). The general `image-gen` skill is a
+thin shuttle over this command.
 
 Providers (Gemini/OpenRouter/fal/BytePlus are intentionally **not** included):
 
-| Provider | Backend | Auth | Output truth |
-|---|---|---|---|
-| `codex` | codex `image_gen` | ChatGPT OAuth | inline base64 in the session rollout jsonl, decoded deterministically |
-| `grok` | grok Imagine `image_gen` / `image_edit` | xAI OAuth | file grok is told to write, verified by PNG magic |
+| Provider | Backend | Auth | Output truth | Transparency strategy |
+|---|---|---|---|---|
+| `codex` | codex `image_gen` | ChatGPT OAuth | inline base64 in the session rollout jsonl, decoded deterministically | **`native`** — image_gen returns a real alpha channel when asked (measured, then published) |
+| `grok` | grok Imagine `image_gen` / `image_edit` | xAI OAuth | file grok is told to write, verified by PNG magic | `chroma` — Imagine returns JPEG only; generate on a key and matte it out |
+
+The strategy is declared **once**, on the adapter (`Provider.transparency`), and is
+the only place that says what a backend can do. See
+[Transparent output](#transparent-output--strategy-per-provider).
 
 ## Default provider selection
 
@@ -63,7 +68,7 @@ sprite-gen gen \
   --prompt "…"            # or --prompt-file PROMPT.txt
   --out DEST.png \
   [--ref REF.png ...]     # repeatable; grok routes refs through image_edit
-  [--transparent [--chroma-key magenta|green]] \
+  [--transparent [--alpha-mode auto|native|chroma] [--chroma-key magenta|green]] \
   [--white-check CHECK.png] \
   [--aspect-ratio 1:1]    # grok only (1:1, 16:9, 9:16, 4:3, 3:4, auto)
   [--model ID] \
@@ -73,18 +78,51 @@ sprite-gen gen \
 
 Backward-compatible wrapper: `$SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/generate_sprite_image.py …` (same args).
 
-- **Non-transparent**: the raw PNG (chroma background included) is copied to `--out`.
-- **`--transparent`**: the raw is keyed to clean RGBA through the frame extractor's
-  canonical YCbCr matte (`remove_chroma_background_ycbcr`). Generate on a `#FF00FF`
-  (or `#00FF00`) background — pick the key by subject colour (magenta subjects →
-  green key). Gradients and texture within that chroma family are supported. A result
-  with `alpha_zero_pct: 0.0`, or any transparent pixel that still carries non-zero
-  RGB, **fails loudly before the output or success report is published** (No Silent Fallback).
-- The pre-chroma raw is preserved next to the destination as `<out>.raw.png` for audit.
+- **Non-transparent**: the raw PNG (background included) is copied to `--out`.
+- **`--transparent`**: publishes a clean RGBA PNG using the provider's transparency
+  strategy (below). Either way a result with no transparent area, or any transparent
+  pixel that still carries non-zero RGB, **fails loudly before the output or success
+  report is published** (No Silent Fallback).
+- The pre-process raw is preserved next to the destination as `<out>.raw.png` for audit.
 - `--report` writes a `sprite-gen-image-report` JSON: provider, prompt, out/raw paths,
-  `raw_bytes`, `elapsed_seconds`, `session_id` (codex), the chroma stats, and the
+  `raw_bytes`, `elapsed_seconds`, `session_id` (codex), an `alpha` block
+  (`strategy` + the measured stats), the `chroma` stats when chroma keying ran, and the
   provider-resolution fields (`provider_resolved_from`, and `provider_fallback` when a
   codex→grok default fallback occurred).
+
+## Transparent output — strategy per provider
+
+`--transparent` does not mean "chroma key" any more. Each adapter declares the one
+strategy it can execute, and `--alpha-mode auto` (the default) follows it:
+
+| Strategy | Who | What happens | Refused when |
+|---|---|---|---|
+| `native` | `codex` (**first choice**, 2026-09-08) | The transport prompt asks image_gen for a genuinely transparent background (the bundled `imagegen` skill honours "transparent background" and keeps the generated alpha; codex reports `transparentBackground: true` on the completed item). The decoded PNG's alpha is **measured**: no alpha band or `alpha_zero_pct: 0.0` refuses to publish, RGB under alpha 0 is scrubbed, partial alpha (1–254) is left as produced and reported as `partial_alpha_pct`. | The model drew a checkerboard / flat background (RGB image) — nothing can recover alpha from that, so the run fails instead of silently keying. |
+| `chroma` | `grok` (only option), `codex` with `--alpha-mode chroma` | Generate on a `#FF00FF` (or `#00FF00`) background — pick the key by subject colour (magenta subjects → green key) — and matte it out through the frame extractor's canonical YCbCr matte (`remove_chroma_background_ycbcr`). Gradients and texture within that chroma family are supported. | `alpha_zero_pct: 0.0` after keying, or stale RGB under alpha 0. |
+
+- **`auto` steps down to `chroma` when `--ref` is attached**, even on codex. Measured
+  2026-09-08 (plan `sprite-gen/parts-rig`): codex `image_gen` with reference images
+  returned real alpha in 1/6 runs and drew a checkerboard (RGB) in 5/6, while the same
+  prompts on a `#00FF00` key + chroma keying succeeded 6/6. The decision is made before
+  the model runs, printed to stderr, and recorded as `alpha.strategy_source:
+  "refs-attached"` (`provider-default` / `explicit` otherwise). `--alpha-mode native`
+  still forces native alpha with refs — and fails loud on an RGB result. So a ref run's
+  prompt must carry the chroma key, exactly as the sprite-row pipeline already does.
+- `--alpha-mode chroma` on codex is for prompts that already carry a key background
+  (the sprite-row pipeline today): the native request is **not** added to the prompt
+  and the raw is keyed like a grok run.
+- `--alpha-mode native` on a `chroma`-only provider **fails loud before any model
+  call** — a strategy the backend cannot execute is not a fallback candidate, and
+  native → chroma never happens silently either (the prompt shapes are different).
+- Why grok is chroma-only: Grok Imagine Image 2.0 returns `image/jpeg` from both the
+  `/v1/images/*` API and the CLI `image_gen`/`image_edit` tools, and the official
+  docs expose no background parameter — its "background removal" is a consumer-app
+  tool (4/4 drawn checkerboards on 2026-09-08). The declaration lives in
+  `sprite_gen/gen/grok_provider.py` and flips only with a new measurement.
+- Measured codex output (2026-09-08, codex 0.153.4): `alpha_zero_pct ≈ 62`, body alpha
+  ≈ 253 (so `partial_alpha_pct` is most of the subject), a ~1 px light fringe on a
+  magenta composite. Downstream extraction treats `alpha ≤ 16` as transparent, so
+  this is usable as-is; alpha snapping is deliberately not applied here.
 
 ## How each provider works
 
@@ -126,7 +164,10 @@ exactly that, rather than falling back on its own.
 
 In the component-row pipeline (SKILL.md §2) generate each state row with
 `--provider codex` (or `grok`) using `prompts/<state>.txt`, writing `raw/<state>.png`.
-Keep the request chroma key on the background; frame extraction removes it downstream.
+The row prompts still carry the request chroma key on the background and frame
+extraction removes it downstream — rows are generated **without** `--transparent`, so
+the native strategy does not apply to them yet (moving rows to native alpha is a
+separate, measured change).
 The correction loop (`sprite-gen correction-loop --provider-command …`) can drive this
 `gen` command as its regeneration step so inspect → score → hint → regenerate closes
 against a real provider.

@@ -6,11 +6,16 @@ ChatGPT OAuth) and grok (Imagine, xAI OAuth). One call = prompt (+ optional refs
 -> one verified raw PNG, with an optional deterministic transparent chroma
 post-process. The general `image-gen` skill is a thin shuttle over `sprite-gen gen`.
 
+Transparency is a per-provider strategy (`Provider.transparency`, declared once
+in each adapter): codex `image_gen` returns a genuinely transparent PNG when asked
+(`native`), grok Imagine cannot and is keyed out of a chroma background (`chroma`).
+`--transparent` follows the provider's strategy unless `--alpha-mode` overrides it.
+
 CLI:
     sprite-gen gen --provider codex|grok --prompt "..." --out DEST.png
-        [--ref REF.png ...] [--transparent [--chroma-key magenta|green]]
-        [--white-check CHECK.png] [--model ID] [--aspect-ratio 1:1]
-        [--report REPORT.json] [--keep-session]
+        [--ref REF.png ...] [--transparent [--alpha-mode auto|native|chroma]
+        [--chroma-key magenta|green]] [--white-check CHECK.png] [--model ID]
+        [--aspect-ratio 1:1] [--report REPORT.json] [--keep-session]
 """
 
 from __future__ import annotations
@@ -28,11 +33,26 @@ from typing import Any
 from sprite_gen.spec.runio import atomic_write_text
 
 from . import chroma as chroma_mod
-from .base import GenRequest, GenResult, verify_png, GenTimeoutError, provider_binary, provider_subprocess_env
+from .base import (
+    TRANSPARENCY_CHROMA,
+    TRANSPARENCY_NATIVE,
+    TRANSPARENCY_STRATEGIES,
+    GenRequest,
+    GenResult,
+    GenTimeoutError,
+    provider_binary,
+    provider_subprocess_env,
+    verify_png,
+)
 from .codex_provider import CodexProvider
 from .grok_provider import GrokProvider
 
 PROVIDERS = ("codex", "grok")
+# `--alpha-mode`: `auto` reads the provider's declared strategy (the SSoT);
+# `native` / `chroma` force one. Forcing `native` on a chroma-only provider fails
+# loud — a strategy the backend cannot execute is not a fallback candidate.
+ALPHA_MODE_AUTO = "auto"
+ALPHA_MODES = (ALPHA_MODE_AUTO, *TRANSPARENCY_STRATEGIES)
 
 # Default-provider policy (maintainer 확정 2026-07-17): the default backend is codex
 # (GPT `image_gen`). If codex is unavailable in the environment (CLI missing or
@@ -52,6 +72,47 @@ def _make_provider(name: str, *, keep_session: bool):
     if name == "grok":
         return GrokProvider()
     raise SystemExit(f"gen: unknown provider {name!r}; expected one of {', '.join(PROVIDERS)}")
+
+
+# Why `auto` steps down to chroma when reference images are attached (2026-09-08
+# 실측, plan sprite-gen/parts-rig): codex image_gen with `--ref` returned real
+# alpha in 1/6 runs and drew a checkerboard (RGB) in 5/6, while the same prompts
+# on a #00FF00 key + chroma keying succeeded 6/6. The edit path is not a reliable
+# alpha source, so `auto` does not gamble on it — the decision is made before the
+# model runs, printed, and recorded in the report (`alpha.strategy_source`).
+# An explicit `--alpha-mode native` still forces it (and fails loud on RGB).
+STRATEGY_SOURCE_PROVIDER = "provider-default"
+STRATEGY_SOURCE_REFS = "refs-attached"
+STRATEGY_SOURCE_EXPLICIT = "explicit"
+
+
+def resolve_transparency_strategy(backend, alpha_mode: str, *, refs: list[Path] | None = None) -> tuple[str, str]:
+    """Decide which transparency strategy this generation runs.
+
+    Returns (strategy, source). The provider's declared `transparency` is the
+    only source of what it can do; `alpha_mode` may pick `chroma` on a native
+    provider (the prompt already carries a key background) but can never pick
+    `native` on a chroma-only provider. `auto` on a native provider steps down to
+    `chroma` when reference images are attached (see STRATEGY_SOURCE_REFS).
+    """
+    if alpha_mode not in ALPHA_MODES:
+        raise SystemExit(f"gen: unknown --alpha-mode {alpha_mode!r}; expected one of {', '.join(ALPHA_MODES)}")
+    declared = getattr(backend, "transparency", None)
+    if declared not in TRANSPARENCY_STRATEGIES:
+        raise SystemExit(
+            f"gen: provider {getattr(backend, 'name', backend)!r} declares no transparency "
+            f"strategy (got {declared!r}); expected one of {', '.join(TRANSPARENCY_STRATEGIES)}"
+        )
+    if alpha_mode == ALPHA_MODE_AUTO:
+        if declared == TRANSPARENCY_NATIVE and refs:
+            return TRANSPARENCY_CHROMA, STRATEGY_SOURCE_REFS
+        return declared, STRATEGY_SOURCE_PROVIDER
+    if alpha_mode == TRANSPARENCY_NATIVE and declared != TRANSPARENCY_NATIVE:
+        raise SystemExit(
+            f"gen: --alpha-mode native is not a capability of provider {backend.name!r} "
+            f"(its transparency strategy is {declared!r}); use --alpha-mode chroma or another provider"
+        )
+    return alpha_mode, STRATEGY_SOURCE_EXPLICIT
 
 
 def _codex_available() -> tuple[bool, str]:
@@ -124,6 +185,7 @@ def generate_image(
     model: str | None = None,
     aspect_ratio: str | None = None,
     transparent: bool = False,
+    alpha_mode: str = ALPHA_MODE_AUTO,
     chroma_key: str = "magenta",
     white_check: Path | None = None,
     keep_session: bool = False,
@@ -140,13 +202,33 @@ def generate_image(
             raise SystemExit(f"gen: reference image not found: {ref}")
 
     backend = _make_provider(provider, keep_session=keep_session)
+    # Decided before the model runs: the strategy shapes the transport prompt
+    # (native asks for alpha) and the post-process (chroma keys it out).
+    strategy: str | None = None
+    strategy_source: str | None = None
+    if transparent:
+        strategy, strategy_source = resolve_transparency_strategy(backend, alpha_mode, refs=refs)
+        if strategy_source == STRATEGY_SOURCE_REFS:
+            print(
+                f"[gen] {len(refs)} reference image(s) attached — using chroma keying instead of "
+                f"{backend.name}'s native alpha (native output with refs is unstable, 2026-09-08). "
+                "Pass --alpha-mode native to force it.",
+                file=sys.stderr,
+            )
     owns_workdir = workdir is None
     workdir = Path(workdir).expanduser().resolve() if workdir else Path(tempfile.mkdtemp(prefix="sprite-gen-gen-"))
     workdir.mkdir(parents=True, exist_ok=True)
     raw = workdir / "raw.png"
 
     try:
-        request = GenRequest(prompt=prompt, raw=raw, refs=refs, model=model, aspect_ratio=aspect_ratio)
+        request = GenRequest(
+            prompt=prompt,
+            raw=raw,
+            refs=refs,
+            model=model,
+            aspect_ratio=aspect_ratio,
+            native_alpha=strategy == TRANSPARENCY_NATIVE,
+        )
         # 타임아웃 1회 관측 가능 재시도 — 산발 provider 스톨은 같은 호출 재시도로
         # 대부분 통과한다 (회귀 2026-07-19). 두 번째도 스톨이면 fail loud.
         try:
@@ -157,9 +239,17 @@ def generate_image(
         raw_bytes = verify_png(raw)
 
         chroma_stats: dict[str, Any] | None = None
+        alpha_stats: dict[str, Any] | None = None
         out.parent.mkdir(parents=True, exist_ok=True)
-        if transparent:
+        if strategy == TRANSPARENCY_NATIVE:
+            alpha_stats = {
+                "strategy": TRANSPARENCY_NATIVE,
+                "strategy_source": strategy_source,
+                **chroma_mod.verify_native_alpha(raw, out, white_check=white_check),
+            }
+        elif strategy == TRANSPARENCY_CHROMA:
             chroma_stats = chroma_mod.key_transparent(raw, out, key=chroma_key, white_check=white_check)
+            alpha_stats = {"strategy": TRANSPARENCY_CHROMA, "strategy_source": strategy_source, **chroma_stats}
         else:
             shutil.copyfile(raw, out)
         verify_png(out)
@@ -179,6 +269,7 @@ def generate_image(
             session_id=run.session_id,
             refs=refs,
             transparent=transparent,
+            alpha=alpha_stats,
             chroma=chroma_stats,
             extra=run.extra,
         )
@@ -219,6 +310,7 @@ def _run(args: argparse.Namespace) -> int:
         model=args.model,
         aspect_ratio=args.aspect_ratio,
         transparent=args.transparent,
+        alpha_mode=args.alpha_mode,
         chroma_key=args.chroma_key,
         white_check=args.white_check,
         keep_session=args.keep_session,
@@ -280,7 +372,25 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--ref", action="append", type=Path, default=[], help="reference image (repeatable)")
     parser.add_argument("--model")
     parser.add_argument("--aspect-ratio", help="grok only, e.g. 1:1 16:9 9:16")
-    parser.add_argument("--transparent", action="store_true", help="chroma-key the raw PNG to transparent RGBA")
+    parser.add_argument(
+        "--transparent",
+        action="store_true",
+        help=(
+            "publish a transparent RGBA PNG using the provider's transparency strategy: "
+            "codex asks image_gen for real alpha (native), grok is keyed out of a chroma background"
+        ),
+    )
+    parser.add_argument(
+        "--alpha-mode",
+        choices=ALPHA_MODES,
+        default=ALPHA_MODE_AUTO,
+        help=(
+            "transparency strategy for --transparent: auto = the provider's declared strategy "
+            "(native on codex, but chroma whenever --ref is attached — native alpha with refs is unstable); "
+            "chroma forces chroma keying (e.g. a codex prompt that already carries a key background); "
+            "native forces native alpha and is refused on a provider that cannot return alpha"
+        ),
+    )
     parser.add_argument("--chroma-key", choices=sorted(chroma_mod.KEYS), default="magenta")
     parser.add_argument("--white-check", type=Path, help="write a white-composite check image")
     parser.add_argument("--keep-session", action="store_true", help="codex: do not delete the rollout jsonl")
