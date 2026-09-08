@@ -13,6 +13,10 @@ from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, compos
 from sprite_gen.qa import correction_loop, inspect, preview, score
 from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
 from sprite_gen.gen import prepare, video
+from sprite_gen.video import batch as video_batch
+from sprite_gen.video import canvas as video_canvas
+from sprite_gen.video import frames as video_frames
+from sprite_gen.video import loop as video_loop
 from sprite_gen.effects import recolor
 from sprite_gen.serve import serve_compose, serve_curation
 from sprite_gen.spec import migrate_breathe, migrate_request
@@ -293,6 +297,27 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Animate one still into a verified mp4 via Grok Imagine (your own grok login or XAI_API_KEY).",
         _add_video,
         video.run,
+    ),
+    # Video -> sprite pipeline (docs/video-pipeline.md): canvas -> video -> frames -> loop, or video-set for a batch.
+    "video-canvas": (
+        "Pad a base still into the canvas a motion state needs (tall for jumps, wide for attacks, square otherwise).",
+        video_canvas.add_arguments,
+        video_canvas.run,
+    ),
+    "video-frames": (
+        "Extract a clip's frames and key the chroma out into RGBA frames (edge-contact checked).",
+        video_frames.add_arguments,
+        video_frames.run,
+    ),
+    "video-loop": (
+        "Find the true period in keyed frames and emit one seamless cycle: strip + meta, transparent GIF, WebP.",
+        video_loop.add_arguments,
+        video_loop.run,
+    ),
+    "video-set": (
+        "Directions x states end to end (canvas -> video -> frames -> loop), rate-limit aware, one report per item.",
+        video_batch.add_arguments,
+        video_batch.run,
     ),
     # The argument surface is `serve_curation.add_arguments` itself, not a copy of it: the
     # webview's own `--help` and this subcommand are the same declaration, so `sprite-gen

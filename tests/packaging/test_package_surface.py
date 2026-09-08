@@ -38,6 +38,10 @@ PACKAGE_RUN_MODULES = [
     "slice_sheet",
     "unpack_atlas",
     "video",
+    "canvas",
+    "frames",
+    "loop",
+    "batch",
 ]
 
 CLI_HELPERS = [
