@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
+import itertools
 import json
 import math
 import shutil
@@ -45,18 +47,19 @@ def rms_envelope(audio: Path, fps: int, *, sample_rate: int = 16000) -> list[flo
     pcm = subprocess.run(["ffmpeg", "-v", "error", "-i", str(audio), "-ac", "1", "-ar", str(sample_rate),
                           "-f", "s16le", "-"], check=True, capture_output=True).stdout
     samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-    window = max(1, sample_rate // fps)
-    frames = int(math.ceil(len(samples) / window))
+    if fps <= 0 or fps > sample_rate:
+        raise ValueError("fps must be between 1 and the audio sample rate")
+    frames = int(math.ceil(len(samples) * fps / sample_rate))
     env = np.zeros(frames, dtype=np.float32)
     for i in range(frames):
-        chunk = samples[i * window:(i + 1) * window]
+        chunk = samples[i * sample_rate // fps:(i + 1) * sample_rate // fps]
         env[i] = float(np.sqrt(np.mean(chunk * chunk))) if len(chunk) else 0.0
     peak = float(env.max()) if frames else 0.0
     if peak <= 0:
         return [0.0] * frames
     # light smoothing so a single loud sample does not flap the mouth
     kernel = np.array([0.25, 0.5, 0.25], dtype=np.float32)
-    smoothed = np.convolve(env / peak, kernel, mode="same")
+    smoothed = np.convolve(np.pad(env / peak, (1, 1)), kernel, mode="valid")
     return [round(float(v), 4) for v in smoothed]
 
 
@@ -122,6 +125,8 @@ def build_rig(catalog_path: Path, match_dir: Path) -> dict[str, Any]:
             name = job_name(part["id"], vname)
             if name not in placed:
                 raise SystemExit(f"parts rig: {name} has no passing placement in the match report")
+            if not (match_dir / "placed" / f"{name}.png").is_file():
+                raise SystemExit(f"parts rig: missing placed layer: {name}")
             variants[vname] = f"placed/{name}.png"
         parts_out.append({"id": part["id"], "z": part["z"], "group": part.get("group", "none"),
                           "pivot": list(part["pivot"]), "placement": placed[part["id"]]["placement"],
@@ -136,22 +141,23 @@ def build_rig(catalog_path: Path, match_dir: Path) -> dict[str, Any]:
 def render_html(rig: dict[str, Any], *, prefix: str = "rig", asset_prefix: str = "") -> str:
     w, h = rig["canvas"]["width"], rig["canvas"]["height"]
     lines = [f'<div id="{prefix}" class="rig" style="position:relative;width:{w}px;height:{h}px;overflow:hidden">']
-    by_group: dict[str, list[dict[str, Any]]] = {}
-    for part in rig["parts"]:
-        by_group.setdefault(part["group"], []).append(part)
-    order = ["none"] + [g for g in rig["groups"] if g != "none"]
-    for gname in order:
-        members = by_group.get(gname, [])
-        if not members:
-            continue
+    # A transformed wrapper creates a stacking context. Split a group whenever
+    # another group interrupts its z run, keeping all runs on the same pivot.
+    runs: dict[str, int] = {}
+    for gname, run in itertools.groupby(sorted(rig["parts"], key=lambda p: p["z"]), key=lambda p: p["group"]):
+        members = list(run)
         if gname != "none":
             px, py = rig["groups"][gname]["pivot"]
-            lines.append(f'<div id="{prefix}-g-{gname}" class="rig-group" style="position:absolute;inset:0;transform-origin:{px}px {py}px">')
+            index = runs.get(gname, 0)
+            runs[gname] = index + 1
+            gid = f"{prefix}-g-{gname}" + (f"--{index}" if index else "")
+            lines.append(f'<div id="{html.escape(gid, quote=True)}" data-rig-group="{html.escape(gname, quote=True)}" class="rig-group" '
+                         f'style="position:absolute;inset:0;z-index:{members[0]["z"]};transform-origin:{px}px {py}px">')
         for part in members:
             for vname, rel in part["variants"].items():
                 vid = f"{prefix}-{part['id']}" + ("" if vname == DEFAULT_VARIANT else f"__{vname}")
                 hidden = "" if vname == DEFAULT_VARIANT else "opacity:0;"
-                lines.append(f'  <img id="{vid}" class="rig-part" src="{asset_prefix}{rel}" '
+                lines.append(f'  <img id="{html.escape(vid, quote=True)}" class="rig-part" src="{html.escape(asset_prefix + rel, quote=True)}" '
                              f'style="position:absolute;left:0;top:0;width:{w}px;height:{h}px;{hidden}z-index:{part["z"]}">')
         if gname != "none":
             lines.append("</div>")
@@ -174,7 +180,7 @@ def render_keys_js(keys: dict[str, Any], *, prefix: str = "rig") -> str:
             out.append(f"  show({json.dumps(track['part'])}, {json.dumps(k['variant'])}, {names}, {k['t']});")
     for track in keys["sway"]:
         for k in track["keys"]:
-            out.append(f"  tl.set('#' + P + '-g-' + {json.dumps(track['group'])}, {{ rotation: {k['rotation']} }}, start + {k['t']});")
+            out.append(f"  tl.set({json.dumps('#' + prefix + ' [data-rig-group=' + chr(34) + track['group'] + chr(34) + ']')}, {{ rotation: {k['rotation']} }}, start + {k['t']});")
     out.append("};")
     return "\n".join(out) + "\n"
 

@@ -160,7 +160,7 @@ def generate_parts(catalog_path: Path, out_dir: Path, *, provider: str = "codex"
     report = {"kind": "sprite-gen-parts-gen-report", "version": 1, "catalog": str(catalog_path.resolve()),
               "base": str(base_path), "provider": provider, "chroma_key": chroma, "jobs": ordered,
               "ran": [r["job"] for r in records],
-              "ok": all(r["ok"] for r in records), "failed": [r["job"] for r in records if not r["ok"]]}
+              "ok": all(r["ok"] for r in ordered), "failed": [r["job"] for r in ordered if not r["ok"]]}
     report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return report
 

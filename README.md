@@ -18,6 +18,23 @@
 
 ---
 
+## Character parts rig
+
+Generate separate character parts from a base illustration, register them back onto
+the base, and export a JSON rig with HTML layers and deterministic GSAP lip-sync,
+blinks and head motion. The catalog declares geometry and acceptance thresholds;
+failed registration is reported before rig export.
+
+```bash
+sprite-gen parts-gen --catalog catalog.json --out-dir parts
+sprite-gen parts-match --catalog catalog.json --parts-dir parts
+sprite-gen parts-rig --catalog catalog.json --match-dir parts --audio narration.wav
+```
+
+See [the catalog and runtime contract](docs/parts-rig.md) for setup, variants and
+HyperFrames integration. Inspect the resulting composite: generated parts may
+change facial details even when the declared numeric thresholds pass.
+
 ## Breathe
 
 A still idle reads as frozen. **Breathe** turns a single pose into a living loop — deterministic squash & stretch baked on top of your curated frames. No regeneration, no re-extraction, no extra art. One sidecar field:

@@ -164,3 +164,80 @@ def test_mouth_quantization_uses_available_variants() -> None:
     assert rig.mouth_variant(0.2, {"default", "closed", "half", "open"}) == "half"
     assert rig.mouth_variant(0.9, {"default", "closed", "open", "o"}) == "o"
     assert rig.mouth_variant(0.9, {"default", "closed", "open"}) == "open"
+
+
+def test_gen_references_alpha_failures_and_partial_report(workspace: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+    from sprite_gen.parts import parts_gen
+    calls = []
+    fail = {"face"}
+
+    def provider(name, prompt, out, **kwargs):
+        calls.append((out.stem, kwargs))
+        assert len(kwargs["refs"]) == 2
+        assert Image.open(kwargs["refs"][0]).size == CANVAS
+        assert Image.open(kwargs["refs"][1]).width <= CANVAS[0]
+        assert kwargs["transparent"] and kwargs["chroma_key"] == "green"
+        if out.stem in fail:
+            Image.new("RGBA", (20, 20), (220, 200, 180, 255)).save(out)
+        else:
+            _part(out, (10, 10), (200, 100, 80))
+        return SimpleNamespace(raw=out, elapsed_seconds=0, provider=name)
+
+    monkeypatch.setattr(parts_gen, "generate_image", provider)
+    out = workspace / "generated"
+    first = parts_gen.generate_parts(workspace / "catalog.json", out, workers=2)
+    assert not first["ok"] and first["failed"] == ["face"]
+    assert len(calls) == len(cat.jobs(_catalog(workspace)))
+    second = parts_gen.generate_parts(workspace / "catalog.json", out, only=["body"])
+    assert not second["ok"] and second["failed"] == ["face"]
+    assert second["ran"] == ["body"] and len(second["jobs"]) == len(first["jobs"])
+    fail.clear()
+    repaired = parts_gen.generate_parts(workspace / "catalog.json", out, only=["face"])
+    assert repaired["ok"] and repaired["failed"] == []
+
+
+def test_rms_uses_exact_frame_boundaries_for_long_audio(monkeypatch) -> None:
+    from types import SimpleNamespace
+    from sprite_gen._deps import np
+    # 16000 / 30 is fractional: truncating each window adds 5 frames in 141s.
+    samples = np.zeros(16000 * 141, dtype=np.int16)
+    samples[16000 * 140:] = 10000
+    monkeypatch.setattr(rig.shutil, "which", lambda _: "ffmpeg")
+    monkeypatch.setattr(rig.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=samples.tobytes()))
+    env = rig.rms_envelope(Path("synthetic.wav"), 30)
+    assert len(env) == 141 * 30
+    assert next(i for i, value in enumerate(env) if value > 0) == 140 * 30 - 1
+    samples = samples[:100]
+    assert len(rig.rms_envelope(Path("short.wav"), 30)) == 1
+
+
+def test_rig_preserves_interleaved_group_draw_order(workspace: Path) -> None:
+    from html.parser import HTMLParser
+    data = _catalog(workspace)
+    # A foreground ungrouped layer interrupts two head layers.
+    data["parts"][2].pop("group")
+    (workspace / "catalog.json").write_text(json.dumps(data))
+    match.match_parts(workspace / "catalog.json", workspace / "parts")
+    model = rig.build_rig(workspace / "catalog.json", workspace / "parts")
+    wrappers, layers = [], []
+    class Parser(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if attrs.get("class") == "rig-group":
+                wrappers.append(attrs)
+            if tag == "img":
+                layers.append(attrs["id"])
+    Parser().feed(rig.render_html(model))
+    assert layers.index("rig-face") < layers.index("rig-mouth") < layers.index("rig-eyelid_l")
+    assert len(wrappers) == 2
+    assert all(w["data-rig-group"] == "head" for w in wrappers)
+    assert "z-index:1;" in wrappers[0]["style"] and "z-index:3;" in wrappers[1]["style"]
+    assert len({w["id"] for w in wrappers}) == 2
+
+
+def test_rig_refuses_deleted_placed_layer(workspace: Path) -> None:
+    match.match_parts(workspace / "catalog.json", workspace / "parts")
+    (workspace / "parts" / "placed" / "mouth__open.png").unlink()
+    with pytest.raises(SystemExit, match="missing placed layer: mouth__open"):
+        rig.build_rig(workspace / "catalog.json", workspace / "parts")

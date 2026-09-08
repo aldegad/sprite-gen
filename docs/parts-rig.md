@@ -54,7 +54,7 @@ Rules (validated by `catalog.validate_catalog`, every violation listed, in order
 - `group` names a declared group or is omitted (`none`). Groups carry a `pivot`.
 - `variants` is an object `variant -> prompt suffix` and must contain `default` (its suffix may be empty).
   The runtime recognises `mouth` variants `closed | half | open | o` and eyelid variants `open | half | closed` by name; anything else is a plain swap.
-- `tolerance` (0..1, default 0.06) is the part's colour gate in `match`; `agree_floor` (0..1], default 0.85) its agreement gate.
+- `tolerance` (0..1 exclusive, default 0.06) is the part's colour gate in `match`; `agree_floor` (0..1], default 0.85) its agreement gate.
 - Top-level `composite: {tolerance, coverage}` declares the whole-composite gate (defaults 0.05 / 0.97).
 - Coordinates are integers, never floats or booleans. Nothing is inferred from pixels.
 
@@ -69,7 +69,9 @@ and sent as reference 1; a crop of the bbox padded by 25% is reference 2; the pr
 asks for that part only, pixel-faithful, on a flat chroma key; the result is keyed to
 RGBA by `gen.generate_image(transparent=True)`. A result with no transparent pixels
 is recorded as a failure. Writes `<job>.png` (+ `.raw.png`) and `parts-gen.report.json`
-(`ok`, `failed[]`, one record per job with alpha stats). Exit 1 if any job failed.
+(`ok`, `failed[]`, one record per job with alpha stats). Partial `--only` runs
+merge existing job records; `ran` identifies jobs attempted this time and a retained
+failure keeps `ok: false`. Exit 1 if any recorded job failed.
 
 ## 4. `sprite-gen parts-match` — the gate
 
@@ -112,16 +114,19 @@ Measured 2026-09-08: a 14-part 1024×1536 character registers in ~25 s.
 
 `--catalog <json> --match-dir <match out> [--out-dir] [--audio narration.mp3 | --duration s] [--fps 30] [--start 0] [--prefix rig] [--asset-prefix]`
 
-Refuses a match report that is not `ok`. Writes:
+Refuses a match report that is not `ok` or a missing placed layer. Writes:
 
 - `rig.json` — canvas, groups (pivot + members), parts in z order with placement and
   `variants: {name: "placed/<job>.png"}`.
 - `rig.html` — `<div id="<prefix>">` with one absolutely positioned canvas-sized `<img>`
   per variant (`id="<prefix>-<part>[__<variant>]"`, non-default `opacity:0`), grouped
-  under `<div id="<prefix>-g-<group>">` with `transform-origin` at the group pivot.
+  under wrappers with `data-rig-group="<group>"` and `transform-origin` at the
+  group pivot. A group interrupted by another layer is split into consecutive z
+  runs, each with a unique id and explicit z-index. All runs rotate together,
+  preserving the composite draw order even across transformed stacking contexts.
 - `rig-keys.json` / `rig-keys.js` — `window.__rigKeys(tl, start)` stamps GSAP `set`
   calls on a paused timeline: mouth variant per frame from the audio's RMS envelope
-  (ffmpeg → 16 kHz mono → per-frame RMS, normalized to the clip peak, thresholds
+  (ffmpeg → 16 kHz mono → per-frame RMS using exact sample boundaries without cumulative rounding drift, normalized to the clip peak, thresholds
   0.12 / 0.38 / 0.70 → closed / half / open / o), fixed-cadence blinks (3.4 s + phase
   seeded from the clip length), and a slow sine sway on the `head` group (±1.2°).
   Same inputs → byte-identical outputs (pinned by test).

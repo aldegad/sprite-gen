@@ -2,6 +2,16 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## Unreleased
+
+- Added catalog-driven `parts-gen`, `parts-match` and `parts-rig` commands for
+  illustrated character layers, using parallel generation, measured chroma alpha,
+  FFT registration and explicit part/composite acceptance gates.
+- Exported JSON rigs, HTML layers and deterministic audio RMS lip-sync, blink and
+  head sway keys for HyperFrames. Interleaved groups preserve global draw order.
+- Added synthetic regression coverage for registration failures, generation report
+  merging, missing layers, long-audio frame timing and deterministic rig export.
+
 ## v1.59.0 - Contributor Collection
 
 This release incorporates accepted work from eight community pull requests. Thanks to [@devswha](https://github.com/devswha) for chroma color preservation, [@bokjk](https://github.com/bokjk) for portable manifest paths, [@Dongkyu-ES](https://github.com/Dongkyu-ES) for deterministic CLI tests, engine export, and subject-aware sparse-frame handling, [@napkn34](https://github.com/napkn34) for the Windows provider and publish-lock fixes, and [@monibu1548](https://github.com/monibu1548) for pixel-unfake vertical centering and grounding controls.
