@@ -96,7 +96,9 @@ def test_provider_run_uses_scrubbed_env(tmp_path: Path, monkeypatch) -> None:
         lambda sid, sessions_root, *, preexisting: tmp_path / "x.jsonl",
     )
     b64 = base64.b64encode(_png_bytes()).decode()
-    monkeypatch.setattr(codex_provider, "_collect_inline_results", lambda rollout: [b64])
+    monkeypatch.setattr(
+        codex_provider, "_collect_inline_results", lambda rollout: [codex_provider.InlineResult(b64)]
+    )
     monkeypatch.setenv("ORCHESTRATOR_RUNTIME_ENDPOINT_ID", "synthetic-endpoint")
     codex_provider.CodexProvider(keep_session=True).generate(
         GenRequest(prompt="a mushroom", raw=tmp_path / "raw.png"), tmp_path
@@ -147,7 +149,11 @@ def test_provider_commands_use_the_single_resolved_binary(tmp_path: Path, monkey
 
     monkeypatch.setattr(codex_provider.subprocess, "run", fake_codex)
     monkeypatch.setattr(codex_provider, "_resolve_rollout", lambda *_args, **_kwargs: tmp_path / "rollout.jsonl")
-    monkeypatch.setattr(codex_provider, "_collect_inline_results", lambda _path: [base64.b64encode(_png_bytes()).decode()])
+    monkeypatch.setattr(
+        codex_provider,
+        "_collect_inline_results",
+        lambda _path: [codex_provider.InlineResult(base64.b64encode(_png_bytes()).decode())],
+    )
     codex_provider.CodexProvider(keep_session=True).generate(
         GenRequest(prompt="도구", raw=tmp_path / "codex.png"), tmp_path
     )
@@ -194,9 +200,11 @@ def test_codex_inline_extraction_reads_both_record_types(tmp_path: Path) -> None
 
     results = codex_provider._collect_inline_results(rollout)
     assert len(results) == 2
+    # Pre-0.149 records carry no transparentBackground field — reported as unknown.
+    assert [r.transparent_background for r in results] == [None, None]
 
     dest = tmp_path / "decoded.png"
-    codex_provider._decode_png(results[-1], dest)
+    codex_provider._decode_png(results[-1].result, dest)
     assert gen_base.verify_png(dest) > 0
 
 
@@ -223,6 +231,7 @@ def test_codex_inline_extraction_reads_0149_imagegen_extension(tmp_path: Path) -
                     "kind": "image_gen.generation",
                     "status": "completed",
                     "result": b64,
+                    "transparentBackground": True,
                 },
             }
         },
@@ -231,7 +240,9 @@ def test_codex_inline_extraction_reads_0149_imagegen_extension(tmp_path: Path) -
 
     results = codex_provider._collect_inline_results(rollout)
 
-    assert results == [b64]
+    # codex 0.153 reports its own transparency claim on the completed item; it is
+    # carried through (the orchestrator still measures the decoded PNG itself).
+    assert results == [codex_provider.InlineResult(b64, transparent_background=True)]
 
 
 @pytest.mark.parametrize(
@@ -381,7 +392,9 @@ def test_codex_prompt_reaches_the_child_process(tmp_path: Path, monkeypatch) -> 
         lambda sid, sessions_root, *, preexisting: tmp_path / "x.jsonl",
     )
     b64 = base64.b64encode(_png_bytes()).decode()
-    monkeypatch.setattr(codex_provider, "_collect_inline_results", lambda path: [b64])
+    monkeypatch.setattr(
+        codex_provider, "_collect_inline_results", lambda path: [codex_provider.InlineResult(b64)]
+    )
 
     codex_provider.CodexProvider(keep_session=True).generate(
         GenRequest(prompt="a mushroom", raw=tmp_path / "raw.png"), tmp_path
@@ -486,14 +499,267 @@ def test_chroma_key_transparent_rejects_zero_percent_alpha(
 
 class _FakeProvider:
     name = "fake"
+    transparency = gen_base.TRANSPARENCY_CHROMA
 
     def __init__(self) -> None:
         self.calls = 0
+        self.requests: list[GenRequest] = []
 
     def generate(self, request: GenRequest, workdir: Path):
         self.calls += 1
+        self.requests.append(request)
         Image.new("RGBA", (8, 8), (255, 0, 255, 255)).save(request.raw)
         return gen_base.ProviderRun(provider=self.name, elapsed_seconds=1.23, model=request.model)
+
+
+def _native_rgba_image() -> Image.Image:
+    """A model-style RGBA: transparent margin, opaque core, one stale-RGB transparent px."""
+    image = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+    for y in range(2, 6):
+        for x in range(2, 6):
+            image.putpixel((x, y), (200, 90, 20, 253))
+    image.putpixel((0, 0), (255, 0, 255, 0))  # stale RGB under alpha 0
+    return image
+
+
+class _FakeNativeProvider(_FakeProvider):
+    """A provider that returns its own alpha (the codex image_gen shape)."""
+
+    name = "fake-native"
+    transparency = gen_base.TRANSPARENCY_NATIVE
+
+    def __init__(self, image: Image.Image | None = None) -> None:
+        super().__init__()
+        self.image = image if image is not None else _native_rgba_image()
+
+    def generate(self, request: GenRequest, workdir: Path):
+        self.calls += 1
+        self.requests.append(request)
+        self.image.save(request.raw)
+        return gen_base.ProviderRun(provider=self.name, elapsed_seconds=2.5, model=request.model)
+
+
+def _gen_kwargs(out: Path, report: Path, **overrides):
+    kwargs = dict(
+        provider="fake",
+        prompt="a mushroom",
+        out=out,
+        ref=[],
+        model=None,
+        aspect_ratio=None,
+        transparent=True,
+        alpha_mode="auto",
+        chroma_key="magenta",
+        white_check=None,
+        keep_session=False,
+        report=report,
+        prompt_file=None,
+        workdir=None,
+    )
+    kwargs.update(overrides)
+    return kwargs
+
+
+def test_native_strategy_publishes_measured_alpha_and_asks_provider_for_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fake = _FakeNativeProvider()
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    out = tmp_path / "asset.png"
+    report = tmp_path / "report.json"
+
+    rc = gen.run(**_gen_kwargs(out, report))
+
+    assert rc == 0
+    # The strategy is decided before the model runs and rides on the request.
+    assert fake.requests[0].native_alpha is True
+    published = Image.open(out)
+    assert published.mode == "RGBA"
+    assert published.getpixel((0, 0)) == (0, 0, 0, 0)  # stale RGB scrubbed
+    assert published.getpixel((3, 3)) == (200, 90, 20, 253)  # partial alpha kept as produced
+    assert (tmp_path / "asset.png.raw.png").is_file()
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["transparent"] is True
+    assert payload["alpha"]["strategy"] == "native"
+    assert payload["alpha"]["method"] == "native"
+    assert payload["alpha"]["alpha_zero_pct"] == 75.0
+    assert payload["alpha"]["partial_alpha_pct"] == 25.0
+    assert payload["alpha"]["opaque_pct"] == 0.0
+    assert payload["alpha"]["cleaned_transparent_rgb_pixels"] == 1
+    assert payload["alpha"]["stale_transparent_rgb_pixels"] == 0
+    assert payload["chroma"] is None  # no chroma key ran
+
+
+def test_chroma_strategy_reports_itself_under_alpha_too(tmp_path: Path, monkeypatch) -> None:
+    fake = _FakeProvider()
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    out = tmp_path / "asset.png"
+    report = tmp_path / "report.json"
+
+    assert gen.run(**_gen_kwargs(out, report)) == 0
+
+    assert fake.requests[0].native_alpha is False
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["alpha"]["strategy"] == "chroma"
+    assert payload["alpha"]["method"] == "ycbcr"
+    assert payload["chroma"]["method"] == "ycbcr"
+
+
+@pytest.mark.parametrize(
+    ("image", "expected_message"),
+    [
+        (Image.new("RGB", (8, 8), (255, 255, 255)), "no alpha channel"),
+        (Image.new("RGBA", (8, 8), (10, 20, 30, 255)), r"0\.0% transparent pixels"),
+    ],
+)
+def test_native_strategy_refuses_drawn_or_opaque_backgrounds(
+    tmp_path: Path, monkeypatch, image: Image.Image, expected_message: str
+) -> None:
+    # A drawn checkerboard is an RGB image; a fully opaque RGBA has no transparency.
+    # Neither can be rescued by chroma keying, so the run fails before publishing.
+    fake = _FakeNativeProvider(image)
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    out = tmp_path / "asset.png"
+    report = tmp_path / "report.json"
+
+    with pytest.raises(SystemExit, match=expected_message):
+        gen.run(**_gen_kwargs(out, report))
+
+    assert not out.exists()
+    assert not report.exists()
+
+
+def test_alpha_mode_native_is_refused_on_a_chroma_provider(tmp_path: Path, monkeypatch) -> None:
+    fake = _FakeProvider()
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    with pytest.raises(SystemExit, match="--alpha-mode native is not a capability"):
+        gen.run(**_gen_kwargs(tmp_path / "a.png", tmp_path / "r.json", alpha_mode="native"))
+    assert fake.calls == 0  # refused before any model call
+
+
+def test_alpha_mode_chroma_forces_keying_on_a_native_provider(tmp_path: Path, monkeypatch) -> None:
+    # The prompt already carries a magenta key: the native provider is told NOT to
+    # return alpha and the raw is keyed out like any chroma run.
+    fake = _FakeNativeProvider(Image.new("RGBA", (8, 8), (255, 0, 255, 255)))
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    out = tmp_path / "asset.png"
+    report = tmp_path / "report.json"
+
+    assert gen.run(**_gen_kwargs(out, report, alpha_mode="chroma")) == 0
+
+    assert fake.requests[0].native_alpha is False
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["alpha"]["strategy"] == "chroma"
+    assert payload["chroma"]["key"] == "magenta"
+
+
+def test_provider_without_a_declared_strategy_fails_loud(tmp_path: Path, monkeypatch) -> None:
+    class _Undeclared(_FakeProvider):
+        name = "undeclared"
+        transparency = None
+
+    fake = _Undeclared()
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    with pytest.raises(SystemExit, match="declares no transparency strategy"):
+        gen.run(**_gen_kwargs(tmp_path / "a.png", tmp_path / "r.json"))
+    assert fake.calls == 0
+
+
+def test_non_transparent_run_ignores_alpha_mode(tmp_path: Path, monkeypatch) -> None:
+    fake = _FakeProvider()
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    out = tmp_path / "asset.png"
+    report = tmp_path / "report.json"
+    assert gen.run(**_gen_kwargs(out, report, transparent=False, alpha_mode="native")) == 0
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["alpha"] is None and payload["chroma"] is None
+    assert fake.requests[0].native_alpha is False
+
+
+def test_real_providers_declare_their_transparency_strategy() -> None:
+    from sprite_gen.gen import grok_provider
+
+    # SSoT: each adapter declares once what it can do (2026-09-08 실측 — codex
+    # image_gen returns real RGBA; grok Imagine 2.0 returns JPEG from API and CLI).
+    assert codex_provider.CodexProvider.transparency == gen_base.TRANSPARENCY_NATIVE
+    assert grok_provider.GrokProvider.transparency == gen_base.TRANSPARENCY_CHROMA
+
+
+def test_grok_refuses_a_native_alpha_request_before_spawning(tmp_path: Path, monkeypatch) -> None:
+    from sprite_gen.gen import grok_provider
+
+    spawned: list = []
+    monkeypatch.setattr(grok_provider.subprocess, "run", lambda *a, **k: spawned.append(a))
+    with pytest.raises(SystemExit, match="cannot return an alpha channel"):
+        grok_provider.GrokProvider().generate(
+            GenRequest(prompt="x", raw=tmp_path / "raw.png", native_alpha=True), tmp_path
+        )
+    assert spawned == []
+
+
+def test_codex_prompt_carries_native_alpha_request_only_when_asked() -> None:
+    user_prompt = "a fox sprite"
+    plain = codex_provider._build_prompt(user_prompt)
+    native = codex_provider._build_prompt(user_prompt, native_alpha=True)
+
+    assert codex_provider._NATIVE_ALPHA_INSTRUCTION not in plain
+    assert codex_provider._NATIVE_ALPHA_INSTRUCTION in native
+    # The bundled imagegen skill keys on this phrase to request real alpha.
+    assert "transparent background" in native
+    # The transport contract and the verbatim user prompt survive on both.
+    for prompt in (plain, native):
+        assert prompt.startswith("$imagegen ")
+        assert user_prompt in prompt
+
+
+def test_codex_generate_reports_transparent_background_claim(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    prompts: list[str] = []
+
+    class _Completed:
+        returncode = 0
+        stdout = '{"type":"thread.started","thread_id":"aaaa-bbbb"}\n'
+        stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        prompts.append(kwargs.get("input"))
+        return _Completed()
+
+    monkeypatch.setattr(codex_provider.subprocess, "run", _fake_run)
+    monkeypatch.setattr(
+        codex_provider, "_resolve_rollout", lambda sid, root, *, preexisting: tmp_path / "x.jsonl"
+    )
+    b64 = base64.b64encode(_png_bytes()).decode()
+    monkeypatch.setattr(
+        codex_provider,
+        "_collect_inline_results",
+        lambda rollout: [codex_provider.InlineResult(b64, transparent_background=True)],
+    )
+    run = codex_provider.CodexProvider(keep_session=True).generate(
+        GenRequest(prompt="a fox", raw=tmp_path / "raw.png", native_alpha=True), tmp_path
+    )
+    assert run.extra["transparent_background_reported"] is True
+    assert codex_provider._NATIVE_ALPHA_INSTRUCTION in prompts[0]
+
+
+def test_verify_native_alpha_writes_white_check(tmp_path: Path) -> None:
+    raw = tmp_path / "raw.png"
+    _native_rgba_image().save(raw)
+    out = tmp_path / "out.png"
+    check = tmp_path / "check.png"
+    stats = chroma_mod.verify_native_alpha(raw, out, white_check=check)
+    assert stats["white_check"] == str(check)
+    assert Image.open(check).mode == "RGB"
+    assert Image.open(check).getpixel((0, 0)) == (255, 255, 255)
+
+
+def test_cli_alpha_mode_defaults_to_auto_and_rejects_unknown() -> None:
+    parser = gen._build_parser()
+    args = parser.parse_args(["--out", "x.png", "--prompt", "p"])
+    assert args.alpha_mode == "auto"
+    assert parser.parse_args(["--out", "x.png", "--alpha-mode", "chroma"]).alpha_mode == "chroma"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--out", "x.png", "--alpha-mode", "magic"])
 
 
 def test_generate_image_zero_percent_alpha_fails_without_success_report(

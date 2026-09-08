@@ -23,9 +23,19 @@ import os
 import re
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
-from .base import GEN_TIMEOUT_SECONDS, GenRequest, GenTimeoutError, ProviderRun, provider_binary, provider_subprocess_env, verify_png
+from .base import (
+    GEN_TIMEOUT_SECONDS,
+    TRANSPARENCY_NATIVE,
+    GenRequest,
+    GenTimeoutError,
+    ProviderRun,
+    provider_binary,
+    provider_subprocess_env,
+    verify_png,
+)
 
 # codex carries the inline base64 on a version-specific record. All are
 # first-class canonical records (not fallbacks) — read whichever the running
@@ -52,6 +62,28 @@ _SID_RE = re.compile(r"session id: ([0-9a-f-]+)")
 # so this trigger is an alignment with the official invocation contract, not a fix
 # for a session that is never offered the tool.
 _SKILL_TRIGGER = "$imagegen"
+# Native transparency (2026-09-08 실측, codex 0.153.4): the bundled `imagegen` skill
+# says "For transparent images, ask built-in image_gen for a transparent background
+# and preserve the generated alpha", and the completed `image_gen.generation` item
+# reports `transparentBackground: true` next to the real RGBA PNG. There is no
+# tool parameter — the request rides on the prompt, so this adapter owns the
+# exact wording (the caller's prompt is still passed through verbatim).
+_NATIVE_ALPHA_INSTRUCTION = (
+    "배경은 진짜 투명(알파 채널이 있는 PNG)으로 만들어라 — image_gen 에 transparent "
+    "background 를 요청하고 생성된 알파를 그대로 보존해라. 체커보드 무늬·흰색·단색 배경을 "
+    "그림으로 그려 넣는 것은 금지다."
+)
+
+
+@dataclass(frozen=True)
+class InlineResult:
+    """One completed image_gen call as recorded in the rollout."""
+
+    result: str  # inline base64 PNG
+    # `transparentBackground` as codex reported it (0.149+ Extension item);
+    # None when the record type does not carry the field. Reported, never trusted —
+    # the orchestrator measures the decoded PNG's alpha itself.
+    transparent_background: bool | None = None
 
 
 def _parse_session_id(stdout: str) -> str | None:
@@ -163,8 +195,8 @@ def _resolve_rollout(
     return rollout
 
 
-def _collect_inline_results(rollout: Path) -> list[str]:
-    results: list[str] = []
+def _collect_inline_results(rollout: Path) -> list[InlineResult]:
+    results: list[InlineResult] = []
     with rollout.open(encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
@@ -189,14 +221,20 @@ def _collect_inline_results(rollout: Path) -> list[str]:
                     raise SystemExit(
                         f"codex-gen: completed image_gen call has no result in {rollout}"
                     )
-                results.append(result)
+                reported = item.get("transparentBackground")
+                results.append(
+                    InlineResult(
+                        result=result,
+                        transparent_background=reported if isinstance(reported, bool) else None,
+                    )
+                )
                 continue
             if payload.get("type") not in _RESULT_TYPES or not payload.get("result"):
                 continue
             status = payload.get("status")
             if status is not None and status != "completed":
                 raise SystemExit(f"codex-gen: image_gen call ended with status={status!r} in {rollout}")
-            results.append(payload["result"])
+            results.append(InlineResult(result=payload["result"]))
     return results
 
 
@@ -207,17 +245,21 @@ def _decode_png(b64: str, dest: Path) -> None:
     verify_png(dest)
 
 
-def _build_prompt(user_prompt: str) -> str:
+def _build_prompt(user_prompt: str, *, native_alpha: bool = False) -> str:
     """Wrap the caller's prompt in the transport-level skill trigger.
 
     The sprite-request prompt is the caller's SSoT and is passed through verbatim;
-    this adapter is the one place that owns the codex invocation contract.
+    this adapter is the one place that owns the codex invocation contract. With
+    `native_alpha` the transport also carries the transparent-background request
+    (`_NATIVE_ALPHA_INSTRUCTION`) — that is how image_gen is told to return alpha.
     """
+    alpha_line = f"{_NATIVE_ALPHA_INSTRUCTION}\n" if native_alpha else ""
     return (
         f"{_SKILL_TRIGGER} 스킬로 built-in image_gen 도구를 정확히 1번 호출해서 "
         "다음 프롬프트의 이미지 1장만 생성해줘.\n"
         "미리보기 전용이라 생성된 파일은 기본 경로에 그대로 두면 된다.\n"
-        "파일 저장·이동·복사·셸 명령·코드 작성·경로 보고 전부 금지. 생성만 하고 끝.\n\n"
+        "파일 저장·이동·복사·셸 명령·코드 작성·경로 보고 전부 금지. 생성만 하고 끝.\n"
+        f"{alpha_line}\n"
         "프롬프트:\n"
         f"{user_prompt}\n"
     )
@@ -248,6 +290,7 @@ class CodexProvider:
     """Generate one image through codex `image_gen`."""
 
     name = "codex"
+    transparency = TRANSPARENCY_NATIVE
 
     def __init__(self, *, keep_session: bool = False) -> None:
         self.keep_session = keep_session
@@ -285,7 +328,7 @@ class CodexProvider:
             cmd += ["-i", str(Path(ref).expanduser().resolve())]
         cmd += ["-", ]
 
-        prompt = _build_prompt(request.prompt)
+        prompt = _build_prompt(request.prompt, native_alpha=request.native_alpha)
         started = time.monotonic()
         child_env = provider_subprocess_env()
         if "CODEX_HOME" in os.environ:
@@ -325,7 +368,8 @@ class CodexProvider:
         results = _collect_inline_results(rollout)
         if not results:
             raise SystemExit(_no_image_records_message(rollout, codex_home))
-        _decode_png(results[-1], request.raw)
+        final = results[-1]
+        _decode_png(final.result, request.raw)
 
         if not self.keep_session:
             try:
@@ -338,5 +382,11 @@ class CodexProvider:
             elapsed_seconds=elapsed,
             model=request.model,
             session_id=session_id,
-            extra={"inline_results": len(results), "rollout_cleaned": not self.keep_session},
+            extra={
+                "inline_results": len(results),
+                "rollout_cleaned": not self.keep_session,
+                # codex's own claim about the output; the orchestrator measures
+                # the real alpha and publishes that, not this flag.
+                "transparent_background_reported": final.transparent_background,
+            },
         )
