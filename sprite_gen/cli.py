@@ -12,7 +12,7 @@ from sprite_gen.curate import anchor
 from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, compose_layers, export_aseprite, export_pngs
 from sprite_gen.qa import correction_loop, inspect, preview, score
 from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
-from sprite_gen.gen import prepare
+from sprite_gen.gen import prepare, video
 from sprite_gen.effects import recolor
 from sprite_gen.serve import serve_compose, serve_curation
 from sprite_gen.spec import migrate_breathe, migrate_request
@@ -204,6 +204,10 @@ def _add_cutout(p: argparse.ArgumentParser) -> None:
     cutout.add_arguments(p)
 
 
+def _add_video(p: argparse.ArgumentParser) -> None:
+    video.add_arguments(p)
+
+
 def _add_anchor(p: argparse.ArgumentParser) -> None:
     anchor.add_arguments(p)
 
@@ -284,6 +288,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Cut a uniform (white/ivory/solid) background off an imported image into a clean transparent PNG.",
         _add_cutout,
         cutout.run,
+    ),
+    "video": (
+        "Animate one still into a verified mp4 via Grok Imagine (your own grok login or XAI_API_KEY).",
+        _add_video,
+        video.run,
     ),
     # The argument surface is `serve_curation.add_arguments` itself, not a copy of it: the
     # webview's own `--help` and this subcommand are the same declaration, so `sprite-gen

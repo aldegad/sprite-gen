@@ -11,6 +11,7 @@ MODULE_DOMAIN = {
     'migrate_request': 'spec',
     'migrate_breathe': 'spec',
     'generate_image': 'gen',
+    'video': 'gen',
     'prepare': 'gen',
     'extract': 'frames',
     'cutout': 'frames',

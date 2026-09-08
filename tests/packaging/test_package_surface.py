@@ -37,6 +37,7 @@ PACKAGE_RUN_MODULES = [
     "serve_curation",
     "slice_sheet",
     "unpack_atlas",
+    "video",
 ]
 
 CLI_HELPERS = [
