@@ -261,6 +261,15 @@ with the repo; the report says which one ran. An expired login stops before
 uploading and tells you the exact refresh command. Setup, parameters, and the
 verification contract: [`docs/video.md`](docs/video.md).
 
+### Video → sprite loops
+
+`sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --out-dir set/`
+turns one still into a seamless, transparent loop per state: the still is padded into
+the canvas the state needs (jumps tall, attacks wide), animated in place by Grok
+Imagine, keyed frame by frame, and cut at its true period into a strip, a GIF and a
+WebP — each stage measured and fail-loud. Contract and the measured rules behind it:
+[`docs/video-pipeline.md`](docs/video-pipeline.md).
+
 ## Attribution
 
 The component-row workflow is inspired by the Apache-2.0 licensed `hatch-pet` skill, but targets generic game sprite atlases and includes no pet packages or pet visual assets.

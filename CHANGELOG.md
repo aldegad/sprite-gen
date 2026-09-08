@@ -2,6 +2,11 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## Unreleased (v1.62.0) - Video to Sprite
+
+- Added the `sprite_gen/video` domain: `sprite-gen video-canvas` (state canvas — tall for jumps, wide for attacks, square otherwise; the still's corner key fills the padding), `sprite-gen video-frames` (ffmpeg extraction + cutout keying with an edge-contact gate), `sprite-gen video-loop` (global-period cycle detection, strip with `body_h` metadata, 1-bit-alpha GIF, `img2webp -exact` WebP, seam and periodicity gates, output re-verification) and `sprite-gen video-set` (directions × states with staggered starts and a bounded HTTP 429 retry, per-item reports and a table).
+- Declared `ffmpeg` and `img2webp` as required binaries for the video pipeline; `docs/video-pipeline.md` records the contract and the 2026-09-08 measurements it comes from.
+
 ## v1.61.0 - Image to Video
 
 - Added `sprite-gen video`: one still + prompt → a verified mp4 through Grok Imagine (`POST /v1/videos/generations`), with duration 1–15 s, 480p/720p/1080p, optional aspect ratio and audio flag, and a `sprite-gen-video-report` JSON.
