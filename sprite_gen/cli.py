@@ -14,6 +14,7 @@ from sprite_gen.qa import correction_loop, inspect, preview, score
 from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
 from sprite_gen.gen import prepare
 from sprite_gen.effects import recolor
+from sprite_gen.parts import match as parts_match, parts_gen, rig as parts_rig
 from sprite_gen.serve import serve_compose, serve_curation
 from sprite_gen.spec import migrate_breathe, migrate_request
 from sprite_gen.gen.prepare import STYLE_DEFAULT, _outline_config
@@ -240,6 +241,24 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Bake a rig run's declared composite stacks into <run-dir>/layers/.",
         compose_layers.add_arguments,
         compose_layers.run,
+    ),
+    # Parts rig: generate body parts alone, register them onto the base by pixels,
+    # export rig.json + HTML runtime. Same rule as compose-layers: the subcommand
+    # reuses the module's own argument declaration.
+    "parts-gen": (
+        "Generate every parts-catalog part alone (base + crop as refs), in parallel.",
+        parts_gen.add_arguments,
+        parts_gen.run,
+    ),
+    "parts-match": (
+        "Register generated parts onto the base by pixel agreement; gate on tolerance.",
+        parts_match.add_arguments,
+        parts_match.run,
+    ),
+    "parts-rig": (
+        "Build rig.json + HTML runtime + deterministic GSAP keys from matched parts.",
+        parts_rig.add_arguments,
+        parts_rig.run,
     ),
     "unpack-atlas": (
         "Unpack a composed sprite sheet back into a curator-ready run directory.",
