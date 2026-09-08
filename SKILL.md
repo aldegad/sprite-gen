@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 1.60.0
+version: 1.61.0
 description: "Generate clean 2D game sprites and animation atlases with a component-row pipeline: base identity, numeric sprite-request SSoT, per-state layout guides, image-gen row strips, chroma-key alpha cleanup, connected-component frame extraction, cell-based atlas composition, QA reports, and runtime manifest frame_layout. Its curation webview also serves ANY image-candidate set (icons, logos, generated drafts) — agent chat can't render images, this can: unpack_atlas_run --pngs-dir import, then serve_curation side-by-side compare/pick. Palette-swap bake (`sprite-gen recolor`) turns a base sheet + palette map into N colourway sheets; the curation view blink-compares and adopts a pick into curation.json.recolor.picked. Curation triggers (KR/EN): 큐레이션, 큐레이션뷰, 큐레이션 해줘, 이미지 후보 보여줘/안 보임, 나란히 비교, 골라볼게 띄워줘, curation view, show image candidates side by side, let me pick. Recolor triggers (KR/EN): 팔레트 스왑, 팔레트 베이크, 리컬러, 색깔 바꾸기, 컬러웨이, 색 변형, 팔레트 맵, 색갈이, palette swap, recolor, colourway, colorway, bake variants, palette map."
 license: Apache-2.0
 depends_on:
@@ -12,6 +12,7 @@ depends_on:
   required_scripts:
     - scripts/prepare_sprite_run.py
     - scripts/generate_sprite_image.py
+    - scripts/generate_sprite_video.py
     - scripts/extract_sprite_row_frames.py
     - scripts/interpolate_frames.py
     - scripts/compose_sprite_atlas.py
@@ -195,6 +196,7 @@ Scripts are explicit pipeline commands, not hidden imports. One job each (stage 
 - `sprite_gen/compose/compose_layers.py` (`sprite-gen compose-layers`) — deterministic composite bake for a run that declares a **rig**. Stacks curated rows onto each other by integer pivot translation + arbitrary alpha masks (no resampling, rotation or scale of its own) into `<run-dir>/layers/<name>.png` + `<name>.manifest.json` + `layers.report.json`. Optional and opt-in: a request with no `rig` / `track` / `layers` is not a layer run and is refused by name rather than composed. All-or-nothing — declaration, composition **and** publish: one violation reports every violation and writes nothing. Declaration schema, CLI usage, and what `prepare` carries: [`docs/layer-tracks.md`](docs/layer-tracks.md).
 - `unpack_atlas_run.py` — inverse of compose: rebuild a curator-ready run dir from a finished sheet (`--grid` > `--manifest` > auto-detect) or import a PNG folder (`--pngs-dir`, with sibling `meta.json` labels/iso grid).
 - `export_curated_pngs.py` — export curated frames back to named PNGs with the transform baked in, into `<run-dir>/curated/`; the deliverable for imported still sets.
+- `sprite_gen/gen/video.py` (`sprite-gen video`) — one still → verified mp4 through Grok Imagine (`POST /v1/videos/generations`) with the user's own credential: `XAI_API_KEY` if set, else the `grok` CLI login (`~/.grok/auth.json`, SuperGrok Imagine quota). Expired login fails before upload with the refresh command; tokens/URLs never reach the report. The `grok-imagine-video` skill is a thin shuttle over this. Contract: [`docs/video.md`](docs/video.md).
 - `cutout.py` (`sprite-gen cutout`) — background remover for **imported** images (not pipeline output, which is already keyed). Routes on the corner background colour (`--key auto|white|magenta|green`): **white/ivory** → position matte (corner flood-fill keeps interior highlights unholed → decontaminated soft-alpha border + soft erode); **magenta/green key** → reuse the verified `extract.remove_chroma_background` engine as-is (no drift — key colours are absent from objects so its colour-only cut is safe there). `--white-check` writes cyan/magenta/yellow verification composites. No Silent Fallback (leftover non-zero RGB under transparency raises).
 - `slice_sheet_cells.py` — slice a multi-figure grid sheet (same character, N expressions/variants in one image) into per-cell standing cuts: v1.13 chroma alpha + centroid cell assignment + merged-figure split/in-cell re-label + neighbour-debris drop + per-cell height normalization + shared feet baseline. For dialogue cut-in portraits (立ち絵), not animation rows. Detail: [`docs/sheet-slicing.md`](docs/sheet-slicing.md).
 - `check_visible_magenta.py` — optional screenshot QA guard for visible chroma-key leakage.
@@ -505,6 +507,7 @@ sprite-gen (this SKILL.md = behavior contract + hub)
 │
 ├─ GENERATION ── "raw/<state>.png from prompts (the one AI step)"
 │   ├─ docs/gen.md               # sprite-gen gen provider CLI · verified PNG/report · image-gen shuttle
+│   ├─ docs/video.md             # sprite-gen video · Grok Imagine i2v with the user's own grok login / XAI_API_KEY
 │   ├─ docs/frame-interpolation.md  # generative in-between (codex/grok) → take raw · auth prereqs · RIFE retire rationale
 │   └─ docs/seamless-video-loop.md  # non-looping AI video clip → seamless loop: flow-matched cut + RIFE seam bridge
 │

@@ -252,6 +252,15 @@ implementation. Transparent stills follow a per-provider strategy: `codex` asks
 is published; `grok` is keyed out of a chroma background. See
 [`docs/gen.md`](docs/gen.md) for the CLI and verification contract.
 
+### Image to video
+
+`sprite-gen video --image still.png --prompt "…" --out clip.mp4` animates one
+still through Grok Imagine using **your own** credential — the `grok` CLI login
+(`grok login`, SuperGrok Imagine quota) or an `XAI_API_KEY`. Nothing is shipped
+with the repo; the report says which one ran. An expired login stops before
+uploading and tells you the exact refresh command. Setup, parameters, and the
+verification contract: [`docs/video.md`](docs/video.md).
+
 ## Attribution
 
 The component-row workflow is inspired by the Apache-2.0 licensed `hatch-pet` skill, but targets generic game sprite atlases and includes no pet packages or pet visual assets.

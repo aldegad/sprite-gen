@@ -2,6 +2,13 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## v1.61.0 - Image to Video
+
+- Added `sprite-gen video`: one still + prompt → a verified mp4 through Grok Imagine (`POST /v1/videos/generations`), with duration 1–15 s, 480p/720p/1080p, optional aspect ratio and audio flag, and a `sprite-gen-video-report` JSON.
+- Credentials are the user's own and never part of the repo: `XAI_API_KEY` when set, otherwise the `grok` CLI login file (`~/.grok/auth.json`, `GROK_HOME` honoured). The report records `auth_source`; tokens and download URLs are never printed or written.
+- An expired grok login fails before any upload with the exact refresh command; a set-but-empty `XAI_API_KEY`, a missing credential, a refused request, a failed/expired generation, a poll timeout, or a non-mp4 download each fail by name and write nothing.
+- New wrapper `scripts/generate_sprite_video.py` and docs at `docs/video.md`.
+
 ## v1.60.0 - Native Alpha
 
 - `sprite-gen gen --transparent` now follows a per-provider transparency strategy declared once on each adapter (`Provider.transparency`). `codex` asks `image_gen` for a genuinely transparent background and publishes the measured alpha (`native`, first choice); `grok` keeps deterministic chroma keying because Grok Imagine returns JPEG only.
