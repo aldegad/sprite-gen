@@ -72,6 +72,20 @@ def _stages(request: dict[str, Any], states: list[str]) -> list[list[str]]:
     return [stage for stage in (first, second) if stage]
 
 
+def read_report(report: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Parse a row's gen report. Returns (report, None) or (None, why) — a missing,
+    unreadable or provider-less report is never treated as a finished row."""
+    if not report.is_file():
+        return None, "report missing"
+    try:
+        data = json.loads(report.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, f"report unreadable ({exc.__class__.__name__})"
+    if not isinstance(data, dict) or not data.get("provider"):
+        return None, "report has no provider — not a finished gen report"
+    return data, None
+
+
 def run_gen_cli(prompt_file: Path, out: Path, refs: list[Path], report: Path, *, provider: str | None, model: str | None, log: Path) -> int:
     import subprocess
 
@@ -111,10 +125,15 @@ def run_item(
             raise SystemExit(f"prompt missing: {prompt_file} — run `sprite-gen prepare` first")
         if not guide.is_file():
             raise SystemExit(f"layout guide missing: {guide} — run `sprite-gen prepare` first")
-        if out.is_file() and report.is_file() and not force:
-            result["reused"] = True
-            result["ok"] = True
-            return result
+        if out.is_file() and not force:
+            prior, why = read_report(report)
+            if prior is not None:
+                result["reused"] = True
+                result["provider"] = prior.get("provider")
+                result["provider_resolved_from"] = prior.get("provider_resolved_from")
+                result["ok"] = True
+                return result
+            result["regenerated_because"] = why  # the row image exists but its report does not prove it — generate again, say why
         identity = anchor_mod.identity_ref(run_dir, state, request, quiet=True)
         refs = [identity, guide]
         result["refs"] = [str(r) for r in refs]
@@ -123,7 +142,12 @@ def run_item(
         if rc != 0 or not out.is_file():
             tail = log.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-3:] if log.exists() else []
             raise SystemExit(f"gen exited {rc}; " + (" | ".join(tail) if tail else f"see {log}"))
-        gen_report = json.loads(report.read_text(encoding="utf-8")) if report.is_file() else {}
+        gen_report, why = read_report(report)
+        if gen_report is None:
+            for partial in (out, report):
+                if partial.exists():
+                    partial.unlink()
+            raise SystemExit(f"gen exited 0 but its {why}; the row and the report were removed so the next run regenerates")
         result["provider"] = gen_report.get("provider")
         result["provider_resolved_from"] = gen_report.get("provider_resolved_from")
         if gen_report.get("provider_fallback"):
