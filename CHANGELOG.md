@@ -36,6 +36,7 @@ All notable public changes to `sprite-gen` are recorded here. Versions track the
 ### Changed
 
 - `SKILL.md` is a route-first hub (still / atlas / video-to-loop / utilities) under the 24 KB skill budget; the interpreter rationale, the rename gate and the breathing contract moved verbatim to `docs/interpreter.md`, `docs/rename-gate.md`, `docs/breathing.md`.
+- `video-loop` strips are capped by pixel width (32 000 px) as well as by cell count: a 650 px-wide cell now yields 49 cells instead of a 41 664 px image Chrome refuses; the strip meta records `cell_cap` and `subsampled`.
 - Walk detection window floor 10 % → 6 % of the clip so a legless body's fast bounce resolves; the 15 % depth rule keeps rejecting the one-step half period (verified on a biped and a quadruped). `video-set` motion templates no longer assume a biped.
 - `README.md` is an entry page: what it is, the four pipelines, one quickstart each, install. Breathe, chroma-alpha quality, Backbone Lattice and the curation webview tour moved verbatim to `docs/breathing.md`, `docs/chroma-alpha.md`, `docs/pixel-unfake.md`, `docs/curation.md`.
 

@@ -39,7 +39,8 @@ from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.gif_utils import save_clean_gif
 
 ANALYSIS_SIZE = 96  # thumbnail edge for the distance matrix
-STRIP_MAX_CELLS = 64  # Chrome caps image dimensions near 32767 px; 64 cells keeps strips renderable
+STRIP_MAX_CELLS = 64  # upper bound on cells even when they are narrow
+STRIP_MAX_WIDTH = 32000  # Chrome refuses images wider than ~32767 px; the cap is on PIXELS — a 650 px cell allows only 49 cells (2026-09-09 wolf idle: 64 cells = 41,664 px, unrenderable)
 STRIP_MAX_HEIGHT = 520
 SEAM_RATIO_MAX = 2.0  # loop seam / mean adjacent distance inside the cycle
 SPECK_MIN_FRACTION = 0.01  # detached components smaller than this fraction of the body are keying specks
@@ -236,26 +237,31 @@ def _scrub(image: Image.Image) -> int:
     return n
 
 
-def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, max_height: int = STRIP_MAX_HEIGHT, cycle_seconds: float) -> tuple[Image.Image, dict[str, Any]]:
-    """Union-crop (no bottom pad so feet meet the floor), scale, bottom-align, tile horizontally."""
+def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, max_height: int = STRIP_MAX_HEIGHT, max_width: int = STRIP_MAX_WIDTH, cycle_seconds: float) -> tuple[Image.Image, dict[str, Any]]:
+    """Union-crop (no bottom pad so feet meet the floor), scale, bottom-align, tile horizontally.
+
+    The cell count is capped by the strip's PIXEL width (`max_width`) as well as by
+    `max_cells`: the crop is measured over every cycle frame first, then as many evenly
+    spaced frames as fit are kept. Subsampling is recorded in the meta, never silent."""
     L = len(frames)
-    idx = list(range(L))
-    if L > max_cells:
-        idx = [round(k * L / max_cells) for k in range(max_cells)]
-    chosen = [frames[i] for i in idx]
-    boxes = [im.getchannel("A").point(lambda v: 255 if v >= 8 else 0).getbbox() for im in chosen]
+    boxes = [im.getchannel("A").point(lambda v: 255 if v >= 8 else 0).getbbox() for im in frames]
     boxes = [b for b in boxes if b]
     if not boxes:
         raise SystemExit("video-loop: every cycle frame is fully transparent")
     left = max(0, min(b[0] for b in boxes) - 8)
     top = max(0, min(b[1] for b in boxes) - 8)
-    right = min(chosen[0].width, max(b[2] for b in boxes) + 8)
+    right = min(frames[0].width, max(b[2] for b in boxes) + 8)
     bottom = max(b[3] for b in boxes)
     heights = sorted(b[3] - b[1] for b in boxes)
     body_src = heights[len(heights) // 2]
     scale = min(1.0, max_height / (bottom - top))
     w = round((right - left) * scale)
     h = round((bottom - top) * scale)
+    cap = max(1, min(max_cells, max_width // max(1, w)))
+    idx = list(range(L))
+    if L > cap:
+        idx = [round(k * L / cap) for k in range(cap)]
+    chosen = [frames[i] for i in idx]
     cells = [im.crop((left, top, right, bottom)).resize((w, h), Image.LANCZOS) for im in chosen]
     strip = Image.new("RGBA", (w * len(cells), h), (0, 0, 0, 0))
     for k, im in enumerate(cells):
@@ -268,7 +274,8 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
         "delay_ms": round(1000 * cycle_seconds / len(cells), 2),
         "cycle_frames": L,
         "cycle_seconds": round(cycle_seconds, 4),
-        "subsampled": L > max_cells,
+        "subsampled": L > cap,
+        "cell_cap": cap,
         "top_margin_px": top,
     }
     return strip, meta
