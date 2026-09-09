@@ -12,7 +12,7 @@ from sprite_gen.curate import anchor
 from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, compose_layers, export_aseprite, export_pngs
 from sprite_gen.qa import correction_loop, inspect, preview, score
 from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
-from sprite_gen.gen import prepare, video
+from sprite_gen.gen import gen_set, prepare, video
 from sprite_gen.video import batch as video_batch
 from sprite_gen.video import canvas as video_canvas
 from sprite_gen.video import frames as video_frames
@@ -292,6 +292,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Cut a uniform (white/ivory/solid) background off an imported image into a clean transparent PNG.",
         _add_cutout,
         cutout.run,
+    ),
+    "gen-set": (
+        "Generate every state row of a prepared run, N at a time — one report per row, table.md, non-zero exit on any failure.",
+        gen_set.add_arguments,
+        gen_set.run,
     ),
     "video": (
         "Animate one still into a verified mp4 via Grok Imagine (your own grok login or XAI_API_KEY).",

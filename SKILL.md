@@ -16,6 +16,7 @@ depends_on:
   required_scripts:
     - scripts/prepare_sprite_run.py
     - scripts/generate_sprite_image.py
+    - scripts/gen_set.py
     - scripts/generate_sprite_video.py
     - scripts/video_canvas.py
     - scripts/video_frames.py
@@ -111,6 +112,7 @@ One job each, all under `scripts/` (wrappers) ↔ `sprite_gen/<domain>/` (impl).
 |---|---|---|
 | `prepare_sprite_run.py` | request → `sprite-request.json`, layout guides, prompts, empty `raw/`+`frames/` | run-contract §2 |
 | `generate_sprite_image.py` (`gen`) | one still via codex `image_gen` / grok Imagine → verified PNG (+ transparent strategy) | [`docs/gen.md`](docs/gen.md) |
+| `gen_set.py` (`gen-set`) | every state row of a prepared run, N at a time — identity ref from the run (base or accepted anchor), one report per row, `table.md`, non-zero exit on any failure | [`docs/gen.md`](docs/gen.md) |
 | `generate_sprite_video.py` (`video`) | one still → verified mp4 via Grok Imagine, user's own login / `XAI_API_KEY` | [`docs/video.md`](docs/video.md) |
 | `video_canvas.py` · `video_frames.py` · `video_loop.py` · `video_set.py` | state canvas (jump tall / attack wide / else square) · ffmpeg + keying · true-period cycle → strip/GIF/WebP · directions × states batch | [`docs/video-pipeline.md`](docs/video-pipeline.md) |
 | `extract_sprite_row_frames.py` (`extract`) | `raw/<state>.png` → chroma removal → components → transparent cells + `frames/frames-manifest.json` | run-contract · [`docs/pixel-unfake.md`](docs/pixel-unfake.md) |
@@ -143,7 +145,7 @@ $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/prepare_sprite_run.py
 
 Hatch-pet-style locomotion adds the cell gate (`--cell-width 192 --cell-height 208`). Directional characters declare the direction contract (`--directions down,side,up --mirror left=side`); files then follow the taxonomy `raw/<dir>/<pose>.png`, `frames/<dir>/<pose>/` (path resolver SSoT `sprite_gen/layout.py`, frame paths SSoT = frames-manifest `row.files`) and `prepare` records the generation chain in `references/generation-plan.json` — [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md). Writes `sprite-request.json`, `base-source.<ext>`, `references/layout-guides/<state>.png`, `prompts/<state>.txt`, `raw/`, `frames/`.
 
-2. Generate one row per state (the one AI step; the `image-gen` skill is a thin shuttle over this):
+2. Generate the rows (the one AI step; the `image-gen` skill is a thin shuttle over this). The batch form is the default — `$SPRITE_GEN_ROOT/.venv/bin/sprite-gen gen-set --run-dir <run>` generates every non-mirrored state 4 at a time with the run's own identity ref and writes `reports/gen-set/table.md`; one row by hand:
 
 ```bash
 $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/generate_sprite_image.py \
@@ -153,7 +155,7 @@ $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/generate_sprite_image
 
 - `--provider` is optional: default codex (`SPRITE_GEN_DEFAULT_PROVIDER` overrides; observable grok fallback only if codex is unavailable). Rows keep the request chroma key and are generated **without** `--transparent`; standalone stills use `--transparent` (codex native alpha first, grok chroma) — [`docs/gen.md`](docs/gen.md).
 - References: default states attach exactly two — `base-source.<ext>` + the state layout guide. Direction-anchor mode attaches the accepted anchor instead of the base: **never pick the anchor crop by hand**, ask `$SPRITE_GEN_ROOT/.venv/bin/python -m sprite_gen.cli anchor --run-dir <run> --for-state <state>` right before each generation (derived cache, re-run every time; the human pins which frame). Extra motion references only when recorded in `qa-notes.md`.
-- **Concurrency (maintainer 2026-07-19)**: multi-row batches run **4 at a time** (`ThreadPoolExecutor(max_workers=4)`); serial one-by-one is an anti-pattern. `runio.py` locks make parallel `raw/<state>.png` writes safe. Providers are engine backends, not agents — no worker surface is spawned ([`docs/gen.md`](docs/gen.md#provider-topology)).
+- **Concurrency (maintainer 2026-07-19)**: multi-row batches run **4 at a time** — that is `gen-set`'s default `--concurrency`; serial one-by-one is an anti-pattern. `runio.py` locks make parallel `raw/<state>.png` writes safe. Providers are engine backends, not agents — no worker surface is spawned ([`docs/gen.md`](docs/gen.md#provider-topology)).
 
 3. Extract frames — chroma removal, connected components, one transparent request-sized cell per pose, `frames/<state>/frame-N.png` + `frames/frames-manifest.json`:
 

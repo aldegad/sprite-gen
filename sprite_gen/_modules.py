@@ -12,6 +12,7 @@ MODULE_DOMAIN = {
     'migrate_breathe': 'spec',
     'generate_image': 'gen',
     'video': 'gen',
+    'gen_set': 'gen',
     'canvas': 'video',
     'frames': 'video',
     'loop': 'video',

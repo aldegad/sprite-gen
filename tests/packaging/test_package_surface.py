@@ -29,6 +29,7 @@ PACKAGE_RUN_MODULES = [
     "export_pngs",
     "extract",
     "gen",
+    "gen_set",
     "generate_image",
     "inspect",
     "prepare",
