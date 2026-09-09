@@ -2,6 +2,13 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## v2.0.2 - Heroes from the pipeline
+
+- `video-loop` GIF/WebP default rate is now 24 fps (the source rate): every cycle frame is kept, so fast actions never read slow; `--gif-fps 12` restores the lighter output.
+- `video-loop --cycle fixed --start N --length L` cuts an explicitly named cycle without detection (reported as `kind = "fixed"`, seam gate still applied) — for clips with too few repeats for the periodicity gate.
+- `video-loop --strip-height` caps the cell/strip/GIF height so an output can be produced at its display size directly from the pipeline.
+- README hero GIFs are `video-loop` outputs verbatim; the jump `<img>` height matches its taller file.
+
 ## v2.0.1 - Jump loops play at the same rate
 
 - `video-loop` GIF/WebP frame count follows the cycle length at a fixed playback rate (`--gif-fps`, default 12) instead of a per-state fixed count: a 2.5 s jump now gets ~30 frames at ~84 ms instead of 12 frames at 210 ms, so every state plays at the same density. `--n-out` still overrides; the report records `gif_fps`.
