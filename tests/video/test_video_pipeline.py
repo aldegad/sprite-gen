@@ -297,15 +297,43 @@ def test_gif_frame_count_follows_cycle_length_at_a_fixed_playback_rate(tmp_path:
     (2026-09-09, lead: '점프만 혼자 왜 프레임이 느리냐')."""
     (tmp_path / "long").mkdir()
     _gait_frames(tmp_path / "long", period=60, n=150, stamp=True)  # 60 frames @ 24 fps = 2.5 s
-    rep = loop_mod.run_loop(tmp_path / "long" / "keyed", tmp_path / "long-out", fps=24.0, state="jump", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="j", report_path=None)
+    rep = loop_mod.run_loop(tmp_path / "long" / "keyed", tmp_path / "long-out", fps=24.0, state="jump", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="j", report_path=None, gif_fps=12.0)
     assert rep["n_out"] == 30 and 80 <= rep["delay_ms"] <= 90
     (tmp_path / "short").mkdir()
     _gait_frames(tmp_path / "short", period=26, n=100, stamp=True)  # 1.08 s
-    rep2 = loop_mod.run_loop(tmp_path / "short" / "keyed", tmp_path / "short-out", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="w", report_path=None)
+    rep2 = loop_mod.run_loop(tmp_path / "short" / "keyed", tmp_path / "short-out", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="w", report_path=None, gif_fps=12.0)
     assert 12 <= rep2["n_out"] <= 14 and abs(rep2["delay_ms"] - rep["delay_ms"]) <= 15  # ~1.1 s at 12 fps; the period may resolve to 24-26
     explicit = loop_mod.run_loop(tmp_path / "short" / "keyed", tmp_path / "short-out2", fps=24.0, state="walk", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="w8", report_path=None)
     assert explicit["n_out"] == 8
     assert rep["n_out"] <= rep["cycle"]["length"] and rep2["n_out"] <= rep2["cycle"]["length"]
+
+
+def test_default_gif_rate_keeps_every_cycle_frame(tmp_path: Path) -> None:
+    """24 fps source, 24 fps GIF: a 61-frame jump cycle stays 61 frames at ~42 ms."""
+    (tmp_path / "j").mkdir()
+    _gait_frames(tmp_path / "j", period=61, n=150, stamp=True)
+    rep = loop_mod.run_loop(tmp_path / "j" / "keyed", tmp_path / "j-out", fps=24.0, state="jump", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="j", report_path=None)
+    assert rep["n_out"] == rep["cycle"]["length"] and 40 <= rep["delay_ms"] <= 43 and rep["gif_fps"] == 24.0
+
+
+def test_fixed_cycle_cuts_exactly_and_skips_detection(tmp_path: Path) -> None:
+    """A clip with too few repeats for the periodicity gate can still be cut where the
+    caller says (2026-09-09: the reel's jump clip held 2.3 hops)."""
+    _one_shot_frames(tmp_path)  # 144 frames, one hop at 60..76 — no period at all
+    rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "fx", fps=24.0, state="jump", min_len=None, max_len=None, n_out=None, seam_max=5.0, name="f", report_path=None, cycle_mode="fixed", start=50, length=40)
+    assert rep["cycle"]["kind"] == "fixed" and rep["cycle"]["start"] == 50 and rep["cycle"]["length"] == 40
+    assert rep["periodic_attempt"] is None and len(list((tmp_path / "fx" / "cycle").glob("frame-*.png"))) == 40
+    with pytest.raises(SystemExit, match="does not fit"):
+        loop_mod.run_loop(tmp_path / "keyed", tmp_path / "fx2", fps=24.0, state="jump", min_len=None, max_len=None, n_out=None, seam_max=5.0, name="f2", report_path=None, cycle_mode="fixed", start=120, length=40)
+    with pytest.raises(SystemExit, match="needs --start"):
+        loop_mod.run_loop(tmp_path / "keyed", tmp_path / "fx3", fps=24.0, state="jump", min_len=None, max_len=None, n_out=None, seam_max=5.0, name="f3", report_path=None, cycle_mode="fixed")
+
+
+def test_strip_height_caps_the_output_size(tmp_path: Path) -> None:
+    files = _gait_frames(tmp_path, period=12, n=60, size=(160, 400))
+    rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "h", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="h", report_path=None, strip_height=100)
+    assert rep["strip"]["h"] <= 100
+    assert Image.open(rep["gif"]["file"] if Path(rep["gif"]["file"]).is_absolute() else tmp_path / "h" / rep["gif"]["file"]).height <= 100
 
 
 def test_drop_specks_erases_detached_slivers_only() -> None:
