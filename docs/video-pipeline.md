@@ -49,7 +49,9 @@ Unchanged from [video.md](video.md): the user's own credential, fail-loud, `ftyp
 mp4. For loops, prompt for **in-place, evenly paced, returns-to-start** motion on a flat
 chroma fill ("walks in place on a treadmill", "hop … return to the exact starting
 stance … same height every time"). `video-set` carries those templates
-(`MOTION_TEXT` / `VIEW_TEXT`).
+(`MOTION_TEXT` / `VIEW_TEXT`). They describe the gait "for this body type" and never
+name limbs — the first drafts said "bipedal … knees … arms pumping", which prompted a
+quadruped and a legless blob into a contradiction (2026-09-09).
 
 ## 3. Frames — extract, key, check the edges
 
@@ -76,12 +78,31 @@ was 17). `video-loop` therefore:
 
 Windows come from the state profile (`STATE_PROFILES`, fractions of the clip length):
 idle 60–95 % (breathing is slow and not periodic — the lowest seam is a long window,
-and idle is exempt from the periodicity gate), walk 10–31 %, run 7–23 %, jump/attack
-11–45 %. `--min-len/--max-len` override.
+and idle is exempt from the periodicity gate), walk 6–31 %, run 7–23 %, jump/attack
+11–45 %. `--min-len/--max-len` override. The walk floor is low on purpose: a legless
+body "walks" as a fast bounce (about 13 frames at 24 fps) while a gait is 24–28, and it
+is the 15 % depth rule — not the window — that rejects the one-step half period (on a
+biped and a quadruped the half period dipped only 55–70 % as deep as the full one).
 
 Gates, all fail-loud: no period (profile flat, `periodicity < 0.15`), loop seam ratio
 above `--seam-max` (2.0), GIF/WebP re-opened and checked (frame count, `loop=0`,
 transparent corners, no RGB under alpha 0 in the WebP).
+
+### One-shot actions — `--cycle auto|periodic|one-shot`
+
+A video model asked to jump "over and over" sometimes jumps once and stands for the
+rest of the clip. That is not a period, and the periodicity gate says so. For states
+that *are* single actions by nature (`jump`, `attack`, unknown states; never `walk`,
+`run`, `idle`) `auto` then runs a second, different detector instead of failing: the
+**rest pose** is the medoid frame (smallest mean distance to all others), frames whose
+distance to it rises more than 3 MADs above the rest noise are the excursion, and the
+longest such run padded by 2 rest frames on each side is the cycle — so the seam is
+rest → rest by construction. The failover is explicit and recorded, not silent: the
+report carries `cycle.kind = "one-shot"` plus `periodic_attempt` (the periodicity that
+failed and the window), `table.md` has a `kind` column, and the same seam and
+animation gates still apply. `--cycle periodic` keeps the old hard failure; `--cycle
+one-shot` forces the excursion cut. A clip that never leaves its rest pose fails loud
+in both detectors.
 
 Outputs:
 
@@ -113,6 +134,12 @@ when any item failed.
 
 Every threshold above (the 15 % period tolerance, the 2.0 seam gate, the 0.15
 periodicity floor, the state windows, the tall/wide canvas rooms, the 2 s stagger) was
-set on one hand-run set of 15 loops (3 directions × 5 states) on 2026-09-08 and every
-loop of that set passed the gates as written. The set itself is operator data and is
-not in this repository; the synthetic fixtures under `tests/video/` pin the same rules.
+set on one hand-run set of 15 loops (3 directions × 5 states, one SD biped) on
+2026-09-08 and every loop of that set passed the gates as written. On 2026-09-09 the
+same rules were run against two deliberately different bodies — a quadruped and a
+legless blob, generated for the test — with idle, walk and jump each. Two rules turned
+out to be *that biped's* rules and were generalized: the walk window floor (the blob's
+bounce was faster than any gait) and the assumption that an action state repeats (the
+quadruped jumped once). Everything else held unchanged, and the original biped set
+still resolves to the same periods afterwards. The subjects are not in this repository;
+the synthetic fixtures under `tests/video/` pin every rule named here.

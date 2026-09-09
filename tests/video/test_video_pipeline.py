@@ -179,6 +179,10 @@ def test_detect_cycle_refuses_empty_window() -> None:
 def test_profiles_scale_windows_with_clip_length() -> None:
     p = loop_mod.profile_for("idle")
     assert p.min_frac > loop_mod.profile_for("walk").min_frac
+    # a 6 s / 24 fps clip: the walk floor must admit a 13-frame bounce (legless body) and the
+    # ceiling a 28-frame gait (2026-09-09: slime 13, wolf 24, biped 25 all resolved by the depth rule)
+    lo, hi = round(144 * loop_mod.profile_for("walk").min_frac), round(144 * loop_mod.profile_for("walk").max_frac)
+    assert lo <= 13 and hi >= 28
     assert loop_mod.profile_for("unknown-state") is loop_mod.STATE_PROFILES["default"]
 
 
@@ -212,6 +216,64 @@ def test_run_loop_seam_gate_fails_loud_on_noise(tmp_path: Path, monkeypatch) -> 
     assert not (tmp_path / "out" / "noise.gif").exists()
 
 
+def _one_shot_frames(tmp_path: Path, n: int = 144, hop: tuple[int, int] = (60, 76), size=(64, 64), jitter: int = 2) -> list[Path]:
+    """A body that stands (with a little rest jitter, like a real keyed clip) except for ONE
+    hop between the given frames — what a video model does when it ignores 'over and over'
+    (2026-09-09 quadruped run)."""
+    d = tmp_path / "keyed"
+    d.mkdir()
+    files = []
+    rng = np.random.default_rng(3)
+    for t in range(n):
+        im = Image.new("RGBA", size, (0, 0, 0, 0))
+        lift = 0
+        if hop[0] <= t < hop[1]:
+            lift = round(14 * math.sin(math.pi * (t - hop[0]) / (hop[1] - hop[0])))
+        dx = int(rng.integers(-jitter, jitter + 1))
+        dy = int(rng.integers(-jitter, jitter + 1))
+        for y in range(20 - lift + dy, 58 - lift + dy):
+            for x in range(24 + dx, 40 + dx):
+                im.putpixel((x, y), (200, 60, 60, 255))
+        p = d / f"frame-{t:04d}.png"
+        im.save(p)
+        files.append(p)
+    return files
+
+
+def test_one_shot_detector_cuts_rest_excursion_rest(tmp_path: Path) -> None:
+    files = _one_shot_frames(tmp_path)
+    D = loop_mod.distance_matrix(files)
+    periodic = loop_mod.detect_cycle(D, min_len=16, max_len=65)
+    assert periodic["periodicity"] < loop_mod.PERIODICITY_MIN  # one hop is not a period
+    cycle = loop_mod.detect_one_shot(D, min_len=9, max_len=65)
+    assert cycle["kind"] == "one-shot"
+    assert cycle["start"] <= 60 and cycle["start"] + cycle["length"] >= 75  # covers the hop, rest on both sides
+    assert cycle["ratio"] < 2.0  # rest -> rest seam within the gate
+
+
+def test_one_shot_detector_fails_loud_when_nothing_moves(tmp_path: Path) -> None:
+    files = _one_shot_frames(tmp_path, n=60, hop=(0, 0), jitter=0)
+    D = loop_mod.distance_matrix(files)
+    with pytest.raises(SystemExit, match="never leaves its rest pose"):
+        loop_mod.detect_one_shot(D, min_len=4, max_len=60)
+
+
+@pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
+def test_run_loop_auto_fails_over_to_one_shot_only_for_action_states(tmp_path: Path) -> None:
+    _one_shot_frames(tmp_path)
+    # walk must not repeat once: the gate stays a hard failure
+    with pytest.raises(SystemExit, match="no periodic cycle"):
+        loop_mod.run_loop(tmp_path / "keyed", tmp_path / "walk", fps=24.0, state="walk", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="w", report_path=None)
+    # jump may happen once: recorded failover, periodic attempt kept in the report
+    rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "jump", fps=24.0, state="jump", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="j", report_path=None)
+    assert rep["cycle"]["kind"] == "one-shot" and rep["cycle_mode"] == "auto"
+    assert rep["periodic_attempt"]["periodicity"] < loop_mod.PERIODICITY_MIN
+    assert rep["gif"]["loop"] == 0 and rep["webp"]["stale_rgb_under_alpha0"] == 0
+    # forcing periodic keeps the old behaviour
+    with pytest.raises(SystemExit, match="no periodic cycle"):
+        loop_mod.run_loop(tmp_path / "keyed", tmp_path / "jump2", fps=24.0, state="jump", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="j2", report_path=None, cycle_mode="periodic")
+
+
 def test_drop_specks_erases_detached_slivers_only() -> None:
     im = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
     for y in range(5, 35):
@@ -228,7 +290,7 @@ def test_drop_specks_erases_detached_slivers_only() -> None:
 
 def test_prompt_uses_state_and_view_and_optional_character() -> None:
     p = batch_mod.build_prompt("side", "walk", "The armored knight")
-    assert p.startswith("2D game sprite animation. The armored knight walks")
+    assert p.startswith("2D game sprite animation. The armored knight moves in place on a treadmill")
     assert "seen from the exact side" in p
     assert "The character" in batch_mod.build_prompt("back", "jump", None)
 
@@ -237,7 +299,16 @@ def test_motion_templates_do_not_assume_a_body_plan() -> None:
     # the templates were first written for a biped; a quadruped or a legless blob must not
     # be prompted into a contradiction (2026-09-09 generalization run)
     for state, text in batch_mod.MOTION_TEXT.items():
-        for word in ("bipedal", "knees", "arms pumping", "arms swinging"):
+        for word in (
+            "bipedal",
+            "knees",
+            "arms pumping",
+            "arms swinging",
+            "limbs alternating",
+            "Feet never",
+            "alternating strides",
+            "crouch,",  # biped verb; jump uses "compress" instead
+        ):
             assert word not in text, (state, word)
 
 
@@ -273,6 +344,6 @@ def test_run_set_staggers_retries_429_and_tables_failures(tmp_path: Path, monkey
     assert not by["side-jump"]["ok"] and "clip generation failed" in by["side-jump"]["error"]
     assert payload["failed"] == ["side-jump"]
     table = (tmp_path / "set" / "table.md").read_text()
-    assert "| side | jump | - | - | - | - | FAIL" in table and "| side | walk | 12 | 12 | 0.50 | 12 | OK |" in table
+    assert "| side | jump | - | - | - | - | - | FAIL" in table and "| side | walk | periodic | 12 | 12 | 0.50 | 12 | OK |" in table
     assert (tmp_path / "set" / "set.report.json").is_file()
     assert (tmp_path / "set" / "side-walk" / "canvas.png").is_file()  # canvas ran for real

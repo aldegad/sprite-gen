@@ -6,6 +6,9 @@ All notable public changes to `sprite-gen` are recorded here. Versions track the
 
 - Added the `sprite_gen/video` domain: `sprite-gen video-canvas` (state canvas — tall for jumps, wide for attacks, square otherwise; the still's corner key fills the padding), `sprite-gen video-frames` (ffmpeg extraction + cutout keying with an edge-contact gate), `sprite-gen video-loop` (global-period cycle detection, strip with `body_h` metadata, 1-bit-alpha GIF, `img2webp -exact` WebP, seam and periodicity gates, output re-verification) and `sprite-gen video-set` (directions × states with staggered starts and a bounded HTTP 429 retry, per-item reports and a table).
 - Declared `ffmpeg` and `img2webp` as required binaries for the video pipeline; `docs/video-pipeline.md` records the contract and the rules behind it. A new domain plus new required binaries is why this is a major version.
+- `video-loop --cycle auto|periodic|one-shot`: action states (`jump`, `attack`, unknown) whose clip performs the action once now get a recorded one-shot cut (rest → excursion → rest, medoid rest pose, 3-MAD excursion) instead of a hard failure; the report keeps the rejected periodic attempt and `table.md` gains a `kind` column. `walk`, `run`, `idle` still fail loud without a period.
+- Walk detection window floor 10 % → 6 % of the clip so a legless body's fast bounce resolves; the 15 % depth rule keeps rejecting the one-step half period (verified on a biped and a quadruped).
+- `video-set` motion templates no longer assume a biped ("this body type" instead of knees/arms).
 - Slimmed `SKILL.md` into a route-first hub (still / atlas / video-to-loop / utilities) under the 24 KB skill budget; the interpreter rationale, the rename gate and the breathing contract moved verbatim to `docs/interpreter.md`, `docs/rename-gate.md` and `docs/breathing.md`.
 
 ## v1.61.0 - Image to Video

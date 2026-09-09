@@ -44,6 +44,9 @@ STRIP_MAX_HEIGHT = 520
 SEAM_RATIO_MAX = 2.0  # loop seam / mean adjacent distance inside the cycle
 SPECK_MIN_FRACTION = 0.01  # detached components smaller than this fraction of the body are keying specks
 PERIODICITY_MIN = 0.15  # the period must dip at least 15% below the profile mean (flat profile = no repeat)
+ONE_SHOT_MIN_CONTRAST = 3.0  # one-shot: the excursion peak must stand this far above the rest-pose noise (in MADs)
+ONE_SHOT_PAD = 2  # one-shot: rest frames kept on each side of the excursion so the seam is rest -> rest
+CYCLE_MODES = ("auto", "periodic", "one-shot")
 
 
 @dataclass(frozen=True)
@@ -53,16 +56,17 @@ class LoopProfile:
     n_out: int  # frames in the resampled GIF/WebP
     why: str
     periodic: bool = True  # gate: the profile must show a real period (idle is exempt)
+    one_shot_ok: bool = False  # the state is an action that may legitimately happen once (jump, attack) -> one-shot detector may take over
 
 
 # State -> detection window. Fractions of the clip length so 6 s and 10 s clips both work.
 STATE_PROFILES: dict[str, LoopProfile] = {
     "idle": LoopProfile(0.60, 0.95, 16, "breathing is slow and not strictly periodic; the lowest seam is a long window", periodic=False),
-    "walk": LoopProfile(0.10, 0.31, 12, "full gait = two steps; window excludes the one-step half period"),
+    "walk": LoopProfile(0.06, 0.31, 12, "full gait = two steps; the floor admits a legless body's fast bounce (~13 frames at 24 fps) — the 15% depth rule, not the window, rejects the one-step half period"),
     "run": LoopProfile(0.07, 0.23, 10, "faster gait"),
-    "jump": LoopProfile(0.11, 0.45, 12, "crouch-spring-land-return"),
-    "attack": LoopProfile(0.11, 0.45, 12, "swing and return to ready"),
-    "default": LoopProfile(0.10, 0.45, 12, "generic in-place action"),
+    "jump": LoopProfile(0.11, 0.45, 12, "crouch-spring-land-return", one_shot_ok=True),
+    "attack": LoopProfile(0.11, 0.45, 12, "swing and return to ready", one_shot_ok=True),
+    "default": LoopProfile(0.10, 0.45, 12, "generic in-place action", one_shot_ok=True),
 }
 
 
@@ -122,6 +126,68 @@ def detect_cycle(D: np.ndarray, *, min_len: int, max_len: int) -> dict[str, Any]
     best["periodicity"] = round(periodicity, 4)  # how far below the profile mean the period dips (0 = flat = no period)
     best["profile_minima"] = [[L, round(prof[L], 5)] for L in sorted(cands, key=lambda L: prof[L])[:6]]
     return best
+
+
+def detect_one_shot(D: np.ndarray, *, min_len: int, max_len: int) -> dict[str, Any]:
+    """A cycle for an action the model performed ONCE: rest -> excursion -> rest.
+
+    The rest pose is the medoid frame (smallest mean distance to every other frame — in a
+    clip that mostly stands still that is a standing frame). Frames whose distance to it
+    rises above the rest noise (median + ONE_SHOT_MIN_CONTRAST MADs) are the excursion; the
+    longest contiguous run of them, padded by ONE_SHOT_PAD rest frames on each side, is the
+    cycle, so the loop seam is rest -> rest by construction. Fails loud when nothing stands
+    out or the excursion does not fit the window — never returns a guess.
+    """
+    n = D.shape[0]
+    rest = int(np.argmin(D.mean(axis=1)))
+    e = D[rest]
+    med = float(np.median(e))
+    mad = float(np.median(np.abs(e - med))) or 1e-6
+    contrast = (float(e.max()) - med) / mad
+    if contrast < ONE_SHOT_MIN_CONTRAST:
+        raise SystemExit(
+            f"video-loop: no one-shot excursion either — the clip never leaves its rest pose "
+            f"(peak {contrast:.1f} MADs above rest, need {ONE_SHOT_MIN_CONTRAST}); regenerate the clip"
+        )
+    active = e > med + ONE_SHOT_MIN_CONTRAST * mad
+    best_run: tuple[int, int] | None = None
+    j = 0
+    while j < n:
+        if active[j]:
+            k = j
+            while k + 1 < n and active[k + 1]:
+                k += 1
+            if best_run is None or (k - j) > (best_run[1] - best_run[0]):
+                best_run = (j, k)
+            j = k + 1
+        else:
+            j += 1
+    assert best_run is not None
+    a, b = best_run
+    start = max(0, a - ONE_SHOT_PAD)
+    end = min(n - 1, b + ONE_SHOT_PAD)
+    L = end - start + 1
+    if L < min_len or L > max_len:
+        raise SystemExit(
+            f"video-loop: the one-shot excursion spans {L} frames ({a}..{b} + {ONE_SHOT_PAD} rest each side), "
+            f"outside the window [{min_len},{max_len}]; pass --min-len/--max-len if that length is intended"
+        )
+    adjacent = np.array([D[i, i + 1] for i in range(start, end)])
+    inner = float(adjacent.mean())
+    seam = float(D[start, end])
+    return {
+        "kind": "one-shot",
+        "start": start,
+        "length": L,
+        "seam": seam,
+        "inner_mean_adjacent": inner,
+        "ratio": seam / inner if inner > 0 else math.inf,
+        "period_global": None,
+        "periodicity": None,
+        "rest_frame": rest,
+        "excursion": [a, b],
+        "excursion_contrast": round(contrast, 2),
+    }
 
 
 def _drop_specks(image: Image.Image, min_fraction: float) -> tuple[Image.Image, int]:
@@ -265,7 +331,10 @@ def run_loop(
     seam_max: float,
     name: str,
     report_path: Path | None,
+    cycle_mode: str = "auto",
 ) -> dict[str, Any]:
+    if cycle_mode not in CYCLE_MODES:
+        raise SystemExit(f"video-loop: unknown --cycle {cycle_mode!r}; expected one of {', '.join(CYCLE_MODES)}")
     frames_dir = frames_dir.expanduser().resolve()
     files = sorted(frames_dir.glob("*.png"))
     if len(files) < 6:
@@ -276,13 +345,27 @@ def run_loop(
     hi = max_len if max_len is not None else max(lo + 2, round(n * prof.max_frac))
     n_out = n_out or prof.n_out
     D = distance_matrix(files)
-    cycle = detect_cycle(D, min_len=lo, max_len=hi)
+    periodic_attempt: dict[str, Any] | None = None
+    if cycle_mode == "one-shot":
+        cycle = detect_one_shot(D, min_len=lo, max_len=hi)
+    else:
+        cycle = detect_cycle(D, min_len=lo, max_len=hi)
+        cycle["kind"] = "periodic"
+        if prof.periodic and cycle["periodicity"] < PERIODICITY_MIN:
+            flat = (
+                f"the period profile is flat (periodicity {cycle['periodicity']:.2f} < {PERIODICITY_MIN}) in window [{lo},{hi}]"
+            )
+            if cycle_mode == "auto" and prof.one_shot_ok:
+                # explicit, recorded failover: the action happened once (allowed for this state),
+                # so cut rest -> excursion -> rest instead. The periodic attempt stays in the report.
+                periodic_attempt = {"periodicity": cycle["periodicity"], "window": [lo, hi], "profile_minima": cycle["profile_minima"], "why_rejected": flat}
+                cycle = detect_one_shot(D, min_len=lo, max_len=max(hi, round(n * 0.9)))
+            else:
+                raise SystemExit(
+                    f"video-loop: no periodic cycle found — {flat}; the motion does not repeat, widen the window, "
+                    "regenerate the clip, or pass --cycle one-shot for a single performed action"
+                )
     i, L = cycle["start"], cycle["length"]
-    if prof.periodic and cycle["periodicity"] < PERIODICITY_MIN:
-        raise SystemExit(
-            f"video-loop: no periodic cycle found — the period profile is flat (periodicity {cycle['periodicity']:.2f} < {PERIODICITY_MIN}) "
-            f"in window [{lo},{hi}]; the motion does not repeat, widen the window or regenerate the clip"
-        )
     n_out = min(n_out, L)  # never ask for more distinct frames than the cycle holds
 
     out_dir = out_dir.expanduser().resolve()
@@ -337,7 +420,9 @@ def run_loop(
         "frames_total": n,
         "window": [lo, hi],
         "profile": prof.why,
+        "cycle_mode": cycle_mode,
         "cycle": cycle,
+        "periodic_attempt": periodic_attempt,
         "cycle_seconds": round(cycle_seconds, 4),
         "n_out": n_out,
         "delay_ms": delay_ms,
@@ -364,6 +449,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-len", type=int, help="override: maximum cycle length in frames")
     parser.add_argument("--n-out", type=int, help="frames in the GIF/WebP (default from the state profile)")
     parser.add_argument("--seam-max", type=float, default=SEAM_RATIO_MAX, help=f"loop seam gate (default {SEAM_RATIO_MAX})")
+    parser.add_argument("--cycle", choices=CYCLE_MODES, default="auto", help="auto: periodic first, one-shot failover for action states (recorded in the report); periodic / one-shot force one detector")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)
 
@@ -374,9 +460,12 @@ def run(**kwargs: object) -> int:
         fps=float(kwargs.get("fps") or 24.0), state=kwargs.get("state"),  # type: ignore[arg-type]
         min_len=kwargs.get("min_len"), max_len=kwargs.get("max_len"), n_out=kwargs.get("n_out"),  # type: ignore[arg-type]
         seam_max=float(kwargs.get("seam_max") or SEAM_RATIO_MAX), name=str(kwargs.get("name") or "loop"), report_path=kwargs.get("report"),  # type: ignore[arg-type]
+        cycle_mode=str(kwargs.get("cycle") or "auto"),
     )
     summary = {k: payload[k] for k in ("state", "frames_total", "window", "cycle_seconds", "n_out", "delay_ms", "resampled_seam_ratio", "specks_dropped", "report")}
-    summary["cycle"] = {k: payload["cycle"][k] for k in ("start", "length", "period_global", "ratio")}
+    summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio")}
+    if payload["periodic_attempt"]:
+        summary["periodic_attempt"] = payload["periodic_attempt"]["why_rejected"]
     summary["strip"] = {k: payload["strip"][k] for k in ("path", "frames", "w", "h", "body_h", "delay_ms")}
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
