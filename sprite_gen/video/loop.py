@@ -305,8 +305,9 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
 
 
 def img2webp_supports_exact(binary: str | None = None) -> bool:
-    """libwebp added `-exact` to img2webp in 1.3; older builds (Ubuntu 22.04: 1.2.x) reject the
-    flag with "Unknown option" and would rewrite RGB under alpha 0. Detected from `-h`, never assumed."""
+    """libwebp added `-exact` to img2webp in 1.5.0 (checked against the 1.4.0 and 1.5.0 release
+    binaries, 2026-09-09); older builds (Ubuntu 24.04: 1.3.x) reject the flag with "Unknown option"
+    and would rewrite RGB under alpha 0. Detected from `-h`, never assumed."""
     binary = binary or shutil.which("img2webp")
     if not binary:
         return False
@@ -325,8 +326,8 @@ def write_webp(frames: list[Image.Image], out: Path, *, delay_ms: int, workdir: 
         raise SystemExit("video-loop: `img2webp` not found on PATH — install libwebp (brew install webp) for exact-alpha WebP")
     if not img2webp_supports_exact(img2webp):
         raise SystemExit(
-            "video-loop: this img2webp has no `-exact` option (libwebp < 1.3; Ubuntu 22.04 ships 1.2.x) — "
-            "install libwebp >= 1.3 (brew install webp, or the official binaries from storage.googleapis.com/downloads.webmproject.org)"
+            "video-loop: this img2webp has no `-exact` option (libwebp < 1.5; Ubuntu 24.04 ships 1.3.x) — "
+            "install libwebp >= 1.5 (brew install webp, or the official binaries from storage.googleapis.com/downloads.webmproject.org)"
         )
     workdir.mkdir(parents=True, exist_ok=True)
     paths = []
