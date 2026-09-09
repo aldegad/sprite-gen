@@ -120,6 +120,10 @@ Outputs:
   24 fps clip yields 41.67 ms cells; render at 24 fps to keep one cell per frame
   (a 30 fps render of 24 fps cells is a 5:4 pulldown and judders).
 - `<name>.gif` — `n_out` frames evenly across the cycle, 1-bit alpha, disposal 2, `loop=0`.
+  `n_out` is a **playback density, not a fixed count**: `round(cycle_seconds × --gif-fps)`
+  (default 12 fps, floor 4, never more than the cycle holds), so a 2.5 s jump gets ~30 frames
+  and a 1.1 s walk ~13 and both play at the same rate. A fixed 12 made the jump hold each
+  frame 210 ms while the walk held 90 ms (2026-09-09). `--n-out` still overrides.
 - `<name>.webp` — same frames, lossless, `img2webp -exact` (Pillow's animated WebP writer
   does not pass `exact` and rewrites RGB under transparent pixels).
 

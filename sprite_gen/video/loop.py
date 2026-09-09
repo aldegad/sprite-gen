@@ -45,6 +45,8 @@ STRIP_MAX_HEIGHT = 520
 SEAM_RATIO_MAX = 2.0  # loop seam / mean adjacent distance inside the cycle
 SPECK_MIN_FRACTION = 0.01  # detached components smaller than this fraction of the body are keying specks
 PERIODICITY_MIN = 0.15  # the period must dip at least 15% below the profile mean (flat profile = no repeat)
+GIF_FPS_DEFAULT = 12.0  # GIF/WebP playback density: n_out = cycle_seconds x this, so a 2.5 s jump and a 1.1 s walk play at the same rate
+GIF_FRAMES_MIN = 4
 ONE_SHOT_MIN_CONTRAST = 3.0  # one-shot: the excursion peak must stand this far above the rest-pose noise (in MADs)
 ONE_SHOT_PAD = 2  # one-shot: rest frames kept on each side of the excursion so the seam is rest -> rest
 CYCLE_MODES = ("auto", "periodic", "one-shot")
@@ -54,7 +56,6 @@ CYCLE_MODES = ("auto", "periodic", "one-shot")
 class LoopProfile:
     min_frac: float  # window as a fraction of the clip's frame count
     max_frac: float
-    n_out: int  # frames in the resampled GIF/WebP
     why: str
     periodic: bool = True  # gate: the profile must show a real period (idle is exempt)
     one_shot_ok: bool = False  # the state is an action that may legitimately happen once (jump, attack) -> one-shot detector may take over
@@ -62,12 +63,12 @@ class LoopProfile:
 
 # State -> detection window. Fractions of the clip length so 6 s and 10 s clips both work.
 STATE_PROFILES: dict[str, LoopProfile] = {
-    "idle": LoopProfile(0.60, 0.95, 16, "breathing is slow and not strictly periodic; the lowest seam is a long window", periodic=False),
-    "walk": LoopProfile(0.06, 0.31, 12, "full gait = two steps; the floor admits a legless body's fast bounce (~13 frames at 24 fps) — the 15% depth rule, not the window, rejects the one-step half period"),
-    "run": LoopProfile(0.07, 0.23, 10, "faster gait"),
-    "jump": LoopProfile(0.11, 0.45, 12, "crouch-spring-land-return", one_shot_ok=True),
-    "attack": LoopProfile(0.11, 0.45, 12, "swing and return to ready", one_shot_ok=True),
-    "default": LoopProfile(0.10, 0.45, 12, "generic in-place action", one_shot_ok=True),
+    "idle": LoopProfile(0.60, 0.95, "breathing is slow and not strictly periodic; the lowest seam is a long window", periodic=False),
+    "walk": LoopProfile(0.06, 0.31, "full gait = two steps; the floor admits a legless body's fast bounce (~13 frames at 24 fps) — the 15% depth rule, not the window, rejects the one-step half period"),
+    "run": LoopProfile(0.07, 0.23, "faster gait"),
+    "jump": LoopProfile(0.11, 0.45, "crouch-spring-land-return", one_shot_ok=True),
+    "attack": LoopProfile(0.11, 0.45, "swing and return to ready", one_shot_ok=True),
+    "default": LoopProfile(0.10, 0.45, "generic in-place action", one_shot_ok=True),
 }
 
 
@@ -339,6 +340,7 @@ def run_loop(
     name: str,
     report_path: Path | None,
     cycle_mode: str = "auto",
+    gif_fps: float = GIF_FPS_DEFAULT,
 ) -> dict[str, Any]:
     if cycle_mode not in CYCLE_MODES:
         raise SystemExit(f"video-loop: unknown --cycle {cycle_mode!r}; expected one of {', '.join(CYCLE_MODES)}")
@@ -350,7 +352,6 @@ def run_loop(
     n = len(files)
     lo = min_len if min_len is not None else max(4, round(n * prof.min_frac))
     hi = max_len if max_len is not None else max(lo + 2, round(n * prof.max_frac))
-    n_out = n_out or prof.n_out
     D = distance_matrix(files)
     periodic_attempt: dict[str, Any] | None = None
     if cycle_mode == "one-shot":
@@ -373,6 +374,10 @@ def run_loop(
                     "regenerate the clip, or pass --cycle one-shot for a single performed action"
                 )
     i, L = cycle["start"], cycle["length"]
+    # playback density, not a fixed count: a long cycle gets more frames so every state plays at
+    # ~gif_fps (a fixed 12 made a 2.5 s jump hold each frame 210 ms while a 1.1 s walk held 90 ms)
+    if n_out is None:
+        n_out = max(GIF_FRAMES_MIN, round(L / fps * gif_fps))
     n_out = min(n_out, L)  # never ask for more distinct frames than the cycle holds
 
     out_dir = out_dir.expanduser().resolve()
@@ -432,6 +437,7 @@ def run_loop(
         "periodic_attempt": periodic_attempt,
         "cycle_seconds": round(cycle_seconds, 4),
         "n_out": n_out,
+        "gif_fps": gif_fps,
         "delay_ms": delay_ms,
         "resampled_seam_ratio": round(seam_ratio, 4),
         "seam_max": seam_max,
@@ -454,7 +460,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--state", help="motion state (idle/walk/run/jump/attack) — selects the detection window")
     parser.add_argument("--min-len", type=int, help="override: minimum cycle length in frames")
     parser.add_argument("--max-len", type=int, help="override: maximum cycle length in frames")
-    parser.add_argument("--n-out", type=int, help="frames in the GIF/WebP (default from the state profile)")
+    parser.add_argument("--n-out", type=int, help="frames in the GIF/WebP (default: cycle seconds x --gif-fps)")
+    parser.add_argument("--gif-fps", type=float, default=GIF_FPS_DEFAULT, help=f"GIF/WebP playback density (default {GIF_FPS_DEFAULT:g}); every state plays at this rate regardless of cycle length")
     parser.add_argument("--seam-max", type=float, default=SEAM_RATIO_MAX, help=f"loop seam gate (default {SEAM_RATIO_MAX})")
     parser.add_argument("--cycle", choices=CYCLE_MODES, default="auto", help="auto: periodic first, one-shot failover for action states (recorded in the report); periodic / one-shot force one detector")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
@@ -467,7 +474,7 @@ def run(**kwargs: object) -> int:
         fps=float(kwargs.get("fps") or 24.0), state=kwargs.get("state"),  # type: ignore[arg-type]
         min_len=kwargs.get("min_len"), max_len=kwargs.get("max_len"), n_out=kwargs.get("n_out"),  # type: ignore[arg-type]
         seam_max=float(kwargs.get("seam_max") or SEAM_RATIO_MAX), name=str(kwargs.get("name") or "loop"), report_path=kwargs.get("report"),  # type: ignore[arg-type]
-        cycle_mode=str(kwargs.get("cycle") or "auto"),
+        cycle_mode=str(kwargs.get("cycle") or "auto"), gif_fps=float(kwargs.get("gif_fps") or GIF_FPS_DEFAULT),
     )
     summary = {k: payload[k] for k in ("state", "frames_total", "window", "cycle_seconds", "n_out", "delay_ms", "resampled_seam_ratio", "specks_dropped", "report")}
     summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio")}
