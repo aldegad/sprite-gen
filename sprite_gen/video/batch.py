@@ -36,8 +36,8 @@ VIEW_TEXT = {
 }
 MOTION_TEXT = {
     "idle": "stands in place in a relaxed idle: slow gentle breathing, a subtle weight sway, one natural eye blink. Feet never move.",
-    "walk": "walks in place on a treadmill: a steady, natural bipedal walk cycle, legs alternating with clear foot contacts, arms swinging gently.",
-    "run": "runs in place on a treadmill: a fast, energetic bipedal run cycle, knees lifting high, arms pumping, clear alternating strides.",
+    "walk": "walks in place on a treadmill: a steady, natural walk cycle for this body type, limbs alternating with clear ground contacts, the rest of the body following naturally.",
+    "run": "runs in place on a treadmill: a fast, energetic run cycle for this body type, clear alternating strides with a bounding rhythm.",
     "jump": "performs a modest vertical hop in place over and over: crouch, spring up about half the body height, land softly, return to the exact starting stance, repeat at an even rhythm. Same height every time.",
     "attack": "performs the same melee attack over and over: one clean strike in front, then returns to the exact ready stance, repeating at an even rhythm.",
 }

@@ -233,6 +233,14 @@ def test_prompt_uses_state_and_view_and_optional_character() -> None:
     assert "The character" in batch_mod.build_prompt("back", "jump", None)
 
 
+def test_motion_templates_do_not_assume_a_body_plan() -> None:
+    # the templates were first written for a biped; a quadruped or a legless blob must not
+    # be prompted into a contradiction (2026-09-09 generalization run)
+    for state, text in batch_mod.MOTION_TEXT.items():
+        for word in ("bipedal", "knees", "arms pumping", "arms swinging"):
+            assert word not in text, (state, word)
+
+
 def test_run_set_staggers_retries_429_and_tables_failures(tmp_path: Path, monkeypatch) -> None:
     base = _still(tmp_path)
     calls: list[tuple[str, float]] = []
