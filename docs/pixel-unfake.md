@@ -1,5 +1,15 @@
 # Pixel Unfake Fit (`fit` / `pixel_unfake`) — sprite-gen reference
 
+> Owns: The `fit` / `pixel_unfake` path for pixel-art targets and jitter-free locomotion · Index: [docs/README.md](README.md)
+
+## Backbone Lattice (from the README, 2026-09-09)
+
+AI-generated "pixel art" is not pixel art. The blocks wobble, the edges carry antialiasing, and the lattice drifts within a single row, so cutting on an even grid smears one block into the next. The community fix is to "unfake" the image — guess the block size from run lengths and re-quantize — but that measures each frame on its own, so a walk cycle's cell size breathes frame to frame.
+
+**Backbone Lattice** measures one grid for the whole subject and holds every cut to it. Per-frame pitch detection feeds a row-wide, cross-frame consensus that outvotes harmonic misdetections; that consensus grid is the *backbone* every cut snaps to. Cuts land on actual colour boundaries, and a minimum cell width proportional to the measured pitch keeps two neighbouring cuts from ever collapsing onto the same band. One backbone, so the same block stays the same size across a whole animation instead of jumping between frames.
+
+The result is verified against what shipped, not eyeballed on a hand-picked frame: every pixel-unfake run is re-derived from its own source strip and compared pixel by pixel. The shape you approved stays the shape you get; what changes is only where outlines and shading land, which is exactly what the backbone decides.
+
 > `SKILL.md` 허브에서 분리한 시나리오 상세. 픽셀아트 타깃, 지터 없는 locomotion, 게임-레디 청키 픽셀 출력이 필요할 때 이 문서를 따른다. 구현 내부(피치 검출·grid-snap·팔레트 단계별 코드 동작)는 [`architecture.md`](architecture.md) §6 참조.
 
 ## `fit` object

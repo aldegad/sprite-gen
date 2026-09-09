@@ -1,5 +1,49 @@
 # Curation — webview, standalone view, finished-sheet editing, `curation.json` — sprite-gen reference
 
+> Owns: The webview, standalone candidate view, finished-sheet editing and every `curation.json` field · Index: [docs/README.md](README.md)
+
+## Contents
+
+- [The webview in one screen (from the README, 2026-09-09)](#the-webview-in-one-screen-from-the-readme-2026-09-09)
+  - [Isometric ground grid](#isometric-ground-grid)
+  - [Languages](#languages)
+- [Standalone Curation View (이미지 후보 큐레이션 — 스프라이트 아님)](#standalone-curation-view-이미지-후보-큐레이션-스프라이트-아님)
+- [Curation Webview (파이프라인 스텝 3.5) — 캐릭터 검수의 정식 뷰](#curation-webview-파이프라인-스텝-35-캐릭터-검수의-정식-뷰)
+  - [Colourway (recolor) compare and pick](#colourway-recolor-compare-and-pick)
+  - [생성 트리거 관용구 (SSoT = `src/gen-trigger.js`)](#생성-트리거-관용구-ssot-srcgen-triggerjs)
+- [Editing a finished sprite sheet (no `frames/` source)](#editing-a-finished-sprite-sheet-no-frames-source)
+- [Multi-agent rules for the auto-launch (클로징 스텝 5)](#multi-agent-rules-for-the-auto-launch-클로징-스텝-5)
+- [Curation Sidecar (`curation.json`)](#curation-sidecar-curationjson)
+- [Related](#related)
+- [Base editing (same component as frames)](#base-editing-same-component-as-frames)
+
+## The webview in one screen (from the README, 2026-09-09)
+
+Generation gets you 90%. The webview is where a human takes it to *shipped* — standalone, no Studio or framework dependency, runs anywhere the skill is installed (Claude Code Desktop, the Codex app, a plain terminal).
+
+![curation webview — characters](assets/demo-character.gif)
+
+- **Two rows per state:** the **play sequence** on top and a **candidate pool** below (e.g. a second or third generated take). Drag a frame's ⠿ grip to reorder the sequence, or pull a cut up from the pool — rebuild one clean run loop from the best frames across takes. The arrangement is saved, so reopening restores it.
+- **Non-destructive transform** per frame: drag = move, wheel = scale, top handle = rotate, bottom-left = shear, plus a horizontal-flip toggle for left-right-reversed output. Edits live in a `curation.json` sidecar — source PNGs are never rewritten, and the compose step bakes the result deterministically. Preview and bake share one affine matrix, so what you align is what you get.
+- **Live preview** animates the sequence at the state's fps, with play/pause, frame-by-frame stepping, and a 0.25×–4× speed control.
+- Not just for sprites: point it at any folder of image candidates (icons, logos, generated drafts) with `unpack_atlas_run.py --pngs-dir` and use it as a general pick-the-winner view.
+
+### Isometric ground grid
+
+For isometric sets, the webview overlays the floor grid (from `meta.json` tile/anchor) so you can snap furniture to the diamond axes with the shear handle.
+
+![curation webview — isometric furniture](assets/demo-furniture.gif)
+
+<img src="assets/curator-iso.png" width="520" alt="isometric ground grid overlay" />
+
+### Languages
+
+The webview ships with English and Korean. Pass `--lang en|ko` when launching, or use the in-app toggle:
+
+```bash
+python3 sprite-gen curation --run-dir <run-dir> --lang en   # or ko
+```
+
 > `SKILL.md` 허브에서 분리한 시나리오 상세. 큐레이션뷰를 띄우거나(파이프라인 스텝 3.5 / 클로징 스텝 5), 임의 이미지 후보군을 비교·선택하거나, 완성된 시트를 다시 편집하거나, `curation.json` 스키마를 다뤄야 할 때 이 문서를 따른다.
 
 ## Standalone Curation View (이미지 후보 큐레이션 — 스프라이트 아님)

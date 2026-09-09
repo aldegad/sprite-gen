@@ -7,12 +7,16 @@ import argparse
 from pathlib import Path
 from typing import Callable
 
-from sprite_gen import gen
+from sprite_gen import _modules, gen
 from sprite_gen.curate import anchor
 from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, compose_layers, export_aseprite, export_pngs
 from sprite_gen.qa import correction_loop, inspect, preview, score
 from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
-from sprite_gen.gen import prepare, video
+from sprite_gen.gen import gen_set, prepare, video
+from sprite_gen.video import batch as video_batch
+from sprite_gen.video import canvas as video_canvas
+from sprite_gen.video import frames as video_frames
+from sprite_gen.video import loop as video_loop
 from sprite_gen.effects import recolor
 from sprite_gen.serve import serve_compose, serve_curation
 from sprite_gen.spec import migrate_breathe, migrate_request
@@ -289,10 +293,36 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         _add_cutout,
         cutout.run,
     ),
+    "gen-set": (
+        "Generate every state row of a prepared run, N at a time — one report per row, table.md, non-zero exit on any failure.",
+        gen_set.add_arguments,
+        gen_set.run,
+    ),
     "video": (
         "Animate one still into a verified mp4 via Grok Imagine (your own grok login or XAI_API_KEY).",
         _add_video,
         video.run,
+    ),
+    # Video -> sprite pipeline (docs/video-pipeline.md): canvas -> video -> frames -> loop, or video-set for a batch.
+    "video-canvas": (
+        "Pad a base still into the canvas a motion state needs (tall for jumps, wide for attacks, square otherwise).",
+        video_canvas.add_arguments,
+        video_canvas.run,
+    ),
+    "video-frames": (
+        "Extract a clip's frames and key the chroma out into RGBA frames (edge-contact checked).",
+        video_frames.add_arguments,
+        video_frames.run,
+    ),
+    "video-loop": (
+        "Find the true period in keyed frames and emit one seamless cycle: strip + meta, transparent GIF, WebP.",
+        video_loop.add_arguments,
+        video_loop.run,
+    ),
+    "video-set": (
+        "Directions x states end to end (canvas -> video -> frames -> loop), rate-limit aware, one report per item.",
+        video_batch.add_arguments,
+        video_batch.run,
     ),
     # The argument surface is `serve_curation.add_arguments` itself, not a copy of it: the
     # webview's own `--help` and this subcommand are the same declaration, so `sprite-gen
@@ -331,11 +361,36 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
 }
 
 
+def command_domains() -> dict[str, list[str]]:
+    """Verbs grouped by domain, derived from each verb's `run` module — never hand-listed."""
+    groups: dict[str, list[str]] = {d: [] for d in _modules.DOMAIN_ORDER}
+    for name, (_description, _add_args, run) in COMMANDS.items():
+        groups[_modules.domain_of(run.__module__)].append(name)
+    return {d: verbs for d, verbs in groups.items() if verbs}
+
+
+def _help_description() -> str:
+    lines = ["sprite-gen — 2D sprite pipelines as one CLI. Every verb works alone or as a pipeline stage.", "", "pipelines:"]
+    for pipe in _modules.PIPELINES:  # the catalog, not a copy of it
+        label = f"{pipe['key']}  {pipe['name']}"
+        lines.append(f"  {label:<20} {pipe['chain']}   ({pipe['doc']})")
+    lines += ["", "tools by domain:"]
+    width = max(len(v) for v in COMMANDS)
+    for domain, verbs in command_domains().items():
+        lines.append(f"  [{domain}] {_modules.DOMAIN_TITLE[domain]}")
+        for verb in verbs:
+            lines.append(f"    {verb:<{width}}  {COMMANDS[verb][0]}")
+    lines += ["", "run `sprite-gen <tool> --help` for a tool's arguments."]
+    return "\n".join(lines)
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="sprite-gen", description="Unified CLI for the sprite-gen pipeline.")
+    parser = argparse.ArgumentParser(
+        prog="sprite-gen", description=_help_description(), formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = parser.add_subparsers(dest="command", required=True, metavar="<tool>")
     for name, (description, add_args, _run) in COMMANDS.items():
-        sp = sub.add_parser(name, description=description, help=description)
+        sp = sub.add_parser(name, description=description)
         add_args(sp)
     return parser
 

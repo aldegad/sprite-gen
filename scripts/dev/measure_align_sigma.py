@@ -10,7 +10,7 @@ bottom-20% foot band) inside the final cells. σ is the jitter a player sees as
 the body axis wobbling during playback.
 
 Usage:
-  python3 scripts/measure_align_sigma.py \
+  python3 scripts/dev/measure_align_sigma.py \
     --run-dir <run with sprite-request.json + raw/> \
     --states down_walk,down_run \
     --variants foot-centroid,alpha-centroid
@@ -24,7 +24,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from PIL import Image
 

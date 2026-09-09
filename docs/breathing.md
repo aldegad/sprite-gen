@@ -1,0 +1,94 @@
+# 호흡(idle breathing) · 정지 자세 행 — 후처리 레이어 계약
+
+> Owns: The idle-breathing post-process layer and the static-pose row recipe · Index: [docs/README.md](README.md)
+
+## What Breathe does (from the README, 2026-09-09)
+
+A still idle reads as frozen. **Breathe** turns a single pose into a living loop — deterministic squash & stretch baked on top of your curated frames. No regeneration, no re-extraction, no extra art. One sidecar field:
+
+```json
+"breathe": { "depth": 0.05, "breaths": 3 }
+```
+
+- **Anatomy-aware.** The engine measures the silhouette: neck bottleneck, symmetric eye pair on neckless blobs, torso-vs-appendage width. Heads stay **bit-identical** across every frame; wings and arms get pushed, never stretched.
+- **Pixel-true.** Integer row/column mapping only — every output frame is still clean pixel art on the same grid. A 1px outline stays a 1px outline: the warp preserves silhouette edges and normalizes staircase doubling, anchored on the inner line.
+- **A ruler you can grab.** Drag the rigid boundary (red), the body axis (blue), and the torso width (dashed) right on the live playback. The server re-derives the anatomy on release — and the preview keeps breathing while it recalculates.
+- **Byte-identical preview.** The webview mirror and the Python bake produce the same bytes, enforced by golden tests. What you watch looping is exactly what ships in the atlas.
+
+<p align="center">
+  <img src="assets/breathe-editor.png" width="760" alt="breathe region editor: rigid boundary, body axis and torso width lines over live playback, with the baked phase filmstrip" />
+</p>
+
+The same deterministic bake applies to front, side, and back views of any silhouette, including humanoids, blobs, and tentacles.
+
+> SKILL.md Script Map 에서 옮겨온 본문(2026-09-09, 허브 슬림화). `compose_sprite_gif.py` / `compose_sprite_atlas.py` 가 굽는 호흡 레이어, 정지 자세 행 레시피, 큐레이션 뷰의 호흡 편집기 계약을 소유한다. 실측 근거·프레임 게이트는 아래 "정지 자세(Static-Pose) 행 레시피" 절.
+
+- **에이전트 주도 호흡** (사용자가 "숨쉬기 적용해서 뽑아줘" 라고만 해도 됨): 호흡은 사이드카 필드라 뷰 없이도 켤 수 있다 — (1) `states.<state>.breathe = {"depth": 0.06, "breaths": 1, "lag": 0.1}` 만 쓰면 된다. **경계는 선언하지 않는다** — `sprite_gen/anatomy.py` 가 검출한다. 큐레이터를 거치면 그 결과가 사이드카 `anatomy` 에 얼려지고(`GET /api/breathe-anatomy`), 뷰 없이 에이전트가 `breathe` 만 쓴 런은 `anatomy` 가 비어 있어 **굽기가 매번 다시 잰다** — 굽기는 사이드카에 쓰지 않는다. 어느 쪽이든 동작한다. **굽기는 얼린 값을 신뢰하지 않는다 — 언제나 자기 기준 프레임에서 다시 잰다** (얼린 값은 큐레이터 프리뷰용 캐시다). 사이드카와 어긋나면 manifest 의 `sidecar_drift` 로 값을 실어 보고한다. 그 캐시가 아직 유효한지는 기준 프레임의 **입력** 지문(원본 파일 스탬프·픽셀편집·변형·변종)으로 판정하고, 어긋나면 큐레이터가 프리뷰·영상 내보내기를 **거부하며 갱신하라고 알린다** — 조용히 낡은 숫자로 그리지 않는다. 사람이 특정 행에 고정하고 싶을 때만 `rigid_row` 를 준다. (에이전트 직접 쓰기는 `load_curation`→`stamp_curation` 도장 경로 필수, 열린 탭은 새로고침 안내 — 함정 상세: [`troubleshooting.md`](troubleshooting.md)), (2) `compose_sprite_gif.py`/`compose_sprite_atlas.py` 가 자동으로 굽는다. 검증: gif-manifest 의 `breathe.phases`. **구 `splits`/`amplitude`/`subpixel` 은 요란하게 거부된다** — 옮기려면 `sprite-gen migrate-breathe <run-dir> --apply`.
+- **정지 자세(sit/lie/carry_idle 등) 행 레시피** — 정지 1컷 + 링크 복제 @ 4fps + 허리선 호흡(breaths 3) + 눈 보이는 방향만 깜빡임. **복제 수 = `recommended_breathe_frames(breathe) − 1`** (호흡당 `SMOOTH_CYCLE_FRAMES`=6 프레임 확보; breaths 3 → 총 18컷) — 짧은 루프(옛 11컷)에 다수 호흡을 우겨넣으면 1px 위상이 매 프레임 토글해 진동으로 읽히던 걸 막는다 (maintainer 2026-07-24). 깜빡임은 **시퀀스 끝 근처**(맨 끝 아님, 뒤에 눈뜬 rest ≥2)에 배치해 루프 이음새 전에 다시 떠 스냅을 없앤다. 실측 도출 근거·자동 적용 절차·프레임 게이트: 아래 "정지 자세(Static-Pose) 행 레시피" 절 (maintainer 확정 2026-07-19, 이징 게이트 2026-07-24).
+- 호흡(idle breathing)은 **후처리 레이어**다 (maintainer 확정 2026-07-18) — 스크립트가 아니라 curation.json 사이드카 `states.<state>.breathe = {depth, depth_x?, breaths, lag, rigid_row?, anatomy}` 로 선언하고, compose/GIF 가 재생 시퀀스 위에 결정론(봉투 워프, `sprite_gen/breathe.py`)으로 굽는다. 깜빡임 프레임도 그대로 숨쉰다 (프레임 선택과 직교).
+  - **변형은 자르지 않고 강도를 떨군다** (2026-07-25 교체): 스프라이트 전체에 연속 변형장을 걸고 그 강도를 강체 경계에서 0 으로 테이퍼한다. `env=0` 인 행은 가로 사상이 항등이고 세로 누적이 정확히 1씩 늘어 **그 구간이 프레임 간 비트 동일**하다 — 눈·입이 몇 도트뿐이라 근사로는 표정이 뭉갠다. 가로는 행 안에서 밀도를 적분하므로 사상이 단조라 접힘이 없고, 날개 같은 부속은 밀리기만 하고 안 늘어난다.
+  - **강체 경계는 가슴이 아니라 목이다.** 가슴은 해부학 개념이라 몬스터마다 다르지만 목은 기하학적 병목이라 안정적으로 잡힌다. 얼굴이 몸통에 있으면(버섯·슬라임) 대칭 눈쌍을 찾아 얼굴 아래로 내린다. 병목도 얼굴도 없으면 어깨-기울기로 떨어지고 그 사실이 `anatomy.warnings` 에 남는다.
+  - 큐레이션 뷰: 줄 헤더 호흡 체크박스(즉시 on/off) + 라벨 클릭 편집기(실재생 위 **강체 경계 1개 드래그** · 세로 진폭 `depth` · 가로 진폭 `depth_x`(기본 "=세로", 0 = 가로 끄기 — maintainer 요청 2026-07-30 가로/세로 분리) · 루프당 호흡 횟수 · `auto` 되돌리기 — 즉시 반영, Esc 복원, 최종 굽기 필름스트립). 루프 길이는 시퀀스 그대로 불변이고 위상이 연속값이라 breaths 는 요청 그대로 적용된다 (범위 1~8이고 **정수여야 한다**; 밖이거나 비정수면 조용히 깎지 않고 요란하게 거부한다 — `depth` 0.005~0.20, `depth_x` null|0~0.20, `lag` 0~0.45 도 같다). 재추출/굽기 대기 없음.
+  - 세로선(몸통 밴드)을 **사람이 조정하면** 보호 램프가 밴드 자체에 앵커된다 — 밴드 밖 열은 늘어나지 않고 밀리기만 한다. 자동 검출 밴드는 부속(날개·긴 팔)이 실재할 때만 켜지는 기존 계약 그대로다 (블롭에서 밴드 조정이 무력했던 버그 수리, 2026-07-30).
+
+## 정지 자세(Static-Pose) 행 레시피
+
+> `docs/static-pose-recipe.md` 에서 병합(2026-09-09, 본문 verbatim). 호흡 레이어와 정지 자세 레시피는 한 계약이라 한 문서가 소유한다.
+
+합성 정지 자세 회귀에서 도출한 결정론적 레시피다.
+
+### 적용 대상
+
+이동/액션이 아닌 모든 "가만히 있는" 상태: `idle`, `sit`, `sit_chair`, `lie`,
+`carry_idle` 등. 로코모션(walk/run/jump)과 action 행에는 적용하지 않는다.
+
+### 레시피
+
+1. **정지 1컷 + 링크 복제**: 추출 프레임 중 최적 정지 포즈 1장을 고르고
+   (사람 검수 대상; 기본 후보 frame 0), 나머지 시퀀스는 전부 그 프레임의
+   **링크 복제**로 채운다 — 편집 truth 1곳, 아틀라스 셀 공유(무비용).
+2. **길이 = 호흡당 최소 프레임 확보** @ 4fps. 시퀀스 길이는
+   `sprite_gen/effects/breathe.py` `recommended_breathe_frames(breathe)` 로 정한다
+   (호흡당 `SMOOTH_CYCLE_FRAMES`=6 프레임): 기본 `breaths: 3` → **18컷**
+   (~4.5s 루프, 호흡당 1.5s). **옛 11컷은 사이클당 ~3.7프레임이라 1px 위상이
+   거의 매 프레임 토글해 호흡이 아니라 진동으로 읽힌다**. 이 게이트가 그 원인을 막는다. 깜빡임 프레임은 이 길이에
+   포함되며 별도로 +하지 않는다 (아래 4).
+3. **호흡 레이어**: `breathe = {depth: 0.06, breaths: 3, lag: 0.1}` 만 쓴다.
+   **강체 경계는 선언하지 않는다** — `sprite_gen/effects/anatomy.py` 가 목 병목(없으면 대칭
+   눈쌍 아래, 그것도 없으면 어깨-기울기)으로 검출해 사이드카 `anatomy` 에 채운다.
+   **굽기는 그 값을 캐시로만 본다** — 매번 자기 기준 프레임에서 다시 재고, 사이드카와
+   어긋나면 manifest 의 `sidecar_drift` 로 값을 실어 보고한다. 사이드카의 `anatomy` 는
+   큐레이터 미리보기가 굽기와 같은 경계로 그리려고 들고 있는 것이고, 그게 아직 유효한지는
+   `fingerprint`(기준 프레임의 **입력** 키 — `breathe.reference_key`)로 판정한다.
+   특정 행에 고정해야 할 때만 `rigid_row`.
+   위상이 연속값이라 이징을 위한 별도 옵션이 없다 — 부드러움은 프레임 수(위 2)로 얻는다.
+4. **깜빡임은 눈이 보이는 방향만**: 시퀀스 **끝 근처**(맨 끝 아님)에 배치하고
+   뒤에 눈-뜬 rest 프레임을 **최소 2장** 남긴다 — 그래야 감았다가 루프 이음새
+   전에 다시 뜨며 이어진다 (맨 끝 1프레임이면 감은 채로 끝나 다음 루프 첫
+   프레임에서 확 떠 스냅난다). 감은-눈은 rest 위상 프레임에
+   얹어 몸통은 그대로 두고 눈만 바뀌게 한다.
+   - 정면(down): 독립(unlink) 복제 2장에 감은-눈 픽셀 ops (open→closed→open
+     읽히게), 뒤에 rest 프레임 ≥2.
+   - 옆(side): 동일 (독립 복제 감은-눈 + 뒤 rest ≥2).
+   - 뒤(up): 깜빡임 없음.
+   감은-눈 픽셀은 **사람이 깎는다** — 자세마다 눈 위치가 달라 자동 이식
+   금지 (포즈별 눈 좌표가 다르면 눈이 엉뚱한 데 감긴다).
+5. **변형/픽셀 편집은 정지 원본 프레임에만** — 복제는 링크 동기화로 따라온다.
+
+### 자동 적용 절차 (에이전트)
+
+새 정지 자세 행이 추출되면 (큐레이션 없음 전제):
+
+1. `curation.json` `states.<state>` 에: `selected=[still]`,
+   `order=[still]+클론N`, `clones={새 idx: still}` (링크 기본 — 편집 복사 금지),
+   breathe 위 레시피. **N = `recommended_breathe_frames(breathe) − 1`** (정지
+   원본 1장 제외; 기본 breaths 3 → 17 클론 → 총 18컷). 링크 복제라 아틀라스
+   셀은 안 늘어난다 — 호흡 위상당 유니크 셀만 굽는다. 18컷 `breaths: 3` 이면 유니크 칸 6개(위상이 6종만 반복).
+2. fps 4 를 `sprite-request.json` 해당 상태에 기록.
+3. 깜빡임(정면/옆)은 자동 생성하지 않는다 — "깜빡임 추가 대기" 로 보고하고
+   사람이 정지 프레임 확정 후 눈을 깎는다.
+4. 열린 큐레이션 탭이 있으면 두-작성자 충돌 방지를 위해 새로고침을 안내한다.
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

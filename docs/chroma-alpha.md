@@ -1,5 +1,37 @@
 # Chroma Key & Alpha Cleanup — sprite-gen reference
 
+> Owns: Choosing the chroma key and diagnosing alpha cleanup after extraction · Index: [docs/README.md](README.md)
+
+## Why the extractor unmixes instead of peeling (from the README, 2026-09-09)
+
+The extractor keeps chroma cleanup deterministic: soft-alpha unmix preserves antialiased hair strands and thin outlines instead of peeling them away before coverage can be solved.
+
+<p align="center">
+  <img src="assets/chroma-fullbody-illustration-magenta.png" width="640" alt="full-body chroma comparison: illustration on magenta key" /><br />
+  <em>Illustration, magenta key: source, v1.12.0 peel, v1.13.0 soft-alpha unmix.</em>
+</p>
+
+<p align="center">
+  <img src="assets/chroma-fullbody-illustration-green.png" width="640" alt="full-body chroma comparison: illustration on green key" /><br />
+  <em>Illustration, green key: source, v1.12.0 peel, v1.13.0 soft-alpha unmix.</em>
+</p>
+
+<p align="center">
+  <img src="assets/chroma-fullbody-pixelart-magenta.png" width="640" alt="full-body chroma comparison: pixel art on magenta key" /><br />
+  <em>Pixel art, magenta key: source, v1.12.0 peel, v1.13.0 binarized output.</em>
+</p>
+
+<p align="center">
+  <img src="assets/chroma-fullbody-pixelart-green.png" width="640" alt="full-body chroma comparison: pixel art on green key" /><br />
+  <em>Pixel art, green key: source, v1.12.0 peel, v1.13.0 binarized output.</em>
+</p>
+
+The close-up crops below show the edge detail behind the full-body comparisons.
+
+![chroma peel before and after — illustrated hair strand](assets/chroma-peel-illustration-before-after.png)
+
+![chroma peel before and after — pixel-art outline](assets/chroma-peel-pixelart-before-after.png)
+
 > `SKILL.md` 허브에서 분리한 시나리오 상세. 크로마 키를 고르거나(특히 소재색이 키와 인접할 때), 추출 후 소재색 손실을 진단할 때 이 문서를 따른다. 분기표 SSoT 는 image-gen SKILL.md 최상단 게이트이고, 이 문서는 그 규칙의 sprite-gen 쪽 상세다.
 
 ## Key selection

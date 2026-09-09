@@ -1,5 +1,7 @@
 # Troubleshooting
 
+> Owns: Symptoms of a pipeline that is "quietly wrong", with causes and fixes · Index: [docs/README.md](README.md)
+
 파이프라인이 "조용히 이상한" 대표 증상들과 원인·대처. 전부 회귀에서 도출.
 (엔진은 특정 오케스트레이터를 모른다 — 여기의 규칙은 어떤 에이전트 환경에서든 성립.)
 
@@ -52,3 +54,7 @@
 - **원인**: WebM/MP4 조립은 서버 머신의 `ffmpeg` 를 쓴다 — 없으면 관측 가능한
   500(`ffmpeg not found`)을 준다. GIF 는 ffmpeg 없이 동작.
 - **대처**: 서버 머신에 ffmpeg 설치 (`brew install ffmpeg` 등).
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

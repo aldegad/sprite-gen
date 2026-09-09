@@ -1,5 +1,7 @@
 # `sprite-gen video` — image to video with your own Grok login (engine SSoT)
 
+> Owns: `sprite-gen video`: image to mp4 through Grok Imagine with the user's own credential · Index: [docs/README.md](README.md)
+
 `sprite-gen video` animates one still into a short mp4 through **Grok Imagine**
 (xAI `POST /v1/videos/generations`). It is the video counterpart of
 [`sprite-gen gen`](gen.md): one call = one still (+ prompt) → one **verified** mp4
@@ -94,3 +96,7 @@ never printed or written** — only the download host (`vidgen.x.ai`).
 - Output is whatever the model returns (typically H.264 mp4 with audio unless
   `--no-audio`). Downstream frame extraction is a separate step and not part of
   this command.
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

@@ -1,5 +1,7 @@
 # Recolor — deterministic palette-swap bake + colourway pick — sprite-gen reference
 
+> Owns: Deterministic palette-swap bake, colourway pick, `variants/` and its report · Index: [docs/README.md](README.md)
+
 > Split out of the `SKILL.md` hub. Follow this doc when you need to bake N colour
 > variants of one base sheet from a palette map, or when the curation webview is
 > comparing and adopting those baked colourways. Implementation:

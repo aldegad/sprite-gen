@@ -1,6 +1,17 @@
 # Directional / 45° Anchor Workflow — sprite-gen reference
 
+> Owns: Directional / 45° rows: base → direction anchors → rows, the left-right gate · Index: [docs/README.md](README.md)
+
 > `SKILL.md` 에서 분리한 시나리오 상세. 방향성·45도·locomotion 행 생성 시 이 문서를 따른다. 기본 simple sprite (`idle`/`jump`/`attack`/`wave`) 에는 필요 없다. 내용은 손실 없이 `SKILL.md` 본문에서 그대로 옮겨졌다.
+
+## Contents
+
+- [전체 체인 한눈에 (그림)](#전체-체인-한눈에-그림)
+- [Prepare 스캐폴딩 (`--directions`, 2026-07-14)](#prepare-스캐폴딩---directions-2026-07-14)
+- [Hatch-Pet Locomotion Pattern](#hatch-pet-locomotion-pattern)
+- [Directional Chain Default](#directional-chain-default)
+- [Checklist Direction-Anchor Workflow](#checklist-direction-anchor-workflow)
+- [Advanced Gates](#advanced-gates)
 
 ### 전체 체인 한눈에 (그림)
 
@@ -316,3 +327,6 @@ Expose only these gates to the caller for advanced hatch-style runs:
 
 All prompt text, guides, extraction, atlas composition, and QA must be regenerated from `sprite-request.json`. Do not keep a separate prompt fork as a second truth surface. If an advanced gate fails QA, report the state as failed or experimental rather than silently falling back to a static or mirrored result.
 
+## Related
+
+- [docs/README.md](README.md) — documentation index

@@ -1,5 +1,7 @@
 # Layer Tracks — rig · track · composite contract (SSoT)
 
+> Owns: Rig runs: `rig` / `track` / `layers` contract and `compose-layers` · Index: [docs/README.md](README.md)
+
 > Status: **contract** (normative). This doc owns the optional layer feature: the
 > character rig profile, the per-row track kind, the composite stack, and what a
 > layer bake is allowed to touch.
@@ -15,6 +17,25 @@
 > and pinned by `tests/test_layer_contract.py`; the composite bake is
 > [`../sprite_gen/compose/compose_layers.py`](../sprite_gen/compose/compose_layers.py), pinned by
 > `tests/test_layer_compose.py`.
+
+## Contents
+
+- [0. One sentence](#0-one-sentence)
+- [1. The compatibility rule (read this first)](#1-the-compatibility-rule-read-this-first)
+- [2. Ownership audit — what already owns what](#2-ownership-audit-what-already-owns-what)
+  - [Boundary findings](#boundary-findings)
+- [3. Request schema extension](#3-request-schema-extension)
+  - [3.1 Profiles and landmarks](#31-profiles-and-landmarks)
+  - [3.2 Tracks](#32-tracks)
+  - [3.3 Stack elements](#33-stack-elements)
+- [4. Composition contract (deterministic)](#4-composition-contract-deterministic)
+- [5. Output and manifest extension](#5-output-and-manifest-extension)
+- [6. Validation contract](#6-validation-contract)
+- [7. Using it — the CLI and where it sits in the run](#7-using-it-the-cli-and-where-it-sits-in-the-run)
+  - [7.1 Declaring](#71-declaring)
+  - [7.2 Baking](#72-baking)
+- [8. Out of scope](#8-out-of-scope)
+- [Related](#related)
 
 ## 0. One sentence
 

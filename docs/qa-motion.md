@@ -1,5 +1,7 @@
 # Motion Continuity QA (BLOCKING) — sprite-gen reference
 
+> Owns: Motion Continuity — the blocking judgement of a row as motion · Index: [docs/README.md](README.md)
+
 > `SKILL.md` 허브에서 분리한 시나리오 상세. 추출·아틀라스 QA 를 통과한 행을 **모션으로서** 판정할 때 이 문서를 따른다. Motion Continuity 는 BLOCKING 이다 — 판정 기준 전체가 여기 있다.
 
 Static identity QA is not enough. A row can have the right frame count, clean alpha, and consistent identity and still animate as garbage. Review motion **as motion**:

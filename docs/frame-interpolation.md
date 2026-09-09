@@ -1,5 +1,7 @@
 # AI Frame Interpolation (in-betweens)
 
+> Owns: Generative in-betweens for sprite frames, recorded as a take · Index: [docs/README.md](README.md)
+
 `sprite_gen/effects/interpolate.py` (`scripts/interpolate_frames.py`) makes an **in-between
 frame** between two frames of one state — a half-closed eyelid between open/closed
 idle frames, a mid-swing arm between windup and strike.
@@ -90,3 +92,7 @@ stray pixels with the curator's pixel editor if needed. Identity drift is a rero
 interpolator (alignment canvas contract, prompt composition, take write, request
 idempotency, loud rejections including unknown providers). Real provider generation
 is exercised manually, not in CI.
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

@@ -1,5 +1,7 @@
 # Engine export
 
+> Owns: Aseprite-compatible export for Phaser and Flame · Index: [docs/README.md](README.md)
+
 `sprite-gen export-aseprite` describes a composed sprite-gen atlas using the JSON schema consumed by Aseprite loaders. It does not create an editable `.aseprite` source file and it does not re-encode the PNG.
 
 Run it after `compose-atlas`:
@@ -50,3 +52,7 @@ This writes `exports/aseprite/idle.json`, `walk.json`, and so on. Every file use
 - `loop` remains in `manifest.json`. Aseprite frame tags carry direction and range but no sprite-gen loop policy, and Flame's Aseprite factory constructs its default looping animation without reading tags.
 - The curation webview is unchanged. This is a post-compose CLI export, not a new webview download button.
 - The exporter refuses malformed row mappings and output paths outside the run directory. Split-state files are staged as a complete directory and then published together.
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

@@ -1,5 +1,7 @@
 # Seamless Video Loop (ambient clip → infinite loop)
 
+> Owns: Making a non-looping ambient clip loop forever (RIFE seam bridge) — a different job from pipeline B · Index: [docs/README.md](README.md)
+
 Turn a **non-looping AI-generated ambient video clip** (an `sprite-gen gen` video, a
 Seedance/Veo/Kling i2v clip, a title/hero backdrop) into a clip that loops **forever with
 no visible seam** — for a title-screen background, a hero loop, a store-page ambient shot.
@@ -99,3 +101,7 @@ A single still cannot tell a playing loop from a paused first frame. Judge numer
 For a game/app, ship the looped clips as the player's native codec and let the player loop
 (Unity `VideoPlayer.isLooping = true`, HTML `<video loop>`). Because the seam is already
 seamless in the file, the engine's plain loop needs no crossfade.
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

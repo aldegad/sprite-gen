@@ -29,6 +29,7 @@ PACKAGE_RUN_MODULES = [
     "export_pngs",
     "extract",
     "gen",
+    "gen_set",
     "generate_image",
     "inspect",
     "prepare",
@@ -38,6 +39,10 @@ PACKAGE_RUN_MODULES = [
     "slice_sheet",
     "unpack_atlas",
     "video",
+    "canvas",
+    "frames",
+    "loop",
+    "batch",
 ]
 
 CLI_HELPERS = [
