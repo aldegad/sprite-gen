@@ -176,3 +176,34 @@ def test_gen_set_row_without_a_real_report_is_regenerated_with_a_reason(tmp_path
     payload = gen_set.run_set(run_dir=run_dir, states=["walk"], provider="codex", model=None, concurrency=1, force=False, gen_runner=_fake_runner(record=calls))
     item = payload["items"][0]
     assert len(calls) == 1 and item["ok"] and item.get("reused") is None and item["regenerated_because"] == "report missing"
+
+
+def test_gen_set_failed_force_regeneration_leaves_no_reusable_row(tmp_path: Path) -> None:
+    """Validator finding 2026-09-09 (round 2): valid row → --force run whose provider half-
+    overwrites the image and exits 3 → a plain rerun must regenerate, never reuse the stale
+    report over the broken image."""
+    run_dir = _prepare(tmp_path)
+    ok = gen_set.run_set(run_dir=run_dir, states=["idle"], provider="codex", model=None, concurrency=1, force=False, gen_runner=_fake_runner())
+    assert ok["ok"] == 1
+
+    def half_writer(prompt_file: Path, out: Path, refs: list[Path], report: Path, *, provider, model, log) -> int:
+        out.write_bytes(b"\x89PNG\r\n\x1a\n incomplete image")  # truncated overwrite
+        log.write_text("provider died mid-write\n", encoding="utf-8")
+        return 3
+
+    forced = gen_set.run_set(run_dir=run_dir, states=["idle"], provider="codex", model=None, concurrency=1, force=True, gen_runner=half_writer)
+    assert forced["failed"] == ["idle"] and "gen exited 3" in forced["items"][0]["error"]
+    assert not (run_dir / "raw" / "idle.png").exists() and not (run_dir / "reports" / "gen-set" / "idle.json").exists()
+
+    calls: list = []
+    retry = gen_set.run_set(run_dir=run_dir, states=["idle"], provider="codex", model=None, concurrency=1, force=False, gen_runner=_fake_runner(record=calls))
+    assert len(calls) == 1 and retry["ok"] == 1 and retry["items"][0].get("reused") is None
+
+
+def test_gen_set_unreadable_row_image_is_not_reused(tmp_path: Path) -> None:
+    run_dir = _prepare(tmp_path)
+    gen_set.run_set(run_dir=run_dir, states=["idle"], provider="codex", model=None, concurrency=1, force=False, gen_runner=_fake_runner())
+    (run_dir / "raw" / "idle.png").write_bytes(b"\x89PNG\r\n\x1a\n incomplete image")  # a valid report next to a broken image
+    calls: list = []
+    again = gen_set.run_set(run_dir=run_dir, states=["idle"], provider="codex", model=None, concurrency=1, force=False, gen_runner=_fake_runner(record=calls))
+    assert len(calls) == 1 and again["items"][0]["regenerated_because"].startswith("row image unreadable")
