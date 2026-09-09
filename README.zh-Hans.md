@@ -9,12 +9,14 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/gptaku-idle.gif" width="170" alt="gptaku octopus idle, breathing" />
-  <img src="docs/assets/gptaku-jump.gif" width="170" alt="gptaku octopus jump" />
-  <img src="docs/assets/gptaku-flail.gif" width="170" alt="gptaku octopus flail" />
+  <img src="docs/assets/hero-paladin-walk.gif" height="200" alt="paladin walk loop" />
+  <img src="docs/assets/hero-paladin-run.gif" height="200" alt="paladin run loop" />
+  <img src="docs/assets/hero-paladin-jump.gif" height="200" alt="paladin jump loop" />
+  <img src="docs/assets/hero-wolf-walk.gif" height="200" alt="wolf walk loop" />
+  <img src="docs/assets/hero-slime-walk.gif" height="200" alt="slime walk loop" />
 </p>
 
-<p align="center"><sub>来自 <i>Cinderisle</i> 的 32×32 像素完美章鱼 gptaku。左侧的 idle 是<b>一帧静止图</b>，呼吸由引擎烘焙。</sub></p>
+<p align="center"><sub>上面每个循环都来自<b>一张静止图</b>：填充到动作所需的画布 → 由 Grok Imagine 驱动 → 逐帧抠像 → 在真实周期处剪成透明 GIF — 流水线 B，<code>sprite-gen video-set</code>。</sub></p>
 
 ---
 

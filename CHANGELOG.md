@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v2.0.0) - Four pipelines, one taxonomy
+## v2.0.0 - Four pipelines, one taxonomy
 
 ### Highlights
 

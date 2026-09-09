@@ -9,12 +9,14 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/gptaku-idle.gif" width="170" alt="gptaku octopus idle, breathing" />
-  <img src="docs/assets/gptaku-jump.gif" width="170" alt="gptaku octopus jump" />
-  <img src="docs/assets/gptaku-flail.gif" width="170" alt="gptaku octopus flail" />
+  <img src="docs/assets/hero-paladin-walk.gif" height="200" alt="paladin walk loop" />
+  <img src="docs/assets/hero-paladin-run.gif" height="200" alt="paladin run loop" />
+  <img src="docs/assets/hero-paladin-jump.gif" height="200" alt="paladin jump loop" />
+  <img src="docs/assets/hero-wolf-walk.gif" height="200" alt="wolf walk loop" />
+  <img src="docs/assets/hero-slime-walk.gif" height="200" alt="slime walk loop" />
 </p>
 
-<p align="center"><sub><i>Cinderisle</i> の 32×32 ピクセルパーフェクトなタコ gptaku。左の idle は<b>静止フレーム一枚</b>で、呼吸はエンジンが焼き込む。</sub></p>
+<p align="center"><sub>上のループはすべて<b>静止画一枚</b>から生まれた: モーションに合うキャンバスへパディング → Grok Imagine で動かす → フレームごとにキーイング → 真の周期で切って透明 GIF に — パイプライン B、<code>sprite-gen video-set</code>。</sub></p>
 
 ---
 

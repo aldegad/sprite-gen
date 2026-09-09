@@ -9,12 +9,14 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/gptaku-idle.gif" width="170" alt="gptaku octopus idle, breathing" />
-  <img src="docs/assets/gptaku-jump.gif" width="170" alt="gptaku octopus jump" />
-  <img src="docs/assets/gptaku-flail.gif" width="170" alt="gptaku octopus flail" />
+  <img src="docs/assets/hero-paladin-walk.gif" height="200" alt="paladin walk loop" />
+  <img src="docs/assets/hero-paladin-run.gif" height="200" alt="paladin run loop" />
+  <img src="docs/assets/hero-paladin-jump.gif" height="200" alt="paladin jump loop" />
+  <img src="docs/assets/hero-wolf-walk.gif" height="200" alt="wolf walk loop" />
+  <img src="docs/assets/hero-slime-walk.gif" height="200" alt="slime walk loop" />
 </p>
 
-<p align="center"><sub>gptaku, un pulpo pixel-perfect de 32×32 de <i>Cinderisle</i>. El idle de la izquierda es <b>un solo fotograma fijo</b>: la respiración la hornea el motor.</sub></p>
+<p align="center"><sub>Cada bucle de arriba empezó como <b>una sola imagen fija</b>: rellenada al lienzo que su movimiento necesita, animada por Grok Imagine, recortada fotograma a fotograma y cortada en su periodo real en un GIF transparente — pipeline B, <code>sprite-gen video-set</code>.</sub></p>
 
 ---
 
