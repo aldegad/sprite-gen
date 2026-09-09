@@ -30,7 +30,7 @@ flowchart LR
 | **A · atlas rows** — one still becomes a runtime sprite sheet | [run-contract.md](run-contract.md) | `prepare` → `gen` / `gen-set` → `extract` → `curation` → `compose-atlas` |
 | **B · video → loop** — one still becomes transparent motion loops | [video-pipeline.md](video-pipeline.md) | `video-canvas` → `video` → `video-frames` → `video-loop`, `video-set` |
 | **C · utilities** — imported images in, clean cuts out | [sheet-slicing.md](sheet-slicing.md) | `cutout`, `slice-sheet`, `unpack-atlas` |
-| **D · post-processing** — finished sheets, refined | [recolor.md](recolor.md) | `recolor`, `compose-layers`, breathing (compose), `export-pngs`, `export-aseprite` |
+| **D · post-processing** — finished sheets, refined | [recolor.md](recolor.md) | `recolor`, `recolor-palette`, `compose-layers`, breathing (compose), `export-pngs`, `export-aseprite` |
 
 `sprite-gen --help` prints the same four pipelines and every verb grouped by domain; the
 grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.

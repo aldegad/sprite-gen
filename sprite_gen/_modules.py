@@ -67,6 +67,20 @@ DOMAIN_ORDER = [d for d, _ in DOMAINS]
 DOMAIN_TITLE = dict(DOMAINS)
 
 
+# The four pipelines — first-class objects. The CLI help, the docs index and the README
+# pipeline table are checked against THIS list; a verb named here must exist as a verb.
+PIPELINES: list[dict[str, object]] = [
+    {"key": "A", "name": "atlas rows", "verbs": ["prepare", "gen", "gen-set", "extract", "curation", "compose-atlas"],
+     "chain": "prepare → gen (or gen-set) → extract → curation → compose-atlas", "doc": "docs/run-contract.md"},
+    {"key": "B", "name": "video → loop", "verbs": ["video-canvas", "video", "video-frames", "video-loop", "video-set"],
+     "chain": "video-canvas → video → video-frames → video-loop, or video-set", "doc": "docs/video-pipeline.md"},
+    {"key": "C", "name": "utilities", "verbs": ["cutout", "slice-sheet", "unpack-atlas"],
+     "chain": "cutout · slice-sheet · unpack-atlas (each stands alone)", "doc": "docs/sheet-slicing.md"},
+    {"key": "D", "name": "post-processing", "verbs": ["recolor", "recolor-palette", "compose-layers", "export-pngs", "export-aseprite"],
+     "chain": "recolor · compose-layers · export-pngs · export-aseprite", "doc": "docs/recolor.md"},
+]
+
+
 def domain_of(module_path: str) -> str:
     """Domain of a fully-qualified module path (`sprite_gen.video.loop` → `video`).
 

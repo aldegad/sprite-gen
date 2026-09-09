@@ -369,18 +369,11 @@ def command_domains() -> dict[str, list[str]]:
     return {d: verbs for d, verbs in groups.items() if verbs}
 
 
-PIPELINES = (
-    ("A  atlas rows", "prepare → gen (or gen-set) → extract → curation → compose-atlas", "docs/run-contract.md"),
-    ("B  video → loop", "video-canvas → video → video-frames → video-loop, or video-set", "docs/video-pipeline.md"),
-    ("C  utilities", "cutout · slice-sheet · unpack-atlas (each stands alone)", "docs/sheet-slicing.md"),
-    ("D  post-processing", "recolor · compose-layers · migrate-breathe · export-*", "docs/recolor.md"),
-)
-
-
 def _help_description() -> str:
     lines = ["sprite-gen — 2D sprite pipelines as one CLI. Every verb works alone or as a pipeline stage.", "", "pipelines:"]
-    for label, chain, doc in PIPELINES:
-        lines.append(f"  {label:<20} {chain}   ({doc})")
+    for pipe in _modules.PIPELINES:  # the catalog, not a copy of it
+        label = f"{pipe['key']}  {pipe['name']}"
+        lines.append(f"  {label:<20} {pipe['chain']}   ({pipe['doc']})")
     lines += ["", "tools by domain:"]
     width = max(len(v) for v in COMMANDS)
     for domain, verbs in command_domains().items():

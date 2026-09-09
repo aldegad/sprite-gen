@@ -141,3 +141,38 @@ def test_run_gen_cli_invokes_the_cli_gen_verb(tmp_path: Path, monkeypatch) -> No
     cmd = captured["cmd"]
     assert cmd[1:4] == ["-m", "sprite_gen.cli", "gen"]
     assert cmd.count("--ref") == 2 and "--provider" in cmd and "--model" not in cmd
+
+
+def _broken_report_runner(record: list | None = None):
+    def runner(prompt_file: Path, out: Path, refs: list[Path], report: Path, *, provider, model, log) -> int:
+        if record is not None:
+            record.append(out.name)
+        log.write_text("fake gen\n", encoding="utf-8")
+        Image.new("RGB", (256, 64), (255, 0, 255)).save(out)
+        report.write_text("{not json", encoding="utf-8")
+        return 0
+    return runner
+
+
+def test_gen_set_broken_report_is_a_named_failure_and_never_reused(tmp_path: Path) -> None:
+    """Validator finding 2026-09-09: a PNG plus an unreadable report used to crash the batch
+    (JSONDecodeError, no table) and the next run reused the row on file existence alone."""
+    run_dir = _prepare(tmp_path)
+    first = gen_set.run_set(run_dir=run_dir, states=["idle"], provider="codex", model=None, concurrency=1, force=False, gen_runner=_broken_report_runner())
+    assert first["failed"] == ["idle"] and "report unreadable" in first["items"][0]["error"]
+    assert not (run_dir / "raw" / "idle.png").exists(), "no half state: the unproven row is removed"
+    assert "FAIL: gen exited 0 but its report unreadable" in (run_dir / "reports" / "gen-set" / "table.md").read_text()
+    # second run must generate again, not reuse
+    calls: list = []
+    second = gen_set.run_set(run_dir=run_dir, states=["idle"], provider="codex", model=None, concurrency=1, force=False, gen_runner=_fake_runner(record=calls))
+    assert calls == [("idle.png", ["base-source.png", "idle.png"], "codex")] and second["ok"] == 1 and second["items"][0].get("reused") is None
+
+
+def test_gen_set_row_without_a_real_report_is_regenerated_with_a_reason(tmp_path: Path) -> None:
+    run_dir = _prepare(tmp_path)
+    (run_dir / "raw").mkdir(exist_ok=True)
+    Image.new("RGB", (256, 64), (255, 0, 255)).save(run_dir / "raw" / "walk.png")  # a row image from nowhere, no report
+    calls: list = []
+    payload = gen_set.run_set(run_dir=run_dir, states=["walk"], provider="codex", model=None, concurrency=1, force=False, gen_runner=_fake_runner(record=calls))
+    item = payload["items"][0]
+    assert len(calls) == 1 and item["ok"] and item.get("reused") is None and item["regenerated_because"] == "report missing"
