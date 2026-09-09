@@ -35,7 +35,7 @@ from sprite_gen.curate import anchor as anchor_mod
 from sprite_gen.spec import layout
 from sprite_gen.spec.runio import atomic_write_text
 
-DEFAULT_CONCURRENCY = 4  # maintainer 2026-07-19: multi-row batches run 4 at a time; serial is the anti-pattern
+DEFAULT_CONCURRENCY = 6  # lead-verified 2026-08 (no provider throttling at 6-wide); serial one-by-one is the anti-pattern
 REPORT_DIR = "reports"  # <run>/reports/gen-set/<state>.json — outside raw/ and frames/, the run contract's derived areas
 
 
