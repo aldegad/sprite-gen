@@ -48,9 +48,10 @@ MODULE_DOMAIN = {
 }
 
 
-# Display order and one-line meaning of each domain — the taxonomy the CLI help, the
-# scripts map and the docs index enumerate from. Adding a module to MODULE_DOMAIN puts it
-# in its group; nothing else needs a hand edit.
+# Display order and one-line meaning of each domain — the taxonomy the CLI help and the
+# scripts map enumerate from (the docs classification is catalogued in docs/README.md and
+# tested against the file set). Adding a module to MODULE_DOMAIN puts it in its group;
+# nothing else needs a hand edit.
 DOMAINS: list[tuple[str, str]] = [
     ("gen", "Generation — prepare a run, generate stills / rows / clips"),
     ("video", "Video → loop — canvas, keyed frames, seamless cycle, batch"),
