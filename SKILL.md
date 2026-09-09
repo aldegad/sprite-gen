@@ -31,9 +31,7 @@ depends_on:
     - scripts/inspect_sprite_run.py
     - scripts/score_sprite_run.py
     - scripts/run_correction_loop.py
-    - scripts/gif_utils.py
     - scripts/curation.py
-    - scripts/runio.py
     - scripts/serve_curation.py
     - scripts/slice_sheet_cells.py
     - scripts/unpack_atlas_run.py
@@ -126,7 +124,7 @@ One job each, all under `scripts/` (wrappers) ↔ `sprite_gen/<domain>/` (impl).
 | `recolor.py` (`recolor` / `recolor-palette`) | deterministic palette-swap bake → `variants/` + report (exact match; opt-in tolerance) | [`docs/recolor.md`](docs/recolor.md) |
 | `compose_layers.py` (`sprite-gen compose-layers`) | rig runs only: curated rows stacked by integer pivots + masks → `layers/` (all-or-nothing) | [`docs/layer-tracks.md`](docs/layer-tracks.md) |
 | `unpack_atlas_run.py` (`unpack-atlas`) · `export_curated_pngs.py` (`export-pngs`) | finished sheet / PNG folder → curator-ready run · curated frames → named PNGs (`curated/`) | [`docs/curation.md`](docs/curation.md) |
-| `cutout` · `slice_sheet_cells.py` (`slice-sheet`) · `check_visible_magenta.py` | imported-image background removal (white matte / chroma engine) · multi-figure sheet → per-cell cuts · screenshot chroma-leak guard | [`docs/sheet-slicing.md`](docs/sheet-slicing.md) |
+| `cutout` · `slice_sheet_cells.py` (`slice-sheet`) · `dev/check_visible_magenta.py` | imported-image background removal (white matte / chroma engine) · multi-figure sheet → per-cell cuts · screenshot chroma-leak guard | [`docs/sheet-slicing.md`](docs/sheet-slicing.md) |
 
 Breathing (idle) and static-pose rows are a **post-process layer** declared in `curation.json` (`states.<state>.breathe`) and baked by compose — never a script step; the contract (anatomy detection, editor, rigid boundary, `migrate-breathe`) is [`docs/breathing.md`](docs/breathing.md) and [`docs/static-pose-recipe.md`](docs/static-pose-recipe.md).
 

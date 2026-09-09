@@ -1,6 +1,6 @@
 """호흡 계약 변이 배터리 — 그물을 손대면 **전부** 다시 돌린다.
 
-    python scripts/breathe_mutation_battery.py
+    python scripts/dev/breathe_mutation_battery.py
 
 각 항목은 "이 계약이 깨지면 어떤 코드가 되는가" 를 소스에 잠깐 심고, 그물이 실제로
 무는지(테스트가 FAIL 하는지) 확인한 뒤 되돌린다. 전부 물어야 exit 0 이다.

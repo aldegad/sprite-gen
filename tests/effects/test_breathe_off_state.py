@@ -25,7 +25,7 @@ validator 검증 2026-07-25).
 - 계약을 **진짜로** 지키는 것은 동작 테스트다: `tests/test_breathe_reference_key.py` 가
   실제 `store.js`/`breathe.js` 를 node 로 돌려 서버 페이로드와 왕복 대조한다. 계약을
   강화할 여지가 있으면 **거기에** 추가하는 것이 옳고, 여기 정규식을 조이는 것이 아니다.
-- 이 스캐너들이 실제로 잡은 회귀는 `scripts/breathe_mutation_battery.py` 에 변이로 남아
+- 이 스캐너들이 실제로 잡은 회귀는 `scripts/dev/breathe_mutation_battery.py` 에 변이로 남아
   있다. 그물을 손대면 배터리 전건을 재실행한다 (새 변이만 확인하는 것으로는 부족하다 —
   그물 자신의 개선이 다른 축을 여는 일이 반복됐다).
 

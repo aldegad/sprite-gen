@@ -40,7 +40,7 @@ canonical files, not hidden imports.
 | Selected cycle | `compose_selected_cycle.py` | `curation.json` / `--frames` | selected-cycle manifest + QA |
 | Inverse / import | `unpack_atlas_run.py` | finished atlas **or** `--pngs-dir` | curator-ready run dir (§4) |
 | Export stills | `export_curated_pngs.py` | curated `frames/` | named PNGs under `curated/` |
-| Chroma guard | `check_visible_magenta.py` | screenshot | leakage warning |
+| Chroma guard | `scripts/dev/check_visible_magenta.py` | screenshot | leakage warning |
 
 The happy path is `prepare → gen → extract → (curate) → compose`, with a curation
 webview opened as the closing step. Stage internals (chroma removal, connected
