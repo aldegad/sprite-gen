@@ -35,10 +35,10 @@ VIEW_TEXT = {
     "back": "seen from directly behind, facing away from the viewer",
 }
 MOTION_TEXT = {
-    "idle": "stands in place in a relaxed idle: slow gentle breathing, a subtle weight sway, one natural eye blink. Feet never move.",
-    "walk": "walks in place on a treadmill: a steady, natural bipedal walk cycle, legs alternating with clear foot contacts, arms swinging gently.",
-    "run": "runs in place on a treadmill: a fast, energetic bipedal run cycle, knees lifting high, arms pumping, clear alternating strides.",
-    "jump": "performs a modest vertical hop in place over and over: crouch, spring up about half the body height, land softly, return to the exact starting stance, repeat at an even rhythm. Same height every time.",
+    "idle": "holds a relaxed idle in place: slow gentle breathing, a subtle weight sway, one natural blink if the face has eyes. The ground contact never slides.",
+    "walk": "moves in place on a treadmill: a steady locomotion cycle for this body type with clear repeating ground contacts and an even left-right or front-back rhythm the body already has.",
+    "run": "moves in place on a treadmill: a fast locomotion cycle for this body type with a bounding rhythm and clear repeating ground contacts.",
+    "jump": "performs a modest vertical hop in place over and over: compress, spring up about half the body height, land softly, return to the exact starting stance, repeat at an even rhythm. Same height every time.",
     "attack": "performs the same melee attack over and over: one clean strike in front, then returns to the exact ready stance, repeating at an even rhythm.",
 }
 COMMON_TEXT = (
@@ -122,7 +122,7 @@ def run_item(
         fr = frames_mod.run_frames(clip, item_dir / "frames", key=key, allow_edge_contact=False, report_path=item_dir / "frames.report.json")
         result["frames"] = {k: fr[k] for k in ("fps", "frames", "alpha_zero_pct_min", "alpha_zero_pct_max")}
         lp = loop_mod.run_loop(Path(fr["keyed_dir"]), item_dir / "loop", fps=float(fr["fps"]), state=state, min_len=None, max_len=None, n_out=None, seam_max=loop_mod.SEAM_RATIO_MAX, name=item, report_path=item_dir / "loop.report.json")
-        result["loop"] = {"cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
+        result["loop"] = {"kind": lp["cycle"].get("kind", "periodic"), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
         result["ok"] = True
     except SystemExit as exc:
         result["ok"] = False
@@ -131,13 +131,13 @@ def run_item(
 
 
 def write_table(results: list[dict[str, Any]], path: Path) -> str:
-    lines = ["| direction | state | cycle | period | seam | frames | status |", "|---|---|---|---|---|---|---|"]
+    lines = ["| direction | state | kind | cycle | period | seam | frames | status |", "|---|---|---|---|---|---|---|---|"]
     for r in results:
         if r.get("ok"):
             lp = r["loop"]
-            lines.append(f"| {r['direction']} | {r['state']} | {lp['cycle']} | {lp['period']} | {lp['seam_ratio']:.2f} | {lp['n_out']} | OK |")
+            lines.append(f"| {r['direction']} | {r['state']} | {lp.get('kind', 'periodic')} | {lp['cycle']} | {lp['period'] if lp['period'] is not None else '-'} | {lp['seam_ratio']:.2f} | {lp['n_out']} | OK |")
         else:
-            lines.append(f"| {r['direction']} | {r['state']} | - | - | - | - | FAIL: {r.get('error', '')[:80]} |")
+            lines.append(f"| {r['direction']} | {r['state']} | - | - | - | - | - | FAIL: {r.get('error', '')[:80]} |")
     text = "\n".join(lines) + "\n"
     atomic_write_text(path, text)
     return text

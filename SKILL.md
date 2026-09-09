@@ -183,7 +183,7 @@ $SPRITE_GEN_ROOT/.venv/bin/sprite-gen video-set \
   --character "<subject phrase>"
 ```
 
-Per item: `video-canvas` (the still padded into the state's canvas — the API ignores `aspect_ratio`, the input frame decides) → `video` (in-place, evenly paced, returns-to-start prompt) → `video-frames` (ffmpeg + cutout keying; edge contact fails loud) → `video-loop` (global period first, then best seam; strip + `body_h` meta, 1-bit GIF, `img2webp -exact` WebP, seam gate). Starts are staggered for the 2 req/s team quota, a 429 retries once or twice, every item reports and `table.md` lists failures by name. Render strips at 24 fps (one cell per frame). Contract and the measurements behind each rule: [`docs/video-pipeline.md`](docs/video-pipeline.md).
+Per item: `video-canvas` (the still padded into the state's canvas — the API ignores `aspect_ratio`, the input frame decides) → `video` (in-place, evenly paced, returns-to-start prompt) → `video-frames` (ffmpeg + cutout keying; edge contact fails loud) → `video-loop` (global period first, then best seam; for `jump`/`attack` a clip that performs the action once gets a recorded one-shot cut, `cycle.kind` in the report; strip + `body_h` meta, 1-bit GIF, `img2webp -exact` WebP, seam gate). Starts are staggered for the 2 req/s team quota, a 429 retries once or twice, every item reports and `table.md` lists failures by name. Render strips at 24 fps (one cell per frame). Contract and the measurements behind each rule: [`docs/video-pipeline.md`](docs/video-pipeline.md).
 
 ## SSoT
 
