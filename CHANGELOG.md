@@ -2,6 +2,10 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## Unreleased (v2.1.0)
+
+- `video-loop` GIF/WebP frame count follows the cycle length at a fixed playback rate (`--gif-fps`, default 12) instead of a per-state fixed count: a 2.5 s jump now gets ~30 frames at ~84 ms instead of 12 frames at 210 ms, so every state plays at the same density. `--n-out` still overrides; the report records `gif_fps`.
+
 ## v2.0.0 - Four pipelines, one taxonomy
 
 ### Highlights
