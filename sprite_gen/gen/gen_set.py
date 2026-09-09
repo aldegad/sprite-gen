@@ -72,6 +72,20 @@ def _stages(request: dict[str, Any], states: list[str]) -> list[list[str]]:
     return [stage for stage in (first, second) if stage]
 
 
+def _row_image_ok(out: Path) -> str | None:
+    """None when `out` is a complete, decodable image; otherwise why not."""
+    if not out.is_file():
+        return "row image missing"
+    try:
+        from PIL import Image
+
+        with Image.open(out) as im:
+            im.verify()
+    except Exception as exc:  # noqa: BLE001 — any decode failure is the same verdict
+        return f"row image unreadable ({exc.__class__.__name__})"
+    return None
+
+
 def read_report(report: Path) -> tuple[dict[str, Any] | None, str | None]:
     """Parse a row's gen report. Returns (report, None) or (None, why) — a missing,
     unreadable or provider-less report is never treated as a finished row."""
@@ -127,27 +141,33 @@ def run_item(
             raise SystemExit(f"layout guide missing: {guide} — run `sprite-gen prepare` first")
         if out.is_file() and not force:
             prior, why = read_report(report)
-            if prior is not None:
+            bad_image = _row_image_ok(out)
+            if prior is not None and bad_image is None:
                 result["reused"] = True
                 result["provider"] = prior.get("provider")
                 result["provider_resolved_from"] = prior.get("provider_resolved_from")
                 result["ok"] = True
                 return result
-            result["regenerated_because"] = why  # the row image exists but its report does not prove it — generate again, say why
+            result["regenerated_because"] = why or bad_image  # the files exist but do not prove a finished row — generate again, say why
         identity = anchor_mod.identity_ref(run_dir, state, request, quiet=True)
         refs = [identity, guide]
         result["refs"] = [str(r) for r in refs]
         out.parent.mkdir(parents=True, exist_ok=True)
+        # The report is the commit marker of a finished row. Drop the previous one BEFORE the
+        # provider runs: a provider that half-overwrites the image and exits non-zero must not
+        # leave a valid-looking report next to a broken image (validator finding 2026-09-09).
+        report.unlink(missing_ok=True)
         rc = gen_runner(prompt_file, out, refs, report, provider=provider, model=model, log=log)
-        if rc != 0 or not out.is_file():
-            tail = log.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-3:] if log.exists() else []
-            raise SystemExit(f"gen exited {rc}; " + (" | ".join(tail) if tail else f"see {log}"))
-        gen_report, why = read_report(report)
-        if gen_report is None:
-            for partial in (out, report):
+        gen_report, why = read_report(report) if rc == 0 else (None, None)
+        bad_image = _row_image_ok(out) if rc == 0 else None
+        if rc != 0 or gen_report is None or bad_image is not None:
+            for partial in (out, report):  # no half state: an unproven row is removed so the next run regenerates
                 if partial.exists():
                     partial.unlink()
-            raise SystemExit(f"gen exited 0 but its {why}; the row and the report were removed so the next run regenerates")
+            if rc != 0:
+                tail = log.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-3:] if log.exists() else []
+                raise SystemExit(f"gen exited {rc}; " + (" | ".join(tail) if tail else f"see {log}") + " — the row and its report were removed")
+            raise SystemExit(f"gen exited 0 but its {why or bad_image}; the row and the report were removed so the next run regenerates")
         result["provider"] = gen_report.get("provider")
         result["provider_resolved_from"] = gen_report.get("provider_resolved_from")
         if gen_report.get("provider_fallback"):
