@@ -7,7 +7,7 @@ import argparse
 from pathlib import Path
 from typing import Callable
 
-from sprite_gen import gen
+from sprite_gen import _modules, gen
 from sprite_gen.curate import anchor
 from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, compose_layers, export_aseprite, export_pngs
 from sprite_gen.qa import correction_loop, inspect, preview, score
@@ -356,11 +356,43 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
 }
 
 
+def command_domains() -> dict[str, list[str]]:
+    """Verbs grouped by domain, derived from each verb's `run` module — never hand-listed."""
+    groups: dict[str, list[str]] = {d: [] for d in _modules.DOMAIN_ORDER}
+    for name, (_description, _add_args, run) in COMMANDS.items():
+        groups[_modules.domain_of(run.__module__)].append(name)
+    return {d: verbs for d, verbs in groups.items() if verbs}
+
+
+PIPELINES = (
+    ("A  atlas rows", "prepare → gen (or gen-set) → extract → curation → compose-atlas", "docs/run-contract.md"),
+    ("B  video → loop", "video-canvas → video → video-frames → video-loop, or video-set", "docs/video-pipeline.md"),
+    ("C  utilities", "cutout · slice-sheet · unpack-atlas (each stands alone)", "docs/sheet-slicing.md"),
+    ("D  post-processing", "recolor · compose-layers · migrate-breathe · export-*", "docs/recolor.md"),
+)
+
+
+def _help_description() -> str:
+    lines = ["sprite-gen — 2D sprite pipelines as one CLI. Every verb works alone or as a pipeline stage.", "", "pipelines:"]
+    for label, chain, doc in PIPELINES:
+        lines.append(f"  {label:<20} {chain}   ({doc})")
+    lines += ["", "tools by domain:"]
+    width = max(len(v) for v in COMMANDS)
+    for domain, verbs in command_domains().items():
+        lines.append(f"  [{domain}] {_modules.DOMAIN_TITLE[domain]}")
+        for verb in verbs:
+            lines.append(f"    {verb:<{width}}  {COMMANDS[verb][0]}")
+    lines += ["", "run `sprite-gen <tool> --help` for a tool's arguments."]
+    return "\n".join(lines)
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="sprite-gen", description="Unified CLI for the sprite-gen pipeline.")
+    parser = argparse.ArgumentParser(
+        prog="sprite-gen", description=_help_description(), formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = parser.add_subparsers(dest="command", required=True, metavar="<tool>")
     for name, (description, add_args, _run) in COMMANDS.items():
-        sp = sub.add_parser(name, description=description, help=description)
+        sp = sub.add_parser(name, description=description)
         add_args(sp)
     return parser
 
