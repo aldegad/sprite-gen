@@ -9,11 +9,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/hero-paladin-walk.gif" height="200" alt="paladin walk loop" />
-  <img src="docs/assets/hero-paladin-run.gif" height="200" alt="paladin run loop" />
-  <img src="docs/assets/hero-paladin-jump.gif" height="301" alt="paladin jump loop" />
-  <img src="docs/assets/hero-wolf-walk.gif" height="200" alt="wolf walk loop" />
-  <img src="docs/assets/hero-slime-walk.gif" height="200" alt="slime walk loop" />
+  <img src="docs/assets/hero-paladin-walk.gif" height="202" alt="paladin walk loop" />
+  <img src="docs/assets/hero-paladin-run.gif" height="206" alt="paladin run loop" />
+  <img src="docs/assets/hero-paladin-jump.gif" height="246" alt="paladin jump loop" />
+  <img src="docs/assets/hero-wolf-walk.gif" height="203" alt="wolf walk loop" />
+  <img src="docs/assets/hero-slime-walk.gif" height="203" alt="slime walk loop" />
 </p>
 
 <p align="center"><sub>Cada bucle de arriba empezó como <b>una sola imagen fija</b>: rellenada al lienzo que su movimiento necesita, animada por Grok Imagine, recortada fotograma a fotograma y cortada en su periodo real en un GIF transparente — pipeline B, <code>sprite-gen video-set</code>.</sub></p>

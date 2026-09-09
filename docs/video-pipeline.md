@@ -118,9 +118,12 @@ Outputs:
   pad** so feet meet the floor, bottom-aligned, ≤ 64 cells **and ≤ 32 000 px wide** because
   Chrome refuses images near 32 767 px — the cap is on pixels, so a 650 px cell allows 49
   cells and the meta says `subsampled`; ≤ 520 px tall) with `frames · w · h · body_h · delay_ms ·
-  cycle_frames · cycle_seconds`. `body_h` is the standing body height (median per-frame
-  bbox height): scale a jump strip — whose cells include air room — by `body_h`, not `h`,
-  and it reads the same size as a walk strip. `delay_ms = cycle_seconds / frames`, so a
+  cycle_frames · cycle_seconds`. `body_h` is the **standing height** — the tallest frame whose feet touch the floor
+  (a median over the cycle undercounts a jump, whose crouch and airborne frames dominate,
+  and then over-scales it by ~22 %, 2026-09-09). Scale a jump strip — whose cells include
+  air room — by `body_h`, not `h`, and it reads the same size as a walk strip;
+  `--body-height N` does that scaling in the pipeline so every state comes out at the same
+  character size (`--strip-height` stays the cap). `delay_ms = cycle_seconds / frames`, so a
   24 fps clip yields 41.67 ms cells; render at 24 fps to keep one cell per frame
   (a 30 fps render of 24 fps cells is a 5:4 pulldown and judders).
 - `<name>.gif` — `n_out` frames evenly across the cycle, 1-bit alpha, disposal 2, `loop=0`.

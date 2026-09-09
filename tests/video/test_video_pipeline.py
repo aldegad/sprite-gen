@@ -21,7 +21,7 @@ from sprite_gen.video import loop as loop_mod
 
 GREEN = (0, 255, 0)
 HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
-HAS_IMG2WEBP = shutil.which("img2webp") is not None
+HAS_IMG2WEBP = shutil.which("img2webp") is not None and __import__("sprite_gen.video.loop", fromlist=["x"]).img2webp_supports_exact()  # presence is not support: libwebp < 1.3 has no -exact
 
 
 def _still(tmp_path: Path, size=(120, 160), key=GREEN, name="still.png") -> Path:
@@ -292,6 +292,7 @@ def test_strip_cap_is_on_pixels_not_cells() -> None:
     assert strip.width == meta["w"] * meta["frames"]
 
 
+@pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_gif_frame_count_follows_cycle_length_at_a_fixed_playback_rate(tmp_path: Path) -> None:
     """A 2.5 s jump used to get the same 12 frames as a 1.1 s walk and play at ~5 fps
     (2026-09-09, lead: '점프만 혼자 왜 프레임이 느리냐')."""
@@ -308,6 +309,7 @@ def test_gif_frame_count_follows_cycle_length_at_a_fixed_playback_rate(tmp_path:
     assert rep["n_out"] <= rep["cycle"]["length"] and rep2["n_out"] <= rep2["cycle"]["length"]
 
 
+@pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_default_gif_rate_keeps_every_cycle_frame(tmp_path: Path) -> None:
     """24 fps source, 24 fps GIF: a 61-frame jump cycle stays 61 frames at ~42 ms."""
     (tmp_path / "j").mkdir()
@@ -316,6 +318,7 @@ def test_default_gif_rate_keeps_every_cycle_frame(tmp_path: Path) -> None:
     assert rep["n_out"] == rep["cycle"]["length"] and 40 <= rep["delay_ms"] <= 43 and rep["gif_fps"] == 24.0
 
 
+@pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_fixed_cycle_cuts_exactly_and_skips_detection(tmp_path: Path) -> None:
     """A clip with too few repeats for the periodicity gate can still be cut where the
     caller says (2026-09-09: the reel's jump clip held 2.3 hops)."""
@@ -329,11 +332,34 @@ def test_fixed_cycle_cuts_exactly_and_skips_detection(tmp_path: Path) -> None:
         loop_mod.run_loop(tmp_path / "keyed", tmp_path / "fx3", fps=24.0, state="jump", min_len=None, max_len=None, n_out=None, seam_max=5.0, name="f3", report_path=None, cycle_mode="fixed")
 
 
+@pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_strip_height_caps_the_output_size(tmp_path: Path) -> None:
     files = _gait_frames(tmp_path, period=12, n=60, size=(160, 400))
     rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "h", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="h", report_path=None, strip_height=100)
     assert rep["strip"]["h"] <= 100
     assert Image.open(rep["gif"]["file"] if Path(rep["gif"]["file"]).is_absolute() else tmp_path / "h" / rep["gif"]["file"]).height <= 100
+
+
+def test_body_h_is_the_standing_height_not_the_cycle_median() -> None:
+    """A jump cycle: 10 standing frames (60 px tall), 20 crouched (40 px) and 30 airborne
+    (60 px, lifted). The median height is not the standing height; body_h must be 60 and
+    --body-height must scale the standing frames, not the median."""
+    frames = []
+    def body(top, height):
+        im = Image.new("RGBA", (80, 120), (0, 0, 0, 0))
+        for y in range(top, top + height):
+            for x in range(30, 50):
+                im.putpixel((x, y), (200, 60, 60, 255))
+        return im
+    frames += [body(60, 60) for _ in range(10)]        # standing on the floor (bottom = 119)
+    frames += [body(80, 40) for _ in range(20)]        # crouched on the floor
+    frames += [body(20, 60) for _ in range(30)]        # airborne (bottom = 79)
+    strip, meta = loop_mod.build_strip(frames, cycle_seconds=60 / 24)
+    assert meta["body_h"] == 60
+    strip2, meta2 = loop_mod.build_strip(frames, cycle_seconds=60 / 24, body_height=30)
+    assert meta2["body_h"] == 30 and meta2["body_height_target"] == 30 and meta2["h"] == 54  # union crop 108 px (8 px top margin) → 0.5
+    strip3, meta3 = loop_mod.build_strip(frames, cycle_seconds=60 / 24, body_height=30, max_height=40)
+    assert meta3["h"] <= 40, "--strip-height stays the cap"
 
 
 def test_drop_specks_erases_detached_slivers_only() -> None:

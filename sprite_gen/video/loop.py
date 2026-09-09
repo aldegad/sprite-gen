@@ -253,7 +253,7 @@ def _scrub(image: Image.Image) -> int:
     return n
 
 
-def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, max_height: int = STRIP_MAX_HEIGHT, max_width: int = STRIP_MAX_WIDTH, cycle_seconds: float) -> tuple[Image.Image, dict[str, Any]]:
+def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, max_height: int = STRIP_MAX_HEIGHT, max_width: int = STRIP_MAX_WIDTH, cycle_seconds: float, body_height: int | None = None) -> tuple[Image.Image, dict[str, Any]]:
     """Union-crop (no bottom pad so feet meet the floor), scale, bottom-align, tile horizontally.
 
     The cell count is capped by the strip's PIXEL width (`max_width`) as well as by
@@ -268,9 +268,15 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
     top = max(0, min(b[1] for b in boxes) - 8)
     right = min(frames[0].width, max(b[2] for b in boxes) + 8)
     bottom = max(b[3] for b in boxes)
-    heights = sorted(b[3] - b[1] for b in boxes)
-    body_src = heights[len(heights) // 2]
+    # body_h = the STANDING height: the tallest frame whose feet touch the floor. A median
+    # over the whole cycle undercounts a jump (crouch + airborne frames dominate) and then
+    # over-scales it — the 2026-09-09 hero read 22 % taller than the walk beside it.
+    floor = max(b[3] for b in boxes)
+    grounded = [b[3] - b[1] for b in boxes if b[3] >= floor - 4] or [b[3] - b[1] for b in boxes]
+    body_src = max(grounded)
     scale = min(1.0, max_height / (bottom - top))
+    if body_height is not None:
+        scale = min(scale, body_height / body_src)  # match the standing height; max_height stays an upper bound
     w = round((right - left) * scale)
     h = round((bottom - top) * scale)
     cap = max(1, min(max_cells, max_width // max(1, w)))
@@ -293,8 +299,23 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
         "subsampled": L > cap,
         "cell_cap": cap,
         "top_margin_px": top,
+        "body_height_target": body_height,
     }
     return strip, meta
+
+
+def img2webp_supports_exact(binary: str | None = None) -> bool:
+    """libwebp added `-exact` to img2webp in 1.5.0 (checked against the 1.4.0 and 1.5.0 release
+    binaries, 2026-09-09); older builds (Ubuntu 24.04: 1.3.x) reject the flag with "Unknown option"
+    and would rewrite RGB under alpha 0. Detected from `-h`, never assumed."""
+    binary = binary or shutil.which("img2webp")
+    if not binary:
+        return False
+    try:
+        proc = subprocess.run([binary, "-h"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "-exact" in (proc.stdout + proc.stderr)
 
 
 def write_webp(frames: list[Image.Image], out: Path, *, delay_ms: int, workdir: Path) -> None:
@@ -303,6 +324,11 @@ def write_webp(frames: list[Image.Image], out: Path, *, delay_ms: int, workdir: 
     img2webp = shutil.which("img2webp")
     if not img2webp:
         raise SystemExit("video-loop: `img2webp` not found on PATH — install libwebp (brew install webp) for exact-alpha WebP")
+    if not img2webp_supports_exact(img2webp):
+        raise SystemExit(
+            "video-loop: this img2webp has no `-exact` option (libwebp < 1.5; Ubuntu 24.04 ships 1.3.x) — "
+            "install libwebp >= 1.5 (brew install webp, or the official binaries from storage.googleapis.com/downloads.webmproject.org)"
+        )
     workdir.mkdir(parents=True, exist_ok=True)
     paths = []
     for k, im in enumerate(frames):
@@ -359,6 +385,7 @@ def run_loop(
     start: int | None = None,
     length: int | None = None,
     strip_height: int = STRIP_MAX_HEIGHT,
+    body_height: int | None = None,
 ) -> dict[str, Any]:
     if cycle_mode not in CYCLE_MODES:
         raise SystemExit(f"video-loop: unknown --cycle {cycle_mode!r}; expected one of {', '.join(CYCLE_MODES)}")
@@ -418,7 +445,7 @@ def run_loop(
         frames.append(im)
 
     cycle_seconds = L / fps
-    strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds)
+    strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds, body_height=body_height)
     strip_path = out_dir / f"{name}.strip.png"
     strip.save(strip_path)
     atomic_write_text(out_dir / f"{name}.strip.json", json.dumps(strip_meta, indent=2) + "\n")
@@ -489,6 +516,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--start", type=int, help="fixed cut: first keyed frame of the cycle (with --cycle fixed)")
     parser.add_argument("--length", type=int, help="fixed cut: cycle length in frames (with --cycle fixed)")
     parser.add_argument("--strip-height", type=int, default=STRIP_MAX_HEIGHT, help=f"cell/strip/GIF height cap in px (default {STRIP_MAX_HEIGHT}); the cycle is scaled down to fit, never up")
+    parser.add_argument("--body-height", type=int, help="scale so the STANDING height (tallest floor-contact frame) is this many px — the same value across states gives the same character size; --strip-height stays the cap")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)
 
@@ -501,6 +529,7 @@ def run(**kwargs: object) -> int:
         seam_max=float(kwargs.get("seam_max") or SEAM_RATIO_MAX), name=str(kwargs.get("name") or "loop"), report_path=kwargs.get("report"),  # type: ignore[arg-type]
         cycle_mode=str(kwargs.get("cycle") or "auto"), gif_fps=float(kwargs.get("gif_fps") or GIF_FPS_DEFAULT),
         start=kwargs.get("start"), length=kwargs.get("length"), strip_height=int(kwargs.get("strip_height") or STRIP_MAX_HEIGHT),  # type: ignore[arg-type]
+        body_height=kwargs.get("body_height"),  # type: ignore[arg-type]
     )
     summary = {k: payload[k] for k in ("state", "frames_total", "window", "cycle_seconds", "n_out", "delay_ms", "resampled_seam_ratio", "specks_dropped", "report")}
     summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio")}

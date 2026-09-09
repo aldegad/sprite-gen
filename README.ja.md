@@ -9,11 +9,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/hero-paladin-walk.gif" height="200" alt="paladin walk loop" />
-  <img src="docs/assets/hero-paladin-run.gif" height="200" alt="paladin run loop" />
-  <img src="docs/assets/hero-paladin-jump.gif" height="301" alt="paladin jump loop" />
-  <img src="docs/assets/hero-wolf-walk.gif" height="200" alt="wolf walk loop" />
-  <img src="docs/assets/hero-slime-walk.gif" height="200" alt="slime walk loop" />
+  <img src="docs/assets/hero-paladin-walk.gif" height="202" alt="paladin walk loop" />
+  <img src="docs/assets/hero-paladin-run.gif" height="206" alt="paladin run loop" />
+  <img src="docs/assets/hero-paladin-jump.gif" height="246" alt="paladin jump loop" />
+  <img src="docs/assets/hero-wolf-walk.gif" height="203" alt="wolf walk loop" />
+  <img src="docs/assets/hero-slime-walk.gif" height="203" alt="slime walk loop" />
 </p>
 
 <p align="center"><sub>上のループはすべて<b>静止画一枚</b>から生まれた: モーションに合うキャンバスへパディング → Grok Imagine で動かす → フレームごとにキーイング → 真の周期で切って透明 GIF に — パイプライン B、<code>sprite-gen video-set</code>。</sub></p>
