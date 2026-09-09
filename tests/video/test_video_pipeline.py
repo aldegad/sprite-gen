@@ -336,6 +336,28 @@ def test_strip_height_caps_the_output_size(tmp_path: Path) -> None:
     assert Image.open(rep["gif"]["file"] if Path(rep["gif"]["file"]).is_absolute() else tmp_path / "h" / rep["gif"]["file"]).height <= 100
 
 
+def test_body_h_is_the_standing_height_not_the_cycle_median() -> None:
+    """A jump cycle: 10 standing frames (60 px tall), 20 crouched (40 px) and 30 airborne
+    (60 px, lifted). The median height is not the standing height; body_h must be 60 and
+    --body-height must scale the standing frames, not the median."""
+    frames = []
+    def body(top, height):
+        im = Image.new("RGBA", (80, 120), (0, 0, 0, 0))
+        for y in range(top, top + height):
+            for x in range(30, 50):
+                im.putpixel((x, y), (200, 60, 60, 255))
+        return im
+    frames += [body(60, 60) for _ in range(10)]        # standing on the floor (bottom = 119)
+    frames += [body(80, 40) for _ in range(20)]        # crouched on the floor
+    frames += [body(20, 60) for _ in range(30)]        # airborne (bottom = 79)
+    strip, meta = loop_mod.build_strip(frames, cycle_seconds=60 / 24)
+    assert meta["body_h"] == 60
+    strip2, meta2 = loop_mod.build_strip(frames, cycle_seconds=60 / 24, body_height=30)
+    assert meta2["body_h"] == 30 and meta2["body_height_target"] == 30 and meta2["h"] == 54  # union crop 108 px (8 px top margin) → 0.5
+    strip3, meta3 = loop_mod.build_strip(frames, cycle_seconds=60 / 24, body_height=30, max_height=40)
+    assert meta3["h"] <= 40, "--strip-height stays the cap"
+
+
 def test_drop_specks_erases_detached_slivers_only() -> None:
     im = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
     for y in range(5, 35):
