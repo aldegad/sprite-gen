@@ -134,7 +134,7 @@ def test_run_frames_extracts_a_real_clip(tmp_path: Path) -> None:
 # --- loop ----------------------------------------------------------------------------
 
 
-def _gait_frames(tmp_path: Path, *, period: int, n: int, size=(64, 64)) -> list[Path]:
+def _gait_frames(tmp_path: Path, *, period: int, n: int, size=(64, 64), stamp: bool = False) -> list[Path]:
     """A 'walker': a body block plus one leg that swings with `period`; the swing is
     mirror-symmetric every half period (the classic 1.5-cycle trap) but a side marker
     breaks the symmetry slightly, exactly like a near/far leg in a side view."""
@@ -155,6 +155,9 @@ def _gait_frames(tmp_path: Path, *, period: int, n: int, size=(64, 64)) -> list[
         # near-leg marker only on the first half of the period
         if math.sin(phase) >= 0:
             im.putpixel((leg_x, 50), (255, 255, 0, 255))
+        if stamp:  # recolour one BODY pixel per frame so no two frames are identical (a detached
+            # marker would be erased as a speck; GIF writers merge byte-identical frames)
+            im.putpixel((26 + t % 12, 10 + (t // 12) % 30), (90, 200, 90, 255))
         p = d / f"frame-{t:04d}.png"
         im.save(p)
         files.append(p)
@@ -287,6 +290,22 @@ def test_strip_cap_is_on_pixels_not_cells() -> None:
     assert strip.width <= loop_mod.STRIP_MAX_WIDTH
     assert meta["frames"] == meta["cell_cap"] < 64 and meta["subsampled"] is True
     assert strip.width == meta["w"] * meta["frames"]
+
+
+def test_gif_frame_count_follows_cycle_length_at_a_fixed_playback_rate(tmp_path: Path) -> None:
+    """A 2.5 s jump used to get the same 12 frames as a 1.1 s walk and play at ~5 fps
+    (2026-09-09, lead: '점프만 혼자 왜 프레임이 느리냐')."""
+    (tmp_path / "long").mkdir()
+    _gait_frames(tmp_path / "long", period=60, n=150, stamp=True)  # 60 frames @ 24 fps = 2.5 s
+    rep = loop_mod.run_loop(tmp_path / "long" / "keyed", tmp_path / "long-out", fps=24.0, state="jump", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="j", report_path=None)
+    assert rep["n_out"] == 30 and 80 <= rep["delay_ms"] <= 90
+    (tmp_path / "short").mkdir()
+    _gait_frames(tmp_path / "short", period=26, n=100, stamp=True)  # 1.08 s
+    rep2 = loop_mod.run_loop(tmp_path / "short" / "keyed", tmp_path / "short-out", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="w", report_path=None)
+    assert 12 <= rep2["n_out"] <= 14 and abs(rep2["delay_ms"] - rep["delay_ms"]) <= 15  # ~1.1 s at 12 fps; the period may resolve to 24-26
+    explicit = loop_mod.run_loop(tmp_path / "short" / "keyed", tmp_path / "short-out2", fps=24.0, state="walk", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="w8", report_path=None)
+    assert explicit["n_out"] == 8
+    assert rep["n_out"] <= rep["cycle"]["length"] and rep2["n_out"] <= rep2["cycle"]["length"]
 
 
 def test_drop_specks_erases_detached_slivers_only() -> None:
