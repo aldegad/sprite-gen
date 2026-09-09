@@ -19,8 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the pipeline's required binaries (ffmpeg for video-frames, libwebp for video-loop)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg webp
+      - name: Install the pipeline's required binaries (ffmpeg for video-frames, libwebp >= 1.3 for video-loop -exact)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          curl -fsSL https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.4.0-linux-x86-64.tar.gz | tar -xz -C /tmp
+          sudo cp /tmp/libwebp-1.4.0-linux-x86-64/bin/* /usr/local/bin/
+          img2webp -version && img2webp -h 2>&1 | grep -q -- -exact
 
       - uses: actions/setup-python@v5
         with:

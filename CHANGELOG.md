@@ -4,7 +4,7 @@ All notable public changes to `sprite-gen` are recorded here. Versions track the
 
 ## v2.0.3 - One standing height
 
-- CI installs `ffmpeg` and `webp` (the declared required binaries) so the video tests run there; the `video-loop` tests that need `img2webp` skip cleanly where it is absent.
+- `video-loop` checks that `img2webp` actually supports `-exact` (libwebp >= 1.3; Ubuntu 22.04 ships 1.2.x) and fails by name otherwise instead of writing WebP with rewritten RGB under alpha; CI installs `ffmpeg` and the official libwebp 1.4.0 binaries so the video tests run there, and those tests skip cleanly where support is absent.
 - `video-loop` `body_h` is the standing height (tallest floor-contact frame) instead of the cycle's median bbox height, which under-measured jumps and over-scaled them by ~22 %; `--body-height N` scales every state to the same standing height directly in the pipeline (`--strip-height` remains the cap). README heroes regenerated at one standing height.
 
 ## v2.0.2 - Heroes from the pipeline

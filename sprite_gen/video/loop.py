@@ -304,12 +304,30 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
     return strip, meta
 
 
+def img2webp_supports_exact(binary: str | None = None) -> bool:
+    """libwebp added `-exact` to img2webp in 1.3; older builds (Ubuntu 22.04: 1.2.x) reject the
+    flag with "Unknown option" and would rewrite RGB under alpha 0. Detected from `-h`, never assumed."""
+    binary = binary or shutil.which("img2webp")
+    if not binary:
+        return False
+    try:
+        proc = subprocess.run([binary, "-h"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "-exact" in (proc.stdout + proc.stderr)
+
+
 def write_webp(frames: list[Image.Image], out: Path, *, delay_ms: int, workdir: Path) -> None:
     """Animated WebP through libwebp's img2webp with -exact (Pillow's animated writer drops `exact`
     and rewrites RGB under alpha 0 to white; measured 2026-09-08)."""
     img2webp = shutil.which("img2webp")
     if not img2webp:
         raise SystemExit("video-loop: `img2webp` not found on PATH — install libwebp (brew install webp) for exact-alpha WebP")
+    if not img2webp_supports_exact(img2webp):
+        raise SystemExit(
+            "video-loop: this img2webp has no `-exact` option (libwebp < 1.3; Ubuntu 22.04 ships 1.2.x) — "
+            "install libwebp >= 1.3 (brew install webp, or the official binaries from storage.googleapis.com/downloads.webmproject.org)"
+        )
     workdir.mkdir(parents=True, exist_ok=True)
     paths = []
     for k, im in enumerate(frames):

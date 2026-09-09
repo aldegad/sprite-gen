@@ -21,7 +21,7 @@ from sprite_gen.video import loop as loop_mod
 
 GREEN = (0, 255, 0)
 HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
-HAS_IMG2WEBP = shutil.which("img2webp") is not None
+HAS_IMG2WEBP = shutil.which("img2webp") is not None and __import__("sprite_gen.video.loop", fromlist=["x"]).img2webp_supports_exact()  # presence is not support: libwebp < 1.3 has no -exact
 
 
 def _still(tmp_path: Path, size=(120, 160), key=GREEN, name="still.png") -> Path:
