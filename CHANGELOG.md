@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v2.0.2)
+## v2.0.2 - Heroes from the pipeline
 
 - `video-loop` GIF/WebP default rate is now 24 fps (the source rate): every cycle frame is kept, so fast actions never read slow; `--gif-fps 12` restores the lighter output.
 - `video-loop --cycle fixed --start N --length L` cuts an explicitly named cycle without detection (reported as `kind = "fixed"`, seam gate still applied) — for clips with too few repeats for the periodicity gate.
