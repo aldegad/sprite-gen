@@ -1,31 +1,90 @@
 # sprite-gen — Implemented Architecture
 
-> Status: reference (describes the code as it actually is, v1.56.x, 2026-07-11).
+> Owns: How the code is laid out: domains, stage ownership, the numeric SSoT, the cell model, extraction internals, runtime manifest · Index: [docs/README.md](README.md)
+
+> Status: reference (describes the code as it actually is, v2.0.0, 2026-09-09).
 > Canonical behavior contract lives in [`../SKILL.md`](../SKILL.md); this doc
-> explains *how* the scripts realize that contract. If this doc and `SKILL.md`
-> ever disagree, `SKILL.md` wins and this doc is the bug.
+> explains *how* the code realizes that contract. If this doc and `SKILL.md`
+> ever disagree, `SKILL.md` wins and this doc is the bug. The documentation
+> index is [`README.md`](README.md).
 
-## 1. One sentence
+## Contents
 
-A character image plus a numeric request becomes a transparent sprite atlas by
-generating **one horizontal strip per animation state**, cleaning chroma,
-extracting poses as connected components, refitting each pose into a fixed cell
-(optionally through the deterministic pixel-unfake path), and packing the
-cells into a single sheet described by a runtime manifest.
+- [0. Domains — the taxonomy](#0-domains--the-taxonomy)
+- [1. Four pipelines](#1-four-pipelines)
+- [2. Stage ownership (each script does one job)](#2-stage-ownership-each-script-does-one-job)
+- [3. The numeric SSoT: `sprite-request.json`](#3-the-numeric-ssot-sprite-requestjson)
+- [4. The cell model](#4-the-cell-model-read-this--it-is-the-most-misunderstood-part)
+- [5. Idle-anchor architecture (identity ownership)](#5-idle-anchor-architecture-identity-ownership)
+- [6. Extraction internals](#6-extraction-internals-extract_sprite_row_framespy)
+- [7. Curation sidecar (`curation.json`)](#7-curation-sidecar-curationjson)
+- [8. Runtime contract (`manifest.json`)](#8-runtime-contract-manifestjson)
+- [9. Output directory](#9-output-directory-one-worker-owns-one-character-folder)
+- [10. Inverse paths](#10-inverse-paths-editing-finished-assets)
+- [11. Relationship to hatch-pet](#11-relationship-to-hatch-pet)
+
+## 0. Domains — the taxonomy
+
+`sprite_gen/_modules.py` is the one table that says which domain a module belongs to.
+`sprite-gen --help`, the `scripts/` wrappers and the docs index enumerate from it; a
+module that is not in the table cannot be a verb (the CLI raises instead of inventing
+a group). Every domain package is a folder under `sprite_gen/`.
+
+```mermaid
+flowchart TB
+    subgraph pkg["sprite_gen/  (_modules.py owns the mapping)"]
+        direction LR
+        spec["spec<br/>sprite-request schema · layout resolver · runio (lock + atomic writes) · migrations"]
+        gen["gen<br/>prepare · gen (codex / grok) · gen-set · video (Grok Imagine)"]
+        video["video<br/>canvas · frames · loop · batch (video-set)"]
+        frames["frames<br/>extract · cutout · slice-sheet · unpack-atlas · segment"]
+        curate["curate<br/>curation sidecar · direction anchors"]
+        compose["compose<br/>atlas · cycle · gif · layers · export-pngs · export-aseprite"]
+        effects["effects<br/>breathe · anatomy · recolor · interpolate"]
+        qa["qa<br/>inspect · score · preview · correction-loop"]
+        serve["serve<br/>curation webview · composition canvas"]
+    end
+    cli["cli.py — one entrypoint, verbs grouped by domain"] --> pkg
+    spec -.read by every stage.-> gen & frames & compose & qa
+```
+
+## 1. Four pipelines
+
+One sentence: a character image plus a numeric request becomes a transparent sprite
+atlas (pipeline A) or a set of transparent motion loops (pipeline B); imported images
+are cut clean (C); finished sheets are refined without regeneration (D). Every verb is
+also a standalone tool — the pipelines are the order the docs recommend, not a wrapper.
 
 ```mermaid
 flowchart TD
-    REQ["sprite-request.json<br/>(numeric SSoT)"] --> PREP["prepare_sprite_run.py"]
-    PREP --> GUIDES["references/layout-guides/&lt;state&gt;.png<br/>prompts/&lt;state&gt;.txt"]
-    GUIDES --> GEN["sprite-gen gen<br/>(codex or grok; one image per state — the only AI step)"]
-    GEN --> RAW["raw/&lt;state&gt;.png<br/>(one horizontal strip per state)"]
-    RAW --> EXTRACT["extract_sprite_row_frames.py<br/>chroma removal → connected components<br/>→ fit_to_cell or pixel-unfake path"]
-    EXTRACT --> FRAMES["frames/&lt;state&gt;/frame-N.png (+ frame-N.plain.png twin)<br/>frames/frames-manifest.json"]
-    FRAMES --> CURATE["serve_curation.py (optional webview)<br/>curation.json (non-destructive sidecar)"]
-    FRAMES --> COMPOSE["compose_sprite_atlas.py"]
-    CURATE -. "selected / transforms / pixel_unfake" .-> COMPOSE
-    COMPOSE --> ATLAS["sprite-sheet-alpha.png + manifest.json<br/>(frame_layout = runtime SSoT)"]
-    FRAMES --> QA["preview_animation.py<br/>qa/&lt;state&gt;-contact.png · qa/&lt;state&gt;.gif"]
+    subgraph A["A · atlas rows  (docs/run-contract.md)"]
+        REQ["sprite-request.json<br/>(numeric SSoT)"] --> PREP["prepare"]
+        PREP --> GUIDES["references/layout-guides/&lt;state&gt;.png<br/>prompts/&lt;state&gt;.txt"]
+        GUIDES --> GEN["gen · gen-set<br/>(codex or grok; one strip per state — the only AI step)"]
+        GEN --> RAW["raw/&lt;state&gt;.png"]
+        RAW --> EXTRACT["extract<br/>chroma removal → connected components<br/>→ fit_to_cell or pixel-unfake"]
+        EXTRACT --> FRAMES["frames/&lt;state&gt;/frame-N.png<br/>frames/frames-manifest.json"]
+        FRAMES --> CURATE["curation (webview)<br/>curation.json sidecar"]
+        FRAMES --> COMPOSE["compose-atlas"]
+        CURATE -. "selected / transforms / breathe" .-> COMPOSE
+        COMPOSE --> ATLAS["sprite-sheet-alpha.png + manifest.json<br/>(frame_layout = runtime SSoT)"]
+        FRAMES --> QA["preview · inspect · score"]
+    end
+    subgraph B["B · video → loop  (docs/video-pipeline.md)"]
+        STILL["one still on a flat key"] --> CANVAS["video-canvas<br/>state canvas (tall / wide / square)"]
+        CANVAS --> VID["video<br/>Grok Imagine, in-place motion"]
+        VID --> VFR["video-frames<br/>ffmpeg + cutout keying"]
+        VFR --> LOOP["video-loop<br/>true period or one-shot → strip · GIF · WebP"]
+        SET["video-set"] -. "directions × states" .-> CANVAS
+    end
+    subgraph C["C · utilities"]
+        CUT["cutout<br/>white matte / chroma engine"] ~~~ SLICE["slice-sheet"] ~~~ UNPACK["unpack-atlas"]
+    end
+    subgraph D["D · post-processing"]
+        RECOLOR["recolor · recolor-palette"] ~~~ LAYERS["compose-layers"] ~~~ EXPORT["export-pngs · export-aseprite"]
+    end
+    ATLAS --> D
+    UNPACK --> CURATE
 ```
 
 ## 2. Stage ownership (each script does one job)

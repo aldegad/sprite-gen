@@ -1,5 +1,7 @@
 # `sprite-gen gen` — provider-backed image generation (engine SSoT)
 
+> Owns: `sprite-gen gen` / `gen-set`: providers, default resolution, transparency strategy per provider, row usage · Index: [docs/README.md](README.md)
+
 Generation is a first-class engine module (`sprite_gen/gen/`), not an external
 skill. One call = a prompt (+ optional reference images) → one **verified** PNG on
 disk, with an optional transparent output whose strategy is decided per provider
@@ -190,3 +192,7 @@ On a 4-frame idle mushroom row, grok generated
 in ~18.4 s vs codex ~39.0 s (~2.1× faster). codex adhered better to negative constraints
 ("no grid lines"); grok added faint cell dividers. Pick per need: grok for speed, codex
 for tighter prompt adherence.
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

@@ -1,6 +1,6 @@
 <h1 align="center">sprite-gen</h1>
 
-<p align="center"><b>One drawing in. A game-ready sprite atlas out — breathing.</b></p>
+<p align="center"><b>One drawing in. Game-ready sprites out — as an atlas, or as transparent motion loops.</b></p>
 
 <p align="center">
 
@@ -18,257 +18,108 @@
 
 ---
 
-## Breathe
-
-A still idle reads as frozen. **Breathe** turns a single pose into a living loop — deterministic squash & stretch baked on top of your curated frames. No regeneration, no re-extraction, no extra art. One sidecar field:
-
-```json
-"breathe": { "depth": 0.05, "breaths": 3 }
-```
-
-- **Anatomy-aware.** The engine measures the silhouette: neck bottleneck, symmetric eye pair on neckless blobs, torso-vs-appendage width. Heads stay **bit-identical** across every frame; wings and arms get pushed, never stretched.
-- **Pixel-true.** Integer row/column mapping only — every output frame is still clean pixel art on the same grid. A 1px outline stays a 1px outline: the warp preserves silhouette edges and normalizes staircase doubling, anchored on the inner line.
-- **A ruler you can grab.** Drag the rigid boundary (red), the body axis (blue), and the torso width (dashed) right on the live playback. The server re-derives the anatomy on release — and the preview keeps breathing while it recalculates.
-- **Byte-identical preview.** The webview mirror and the Python bake produce the same bytes, enforced by golden tests. What you watch looping is exactly what ships in the atlas.
-
-<p align="center">
-  <img src="docs/assets/breathe-editor.png" width="760" alt="breathe region editor: rigid boundary, body axis and torso width lines over live playback, with the baked phase filmstrip" />
-</p>
-
-The same deterministic bake applies to front, side, and back views of any silhouette, including humanoids, blobs, and tentacles.
-
 Ask an image model for a "sprite sheet" and you know what you get: a character whose face changes every frame, a background that won't key out, poses that overlap and drift off-grid, and a PNG your game engine can't actually consume. Cute demo, useless asset.
 
-`sprite-gen` is a Codex/Claude skill that closes that gap. Give it **one base image** and a list of actions — it drives the generation row by row, locks the character's identity, strips the chroma background to real alpha, extracts each pose as a clean transparent frame, and bakes a runtime atlas **with a machine-readable `manifest.json.frame_layout`**.
+`sprite-gen` is a Codex/Claude skill and a Python CLI that closes that gap. Give it **one base image** — it drives generation row by row, locks the character's identity, strips the chroma background to real alpha, extracts each pose as a clean transparent frame, and bakes a runtime atlas **with a machine-readable `manifest.json.frame_layout`**. Or hand the same still to a video model and get back a seamless, transparent loop per motion state. For the last 10% that generation never gets right, a **curation webview** lets you compare, reject, nudge and watch the loop live before you bake.
 
-And for the last 10% that generation never gets right, there's a **curation webview**: compare frames side by side, reject the broken ones, nudge rotation/scale/position non-destructively, watch the loop live — then bake. The pipeline does the labor; you keep the taste.
+## Four pipelines, one CLI
 
-```text
-sprite-request.json → layout guides + prompts → sprite-gen gen state rows
-→ chroma alpha → connected components → transparent frames
-→ sprite-sheet-alpha.png + manifest.json.frame_layout
-```
+Every verb works alone or as a pipeline stage. `sprite-gen --help` prints this same map, with every verb grouped by domain.
 
 ```mermaid
 flowchart LR
-    REQ["sprite-request.json<br/>(numeric SSoT)"] --> GUIDES["layout guides<br/>+ prompts"]
-    GUIDES --> GEN["sprite-gen gen<br/>state row strips"]
-    GEN --> EXTRACT["chroma alpha →<br/>connected components"]
-    EXTRACT --> FRAMES["transparent frames"]
-    FRAMES --> ATLAS["sprite-sheet-alpha.png<br/>+ manifest.json.frame_layout"]
-    FRAMES -. "curation webview (optional)" .-> ATLAS
+    subgraph A["A · atlas rows"]
+        direction LR
+        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a4[curation] --> a5[compose-atlas]
+    end
+    subgraph B["B · video → loop"]
+        direction LR
+        b1[video-canvas] --> b2[video] --> b3[video-frames] --> b4[video-loop]
+    end
+    subgraph C["C · utilities"]
+        direction LR
+        c1[cutout] ~~~ c2[slice-sheet] ~~~ c3[unpack-atlas]
+    end
+    subgraph D["D · post-processing"]
+        direction LR
+        d1[recolor] ~~~ d2[compose-layers] ~~~ d3[export-*]
+    end
 ```
 
-> Full architecture: [`docs/architecture.md`](docs/architecture.md)
+| Pipeline | What goes in → what comes out | Docs |
+|---|---|---|
+| **A · atlas rows** | one still + a list of states → `sprite-sheet-alpha.png` + `manifest.json.frame_layout`, with **Breathe** baked on idle poses | [run-contract](docs/run-contract.md) · [breathing](docs/breathing.md) |
+| **B · video → loop** | one still → per state, a seamless transparent GIF / WebP / strip, animated by Grok Imagine and cut at its true period | [video-pipeline](docs/video-pipeline.md) · [video](docs/video.md) |
+| **C · utilities** | an imported image or grid sheet → clean transparent cuts; a finished atlas → a curator-ready run | [sheet-slicing](docs/sheet-slicing.md) · [curation](docs/curation.md) |
+| **D · post-processing** | a finished sheet → deterministic colourways, rig layer composites, Aseprite / Phaser / Flame exports | [recolor](docs/recolor.md) · [layer-tracks](docs/layer-tracks.md) · [engine-export](docs/engine-export.md) |
+
+Full index: [`docs/README.md`](docs/README.md). Architecture with domain and pipeline diagrams: [`docs/architecture.md`](docs/architecture.md).
 
 ## What you actually get
 
-- **A transparent sprite atlas** (`sprite-sheet-alpha.png`) — real alpha, no leftover chroma fringe, verified against white backgrounds.
+- **A transparent sprite atlas** (`sprite-sheet-alpha.png`) — real alpha, no leftover chroma fringe, verified against white backgrounds ([why the extractor unmixes instead of peeling](docs/chroma-alpha.md)).
 - **A runtime manifest** (`manifest.json.frame_layout`) — absolute frame rectangles, per-state fps and loop flags. Your engine samples rectangles; it never guesses a grid.
-- **Deterministic colourways** — `sprite-gen recolor` takes the base sheet plus a palette map and bakes N variant sheets in one command (exact RGB match by default; same input, same output bytes). The curation webview blink-compares them and records the adopted name. Detail: [`docs/recolor.md`](docs/recolor.md).
-- **QA you can watch** — per-state GIFs and contact sheets, so motion is judged as motion before anything ships.
-- **Honest labels** — short readable actions (idle, jump, attack, wave) are the stable path; cyclic locomotion (walk/run) is marked experimental unless motion QA actually passes. No silent overpromising.
-
-## Chroma alpha quality
-
-The extractor keeps chroma cleanup deterministic: soft-alpha unmix preserves antialiased hair strands and thin outlines instead of peeling them away before coverage can be solved.
-
-<p align="center">
-  <img src="docs/assets/chroma-fullbody-illustration-magenta.png" width="640" alt="full-body chroma comparison: illustration on magenta key" /><br />
-  <em>Illustration, magenta key: source, v1.12.0 peel, v1.13.0 soft-alpha unmix.</em>
-</p>
-
-<p align="center">
-  <img src="docs/assets/chroma-fullbody-illustration-green.png" width="640" alt="full-body chroma comparison: illustration on green key" /><br />
-  <em>Illustration, green key: source, v1.12.0 peel, v1.13.0 soft-alpha unmix.</em>
-</p>
-
-<p align="center">
-  <img src="docs/assets/chroma-fullbody-pixelart-magenta.png" width="640" alt="full-body chroma comparison: pixel art on magenta key" /><br />
-  <em>Pixel art, magenta key: source, v1.12.0 peel, v1.13.0 binarized output.</em>
-</p>
-
-<p align="center">
-  <img src="docs/assets/chroma-fullbody-pixelart-green.png" width="640" alt="full-body chroma comparison: pixel art on green key" /><br />
-  <em>Pixel art, green key: source, v1.12.0 peel, v1.13.0 binarized output.</em>
-</p>
-
-The close-up crops below show the edge detail behind the full-body comparisons.
-
-![chroma peel before and after — illustrated hair strand](docs/assets/chroma-peel-illustration-before-after.png)
-
-![chroma peel before and after — pixel-art outline](docs/assets/chroma-peel-pixelart-before-after.png)
-
-## Backbone Lattice
-
-AI-generated "pixel art" is not pixel art. The blocks wobble, the edges carry antialiasing, and the lattice drifts within a single row, so cutting on an even grid smears one block into the next. The community fix is to "unfake" the image — guess the block size from run lengths and re-quantize — but that measures each frame on its own, so a walk cycle's cell size breathes frame to frame.
-
-**Backbone Lattice** measures one grid for the whole subject and holds every cut to it. Per-frame pitch detection feeds a row-wide, cross-frame consensus that outvotes harmonic misdetections; that consensus grid is the *backbone* every cut snaps to. Cuts land on actual colour boundaries, and a minimum cell width proportional to the measured pitch keeps two neighbouring cuts from ever collapsing onto the same band. One backbone, so the same block stays the same size across a whole animation instead of jumping between frames.
-
-The result is verified against what shipped, not eyeballed on a hand-picked frame: every pixel-unfake run is re-derived from its own source strip and compared pixel by pixel. The shape you approved stays the shape you get; what changes is only where outlines and shading land, which is exactly what the backbone decides.
-
-## Curation webview
-
-Generation gets you 90%. The webview is where a human takes it to *shipped* — standalone, no Studio or framework dependency, runs anywhere the skill is installed (Claude Code Desktop, the Codex app, a plain terminal).
-
-![curation webview — characters](docs/assets/demo-character.gif)
-
-- **Two rows per state:** the **play sequence** on top and a **candidate pool** below (e.g. a second or third generated take). Drag a frame's ⠿ grip to reorder the sequence, or pull a cut up from the pool — rebuild one clean run loop from the best frames across takes. The arrangement is saved, so reopening restores it.
-- **Non-destructive transform** per frame: drag = move, wheel = scale, top handle = rotate, bottom-left = shear, plus a horizontal-flip toggle for left-right-reversed output. Edits live in a `curation.json` sidecar — source PNGs are never rewritten, and the compose step bakes the result deterministically. Preview and bake share one affine matrix, so what you align is what you get.
-- **Live preview** animates the sequence at the state's fps, with play/pause, frame-by-frame stepping, and a 0.25×–4× speed control.
-- Not just for sprites: point it at any folder of image candidates (icons, logos, generated drafts) with `unpack_atlas_run.py --pngs-dir` and use it as a general pick-the-winner view.
-
-### Isometric ground grid
-
-For isometric sets, the webview overlays the floor grid (from `meta.json` tile/anchor) so you can snap furniture to the diamond axes with the shear handle.
-
-![curation webview — isometric furniture](docs/assets/demo-furniture.gif)
-
-<img src="docs/assets/curator-iso.png" width="520" alt="isometric ground grid overlay" />
-
-### Languages
-
-The webview ships with English and Korean. Pass `--lang en|ko` when launching, or use the in-app toggle:
-
-```bash
-python3 scripts/serve_curation.py --run-dir <run-dir> --lang en   # or ko
-```
-
-## Python support
-
-`sprite-gen` supports CPython 3.10+. CI runs the minimum supported version (3.10) and the latest covered version (3.14) on GitHub-hosted runners.
-
-The quickstart requires a Python install with working `venv`/`ensurepip`. If `python3 -m venv` fails before package installation in a local distribution, use a standard CPython build for any supported version and rerun the same commands.
+- **Breathe** — a still idle becomes a living loop, deterministic squash & stretch baked on your curated frames from one sidecar field, anatomy-aware and pixel-true ([details](docs/breathing.md)).
+- **Pixel-art that stays on grid** — the Backbone Lattice measures one grid for the whole subject and holds every cut to it ([details](docs/pixel-unfake.md)).
+- **Motion loops from video** — jumps get a tall canvas, attacks a wide one, the loop point is the clip's own period, and a one-shot action is cut rest → action → rest ([details](docs/video-pipeline.md)).
+- **Deterministic colourways** — `recolor` bakes N variant sheets from a palette map; same input, same output bytes ([details](docs/recolor.md)).
+- **QA you can watch** — per-state GIFs and contact sheets, so motion is judged as motion before anything ships. Cyclic locomotion (walk/run) stays experimental unless motion QA actually passes.
 
 ## Quickstart
 
 ```bash
-# 0. install dependencies (Pillow, NumPy) into a fresh virtualenv
+# install (Pillow, NumPy) into a fresh virtualenv — the venv is the only supported interpreter
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
-
-# 1. prepare a run from a base image
-python3 scripts/prepare_sprite_run.py --out-dir <run-dir> --character-id <id> --base-image base.png
-
-# 2. generate one row image per state with the engine-owned provider CLI
-python3 scripts/generate_sprite_image.py --provider codex \
-  --prompt-file <run-dir>/prompts/<state>.txt \
-  --out <run-dir>/raw/<state>.png \
-  --ref <run-dir>/base-source.png \
-  --ref <run-dir>/references/layout-guides/<state>.png
-# 3. extract frames
-python3 scripts/extract_sprite_row_frames.py --run-dir <run-dir>
-
-# 4. (optional) curate frames in the webview
-python3 scripts/serve_curation.py --run-dir <run-dir>
-
-# 5. bake the runtime atlas
-python3 scripts/compose_sprite_atlas.py --run-dir <run-dir>
+sprite-gen --help
 ```
 
-### Editing a finished sheet
-
-When only the combined sheet survives, rebuild a curator-ready run dir, then curate and export:
+**A · atlas rows** — one still to a runtime atlas.
 
 ```bash
-# rebuild frames: explicit --grid, --manifest rectangles, or alpha auto-detect (default)
-python3 scripts/unpack_atlas_run.py --atlas sheet.png            # auto-detect
-python3 scripts/unpack_atlas_run.py --manifest manifest.json     # exact rectangles
-python3 scripts/unpack_atlas_run.py --pngs-dir furniture/        # import a loose PNG set
-
-# after curating, bake corrections back to named PNGs
-python3 scripts/export_curated_pngs.py --run-dir <run-dir>
+sprite-gen prepare --out-dir <run> --character-id <id> --base-image base.png   # request, guides, prompts
+sprite-gen gen-set --run-dir <run> --provider codex                            # every state row, 4 at a time
+sprite-gen extract --run-dir <run>                                             # chroma → transparent frames
+sprite-gen curation --run-dir <run>                                            # (optional) pick, nudge, breathe
+sprite-gen compose-atlas --run-dir <run>                                       # sprite-sheet-alpha.png + manifest.json
 ```
 
-Output defaults to a findable `<source>-curator` folder next to the input.
-
-### Baking colourways of a finished sheet
-
-Once the atlas is composed, swap selected colours into N finished sheets without
-re-running generation. Dot art is exact-match by default; soft-edged art can opt
-into a tolerance. Geometry and alpha never move — the base manifest describes
-every variant.
+**B · video → loop** — one still to transparent loops (needs `ffmpeg`, `img2webp`, and your own `grok` login or `XAI_API_KEY`).
 
 ```bash
-# draft the opaque colours (edit into a recolor spec with kind "sprite-gen-recolor")
-python3 -m sprite_gen.cli recolor-palette --base <run-dir>/sprite-sheet-alpha.png --out palette.draft.json
-
-# bake every colourway into <run-dir>/variants/
-python3 -m sprite_gen.cli recolor --run-dir <run-dir> --spec recolor.spec.json
-
-# blink-compare and adopt in the curation view
-python3 -m sprite_gen.cli curation --run-dir <run-dir>
+sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --out-dir set/
+# per item: video-canvas → video → video-frames → video-loop; set/table.md names every result
 ```
 
-Full spec/report contract and the adopt sidecar field: [`docs/recolor.md`](docs/recolor.md).
-
-### Cutting a background off an imported image
-
-Generated sprites are keyed off their own magenta/green background inside the
-pipeline, so they never need this. `cutout` is the import/post-edit utility: an
-image that arrived *with* an opaque uniform background (a hand-drawn icon, a
-downloaded sprite, a screenshot) is turned into a clean transparent PNG.
-
-<p align="center">
-  <img src="docs/assets/cutout-demo.png" width="720" alt="cutout: a white-background game icon turned into a clean transparent PNG, glass highlights preserved" />
-</p>
+**C · utilities** — each stands alone.
 
 ```bash
-# routes on the corner colour: white/ivory -> matte, magenta/green -> extract engine
-python3 -m sprite_gen.cli cutout icon.png --white-check
+sprite-gen cutout icon.png --white-check              # white/ivory → matte, magenta/green → chroma engine
+sprite-gen slice-sheet --sheet sheet.png --chroma-key magenta --grid 3x2   # multi-figure sheet → per-cell cuts
+sprite-gen unpack-atlas --atlas sheet.png             # finished atlas → curator-ready run (or --pngs-dir folder/)
 ```
 
-It reads the corner background colour and routes (`--key auto|white|magenta|green`):
+**D · post-processing** — refine a finished sheet without regenerating.
 
-- **white / ivory / solid** → position matte. A corner flood-fill keeps the
-  connected background only (bright highlights *inside* the object survive, not
-  holed), then a decontaminated soft alpha feathers the border. Tune with
-  `--strength` (bevel removal), `--band` (edge depth), `--erode`.
-- **magenta / green key** → the project's verified `extract` chroma engine is
-  reused as-is. Key colours never appear in objects, so its colour-only cut is
-  safe there — exactly where a white matte's flood-fill guard is *not* needed.
+```bash
+sprite-gen recolor-palette --base <run>/sprite-sheet-alpha.png --out palette.draft.json
+sprite-gen recolor --run-dir <run> --spec recolor.spec.json      # → <run>/variants/
+sprite-gen compose-layers --run-dir <run>                        # rig runs: declared stacks → <run>/layers/
+sprite-gen export-aseprite --run-dir <run>                       # Aseprite JSON for Phaser / Flame
+```
 
-`--white-check` writes cyan/magenta/yellow composites so any leftover fringe
-shows loudly. For uniform backgrounds; not for complex/non-uniform ones.
+The agent-facing workflow, gates and contracts live in [`SKILL.md`](SKILL.md).
 
-The full agent-facing workflow and contracts live in [`SKILL.md`](SKILL.md).
-
-## Install
-
-From Codex skill installer workflows, install this repository as a root skill:
+## Install as a skill
 
 ```bash
 python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
   --repo aldegad/sprite-gen --path . --name sprite-gen
 ```
 
-### Image generation ownership
+Image generation is part of this engine (`sprite_gen.gen`, providers `codex` and `grok`; the general `image-gen` skill is a thin shuttle over it). Video uses **your own** credential — the `grok` CLI login or an `XAI_API_KEY` — and nothing is shipped with the repo ([docs/video.md](docs/video.md)).
 
-Provider-backed generation is part of this engine (`sprite_gen.gen`), with
-`codex` and `grok` as the supported providers. The general `image-gen` skill is
-only a thin shuttle to the same command, so it does not need a second provider
-implementation. Transparent stills follow a per-provider strategy: `codex` asks
-`image_gen` for a real alpha channel (native, first choice) and the measured alpha
-is published; `grok` is keyed out of a chroma background. See
-[`docs/gen.md`](docs/gen.md) for the CLI and verification contract.
-
-### Image to video
-
-`sprite-gen video --image still.png --prompt "…" --out clip.mp4` animates one
-still through Grok Imagine using **your own** credential — the `grok` CLI login
-(`grok login`, SuperGrok Imagine quota) or an `XAI_API_KEY`. Nothing is shipped
-with the repo; the report says which one ran. An expired login stops before
-uploading and tells you the exact refresh command. Setup, parameters, and the
-verification contract: [`docs/video.md`](docs/video.md).
-
-### Video → sprite loops
-
-`sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --out-dir set/`
-turns one still into a seamless, transparent loop per state: the still is padded into
-the canvas the state needs (jumps tall, attacks wide), animated in place by Grok
-Imagine, keyed frame by frame, and cut at its true period into a strip, a GIF and a
-WebP — each stage measured and fail-loud. Contract and the measured rules behind it:
-[`docs/video-pipeline.md`](docs/video-pipeline.md).
+`sprite-gen` supports CPython 3.10+; CI runs 3.10 and 3.14. The quickstart needs a Python with working `venv`/`ensurepip`.
 
 ## Attribution
 

@@ -223,19 +223,6 @@ qa_note=<one sentence>
 
 ## Docs Topology
 
-Leaf docs are one link deep. Walk the branch that matches your task; each doc owns its tables and this hub only points.
-
-```text
-CONTRACT & STRUCTURE   docs/run-contract.md · docs/architecture.md
-REQUEST AUTHORING      docs/states-and-frames.md · docs/subject-profiles.md · docs/pixel-unfake.md · docs/chroma-alpha.md
-GENERATION             docs/gen.md · docs/video.md · docs/video-pipeline.md · docs/frame-interpolation.md · docs/seamless-video-loop.md
-CURATION               docs/curation.md · docs/breathing.md
-COLOURWAYS             docs/recolor.md
-LAYER TRACKS           docs/layer-tracks.md
-ENGINE EXPORT          docs/engine-export.md
-SPECIALIZED INPUTS     docs/directional-anchor-workflow.md · docs/sheet-slicing.md
-QA                     docs/qa-motion.md · docs/locomotion-curation.md
-RUNTIME & PROCESS      docs/interpreter.md · docs/rename-gate.md · docs/troubleshooting.md
-```
+The documentation index is [`docs/README.md`](docs/README.md): every leaf doc once, under the four pipelines (A atlas rows · B video → loop · C utilities · D post-processing) and the taxonomy branches, each with a one-line owner. Leaf docs are one link deep; each owns its tables and this hub only points. Architecture with the domain and pipeline diagrams: [`docs/architecture.md`](docs/architecture.md).
 
 Concept ownership: `sprite-request.json`/cell/states/takes → run-contract §2 · states-and-frames; `run_revision`/salvage/`curation.stale-*.json` and every `curation.json` field (`selected`/`order`/`deleted`/`transforms`/`pixels`/`clones`/`pixel_unfake`/`revision`/`recolor.picked`) → curation.md; frame **clones** → curation.md + compose; `frame_layout` runtime contract → run-contract + "Runtime Contract" above; `fit`/pixel-unfake twins → pixel-unfake.md; recolor spec/report/`variants/` → recolor.md; `rig`/`track`/`layers` → layer-tracks.md; video canvas/period/seam/strip meta → video-pipeline.md; webview interactions → `sprite_gen/curator/` described in curation.md + recolor.md.

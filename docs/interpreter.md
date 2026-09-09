@@ -1,5 +1,7 @@
 # 실행 인터프리터 — 전역 `python3` 는 이 스킬의 인터프리터가 아니다
 
+> Owns: Why the project venv is the only interpreter (no global `python3`, no NumPy fallback) · Index: [docs/README.md](README.md)
+
 > SKILL.md 허브에서 옮겨온 전문(2026-09-09, 허브 슬림화). 규칙 자체(venv 절대경로 · 폴백 금지 · NumPy 게이트)는 허브가 요약으로 유지하고, 근거와 세부는 여기가 소유한다.
 
 이 스킬의 모든 명령은 **레포 루트의 venv 인터프리터**로 실행한다:
@@ -46,3 +48,7 @@ $SPRITE_GEN_ROOT/.venv/bin/python <script.py> ...
   `docs/*.md` 는 활성화 단계가 없는 셸에서 읽히므로, 절대경로든 상대경로든 **여기서는 상대형을 쓰지
   않는다** — 위 venv 절대경로 형식 하나만 쓴다. (`tests/test_entrypoint_interpreter.py` 가 이 두 파일군에
   대해 잠근다.)
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

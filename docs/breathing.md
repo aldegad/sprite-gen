@@ -1,5 +1,26 @@
 # 호흡(idle breathing) · 정지 자세 행 — 후처리 레이어 계약
 
+> Owns: The idle-breathing post-process layer and the static-pose row recipe · Index: [docs/README.md](README.md)
+
+## What Breathe does (from the README, 2026-09-09)
+
+A still idle reads as frozen. **Breathe** turns a single pose into a living loop — deterministic squash & stretch baked on top of your curated frames. No regeneration, no re-extraction, no extra art. One sidecar field:
+
+```json
+"breathe": { "depth": 0.05, "breaths": 3 }
+```
+
+- **Anatomy-aware.** The engine measures the silhouette: neck bottleneck, symmetric eye pair on neckless blobs, torso-vs-appendage width. Heads stay **bit-identical** across every frame; wings and arms get pushed, never stretched.
+- **Pixel-true.** Integer row/column mapping only — every output frame is still clean pixel art on the same grid. A 1px outline stays a 1px outline: the warp preserves silhouette edges and normalizes staircase doubling, anchored on the inner line.
+- **A ruler you can grab.** Drag the rigid boundary (red), the body axis (blue), and the torso width (dashed) right on the live playback. The server re-derives the anatomy on release — and the preview keeps breathing while it recalculates.
+- **Byte-identical preview.** The webview mirror and the Python bake produce the same bytes, enforced by golden tests. What you watch looping is exactly what ships in the atlas.
+
+<p align="center">
+  <img src="assets/breathe-editor.png" width="760" alt="breathe region editor: rigid boundary, body axis and torso width lines over live playback, with the baked phase filmstrip" />
+</p>
+
+The same deterministic bake applies to front, side, and back views of any silhouette, including humanoids, blobs, and tentacles.
+
 > SKILL.md Script Map 에서 옮겨온 본문(2026-09-09, 허브 슬림화). `compose_sprite_gif.py` / `compose_sprite_atlas.py` 가 굽는 호흡 레이어, 정지 자세 행 레시피, 큐레이션 뷰의 호흡 편집기 계약을 소유한다. 실측 근거·프레임 게이트는 아래 "정지 자세(Static-Pose) 행 레시피" 절.
 
 - **에이전트 주도 호흡** (사용자가 "숨쉬기 적용해서 뽑아줘" 라고만 해도 됨): 호흡은 사이드카 필드라 뷰 없이도 켤 수 있다 — (1) `states.<state>.breathe = {"depth": 0.06, "breaths": 1, "lag": 0.1}` 만 쓰면 된다. **경계는 선언하지 않는다** — `sprite_gen/anatomy.py` 가 검출한다. 큐레이터를 거치면 그 결과가 사이드카 `anatomy` 에 얼려지고(`GET /api/breathe-anatomy`), 뷰 없이 에이전트가 `breathe` 만 쓴 런은 `anatomy` 가 비어 있어 **굽기가 매번 다시 잰다** — 굽기는 사이드카에 쓰지 않는다. 어느 쪽이든 동작한다. **굽기는 얼린 값을 신뢰하지 않는다 — 언제나 자기 기준 프레임에서 다시 잰다** (얼린 값은 큐레이터 프리뷰용 캐시다). 사이드카와 어긋나면 manifest 의 `sidecar_drift` 로 값을 실어 보고한다. 그 캐시가 아직 유효한지는 기준 프레임의 **입력** 지문(원본 파일 스탬프·픽셀편집·변형·변종)으로 판정하고, 어긋나면 큐레이터가 프리뷰·영상 내보내기를 **거부하며 갱신하라고 알린다** — 조용히 낡은 숫자로 그리지 않는다. 사람이 특정 행에 고정하고 싶을 때만 `rigid_row` 를 준다. (에이전트 직접 쓰기는 `load_curation`→`stamp_curation` 도장 경로 필수, 열린 탭은 새로고침 안내 — 함정 상세: [`troubleshooting.md`](troubleshooting.md)), (2) `compose_sprite_gif.py`/`compose_sprite_atlas.py` 가 자동으로 굽는다. 검증: gif-manifest 의 `breathe.phases`. **구 `splits`/`amplitude`/`subpixel` 은 요란하게 거부된다** — 옮기려면 `sprite-gen migrate-breathe <run-dir> --apply`.
@@ -67,3 +88,7 @@
 3. 깜빡임(정면/옆)은 자동 생성하지 않는다 — "깜빡임 추가 대기" 로 보고하고
    사람이 정지 프레임 확정 후 눈을 깎는다.
 4. 열린 큐레이션 탭이 있으면 두-작성자 충돌 방지를 위해 새로고침을 안내한다.
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

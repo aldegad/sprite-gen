@@ -2,14 +2,46 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v2.0.0) - Video to Sprite
+## Unreleased (v2.0.0) - Four pipelines, one taxonomy
 
-- Added the `sprite_gen/video` domain: `sprite-gen video-canvas` (state canvas — tall for jumps, wide for attacks, square otherwise; the still's corner key fills the padding), `sprite-gen video-frames` (ffmpeg extraction + cutout keying with an edge-contact gate), `sprite-gen video-loop` (global-period cycle detection, strip with `body_h` metadata, 1-bit-alpha GIF, `img2webp -exact` WebP, seam and periodicity gates, output re-verification) and `sprite-gen video-set` (directions × states with staggered starts and a bounded HTTP 429 retry, per-item reports and a table).
-- Declared `ffmpeg` and `img2webp` as required binaries for the video pipeline; `docs/video-pipeline.md` records the contract and the rules behind it. A new domain plus new required binaries is why this is a major version.
-- `video-loop --cycle auto|periodic|one-shot`: action states (`jump`, `attack`, unknown) whose clip performs the action once now get a recorded one-shot cut (rest → excursion → rest, medoid rest pose, 3-MAD excursion) instead of a hard failure; the report keeps the rejected periodic attempt and `table.md` gains a `kind` column. `walk`, `run`, `idle` still fail loud without a period.
-- Walk detection window floor 10 % → 6 % of the clip so a legless body's fast bounce resolves; the 15 % depth rule keeps rejecting the one-step half period (verified on a biped and a quadruped).
-- `video-set` motion templates no longer assume a biped ("this body type" instead of knees/arms).
-- Slimmed `SKILL.md` into a route-first hub (still / atlas / video-to-loop / utilities) under the 24 KB skill budget; the interpreter rationale, the rename gate and the breathing contract moved verbatim to `docs/interpreter.md`, `docs/rename-gate.md` and `docs/breathing.md`.
+### Highlights
+
+- **Video → sprite loops.** One still becomes a whole motion set: `video-canvas` pads it into the canvas the state needs, `video` animates it in place through Grok Imagine, `video-frames` keys every frame, `video-loop` finds the true period (or the one performed action) and emits a strip, a transparent GIF and a WebP, and `video-set` runs directions × states with per-item reports. Every stage is measured and fails by name.
+- **Parallel row generation is a command.** `gen-set` generates every state row of a prepared run N at a time with the run's own identity ref, one report per row, a table and a non-zero exit on any failure — what the skill used to describe in prose.
+- **One taxonomy.** `sprite-gen --help` opens with the four named pipelines (A atlas rows · B video → loop · C utilities · D post-processing) and groups every verb by domain; the grouping, the `scripts/` map and the docs index all derive from `sprite_gen/_modules.py`.
+- **Documentation you can navigate.** `docs/README.md` indexes every doc once under its branch with a one-line owner; `docs/architecture.md` opens with a domain diagram and a four-pipeline diagram; the largest docs carry a table of contents; the repo README shrinks to an entry page and the sections it carried live in the docs that own them.
+
+### Breaking
+
+- New required binaries for pipeline B: `ffmpeg` (frame extraction) and `img2webp` from libwebp (WebP with exact alpha). Pipelines A, C and D do not need them.
+- Removed the `scripts/` aliases that pointed at library modules or verb-less modules. Use the verb or module instead:
+
+  | Removed | Use |
+  |---|---|
+  | `scripts/extract.py` | `sprite-gen extract` (`scripts/extract_sprite_row_frames.py`) |
+  | `scripts/gif_utils.py` | `from sprite_gen.util import gif_utils` |
+  | `scripts/runio.py` | `from sprite_gen.spec import runio` |
+  | `scripts/reroll_state_row.py` | `sprite_gen.effects.reroll` (module; `interpolate_frames.py` covers the take workflow) |
+
+- Maintainer experiments moved to `scripts/dev/` (`breathe_mutation_battery.py`, `measure_align_sigma.py`, `validate_pr6_subject_profile.py`, `check_visible_magenta.py`); they are not verbs and the skill no longer requires them.
+- `docs/static-pose-recipe.md` merged into `docs/breathing.md` (one contract, one owner); links to the old file are gone.
+
+### Added
+
+- `sprite_gen/video/` domain and the verbs `video-canvas`, `video-frames`, `video-loop`, `video-set` (contract: `docs/video-pipeline.md`). `video-loop --cycle auto|periodic|one-shot`: action states (`jump`, `attack`, unknown) whose clip performs the action once get a recorded one-shot cut (rest → excursion → rest) instead of a hard failure; the report keeps the rejected periodic attempt and `table.md` gains a `kind` column. `walk`, `run`, `idle` still fail loud without a period.
+- `sprite-gen gen-set` (`sprite_gen/gen/gen_set.py`, `scripts/gen_set.py`): anchors before rows on direction runs, reuse unless `--force`, `reports/gen-set/table.md` + `set.report.json`, `--provider` honoured verbatim with `gen`'s own default resolution and its recorded codex → grok availability failover per row.
+- `sprite_gen._modules.DOMAINS` / `domain_of()`: display order and one-line meaning per domain; `cli.command_domains()` derives the help groups. A verb whose module is not in the table fails loudly.
+- `docs/README.md` (documentation index) with a test that pins it to the file set and resolves every relative markdown link; tables of contents in `run-contract.md`, `layer-tracks.md`, `curation.md`, `directional-anchor-workflow.md`, `architecture.md`; `scripts/dev/README.md`.
+
+### Changed
+
+- `SKILL.md` is a route-first hub (still / atlas / video-to-loop / utilities) under the 24 KB skill budget; the interpreter rationale, the rename gate and the breathing contract moved verbatim to `docs/interpreter.md`, `docs/rename-gate.md`, `docs/breathing.md`.
+- Walk detection window floor 10 % → 6 % of the clip so a legless body's fast bounce resolves; the 15 % depth rule keeps rejecting the one-step half period (verified on a biped and a quadruped). `video-set` motion templates no longer assume a biped.
+- `README.md` is an entry page: what it is, the four pipelines, one quickstart each, install. Breathe, chroma-alpha quality, Backbone Lattice and the curation webview tour moved verbatim to `docs/breathing.md`, `docs/chroma-alpha.md`, `docs/pixel-unfake.md`, `docs/curation.md`.
+
+### Removed
+
+- See **Breaking** for the removed `scripts/` aliases and the merged doc.
 
 ## v1.61.0 - Image to Video
 

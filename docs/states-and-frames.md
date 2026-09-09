@@ -1,5 +1,7 @@
 # States & Frame Counts — sprite-gen reference
 
+> Owns: Which states to request and how many frames each · Index: [docs/README.md](README.md)
+
 > `SKILL.md` 허브에서 분리한 시나리오 상세. 요청할 상태(state) 목록과 프레임 수를 정할 때 이 문서를 따른다.
 
 ## Simple MVP Scope
