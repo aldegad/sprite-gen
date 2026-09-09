@@ -19,6 +19,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install the pipeline's required binaries (ffmpeg for video-frames, libwebp for video-loop)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg webp
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}

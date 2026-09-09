@@ -292,6 +292,7 @@ def test_strip_cap_is_on_pixels_not_cells() -> None:
     assert strip.width == meta["w"] * meta["frames"]
 
 
+@pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_gif_frame_count_follows_cycle_length_at_a_fixed_playback_rate(tmp_path: Path) -> None:
     """A 2.5 s jump used to get the same 12 frames as a 1.1 s walk and play at ~5 fps
     (2026-09-09, lead: '점프만 혼자 왜 프레임이 느리냐')."""
@@ -308,6 +309,7 @@ def test_gif_frame_count_follows_cycle_length_at_a_fixed_playback_rate(tmp_path:
     assert rep["n_out"] <= rep["cycle"]["length"] and rep2["n_out"] <= rep2["cycle"]["length"]
 
 
+@pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_default_gif_rate_keeps_every_cycle_frame(tmp_path: Path) -> None:
     """24 fps source, 24 fps GIF: a 61-frame jump cycle stays 61 frames at ~42 ms."""
     (tmp_path / "j").mkdir()
@@ -316,6 +318,7 @@ def test_default_gif_rate_keeps_every_cycle_frame(tmp_path: Path) -> None:
     assert rep["n_out"] == rep["cycle"]["length"] and 40 <= rep["delay_ms"] <= 43 and rep["gif_fps"] == 24.0
 
 
+@pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_fixed_cycle_cuts_exactly_and_skips_detection(tmp_path: Path) -> None:
     """A clip with too few repeats for the periodicity gate can still be cut where the
     caller says (2026-09-09: the reel's jump clip held 2.3 hops)."""
@@ -329,6 +332,7 @@ def test_fixed_cycle_cuts_exactly_and_skips_detection(tmp_path: Path) -> None:
         loop_mod.run_loop(tmp_path / "keyed", tmp_path / "fx3", fps=24.0, state="jump", min_len=None, max_len=None, n_out=None, seam_max=5.0, name="f3", report_path=None, cycle_mode="fixed")
 
 
+@pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_strip_height_caps_the_output_size(tmp_path: Path) -> None:
     files = _gait_frames(tmp_path, period=12, n=60, size=(160, 400))
     rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "h", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="h", report_path=None, strip_height=100)
