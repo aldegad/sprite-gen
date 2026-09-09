@@ -143,7 +143,7 @@ $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/prepare_sprite_run.py
 
 Hatch-pet-style locomotion adds the cell gate (`--cell-width 192 --cell-height 208`). Directional characters declare the direction contract (`--directions down,side,up --mirror left=side`); files then follow the taxonomy `raw/<dir>/<pose>.png`, `frames/<dir>/<pose>/` (path resolver SSoT `sprite_gen/layout.py`, frame paths SSoT = frames-manifest `row.files`) and `prepare` records the generation chain in `references/generation-plan.json` — [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md). Writes `sprite-request.json`, `base-source.<ext>`, `references/layout-guides/<state>.png`, `prompts/<state>.txt`, `raw/`, `frames/`.
 
-2. Generate the rows (the one AI step; the `image-gen` skill is a thin shuttle over this). The batch form is the default — `$SPRITE_GEN_ROOT/.venv/bin/sprite-gen gen-set --run-dir <run>` generates every non-mirrored state 4 at a time with the run's own identity ref and writes `reports/gen-set/table.md`; one row by hand:
+2. Generate the rows (the one AI step; the `image-gen` skill is a thin shuttle over this). The batch form is the default — `$SPRITE_GEN_ROOT/.venv/bin/sprite-gen gen-set --run-dir <run>` generates every non-mirrored state 6 at a time with the run's own identity ref and writes `reports/gen-set/table.md`; one row by hand:
 
 ```bash
 $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/generate_sprite_image.py \
@@ -153,7 +153,7 @@ $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/generate_sprite_image
 
 - `--provider` is optional: default codex (`SPRITE_GEN_DEFAULT_PROVIDER` overrides; observable grok fallback only if codex is unavailable). Rows keep the request chroma key and are generated **without** `--transparent`; standalone stills use `--transparent` (codex native alpha first, grok chroma) — [`docs/gen.md`](docs/gen.md).
 - References: default states attach exactly two — `base-source.<ext>` + the state layout guide. Direction-anchor mode attaches the accepted anchor instead of the base: **never pick the anchor crop by hand**, ask `$SPRITE_GEN_ROOT/.venv/bin/python -m sprite_gen.cli anchor --run-dir <run> --for-state <state>` right before each generation (derived cache, re-run every time; the human pins which frame). Extra motion references only when recorded in `qa-notes.md`.
-- **Concurrency (maintainer 2026-07-19)**: multi-row batches run **4 at a time** — that is `gen-set`'s default `--concurrency`; serial one-by-one is an anti-pattern. `runio.py` locks make parallel `raw/<state>.png` writes safe. Providers are engine backends, not agents — no worker surface is spawned ([`docs/gen.md`](docs/gen.md#provider-topology)).
+- **Concurrency (lead-verified 2026-08, no throttling at 6)**: multi-row batches run **6 at a time** — that is `gen-set`'s default `--concurrency`; serial one-by-one is an anti-pattern. `runio.py` locks make parallel `raw/<state>.png` writes safe. Providers are engine backends, not agents — no worker surface is spawned ([`docs/gen.md`](docs/gen.md#provider-topology)).
 
 3. Extract frames — chroma removal, connected components, one transparent request-sized cell per pose, `frames/<state>/frame-N.png` + `frames/frames-manifest.json`:
 

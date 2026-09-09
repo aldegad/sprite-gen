@@ -29,7 +29,7 @@ All notable public changes to `sprite-gen` are recorded here. Versions track the
 ### Added
 
 - `sprite_gen/video/` domain and the verbs `video-canvas`, `video-frames`, `video-loop`, `video-set` (contract: `docs/video-pipeline.md`). `video-loop --cycle auto|periodic|one-shot`: action states (`jump`, `attack`, unknown) whose clip performs the action once get a recorded one-shot cut (rest → excursion → rest) instead of a hard failure; the report keeps the rejected periodic attempt and `table.md` gains a `kind` column. `walk`, `run`, `idle` still fail loud without a period.
-- `sprite-gen gen-set` (`sprite_gen/gen/gen_set.py`, `scripts/gen_set.py`): anchors before rows on direction runs, reuse unless `--force`, `reports/gen-set/table.md` + `set.report.json`, `--provider` honoured verbatim with `gen`'s own default resolution and its recorded codex → grok availability failover per row.
+- `sprite-gen gen-set` (`sprite_gen/gen/gen_set.py`, `scripts/gen_set.py`): 6 rows at a time by default (the lead-verified batch width), anchors before rows on direction runs, reuse unless `--force`, `reports/gen-set/table.md` + `set.report.json`, `--provider` honoured verbatim with `gen`'s own default resolution and its recorded codex → grok availability failover per row.
 - `sprite_gen._modules.DOMAINS` / `domain_of()`: display order and one-line meaning per domain; `cli.command_domains()` derives the help groups. A verb whose module is not in the table fails loudly.
 - `docs/README.md` (documentation index) with a test that pins it to the file set and resolves every relative markdown link; tables of contents in `run-contract.md`, `layer-tracks.md`, `curation.md`, `directional-anchor-workflow.md`, `architecture.md`; `scripts/dev/README.md`.
 
