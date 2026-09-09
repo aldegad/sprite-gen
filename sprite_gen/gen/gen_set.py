@@ -75,7 +75,7 @@ def _stages(request: dict[str, Any], states: list[str]) -> list[list[str]]:
 def run_gen_cli(prompt_file: Path, out: Path, refs: list[Path], report: Path, *, provider: str | None, model: str | None, log: Path) -> int:
     import subprocess
 
-    cmd = [sys.executable, "-m", "sprite_gen.gen", "--prompt-file", str(prompt_file), "--out", str(out), "--report", str(report)]
+    cmd = [sys.executable, "-m", "sprite_gen.cli", "gen", "--prompt-file", str(prompt_file), "--out", str(out), "--report", str(report)]
     for ref in refs:
         cmd += ["--ref", str(ref)]
     if provider:
