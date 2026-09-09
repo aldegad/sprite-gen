@@ -900,7 +900,7 @@ RETIRED_DOC_CLAIMS = [
     ("a mismatch re-detects", "굽기는 지문을 안 보고 **매번** 재검출한다"),
 ]
 DOC_FILES = ["CHANGELOG.md", "SKILL.md", "README.md",
-             "docs/static-pose-recipe.md", "docs/run-contract.md", "docs/curation.md"]
+             "docs/breathing.md", "docs/run-contract.md", "docs/curation.md"]
 
 
 def test_no_doc_still_describes_the_retired_fingerprint_design():

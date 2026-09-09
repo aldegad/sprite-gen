@@ -126,7 +126,7 @@ One job each, all under `scripts/` (wrappers) ↔ `sprite_gen/<domain>/` (impl).
 | `unpack_atlas_run.py` (`unpack-atlas`) · `export_curated_pngs.py` (`export-pngs`) | finished sheet / PNG folder → curator-ready run · curated frames → named PNGs (`curated/`) | [`docs/curation.md`](docs/curation.md) |
 | `cutout` · `slice_sheet_cells.py` (`slice-sheet`) · `dev/check_visible_magenta.py` | imported-image background removal (white matte / chroma engine) · multi-figure sheet → per-cell cuts · screenshot chroma-leak guard | [`docs/sheet-slicing.md`](docs/sheet-slicing.md) |
 
-Breathing (idle) and static-pose rows are a **post-process layer** declared in `curation.json` (`states.<state>.breathe`) and baked by compose — never a script step; the contract (anatomy detection, editor, rigid boundary, `migrate-breathe`) is [`docs/breathing.md`](docs/breathing.md) and [`docs/static-pose-recipe.md`](docs/static-pose-recipe.md).
+Breathing (idle) and static-pose rows are a **post-process layer** declared in `curation.json` (`states.<state>.breathe`) and baked by compose — never a script step; the contract (anatomy detection, editor, rigid boundary, `migrate-breathe`) is [`docs/breathing.md`](docs/breathing.md) and [`docs/breathing.md`](docs/breathing.md) "정지 자세 행 레시피".
 
 ## Workflow (atlas route)
 
@@ -229,7 +229,7 @@ Leaf docs are one link deep. Walk the branch that matches your task; each doc ow
 CONTRACT & STRUCTURE   docs/run-contract.md · docs/architecture.md
 REQUEST AUTHORING      docs/states-and-frames.md · docs/subject-profiles.md · docs/pixel-unfake.md · docs/chroma-alpha.md
 GENERATION             docs/gen.md · docs/video.md · docs/video-pipeline.md · docs/frame-interpolation.md · docs/seamless-video-loop.md
-CURATION               docs/curation.md · docs/breathing.md · docs/static-pose-recipe.md
+CURATION               docs/curation.md · docs/breathing.md
 COLOURWAYS             docs/recolor.md
 LAYER TRACKS           docs/layer-tracks.md
 ENGINE EXPORT          docs/engine-export.md
