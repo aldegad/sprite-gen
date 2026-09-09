@@ -1,5 +1,7 @@
 # 리네임 게이트 — 어휘/키를 바꿀 때 (BLOCKING)
 
+> Owns: What must move together when a vocabulary word or key is renamed · Index: [docs/README.md](README.md)
+
 > SKILL.md 허브에서 옮겨온 계약 본문(2026-09-09, 허브 슬림화). 허브는 이 페이지를 가리키기만 한다.
 
 스키마 키·식별자·라벨을 걸쳐 어휘를 바꾸는 작업(`pixel_perfect` → `pixel_unfake` 류)은
@@ -26,3 +28,7 @@
 - [ ] **은퇴 이름은 조용한 별칭으로 남기지 않는다.** 새 이름을 안내하며 hard error. 그 안내
       문구 자체는 치환 대상에서 제외한다.
 - [ ] **순수 리네임 주장은 골든 회귀로 증명한다.** 리네임 전/후 산출물이 바이트 동일한지.
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

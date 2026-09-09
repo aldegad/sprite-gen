@@ -1,5 +1,7 @@
 # Locomotion Curation & Clean GIF Export — sprite-gen reference
 
+> Owns: Motion-phase experiments, manual selected cycles, clean GIF export · Index: [docs/README.md](README.md)
+
 > `SKILL.md` 에서 분리한 시나리오 상세. motion-phase 실험·수동 selected-cycle·클린 GIF export 가 필요할 때 따른다. 내용은 손실 없이 `SKILL.md` 본문에서 그대로 옮겨졌다.
 
 ### Motion Phase Guide Experiment
@@ -70,3 +72,7 @@ Clean GIF invariants:
 - Use infinite loop (`loop-count 0`) for looped states.
 - Keep contact sheets separate from GIFs. Contact sheets may use checker backgrounds for inspection; runtime/shareable GIFs should preserve transparency.
 - If a loop only works after dropping or reordering frames, record the selected 1-based frame order. Do not hide that as an automatic pass.
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

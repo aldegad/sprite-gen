@@ -274,6 +274,21 @@ def test_run_loop_auto_fails_over_to_one_shot_only_for_action_states(tmp_path: P
         loop_mod.run_loop(tmp_path / "keyed", tmp_path / "jump2", fps=24.0, state="jump", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="j2", report_path=None, cycle_mode="periodic")
 
 
+def test_strip_cap_is_on_pixels_not_cells() -> None:
+    # 100 wide frames (body 700 px across): 64 cells would be 44,800 px — Chrome cannot show it
+    frames = []
+    for t in range(100):
+        im = Image.new("RGBA", (720, 300), (0, 0, 0, 0))
+        for y in range(40 + (t % 7), 300):
+            for x in range(10, 710):
+                im.putpixel((x, y), (200, 60, 60, 255))
+        frames.append(im)
+    strip, meta = loop_mod.build_strip(frames, cycle_seconds=100 / 24)
+    assert strip.width <= loop_mod.STRIP_MAX_WIDTH
+    assert meta["frames"] == meta["cell_cap"] < 64 and meta["subsampled"] is True
+    assert strip.width == meta["w"] * meta["frames"]
+
+
 def test_drop_specks_erases_detached_slivers_only() -> None:
     im = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
     for y in range(5, 35):

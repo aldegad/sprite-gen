@@ -1,5 +1,7 @@
 # Video → sprite pipeline (engine SSoT)
 
+> Owns: Pipeline B engine contract: state canvas, keyed frames, true-period and one-shot cycles, strip/GIF/WebP, the batch · Index: [docs/README.md](README.md)
+
 One still becomes a whole motion set: the still is padded into the canvas a state
 needs, Grok Imagine animates it in place, the clip is keyed frame by frame, and one
 seamless cycle is cut out as a strip, a transparent GIF and a WebP — every stage
@@ -109,8 +111,9 @@ Outputs:
 - `cycle/frame-NNN.png` — the cycle frames, RGB under alpha 0 scrubbed, detached specks
   below 1 % of the body erased.
 - `<name>.strip.png` + `<name>.strip.json` — a horizontal strip (union-cropped, **no bottom
-  pad** so feet meet the floor, bottom-aligned, ≤ 64 cells because Chrome caps image
-  dimensions near 32 767 px, ≤ 520 px tall) with `frames · w · h · body_h · delay_ms ·
+  pad** so feet meet the floor, bottom-aligned, ≤ 64 cells **and ≤ 32 000 px wide** because
+  Chrome refuses images near 32 767 px — the cap is on pixels, so a 650 px cell allows 49
+  cells and the meta says `subsampled`; ≤ 520 px tall) with `frames · w · h · body_h · delay_ms ·
   cycle_frames · cycle_seconds`. `body_h` is the standing body height (median per-frame
   bbox height): scale a jump strip — whose cells include air room — by `body_h`, not `h`,
   and it reads the same size as a walk strip. `delay_ms = cycle_seconds / frames`, so a
@@ -143,3 +146,7 @@ bounce was faster than any gait) and the assumption that an action state repeats
 quadruped jumped once). Everything else held unchanged, and the original biped set
 still resolves to the same periods afterwards. The subjects are not in this repository;
 the synthetic fixtures under `tests/video/` pin every rule named here.
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

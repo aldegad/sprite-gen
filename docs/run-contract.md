@@ -1,5 +1,7 @@
 # Run Contract — pipeline stages · run-dir folder tree · curation-view display (SSoT)
 
+> Owns: The atlas pipeline's normative contract: stages, the run-dir folder tree, curation-view display, atomic extract, concurrency scope · Index: [docs/README.md](README.md)
+
 > Status: **contract** (normative). This doc is the single source of truth for
 > three things every sprite-gen run must satisfy so that **any agent who serves a
 > view gets the same experience** — the base reference row, the per-state
@@ -15,6 +17,19 @@
 >
 > If the three ever disagree: behavior → SKILL.md wins; structure/display → this
 > doc wins; architecture.md is the bug.
+
+## Contents
+
+- [1. Pipeline stages](#1-pipeline-stages)
+- [2. Run-dir folder contract](#2-run-dir-folder-contract)
+- [2-b-2. Reading a run never writes to it](#2-b-2-reading-a-run-never-writes-to-it)
+- [2-c. External consumers install from `curated/`, never from `frames/`](#2-c-external-consumers-install-from-curated-never-from-frames)
+- [3. Curation-view display contract](#3-curation-view-display-contract)
+- [4. Import-run source rule (`--pngs-dir`)](#4-import-run-source-rule---pngs-dir)
+- [5. Conformance status](#5-conformance-status)
+- [6. Failed extract is atomic — no partial generation in `frames/`](#6-failed-extract-is-atomic-no-partial-generation-in-frames)
+- [7. Guarantee boundary — atomicity & concurrency (honest scope)](#7-guarantee-boundary-atomicity-concurrency-honest-scope)
+- [Related](#related)
 
 ## 1. Pipeline stages
 
@@ -40,7 +55,7 @@ canonical files, not hidden imports.
 | Selected cycle | `compose_selected_cycle.py` | `curation.json` / `--frames` | selected-cycle manifest + QA |
 | Inverse / import | `unpack_atlas_run.py` | finished atlas **or** `--pngs-dir` | curator-ready run dir (§4) |
 | Export stills | `export_curated_pngs.py` | curated `frames/` | named PNGs under `curated/` |
-| Chroma guard | `check_visible_magenta.py` | screenshot | leakage warning |
+| Chroma guard | `scripts/dev/check_visible_magenta.py` | screenshot | leakage warning |
 
 The happy path is `prepare → gen → extract → (curate) → compose`, with a curation
 webview opened as the closing step. Stage internals (chroma removal, connected

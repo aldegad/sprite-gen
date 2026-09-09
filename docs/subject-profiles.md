@@ -1,5 +1,7 @@
 # Subject profiles - character vs effect
 
+> Owns: `character` vs `effect` subjects and the sparse-frame floor they set · Index: [docs/README.md](README.md)
+
 The sparse-frame floor (`--min-used-pixels`) catches empty frames and extraction debris. The right floor depends on what a run draws and on its cell geometry. A character normally fills more of its cell than a spell spark, while users may choose any resolution, so neither profile owns one absolute pixel constant.
 
 ```jsonc
@@ -63,3 +65,7 @@ These public examples were generated through `prepare --subject effect`, `gen`, 
 - Use `--min-used-pixels` only for a deliberate outlier below the derived profile floor.
 - Keep chroma-key hues far from wispy or translucent effect colors so unmixing does not erase the subject into the debris band.
 - Do not lower a global floor for every run. That would disable the debris guard for unrelated subjects.
+
+## Related
+
+- [docs/README.md](README.md) — documentation index

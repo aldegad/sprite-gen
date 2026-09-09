@@ -14,7 +14,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PYTHON = Path(sys.executable)
 EXTRACT = ROOT / "scripts" / "extract_sprite_row_frames.py"
 COMPOSE = ROOT / "scripts" / "compose_sprite_atlas.py"

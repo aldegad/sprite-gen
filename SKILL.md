@@ -16,6 +16,7 @@ depends_on:
   required_scripts:
     - scripts/prepare_sprite_run.py
     - scripts/generate_sprite_image.py
+    - scripts/gen_set.py
     - scripts/generate_sprite_video.py
     - scripts/video_canvas.py
     - scripts/video_frames.py
@@ -30,9 +31,7 @@ depends_on:
     - scripts/inspect_sprite_run.py
     - scripts/score_sprite_run.py
     - scripts/run_correction_loop.py
-    - scripts/gif_utils.py
     - scripts/curation.py
-    - scripts/runio.py
     - scripts/serve_curation.py
     - scripts/slice_sheet_cells.py
     - scripts/unpack_atlas_run.py
@@ -111,6 +110,7 @@ One job each, all under `scripts/` (wrappers) ↔ `sprite_gen/<domain>/` (impl).
 |---|---|---|
 | `prepare_sprite_run.py` | request → `sprite-request.json`, layout guides, prompts, empty `raw/`+`frames/` | run-contract §2 |
 | `generate_sprite_image.py` (`gen`) | one still via codex `image_gen` / grok Imagine → verified PNG (+ transparent strategy) | [`docs/gen.md`](docs/gen.md) |
+| `gen_set.py` (`gen-set`) | every state row of a prepared run, N at a time — identity ref from the run (base or accepted anchor), one report per row, `table.md`, non-zero exit on any failure | [`docs/gen.md`](docs/gen.md) |
 | `generate_sprite_video.py` (`video`) | one still → verified mp4 via Grok Imagine, user's own login / `XAI_API_KEY` | [`docs/video.md`](docs/video.md) |
 | `video_canvas.py` · `video_frames.py` · `video_loop.py` · `video_set.py` | state canvas (jump tall / attack wide / else square) · ffmpeg + keying · true-period cycle → strip/GIF/WebP · directions × states batch | [`docs/video-pipeline.md`](docs/video-pipeline.md) |
 | `extract_sprite_row_frames.py` (`extract`) | `raw/<state>.png` → chroma removal → components → transparent cells + `frames/frames-manifest.json` | run-contract · [`docs/pixel-unfake.md`](docs/pixel-unfake.md) |
@@ -124,9 +124,9 @@ One job each, all under `scripts/` (wrappers) ↔ `sprite_gen/<domain>/` (impl).
 | `recolor.py` (`recolor` / `recolor-palette`) | deterministic palette-swap bake → `variants/` + report (exact match; opt-in tolerance) | [`docs/recolor.md`](docs/recolor.md) |
 | `compose_layers.py` (`sprite-gen compose-layers`) | rig runs only: curated rows stacked by integer pivots + masks → `layers/` (all-or-nothing) | [`docs/layer-tracks.md`](docs/layer-tracks.md) |
 | `unpack_atlas_run.py` (`unpack-atlas`) · `export_curated_pngs.py` (`export-pngs`) | finished sheet / PNG folder → curator-ready run · curated frames → named PNGs (`curated/`) | [`docs/curation.md`](docs/curation.md) |
-| `cutout` · `slice_sheet_cells.py` (`slice-sheet`) · `check_visible_magenta.py` | imported-image background removal (white matte / chroma engine) · multi-figure sheet → per-cell cuts · screenshot chroma-leak guard | [`docs/sheet-slicing.md`](docs/sheet-slicing.md) |
+| `cutout` · `slice_sheet_cells.py` (`slice-sheet`) · `dev/check_visible_magenta.py` | imported-image background removal (white matte / chroma engine) · multi-figure sheet → per-cell cuts · screenshot chroma-leak guard | [`docs/sheet-slicing.md`](docs/sheet-slicing.md) |
 
-Breathing (idle) and static-pose rows are a **post-process layer** declared in `curation.json` (`states.<state>.breathe`) and baked by compose — never a script step; the contract (anatomy detection, editor, rigid boundary, `migrate-breathe`) is [`docs/breathing.md`](docs/breathing.md) and [`docs/static-pose-recipe.md`](docs/static-pose-recipe.md).
+Breathing (idle) and static-pose rows are a **post-process layer** declared in `curation.json` (`states.<state>.breathe`) and baked by compose — never a script step; the contract (anatomy detection, editor, rigid boundary, `migrate-breathe`) is [`docs/breathing.md`](docs/breathing.md) and [`docs/breathing.md`](docs/breathing.md) "정지 자세 행 레시피".
 
 ## Workflow (atlas route)
 
@@ -143,7 +143,7 @@ $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/prepare_sprite_run.py
 
 Hatch-pet-style locomotion adds the cell gate (`--cell-width 192 --cell-height 208`). Directional characters declare the direction contract (`--directions down,side,up --mirror left=side`); files then follow the taxonomy `raw/<dir>/<pose>.png`, `frames/<dir>/<pose>/` (path resolver SSoT `sprite_gen/layout.py`, frame paths SSoT = frames-manifest `row.files`) and `prepare` records the generation chain in `references/generation-plan.json` — [`docs/directional-anchor-workflow.md`](docs/directional-anchor-workflow.md). Writes `sprite-request.json`, `base-source.<ext>`, `references/layout-guides/<state>.png`, `prompts/<state>.txt`, `raw/`, `frames/`.
 
-2. Generate one row per state (the one AI step; the `image-gen` skill is a thin shuttle over this):
+2. Generate the rows (the one AI step; the `image-gen` skill is a thin shuttle over this). The batch form is the default — `$SPRITE_GEN_ROOT/.venv/bin/sprite-gen gen-set --run-dir <run>` generates every non-mirrored state 4 at a time with the run's own identity ref and writes `reports/gen-set/table.md`; one row by hand:
 
 ```bash
 $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/generate_sprite_image.py \
@@ -153,7 +153,7 @@ $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/generate_sprite_image
 
 - `--provider` is optional: default codex (`SPRITE_GEN_DEFAULT_PROVIDER` overrides; observable grok fallback only if codex is unavailable). Rows keep the request chroma key and are generated **without** `--transparent`; standalone stills use `--transparent` (codex native alpha first, grok chroma) — [`docs/gen.md`](docs/gen.md).
 - References: default states attach exactly two — `base-source.<ext>` + the state layout guide. Direction-anchor mode attaches the accepted anchor instead of the base: **never pick the anchor crop by hand**, ask `$SPRITE_GEN_ROOT/.venv/bin/python -m sprite_gen.cli anchor --run-dir <run> --for-state <state>` right before each generation (derived cache, re-run every time; the human pins which frame). Extra motion references only when recorded in `qa-notes.md`.
-- **Concurrency (maintainer 2026-07-19)**: multi-row batches run **4 at a time** (`ThreadPoolExecutor(max_workers=4)`); serial one-by-one is an anti-pattern. `runio.py` locks make parallel `raw/<state>.png` writes safe. Providers are engine backends, not agents — no worker surface is spawned ([`docs/gen.md`](docs/gen.md#provider-topology)).
+- **Concurrency (maintainer 2026-07-19)**: multi-row batches run **4 at a time** — that is `gen-set`'s default `--concurrency`; serial one-by-one is an anti-pattern. `runio.py` locks make parallel `raw/<state>.png` writes safe. Providers are engine backends, not agents — no worker surface is spawned ([`docs/gen.md`](docs/gen.md#provider-topology)).
 
 3. Extract frames — chroma removal, connected components, one transparent request-sized cell per pose, `frames/<state>/frame-N.png` + `frames/frames-manifest.json`:
 
@@ -223,19 +223,6 @@ qa_note=<one sentence>
 
 ## Docs Topology
 
-Leaf docs are one link deep. Walk the branch that matches your task; each doc owns its tables and this hub only points.
-
-```text
-CONTRACT & STRUCTURE   docs/run-contract.md · docs/architecture.md
-REQUEST AUTHORING      docs/states-and-frames.md · docs/subject-profiles.md · docs/pixel-unfake.md · docs/chroma-alpha.md
-GENERATION             docs/gen.md · docs/video.md · docs/video-pipeline.md · docs/frame-interpolation.md · docs/seamless-video-loop.md
-CURATION               docs/curation.md · docs/breathing.md · docs/static-pose-recipe.md
-COLOURWAYS             docs/recolor.md
-LAYER TRACKS           docs/layer-tracks.md
-ENGINE EXPORT          docs/engine-export.md
-SPECIALIZED INPUTS     docs/directional-anchor-workflow.md · docs/sheet-slicing.md
-QA                     docs/qa-motion.md · docs/locomotion-curation.md
-RUNTIME & PROCESS      docs/interpreter.md · docs/rename-gate.md · docs/troubleshooting.md
-```
+The documentation index is [`docs/README.md`](docs/README.md): every leaf doc once, under the four pipelines (A atlas rows · B video → loop · C utilities · D post-processing) and the taxonomy branches, each with a one-line owner. Leaf docs are one link deep; each owns its tables and this hub only points. Architecture with the domain and pipeline diagrams: [`docs/architecture.md`](docs/architecture.md).
 
 Concept ownership: `sprite-request.json`/cell/states/takes → run-contract §2 · states-and-frames; `run_revision`/salvage/`curation.stale-*.json` and every `curation.json` field (`selected`/`order`/`deleted`/`transforms`/`pixels`/`clones`/`pixel_unfake`/`revision`/`recolor.picked`) → curation.md; frame **clones** → curation.md + compose; `frame_layout` runtime contract → run-contract + "Runtime Contract" above; `fit`/pixel-unfake twins → pixel-unfake.md; recolor spec/report/`variants/` → recolor.md; `rig`/`track`/`layers` → layer-tracks.md; video canvas/period/seam/strip meta → video-pipeline.md; webview interactions → `sprite_gen/curator/` described in curation.md + recolor.md.

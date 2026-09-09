@@ -1,5 +1,7 @@
 # Sheet Slicing — multi-figure grid sheets to per-cell standing cuts (tachi-e)
 
+> Owns: Multi-figure grid sheets to per-cell standing cuts; the `cutout` routes · Index: [docs/README.md](README.md)
+
 `slice_sheet_cells.py` (= `sprite_gen.cli slice-sheet`) turns ONE generated
 image containing a COLSxROWS grid of the same character (expressions, poses,
 outfits) into per-cell RGBA cuts on a fixed canvas with a shared feet
@@ -91,3 +93,7 @@ feet line across cells, the flat chroma background, and no grid lines,
 labels, or numbers. Two-arm/anatomy constraints belong in the prompt too:
 the slicer cannot repair a three-armed generation, only regeneration fixes
 bad drawing (same doctrine as the row pipeline).
+
+## Related
+
+- [docs/README.md](README.md) — documentation index
