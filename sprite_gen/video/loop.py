@@ -45,11 +45,11 @@ STRIP_MAX_HEIGHT = 520
 SEAM_RATIO_MAX = 2.0  # loop seam / mean adjacent distance inside the cycle
 SPECK_MIN_FRACTION = 0.01  # detached components smaller than this fraction of the body are keying specks
 PERIODICITY_MIN = 0.15  # the period must dip at least 15% below the profile mean (flat profile = no repeat)
-GIF_FPS_DEFAULT = 12.0  # GIF/WebP playback density: n_out = cycle_seconds x this, so a 2.5 s jump and a 1.1 s walk play at the same rate
+GIF_FPS_DEFAULT = 24.0  # GIF/WebP playback density = the source rate: every cycle frame is kept, a fast action never looks slow (12 made a jump read sluggish, 2026-09-09)
 GIF_FRAMES_MIN = 4
 ONE_SHOT_MIN_CONTRAST = 3.0  # one-shot: the excursion peak must stand this far above the rest-pose noise (in MADs)
 ONE_SHOT_PAD = 2  # one-shot: rest frames kept on each side of the excursion so the seam is rest -> rest
-CYCLE_MODES = ("auto", "periodic", "one-shot")
+CYCLE_MODES = ("auto", "periodic", "one-shot", "fixed")
 
 
 @dataclass(frozen=True)
@@ -190,6 +190,21 @@ def detect_one_shot(D: np.ndarray, *, min_len: int, max_len: int) -> dict[str, A
         "excursion": [a, b],
         "excursion_contrast": round(contrast, 2),
     }
+
+
+def fixed_cycle(D: np.ndarray, *, start: int, length: int) -> dict[str, Any]:
+    """An explicitly requested cut (`--cycle fixed --start N --length L`): no detection, no
+    periodicity gate — the caller says which frames are the cycle and the report says so
+    (kind = "fixed"). The seam is still measured and the seam gate still applies."""
+    n = D.shape[0]
+    if start < 0 or length < 2 or start + length > n:
+        raise SystemExit(f"video-loop: --start {start} --length {length} does not fit {n} frames")
+    end = start + length - 1
+    adjacent = np.array([D[i, i + 1] for i in range(start, end)])
+    inner = float(adjacent.mean())
+    seam = float(D[start, end])
+    return {"kind": "fixed", "start": start, "length": length, "seam": seam, "inner_mean_adjacent": inner,
+            "ratio": seam / inner if inner > 0 else math.inf, "period_global": None, "periodicity": None}
 
 
 def _drop_specks(image: Image.Image, min_fraction: float) -> tuple[Image.Image, int]:
@@ -341,6 +356,9 @@ def run_loop(
     report_path: Path | None,
     cycle_mode: str = "auto",
     gif_fps: float = GIF_FPS_DEFAULT,
+    start: int | None = None,
+    length: int | None = None,
+    strip_height: int = STRIP_MAX_HEIGHT,
 ) -> dict[str, Any]:
     if cycle_mode not in CYCLE_MODES:
         raise SystemExit(f"video-loop: unknown --cycle {cycle_mode!r}; expected one of {', '.join(CYCLE_MODES)}")
@@ -354,7 +372,11 @@ def run_loop(
     hi = max_len if max_len is not None else max(lo + 2, round(n * prof.max_frac))
     D = distance_matrix(files)
     periodic_attempt: dict[str, Any] | None = None
-    if cycle_mode == "one-shot":
+    if cycle_mode == "fixed":
+        if start is None or length is None:
+            raise SystemExit("video-loop: --cycle fixed needs --start and --length")
+        cycle = fixed_cycle(D, start=start, length=length)
+    elif cycle_mode == "one-shot":
         cycle = detect_one_shot(D, min_len=lo, max_len=hi)
     else:
         cycle = detect_cycle(D, min_len=lo, max_len=hi)
@@ -396,7 +418,7 @@ def run_loop(
         frames.append(im)
 
     cycle_seconds = L / fps
-    strip, strip_meta = build_strip(frames, cycle_seconds=cycle_seconds)
+    strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds)
     strip_path = out_dir / f"{name}.strip.png"
     strip.save(strip_path)
     atomic_write_text(out_dir / f"{name}.strip.json", json.dumps(strip_meta, indent=2) + "\n")
@@ -463,7 +485,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--n-out", type=int, help="frames in the GIF/WebP (default: cycle seconds x --gif-fps)")
     parser.add_argument("--gif-fps", type=float, default=GIF_FPS_DEFAULT, help=f"GIF/WebP playback density (default {GIF_FPS_DEFAULT:g}); every state plays at this rate regardless of cycle length")
     parser.add_argument("--seam-max", type=float, default=SEAM_RATIO_MAX, help=f"loop seam gate (default {SEAM_RATIO_MAX})")
-    parser.add_argument("--cycle", choices=CYCLE_MODES, default="auto", help="auto: periodic first, one-shot failover for action states (recorded in the report); periodic / one-shot force one detector")
+    parser.add_argument("--cycle", choices=CYCLE_MODES, default="auto", help="auto: periodic first, one-shot failover for action states (recorded in the report); periodic / one-shot force one detector; fixed cuts exactly --start/--length (no detection, reported as kind=fixed)")
+    parser.add_argument("--start", type=int, help="fixed cut: first keyed frame of the cycle (with --cycle fixed)")
+    parser.add_argument("--length", type=int, help="fixed cut: cycle length in frames (with --cycle fixed)")
+    parser.add_argument("--strip-height", type=int, default=STRIP_MAX_HEIGHT, help=f"cell/strip/GIF height cap in px (default {STRIP_MAX_HEIGHT}); the cycle is scaled down to fit, never up")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)
 
@@ -475,6 +500,7 @@ def run(**kwargs: object) -> int:
         min_len=kwargs.get("min_len"), max_len=kwargs.get("max_len"), n_out=kwargs.get("n_out"),  # type: ignore[arg-type]
         seam_max=float(kwargs.get("seam_max") or SEAM_RATIO_MAX), name=str(kwargs.get("name") or "loop"), report_path=kwargs.get("report"),  # type: ignore[arg-type]
         cycle_mode=str(kwargs.get("cycle") or "auto"), gif_fps=float(kwargs.get("gif_fps") or GIF_FPS_DEFAULT),
+        start=kwargs.get("start"), length=kwargs.get("length"), strip_height=int(kwargs.get("strip_height") or STRIP_MAX_HEIGHT),  # type: ignore[arg-type]
     )
     summary = {k: payload[k] for k in ("state", "frames_total", "window", "cycle_seconds", "n_out", "delay_ms", "resampled_seam_ratio", "specks_dropped", "report")}
     summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio")}

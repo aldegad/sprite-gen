@@ -11,7 +11,7 @@
 <p align="center">
   <img src="docs/assets/hero-paladin-walk.gif" height="200" alt="paladin walk loop" />
   <img src="docs/assets/hero-paladin-run.gif" height="200" alt="paladin run loop" />
-  <img src="docs/assets/hero-paladin-jump.gif" height="200" alt="paladin jump loop" />
+  <img src="docs/assets/hero-paladin-jump.gif" height="301" alt="paladin jump loop" />
   <img src="docs/assets/hero-wolf-walk.gif" height="200" alt="wolf walk loop" />
   <img src="docs/assets/hero-slime-walk.gif" height="200" alt="slime walk loop" />
 </p>

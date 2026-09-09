@@ -104,7 +104,11 @@ report carries `cycle.kind = "one-shot"` plus `periodic_attempt` (the periodicit
 failed and the window), `table.md` has a `kind` column, and the same seam and
 animation gates still apply. `--cycle periodic` keeps the old hard failure; `--cycle
 one-shot` forces the excursion cut. A clip that never leaves its rest pose fails loud
-in both detectors.
+in both detectors. `--cycle fixed --start N --length L` skips detection and cuts exactly
+those frames — for a clip that holds too few repeats for the periodicity gate but whose
+cycle is known (the 2026-09-09 reel jump: 2.3 hops in 145 frames). It is an explicit
+instruction, not a failover: the report says `kind = "fixed"`, and the seam gate still
+applies.
 
 Outputs:
 
@@ -121,9 +125,11 @@ Outputs:
   (a 30 fps render of 24 fps cells is a 5:4 pulldown and judders).
 - `<name>.gif` — `n_out` frames evenly across the cycle, 1-bit alpha, disposal 2, `loop=0`.
   `n_out` is a **playback density, not a fixed count**: `round(cycle_seconds × --gif-fps)`
-  (default 12 fps, floor 4, never more than the cycle holds), so a 2.5 s jump gets ~30 frames
-  and a 1.1 s walk ~13 and both play at the same rate. A fixed 12 made the jump hold each
-  frame 210 ms while the walk held 90 ms (2026-09-09). `--n-out` still overrides.
+  (default 24 fps = the source rate, so every cycle frame is kept; floor 4, never more than
+  the cycle holds). A fixed 12 made a 2.5 s jump hold each frame 210 ms while a 1.1 s walk
+  held 90 ms, and even an even 12 fps read sluggish on a jump (2026-09-09). `--n-out` and
+  `--gif-fps` still override; `--strip-height` caps the cell/strip/GIF height (scaled down,
+  never up) when the output has a target size such as a README hero.
 - `<name>.webp` — same frames, lossless, `img2webp -exact` (Pillow's animated WebP writer
   does not pass `exact` and rewrites RGB under transparent pixels).
 
