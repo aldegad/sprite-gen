@@ -76,13 +76,18 @@ def save_clean_gif(
 def gif_report(path: Path) -> dict[str, object]:
     """Return frame count, delay list, loop, transparency, and disposal values."""
     with Image.open(path) as image:
-        frames = list(ImageSequence.Iterator(image))
-        delays = [int(frame.info.get("duration", 0) / 10) for frame in frames]
-        alpha_extrema = [frame.convert("RGBA").getchannel("A").getextrema() for frame in frames]
-        disposal = [getattr(frame, "disposal_method", None) for frame in frames]
+        delays = []
+        alpha_extrema = []
+        disposal = []
+        # The iterator reuses its decoder object. Read each frame's properties
+        # before advancing, while they still describe that frame.
+        for frame in ImageSequence.Iterator(image):
+            delays.append(int(frame.info.get("duration", 0) / 10))
+            alpha_extrema.append(frame.convert("RGBA").getchannel("A").getextrema())
+            disposal.append(getattr(frame, "disposal_method", None))
         return {
             "path": str(path),
-            "frames": len(frames),
+            "frames": len(delays),
             "delay_ticks": delays,
             "loop": image.info.get("loop", 0),
             "transparent": all(min_alpha < 255 for min_alpha, _max_alpha in alpha_extrema),
