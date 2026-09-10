@@ -9,6 +9,12 @@
 </p>
 
 <p align="center">
+  <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/sprite-gen-v2-showcase.jpg" width="960" alt="sprite-gen v2 HyperFrames showcase" /></a>
+</p>
+
+<p align="center"><a href="https://youtu.be/zVu9YlbPtog">观看 v2 演示：从一张静态图到会动的圣骑士、狼和史莱姆。</a></p>
+
+<p align="center">
   <img src="docs/assets/hero-paladin-walk.gif" height="202" alt="paladin walk loop" />
   <img src="docs/assets/hero-paladin-run.gif" height="206" alt="paladin run loop" />
   <img src="docs/assets/hero-paladin-jump.gif" height="246" alt="paladin jump loop" />

@@ -26,3 +26,14 @@ def test_hero_img_heights_match_the_files_in_every_readme() -> None:
             assert im.height == int(height), (name, gif, im.height, height)
             assert im.info.get("loop") == 0 and im.n_frames > 1, gif
     assert all(s == sets[0] for s in sets), "hero rows differ between READMEs"
+
+
+def test_showcase_poster_fits_social_preview_limits_and_all_readmes_link_it() -> None:
+    poster = ROOT / "docs/assets/sprite-gen-v2-showcase.jpg"
+    with Image.open(poster) as image:
+        assert image.format == "JPEG"
+        assert image.size == (1280, 640)
+    assert poster.stat().st_size < 1_000_000
+    for name in READMES:
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert 'href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/sprite-gen-v2-showcase.jpg"' in text
