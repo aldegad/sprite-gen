@@ -9,20 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/sprite-gen-v2-showcase.jpg" width="960" alt="sprite-gen v2 HyperFrames showcase" /></a>
+  <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/hero-v2-party.gif" width="960" alt="Animated sprite-gen v2 showcase: paladin, wolf and slime" /></a>
 </p>
 
-<p align="center"><a href="https://youtu.be/zVu9YlbPtog">Watch the v2 showcase: paladin, wolf and slime, animated from still images.</a></p>
-
-<p align="center">
-  <img src="docs/assets/hero-paladin-walk.gif" height="202" alt="paladin walk loop" />
-  <img src="docs/assets/hero-paladin-run.gif" height="206" alt="paladin run loop" />
-  <img src="docs/assets/hero-paladin-jump.gif" height="246" alt="paladin jump loop" />
-  <img src="docs/assets/hero-wolf-walk.gif" height="203" alt="wolf walk loop" />
-  <img src="docs/assets/hero-slime-walk.gif" height="203" alt="slime walk loop" />
-</p>
-
-<p align="center"><sub>Every loop above started as <b>one still image</b>: padded into the canvas its motion needs, animated by Grok Imagine, keyed frame by frame, and cut at its true period into a transparent GIF — pipeline B, <code>sprite-gen video-set</code>.</sub></p>
+<p align="center"><sub>Each character started as <b>one still image</b>. Grok Imagine brought it to life; sprite-gen extracted the transparent loops, and HyperFrames assembled this showcase.</sub></p>
 
 ---
 

@@ -9,20 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/sprite-gen-v2-showcase.jpg" width="960" alt="sprite-gen v2 HyperFrames showcase" /></a>
+  <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/hero-v2-party.gif" width="960" alt="Animated sprite-gen v2 showcase: paladin, wolf and slime" /></a>
 </p>
 
-<p align="center"><a href="https://youtu.be/zVu9YlbPtog">观看 v2 演示：从一张静态图到会动的圣骑士、狼和史莱姆。</a></p>
-
-<p align="center">
-  <img src="docs/assets/hero-paladin-walk.gif" height="202" alt="paladin walk loop" />
-  <img src="docs/assets/hero-paladin-run.gif" height="206" alt="paladin run loop" />
-  <img src="docs/assets/hero-paladin-jump.gif" height="246" alt="paladin jump loop" />
-  <img src="docs/assets/hero-wolf-walk.gif" height="203" alt="wolf walk loop" />
-  <img src="docs/assets/hero-slime-walk.gif" height="203" alt="slime walk loop" />
-</p>
-
-<p align="center"><sub>上面每个循环都来自<b>一张静止图</b>：填充到动作所需的画布 → 由 Grok Imagine 驱动 → 逐帧抠像 → 在真实周期处剪成透明 GIF — 流水线 B，<code>sprite-gen video-set</code>。</sub></p>
+<p align="center"><sub>每个角色都始于<b>一张静态图</b>。Grok Imagine 生成动作，sprite-gen 提取透明循环动画，再由 HyperFrames 合成这一场景。</sub></p>
 
 ---
 

@@ -9,20 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/sprite-gen-v2-showcase.jpg" width="960" alt="sprite-gen v2 HyperFrames showcase" /></a>
+  <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/hero-v2-party.gif" width="960" alt="Animated sprite-gen v2 showcase: paladin, wolf and slime" /></a>
 </p>
 
-<p align="center"><a href="https://youtu.be/zVu9YlbPtog">Voir la démo v2 : paladin, loup et slime animés à partir d'images.</a></p>
-
-<p align="center">
-  <img src="docs/assets/hero-paladin-walk.gif" height="202" alt="paladin walk loop" />
-  <img src="docs/assets/hero-paladin-run.gif" height="206" alt="paladin run loop" />
-  <img src="docs/assets/hero-paladin-jump.gif" height="246" alt="paladin jump loop" />
-  <img src="docs/assets/hero-wolf-walk.gif" height="203" alt="wolf walk loop" />
-  <img src="docs/assets/hero-slime-walk.gif" height="203" alt="slime walk loop" />
-</p>
-
-<p align="center"><sub>Chaque boucle ci-dessus est partie d'<b>une seule image fixe</b> : rembourrée au canevas que son mouvement exige, animée par Grok Imagine, détourée image par image et coupée à sa vraie période en GIF transparent — pipeline B, <code>sprite-gen video-set</code>.</sub></p>
+<p align="center"><sub>Chaque personnage est né d'une <b>seule image fixe</b>. Grok Imagine lui a donné vie, sprite-gen a extrait les boucles transparentes et HyperFrames a composé cette scène.</sub></p>
 
 ---
 

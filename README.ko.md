@@ -9,20 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/sprite-gen-v2-showcase.jpg" width="960" alt="sprite-gen v2 HyperFrames showcase" /></a>
+  <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/hero-v2-party.gif" width="960" alt="Animated sprite-gen v2 showcase: paladin, wolf and slime" /></a>
 </p>
 
-<p align="center"><a href="https://youtu.be/zVu9YlbPtog">v2 쇼케이스 보기: 이미지 한 장에서 움직이는 성기사, 늑대, 슬라임까지.</a></p>
-
-<p align="center">
-  <img src="docs/assets/hero-paladin-walk.gif" height="202" alt="paladin walk loop" />
-  <img src="docs/assets/hero-paladin-run.gif" height="206" alt="paladin run loop" />
-  <img src="docs/assets/hero-paladin-jump.gif" height="246" alt="paladin jump loop" />
-  <img src="docs/assets/hero-wolf-walk.gif" height="203" alt="wolf walk loop" />
-  <img src="docs/assets/hero-slime-walk.gif" height="203" alt="slime walk loop" />
-</p>
-
-<p align="center"><sub>위 루프는 전부 <b>정지 이미지 한 장</b>에서 나왔다: 모션에 맞는 캔버스로 패딩 → Grok Imagine 으로 움직임 → 프레임마다 키잉 → 진짜 주기에서 잘라 투명 GIF 로 — 파이프라인 B, <code>sprite-gen video-set</code>.</sub></p>
+<p align="center"><sub>각 캐릭터는 <b>이미지 한 장</b>에서 시작했습니다. Grok Imagine으로 움직임을 만들고, sprite-gen으로 투명 루프를 추출한 뒤 HyperFrames로 이 장면을 구성했습니다.</sub></p>
 
 ---
 
