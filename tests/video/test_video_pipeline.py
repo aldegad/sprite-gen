@@ -362,6 +362,35 @@ def test_body_h_is_the_standing_height_not_the_cycle_median() -> None:
     assert meta3["h"] <= 40, "--strip-height stays the cap"
 
 
+def test_body_height_is_a_target_across_states_not_a_downward_clamp() -> None:
+    """`--body-height` exists so the same number across states gives one character size.
+    That only holds if a state whose source body is SHORTER than the request scales UP:
+    a 40 px walk and an 80 px jump both asked for 60 must both come out 60. Clamping the
+    scale to 1.0 first left the short one at 40 and the tall one at 60 — two sizes from
+    the one option meant to produce one."""
+    def body(height: int) -> Image.Image:
+        im = Image.new("RGBA", (80, 120), (0, 0, 0, 0))
+        for y in range(120 - height, 120):        # standing on the floor
+            for x in range(30, 50):
+                im.putpixel((x, y), (200, 60, 60, 255))
+        return im
+
+    short = [body(40) for _ in range(4)]
+    tall = [body(80) for _ in range(4)]
+    _, short_meta = loop_mod.build_strip(short, cycle_seconds=4 / 24, body_height=60)
+    _, tall_meta = loop_mod.build_strip(tall, cycle_seconds=4 / 24, body_height=60)
+    assert short_meta["body_h"] == tall_meta["body_h"] == 60
+
+    # No body_height still never scales up: that is what --strip-height is for.
+    _, plain = loop_mod.build_strip(short, cycle_seconds=4 / 24)
+    assert plain["body_h"] == 40
+
+    # The cell cap still beats the target, and the miss stays visible in the meta.
+    _, capped = loop_mod.build_strip(short, cycle_seconds=4 / 24, body_height=60, max_height=40)
+    assert capped["h"] <= 40
+    assert capped["body_height_target"] == 60 and capped["body_h"] < 60
+
+
 def test_drop_specks_erases_detached_slivers_only() -> None:
     im = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
     for y in range(5, 35):
