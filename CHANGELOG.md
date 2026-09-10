@@ -2,6 +2,14 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## v2.1.0 - Guided requests and saved defaults
+
+- Added two user journeys: sprites (base-image provider, then GPT rows or Grok video) and ordinary images (provider). The read-only `workflow` command checks credentials, resolves request choices over saved defaults and returns the next questions and existing engine route.
+- Added `defaults show|save|clear` with separate sprite/image preferences. Saves require the observed revision, use the existing cross-platform file lock and publish atomically. A stale concurrent writer is rejected; one-off requests and reads never change defaults.
+- Results are delivered before optional curation. The first completed selection can be saved for future requests; saved curation choices skip repeat questions. Subscription and quota remain unknown when not independently verified, and configured video API-credit billing requires its own explicit choice.
+- Simplified the skill entry point, separated conversation and row execution contracts, refreshed all six README entry pages, and removed the retired PR-specific subject-profile proof script. Existing pipeline and utility commands remain available.
+- Removed stick-pose motion guides and obsolete rendering-style bans from generated prompts. Fixed GIF inspection to read each frame's metadata before advancing the decoder.
+
 ## v2.0.3 - One standing height
 
 - `video-loop` checks that `img2webp` actually supports `-exact` (libwebp >= 1.5; Ubuntu 24.04 ships 1.3.x) and fails by name otherwise instead of writing WebP with rewritten RGB under alpha; CI installs `ffmpeg` and the official libwebp 1.6.0 binaries so the video tests run there, and those tests skip cleanly where support is absent.

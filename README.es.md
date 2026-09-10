@@ -25,6 +25,10 @@ Pídele a un modelo de imagen una "sprite sheet" y ya sabes lo que obtienes: un 
 
 `sprite-gen` es una skill de Codex/Claude y una CLI de Python que cierra esa brecha. Dale **una imagen base**: dirige la generación fila por fila, fija la identidad del personaje, convierte el fondo croma en alfa real, extrae cada pose como un fotograma transparente limpio y hornea un atlas de runtime **con un `manifest.json.frame_layout` legible por máquina**. Pasa el mismo fotograma a un modelo de vídeo y recibes un bucle transparente sin costura por cada estado de movimiento. Para el último 10 % que la generación nunca acierta, una **webview de curación** te deja comparar, descartar, ajustar y ver el bucle en vivo antes de hornear.
 
+## Empezar con una petición
+
+Pide **sprites** o **una imagen**. El agente comprueba el acceso, pregunta solo por las opciones que faltan y entrega los archivos mediante el proceso existente. La vista de selección es opcional. Puedes guardar valores predeterminados separados para cada uso; una elección puntual no los modifica. [Flujo y preferencias](docs/user-workflow.md).
+
 ## Cuatro pipelines, una CLI
 
 Cada verbo funciona solo o como etapa de un pipeline. `sprite-gen --help` imprime este mismo mapa con cada verbo agrupado por dominio.
@@ -33,7 +37,9 @@ Cada verbo funciona solo o como etapa de un pipeline. `sprite-gen --help` imprim
 flowchart LR
     subgraph A["A · atlas rows"]
         direction LR
-        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a4[curation] --> a5[compose-atlas]
+        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a5[compose-atlas]
+        a5 -.-> a4["curation (optional)"]
+        a4 --> a5
     end
     subgraph B["B · video → loop"]
         direction LR
