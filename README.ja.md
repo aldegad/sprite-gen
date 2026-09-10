@@ -9,14 +9,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/hero-paladin-walk.gif" height="202" alt="paladin walk loop" />
-  <img src="docs/assets/hero-paladin-run.gif" height="206" alt="paladin run loop" />
-  <img src="docs/assets/hero-paladin-jump.gif" height="246" alt="paladin jump loop" />
-  <img src="docs/assets/hero-wolf-walk.gif" height="203" alt="wolf walk loop" />
-  <img src="docs/assets/hero-slime-walk.gif" height="203" alt="slime walk loop" />
+  <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/hero-v2-party.gif" width="960" alt="Animated sprite-gen v2 showcase: paladin, wolf and slime" /></a>
 </p>
 
-<p align="center"><sub>上のループはすべて<b>静止画一枚</b>から生まれた: モーションに合うキャンバスへパディング → Grok Imagine で動かす → フレームごとにキーイング → 真の周期で切って透明 GIF に — パイプライン B、<code>sprite-gen video-set</code>。</sub></p>
+<p align="center"><sub>各キャラクターは<b>1枚の静止画</b>から始まりました。Grok Imagineで動きを作り、sprite-genで透過ループを抽出し、HyperFramesでこのシーンを構成しました。</sub></p>
 
 ---
 
