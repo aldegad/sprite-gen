@@ -75,7 +75,6 @@ def _add_prepare(p: argparse.ArgumentParser) -> None:
     p.add_argument("--fit-detail-bias", action=argparse.BooleanOptionalAction, default=None)
     p.add_argument("--fit-outline", type=_outline_config, default=None, metavar="{on,off,STRENGTH}")
     p.add_argument("--fit-pitch-hint", type=int, default=None)
-    p.add_argument("--motion-phase-guides", action="store_true")
     p.add_argument("--request", type=Path)
     p.add_argument("--request-json")
     p.add_argument("--force", action="store_true")

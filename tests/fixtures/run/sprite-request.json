@@ -36,6 +36,5 @@
       "action": "synthetic shapes for golden regression"
     }
   },
-  "style": "synthetic golden fixture, flat solid shapes on magenta",
-  "motion_phase_guides": false
+  "style": "synthetic golden fixture, flat solid shapes on magenta"
 }

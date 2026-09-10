@@ -81,7 +81,7 @@ boundary instead of a memory.
 
 - **B1 — `prepare` re-emits the request from a whitelist.** `prepare._run` builds a
   fresh dict (`version`/`kind`/`engine`/`character`/`cell`/`chroma_key`/`states`/
-  `style`/`motion_phase_guides`, plus `directions`/`layout`/`fit` when present), and
+  `style`, plus `directions`/`layout`/`fit` when present), and
   `normalize_states` rebuilds each state entry as `frames`/`fps`/`loop`/`action`.
   Anything else in `--request` / `--request-json` is dropped, and the command still
   exits 0 — measured, not inferred: a request carrying `rig`, `tracks` and

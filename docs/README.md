@@ -67,7 +67,7 @@ grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
 |---|---|
 | [curation.md](curation.md) | The webview, standalone candidate view, finished-sheet editing and every `curation.json` field |
 | [breathing.md](breathing.md) | The idle-breathing post-process layer and the static-pose row recipe |
-| [locomotion-curation.md](locomotion-curation.md) | Motion-phase experiments, manual selected cycles, clean GIF export |
+| [locomotion-curation.md](locomotion-curation.md) | Manual selected cycles, clean GIF export |
 
 ## Post-processing (pipeline D)
 

@@ -71,7 +71,6 @@ def _build_run(run_dir: Path, frames: int = 2) -> Image.Image:
         "states": {"idle": {"frames": frames, "fps": 8, "loop": True,
                             "action": "offset-phase probe"}},
         "style": "synthetic, flat solid shapes on magenta",
-        "motion_phase_guides": False,
     }
     (run_dir / "sprite-request.json").write_text(json.dumps(request, indent=2), encoding="utf-8")
     return art

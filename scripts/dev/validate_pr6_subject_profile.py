@@ -43,7 +43,6 @@ def _request(subject: str | None) -> dict[str, object]:
         "chroma_key": {"name": "magenta", "hex": "#FF00FF", "rgb": [255, 0, 255], "selection": "explicit"},
         "states": {"burst": {"frames": 3, "fps": 6, "loop": True}},
         "style": "same raw A/B proof",
-        "motion_phase_guides": False,
         "layout": "taxonomy/v1",
     }
     if subject is not None:

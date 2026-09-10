@@ -164,9 +164,8 @@ in one image.
    For cyclic locomotion (`running`, `walking`, `run`, `walk`, and directional
    variants), do **not** feed a single peak-pose state anchor into the final
    row. A single contact pose causes the model to repeat that same leg phase
-   across every frame. Locomotion needs a motion-phase reference that contains
-   both opposite contacts, such as a contact sheet, selected cycle, or layout
-   phase guide.
+   across every frame. An optional motion reference should contain both opposite contacts,
+   such as a generated contact sheet or selected cycle.
 
 4. **Asymmetric identity gate** — lock side-specific character features before
    paired direction generation. Hairpins, earrings, scars, logos, handed props,
@@ -187,7 +186,7 @@ in one image.
      identity rendering, for non-locomotion states only
    - locomotion motion sheet/contact sheet: foot-contact phase and gait rhythm
    - paired basis row: timing, scale, and animation intensity
-   - layout guide: frame count, slots, margins, optional motion phase
+   - layout guide: frame count, slots, centers and margins only
    The row prompt must keep character detail as an already-approved idle-anchor input and
    spend its degrees of freedom on animation only: limb contacts, arm
    counter-swing, body height, torso lean, head bob, hair bounce, and loop seam.
