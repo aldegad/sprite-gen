@@ -8,7 +8,7 @@
   - [Isometric ground grid](#isometric-ground-grid)
   - [Languages](#languages)
 - [Standalone Curation View (이미지 후보 큐레이션 — 스프라이트 아님)](#standalone-curation-view-이미지-후보-큐레이션-스프라이트-아님)
-- [Curation Webview (파이프라인 스텝 3.5) — 캐릭터 검수의 정식 뷰](#curation-webview-파이프라인-스텝-35-캐릭터-검수의-정식-뷰)
+- [Curation Webview](#curation-webview)
   - [Colourway (recolor) compare and pick](#colourway-recolor-compare-and-pick)
   - [생성 트리거 관용구 (SSoT = `src/gen-trigger.js`)](#생성-트리거-관용구-ssot-srcgen-triggerjs)
 - [Editing a finished sprite sheet (no `frames/` source)](#editing-a-finished-sprite-sheet-no-frames-source)
@@ -44,7 +44,7 @@ The webview ships with English and Korean. Pass `--lang en|ko` when launching, o
 python3 sprite-gen curation --run-dir <run-dir> --lang en   # or ko
 ```
 
-> `SKILL.md` 허브에서 분리한 시나리오 상세. 큐레이션뷰를 띄우거나(파이프라인 스텝 3.5 / 클로징 스텝 5), 임의 이미지 후보군을 비교·선택하거나, 완성된 시트를 다시 편집하거나, `curation.json` 스키마를 다뤄야 할 때 이 문서를 따른다.
+> 큐레이션뷰의 실행과 데이터 계약. 생성 완료 후 열기 선택과 저장된 기본값은 [user-workflow](user-workflow.md)가 소유한다.
 
 ## Standalone Curation View (이미지 후보 큐레이션 — 스프라이트 아님)
 
@@ -76,12 +76,12 @@ curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/"   # 200 = posit
   게임이 행 전체를 돌리는데 한 장만 보여주면 검수 대상이 왜곡된다. 아틀라스 시트 통짜·raw
   멀티프레임 row 이미지·비교용 합성 시트를 그대로 붓는 것도 금지 (셀 크기 폭발 + 선택 단위 흐림).
   파이프라인 산출물 검수는 이 standalone 경로가 아니라 run dir 를 직접 서빙하는 파이프라인
-  큐레이션(아래 스텝 3.5)이 우선이다.
+  큐레이션(아래 Curation Webview)이 우선이다.
 - 사용자 로컬이면 브라우저 자동 오픈이 기본, headless/원격이면 `--no-open` + URL 전달.
 - 선택 회수는 `"$STAGE/run/curation.json"` 의 `selected` 인덱스를 파일명으로 역매핑. 비어 있으면 다시 묻는다 — 추측 진행 금지.
-- 결정 후 서버 kill + `$STAGE` 정리. 후보가 1장이면 큐레이션이 아니다 — 경로만 보고하고 끝.
+- 큐레이션을 열기로 선택했다면 이미지가 한 장이어도 이 뷰에서 확인할 수 있다. 필요한 편집 결과를 내보낸 뒤 이 작업이 시작한 서버를 종료하고 임시 `$STAGE`를 정리한다.
 
-## Curation Webview (파이프라인 스텝 3.5) — 캐릭터 검수의 정식 뷰
+## Curation Webview
 
 **캐릭터/스프라이트 검수의 정식 뷰 = run dir 를 직접 서빙하는 이 파이프라인 뷰다** (maintainer 채택 2026-07-12).
 이 뷰의 네 표시 요소(베이스 참조 줄 · 생성 재료 ref 칩 · 픽셀 격자 · 원본 화질 토글)와 그것을
@@ -272,7 +272,8 @@ The chosen layout source is always reported (`manifest` / `grid-explicit` / `aut
 
 ## Related
 
-- [`../SKILL.md`](../SKILL.md) — canonical behavior contract (Workflow 스텝 3.5/4.5/5)
+- [`user-workflow.md`](user-workflow.md) - request choices, optional curation and saved defaults
+- [`atlas-workflow.md`](atlas-workflow.md) - row execution and delivery
 - [`architecture.md`](architecture.md) — 큐레이션 사이드카가 파이프라인에서 소비되는 위치
 - [`recolor.md`](recolor.md) — palette-swap bake CLI, report schema, colourway adopt
 - [`locomotion-curation.md`](locomotion-curation.md) — 수동 selected-cycle, 클린 GIF export

@@ -6,6 +6,8 @@ the reorg tooling. Keep in sync with the physical folder layout.
 """
 
 MODULE_DOMAIN = {
+    'guide': 'workflow',
+    'preferences': 'workflow',
     'runio': 'spec',
     'layout': 'spec',
     'migrate_request': 'spec',
@@ -53,6 +55,7 @@ MODULE_DOMAIN = {
 # tested against the file set). Adding a module to MODULE_DOMAIN puts it in its group;
 # nothing else needs a hand edit.
 DOMAINS: list[tuple[str, str]] = [
+    ("workflow", "Start here — image or sprite choices, access checks, saved defaults"),
     ("gen", "Generation — prepare a run, generate stills / rows / clips"),
     ("video", "Video → loop — canvas, keyed frames, seamless cycle, batch"),
     ("frames", "Frames — chroma/white removal, row extraction, sheet slicing, atlas unpacking"),
@@ -71,8 +74,8 @@ DOMAIN_TITLE = dict(DOMAINS)
 # The four pipelines — first-class objects. The CLI help, the docs index and the README
 # pipeline table are checked against THIS list; a verb named here must exist as a verb.
 PIPELINES: list[dict[str, object]] = [
-    {"key": "A", "name": "atlas rows", "verbs": ["prepare", "gen", "gen-set", "extract", "curation", "compose-atlas"],
-     "chain": "prepare → gen (or gen-set) → extract → curation → compose-atlas", "doc": "docs/run-contract.md"},
+    {"key": "A", "name": "atlas rows", "verbs": ["prepare", "gen", "gen-set", "extract", "compose-atlas", "curation"],
+     "chain": "prepare → gen (or gen-set) → extract → compose-atlas; optional curation and recompose", "doc": "docs/run-contract.md"},
     {"key": "B", "name": "video → loop", "verbs": ["video-canvas", "video", "video-frames", "video-loop", "video-set"],
      "chain": "video-canvas → video → video-frames → video-loop, or video-set", "doc": "docs/video-pipeline.md"},
     {"key": "C", "name": "utilities", "verbs": ["cutout", "slice-sheet", "unpack-atlas"],

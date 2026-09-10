@@ -25,6 +25,10 @@
 
 `sprite-gen` 은 그 간극을 메우는 Codex/Claude 스킬이자 파이썬 CLI 다. **베이스 이미지 한 장**을 주면 행 단위로 생성을 몰고, 캐릭터 identity 를 고정하고, 크로마 배경을 진짜 알파로 벗기고, 포즈마다 깨끗한 투명 프레임을 뽑아 **기계가 읽는 `manifest.json.frame_layout`** 이 딸린 런타임 아틀라스를 굽는다. 같은 스틸을 영상 모델에 넘기면 모션 상태별로 이음새 없는 투명 루프가 돌아온다. 생성이 끝내 못 맞추는 마지막 10% 는 **큐레이션 웹뷰**에서 비교·거부·미세조정하고 루프를 실재생으로 본 뒤 굽는다.
 
+## 요청으로 시작하기
+
+**스프라이트 만들기** 또는 **이미지 만들기**를 요청하세요. 이용 상태를 확인하고 생성 도구와 동작 방식 중 빠진 선택만 물어본 뒤 기존 파이프라인으로 결과를 전달합니다. 큐레이션뷰는 선택 사항입니다. 두 요청의 기본 설정을 따로 저장할 수 있고, 이번 요청의 선택은 저장값을 바꾸지 않습니다. [요청 흐름과 기본 설정](docs/user-workflow.md).
+
 ## 파이프라인 4종, CLI 하나
 
 모든 verb 는 단독으로도, 파이프라인 단계로도 쓴다. `sprite-gen --help` 가 같은 지도를 도메인별 verb 로 출력한다.
@@ -33,7 +37,9 @@
 flowchart LR
     subgraph A["A · atlas rows"]
         direction LR
-        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a4[curation] --> a5[compose-atlas]
+        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a5[compose-atlas]
+        a5 -.-> a4["curation (optional)"]
+        a4 --> a5
     end
     subgraph B["B · video → loop"]
         direction LR

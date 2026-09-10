@@ -65,8 +65,6 @@ def test_skill_hub_routes_recolor_triggers_and_points_at_leaf() -> None:
     assert "docs/recolor.md" in text
     assert "sprite-gen recolor" in text
     assert "recolor-palette" in text
-    # Workflow step after compose.
-    assert "4.5" in text
     # Docs topology branch.
     assert "COLOURWAYS" in text or "docs/recolor.md" in text
     # Wrapper listed among required scripts.

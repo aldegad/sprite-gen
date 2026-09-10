@@ -75,7 +75,6 @@ def _request(**overrides) -> dict:
                     "track": "prop_effect"},
         },
         "style": "flat solid shapes on magenta",
-        "motion_phase_guides": False,
         "rig": {"profile": "humanoid_biped", "landmarks": json.loads(json.dumps(LANDMARKS))},
         "layers": {
             "walk_with_can": {"stack": [

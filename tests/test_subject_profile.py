@@ -32,7 +32,7 @@ def _make_run(run_dir: Path, density: int, subject: str | None, cell: int = 64) 
         "chroma_key": {"name": "magenta", "hex": "#FF00FF", "rgb": [255, 0, 255],
                        "selection": "explicit"},
         "states": {"burst": {"frames": FRAMES, "fps": 8, "loop": True}},
-        "style": "test", "motion_phase_guides": False, "layout": "taxonomy/v1",
+        "style": "test", "layout": "taxonomy/v1",
     }
     if subject:
         request["subject"] = subject

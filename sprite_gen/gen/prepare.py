@@ -56,9 +56,7 @@ STYLE_DEFAULT = (
     "match the attached base/anchor reference image EXACTLY: same pixel density "
     "(logical pixel block size), same body proportions, same outline weight, same "
     "palette, same shading style, same level of detail. Do not restyle, do not "
-    "change proportions, do not add or remove detail density. Avoid polished "
-    "illustration, painterly rendering, anime key art, 3D render, vector app-icon "
-    "polish, glossy lighting, soft gradients, and anti-aliased high-detail edges."
+    "change proportions, do not add or remove detail density."
 )
 
 TRANSPARENCY_ARTIFACT_RULES = [
@@ -136,65 +134,6 @@ STATE_REQUIREMENTS = {
         "Do not draw ground shadows, contact shadows, oval shadows, landing marks, dust, smears, or motion marks under the character.",
     ],
 }
-
-RUN_PHASE_CYCLE = [
-    {
-        "name": "contact",
-        "body_y": 0,
-        "front_leg": "forward_straight",
-        "back_leg": "back_extended",
-        "note": "front foot contacts ground, back foot pushes off",
-    },
-    {
-        "name": "down",
-        "body_y": 6,
-        "front_leg": "under_bent",
-        "back_leg": "back_bent",
-        "note": "weight drops over planted foot",
-    },
-    {
-        "name": "passing",
-        "body_y": 2,
-        "front_leg": "under_vertical",
-        "back_leg": "passing_forward",
-        "note": "swing leg passes under body",
-    },
-    {
-        "name": "up",
-        "body_y": -6,
-        "front_leg": "back_lifted",
-        "back_leg": "forward_lifted",
-        "note": "body lifts before the opposite contact",
-    },
-    {
-        "name": "opposite_contact",
-        "body_y": 0,
-        "front_leg": "back_extended",
-        "back_leg": "forward_straight",
-        "note": "opposite foot contacts ground",
-    },
-    {
-        "name": "opposite_down",
-        "body_y": 6,
-        "front_leg": "back_bent",
-        "back_leg": "under_bent",
-        "note": "weight drops over the opposite planted foot",
-    },
-    {
-        "name": "opposite_passing",
-        "body_y": 2,
-        "front_leg": "passing_forward",
-        "back_leg": "under_vertical",
-        "note": "first leg passes under body",
-    },
-    {
-        "name": "opposite_up",
-        "body_y": -6,
-        "front_leg": "forward_lifted",
-        "back_leg": "back_lifted",
-        "note": "body lifts back toward frame 1",
-    },
-]
 
 CHROMA_CANDIDATES = [
     ("magenta", "#FF00FF"),
@@ -527,7 +466,7 @@ def normalize_states(raw: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
 # after the fact (docs/layer-tracks.md §2 B1). The lists are the one place that
 # rule is written down, and `dropped_key_notes` makes every drop observable
 # instead of silent.
-REQUEST_KEYS_CARRIED = ("cell", "states", "style", "motion_phase_guides",
+REQUEST_KEYS_CARRIED = ("cell", "states", "style",
                         "directions", "fit", "rig", "layers")
 # Written by prepare itself, from CLI flags and from measuring the base image. An
 # incoming copy is not carried either, but it is restated rather than lost, so the
@@ -601,20 +540,6 @@ def load_request(path: Path | None, inline_json: str | None) -> dict[str, Any]:
     if inline_json:
         return json.loads(inline_json)
     return {}
-
-
-def state_motion_phases(state: str, frames: int) -> list[dict[str, Any]]:
-    if frames != 8:
-        return []
-    if (
-        state in {"running-right", "running-left", "run", "walk"}
-        or state.startswith("running-front-")
-        or state.startswith("running-back-")
-        or state.startswith("walking-front-")
-        or state.startswith("walking-back-")
-    ):
-        return RUN_PHASE_CYCLE
-    return []
 
 
 # --- 방향 계약 (directions block) -------------------------------------------
@@ -800,81 +725,7 @@ def directional_requirements(state: str) -> list[str]:
     return requirements
 
 
-def mirrored_x(center_x: int, x: int, facing: str) -> int:
-    if facing == "left":
-        return center_x - (x - center_x)
-    return x
-
-
-def leg_points(root: tuple[int, int], pose: str, facing: str, scale: float) -> tuple[tuple[int, int], tuple[int, int]]:
-    root_x, root_y = root
-    forward = round(34 * scale)
-    back = round(32 * scale)
-    down = round(54 * scale)
-    bend = round(24 * scale)
-    lift = round(22 * scale)
-    if pose == "forward_straight":
-        knee = (root_x + round(forward * 0.45), root_y + round(down * 0.48))
-        foot = (root_x + forward, root_y + down)
-    elif pose == "back_extended":
-        knee = (root_x - round(back * 0.45), root_y + round(down * 0.48))
-        foot = (root_x - back, root_y + down)
-    elif pose == "under_bent":
-        knee = (root_x + round(bend * 0.2), root_y + round(down * 0.45))
-        foot = (root_x + round(bend * 0.55), root_y + round(down * 0.82))
-    elif pose == "back_bent":
-        knee = (root_x - round(bend * 0.65), root_y + round(down * 0.42))
-        foot = (root_x - round(bend * 0.2), root_y + round(down * 0.78))
-    elif pose == "passing_forward":
-        knee = (root_x + round(bend * 0.45), root_y + round(down * 0.35))
-        foot = (root_x + round(bend * 0.1), root_y + round(down * 0.63))
-    elif pose == "under_vertical":
-        knee = (root_x, root_y + round(down * 0.42))
-        foot = (root_x, root_y + round(down * 0.88))
-    elif pose == "forward_lifted":
-        knee = (root_x + round(forward * 0.45), root_y + round(down * 0.18))
-        foot = (root_x + round(forward * 0.7), root_y + round(down * 0.35))
-    elif pose == "back_lifted":
-        knee = (root_x - round(back * 0.45), root_y + round(down * 0.18))
-        foot = (root_x - round(back * 0.7), root_y + round(down * 0.35))
-    else:
-        knee = (root_x, root_y + round(down * 0.45))
-        foot = (root_x, root_y + down)
-    if facing == "left":
-        knee = (root_x - (knee[0] - root_x), knee[1])
-        foot = (root_x - (foot[0] - root_x), foot[1])
-    return knee, foot
-
-
-def draw_motion_phase(draw: ImageDraw.ImageDraw, slot_left: int, cell_width: int, cell_height: int, phase: dict[str, Any], facing: str) -> None:
-    scale = min(cell_width / 192, cell_height / 208)
-    center_x = slot_left + cell_width // 2
-    hip_y = round(cell_height * 0.52 + int(phase["body_y"]) * scale)
-    shoulder_y = hip_y - round(42 * scale)
-    head_y = shoulder_y - round(26 * scale)
-    hip = (center_x, hip_y)
-    shoulder = (center_x, shoulder_y)
-    head_bbox = (
-        center_x - round(11 * scale),
-        head_y - round(11 * scale),
-        center_x + round(11 * scale),
-        head_y + round(11 * scale),
-    )
-    draw.ellipse(head_bbox, outline="#6b7280", width=max(1, round(2 * scale)))
-    draw.line((shoulder, hip), fill="#6b7280", width=max(2, round(3 * scale)))
-    front_arm = (mirrored_x(center_x, center_x - round(26 * scale), facing), shoulder_y + round(30 * scale))
-    back_arm = (mirrored_x(center_x, center_x + round(26 * scale), facing), shoulder_y + round(18 * scale))
-    draw.line((shoulder, front_arm), fill="#94a3b8", width=max(1, round(2 * scale)))
-    draw.line((shoulder, back_arm), fill="#cbd5e1", width=max(1, round(2 * scale)))
-    front_knee, front_foot = leg_points(hip, str(phase["front_leg"]), facing, scale)
-    back_knee, back_foot = leg_points(hip, str(phase["back_leg"]), facing, scale)
-    draw.line((hip, front_knee, front_foot), fill="#ef4444", width=max(2, round(4 * scale)))
-    draw.line((hip, back_knee, back_foot), fill="#2563eb", width=max(2, round(4 * scale)))
-    ground_y = round(cell_height * 0.52 + 54 * scale + int(phase["body_y"]) * scale)
-    draw.line((slot_left + round(34 * scale), ground_y, slot_left + cell_width - round(34 * scale), ground_y), fill="#cbd5e1", width=1)
-
-
-def draw_guide(path: Path, state: str, frames: int, cell: dict[str, Any], motion_phase_guides: bool = False) -> None:
+def draw_guide(path: Path, frames: int, cell: dict[str, Any]) -> None:
     cell_width = int(cell["width"])
     cell_height = int(cell["height"])
     safe_margin_x = int(cell["safe_margin_x"])
@@ -895,11 +746,6 @@ def draw_guide(path: Path, state: str, frames: int, cell: dict[str, Any], motion
         )
         draw.rectangle(safe, outline="#2f80ed", width=2)
         draw.line((left + cell_width // 2, safe_margin_y, left + cell_width // 2, height - safe_margin_y), fill="#b8c8e8", width=1)
-    if motion_phase_guides:
-        phases = state_motion_phases(state, frames)
-        facing = "left" if state.endswith("left") else "right"
-        for index, phase in enumerate(phases):
-            draw_motion_phase(draw, index * cell_width, cell_width, cell_height, phase, facing)
     path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path)
 
@@ -923,21 +769,6 @@ def row_prompt(request: dict[str, Any], state: str, entry: dict[str, Any]) -> st
         state_requirement_text = "\n\nState-specific requirements:\n" + "\n".join(
             f"- {requirement}" for requirement in state_requirements
         )
-    phase_prompt_text = ""
-    phases = state_motion_phases(state, frames) if request.get("motion_phase_guides") else []
-    if phases:
-        phase_lines = [
-            f"- frame {index + 1}: {phase['name']} — {phase['note']}"
-            for index, phase in enumerate(phases)
-        ]
-        phase_prompt_text = (
-            "\n\nMotion phase requirements:\n"
-            "- The layout guide includes simple stick-pose motion hints inside each slot. Use those hints only for body height, foot contact, and leg phase. Do not copy guide colors or guide lines into the artwork.\n"
-            "- Make the sequence loop as one continuous locomotion cycle, not eight unrelated poses.\n"
-            "- The motion phase guide and any multi-pose contact sheet override a single running/walking pose anchor for leg phase. Do not repeat one anchor's forward leg across every frame.\n"
-            "- Opposite contact frames must visibly trade which leg reaches forward; passing frames must not look like duplicate contact frames.\n"
-            + "\n".join(phase_lines)
-        )
     transparency_artifact_text = "\n".join(f"- {rule}" for rule in TRANSPARENCY_ARTIFACT_RULES)
     runtime_size = f"{cell_width}x{cell_height}"
     reference_contract = (
@@ -960,7 +791,7 @@ def row_prompt(request: dict[str, Any], state: str, entry: dict[str, Any]) -> st
 Character: {character.get("description") or character["id"]}.
 Style contract: {request["style"]}.
 
-Use this prompt as an authoritative sprite-production spec. Do not expand it into a polished illustration, painterly character image, anime key art, 3D render, vector mascot, glossy app icon, realistic portrait, or marketing artwork.
+Use this prompt as an authoritative sprite-production spec.
 
 Animation action: {entry["action"]}.
 
@@ -971,18 +802,17 @@ Anchor lock:
 - Do not redesign or reinterpret identity details while animating. Keep face, hair shape, markings, palette, outline weight, body proportions, outfit, props, and silhouette copied from the approved anchors.
 - Preserve side-specific features exactly as the approved anchors show them. Do not solve hairpin side, earring side, logos, handed props, scars, one-sided markings, asymmetric clothing, or lighting cues from scratch inside the row.
 - When generating a paired left/right row, use the paired row reference only for timing, scale, and animation intensity. Rotate the body, feet, shoulders, face angle, and gaze to the target facing, but keep identity details attached according to the accepted target-direction anchor.
-- For cyclic locomotion, do not let a single running/walking pose anchor determine every frame's leg phase. Use multi-pose motion references and the layout phase guide for foot contacts.
+- For cyclic locomotion, do not let a single running/walking pose anchor determine every frame's leg phase. When a multi-pose motion reference is attached, use it for foot contacts.
 - Prefer a subtler animation over any change that mutates the character identity.
 {state_requirement_text}
-{phase_prompt_text}
 
 Transparency and artifact rules:
 {transparency_artifact_text}
 
 Layout requirements:
 - Exactly {frames} full-body frames, left to right, in one horizontal row.
-- The attached layout guide shows the {frames} frame boxes, inner safe area, and optional motion phase hints for this row. Follow its slot count, spacing, centering, padding, and phase timing.
-- Do not reproduce the layout guide itself: no visible boxes, guide lines, center marks, labels, stick figures, guide colors, or guide background may appear in the output.
+- The attached layout guide shows the {frames} frame boxes, inner safe area, and centers for this row. Follow its slot count, spacing, centering, and padding.
+- Do not reproduce the layout guide itself: no visible boxes, guide lines, center marks, labels, guide colors, or guide background may appear in the output.
 - Treat the image as {frames} equal-width invisible {runtime_size} frame slots. Fill every slot: each requested slot must contain exactly one complete full-body pose.
 - Spread the {frames} poses evenly across the whole image width. Do not leave any requested slot blank or create large empty gaps between poses.
 - Center one complete pose in each slot. No pose may cross into the neighboring slot.
@@ -1040,7 +870,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fit-detail-bias", action=argparse.BooleanOptionalAction, default=None, help="pixel unfake dominant-color voting bias toward near-black detail clusters (default on)")
     parser.add_argument("--fit-outline", type=_outline_config, default=None, metavar="{on,off,STRENGTH}", help="pixel unfake outline enforcement: on (strength 0.62), off, or an explicit 0..1 strength")
     parser.add_argument("--fit-pitch-hint", type=int, default=None, help="pixel unfake fallback pixel pitch when per-frame detection is inconclusive")
-    parser.add_argument("--motion-phase-guides", action="store_true", help="draw simple per-frame motion phase hints into locomotion layout guides")
     parser.add_argument("--directions", help="comma list of generated directions (e.g. down,side,up); states must be named <direction>_<state>; missing <direction>_idle anchors are synthesized and a generation plan is written")
     parser.add_argument("--mirror", help="comma list of target=source pairs covered by runtime mirroring instead of generation (e.g. left=side)")
     parser.add_argument("--request", type=Path)
@@ -1130,7 +959,6 @@ def _run(args: argparse.Namespace):
         "chroma_key": chroma_key,
         "states": states,
         "style": raw_request.get("style", args.style),
-        "motion_phase_guides": bool(raw_request.get("motion_phase_guides", args.motion_phase_guides)),
     }
     # Subject profile: CLI wins over --request-json; absent = character. The
     # field stays omitted for the default so the request has one canonical
@@ -1179,10 +1007,8 @@ def _run(args: argparse.Namespace):
             parent.mkdir(parents=True, exist_ok=True)
         draw_guide(
             guide_path,
-            state,
             int(entry["frames"]),
             cell,
-            motion_phase_guides=bool(request["motion_phase_guides"]),
         )
         prompt_path.write_text(row_prompt(request, state, entry).rstrip() + "\n", encoding="utf-8")
 

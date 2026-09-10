@@ -8,7 +8,9 @@ pipeline you are running, then follow its contract doc.
 flowchart LR
     subgraph A["A · atlas rows"]
         direction LR
-        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a4[curation] --> a5[compose-atlas]
+        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a5[compose-atlas]
+        a5 -.-> a4["curation (optional)"]
+        a4 --> a5
     end
     subgraph B["B · video → loop"]
         direction LR
@@ -27,13 +29,20 @@ flowchart LR
 
 | Pipeline | Entry doc | Verbs |
 |---|---|---|
-| **A · atlas rows** — one still becomes a runtime sprite sheet | [run-contract.md](run-contract.md) | `prepare` → `gen` / `gen-set` → `extract` → `curation` → `compose-atlas` |
+| **A · atlas rows** — one still becomes a runtime sprite sheet | [run-contract.md](run-contract.md) | `prepare` → `gen` / `gen-set` → `extract` → `compose-atlas`; optional `curation` and recompose |
 | **B · video → loop** — one still becomes transparent motion loops | [video-pipeline.md](video-pipeline.md) | `video-canvas` → `video` → `video-frames` → `video-loop`, `video-set` |
 | **C · utilities** — imported images in, clean cuts out | [sheet-slicing.md](sheet-slicing.md) | `cutout`, `slice-sheet`, `unpack-atlas` |
 | **D · post-processing** — finished sheets, refined | [recolor.md](recolor.md) | `recolor`, `recolor-palette`, `compose-layers`, breathing (compose), `export-pngs`, `export-aseprite` |
 
 `sprite-gen --help` prints the same four pipelines and every verb grouped by domain; the
 grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
+
+## User requests
+
+| Doc | Owns |
+|---|---|
+| [user-workflow.md](user-workflow.md) | Two conversation flows, access checks, optional curation and saved defaults |
+| [atlas-workflow.md](atlas-workflow.md) | Execution of GPT row sprites through the existing extraction pipeline |
 
 ## Contract & structure
 
@@ -67,7 +76,7 @@ grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
 |---|---|
 | [curation.md](curation.md) | The webview, standalone candidate view, finished-sheet editing and every `curation.json` field |
 | [breathing.md](breathing.md) | The idle-breathing post-process layer and the static-pose row recipe |
-| [locomotion-curation.md](locomotion-curation.md) | Motion-phase experiments, manual selected cycles, clean GIF export |
+| [locomotion-curation.md](locomotion-curation.md) | Manual selected cycles, clean GIF export |
 
 ## Post-processing (pipeline D)
 

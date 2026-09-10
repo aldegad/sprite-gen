@@ -22,6 +22,7 @@ from sprite_gen.serve import serve_compose, serve_curation
 from sprite_gen.spec import migrate_breathe, migrate_request
 from sprite_gen.gen.prepare import STYLE_DEFAULT, _outline_config
 from sprite_gen.spec.subject import SUBJECTS
+from sprite_gen.workflow import guide, preferences
 
 
 def _parse_frames(value: str) -> list[int]:
@@ -75,7 +76,6 @@ def _add_prepare(p: argparse.ArgumentParser) -> None:
     p.add_argument("--fit-detail-bias", action=argparse.BooleanOptionalAction, default=None)
     p.add_argument("--fit-outline", type=_outline_config, default=None, metavar="{on,off,STRENGTH}")
     p.add_argument("--fit-pitch-hint", type=int, default=None)
-    p.add_argument("--motion-phase-guides", action="store_true")
     p.add_argument("--request", type=Path)
     p.add_argument("--request-json")
     p.add_argument("--force", action="store_true")
@@ -228,6 +228,8 @@ def _add_correction_loop(p: argparse.ArgumentParser) -> None:
 
 
 COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[..., int]]] = {
+    "workflow": ("Resolve image/sprite choices, check access and guide the next conversation step.", guide.add_arguments, guide.run),
+    "defaults": ("Show, explicitly save or clear the defaults for each user workflow.", preferences.add_arguments, preferences.run),
     "prepare": ("Prepare a sprite-gen component-row run.", _add_prepare, prepare.run),
     "extract": ("Extract component-row sprite strips into clean RGBA frames.", _add_extract, extract.run),
     "compose-atlas": (

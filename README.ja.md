@@ -25,6 +25,10 @@
 
 `sprite-gen` はその隙間を埋める Codex/Claude スキルであり Python CLI だ。**ベース画像一枚**を渡すと、行ごとに生成を進め、キャラの identity を固定し、クロマ背景を本物のアルファに剥がし、ポーズごとに綺麗な透明フレームを取り出し、**機械可読な `manifest.json.frame_layout`** 付きのランタイムアトラスを焼く。同じ静止画を動画モデルに渡せば、モーション状態ごとに継ぎ目のない透明ループが返ってくる。生成が最後まで合わせられない 10% は**キュレーション Webview** で比較・除外・微調整し、ループを実再生で確かめてから焼く。
 
+## リクエストから始める
+
+**スプライト作成**または**画像作成**を依頼してください。利用状態を確認し、未指定の生成ツールと動作方式だけを質問して、既存のパイプラインで結果を渡します。キュレーション画面は任意です。用途別の既定値を保存でき、今回だけの指定では保存値を変更しません。[リクエストと既定値](docs/user-workflow.md)。
+
 ## 4 本のパイプライン、1 つの CLI
 
 どの verb も単独でも、パイプラインの一段としても使える。`sprite-gen --help` が同じ地図をドメイン別 verb で表示する。
@@ -33,7 +37,9 @@
 flowchart LR
     subgraph A["A · atlas rows"]
         direction LR
-        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a4[curation] --> a5[compose-atlas]
+        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a5[compose-atlas]
+        a5 -.-> a4["curation (optional)"]
+        a4 --> a5
     end
     subgraph B["B · video → loop"]
         direction LR

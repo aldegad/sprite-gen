@@ -1,18 +1,6 @@
 # Locomotion Curation & Clean GIF Export — sprite-gen reference
 
-> Owns: Motion-phase experiments, manual selected cycles, clean GIF export · Index: [docs/README.md](README.md)
-
-> `SKILL.md` 에서 분리한 시나리오 상세. motion-phase 실험·수동 selected-cycle·클린 GIF export 가 필요할 때 따른다. 내용은 손실 없이 `SKILL.md` 본문에서 그대로 옮겨졌다.
-
-### Motion Phase Guide Experiment
-
-For 8-frame run rows, `prepare_sprite_run.py --motion-phase-guides` adds simple stick-pose hints to the layout guide:
-
-```text
-contact -> down -> passing -> up -> opposite contact -> down -> passing -> up
-```
-
-Use this only for explicit locomotion experiments. The guide is not final art and must not appear in the generated row. Its purpose is to nudge foot contact, body height, and leg phase. It can improve leg alternation, but it is not a guarantee of a natural run loop; visual motion QA remains blocking.
+> Owns: Manual selected cycles, clean GIF export · Index: [docs/README.md](README.md)
 
 ### Manual Selected Cycle
 

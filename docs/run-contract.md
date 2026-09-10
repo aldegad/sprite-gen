@@ -8,14 +8,14 @@
 > generation-material chips, the pixel grid, and the original-quality toggle.
 >
 > Precedence (no overlap, so no contradiction):
-> - [`../SKILL.md`](../SKILL.md) owns the **behavior** contract — what the agent does, step by step.
+> - [`user-workflow.md`](user-workflow.md) owns the conversation; [`atlas-workflow.md`](atlas-workflow.md) owns row execution.
 > - **This doc** owns the **structural** contract — the stage I/O table, the run-dir
 >   folder tree, the curation-view display payload, and the import-run source rule.
 >   These are the parts the scripts enforce.
 > - [`architecture.md`](architecture.md) explains **how** the code realizes both; it is
 >   always description, never contract.
 >
-> If the three ever disagree: behavior → SKILL.md wins; structure/display → this
+> If the three ever disagree: behavior → the workflow docs win; structure/display → this
 > doc wins; architecture.md is the bug.
 
 ## Contents
@@ -57,8 +57,7 @@ canonical files, not hidden imports.
 | Export stills | `export_curated_pngs.py` | curated `frames/` | named PNGs under `curated/` |
 | Chroma guard | `scripts/dev/check_visible_magenta.py` | screenshot | leakage warning |
 
-The happy path is `prepare → gen → extract → (curate) → compose`, with a curation
-webview opened as the closing step. Stage internals (chroma removal, connected
+The happy path is `prepare -> gen -> extract -> compose`, followed by delivery and an optional curation view. Curation is opened only when requested or enabled in saved defaults; edits are composed again for export. Stage internals (chroma removal, connected
 components, pixel-unfake path, the `.sprite-gen.lock` single-writer rule, the
 inspect/score/loop split) are described in
 [`architecture.md`](architecture.md) §2, §6 — this table is the contract, that doc

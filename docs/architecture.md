@@ -144,8 +144,7 @@ Every run starts here. It owns the recipe consumed by both prompts and scripts:
   "chroma": { "mode": "rgb" },
   "states": { "idle": { "frames": 4, "fps": 4, "loop": true, "action": "..." } },
   "fit": { "pixel_unfake": true, "logical_height": 64, "palette_size": 24, "align_x": "foot-centroid", "align_y": "bottom", "segmentation": "components" },
-  "style": "...",
-  "motion_phase_guides": false
+  "style": "..."
 }
 ```
 
@@ -164,7 +163,6 @@ Every run starts here. It owns the recipe consumed by both prompts and scripts:
 - `chroma.mode` is `rgb` by default; opt-in `ycbcr` is owned by
   [`chroma-alpha.md`](chroma-alpha.md). The extract and inspect CLIs can
   explicitly override it.
-- `motion_phase_guides` only does something for 8-frame locomotion states.
 
 ## 4. The cell model (read this — it is the most misunderstood part)
 

@@ -427,7 +427,7 @@ def test_landmark_map_reads_a_whole_frame_and_never_invents_one() -> None:
 
 NON_LAYER_REQUEST_KEYS = {
     "version", "kind", "engine", "character", "cell", "chroma_key",
-    "states", "style", "motion_phase_guides", "layout",
+    "states", "style", "layout",
 }
 
 NON_LAYER_MANIFEST_KEYS = {

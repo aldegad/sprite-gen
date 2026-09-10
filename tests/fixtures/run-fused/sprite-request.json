@@ -40,6 +40,5 @@
     "segmentation": "projection",
     "align_x": "bbox-center"
   },
-  "style": "synthetic fused fixture, flat solid shapes on magenta",
-  "motion_phase_guides": false
+  "style": "synthetic fused fixture, flat solid shapes on magenta"
 }

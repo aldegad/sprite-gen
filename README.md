@@ -24,6 +24,10 @@ Ask an image model for a "sprite sheet" and you know what you get: a character w
 
 `sprite-gen` is a Codex/Claude skill and a Python CLI that closes that gap. Give it **one base image** — it drives generation row by row, locks the character's identity, strips the chroma background to real alpha, extracts each pose as a clean transparent frame, and bakes a runtime atlas **with a machine-readable `manifest.json.frame_layout`**. Or hand the same still to a video model and get back a seamless, transparent loop per motion state. For the last 10% that generation never gets right, a **curation webview** lets you compare, reject, nudge and watch the loop live before you bake.
 
+## Start with a request
+
+Ask for **sprites** or **an image**. The agent checks access, asks only for missing provider/motion choices, runs the existing pipeline, and delivers the files. The curation view is optional. Save your choices once to reuse separate sprite and image defaults; a one-off request does not overwrite them. [User workflow and defaults](docs/user-workflow.md).
+
 ## Four pipelines, one CLI
 
 Every verb works alone or as a pipeline stage. `sprite-gen --help` prints this same map, with every verb grouped by domain.
@@ -32,7 +36,9 @@ Every verb works alone or as a pipeline stage. `sprite-gen --help` prints this s
 flowchart LR
     subgraph A["A · atlas rows"]
         direction LR
-        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a4[curation] --> a5[compose-atlas]
+        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a5[compose-atlas]
+        a5 -.-> a4["curation (optional)"]
+        a4 --> a5
     end
     subgraph B["B · video → loop"]
         direction LR
@@ -82,8 +88,8 @@ sprite-gen --help
 sprite-gen prepare --out-dir <run> --character-id <id> --base-image base.png   # request, guides, prompts
 sprite-gen gen-set --run-dir <run> --provider codex                            # every state row, 4 at a time
 sprite-gen extract --run-dir <run>                                             # chroma → transparent frames
-sprite-gen curation --run-dir <run>                                            # (optional) pick, nudge, breathe
 sprite-gen compose-atlas --run-dir <run>                                       # sprite-sheet-alpha.png + manifest.json
+sprite-gen curation --run-dir <run>                                            # (optional) pick, nudge, breathe
 ```
 
 **B · video → loop** — one still to transparent loops (needs `ffmpeg`, `img2webp`, and your own `grok` login or `XAI_API_KEY`).
