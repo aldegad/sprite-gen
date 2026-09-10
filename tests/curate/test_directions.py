@@ -90,3 +90,16 @@ def test_directions_mirror_source_must_be_generated(tmp_path: Path) -> None:
     out_dir, result = _prepare(tmp_path, "--directions", "down,side,up", "--mirror", "left=right")
     assert result.returncode != 0
     assert "not in directions.set" in (result.stdout + result.stderr)
+
+
+def test_prepared_prompts_preserve_reference_style_without_medium_bans(tmp_path: Path) -> None:
+    out_dir, result = _prepare(tmp_path, "--directions", "down,side,up")
+    assert result.returncode == 0, result.stdout + result.stderr
+    request = json.loads((out_dir / "sprite-request.json").read_text(encoding="utf-8"))
+    assert "same body proportions" in request["style"]
+    for path in (out_dir / "prompts").rglob("*.txt"):
+        prompt = path.read_text(encoding="utf-8")
+        assert "same shading style" in prompt
+        assert "Exactly" in prompt and "full-body frames" in prompt
+        for removed in ("polished illustration", "painterly", "anime key art", "3D render", "vector mascot", "glossy"):
+            assert removed not in prompt, (path, removed)

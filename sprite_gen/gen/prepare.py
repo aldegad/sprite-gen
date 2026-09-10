@@ -56,9 +56,7 @@ STYLE_DEFAULT = (
     "match the attached base/anchor reference image EXACTLY: same pixel density "
     "(logical pixel block size), same body proportions, same outline weight, same "
     "palette, same shading style, same level of detail. Do not restyle, do not "
-    "change proportions, do not add or remove detail density. Avoid polished "
-    "illustration, painterly rendering, anime key art, 3D render, vector app-icon "
-    "polish, glossy lighting, soft gradients, and anti-aliased high-detail edges."
+    "change proportions, do not add or remove detail density."
 )
 
 TRANSPARENCY_ARTIFACT_RULES = [
@@ -960,7 +958,7 @@ def row_prompt(request: dict[str, Any], state: str, entry: dict[str, Any]) -> st
 Character: {character.get("description") or character["id"]}.
 Style contract: {request["style"]}.
 
-Use this prompt as an authoritative sprite-production spec. Do not expand it into a polished illustration, painterly character image, anime key art, 3D render, vector mascot, glossy app icon, realistic portrait, or marketing artwork.
+Use this prompt as an authoritative sprite-production spec.
 
 Animation action: {entry["action"]}.
 
