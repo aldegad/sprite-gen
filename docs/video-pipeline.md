@@ -131,8 +131,8 @@ Outputs:
   (default 24 fps = the source rate, so every cycle frame is kept; floor 4, never more than
   the cycle holds). A fixed 12 made a 2.5 s jump hold each frame 210 ms while a 1.1 s walk
   held 90 ms, and even an even 12 fps read sluggish on a jump (2026-09-09). `--n-out` and
-  `--gif-fps` still override; `--strip-height` caps the cell/strip/GIF height (scaled down,
-  never up) when the output has a target size such as a README hero.
+  `--gif-fps` still override; `--strip-height` caps the cell/strip/GIF height. Scaling up
+  requires an explicit `--body-height` target and still respects that cap.
 - `<name>.webp` — same frames, lossless, `img2webp -exact` (Pillow's animated WebP writer
   does not pass `exact` and rewrites RGB under transparent pixels).
 

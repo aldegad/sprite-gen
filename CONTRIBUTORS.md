@@ -37,4 +37,8 @@ The following external contributors have work that is incorporated into, or mate
 
 - [PR #16](https://github.com/aldegad/sprite-gen/pull/16): added support for Codex `image_gen.generation` Extension result records while preserving the existing inline PNG verification path.
 
+## [@Chang-Jin-Lee](https://github.com/Chang-Jin-Lee)
+
+- [PR #28](https://github.com/aldegad/sprite-gen/pull/28): made explicit character-height targets scale smaller video sprites up while preserving the cell-height cap.
+
 Thank you for testing the project in real environments, documenting failures clearly, and contributing fixes or experiments that inform `sprite-gen`.
