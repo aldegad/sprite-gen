@@ -274,9 +274,14 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
     floor = max(b[3] for b in boxes)
     grounded = [b[3] - b[1] for b in boxes if b[3] >= floor - 4] or [b[3] - b[1] for b in boxes]
     body_src = max(grounded)
-    scale = min(1.0, max_height / (bottom - top))
-    if body_height is not None:
-        scale = min(scale, body_height / body_src)  # match the standing height; max_height stays an upper bound
+    # max_height is a ceiling on the CELL; an explicit body_height is a target for the BODY.
+    # Without one, nothing is ever scaled up. With one, a state whose source body is SHORTER
+    # than the request has to grow — clamping to 1.0 first made the option a downward clamp
+    # only, so "the same value across states gives the same character size" was false for
+    # exactly the states that needed it: a 200 px source and a 400 px source both asked for
+    # 300 came out 200 and 300 (measured 2026-09-10). The cap still wins over the target.
+    fit = max_height / (bottom - top)
+    scale = min(1.0, fit) if body_height is None else min(fit, body_height / body_src)
     w = round((right - left) * scale)
     h = round((bottom - top) * scale)
     cap = max(1, min(max_cells, max_width // max(1, w)))
@@ -515,7 +520,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cycle", choices=CYCLE_MODES, default="auto", help="auto: periodic first, one-shot failover for action states (recorded in the report); periodic / one-shot force one detector; fixed cuts exactly --start/--length (no detection, reported as kind=fixed)")
     parser.add_argument("--start", type=int, help="fixed cut: first keyed frame of the cycle (with --cycle fixed)")
     parser.add_argument("--length", type=int, help="fixed cut: cycle length in frames (with --cycle fixed)")
-    parser.add_argument("--strip-height", type=int, default=STRIP_MAX_HEIGHT, help=f"cell/strip/GIF height cap in px (default {STRIP_MAX_HEIGHT}); the cycle is scaled down to fit, never up")
+    parser.add_argument("--strip-height", type=int, default=STRIP_MAX_HEIGHT, help=f"cell/strip/GIF height cap in px (default {STRIP_MAX_HEIGHT}); the cycle is scaled down to fit, and never up unless --body-height asks for it")
     parser.add_argument("--body-height", type=int, help="scale so the STANDING height (tallest floor-contact frame) is this many px — the same value across states gives the same character size; --strip-height stays the cap")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)
