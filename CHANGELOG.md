@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v2.1.1)
+## v2.1.1 - Chroma keying follows the painted background
 
 - Chroma keying measures the key distance from the background colour the generator actually painted (detected from the flat borders, `detect_background_key_rgb`) as well as from the pure key, in `cutout`, `extract`, `slice-sheet` and `video-frames`. Image models paint `#00FF00` as (8, 162, 24) and darker; that colour sat on the 96 radius from pure green and keyed half-and-half pixel by pixel. The radius is unchanged. Reports carry `chroma_key_painted`. Documented cost: key-family dark subject colours are erased on darker painted backgrounds — choose the key away from the subject's hues.
 - `video-canvas` normalizes a green/magenta still's flat background to the exact declared key and pads with that key (`--key auto|green|magenta|white`; the repaint mask is the `cutout` matte's own alpha-0 set, the subject is byte-identical). The report records `key`, `key_painted`, `normalized_px`.
