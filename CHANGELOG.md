@@ -2,6 +2,12 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## v2.1.1 - Chroma keying follows the painted background
+
+- Chroma keying measures the key distance from the background colour the generator actually painted (detected from the flat borders, `detect_background_key_rgb`) as well as from the pure key, in `cutout`, `extract`, `slice-sheet` and `video-frames`. Image models paint `#00FF00` as (8, 162, 24) and darker; that colour sat on the 96 radius from pure green and keyed half-and-half pixel by pixel. The radius is unchanged. Reports carry `chroma_key_painted`. Documented cost: key-family dark subject colours are erased on darker painted backgrounds — choose the key away from the subject's hues.
+- `video-canvas` normalizes a green/magenta still's flat background to the exact declared key and pads with that key (`--key auto|green|magenta|white`; the repaint mask is the `cutout` matte's own alpha-0 set, the subject is byte-identical). The report records `key`, `key_painted`, `normalized_px`.
+- `video-frames` tells leftover key background at the frame edge (`residual`, points at `video-canvas`) from a subject that was framed too tight (`subject`, points at a taller/wider canvas) instead of reporting both as "framed too tight".
+
 ## v2.1.0 - Guided requests and saved defaults
 
 - Added two user journeys: sprites (base-image provider, then GPT rows or Grok video) and ordinary images (provider). The read-only `workflow` command checks credentials, resolves request choices over saved defaults and returns the next questions and existing engine route.

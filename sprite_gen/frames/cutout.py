@@ -112,15 +112,16 @@ def _corner_average(image: Image.Image) -> tuple[int, int, int]:
 def _detect_key_kind(color: tuple[int, int, int]) -> str:
     """Classify a corner background colour into a route: magenta | green | white.
 
-    Saturated magenta/green keys route to the extract engine; everything else
-    (bright achromatic ivory/white, or any low-saturation background) routes to
-    the position-based matte.
+    Saturated magenta/green keys — at whatever brightness the model painted
+    them (`extract.is_key_family`, the same rule the engine keys with) — route
+    to the extract engine; everything else (bright achromatic ivory/white, or
+    any low-saturation background) routes to the position-based matte.
     """
-    r, g, b = color
-    if r >= 128 and b >= 128 and g <= 100 and (r - g) >= 60 and (b - g) >= 60:
-        return "magenta"
-    if g >= 128 and r <= 100 and b <= 100 and (g - r) >= 60 and (g - b) >= 60:
-        return "green"
+    from sprite_gen.frames.extract import is_key_family
+
+    for kind, target in KEY_TARGETS.items():
+        if is_key_family(color, target):
+            return kind
     return "white"
 
 
@@ -269,15 +270,28 @@ def _matte_route(
     }
 
 
-def _extract_route(image: Image.Image, kind: str) -> tuple[Image.Image, dict[str, Any]]:
-    """Magenta/green key background → reuse the verified `extract` chroma engine (no drift)."""
-    from sprite_gen.frames.extract import remove_chroma_background
+def extract_route(image: Image.Image, kind: str) -> tuple[Image.Image, dict[str, Any]]:
+    """Magenta/green key background → reuse the verified `extract` chroma engine (no drift).
+
+    The engine keys from the background colour it detects on the borders
+    (`detect_background_key_rgb`) as well as the pure key, so the brightness
+    the model happened to paint does not decide whether the cut lands. The
+    detected colour is reported as `chroma_key_painted` for the audit trail.
+    Public because `video-canvas` normalizes a still's background through this
+    exact matte, so the canvas and `video-frames` agree by construction.
+    """
+    from sprite_gen.frames.extract import detect_background_key_rgb, remove_chroma_background
 
     target = KEY_TARGETS[kind]
+    painted = detect_background_key_rgb(image, target)
     result = remove_chroma_background(
         image, target, _EXTRACT_KEY_THRESHOLD, _EXTRACT_FRINGE_THRESHOLD, _EXTRACT_FRINGE_DELTA
     )
-    return result.convert("RGBA"), {"route": f"extract:{kind}", "chroma_key": list(target)}
+    return result.convert("RGBA"), {
+        "route": f"extract:{kind}",
+        "chroma_key": list(target),
+        "chroma_key_painted": list(painted),
+    }
 
 
 def cutout(
@@ -306,7 +320,7 @@ def cutout(
 
     route = _detect_key_kind(_corner_average(image)) if key == "auto" else key
     if route in ("magenta", "green"):
-        result, route_stats = _extract_route(image, route)
+        result, route_stats = extract_route(image, route)
     else:
         result, route_stats = _matte_route(image, input_path, strength, band, erode, tolerance)
 

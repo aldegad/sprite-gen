@@ -48,7 +48,10 @@ $SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT/scripts/slice_sheet_cells.py 
   its height hierarchy.
 - Extraction tunables (`--key-threshold`, `--fringe-*`, `--spill-max-fraction`)
   pass through to `remove_chroma_background` with the same defaults as
-  `extract`.
+  `extract`. The key distance is measured from the pure key *and* from the
+  background colour detected on the sheet's borders, so a sheet the generator
+  painted a darker green/magenta than asked still keys cleanly
+  ([chroma-alpha.md](chroma-alpha.md)).
 
 ## Geometry rules (and the field failures they encode)
 

@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 2.1.0
+version: 2.1.1
 description: "Generates images and game sprites through GPT or Grok with guided provider choices, separate saved defaults, automatic cleanup and optional curation. Handles sprite requests, ordinary image generation/editing, chroma removal, animation atlases, video loops, 큐레이션뷰, image candidates, 팔레트 스왑, palette swap, recolor, rig layers and engine exports."
 license: Apache-2.0
 depends_on:

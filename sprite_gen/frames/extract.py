@@ -169,6 +169,115 @@ def _grow_chebyshev(mask: np.ndarray) -> np.ndarray:
     return spread
 
 
+# --- background key detection (RGB path) -------------------------------------
+# Image models asked for #00FF00 / #FF00FF hand back a slightly different flat
+# colour every run (measured 2026-09-11: Grok painted (8, 162, 24) for green).
+# Its absolute distance to the pure key was 96.38 — a hair over the 96 hard-cut
+# radius — so the whole background survived, while (7, 163, 24) at 95.34 keyed
+# out. The rule below reads the *actual* background from the frame borders and,
+# when that colour is the declared key's hue family, measures the hard cut from
+# it as well. Raising the radius instead would only move the cliff to the next
+# darker green; this removes the cliff for any brightness the model picks.
+_KEY_FAMILY_MIN_KEYED = 64  # a keyed channel must at least read as lit (same bar as _key_channel_split's dark side)
+_KEY_FAMILY_MAX_UNKEYED_RATIO = 0.35  # unkeyed channels stay below this fraction of the dimmest keyed one
+_KEY_FAMILY_KEYED_BALANCE = 0.8  # for two-channel keys (magenta) the dimmer keyed channel keeps this share of the brighter
+_KEY_DETECT_CORNER_DIV = 5  # corner patch = width/5 x height/5 (same sampling as the YCbCr path)
+_KEY_DETECT_MIN_FRACTION = 0.12  # family share of the samples needed to trust the detection
+_KEY_DETECT_BIN_SHIFT = 3  # RGB histogram bin width 8 — the mode bin, never a mean, picks the colour
+
+
+def is_key_family(color: tuple[int, int, int], chroma_key: tuple[int, int, int]) -> bool:
+    """True when `color` is the key's hue at any brightness — a *variant of the key*.
+
+    Brightness is free; saturation and hue are not. Every channel the key
+    saturates must read as lit (>= 64), the channels the key leaves dark must
+    stay under 35% of the dimmest keyed channel, and a two-channel key keeps
+    its keyed channels within 20% of each other. (8, 162, 24) and (170, 8, 180)
+    are family; hot pink (250, 77, 150), purple (213, 112, 246) and cyan are
+    subject colours, not keys. Degenerate keys have no family.
+    """
+    keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
+    if not keyed_channels:
+        return False
+    keyed_min = min(color[index] for index in keyed_channels)
+    keyed_max = max(color[index] for index in keyed_channels)
+    unkeyed_max = max(color[index] for index in unkeyed_channels)
+    return (
+        keyed_min >= _KEY_FAMILY_MIN_KEYED
+        and unkeyed_max <= keyed_min * _KEY_FAMILY_MAX_UNKEYED_RATIO
+        and keyed_min >= keyed_max * _KEY_FAMILY_KEYED_BALANCE
+    )
+
+
+def _key_detect_sample_mask(height: int, width: int) -> np.ndarray:
+    """Corner patches (w/5 x h/5) plus the 1-px border — where the background lives."""
+    mask = np.zeros((height, width), dtype=bool)
+    if height == 0 or width == 0:
+        return mask
+    corner_w = width // _KEY_DETECT_CORNER_DIV
+    corner_h = height // _KEY_DETECT_CORNER_DIV
+    if corner_w < 2:
+        corner_w = width
+    if corner_h < 2:
+        corner_h = height
+    mask[:corner_h, :corner_w] = True
+    mask[:corner_h, width - corner_w:] = True
+    mask[height - corner_h:, :corner_w] = True
+    mask[height - corner_h:, width - corner_w:] = True
+    mask[0, :] = mask[-1, :] = True
+    mask[:, 0] = mask[:, -1] = True
+    return mask
+
+
+def detect_background_key_rgb(
+    image: Image.Image, chroma_key: tuple[int, int, int]
+) -> tuple[int, int, int]:
+    """The flat background colour as the model actually painted it, or the declared key.
+
+    Samples the corner patches and the border, keeps the opaque pixels that are
+    the declared key's hue family (`is_key_family`), and — when they make up at
+    least 12% of the samples — returns the mean of the most populated 8-wide
+    RGB histogram bin among them. The mode, never the mean of everything: a
+    handful of antialiased fringe pixels on the border must not drag an
+    exact-key background off the key, and a two-cluster border must resolve to
+    the dominant cluster, not a midpoint that mattes neither. Otherwise — no
+    such background, the subject crowds every border, a degenerate key — the
+    declared key comes back unchanged, which keeps `remove_chroma_background`
+    byte-identical to its pre-detection behaviour on exact-key backgrounds.
+    """
+    keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
+    if not keyed_channels:
+        return tuple(chroma_key)  # type: ignore[return-value]
+    rgba = image if image.mode == "RGBA" else image.convert("RGBA")
+    data = np.array(rgba, dtype=np.uint8)
+    height, width = data.shape[:2]
+    sample = _key_detect_sample_mask(height, width) & (data[..., 3] != 0)
+    if not sample.any():
+        return tuple(chroma_key)  # type: ignore[return-value]
+    rgb = data[..., :3].astype(np.int32)
+    # Vector form of `is_key_family` — same three inequalities, same constants.
+    keyed_min = rgb[..., keyed_channels].min(axis=-1)
+    keyed_max = rgb[..., keyed_channels].max(axis=-1)
+    unkeyed_max = rgb[..., unkeyed_channels].max(axis=-1)
+    family = (
+        sample
+        & (keyed_min >= _KEY_FAMILY_MIN_KEYED)
+        & (unkeyed_max <= keyed_min * _KEY_FAMILY_MAX_UNKEYED_RATIO)
+        & (keyed_min >= keyed_max * _KEY_FAMILY_KEYED_BALANCE)
+    )
+    family_count = int(np.count_nonzero(family))
+    if family_count < int(np.count_nonzero(sample)) * _KEY_DETECT_MIN_FRACTION:
+        return tuple(chroma_key)  # type: ignore[return-value]
+    colors = rgb[family]  # (N, 3)
+    bins = (colors >> _KEY_DETECT_BIN_SHIFT).astype(np.int64)
+    slots = (bins[:, 0] << 16) | (bins[:, 1] << 8) | bins[:, 2]
+    unique, inverse, counts = np.unique(slots, return_inverse=True, return_counts=True)
+    mode = int(np.argmax(counts))  # first max = lowest slot on a tie: deterministic
+    members = colors[inverse == mode]
+    mean = members.sum(axis=0, dtype=np.int64) // len(members)
+    return (int(mean[0]), int(mean[1]), int(mean[2]))
+
+
 # remove_chroma_background pixel classes, decided once on the source colors.
 _KEYED = 0  # erased: transparent input or hard key cut
 _SUBJECT = 1  # not key-tinted — never touched
@@ -192,7 +301,15 @@ def remove_chroma_background(
     *,
     unmix_reach: int = 4,
     spill_max_fraction: float = 0.005,
+    background_key: tuple[int, int, int] | None = None,
 ) -> Image.Image:
+    """Key `chroma_key` out of `image` (hard cut + soft-alpha fringe unmix + trapped-spill despill).
+
+    `background_key`: the background colour as actually painted. None (the
+    default) detects it from the borders with `detect_background_key_rgb`;
+    passing `chroma_key` itself pins the single-key behaviour (the frozen
+    byte-identity gate does that).
+    """
     rgba = image.convert("RGBA")
     width, height = rgba.size
     data = np.array(rgba, dtype=np.uint8)  # (H, W, 4); written back at the end
@@ -200,12 +317,27 @@ def remove_chroma_background(
     keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
     unseen = 255
 
+    # The background as painted. Distances are taken to the declared key *and*
+    # to the detected family colour and the smaller one wins, so an exact-key
+    # background reproduces the single-key result bit for bit while a darker or
+    # paler key of the same hue is cut from where it actually sits. The blend
+    # model (despill / unmix) also mixes against the painted colour — that is
+    # the colour the antialiased fringe was actually blended with. Which
+    # channels count as "keyed" stays a property of the declared key.
+    painted_key = (
+        detect_background_key_rgb(rgba, chroma_key)
+        if background_key is None
+        else (int(background_key[0]), int(background_key[1]), int(background_key[2]))
+    )
+
     # Classification, decided on the source colors before anything is erased.
     # np.select takes the first condition that holds, so the condlist order below
     # *is* the if/elif order it replaces — swapping the subject and in-band rows
     # changes the output wherever both hold at once (a wide --fringe-key-threshold
     # makes that reachable, and the gate has a case for it).
     key_distance = _key_distance_field(source_rgb, chroma_key)
+    if painted_key != tuple(chroma_key):
+        key_distance = np.minimum(key_distance, _key_distance_field(source_rgb, painted_key))
     source_tint = _key_tint_field(source_rgb, keyed_channels, unkeyed_channels)
     keyed_mask = (data[..., 3] == 0) | (key_distance <= threshold)
     classes = np.select(
@@ -218,7 +350,7 @@ def remove_chroma_background(
     depths = np.full((height, width), unseen, dtype=np.uint8)  # chebyshev distance to keyed region
     depths[keyed_mask] = 0
 
-    key_tint = key_tint_score(chroma_key, chroma_key)
+    key_tint = key_tint_score(painted_key, chroma_key)
     max_reach = min(unseen - 1, unmix_reach if key_tint > 0 else 0)
 
     # Geometric distance to the nearest keyed-out pixel — outer background
@@ -255,7 +387,7 @@ def remove_chroma_background(
             red, green, blue, alpha = (int(value) for value in data[y, x])
             color = (red, green, blue)
             out_red, out_green, out_blue, out_alpha = unmix_key_blend(
-                color, alpha, chroma_key, key_tint, key_tint_score(color, chroma_key)
+                color, alpha, painted_key, key_tint, key_tint_score(color, chroma_key)
             )
             # The scalar path wrote this through `pixels[x, y] = (...)`, and PIL
             # clamped every channel to 0..255 on the way in. A uint8 array does
@@ -323,7 +455,7 @@ def remove_chroma_background(
                 red, green, blue, alpha = (int(value) for value in data[y, x])
                 color = (red, green, blue)
                 coverage, despilled = despill_color(
-                    color, chroma_key, key_tint, key_tint_score(color, chroma_key)
+                    color, painted_key, key_tint, key_tint_score(color, chroma_key)
                 )
                 if coverage > 0:
                     data[y, x] = (*despilled, alpha)

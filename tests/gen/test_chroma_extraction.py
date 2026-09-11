@@ -96,22 +96,33 @@ def _open_moe(name: str) -> Image.Image:
 
 
 def _fringe_peel_candidates(image: Image.Image, chroma_key: tuple[int, int, int]) -> list[tuple[int, int]]:
-    """Pixels the legacy in-band peel would erase before soft-alpha unmix."""
+    """Pixels the legacy in-band peel would erase before soft-alpha unmix.
+
+    Key distance is what the engine measures: the smaller of the distance to the
+    declared key and to the background colour actually painted on the borders
+    (`detect_background_key_rgb`) — the moe fixtures were painted a few units
+    off the pure key, and the hard-cut sphere sits where the paint is.
+    """
     width, height = image.size
     pixels = image.load()
+    painted_key = extract.detect_background_key_rgb(image, chroma_key)
     classes = bytearray(width * height)
     keyed: list[int] = []
+
+    def key_distance(color: tuple[int, int, int]) -> float:
+        return min(extract.color_distance(color, chroma_key), extract.color_distance(color, painted_key))
+
     for y in range(height):
         for x in range(width):
             red, green, blue, alpha = pixels[x, y]
             index = y * width + x
             color = (red, green, blue)
-            if alpha == 0 or extract.color_distance(color, chroma_key) <= KEY_THRESHOLD:
+            if alpha == 0 or key_distance(color) <= KEY_THRESHOLD:
                 classes[index] = extract._KEYED
                 keyed.append(index)
             elif extract.key_tint_score(color, chroma_key) < FRINGE_DELTA:
                 classes[index] = extract._SUBJECT
-            elif extract.color_distance(color, chroma_key) <= FRINGE_THRESHOLD:
+            elif key_distance(color) <= FRINGE_THRESHOLD:
                 classes[index] = extract._BLEND_IN_BAND
             else:
                 classes[index] = extract._BLEND_OUT_OF_BAND
