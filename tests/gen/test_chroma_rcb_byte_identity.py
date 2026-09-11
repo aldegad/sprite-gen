@@ -1138,10 +1138,15 @@ def _run_production(case, image=None):
     """`image` 를 주면 **그 이미지 객체 그대로** 넘긴다 — 입력 불변 단정은 자기가
     들고 있는 객체가 들어가야 성립한다 (노드 3: 매번 새로 빌드하면 공허해진다)."""
     _, builder, key, threshold, fringe_threshold, fringe_delta, reach, spill = case
+    # `background_key=key` 는 단일키(선언키) 계약을 고정한다. 2026-09-11 이후 엔진은
+    # 기본값(None)에서 보더 검출색(`detect_background_key_rgb`)까지 기준으로 키잉하므로,
+    # 여기 픽스처(오프키 노이즈 배경·moe 실사)에서는 기본값이 출력을 바꾼다. 이 게이트가
+    # 잠그는 것은 벡터화 == 동결 스칼라 이고, 검출 층은 tests/frames/test_chroma_key_relative.py
+    # 가 따로 잠근다.
     return extract.remove_chroma_background(
         builder() if image is None else image,
         key, threshold, fringe_threshold, fringe_delta,
-        unmix_reach=reach, spill_max_fraction=spill,
+        unmix_reach=reach, spill_max_fraction=spill, background_key=key,
     )
 
 

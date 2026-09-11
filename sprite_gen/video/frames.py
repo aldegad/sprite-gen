@@ -8,6 +8,15 @@ per-frame alpha coverage and an **edge-contact check**: a frame whose subject
 touches the top/left/right edge means the model framed too tight (a jump whose
 hair left the frame, 2026-09-08) and the run fails loud — the fix is a taller or
 wider canvas (`video-canvas`), not a quiet crop.
+
+An opaque edge pixel is not always the subject. When the model painted the key
+a little off and part of that background survives the matte, the edge band is
+"touched" by leftover *background* (2026-09-11: a (8, 162, 24) green read as
+"framed too tight"). The check therefore classifies every contact pixel by its
+raw colour — the declared key's hue family (`extract.is_key_family`) is
+**residual background**, anything else is the **subject** — and the two fail
+with different messages: residual points at `video-canvas` normalization of the
+base still, subject contact at a taller/wider canvas.
 """
 
 from __future__ import annotations
@@ -22,6 +31,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen.frames.cutout import cutout
+from sprite_gen.frames.extract import is_key_family
 from sprite_gen.spec.runio import atomic_write_text
 
 EDGE_ROWS = 4  # rows/cols inspected at each edge
@@ -78,6 +88,31 @@ def edge_contact(image: Image.Image) -> dict[str, int]:
     return {"top": top, "left": left, "right": right}
 
 
+def classify_edge_contact(raw: Image.Image, keyed: Image.Image, chroma_key: tuple[int, int, int] | None) -> dict[str, int]:
+    """Split the opaque edge-band pixels into `subject` and `residual` (leftover key background).
+
+    A contact pixel whose *raw* colour is the declared key's hue family is
+    background the matte failed to erase, not the subject. Without a chroma key
+    (matte route) every contact is the subject.
+    """
+    alpha = keyed.convert("RGBA").getchannel("A").load()
+    rgb = raw.convert("RGB").load()
+    w, h = keyed.size
+    band = set()
+    band.update((x, y) for y in range(min(EDGE_ROWS, h)) for x in range(w))
+    band.update((x, y) for x in range(min(EDGE_ROWS, w)) for y in range(h))
+    band.update((x, y) for x in range(max(0, w - EDGE_ROWS), w) for y in range(h))
+    subject = residual = 0
+    for x, y in band:
+        if alpha[x, y] <= 0:
+            continue
+        if chroma_key is not None and is_key_family(rgb[x, y], chroma_key):
+            residual += 1
+        else:
+            subject += 1
+    return {"subject": subject, "residual": residual}
+
+
 def key_frames(
     raw_files: list[Path],
     keyed_dir: Path,
@@ -98,9 +133,12 @@ def key_frames(
         row = {"frame": src.name, "alpha_zero_pct": alpha_zero_pct, "route": stats.get("route")}
         if check_edges:
             contact = edge_contact(image)
-            row["edge"] = contact
             if any(v > EDGE_MAX_PIXELS for v in contact.values()):
+                chroma = stats.get("chroma_key")
+                contact.update(classify_edge_contact(Image.open(src), image, tuple(chroma) if chroma else None))
+                contact["key_painted"] = stats.get("chroma_key_painted")
                 contacts.append({"frame": src.name, **contact})
+            row["edge"] = contact
         if hist[0] == 0:
             raise SystemExit(f"video-frames: {src.name} keyed to 0% transparency — the background is not the chroma key")
         rows.append(row)
@@ -112,14 +150,32 @@ def key_frames(
         "rows": rows,
     }
     if contacts and check_edges:
-        worst = max(contacts, key=lambda c: c["top"] + c["left"] + c["right"])
-        raise SystemExit(
-            f"video-frames: the subject touches the frame edge in {len(contacts)} frame(s) "
-            f"(worst {worst['frame']}: top {worst['top']} / left {worst['left']} / right {worst['right']} px) — "
-            "the clip was framed too tight; regenerate from a taller/wider canvas (`sprite-gen video-canvas`) "
-            "or pass --allow-edge-contact to accept the clipping"
-        )
+        raise SystemExit(_edge_contact_message(contacts))
     return report
+
+
+def _edge_contact_message(contacts: list[dict[str, Any]]) -> str:
+    """Residual background and a clipped subject are different defects with different fixes."""
+    worst = max(contacts, key=lambda c: c["top"] + c["left"] + c["right"])
+    where = f"(worst {worst['frame']}: top {worst['top']} / left {worst['left']} / right {worst['right']} px)"
+    subject_frames = [c for c in contacts if c["subject"] > 0]
+    residual_frames = [c for c in contacts if c["residual"] > 0]
+    if not subject_frames:
+        painted = tuple(worst["key_painted"]) if worst.get("key_painted") else None
+        return (
+            f"video-frames: leftover chroma background reaches the frame edge in {len(contacts)} frame(s) {where} — "
+            f"the key survived the matte (painted background {painted}); this is background, not the subject: "
+            "normalize the base still with `sprite-gen video-canvas` (repaints the flat background to the exact key) "
+            "and regenerate the clip"
+        )
+    message = (
+        f"video-frames: the subject touches the frame edge in {len(subject_frames)} frame(s) {where} — "
+        "the clip was framed too tight; regenerate from a taller/wider canvas (`sprite-gen video-canvas`) "
+        "or pass --allow-edge-contact to accept the clipping"
+    )
+    if residual_frames:
+        message += f"; {len(residual_frames)} frame(s) also carry leftover chroma background at the edge (`residual` in the report)"
+    return message
 
 
 def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool, report_path: Path | None) -> dict[str, Any]:

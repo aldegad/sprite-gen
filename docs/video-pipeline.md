@@ -41,9 +41,21 @@ is a property of the motion state, owned by one table (`STATE_CANVAS`):
 | everything else | square | 1:1 | — | in-place motion fits the still |
 
 `--shape tall|wide|square` overrides the row; `--headroom` / `--lead` tune the room;
-`--facing left` mirrors the wide layout. The padding is filled with the still's own
-corner colour (its chroma key), and a still whose corners are not one flat colour is
-refused — a non-flat background cannot be extended without guessing.
+`--facing left` mirrors the wide layout. A still whose corners are not one flat colour
+is refused — a non-flat background cannot be extended without guessing.
+
+**The canvas owns key normalization.** Image models paint "`#00FF00`" a little
+differently every run — (8, 166, 25) on 2026-09-11 — and the video model reproduces
+the input colour almost exactly (a pure-key input came back as (16, 239, 11)). So when
+the flat corners are a green/magenta key at *any* brightness (`--key auto`, the
+default; `--key green|magenta` to insist, refused when the corners are not that
+family), the still's background is repainted to the **exact declared key** and the
+padding is that same pure key. The repaint mask is the `cutout` chroma matte's own
+alpha-0 set — the pixels the canvas repaints are exactly the pixels `video-frames` will
+erase, and the subject stays byte-identical. A corner that survives the matte fails loud
+(the still is not on a key the engine can cut). `--key white` keeps the old behaviour: no
+chroma key, the padding is the corner colour. The report records `key`, `key_painted`
+(the colour the model actually used) and `normalized_px`.
 
 ## 2. Clip — `sprite-gen video`
 
@@ -59,10 +71,39 @@ quadruped and a legless blob into a contradiction (2026-09-09).
 
 `ffmpeg` extracts every frame; the clip's real fps is recorded (never assumed). Each
 frame goes through the same `cutout` engine imported stills use (`--key auto` reads
-the corners; green/magenta route to the extract matte). The report carries per-frame
-alpha coverage and an **edge-contact check**: any opaque pixel in the top/left/right
-4-pixel bands means the model framed too tight, and the run fails loud pointing at
-`video-canvas`. `--allow-edge-contact` accepts the clipping on purpose.
+the corners; green/magenta route to the extract matte). The matte keys from the
+background colour **as the model painted it**, not only from the pure key: the flat
+border colour is detected per frame (`extract.detect_background_key_rgb`, the mode of an
+RGB histogram over the corner/border samples that are the key's hue family) and a pixel
+is erased when it is within the key radius of *either* the pure key or that painted
+colour. The 96 radius is unchanged — what moved is its centre. Before this (2026-09-11)
+a (8, 162, 24) green sat at distance 96.38 from pure green while (7, 163, 24) sat at
+95.34, so a clip was keyed half-and-half pixel by pixel and the edge check read the
+leftover background as a clipped subject. The report records `chroma_key_painted` per
+frame.
+
+Two consequences worth knowing. Dark outline halo (the antialiased blend between subject
+and a dark-painted key) is now erased with the background — on the three 2026-09-11
+walk clips that was outline pixels only (0 newly opaque, interior holes ≤ 7 px per
+frame, seam ratios moving in the third decimal, periods and start frames identical).
+And **a key-family subject colour is at more risk the darker the painted background**:
+the erase ball follows the detected key, so on a still painted (20, 120, 25) a dark
+olive (40, 70, 35) inside the subject (distance 54.8) is erased, while the same olive
+survives untouched on (8, 162, 24), (5, 200, 10) or pure-key backgrounds. Choose the key
+away from the subject's hues ([chroma-alpha.md](chroma-alpha.md)) — that rule now covers
+the painted key's darker variants too.
+
+The report also carries per-frame alpha coverage and an **edge-contact check**: any
+opaque pixel in the top/left/right 4-pixel bands fails the run. Each contact pixel is
+classified by its *raw* colour — the declared key's hue family is **`residual`**
+(background the matte did not erase), anything else is **`subject`** — and the two
+defects fail with different messages: residual-only contact points at `video-canvas`
+(normalize the base still and regenerate); subject contact means the model framed too
+tight and points at a taller/wider canvas. When both occur the message names both.
+`residual` can also be reported on the antialiased fringe where a subject genuinely
+touches the edge (a key-tinted blend pixel with low alpha), so a "framed too tight"
+message with a small residual count is still a framing problem, not a key problem.
+`--allow-edge-contact` accepts the clipping on purpose.
 
 ## 4. Loop — period first, seam second
 
