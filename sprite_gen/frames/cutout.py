@@ -270,13 +270,15 @@ def _matte_route(
     }
 
 
-def _extract_route(image: Image.Image, kind: str) -> tuple[Image.Image, dict[str, Any]]:
+def extract_route(image: Image.Image, kind: str) -> tuple[Image.Image, dict[str, Any]]:
     """Magenta/green key background → reuse the verified `extract` chroma engine (no drift).
 
     The engine keys from the background colour it detects on the borders
     (`detect_background_key_rgb`) as well as the pure key, so the brightness
     the model happened to paint does not decide whether the cut lands. The
     detected colour is reported as `chroma_key_painted` for the audit trail.
+    Public because `video-canvas` normalizes a still's background through this
+    exact matte, so the canvas and `video-frames` agree by construction.
     """
     from sprite_gen.frames.extract import detect_background_key_rgb, remove_chroma_background
 
@@ -318,7 +320,7 @@ def cutout(
 
     route = _detect_key_kind(_corner_average(image)) if key == "auto" else key
     if route in ("magenta", "green"):
-        result, route_stats = _extract_route(image, route)
+        result, route_stats = extract_route(image, route)
     else:
         result, route_stats = _matte_route(image, input_path, strength, band, erode, tolerance)
 

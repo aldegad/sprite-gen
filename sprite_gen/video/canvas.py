@@ -8,9 +8,17 @@ attack or projectile needs room in front (wide), everything else stays square.
 The state -> canvas table below is the single owner of that rule; `--shape`
 overrides it per call.
 
-The padding is filled with the still's own corner colour (its chroma key) so the
-clip stays keyable end to end. A still whose corners disagree is refused — a
-non-flat background cannot be extended without guessing.
+The padding is filled with the chroma key so the clip stays keyable end to end.
+A still whose corners disagree is refused — a non-flat background cannot be
+extended without guessing.
+
+Image models paint "#00FF00" a little differently every time ((8, 166, 25) on
+2026-09-11), and the video model reproduces the input colour almost exactly. So
+when the corners are a green/magenta key at *any* brightness, the flat
+background is repainted to the exact declared key here — the pixels the
+`cutout` chroma matte erases become the pure key, the subject is untouched —
+and the padding uses that same pure key. A white/ivory base is padded with its
+own corner colour as before (no chroma key to normalize to).
 """
 
 from __future__ import annotations
@@ -23,6 +31,9 @@ from typing import Any
 
 from PIL import Image
 
+from sprite_gen._deps import np
+from sprite_gen.frames.cutout import KEY_TARGETS, extract_route
+from sprite_gen.frames.extract import is_key_family
 from sprite_gen.spec.runio import atomic_write_text
 
 SHAPE_SQUARE = "square"
@@ -54,6 +65,7 @@ SHAPE_DEFAULTS: dict[str, CanvasProfile] = {
     SHAPE_WIDE: STATE_CANVAS["attack"],
 }
 CORNER_TOLERANCE = 24  # max per-channel spread across the four corners for a "flat" background
+KEYS = ("auto", "green", "magenta", "white")  # auto: the corners decide; white: no chroma key, pad with the corner colour
 
 
 def profile_for(state: str | None, shape: str | None = None) -> CanvasProfile:
@@ -81,6 +93,61 @@ def corner_key(image: Image.Image) -> tuple[int, int, int]:
     return tuple(round(sum(c[i] for c in corners) / 4) for i in range(3))  # type: ignore[return-value]
 
 
+def resolve_key(corner: tuple[int, int, int], key: str) -> str | None:
+    """Which chroma key the still is on: `green` | `magenta`, or None for a non-key (white/ivory) base.
+
+    `auto` classifies the flat corner colour with the engine's own family rule
+    (`is_key_family` — the key's hue at any brightness). An explicit green/magenta
+    that the corners are not is refused rather than repainted blindly.
+    """
+    if key not in KEYS:
+        raise SystemExit(f"video-canvas: unknown --key {key!r}; expected one of {', '.join(KEYS)}")
+    if key == "white":
+        return None
+    if key == "auto":
+        for kind, target in KEY_TARGETS.items():
+            if is_key_family(corner, target):
+                return kind
+        return None
+    if not is_key_family(corner, KEY_TARGETS[key]):
+        raise SystemExit(
+            f"video-canvas: --key {key} but the still's corners are {corner}, not a {key} key family colour; "
+            "pass --key auto to let the corners decide or --key white for a non-chroma base"
+        )
+    return key
+
+
+def normalize_key(image: Image.Image, kind: str) -> tuple[Image.Image, dict[str, Any]]:
+    """Repaint the still's flat background to the exact declared key; the subject stays byte-identical.
+
+    The mask is the `cutout` chroma matte's own alpha-0 set (keyed from the
+    painted background colour, see `extract.detect_background_key_rgb`), so the
+    pixels this repaints are exactly the pixels `video-frames` will erase. Fails
+    loud when a corner survives the matte — then the still is not on a key the
+    engine can cut and padding it would only hide that.
+    """
+    target = KEY_TARGETS[kind]
+    rgb = image.convert("RGB")
+    keyed, stats = extract_route(rgb.convert("RGBA"), kind)
+    erased = np.array(keyed, dtype=np.uint8)[..., 3] == 0
+    data = np.array(rgb, dtype=np.uint8)
+    h, w = erased.shape
+    corners = ((0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1))
+    if not all(erased[y, x] for y, x in corners):
+        raise SystemExit(
+            f"video-canvas: the still's corners survived the {kind} key matte "
+            f"(painted {tuple(stats['chroma_key_painted'])}); the background is not a {kind} key the engine can cut"
+        )
+    data[erased] = target
+    report = {
+        "key": kind,
+        "key_painted": stats["chroma_key_painted"],
+        "normalized_px": int(erased.sum()),
+        "normalized_pct": round(100 * float(erased.mean()), 2),
+    }
+    return Image.fromarray(data, "RGB"), report
+
+
 def pad_canvas(
     image: Image.Image,
     profile: CanvasProfile,
@@ -88,10 +155,20 @@ def pad_canvas(
     facing: str = "right",
     headroom: float | None = None,
     lead: float | None = None,
+    key: str = "auto",
 ) -> tuple[Image.Image, dict[str, Any]]:
-    """Return (padded RGB image, placement report). Never downsizes the still."""
-    key = corner_key(image)
-    src = image.convert("RGB")
+    """Return (padded RGB image, placement report). Never downsizes the still.
+
+    On a green/magenta base the background is normalized to the exact key and
+    the padding is that key; otherwise the padding is the corner colour.
+    """
+    corner = corner_key(image)
+    kind = resolve_key(corner, key)
+    if kind is None:
+        src, fill, key_report = image.convert("RGB"), corner, {"key": None, "key_painted": list(corner), "normalized_px": 0, "normalized_pct": 0.0}
+    else:
+        src, key_report = normalize_key(image, kind)
+        fill = KEY_TARGETS[kind]
     w, h = src.size
     head = profile.headroom if headroom is None else headroom
     front = profile.lead if lead is None else lead
@@ -112,7 +189,7 @@ def pad_canvas(
         canvas_h = max(h, round(canvas_w / profile.ratio))
         y = canvas_h - h
         x = 0 if facing == "right" else canvas_w - w
-    canvas = Image.new("RGB", (canvas_w, canvas_h), key)
+    canvas = Image.new("RGB", (canvas_w, canvas_h), fill)
     canvas.paste(src, (x, y))
     report = {
         "shape": profile.shape,
@@ -123,7 +200,9 @@ def pad_canvas(
         "headroom": head,
         "lead": front,
         "facing": facing,
-        "key_rgb": list(key),
+        "key_rgb": list(fill),
+        "corner_rgb": list(corner),
+        **key_report,
         "why": profile.why,
     }
     return canvas, report
@@ -139,12 +218,13 @@ def run_canvas(
     headroom: float | None,
     lead: float | None,
     report_path: Path | None,
+    key: str = "auto",
 ) -> dict[str, Any]:
     still = still.expanduser().resolve()
     if not still.is_file():
         raise SystemExit(f"video-canvas: still not found: {still}")
     profile = profile_for(state, shape)
-    canvas, report = pad_canvas(Image.open(still), profile, facing=facing, headroom=headroom, lead=lead)
+    canvas, report = pad_canvas(Image.open(still), profile, facing=facing, headroom=headroom, lead=lead, key=key)
     out = out.expanduser().resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(out.name + ".part")
@@ -164,6 +244,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--facing", choices=("right", "left"), default="right", help="which way the subject faces (wide canvases add room in front)")
     parser.add_argument("--headroom", type=float, help="tall: empty fraction above the subject (default from the profile)")
     parser.add_argument("--lead", type=float, help="wide: empty fraction in front of the subject (default from the profile)")
+    parser.add_argument("--key", choices=KEYS, default="auto", help="chroma key of the still (auto reads the corners; green/magenta are normalized to the exact key; white pads with the corner colour)")
     parser.add_argument("--report", type=Path, help="write the canvas report JSON here")
 
 
@@ -172,6 +253,7 @@ def run(**kwargs: object) -> int:
         Path(str(kwargs["still"])), Path(str(kwargs["out"])),
         state=kwargs.get("state"), shape=kwargs.get("shape"), facing=str(kwargs.get("facing") or "right"),  # type: ignore[arg-type]
         headroom=kwargs.get("headroom"), lead=kwargs.get("lead"), report_path=kwargs.get("report"),  # type: ignore[arg-type]
+        key=str(kwargs.get("key") or "auto"),
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
