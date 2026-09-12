@@ -2,6 +2,11 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## Unreleased (v2.1.2)
+
+- The flat-border colour that decides the painted key no longer has to balance its keyed channels. Grok paints `#FF00FF` as (216, 46, 147) / (225, 52, 155) / (236, 59, 161) — blue/red ≈ 0.68, under the 0.8 balance the interior family rule (`is_key_family`) demands — so `detect_background_key_rgb` fell back to the declared key and, at ~120 from pure magenta, the whole background survived (2026-09-11 rev3 objects). A border is already background evidence: the new border rule `is_border_key_candidate` (keyed channels lit, unkeyed channels dark and under 35 % of the brightest keyed one — a superset of `is_key_family`) is the one function `detect_background_key_rgb`, `cutout --key auto`, `video-canvas --key` and the `video-frames` residual/subject split classify the border with. The interior rule is unchanged; hot pink (250, 77, 150) and purple (213, 112, 246) inside the subject still survive.
+- The painted key's erase ball is bounded by the background it came from: it erases the pixels that carry the key's hue signature plus whatever inside the ball is 8-connected to them (the antialiased rim), not an isolated look-alike patch inside the subject — hot pink sits 46 from Grok's magenta and would otherwise have been cut out. The declared key's ball stays position-blind. The 96 radius is unchanged.
+
 ## v2.1.1 - Chroma keying follows the painted background
 
 - Chroma keying measures the key distance from the background colour the generator actually painted (detected from the flat borders, `detect_background_key_rgb`) as well as from the pure key, in `cutout`, `extract`, `slice-sheet` and `video-frames`. Image models paint `#00FF00` as (8, 162, 24) and darker; that colour sat on the 96 radius from pure green and keyed half-and-half pixel by pixel. The radius is unchanged. Reports carry `chroma_key_painted`. Documented cost: key-family dark subject colours are erased on darker painted backgrounds — choose the key away from the subject's hues.

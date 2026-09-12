@@ -82,6 +82,27 @@ a (8, 162, 24) green sat at distance 96.38 from pure green while (7, 163, 24) sa
 leftover background as a clipped subject. The report records `chroma_key_painted` per
 frame.
 
+**The border is classified by a looser rule than the interior** (2026-09-12). The
+detector's "hue family" test used to be `extract.is_key_family`, the interior rule, whose
+two-channel balance (the dimmer keyed channel ≥ 0.8 of the brighter) exists to keep hot
+pink (250, 77, 150) and purple (213, 112, 246) alive *inside* the subject. Grok paints
+`#FF00FF` as (216, 46, 147) / (225, 52, 155) — blue/red ≈ 0.68 — so that rule said "not
+the key" for a colour that filled the whole border, the detector fell back to the declared
+key, and at ~120 from pure magenta the entire background survived. A flat border is
+already evidence of *background*, so the border rule `extract.is_border_key_candidate`
+drops the balance and keeps the hue signature: every keyed channel lit (≥ 64), every
+unkeyed channel dark (< 64) and under 35 % of the brightest keyed channel. It is a
+superset of the interior rule (family ∪ signature), so nothing the old detector found is
+lost, and hot pink / purple fail it on a different axis (their green channel is lit). One
+function classifies the border everywhere — `detect_background_key_rgb`, `cutout --key
+auto`, `video-canvas --key` and the edge-contact split below. The interior rule is
+untouched. And because the painted colour's authority is border evidence, its erase ball
+is bounded by the background it came from: it erases the signature pixels plus whatever
+inside the ball is 8-connected to them (the antialiased rim, whose blend with a lit
+subject colour lifts the unkeyed channel over the bar), never an isolated look-alike patch
+inside the subject — hot pink sits 46 from Grok's magenta. The declared key's ball stays a
+colour ball, position-blind.
+
 Two consequences worth knowing. Dark outline halo (the antialiased blend between subject
 and a dark-painted key) is now erased with the background — on the three 2026-09-11
 walk clips that was outline pixels only (0 newly opaque, interior holes ≤ 7 px per
