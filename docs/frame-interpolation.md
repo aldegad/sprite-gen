@@ -29,17 +29,16 @@ clean discrete pixels. codex preserved identity best; grok drifted; RIFE smeared
 
 ## Auth prerequisites (applies to the curator Tween button too)
 
-Generation always runs on the **server machine's provider CLI** — the browser/webview
+Generation always runs through the **server machine's image provider** — the browser/webview
 never sees or carries any credential. The Tween button POSTs to the local curation
-server, which spawns `codex`/`grok` as a subprocess; those CLIs use their own
-machine-local OAuth sessions.
+server, which uses the shared image providers (Codex subprocess or direct Grok API) with their own
+machine-local credentials.
 
 - Required on the machine running the curation server / CLI:
   - `codex` CLI installed and logged in (ChatGPT OAuth) for `--provider codex`
-  - `grok` CLI installed and logged in (xAI OAuth) for `--provider grok`
-- Setup and provider topology: [`docs/gen.md`](gen.md) (the SKILL's
-  `required_bins` names both CLIs).
-- Not authenticated / CLI missing → the provider fails loudly and the message
+  - a valid Grok login or `XAI_API_KEY` for `--provider grok` (see [gen](gen.md))
+- Setup and provider topology: [`docs/gen.md`](gen.md).
+- Not authenticated / required Codex CLI missing → the provider fails loudly and the message
   surfaces as-is (CLI stderr / curator status bar). No silent fallback between
   providers.
 

@@ -5,8 +5,8 @@
 `sprite-gen video` animates one still into a short mp4 through **Grok Imagine**
 (xAI `POST /v1/videos/generations`). It is the video counterpart of
 [`sprite-gen gen`](gen.md): one call = one still (+ prompt) → one **verified** mp4
-on disk plus a machine-readable report. The `grok-imagine-video` skill is a thin
-shuttle over this command.
+on disk plus a machine-readable report. The sprite-gen skill routes standalone
+video requests here from any agent engine.
 
 No credential is shipped with this repository. You bring your own, in one of two
 forms, and every run reports which one it used.
@@ -41,7 +41,7 @@ Why not refresh it here: `auth.json` is the grok CLI's file, the refresh token i
 it may rotate, and a second writer would break the login the user relies on
 everywhere else. The same shape as `sprite-gen gen`'s `codex login status` gate.
 
-### Why the direct API call and not Grok Build's `image_to_video` tool
+### Direct API transport
 
 Grok Build's built-in `image_to_video` tool posts without `output.upload_url`, and
 on Zero-Data-Retention teams the API answers `HTTP 400 — Zero Data Retention teams

@@ -6,7 +6,7 @@ import shutil
 import subprocess
 
 from sprite_gen.gen.base import provider_binary, provider_subprocess_env
-from sprite_gen.gen.video import AUTH_SOURCE_API_KEY, resolve_credential
+from sprite_gen.gen.xai import AUTH_SOURCE_API_KEY, resolve_credential
 
 
 def probe_access(provider: str, *, video: bool = False) -> dict:
@@ -29,15 +29,12 @@ def probe_access(provider: str, *, video: bool = False) -> dict:
         return {**result, "login": "ready"}
     if provider != "grok":
         raise ValueError(f"unknown provider: {provider}")
-    if not video and shutil.which("grok") is None:
-        return {**result, "login": "unavailable", "reason": "grok CLI is not installed"}
     try:
-        # Image generation uses CLI login. Video may instead use the configured
-        # API key; the existing video resolver alone owns that precedence.
-        credential = resolve_credential(env=None if video else {})
+        # Images and videos use the same direct API credential precedence.
+        credential = resolve_credential()
     except (SystemExit, OSError, ValueError):
         return {**result, "login": "unavailable", "reason": "grok credential missing, expired or unreadable; check grok login"}
     if credential.source == AUTH_SOURCE_API_KEY:
         return {**result, "login": "ready", "billing": "api-credit",
-                "reason": "Video will use XAI_API_KEY and separate API credit; confirm this billing choice."}
+                "reason": "Grok media will use XAI_API_KEY and separate API credit; confirm this billing choice."}
     return {**result, "login": "ready"}

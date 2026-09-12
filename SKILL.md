@@ -1,14 +1,12 @@
 ---
 name: sprite-gen
-version: 2.1.1
-description: "Generates images and game sprites through GPT or Grok with guided provider choices, separate saved defaults, automatic cleanup and optional curation. Handles sprite requests, ordinary image generation/editing, chroma removal, animation atlases, video loops, 큐레이션뷰, image candidates, 팔레트 스왑, palette swap, recolor, rig layers and engine exports."
+version: 2.2.0
+description: "Generates images and game sprites through GPT or Grok with guided provider choices, separate saved defaults, automatic cleanup and optional curation. Handles sprite requests, ordinary image generation/editing, standalone image-to-video clips (i2v, animate this still, 그록 영상, 이매진 비디오, 스틸 움직여줘), chroma removal, animation atlases, video loops, 큐레이션뷰, image candidates, 팔레트 스왑, palette swap, recolor, rig layers and engine exports."
 license: Apache-2.0
 depends_on:
   required_bins:
     - name: codex
       why: "gen --provider codex (image_gen via ChatGPT OAuth)"
-    - name: grok
-      why: "gen --provider grok (Imagine via xAI OAuth)"
     - name: ffmpeg
       why: "video-frames (clip -> frames) and video-set"
     - name: img2webp
@@ -44,9 +42,13 @@ modes:
 
 # Sprite Gen
 
-Two user entry points: **make sprites** or **make an image**. Existing generation, extraction and export tools do the work; the user chooses the result and provider.
+Three user entry points: **make sprites**, **make an image**, or **animate a still into a video**. Existing generation, extraction and export tools do the work; the user chooses the result and provider.
 
 ## Start every generation request here
+
+For a standalone video clip, read [video](docs/video.md) and use `sprite-gen video`.
+This route works from any agent engine and delivers a verified MP4 plus report.
+For sprites or ordinary images, use the guides below.
 
 Read [user-workflow](docs/user-workflow.md), then run the appropriate read-only guide:
 
@@ -62,6 +64,7 @@ Pass choices already stated in the request. The guide checks access, combines ex
 | Task | Entry | Contract |
 |---|---|---|
 | GPT image sprites | `prepare`, `gen-set --provider codex`, `extract`, compose and QA | [atlas-workflow](docs/atlas-workflow.md) |
+| Standalone video / animate a still | `video` | [video](docs/video.md) |
 | Grok video sprites | `video-set` | [video-pipeline](docs/video-pipeline.md) |
 | Ordinary image or edit | `gen --provider codex` or `gen --provider grok` | [gen](docs/gen.md) |
 | Base and direction anchors | `anchor` | [directional-anchor-workflow](docs/directional-anchor-workflow.md) |

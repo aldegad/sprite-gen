@@ -71,8 +71,7 @@ def test_provider_binary_resolves_windows_style_path_shims(monkeypatch) -> None:
 
 
 def test_provider_run_uses_scrubbed_env(tmp_path: Path, monkeypatch) -> None:
-    # Both providers must route their subprocess.run through the scrubbed env.
-    import sprite_gen.gen.grok_provider as grok_provider
+    # Codex remains the subprocess provider; Grok now calls the API directly.
 
     monkeypatch.setenv("CODEX_HOME", str(tmp_path))
     seen: dict[str, dict | None] = {}
@@ -107,36 +106,11 @@ def test_provider_run_uses_scrubbed_env(tmp_path: Path, monkeypatch) -> None:
     assert "ORCHESTRATOR_RUNTIME_ENDPOINT_ID" not in seen["codex"]
     assert seen["codex_encoding"] == "utf-8"
 
-    grok_raw = tmp_path / "grok_raw.png"
-
-    def _fake_grok_run(cmd, **kwargs):
-        seen["grok"] = kwargs.get("env")
-        seen["grok_cmd"] = cmd
-        seen["grok_encoding"] = kwargs.get("encoding")
-        # grok's truth is the PNG on disk — write one so verify_png passes.
-        Image.new("RGBA", (8, 8), (255, 0, 255, 255)).save(grok_raw)
-        class _C:
-            returncode = 0
-            stdout = str(grok_raw)
-            stderr = ""
-        return _C()
-
-    monkeypatch.setattr(grok_provider.subprocess, "run", _fake_grok_run)
-    grok_provider.GrokProvider().generate(
-        GenRequest(prompt="a mushroom", raw=grok_raw), tmp_path
-    )
-    assert seen["grok"] is not None
-    assert "ORCHESTRATOR_RUNTIME_ENDPOINT_ID" not in seen["grok"]
-    assert seen["grok_encoding"] == "utf-8"
-
 
 def test_provider_commands_use_the_single_resolved_binary(tmp_path: Path, monkeypatch) -> None:
-    import sprite_gen.gen.grok_provider as grok_provider
-
     monkeypatch.setenv("CODEX_HOME", str(tmp_path))
     seen: dict[str, list[str]] = {}
     monkeypatch.setattr(codex_provider, "provider_binary", lambda _name: "C:/bin/codex.CMD")
-    monkeypatch.setattr(grok_provider, "provider_binary", lambda _name: "C:/bin/grok.CMD")
 
     class _CodexCompleted:
         returncode = 0
@@ -158,22 +132,7 @@ def test_provider_commands_use_the_single_resolved_binary(tmp_path: Path, monkey
         GenRequest(prompt="도구", raw=tmp_path / "codex.png"), tmp_path
     )
 
-    grok_out = tmp_path / "grok.png"
-
-    class _GrokCompleted:
-        returncode = 0
-        stdout = "ok"
-        stderr = ""
-
-    def fake_grok(cmd, **_kwargs):
-        seen["grok"] = cmd
-        Image.new("RGBA", (2, 2), (1, 2, 3, 255)).save(grok_out)
-        return _GrokCompleted()
-
-    monkeypatch.setattr(grok_provider.subprocess, "run", fake_grok)
-    grok_provider.GrokProvider().generate(GenRequest(prompt="도구", raw=grok_out), tmp_path)
     assert seen["codex"][0] == "C:/bin/codex.CMD"
-    assert seen["grok"][0] == "C:/bin/grok.CMD"
 
 
 def test_json_report_writes_utf8_bytes_without_reconfiguring_stdout(monkeypatch) -> None:
@@ -402,19 +361,6 @@ def test_codex_prompt_reaches_the_child_process(tmp_path: Path, monkeypatch) -> 
 
     assert seen["input"].startswith("$imagegen ")
     assert "a mushroom" in seen["input"]
-
-
-def test_grok_prompt_switches_on_refs(tmp_path: Path) -> None:
-    from sprite_gen.gen import grok_provider
-
-    raw = tmp_path / "raw.png"
-    no_ref = grok_provider._build_prompt(GenRequest(prompt="a red apple", raw=raw, aspect_ratio="1:1"))
-    assert "image_gen" in no_ref and "1:1" in no_ref and str(raw) in no_ref
-
-    ref = tmp_path / "ref.png"
-    ref.write_bytes(_png_bytes())
-    with_ref = grok_provider._build_prompt(GenRequest(prompt="same char waving", raw=raw, refs=[ref]))
-    assert "image_edit" in with_ref and str(ref.resolve()) in with_ref
 
 
 def test_chroma_key_transparent_clears_magenta(tmp_path: Path) -> None:
@@ -722,11 +668,11 @@ def test_real_providers_declare_their_transparency_strategy() -> None:
     assert grok_provider.GrokProvider.transparency == gen_base.TRANSPARENCY_CHROMA
 
 
-def test_grok_refuses_a_native_alpha_request_before_spawning(tmp_path: Path, monkeypatch) -> None:
+def test_grok_refuses_a_native_alpha_request_before_upload(tmp_path: Path, monkeypatch) -> None:
     from sprite_gen.gen import grok_provider
 
     spawned: list = []
-    monkeypatch.setattr(grok_provider.subprocess, "run", lambda *a, **k: spawned.append(a))
+    monkeypatch.setattr(grok_provider.xai, "http_json", lambda *a, **k: spawned.append(a))
     with pytest.raises(SystemExit, match="cannot return an alpha channel"):
         grok_provider.GrokProvider().generate(
             GenRequest(prompt="x", raw=tmp_path / "raw.png", native_alpha=True), tmp_path

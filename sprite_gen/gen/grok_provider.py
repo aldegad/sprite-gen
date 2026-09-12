@@ -1,122 +1,109 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Grok Imagine provider (xAI OAuth, no API key).
-
-grok build ships an Imagine skill with `image_gen` (text -> new image) and
-`image_edit` (edit an existing image). Unlike codex, grok's tool result is not
-inline base64 — grok (the agent) holds the produced file and can move it. We run
-grok headless with `--always-approve` (media/shell must be auto-approved; plain
-`--write`/acceptEdits blocks tool execution and returns an empty answer) and
-instruct it to write the final PNG to an exact absolute path. Truth is the PNG on
-disk at that path, never grok's text (No Silent Fallback).
-
-Model note: image tools route to the grok-build model, which 400s on
-`reasoningEffort` — so this provider never passes `--effort`.
-"""
-
+"""Direct Grok Imagine image generation/editing, with no Grok Build process."""
 from __future__ import annotations
 
-import subprocess
+import base64
+import binascii
+import io
+import os
+import tempfile
 import time
 from pathlib import Path
 
-from .base import (
-    GEN_TIMEOUT_SECONDS,
-    TRANSPARENCY_CHROMA,
-    GenRequest,
-    GenTimeoutError,
-    ProviderRun,
-    provider_binary,
-    provider_subprocess_env,
-    verify_png,
-)
+from PIL import Image, UnidentifiedImageError
+
+from . import xai
+from .base import GEN_TIMEOUT_SECONDS, TRANSPARENCY_CHROMA, GenRequest, ProviderRun, verify_png
+
+DEFAULT_MODEL = "grok-imagine-image-2.0"
+MAX_REFS = 5
+ASPECT_RATIOS = ("auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3",
+                 "2:1", "1:2", "19.5:9", "9:19.5", "20:9", "9:20", "21:9", "5:2")
 
 
-def _build_prompt(request: GenRequest) -> str:
-    raw = str(request.raw)
-    aspect = request.aspect_ratio or "auto"
-    lines = [
-        "You are generating exactly one image, then saving it. Do only this:",
-        "",
-    ]
+def _reference(path: Path) -> dict:
+    try:
+        data = path.read_bytes()
+        with Image.open(io.BytesIO(data)) as source:
+            source.load()
+            mime = Image.MIME.get(source.format)
+        if mime not in ("image/png", "image/jpeg", "image/webp"):
+            raise ValueError("reference must be PNG, JPEG or WebP")
+    except (OSError, ValueError, UnidentifiedImageError) as exc:
+        raise SystemExit(f"grok-gen: invalid reference image {path}") from exc
+    return {"type": "image_url", "url": f"data:{mime};base64," + base64.b64encode(data).decode("ascii")}
+
+
+def _request_body(request: GenRequest) -> tuple[str, dict]:
+    if not request.prompt.strip():
+        raise SystemExit("grok-gen: empty prompt")
+    if len(request.refs) > MAX_REFS:
+        raise SystemExit(f"grok-gen: at most {MAX_REFS} reference images are supported")
+    if request.aspect_ratio is not None and request.aspect_ratio not in ASPECT_RATIOS:
+        raise SystemExit(f"grok-gen: unsupported aspect ratio {request.aspect_ratio!r}")
+    body = {"model": request.model or DEFAULT_MODEL, "prompt": request.prompt,
+            "n": 1, "response_format": "b64_json"}
+    if request.aspect_ratio and len(request.refs) != 1:
+        body["aspect_ratio"] = request.aspect_ratio
     if request.refs:
-        ref_list = ", ".join(str(Path(r).expanduser().resolve()) for r in request.refs)
-        lines += [
-            f"1. Call `image_edit` once using these source image(s) as reference: {ref_list}",
-            "   Apply this instruction while keeping the referenced subject/style consistent:",
-            f"   {request.prompt}",
-        ]
-    else:
-        lines += [
-            f"1. Call `image_gen` once with aspect_ratio `{aspect}` and this prompt:",
-            f"   {request.prompt}",
-        ]
-    lines += [
-        f"2. Save the produced image to EXACTLY this absolute path as a PNG file: {raw}",
-        "   Overwrite it if it already exists. Use the shell to copy/convert the produced",
-        "   file to that path if the tool wrote it elsewhere. Do not resize or restyle it.",
-        f"3. Print only the final absolute path ({raw}). Do not do anything else — no extra",
-        "   images, no edits, no commentary, no other files.",
-    ]
-    return "\n".join(lines)
+        images = [_reference(Path(ref)) for ref in request.refs]
+        if len(images) == 1:
+            body["image"] = images[0]
+        else:
+            body["images"] = images
+        return "/images/edits", body
+    return "/images/generations", body
+
+
+def _publish_image(item: dict, path: Path) -> None:
+    # Inline bytes avoid signed download URLs and bearer forwarding.
+    encoded = item.get("b64_json")
+    if not isinstance(encoded, str) or not encoded:
+        raise SystemExit("grok-gen: response has no b64_json image; nothing published")
+    try:
+        data = base64.b64decode(encoded, validate=True)
+        with Image.open(io.BytesIO(data)) as source:
+            source.load()
+            # Imagine may return JPEG. Encode a real PNG without resizing.
+            png = io.BytesIO()
+            source.convert("RGBA" if "A" in source.getbands() else "RGB").save(png, format="PNG")
+    except (ValueError, binascii.Error, OSError, UnidentifiedImageError) as exc:
+        raise SystemExit("grok-gen: response image is invalid; nothing published") from exc
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".png", delete=False) as tmp:
+        temp = Path(tmp.name)
+    try:
+        temp.write_bytes(png.getvalue())
+        verify_png(temp)
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 class GrokProvider:
-    """Generate one image through grok Imagine `image_gen` / `image_edit`."""
-
     name = "grok"
-    # Grok Imagine Image 2.0 returns image/jpeg from both the API and the CLI
-    # tools (2026-09-08 실측, 4/4 drawn checkerboards) — no alpha path exists.
     transparency = TRANSPARENCY_CHROMA
 
     def generate(self, request: GenRequest, workdir: Path) -> ProviderRun:
         if request.native_alpha:
-            raise SystemExit(
-                "grok-gen: native alpha was requested but grok Imagine cannot return an "
-                f"alpha channel (transparency strategy is {self.transparency!r}); "
-                "generate on a chroma key instead"
-            )
-        request.raw.parent.mkdir(parents=True, exist_ok=True)
-        cmd = [
-            provider_binary("grok"),
-            "-p",
-            _build_prompt(request),
-            "--output-format",
-            "plain",
-            "--sandbox",
-            "workspace",
-            "--always-approve",
-            "--cwd",
-            str(workdir),
-        ]
-        if request.model:
-            cmd += ["-m", request.model]
-
+            raise SystemExit("grok-gen: grok Imagine cannot return an alpha channel; generate on a chroma key instead")
+        endpoint, body = _request_body(request)
+        credential = xai.resolve_credential()
         started = time.monotonic()
-        # env: parent minus orchestrator session env — same reason as codex
-        # (base.provider_subprocess_env). grok hooks are off today, but a headless
-        # generation subprocess must never carry the parent worker's endpoint
-        # identity regardless of the engine's current hook config.
-        try:
-            completed = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                                       env=provider_subprocess_env(), timeout=GEN_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired:
-            raise GenTimeoutError(
-                f"grok-gen: no completion within {GEN_TIMEOUT_SECONDS}s — "
-                "provider stream stalled; child killed (gen-timeout)")
-        elapsed = time.monotonic() - started
-        if completed.returncode != 0:
-            tail = (completed.stderr or "").strip().splitlines()[-20:]
-            raise SystemExit(
-                f"grok-gen: grok exited {completed.returncode} (empty answer + non-zero = blocked exec or login).\n"
-                + "\n".join(tail)
-            )
-        # Verify the real file grok wrote, not its text. Missing/not-a-PNG fails loudly.
-        verify_png(request.raw)
-
-        return ProviderRun(
-            provider=self.name,
-            elapsed_seconds=elapsed,
-            model=request.model,
-            session_id=None,
-            extra={"stdout_tail": "\n".join((completed.stdout or "").strip().splitlines()[-5:])},
-        )
+        status, reply = xai.http_json("POST", xai.API_BASE + endpoint, credential.token,
+                                      body, timeout=GEN_TIMEOUT_SECONDS)
+        if status in (401, 403):
+            remedy = (f"run `{xai.GROK_LOGIN_COMMAND}` to renew the login" if credential.source == xai.AUTH_SOURCE_GROK_LOGIN
+                      else f"check {xai.AUTH_ENV}")
+            raise SystemExit(f"grok-gen: credential {credential.source} rejected (HTTP {status}); {remedy}")
+        # Error bodies can include prompts, credentials or URLs; do not echo them.
+        if status != 200:
+            raise SystemExit(f"grok-gen: image request failed (HTTP {status}); no retry or provider fallback")
+        items = reply.get("data") if isinstance(reply, dict) else None
+        if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+            raise SystemExit("grok-gen: expected exactly one image in the response; nothing published")
+        _publish_image(items[0], request.raw)
+        return ProviderRun(provider=self.name, elapsed_seconds=time.monotonic() - started,
+                           model=body["model"], extra={"auth_source": credential.source,
+                           "transport": "xai-api", "endpoint": endpoint,
+                           "aspect_ratio_source": "reference" if len(request.refs) == 1 else "request-or-auto"})
