@@ -18,10 +18,13 @@ forms, and every run reports which one it used.
 | `grok-login` (default) | the `grok` CLI signed in once | your SuperGrok **Imagine quota** (no console spend) | install the grok CLI, run `grok login` (`--oauth` for a browser, `--device-auth` for a headless box). It writes `~/.grok/auth.json`; this tool only reads it. |
 | `XAI_API_KEY` | an xAI console API key | console credit | `export XAI_API_KEY=xai-…` |
 
-Resolution order is fixed: **`XAI_API_KEY` wins when set**, otherwise the grok
-login file (`GROK_HOME` relocates `~/.grok`). Neither is a fallback for the other —
-a set-but-empty `XAI_API_KEY` is an error, and with no key and no login the run
-stops with both setup paths spelled out.
+Resolution order is fixed for both images and videos: **the Grok subscription
+login wins**, even when `XAI_API_KEY` is set. `GROK_HOME` relocates `~/.grok`.
+Only when no login file exists can the configured API key use console credits.
+An expired, unreadable, corrupt or API-rejected login stops the request; it never
+switches to API credit. An empty API key is ignored when the login is usable,
+but is an error when no login exists. With neither credential, the run stops
+with both setup paths spelled out.
 
 ### The login token expires — and this tool does not refresh it
 
@@ -32,7 +35,7 @@ it has passed, the run fails with the refresh prescription instead of gambling o
 a 403 mid-upload:
 
 ```
-video: the grok login token expired at 2026-09-08T10:56:34Z (now …); nothing was uploaded.
+xai: the grok login token expired at 2026-09-08T10:56:34Z (now …); nothing was uploaded.
   refresh it with any grok CLI command that reaches the API, e.g. `grok -p ok --output-format plain`,
   or sign in again with `grok login`. This tool never rewrites ~/.grok/auth.json itself.
 ```

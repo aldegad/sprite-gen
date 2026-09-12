@@ -52,8 +52,9 @@ The default is `grok-imagine-image-2.0`. `--model` selects an **image API model*
 not a Grok Build reasoning model.
 
 Image and video calls share `sprite_gen/gen/xai.py` for credentials and JSON
-transport. `XAI_API_KEY` takes precedence (console credits); otherwise the
-user's Grok login is read from `GROK_HOME` or `~/.grok`. See
+transport. The user's Grok subscription login (`GROK_HOME` or `~/.grok`) takes
+precedence even when `XAI_API_KEY` is set. Only an absent login file permits the
+API key (console credits); an invalid, expired or rejected login never does. See
 [authentication and expiry](video.md#setup--pick-one-credential)
 for setup. No Grok executable is needed during generation with a valid credential.
 No agent, credential fallback or automatic retry is started on failure.
