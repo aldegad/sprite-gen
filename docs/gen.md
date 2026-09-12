@@ -265,6 +265,27 @@ exactly that, rather than falling back on its own.
   measured `elapsed_seconds`), `reported_paths`, `recovered_from`,
   `chroma_key_requested` and `refs`. The matte's own stats land in the standard `chroma`
   block (`key`, `keyed_pixels`, `fringe_pixels`, `alpha_zero_pct`), exactly as for grok.
+- **Not usable for multi-pose row generation — `gen-set` and `reroll` exclude it.**
+  Measured 2026-09-12 on a 4-pose walk-cycle prompt shaped like the ones `prepare.py`
+  writes (distinct gait poses, one identity, no grid or labels, flat chroma backdrop):
+  the turn **never finished**. It hit agy's own 5-minute `--print-timeout` still in
+  progress, burned **~240k tokens** (218k input via cache, 21k output, 9.8k thinking),
+  and returned `status: "SUCCESS"` with an **empty response and no file written
+  anywhere**. Single-subject prompts on the same machine finish in ~27-65 s.
+  The gap looks structural rather than one of degree: `codex image_gen` and grok
+  Imagine are single-shot image models doing one inference at exactly this
+  composition task, while agy is an agent that deliberates and iterates — the same
+  unpredictability class as the unasked-for `rembg` run below.
+  The adapter handled it correctly (no file → no recoverable candidate → loud
+  `SystemExit`, never a false success), so the exclusion is about not spending five
+  minutes and a quarter of a million tokens to reach a guaranteed failure, not about
+  safety. `agy` therefore stays fully available on **`gen`** (one image per call,
+  verified solid) and on **`interpolate`** (its prompt asks for "exactly ONE full-body
+  pose"), and is refused by **`gen-set`** and **`reroll`**, which regenerate a whole
+  row from one `prompts/<state>.txt`. The split lives in `sprite_gen.gen.ROW_PROVIDERS`.
+  **Not proven unfixable** — exactly one prompt shape was tried and no variations were
+  attempted. Widen it only on the strength of a run that actually produced a usable
+  row.
 - **Security note — the background rule is a soft, unenforced control.** Worth being
   blunt about, because the rest of this section reads like a guarantee and it is not
   one. The anti-self-matting instruction is *prose in a prompt*. Nothing sandboxes or

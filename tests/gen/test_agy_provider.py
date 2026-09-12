@@ -546,3 +546,65 @@ def test_recovery_still_works_for_a_file_inside_the_workspace(tmp_path, spawn) -
     run = agy.AgyProvider().generate(GenRequest(prompt="p", raw=raw), work)
     assert raw.read_bytes() == _png_bytes()
     assert run.extra["recovered_from"]
+
+
+# --- row capability: agy is a single-image provider, not a row provider -------
+
+
+def _argparse_choices(add_arguments, flag: str = "--provider"):
+    """The literal `choices=` a command declares for `--provider`."""
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    add_arguments(parser)
+    action = next(a for a in parser._actions if flag in a.option_strings)
+    return tuple(action.choices)
+
+
+def test_agy_is_a_provider_but_not_a_row_provider() -> None:
+    assert "agy" in gen.PROVIDERS
+    assert "agy" not in gen.ROW_PROVIDERS
+    assert gen.ROW_PROVIDERS == ("codex", "grok")
+
+
+def test_the_standalone_gen_command_still_accepts_agy() -> None:
+    """agy is verified solid for one image per call — it must stay selectable here."""
+    assert "agy" in _argparse_choices(gen.add_arguments)
+
+
+def test_gen_set_refuses_agy_because_a_row_is_multi_pose() -> None:
+    """Regression guard: 2026-09-12 실측 — a 4-pose prompt hit agy's own 5-minute
+    timeout unfinished, spent ~240k tokens and wrote no file. Nothing may silently
+    re-widen this without a fresh measurement."""
+    from sprite_gen.gen import gen_set
+
+    choices = _argparse_choices(gen_set.add_arguments)
+    assert "agy" not in choices
+    assert "codex" in choices and "grok" in choices
+
+
+def test_reroll_refuses_agy_at_the_cli_and_in_the_function() -> None:
+    """reroll regenerates the whole row from the same `prompts/<state>.txt` as gen-set.
+
+    The function-level guard matters because the curation view (`serve_curation`)
+    calls `reroll_state` directly, never through argparse.
+    """
+    from sprite_gen.effects import reroll
+
+    parser = reroll._build_parser()
+    action = next(a for a in parser._actions if "--provider" in a.option_strings)
+    assert "agy" not in tuple(action.choices)
+
+    with pytest.raises(SystemExit, match="cannot generate a multi-pose row"):
+        reroll.reroll_state(Path("nonexistent-run"), "idle", provider="agy")
+
+
+def test_interpolate_keeps_agy_because_it_draws_one_pose() -> None:
+    """`gen_interpolator`'s prompt asks for "exactly ONE full-body pose" — the shape
+    agy is verified good at, so this call site is deliberately NOT restricted."""
+    from sprite_gen.effects import interpolate
+
+    assert "agy" in interpolate.PROVIDERS
+    parser = interpolate._build_parser()
+    action = next(a for a in parser._actions if "--provider" in a.option_strings)
+    assert "agy" in tuple(action.choices)

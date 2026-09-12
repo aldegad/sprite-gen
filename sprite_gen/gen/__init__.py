@@ -52,6 +52,36 @@ from .codex_provider import CodexProvider
 from .grok_provider import GrokProvider
 
 PROVIDERS = ("codex", "grok", "agy")
+
+# Providers able to compose a MULTI-POSE ROW (several distinct gait poses, one
+# identity, no grid/labels) in a single call. `PROVIDERS` answers "can this backend
+# make an image"; this answers "can it make a sprite row", and those are not the same
+# question — so `gen` and `interpolate` (one figure per call) take the full list while
+# `gen-set` and `reroll` (a whole row per call, from the same `prompts/<state>.txt`)
+# take this one.
+#
+# agy is excluded, measured 2026-09-12 on a 4-pose walk-cycle prompt shaped like the
+# ones `prepare.py` writes: the turn **never finished**. It hit agy's own 5-minute
+# `--print-timeout` still in progress, burned ~240k tokens (218k input via cache, 21k
+# output, 9.8k thinking), and returned `status: "SUCCESS"` with an EMPTY response and
+# no file written anywhere. Single-subject prompts on the same machine complete in
+# ~27-65 s. The gap is structural rather than one of degree: codex `image_gen` and
+# grok Imagine are single-shot image models doing one inference, while agy is an agent
+# that deliberates and iterates on a hard compositional prompt — the same
+# unpredictability class as the unasked-for rembg run, and not something this adapter
+# can bound from the outside.
+#
+# `agy_provider` handled that run correctly (no file -> no recoverable candidate ->
+# loud SystemExit, never a false success), so this exclusion is not a safety patch. It
+# exists so nobody spends five minutes and a quarter of a million tokens reaching a
+# guaranteed failure.
+#
+# NOT PROVEN UNFIXABLE: exactly one prompt shape was tried, and no prompt variations
+# were attempted. Widen this only on the strength of a run that actually produced a
+# usable row, not on the assumption that a rewording would.
+ROW_INCAPABLE_PROVIDERS = ("agy",)
+ROW_PROVIDERS = tuple(name for name in PROVIDERS if name not in ROW_INCAPABLE_PROVIDERS)
+
 # `--alpha-mode`: `auto` reads the provider's declared strategy (the SSoT);
 # `native` / `chroma` force one. Forcing `native` on a chroma-only provider fails
 # loud — a strategy the backend cannot execute is not a fallback candidate.

@@ -67,6 +67,18 @@ Decisive flags (each read off `agy --help`, 2026-09-12):
   skipped that setup stalls on the approval prompt and is killed by the timeout
   below, whose message says so.
 
+Capability limit — one image per call, not a sprite row:
+- A single-subject prompt completes reliably in ~27-65 s. A MULTI-POSE ROW prompt (the
+  shape `prepare.py` writes for `gen-set`/`reroll`: several distinct gait poses, one
+  identity, no grid or labels) did not complete at all — 2026-09-12 실측: agy's own
+  5-minute `--print-timeout` expired with the turn still in progress, ~240k tokens
+  spent (218k input via cache, 21k output, 9.8k thinking), `status: "SUCCESS"` with an
+  empty response and no file anywhere. This adapter refused it correctly (no
+  recoverable candidate -> SystemExit), but the capability is simply not there.
+- `sprite_gen.gen.ROW_PROVIDERS` therefore excludes agy, and `gen-set`/`reroll` take
+  that list while `gen`/`interpolate` (one figure per call) take the full `PROVIDERS`.
+  Only one prompt shape was tried, so treat this as unproven rather than impossible.
+
 Security posture — read this before trusting the instructions above:
 - **The anti-self-matting rule is prose, and prose is not enforcement.** "Do NOT run
   rembg, any background-removal, segmentation, matting or cutout tool" is a request in

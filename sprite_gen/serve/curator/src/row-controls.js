@@ -48,7 +48,8 @@ function makeRerollButton(stateName) {
   const pop = document.createElement("div");
   pop.className = "gen-pop";
   pop.hidden = true;
-  const providerSel = makeProviderSelect();
+  // 리롤 = 다중 포즈 행 한 장 재생성이라 행을 만들 수 있는 provider 만 (gen-trigger.js).
+  const providerSel = makeProviderSelect({ rowCapableOnly: true });
   pop.appendChild(providerSel);
   const go = document.createElement("button");
   go.type = "button";
