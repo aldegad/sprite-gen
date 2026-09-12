@@ -26,7 +26,7 @@ from typing import Any
 
 from sprite_gen.curate.anchor import identity_ref
 from sprite_gen.spec.runio import load_request, write_request
-from sprite_gen.gen import PROVIDERS, generate_image
+from sprite_gen.gen import ROW_PROVIDERS, generate_image
 from sprite_gen.spec.layout import guide_rel, prompt_rel, take_raw_rel
 
 
@@ -74,6 +74,18 @@ def reroll_state(run_dir: Path | str, state: str, provider: str = "codex",
     # 레거시 런에서 아래 `fit.pixel_unfake` 검사가 항상 False 가 되어, 언페이크가 켜진 런의
     # 리롤을 "켜져 있지 않다" 며 거부한다 (validator 검증 2026-07-26 R1 재현). 리롤은 뷰가 **별도
     # 서브프로세스**로 띄우므로 뷰 프로세스의 in-memory 이관도 여기로 넘어오지 않는다.
+    # 리롤은 `gen-set` 과 **같은 행 프롬프트**(`prompts/<state>.txt`) 로 다중 포즈 행 한 장을
+    # 통째로 다시 생성한다 — 프레임 한 장이 아니다. 따라서 행 생성이 불가능한 provider 는
+    # 여기서도 불가능하다 (agy: 4포즈 프롬프트가 자체 5분 타임아웃을 미완료로 넘기고 ~240k
+    # 토큰을 쓰고 파일을 하나도 남기지 않았다 — 2026-09-12 실측, 근거는 gen/__init__.py).
+    # argparse choices 밖에서도 막는 이유: 큐레이션 뷰(`serve_curation.run_reroll`)와 다른
+    # 파이썬 호출자는 CLI 를 거치지 않고 이 함수를 직접 부른다. 생성비를 쓰기 전에 막는다.
+    if provider not in ROW_PROVIDERS:
+        raise SystemExit(
+            f"reroll: provider {provider!r} cannot generate a multi-pose row "
+            f"(row-capable: {', '.join(ROW_PROVIDERS)}); reroll regenerates the whole "
+            "state row from its row prompt, not a single frame"
+        )
     request = load_request(run_dir)
     if state not in request.get("states", {}):
         raise SystemExit(f"unknown state: {state}")
@@ -107,8 +119,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--state", required=True)
-    parser.add_argument("--provider", choices=PROVIDERS, default="codex",
-                        help="생성 백엔드 (기본 codex)")
+    parser.add_argument("--provider", choices=ROW_PROVIDERS, default="codex",
+                        help="생성 백엔드 (기본 codex; 행 생성이라 agy 는 제외 — reroll_state 주석 참조)")
     parser.add_argument("--label", default=None, help="테이크 라벨 (기본 rerollN 자동 증가)")
     parser.add_argument("--extract", action="store_true",
                         help="기록 후 전체 배치 재추출까지 수행 (부분 추출은 팔레트 배치 결합 때문에 지원하지 않음)")

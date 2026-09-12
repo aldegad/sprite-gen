@@ -8,9 +8,13 @@ MOTION_METHODS = {
     "grok-video": {"label": "그록 영상", "provider": "grok", "doc": "docs/video-pipeline.md",
                    "steps": ["video-set"]},
 }
+# One label per provider, keyed by name — never zipped against PROVIDERS positionally.
+# `zip` truncates to the shorter side, so a newly registered provider with no label here
+# would have been dropped from the question silently; a dict lookup fails loudly instead.
+PROVIDER_LABELS = {"codex": "지피티", "grok": "그록", "agy": "안티그래비티"}
 FIELDS = {
-    "image_provider": {"options": dict(zip(PROVIDERS, ("지피티", "그록"))),
-                       "question": "이미지를 지피티로 만들까요, 그록으로 만들까요?"},
+    "image_provider": {"options": {name: PROVIDER_LABELS[name] for name in PROVIDERS},
+                       "question": "이미지를 지피티, 그록, 안티그래비티 중 무엇으로 만들까요?"},
     "motion_method": {"options": {k: v["label"] for k, v in MOTION_METHODS.items()},
                       "question": "동작을 그록 영상으로 만들까요, 지피티 이미지 스프라이트로 만들까요?"},
     "curation": {"options": {"open": "열기", "skip": "열지 않기"},

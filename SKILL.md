@@ -66,7 +66,7 @@ Pass choices already stated in the request. The guide checks access, combines ex
 | GPT image sprites | `prepare`, `gen-set --provider codex`, `extract`, compose and QA | [atlas-workflow](docs/atlas-workflow.md) |
 | Standalone video / animate a still | `video` | [video](docs/video.md) |
 | Grok video sprites | `video-set` | [video-pipeline](docs/video-pipeline.md) |
-| Ordinary image or edit | `gen --provider codex` or `gen --provider grok` | [gen](docs/gen.md) |
+| Ordinary image or edit | `gen --provider codex`, `--provider grok`, or `--provider agy` (optional, only if the Antigravity CLI is installed) | [gen](docs/gen.md) |
 | Base and direction anchors | `anchor` | [directional-anchor-workflow](docs/directional-anchor-workflow.md) |
 | Curation view or existing image candidates | `curation`, `unpack-atlas --pngs-dir` | [curation](docs/curation.md) |
 | Uniform background removal or imported sheets | `cutout`, `slice-sheet` | [sheet-slicing](docs/sheet-slicing.md) |

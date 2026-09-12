@@ -244,7 +244,12 @@ def run_set(
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run-dir", required=True, type=Path, help="a prepared run (sprite-request.json, prompts/, references/layout-guides/)")
     parser.add_argument("--states", help="comma list; default = every non-mirrored state in the request")
-    parser.add_argument("--provider", choices=("codex", "grok"), help="honoured verbatim; default resolves like `gen` (env > codex, observable failover)")
+    # ROW_PROVIDERS, not PROVIDERS: every item here is a whole multi-pose row generated
+    # from one `prompts/<state>.txt`, and agy could not produce one at all — 2026-09-12
+    # 실측, a 4-pose prompt hit agy's own 5-minute timeout unfinished, burned ~240k
+    # tokens and wrote no file. Sourced from the gen module so the row-capability list
+    # lives in exactly one place (see gen/__init__.py for the full measurement).
+    parser.add_argument("--provider", choices=gen_mod.ROW_PROVIDERS, help="honoured verbatim; default resolves like `gen` (env > codex, observable failover); row generation excludes agy")
     parser.add_argument("--model")
     parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY, help=f"rows generated at once (default {DEFAULT_CONCURRENCY})")
     parser.add_argument("--force", action="store_true", help="regenerate rows that already exist")

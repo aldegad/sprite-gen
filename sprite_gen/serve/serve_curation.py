@@ -63,6 +63,8 @@ from sprite_gen.frames.extract import heal_run, load_consistent_frames_manifest
 from sprite_gen.spec.layout import frames_dir_rel, raw_rel, row_frame_rel, row_orig_rel, state_frame_total
 from sprite_gen.spec.runio import load_request, publish_guard, read_guard, write_request
 from sprite_gen._modules import qualified
+from sprite_gen.gen import PROVIDERS as GEN_PROVIDERS
+from sprite_gen.gen import ROW_PROVIDERS as GEN_ROW_PROVIDERS
 
 # The SPA assets are package data (declared in pyproject's `package-data`), so the one
 # path that finds them is relative to this module — the same place in a repo checkout and
@@ -1496,7 +1498,9 @@ class CurationHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"t must be inside (0, 1): {t_value}"}, 400)
                     return
                 provider = str(payload.get("provider") or "codex")
-                if provider not in ("codex", "grok"):
+                # The accepted set is `sprite_gen.gen.PROVIDERS` (the SSoT) — a view
+                # button must not carry its own copy of the provider list.
+                if provider not in GEN_PROVIDERS:
                     self._send_json({"error": f"unknown provider: {provider}"}, 400)
                     return
                 result = run_interpolate(self.run_dir, state, index_a, index_b,
@@ -1511,8 +1515,12 @@ class CurationHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"unknown state: {state}"}, 400)
                     return
                 provider = str(payload.get("provider") or "codex")
-                if provider not in ("codex", "grok"):
-                    self._send_json({"error": f"unknown provider: {provider}"}, 400)
+                # Reroll regenerates a whole multi-pose ROW, so the accepted set is
+                # ROW_PROVIDERS, not PROVIDERS (agy cannot compose a row — see
+                # sprite_gen.gen). `reroll_state` re-checks; this just answers 400
+                # instead of 500 and never starts the subprocess.
+                if provider not in GEN_ROW_PROVIDERS:
+                    self._send_json({"error": f"provider cannot generate a row: {provider}"}, 400)
                     return
                 result = run_reroll(self.run_dir, state, provider)
                 self._send_json(result, 200 if result["ok"] else 500)
