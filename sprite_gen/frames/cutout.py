@@ -112,15 +112,16 @@ def _corner_average(image: Image.Image) -> tuple[int, int, int]:
 def _detect_key_kind(color: tuple[int, int, int]) -> str:
     """Classify a corner background colour into a route: magenta | green | white.
 
-    Saturated magenta/green keys — at whatever brightness the model painted
-    them (`extract.is_key_family`, the same rule the engine keys with) — route
-    to the extract engine; everything else (bright achromatic ivory/white, or
-    any low-saturation background) routes to the position-based matte.
+    Saturated magenta/green keys — at whatever brightness or balance the model
+    painted them (`extract.is_border_key_candidate`, the border rule the engine's
+    detector shares: a corner colour is background evidence) — route to the
+    extract engine; everything else (bright achromatic ivory/white, or any
+    low-saturation background) routes to the position-based matte.
     """
-    from sprite_gen.frames.extract import is_key_family
+    from sprite_gen.frames.extract import is_border_key_candidate
 
     for kind, target in KEY_TARGETS.items():
-        if is_key_family(color, target):
+        if is_border_key_candidate(color, target):
             return kind
     return "white"
 

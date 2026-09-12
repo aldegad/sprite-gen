@@ -14,7 +14,7 @@ extended without guessing.
 
 Image models paint "#00FF00" a little differently every time ((8, 166, 25) on
 2026-09-11), and the video model reproduces the input colour almost exactly. So
-when the corners are a green/magenta key at *any* brightness, the flat
+when the corners are a green/magenta key at *any* brightness or balance, the flat
 background is repainted to the exact declared key here — the pixels the
 `cutout` chroma matte erases become the pure key, the subject is untouched —
 and the padding uses that same pure key. A white/ivory base is padded with its
@@ -33,7 +33,7 @@ from PIL import Image
 
 from sprite_gen._deps import np
 from sprite_gen.frames.cutout import KEY_TARGETS, extract_route
-from sprite_gen.frames.extract import is_key_family
+from sprite_gen.frames.extract import is_border_key_candidate
 from sprite_gen.spec.runio import atomic_write_text
 
 SHAPE_SQUARE = "square"
@@ -96,8 +96,9 @@ def corner_key(image: Image.Image) -> tuple[int, int, int]:
 def resolve_key(corner: tuple[int, int, int], key: str) -> str | None:
     """Which chroma key the still is on: `green` | `magenta`, or None for a non-key (white/ivory) base.
 
-    `auto` classifies the flat corner colour with the engine's own family rule
-    (`is_key_family` — the key's hue at any brightness). An explicit green/magenta
+    `auto` classifies the flat corner colour with the engine's own border rule
+    (`is_border_key_candidate` — the key's hue signature at any brightness or
+    balance; a flat corner is background evidence). An explicit green/magenta
     that the corners are not is refused rather than repainted blindly.
     """
     if key not in KEYS:
@@ -106,10 +107,10 @@ def resolve_key(corner: tuple[int, int, int], key: str) -> str | None:
         return None
     if key == "auto":
         for kind, target in KEY_TARGETS.items():
-            if is_key_family(corner, target):
+            if is_border_key_candidate(corner, target):
                 return kind
         return None
-    if not is_key_family(corner, KEY_TARGETS[key]):
+    if not is_border_key_candidate(corner, KEY_TARGETS[key]):
         raise SystemExit(
             f"video-canvas: --key {key} but the still's corners are {corner}, not a {key} key family colour; "
             "pass --key auto to let the corners decide or --key white for a non-chroma base"
