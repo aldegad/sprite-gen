@@ -38,16 +38,12 @@ a package that arrives only because some other dependency pulls it in can leave
 on the next clean environment, and this package's own code must not be at the
 mercy of another package's dependency list.
 
-NumPy was cleared through the advisory gate above before it was declared, and
-every version that `numpy>=2.2.6,<3` resolves to on a supported interpreter
-carries a live approval: 2.2.6 on CPython 3.10, 2.4.6 on 3.11, and 2.5.1 on 3.12
-and later.
-
-Pillow is a separate matter and predates this section, so this document does not
-claim it is cleared. Its ledger approval for 12.2.0 is recorded as revoked, and
-12.3.0 — the version `pillow>=12.0,<13` actually resolves to today — has no
-ledger entry at all. The declared Pillow range is therefore not covered by a
-live approval. Closing that gap is tracked separately and is not resolved here.
+Pillow requires `>=12.3.0,<13`, which excludes versions affected by the
+security issues fixed in the [Pillow 12.3.0 release](https://pillow.readthedocs.io/en/stable/releasenotes/12.3.0.html).
+NumPy requires `>=2.2.6,<3` to retain CPython 3.10 compatibility. A version floor
+does not guarantee future advisory coverage: audit the exact versions resolved
+for each supported interpreter when releasing, and audit existing environments
+separately. Changing package metadata does not upgrade an already installed venv.
 
 A pure-Python fallback for a missing NumPy is not permitted. The extraction path
 carries a byte-identity contract, and a second code path for the same contract

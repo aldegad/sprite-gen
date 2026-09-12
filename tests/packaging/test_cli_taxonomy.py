@@ -40,26 +40,26 @@ def test_help_lists_each_verb_once_under_its_domain() -> None:
         assert f"[{domain}]" in out
         for verb in verbs:
             assert len(re.findall(rf"(?m)^\s+{re.escape(verb)}\s{{2,}}", out)) == 1, verb
-    for pipe in _modules.PIPELINES:
+    for pipe in (*_modules.PIPELINES, *_modules.TOOL_GROUPS, *_modules.WORKFLOWS):
         assert f"{pipe['key']}  {pipe['name']}" in out and str(pipe["doc"]) in out
 
 
-def test_pipeline_catalog_names_real_verbs_and_docs() -> None:
-    """Validator finding 2026-09-09: the pipeline list was a hand-written tuple in cli.py.
-    It is now a catalog in _modules; every verb it names is a real verb, every doc exists,
-    and both README pipeline tables mention each pipeline's doc."""
+def test_catalog_names_real_verbs_and_docs() -> None:
+    """Ordered pipelines, tool groups and optional workflows have distinct catalogs."""
     from pathlib import Path
 
     root = Path(cli.__file__).resolve().parents[1]
-    keys = [p["key"] for p in _modules.PIPELINES]
-    assert keys == ["A", "B", "C", "D"]
-    for pipe in _modules.PIPELINES:
+    assert [p["key"] for p in _modules.PIPELINES] == ["A", "B"]
+    assert [p["key"] for p in _modules.TOOL_GROUPS] == ["C", "D", "E"]
+    assert [p["key"] for p in _modules.WORKFLOWS] == ["S"]
+    catalog = [*_modules.PIPELINES, *_modules.TOOL_GROUPS, *_modules.WORKFLOWS]
+    for pipe in catalog:
         for verb in pipe["verbs"]:
             assert verb in cli.COMMANDS, (pipe["key"], verb)
         assert (root / str(pipe["doc"])).is_file(), pipe["doc"]
     index = (root / "docs" / "README.md").read_text(encoding="utf-8")
     readme = (root / "README.md").read_text(encoding="utf-8")
-    for pipe in _modules.PIPELINES:
+    for pipe in catalog:
         doc_name = str(pipe["doc"]).split("/")[-1]
         row = next((l for l in index.splitlines() if l.startswith(f"| **{pipe['key']} ·")), None)
         assert row is not None, f"docs/README.md has no pipeline row for {pipe['key']}"
