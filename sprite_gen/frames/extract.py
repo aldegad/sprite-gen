@@ -50,6 +50,10 @@ def edge_alpha_count(image: Image.Image, margin: int) -> int:
     return total
 
 
+_KEY_CHANNEL_LIT = 192  # a channel the key saturates
+_KEY_CHANNEL_DARK = 64  # a channel the key leaves dark — the one bar `is_key_family` / `is_border_key_candidate` reuse
+
+
 def _key_channel_split(chroma_key: tuple[int, int, int]) -> tuple[list[int], list[int]]:
     """Which channels the key saturates, and which it leaves dark.
 
@@ -58,8 +62,8 @@ def _key_channel_split(chroma_key: tuple[int, int, int]) -> tuple[list[int], lis
     tint axis at all and come back as two empty lists; that emptiness is the one
     switch both callers read, and it turns off the unmix and spill passes.
     """
-    keyed_channels = [index for index, value in enumerate(chroma_key) if value >= 192]
-    unkeyed_channels = [index for index, value in enumerate(chroma_key) if value < 64]
+    keyed_channels = [index for index, value in enumerate(chroma_key) if value >= _KEY_CHANNEL_LIT]
+    unkeyed_channels = [index for index, value in enumerate(chroma_key) if value < _KEY_CHANNEL_DARK]
     if not keyed_channels or not unkeyed_channels:
         return [], []
     return keyed_channels, unkeyed_channels
@@ -152,6 +156,16 @@ def _key_tint_field(rgb: np.ndarray, keyed_channels: list[int],
     return keyed_sum / len(keyed_channels) - unkeyed_sum / len(unkeyed_channels)
 
 
+def _grow_into(seed: np.ndarray, allowed: np.ndarray) -> np.ndarray:
+    """Every `allowed` pixel 8-connected to `seed` through `allowed` pixels (seed included)."""
+    reached = seed & allowed
+    while True:
+        grown = _grow_chebyshev(reached) & allowed
+        if not (grown & ~reached).any():
+            return reached
+        reached = grown
+
+
 def _grow_chebyshev(mask: np.ndarray) -> np.ndarray:
     """One step of 8-connected growth: the 3x3 neighborhood of every set pixel.
 
@@ -178,9 +192,20 @@ def _grow_chebyshev(mask: np.ndarray) -> np.ndarray:
 # when that colour is the declared key's hue family, measures the hard cut from
 # it as well. Raising the radius instead would only move the cliff to the next
 # darker green; this removes the cliff for any brightness the model picks.
-_KEY_FAMILY_MIN_KEYED = 64  # a keyed channel must at least read as lit (same bar as _key_channel_split's dark side)
+_KEY_FAMILY_MIN_KEYED = _KEY_CHANNEL_DARK  # a keyed channel must at least read as lit (the key split's dark bar)
 _KEY_FAMILY_MAX_UNKEYED_RATIO = 0.35  # unkeyed channels stay below this fraction of the dimmest keyed one
 _KEY_FAMILY_KEYED_BALANCE = 0.8  # for two-channel keys (magenta) the dimmer keyed channel keeps this share of the brighter
+# Border candidate (2026-09-12): Grok paints #FF00FF as (216, 46, 147) / (225, 52, 155) /
+# (236, 59, 161) — blue/red ≈ 0.68, under the 0.8 balance — so `is_key_family` said "not
+# the key" for a colour that filled the whole border, the detector fell back to the
+# declared key, and at ~120 from pure magenta the entire background survived. A flat
+# border is already evidence of *background*; the balance rule exists to keep hot pink
+# (250, 77, 150) and purple (213, 112, 246) inside the subject alive, and those two fail
+# the border rule on a different axis: their unkeyed channel is lit (77, 112 >= 64), the
+# painted keys' never is (46..59). So the border rule keeps the hue signature — keyed
+# channels lit, unkeyed channels dark and saturated against the *brighter* keyed
+# channel — and drops the balance between the keyed channels.
+_BORDER_KEY_MAX_UNKEYED_RATIO = _KEY_FAMILY_MAX_UNKEYED_RATIO  # against the brightest keyed channel, not the dimmest
 _KEY_DETECT_CORNER_DIV = 5  # corner patch = width/5 x height/5 (same sampling as the YCbCr path)
 _KEY_DETECT_MIN_FRACTION = 0.12  # family share of the samples needed to trust the detection
 _KEY_DETECT_BIN_SHIFT = 3  # RGB histogram bin width 8 — the mode bin, never a mean, picks the colour
@@ -189,6 +214,8 @@ _KEY_DETECT_BIN_SHIFT = 3  # RGB histogram bin width 8 — the mode bin, never a
 def is_key_family(color: tuple[int, int, int], chroma_key: tuple[int, int, int]) -> bool:
     """True when `color` is the key's hue at any brightness — a *variant of the key*.
 
+    The *interior* rule: what a pixel with no border evidence has to be before
+    it counts as key (the border rule is `is_border_key_candidate`).
     Brightness is free; saturation and hue are not. Every channel the key
     saturates must read as lit (>= 64), the channels the key leaves dark must
     stay under 35% of the dimmest keyed channel, and a two-channel key keeps
@@ -207,6 +234,58 @@ def is_key_family(color: tuple[int, int, int], chroma_key: tuple[int, int, int])
         and unkeyed_max <= keyed_min * _KEY_FAMILY_MAX_UNKEYED_RATIO
         and keyed_min >= keyed_max * _KEY_FAMILY_KEYED_BALANCE
     )
+
+
+def is_border_key_candidate(color: tuple[int, int, int], chroma_key: tuple[int, int, int]) -> bool:
+    """True when a colour *found on a flat border* can be the key as the model painted it.
+
+    The border rule — one function for every entry point that classifies the
+    border: `detect_background_key_rgb`, `cutout --key auto`, `video-canvas`
+    and the `video-frames` edge-contact split. A superset of `is_key_family`:
+    everything the interior rule admits, plus colours that carry the key's hue
+    *signature* without the keyed channels balancing — every keyed channel lit
+    (>= 64), every unkeyed channel dark (< 64, the key split's own bar) and
+    under 35% of the *brightest* keyed channel. So Grok's (216, 46, 147)
+    magenta is a candidate; hot pink (250, 77, 150) and purple (213, 112, 246)
+    are not (their green channel is lit), nor are ivory and cyan. The interior
+    rule stays `is_key_family` — a pixel *inside* the frame has no border evidence.
+    """
+    keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
+    if not keyed_channels:
+        return False
+    keyed_min = min(color[index] for index in keyed_channels)
+    keyed_max = max(color[index] for index in keyed_channels)
+    unkeyed_max = max(color[index] for index in unkeyed_channels)
+    return is_key_family(color, chroma_key) or (
+        keyed_min >= _KEY_FAMILY_MIN_KEYED
+        and unkeyed_max < _KEY_CHANNEL_DARK
+        and unkeyed_max <= keyed_max * _BORDER_KEY_MAX_UNKEYED_RATIO
+    )
+
+
+def _key_family_field(rgb: np.ndarray, keyed_channels: list[int], unkeyed_channels: list[int]) -> np.ndarray:
+    """Vector form of `is_key_family` — same three inequalities, same constants."""
+    keyed_min = rgb[..., keyed_channels].min(axis=-1)
+    keyed_max = rgb[..., keyed_channels].max(axis=-1)
+    unkeyed_max = rgb[..., unkeyed_channels].max(axis=-1)
+    return (
+        (keyed_min >= _KEY_FAMILY_MIN_KEYED)
+        & (unkeyed_max <= keyed_min * _KEY_FAMILY_MAX_UNKEYED_RATIO)
+        & (keyed_min >= keyed_max * _KEY_FAMILY_KEYED_BALANCE)
+    )
+
+
+def _border_key_candidate_field(rgb: np.ndarray, keyed_channels: list[int], unkeyed_channels: list[int]) -> np.ndarray:
+    """Vector form of `is_border_key_candidate` — same inequalities, same constants."""
+    keyed_min = rgb[..., keyed_channels].min(axis=-1)
+    keyed_max = rgb[..., keyed_channels].max(axis=-1)
+    unkeyed_max = rgb[..., unkeyed_channels].max(axis=-1)
+    signature = (
+        (keyed_min >= _KEY_FAMILY_MIN_KEYED)
+        & (unkeyed_max < _KEY_CHANNEL_DARK)
+        & (unkeyed_max <= keyed_max * _BORDER_KEY_MAX_UNKEYED_RATIO)
+    )
+    return _key_family_field(rgb, keyed_channels, unkeyed_channels) | signature
 
 
 def _key_detect_sample_mask(height: int, width: int) -> np.ndarray:
@@ -234,8 +313,10 @@ def detect_background_key_rgb(
 ) -> tuple[int, int, int]:
     """The flat background colour as the model actually painted it, or the declared key.
 
-    Samples the corner patches and the border, keeps the opaque pixels that are
-    the declared key's hue family (`is_key_family`), and — when they make up at
+    Samples the corner patches and the border, keeps the opaque pixels that
+    carry the declared key's hue signature (`is_border_key_candidate` — the
+    border rule, which unlike the interior `is_key_family` does not demand the
+    keyed channels balance), and — when they make up at
     least 12% of the samples — returns the mean of the most populated 8-wide
     RGB histogram bin among them. The mode, never the mean of everything: a
     handful of antialiased fringe pixels on the border must not drag an
@@ -255,16 +336,7 @@ def detect_background_key_rgb(
     if not sample.any():
         return tuple(chroma_key)  # type: ignore[return-value]
     rgb = data[..., :3].astype(np.int32)
-    # Vector form of `is_key_family` — same three inequalities, same constants.
-    keyed_min = rgb[..., keyed_channels].min(axis=-1)
-    keyed_max = rgb[..., keyed_channels].max(axis=-1)
-    unkeyed_max = rgb[..., unkeyed_channels].max(axis=-1)
-    family = (
-        sample
-        & (keyed_min >= _KEY_FAMILY_MIN_KEYED)
-        & (unkeyed_max <= keyed_min * _KEY_FAMILY_MAX_UNKEYED_RATIO)
-        & (keyed_min >= keyed_max * _KEY_FAMILY_KEYED_BALANCE)
-    )
+    family = sample & _border_key_candidate_field(rgb, keyed_channels, unkeyed_channels)
     family_count = int(np.count_nonzero(family))
     if family_count < int(np.count_nonzero(sample)) * _KEY_DETECT_MIN_FRACTION:
         return tuple(chroma_key)  # type: ignore[return-value]
@@ -337,7 +409,22 @@ def remove_chroma_background(
     # makes that reachable, and the gate has a case for it).
     key_distance = _key_distance_field(source_rgb, chroma_key)
     if painted_key != tuple(chroma_key):
-        key_distance = np.minimum(key_distance, _key_distance_field(source_rgb, painted_key))
+        # The painted colour's authority is border evidence, and a pixel deep
+        # inside the frame has none. So its ball erases the *background*: the
+        # pixels that carry the key's hue signature themselves, plus whatever
+        # else inside the ball touches that keyed region (the antialiased rim
+        # of the subject, whose blend with a lit subject colour lifts the
+        # unkeyed channel over the signature bar). An isolated patch inside
+        # the subject that merely resembles the painted colour is left alone:
+        # hot pink (250, 77, 150) sits 46 from Grok's (216, 46, 147) magenta
+        # and would otherwise be cut out of the subject. The declared key's
+        # ball stays what it always was — a colour ball, position-blind.
+        painted_distance = _key_distance_field(source_rgb, painted_key)
+        in_ball = painted_distance <= threshold
+        painted_keyed = in_ball & _border_key_candidate_field(source_rgb, keyed_channels, unkeyed_channels)
+        painted_keyed |= in_ball & (key_distance <= threshold)
+        painted_keyed = _grow_into(painted_keyed, in_ball)
+        key_distance = np.where(painted_keyed, np.minimum(key_distance, painted_distance), key_distance)
     source_tint = _key_tint_field(source_rgb, keyed_channels, unkeyed_channels)
     keyed_mask = (data[..., 3] == 0) | (key_distance <= threshold)
     classes = np.select(
