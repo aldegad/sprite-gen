@@ -2,15 +2,14 @@
 """Image-to-video through Grok Imagine (xAI `POST /v1/videos/generations`).
 
 One call = one still (+ prompt) -> one verified mp4 on disk. This is the engine
-module behind `sprite-gen video`; the general `grok-imagine-video` skill is a thin
-shuttle over this command.
+module behind the sprite-gen skill's standalone `video` command.
 
 Credentials are the user's own and never live in this repository. Two sources,
 resolved in a fixed order and always reported (`auth_source`):
 
-1. `XAI_API_KEY` - an xAI console key (the explicit, environment-level choice).
-2. the grok CLI login file `~/.grok/auth.json` (SuperGrok Imagine quota via the
+1. the grok CLI login file `~/.grok/auth.json` (SuperGrok Imagine quota via the
    OIDC access token the CLI stored at `grok login`). `GROK_HOME` relocates it.
+2. `XAI_API_KEY` - an xAI console key, only when no grok login file exists.
 
 The login token expires (about six hours, 2026-09-08 실측) and the grok CLI is the
 only writer of that file, so an expired token is not refreshed here: the run
@@ -35,136 +34,27 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from sprite_gen.spec.runio import atomic_write_text
+from .xai import (
+    API_BASE, AUTH_ENV, AUTH_SOURCE_API_KEY, AUTH_SOURCE_GROK_LOGIN,
+    HTTP_TIMEOUT_SECONDS, GROK_REFRESH_COMMAND, GROK_LOGIN_COMMAND,
+    Credential, HttpCall, grok_home, resolve_credential, http_json,
+)
 
-API_BASE = "https://api.x.ai/v1"
 DEFAULT_MODEL = "grok-imagine-video-1.5"
 RESOLUTIONS = ("480p", "720p", "1080p")
 ASPECT_RATIOS = ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3")
 DURATION_MIN, DURATION_MAX = 1, 15
-AUTH_ENV = "XAI_API_KEY"
-AUTH_SOURCE_API_KEY = "XAI_API_KEY"
-AUTH_SOURCE_GROK_LOGIN = "grok-login"
 POLL_INTERVAL_SECONDS = 4.0
 POLL_TIMEOUT_SECONDS = int(os.environ.get("SPRITE_GEN_VIDEO_TIMEOUT_SECONDS", "600"))
-HTTP_TIMEOUT_SECONDS = 120
 # Every mp4/mov starts with a size-prefixed `ftyp` box: bytes 4..8 spell it.
 MP4_FTYP_OFFSET = 4
 MP4_FTYP = b"ftyp"
 _DONE_STATUSES = ("done", "complete", "completed")
 _FAILED_STATUSES = ("failed", "error", "expired")
-
-# The refresh instruction for an expired login. The grok CLI rewrites the token
-# the next time it talks to the API — measured 2026-09-08 with a one-line prompt
-# (`grok -p ok`): expires_at moved from 10:56Z to 18:26Z. `grok login` is the
-# full re-sign-in for a revoked or missing login.
-GROK_REFRESH_COMMAND = "grok -p ok --output-format plain"
-GROK_LOGIN_COMMAND = "grok login"
-
-
-def grok_home() -> Path:
-    configured = os.environ.get("GROK_HOME")
-    if configured is None:
-        return Path.home() / ".grok"
-    if not configured.strip():
-        raise SystemExit("video: GROK_HOME is set but empty; refusing to guess the grok home")
-    return Path(configured).expanduser().resolve()
-
-
-@dataclass(frozen=True)
-class Credential:
-    token: str
-    source: str  # AUTH_SOURCE_API_KEY | AUTH_SOURCE_GROK_LOGIN
-    expires_at: str | None = None
-
-
-def _parse_expiry(raw: str) -> datetime:
-    text = raw.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    parsed = datetime.fromisoformat(text)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
-def _load_grok_login(auth_path: Path, *, now: datetime) -> Credential:
-    if not auth_path.is_file():
-        raise SystemExit(
-            f"video: no xAI credential — {AUTH_ENV} is not set and there is no grok login at "
-            f"{auth_path}.\n"
-            f"  either sign in once with `{GROK_LOGIN_COMMAND}` (SuperGrok Imagine quota, no API key), "
-            f"or export {AUTH_ENV}=<your xAI console key>."
-        )
-    try:
-        auth = json.loads(auth_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise SystemExit(f"video: cannot read grok login file {auth_path}: {exc}") from exc
-    entries = [entry for entry in (auth.values() if isinstance(auth, dict) else []) if isinstance(entry, dict)]
-    if len(entries) != 1:
-        raise SystemExit(
-            f"video: grok login file {auth_path} holds {len(entries)} account entr"
-            f"{'y' if len(entries) == 1 else 'ies'}; expected exactly one — refusing to pick one silently. "
-            f"Run `{GROK_LOGIN_COMMAND}` to reset it."
-        )
-    entry = entries[0]
-    token = entry.get("key")
-    if not isinstance(token, str) or not token.strip():
-        raise SystemExit(f"video: grok login file {auth_path} has no access token; run `{GROK_LOGIN_COMMAND}`.")
-    expires_at = entry.get("expires_at")
-    if isinstance(expires_at, str) and expires_at.strip():
-        try:
-            expiry = _parse_expiry(expires_at)
-        except ValueError as exc:
-            raise SystemExit(f"video: grok login file {auth_path} has an unreadable expires_at {expires_at!r}: {exc}") from exc
-        if expiry <= now:
-            raise SystemExit(
-                f"video: the grok login token expired at {expires_at} (now {now.isoformat()}); nothing was uploaded.\n"
-                f"  refresh it with any grok CLI command that reaches the API, e.g. `{GROK_REFRESH_COMMAND}`, "
-                f"or sign in again with `{GROK_LOGIN_COMMAND}`. This tool never rewrites {auth_path} itself."
-            )
-    return Credential(token=token, source=AUTH_SOURCE_GROK_LOGIN, expires_at=expires_at if isinstance(expires_at, str) else None)
-
-
-def resolve_credential(*, env: dict[str, str] | None = None, now: datetime | None = None) -> Credential:
-    """Pick the credential in the fixed order: XAI_API_KEY, then the grok login file."""
-    env = os.environ if env is None else env
-    now = now or datetime.now(timezone.utc)
-    api_key = (env.get(AUTH_ENV) or "").strip()
-    if api_key:
-        return Credential(token=api_key, source=AUTH_SOURCE_API_KEY)
-    if AUTH_ENV in env and not api_key:
-        raise SystemExit(f"video: {AUTH_ENV} is set but empty; unset it to use the grok login, or give it a value")
-    return _load_grok_login(grok_home() / "auth.json", now=now)
-
-
-HttpCall = Callable[[str, str, str, dict | None], tuple[int, Any]]
-
-
-def http_json(method: str, url: str, token: str, body: dict | None = None) -> tuple[int, Any]:
-    data = None if body is None else json.dumps(body).encode("utf-8")
-    request = urllib.request.Request(url, data=data, method=method)
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("Accept", "application/json")
-    if body is not None:
-        request.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-            raw = response.read().decode("utf-8")
-            return response.status, (json.loads(raw) if raw else {})
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", "replace")
-        try:
-            return exc.code, json.loads(raw)
-        except json.JSONDecodeError:
-            return exc.code, {"raw": raw[:400]}
-    except urllib.error.URLError as exc:
-        raise SystemExit(f"video: cannot reach {url}: {exc.reason}") from exc
-
 
 def http_download(url: str, token: str) -> bytes:
     request = urllib.request.Request(url)

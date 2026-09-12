@@ -5,8 +5,8 @@
 `sprite-gen video` animates one still into a short mp4 through **Grok Imagine**
 (xAI `POST /v1/videos/generations`). It is the video counterpart of
 [`sprite-gen gen`](gen.md): one call = one still (+ prompt) → one **verified** mp4
-on disk plus a machine-readable report. The `grok-imagine-video` skill is a thin
-shuttle over this command.
+on disk plus a machine-readable report. The sprite-gen skill routes standalone
+video requests here from any agent engine.
 
 No credential is shipped with this repository. You bring your own, in one of two
 forms, and every run reports which one it used.
@@ -18,10 +18,13 @@ forms, and every run reports which one it used.
 | `grok-login` (default) | the `grok` CLI signed in once | your SuperGrok **Imagine quota** (no console spend) | install the grok CLI, run `grok login` (`--oauth` for a browser, `--device-auth` for a headless box). It writes `~/.grok/auth.json`; this tool only reads it. |
 | `XAI_API_KEY` | an xAI console API key | console credit | `export XAI_API_KEY=xai-…` |
 
-Resolution order is fixed: **`XAI_API_KEY` wins when set**, otherwise the grok
-login file (`GROK_HOME` relocates `~/.grok`). Neither is a fallback for the other —
-a set-but-empty `XAI_API_KEY` is an error, and with no key and no login the run
-stops with both setup paths spelled out.
+Resolution order is fixed for both images and videos: **the Grok subscription
+login wins**, even when `XAI_API_KEY` is set. `GROK_HOME` relocates `~/.grok`.
+Only when no login file exists can the configured API key use console credits.
+An expired, unreadable, corrupt or API-rejected login stops the request; it never
+switches to API credit. An empty API key is ignored when the login is usable,
+but is an error when no login exists. With neither credential, the run stops
+with both setup paths spelled out.
 
 ### The login token expires — and this tool does not refresh it
 
@@ -32,7 +35,7 @@ it has passed, the run fails with the refresh prescription instead of gambling o
 a 403 mid-upload:
 
 ```
-video: the grok login token expired at 2026-09-08T10:56:34Z (now …); nothing was uploaded.
+xai: the grok login token expired at 2026-09-08T10:56:34Z (now …); nothing was uploaded.
   refresh it with any grok CLI command that reaches the API, e.g. `grok -p ok --output-format plain`,
   or sign in again with `grok login`. This tool never rewrites ~/.grok/auth.json itself.
 ```
@@ -41,7 +44,7 @@ Why not refresh it here: `auth.json` is the grok CLI's file, the refresh token i
 it may rotate, and a second writer would break the login the user relies on
 everywhere else. The same shape as `sprite-gen gen`'s `codex login status` gate.
 
-### Why the direct API call and not Grok Build's `image_to_video` tool
+### Direct API transport
 
 Grok Build's built-in `image_to_video` tool posts without `output.upload_url`, and
 on Zero-Data-Retention teams the API answers `HTTP 400 — Zero Data Retention teams

@@ -57,7 +57,7 @@ def provider_subprocess_env() -> dict[str, str]:
     """Environment for a headless generation subprocess.
 
     The parent environment minus known orchestrator session env families, so a
-    spawned engine (`codex exec`, `grok`) is a clean standalone process — it
+    spawned engine (`codex exec`) is a clean standalone process — it
     neither impersonates the spawning agent nor gets strangled by the
     orchestrator's hooks. SSoT for every provider's `subprocess.run` env —
     providers must not spawn with the inherited env directly.

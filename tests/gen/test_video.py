@@ -63,8 +63,15 @@ def _request(tmp_path: Path, **overrides) -> video.VideoRequest:
 # --- credential resolution -------------------------------------------------
 
 
-def test_api_key_env_wins_over_grok_login(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("api_key", ["xai-console", "", "  "])
+def test_grok_login_wins_over_api_key_env(tmp_path: Path, monkeypatch, api_key) -> None:
     monkeypatch.setenv("GROK_HOME", str(_login_file(tmp_path)))
+    cred = video.resolve_credential(env={"XAI_API_KEY": api_key}, now=NOW)
+    assert cred.token == "tok" and cred.source == video.AUTH_SOURCE_GROK_LOGIN
+
+
+def test_api_key_is_used_only_without_a_login_file(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("GROK_HOME", str(tmp_path / "no-login"))
     cred = video.resolve_credential(env={"XAI_API_KEY": "xai-console"}, now=NOW)
     assert cred == video.Credential(token="xai-console", source=video.AUTH_SOURCE_API_KEY)
 
@@ -95,7 +102,7 @@ def test_missing_login_and_key_prescribes_both_setups(tmp_path: Path, monkeypatc
 
 
 def test_empty_api_key_env_is_refused_not_ignored(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("GROK_HOME", str(_login_file(tmp_path)))
+    monkeypatch.setenv("GROK_HOME", str(tmp_path / "no-login"))
     with pytest.raises(SystemExit, match="XAI_API_KEY is set but empty"):
         video.resolve_credential(env={"XAI_API_KEY": "  "}, now=NOW)
 
@@ -269,3 +276,53 @@ def test_unified_cli_exposes_video() -> None:
     parser = cli._build_parser()
     args = parser.parse_args(["video", "--image", "a.png", "--prompt", "p", "--out", "o.mp4"])
     assert args.command == "video"
+
+
+@pytest.mark.parametrize("contents, message", [
+    ('{"account":{"key":"subscription","expires_at":"2000-01-01T00:00:00Z"}}', "expired"),
+    ('{', "cannot read grok login"),
+    ('{"account":{}}', "no access token"),
+    ('{"a":{"key":"one"},"b":{"key":"two"}}', "holds 2 account"),
+])
+def test_invalid_login_never_falls_back_to_configured_key(tmp_path, monkeypatch, contents, message):
+    monkeypatch.setenv("GROK_HOME", str(tmp_path))
+    auth = tmp_path / "auth.json"
+    auth.write_text(contents)
+    with pytest.raises(SystemExit, match=message):
+        video.resolve_credential(env={"XAI_API_KEY": "console-key"}, now=NOW)
+    assert auth.read_text() == contents
+
+
+def test_login_directory_never_permits_api_credit(tmp_path, monkeypatch):
+    monkeypatch.setenv("GROK_HOME", str(tmp_path))
+    (tmp_path / "auth.json").mkdir()
+    with pytest.raises(SystemExit, match="not a readable file"):
+        video.resolve_credential(env={"XAI_API_KEY": "console-key"}, now=NOW)
+
+
+def test_uninspectable_login_never_permits_api_credit(tmp_path, monkeypatch):
+    monkeypatch.setenv("GROK_HOME", str(tmp_path))
+    original = Path.lstat
+    def denied(path, *args, **kwargs):
+        if path == tmp_path / "auth.json":
+            raise PermissionError("test")
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "lstat", denied)
+    with pytest.raises(SystemExit, match="refusing API-credit fallback"):
+        video.resolve_credential(env={"XAI_API_KEY": "console-key"}, now=NOW)
+
+
+@pytest.mark.parametrize("status", [200, 403, 429])
+def test_video_uses_subscription_with_api_key_present(tmp_path, monkeypatch, status):
+    monkeypatch.setenv("GROK_HOME", str(_login_file(tmp_path, key="subscription-token", expires_at="2100-01-01T00:00:00Z")))
+    monkeypatch.setenv("XAI_API_KEY", "console-key")
+    api = _FakeApi(post=(status, {"error": "rejected"}) if status != 200 else (200, {"request_id": "req-1"}))
+    request = _request(tmp_path)
+    if status != 200:
+        with pytest.raises(SystemExit, match=f"HTTP {status}"):
+            video.generate_video(request, call=api.call, download=api.download, sleep=lambda _: None)
+        assert len(api.calls) == 1 and not request.out.exists()
+    else:
+        result = video.generate_video(request, call=api.call, download=api.download, sleep=lambda _: None)
+        assert result.auth_source == "grok-login"
+    assert all(call[2] == "subscription-token" for call in api.calls)

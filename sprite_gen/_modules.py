@@ -9,6 +9,13 @@ MODULE_DOMAIN = {
     'guide': 'workflow',
     'preferences': 'workflow',
     'runio': 'spec',
+    'assets': 'spec',
+    'tile': 'background',
+    'shadow': 'effects',
+    'motion': 'qa',
+    'render': 'scene',
+    'inspect_scene': 'scene',
+    'model': 'scene',
     'layout': 'spec',
     'migrate_request': 'spec',
     'migrate_breathe': 'spec',
@@ -61,27 +68,41 @@ DOMAINS: list[tuple[str, str]] = [
     ("frames", "Frames — chroma/white removal, row extraction, sheet slicing, atlas unpacking"),
     ("curate", "Curation — direction anchors and the curation sidecar"),
     ("compose", "Compose — runtime atlas, cycles, GIFs, layers, exports"),
-    ("effects", "Post-processing — recolor, breathing, interpolation"),
-    ("qa", "QA — inspect, score, preview, bounded correction loop"),
+    ("background", "Background — repeating painted strips and textures"),
+    ("effects", "Post-processing — recolor, breathing, interpolation, projected shadows"),
+    ("scene", "Scene — asset placement, camera, lighting, rendering and inspection"),
+    ("qa", "QA — motion/contact measurements, inspect, score, preview, bounded correction loop"),
     ("serve", "Webviews — curation and composition canvases"),
-    ("spec", "Spec — request migrations and run I/O"),
+    ("spec", "Spec — read-only assets, request migrations and run I/O"),
     ("util", "Utilities"),
 ]
 DOMAIN_ORDER = [d for d, _ in DOMAINS]
 DOMAIN_TITLE = dict(DOMAINS)
 
 
-# The four pipelines — first-class objects. The CLI help, the docs index and the README
+# Ordered sprite pipelines. Standalone tool groups and scene workflow are separate.
+# The CLI help, the docs index and the README
 # pipeline table are checked against THIS list; a verb named here must exist as a verb.
 PIPELINES: list[dict[str, object]] = [
     {"key": "A", "name": "atlas rows", "verbs": ["prepare", "gen", "gen-set", "extract", "compose-atlas", "curation"],
      "chain": "prepare → gen (or gen-set) → extract → compose-atlas; optional curation and recompose", "doc": "docs/run-contract.md"},
     {"key": "B", "name": "video → loop", "verbs": ["video-canvas", "video", "video-frames", "video-loop", "video-set"],
      "chain": "video-canvas → video → video-frames → video-loop, or video-set", "doc": "docs/video-pipeline.md"},
+]
+
+TOOL_GROUPS: list[dict[str, object]] = [
     {"key": "C", "name": "utilities", "verbs": ["cutout", "slice-sheet", "unpack-atlas"],
      "chain": "cutout · slice-sheet · unpack-atlas (each stands alone)", "doc": "docs/sheet-slicing.md"},
     {"key": "D", "name": "post-processing", "verbs": ["recolor", "recolor-palette", "compose-layers", "export-pngs", "export-aseprite"],
      "chain": "recolor · compose-layers · export-pngs · export-aseprite", "doc": "docs/recolor.md"},
+    {"key": "E", "name": "asset tools", "verbs": ["background-tile", "shadow", "inspect-motion"],
+     "chain": "background-tile · shadow · inspect-motion (independent; no generation required)", "doc": "docs/asset-tools.md"},
+]
+
+WORKFLOWS: list[dict[str, object]] = [
+    {"key": "S", "name": "scene", "verbs": ["scene-render", "scene-inspect"],
+     "chain": "existing assets + scene spec → scene-render; scene-inspect for measurements",
+     "doc": "docs/scene.md"},
 ]
 
 

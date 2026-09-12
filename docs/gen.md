@@ -13,7 +13,7 @@ Providers (Gemini/OpenRouter/fal/BytePlus are intentionally **not** included):
 | Provider | Backend | Auth | Output truth | Transparency strategy |
 |---|---|---|---|---|
 | `codex` | codex `image_gen` | ChatGPT OAuth | inline base64 in the session rollout jsonl, decoded deterministically | **`native`** — image_gen returns a real alpha channel when asked (measured, then published) |
-| `grok` | grok Imagine `image_gen` / `image_edit` | xAI OAuth | file grok is told to write, verified by PNG magic | `chroma` — Imagine returns JPEG only; generate on a key and matte it out |
+| `grok` | direct Imagine `/images/generations` or `/images/edits` | Grok login or `XAI_API_KEY` | inline bytes decoded and re-encoded as a verified PNG | `chroma` — Imagine returns JPEG only; generate on a key and matte it out |
 
 The strategy is declared **once**, on the adapter (`Provider.transparency`), and is
 the only place that says what a backend can do. See
@@ -44,23 +44,37 @@ backend), `provider_resolved_from` (`explicit` / `SPRITE_GEN_DEFAULT_PROVIDER` /
 `hard-default` / `fallback-from-codex`), and `provider_fallback` when a fallback
 happened.
 
-## Provider and visible-worker topology
+## Direct Grok calls and authentication
 
-Provider selection and user-facing worker/agent creation are orthogonal:
+`sprite-gen gen --provider grok` → `GrokProvider` → xAI Imagine API. The same
+path works from any agent engine; no Grok Build subprocess is started.
+The default is `grok-imagine-image-2.0`. `--model` selects an **image API model**,
+not a Grok Build reasoning model.
 
-| Layer | Canonical path | Responsibility |
-|---|---|---|
-| Generation request | `generate_sprite_image.py --provider grok` | Select the engine provider for one image request. |
-| Provider adapter | `GrokProvider` | Build the prompt, choose Imagine `image_gen` or `image_edit`, and verify the requested PNG. |
-| Headless provider process | `grok -p --sandbox workspace --always-approve` | Execute the xAI-authenticated Imagine tool call. |
-| Image model tool | Imagine `image_gen` / `image_edit` | Generate a new image, or edit from references. |
-| Visible worker/agent | (caller's orchestrator) | Creating a user-facing worker surface that may invoke the generation request is the orchestrator's own concern; it does not select or replace the provider. |
+Image and video calls share `sprite_gen/gen/xai.py` for credentials and JSON
+transport. The user's Grok subscription login (`GROK_HOME` or `~/.grok`) takes
+precedence even when `XAI_API_KEY` is set. Only an absent login file permits the
+API key (console credits); an invalid, expired or rejected login never does. See
+[authentication and expiry](video.md#setup--pick-one-credential)
+for setup. No Grok executable is needed during generation with a valid credential.
+No agent, credential fallback or automatic retry is started on failure.
 
-Therefore the direct Grok chain is `generate_sprite_image.py --provider grok`
-→ `GrokProvider` → `grok -p --always-approve` → Imagine
-`image_gen`/`image_edit`. `GrokProvider` owns the headless agent process lifecycle;
-the chain does not require or route through a separate user-facing skill/task, and
-it is not a second visible-worker topology.
+New images use `/v1/images/generations`; one reference uses `/v1/images/edits`
+with `image`, two to five use `images` in input order. A single-reference edit
+inherits its source aspect ratio; `--aspect-ratio` applies to generation and
+multi-reference edits. Invalid reference files and more than five references
+fail before upload. Base64 output is requested, decoded, and converted to a real
+PNG without resizing before atomic publication. Missing or malformed image data
+fails without replacing an existing raw output.
+
+Image reports include `extra.auth_source`, `extra.transport: "xai-api"`,
+`extra.endpoint`, and `extra.aspect_ratio_source`. Tokens, signed URLs and raw
+API error bodies are not reported. Skipping the agent removes its startup and
+reasoning overhead; speed and account-quota savings are not benchmarked guarantees.
+
+API contracts: [image generation](https://docs.x.ai/developers/model-capabilities/images/generation),
+[image editing](https://docs.x.ai/developers/model-capabilities/images/editing),
+[multi-image editing](https://docs.x.ai/developers/model-capabilities/images/multi-image-editing).
 
 ## CLI
 
@@ -69,10 +83,10 @@ sprite-gen gen \
   [--provider codex|grok] # optional; default = SPRITE_GEN_DEFAULT_PROVIDER env → codex (observable grok fallback if codex is down)
   --prompt "…"            # or --prompt-file PROMPT.txt
   --out DEST.png \
-  [--ref REF.png ...]     # repeatable; grok routes refs through image_edit
+  [--ref REF.png ...]     # repeatable; Grok accepts up to five references
   [--transparent [--alpha-mode auto|native|chroma] [--chroma-key magenta|green]] \
   [--white-check CHECK.png] \
-  [--aspect-ratio 1:1]    # grok only (1:1, 16:9, 9:16, 4:3, 3:4, auto)
+  [--aspect-ratio 1:1]    # grok only, e.g. 1:1 or 16:9; single-ref edits inherit the source ratio
   [--model ID] \
   [--report REPORT.json] \
   [--keep-session]        # codex: keep the rollout jsonl instead of deleting it
@@ -155,12 +169,7 @@ change it; and no `config.toml` feature toggle grants it. The remedy is to point
 `CODEX_HOME` at a Codex state root whose account provides image generation
 (`codex login status`), or to use `--provider grok`. The adapter fails loudly with
 exactly that, rather than falling back on its own.
-- **grok** — runs `grok -p … --sandbox workspace --always-approve` (media/shell must be
-  auto-approved; plain acceptEdits blocks tool execution and returns an empty answer).
-  grok is instructed to write the final PNG to an exact absolute path; we then verify
-  that file's PNG magic. No `--effort` is passed (the grok-build image model 400s on
-  `reasoningEffort`). With `--ref`, grok uses `image_edit` on the reference instead of
-  `image_gen`.
+- **grok** — uses the [direct API contract](#direct-grok-calls-and-authentication) above.
 
 ## Sprite-row usage
 

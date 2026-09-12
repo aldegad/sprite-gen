@@ -8,16 +8,18 @@ from pathlib import Path
 from typing import Callable
 
 from sprite_gen import _modules, gen
+from sprite_gen.background import tile
 from sprite_gen.curate import anchor
 from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, compose_layers, export_aseprite, export_pngs
-from sprite_gen.qa import correction_loop, inspect, preview, score
+from sprite_gen.qa import correction_loop, inspect, preview, score, motion
 from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
 from sprite_gen.gen import gen_set, prepare, video
 from sprite_gen.video import batch as video_batch
 from sprite_gen.video import canvas as video_canvas
 from sprite_gen.video import frames as video_frames
 from sprite_gen.video import loop as video_loop
-from sprite_gen.effects import recolor
+from sprite_gen.effects import recolor, shadow
+from sprite_gen.scene import render, inspect_scene
 from sprite_gen.serve import serve_compose, serve_curation
 from sprite_gen.spec import migrate_breathe, migrate_request
 from sprite_gen.gen.prepare import STYLE_DEFAULT, _outline_config
@@ -228,6 +230,11 @@ def _add_correction_loop(p: argparse.ArgumentParser) -> None:
 
 
 COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[..., int]]] = {
+    "background-tile": ("Quilt a repeating RGBA background and measure its join.", tile.add_arguments, tile.run),
+    "shadow": ("Project silhouette shadows from any supported asset.", shadow.add_arguments, shadow.run),
+    "inspect-motion": ("Measure asset timing and contact evidence without changing animation.", motion.add_arguments, motion.run),
+    "scene-render": ("Render referenced assets using scene placement, camera and lighting.", render.add_arguments, render.run),
+    "scene-inspect": ("Measure scene loops, viewport clipping and repeated joins.", inspect_scene.add_arguments, inspect_scene.run),
     "workflow": ("Resolve image/sprite choices, check access and guide the next conversation step.", guide.add_arguments, guide.run),
     "defaults": ("Show, explicitly save or clear the defaults for each user workflow.", preferences.add_arguments, preferences.run),
     "prepare": ("Prepare a sprite-gen component-row run.", _add_prepare, prepare.run),
@@ -372,10 +379,14 @@ def command_domains() -> dict[str, list[str]]:
 
 
 def _help_description() -> str:
-    lines = ["sprite-gen — 2D sprite pipelines as one CLI. Every verb works alone or as a pipeline stage.", "", "pipelines:"]
-    for pipe in _modules.PIPELINES:  # the catalog, not a copy of it
-        label = f"{pipe['key']}  {pipe['name']}"
-        lines.append(f"  {label:<20} {pipe['chain']}   ({pipe['doc']})")
+    lines = ["sprite-gen — assets and scenes in one CLI. Workflows compose independent commands."]
+    for title, entries in (("sprite pipelines", _modules.PIPELINES),
+                           ("standalone tool groups", _modules.TOOL_GROUPS),
+                           ("scene workflow", _modules.WORKFLOWS)):
+        lines += ["", f"{title}:"]
+        for item in entries:
+            label = f"{item['key']}  {item['name']}"
+            lines.append(f"  {label:<20} {item['chain']}   ({item['doc']})")
     lines += ["", "tools by domain:"]
     width = max(len(v) for v in COMMANDS)
     for domain, verbs in command_domains().items():
