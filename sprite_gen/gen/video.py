@@ -7,9 +7,9 @@ module behind the sprite-gen skill's standalone `video` command.
 Credentials are the user's own and never live in this repository. Two sources,
 resolved in a fixed order and always reported (`auth_source`):
 
-1. `XAI_API_KEY` - an xAI console key (the explicit, environment-level choice).
-2. the grok CLI login file `~/.grok/auth.json` (SuperGrok Imagine quota via the
+1. the grok CLI login file `~/.grok/auth.json` (SuperGrok Imagine quota via the
    OIDC access token the CLI stored at `grok login`). `GROK_HOME` relocates it.
+2. `XAI_API_KEY` - an xAI console key, only when no grok login file exists.
 
 The login token expires (about six hours, 2026-09-08 실측) and the grok CLI is the
 only writer of that file, so an expired token is not refreshed here: the run

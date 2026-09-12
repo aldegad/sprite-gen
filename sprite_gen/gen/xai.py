@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Shared xAI credentials and JSON transport for direct image/video generation.
 
-XAI_API_KEY takes precedence; otherwise use the user's Grok login. The Grok
-CLI alone writes/refreshes that login. Never spawn an agent or switch sources.
+The user's Grok subscription login takes precedence over XAI_API_KEY. The key
+is used only when no login file exists. The Grok CLI alone writes/refreshes
+that login. Never spawn an agent or switch sources after a login failure.
 """
 from __future__ import annotations
 
@@ -58,10 +59,8 @@ def _parse_expiry(raw: str) -> datetime:
 def _load_grok_login(auth_path: Path, *, now: datetime) -> Credential:
     if not auth_path.is_file():
         raise SystemExit(
-            f"xai: no xAI credential — {AUTH_ENV} is not set and there is no grok login at "
-            f"{auth_path}.\n"
-            f"  either sign in once with `{GROK_LOGIN_COMMAND}` (SuperGrok Imagine quota, no API key), "
-            f"or export {AUTH_ENV}=<your xAI console key>."
+            f"xai: grok login path {auth_path} is not a readable file; "
+            f"run `{GROK_LOGIN_COMMAND}`. Refusing API-credit fallback."
         )
     try:
         auth = json.loads(auth_path.read_text(encoding="utf-8"))
@@ -94,15 +93,30 @@ def _load_grok_login(auth_path: Path, *, now: datetime) -> Credential:
 
 
 def resolve_credential(*, env: dict[str, str] | None = None, now: datetime | None = None) -> Credential:
-    """Pick the credential in the fixed order: XAI_API_KEY, then the grok login file."""
+    """Prefer the subscription login; a failed login never switches to API credit."""
     env = os.environ if env is None else env
     now = now or datetime.now(timezone.utc)
+    auth_path = grok_home() / "auth.json"
+    # Only absence allows the API key. Broken links/directories are invalid
+    # logins too, not permission to switch to another billing source.
+    try:
+        auth_path.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise SystemExit(f"xai: cannot inspect grok login file {auth_path}; refusing API-credit fallback") from exc
+    else:
+        return _load_grok_login(auth_path, now=now)
     api_key = (env.get(AUTH_ENV) or "").strip()
     if api_key:
         return Credential(token=api_key, source=AUTH_SOURCE_API_KEY)
     if AUTH_ENV in env and not api_key:
-        raise SystemExit(f"xai: {AUTH_ENV} is set but empty; unset it to use the grok login, or give it a value")
-    return _load_grok_login(grok_home() / "auth.json", now=now)
+        raise SystemExit(f"xai: {AUTH_ENV} is set but empty and no grok login exists; run `{GROK_LOGIN_COMMAND}` or give the key a value")
+    raise SystemExit(
+        f"xai: no xAI credential — no grok login at {auth_path} and {AUTH_ENV} is not set.\n"
+        f"  sign in with `{GROK_LOGIN_COMMAND}` (SuperGrok Imagine quota, no API key), "
+        f"or export {AUTH_ENV}=<your xAI console key>."
+    )
 
 
 HttpCall = Callable[[str, str, str, dict | None], tuple[int, Any]]
@@ -129,5 +143,3 @@ def http_json(method: str, url: str, token: str, body: dict | None = None, *, ti
             return exc.code, {"raw": raw[:400]}
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise SystemExit("xai: request failed or timed out; no automatic retry (the server may have accepted it)") from exc
-
-

@@ -26,8 +26,9 @@ def encoded_image(fmt="JPEG"):
 
 
 @pytest.fixture
-def api(monkeypatch):
+def api(monkeypatch, tmp_path):
     monkeypatch.setenv("XAI_API_KEY", "synthetic-secret")
+    monkeypatch.setenv("GROK_HOME", str(tmp_path / "no-login"))
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("Grok Build must never be spawned"))
     state = {"status": 200, "body": {"data": [{"b64_json": encoded_image()}]}, "calls": []}
 
@@ -172,3 +173,38 @@ def test_image_guide_requires_explicit_api_billing_confirmation(tmp_path, api, m
     ready = guide.guide("image", **options, confirm_api_billing=True)
     assert ready["status"] == "ready"
 
+
+def _subscription_login(tmp_path, monkeypatch):
+    monkeypatch.setenv("GROK_HOME", str(tmp_path))
+    (tmp_path / "auth.json").write_text(json.dumps({"account": {
+        "key": "subscription-token", "expires_at": "2100-01-01T00:00:00Z"}}))
+
+
+@pytest.mark.parametrize("status", [200, 403, 429])
+def test_images_use_subscription_even_with_api_key(tmp_path, api, monkeypatch, status):
+    _subscription_login(tmp_path, monkeypatch)
+    api["status"] = status
+    out = tmp_path / "out.png"
+    if status != 200:
+        with pytest.raises(SystemExit, match=f"HTTP {status}"):
+            gen.generate_image("grok", "x", out)
+        assert not out.exists()
+    else:
+        result = gen.generate_image("grok", "x", out)
+        assert result.extra["auth_source"] == "grok-login"
+    assert len(api["calls"]) == 1
+    assert api["calls"][0][0].get_header("Authorization") == "Bearer subscription-token"
+
+
+@pytest.mark.parametrize("kind", ["image", "sprite"])
+def test_guide_prefers_subscription_without_api_billing_question(tmp_path, api, monkeypatch, kind):
+    _subscription_login(tmp_path, monkeypatch)
+    monkeypatch.setenv("SPRITE_GEN_CONFIG_DIR", str(tmp_path / "settings"))
+    choices = {"image_provider": "grok"}
+    if kind == "sprite":
+        choices["motion_method"] = "grok-video"
+    result = guide.guide(kind, choices=choices, confirmed_access=("grok",))
+    assert result["status"] == "ready"
+    assert all(item["billing"] == "subscription" for item in result["access"])
+    assert not any(question["field"] == "confirm_api_billing" for question in result["questions"])
+    assert api["calls"] == []
