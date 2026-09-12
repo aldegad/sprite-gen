@@ -51,7 +51,15 @@ DARK_KEY_CASES = [
     pytest.param("magenta", (255, 0, 255), (170, 8, 180), id="magenta-dark-170-8-180-dist113.64"),
     pytest.param("magenta", (255, 0, 255), (180, 10, 175), id="magenta-dark-180-10-175-dist110.11"),
     pytest.param("magenta", (255, 0, 255), (250, 8, 240), id="magenta-easy-250-8-240-dist17.72"),
+    # Grok's #FF00FF (measured 2026-09-11, samurai-village rev3 objects): the blue channel
+    # sits well under the red one (147/216 = 0.68, 155/225 = 0.69), so the keyed-channel
+    # balance rule of `is_key_family` says "not the key's family" even though the whole
+    # border is this one flat colour — the detector falls back to the declared key and
+    # the ~124 / ~117 distance keeps the entire background opaque.
+    pytest.param("magenta", (255, 0, 255), (216, 46, 147), id="magenta-grok-216-46-147-dist123.70"),
+    pytest.param("magenta", (255, 0, 255), (225, 52, 155), id="magenta-grok-225-52-155-dist116.64"),
 ]
+GROK_MAGENTA_CASES = [c for c in DARK_KEY_CASES if "grok" in c.id]
 
 
 def make_flat_key_still(background: tuple[int, int, int]) -> Image.Image:
@@ -170,6 +178,8 @@ PURPLE = (213, 112, 246)  # ~153 from magenta — same
         (HOT_PINK, MAGENTA, False),
         (PURPLE, MAGENTA, False),
         ((255, 0, 128), MAGENTA, False),  # keyed channels out of balance
+        ((216, 46, 147), MAGENTA, False),  # Grok magenta: out of balance too — interior rule stays strict
+        ((225, 52, 155), MAGENTA, False),  # (the border-candidate rule below is what admits these)
         ((248, 247, 242), GREEN, False),
         ((8, 162, 24), (128, 128, 128), False),  # degenerate key has no family
     ],
@@ -252,3 +262,113 @@ def test_cutout_auto_route_uses_the_engine_family_rule() -> None:
     assert _detect_key_kind((170, 8, 180)) == "magenta"
     assert _detect_key_kind(HOT_PINK) == "white"
     assert _detect_key_kind((248, 247, 242)) == "white"
+
+
+# --- border key candidate: a flat border is already evidence of "background" --------------
+# The interior family rule (`is_key_family`) keeps its keyed-channel balance test so hot pink
+# and purple inside the subject are never keyed. A colour that fills the *border* is a
+# different question: it is the background, and only needs the key's hue signature — lit
+# keyed channels, dark unkeyed channels — to be accepted as the painted key. Every entry
+# point that classifies the border (engine detector, `cutout --key auto`, `video-canvas`)
+# must share that one rule.
+
+
+@pytest.mark.parametrize(("key", "key_rgb", "background"), GROK_MAGENTA_CASES)
+def test_detect_accepts_grok_magenta_painted_on_a_flat_border(
+    key: str, key_rgb: tuple[int, int, int], background: tuple[int, int, int]
+) -> None:
+    """The detector returns the painted border colour, not the declared key, for an off-balance magenta."""
+    assert detect_background_key_rgb(make_flat_key_still(background), key_rgb) == background
+
+
+@pytest.mark.parametrize(("key", "key_rgb", "background"), GROK_MAGENTA_CASES)
+def test_cutout_auto_routes_grok_magenta_corners_to_extract(
+    tmp_path: Path, key: str, key_rgb: tuple[int, int, int], background: tuple[int, int, int]
+) -> None:
+    """`cutout --key auto` on the Grok magenta: extract route, painted key recorded, bg fully cleared."""
+    from sprite_gen.frames.cutout import _detect_key_kind
+
+    assert _detect_key_kind(background) == key
+    source = make_flat_key_still(background)
+    src_path = tmp_path / "grok-magenta.png"
+    source.save(src_path)
+    stats = cutout(src_path, tmp_path / "out.png", key="auto")
+    assert stats["route"] == f"extract:{key}"
+    assert stats["chroma_key"] == list(key_rgb)
+    assert stats["chroma_key_painted"] == list(background)
+    assert audit(Image.open(tmp_path / "out.png"), source) == (0, 0)
+
+
+def test_border_candidate_rule_still_rejects_subject_colours_and_non_keys() -> None:
+    """Relaxing the border rule must not let hot pink / purple / ivory / cyan become a key."""
+    for colour in (HOT_PINK, PURPLE, (248, 247, 242), (0, 255, 255), (30, 60, 30)):
+        assert detect_background_key_rgb(make_flat_key_still(colour), MAGENTA) == MAGENTA
+        assert detect_background_key_rgb(make_flat_key_still(colour), GREEN) == GREEN
+
+
+def test_hot_pink_block_inside_the_subject_survives_a_grok_magenta_key() -> None:
+    """Interior protection with the relaxed border: a hot-pink patch inside the brown subject stays."""
+    background = (216, 46, 147)
+    source = make_flat_key_still(background)
+    px = source.load()
+    for y in range(40, 52):
+        for x in range(40, 52):
+            px[x, y] = HOT_PINK + (255,)
+    result = remove_chroma_background(
+        source, MAGENTA, _EXTRACT_KEY_THRESHOLD, _EXTRACT_FRINGE_THRESHOLD, _EXTRACT_FRINGE_DELTA
+    )
+    residual, subject_changed = audit(result, source)
+    assert residual == 0, f"{residual} background px survived"
+    assert subject_changed == 0, f"{subject_changed} subject px altered (hot-pink block must be untouched)"
+
+
+# --- real stills (opt-in) ---------------------------------------------------------------
+# Binary stills from image models are not committed (private data, and every regeneration
+# would pile up in the public history). Point SPRITE_GEN_CHROMA_REAL_STILLS at them to run
+# the same contract on the model's own output: `os.pathsep`-separated `<key>=<path.png>`
+# entries, e.g. `magenta=/data/a.png:green=/data/b.png`. Skipped when unset.
+
+_REAL_STILLS_ENV = "SPRITE_GEN_CHROMA_REAL_STILLS"
+
+
+def _real_stills() -> list[pytest.ParameterSet]:
+    import os
+
+    raw = os.environ.get(_REAL_STILLS_ENV, "")
+    params: list[pytest.ParameterSet] = []
+    for entry in filter(None, raw.split(os.pathsep)):
+        key, _, path = entry.partition("=")
+        params.append(pytest.param(key, Path(path), id=f"{key}:{Path(path).name}"))
+    return params
+
+
+@pytest.mark.skipif(not _real_stills(), reason=f"{_REAL_STILLS_ENV} not set")
+@pytest.mark.parametrize(("key", "still"), _real_stills())
+def test_real_still_keys_out_its_painted_border(tmp_path: Path, key: str, still: Path) -> None:
+    """`cutout --key <key>` on a model still: the flat border colour is gone, untinted subject untouched."""
+    from sprite_gen._deps import np
+    from sprite_gen.frames.extract import _key_channel_split, _key_tint_field
+    from sprite_gen.frames.cutout import KEY_TARGETS
+
+    source = Image.open(still).convert("RGBA")
+    data = np.array(source).astype(np.int32)
+    rgb, alpha = data[..., :3], data[..., 3]
+    border = np.concatenate([rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]])
+    painted = np.median(border, axis=0)
+    dist = np.sqrt(((rgb - painted) ** 2).sum(axis=-1))
+    background = (alpha != 0) & (dist <= 48)  # the painted key and its near-flat neighbours
+    # The engine's own `_SUBJECT` class: not key-tinted (below fringe_delta) — never touched.
+    tint = _key_tint_field(rgb, *_key_channel_split(KEY_TARGETS[key]))
+    subject = (alpha != 0) & (dist > 140) & (tint < _EXTRACT_FRINGE_DELTA)
+
+    stats = cutout(still, tmp_path / "out.png", key=key)
+    out = np.array(Image.open(tmp_path / "out.png").convert("RGBA")).astype(np.int32)
+
+    assert stats["route"] == f"extract:{key}"
+    painted_to_key = float(np.sqrt(((painted - np.array(stats["chroma_key"])) ** 2).sum()))
+    assert stats["chroma_key_painted"] != stats["chroma_key"] or painted_to_key <= 16, (
+        f"the painted border {tuple(int(v) for v in painted)} was not detected as the key (fell back to the declared key)"
+    )
+    residual = int((background & (out[..., 3] != 0)).sum())
+    assert residual == 0, f"{residual} px of the painted background {tuple(int(v) for v in painted)} survived"
+    assert (out[subject] == data[subject]).all(), "untinted subject pixels must stay byte-identical"
