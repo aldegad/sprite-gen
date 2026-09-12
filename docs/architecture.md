@@ -2,7 +2,7 @@
 
 > Owns: How the code is laid out: domains, stage ownership, the numeric SSoT, the cell model, extraction internals, runtime manifest · Index: [docs/README.md](README.md)
 
-> Status: reference (describes the code as it actually is, v2.0.0, 2026-09-09).
+> Status: reference (v2.2.0).
 > Canonical behavior contract lives in [`../SKILL.md`](../SKILL.md); this doc
 > explains *how* the code realizes that contract. If this doc and `SKILL.md`
 > ever disagree, `SKILL.md` wins and this doc is the bug. The documentation
@@ -11,7 +11,7 @@
 ## Contents
 
 - [0. Domains — the taxonomy](#0-domains--the-taxonomy)
-- [1. Four pipelines](#1-four-pipelines)
+- [1. Pipelines, tools and scenes](#1-pipelines-tools-and-scenes)
 - [2. Stage ownership (each script does one job)](#2-stage-ownership-each-script-does-one-job)
 - [3. The numeric SSoT: `sprite-request.json`](#3-the-numeric-ssot-sprite-requestjson)
 - [4. The cell model](#4-the-cell-model-read-this--it-is-the-most-misunderstood-part)
@@ -34,26 +34,30 @@ a group). Every domain package is a folder under `sprite_gen/`.
 flowchart TB
     subgraph pkg["sprite_gen/  (_modules.py owns the mapping)"]
         direction LR
-        spec["spec<br/>sprite-request schema · layout resolver · runio (lock + atomic writes) · migrations"]
+        spec["spec<br/>read-only asset adapters · sprite-request schema · layout resolver · runio · migrations"]
         gen["gen<br/>prepare · gen (codex / grok) · gen-set · video (Grok Imagine)"]
         video["video<br/>canvas · frames · loop · batch (video-set)"]
         frames["frames<br/>extract · cutout · slice-sheet · unpack-atlas · segment"]
         curate["curate<br/>curation sidecar · direction anchors"]
         compose["compose<br/>atlas · cycle · gif · layers · export-pngs · export-aseprite"]
-        effects["effects<br/>breathe · anatomy · recolor · interpolate"]
-        qa["qa<br/>inspect · score · preview · correction-loop"]
+        background["background<br/>repeating RGBA tiles · join inspection"]
+        effects["effects<br/>breathe · anatomy · recolor · interpolate · projected shadows"]
+        qa["qa<br/>inspect-motion · inspect · score · preview · correction-loop"]
+        scene["scene<br/>placement · planes · camera · light · render · inspect"]
         serve["serve<br/>curation webview · composition canvas"]
     end
     cli["cli.py — one entrypoint, verbs grouped by domain"] --> pkg
     spec -.read by every stage.-> gen & frames & compose & qa
 ```
 
-## 1. Four pipelines
+## 1. Pipelines, tools and scenes
 
-One sentence: a character image plus a numeric request becomes a transparent sprite
-atlas (pipeline A) or a set of transparent motion loops (pipeline B); imported images
-are cut clean (C); finished sheets are refined without regeneration (D). Every verb is
-also a standalone tool — the pipelines are the order the docs recommend, not a wrapper.
+A character image plus a numeric request becomes a transparent sprite atlas (pipeline A)
+or transparent motion loops (pipeline B). C/D/E are independent tool groups: imported
+image processing, finished-sheet refinement, and background/shadow/motion tools.
+Scene creation (S) is an optional workflow consuming existing assets. `_modules.py`
+owns separate `PIPELINES`, `TOOL_GROUPS` and `WORKFLOWS` catalogs. Domains express code
+ownership; workflows express the result; pipelines express an execution order.
 
 ```mermaid
 flowchart TD
@@ -85,7 +89,23 @@ flowchart TD
     end
     ATLAS --> D
     UNPACK --> CURATE
+    subgraph E["E · independent asset tools"]
+        TILE[background-tile] ~~~ SHADOW[shadow] ~~~ MOTION[inspect-motion]
+    end
+    subgraph S["S · optional scene workflow"]
+        INPUT["existing assets + scene.json"] --> RENDER[scene-render]
+        INPUT --> CHECK[scene-inspect]
+    end
 ```
+
+`spec.assets` adapts external descriptors, native loop strips and runtime atlases into
+one `FrameSequence`. Asset metadata owns frame order, native timing and anchor;
+`scene.model` owns references, placement, scale, playback rate, planes, camera and light.
+Scene never rewrites source assets. `qa.motion` measures contact evidence; scene applies
+only a verified measurement for the matching asset, in an explicitly chosen direction.
+`effects.shadow.project_shadow` is shared by standalone shadow export and scene render.
+Background generation remains a recipe for existing `gen` and `cutout` commands.
+The complete contracts live in [asset-tools](asset-tools.md) and [scene](scene.md).
 
 ## 2. Stage ownership (each script does one job)
 

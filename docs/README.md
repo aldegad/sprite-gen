@@ -1,8 +1,8 @@
 # sprite-gen documentation index
 
-One tool, four pipelines, one taxonomy. Every verb works alone or as a pipeline stage;
-every doc below owns exactly one concern and the others point at it. Start with the
-pipeline you are running, then follow its contract doc.
+One CLI, two sprite pipelines, independent tool groups and optional scene creation.
+Each doc owns one concern. Start with the result you want, then follow its contract;
+the code domains describe ownership rather than an execution order.
 
 ```mermaid
 flowchart LR
@@ -25,16 +25,25 @@ flowchart LR
         direction LR
         d1[recolor] ~~~ d2[compose-layers] ~~~ d3["breathe (compose)"] ~~~ d4[export-*]
     end
+    subgraph E["E · asset tools (independent)"]
+        e1[background-tile] ~~~ e2[shadow] ~~~ e3[inspect-motion]
+    end
+    subgraph S["S · scene (optional)"]
+        s1["existing assets + scene.json"] --> s2[scene-render]
+        s1 --> s3[scene-inspect]
+    end
 ```
 
-| Pipeline | Entry doc | Verbs |
+| Pipeline / tool group / workflow | Entry doc | Verbs |
 |---|---|---|
 | **A · atlas rows** — one still becomes a runtime sprite sheet | [run-contract.md](run-contract.md) | `prepare` → `gen` / `gen-set` → `extract` → `compose-atlas`; optional `curation` and recompose |
 | **B · video → loop** — one still becomes transparent motion loops | [video-pipeline.md](video-pipeline.md) | `video-canvas` → `video` → `video-frames` → `video-loop`, `video-set` |
 | **C · utilities** — imported images in, clean cuts out | [sheet-slicing.md](sheet-slicing.md) | `cutout`, `slice-sheet`, `unpack-atlas` |
 | **D · post-processing** — finished sheets, refined | [recolor.md](recolor.md) | `recolor`, `recolor-palette`, `compose-layers`, breathing (compose), `export-pngs`, `export-aseprite` |
+| **E · asset tools** — independent background, shadow and motion tools | [asset-tools.md](asset-tools.md) | `background-tile`, `shadow`, `inspect-motion` |
+| **S · scene** — optional composition of existing assets | [scene.md](scene.md) | `scene-render`, `scene-inspect` |
 
-`sprite-gen --help` prints the same four pipelines and every verb grouped by domain; the
+`sprite-gen --help` prints these separate catalogs and every verb grouped by domain; the
 grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
 
 ## User requests
@@ -78,7 +87,7 @@ grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
 | [breathing.md](breathing.md) | The idle-breathing post-process layer and the static-pose row recipe |
 | [locomotion-curation.md](locomotion-curation.md) | Manual selected cycles, clean GIF export |
 
-## Post-processing (pipeline D)
+## Post-processing (tool group D)
 
 | Doc | Owns |
 |---|---|
@@ -86,7 +95,14 @@ grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
 | [layer-tracks.md](layer-tracks.md) | Rig runs: `rig` / `track` / `layers` contract and `compose-layers` |
 | [engine-export.md](engine-export.md) | Aseprite-compatible export for Phaser and Flame |
 
-## Specialized inputs (pipeline C and direction runs)
+## Asset tools and optional scenes
+
+| Doc | Owns |
+|---|---|
+| [asset-tools.md](asset-tools.md) | Background recipes, repeating RGBA tiles, projected shadows, shared asset formats and motion/contact measurements |
+| [scene.md](scene.md) | Scene spec, planes, camera, lighting, measured stride application, render/inspection and output contracts |
+
+## Specialized inputs (tool group C and direction runs)
 
 | Doc | Owns |
 |---|---|

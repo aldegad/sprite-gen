@@ -2,7 +2,13 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v2.2.0)
+## v2.2.0 - Independent asset tools and optional scenes
+
+- Added standalone `background-tile`, `shadow` and `inspect-motion` commands. They accept existing artwork and report tile joins, anchor-preserving shadow projections, repeated poses and explicit foot-contact measurements without changing source animation.
+- Added optional `scene-render` and `scene-inspect` with asset references, planes, placement, playback rate, camera, lighting, PNG/MP4/GIF output and layer/placement export. Scene applies only verified stride for the matching asset and an explicitly chosen direction.
+- Added one read-only adapter for PNGs, external frame descriptors, existing loop strips and runtime atlases, preserving native timing and anchors. Source fingerprints bind measurements to loaded content; output publication uses shared locking and atomic writes.
+- Split the command catalog into ordered sprite pipelines, independent tool groups and optional workflows. Added background recipes and asset/scene contracts to the skill and documentation, plus a 20 fps, 256-colour village GIF below the existing README showcase.
+- Raised the Pillow minimum to 12.3.0 for its upstream security fixes; existing environments must update separately to satisfy the new requirement.
 
 - Grok images now call xAI Imagine directly for generation and one-to-five-reference editing, without spawning Grok Build. The default image model is `grok-imagine-image-2.0`; `--model` now selects the image API model. Responses are decoded and published as verified PNGs with existing chroma cleanup preserved.
 - Images and videos share one credential reader: `XAI_API_KEY` first, otherwise the user's Grok login (`GROK_HOME` supported). Image reports expose the auth source and API endpoint. The workflow guide checks the same source and explicitly confirms API-credit billing for either media type. Expired login and request failures stop without agent fallback or automatic image request retries.
