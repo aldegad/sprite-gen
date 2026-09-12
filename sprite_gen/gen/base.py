@@ -104,6 +104,19 @@ class GenRequest:
     # legal for a provider whose `transparency` is `native`; the orchestrator gates
     # it and the provider carries the request into its transport prompt.
     native_alpha: bool = False
+    # The chroma key (`chroma.KEYS` name) the orchestrator will matte out after this
+    # generation, or None when the run is not keying. The exact mirror of
+    # `native_alpha` for the other strategy: the orchestrator decides the strategy,
+    # and the provider carries whatever that strategy needs into its transport prompt.
+    #
+    # Only a provider that can act on its own initiative needs to read this. grok is a
+    # bare image API — it paints exactly the background the caller's prompt describes,
+    # so the sprite-row prompts carry the key themselves and the adapter stays out of it
+    # (unchanged). An agent CLI does not behave that way: given no instruction it picks
+    # its own background, and measured 2026-09-12 it will even segment the subject out
+    # unasked. `agy_provider` therefore states the key in its prompt — and it must be
+    # THIS key, not a guess, or the painted background and the matte disagree.
+    chroma_key: str | None = None
 
 
 @dataclass

@@ -27,6 +27,19 @@ def probe_access(provider: str, *, video: bool = False) -> dict:
         if "chatgpt" not in output:
             return {**result, "reason": "login succeeded but ChatGPT subscription authentication was not identified"}
         return {**result, "login": "ready"}
+    if provider == "agy":
+        # Antigravity signs in through a Google AI Pro account inside the CLI and
+        # exposes no offline status subcommand (`agy --help`, 2026-09-12: agent /
+        # models / mcp / plugin / update — nothing like `login status`). Everything
+        # that would actually prove the session works (`agy models`, a probe turn)
+        # is a network round trip on the user's quota, which a read-only guide must
+        # not spend. So presence on PATH is the only thing checked and the login
+        # stays "unknown" — which is what makes the guide ask the user to confirm
+        # the subscription rather than assert it.
+        if shutil.which("agy") is None:
+            return {**result, "login": "unavailable", "reason": "agy (Antigravity) CLI is not installed"}
+        return {**result, "reason": "agy CLI is installed; Antigravity has no offline login check, "
+                                    "so confirm the Google AI Pro sign-in and image availability."}
     if provider != "grok":
         raise ValueError(f"unknown provider: {provider}")
     try:

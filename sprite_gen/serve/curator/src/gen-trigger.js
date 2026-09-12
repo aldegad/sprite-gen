@@ -12,6 +12,9 @@
 const GEN_PROVIDERS = [
   { value: "codex", label: "GPT" },
   { value: "grok", label: "Grok" },
+  // 서버의 sprite_gen.gen.PROVIDERS 와 같은 집합 (서버가 최종 검증한다). agy 는
+  // 한 턴이 60~130초라 다른 둘보다 눈에 띄게 느리다 — 그래서 목록 마지막.
+  { value: "agy", label: "Antigravity" },
 ];
 
 // 공용 모델 선택 위젯 — 표기/순서/기본값(codex)의 유일한 자리

@@ -12,16 +12,16 @@ AI 생성이다. 산출물은 최종 프레임이 아니라 **테이크 raw** (`
 (hero down_action 팔스윙: codex/grok/RIFE)에서 생성형이 중간 포즈를 깨끗한
 픽셀로 그려내 압승했다 — 근거 시트 `tween-3way-compare.png` (트레이 2026-07-17).
 
-인증 전제 (GUI 버튼 포함): 생성은 항상 **서버 머신의 provider CLI** (`codex`/`grok`)
+인증 전제 (GUI 버튼 포함): 생성은 항상 **서버 머신의 provider CLI** (`codex`/`grok`/`agy`)
 가 수행한다 — 브라우저·웹뷰에는 어떤 자격증명도 지나가지 않는다. 해당 CLI 가
-이 머신에 설치·로그인(ChatGPT OAuth / xAI OAuth)되어 있어야 하며, 미인증이면
+이 머신에 설치·로그인(ChatGPT OAuth / xAI OAuth / Google AI Pro)되어 있어야 하며, 미인증이면
 provider 가 요란하게 실패하고 그 메시지가 CLI/뷰 상태줄에 그대로 표면화된다.
 설정 절차는 [`docs/gen.md`](../docs/gen.md), 보간 관점 가이드는
 [`docs/frame-interpolation.md`](../docs/frame-interpolation.md).
 
 사용:
     python3 scripts/interpolate_frames.py --run-dir <run> --state down_idle \
-        --between 1 2 [--provider codex|grok] [--t 0.5] [--label blink_mid] [--extract]
+        --between 1 2 [--provider codex|grok|agy] [--t 0.5] [--label blink_mid] [--extract]
 
 - `--between A B`: 그 상태 primary 스트립의 프레임 인덱스 두 개 (추출된 컴포넌트 순서).
 - `--provider`: 생성 백엔드 (기본 codex — 3-way 비교 승자).
@@ -49,7 +49,10 @@ from sprite_gen.frames.extract import (extract_component_images, register_row_fr
 from sprite_gen.spec.layout import raw_rel, take_raw_rel
 from sprite_gen.spec.runio import load_request, write_request
 
-PROVIDERS = ("codex", "grok")
+# 보간은 두 프레임을 ref 로 물리므로 ref 를 받을 수 있는 provider 만 의미가 있는데,
+# codex(`-i`)/grok(images 배열)/agy(`--add-dir` + 프롬프트에 절대경로 명시, 2026-09-12 실측)
+# 모두 ref 를 받는다 — 즉 `sprite_gen.gen.PROVIDERS` 전부가 여기서도 유효하다.
+PROVIDERS = ("codex", "grok", "agy")
 
 # interpolator 시그니처: (img0 RGB, img1 RGB, t, prompt) -> mid RGB. 테스트는 스텁을 주입한다.
 Interpolator = Callable[[Image.Image, Image.Image, float, str], Image.Image]

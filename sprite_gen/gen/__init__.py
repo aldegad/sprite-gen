@@ -2,17 +2,20 @@
 """Unified image generation layer for sprite-gen.
 
 Single source of truth for provider-backed image generation: codex (`image_gen`,
-ChatGPT OAuth) and grok (Imagine, xAI OAuth). One call = prompt (+ optional refs)
--> one verified raw PNG, with an optional deterministic transparent chroma
-post-process. The general `image-gen` skill is a thin shuttle over `sprite-gen gen`.
+ChatGPT OAuth), grok (Imagine, xAI OAuth) and agy (Antigravity CLI, Google AI Pro
+subscription). One call = prompt (+ optional refs) -> one verified raw PNG, with an
+optional deterministic transparent chroma post-process. The general `image-gen`
+skill is a thin shuttle over `sprite-gen gen`.
 
 Transparency is a per-provider strategy (`Provider.transparency`, declared once
 in each adapter): codex `image_gen` returns a genuinely transparent PNG when asked
-(`native`), grok Imagine cannot and is keyed out of a chroma background (`chroma`).
+(`native`); grok Imagine and agy cannot, so both generate on a key background that
+sprite-gen mattes out itself (`chroma`) — agy's adapter states the key in its prompt
+because an agent, unlike a bare API, otherwise picks its own background.
 `--transparent` follows the provider's strategy unless `--alpha-mode` overrides it.
 
 CLI:
-    sprite-gen gen --provider codex|grok --prompt "..." --out DEST.png
+    sprite-gen gen --provider codex|grok|agy --prompt "..." --out DEST.png
         [--ref REF.png ...] [--transparent [--alpha-mode auto|native|chroma]
         [--chroma-key magenta|green]] [--white-check CHECK.png] [--model ID]
         [--aspect-ratio 1:1] [--report REPORT.json] [--keep-session]
@@ -44,10 +47,11 @@ from .base import (
     provider_subprocess_env,
     verify_png,
 )
+from .agy_provider import AgyProvider
 from .codex_provider import CodexProvider
 from .grok_provider import GrokProvider
 
-PROVIDERS = ("codex", "grok")
+PROVIDERS = ("codex", "grok", "agy")
 # `--alpha-mode`: `auto` reads the provider's declared strategy (the SSoT);
 # `native` / `chroma` force one. Forcing `native` on a chroma-only provider fails
 # loud — a strategy the backend cannot execute is not a fallback candidate.
@@ -71,6 +75,8 @@ def _make_provider(name: str, *, keep_session: bool):
         return CodexProvider(keep_session=keep_session)
     if name == "grok":
         return GrokProvider()
+    if name == "agy":
+        return AgyProvider()
     raise SystemExit(f"gen: unknown provider {name!r}; expected one of {', '.join(PROVIDERS)}")
 
 
@@ -163,7 +169,12 @@ def resolve_default_provider() -> tuple[str, dict[str, str] | None]:
 
     # The availability-driven fallback is codex -> grok only (the mandated default).
     # A grok default that is down fails loud at generation time rather than silently
-    # reverse-falling-back to codex.
+    # reverse-falling-back to codex. agy is deliberately outside this failover in
+    # either direction: it is selectable (explicitly, or as SPRITE_GEN_DEFAULT_PROVIDER)
+    # but never chosen FOR the user, because a ~63-130s agent turn is not a drop-in
+    # substitute for a stalled default (an agy turn is a whole agent run, ~63s 실측), and an
+    # agy default that is down likewise fails
+    # loud at generation time.
     if default == "codex":
         ok, reason = _codex_available()
         if not ok:
@@ -228,6 +239,10 @@ def generate_image(
             model=model,
             aspect_ratio=aspect_ratio,
             native_alpha=strategy == TRANSPARENCY_NATIVE,
+            # The same key `key_transparent` will matte out below, so a provider that
+            # has to state its background in a prompt states the right one, and the
+            # painted background can never disagree with the matte (see GenRequest).
+            chroma_key=chroma_key if strategy == TRANSPARENCY_CHROMA else None,
         )
         # 타임아웃 1회 관측 가능 재시도 — 산발 provider 스톨은 같은 호출 재시도로
         # 대부분 통과한다 (회귀 2026-07-19). 두 번째도 스톨이면 fail loud.
@@ -377,7 +392,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "publish a transparent RGBA PNG using the provider's transparency strategy: "
-            "codex asks image_gen for real alpha (native), grok is keyed out of a chroma background"
+            "codex asks image_gen for real alpha (native); grok and agy are keyed out of a "
+            "chroma background (chroma)"
         ),
     )
     parser.add_argument(
@@ -386,7 +402,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=ALPHA_MODE_AUTO,
         help=(
             "transparency strategy for --transparent: auto = the provider's declared strategy "
-            "(native on codex, but chroma whenever --ref is attached — native alpha with refs is unstable); "
+            "(native on codex, but chroma whenever --ref is attached — native alpha with refs is unstable; "
+            "chroma on grok/agy always); "
             "chroma forces chroma keying (e.g. a codex prompt that already carries a key background); "
             "native forces native alpha and is refused on a provider that cannot return alpha"
         ),
