@@ -10,7 +10,8 @@ from PIL import Image, ImageDraw
 
 from sprite_gen.qa.motion import analyze_motion
 from sprite_gen.scene import model
-from sprite_gen.scene.model import bound_stride, load_scene
+from sprite_gen.scene.model import bound_stride, load_scene, merge_fingerprints
+from sprite_gen.spec import assets
 from sprite_gen.spec.assets import load_asset
 
 
@@ -180,6 +181,90 @@ def test_scene_and_report_identity_are_the_parsed_bytes(tmp_path, monkeypatch):
         assert loaded.source_fingerprints[path] == digest
         assert sha(path) != digest
     assert loaded.layers[0].velocity == (pytest.approx(20), 0)
+
+
+def test_merge_fingerprints_keeps_one_digest_per_path_and_refuses_a_second_without_touching_the_map():
+    known = {"/scene.json": "a", "/actor.png": "b"}
+    assert merge_fingerprints(known, {"/actor.png": "b", "/atlas.png": "c"}) is known
+    assert known == {"/scene.json": "a", "/actor.png": "b", "/atlas.png": "c"}
+    with pytest.raises(ValueError, match=r"changed during load.*/actor\.png, /scene\.json"):
+        merge_fingerprints(known, {"/report.json": "d", "/scene.json": "A", "/actor.png": "B"})
+    assert known == {"/scene.json": "a", "/actor.png": "b", "/atlas.png": "c"}
+
+
+def test_shared_asset_file_replaced_between_two_loads_is_refused(tmp_path, monkeypatch):
+    actor = tmp_path / "actor.png"
+    Image.new("RGBA", (4, 4), "red").save(actor)
+    spec = scene(tmp_path, assets={"first": "actor.png", "second": "actor.png"},
+                 layers=[{"id": "first", "asset": "first", "at": [12, 40]}, {"id": "second", "asset": "second", "at": [36, 40]}])
+    original = assets._read_bytes
+    reads = []
+
+    def read_then_replace_once(path):
+        data = original(path)
+        if Path(path).name == "actor.png":
+            reads.append(data)
+            if len(reads) == 1:
+                Image.new("RGBA", (4, 4), "blue").save(actor)
+        return data
+
+    monkeypatch.setattr(assets, "_read_bytes", read_then_replace_once)
+    # Each asset's own snapshot is right; the scene must not attest to one file with two byte histories.
+    with pytest.raises(ValueError, match=r"changed during load.*actor\.png"):
+        load_scene(spec)
+    assert len(reads) == 2 and reads[0] != reads[1]
+    monkeypatch.undo()
+    loaded = load_scene(spec)
+    assert loaded.source_fingerprints[str(actor.resolve())] == sha(actor)
+    assert loaded.assets["first"].fingerprints() == loaded.assets["second"].fingerprints() == {str(actor.resolve()): sha(actor)}
+
+
+def test_stride_report_replaced_between_two_layers_reads_is_refused(tmp_path, monkeypatch):
+    atlas(tmp_path)
+    report = motion_report(tmp_path, state="walk")
+    spec = scene(tmp_path, layers=[
+        {"id": "left", "asset": "walk", "at": [12, 40], "stride": {"report": report.name, "direction": "left"}},
+        {"id": "right", "asset": "walk", "at": [36, 40], "stride": {"report": report.name, "direction": "right"}},
+    ])
+    original = model.read_json
+    digests = []
+
+    def read_then_double_the_stride_once(path):
+        document, digest = original(path)
+        if Path(path) == report.resolve():
+            digests.append(digest)
+            if len(digests) == 1:
+                report.write_text(json.dumps({**document, "stride_px_per_second": 2 * document["stride_px_per_second"]}))
+        return document, digest
+
+    monkeypatch.setattr(model, "read_json", read_then_double_the_stride_once)
+    with pytest.raises(ValueError, match=r"changed during load.*walk\.motion\.json"):
+        load_scene(spec)
+    assert len(digests) == 2 and digests[0] != digests[1]
+    # Both versions pass the per-report gate for this sequence; only the scene-wide map tells them apart.
+    assert bound_stride(json.loads(report.read_text()), load_asset(tmp_path / "atlas.json", state="walk")) == pytest.approx(40)
+    monkeypatch.undo()
+    loaded = load_scene(spec)
+    assert [layer.velocity for layer in loaded.layers] == [(pytest.approx(-40), 0), (pytest.approx(40), 0)]
+    assert loaded.source_fingerprints[str(report.resolve())] == sha(report)
+
+
+def test_unchanged_repeated_references_share_one_digest_per_path(tmp_path):
+    atlas(tmp_path)
+    Image.new("RGBA", (4, 4), "red").save(tmp_path / "actor.png")
+    report = motion_report(tmp_path, state="walk")
+    loaded = load_scene(scene(tmp_path, assets={"walk": {"source": "atlas.json", "state": "walk"}, "idle": {"source": "atlas.json", "state": "idle"},
+                                                "first": "actor.png", "second": "actor.png"},
+                              layers=[{"id": "left", "asset": "walk", "at": [12, 40], "stride": {"report": report.name, "direction": "left"}},
+                                      {"id": "right", "asset": "walk", "at": [36, 40], "stride": {"report": report.name, "direction": "right"}},
+                                      {"id": "still", "asset": "idle", "at": [24, 40]},
+                                      {"id": "first", "asset": "first", "at": [8, 40]},
+                                      {"id": "second", "asset": "second", "at": [40, 40]}]))
+    assert loaded.source_fingerprints == {str((tmp_path / name).resolve()): sha(tmp_path / name)
+                                          for name in ("scene.json", "atlas.json", "atlas.png", "actor.png", report.name)}
+    by_id = {layer.id: layer for layer in loaded.layers}
+    assert by_id["left"].velocity == (pytest.approx(-20), 0) and by_id["right"].velocity == (pytest.approx(20), 0)
+    assert by_id["still"].velocity == by_id["first"].velocity == by_id["second"].velocity == (0, 0)
 
 
 @pytest.mark.parametrize("overrides, message", [

@@ -232,6 +232,34 @@ def test_input_replaced_after_decoding_is_detected_and_nothing_is_published(tmp_
         assert frame.getpixel((2, 2)) == BLUE
 
 
+def test_shared_source_replaced_between_asset_loads_fails_before_any_output_exists(tmp_path, monkeypatch):
+    actor = square(tmp_path / "actor.png")
+    spec = write_scene(tmp_path, [{"id": "left", "asset": "first", "at": [4, 8]}, {"id": "right", "asset": "second", "at": [12, 8]}],
+                       assets={"first": "actor.png", "second": "actor.png"}, height=8, fps=1, duration=1)
+    original = assets._read_bytes
+    reads = []
+
+    def replace_after_first_read(path):
+        data = original(path)
+        if Path(path).name == "actor.png":
+            reads.append(data)
+            if len(reads) == 1:
+                square(actor, BLUE)
+        return data
+
+    monkeypatch.setattr(assets, "_read_bytes", replace_after_first_read)
+    out = tmp_path / "out"
+    with pytest.raises(ValueError, match="changed during load"):
+        render_scene(spec, out, formats="png")
+    assert len(reads) == 2 and reads[0] != reads[1]
+    assert not out.exists() and sorted(p.name for p in tmp_path.iterdir()) == ["actor.png", "scene.json"]
+    monkeypatch.undo()
+    report = render_scene(spec, out, formats="png")
+    assert report["source_fingerprints"][str(actor.resolve())] == hashlib.sha256(actor.read_bytes()).hexdigest()
+    with Image.open(out / "check-00000.png") as frame:
+        assert frame.getpixel((4, 6)) == BLUE and frame.getpixel((12, 6)) == BLUE
+
+
 @pytest.mark.parametrize("problem", ["inputs-inside", "nonempty", "live-lock", "file"])
 def test_output_directory_rules_are_enforced_without_touching_the_destination(tmp_path, problem):
     spec = write_scene(tmp_path, [{"id": "hero", "asset": "red", "at": [8, 12]}])

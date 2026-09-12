@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Scene layout and time belong here; source frames belong to asset metadata."""
+"""Scene layout and time belong here; source frames belong to asset metadata.
+
+The scene also owns the scene-wide input fingerprint map: one digest per
+resolved path for the spec, every asset file and every stride report, each
+hashed from the bytes that were actually parsed or decoded. Inputs that are
+read more than once must come back as the same bytes, or the scene is refused.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -34,6 +40,23 @@ def read_json(path: Path) -> tuple[object, str]:
     """Parse a JSON file from one read and return the document with the SHA-256 of those bytes."""
     data = Path(path).read_bytes()
     return json.loads(data.decode("utf-8")), hashlib.sha256(data).hexdigest()
+
+
+def merge_fingerprints(fingerprints: dict, more: dict) -> dict:
+    """Add ``more`` to a scene-wide fingerprint map that keeps one digest per path.
+
+    One path may legitimately be read more than once while a scene loads: two
+    asset names can share a file, two states share an atlas, two layers share a
+    stride report. A path that comes back with a different digest was replaced
+    between those reads, so the scene would hold two versions of one input while
+    attesting to only one of them. That is refused with the map left untouched;
+    neither digest is preferred and nothing is read again.
+    """
+    changed = sorted(path for path, digest in more.items() if fingerprints.get(path, digest) != digest)
+    if changed:
+        raise ValueError(f"scene inputs changed during load; read twice as different bytes: {', '.join(changed)}")
+    fingerprints.update(more)
+    return fingerprints
 
 
 @dataclass
@@ -145,7 +168,7 @@ def load_scene(path: Path) -> Scene:
             raise ValueError(f"asset {name} requires a source path")
         asset = load_asset(path.parent / reference["source"], state=reference.get("state"))
         assets[name] = asset
-        fingerprints.update(asset.fingerprints())
+        merge_fingerprints(fingerprints, asset.fingerprints())
     entries = data.get("layers")
     if not isinstance(entries, list) or not entries:
         raise ValueError("scene layers must be a nonempty list")
@@ -187,7 +210,7 @@ def load_scene(path: Path) -> Scene:
             # the raster scale actually used for this layer times the playback rate.
             raster_scale = raster_size[0] / seq.size[0]
             velocity = (speed*raster_scale*rate*(-1 if stride["direction"] == "left" else 1), 0)
-            fingerprints[str(rp)] = report_digest
+            merge_fingerprints(fingerprints, {str(rp): report_digest})
         velocity = tuple(a+b for a, b in zip(plane_v, velocity))
         period = finite(entry.get("period", seq.size[0]), "repeat period", positive=True)
         if period > seq.size[0] or int(period) != period or round(period*scale) < 1:
