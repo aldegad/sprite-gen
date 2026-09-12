@@ -85,7 +85,7 @@ sprite-gen gen \
   [--ref REF.png ...]     # repeatable; Grok accepts up to five references
   [--transparent [--alpha-mode auto|native|chroma] [--chroma-key magenta|green]] \
   [--white-check CHECK.png] \
-  [--aspect-ratio 1:1]    # grok only (1:1, 16:9, 9:16, 4:3, 3:4, auto)
+  [--aspect-ratio 1:1]    # grok only, e.g. 1:1 or 16:9; single-ref edits inherit the source ratio
   [--model ID] \
   [--report REPORT.json] \
   [--keep-session]        # codex: keep the rollout jsonl instead of deleting it
