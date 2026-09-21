@@ -109,6 +109,11 @@ STATE_REQUIREMENTS = {
         "Use distinct gait poses that create a readable cycle instead of repeated standing or static bobbing.",
         "Do not draw speed lines, dust clouds, floor shadows, motion trails, or detached motion effects.",
     ],
+    "move": [
+        "Show locomotion through body, arm, leg, hair, and prop movement only.",
+        "Use distinct gait poses that create a readable cycle instead of repeated standing or static bobbing.",
+        "Do not draw speed lines, dust clouds, floor shadows, motion trails, or detached motion effects.",
+    ],
     "walk": [
         "Show locomotion through body, arm, leg, hair, and prop movement only.",
         "Use distinct gait poses that create a readable cycle instead of repeated standing or static bobbing.",
@@ -759,10 +764,18 @@ def row_prompt(request: dict[str, Any], state: str, entry: dict[str, Any]) -> st
     cell_height = int(cell["height"])
     safe_margin_x = int(cell["safe_margin_x"])
     safe_margin_y = int(cell["safe_margin_y"])
+    # Direction-contract rows use `<direction>_<pose>` ids. Exact legacy names keep
+    # priority, then the pose suffix inherits the same semantic requirements. This
+    # replaces the retired stick/phase-guide workaround without bringing drawings
+    # back into geometry-only layout guides.
+    pose = state.rsplit("_", 1)[-1]
+    semantic_requirements = STATE_REQUIREMENTS.get(state)
+    if semantic_requirements is None:
+        semantic_requirements = STATE_REQUIREMENTS.get(pose, [])
     state_requirements = [
         *direction_prefix_requirements(request, state),
         *directional_requirements(state),
-        *STATE_REQUIREMENTS.get(state, []),
+        *semantic_requirements,
     ]
     state_requirement_text = ""
     if state_requirements:

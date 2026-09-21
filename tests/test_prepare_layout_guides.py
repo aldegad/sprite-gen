@@ -66,3 +66,17 @@ def test_library_does_not_accept_removed_option(tmp_path: Path):
     with pytest.raises(TypeError, match="unexpected keyword argument.*motion_phase_guides"):
         prepare.run(out_dir=tmp_path / "run", character_id="runner", motion_phase_guides=True)
     assert not (tmp_path / "run").exists()
+
+
+@pytest.mark.parametrize("state", ["east_run", "south_move"])
+def test_direction_pose_state_inherits_locomotion_requirements(tmp_path: Path, state: str):
+    request = {"directions": {"set": [state.split("_", 1)[0]]}, "states": {
+        state: {"frames": 8, "fps": 8, "loop": True, "action": "eight-phase gait"},
+    }}
+    result = run_script("prepare_sprite_run.py", "--out-dir", str(tmp_path / "run"),
+                        "--character-id", "runner", "--request-json", json.dumps(request))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    prompt = next((tmp_path / "run" / "prompts").rglob("*run.txt" if state.endswith("run") else "*move.txt")).read_text()
+    assert "Use distinct gait poses that create a readable cycle" in prompt
+    assert "phase guide" not in prompt

@@ -10,7 +10,7 @@ from typing import Callable
 from sprite_gen import _modules, gen
 from sprite_gen.background import tile
 from sprite_gen.curate import anchor
-from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, compose_layers, export_aseprite, export_pngs
+from sprite_gen.compose import compact_atlas, compose_atlas, compose_cycle, compose_gif, compose_layers, export_aseprite, export_pngs
 from sprite_gen.qa import correction_loop, inspect, preview, score, motion
 from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
 from sprite_gen.gen import gen_set, prepare, video
@@ -243,6 +243,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Compose component-row frames into a game atlas and runtime manifest.",
         _add_compose_atlas,
         compose_atlas.run,
+    ),
+    "compact-atlas": (
+        "Trim and pack a composed atlas into Texture2DArray-compatible pages.",
+        compact_atlas.add_arguments,
+        compact_atlas.run,
     ),
     "preview": ("Build motion-QA previews for a sprite-gen run.", _add_preview, preview.run),
     "compose-cycle": (

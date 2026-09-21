@@ -35,6 +35,7 @@ MODULE_DOMAIN = {
     'curation': 'curate',
     'anchor': 'curate',
     'compose_atlas': 'compose',
+    'compact_atlas': 'compose',
     'compose_cycle': 'compose',
     'compose_gif': 'compose',
     'compose_layers': 'compose',
@@ -83,8 +84,8 @@ DOMAIN_TITLE = dict(DOMAINS)
 # The CLI help, the docs index and the README
 # pipeline table are checked against THIS list; a verb named here must exist as a verb.
 PIPELINES: list[dict[str, object]] = [
-    {"key": "A", "name": "atlas rows", "verbs": ["prepare", "gen", "gen-set", "extract", "compose-atlas", "curation"],
-     "chain": "prepare → gen (or gen-set) → extract → compose-atlas; optional curation and recompose", "doc": "docs/run-contract.md"},
+    {"key": "A", "name": "atlas rows", "verbs": ["prepare", "gen", "gen-set", "extract", "compose-atlas", "compact-atlas", "curation"],
+     "chain": "prepare → gen (or gen-set) → extract → compose-atlas → optional compact-atlas; optional curation and recompose", "doc": "docs/run-contract.md"},
     {"key": "B", "name": "video → loop", "verbs": ["video-canvas", "video", "video-frames", "video-loop", "video-set"],
      "chain": "video-canvas → video → video-frames → video-loop, or video-set", "doc": "docs/video-pipeline.md"},
 ]

@@ -44,6 +44,7 @@ canonical files, not hidden imports.
 | Extract | `extract_sprite_row_frames.py` | `raw/<state>.png` | on success: `frames/<state>/frame-N.png` (+ `.plain.png` twin on pixel-unfake runs), `frames/frames-manifest.json`; on failure: nothing in `frames/`, `extract-failure.json` instead (§6) |
 | Curate (opt) | `sprite-gen curation` (`serve_curation.py`) + `curation.py` | `frames/` | `curation.json` sidecar |
 | Compose | `compose_sprite_atlas.py` | `frames/` + `curation.json` | `sprite-sheet-alpha.png`, `manifest.json`, `*.report.json` |
+| Compact (opt) | `compact_sprite_atlas.py` | composed atlas + `manifest.json.frame_layout` | fixed-size page PNGs, `manifest.compact.json`, `compact-atlas.report.json` |
 | Engine export (opt) | `sprite-gen export-aseprite` (`sprite_gen/compose/export_aseprite.py`) | composed `manifest.json` + existing atlas | `exports/aseprite.json`, or `exports/aseprite/<state>.json` for Flame |
 | Recolor (opt) | `sprite-gen recolor` / `recolor-palette` (`sprite_gen/effects/recolor.py`) | base sheet (default `sprite-sheet-alpha.png`) + recolor spec | `variants/<name>.png`, optional `variants/<name>.manifest.json`, `variants/recolor.report.json` |
 | Layer bake (opt) | `sprite-gen compose-layers` (`sprite_gen/compose/compose_layers.py`) | `frames/` + `curation.json` + the request's `rig` / `layers` | `layers/<name>.png`, `layers/<name>.manifest.json`, `layers/layers.report.json` (published as one set) |

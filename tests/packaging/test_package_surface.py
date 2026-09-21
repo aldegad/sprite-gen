@@ -20,6 +20,7 @@ PACKAGE_DIR = ROOT / "sprite_gen"
 
 PACKAGE_RUN_MODULES = [
     "anchor",
+    "compact_atlas",
     "compose_atlas",
     "compose_cycle",
     "compose_gif",

@@ -8,7 +8,7 @@ the code domains describe ownership rather than an execution order.
 flowchart LR
     subgraph A["A · atlas rows"]
         direction LR
-        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a5[compose-atlas]
+        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a5[compose-atlas] --> a6[compact-atlas optional]
         a5 -.-> a4["curation (optional)"]
         a4 --> a5
     end
@@ -36,7 +36,7 @@ flowchart LR
 
 | Pipeline / tool group / workflow | Entry doc | Verbs |
 |---|---|---|
-| **A · atlas rows** — one still becomes a runtime sprite sheet | [run-contract.md](run-contract.md) | `prepare` → `gen` / `gen-set` → `extract` → `compose-atlas`; optional `curation` and recompose |
+| **A · atlas rows** — one still becomes runtime atlas pages | [run-contract.md](run-contract.md) · [compact-atlas.md](compact-atlas.md) | `prepare` → `gen` / `gen-set` → `extract` → `compose-atlas` → optional `compact-atlas`; optional `curation` and recompose |
 | **B · video → loop** — one still becomes transparent motion loops | [video-pipeline.md](video-pipeline.md) | `video-canvas` → `video` → `video-frames` → `video-loop`, `video-set` |
 | **C · utilities** — imported images in, clean cuts out | [sheet-slicing.md](sheet-slicing.md) | `cutout`, `slice-sheet`, `unpack-atlas` |
 | **D · post-processing** — finished sheets, refined | [recolor.md](recolor.md) | `recolor`, `recolor-palette`, `compose-layers`, breathing (compose), `export-pngs`, `export-aseprite` |

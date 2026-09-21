@@ -20,8 +20,13 @@ $SPRITE_GEN_ROOT/.venv/bin/sprite-gen prepare --out-dir /absolute/run \
 $SPRITE_GEN_ROOT/.venv/bin/sprite-gen gen-set --run-dir /absolute/run --provider codex
 $SPRITE_GEN_ROOT/.venv/bin/sprite-gen extract --run-dir /absolute/run
 $SPRITE_GEN_ROOT/.venv/bin/sprite-gen compose-atlas --run-dir /absolute/run
+$SPRITE_GEN_ROOT/.venv/bin/sprite-gen compact-atlas --run-dir /absolute/run \
+  --page-size 2048 --max-pages 4 --max-empty-percent 25
 $SPRITE_GEN_ROOT/.venv/bin/sprite-gen compose-gif --run-dir /absolute/run --out-dir /absolute/run/previews
 $SPRITE_GEN_ROOT/.venv/bin/sprite-gen inspect --run-dir /absolute/run
 ```
 
 The runtime consumes `manifest.json.frame_layout`; it does not infer a grid from alpha. AI operates only at generation. Frame cleanup and atlas assembly remain deterministic, with one writer per run and atomic publication. [architecture](architecture.md) explains these boundaries. [subject-profiles](subject-profiles.md) covers effects and sparse subjects. [breathing](breathing.md), [recolor](recolor.md) and [layer-tracks](layer-tracks.md) own optional post-processing; none is an extra default question for every sprite request.
+
+Use [compact-atlas](compact-atlas.md) only after the last compose. It writes a separate
+`manifest.compact.json`, so curation/recompose remains non-destructive.

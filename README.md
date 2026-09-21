@@ -48,7 +48,7 @@ The two sprite pipelines are ordered generation flows. Tool groups contain indep
 flowchart LR
     subgraph A["A · atlas rows"]
         direction LR
-        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a5[compose-atlas]
+        a1[prepare] --> a2["gen · gen-set"] --> a3[extract] --> a5[compose-atlas] --> a6[compact-atlas optional]
         a5 -.-> a4["curation (optional)"]
         a4 --> a5
     end
@@ -75,7 +75,7 @@ flowchart LR
 
 | Pipeline / tool group / workflow | What goes in → what comes out | Docs |
 |---|---|---|
-| **A · atlas rows** | one still + a list of states → `sprite-sheet-alpha.png` + `manifest.json.frame_layout`, with **Breathe** baked on idle poses | [run-contract](docs/run-contract.md) · [breathing](docs/breathing.md) |
+| **A · atlas rows** | `prepare` · `gen` · `gen-set` · `extract` · `compose-atlas` · `compact-atlas` · `curation`; one still + states → runtime atlas pages + `manifest.frame_layout` | [run-contract](docs/run-contract.md) · [compact-atlas](docs/compact-atlas.md) · [breathing](docs/breathing.md) |
 | **B · video → loop** | one still → per state, a seamless transparent GIF / WebP / strip, animated by Grok Imagine and cut at its true period | [video-pipeline](docs/video-pipeline.md) · [video](docs/video.md) |
 | **C · utilities** | an imported image or grid sheet → clean transparent cuts; a finished atlas → a curator-ready run | [sheet-slicing](docs/sheet-slicing.md) · [curation](docs/curation.md) |
 | **D · post-processing** | a finished sheet → deterministic colourways, rig layer composites, Aseprite / Phaser / Flame exports | [recolor](docs/recolor.md) · [layer-tracks](docs/layer-tracks.md) · [engine-export](docs/engine-export.md) |
@@ -112,6 +112,7 @@ sprite-gen prepare --out-dir <run> --character-id <id> --base-image base.png   #
 sprite-gen gen-set --run-dir <run> --provider codex                            # every state row, 4 at a time
 sprite-gen extract --run-dir <run>                                             # chroma → transparent frames
 sprite-gen compose-atlas --run-dir <run>                                       # sprite-sheet-alpha.png + manifest.json
+sprite-gen compact-atlas --run-dir <run> --page-size 2048 --max-pages 4        # pages + manifest.compact.json
 sprite-gen curation --run-dir <run>                                            # (optional) pick, nudge, breathe
 ```
 
