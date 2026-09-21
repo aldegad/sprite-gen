@@ -97,9 +97,17 @@ def test_prepared_prompts_preserve_reference_style_without_medium_bans(tmp_path:
     assert result.returncode == 0, result.stdout + result.stderr
     request = json.loads((out_dir / "sprite-request.json").read_text(encoding="utf-8"))
     assert "same body proportions" in request["style"]
+    assert "same color relationships" in request["style"]
+    assert "pixel density" not in request["style"]
+    assert "same palette" not in request["style"]
     for path in (out_dir / "prompts").rglob("*.txt"):
         prompt = path.read_text(encoding="utf-8")
         assert "same shading style" in prompt
         assert "Exactly" in prompt and "full-body frames" in prompt
+        assert "attached layout guide" in prompt
+        assert "chroma-key background" in prompt
+        assert "No character body part should be clipped" in prompt
+        for removed in ("pixel density", "same palette", "256x256", "at least 24 px"):
+            assert removed not in prompt, (path, removed)
         for removed in ("polished illustration", "painterly", "anime key art", "3D render", "vector mascot", "glossy"):
             assert removed not in prompt, (path, removed)

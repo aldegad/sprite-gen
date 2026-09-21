@@ -53,16 +53,16 @@ DEFAULT_STATES: dict[str, dict[str, Any]] = {
 # (2026-07-05 사고: 기본값의 "compact chibi/chunky/thick outline" 조항이
 # 슬림 베이스를 계속 뭉툭하게 되돌렸다). 기본값은 레퍼런스 추종 + 금지선만.
 STYLE_DEFAULT = (
-    "match the attached base/anchor reference image EXACTLY: same pixel density "
-    "(logical pixel block size), same body proportions, same outline weight, same "
-    "palette, same shading style, same level of detail. Do not restyle, do not "
-    "change proportions, do not add or remove detail density."
+    "match the attached base/anchor reference image EXACTLY: same body proportions, "
+    "same outline weight, same color relationships, same shading style, and same "
+    "level of detail. Do not restyle, do not change proportions, and do not add or "
+    "remove detail density."
 )
 
 TRANSPARENCY_ARTIFACT_RULES = [
     "Prefer pose, expression, and silhouette changes over decorative effects.",
-    "Effects are allowed only when state-relevant, opaque, hard-edged, sprite-like, fully inside the same frame slot, and physically touching or overlapping the character silhouette.",
-    "Do not draw detached effects: floating stars, loose sparkles, floating punctuation, floating icons, separated smoke clouds, loose dust, disconnected outline bits, or stray pixels.",
+    "Effects are allowed only when state-relevant, cleanly separated from the background, fully inside the same frame slot, and physically touching or overlapping the character silhouette.",
+    "Do not draw detached effects: floating stars, loose sparkles, floating punctuation, floating icons, separated smoke clouds, loose dust, disconnected outline bits, or disconnected debris.",
     "Do not draw wave marks, motion arcs, speed lines, action streaks, afterimages, blur, smears, halos, glows, auras, floor patches, cast shadows, contact shadows, drop shadows, oval floor shadows, landing marks, or impact bursts.",
     "Do not include text, labels, frame numbers, visible grids, guide marks, speech bubbles, thought bubbles, UI panels, code snippets, scenery, checkerboard transparency, white backgrounds, or black backgrounds.",
     "Reject any pose that is cropped, overlaps another pose, crosses into a neighboring frame slot, or creates a separate disconnected component that is not attached to the character.",
@@ -751,14 +751,9 @@ def draw_guide(path: Path, frames: int, cell: dict[str, Any]) -> None:
 
 
 def row_prompt(request: dict[str, Any], state: str, entry: dict[str, Any]) -> str:
-    cell = request["cell"]
     chroma = request["chroma_key"]
     character = request["character"]
     frames = int(entry["frames"])
-    cell_width = int(cell["width"])
-    cell_height = int(cell["height"])
-    safe_margin_x = int(cell["safe_margin_x"])
-    safe_margin_y = int(cell["safe_margin_y"])
     state_requirements = [
         *direction_prefix_requirements(request, state),
         *directional_requirements(state),
@@ -770,7 +765,6 @@ def row_prompt(request: dict[str, Any], state: str, entry: dict[str, Any]) -> st
             f"- {requirement}" for requirement in state_requirements
         )
     transparency_artifact_text = "\n".join(f"- {rule}" for rule in TRANSPARENCY_ARTIFACT_RULES)
-    runtime_size = f"{cell_width}x{cell_height}"
     reference_contract = (
         "Use the attached accepted idle/direction anchor as the canonical character design for this row. "
         "If a state anchor is attached for a non-locomotion state, treat it as approved state vocabulary only. "
@@ -799,7 +793,7 @@ Anchor lock:
 - Accepted idle/direction anchors own character identity, outfit details, colors, face design, asymmetric markings, and side-specific accessories for final action rows.
 - Base character images and original character sheets are pre-idle sources only. Do not reinterpret or reintroduce base-character details inside a direction-anchor action row.
 - This row owns motion only. Spend the variation budget on limb contacts, arm counter-swing, body height, torso lean, head bob, hair bounce, and loop continuity.
-- Do not redesign or reinterpret identity details while animating. Keep face, hair shape, markings, palette, outline weight, body proportions, outfit, props, and silhouette copied from the approved anchors.
+- Do not redesign or reinterpret identity details while animating. Keep face, hair shape, markings, color relationships, outline weight, body proportions, outfit, props, and silhouette copied from the approved anchors.
 - Preserve side-specific features exactly as the approved anchors show them. Do not solve hairpin side, earring side, logos, handed props, scars, one-sided markings, asymmetric clothing, or lighting cues from scratch inside the row.
 - When generating a paired left/right row, use the paired row reference only for timing, scale, and animation intensity. Rotate the body, feet, shoulders, face angle, and gaze to the target facing, but keep identity details attached according to the accepted target-direction anchor.
 - For cyclic locomotion, do not let a single running/walking pose anchor determine every frame's leg phase. When a multi-pose motion reference is attached, use it for foot contacts.
@@ -813,15 +807,15 @@ Layout requirements:
 - Exactly {frames} full-body frames, left to right, in one horizontal row.
 - The attached layout guide shows the {frames} frame boxes, inner safe area, and centers for this row. Follow its slot count, spacing, centering, and padding.
 - Do not reproduce the layout guide itself: no visible boxes, guide lines, center marks, labels, guide colors, or guide background may appear in the output.
-- Treat the image as {frames} equal-width invisible {runtime_size} frame slots. Fill every slot: each requested slot must contain exactly one complete full-body pose.
+- Treat the image as {frames} equal-width invisible frame slots matching the attached guide. Fill every slot: each requested slot must contain exactly one complete full-body pose.
 - Spread the {frames} poses evenly across the whole image width. Do not leave any requested slot blank or create large empty gaps between poses.
 - Center one complete pose in each slot. No pose may cross into the neighboring slot.
 - Use a perfectly flat pure {chroma["name"]} {chroma["hex"]} chroma-key background across the whole image.
 - Do not use {chroma["hex"]}, pure {chroma["name"]}, or chroma-adjacent colors in the character, highlights, props, shadows, or effects.
-- Keep the rendering faithful to the attached reference sprite: same outline weight, same palette, same detail level — do not restyle it.
-- Keep every frame self-contained with at least {safe_margin_x} px horizontal and {safe_margin_y} px vertical safe padding. No character body part should be clipped by the frame slot.
-- Avoid motion blur. Use clear pose changes readable at {runtime_size}.
-- Preserve the same silhouette, face, proportions, palette, material, and props across every frame.
+- Keep the rendering faithful to the attached reference sprite: same outline weight, color relationships, shading style, and detail level — do not restyle it.
+- Keep every frame self-contained inside the safe area shown by the attached guide. No character body part should be clipped by the frame slot.
+- Avoid motion blur. Use clear pose changes readable at the intended in-game display size.
+- Preserve the same silhouette, face, proportions, colors, materials, and props across every frame.
 
 Output only the sprite strip image."""
 
