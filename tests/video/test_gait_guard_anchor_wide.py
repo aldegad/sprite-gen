@@ -213,7 +213,10 @@ def test_video_set_passes_shape_and_anchor_through(tmp_path: Path, monkeypatch, 
 
     def fake_loop(frames_dir, out_dir, **kw):
         seen["anchor"] = kw.get("anchor")
-        return {"cycle": {"kind": "periodic", "length": 24, "period_global": 24, "ratio": 0.2}, "resampled_seam_ratio": 0.3, "n_out": 8, "gif": {"file": "g"}, "webp": {"file": "w"}, "strip": {"path": "s", "drift_px": 0}}
+        report = {"cycle": {"kind": "periodic", "length": 24, "period_global": 24, "ratio": 0.2}, "resampled_seam_ratio": 0.3, "n_out": 8, "gif": {"file": "g"}, "webp": {"file": "w"}, "strip": {"path": "s", "drift_px": 0}}
+        if anchor == "motion-auto":
+            report["motion_anchor"] = {"applied": False, "reason": "fine-match-at-search-boundary"}
+        return report
 
     def fake_video(image, prompt, out, report, *, duration, resolution, log):
         Path(out).write_bytes(b"x")
@@ -232,6 +235,9 @@ def test_video_set_passes_shape_and_anchor_through(tmp_path: Path, monkeypatch, 
     assert payload["ok"] == 1
     # the frames step is told to judge spill from the item's own canvas still
     assert seen == {"shape": "wide", "anchor": anchor, "spill": ("auto", "canvas.png")}
+    if anchor == "motion-auto":
+        assert payload["items"][0]["loop"]["motion_anchor"]["applied"] is False
+        assert "uncorrected" in (tmp_path / "set/table.md").read_text()
 
 
 def test_cheer_motion_template_names_no_limbs() -> None:

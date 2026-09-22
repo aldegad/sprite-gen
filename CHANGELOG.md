@@ -4,6 +4,8 @@ All notable public changes to `sprite-gen` are recorded here. Versions track the
 
 ## Unreleased
 
+- In `motion-auto`, an uncertain fine XY search-boundary match can emit the selected frames unchanged only after the existing rendered-cell seam gate and animation checks pass. Reports and the CLI expose the rejected measurement and unapplied correction. Other failures and explicit `motion` registration remain strict.
+
 - Add explicit `video-loop --anchor motion` for reviewed fixed cuts with head and torso regions. Masked XY registration and boundary velocity determine one integer translation ramp; padded cycle PNGs retain the original keyed pixels. Reports record the inputs and shifts, and the unchanged seam threshold measures the rendered output. Automatic cycle selection and existing anchor defaults are unchanged; batch generation rejects this review-only mode before provider work.
 
 - Add opt-in `--anchor motion-auto` for walk/run in `video-loop` and `video-set`: discover stable texture regions, separate drift during local repeat analysis, and apply the same XY boundary-velocity ramp without manual cut/region inputs. Keep source motion and pixels in padded cycle frames; gate the rendered cells. Reports expose automatic tracking, candidate selection, and correction. Existing defaults stay unchanged.
