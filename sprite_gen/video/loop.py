@@ -852,7 +852,8 @@ def run_loop(
             if anchor == "motion-auto":
                 anchor_regions, region_report = auto_motion.discover(frames, reference_index=0)
                 report_base["automatic_motion_regions"] = region_report
-            frames, motion = motion_anchor.correct_motion(
+            correct = auto_motion.correct_cycle if anchor == "motion-auto" else motion_anchor.correct_motion
+            frames, motion = correct(
                 frames, anchor_regions, coarse_dx=body_wrap_offset(frames, search=motion_anchor.COARSE_SEARCH),
             )
         except ValueError as exc:
@@ -990,6 +991,8 @@ def run(**kwargs: object) -> int:
     summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio", "review_recommended", "half_period_guard")}
     if payload["periodic_attempt"]:
         summary["periodic_attempt"] = payload["periodic_attempt"]["why_rejected"]
+    if payload.get("motion_anchor", {}).get("applied") is False:
+        summary["motion_anchor"] = payload["motion_anchor"]
     summary["strip"] = {k: payload["strip"][k] for k in ("path", "frames", "w", "h", "body_h", "delay_ms")}
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

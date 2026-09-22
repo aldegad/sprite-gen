@@ -19,6 +19,14 @@ COARSE_SEARCH = 64
 Box = tuple[int, int, int, int]
 
 
+class FineSearchBoundaryError(ValueError):
+    """A measured candidate is outside the trusted fine-registration interior."""
+
+    def __init__(self, measurement: dict):
+        super().__init__("motion anchor match reached search boundary; inspect the cut and regions")
+        self.measurement = measurement
+
+
 def parse_region(value: str) -> Box:
     try:
         coordinates = tuple(int(v.strip()) for v in value.split(","))
@@ -102,7 +110,10 @@ def _register(references: list[tuple], moving: np.ndarray, center: tuple[int, in
     candidates.sort()
     score, dx, dy, costs = candidates[0]
     if abs(dx - cx) == rx or abs(dy - cy) == ry:
-        raise ValueError("motion anchor match reached search boundary; inspect the cut and regions")
+        raise FineSearchBoundaryError({
+            "dx": dx, "dy": dy, "cost": score, "region_costs": costs,
+            "center_xy": [cx, cy], "search_radius_xy": [rx, ry],
+        })
     return {"dx": dx, "dy": dy, "cost": score, "region_costs": costs}
 
 
@@ -123,7 +134,11 @@ def correct_motion(frames: list[Image.Image], regions: list[Box], *, coarse_dx: 
     measurements = []
     for k in (0, 1, 2, length - 3, length - 2, length - 1):
         center = (round(coarse_dx * k / (length - 1)), 0)
-        measurements.append({"k": k, **_register(references, _features(frames[k]), center)})
+        try:
+            measurements.append({"k": k, **_register(references, _features(frames[k]), center)})
+        except FineSearchBoundaryError as exc:
+            exc.measurement["k"] = k
+            raise
     positions = -np.array([[r["dx"], r["dy"]] for r in measurements], dtype=float)
     v_start = (positions[2] - positions[0]) / 2
     v_end = (positions[5] - positions[3]) / 2

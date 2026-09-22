@@ -2,7 +2,8 @@
 """Discover stable texture regions and remove drift for cycle ANALYSIS only.
 
 No semantic body labels, character profiles, learned weights or external models.
-The emitted animation is still corrected by motion_anchor's single integer ramp.
+Output correction uses one integer ramp, or explicitly abstains from an uncertain
+fine match. The caller must still gate the rendered, uncorrected output.
 """
 from __future__ import annotations
 
@@ -12,6 +13,27 @@ from sprite_gen.video import motion_anchor
 
 ANALYSIS_EDGE = 184
 SAMPLE_COUNT = 9
+
+
+def correct_cycle(frames, regions, *, coarse_dx):
+    """Do not turn an uncertain fine match into a potentially damaging shift.
+
+    Returning unchanged pixels is not a pass: the loop owner always runs the
+    rendered-cell seam gate and animation verification before accepting output.
+    Other registration/discovery errors retain their failure contract.
+    """
+    try:
+        return motion_anchor.correct_motion(frames, regions, coarse_dx=coarse_dx)
+    except motion_anchor.FineSearchBoundaryError as exc:
+        return frames, {
+            "method": "uncorrected-after-uncertain-fine-match-v1",
+            "applied": False, "reason": "fine-match-at-search-boundary",
+            "registration_error": str(exc), "rejected_measurement": exc.measurement,
+            "requires_rendered_seam_gate": True,
+            "regions": [list(box) for box in regions], "coarse_dx_px": coarse_dx,
+            "endpoint_xy": [0, 0], "shifts_xy": [[0, 0] for _ in frames],
+            "padding_ltrb": [0, 0, 0, 0],
+        }
 
 
 def _center(a):

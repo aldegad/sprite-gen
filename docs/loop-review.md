@@ -93,6 +93,15 @@ Automatic results carry `review_recommended=true`: these measurements cannot
 establish limb identity or fix changing drawings. Validate unfamiliar body shapes
 and motions visually; no animal-wide quality claim follows from humanoid examples.
 
+If the selected cycle's fine XY match reaches its bounded search edge,
+`motion-auto` discards that uncertain correction and submits the unchanged selected
+frames to the same rendered-cell seam gate. It emits them only if that gate and
+normal animation verification pass. Reports and the CLI summary explicitly say
+`applied: false`, retain the rejected match and record zero translations; this is
+an uncorrected output, not a successful registration. Failed period selection,
+unusable regions, coarse-search limits and other errors still fail. The explicit
+`motion` mode also keeps its strict registration contract.
+
 ## Explicit adjustments
 
 If the visible full cycle is clear but the automatic candidate is wrong, make the choice

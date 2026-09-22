@@ -188,6 +188,8 @@ def run_item(
         result["loop"] = {"kind": lp["cycle"].get("kind", "periodic"), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "drift_px": lp["strip"].get("drift_px", 0), "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
         result["loop"]["review_recommended"] = lp["cycle"].get("review_recommended", False)
         result["loop"]["half_period_guard"] = lp["cycle"].get("half_period_guard")
+        if lp.get("motion_anchor", {}).get("applied") is False:
+            result["loop"]["motion_anchor"] = lp["motion_anchor"]
         result["ok"] = True
     except SystemExit as exc:
         result["ok"] = False
@@ -201,6 +203,8 @@ def write_table(results: list[dict[str, Any]], path: Path) -> str:
         if r.get("ok"):
             lp = r["loop"]
             status = "OK (review gait)" if lp.get("review_recommended") else "OK"
+            if lp.get("motion_anchor", {}).get("applied") is False:
+                status = "OK (uncorrected; review gait)"
             lines.append(f"| {r['direction']} | {r['state']} | {lp.get('kind', 'periodic')} | {lp['cycle']} | {lp['period'] if lp['period'] is not None else '-'} | {lp['seam_ratio']:.2f} | {lp['n_out']} | {status} |")
         else:
             lines.append(f"| {r['direction']} | {r['state']} | - | - | - | - | - | FAIL: {r.get('error', '')[:80]} |")
