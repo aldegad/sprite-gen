@@ -39,6 +39,7 @@ from PIL import Image
 from sprite_gen._deps import np
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.gif_utils import save_clean_gif
+from sprite_gen.video import motion_anchor
 
 ANALYSIS_SIZE = 96  # thumbnail edge for the distance matrix
 STRIP_MAX_CELLS = 64  # upper bound on cells even when they are narrow
@@ -69,7 +70,7 @@ ONE_SHOT_MIN_LEN = 4  # a one-shot's length is the clip's own fact; only a degen
 GAIT_DOUBLE_TOL = 0.25
 GAIT_DOUBLE_SEARCH = 3  # frames either side of 2x the step where the full gait's own minimum may sit
 GAIT_NEAR_EXACT_STEP_FRACTION = 0.10  # no ambiguity extension when repeat error is tiny compared with a playback step
-ANCHOR_MODES = ("none", "feet", "body")
+ANCHOR_MODES = ("none", "feet", "body", "motion")
 BODY_ANCHOR_BAND = 0.6  # --anchor body reads the wrap offset from the top 60 % of the first frame's box: head and torso, not the legs
 BODY_ANCHOR_SEARCH = 24  # px either side searched for the last frame's horizontal offset against the first
 FOOT_BAND = 0.08  # fraction of the frame's own height, measured up from its lowest opaque row
@@ -138,7 +139,11 @@ def profile_for(state: str | None) -> LoopProfile:
 
 
 def _load_small(path: Path) -> np.ndarray:
-    im = Image.open(path).convert("RGBA")
+    return _small_features(Image.open(path).convert("RGBA"))
+
+
+def _small_features(image: Image.Image) -> np.ndarray:
+    im = image.copy()
     im.thumbnail((ANALYSIS_SIZE, ANALYSIS_SIZE))
     a = np.asarray(im, dtype=np.float32) / 255.0
     rgb = a[..., :3] * a[..., 3:4]  # premultiplied: transparent pixels contribute 0
@@ -735,12 +740,17 @@ def run_loop(
     strip_height: int = STRIP_MAX_HEIGHT,
     body_height: int | None = None,
     anchor: str | None = None,
+    anchor_regions: list[motion_anchor.Box] | None = None,
 ) -> dict[str, Any]:
     if anchor is None:
         # gaits drift a few pixels over a cycle and the wrap shows it; in-place states do not
         anchor = "body" if profile_for(state).gait else "none"
     if anchor not in ANCHOR_MODES:
         raise SystemExit(f"video-loop: unknown --anchor {anchor!r}; expected one of {', '.join(ANCHOR_MODES)}")
+    try:
+        motion_anchor.validate_request(anchor, cycle_mode, length, anchor_regions)
+    except ValueError as exc:
+        raise SystemExit(f"video-loop: {exc}") from exc
     if cycle_mode not in CYCLE_MODES:
         raise SystemExit(f"video-loop: unknown --cycle {cycle_mode!r}; expected one of {', '.join(CYCLE_MODES)}")
     frames_dir = frames_dir.expanduser().resolve()
@@ -761,6 +771,8 @@ def run_loop(
         "out_dir": str(out_dir), "state": state, "fps": fps, "frames_total": n,
         "window": [lo, hi], "profile": prof.why, "cycle_mode": cycle_mode,
         "seam_max": seam_max,
+        "anchor": anchor,
+        "seam_measurement": "rendered-cells" if anchor == "motion" else "source-frames",
     }
     cycle = None
     try:
@@ -804,17 +816,15 @@ def run_loop(
 
     out_dir = out_dir.expanduser().resolve()
     cycle_dir = out_dir / "cycle"
-    cycle_dir.mkdir(parents=True, exist_ok=True)
-    for old in cycle_dir.glob("frame-*.png"):
-        old.unlink()
     frames: list[Image.Image] = []
     scrubbed = specks = 0
     for k, f in enumerate(files[i : i + L]):
         im = Image.open(f).convert("RGBA")
-        scrubbed += _scrub(im)
-        im, d = _drop_specks(im, SPECK_MIN_FRACTION)
-        specks += d
-        im.save(cycle_dir / f"frame-{k:03d}.png")
+        # Motion review is pixel preserving: cleanup belongs to the keyed input.
+        if anchor != "motion":
+            scrubbed += _scrub(im)
+            im, d = _drop_specks(im, SPECK_MIN_FRACTION)
+            specks += d
         frames.append(im)
 
     cycle_seconds = L / fps
@@ -822,9 +832,26 @@ def run_loop(
     if anchor == "body":
         wrap_dx = body_wrap_offset(frames)
         frames = ramp_frames(frames, wrap_dx)
-        for k, im in enumerate(frames):
-            im.save(cycle_dir / f"frame-{k:03d}.png")
+    motion = None
+    if anchor == "motion":
+        try:
+            frames, motion = motion_anchor.correct_motion(
+                frames, anchor_regions, coarse_dx=body_wrap_offset(frames, search=motion_anchor.COARSE_SEARCH),
+            )
+        except ValueError as exc:
+            error = f"video-loop: {exc}"
+            write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle})
+            raise SystemExit(error) from exc
+        report_base["motion_anchor"] = motion
+    cycle_dir.mkdir(parents=True, exist_ok=True)
+    for old in cycle_dir.glob("frame-*.png"):
+        old.unlink()
+    for k, im in enumerate(frames):
+        im.save(cycle_dir / f"frame-{k:03d}.png")
     strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds, body_height=body_height, anchor="feet" if anchor == "feet" else "none", kind=str(cycle.get("kind") or "periodic"))
+    if motion is not None:
+        strip_meta["foot_anchor"] = "motion"
+        strip_meta["motion_anchor"] = motion
     if anchor == "body":
         strip_meta["foot_anchor"] = "body"
         strip_meta["wrap_dx_px"] = wrap_dx
@@ -849,6 +876,11 @@ def run_loop(
     seam_idx = [i + j for j in idx]
     resampled_adjacent = float(np.mean([D[seam_idx[k], seam_idx[k + 1]] for k in range(len(seam_idx) - 1)]))
     resampled_seam = float(D[seam_idx[-1], seam_idx[0]])
+    if anchor == "motion":
+        # Gate the actual corrected/resampled strip cells, with the same limit.
+        flat = np.stack([_small_features(im) for im in pick])
+        resampled_adjacent = float(np.abs(flat[1:] - flat[:-1]).mean())
+        resampled_seam = float(np.abs(flat[-1] - flat[0]).mean())
     seam_ratio = resampled_seam / resampled_adjacent if resampled_adjacent > 0 else math.inf
     delay_ms = max(20, round(1000 * cycle_seconds / n_out))
     gif_path = out_dir / f"{name}.gif"
@@ -872,6 +904,7 @@ def run_loop(
     webp_report = verify_animation(webp_path, expect_frames=n_out, check_stale=True)
 
     payload = {
+        **report_base,
         "kind": "sprite-gen-video-loop-report",
         "frames_dir": str(frames_dir),
         "out_dir": str(out_dir),
@@ -919,6 +952,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--strip-height", type=int, default=STRIP_MAX_HEIGHT, help=f"cell/strip/GIF height cap in px (default {STRIP_MAX_HEIGHT}); the cycle is scaled down to fit, and never up unless --body-height asks for it")
     parser.add_argument("--body-height", type=int, help="scale so the STANDING height (tallest floor-contact frame) is this many px — the same value across states gives the same character size; --strip-height stays the cap")
     parser.add_argument("--anchor", choices=ANCHOR_MODES, default=None, help="body (default for walk/run): measure the last-to-first head-and-torso offset once and spread it as a ramp over the cycle; feet: remove in-canvas drift (a straight-line trend) so every cell stands on the mean foot line; none: leave placement as filmed (default for other states)")
+    parser.add_argument("--anchor-region", type=motion_anchor.parse_region, action="append", help="motion anchor only: repeat twice with head then torso x0,y0,x1,y1 in the first selected frame; requires --cycle fixed and at least 6 frames")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)
 
@@ -933,6 +967,7 @@ def run(**kwargs: object) -> int:
         start=kwargs.get("start"), length=kwargs.get("length"), strip_height=int(kwargs.get("strip_height") or STRIP_MAX_HEIGHT),  # type: ignore[arg-type]
         body_height=kwargs.get("body_height"),  # type: ignore[arg-type]
         anchor=kwargs.get("anchor"),  # None resolves by state inside run_loop
+        anchor_regions=kwargs.get("anchor_region"),
     )
     summary = {k: payload[k] for k in ("state", "frames_total", "window", "cycle_seconds", "n_out", "delay_ms", "resampled_seam_ratio", "specks_dropped", "report")}
     summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio", "review_recommended", "half_period_guard")}

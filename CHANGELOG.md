@@ -2,6 +2,10 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## Unreleased
+
+- Add explicit `video-loop --anchor motion` for reviewed fixed cuts with head and torso regions. Masked XY registration and boundary velocity determine one integer translation ramp; padded cycle PNGs retain the original keyed pixels. Reports record the inputs and shifts, and the unchanged seam threshold measures the rendered output. Automatic cycle selection and existing anchor defaults are unchanged; batch generation rejects this review-only mode before provider work.
+
 ## v2.5.6 - Walk and run loops close their wrap with one ramp
 
 - Walk and run loops close their wrap with one ramp. `video-loop --anchor body` (now the default for `walk` and `run`) measures how far the last frame's head and torso sit from the first's, once, by whole-pixel registration over the top of the first frame's box, and shifts frame k by that offset times k/L. It never fits frame by frame: per-frame fitting turns a head bob into a full-body shiver, and the feet anchor pins the planted foot, which a quadruped moves every step. A cycle whose wrap already lands (most bipeds) is left byte-identical; the strip sidecar records `wrap_dx_px` and `seam_ratio_after_anchor`. `--anchor feet` and `--anchor none` are unchanged, and other states keep `none`.

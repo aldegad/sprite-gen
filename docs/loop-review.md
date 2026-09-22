@@ -7,7 +7,8 @@ sprite-gen video-loop --frames-dir keyed/ --out-dir loop/ --state run --fps 24
 ```
 
 The caller must pass the **measured source fps**, not always 24. `video-set` obtains it
-from `video-frames`. The default anchor is `none` in both commands. The default clip
+from `video-frames`. `video-loop` defaults to `body` for walk/run and `none` otherwise;
+`video-set` defaults to `none`. The default clip
 request remains 3 seconds; it does not determine the playback speed.
 
 ## What the script decides
@@ -66,9 +67,42 @@ Do not double a frame count unconditionally or duplicate existing frames. Choose
 continuous interval in the original sequence. `--min-len/--max-len` can instead narrow
 an evidenced search interval while leaving the exact cut to the detector.
 
+### Explicit XY motion correction
+
+For a visually reviewed fixed cut, `--anchor motion` measures both XY placement and
+the average movement at the wrap. Supply two rectangles in the **first selected
+source frame**, head first and torso second, excluding swinging hair, limbs and
+accessories. Coordinates are original pixels, with exclusive right/bottom edges:
+
+```bash
+sprite-gen video-loop --frames-dir keyed/ --out-dir reviewed/ --state walk \
+  --fps 24 --cycle fixed --start 4 --length 24 --anchor motion \
+  --anchor-region 60,20,90,50 --anchor-region 50,50,100,100
+```
+
+The rectangles are explicit inputs, not automatically detected regions. This mode
+requires at least six frames and is unavailable in `video-set`, where the cycle and
+its regions have not been reviewed. Existing automatic selection and default anchors
+are unchanged. A fixed cut remains `kind=fixed`; correction does not prove a gait cycle.
+
+Masked normalized cross-correlation of premultiplied RGBA (head weight 0.7, torso
+0.3) matches the first/last three frames against the first. With measured last-frame
+translation `m`, mean boundary velocity `v` and length `L`, the correction endpoint
+is `round((m-v)*(L-1)/L)`. One integer XY ramp runs from zero to that endpoint;
+it does not pin each frame or remove the original bob. Empty/flat regions and
+search-boundary matches are errors, never a fallback to another anchor.
+
+Cycle PNGs preserve the supplied keyed pixels (no additional speck removal), with
+common transparent padding to avoid clipping. Strip scaling, GIF palette conversion
+and output frame-density settings still apply. The sidecar/report records regions,
+measurements, endpoint, every shift and padding. For this mode the unchanged seam
+limit gates the **rendered, resampled cells**, recorded as `seam_measurement=rendered-cells`.
+This tests the corrected output, not the drifting input. It cannot repair missing
+poses, changing colors, limb identity or an incorrectly chosen cycle.
+
 Use `--anchor feet` only when the source shows slow in-canvas translation. It removes a
 linear horizontal trend; it is not a universal stabilizer, does not pin each planted foot,
-and can alter an already stationary subject. Start with the default `none`. Compare with
+and can alter an already stationary subject. Compare with `--anchor none` and
 `feet` on identical frames before selecting it. Normal body bounce, clothing motion and
 a model's changing anatomy are not position drift.
 
