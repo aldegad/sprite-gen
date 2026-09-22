@@ -195,7 +195,8 @@ def test_raised_limb_states_get_a_wide_canvas() -> None:
     assert canvas_mod.profile_for("idle").shape == canvas_mod.SHAPE_SQUARE
 
 
-def test_video_set_passes_shape_and_anchor_through(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("state,anchor", [("cheer", "feet"), ("walk", "motion-auto")])
+def test_video_set_passes_shape_and_anchor_through(tmp_path: Path, monkeypatch, state, anchor) -> None:
     seen: dict[str, object] = {}
 
     def fake_canvas(base, out, *, state, shape, facing, headroom, lead, report_path):
@@ -212,7 +213,10 @@ def test_video_set_passes_shape_and_anchor_through(tmp_path: Path, monkeypatch) 
 
     def fake_loop(frames_dir, out_dir, **kw):
         seen["anchor"] = kw.get("anchor")
-        return {"cycle": {"kind": "periodic", "length": 24, "period_global": 24, "ratio": 0.2}, "resampled_seam_ratio": 0.3, "n_out": 8, "gif": {"file": "g"}, "webp": {"file": "w"}, "strip": {"path": "s", "drift_px": 0}}
+        report = {"cycle": {"kind": "periodic", "length": 24, "period_global": 24, "ratio": 0.2}, "resampled_seam_ratio": 0.3, "n_out": 8, "gif": {"file": "g"}, "webp": {"file": "w"}, "strip": {"path": "s", "drift_px": 0}}
+        if anchor == "motion-auto":
+            report["motion_anchor"] = {"applied": False, "reason": "fine-match-at-search-boundary"}
+        return report
 
     def fake_video(image, prompt, out, report, *, duration, resolution, log):
         Path(out).write_bytes(b"x")
@@ -227,10 +231,13 @@ def test_video_set_passes_shape_and_anchor_through(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(batch_mod.loop_mod, "run_loop", fake_loop)
     base = tmp_path / "base.png"
     Image.new("RGB", (32, 32), (0, 255, 0)).save(base)
-    payload = batch_mod.run_set(bases={"side": base}, states=["cheer"], root=tmp_path / "set", character=None, duration=6, resolution="720p", key="green", concurrency=1, force=False, gap=0.0, video_runner=fake_video, shape="wide", anchor="feet")
+    payload = batch_mod.run_set(bases={"side": base}, states=[state], root=tmp_path / "set", character=None, duration=6, resolution="720p", key="green", concurrency=1, force=False, gap=0.0, video_runner=fake_video, shape="wide", anchor=anchor)
     assert payload["ok"] == 1
     # the frames step is told to judge spill from the item's own canvas still
-    assert seen == {"shape": "wide", "anchor": "feet", "spill": ("auto", "canvas.png")}
+    assert seen == {"shape": "wide", "anchor": anchor, "spill": ("auto", "canvas.png")}
+    if anchor == "motion-auto":
+        assert payload["items"][0]["loop"]["motion_anchor"]["applied"] is False
+        assert "uncorrected" in (tmp_path / "set/table.md").read_text()
 
 
 def test_cheer_motion_template_names_no_limbs() -> None:
