@@ -195,7 +195,8 @@ def test_raised_limb_states_get_a_wide_canvas() -> None:
     assert canvas_mod.profile_for("idle").shape == canvas_mod.SHAPE_SQUARE
 
 
-def test_video_set_passes_shape_and_anchor_through(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("state,anchor", [("cheer", "feet"), ("walk", "motion-auto")])
+def test_video_set_passes_shape_and_anchor_through(tmp_path: Path, monkeypatch, state, anchor) -> None:
     seen: dict[str, object] = {}
 
     def fake_canvas(base, out, *, state, shape, facing, headroom, lead, report_path):
@@ -227,10 +228,10 @@ def test_video_set_passes_shape_and_anchor_through(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(batch_mod.loop_mod, "run_loop", fake_loop)
     base = tmp_path / "base.png"
     Image.new("RGB", (32, 32), (0, 255, 0)).save(base)
-    payload = batch_mod.run_set(bases={"side": base}, states=["cheer"], root=tmp_path / "set", character=None, duration=6, resolution="720p", key="green", concurrency=1, force=False, gap=0.0, video_runner=fake_video, shape="wide", anchor="feet")
+    payload = batch_mod.run_set(bases={"side": base}, states=[state], root=tmp_path / "set", character=None, duration=6, resolution="720p", key="green", concurrency=1, force=False, gap=0.0, video_runner=fake_video, shape="wide", anchor=anchor)
     assert payload["ok"] == 1
     # the frames step is told to judge spill from the item's own canvas still
-    assert seen == {"shape": "wide", "anchor": "feet", "spill": ("auto", "canvas.png")}
+    assert seen == {"shape": "wide", "anchor": anchor, "spill": ("auto", "canvas.png")}
 
 
 def test_cheer_motion_template_names_no_limbs() -> None:

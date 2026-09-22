@@ -105,6 +105,10 @@ def run_item(
     facing_fix: str = "none",
     prepare_side: Callable[[Path], tuple[Path, dict]] | None = None,
 ) -> dict[str, Any]:
+    if anchor == "motion-auto" and not loop_mod.profile_for(state).gait:
+        raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
+    if anchor == "motion":
+        raise SystemExit("video-set: motion anchor requires reviewed regions; use video-loop --cycle fixed")
     validate_facing(facing, facing_fix)
     if facing_fix not in facing_mod.FIXES:
         raise SystemExit("video-set: --facing-fix must be mirror or none")
@@ -224,6 +228,10 @@ def run_set(
     facing: str = "right",
     facing_fix: str = "none",
 ) -> dict[str, Any]:
+    if anchor == "motion-auto" and any(not loop_mod.profile_for(state).gait for state in states):
+        raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
+    if anchor == "motion":
+        raise SystemExit("video-set: motion anchor requires reviewed regions; use video-loop --cycle fixed")
     validate_facing(facing, facing_fix)
     if facing_fix not in facing_mod.FIXES:
         raise SystemExit("video-set: --facing-fix must be mirror or none")
@@ -289,7 +297,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--concurrency", type=int, default=3, help="parallel clip generations (starts are staggered regardless)")
     parser.add_argument("--start-gap", type=float, default=START_GAP_SECONDS, help="seconds between clip request starts")
     parser.add_argument("--shape", choices=canvas_mod.SHAPES, help="force one canvas shape for every state (e.g. wide for a costume or arms that leave a 1:1 frame)")
-    parser.add_argument("--anchor", choices=loop_mod.ANCHOR_MODES, default="none", help="feet: remove in-canvas drift so every cell stands on the mean foot line")
+    parser.add_argument("--anchor", choices=tuple(a for a in loop_mod.ANCHOR_MODES if a != "motion"), default="none", help="motion-auto: automatic regions, local period and XY correction (walk/run only); feet: remove in-canvas drift")
     parser.add_argument("--spill", choices=frames_mod.SPILL_MODES, default="auto", help="auto: judge key reflections from each item's canvas still (default); small / full: force")
     parser.add_argument("--force", action="store_true", help="regenerate clips that already exist")
 
