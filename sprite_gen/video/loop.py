@@ -39,7 +39,7 @@ from PIL import Image
 from sprite_gen._deps import np
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.gif_utils import save_clean_gif
-from sprite_gen.video import motion_anchor
+from sprite_gen.video import motion_anchor, auto_motion, local_cycle
 
 ANALYSIS_SIZE = 96  # thumbnail edge for the distance matrix
 STRIP_MAX_CELLS = 64  # upper bound on cells even when they are narrow
@@ -70,7 +70,7 @@ ONE_SHOT_MIN_LEN = 4  # a one-shot's length is the clip's own fact; only a degen
 GAIT_DOUBLE_TOL = 0.25
 GAIT_DOUBLE_SEARCH = 3  # frames either side of 2x the step where the full gait's own minimum may sit
 GAIT_NEAR_EXACT_STEP_FRACTION = 0.10  # no ambiguity extension when repeat error is tiny compared with a playback step
-ANCHOR_MODES = ("none", "feet", "body", "motion")
+ANCHOR_MODES = ("none", "feet", "body", "motion", "motion-auto")
 BODY_ANCHOR_BAND = 0.6  # --anchor body reads the wrap offset from the top 60 % of the first frame's box: head and torso, not the legs
 BODY_ANCHOR_SEARCH = 24  # px either side searched for the last frame's horizontal offset against the first
 FOOT_BAND = 0.08  # fraction of the frame's own height, measured up from its lowest opaque row
@@ -751,6 +751,9 @@ def run_loop(
         motion_anchor.validate_request(anchor, cycle_mode, length, anchor_regions)
     except ValueError as exc:
         raise SystemExit(f"video-loop: {exc}") from exc
+    if anchor == "motion-auto" and (cycle_mode not in ("auto", "periodic") or not profile_for(state).gait
+                                     or start is not None or length is not None):
+        raise SystemExit("video-loop: --anchor motion-auto requires walk/run with automatic or periodic selection; no fixed cut")
     if cycle_mode not in CYCLE_MODES:
         raise SystemExit(f"video-loop: unknown --cycle {cycle_mode!r}; expected one of {', '.join(CYCLE_MODES)}")
     frames_dir = frames_dir.expanduser().resolve()
@@ -772,11 +775,20 @@ def run_loop(
         "window": [lo, hi], "profile": prof.why, "cycle_mode": cycle_mode,
         "seam_max": seam_max,
         "anchor": anchor,
-        "seam_measurement": "rendered-cells" if anchor == "motion" else "source-frames",
+        "seam_measurement": "rendered-cells" if anchor in ("motion", "motion-auto") else "source-frames",
     }
     cycle = None
     try:
-        if cycle_mode == "fixed":
+        if anchor == "motion-auto":
+            source_frames = [Image.open(f).convert("RGBA") for f in files]
+            D, trajectory, analysis = auto_motion.analyse(source_frames, fps=fps)
+            report_base["automatic_motion_analysis"] = analysis
+            cycle = local_cycle.detect(
+                D, trajectory, min_len=lo, max_len=hi, gait_floor=round(prof.min_seconds*fps),
+                periodicity_min=PERIODICITY_MIN, double_tolerance=GAIT_DOUBLE_TOL,
+                double_search=GAIT_DOUBLE_SEARCH,
+            )
+        elif cycle_mode == "fixed":
             if start is None or length is None:
                 raise SystemExit("video-loop: --cycle fixed needs --start and --length")
             cycle = fixed_cycle(D, start=start, length=length)
@@ -802,10 +814,12 @@ def run_loop(
                         f"video-loop: no periodic cycle found — {flat}; the motion does not repeat, widen the window, "
                         "regenerate the clip, or pass --cycle one-shot for a single performed action"
                     )
-    except SystemExit as exc:
+    except (SystemExit, ValueError) as exc:
         write_loop_report(target, {**report_base, "status": "failed", "error": str(exc),
                                   "cycle": getattr(exc, "diagnostics", cycle),
                                   "periodic_attempt": periodic_attempt})
+        if isinstance(exc, ValueError):
+            raise SystemExit(f"video-loop: {exc}") from exc
         raise
     i, L = cycle["start"], cycle["length"]
     # playback density, not a fixed count: a long cycle gets more frames so every state plays at
@@ -821,7 +835,7 @@ def run_loop(
     for k, f in enumerate(files[i : i + L]):
         im = Image.open(f).convert("RGBA")
         # Motion review is pixel preserving: cleanup belongs to the keyed input.
-        if anchor != "motion":
+        if anchor not in ("motion", "motion-auto"):
             scrubbed += _scrub(im)
             im, d = _drop_specks(im, SPECK_MIN_FRACTION)
             specks += d
@@ -833,8 +847,11 @@ def run_loop(
         wrap_dx = body_wrap_offset(frames)
         frames = ramp_frames(frames, wrap_dx)
     motion = None
-    if anchor == "motion":
+    if anchor in ("motion", "motion-auto"):
         try:
+            if anchor == "motion-auto":
+                anchor_regions, region_report = auto_motion.discover(frames, reference_index=0)
+                report_base["automatic_motion_regions"] = region_report
             frames, motion = motion_anchor.correct_motion(
                 frames, anchor_regions, coarse_dx=body_wrap_offset(frames, search=motion_anchor.COARSE_SEARCH),
             )
@@ -850,7 +867,7 @@ def run_loop(
         im.save(cycle_dir / f"frame-{k:03d}.png")
     strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds, body_height=body_height, anchor="feet" if anchor == "feet" else "none", kind=str(cycle.get("kind") or "periodic"))
     if motion is not None:
-        strip_meta["foot_anchor"] = "motion"
+        strip_meta["foot_anchor"] = anchor
         strip_meta["motion_anchor"] = motion
     if anchor == "body":
         strip_meta["foot_anchor"] = "body"
@@ -876,7 +893,7 @@ def run_loop(
     seam_idx = [i + j for j in idx]
     resampled_adjacent = float(np.mean([D[seam_idx[k], seam_idx[k + 1]] for k in range(len(seam_idx) - 1)]))
     resampled_seam = float(D[seam_idx[-1], seam_idx[0]])
-    if anchor == "motion":
+    if anchor in ("motion", "motion-auto"):
         # Gate the actual corrected/resampled strip cells, with the same limit.
         flat = np.stack([_small_features(im) for im in pick])
         resampled_adjacent = float(np.abs(flat[1:] - flat[:-1]).mean())
@@ -951,7 +968,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--length", type=int, help="fixed cut: cycle length in frames (with --cycle fixed)")
     parser.add_argument("--strip-height", type=int, default=STRIP_MAX_HEIGHT, help=f"cell/strip/GIF height cap in px (default {STRIP_MAX_HEIGHT}); the cycle is scaled down to fit, and never up unless --body-height asks for it")
     parser.add_argument("--body-height", type=int, help="scale so the STANDING height (tallest floor-contact frame) is this many px — the same value across states gives the same character size; --strip-height stays the cap")
-    parser.add_argument("--anchor", choices=ANCHOR_MODES, default=None, help="body (default for walk/run): measure the last-to-first head-and-torso offset once and spread it as a ramp over the cycle; feet: remove in-canvas drift (a straight-line trend) so every cell stands on the mean foot line; none: leave placement as filmed (default for other states)")
+    parser.add_argument("--anchor", choices=ANCHOR_MODES, default=None, help="motion-auto: automatic stable regions, local repeat selection and XY ramp (walk/run); motion: fixed cut with explicit regions; body (default for walk/run): measure the last-to-first head-and-torso offset once and spread it as a ramp over the cycle; feet: remove in-canvas drift (a straight-line trend) so every cell stands on the mean foot line; none: leave placement as filmed (default for other states)")
     parser.add_argument("--anchor-region", type=motion_anchor.parse_region, action="append", help="motion anchor only: repeat twice with head then torso x0,y0,x1,y1 in the first selected frame; requires --cycle fixed and at least 6 frames")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)

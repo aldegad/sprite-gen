@@ -53,6 +53,46 @@ uncertainty. Keep that decision separate from the unmodified automatic report. A
 without the required visual input must not claim it reviewed the gait. Ambiguous or
 contradictory visual evidence should remain unresolved rather than inventing a precise cut.
 
+## Automatic XY correction and local cycle selection
+
+For a fully automatic walk/run candidate, opt into `motion-auto`:
+
+```bash
+sprite-gen video-frames --clip clip.mp4 --out-dir frames/ --key auto \
+  --spill auto --reference canvas.png --report frames.report.json
+sprite-gen video-loop --frames-dir frames/keyed/ --out-dir loop/ \
+  --state walk --fps <measured-source-fps> --anchor motion-auto
+```
+
+`video-set --states walk,run --anchor motion-auto` uses the same path. Other
+states and fixed/manual cuts are rejected before generation. The defaults above
+remain unchanged. This mode accepts no supplied regions or frame indices.
+
+The script searches a grid in the upper part of the foreground for two separated,
+textured regions. It ranks their normalized cross-correlation across time and
+requires both to track throughout the sequence. These are stable image regions,
+not semantic detections of a face, torso, species or limb. Untrackable patches are
+counted as rejected candidates; absence of a usable pair is an explicit failure.
+
+For selection only, the measured horizontal trajectory is locally fitted and the
+vertical linear trend is removed. Local lag minima can then identify a repeat in
+a clip with changing drift or cadence. Selection requires repeat depth, active
+motion around both boundaries, and a supported doubled recurrence when a short
+step falls below the gait floor. Candidate ranking also penalizes drift that a
+single linear correction could not remove. Among scores within 15% of the best,
+the earliest repeat is used; exact cut quantization may differ by one frame from
+the lag minimum. The requested length window is never widened.
+
+The selected original frames receive the same integer XY correction described
+below, using regions discovered again in the selected interval. Analysis resampling
+never enters the emitted cycle. Reports include `automatic_motion_analysis`,
+`automatic_motion_regions`, local candidates, the duration guard and every final
+translation. The unchanged seam limit measures the actual rendered cells.
+
+Automatic results carry `review_recommended=true`: these measurements cannot
+establish limb identity or fix changing drawings. Validate unfamiliar body shapes
+and motions visually; no animal-wide quality claim follows from humanoid examples.
+
 ## Explicit adjustments
 
 If the visible full cycle is clear but the automatic candidate is wrong, make the choice
