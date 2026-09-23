@@ -1,6 +1,6 @@
 """Synthetic regressions for the 3 s default and its consequences (2026-09-18/20 field tests):
 
-* `video-set` asks for 3 s clips by default;
+* `video-set` asks for 3 s clips by default (4 s for attack);
 * a gait's period window is taken in seconds (floor) and half the clip (ceiling), so a
   1.0-1.3 s stride is still inside the window of a 3 s clip; idle and the action
   states keep their clip-length fractions;
@@ -24,10 +24,12 @@ from sprite_gen.video import loop as loop_mod
 from tests.video.test_video_pipeline import HAS_IMG2WEBP, _gait_frames, _one_shot_frames
 
 
-def test_video_set_defaults_to_three_seconds(monkeypatch) -> None:
+def test_video_set_duration_defaults_per_state(monkeypatch) -> None:
     parser = argparse.ArgumentParser()
     batch_mod.add_arguments(parser)
-    assert parser.parse_args(["--out-dir", "x"]).duration == batch_mod.DEFAULT_DURATION_SECONDS == 3
+    # unset on the command line means "each state's own default", not one number for all
+    assert parser.parse_args(["--out-dir", "x"]).duration is None
+    assert parser.parse_args(["--out-dir", "x", "--duration", "6"]).duration == 6
     seen: dict = {}
 
     def fake_run_set(**kw):
@@ -36,8 +38,12 @@ def test_video_set_defaults_to_three_seconds(monkeypatch) -> None:
 
     monkeypatch.setattr(batch_mod, "run_set", fake_run_set)
     monkeypatch.setattr(batch_mod, "_parse_bases", lambda items: {})
-    batch_mod.run(out_dir="x", duration=None)  # a caller that leaves it unset gets the default, not 6
-    assert seen["duration"] == 3
+    batch_mod.run(out_dir="x", duration=None)
+    assert seen["duration"] is None
+    assert batch_mod.DEFAULT_DURATION_SECONDS == 3
+    assert batch_mod.duration_for("walk", None) == batch_mod.duration_for("jump", None) == 3
+    assert batch_mod.duration_for("attack", None) == 4
+    assert batch_mod.duration_for("attack", 6) == batch_mod.duration_for("walk", 6) == 6
 
 
 def test_gait_windows_are_in_seconds_capped_at_half_the_clip() -> None:

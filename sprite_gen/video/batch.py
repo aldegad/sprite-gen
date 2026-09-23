@@ -35,7 +35,20 @@ START_GAP_SECONDS = 2.0
 # for jump/attack, which the one-shot cut handles; 6 s bought nothing but a longer wait
 # and, for jump, more idle standing between hops.
 DEFAULT_DURATION_SECONDS = 3
+# An attack is timed rather than repeated: a windup, one strike, a held impact pose and the
+# recovery, twice. Four seconds holds both attacks at the stated timing; a shorter clip squeezes
+# them, a longer one stretches them.
+STATE_DURATION_SECONDS = {"attack": 4}
+# States whose clip is pinned to end on the frame it starts from (first-last mode): the model
+# has to come back to the still, which is what closes a one-shot action into a loop instead of
+# leaving it wherever the strike ended.
+PIN_LAST_FRAME_STATES = frozenset({"attack"})
 RETRY_BACKOFF_SECONDS = (15, 30)
+
+
+def duration_for(state: str, requested: int | None) -> int:
+    """Seconds to ask for: an explicit request wins, otherwise the state's own default."""
+    return requested if requested is not None else STATE_DURATION_SECONDS.get(state, DEFAULT_DURATION_SECONDS)
 VIEW_TEXT = {
     "side": "seen from the exact side, facing {facing}",
     "front": "seen from the front, facing the viewer directly",
@@ -46,7 +59,13 @@ MOTION_TEXT = {
     "walk": "moves in place on a treadmill: a steady locomotion cycle for this body type with clear repeating ground contacts and an even left-right or front-back rhythm the body already has.",
     "run": "moves in place on a treadmill: a fast locomotion cycle for this body type with a bounding rhythm and clear repeating ground contacts.",
     "jump": "performs a modest vertical hop in place over and over: compress, spring up about half the body height, land softly, return to the exact starting stance, repeat at an even rhythm. Same height every time.",
-    "attack": "performs the same melee attack over and over with the weapon it is already holding (bare hands only if it holds nothing), keeping every piece of its gear and outfit exactly as drawn: one clean strike in front, then returns to the exact ready stance, repeating at an even rhythm.",
+    "attack": (
+        "performs the same melee attack twice in a row with what it is already holding in the hand nearest the viewer "
+        "(bare hands only if it holds nothing), keeping every piece of its gear and outfit exactly as drawn. Each attack is "
+        "a windup (about 0.5 s), one clean strike in front (about 0.25 s), a held impact pose (about 0.3 s), then a recovery "
+        "to the exact starting stance (about 0.5 s). What it holds never changes hands, and the body keeps facing the same "
+        "direction without turning."
+    ),
     "cheer": "celebrates in place: rises into a raised, spread-out cheer pose, holds it for a beat, then settles back to the exact starting stance, repeating at an even rhythm.",
     "wave": "waves in place: lifts one side into a friendly wave, sways it a few times, then settles back to the exact starting stance, repeating at an even rhythm.",
 }
@@ -57,6 +76,20 @@ COMMON_TEXT = (
     "clip — no shadows, no ground line, no particles, no lighting changes, no effects. Keep the design, colors and "
     "proportions exactly as in the image. Consistent, evenly paced motion so the animation loops."
 )
+
+# One-shot actions pinned to their first frame (`PIN_LAST_FRAME_STATES`). No "evenly paced" line:
+# a strike is fast and a windup is not, so the timing lives in the motion sentence instead. What the
+# character holds is kept inside the frame too, and the fast frames are asked to stay crisp.
+ACTION_COMMON_TEXT = (
+    "2D game sprite animation. The character {motion} The character is {view}. Stays centered in the frame and does "
+    "not move across the screen; the body, hair and anything it holds always stay fully inside the frame with margin. "
+    "Camera completely locked, no zoom, no pan, no reframing. The background stays a perfectly flat, pure chroma-key fill "
+    "for the whole clip — no shadows, no ground line, no particles, no lighting changes, no effects. Keep the design, "
+    "colors and proportions exactly as in the image. Crisp, clean frames with no motion blur, no smears and no afterimages."
+)
+# A caller's own motion paragraph (`build_prompt(motion=...)`) says what one attack is; this says
+# how many to make, the same count the built-in attack text asks for.
+REPEAT_TEXT = {"attack": "Perform this attack twice in a row with the same timing each time."}
 
 _start_lock = threading.Lock()
 _last_start = [0.0]
@@ -70,16 +103,32 @@ def _staggered_start(gap: float) -> None:
         _last_start[0] = time.monotonic()
 
 
-def build_prompt(direction: str, state: str, character: str | None, facing: str = "right") -> str:
+def build_prompt(direction: str, state: str, character: str | None, facing: str = "right", motion: str | None = None) -> str:
+    """The clip prompt for one (direction, state).
+
+    `motion` replaces the built-in state sentence with the caller's own description of the
+    motion, written as whole sentences about the subject (a request interpreter's output, for
+    instance). The frame, camera, background and design rules stay the engine's.
+    """
     validate_facing(facing)
-    motion = MOTION_TEXT.get(state, f"performs the '{state}' action in place, repeating at an even rhythm.")
     view = VIEW_TEXT.get(direction, f"seen from the {direction}").format(facing=facing)
-    text = COMMON_TEXT.format(motion=motion, view=view)
+    template = ACTION_COMMON_TEXT if state in PIN_LAST_FRAME_STATES else COMMON_TEXT
+    if motion is not None:
+        motion = " ".join(motion.split())
+        if not motion:
+            raise SystemExit("video: motion description is empty")
+        head = "2D game sprite animation. The character {motion} The character is {view}."
+        repeat = f" {REPEAT_TEXT[state]}" if state in REPEAT_TEXT else ""
+        subject = character.strip().rstrip(".") if character else "The character"
+        return f"2D game sprite animation. {motion}{repeat} {subject} is {view}." + template[len(head):]
+    text = template.format(motion=MOTION_TEXT.get(state, f"performs the '{state}' action in place, repeating at an even rhythm."), view=view)
     return text.replace("The character", character, 1) if character else text
 
 
-def run_video_cli(image: Path, prompt: str, out: Path, report: Path, *, duration: int, resolution: str, log: Path) -> int:
+def run_video_cli(image: Path, prompt: str, out: Path, report: Path, *, duration: int, resolution: str, log: Path, last_frame: Path | None = None) -> int:
     cmd = [sys.executable, "-m", "sprite_gen.gen.video", "--image", str(image), "--prompt", prompt, "--out", str(out), "--duration", str(duration), "--resolution", resolution, "--no-audio", "--report", str(report)]
+    if last_frame is not None:
+        cmd += ["--last-frame", str(last_frame)]
     with log.open("w", encoding="utf-8") as fh:
         return subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT, text=True).returncode
 
@@ -92,7 +141,7 @@ def run_item(
     base: Path,
     root: Path,
     character: str | None,
-    duration: int,
+    duration: int | None,
     resolution: str,
     key: str,
     force: bool,
@@ -104,6 +153,7 @@ def run_item(
     facing: str = "right",
     facing_fix: str = "none",
     prepare_side: Callable[[Path], tuple[Path, dict]] | None = None,
+    body_height: int | None = None,
 ) -> dict[str, Any]:
     if anchor == "motion-auto" and not loop_mod.profile_for(state).gait:
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
@@ -112,6 +162,7 @@ def run_item(
     validate_facing(facing, facing_fix)
     if facing_fix not in facing_mod.FIXES:
         raise SystemExit("video-set: --facing-fix must be mirror or none")
+    duration = duration_for(state, duration)
     item_dir = root / item
     item_dir.mkdir(parents=True, exist_ok=True)
     result: dict[str, Any] = {"item": item, "direction": direction, "state": state, "dir": str(item_dir)}
@@ -168,7 +219,8 @@ def run_item(
             attempts: list[int] = []
             for attempt in range(1 + len(RETRY_BACKOFF_SECONDS)):
                 _staggered_start(gap)
-                rc = video_runner(canvas_png, prompt, clip, clip_report, duration=duration, resolution=resolution, log=item_dir / "clip.log")
+                pin = {"last_frame": canvas_png} if state in PIN_LAST_FRAME_STATES else {}
+                rc = video_runner(canvas_png, prompt, clip, clip_report, duration=duration, resolution=resolution, log=item_dir / "clip.log", **pin)
                 attempts.append(rc)
                 if rc == 0 and clip.exists():
                     break
@@ -177,14 +229,14 @@ def run_item(
                     time.sleep(RETRY_BACKOFF_SECONDS[attempt])
                     continue
                 break
-            result["clip"] = {"attempts": attempts}
+            result["clip"] = {"attempts": attempts, "duration": duration, "last_frame": state in PIN_LAST_FRAME_STATES}
             if attempts[-1] != 0 or not clip.exists():
                 raise SystemExit(f"clip generation failed after {len(attempts)} attempt(s); see {item_dir / 'clip.log'}")
 
         fr = frames_mod.run_frames(clip, item_dir / "frames", key=key, allow_edge_contact=False, report_path=item_dir / "frames.report.json", spill=spill, reference=canvas_png)
         result["frames"] = {k: fr[k] for k in ("fps", "frames", "alpha_zero_pct_min", "alpha_zero_pct_max")}
         result["frames"]["spill"] = fr.get("spill", {}).get("mode")
-        lp = loop_mod.run_loop(Path(fr["keyed_dir"]), item_dir / "loop", fps=float(fr["fps"]), state=state, min_len=None, max_len=None, n_out=None, seam_max=loop_mod.SEAM_RATIO_MAX, name=item, report_path=item_dir / "loop.report.json", anchor=anchor)
+        lp = loop_mod.run_loop(Path(fr["keyed_dir"]), item_dir / "loop", fps=float(fr["fps"]), state=state, min_len=None, max_len=None, n_out=None, seam_max=loop_mod.SEAM_RATIO_MAX, name=item, report_path=item_dir / "loop.report.json", anchor=anchor, body_height=body_height)
         result["loop"] = {"kind": lp["cycle"].get("kind", "periodic"), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "drift_px": lp["strip"].get("drift_px", 0), "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
         result["loop"]["review_recommended"] = lp["cycle"].get("review_recommended", False)
         result["loop"]["half_period_guard"] = lp["cycle"].get("half_period_guard")
@@ -219,7 +271,7 @@ def run_set(
     states: list[str],
     root: Path,
     character: str | None,
-    duration: int,
+    duration: int | None,
     resolution: str,
     key: str,
     concurrency: int,
@@ -231,6 +283,7 @@ def run_set(
     spill: str = "auto",
     facing: str = "right",
     facing_fix: str = "none",
+    body_height: int | None = None,
 ) -> dict[str, Any]:
     if anchor == "motion-auto" and any(not loop_mod.profile_for(state).gait for state in states):
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
@@ -260,14 +313,14 @@ def run_set(
             return prepared[base]
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
-        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=bases[d], root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=facing, facing_fix=facing_fix, prepare_side=prepare_side): i for i, d, s in items}
+        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=bases[d], root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=facing, facing_fix=facing_fix, prepare_side=prepare_side, body_height=body_height): i for i, d, s in items}
         for fut in as_completed(futures):
             r = fut.result()
             results.append(r)
             print(json.dumps({k: r[k] for k in ("item", "ok") if k in r} | ({"error": r["error"]} if not r.get("ok") else {"seam": r["loop"]["seam_ratio"]}), ensure_ascii=False), flush=True)
     results.sort(key=lambda r: [i for i, _, _ in items].index(r["item"]))
     table = write_table(results, root / "table.md")
-    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), "ok": sum(1 for r in results if r.get("ok")), "failed": [r["item"] for r in results if not r.get("ok")], "items": results}
+    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": [r["item"] for r in results if not r.get("ok")], "items": results}
     atomic_write_text(root / "set.report.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     print(table)
     return payload
@@ -295,7 +348,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--states", default="idle,walk,run,jump,attack", help="comma list of motion states")
     parser.add_argument("--out-dir", required=True, type=Path, help="batch root; one folder per direction-state")
     parser.add_argument("--character", help="short subject phrase used in the prompts (e.g. 'The armored knight')")
-    parser.add_argument("--duration", type=int, default=DEFAULT_DURATION_SECONDS, help=f"seconds per clip (default {DEFAULT_DURATION_SECONDS}); a repeating motion holds enough cycles at 3 s and a longer clip only costs more (2026-09-18)")
+    parser.add_argument("--duration", type=int, default=None, help=f"seconds per clip for every state (default: {DEFAULT_DURATION_SECONDS}, attack {STATE_DURATION_SECONDS['attack']}); a repeating motion holds enough cycles at 3 s and a longer clip only costs more (2026-09-18)")
     parser.add_argument("--resolution", default="720p")
     parser.add_argument("--key", choices=("auto", "green", "magenta", "white"), default="auto")
     parser.add_argument("--concurrency", type=int, default=3, help="parallel clip generations (starts are staggered regardless)")
@@ -303,6 +356,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--shape", choices=canvas_mod.SHAPES, help="force one canvas shape for every state (e.g. wide for a costume or arms that leave a 1:1 frame)")
     parser.add_argument("--anchor", choices=tuple(a for a in loop_mod.ANCHOR_MODES if a != "motion"), default="none", help="motion-auto: automatic regions, local period and XY correction (walk/run only); feet: remove in-canvas drift")
     parser.add_argument("--spill", choices=frames_mod.SPILL_MODES, default="auto", help="auto: judge key reflections from each item's canvas still (default); small / full: force")
+    parser.add_argument("--body-height", type=int, default=None, help="scale every state's loop so the standing height is this many px (video-loop --body-height): one value for the whole set keeps the character the same size across states")
     parser.add_argument("--force", action="store_true", help="regenerate clips that already exist")
 
 
@@ -311,10 +365,11 @@ def run(**kwargs: object) -> int:
         bases=_parse_bases(list(kwargs.get("base") or [])),  # type: ignore[arg-type]
         states=[s.strip() for s in str(kwargs.get("states") or "").split(",") if s.strip()],
         root=Path(str(kwargs["out_dir"])), character=kwargs.get("character"),  # type: ignore[arg-type]
-        duration=int(kwargs.get("duration") or DEFAULT_DURATION_SECONDS), resolution=str(kwargs.get("resolution") or "720p"), key=str(kwargs.get("key") or "auto"),
+        duration=(int(kwargs["duration"]) if kwargs.get("duration") else None), resolution=str(kwargs.get("resolution") or "720p"), key=str(kwargs.get("key") or "auto"),
         concurrency=int(kwargs.get("concurrency") or 3), force=bool(kwargs.get("force")), gap=float(kwargs.get("start_gap") or START_GAP_SECONDS),
         facing=str(kwargs.get("facing") or "right"), facing_fix=str(kwargs.get("facing_fix") or "none"),
         shape=(str(kwargs["shape"]) if kwargs.get("shape") else None), anchor=str(kwargs.get("anchor") or "none"), spill=str(kwargs.get("spill") or "auto"),
+        body_height=(int(kwargs["body_height"]) if kwargs.get("body_height") else None),
     )
     return 0 if not payload["failed"] else 1
 

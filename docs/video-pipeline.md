@@ -70,6 +70,21 @@ stance … same height every time"). `video-set` carries those templates
 name limbs — the first drafts said "bipedal … knees … arms pumping", which prompted a
 quadruped and a legless blob into a contradiction (2026-09-09).
 
+An attack is a timed strike, not a repeat. `MOTION_TEXT["attack"]` asks for the same attack
+twice, each a windup (about 0.5 s), one strike in front (about 0.25 s), a held impact pose
+(about 0.3 s) and a recovery to the exact starting stance (about 0.5 s), with what the subject
+holds kept in the hand nearest the viewer and the body never turning. Its template
+(`ACTION_COMMON_TEXT`) drops the "evenly paced" line, keeps what the subject holds inside the
+frame, and asks for crisp frames without motion blur. `video-set` asks attack clips for 4 s
+(`STATE_DURATION_SECONDS`; every other state keeps 3 s, and `--duration` overrides every state)
+and pins the clip to end on the frame it starts from: `--last-frame` is the canvas itself
+(first-last mode, see [video.md](video.md)), so the strike has to come back to the still.
+
+`build_prompt(direction, state, character, facing, motion=...)` takes a caller's own motion
+paragraph — whole sentences about the subject, such as a request interpreter writes per
+request — in place of the built-in state sentence. The frame, camera, background and design
+rules stay the engine's, and an attack keeps its "twice in a row" sentence.
+
 ## 3. Frames — extract, key, check the edges
 
 `ffmpeg` extracts every frame; the clip's real fps is recorded (never assumed). Each
@@ -312,7 +327,11 @@ Outputs:
 `sprite-gen video-set --base side=side.png --base front=front.png --states idle,walk,run,jump,attack --out-dir set/`
 runs canvas → video → frames → loop for every (direction, state). The xAI team quota
 is **2 requests per second** (five parallel starts produced two HTTP 429s): starts are
-staggered (`--start-gap 2`) and a 429 gets a bounded, logged retry (15 s, 30 s). Items
+staggered (`--start-gap 2`) and a 429 gets a bounded, logged retry (15 s, 30 s). Clip length
+is each state's own default (3 s, attack 4 s) unless `--duration` sets one for all, and an
+attack clip is pinned to end on its canvas. States use differently shaped canvases (square, tall, wide),
+so the same character films at different pixel heights; `--body-height N` gives every state's loop the
+same standing-height target and keeps the character one size across the set. Items
 are idempotent (an existing clip is reused unless `--force`); one failure stops only
 its item and is listed in `table.md` with its stage and error. Exit code is non-zero
 when any item failed.
