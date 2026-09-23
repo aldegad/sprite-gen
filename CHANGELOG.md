@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v2.7.0)
+## v2.7.0 - Timed attack clips pinned to their start
 
 - Attack clips are timed strikes pinned to their start. `MOTION_TEXT["attack"]` asks for the same attack twice, each a windup, one strike in front, a held impact pose and a recovery to the exact starting stance with approximate times, keeps what the subject holds in the hand nearest the viewer, and forbids turning. The attack template drops the "evenly paced" line, keeps what the subject holds inside the frame and asks for crisp frames. `video-set` asks attack clips for 4 s by default (other states keep 3 s; `--duration` still sets one length for all) and passes the canvas as `--last-frame`, so the clip ends where it began. The item report records the clip's `duration` and `last_frame`.
 - `build_prompt(..., motion=...)` accepts a caller's own motion paragraph in place of the built-in state sentence, keeping the engine's frame, camera, background and design rules.
