@@ -409,6 +409,30 @@ def test_body_h_is_the_standing_height_not_the_cycle_median() -> None:
     assert meta3["h"] <= 40, "--strip-height stays the cap"
 
 
+def test_body_height_measures_the_clips_first_frame_not_a_raised_weapon(tmp_path: Path) -> None:
+    """Every clip starts from its still, so the first frame is the one pose all of a
+    character's states share. An attack's tallest grounded frame is its windup with the
+    weapon overhead; scaled to the target, it made the attacking character smaller than
+    the walking one."""
+    files = _gait_frames(tmp_path, period=12, n=72)
+    for path in files[1:]:  # from the second frame on, something is held up above the head
+        im = Image.open(path)
+        for y in range(2, 10):
+            im.putpixel((36, y), (120, 120, 120, 255))
+        im.save(path)
+    rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "out", fps=24.0, state="walk", min_len=None, max_len=None,
+                            n_out=8, seam_max=9.0, name="w", report_path=None, body_height=48)
+    meta = json.loads((tmp_path / "out" / "w.strip.json").read_text())
+    assert meta["body_ref"] == "first-frame"
+    assert (meta["body_src_h"], meta["scale"], meta["body_h"]) == (48, 1.0, 48)  # the raised frames are 56 tall
+    assert rep["strip"]["body_h"] == 48
+    # without a target nothing changes: the tallest grounded frame, never scaled up
+    loop_mod.run_loop(tmp_path / "keyed", tmp_path / "plain", fps=24.0, state="walk", min_len=None, max_len=None,
+                      n_out=8, seam_max=9.0, name="w", report_path=None)
+    plain = json.loads((tmp_path / "plain" / "w.strip.json").read_text())
+    assert plain["body_ref"] == "tallest-grounded" and plain["body_src_h"] == 56
+
+
 def test_body_height_is_a_target_across_states_not_a_downward_clamp() -> None:
     """`--body-height` exists so the same number across states gives one character size.
     That only holds if a state whose source body is SHORTER than the request scales UP:
@@ -427,6 +451,9 @@ def test_body_height_is_a_target_across_states_not_a_downward_clamp() -> None:
     _, short_meta = loop_mod.build_strip(short, cycle_seconds=4 / 24, body_height=60)
     _, tall_meta = loop_mod.build_strip(tall, cycle_seconds=4 / 24, body_height=60)
     assert short_meta["body_h"] == tall_meta["body_h"] == 60
+    # the sidecar says which one was filmed small: the short body was upscaled, the tall one was not
+    assert (short_meta["body_src_h"], short_meta["scale"]) == (40, 1.5)
+    assert (tall_meta["body_src_h"], tall_meta["scale"]) == (80, 0.75)
 
     # No body_height still never scales up: that is what --strip-height is for.
     _, plain = loop_mod.build_strip(short, cycle_seconds=4 / 24)

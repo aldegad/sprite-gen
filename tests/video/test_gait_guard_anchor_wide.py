@@ -199,12 +199,12 @@ def test_raised_limb_states_get_a_wide_canvas() -> None:
 def test_video_set_passes_shape_and_anchor_through(tmp_path: Path, monkeypatch, state, anchor) -> None:
     seen: dict[str, object] = {}
 
-    def fake_canvas(base, out, *, state, shape, facing, headroom, lead, report_path):
+    def fake_canvas(base, out, *, state, shape, facing, headroom, lead, report_path, fit="state"):
         seen["shape"] = shape
         Image.new("RGB", (32, 32), (0, 255, 0)).save(out)
         return {"shape": shape or "square", "canvas": [32, 32], "offset": [0, 0]}
 
-    def fake_frames(clip, out_dir, *, key, allow_edge_contact, report_path, spill, reference):
+    def fake_frames(clip, out_dir, *, key, allow_edge_contact, report_path, spill, reference, allow_subject_edge_contact=False):
         seen["spill"] = (spill, Path(reference).name)
         keyed = Path(out_dir) / "keyed"
         keyed.mkdir(parents=True, exist_ok=True)
