@@ -2,6 +2,11 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## v2.8.1 - Tight clips pass their own edge and corner checks
+
+- `video-frames --allow-subject-edge-contact` fails only on a frame where the key alone reaches the edge. A frame where the subject touches the edge carries key-tinted pixels beside it (its antialiased fringe, or the key reflected on metal) and is accepted with them, the same reading a mixed contact already had in the refusal message. Before, a few such pixels failed a tight clip as leftover background.
+- `video-loop` keeps its 8 transparent columns on both sides of every cell even when the subject reaches the frame's side edge, so no cell corner is the subject and the GIF/WebP corner check holds. A crop that stays inside the frame is unchanged.
+
 ## v2.8.0 - Tight framing for a fixed body height
 
 - `video-canvas --fit tight` frames a still with no room for the motion: it drops the empty rows above and below the subject (keeping headroom of 4 % of the subject's height), keeps the still's width, and pads to the nearest framing the video model returns (9:16, 1:1, 16:9). The subject is never scaled or cut. A long, low subject in a square still becomes a 16:9 frame it fills, so a `--body-height` target is reached at a low clip resolution by scaling down rather than up. A motion that leaves the frame is clipped. The default `--fit state` is unchanged, and the report now says which `fit` framed it.
