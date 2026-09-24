@@ -154,6 +154,7 @@ def run_item(
     facing_fix: str = "none",
     prepare_side: Callable[[Path], tuple[Path, dict]] | None = None,
     body_height: int | None = None,
+    fit: str = "state",
 ) -> dict[str, Any]:
     if anchor == "motion-auto" and not loop_mod.profile_for(state).gait:
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
@@ -187,6 +188,8 @@ def run_item(
                     raise ValueError("missing canvas")
                 if not all(key in canvas_report for key in ("shape", "canvas", "offset")):
                     raise ValueError("incomplete canvas report")
+                if canvas_report.get("fit", "state") != fit:
+                    raise ValueError("cached canvas was framed with another --fit")
                 if direction == "side":
                     prior = canvas_report.get("facing_check") or {}
                     if not isinstance(prior, dict):
@@ -205,11 +208,11 @@ def run_item(
                 else:
                     still = item_dir / "facing.png"
                     facing_report = facing_mod.prepare_still(base, still, facing=facing, fix=facing_fix)
-            canvas_report = canvas_mod.run_canvas(still, canvas_png, state=state, shape=shape, facing=facing if direction not in ("front", "back") else "right", headroom=None, lead=None, report_path=canvas_report_path)
+            canvas_report = canvas_mod.run_canvas(still, canvas_png, state=state, shape=shape, facing=facing if direction not in ("front", "back") else "right", headroom=None, lead=None, report_path=canvas_report_path, fit=fit)
             if facing_report is not None:
                 canvas_report["facing_check"] = facing_report
                 atomic_write_text(canvas_report_path, json.dumps(canvas_report, ensure_ascii=False, indent=2) + "\n")
-        result["canvas"] = {k: canvas_report[k] for k in ("shape", "canvas", "offset")}
+        result["canvas"] = {k: canvas_report[k] for k in ("fit", "shape", "canvas", "offset") if k in canvas_report}
         if "facing_check" in canvas_report:
             result["facing"] = canvas_report["facing_check"]
 
@@ -233,7 +236,8 @@ def run_item(
             if attempts[-1] != 0 or not clip.exists():
                 raise SystemExit(f"clip generation failed after {len(attempts)} attempt(s); see {item_dir / 'clip.log'}")
 
-        fr = frames_mod.run_frames(clip, item_dir / "frames", key=key, allow_edge_contact=False, report_path=item_dir / "frames.report.json", spill=spill, reference=canvas_png)
+        # a tight frame is clipped on purpose; leftover key background still fails
+        fr = frames_mod.run_frames(clip, item_dir / "frames", key=key, allow_edge_contact=False, report_path=item_dir / "frames.report.json", spill=spill, reference=canvas_png, allow_subject_edge_contact=fit == "tight")
         result["frames"] = {k: fr[k] for k in ("fps", "frames", "alpha_zero_pct_min", "alpha_zero_pct_max")}
         result["frames"]["spill"] = fr.get("spill", {}).get("mode")
         lp = loop_mod.run_loop(Path(fr["keyed_dir"]), item_dir / "loop", fps=float(fr["fps"]), state=state, min_len=None, max_len=None, n_out=None, seam_max=loop_mod.SEAM_RATIO_MAX, name=item, report_path=item_dir / "loop.report.json", anchor=anchor, body_height=body_height)
@@ -284,6 +288,7 @@ def run_set(
     facing: str = "right",
     facing_fix: str = "none",
     body_height: int | None = None,
+    fit: str = "state",
 ) -> dict[str, Any]:
     if anchor == "motion-auto" and any(not loop_mod.profile_for(state).gait for state in states):
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
@@ -292,6 +297,8 @@ def run_set(
     validate_facing(facing, facing_fix)
     if facing_fix not in facing_mod.FIXES:
         raise SystemExit("video-set: --facing-fix must be mirror or none")
+    if fit == "tight" and shape is not None:
+        raise SystemExit("video-set: --fit tight picks each canvas's shape itself; drop --shape")
     root = root.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     for direction, base in bases.items():
@@ -313,7 +320,7 @@ def run_set(
             return prepared[base]
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
-        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=bases[d], root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=facing, facing_fix=facing_fix, prepare_side=prepare_side, body_height=body_height): i for i, d, s in items}
+        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=bases[d], root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=facing, facing_fix=facing_fix, prepare_side=prepare_side, body_height=body_height, fit=fit): i for i, d, s in items}
         for fut in as_completed(futures):
             r = fut.result()
             results.append(r)
@@ -356,6 +363,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--shape", choices=canvas_mod.SHAPES, help="force one canvas shape for every state (e.g. wide for a costume or arms that leave a 1:1 frame)")
     parser.add_argument("--anchor", choices=tuple(a for a in loop_mod.ANCHOR_MODES if a != "motion"), default="none", help="motion-auto: automatic regions, local period and XY correction (walk/run only); feet: remove in-canvas drift")
     parser.add_argument("--spill", choices=frames_mod.SPILL_MODES, default="auto", help="auto: judge key reflections from each item's canvas still (default); small / full: force")
+    parser.add_argument("--fit", choices=canvas_mod.FITS, default="state", help="state: each state's room for the motion (default); tight: no room, the subject fills the frame and a motion that leaves it is clipped (use with --body-height at a low --resolution)")
     parser.add_argument("--body-height", type=int, default=None, help="scale every state's loop so the standing height is this many px (video-loop --body-height): one value for the whole set keeps the character the same size across states")
     parser.add_argument("--force", action="store_true", help="regenerate clips that already exist")
 
@@ -369,7 +377,7 @@ def run(**kwargs: object) -> int:
         concurrency=int(kwargs.get("concurrency") or 3), force=bool(kwargs.get("force")), gap=float(kwargs.get("start_gap") or START_GAP_SECONDS),
         facing=str(kwargs.get("facing") or "right"), facing_fix=str(kwargs.get("facing_fix") or "none"),
         shape=(str(kwargs["shape"]) if kwargs.get("shape") else None), anchor=str(kwargs.get("anchor") or "none"), spill=str(kwargs.get("spill") or "auto"),
-        body_height=(int(kwargs["body_height"]) if kwargs.get("body_height") else None),
+        body_height=(int(kwargs["body_height"]) if kwargs.get("body_height") else None), fit=str(kwargs.get("fit") or "state"),
     )
     return 0 if not payload["failed"] else 1
 

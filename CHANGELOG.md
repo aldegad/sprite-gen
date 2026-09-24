@@ -2,6 +2,13 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## v2.8.0 - Tight framing for a fixed body height
+
+- `video-canvas --fit tight` frames a still with no room for the motion: it drops the empty rows above and below the subject (keeping headroom of 4 % of the subject's height), keeps the still's width, and pads to the nearest framing the video model returns (9:16, 1:1, 16:9). The subject is never scaled or cut. A long, low subject in a square still becomes a 16:9 frame it fills, so a `--body-height` target is reached at a low clip resolution by scaling down rather than up. A motion that leaves the frame is clipped. The default `--fit state` is unchanged, and the report now says which `fit` framed it.
+- `video-frames --allow-subject-edge-contact` accepts the subject at the frame edge and still refuses leftover key background there. The report's `edge_policy` names the rule that applied.
+- `video-set --fit tight` frames every item that way and lets its subject reach the edge. It refuses `--shape`, and a cached canvas framed with another fit is not reused.
+- `--body-height` measures the standing height on the clip's first frame, the base still's pose that every clip starts from. The tallest grounded frame, used before, is an attack's windup with the weapon overhead, and scaling that to the target made the character smaller in its attack than in its walk. The strip sidecar records `body_ref`, `body_src_h` (the standing height as filmed) and `scale`, so a strip whose cells were upscaled says so. Without a target nothing changes.
+
 ## v2.7.0 - Timed attack clips pinned to their start
 
 - Attack clips are timed strikes pinned to their start. `MOTION_TEXT["attack"]` asks for the same attack twice, each a windup, one strike in front, a held impact pose and a recovery to the exact starting stance with approximate times, keeps what the subject holds in the hand nearest the viewer, and forbids turning. The attack template drops the "evenly paced" line, keeps what the subject holds inside the frame and asks for crisp frames. `video-set` asks attack clips for 4 s by default (other states keep 3 s; `--duration` still sets one length for all) and passes the canvas as `--last-frame`, so the clip ends where it began. The item report records the clip's `duration` and `last_frame`.

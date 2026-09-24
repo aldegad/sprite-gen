@@ -8,6 +8,13 @@ attack needs room above and in front, a projectile needs room in front (wide), e
 The state -> canvas table below is the single owner of that rule; `--shape`
 overrides it per call.
 
+`--fit tight` is the other way to frame: no room is added for the motion. The
+empty rows above and below the subject are dropped (a little headroom stays),
+the still's width is kept, and the result is padded to the nearest framing the
+video model returns (9:16, 1:1, 16:9). The subject then fills as much of the
+clip's height as it can, which is what keeps a fixed body height from being
+upscaled at a low clip resolution; a motion that leaves that frame is clipped.
+
 The padding is filled with the chroma key so the clip stays keyable end to end.
 A still whose corners disagree is refused — a non-flat background cannot be
 extended without guessing.
@@ -25,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -71,6 +79,11 @@ SHAPE_DEFAULTS: dict[str, CanvasProfile] = {
     SHAPE_WIDE: STATE_CANVAS["attack"],
 }
 CORNER_TOLERANCE = 24  # max per-channel spread across the four corners for a "flat" background
+FITS = ("state", "tight")  # state: the table's room for the motion; tight: none
+# The framings Grok returns for an input image, width / height. A tight canvas snaps to
+# the nearest one so the clip keeps the proportions the subject was cut to.
+TIGHT_RATIOS = {SHAPE_TALL: 9 / 16, SHAPE_SQUARE: 1.0, SHAPE_WIDE: 16 / 9}
+TIGHT_HEADROOM = 0.04  # of the subject's own height, kept above it so the head is not flush with the edge
 KEYS = ("auto", "green", "magenta", "white")  # auto: the corners decide; white: no chroma key, pad with the corner colour
 
 
@@ -155,6 +168,49 @@ def normalize_key(image: Image.Image, kind: str) -> tuple[Image.Image, dict[str,
     return Image.fromarray(data, "RGB"), report
 
 
+def subject_rows(image: Image.Image, fill: tuple[int, int, int], tolerance: int) -> tuple[int, int]:
+    """First and one-past-last row holding a pixel that is not the background `fill`."""
+    data = np.asarray(image.convert("RGB"), dtype=np.int16)
+    diff = np.abs(data - np.array(fill, dtype=np.int16)).max(axis=2)
+    rows = np.flatnonzero((diff > tolerance).any(axis=1))
+    if rows.size == 0:
+        raise SystemExit("video-canvas: --fit tight found no subject on the still's background")
+    return int(rows[0]), int(rows[-1]) + 1
+
+
+def tight_canvas(src: Image.Image, fill: tuple[int, int, int], *, tolerance: int) -> tuple[Image.Image, dict[str, Any]]:
+    """Drop the empty rows above and below the subject, keep the width, pad to the nearest framing.
+
+    Never scales the subject and never cuts a column of it. Extra height goes above
+    the subject (it stands on the bottom edge, as on every canvas); extra width is
+    split evenly, because a tight frame adds no room in front on purpose.
+    """
+    w, h = src.size
+    top, bottom = subject_rows(src, fill, tolerance)
+    head = round((bottom - top) * TIGHT_HEADROOM)
+    kept_top = max(0, top - head)
+    band = src.crop((0, kept_top, w, bottom))
+    bw, bh = band.size
+    shape = min(TIGHT_RATIOS, key=lambda name: abs(math.log((bw / bh) / TIGHT_RATIOS[name])))
+    ratio = TIGHT_RATIOS[shape]
+    if bw / bh >= ratio:
+        canvas_w, canvas_h = bw, max(bh, round(bw / ratio))
+    else:
+        canvas_w, canvas_h = max(bw, round(bh * ratio)), bh
+    x, y = (canvas_w - bw) // 2, canvas_h - bh
+    canvas = Image.new("RGB", (canvas_w, canvas_h), fill)
+    canvas.paste(band, (x, y))
+    report = {
+        "shape": shape,
+        "ratio": round(canvas_w / canvas_h, 4),
+        "canvas": [canvas_w, canvas_h],
+        "still": [w, h],
+        "offset": [x, y],
+        "tight": {"subject_rows": [top, bottom], "kept_rows": [kept_top, bottom], "headroom_px": top - kept_top},
+    }
+    return canvas, report
+
+
 def pad_canvas(
     image: Image.Image,
     profile: CanvasProfile,
@@ -164,6 +220,7 @@ def pad_canvas(
     lead: float | None = None,
     trail: float | None = None,
     key: str = "auto",
+    fit: str = "state",
 ) -> tuple[Image.Image, dict[str, Any]]:
     """Return (padded RGB image, placement report). Never downsizes the still.
 
@@ -177,6 +234,25 @@ def pad_canvas(
     else:
         src, key_report = normalize_key(image, kind)
         fill = KEY_TARGETS[kind]
+    if fit not in FITS:
+        raise SystemExit(f"video-canvas: unknown --fit {fit!r}; expected one of {', '.join(FITS)}")
+    if fit == "tight":
+        # A normalized key background is the exact key, so any other value is the subject;
+        # a white/ivory base only has its corner colour to go by.
+        canvas, placed = tight_canvas(src, tuple(fill), tolerance=0 if kind is not None else CORNER_TOLERANCE)  # type: ignore[arg-type]
+        report = {
+            "fit": "tight",
+            **placed,
+            "headroom": 0.0,
+            "lead": 0.0,
+            "trail": 0.0,
+            "facing": facing,
+            "key_rgb": list(fill),
+            "corner_rgb": list(corner),
+            **key_report,
+            "why": "tight: no room for the motion; the subject fills the frame and a motion that leaves it is clipped",
+        }
+        return canvas, report
     w, h = src.size
     head = profile.headroom if headroom is None else headroom
     front = profile.lead if lead is None else lead
@@ -203,6 +279,7 @@ def pad_canvas(
     canvas = Image.new("RGB", (canvas_w, canvas_h), fill)
     canvas.paste(src, (x, y))
     report = {
+        "fit": "state",
         "shape": profile.shape,
         "ratio": round(canvas_w / canvas_h, 4),
         "canvas": [canvas_w, canvas_h],
@@ -232,12 +309,15 @@ def run_canvas(
     report_path: Path | None,
     key: str = "auto",
     trail: float | None = None,
+    fit: str = "state",
 ) -> dict[str, Any]:
     still = still.expanduser().resolve()
     if not still.is_file():
         raise SystemExit(f"video-canvas: still not found: {still}")
+    if fit == "tight" and (shape is not None or headroom is not None or lead is not None or trail is not None):
+        raise SystemExit("video-canvas: --fit tight picks its own shape and adds no room; drop --shape/--headroom/--lead/--trail")
     profile = profile_for(state, shape)
-    canvas, report = pad_canvas(Image.open(still), profile, facing=facing, headroom=headroom, lead=lead, trail=trail, key=key)
+    canvas, report = pad_canvas(Image.open(still), profile, facing=facing, headroom=headroom, lead=lead, trail=trail, key=key, fit=fit)
     out = out.expanduser().resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(out.name + ".part")
@@ -259,6 +339,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--lead", type=float, help="wide: empty fraction in front of the subject (default from the profile)")
     parser.add_argument("--trail", type=float, help="wide: empty fraction behind the subject, for a weapon drawn back (default from the profile)")
     parser.add_argument("--key", choices=KEYS, default="auto", help="chroma key of the still (auto reads the corners; green/magenta are normalized to the exact key; white pads with the corner colour)")
+    parser.add_argument("--fit", choices=FITS, default="state", help="state: the state's room for the motion (default); tight: drop the empty rows around the subject and add no room, so it fills the frame and a motion that leaves it is clipped")
     parser.add_argument("--report", type=Path, help="write the canvas report JSON here")
 
 
@@ -267,7 +348,7 @@ def run(**kwargs: object) -> int:
         Path(str(kwargs["still"])), Path(str(kwargs["out"])),
         state=kwargs.get("state"), shape=kwargs.get("shape"), facing=str(kwargs.get("facing") or "right"),  # type: ignore[arg-type]
         headroom=kwargs.get("headroom"), lead=kwargs.get("lead"), trail=kwargs.get("trail"), report_path=kwargs.get("report"),  # type: ignore[arg-type]
-        key=str(kwargs.get("key") or "auto"),
+        key=str(kwargs.get("key") or "auto"), fit=str(kwargs.get("fit") or "state"),
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0

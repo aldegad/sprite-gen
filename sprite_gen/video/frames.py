@@ -18,6 +18,10 @@ the border rule: an edge pixel is border evidence) is **residual background**,
 anything else is the **subject** — and the two fail
 with different messages: residual points at `video-canvas` normalization of the
 base still, subject contact at a taller/wider canvas.
+
+`--allow-subject-edge-contact` accepts the second and keeps the first: a clip made
+from a `video-canvas --fit tight` frame is clipped on purpose, but leftover key
+background at the edge is still a keying defect. The contacts stay in the report.
 """
 
 from __future__ import annotations
@@ -156,6 +160,7 @@ def key_frames(
     key: str = "auto",
     check_edges: bool = True,
     spill: str = "small",
+    allow_subject: bool = False,
 ) -> dict[str, Any]:
     if spill not in ("small", "full"):
         raise SystemExit(f"video-frames: key_frames takes a resolved spill mode (small|full), got {spill!r}")
@@ -190,27 +195,41 @@ def key_frames(
         "alpha_zero_pct_min": min(r["alpha_zero_pct"] for r in rows),
         "alpha_zero_pct_max": max(r["alpha_zero_pct"] for r in rows),
         "edge_contacts": contacts,
+        "edge_policy": "off" if not check_edges else ("subject-allowed" if allow_subject else "refuse"),
         "rows": rows,
     }
     if contacts and check_edges:
-        raise SystemExit(_edge_contact_message(contacts))
+        if not allow_subject:
+            raise SystemExit(_edge_contact_message(contacts))
+        residual = [c for c in contacts if c["residual"] > 0]
+        if residual:
+            raise SystemExit(_residual_message(residual))
     return report
+
+
+def _worst(contacts: list[dict[str, Any]]) -> tuple[dict[str, Any], str]:
+    worst = max(contacts, key=lambda c: c["top"] + c["left"] + c["right"])
+    return worst, f"(worst {worst['frame']}: top {worst['top']} / left {worst['left']} / right {worst['right']} px)"
+
+
+def _residual_message(contacts: list[dict[str, Any]]) -> str:
+    worst, where = _worst(contacts)
+    painted = tuple(worst["key_painted"]) if worst.get("key_painted") else None
+    return (
+        f"video-frames: leftover chroma background reaches the frame edge in {len(contacts)} frame(s) {where} — "
+        f"the key survived the matte (painted background {painted}); this is background, not the subject: "
+        "normalize the base still with `sprite-gen video-canvas` (repaints the flat background to the exact key) "
+        "and regenerate the clip"
+    )
 
 
 def _edge_contact_message(contacts: list[dict[str, Any]]) -> str:
     """Residual background and a clipped subject are different defects with different fixes."""
-    worst = max(contacts, key=lambda c: c["top"] + c["left"] + c["right"])
-    where = f"(worst {worst['frame']}: top {worst['top']} / left {worst['left']} / right {worst['right']} px)"
+    worst, where = _worst(contacts)
     subject_frames = [c for c in contacts if c["subject"] > 0]
     residual_frames = [c for c in contacts if c["residual"] > 0]
     if not subject_frames:
-        painted = tuple(worst["key_painted"]) if worst.get("key_painted") else None
-        return (
-            f"video-frames: leftover chroma background reaches the frame edge in {len(contacts)} frame(s) {where} — "
-            f"the key survived the matte (painted background {painted}); this is background, not the subject: "
-            "normalize the base still with `sprite-gen video-canvas` (repaints the flat background to the exact key) "
-            "and regenerate the clip"
-        )
+        return _residual_message(contacts)
     message = (
         f"video-frames: the subject touches the frame edge in {len(subject_frames)} frame(s) {where} — "
         "the clip was framed too tight; regenerate from a taller/wider canvas (`sprite-gen video-canvas`) "
@@ -221,7 +240,7 @@ def _edge_contact_message(contacts: list[dict[str, Any]]) -> str:
     return message
 
 
-def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool, report_path: Path | None, spill: str = "small", reference: Path | None = None) -> dict[str, Any]:
+def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool, report_path: Path | None, spill: str = "small", reference: Path | None = None, allow_subject_edge_contact: bool = False) -> dict[str, Any]:
     if spill not in SPILL_MODES:
         raise SystemExit(f"video-frames: unknown --spill {spill!r}; expected one of {', '.join(SPILL_MODES)}")
     if spill == "auto" and reference is None:
@@ -235,7 +254,7 @@ def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool,
     keyed_dir = out_dir / "keyed"
     decision = decide_spill(Path(reference).expanduser().resolve(), key) if spill == "auto" else {"mode": spill, "reason": "explicit"}
     files = extract(clip, raw_dir)
-    report = key_frames(files, keyed_dir, key=key, check_edges=not allow_edge_contact, spill=decision["mode"])
+    report = key_frames(files, keyed_dir, key=key, check_edges=not allow_edge_contact, spill=decision["mode"], allow_subject=allow_subject_edge_contact)
     payload = {"kind": "sprite-gen-video-frames-report", "clip": str(clip), "out_dir": str(out_dir), "raw_dir": str(raw_dir), "keyed_dir": str(keyed_dir), "key": key, "spill": decision, **meta, **report}
     target = (report_path or (out_dir / "frames.report.json")).expanduser().resolve()
     atomic_write_text(target, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
@@ -247,7 +266,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--clip", required=True, type=Path, help="mp4 from `sprite-gen video`")
     parser.add_argument("--out-dir", required=True, type=Path, help="writes raw/ and keyed/ here")
     parser.add_argument("--key", choices=("auto", "green", "magenta", "white"), default="auto", help="background key (auto reads the corners)")
-    parser.add_argument("--allow-edge-contact", action="store_true", help="accept frames whose subject touches the top/left/right edge")
+    parser.add_argument("--allow-edge-contact", action="store_true", help="accept any opaque pixel at the top/left/right edge (subject and leftover key background alike)")
+    parser.add_argument("--allow-subject-edge-contact", action="store_true", help="accept the subject touching the top/left/right edge (a `video-canvas --fit tight` clip) but still refuse leftover key background there")
     parser.add_argument("--report", type=Path, help="report JSON (default <out-dir>/frames.report.json)")
     parser.add_argument("--spill", choices=SPILL_MODES, default="small", help="small: correct only small key-tinted clusters (default); full: every key tint in the subject is spill; auto: decide from --reference")
     parser.add_argument("--reference", type=Path, help="the still the clip was made from (required by --spill auto)")
@@ -256,8 +276,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(**kwargs: object) -> int:
     payload = run_frames(Path(str(kwargs["clip"])), Path(str(kwargs["out_dir"])), key=str(kwargs.get("key") or "auto"),
                          allow_edge_contact=bool(kwargs.get("allow_edge_contact")), report_path=kwargs.get("report"),  # type: ignore[arg-type]
-                         spill=str(kwargs.get("spill") or "small"), reference=kwargs.get("reference"))  # type: ignore[arg-type]
-    summary = {k: payload[k] for k in ("clip", "keyed_dir", "fps", "frames", "alpha_zero_pct_min", "alpha_zero_pct_max", "edge_contacts", "spill", "report")}
+                         spill=str(kwargs.get("spill") or "small"), reference=kwargs.get("reference"),  # type: ignore[arg-type]
+                         allow_subject_edge_contact=bool(kwargs.get("allow_subject_edge_contact")))
+    summary = {k: payload[k] for k in ("clip", "keyed_dir", "fps", "frames", "alpha_zero_pct_min", "alpha_zero_pct_max", "edge_contacts", "edge_policy", "spill", "report")}
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 

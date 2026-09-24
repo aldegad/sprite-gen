@@ -86,7 +86,7 @@ def test_video_set_gives_every_state_the_same_body_height(tmp_path: Path, monkey
     from PIL import Image
     seen: list = []
 
-    def fake_canvas(base, out, *, state, shape, facing, headroom, lead, report_path):
+    def fake_canvas(base, out, *, state, shape, facing, headroom, lead, report_path, fit="state"):
         Image.new("RGB", (32, 32), (0, 255, 0)).save(out)
         return {"shape": "square", "canvas": [32, 32], "offset": [0, 0]}
 
