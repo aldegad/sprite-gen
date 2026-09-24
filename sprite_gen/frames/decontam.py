@@ -36,6 +36,9 @@ Guards, in order of the decision they make:
   when the subject owns no key-coloured material is a residual key hue on such a
   pixel capped (`KEY_HUE_TINT`), which lowers the keyed channel and never raises
   another.
+- *Tint.* Between the two: a pixel pushed from its colour toward the key by at
+  least `TINT_SHIFT`, and `TINT_RATIO` times more than the fit misses by, is
+  recoloured with its coverage left alone (a faint cast, not proven coverage).
 - *Depth.* Coverage is refitted only within `alpha_depth` of the keyed region
   (the engine's unmix reach, same meaning). Deeper band pixels get colour only,
   so a key reflection on a solid surface is recoloured, not turned see-through.
@@ -341,6 +344,7 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
     out[detached] = 0
     out[out[..., 3] == 0] = 0
     recovered = int(np.count_nonzero(flank & (out[..., 3] > 0)))
+    changed = int(np.count_nonzero((out != np.asarray(keyed, dtype=np.uint8)).any(axis=-1)))
     stats = {
         "mode": "palette",
         "fit": fit,
@@ -354,6 +358,7 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
         "key_material_share": round(key_material, 5),
         "noise_sigma_rgb": round(sigma_rgb, 3),
         "opaque_margin": round(margin, 3),
+        "changed_px": changed,
         "refit_px": int(np.count_nonzero(blend & ~tinted)),
         "tint_px": int(np.count_nonzero(tinted)),
         "recovered_px": recovered,

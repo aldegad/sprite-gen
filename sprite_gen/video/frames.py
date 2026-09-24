@@ -53,7 +53,7 @@ EDGE_MAX_PIXELS = 0  # any opaque pixel on the top/left/right edge band = contac
 # learned on the first frame, so the colours an edge may take cannot change between frames.
 DECONTAM_MODES = ("off", "palette")
 DECONTAM_FIT = "video"
-DECONTAM_STAT_KEYS = ("refit_px", "tint_px", "recovered_px", "unexplained_px", "key_hue_capped_px")
+DECONTAM_STAT_KEYS = ("changed_px", "refit_px", "tint_px", "recovered_px", "unexplained_px", "key_hue_capped_px")
 
 
 def _require(binary: str) -> str:
