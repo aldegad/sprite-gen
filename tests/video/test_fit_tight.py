@@ -144,11 +144,20 @@ def test_subject_contact_passes_when_allowed_and_stays_in_the_report(tmp_path: P
     assert report["edge_contacts"] and all(c["subject"] > 0 for c in report["edge_contacts"])
 
 
-def test_leftover_background_still_fails_when_the_subject_is_allowed(tmp_path: Path) -> None:
-    files = _frames(tmp_path, residual=True, touch_top=True)
+def test_leftover_background_alone_at_the_edge_still_fails_when_the_subject_is_allowed(tmp_path: Path) -> None:
+    files = _frames(tmp_path, residual=True, touch_top=False)
     with pytest.raises(SystemExit, match="leftover chroma background") as info:
         frames_mod.key_frames(files, tmp_path / "keyed", key="green", allow_subject=True)
     assert "framed too tight" not in str(info.value)
+
+
+def test_key_tinted_pixels_beside_a_touching_subject_are_accepted_with_it(tmp_path: Path) -> None:
+    """A subject at the edge brings key-tinted pixels with it — its antialiased fringe, or the
+    key reflected on metal. Only a frame where the key alone reaches the edge is background."""
+    files = _frames(tmp_path, residual=True, touch_top=True)
+    report = frames_mod.key_frames(files, tmp_path / "keyed", key="green", allow_subject=True)
+    assert report["edge_policy"] == "subject-allowed"
+    assert all(c["subject"] > 0 and c["residual"] > 0 for c in report["edge_contacts"])
 
 
 def test_the_default_policy_is_unchanged(tmp_path: Path) -> None:
@@ -206,3 +215,28 @@ def test_video_set_fit_tight_reaches_canvas_and_frames(tmp_path: Path, monkeypat
     with pytest.raises(SystemExit, match="--fit tight"):
         batch_mod.run_set(bases={"side": base}, states=["attack"], root=tmp_path / "set2", character=None, duration=None,
                           resolution="480p", key="green", concurrency=1, force=False, gap=0.0, video_runner=video, fit="tight", shape="wide")
+
+
+# --- loop: a subject at the side edge keeps transparent cell corners -----------------------
+
+
+def test_a_subject_touching_the_side_edge_still_gets_transparent_cell_margins(tmp_path: Path) -> None:
+    """The union crop used to stop at the frame edge, so a subject allowed to touch it put
+    opaque pixels on the cell's corner and the GIF check refused the run."""
+    from sprite_gen.video import loop as loop_mod
+    from tests.video.test_video_pipeline import _gait_frames
+
+    files = _gait_frames(tmp_path, period=12, n=72)
+    for path in files:  # something held low reaches the left edge of every frame
+        im = Image.open(path)
+        for y in range(52, 58):
+            for x in range(0, 26):
+                im.putpixel((x, y), (120, 120, 120, 255))
+        im.save(path)
+    rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "out", fps=24.0, state="walk", min_len=None, max_len=None,
+                            n_out=8, seam_max=9.0, name="w", report_path=None, body_height=48)
+    assert rep["gif"]["corners_transparent"] is True
+    strip = Image.open(tmp_path / "out" / "w.strip.png").convert("RGBA")
+    w = rep["strip"]["w"]
+    alpha = np.asarray(strip.getchannel("A"))
+    assert (alpha[:, :7] == 0).all() and (alpha[:, w - 7:w] == 0).all()  # the 8 px side margins, scaled 1:1

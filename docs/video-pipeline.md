@@ -156,8 +156,10 @@ touches the edge (a key-tinted blend pixel with low alpha), so a "framed too tig
 message with a small residual count is still a framing problem, not a key problem.
 `--allow-edge-contact` turns the whole check off. `--allow-subject-edge-contact`
 accepts only the subject at the edge — the clipping a `--fit tight` canvas chooses —
-and still fails on leftover key background, which is a keying defect whatever the
-framing. Contacts stay in the report either way, with `edge_policy` saying which rule
+and still fails a frame where the key alone reaches the edge, which is a keying defect
+whatever the framing. A frame where the subject touches the edge passes with the
+key-tinted pixels beside it (fringe, or the key reflected on metal): the same reading the
+refusal message gives a mixed contact. Contacts stay in the report either way, with `edge_policy` saying which rule
 applied (`refuse`, `subject-allowed`, `off`).
 
 ## 3a. Spill — key colour the model painted into the subject
@@ -316,7 +318,8 @@ Outputs:
 
 - `cycle/frame-NNN.png` — the cycle frames, RGB under alpha 0 scrubbed, detached specks
   below 1 % of the body erased.
-- `<name>.strip.png` + `<name>.strip.json` — a horizontal strip (union-cropped, **no bottom
+- `<name>.strip.png` + `<name>.strip.json` — a horizontal strip (union-cropped with 8 transparent
+  columns on each side even where the subject reaches the frame's side edge, **no bottom
   pad** so feet meet the floor, bottom-aligned, ≤ 64 cells **and ≤ 32 000 px wide** because
   Chrome refuses images near 32 767 px — the cap is on pixels, so a 650 px cell allows 49
   cells and the meta says `subsampled`; ≤ 520 px tall) with `frames · w · h · body_h · delay_ms ·
