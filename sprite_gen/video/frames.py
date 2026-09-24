@@ -48,6 +48,12 @@ SPILL_FULL_FRACTION = 1.0  # every tinted cluster is spill, whatever its size
 SPILL_FULL_MIN_TINT = _SPILL_FULL_MIN_TINT  # ... and whatever its strength (see extract.py)
 SPILL_REFERENCE_MAX = 0.005  # the still's own key material ≤ the engine's small-cluster share → full
 EDGE_MAX_PIXELS = 0  # any opaque pixel on the top/left/right edge band = contact
+# Edge decontamination (`sprite_gen.frames.decontam`). A decoded frame's chroma is blurred by
+# 4:2:0 while its luma is not, so frames use the video fit. One palette serves the whole clip,
+# learned on the first frame, so the colours an edge may take cannot change between frames.
+DECONTAM_MODES = ("off", "palette")
+DECONTAM_FIT = "video"
+DECONTAM_STAT_KEYS = ("refit_px", "tint_px", "recovered_px", "unexplained_px", "key_hue_capped_px")
 
 
 def _require(binary: str) -> str:
@@ -156,9 +162,16 @@ def key_frames(
     key: str = "auto",
     check_edges: bool = True,
     spill: str = "small",
+    decontam: str = "off",
 ) -> dict[str, Any]:
     if spill not in ("small", "full"):
         raise SystemExit(f"video-frames: key_frames takes a resolved spill mode (small|full), got {spill!r}")
+    if decontam not in DECONTAM_MODES:
+        raise SystemExit(f"video-frames: unknown --decontam {decontam!r}; expected one of {', '.join(DECONTAM_MODES)}")
+    from sprite_gen.frames.decontam import palette_from_stats
+    clip_palette: dict[str, Any] | None = None
+    decontam_first: dict[str, Any] | None = None
+    decontam_totals = {name: 0 for name in DECONTAM_STAT_KEYS}
     # Full correction lowers the tint threshold as well as lifting the size cap.
     spill_max = SPILL_FULL_FRACTION if spill == "full" else None
     spill_tint = SPILL_FULL_MIN_TINT if spill == "full" else None
@@ -168,12 +181,21 @@ def key_frames(
     for src in raw_files:
         dst = keyed_dir / src.name
         stats = cutout(src, dst, key=key, spill_max_fraction=spill_max, spill_min_tint=spill_tint,
-                       spill_require_hue=spill == "full")
+                       spill_require_hue=spill == "full", decontam=decontam, decontam_fit=DECONTAM_FIT,
+                       decontam_palette=clip_palette)
         image = Image.open(dst).convert("RGBA")
         hist = image.getchannel("A").histogram()
         w, h = image.size
         alpha_zero_pct = round(100 * hist[0] / (w * h), 2)
         row = {"frame": src.name, "alpha_zero_pct": alpha_zero_pct, "route": stats.get("route")}
+        if decontam != "off":
+            done = stats["decontam"]
+            if clip_palette is None:
+                clip_palette = palette_from_stats(done)
+                decontam_first = done
+            row["decontam"] = {name: done[name] for name in DECONTAM_STAT_KEYS}
+            for name in DECONTAM_STAT_KEYS:
+                decontam_totals[name] += int(done[name])
         if check_edges:
             contact = edge_contact(image)
             if any(v > EDGE_MAX_PIXELS for v in contact.values()):
@@ -192,6 +214,18 @@ def key_frames(
         "edge_contacts": contacts,
         "rows": rows,
     }
+    if decontam != "off" and decontam_first is not None:
+        report["decontam"] = {
+            "mode": decontam,
+            "fit": DECONTAM_FIT,
+            "palette_source": f"clip (learned on {rows[0]['frame']})",
+            "palette": decontam_first["palette"],
+            "palette_keyfree": decontam_first["palette_keyfree"],
+            "key_material_share": decontam_first["key_material_share"],
+            "totals": decontam_totals,
+        }
+    else:
+        report["decontam"] = {"mode": decontam}
     if contacts and check_edges:
         raise SystemExit(_edge_contact_message(contacts))
     return report
@@ -221,11 +255,13 @@ def _edge_contact_message(contacts: list[dict[str, Any]]) -> str:
     return message
 
 
-def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool, report_path: Path | None, spill: str = "small", reference: Path | None = None) -> dict[str, Any]:
+def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool, report_path: Path | None, spill: str = "small", reference: Path | None = None, decontam: str = "off") -> dict[str, Any]:
     if spill not in SPILL_MODES:
         raise SystemExit(f"video-frames: unknown --spill {spill!r}; expected one of {', '.join(SPILL_MODES)}")
     if spill == "auto" and reference is None:
         raise SystemExit("video-frames: --spill auto needs --reference (the still the clip was made from)")
+    if decontam not in DECONTAM_MODES:
+        raise SystemExit(f"video-frames: unknown --decontam {decontam!r}; expected one of {', '.join(DECONTAM_MODES)}")
     clip = clip.expanduser().resolve()
     if not clip.is_file():
         raise SystemExit(f"video-frames: clip not found: {clip}")
@@ -235,7 +271,7 @@ def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool,
     keyed_dir = out_dir / "keyed"
     decision = decide_spill(Path(reference).expanduser().resolve(), key) if spill == "auto" else {"mode": spill, "reason": "explicit"}
     files = extract(clip, raw_dir)
-    report = key_frames(files, keyed_dir, key=key, check_edges=not allow_edge_contact, spill=decision["mode"])
+    report = key_frames(files, keyed_dir, key=key, check_edges=not allow_edge_contact, spill=decision["mode"], decontam=decontam)
     payload = {"kind": "sprite-gen-video-frames-report", "clip": str(clip), "out_dir": str(out_dir), "raw_dir": str(raw_dir), "keyed_dir": str(keyed_dir), "key": key, "spill": decision, **meta, **report}
     target = (report_path or (out_dir / "frames.report.json")).expanduser().resolve()
     atomic_write_text(target, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
@@ -251,12 +287,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--report", type=Path, help="report JSON (default <out-dir>/frames.report.json)")
     parser.add_argument("--spill", choices=SPILL_MODES, default="small", help="small: correct only small key-tinted clusters (default); full: every key tint in the subject is spill; auto: decide from --reference")
     parser.add_argument("--reference", type=Path, help="the still the clip was made from (required by --spill auto)")
+    parser.add_argument("--decontam", choices=DECONTAM_MODES, default="off", help="off: the matte as is (default); palette: re-explain key-tinted edges with the subject's own colours (one palette per clip, video fit)")
 
 
 def run(**kwargs: object) -> int:
     payload = run_frames(Path(str(kwargs["clip"])), Path(str(kwargs["out_dir"])), key=str(kwargs.get("key") or "auto"),
                          allow_edge_contact=bool(kwargs.get("allow_edge_contact")), report_path=kwargs.get("report"),  # type: ignore[arg-type]
-                         spill=str(kwargs.get("spill") or "small"), reference=kwargs.get("reference"))  # type: ignore[arg-type]
+                         spill=str(kwargs.get("spill") or "small"), reference=kwargs.get("reference"),  # type: ignore[arg-type]
+                         decontam=str(kwargs.get("decontam") or "off"))
     summary = {k: payload[k] for k in ("clip", "keyed_dir", "fps", "frames", "alpha_zero_pct_min", "alpha_zero_pct_max", "edge_contacts", "spill", "report")}
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

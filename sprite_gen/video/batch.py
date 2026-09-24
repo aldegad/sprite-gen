@@ -104,6 +104,7 @@ def run_item(
     facing: str = "right",
     facing_fix: str = "none",
     prepare_side: Callable[[Path], tuple[Path, dict]] | None = None,
+    decontam: str = "off",
 ) -> dict[str, Any]:
     if anchor == "motion-auto" and not loop_mod.profile_for(state).gait:
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
@@ -181,7 +182,7 @@ def run_item(
             if attempts[-1] != 0 or not clip.exists():
                 raise SystemExit(f"clip generation failed after {len(attempts)} attempt(s); see {item_dir / 'clip.log'}")
 
-        fr = frames_mod.run_frames(clip, item_dir / "frames", key=key, allow_edge_contact=False, report_path=item_dir / "frames.report.json", spill=spill, reference=canvas_png)
+        fr = frames_mod.run_frames(clip, item_dir / "frames", key=key, allow_edge_contact=False, report_path=item_dir / "frames.report.json", spill=spill, reference=canvas_png, decontam=decontam)
         result["frames"] = {k: fr[k] for k in ("fps", "frames", "alpha_zero_pct_min", "alpha_zero_pct_max")}
         result["frames"]["spill"] = fr.get("spill", {}).get("mode")
         lp = loop_mod.run_loop(Path(fr["keyed_dir"]), item_dir / "loop", fps=float(fr["fps"]), state=state, min_len=None, max_len=None, n_out=None, seam_max=loop_mod.SEAM_RATIO_MAX, name=item, report_path=item_dir / "loop.report.json", anchor=anchor)
@@ -231,6 +232,7 @@ def run_set(
     spill: str = "auto",
     facing: str = "right",
     facing_fix: str = "none",
+    decontam: str = "off",
 ) -> dict[str, Any]:
     if anchor == "motion-auto" and any(not loop_mod.profile_for(state).gait for state in states):
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
@@ -260,7 +262,7 @@ def run_set(
             return prepared[base]
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
-        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=bases[d], root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=facing, facing_fix=facing_fix, prepare_side=prepare_side): i for i, d, s in items}
+        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=bases[d], root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=facing, facing_fix=facing_fix, prepare_side=prepare_side, decontam=decontam): i for i, d, s in items}
         for fut in as_completed(futures):
             r = fut.result()
             results.append(r)
@@ -303,6 +305,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--shape", choices=canvas_mod.SHAPES, help="force one canvas shape for every state (e.g. wide for a costume or arms that leave a 1:1 frame)")
     parser.add_argument("--anchor", choices=tuple(a for a in loop_mod.ANCHOR_MODES if a != "motion"), default="none", help="motion-auto: automatic regions, local period and XY correction (walk/run only); feet: remove in-canvas drift")
     parser.add_argument("--spill", choices=frames_mod.SPILL_MODES, default="auto", help="auto: judge key reflections from each item's canvas still (default); small / full: force")
+    parser.add_argument("--decontam", choices=frames_mod.DECONTAM_MODES, default="off", help="passed to video-frames: palette re-explains key-tinted edges with the subject's own colours (default off)")
     parser.add_argument("--force", action="store_true", help="regenerate clips that already exist")
 
 
@@ -315,6 +318,7 @@ def run(**kwargs: object) -> int:
         concurrency=int(kwargs.get("concurrency") or 3), force=bool(kwargs.get("force")), gap=float(kwargs.get("start_gap") or START_GAP_SECONDS),
         facing=str(kwargs.get("facing") or "right"), facing_fix=str(kwargs.get("facing_fix") or "none"),
         shape=(str(kwargs["shape"]) if kwargs.get("shape") else None), anchor=str(kwargs.get("anchor") or "none"), spill=str(kwargs.get("spill") or "auto"),
+        decontam=str(kwargs.get("decontam") or "off"),
     )
     return 0 if not payload["failed"] else 1
 
