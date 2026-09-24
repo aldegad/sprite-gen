@@ -577,9 +577,12 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
     boxes = [b for b in boxes if b]
     if not boxes:
         raise SystemExit("video-loop: every cycle frame is fully transparent")
-    left = max(0, min(b[0] for b in boxes) - 8)
+    # The side margins may reach past the frame: a subject allowed to touch the left or right
+    # edge (video-frames --allow-subject-edge-contact) still gets its 8 transparent columns,
+    # so no cell corner is ever the subject. `crop` fills outside the frame with alpha 0.
+    left = min(b[0] for b in boxes) - 8
     top = max(0, min(b[1] for b in boxes) - 8)
-    right = min(frames[0].width, max(b[2] for b in boxes) + 8)
+    right = max(b[2] for b in boxes) + 8
     bottom = max(b[3] for b in boxes)
     # body_h = the STANDING height: the tallest frame whose feet touch the floor. A median
     # over the whole cycle undercounts a jump (crouch + airborne frames dominate) and then

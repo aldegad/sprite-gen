@@ -20,8 +20,10 @@ with different messages: residual points at `video-canvas` normalization of the
 base still, subject contact at a taller/wider canvas.
 
 `--allow-subject-edge-contact` accepts the second and keeps the first: a clip made
-from a `video-canvas --fit tight` frame is clipped on purpose, but leftover key
-background at the edge is still a keying defect. The contacts stay in the report.
+from a `video-canvas --fit tight` frame is clipped on purpose, but a frame where only
+leftover key background reaches the edge is still a keying defect. A frame where the
+subject touches the edge carries key-tinted fringe pixels beside it and is accepted with
+them. The contacts stay in the report.
 """
 
 from __future__ import annotations
@@ -201,7 +203,11 @@ def key_frames(
     if contacts and check_edges:
         if not allow_subject:
             raise SystemExit(_edge_contact_message(contacts))
-        residual = [c for c in contacts if c["residual"] > 0]
+        # Only a frame where the key alone reaches the edge is leftover background. Where the
+        # subject touches it too, the key-tinted pixels beside it are its antialiased fringe or
+        # a reflection of the key on it (a silver armour on green) — the same reading
+        # `_edge_contact_message` gives a mixed contact.
+        residual = [c for c in contacts if c["residual"] > 0 and c["subject"] == 0]
         if residual:
             raise SystemExit(_residual_message(residual))
     return report
