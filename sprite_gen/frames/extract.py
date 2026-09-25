@@ -562,6 +562,7 @@ def remove_chroma_background(
     width, height = rgba.size
     data = np.array(rgba, dtype=np.uint8)  # (H, W, 4); written back at the end
     source_rgb = data[..., :3].astype(np.int32)
+    source_alpha = data[..., 3].copy() if decontam != "off" else None  # coverage decontam may give back
     keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
     unseen = 255
 
@@ -718,7 +719,8 @@ def remove_chroma_background(
                     data[y, x] = (*despilled, alpha)
     if decontam != "off":
         data, stats = decontam_module.decontaminate(source_rgb, data, keyed_mask, chroma_key, fit=decontam_fit,
-                                                    alpha_depth=unmix_reach, palette=decontam_palette, mode=decontam)
+                                                    alpha_depth=unmix_reach, palette=decontam_palette, mode=decontam,
+                                                    source_alpha=source_alpha)
         if decontam_stats is not None:
             decontam_stats.update(stats)
     # Back into the converted copy rather than a fresh Image.fromarray, so the
@@ -1105,7 +1107,8 @@ def remove_chroma_background_ycbcr(
         keyed_mask, _ = hard_key_mask(source_rgb, source[..., 3], chroma_key, painted, DEFAULT_KEY_THRESHOLD)
         data, stats = decontam_module.decontaminate(source_rgb, np.array(out, dtype=np.uint8), keyed_mask, chroma_key,
                                                     fit=decontam_fit, alpha_depth=DEFAULT_UNMIX_REACH,
-                                                    palette=decontam_palette, mode=decontam)
+                                                    palette=decontam_palette, mode=decontam,
+                                                    source_alpha=source[..., 3])
         if decontam_stats is not None:
             decontam_stats.update(stats)
         out.frombytes(data.tobytes())
