@@ -2,6 +2,17 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## v2.10.2 - The spill judgment keys only the subject, and decontam keeps gold
+
+- `video-frames --spill auto` (and `video-set`, which judges each item's `canvas.png`) keys only the subject window of the reference still instead of the whole still. A canvas padded for motion room is mostly key, and keying all of it cost about 0.14 GiB more per megapixel of canvas, past 4 GiB for a 30-megapixel canvas, while keying the frames themselves stays near 1 GiB. The window is the box of pixels the hard cut cannot erase plus one keyed pixel all round, and the painted key is read on the whole still, so it gives exactly the whole still's counts: the decision and the frames do not change. A window over 6 megapixels is judged on every n-th pixel instead; the report records `reference_size`, `reference_window` and `reference_stride`. Background-key detection now reads an image a band of rows at a time. On synthetic padded canvases the judgment peaks at 0.42 to 0.56 GiB from 8 to 39 megapixels, and a synthetic 1080p clip judged against a 39-megapixel canvas runs `video-frames --decontam palette` in 1.1 GiB.
+- `--decontam` keeps gold and yellow on stills. A gold a little darker or yellower than the palette's own read as a warmer palette gold with some green mixed in, so gold edges and small gold drops came out orange and partly see-through. The still fit now counts a palette colour at the pixel's own luma as the subject's colour within the subject's own spread (how far its interior sits from the palette); a pixel deeper than a still's antialiased edge (2 px) without the key's hue, or an edge pixel with the colour of the material right behind it, is the subject's own colour; and where the matte changed such a pixel it gets its source colour and coverage back. That last part matters for `cutout`, whose RGB matte scores key tint on the channel average: that calls yellow green, so the matte unmixed gold by itself. On a synthetic gold scene every decontam path now matches the clean YCbCr matte, where `cutout --decontam palette` left 39 % of the solid gold edge see-through. On the procedural ground-truth set key contamination falls from 0.07 % to 0.03 % (RGB matte) and from 0.16 % to 0.12 % (YCbCr matte), halos shrink and recall stays the same. The video fit is unchanged. Reports gain `material_spread` and `restored_px`. Method: [docs/chroma-alpha.md](docs/chroma-alpha.md#decontam--give-the-edge-the-subjects-own-colour-back).
+
+### Gold showcase
+
+A synthetic gold scene (the fixture of `tests/frames/test_decontam_gold.py`) through `cutout --decontam palette` (RGB matte) and `gen`'s YCbCr matte with decontam, v2.10.1 then v2.10.2, on dark and on white.
+
+![Gold drops and strokes before and after](https://github.com/aldegad/sprite-gen/releases/download/v2.10.2/decontam-gold.gif)
+
 ## v2.10.1 - Attacks keep the grip the image shows
 
 - `MOTION_TEXT["attack"]` no longer names one hand. What the subject holds is kept exactly as gripped in the image — one hand stays one hand, both hands stay both hands — and is never let go, switched to the other hand or taken in an extra hand. Naming the hand nearest the viewer for a weapon the still draws in both hands made the clip let go of it on the windup and grab it again for the strike.
