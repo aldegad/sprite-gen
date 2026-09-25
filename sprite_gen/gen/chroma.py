@@ -42,19 +42,25 @@ def key_transparent(
     *,
     key: str = "magenta",
     white_check: Path | None = None,
+    decontam: str = "off",
 ) -> dict[str, Any]:
     """Key a chroma-background PNG to a clean transparent RGBA PNG.
 
     Returns a stats dict (keyed/fringe/cleaned pixel counts, alpha_zero_pct).
-    Raises SystemExit before publishing if no measurable transparent area was
-    made, or if a transparent pixel keeps non-zero RGB.
+    `decontam` is the edge decontamination pass after the matte, reported under
+    `decontam`: "off" (the default) publishes the matte as it is, "auto" runs it where
+    it applies, "palette" demands it. Raises SystemExit before publishing if no
+    measurable transparent area was made, or if a transparent pixel keeps non-zero RGB.
     """
     if key not in KEYS:
         raise SystemExit(f"chroma: unknown key {key!r}; expected one of {sorted(KEYS)}")
     source = Image.open(input_path).convert("RGBA")
     source_pixels = source.load()
     warnings: list[str] = []
-    image = remove_chroma_background_ycbcr(source, KEYS[key]["target"], warnings)
+    decontam_stats: dict[str, Any] = {}
+    # the default call keeps its pre-decontam signature, so a caller's matte stand-in still fits
+    extra = {} if decontam == "off" else {"decontam": decontam, "decontam_stats": decontam_stats}
+    image = remove_chroma_background_ycbcr(source, KEYS[key]["target"], warnings, **extra)
     pixels = image.load()
     width, height = image.size
     total = width * height
@@ -93,6 +99,8 @@ def key_transparent(
     }
     if warnings:
         stats["warnings"] = warnings
+    if decontam != "off":
+        stats["decontam"] = decontam_stats
     if white_check is not None:
         stats["white_check"] = str(white_check)
     if alpha_zero_pct == 0.0:

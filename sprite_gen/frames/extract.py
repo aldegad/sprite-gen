@@ -391,6 +391,38 @@ _SPILL_MIN_TINT = 40.0
 # reference at this same threshold before choosing full correction.
 _SPILL_FULL_MIN_TINT = 8.0
 DEFAULT_UNMIX_REACH = 4
+DEFAULT_KEY_THRESHOLD = 96.0  # `--key-threshold` default; the YCbCr path's decontam geometry reuses it
+
+
+def hard_key_mask(source_rgb: np.ndarray, alpha: np.ndarray, chroma_key: tuple[int, int, int],
+                  painted_key: tuple[int, int, int], threshold: float) -> tuple[np.ndarray, np.ndarray]:
+    """The hard cut: (keyed_mask, key_distance) for an (H, W, 3) int32 source.
+
+    `key_distance` is the distance to the declared key, lowered to the distance to the
+    painted colour for the pixels that colour may claim; `keyed_mask` is transparent
+    input plus everything within `threshold` of it. One definition for the RGB matte and
+    for the decontam pass that runs after either matte.
+    """
+    keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
+    key_distance = _key_distance_field(source_rgb, chroma_key)
+    if painted_key != tuple(chroma_key):
+        # The painted colour's authority is border evidence, and a pixel deep
+        # inside the frame has none. So its ball erases the *background*: the
+        # pixels that carry the key's hue signature themselves, plus whatever
+        # else inside the ball touches that keyed region (the antialiased rim
+        # of the subject, whose blend with a lit subject colour lifts the
+        # unkeyed channel over the signature bar). An isolated patch inside
+        # the subject that merely resembles the painted colour is left alone:
+        # hot pink (250, 77, 150) sits 46 from Grok's (216, 46, 147) magenta
+        # and would otherwise be cut out of the subject. The declared key's
+        # ball stays what it always was — a colour ball, position-blind.
+        painted_distance = _key_distance_field(source_rgb, painted_key)
+        in_ball = painted_distance <= threshold
+        painted_keyed = in_ball & _border_key_candidate_field(source_rgb, keyed_channels, unkeyed_channels)
+        painted_keyed |= in_ball & (key_distance <= threshold)
+        painted_keyed = _grow_into(painted_keyed, in_ball)
+        key_distance = np.where(painted_keyed, np.minimum(key_distance, painted_distance), key_distance)
+    return (alpha == 0) | (key_distance <= threshold), key_distance
 
 
 def key_material_pixels(image: Image.Image, chroma_key: tuple[int, int, int],
@@ -435,6 +467,10 @@ def remove_chroma_background(
     spill_min_tint: float = _SPILL_MIN_TINT,
     spill_require_hue: bool = False,
     background_key: tuple[int, int, int] | None = None,
+    decontam: str = "off",
+    decontam_fit: str = "still",
+    decontam_palette: dict[str, Any] | None = None,
+    decontam_stats: dict[str, Any] | None = None,
 ) -> Image.Image:
     """Key `chroma_key` out of `image` (hard cut + soft-alpha fringe unmix + trapped-spill despill).
 
@@ -442,7 +478,15 @@ def remove_chroma_background(
     default) detects it from the borders with `detect_background_key_rgb`;
     passing `chroma_key` itself pins the single-key behaviour (the frozen
     byte-identity gate does that).
+
+    `decontam="palette"` re-explains the edge afterwards with the subject's own
+    colours (`sprite_gen.frames.decontam`; "auto" does so where it applies and reports
+    why not elsewhere); "off" (the default) returns exactly what the passes above produce. `decontam_stats`, when given, receives what
+    that pass did; `decontam_palette` reuses a palette learned elsewhere.
     """
+    if decontam != "off":
+        from sprite_gen.frames import decontam as decontam_module
+        decontam_module.validate(decontam, decontam_fit)
     rgba = image.convert("RGBA")
     width, height = rgba.size
     data = np.array(rgba, dtype=np.uint8)  # (H, W, 4); written back at the end
@@ -468,26 +512,8 @@ def remove_chroma_background(
     # *is* the if/elif order it replaces — swapping the subject and in-band rows
     # changes the output wherever both hold at once (a wide --fringe-key-threshold
     # makes that reachable, and the gate has a case for it).
-    key_distance = _key_distance_field(source_rgb, chroma_key)
-    if painted_key != tuple(chroma_key):
-        # The painted colour's authority is border evidence, and a pixel deep
-        # inside the frame has none. So its ball erases the *background*: the
-        # pixels that carry the key's hue signature themselves, plus whatever
-        # else inside the ball touches that keyed region (the antialiased rim
-        # of the subject, whose blend with a lit subject colour lifts the
-        # unkeyed channel over the signature bar). An isolated patch inside
-        # the subject that merely resembles the painted colour is left alone:
-        # hot pink (250, 77, 150) sits 46 from Grok's (216, 46, 147) magenta
-        # and would otherwise be cut out of the subject. The declared key's
-        # ball stays what it always was — a colour ball, position-blind.
-        painted_distance = _key_distance_field(source_rgb, painted_key)
-        in_ball = painted_distance <= threshold
-        painted_keyed = in_ball & _border_key_candidate_field(source_rgb, keyed_channels, unkeyed_channels)
-        painted_keyed |= in_ball & (key_distance <= threshold)
-        painted_keyed = _grow_into(painted_keyed, in_ball)
-        key_distance = np.where(painted_keyed, np.minimum(key_distance, painted_distance), key_distance)
+    keyed_mask, key_distance = hard_key_mask(source_rgb, data[..., 3], chroma_key, painted_key, threshold)
     source_tint = _key_tint_field(source_rgb, keyed_channels, unkeyed_channels)
-    keyed_mask = (data[..., 3] == 0) | (key_distance <= threshold)
     classes = np.select(
         [keyed_mask, source_tint < fringe_delta, key_distance <= fringe_threshold],
         [_KEYED, _SUBJECT, _BLEND_IN_BAND],
@@ -619,6 +645,11 @@ def remove_chroma_background(
                 )
                 if coverage > 0:
                     data[y, x] = (*despilled, alpha)
+    if decontam != "off":
+        data, stats = decontam_module.decontaminate(source_rgb, data, keyed_mask, chroma_key, fit=decontam_fit,
+                                                    alpha_depth=unmix_reach, palette=decontam_palette, mode=decontam)
+        if decontam_stats is not None:
+            decontam_stats.update(stats)
     # Back into the converted copy rather than a fresh Image.fromarray, so the
     # returned image keeps the mode, size and `info` (icc profile, dpi) that
     # `convert` carried over from the caller's image.
@@ -931,6 +962,11 @@ def remove_chroma_background_ycbcr(
     image: Image.Image,
     chroma_key: tuple[int, int, int],
     warnings: list[str] | None = None,
+    *,
+    decontam: str = "off",
+    decontam_fit: str = "still",
+    decontam_palette: dict[str, Any] | None = None,
+    decontam_stats: dict[str, Any] | None = None,
 ) -> Image.Image:
     """Chrominance-plane matting with self-diagnostic pure-key rematte.
 
@@ -941,7 +977,14 @@ def remove_chroma_background_ycbcr(
     symptom triggers a rematte with the declared pure key; the better result
     wins and the fallback is reported through `warnings` (observable, never
     silent).
+
+    `decontam="palette"` then re-explains the edge exactly as the RGB path does,
+    over this matte's output; its geometry is the RGB path's hard cut at the
+    default `--key-threshold`, so both mattes share one definition of the edge.
     """
+    if decontam != "off":
+        from sprite_gen.frames import decontam as decontam_module
+        decontam_module.validate(decontam, decontam_fit)
 
     def note(message: str) -> None:
         if warnings is not None:
@@ -984,6 +1027,17 @@ def remove_chroma_background_ycbcr(
                 out = retry
 
     _cleanup_alpha_ycc(out)
+    if decontam != "off":
+        source = np.array(rgba, dtype=np.uint8)
+        source_rgb = source[..., :3].astype(np.int32)
+        painted = detect_background_key_rgb(rgba, chroma_key)
+        keyed_mask, _ = hard_key_mask(source_rgb, source[..., 3], chroma_key, painted, DEFAULT_KEY_THRESHOLD)
+        data, stats = decontam_module.decontaminate(source_rgb, np.array(out, dtype=np.uint8), keyed_mask, chroma_key,
+                                                    fit=decontam_fit, alpha_depth=DEFAULT_UNMIX_REACH,
+                                                    palette=decontam_palette, mode=decontam)
+        if decontam_stats is not None:
+            decontam_stats.update(stats)
+        out.frombytes(data.tobytes())
     return out
 
 
@@ -2525,6 +2579,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "despill and flood fill — perfectpixel-studio port; default rgb)",
     )
     parser.add_argument(
+        "--decontam",
+        choices=("off", "auto", "palette"),
+        default=None,
+        help="edge decontamination after the matte; overrides request chroma.decontam "
+        "(palette = re-explain key-tinted edges with the subject's own colours, auto = where it "
+        "applies; default off)",
+    )
+    parser.add_argument(
         "--segmentation",
         choices=("components", "projection"),
         default=None,
@@ -2894,12 +2956,23 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
     )
     if chroma_mode not in ("rgb", "ycbcr"):
         raise SystemExit("chroma.mode must be 'rgb' or 'ycbcr'")
+    decontam_mode = (
+        args.decontam
+        if args.decontam is not None
+        else str(chroma_config.get("decontam", "off"))
+    )
+    if decontam_mode not in ("off", "auto", "palette"):
+        raise SystemExit("chroma.decontam must be 'off', 'auto' or 'palette'")
     effective_chroma = {
         **chroma_config,
         "mode": chroma_mode,
         "unmix_reach": unmix_reach,
         "spill_max_fraction": spill_max_fraction,
     }
+    # Recorded once it is in play, so a run keyed before decontam existed keeps its request bytes.
+    if decontam_mode != "off" or "decontam" in chroma_config:
+        effective_chroma["decontam"] = decontam_mode
+    decontam_kwargs = {} if decontam_mode == "off" else {"decontam": decontam_mode}
     if effective_chroma != chroma_config:
         request["chroma"] = effective_chroma
         atomic_write_text(
@@ -3065,7 +3138,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         with Image.open(raw_path) as opened:
             if chroma_mode == "ycbcr":
                 ycc_notes: list[str] = []
-                strip = remove_chroma_background_ycbcr(opened, chroma_key, ycc_notes)
+                strip = remove_chroma_background_ycbcr(opened, chroma_key, ycc_notes, **decontam_kwargs)
                 all_warnings.extend(f"{tag}: {note}" for note in ycc_notes)
             else:
                 strip = remove_chroma_background(
@@ -3076,6 +3149,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
                     args.fringe_delta,
                     unmix_reach=unmix_reach,
                     spill_max_fraction=spill_max_fraction,
+                    **decontam_kwargs,
                 )
         return separate_fused_poses(strip, frame_count, fit_config, args.segmentation, state)
 
@@ -3482,7 +3556,8 @@ def engine_revision() -> str:
     # the same folder (extract=frames/, layout=spec/), so resolve layout by its
     # module file, not as a sibling of __file__.
     import sprite_gen.spec.layout as _layout_module
-    sources = (Path(__file__), Path(_layout_module.__file__))
+    import sprite_gen.frames.decontam as _decontam_module
+    sources = (Path(__file__), Path(_layout_module.__file__), Path(_decontam_module.__file__))
     key = tuple(source.stat().st_mtime_ns for source in sources)
     if _ENGINE_REVISION is None or _ENGINE_REVISION_KEY != key:
         digest = hashlib.sha256()

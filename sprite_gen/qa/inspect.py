@@ -40,6 +40,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fringe-unmix-reach", type=int, default=None)
     parser.add_argument("--spill-max-fraction", type=float, default=None)
     parser.add_argument("--chroma-mode", choices=("rgb", "ycbcr"), default=None)
+    parser.add_argument("--decontam", choices=("off", "auto", "palette"), default=None)
     parser.add_argument("--no-write", action="store_true")
     return parser
 
@@ -117,10 +118,12 @@ def _strip_for_state(run_dir: Path, request: dict[str, Any], state: str, args: a
         if args.spill_max_fraction is not None
         else float(chroma_config.get("spill_max_fraction", 0.005))
     )
+    decontam = args.decontam if args.decontam is not None else str(chroma_config.get("decontam", "off"))
+    decontam_kwargs = {} if decontam == "off" else {"decontam": decontam}
     with Image.open(raw_path) as opened:
         if chroma_mode == "ycbcr":
             notes: list[str] = []
-            return extract.remove_chroma_background_ycbcr(opened, chroma_key, notes)
+            return extract.remove_chroma_background_ycbcr(opened, chroma_key, notes, **decontam_kwargs)
         return extract.remove_chroma_background(
             opened,
             chroma_key,
@@ -129,6 +132,7 @@ def _strip_for_state(run_dir: Path, request: dict[str, Any], state: str, args: a
             args.fringe_delta,
             unmix_reach=unmix_reach,
             spill_max_fraction=spill_max_fraction,
+            **decontam_kwargs,
         )
 
 
@@ -416,6 +420,7 @@ def _run(args: argparse.Namespace) -> int:
         fringe_unmix_reach=args.fringe_unmix_reach,
         spill_max_fraction=args.spill_max_fraction,
         chroma_mode=args.chroma_mode,
+        decontam=args.decontam,
     )
     if not args.no_write:
         acquire_run_dir_lock(run_dir, "inspect_sprite_run")
