@@ -2,6 +2,18 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## v2.9.0 - Idle stands still and closes on its first frame
+
+- `MOTION_TEXT["idle"]` keeps both feet planted flat for the whole clip, limits the motion to breathing, a settle of the arms, hair and loose cloth and one blink, and names walking and marching in place as what not to do. A side-view full body asked for "a subtle weight sway" and an evenly paced loop tended to step in place.
+- Idle is pinned to end on its first frame (`PIN_LAST_FRAME_STATES`) and its template (`PINNED_LOOP_TEXT`) asks for that return instead of an evenly paced repeating motion.
+- `video-loop --cycle pinned` keeps a pinned clip whole as the loop (every frame but the last, which re-renders the first) and gates it on the pin: the last frame has to land within `max(seam_max x the mean step, PIN_NOISE_MAX)` of the first. A near-still idle moves so little per frame that the seam ratio read its re-render noise as a jump. A clip that ends in another pose fails with its own message. `video-set` cuts idle this way (`PINNED_LOOP_STATES`).
+
+### Idle showcase
+
+Nine side-view idles before and after this release, each strip played at its own speed (`idle-nine.mp4` is the same comparison as video).
+
+![Nine idle loops before and after](https://github.com/aldegad/sprite-gen/releases/download/v2.9.0/idle-nine.gif)
+
 ## v2.8.1 - Tight clips pass their own edge and corner checks
 
 - `video-frames --allow-subject-edge-contact` fails only on a frame where the key alone reaches the edge. A frame where the subject touches the edge carries key-tinted pixels beside it (its antialiased fringe, or the key reflected on metal) and is accepted with them, the same reading a mixed contact already had in the refusal message. Before, a few such pixels failed a tight clip as leftover background.
