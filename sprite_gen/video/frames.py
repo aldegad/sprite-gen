@@ -52,7 +52,7 @@ EDGE_MAX_PIXELS = 0  # any opaque pixel on the top/left/right edge band = contac
 # Edge decontamination (`sprite_gen.frames.decontam`). A decoded frame's chroma is blurred by
 # 4:2:0 while its luma is not, so frames use the video fit. One palette serves the whole clip,
 # learned on the first frame, so the colours an edge may take cannot change between frames.
-DECONTAM_MODES = ("off", "palette")
+DECONTAM_MODES = ("off", "auto", "palette")
 DECONTAM_FIT = "video"
 DECONTAM_STAT_KEYS = ("changed_px", "refit_px", "tint_px", "recovered_px", "unexplained_px", "key_hue_capped_px")
 
@@ -172,6 +172,7 @@ def key_frames(
     clip_palette: dict[str, Any] | None = None
     decontam_first: dict[str, Any] | None = None
     decontam_totals = {name: 0 for name in DECONTAM_STAT_KEYS}
+    decontam_applied = 0
     # Full correction lowers the tint threshold as well as lifting the size cap.
     spill_max = SPILL_FULL_FRACTION if spill == "full" else None
     spill_tint = SPILL_FULL_MIN_TINT if spill == "full" else None
@@ -190,12 +191,16 @@ def key_frames(
         row = {"frame": src.name, "alpha_zero_pct": alpha_zero_pct, "route": stats.get("route")}
         if decontam != "off":
             done = stats["decontam"]
-            if clip_palette is None:
-                clip_palette = palette_from_stats(done)
-                decontam_first = done
-            row["decontam"] = {name: done[name] for name in DECONTAM_STAT_KEYS}
-            for name in DECONTAM_STAT_KEYS:
-                decontam_totals[name] += int(done[name])
+            if done.get("applied"):
+                if clip_palette is None:
+                    clip_palette = palette_from_stats(done)
+                    decontam_first = done | {"frame": src.name}
+                row["decontam"] = {name: done[name] for name in DECONTAM_STAT_KEYS}
+                for name in DECONTAM_STAT_KEYS:
+                    decontam_totals[name] += int(done[name])
+                decontam_applied += 1
+            else:
+                row["decontam"] = {"applied": False, "reason": done.get("reason")}
         if check_edges:
             contact = edge_contact(image)
             if any(v > EDGE_MAX_PIXELS for v in contact.values()):
@@ -218,14 +223,15 @@ def key_frames(
         report["decontam"] = {
             "mode": decontam,
             "fit": DECONTAM_FIT,
-            "palette_source": f"clip (learned on {rows[0]['frame']})",
+            "palette_source": f"clip (learned on {decontam_first['frame']})",
             "palette": decontam_first["palette"],
             "palette_keyfree": decontam_first["palette_keyfree"],
             "key_material_share": decontam_first["key_material_share"],
+            "applied_frames": decontam_applied,
             "totals": decontam_totals,
         }
     else:
-        report["decontam"] = {"mode": decontam}
+        report["decontam"] = {"mode": decontam, "applied_frames": 0}
     if contacts and check_edges:
         raise SystemExit(_edge_contact_message(contacts))
     return report
@@ -287,7 +293,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--report", type=Path, help="report JSON (default <out-dir>/frames.report.json)")
     parser.add_argument("--spill", choices=SPILL_MODES, default="small", help="small: correct only small key-tinted clusters (default); full: every key tint in the subject is spill; auto: decide from --reference")
     parser.add_argument("--reference", type=Path, help="the still the clip was made from (required by --spill auto)")
-    parser.add_argument("--decontam", choices=DECONTAM_MODES, default="off", help="off: the matte as is (default); palette: re-explain key-tinted edges with the subject's own colours (one palette per clip, video fit)")
+    parser.add_argument("--decontam", choices=DECONTAM_MODES, default="off", help="off: the matte as is (default); palette: re-explain key-tinted edges with the subject's own colours (one palette per clip, video fit); auto: the same where it applies, reasons recorded where not")
 
 
 def run(**kwargs: object) -> int:

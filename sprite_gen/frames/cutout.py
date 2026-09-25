@@ -327,7 +327,7 @@ def cutout(
     spill_max_fraction: float | None = None,
     spill_min_tint: float | None = None,
     spill_require_hue: bool = False,
-    decontam: str = "off",
+    decontam: str = "auto",
     decontam_fit: str = "still",
     decontam_palette: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -336,16 +336,17 @@ def cutout(
     `key`: "auto" (detect from corners) | "white" (matte) | "magenta" | "green"
     (reuse the extract chroma engine). `spill_max_fraction` overrides the chroma
     engine's trapped-spill cluster cap and `spill_min_tint` its tint bar (None = the
-    engine default for either). `decontam="palette"` adds the engine's edge
-    decontamination pass; it needs a chroma key, so on the white matte it fails
-    rather than doing nothing. Returns a stats dict. Raises SystemExit if
-    the key is unknown, the background cannot be located, or any transparent pixel
-    keeps non-zero RGB (No Silent Fallback).
+    engine default for either). `decontam` is the engine's edge decontamination
+    pass: "auto" (the default) runs it on chroma routes where it applies and records
+    why not elsewhere; "palette" demands it and fails where it cannot run (the white
+    matte has no key colour to remove); "off" keeps the matte as it is. Returns a
+    stats dict. Raises SystemExit if the key is unknown, the background cannot be
+    located, or any transparent pixel keeps non-zero RGB (No Silent Fallback).
     """
     if key not in ("auto", "white", "magenta", "green"):
         raise SystemExit(f"cutout: unknown key {key!r}; expected one of auto|white|magenta|green")
-    if decontam not in ("off", "palette"):
-        raise SystemExit(f"cutout: unknown decontam {decontam!r}; expected off|palette")
+    if decontam not in ("off", "auto", "palette"):
+        raise SystemExit(f"cutout: unknown decontam {decontam!r}; expected off|auto|palette")
 
     image = Image.open(input_path).convert("RGBA")
     width, height = image.size
@@ -357,10 +358,13 @@ def cutout(
                                             decontam=decontam, decontam_fit=decontam_fit,
                                             decontam_palette=decontam_palette)
     else:
-        if decontam != "off":
+        if decontam == "palette":
             raise SystemExit(f"cutout: --decontam {decontam} needs a chroma key background (magenta/green); "
                              f"{input_path} routed to the white matte, which has no key colour to remove")
         result, route_stats = _matte_route(image, input_path, strength, band, erode, tolerance)
+        if decontam == "auto":
+            route_stats["decontam"] = {"mode": "auto", "applied": False,
+                                       "reason": "the white matte has no key colour to remove"}
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     result.save(out_path)
@@ -436,10 +440,11 @@ def add_arguments(p: Any) -> None:
     )
     p.add_argument(
         "--decontam",
-        choices=["off", "palette"],
-        default="off",
-        help="chroma routes only: re-explain key-tinted edges with the subject's own colours "
-        "(palette); off keeps the engine output byte-identical (default off)",
+        choices=["off", "auto", "palette"],
+        default="auto",
+        help="edge decontamination on chroma routes: re-explain key-tinted edges (hair strands, outlines) "
+        "with the subject's own colours. auto (default) runs it where it applies and records why not "
+        "elsewhere; palette demands it; off keeps the chroma engine's output as it was before",
     )
 
 
@@ -457,7 +462,7 @@ def run(**kwargs: object) -> int:
         erode=float(kwargs.get("erode", ERODE_DEFAULT)),  # type: ignore[arg-type]
         tolerance=int(kwargs.get("tolerance", CHROMA_TOLERANCE)),  # type: ignore[arg-type]
         white_check_dir=out_path.parent if white_check else None,
-        decontam=str(kwargs.get("decontam") or "off"),
+        decontam=str(kwargs.get("decontam") or "auto"),
     )
     import json
 

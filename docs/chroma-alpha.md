@@ -60,7 +60,7 @@ When unsure, let `--chroma-key auto` sample the base. It excludes the detected f
 2. **Soft-alpha unmix** — key-tinted blends near the keyed region are separated into despilled RGB + **partial alpha**: the blend model `observed = (1-k)·subject + k·key` is solved from the key-tint score, so antialiased silhouettes keep their coverage ramp instead of collapsing into a binary staircase. In-band blends (inside `--fringe-key-threshold`) are eligible only at key-distance `<= 2`; out-of-band blends use `--fringe-unmix-reach` (default 4). This preserves deeper key-tinted material while fixing trapped blend pockets between hair strands.
 3. **Trapped-spill despill** — a small connected cluster of key-tinted pixels (≤ `--spill-max-fraction` of the subject, default 0.005) containing at least one strongly tinted pixel is generator spill, wherever it sits: its color is corrected in place with alpha kept (no pinholes). Large key-tinted regions are intentional material and are never touched; marginally warm subject colors (skin) never qualify.
 
-An opt-in fourth pass, edge decontamination (`chroma.decontam: "palette"`, below), then re-explains the edge with the subject's own colours.
+A fourth pass, edge decontamination (`decontam`, below; opt-in for sprite rows through `chroma.decontam`), then re-explains the edge with the subject's own colours.
 
 The unmix/spill tunables live in the run's `sprite-request.json` under `chroma` (`unmix_reach`, `spill_max_fraction`) — the extractor reads them from there, CLI flags override, and the effective values are written back to the request so every run records what produced it. Then it extracts connected components and writes fresh transparent cells. The pixel-unfake path is unaffected: it binarizes alpha downstream (α ≥ 128 → opaque), so soft-alpha input degrades gracefully. This is intentionally closer to hatch-pet than to simple `magick -transparent`.
 
@@ -78,7 +78,7 @@ Port of perfectpixel-studio's `chroma.go` (MIT, see NOTICE). The default RGB pat
 
 Select with request `chroma.mode: "ycbcr"` or `--chroma-mode ycbcr`. **The default stays `"rgb"`**: on clean flat-key raws the RGB path's exact-solve unmix already removes key tint completely, while ycbcr's fixed-scale despill leaves a small tinted soft-edge halo — ycbcr is for degraded sources (shaded/gradient backgrounds, JPEG chroma noise), not a general upgrade.
 
-## `decontam: "palette"` — give the edge the subject's own colour back (opt-in)
+## `decontam` — give the edge the subject's own colour back
 
 The unmix above separates a blend by its key-tint score, and that assumes the subject's own colour carries no tint (grey, white). A saturated subject breaks the assumption. A crimson hair strand blended a third of the way into green scores as barely tinted, so it stays opaque and olive; where the full spill pass does reach it, the `1/(1-k)` gain of `despill_color` turns it orange. Video adds a second loss: H.264 4:2:0 has already averaged the key into the chroma of every strand one or two pixels wide. Its luma survives at full resolution.
 
@@ -101,14 +101,16 @@ Interior pixels are never touched, `off` returns the engine's output byte for by
 
 Two fits. `still` chooses P per pixel. `video` chooses P on a 3×3 mean of the observation, whose chroma is blurred anyway, and averages the projection alpha with a luma-only alpha where P and B differ in luma. `video-frames` uses the video fit and learns one palette per clip on the first frame, so the colours an edge may take cannot change from frame to frame.
 
-| Entry point | Flag |
-|---|---|
-| `sprite-gen cutout IMAGE` | `--decontam palette` (chroma routes; the white matte refuses it) |
-| `sprite-gen gen … --transparent` | `--decontam palette` (chroma strategy only; refused before the provider is called otherwise) |
-| `sprite-gen video-frames`, `video-set` | `--decontam palette` |
-| row extractor (`extract`, `inspect`) | request `chroma.decontam: "palette"`, or `--decontam palette` to override; written back to the request once in play |
+Three modes: `palette` runs the pass and fails loud where it cannot (no key hue, or no subject pixel deeper than 6 px to learn from); `auto` runs it wherever it applies and records why not elsewhere; `off` leaves the matte as it is.
 
-Reports record what the pass did under `decontam`: mode, fit, the palette, and changed / refit / tint / recovered / unexplained pixel counts.
+| Entry point | Default | Flag |
+|---|---|---|
+| `sprite-gen cutout IMAGE` | `auto` (chroma routes; the white matte records that it has no key colour) | `--decontam off\|auto\|palette` |
+| `sprite-gen gen … --transparent` | `auto` (chroma strategy; native alpha is left alone) | `--decontam off\|auto\|palette`; `palette` is refused before the provider is called when it cannot apply |
+| `sprite-gen video-frames`, `video-set` | `off` | `--decontam off\|auto\|palette` |
+| row extractor (`extract`, `inspect`) | `off` | request `chroma.decontam`, or `--decontam` to override; written back to the request once in play |
+
+Reports record what the pass did under `decontam`: mode, whether it applied (and why not), fit, the palette, and changed / refit / tint / recovered / unexplained pixel counts.
 
 Measured on a procedural ground-truth set (red strands 0.5–3 px wide, outline and interior ink, highlights, translucent wisps, white cloth and a gold accent on a painted green key; a still, and an H.264 4:2:0 round trip at CRF 16). Key contamination counts edge pixels covered in both output and truth whose hue turned 12° or more toward the key (green residue and the despill's warm drift both turn that way), or, on near-grey truth, whose a*/b* moved toward the key by 8. Halo is the mean CIEDE2000 against the true composite on #0A0A0D and on white:
 
@@ -121,7 +123,7 @@ Measured on a procedural ground-truth set (red strands 0.5–3 px wide, outline 
 | H.264 frames | RGB engine + `--spill full` | 33.2 % | 12.79 / 12.43 | 82.1 % |
 | H.264 frames | + `decontam` (video fit) | 10.8 % | 9.38 / 8.73 | 91.4 % |
 
-**The default stays `off`.** It returns the current output byte for byte, and every published run and golden fixture depends on those bytes.
+**Defaults.** Stills cut by `cutout` and `gen --transparent` default to `auto`: on stills the pass removes nearly all key contamination with a smaller halo and more strand coverage, and `off` gives the previous output back byte for byte. The row extractor stays `off`: its frames are a derived cache that `heal` re-derives from raw, so a changed default would silently rewrite every existing run, and pixel-art rows binarize alpha downstream anyway. `video-frames` / `video-set` stay `off` (see the video numbers above).
 
 Limitations:
 

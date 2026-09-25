@@ -182,7 +182,7 @@ each edge pixel as a blend of the local key background with one colour the subje
 and writes that colour at the pixel's observed luma. It uses the video fit and one palette
 per clip, learned on the first frame, so edge colours cannot flicker between palettes. The
 default `off` keeps frames byte-identical. Method, guards and measurements:
-[chroma-alpha.md](chroma-alpha.md#decontam-palette--give-the-edge-the-subjects-own-colour-back-opt-in).
+[chroma-alpha.md](chroma-alpha.md#decontam--give-the-edge-the-subjects-own-colour-back).
 
 ## 3b. Canvas shape for raised limbs and wide costumes
 

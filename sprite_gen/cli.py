@@ -91,7 +91,7 @@ def _add_extract(p: argparse.ArgumentParser) -> None:
     p.add_argument("--fringe-delta", type=float, default=18.0)
     p.add_argument("--fringe-unmix-reach", type=int, default=None)
     p.add_argument("--spill-max-fraction", type=float, default=None)
-    p.add_argument("--decontam", choices=("off", "palette"), default=None)
+    p.add_argument("--decontam", choices=("off", "auto", "palette"), default=None)
     p.add_argument("--segmentation", choices=("components", "projection"), default=None)
     p.add_argument("--allow-slot-fallback", action="store_true")
     p.add_argument("--min-used-pixels", type=int, default=None)
@@ -194,7 +194,7 @@ def _add_inspect(p: argparse.ArgumentParser) -> None:
     p.add_argument("--fringe-unmix-reach", type=int, default=None)
     p.add_argument("--spill-max-fraction", type=float, default=None)
     p.add_argument("--chroma-mode", choices=("rgb", "ycbcr"), default=None)
-    p.add_argument("--decontam", choices=("off", "palette"), default=None)
+    p.add_argument("--decontam", choices=("off", "auto", "palette"), default=None)
     p.add_argument("--no-write", action="store_true")
 
 

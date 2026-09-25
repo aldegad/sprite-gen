@@ -40,7 +40,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fringe-unmix-reach", type=int, default=None)
     parser.add_argument("--spill-max-fraction", type=float, default=None)
     parser.add_argument("--chroma-mode", choices=("rgb", "ycbcr"), default=None)
-    parser.add_argument("--decontam", choices=("off", "palette"), default=None)
+    parser.add_argument("--decontam", choices=("off", "auto", "palette"), default=None)
     parser.add_argument("--no-write", action="store_true")
     return parser
 

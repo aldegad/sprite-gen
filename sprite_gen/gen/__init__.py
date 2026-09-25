@@ -257,12 +257,12 @@ def generate_image(
     trim_alpha: bool = False,
     keep_session: bool = False,
     workdir: Path | None = None,
-    decontam: str = "off",
+    decontam: str = "auto",
 ) -> GenResult:
     """Generate one image and return a GenResult. Raises SystemExit on any failure."""
-    if decontam not in ("off", "palette"):
-        raise SystemExit(f"gen: unknown --decontam {decontam!r}; expected off|palette")
-    if decontam != "off" and not transparent:
+    if decontam not in ("off", "auto", "palette"):
+        raise SystemExit(f"gen: unknown --decontam {decontam!r}; expected off|auto|palette")
+    if decontam == "palette" and not transparent:
         raise SystemExit("gen: --decontam applies to the chroma key of a --transparent image; add --transparent")
     prompt = (prompt or "").strip()
     if not prompt:
@@ -284,7 +284,7 @@ def generate_image(
     strategy_source: str | None = None
     if transparent:
         strategy, strategy_source = resolve_transparency_strategy(backend, alpha_mode, refs=refs)
-        if decontam != "off" and strategy != TRANSPARENCY_CHROMA:
+        if decontam == "palette" and strategy != TRANSPARENCY_CHROMA:
             # before the provider is called: a paid generation must not end in this refusal
             raise SystemExit(f"gen: --decontam removes a chroma key; this image would use {strategy} alpha "
                              "(pass --alpha-mode chroma to key it instead)")
@@ -419,7 +419,7 @@ def _run(args: argparse.Namespace) -> int:
         trim_alpha=bool(getattr(args, "trim_alpha", False)),
         keep_session=args.keep_session,
         workdir=args.workdir,
-        decontam=str(getattr(args, "decontam", None) or "off"),
+        decontam=str(getattr(args, "decontam", None) or "auto"),
     )
     payload = result.to_dict()
     # `provider` in the payload is always the backend that actually generated the
@@ -524,10 +524,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--decontam",
-        choices=("off", "palette"),
-        default="off",
-        help="chroma keying only: re-explain key-tinted edges (hair strands, outlines) with the subject's "
-        "own colours after the matte (palette); off keeps the matte as is (default off)",
+        choices=("off", "auto", "palette"),
+        default="auto",
+        help="chroma keying: re-explain key-tinted edges (hair strands, outlines) with the subject's own "
+        "colours after the matte. auto (default) runs it where it applies (chroma strategy, a subject "
+        "interior); palette demands it; off publishes the matte as it is",
     )
     parser.add_argument("--chroma-key", choices=sorted(chroma_mod.KEYS), default="magenta")
     parser.add_argument("--facing", choices=(*facing_mod.FACINGS, "preserve"), default="preserve", help="with --ref: required direction; preserve (default) leaves prompt and pixels unchanged")

@@ -42,13 +42,14 @@ def key_transparent(
     *,
     key: str = "magenta",
     white_check: Path | None = None,
-    decontam: str = "off",
+    decontam: str = "auto",
 ) -> dict[str, Any]:
     """Key a chroma-background PNG to a clean transparent RGBA PNG.
 
     Returns a stats dict (keyed/fringe/cleaned pixel counts, alpha_zero_pct).
-    `decontam="palette"` adds the edge decontamination pass after the matte and
-    reports it under `decontam`. Raises SystemExit before publishing if no
+    `decontam` is the edge decontamination pass after the matte, reported under
+    `decontam`: "auto" (the default) runs it where it applies, "palette" demands it,
+    "off" publishes the matte as it is. Raises SystemExit before publishing if no
     measurable transparent area was made, or if a transparent pixel keeps non-zero RGB.
     """
     if key not in KEYS:

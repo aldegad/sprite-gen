@@ -480,8 +480,8 @@ def remove_chroma_background(
     byte-identity gate does that).
 
     `decontam="palette"` re-explains the edge afterwards with the subject's own
-    colours (`sprite_gen.frames.decontam`); "off" (the default) returns exactly
-    what the passes above produce. `decontam_stats`, when given, receives what
+    colours (`sprite_gen.frames.decontam`; "auto" does so where it applies and reports
+    why not elsewhere); "off" (the default) returns exactly what the passes above produce. `decontam_stats`, when given, receives what
     that pass did; `decontam_palette` reuses a palette learned elsewhere.
     """
     if decontam != "off":
@@ -647,7 +647,7 @@ def remove_chroma_background(
                     data[y, x] = (*despilled, alpha)
     if decontam != "off":
         data, stats = decontam_module.decontaminate(source_rgb, data, keyed_mask, chroma_key, fit=decontam_fit,
-                                                    alpha_depth=unmix_reach, palette=decontam_palette)
+                                                    alpha_depth=unmix_reach, palette=decontam_palette, mode=decontam)
         if decontam_stats is not None:
             decontam_stats.update(stats)
     # Back into the converted copy rather than a fresh Image.fromarray, so the
@@ -1034,7 +1034,7 @@ def remove_chroma_background_ycbcr(
         keyed_mask, _ = hard_key_mask(source_rgb, source[..., 3], chroma_key, painted, DEFAULT_KEY_THRESHOLD)
         data, stats = decontam_module.decontaminate(source_rgb, np.array(out, dtype=np.uint8), keyed_mask, chroma_key,
                                                     fit=decontam_fit, alpha_depth=DEFAULT_UNMIX_REACH,
-                                                    palette=decontam_palette)
+                                                    palette=decontam_palette, mode=decontam)
         if decontam_stats is not None:
             decontam_stats.update(stats)
         out.frombytes(data.tobytes())
@@ -2580,10 +2580,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--decontam",
-        choices=("off", "palette"),
+        choices=("off", "auto", "palette"),
         default=None,
         help="edge decontamination after the matte; overrides request chroma.decontam "
-        "(palette = re-explain key-tinted edges with the subject's own colours; default off)",
+        "(palette = re-explain key-tinted edges with the subject's own colours, auto = where it "
+        "applies; default off)",
     )
     parser.add_argument(
         "--segmentation",
@@ -2960,8 +2961,8 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         if args.decontam is not None
         else str(chroma_config.get("decontam", "off"))
     )
-    if decontam_mode not in ("off", "palette"):
-        raise SystemExit("chroma.decontam must be 'off' or 'palette'")
+    if decontam_mode not in ("off", "auto", "palette"):
+        raise SystemExit("chroma.decontam must be 'off', 'auto' or 'palette'")
     effective_chroma = {
         **chroma_config,
         "mode": chroma_mode,

@@ -170,14 +170,40 @@ def test_off_is_the_engine_byte_for_byte():
     assert stats == {}
 
 
-def test_cutout_default_is_unchanged(tmp_path: Path):
+def test_cutout_defaults_to_auto_and_off_is_the_engine(tmp_path: Path):
     F, A = _render()
     src = tmp_path / "raw.png"
-    Image.fromarray(_composite_on(F, A, GREEN_PAINTED)).save(src)
-    plain = cutout(src, tmp_path / "plain.png", key="green")
+    raw = _composite_on(F, A, GREEN_PAINTED)
+    Image.fromarray(raw).save(src)
+    default = cutout(src, tmp_path / "default.png", key="green")
     off = cutout(src, tmp_path / "off.png", key="green", decontam="off")
-    assert "decontam" not in plain and "decontam" not in off
-    assert np.array_equal(np.array(Image.open(tmp_path / "plain.png")), np.array(Image.open(tmp_path / "off.png")))
+    palette = cutout(src, tmp_path / "palette.png", key="green", decontam="palette")
+    assert default["decontam"]["mode"] == "auto" and default["decontam"]["applied"] is True
+    assert "decontam" not in off
+    engine = np.array(remove_chroma_background(Image.fromarray(raw), (0, 255, 0), *KEY_ARGS))
+    assert np.array_equal(np.array(Image.open(tmp_path / "off.png")), engine)
+    assert np.array_equal(np.array(Image.open(tmp_path / "default.png")), np.array(Image.open(tmp_path / "palette.png")))
+    assert palette["decontam"]["mode"] == "palette"
+
+
+def test_auto_reports_why_it_did_not_run(tmp_path: Path):
+    # the white matte has no key colour to remove
+    img = Image.new("RGB", (64, 64), (250, 250, 248))
+    ImageDraw.Draw(img).ellipse([16, 16, 48, 48], fill=(200, 40, 40))
+    img.save(tmp_path / "white.png")
+    stats = cutout(tmp_path / "white.png", tmp_path / "white-out.png", key="auto")
+    assert stats["route"] == "matte" and stats["decontam"] == {
+        "mode": "auto", "applied": False, "reason": "the white matte has no key colour to remove"}
+    # a subject with no interior to learn from: auto keys it as before and says why
+    bar = np.full((80, 160, 3), GREEN_PAINTED, np.uint8)
+    bar[38:41, 20:140] = HAIR
+    Image.fromarray(bar).save(tmp_path / "bar.png")
+    auto = cutout(tmp_path / "bar.png", tmp_path / "bar-auto.png", key="green")
+    cutout(tmp_path / "bar.png", tmp_path / "bar-off.png", key="green", decontam="off")
+    assert auto["decontam"]["applied"] is False and "deeper than" in auto["decontam"]["reason"]
+    assert np.array_equal(np.array(Image.open(tmp_path / "bar-auto.png")), np.array(Image.open(tmp_path / "bar-off.png")))
+    with pytest.raises(SystemExit, match="no subject pixel lies deeper"):
+        cutout(tmp_path / "bar.png", tmp_path / "bar-palette.png", key="green", decontam="palette")
 
 
 # --------------------------------------------------------------------------- what the pass is for
@@ -336,7 +362,8 @@ def test_video_frames_learn_one_palette_per_clip(tmp_path: Path):
     assert all("decontam" in row for row in report["rows"])
     assert done["totals"]["changed_px"] == sum(row["decontam"]["changed_px"] for row in report["rows"])
     off = frames_mod.key_frames(raws, tmp_path / "plain", key="green", check_edges=False, spill="full")
-    assert off["decontam"] == {"mode": "off"}
+    assert off["decontam"] == {"mode": "off", "applied_frames": 0}
+    assert done["applied_frames"] == len(raws)
     assert all("decontam" not in row for row in off["rows"])
 
 
@@ -410,12 +437,13 @@ def test_gen_decontam_runs_after_the_ycbcr_matte_and_reports(tmp_path: Path, mon
     from sprite_gen.gen import base as gen_base
 
     provider = _FakeKeyProvider(gen_base.TRANSPARENCY_CHROMA)
-    assert _gen(tmp_path, monkeypatch, provider, out=tmp_path / "off.png", report=tmp_path / "off.json") == 0
-    assert _gen(tmp_path, monkeypatch, provider, decontam="palette") == 0
+    assert _gen(tmp_path, monkeypatch, provider, out=tmp_path / "off.png", report=tmp_path / "off.json",
+                decontam="off") == 0
+    assert _gen(tmp_path, monkeypatch, provider) == 0  # the default: auto
     off = json.loads((tmp_path / "off.json").read_text())
     on = json.loads((tmp_path / "girl.json").read_text())
     assert "decontam" not in off["chroma"]
-    assert on["chroma"]["decontam"]["mode"] == "palette" and on["chroma"]["decontam"]["changed_px"] > 0
+    assert on["chroma"]["decontam"]["mode"] == "auto" and on["chroma"]["decontam"]["changed_px"] > 0
     raw = np.array(Image.open(tmp_path / "girl.png.raw.png").convert("RGB"))
     _, interior = _edge(raw)
     before, after = np.array(Image.open(tmp_path / "off.png")), np.array(Image.open(tmp_path / "girl.png"))
@@ -441,3 +469,26 @@ def test_gen_decontam_needs_a_transparent_image(tmp_path: Path, monkeypatch):
     with pytest.raises(SystemExit, match="add --transparent"):
         _gen(tmp_path, monkeypatch, provider, transparent=False, decontam="palette")
     assert provider.calls == 0
+
+
+def test_gen_default_auto_leaves_native_alpha_and_opaque_images_alone(tmp_path: Path, monkeypatch):
+    from sprite_gen.gen import base as gen_base
+
+    class _Native(_FakeKeyProvider):
+        def generate(self, request, workdir):
+            self.calls += 1
+            image = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+            for y in range(2, 6):
+                for x in range(2, 6):
+                    image.putpixel((x, y), (200, 90, 20, 255))
+            image.save(request.raw)
+            return gen_base.ProviderRun(provider=self.name, elapsed_seconds=0.1, model=request.model)
+
+    native = _Native(gen_base.TRANSPARENCY_NATIVE)
+    assert _gen(tmp_path, monkeypatch, native, out=tmp_path / "native.png", report=tmp_path / "native.json") == 0
+    payload = json.loads((tmp_path / "native.json").read_text())
+    assert payload["alpha"]["strategy"] == "native" and payload["chroma"] is None
+    opaque = _FakeKeyProvider(gen_base.TRANSPARENCY_CHROMA)
+    assert _gen(tmp_path, monkeypatch, opaque, transparent=False, out=tmp_path / "opaque.png",
+                report=tmp_path / "opaque.json") == 0
+    assert opaque.calls == 1 and json.loads((tmp_path / "opaque.json").read_text())["chroma"] is None

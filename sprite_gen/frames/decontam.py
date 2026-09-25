@@ -67,7 +67,9 @@ from typing import Any
 from sprite_gen._deps import np
 from sprite_gen.frames.extract import _grow_chebyshev, _grow_into, _key_channel_split, _key_excess_field
 
-DECONTAM_MODES = ("off", "palette")
+# "palette" runs the pass and fails loud when it cannot; "auto" runs it wherever it applies (a
+# chroma key, a subject interior to learn from) and otherwise reports why it did not.
+DECONTAM_MODES = ("off", "auto", "palette")
 DECONTAM_FITS = ("still", "video")
 
 BAND_PX = 6  # subject pixels this close (Chebyshev) to the keyed background are re-examined
@@ -195,24 +197,34 @@ def _box3(rgb: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.ndarray:
     return acc / 9.0
 
 
+def not_applicable(keyed: np.ndarray, keyed_mask: np.ndarray, chroma_key: tuple[int, int, int]) -> str | None:
+    """Why the pass cannot run on this image, or None when it can."""
+    keyed_channels, _ = _key_channel_split(chroma_key)
+    if not keyed_channels:
+        return (f"key {tuple(chroma_key)} has no key hue (needs saturated and dark channels); "
+                "edge decontamination only applies to chroma keys such as green or magenta")
+    interior = ~keyed_mask & (_ring_depth(keyed_mask, BAND_PX) > BAND_PX)
+    if not np.count_nonzero(interior & (keyed[..., 3] == 255)):
+        return (f"no subject pixel lies deeper than {BAND_PX} px inside the keyed silhouette, "
+                "so there is no interior to learn the subject's colours from")
+    return None
+
+
 def subject_palette(keyed: np.ndarray, keyed_mask: np.ndarray, chroma_key: tuple[int, int, int]) -> dict[str, Any]:
     """The subject's colours, learned from its confident interior (opaque, deeper than `BAND_PX`).
 
     Returns {"palette": (k, 3) float64, "keyfree": bool, "key_material_share": float}. A clip
     can learn this once and hand it to every frame, so the colours an edge may take do not
-    change from frame to frame.
+    change from frame to frame. Raises SystemExit when `not_applicable` says why it cannot.
     """
+    reason = not_applicable(keyed, keyed_mask, chroma_key)
+    if reason is not None:
+        raise SystemExit(f"decontam: {reason}; run without decontam")
     keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
-    if not keyed_channels:
-        raise SystemExit(f"decontam: key {tuple(chroma_key)} has no key hue (needs saturated and dark channels); "
-                         "edge decontamination only applies to chroma keys such as green or magenta")
     subject = ~keyed_mask
     interior = subject & (_ring_depth(keyed_mask, BAND_PX) > BAND_PX)
     confident = interior & (keyed[..., 3] == 255)
     confident_count = int(np.count_nonzero(confident))
-    if confident_count == 0:
-        raise SystemExit(f"decontam: no subject pixel lies deeper than {BAND_PX} px inside the keyed silhouette, "
-                         "so there is no interior to learn the subject's colours from; run without decontam")
     excess = _key_excess_field(keyed[..., :3].astype(np.int32), keyed_channels, unkeyed_channels)
     key_material = float(np.count_nonzero(confident & (excess > KEY_HUE_TINT))) / confident_count
     keyfree = key_material <= KEY_MATERIAL_MAX_SHARE
@@ -233,19 +245,26 @@ def palette_from_stats(stats: dict[str, Any]) -> dict[str, Any]:
 
 def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndarray,
                   chroma_key: tuple[int, int, int], *, fit: str = "still", alpha_depth: int = 4,
-                  palette: dict[str, Any] | None = None) -> tuple[np.ndarray, dict[str, Any]]:
+                  palette: dict[str, Any] | None = None, mode: str = "palette") -> tuple[np.ndarray, dict[str, Any]]:
     """Re-explain the edge of an already keyed image. Returns (RGBA uint8, stats).
 
     `source_rgb` (H, W, 3) is the frame as generated, `keyed` (H, W, 4) the engine's
     output for it and `keyed_mask` the engine's hard-cut background (transparent input
     included). Interior pixels (deeper than `BAND_PX`) are returned byte-identical.
     `palette` is a `subject_palette` result to reuse (a clip's); None learns this frame's.
+    `mode="auto"` returns the input unchanged, with the reason in the stats, where the
+    pass does not apply; `mode="palette"` raises SystemExit there instead.
     """
-    validate("palette", fit)
+    validate(mode, fit)
+    if mode == "off":
+        raise SystemExit("decontam: decontaminate() called with mode 'off'")
+    if palette is None:
+        reason = not_applicable(keyed, keyed_mask, chroma_key)
+        if reason is not None:
+            if mode == "palette":
+                raise SystemExit(f"decontam: {reason}; run without decontam")
+            return np.array(keyed, dtype=np.uint8, copy=True), {"mode": mode, "applied": False, "reason": reason}
     keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
-    if not keyed_channels:
-        raise SystemExit(f"decontam: key {tuple(chroma_key)} has no key hue (needs saturated and dark channels); "
-                         "edge decontamination only applies to chroma keys such as green or magenta")
     rgb = np.asarray(source_rgb, dtype=np.float64)[..., :3]
     out = np.array(keyed, dtype=np.uint8, copy=True)
     subject = ~keyed_mask
@@ -357,7 +376,8 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
     recovered = int(np.count_nonzero(flank & (out[..., 3] > 0)))
     changed = int(np.count_nonzero((out != np.asarray(keyed, dtype=np.uint8)).any(axis=-1)))
     stats = {
-        "mode": "palette",
+        "mode": mode,
+        "applied": True,
         "fit": fit,
         "band_px": BAND_PX,
         "alpha_depth": int(alpha_depth),
