@@ -92,6 +92,16 @@ frame, and asks for crisp frames without motion blur. `video-set` asks attack cl
 and pins the clip to end on the frame it starts from: `--last-frame` is the canvas itself
 (first-last mode, see [video.md](video.md)), so the strike has to come back to the still.
 
+An idle holds its feet and is pinned too. `MOTION_TEXT["idle"]` keeps both feet planted flat for
+the whole clip, limits the motion to breathing, a settle of the arms, hair and loose cloth and
+one blink, and names walking and marching in place as what not to do — a side-view full body
+asked for "a subtle weight sway" and an evenly paced loop tends to step in place. Its template
+(`PINNED_LOOP_TEXT`) replaces the "evenly paced motion so the animation loops" line with the
+return: the last frame comes back to the exact pose of the first. `video-set` pins idle clips
+to the canvas (`PIN_LAST_FRAME_STATES`) and, because such a clip starts and ends on the same
+frame, cuts it with `video-loop --cycle pinned` (`PINNED_LOOP_STATES`) instead of searching
+it for a repeat.
+
 `build_prompt(direction, state, character, facing, motion=...)` takes a caller's own motion
 paragraph — whole sentences about the subject, such as a request interpreter writes per
 request — in place of the built-in state sentence. The frame, camera, background and design
@@ -314,6 +324,15 @@ cycle is known (the 2026-09-09 reel jump: 2.3 hops in 145 frames). It is an expl
 instruction, not a failover: the report says `kind = "fixed"`, and the seam gate still
 applies.
 
+`--cycle pinned` is for a clip pinned to end on its first frame (`video --last-frame` set to
+the start image). The cycle is every frame but the last, which re-renders the first, so the
+wrap plays like the step into that last frame. The gate is the pin, not the seam ratio: the
+last frame has to land within `max(seam_max x the mean step, PIN_NOISE_MAX)` of the first, on
+the analysis thumbnail. A near-still clip moves so little per frame that the ratio reads the
+re-render noise of the pinned frame as a jump; a clip that ends in another pose still fails,
+with its own message (`the pinned clip does not end on its first frame`). The report says
+`kind = "pinned"` and records `pin_error` and `pin_tolerance`.
+
 Outputs:
 
 - `cycle/frame-NNN.png` — the cycle frames, RGB under alpha 0 scrubbed, detached specks
@@ -352,7 +371,7 @@ runs canvas → video → frames → loop for every (direction, state). The xAI 
 is **2 requests per second** (five parallel starts produced two HTTP 429s): starts are
 staggered (`--start-gap 2`) and a 429 gets a bounded, logged retry (15 s, 30 s). Clip length
 is each state's own default (3 s, attack 4 s) unless `--duration` sets one for all, and an
-attack clip is pinned to end on its canvas. States use differently shaped canvases (square, tall, wide),
+attack or idle clip is pinned to end on its canvas (an idle is then cut whole, `--cycle pinned`). States use differently shaped canvases (square, tall, wide),
 so the same character films at different pixel heights; `--body-height N` gives every state's loop the
 same standing-height target and keeps the character one size across the set. At a low
 `--resolution`, `--fit tight` frames every item without room so that target is reached by

@@ -40,9 +40,13 @@ DEFAULT_DURATION_SECONDS = 3
 # them, a longer one stretches them.
 STATE_DURATION_SECONDS = {"attack": 4}
 # States whose clip is pinned to end on the frame it starts from (first-last mode): the model
-# has to come back to the still, which is what closes a one-shot action into a loop instead of
-# leaving it wherever the strike ended.
-PIN_LAST_FRAME_STATES = frozenset({"attack"})
+# has to come back to the still, which closes a one-shot action instead of leaving it wherever
+# the strike ended, and closes an idle without asking for a repeating rhythm.
+PIN_LAST_FRAME_STATES = frozenset({"attack", "idle"})
+# Pinned states whose whole clip is the loop: it starts and ends on the canvas, so `video-loop
+# --cycle pinned` keeps every frame but the last (a re-render of the first). An attack is
+# pinned too but is cut as the one-shot it is.
+PINNED_LOOP_STATES = frozenset({"idle"})
 RETRY_BACKOFF_SECONDS = (15, 30)
 
 
@@ -55,7 +59,14 @@ VIEW_TEXT = {
     "back": "seen from directly behind, facing away from the viewer",
 }
 MOTION_TEXT = {
-    "idle": "holds a relaxed idle in place: slow gentle breathing, a subtle weight sway, one natural blink if the face has eyes. The ground contact never slides.",
+    # A side-view full body asked for "a subtle weight sway" and an evenly paced loop steps in place
+    # more often than not, so the feet are held and walking is named as what not to do.
+    "idle": (
+        "stands still in a relaxed idle pose with both feet planted flat on the ground for the whole clip: "
+        "slow, gentle breathing that softly rises and falls in the chest and shoulders, a slight settle of the arms, "
+        "hair and loose cloth, and one natural blink if the face has eyes. The feet never lift, step, shuffle or slide "
+        "— no walking, no marching in place, no turning."
+    ),
     "walk": "moves in place on a treadmill: a steady locomotion cycle for this body type with clear repeating ground contacts and an even left-right or front-back rhythm the body already has.",
     "run": "moves in place on a treadmill: a fast locomotion cycle for this body type with a bounding rhythm and clear repeating ground contacts.",
     "jump": "performs a modest vertical hop in place over and over: compress, spring up about half the body height, land softly, return to the exact starting stance, repeat at an even rhythm. Same height every time.",
@@ -75,6 +86,13 @@ COMMON_TEXT = (
     "locked, no zoom, no pan, no reframing. The background stays a perfectly flat, pure chroma-key fill for the whole "
     "clip — no shadows, no ground line, no particles, no lighting changes, no effects. Keep the design, colors and "
     "proportions exactly as in the image. Consistent, evenly paced motion so the animation loops."
+)
+
+# A pinned loop (`PINNED_LOOP_STATES`) closes because the clip ends on its first frame, not by
+# repeating a motion at an even rhythm — so it asks for the return instead of the rhythm.
+PINNED_LOOP_TEXT = COMMON_TEXT.replace(
+    "Consistent, evenly paced motion so the animation loops.",
+    "The last frame returns to the exact pose of the first frame, so the animation loops seamlessly.",
 )
 
 # One-shot actions pinned to their first frame (`PIN_LAST_FRAME_STATES`). No "evenly paced" line:
@@ -112,7 +130,12 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
     """
     validate_facing(facing)
     view = VIEW_TEXT.get(direction, f"seen from the {direction}").format(facing=facing)
-    template = ACTION_COMMON_TEXT if state in PIN_LAST_FRAME_STATES else COMMON_TEXT
+    if state in PINNED_LOOP_STATES:
+        template = PINNED_LOOP_TEXT
+    elif state in PIN_LAST_FRAME_STATES:
+        template = ACTION_COMMON_TEXT
+    else:
+        template = COMMON_TEXT
     if motion is not None:
         motion = " ".join(motion.split())
         if not motion:
@@ -240,7 +263,8 @@ def run_item(
         fr = frames_mod.run_frames(clip, item_dir / "frames", key=key, allow_edge_contact=False, report_path=item_dir / "frames.report.json", spill=spill, reference=canvas_png, allow_subject_edge_contact=fit == "tight")
         result["frames"] = {k: fr[k] for k in ("fps", "frames", "alpha_zero_pct_min", "alpha_zero_pct_max")}
         result["frames"]["spill"] = fr.get("spill", {}).get("mode")
-        lp = loop_mod.run_loop(Path(fr["keyed_dir"]), item_dir / "loop", fps=float(fr["fps"]), state=state, min_len=None, max_len=None, n_out=None, seam_max=loop_mod.SEAM_RATIO_MAX, name=item, report_path=item_dir / "loop.report.json", anchor=anchor, body_height=body_height)
+        lp = loop_mod.run_loop(Path(fr["keyed_dir"]), item_dir / "loop", fps=float(fr["fps"]), state=state, min_len=None, max_len=None, n_out=None, seam_max=loop_mod.SEAM_RATIO_MAX, name=item, report_path=item_dir / "loop.report.json", anchor=anchor, body_height=body_height,
+                               cycle_mode="pinned" if state in PINNED_LOOP_STATES else "auto")
         result["loop"] = {"kind": lp["cycle"].get("kind", "periodic"), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "drift_px": lp["strip"].get("drift_px", 0), "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
         result["loop"]["review_recommended"] = lp["cycle"].get("review_recommended", False)
         result["loop"]["half_period_guard"] = lp["cycle"].get("half_period_guard")
