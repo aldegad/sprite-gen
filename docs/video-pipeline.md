@@ -215,6 +215,18 @@ count even on an edge. The report names the metric, band and dark-only policy.
 Genuine key-coloured material above the 0.5% share still keeps the conservative
 mode. Tiny accents or dark, edge-only material can fall below that reference test; use `--spill small` when preserving those is essential.
 
+The reference is keyed on its subject window only. A canvas padded for motion room
+(`video-canvas`) is mostly key, and the matte's memory grows with every pixel it keys,
+so keying the whole canvas made the judgment cost grow with the padding: about 0.14 GiB
+per megapixel, past 4 GiB for a 30-megapixel canvas. The window is the box of pixels the
+hard cut cannot erase (farther than 96 from the declared key, and not the painted key's
+own colour), plus one keyed pixel all round. The painted key is read on the whole still,
+and with that ring the window gives exactly the counts the whole still gives, so the
+decision does not change. The still itself is only decoded and read a band of rows at
+a time. A window over 6 megapixels is keyed on every n-th pixel each way instead, so no
+reference costs more than that to judge. The report records `reference_size`,
+`reference_window` and `reference_stride` (1 = every pixel of the window).
+
 ### Edges: `--decontam palette`
 
 `--spill` fixes key colour painted *into* the subject. The strands and outlines at its

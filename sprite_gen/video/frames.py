@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import subprocess
 from pathlib import Path
@@ -37,6 +38,7 @@ from typing import Any
 
 from PIL import Image
 
+from sprite_gen._deps import np
 from sprite_gen.frames.cutout import cutout
 from sprite_gen.frames.decontam import palette_from_stats
 from sprite_gen.frames.extract import is_border_key_candidate
@@ -54,6 +56,14 @@ SPILL_MODES = ("auto", "small", "full")
 SPILL_FULL_FRACTION = 1.0  # every tinted cluster is spill, whatever its size
 SPILL_FULL_MIN_TINT = _SPILL_FULL_MIN_TINT  # ... and whatever its strength (see extract.py)
 SPILL_REFERENCE_MAX = 0.005  # the still's own key material ≤ the engine's small-cluster share → full
+# The reference is keyed on its subject window only (`extract.subject_window`). A canvas padded
+# for motion room is mostly key, and the matte's memory grows with every pixel it keys, so keying
+# the whole canvas made the judgment grow with the padding. One keyed ring around the window is
+# enough for the window to give the whole still's counts (see `subject_window`). A window over the
+# pixel budget is keyed on every n-th pixel each way instead, reported as `reference_stride`, so
+# no still costs more than the budget to judge.
+SPILL_REFERENCE_MARGIN = 1
+SPILL_REFERENCE_MAX_PIXELS = 6_000_000
 EDGE_MAX_PIXELS = 0  # any opaque pixel on the top/left/right edge band = contact
 # Edge decontamination (`sprite_gen.frames.decontam`). A decoded frame's chroma is blurred by
 # 4:2:0 while its luma is not, so frames use the video fit. One palette serves the whole clip,
@@ -139,27 +149,61 @@ def classify_edge_contact(raw: Image.Image, keyed: Image.Image, chroma_key: tupl
     return {"subject": subject, "residual": residual}
 
 
-def decide_spill(reference: Path, key: str) -> dict[str, Any]:
-    """`auto`: key the reference still with the same matte and measure its own
-    key-coloured material. None worth the name → `full`; some → `small`."""
-    from sprite_gen.frames.cutout import KEY_TARGETS, _corner_average, _detect_key_kind, extract_route
-    from sprite_gen.frames.extract import key_material_pixels
+def _reference_window(reference: Path, key: str) -> tuple[str, Image.Image | None, tuple[int, int, int] | None, dict[str, Any]]:
+    """What `decide_spill` keys: (key kind, subject window or None, painted key, report fields).
 
-    image = Image.open(reference).convert("RGBA")
+    The painted key is read on the whole still, whose borders the window no longer has. The
+    still is kept in the mode it was decoded in and read a band of rows at a time; only the
+    window is converted to RGBA, and the full-size image is released before it is keyed.
+    """
+    from sprite_gen.frames.cutout import KEY_TARGETS, _EXTRACT_KEY_THRESHOLD, _corner_average, _detect_key_kind
+    from sprite_gen.frames.extract import detect_background_key_rgb, subject_window
+
+    image = Image.open(reference)
+    image.load()
     kind = _detect_key_kind(_corner_average(image)) if key == "auto" else key
     if kind not in ("green", "magenta"):
+        return kind, None, None, {}
+    target = KEY_TARGETS[kind]
+    painted = detect_background_key_rgb(image, target)
+    box = subject_window(image, target, _EXTRACT_KEY_THRESHOLD, SPILL_REFERENCE_MARGIN, painted)
+    facts: dict[str, Any] = {"reference_size": list(image.size), "reference_window": list(box) if box else None,
+                             "reference_stride": 1}
+    if box is None:  # every pixel is within the hard cut of the key: nothing of the still survives
+        return kind, None, painted, facts
+    window = image.crop(box).convert("RGBA")
+    stride = math.ceil(math.sqrt(window.width * window.height / SPILL_REFERENCE_MAX_PIXELS))
+    if stride > 1:
+        window = Image.fromarray(np.ascontiguousarray(np.asarray(window)[::stride, ::stride]))
+        facts["reference_stride"] = stride
+    return kind, window, painted, facts
+
+
+def decide_spill(reference: Path, key: str) -> dict[str, Any]:
+    """`auto`: key the reference still with the same matte and measure its own
+    key-coloured material. None worth the name → `full`; some → `small`.
+
+    Only the still's subject window is keyed (`reference_window`); a window over
+    `SPILL_REFERENCE_MAX_PIXELS` is keyed on every `reference_stride`-th pixel each way."""
+    from sprite_gen.frames.cutout import KEY_TARGETS, extract_route
+    from sprite_gen.frames.extract import key_material_pixels
+
+    kind, window, painted, facts = _reference_window(reference, key)
+    if kind not in ("green", "magenta"):
         return {"mode": "small", "reference": str(reference), "reason": f"key {kind!r} has no spill pass"}
-    keyed, _ = extract_route(image, kind)
-    # judged at the bar `full` would treat with, so a subject that owns a mild key tint
-    # is not first called "no key material" and then scrubbed of it
-    material, subject = key_material_pixels(keyed, KEY_TARGETS[kind], SPILL_FULL_MIN_TINT,
-                                            require_hue=True, ignore_fringe=DEFAULT_UNMIX_REACH)
+    material = subject = 0
+    if window is not None:
+        keyed, _ = extract_route(window, kind, background_key=painted)
+        # judged at the bar `full` would treat with, so a subject that owns a mild key tint
+        # is not first called "no key material" and then scrubbed of it
+        material, subject = key_material_pixels(keyed, KEY_TARGETS[kind], SPILL_FULL_MIN_TINT,
+                                                require_hue=True, ignore_fringe=DEFAULT_UNMIX_REACH)
     share = material / subject if subject else 0.0
     mode = "full" if share <= SPILL_REFERENCE_MAX else "small"
     return {"mode": mode, "reference": str(reference), "key": kind, "key_material_px": material,
             "subject_px": subject, "key_material_share": round(share, 5), "share_max": SPILL_REFERENCE_MAX,
             "material_metric": "key-channel-excess", "reference_fringe_ignored_px": DEFAULT_UNMIX_REACH,
-            "reference_fringe_policy": "dark-only"}
+            "reference_fringe_policy": "dark-only", **facts}
 
 
 def key_frames(
