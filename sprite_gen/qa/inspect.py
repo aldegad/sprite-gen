@@ -119,10 +119,11 @@ def _strip_for_state(run_dir: Path, request: dict[str, Any], state: str, args: a
         else float(chroma_config.get("spill_max_fraction", 0.005))
     )
     decontam = args.decontam if args.decontam is not None else str(chroma_config.get("decontam", "off"))
+    decontam_kwargs = {} if decontam == "off" else {"decontam": decontam}
     with Image.open(raw_path) as opened:
         if chroma_mode == "ycbcr":
             notes: list[str] = []
-            return extract.remove_chroma_background_ycbcr(opened, chroma_key, notes, decontam=decontam)
+            return extract.remove_chroma_background_ycbcr(opened, chroma_key, notes, **decontam_kwargs)
         return extract.remove_chroma_background(
             opened,
             chroma_key,
@@ -131,7 +132,7 @@ def _strip_for_state(run_dir: Path, request: dict[str, Any], state: str, args: a
             args.fringe_delta,
             unmix_reach=unmix_reach,
             spill_max_fraction=spill_max_fraction,
-            decontam=decontam,
+            **decontam_kwargs,
         )
 
 

@@ -368,7 +368,76 @@ def test_cli_exposes_the_flag_on_every_entry_point():
 
     parser = cli._build_parser()
     for argv in (["cutout", "x.png", "--decontam", "palette"],
+                 ["gen", "--out", "x.png", "--transparent", "--decontam", "palette"],
                  ["video-frames", "--clip", "c.mp4", "--out-dir", "o", "--decontam", "palette"],
                  ["extract", "--run-dir", "r", "--decontam", "palette"],
                  ["inspect", "--run-dir", "r", "--decontam", "palette"]):
         assert parser.parse_args(argv).decontam == "palette"
+
+
+# --------------------------------------------------------------------------- gen (YCbCr matte)
+
+class _FakeKeyProvider:
+    """Paints the hair scene on a green key, the way a chroma-strategy provider returns it."""
+
+    name = "fake"
+
+    def __init__(self, transparency: str) -> None:
+        self.transparency = transparency
+        self.calls = 0
+
+    def generate(self, request, workdir):
+        from sprite_gen.gen import base as gen_base
+
+        self.calls += 1
+        F, A = _render()
+        Image.fromarray(_composite_on(F, A, GREEN_PAINTED)).save(request.raw)
+        return gen_base.ProviderRun(provider=self.name, elapsed_seconds=0.1, model=request.model)
+
+
+def _gen(tmp_path: Path, monkeypatch, provider, **overrides) -> int:
+    from sprite_gen import gen
+
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: provider)
+    kwargs = dict(provider="fake", prompt="a red-haired girl", out=tmp_path / "girl.png", ref=[], model=None,
+                  aspect_ratio=None, transparent=True, alpha_mode="auto", chroma_key="green", white_check=None,
+                  keep_session=False, report=tmp_path / "girl.json", prompt_file=None, workdir=None)
+    kwargs.update(overrides)
+    return gen.run(**kwargs)
+
+
+def test_gen_decontam_runs_after_the_ycbcr_matte_and_reports(tmp_path: Path, monkeypatch):
+    from sprite_gen.gen import base as gen_base
+
+    provider = _FakeKeyProvider(gen_base.TRANSPARENCY_CHROMA)
+    assert _gen(tmp_path, monkeypatch, provider, out=tmp_path / "off.png", report=tmp_path / "off.json") == 0
+    assert _gen(tmp_path, monkeypatch, provider, decontam="palette") == 0
+    off = json.loads((tmp_path / "off.json").read_text())
+    on = json.loads((tmp_path / "girl.json").read_text())
+    assert "decontam" not in off["chroma"]
+    assert on["chroma"]["decontam"]["mode"] == "palette" and on["chroma"]["decontam"]["changed_px"] > 0
+    raw = np.array(Image.open(tmp_path / "girl.png.raw.png").convert("RGB"))
+    _, interior = _edge(raw)
+    before, after = np.array(Image.open(tmp_path / "off.png")), np.array(Image.open(tmp_path / "girl.png"))
+    assert np.array_equal(before[interior], after[interior])
+    F, A = _render()
+    edge, _ = _edge(raw)
+    assert _toward_key(after, F, A, edge) <= 0.5 * _toward_key(before, F, A, edge)
+
+
+def test_gen_decontam_refuses_native_alpha_before_generating(tmp_path: Path, monkeypatch):
+    from sprite_gen.gen import base as gen_base
+
+    provider = _FakeKeyProvider(gen_base.TRANSPARENCY_NATIVE)
+    with pytest.raises(SystemExit, match="removes a chroma key"):
+        _gen(tmp_path, monkeypatch, provider, decontam="palette")
+    assert provider.calls == 0  # refused before a paid generation
+
+
+def test_gen_decontam_needs_a_transparent_image(tmp_path: Path, monkeypatch):
+    from sprite_gen.gen import base as gen_base
+
+    provider = _FakeKeyProvider(gen_base.TRANSPARENCY_CHROMA)
+    with pytest.raises(SystemExit, match="add --transparent"):
+        _gen(tmp_path, monkeypatch, provider, transparent=False, decontam="palette")
+    assert provider.calls == 0

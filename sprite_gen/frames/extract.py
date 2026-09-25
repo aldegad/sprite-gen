@@ -2971,6 +2971,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
     # Recorded once it is in play, so a run keyed before decontam existed keeps its request bytes.
     if decontam_mode != "off" or "decontam" in chroma_config:
         effective_chroma["decontam"] = decontam_mode
+    decontam_kwargs = {} if decontam_mode == "off" else {"decontam": decontam_mode}
     if effective_chroma != chroma_config:
         request["chroma"] = effective_chroma
         atomic_write_text(
@@ -3136,7 +3137,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
         with Image.open(raw_path) as opened:
             if chroma_mode == "ycbcr":
                 ycc_notes: list[str] = []
-                strip = remove_chroma_background_ycbcr(opened, chroma_key, ycc_notes, decontam=decontam_mode)
+                strip = remove_chroma_background_ycbcr(opened, chroma_key, ycc_notes, **decontam_kwargs)
                 all_warnings.extend(f"{tag}: {note}" for note in ycc_notes)
             else:
                 strip = remove_chroma_background(
@@ -3147,7 +3148,7 @@ def _run_locked(args: argparse.Namespace, run_dir: Path):
                     args.fringe_delta,
                     unmix_reach=unmix_reach,
                     spill_max_fraction=spill_max_fraction,
-                    decontam=decontam_mode,
+                    **decontam_kwargs,
                 )
         return separate_fused_poses(strip, frame_count, fit_config, args.segmentation, state)
 
