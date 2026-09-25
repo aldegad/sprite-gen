@@ -94,15 +94,15 @@ def _corner_average(image: Image.Image) -> tuple[int, int, int]:
     """Raw average of the non-transparent corner pixels — no brightness filter.
 
     Used for route detection so a saturated key colour (magenta/green, which the
-    bright-only `estimate_background` skips) is still seen.
+    bright-only `estimate_background` skips) is still seen. Any mode: only the four
+    corner pixels are converted to RGBA, so a large still is not converted whole.
     """
     width, height = image.size
-    px = image.load()
-    samples = [
-        px[x, y][:3]
+    corners = [
+        image.crop((x, y, x + 1, y + 1)).convert("RGBA").getpixel((0, 0))
         for x, y in ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1))
-        if px[x, y][3] > 0
     ]
+    samples = [pixel[:3] for pixel in corners if pixel[3] > 0]
     if not samples:
         return (248, 247, 242)
     n = len(samples)
@@ -274,13 +274,17 @@ def _matte_route(
 def extract_route(image: Image.Image, kind: str, *, spill_max_fraction: float | None = None,
                   spill_min_tint: float | None = None,
                   spill_require_hue: bool = False, decontam: str = "off", decontam_fit: str = "still",
-                  decontam_palette: dict[str, Any] | None = None) -> tuple[Image.Image, dict[str, Any]]:
+                  decontam_palette: dict[str, Any] | None = None,
+                  background_key: tuple[int, int, int] | None = None) -> tuple[Image.Image, dict[str, Any]]:
     """Magenta/green key background → reuse the verified `extract` chroma engine (no drift).
 
     The engine keys from the background colour it detects on the borders
     (`detect_background_key_rgb`) as well as the pure key, so the brightness
     the model happened to paint does not decide whether the cut lands. The
     detected colour is reported as `chroma_key_painted` for the audit trail.
+    `background_key` hands in a colour detected elsewhere instead: a crop keyed as part
+    of a larger image (`extract.subject_window`) takes the whole image's, whose borders
+    it no longer has.
     Public because `video-canvas` normalizes a still's background through this
     exact matte, so the canvas and `video-frames` agree by construction.
     `decontam` is the engine's edge decontamination pass (`extract.remove_chroma_background`);
@@ -289,7 +293,10 @@ def extract_route(image: Image.Image, kind: str, *, spill_max_fraction: float | 
     from sprite_gen.frames.extract import detect_background_key_rgb, remove_chroma_background
 
     target = KEY_TARGETS[kind]
-    painted = detect_background_key_rgb(image, target)
+    if background_key is None:
+        painted = detect_background_key_rgb(image, target)
+    else:
+        painted = (int(background_key[0]), int(background_key[1]), int(background_key[2]))
     extra: dict[str, Any] = {}
     if spill_max_fraction is not None:
         extra["spill_max_fraction"] = spill_max_fraction
@@ -301,8 +308,10 @@ def extract_route(image: Image.Image, kind: str, *, spill_max_fraction: float | 
     if decontam != "off":
         extra.update(decontam=decontam, decontam_fit=decontam_fit, decontam_palette=decontam_palette,
                      decontam_stats=decontam_stats)
+    # the colour detected above, not a second detection of the same borders
     result = remove_chroma_background(
-        image, target, _EXTRACT_KEY_THRESHOLD, _EXTRACT_FRINGE_THRESHOLD, _EXTRACT_FRINGE_DELTA, **extra
+        image, target, _EXTRACT_KEY_THRESHOLD, _EXTRACT_FRINGE_THRESHOLD, _EXTRACT_FRINGE_DELTA,
+        background_key=painted, **extra
     )
     stats: dict[str, Any] = {
         "route": f"extract:{kind}",

@@ -313,9 +313,14 @@ def _border_key_candidate_field(rgb: np.ndarray, keyed_channels: list[int], unke
     return _key_family_field(rgb, keyed_channels, unkeyed_channels) | signature
 
 
-def _key_detect_sample_mask(height: int, width: int) -> np.ndarray:
-    """Corner patches (w/5 x h/5) plus the 1-px border — where the background lives."""
-    mask = np.zeros((height, width), dtype=bool)
+def _key_detect_sample_mask(height: int, width: int, top: int = 0, bottom: int | None = None) -> np.ndarray:
+    """Corner patches (w/5 x h/5) plus the 1-px border — where the background lives.
+
+    Rows `top` to `bottom` of the (height, width) mask, so an image can be sampled a band
+    of rows at a time.
+    """
+    bottom = height if bottom is None else bottom
+    mask = np.zeros((bottom - top, width), dtype=bool)
     if height == 0 or width == 0:
         return mask
     corner_w = width // _KEY_DETECT_CORNER_DIV
@@ -324,13 +329,22 @@ def _key_detect_sample_mask(height: int, width: int) -> np.ndarray:
         corner_w = width
     if corner_h < 2:
         corner_h = height
-    mask[:corner_h, :corner_w] = True
-    mask[:corner_h, width - corner_w:] = True
-    mask[height - corner_h:, :corner_w] = True
-    mask[height - corner_h:, width - corner_w:] = True
-    mask[0, :] = mask[-1, :] = True
+    rows = np.arange(top, bottom)
+    corner_rows = (rows < corner_h) | (rows >= height - corner_h)
+    mask[corner_rows, :corner_w] = True
+    mask[corner_rows, width - corner_w:] = True
+    mask[(rows == 0) | (rows == height - 1), :] = True
     mask[:, 0] = mask[:, -1] = True
     return mask
+
+
+_KEY_DETECT_BAND_ROWS = 64  # rows sampled at a time: a large still is never one int32 array
+
+
+def _rgba_rows(image: Image.Image, top: int, bottom: int) -> np.ndarray:
+    """Rows `top` to `bottom` of `image` as an RGBA uint8 array, converting only those rows."""
+    rows = image.crop((0, top, image.width, bottom))
+    return np.asarray(rows if rows.mode == "RGBA" else rows.convert("RGBA"))
 
 
 def detect_background_key_rgb(
@@ -350,29 +364,39 @@ def detect_background_key_rgb(
     such background, the subject crowds every border, a degenerate key — the
     declared key comes back unchanged, which keeps `remove_chroma_background`
     byte-identical to its pre-detection behaviour on exact-key backgrounds.
+
+    The image is read a band of rows at a time (any mode, each band converted to RGBA
+    on its own) into a count and a channel sum per bin, so the corners of a large
+    still cost a histogram, not an array of samples.
     """
     keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
     if not keyed_channels:
         return tuple(chroma_key)  # type: ignore[return-value]
-    rgba = image if image.mode == "RGBA" else image.convert("RGBA")
-    data = np.array(rgba, dtype=np.uint8)
-    height, width = data.shape[:2]
-    sample = _key_detect_sample_mask(height, width) & (data[..., 3] != 0)
-    if not sample.any():
+    width, height = image.size
+    bits = 8 - _KEY_DETECT_BIN_SHIFT
+    # one slot per bin, ordered by (R, G, B) bin: the lowest slot is the lowest bin
+    counts = np.zeros(1 << (3 * bits), dtype=np.int64)
+    sums = np.zeros((3, 1 << (3 * bits)), dtype=np.float64)  # integers far below 2**53: exact
+    sampled = family_count = 0
+    for top in range(0, height, _KEY_DETECT_BAND_ROWS):
+        bottom = min(height, top + _KEY_DETECT_BAND_ROWS)
+        band = _rgba_rows(image, top, bottom)
+        sample = _key_detect_sample_mask(height, width, top, bottom) & (band[..., 3] != 0)
+        rgb = band[sample][:, :3].astype(np.int32)
+        family = _border_key_candidate_field(rgb, keyed_channels, unkeyed_channels)
+        sampled += len(rgb)
+        family_count += int(np.count_nonzero(family))
+        colors = rgb[family]
+        bins = colors >> _KEY_DETECT_BIN_SHIFT
+        slots = (bins[:, 0] << (2 * bits)) | (bins[:, 1] << bits) | bins[:, 2]
+        counts += np.bincount(slots, minlength=len(counts))
+        for channel in range(3):
+            sums[channel] += np.bincount(slots, weights=colors[:, channel], minlength=len(counts))
+    if not sampled or family_count < sampled * _KEY_DETECT_MIN_FRACTION:
         return tuple(chroma_key)  # type: ignore[return-value]
-    rgb = data[..., :3].astype(np.int32)
-    family = sample & _border_key_candidate_field(rgb, keyed_channels, unkeyed_channels)
-    family_count = int(np.count_nonzero(family))
-    if family_count < int(np.count_nonzero(sample)) * _KEY_DETECT_MIN_FRACTION:
-        return tuple(chroma_key)  # type: ignore[return-value]
-    colors = rgb[family]  # (N, 3)
-    bins = (colors >> _KEY_DETECT_BIN_SHIFT).astype(np.int64)
-    slots = (bins[:, 0] << 16) | (bins[:, 1] << 8) | bins[:, 2]
-    unique, inverse, counts = np.unique(slots, return_inverse=True, return_counts=True)
     mode = int(np.argmax(counts))  # first max = lowest slot on a tie: deterministic
-    members = colors[inverse == mode]
-    mean = members.sum(axis=0, dtype=np.int64) // len(members)
-    return (int(mean[0]), int(mean[1]), int(mean[2]))
+    members = int(counts[mode])
+    return tuple(int(sums[channel][mode]) // members for channel in range(3))  # type: ignore[return-value]
 
 
 # remove_chroma_background pixel classes, decided once on the source colors.
@@ -423,6 +447,53 @@ def hard_key_mask(source_rgb: np.ndarray, alpha: np.ndarray, chroma_key: tuple[i
         painted_keyed = _grow_into(painted_keyed, in_ball)
         key_distance = np.where(painted_keyed, np.minimum(key_distance, painted_distance), key_distance)
     return (alpha == 0) | (key_distance <= threshold), key_distance
+
+
+_WINDOW_BAND_ROWS = 64  # rows `subject_window` widens to int32 at a time
+
+
+def subject_window(image: Image.Image, chroma_key: tuple[int, int, int], threshold: float, margin: int,
+                   painted_key: tuple[int, int, int] | None = None) -> tuple[int, int, int, int] | None:
+    """The box outside which `remove_chroma_background` erases every pixel, grown by `margin`.
+
+    `hard_key_mask` keys, whatever their alpha, every pixel within `threshold` of the
+    declared key and, when the painted colour differs, every pixel within `threshold` of
+    the painted colour that carries the key's border signature (`is_border_key_candidate`).
+    Only the other pixels can stay opaque. Returns their bounding box grown by `margin`
+    and clipped to the image, as (left, top, right, bottom), or None when there are none
+    (the whole image keys out). Pass the painted colour the engine will use.
+
+    Keying the crop instead of the image changes no pixel inside it, provided `margin` is
+    at least 1 and the same painted colour, detected on the whole image, is passed as
+    `background_key`. Every pixel of the margin is keyed and would seed the painted ball,
+    so from any pixel inside, a keyed pixel beyond the crop is never nearer than the
+    margin pixel on the way to it: the unmix depth, a fringe band counted on the result,
+    and a painted-ball path all come out the same. Spill clusters and the subject count
+    lie inside the box. A still that is mostly key, such as a canvas padded for motion
+    room, is then keyed at the size of its subject.
+
+    Scanned in bands of rows, each converted to RGBA on its own, so a large image is never
+    converted or widened to int32 as a whole.
+    """
+    keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
+    ball = painted_key is not None and tuple(painted_key) != tuple(chroma_key) and bool(keyed_channels)
+    width, height = image.size
+    rows = np.zeros(height, dtype=bool)
+    cols = np.zeros(width, dtype=bool)
+    for top in range(0, height, _WINDOW_BAND_ROWS):
+        rgb = _rgba_rows(image, top, min(height, top + _WINDOW_BAND_ROWS))[..., :3].astype(np.int32)
+        erased = _key_distance_field(rgb, chroma_key) <= threshold
+        if ball:
+            erased |= ((_key_distance_field(rgb, painted_key) <= threshold)
+                       & _border_key_candidate_field(rgb, keyed_channels, unkeyed_channels))
+        rows[top:top + len(rgb)] = ~erased.all(axis=1)
+        cols |= ~erased.all(axis=0)
+    if not rows.any():
+        return None
+    ys = np.flatnonzero(rows)
+    xs = np.flatnonzero(cols)
+    return (max(0, int(xs[0]) - margin), max(0, int(ys[0]) - margin),
+            min(width, int(xs[-1]) + 1 + margin), min(height, int(ys[-1]) + 1 + margin))
 
 
 def key_material_pixels(image: Image.Image, chroma_key: tuple[int, int, int],
@@ -491,6 +562,7 @@ def remove_chroma_background(
     width, height = rgba.size
     data = np.array(rgba, dtype=np.uint8)  # (H, W, 4); written back at the end
     source_rgb = data[..., :3].astype(np.int32)
+    source_alpha = data[..., 3].copy() if decontam != "off" else None  # coverage decontam may give back
     keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
     unseen = 255
 
@@ -647,7 +719,8 @@ def remove_chroma_background(
                     data[y, x] = (*despilled, alpha)
     if decontam != "off":
         data, stats = decontam_module.decontaminate(source_rgb, data, keyed_mask, chroma_key, fit=decontam_fit,
-                                                    alpha_depth=unmix_reach, palette=decontam_palette, mode=decontam)
+                                                    alpha_depth=unmix_reach, palette=decontam_palette, mode=decontam,
+                                                    source_alpha=source_alpha)
         if decontam_stats is not None:
             decontam_stats.update(stats)
     # Back into the converted copy rather than a fresh Image.fromarray, so the
@@ -1034,7 +1107,8 @@ def remove_chroma_background_ycbcr(
         keyed_mask, _ = hard_key_mask(source_rgb, source[..., 3], chroma_key, painted, DEFAULT_KEY_THRESHOLD)
         data, stats = decontam_module.decontaminate(source_rgb, np.array(out, dtype=np.uint8), keyed_mask, chroma_key,
                                                     fit=decontam_fit, alpha_depth=DEFAULT_UNMIX_REACH,
-                                                    palette=decontam_palette, mode=decontam)
+                                                    palette=decontam_palette, mode=decontam,
+                                                    source_alpha=source[..., 3])
         if decontam_stats is not None:
             decontam_stats.update(stats)
         out.frombytes(data.tobytes())

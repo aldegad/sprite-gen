@@ -38,6 +38,22 @@ Guards, in order of the decision they make:
   when the subject owns no key-coloured material is a residual key hue on such a
   pixel capped (`KEY_HUE_TINT`), which lowers the keyed channels and never raises
   one.
+- *Own colour (still fit).* Gold sits between red and green, so a gold a little
+  darker or yellower than the palette's own also reads as a warmer palette gold
+  with some green mixed in, and came out orange and see-through. The still fit
+  therefore also counts a palette colour at the pixel's own luma (the freedom the
+  written colour has too) when it comes within the subject's own spread: how far
+  its confident interior sits from the palette (`MATERIAL_SPREAD_QUANTILE`), which
+  also raises the margin a blend has to win by. And a still's antialiased edge is
+  at most `_IN_BAND_UNMIX_KEY_DEPTH` pixels deep, so deeper in the band a key share
+  shows only as the key's hue: a pixel without it is the subject's own colour, and
+  so is an edge pixel without it that has the colour of the plain material right
+  behind it. Such pixels are never blends or tints. Where the matte changed one of
+  them although it carries no key hue, the source colour and coverage come back:
+  the RGB matte scores tint on the channel average, which calls yellow green (and
+  red or blue magenta), so it unmixes gold as if it were a blend. The video fit
+  does none of this, since a decoded frame's chroma is blurred and an edge pixel's
+  colour is no evidence of what the subject is made of there.
 - *Tint.* Between the two: a pixel pushed from its colour toward the key by at
   least `TINT_SHIFT`, and `TINT_RATIO` times more than the fit misses by, is
   recoloured with its coverage left alone (a faint cast, not proven coverage).
@@ -65,7 +81,8 @@ from __future__ import annotations
 from typing import Any
 
 from sprite_gen._deps import np
-from sprite_gen.frames.extract import _grow_chebyshev, _grow_into, _key_channel_split, _key_excess_field
+from sprite_gen.frames.extract import (_IN_BAND_UNMIX_KEY_DEPTH, _grow_chebyshev, _grow_into, _key_channel_split,
+                                       _key_excess_field)
 
 # "palette" runs the pass and fails loud when it cannot; "auto" runs it wherever it applies (a
 # chroma key, a subject interior to learn from) and otherwise reports why it did not.
@@ -81,6 +98,10 @@ PALETTE_ITERATIONS = 10
 KEY_HUE_TINT = 8.0  # the key-hue bar of the full spill pass (extract._SPILL_FULL_MIN_TINT)
 KEY_MATERIAL_MAX_SHARE = 0.005  # the key-material share `video-frames --spill auto` tolerates
 OPAQUE_MARGIN = 10.0  # a blend must explain the pixel this much better than "opaque as observed"
+# ... and better than the subject's own interior sits from its palette: material this far from every
+# palette colour is still material (the quantile of the confident interior's distance to the palette)
+MATERIAL_SPREAD_QUANTILE = 99.0
+MATERIAL_SPREAD_SAMPLES = 1 << 16  # interior pixels the spread is measured on, at a fixed stride
 NOISE_SIGMAS = 3.0
 MIN_RECOVERED_ALPHA = 0.06
 LUMA_TRUST_ALPHA = 0.35  # below this coverage the observed luma is noise; lean on the palette
@@ -123,6 +144,18 @@ def _box_sum(values: np.ndarray, radius: int) -> np.ndarray:
     x0 = np.clip(np.arange(width) - radius, 0, width)
     x1 = np.clip(np.arange(width) + radius + 1, 0, width)
     return table[y1][:, x1] - table[y0][:, x1] - table[y1][:, x0] + table[y0][:, x0]
+
+
+def _box_sum_at(values: np.ndarray, radius: int, rows: np.ndarray, cols: np.ndarray) -> np.ndarray:
+    """`_box_sum` of a 2-D array, at the given pixels only: one summed-area table, no full-size result."""
+    height, width = values.shape
+    table = np.zeros((height + 1, width + 1), dtype=np.float64)
+    table[1:, 1:] = values.cumsum(0).cumsum(1)
+    y0 = np.clip(rows - radius, 0, height)
+    y1 = np.clip(rows + radius + 1, 0, height)
+    x0 = np.clip(cols - radius, 0, width)
+    x1 = np.clip(cols + radius + 1, 0, width)
+    return table[y1, x1] - table[y0, x1] - table[y1, x0] + table[y0, x0]
 
 
 def local_background(rgb: np.ndarray, preferred: np.ndarray, fallback: np.ndarray, radius: int) -> np.ndarray:
@@ -194,6 +227,20 @@ def recolor_to_luma(colour: np.ndarray, luma: np.ndarray) -> np.ndarray:
     return np.where(darker[:, None], colour * scale[:, None], colour + lift[:, None] * (255 - colour))
 
 
+def material_distance(obs: np.ndarray, palette: np.ndarray) -> np.ndarray:
+    """How far each observation (N, 3) is from being the subject's own material: the nearest
+    palette colour as it is, or at the observation's luma (the shading the colour written by
+    `decontaminate` is granted too)."""
+    obs = np.asarray(obs, dtype=np.float64)
+    light = obs @ LUMA
+    nearest = np.full(len(obs), np.inf)
+    for colour in np.asarray(palette, dtype=np.float64):
+        shaded = recolor_to_luma(np.broadcast_to(colour, obs.shape), light)
+        nearest = np.minimum(nearest, np.minimum(np.linalg.norm(obs - colour, axis=-1),
+                                                 np.linalg.norm(obs - shaded, axis=-1)))
+    return nearest
+
+
 def _box3(rgb: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.ndarray:
     """3x3 mean (edge-clamped) of `rgb` at the given pixels."""
     height, width = rgb.shape[:2]
@@ -220,9 +267,11 @@ def not_applicable(keyed: np.ndarray, keyed_mask: np.ndarray, chroma_key: tuple[
 def subject_palette(keyed: np.ndarray, keyed_mask: np.ndarray, chroma_key: tuple[int, int, int]) -> dict[str, Any]:
     """The subject's colours, learned from its confident interior (opaque, deeper than `BAND_PX`).
 
-    Returns {"palette": (k, 3) float64, "keyfree": bool, "key_material_share": float}. A clip
-    can learn this once and hand it to every frame, so the colours an edge may take do not
-    change from frame to frame. Raises SystemExit when `not_applicable` says why it cannot.
+    Returns {"palette": (k, 3) float64, "keyfree": bool, "key_material_share": float,
+    "material_spread": float}, the last being how far the interior itself sits from the
+    palette (`material_distance`, its `MATERIAL_SPREAD_QUANTILE`). A clip can learn this once
+    and hand it to every frame, so the colours an edge may take do not change from frame to
+    frame. Raises SystemExit when `not_applicable` says why it cannot.
     """
     reason = not_applicable(keyed, keyed_mask, chroma_key)
     if reason is not None:
@@ -241,23 +290,28 @@ def subject_palette(keyed: np.ndarray, keyed_mask: np.ndarray, chroma_key: tuple
     palette = np.round(learn_palette(samples))
     if keyfree:
         palette = _cap_key_hue(palette, keyed_channels, unkeyed_channels, KEY_HUE_TINT)
-    return {"palette": palette, "keyfree": keyfree, "key_material_share": key_material}
+    measured = samples[::max(1, len(samples) // MATERIAL_SPREAD_SAMPLES)]
+    spread = round(float(np.percentile(material_distance(measured, palette), MATERIAL_SPREAD_QUANTILE)), 3)
+    return {"palette": palette, "keyfree": keyfree, "key_material_share": key_material, "material_spread": spread}
 
 
 def palette_from_stats(stats: dict[str, Any]) -> dict[str, Any]:
     """The `subject_palette` a `decontaminate` call used, rebuilt from its stats."""
     return {"palette": np.asarray(stats["palette"], dtype=np.float64), "keyfree": bool(stats["palette_keyfree"]),
-            "key_material_share": float(stats["key_material_share"])}
+            "key_material_share": float(stats["key_material_share"]),
+            "material_spread": float(stats["material_spread"])}
 
 
 def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndarray,
                   chroma_key: tuple[int, int, int], *, fit: str = "still", alpha_depth: int = 4,
-                  palette: dict[str, Any] | None = None, mode: str = "palette") -> tuple[np.ndarray, dict[str, Any]]:
+                  palette: dict[str, Any] | None = None, mode: str = "palette",
+                  source_alpha: np.ndarray | None = None) -> tuple[np.ndarray, dict[str, Any]]:
     """Re-explain the edge of an already keyed image. Returns (RGBA uint8, stats).
 
-    `source_rgb` (H, W, 3) is the frame as generated, `keyed` (H, W, 4) the engine's
-    output for it and `keyed_mask` the engine's hard-cut background (transparent input
-    included). Interior pixels (deeper than `BAND_PX`) are returned byte-identical.
+    `source_rgb` (H, W, 3) is the frame as generated and `source_alpha` (H, W) its own
+    coverage (None: opaque), `keyed` (H, W, 4) the engine's output for it and `keyed_mask`
+    the engine's hard-cut background (transparent input included). Interior pixels
+    (deeper than `BAND_PX`) are returned byte-identical.
     `palette` is a `subject_palette` result to reuse (a clip's); None learns this frame's.
     `mode="auto"` returns the input unchanged, with the reason in the stats, where the
     pass does not apply; `mode="palette"` raises SystemExit there instead.
@@ -282,6 +336,10 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
     palette_rgb = np.asarray(learned["palette"], dtype=np.float64)
     keyfree = bool(learned["keyfree"])
     key_material = float(learned["key_material_share"])
+    spread = float(learned["material_spread"])
+    # the still fit reads an edge pixel's colour as evidence of the subject's own material; a decoded
+    # video frame's chroma is blurred, so there the colour is no such evidence and the fit decides alone
+    material_test = fit == "still"
 
     far_background = keyed_mask & ~flank
     background = local_background(rgb, far_background, keyed_mask, BACKGROUND_RADIUS)
@@ -291,14 +349,23 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
         sigma_rgb = 1.4826 * float(np.median(np.linalg.norm(residual, axis=-1)))
     else:
         sigma_luma = sigma_rgb = 0.0
-    margin = max(OPAQUE_MARGIN, NOISE_SIGMAS * sigma_rgb)
+    margin = max(OPAQUE_MARGIN, NOISE_SIGMAS * sigma_rgb, spread if material_test else 0.0)
 
     rows, cols = np.nonzero(band | flank)
+    edge = _IN_BAND_UNMIX_KEY_DEPTH  # a still's antialiased edge: the engine's in-band unmix depth
+    if material_test:
+        # the subject's plain material right behind the edge: deeper than it and without the key's hue
+        source_int = np.asarray(source_rgb)[..., :3].astype(np.int32)
+        behind = subject & (depth > edge) & (_key_excess_field(source_int, keyed_channels, unkeyed_channels) <= 0)
+        behind_weight = _box_sum_at(behind.astype(np.float64), edge, rows, cols)
+        behind_mean = np.stack([_box_sum_at(rgb[..., channel] * behind, edge, rows, cols) for channel in range(3)],
+                               axis=-1) / np.maximum(behind_weight, 1.0)[:, None]
     alpha_new = np.zeros(len(rows))
     colour_new = np.zeros((len(rows), 3))
     blend = np.zeros(len(rows), dtype=bool)
     tinted = np.zeros(len(rows), dtype=bool)
     unexplained = np.zeros(len(rows), dtype=bool)
+    own = np.zeros(len(rows), dtype=bool)
     for start in range(0, len(rows), _CHUNK):
         r = rows[start:start + _CHUNK]
         c = cols[start:start + _CHUNK]
@@ -312,7 +379,6 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
         towards = choose_obs - choose_bg
         best = np.full(len(r), np.inf)
         pick = np.zeros(len(r), dtype=np.int64)
-        opaque_distance = np.full(len(r), np.inf)
         for index, colour in enumerate(palette_rgb):
             line = colour - choose_bg
             length = np.maximum((line * line).sum(-1), 1e-9)
@@ -321,7 +387,15 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
             closer = miss < best
             best[closer] = miss[closer]
             pick[closer] = index
-            opaque_distance = np.minimum(opaque_distance, np.linalg.norm(obs - colour, axis=-1))
+        near = np.min([np.linalg.norm(obs - colour, axis=-1) for colour in palette_rgb], axis=0)
+        if material_test:
+            # the subject's own colour at its own light, as closely as its interior sits to the palette
+            lit = material_distance(obs, palette_rgb)
+            own_colour = lit <= spread
+            material = np.where(own_colour, lit, near)
+        else:
+            own_colour = np.zeros(len(r), dtype=bool)
+            material = near
         chosen = palette_rgb[pick]
         line = chosen - bg
         offset = obs - bg
@@ -339,11 +413,25 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
             # pixel darker than the line allows (outline ink the interior never shows) is not a blend
             explained &= np.abs(residual @ LUMA) <= LUMA_MISS_SLACK + NOISE_SIGMAS * sigma_luma
         in_flank = flank[r, c]
-        is_blend = explained & (alpha < 1.0) & (in_flank | (miss + margin < opaque_distance))
+        if material_test:
+            # Deeper than a still's antialiased edge, a key share shows only as the key's hue: a pixel
+            # without it is the subject's own colour. On the edge, so is a pixel without it that has
+            # the colour (at its own luma) of the plain material right behind it.
+            hueless = ~in_flank & (_key_excess_field(obs, keyed_channels, unkeyed_channels) <= 0)
+            deep = depth[r, c] > edge
+            mean = behind_mean[start:start + len(r)]
+            behind_distance = np.minimum(np.linalg.norm(obs - mean, axis=-1),
+                                         np.linalg.norm(obs - recolor_to_luma(mean, obs @ LUMA), axis=-1))
+            settled = hueless & (deep | ((behind_weight[start:start + len(r)] > 0) & (behind_distance <= margin)))
+        else:
+            settled = np.zeros(len(r), dtype=bool)
+        is_blend = explained & (alpha < 1.0) & (in_flank | (miss + margin < material)) & ~settled
         # a tint: displaced from its colour toward the key clearly more than the fit misses by, but
-        # not by enough to prove partial coverage. Recoloured, coverage untouched.
+        # not by enough to prove partial coverage, and by more than shading any palette colour
+        # accounts for. Recoloured, coverage untouched.
         shift = (1.0 - alpha) * np.sqrt((line * line).sum(-1))
-        is_tint = explained & ~is_blend & ~in_flank & (shift >= TINT_SHIFT) & (shift >= TINT_RATIO * miss)
+        is_tint = (explained & ~is_blend & ~in_flank & (shift >= TINT_SHIFT) & (shift >= TINT_RATIO * miss)
+                   & ~own_colour & ~settled)
         # coverage: refit within the unmix reach and on the flank; colour only deeper in the band
         refit = (in_flank | (depth[r, c] <= alpha_depth)) & ~is_tint
         floor = np.maximum(MIN_RECOVERED_ALPHA, NOISE_SIGMAS * sigma_luma / np.maximum(np.abs((chosen - bg) @ LUMA), 1e-6))
@@ -359,12 +447,22 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
         blend[start:start + len(r)] = is_blend | is_tint
         tinted[start:start + len(r)] = is_tint
         unexplained[start:start + len(r)] = ~explained
+        own[start:start + len(r)] = material_test & ~is_blend & ~is_tint & ~in_flank & ((material <= margin) | settled)
 
     alpha8 = np.clip(np.round(alpha_new * 255), 0, 255).astype(np.uint8)
     colour8 = np.clip(np.round(colour_new), 0, 255).astype(np.uint8)
     br, bc = rows[blend], cols[blend]
     out[br, bc, :3] = colour8[blend]
     out[br, bc, 3] = alpha8[blend]
+    # the subject's own material, with no key hue, that the matte changed anyway (its channel-average
+    # tint calls yellow green): the source pixel and its coverage come back
+    source8 = np.asarray(source_rgb)[rows, cols, :3].astype(np.int32)
+    source_a = np.full(len(rows), 255, dtype=np.int32) if source_alpha is None else np.asarray(source_alpha)[rows, cols].astype(np.int32)
+    back = (own & (_key_excess_field(source8, keyed_channels, unkeyed_channels) <= 0)
+            & ((out[rows, cols, :3] != source8).any(-1) | (out[rows, cols, 3] != source_a)))
+    out[rows[back], cols[back], :3] = source8[back].astype(np.uint8)
+    out[rows[back], cols[back], 3] = source_a[back].astype(np.uint8)
+    restored = int(np.count_nonzero(back))
     clamped = 0
     if keyfree:
         kept = ~blend & band[rows, cols] & (out[rows, cols, 3] > 0)
@@ -395,12 +493,14 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
         "palette_keyfree": bool(keyfree),
         "key_material_share": round(key_material, 5),
         "noise_sigma_rgb": round(sigma_rgb, 3),
+        "material_spread": round(spread, 3),
         "opaque_margin": round(margin, 3),
         "changed_px": changed,
         "refit_px": int(np.count_nonzero(blend & ~tinted)),
         "tint_px": int(np.count_nonzero(tinted)),
         "recovered_px": recovered,
         "unexplained_px": int(np.count_nonzero(unexplained & band[rows, cols])),
+        "restored_px": restored,
         "key_hue_capped_px": clamped,
     }
     return out, stats

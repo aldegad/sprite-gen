@@ -91,8 +91,9 @@ B is the key background measured locally (mean of keyed pixels within 12 px). P 
 | The pixel | Outcome |
 |---|---|
 | no palette colour explains it (a colour the interior never shows), or, in the still fit, the explanation misses its luma (outline ink darker than any blend) | engine bytes |
-| closer to a palette colour as observed than the blend explains it (margin 10, or 3 noise sigmas of the background) | engine bytes; with a key-free palette, a leftover key hue (every keyed channel above every other by more than 8) loses the excess beyond 8 on its keyed channels, which never raises a channel and leaves colours without the key hue alone (a red or a skin tone under magenta is not magenta) |
-| pushed toward the key clearly more than the fit misses by, but not proven partial coverage | colour only |
+| closer to a palette colour than the blend explains it (margin 10, or 3 noise sigmas of the background): as observed, or, in the still fit, at its own luma within the subject's own spread (below), which then also raises the margin | engine bytes, except where the still fit finds that the matte changed it although it carries no key hue: then its own colour and coverage come back. With a key-free palette, a leftover key hue (every keyed channel above every other by more than 8) loses the excess beyond 8 on its keyed channels, which never raises a channel and leaves colours without the key hue alone (a red or a skin tone under magenta is not magenta) |
+| still fit: deeper than a still's antialiased edge (2 px, the engine's in-band unmix depth) without the key's hue, or on that edge without it and with the colour (at its own luma) of the material right behind it | the subject's own colour, never a blend or a tint; its own colour and coverage come back where the matte changed it |
+| pushed toward the key clearly more than the fit misses by, but not proven partial coverage (in the still fit, not when a shade of a palette colour explains it within the spread) | colour only |
 | a blend within the unmix reach (`chroma.unmix_reach`, default 4) | alpha and colour |
 | a blend deeper in the 6 px band | colour only, so a key reflection on a solid surface is recoloured rather than made see-through |
 | a keyed pixel within 3 px of the subject that fits a blend above the background's noise floor and chains to the subject | coverage recovered: the faint sides of a strand the hard cut erased |
@@ -103,6 +104,8 @@ Licensing: the pass is plain numpy inside this Apache-2.0 repository and install
 
 Two fits. `still` chooses P per pixel. `video` chooses P on a 3×3 mean of the observation, whose chroma is blurred anyway, and averages the projection alpha with a luma-only alpha where P and B differ in luma. `video-frames` uses the video fit and learns one palette per clip on the first frame, so the colours an edge may take cannot change from frame to frame.
 
+**Gold and yellow.** Gold sits between red and green, so a gold a little darker or yellower than the palette's own also fits as a warmer palette gold with some green mixed in. Up to v2.10.1 the still fit took that reading, and gold edges and small gold drops came out orange and partly see-through. Since v2.10.2 the still fit weighs the blend against the subject's own colour at the pixel's own light (the freedom the written colour already has), and a blend has to win by more than the subject's own spread: the 99th percentile of how far its confident interior sits from the palette, large for a textured gold and small for flat colour. A still's antialiased edge is at most two pixels deep, so deeper in the band a key share has to show as the key's hue: a pixel without it is the subject's own colour, and so is an edge pixel without it that has the colour of the material right behind it. Where the matte changed such a pixel, the source colour and coverage come back. The RGB matte (`cutout`'s default) needs that: it scores key tint on the channel average, which calls yellow green, so it unmixes gold as if it were a blend; the YCbCr matte (`gen`) does not. The video fit keeps its decisions, because a decoded frame's chroma is blurred and an edge pixel's colour is no evidence of what the subject is made of there.
+
 Three modes: `palette` runs the pass and fails loud where it cannot (no key hue, or no subject pixel deeper than 6 px to learn from); `auto` runs it wherever it applies and records why not elsewhere; `off` leaves the matte as it is.
 
 | Entry point | Default | Flag |
@@ -112,24 +115,26 @@ Three modes: `palette` runs the pass and fails loud where it cannot (no key hue,
 | `sprite-gen video-frames`, `video-set` | `off` | `--decontam off\|auto\|palette` |
 | row extractor (`extract`, `inspect`) | `off` | request `chroma.decontam`, or `--decontam` to override; written back to the request once in play |
 
-Reports record what the pass did under `decontam`: mode, whether it applied (and why not), fit, the palette, and changed / refit / tint / recovered / unexplained pixel counts.
+Reports record what the pass did under `decontam`: mode, whether it applied (and why not), fit, the palette and its material spread, and changed / refit / tint / recovered / unexplained / restored pixel counts.
 
 Measured on a procedural ground-truth set (red strands 0.5–3 px wide, outline and interior ink, highlights, translucent wisps, white cloth and a gold accent on a painted green key; a still, and an H.264 4:2:0 round trip at CRF 16). Key contamination counts edge pixels covered in both output and truth whose hue turned 12° or more toward the key (green residue and the despill's warm drift both turn that way), or, on near-grey truth, whose a*/b* moved toward the key by 8. Halo is the mean CIEDE2000 against the true composite on #0A0A0D and on white:
 
 | Source | Path | Key contamination | Halo dark / white | Strand recall |
 |---|---|---|---|---|
 | still | RGB engine (default) | 22.5 % | 6.65 / 7.16 | 84.3 % |
-| still | RGB engine + `decontam` (still fit) | 0.07 % | 1.14 / 1.14 | 99.0 % |
+| still | RGB engine + `decontam` (still fit) | 0.03 % | 1.08 / 1.09 | 99.0 % |
 | still | YCbCr matte (`gen`) | 19.1 % | 9.77 / 9.36 | 77.3 % |
-| still | YCbCr matte + `decontam` | 0.16 % | 1.15 / 1.14 | 99.0 % |
+| still | YCbCr matte + `decontam` | 0.12 % | 1.09 / 1.08 | 99.0 % |
 | H.264 frames | RGB engine + `--spill full` | 33.2 % | 12.79 / 12.43 | 82.1 % |
 | H.264 frames | + `decontam` (video fit) | 10.8 % | 9.38 / 8.73 | 91.4 % |
+
+The two still-fit rows are v2.10.2's; v2.10.0 measured 0.07 % · 1.14 / 1.14 and 0.16 % · 1.15 / 1.14 on the same set, with the same recall. The video-fit row is unchanged.
 
 **Defaults.** Every entry point defaults to `off`, which returns the engine's output byte for byte; pass `--decontam auto` (or `palette`) to use the pass. Stills defaulted to `auto` for a while during development. The full test suite then caught a regression on Grok's darker magenta: the key-hue cap greyed the warm colours of the palette, so a hard-edged brown square lost its opaque edge. The cap is fixed and tested, but the measurements above use a green key, so the default stays `off`. The row extractor stays `off` in any case: its frames are a derived cache that `heal` re-derives from raw, so a changed default would silently rewrite every existing run, and pixel-art rows binarize alpha downstream anyway. `video-frames` / `video-set` stay `off` (see the video numbers above).
 
 Limitations:
 
-- An edge takes one of the subject's interior colours at its observed brightness. A thin feature whose colour appears nowhere inside the subject keeps the engine's pixels.
+- An edge takes one of the subject's interior colours at its observed brightness. A thin feature whose colour appears nowhere inside the subject keeps the engine's pixels. On the RGB matte that includes the matte's reading of a thin yellow line or dot, with no pixel deeper than two pixels, as a green blend.
 - In video a thin strand's chroma is gone before keying, so its colour is chosen from blurred chroma; strands come back in the hair's hue, sometimes a shade darker or paler than drawn.
 - A subject that owns key-coloured material keeps it in its palette, and its edges are repainted with whatever explains them best, key colour included. Keep the default when that material matters.
 - The pixel-unfake path binarizes alpha downstream, so on pixel-art rows only edge colours change.
