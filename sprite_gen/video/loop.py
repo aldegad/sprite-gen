@@ -58,7 +58,11 @@ ONE_SHOT_MIN_MOVED = 0.4
 ONE_SHOT_MIN_COHERENCE = 3.0  # departure must exceed three ordinary playback steps
 ONE_SHOT_MIN_ACTIVE = 4  # isolated keying/jitter spikes are not a performed action
 ONE_SHOT_PAD = 2  # one-shot: rest frames kept on each side of the excursion so the seam is rest -> rest
-CYCLE_MODES = ("auto", "periodic", "one-shot", "fixed")
+CYCLE_MODES = ("auto", "periodic", "one-shot", "fixed", "pinned")
+# --cycle pinned: the clip was asked to end on its first frame (first-last mode). A re-rendered
+# first frame is never byte-identical to its source; on the analysis thumbnail (mean absolute
+# RGBA difference, 0..1) it lands within this of it, well under one frame of visible motion.
+PIN_NOISE_MAX = 0.005
 ONE_SHOT_MIN_LEN = 4  # a one-shot's length is the clip's own fact; only a degenerate cut is refused
 # Gait half-period guard. A walk cycle is two steps; when the two halves look alike in
 # pixels (legs hidden by a costume, near/far leg not distinguishable) the half period dips
@@ -420,6 +424,27 @@ def fixed_cycle(D: np.ndarray, *, start: int, length: int) -> dict[str, Any]:
     seam = float(D[start, end])
     return {"kind": "fixed", "start": start, "length": length, "seam": seam, "inner_mean_adjacent": inner,
             "ratio": seam / inner if inner > 0 else math.inf, "period_global": None, "periodicity": None}
+
+
+def pinned_cycle(D: np.ndarray, *, seam_max: float) -> dict[str, Any]:
+    """The whole clip as one cycle, for a clip pinned to end on its first frame.
+
+    Every frame but the last is kept: the last re-renders the first, so playing it too would show
+    that pose twice at the wrap. The wrap (second-to-last -> first) then plays like the step into
+    that last frame, and closes when the last frame really is the first again — so the gate is
+    the pin error, allowed the same `seam_max` steps as any seam or the re-render noise, whichever
+    is larger. A near-still clip moves so little per frame that the seam ratio alone reads its
+    re-render noise as a jump.
+    """
+    n = D.shape[0]
+    length = n - 1
+    adjacent = np.array([D[i, i + 1] for i in range(length - 1)])
+    inner = float(adjacent.mean())
+    seam = float(D[length - 1, 0])
+    pin_error = float(D[n - 1, 0])
+    return {"kind": "pinned", "start": 0, "length": length, "seam": seam, "inner_mean_adjacent": inner,
+            "ratio": seam / inner if inner > 0 else math.inf, "pin_error": pin_error,
+            "pin_tolerance": max(seam_max * inner, PIN_NOISE_MAX), "period_global": None, "periodicity": None}
 
 
 def _drop_specks(image: Image.Image, min_fraction: float) -> tuple[Image.Image, int]:
@@ -816,6 +841,8 @@ def run_loop(
             cycle = fixed_cycle(D, start=start, length=length)
         elif cycle_mode == "one-shot":
             cycle = detect_one_shot(D, min_len=lo, max_len=hi, frame_mass=masses)
+        elif cycle_mode == "pinned":
+            cycle = pinned_cycle(D, seam_max=seam_max)
         else:
             gait_floor = round(prof.min_seconds * fps) if prof.gait and prof.min_seconds > 0 else None
             cycle = detect_cycle(D, min_len=lo, max_len=hi, gait_floor=gait_floor)
@@ -926,7 +953,19 @@ def run_loop(
     delay_ms = max(20, round(1000 * cycle_seconds / n_out))
     gif_path = out_dir / f"{name}.gif"
     webp_path = out_dir / f"{name}.webp"
-    if seam_ratio > seam_max:
+    if cycle["kind"] == "pinned":
+        if cycle["pin_error"] > cycle["pin_tolerance"]:
+            error = (
+                f"video-loop: the pinned clip does not end on its first frame (pin error {cycle['pin_error']:.4f} "
+                f"exceeds {cycle['pin_tolerance']:.4f}); the loop does not close — regenerate the clip with "
+                "--last-frame set to its first frame"
+            )
+            write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle,
+                                      "resampled_seam": resampled_seam,
+                                      "resampled_inner_mean_adjacent": resampled_adjacent,
+                                      "resampled_seam_ratio": seam_ratio})
+            raise SystemExit(error)
+    elif seam_ratio > seam_max:
         error = (
             f"video-loop: loop seam ratio {seam_ratio:.2f} exceeds {seam_max} "
             f"({cycle['kind']} length {L} frames from {i}); the cycle does not close — "
@@ -987,7 +1026,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--n-out", type=int, help="frames in the GIF/WebP (default: cycle seconds x --gif-fps)")
     parser.add_argument("--gif-fps", type=float, default=GIF_FPS_DEFAULT, help=f"GIF/WebP playback density (default {GIF_FPS_DEFAULT:g}); every state plays at this rate regardless of cycle length")
     parser.add_argument("--seam-max", type=float, default=SEAM_RATIO_MAX, help=f"loop seam gate (default {SEAM_RATIO_MAX})")
-    parser.add_argument("--cycle", choices=CYCLE_MODES, default="auto", help="auto: periodic first, one-shot failover for action states (recorded in the report); periodic / one-shot force one detector; fixed cuts exactly --start/--length (no detection, reported as kind=fixed)")
+    parser.add_argument("--cycle", choices=CYCLE_MODES, default="auto", help="auto: periodic first, one-shot failover for action states (recorded in the report); periodic / one-shot force one detector; fixed cuts exactly --start/--length (no detection, reported as kind=fixed); pinned: the whole clip but its last frame, for a clip pinned to end on its first frame (the gate is that pin)")
     parser.add_argument("--start", type=int, help="fixed cut: first keyed frame of the cycle (with --cycle fixed)")
     parser.add_argument("--length", type=int, help="fixed cut: cycle length in frames (with --cycle fixed)")
     parser.add_argument("--strip-height", type=int, default=STRIP_MAX_HEIGHT, help=f"cell/strip/GIF height cap in px (default {STRIP_MAX_HEIGHT}); the cycle is scaled down to fit, and never up unless --body-height asks for it")

@@ -2,9 +2,21 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v2.9.0)
+## Unreleased
 
 - Add opt-in edge decontamination, `--decontam auto|palette` (request `chroma.decontam` for the row extractor and `inspect`). After the matte, each edge pixel is explained as a blend of the locally measured key background with one colour from a palette learned on the subject's own interior. The colour written is that palette colour at the pixel's observed luma, so thin hair strands and outlines come back in the subject's hue: not green, and not the orange that despill's channel gain produces. `palette` demands the pass and fails where it cannot run; `auto` runs it wherever it applies and records why it did not elsewhere. Available on `cutout`, `gen --transparent` (chroma keying), `video-frames` / `video-set` (video fit, one palette per clip) and the row extractor. Every default stays `off`, which returns existing output byte for byte. On a procedural ground-truth set, key contamination at the edge falls from 22.5 % to 0.07 % on stills and from 33 % to 11 % on H.264 frames; halo against the true composite shrinks on dark and white backgrounds, and strand recall rises from 84 % to 99 % (stills) and from 82 % to 91 % (frames). Method, guards and limits: [docs/chroma-alpha.md](docs/chroma-alpha.md).
+
+## v2.9.0 - Idle stands still and closes on its first frame
+
+- `MOTION_TEXT["idle"]` keeps both feet planted flat for the whole clip, limits the motion to breathing, a settle of the arms, hair and loose cloth and one blink, and names walking and marching in place as what not to do. A side-view full body asked for "a subtle weight sway" and an evenly paced loop tended to step in place.
+- Idle is pinned to end on its first frame (`PIN_LAST_FRAME_STATES`) and its template (`PINNED_LOOP_TEXT`) asks for that return instead of an evenly paced repeating motion.
+- `video-loop --cycle pinned` keeps a pinned clip whole as the loop (every frame but the last, which re-renders the first) and gates it on the pin: the last frame has to land within `max(seam_max x the mean step, PIN_NOISE_MAX)` of the first. A near-still idle moves so little per frame that the seam ratio read its re-render noise as a jump. A clip that ends in another pose fails with its own message. `video-set` cuts idle this way (`PINNED_LOOP_STATES`).
+
+### Idle showcase
+
+Nine side-view idles before and after this release, each strip played at its own speed (`idle-nine.mp4` is the same comparison as video).
+
+![Nine idle loops before and after](https://github.com/aldegad/sprite-gen/releases/download/v2.9.0/idle-nine.gif)
 
 ## v2.8.1 - Tight clips pass their own edge and corner checks
 
