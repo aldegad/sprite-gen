@@ -71,11 +71,12 @@ MOTION_TEXT = {
     "run": "moves in place on a treadmill: a fast locomotion cycle for this body type with a bounding rhythm and clear repeating ground contacts.",
     "jump": "performs a modest vertical hop in place over and over: compress, spring up about half the body height, land softly, return to the exact starting stance, repeat at an even rhythm. Same height every time.",
     "attack": (
-        "performs the same melee attack twice in a row with what it is already holding in the hand nearest the viewer "
-        "(bare hands only if it holds nothing), keeping every piece of its gear and outfit exactly as drawn. Each attack is "
-        "a windup (about 0.5 s), one clean strike in front (about 0.25 s), a held impact pose (about 0.3 s), then a recovery "
-        "to the exact starting stance (about 0.5 s). What it holds never changes hands, and the body keeps facing the same "
-        "direction without turning."
+        "performs the same melee attack twice in a row with what it is already holding, gripped exactly as in the image "
+        "— one hand stays one hand, both hands stay both hands — (bare hands only if it holds nothing), keeping every "
+        "piece of its gear and outfit exactly as drawn. Each attack is a windup (about 0.5 s), one clean strike in front "
+        "(about 0.25 s), a held impact pose (about 0.3 s), then a recovery to the exact starting stance (about 0.5 s). "
+        "What it holds is never let go, switched to the other hand or taken in an extra hand, and the body keeps facing "
+        "the same direction without turning."
     ),
     "cheer": "celebrates in place: rises into a raised, spread-out cheer pose, holds it for a beat, then settles back to the exact starting stance, repeating at an even rhythm.",
     "wave": "waves in place: lifts one side into a friendly wave, sways it a few times, then settles back to the exact starting stance, repeating at an even rhythm.",

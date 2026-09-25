@@ -16,12 +16,15 @@ from sprite_gen.video import batch as batch_mod
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "facing" / "left.png"
 
 
-def test_attack_text_is_timed_one_handed_and_twice() -> None:
+def test_attack_text_is_timed_keeps_the_drawn_grip_and_is_twice() -> None:
     text = batch_mod.build_prompt("side", "attack", None)
-    for phrase in ("twice in a row", "hand nearest the viewer", "windup (about 0.5 s)", "strike in front (about 0.25 s)",
-                   "held impact pose (about 0.3 s)", "exact starting stance", "never changes hands", "without turning",
-                   "anything it holds always stay fully inside the frame", "no motion blur"):
+    for phrase in ("twice in a row", "gripped exactly as in the image", "one hand stays one hand, both hands stay both hands",
+                   "windup (about 0.5 s)", "strike in front (about 0.25 s)", "held impact pose (about 0.3 s)",
+                   "exact starting stance", "never let go, switched to the other hand or taken in an extra hand",
+                   "without turning", "anything it holds always stay fully inside the frame", "no motion blur"):
         assert phrase in text, phrase
+    # the grip is the image's: a heavy weapon drawn in both hands is not asked into one
+    assert "hand nearest the viewer" not in text
     assert "evenly paced" not in text
     # the repeating states keep their template, evenly paced line included
     assert "evenly paced" in batch_mod.build_prompt("side", "walk", None)
