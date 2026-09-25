@@ -36,8 +36,8 @@ Guards, in order of the decision they make:
   mix explains it (by `OPAQUE_MARGIN`, or three noise sigmas when the source is
   noisier) is ordinary shading, not a blend: it keeps the engine's bytes. Only
   when the subject owns no key-coloured material is a residual key hue on such a
-  pixel capped (`KEY_HUE_TINT`), which lowers the keyed channel and never raises
-  another.
+  pixel capped (`KEY_HUE_TINT`), which lowers the keyed channels and never raises
+  one.
 - *Tint.* Between the two: a pixel pushed from its colour toward the key by at
   least `TINT_SHIFT`, and `TINT_RATIO` times more than the fit misses by, is
   recoloured with its coverage left alone (a faint cast, not proven coverage).
@@ -169,11 +169,18 @@ def learn_palette(samples: np.ndarray, size: int = PALETTE_SIZE) -> np.ndarray:
 
 
 def _cap_key_hue(rgb: np.ndarray, keyed_channels: list[int], unkeyed_channels: list[int], tint: float) -> np.ndarray:
-    """Lower every keyed channel to at most (max unkeyed channel + tint). Never raises a channel."""
+    """Take the key hue out of the colours that carry it and leave every other colour alone.
+
+    A colour carries the key hue by the engine's own test (`_key_excess_field`: G - max(R, B)
+    for green, min(R, B) - G for magenta). Where that excess passes `tint`, the part beyond it
+    comes off every keyed channel alike: for green that is G <= max(R, B) + tint, for magenta
+    R and B come down together and whichever led keeps its lead. A red, a blue or a skin tone
+    under a magenta key has no key hue and is returned as it is. Never raises a channel.
+    """
     out = np.array(rgb, dtype=np.float64, copy=True)
-    ceiling = out[..., unkeyed_channels].max(axis=-1) + tint
+    over = np.maximum(_key_excess_field(out, keyed_channels, unkeyed_channels) - tint, 0.0)
     for channel in keyed_channels:
-        out[..., channel] = np.minimum(out[..., channel], ceiling)
+        out[..., channel] -= over
     return out
 
 

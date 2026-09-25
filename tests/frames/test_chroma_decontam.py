@@ -280,6 +280,54 @@ def test_magenta_key_is_handled_by_the_same_pass():
     assert before > 0.02 and after <= 0.5 * before
 
 
+# Grok's "magenta" comes back darker and bluer than the painted key (the values measured in
+# test_chroma_key_relative). Warm colours carry no magenta hue of their own (min(R, B) - G < 0).
+GROK_MAGENTA = (216, 46, 147)
+
+
+def test_key_hue_cap_touches_only_key_hued_colours():
+    colours = np.array([[110, 70, 50], [40, 70, 230], [232, 180, 150], [200, 40, 30],  # no magenta hue
+                        [210, 60, 120], [190, 150, 190], [60, 200, 70], [30, 110, 40]], np.float64)
+    green = decontam._cap_key_hue(colours, [1], [0, 2], 8.0)
+    classic = colours.copy()
+    classic[:, 1] = np.minimum(colours[:, 1], colours[:, [0, 2]].max(1) + 8)  # G <= max(R, B) + 8
+    assert np.array_equal(green, classic)
+    magenta = decontam._cap_key_hue(colours, [0, 2], [1], 8.0)
+    assert np.array_equal(magenta[:4], colours[:4])  # warm, blue, skin and red are not magenta
+    assert magenta[4].tolist() == [158, 60, 68]  # a red with a magenta cast stays red
+    assert magenta[5].tolist() == [158, 150, 158]  # a grey with a magenta cast comes back grey
+    assert np.array_equal(magenta[6:], colours[6:]) and (magenta <= colours).all()
+
+
+@pytest.mark.parametrize("painted", [MAGENTA_PAINTED, GROK_MAGENTA], ids=["painted", "grok"])
+def test_magenta_key_leaves_an_opaque_warm_subject_alone(painted):
+    """A hard-edged brown square: nothing on its edge is a blend, so nothing may change."""
+    raw = np.full((128, 128, 3), painted, np.uint8)
+    raw[32:96, 32:96] = (110, 70, 50)
+    raw[56:72, 56:72] = (230, 210, 190)
+    off, _ = _key(raw, (255, 0, 255))
+    pal, stats = _key(raw, (255, 0, 255), decontam="palette")
+    assert stats["palette_keyfree"] is True
+    assert [110, 70, 50] in stats["palette"] and [230, 210, 190] in stats["palette"]
+    assert np.array_equal(pal, off)
+
+
+@pytest.mark.parametrize("video", [False, True], ids=["still", "4:2:0"])
+def test_magenta_key_keeps_a_skin_tone_and_cleans_its_edge(video):
+    F, A = _render(subject=(232, 180, 150), lineart=(90, 50, 40), highlight=(250, 215, 195))
+    raw = _composite_on(F, A, GROK_MAGENTA)
+    if video:
+        raw = _subsample_420(raw)
+    edge, interior = _edge(raw, (255, 0, 255))
+    off, _ = _key(raw, (255, 0, 255))
+    pal, stats = _key(raw, (255, 0, 255), decontam="palette", decontam_fit="video" if video else "still")
+    assert any(r > g + 40 for r, g, _b in stats["palette"])  # the skin tone is learned, not greyed toward G + 8
+    halo_off, halo_pal = _halo(off, F, A, edge), _halo(pal, F, A, edge)
+    assert halo_pal[0] <= 0.5 * halo_off[0] and halo_pal[1] <= 0.5 * halo_off[1]
+    assert _recall(pal, A, edge) >= _recall(off, A, edge)
+    assert np.array_equal(off[interior], pal[interior])
+
+
 # --------------------------------------------------------------------------- guards
 
 def test_subject_that_owns_key_material_keeps_it():
