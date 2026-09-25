@@ -32,6 +32,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen.frames.cutout import cutout
+from sprite_gen.frames.decontam import palette_from_stats
 from sprite_gen.frames.extract import is_border_key_candidate
 from sprite_gen.frames.extract import _SPILL_FULL_MIN_TINT, DEFAULT_UNMIX_REACH
 from sprite_gen.spec.runio import atomic_write_text
@@ -168,7 +169,6 @@ def key_frames(
         raise SystemExit(f"video-frames: key_frames takes a resolved spill mode (small|full), got {spill!r}")
     if decontam not in DECONTAM_MODES:
         raise SystemExit(f"video-frames: unknown --decontam {decontam!r}; expected one of {', '.join(DECONTAM_MODES)}")
-    from sprite_gen.frames.decontam import palette_from_stats
     clip_palette: dict[str, Any] | None = None
     decontam_first: dict[str, Any] | None = None
     decontam_totals = {name: 0 for name in DECONTAM_STAT_KEYS}

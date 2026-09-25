@@ -274,10 +274,13 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
     tinted = np.zeros(len(rows), dtype=bool)
     unexplained = np.zeros(len(rows), dtype=bool)
     for start in range(0, len(rows), _CHUNK):
-        r = rows[start:start + _CHUNK]; c = cols[start:start + _CHUNK]
-        obs = rgb[r, c]; bg = background[r, c]
+        r = rows[start:start + _CHUNK]
+        c = cols[start:start + _CHUNK]
+        obs = rgb[r, c]
+        bg = background[r, c]
         if fit == "video":
-            choose_obs = _box3(rgb, r, c); choose_bg = _box3(background, r, c)
+            choose_obs = _box3(rgb, r, c)
+            choose_bg = _box3(background, r, c)
         else:
             choose_obs, choose_bg = obs, bg
         towards = choose_obs - choose_bg
