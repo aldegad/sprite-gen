@@ -327,7 +327,7 @@ def cutout(
     spill_max_fraction: float | None = None,
     spill_min_tint: float | None = None,
     spill_require_hue: bool = False,
-    decontam: str = "auto",
+    decontam: str = "off",
     decontam_fit: str = "still",
     decontam_palette: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -337,9 +337,9 @@ def cutout(
     (reuse the extract chroma engine). `spill_max_fraction` overrides the chroma
     engine's trapped-spill cluster cap and `spill_min_tint` its tint bar (None = the
     engine default for either). `decontam` is the engine's edge decontamination
-    pass: "auto" (the default) runs it on chroma routes where it applies and records
-    why not elsewhere; "palette" demands it and fails where it cannot run (the white
-    matte has no key colour to remove); "off" keeps the matte as it is. Returns a
+    pass: "off" (the default) keeps the matte as it is; "auto" runs it on chroma routes
+    where it applies and records why not elsewhere; "palette" demands it and fails where
+    it cannot run (the white matte has no key colour to remove). Returns a
     stats dict. Raises SystemExit if the key is unknown, the background cannot be
     located, or any transparent pixel keeps non-zero RGB (No Silent Fallback).
     """
@@ -441,10 +441,10 @@ def add_arguments(p: Any) -> None:
     p.add_argument(
         "--decontam",
         choices=["off", "auto", "palette"],
-        default="auto",
+        default="off",
         help="edge decontamination on chroma routes: re-explain key-tinted edges (hair strands, outlines) "
-        "with the subject's own colours. auto (default) runs it where it applies and records why not "
-        "elsewhere; palette demands it; off keeps the chroma engine's output as it was before",
+        "with the subject's own colours. off (default) keeps the chroma engine's output; auto runs it "
+        "where it applies and records why not elsewhere; palette demands it",
     )
 
 
@@ -462,7 +462,7 @@ def run(**kwargs: object) -> int:
         erode=float(kwargs.get("erode", ERODE_DEFAULT)),  # type: ignore[arg-type]
         tolerance=int(kwargs.get("tolerance", CHROMA_TOLERANCE)),  # type: ignore[arg-type]
         white_check_dir=out_path.parent if white_check else None,
-        decontam=str(kwargs.get("decontam") or "auto"),
+        decontam=str(kwargs.get("decontam") or "off"),
     )
     import json
 

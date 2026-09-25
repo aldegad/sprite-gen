@@ -60,7 +60,7 @@ When unsure, let `--chroma-key auto` sample the base. It excludes the detected f
 2. **Soft-alpha unmix** — key-tinted blends near the keyed region are separated into despilled RGB + **partial alpha**: the blend model `observed = (1-k)·subject + k·key` is solved from the key-tint score, so antialiased silhouettes keep their coverage ramp instead of collapsing into a binary staircase. In-band blends (inside `--fringe-key-threshold`) are eligible only at key-distance `<= 2`; out-of-band blends use `--fringe-unmix-reach` (default 4). This preserves deeper key-tinted material while fixing trapped blend pockets between hair strands.
 3. **Trapped-spill despill** — a small connected cluster of key-tinted pixels (≤ `--spill-max-fraction` of the subject, default 0.005) containing at least one strongly tinted pixel is generator spill, wherever it sits: its color is corrected in place with alpha kept (no pinholes). Large key-tinted regions are intentional material and are never touched; marginally warm subject colors (skin) never qualify.
 
-A fourth pass, edge decontamination (`decontam`, below; opt-in for sprite rows through `chroma.decontam`), then re-explains the edge with the subject's own colours.
+An opt-in fourth pass, edge decontamination (`decontam`, below), then re-explains the edge with the subject's own colours.
 
 The unmix/spill tunables live in the run's `sprite-request.json` under `chroma` (`unmix_reach`, `spill_max_fraction`) — the extractor reads them from there, CLI flags override, and the effective values are written back to the request so every run records what produced it. Then it extracts connected components and writes fresh transparent cells. The pixel-unfake path is unaffected: it binarizes alpha downstream (α ≥ 128 → opaque), so soft-alpha input degrades gracefully. This is intentionally closer to hatch-pet than to simple `magick -transparent`.
 
@@ -91,7 +91,7 @@ B is the key background measured locally (mean of keyed pixels within 12 px). P 
 | The pixel | Outcome |
 |---|---|
 | no palette colour explains it (a colour the interior never shows), or, in the still fit, the explanation misses its luma (outline ink darker than any blend) | engine bytes |
-| closer to a palette colour as observed than the blend explains it (margin 10, or 3 noise sigmas of the background) | engine bytes; with a key-free palette, a leftover key hue is capped (keyed channel ≤ largest other channel + 8), which never raises a channel |
+| closer to a palette colour as observed than the blend explains it (margin 10, or 3 noise sigmas of the background) | engine bytes; with a key-free palette, a leftover key hue (every keyed channel above every other by more than 8) loses the excess beyond 8 on its keyed channels, which never raises a channel and leaves colours without the key hue alone (a red or a skin tone under magenta is not magenta) |
 | pushed toward the key clearly more than the fit misses by, but not proven partial coverage | colour only |
 | a blend within the unmix reach (`chroma.unmix_reach`, default 4) | alpha and colour |
 | a blend deeper in the 6 px band | colour only, so a key reflection on a solid surface is recoloured rather than made see-through |
@@ -105,8 +105,8 @@ Three modes: `palette` runs the pass and fails loud where it cannot (no key hue,
 
 | Entry point | Default | Flag |
 |---|---|---|
-| `sprite-gen cutout IMAGE` | `auto` (chroma routes; the white matte records that it has no key colour) | `--decontam off\|auto\|palette` |
-| `sprite-gen gen … --transparent` | `auto` (chroma strategy; native alpha is left alone) | `--decontam off\|auto\|palette`; `palette` is refused before the provider is called when it cannot apply |
+| `sprite-gen cutout IMAGE` | `off` | `--decontam off\|auto\|palette` (chroma routes; on the white matte `auto` records that it has no key colour and `palette` is refused) |
+| `sprite-gen gen … --transparent` | `off` | `--decontam off\|auto\|palette` (chroma strategy; `auto` leaves native alpha alone, `palette` is refused before the provider is called when it cannot apply) |
 | `sprite-gen video-frames`, `video-set` | `off` | `--decontam off\|auto\|palette` |
 | row extractor (`extract`, `inspect`) | `off` | request `chroma.decontam`, or `--decontam` to override; written back to the request once in play |
 
@@ -123,7 +123,7 @@ Measured on a procedural ground-truth set (red strands 0.5–3 px wide, outline 
 | H.264 frames | RGB engine + `--spill full` | 33.2 % | 12.79 / 12.43 | 82.1 % |
 | H.264 frames | + `decontam` (video fit) | 10.8 % | 9.38 / 8.73 | 91.4 % |
 
-**Defaults.** Stills cut by `cutout` and `gen --transparent` default to `auto`: on stills the pass removes nearly all key contamination with a smaller halo and more strand coverage, and `off` gives the previous output back byte for byte. The row extractor stays `off`: its frames are a derived cache that `heal` re-derives from raw, so a changed default would silently rewrite every existing run, and pixel-art rows binarize alpha downstream anyway. `video-frames` / `video-set` stay `off` (see the video numbers above).
+**Defaults.** Every entry point defaults to `off`, which returns the engine's output byte for byte; pass `--decontam auto` (or `palette`) to use the pass. Stills defaulted to `auto` for a while during development. The full test suite then caught a regression on Grok's darker magenta: the key-hue cap greyed the warm colours of the palette, so a hard-edged brown square lost its opaque edge. The cap is fixed and tested, but the measurements above use a green key, so the default stays `off`. The row extractor stays `off` in any case: its frames are a derived cache that `heal` re-derives from raw, so a changed default would silently rewrite every existing run, and pixel-art rows binarize alpha downstream anyway. `video-frames` / `video-set` stay `off` (see the video numbers above).
 
 Limitations:
 
@@ -131,6 +131,7 @@ Limitations:
 - In video a thin strand's chroma is gone before keying, so its colour is chosen from blurred chroma; strands come back in the hair's hue, sometimes a shade darker or paler than drawn.
 - A subject that owns key-coloured material keeps it in its palette, and its edges are repainted with whatever explains them best, key colour included. Keep the default when that material matters.
 - The pixel-unfake path binarizes alpha downstream, so on pixel-art rows only edge colours change.
+- The measurements are on a green key. On magenta the pass is covered by synthetic tests (teal, skin-toned and hard-edged warm subjects, the painted key and Grok's darker one), not by a benchmark.
 
 ## Related
 

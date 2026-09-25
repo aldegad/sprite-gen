@@ -430,7 +430,7 @@ def test_chroma_key_transparent_rejects_zero_percent_alpha(
     src = tmp_path / "src.png"
     Image.new("RGBA", (512, 512), (20, 30, 40, 255)).save(src)
 
-    def ineffective_matte(image, chroma_key, warnings, **_decontam):
+    def ineffective_matte(image, chroma_key, warnings):
         result = image.convert("RGBA")
         result.putpixel((0, 0), (0, 0, 0, 0))
         return result
@@ -769,7 +769,7 @@ def test_generate_image_zero_percent_alpha_fails_without_success_report(
     monkeypatch.setattr(
         chroma_mod,
         "remove_chroma_background_ycbcr",
-        lambda image, chroma_key, warnings, **_decontam: image.convert("RGBA"),
+        lambda image, chroma_key, warnings: image.convert("RGBA"),
     )
 
     out = tmp_path / "asset.png"

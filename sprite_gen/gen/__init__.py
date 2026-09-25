@@ -257,7 +257,7 @@ def generate_image(
     trim_alpha: bool = False,
     keep_session: bool = False,
     workdir: Path | None = None,
-    decontam: str = "auto",
+    decontam: str = "off",
 ) -> GenResult:
     """Generate one image and return a GenResult. Raises SystemExit on any failure."""
     if decontam not in ("off", "auto", "palette"):
@@ -419,7 +419,7 @@ def _run(args: argparse.Namespace) -> int:
         trim_alpha=bool(getattr(args, "trim_alpha", False)),
         keep_session=args.keep_session,
         workdir=args.workdir,
-        decontam=str(getattr(args, "decontam", None) or "auto"),
+        decontam=str(getattr(args, "decontam", None) or "off"),
     )
     payload = result.to_dict()
     # `provider` in the payload is always the backend that actually generated the
@@ -525,10 +525,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--decontam",
         choices=("off", "auto", "palette"),
-        default="auto",
+        default="off",
         help="chroma keying: re-explain key-tinted edges (hair strands, outlines) with the subject's own "
-        "colours after the matte. auto (default) runs it where it applies (chroma strategy, a subject "
-        "interior); palette demands it; off publishes the matte as it is",
+        "colours after the matte. off (default) publishes the matte as it is; auto runs it where it "
+        "applies (chroma strategy, a subject interior); palette demands it",
     )
     parser.add_argument("--chroma-key", choices=sorted(chroma_mod.KEYS), default="magenta")
     parser.add_argument("--facing", choices=(*facing_mod.FACINGS, "preserve"), default="preserve", help="with --ref: required direction; preserve (default) leaves prompt and pixels unchanged")
