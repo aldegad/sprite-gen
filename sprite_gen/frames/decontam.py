@@ -29,7 +29,9 @@ Guards, in order of the decision they make:
   coverage (the faint sides of a strand the hard cut erased), above a noise
   floor measured on the background itself, and only when chained to the subject.
 - *Unexplained.* A pixel no palette colour explains (a small gem of a colour the
-  interior never shows) keeps the engine's bytes.
+  interior never shows) keeps the engine's bytes. In the still fit the blend must
+  also reproduce the observed luma, so outline ink darker than any mix of a
+  palette colour with the key stays as the engine left it.
 - *Opaque.* A band pixel that is closer to some palette colour as it is than the
   mix explains it (by `OPAQUE_MARGIN`, or three noise sigmas when the source is
   noisier) is ordinary shading, not a blend: it keeps the engine's bytes. Only
@@ -83,6 +85,7 @@ LUMA_TRUST_ALPHA = 0.35  # below this coverage the observed luma is noise; lean 
 UNEXPLAINED_RATIO = 0.5
 UNEXPLAINED_SLACK = 8.0
 LUMA_SEPARATION = 24.0  # video fit: luma alpha only where P and B differ this much in luma
+LUMA_MISS_SLACK = 12.0  # still fit: a blend must reproduce the observed luma this closely (plus 3 sigma)
 TINT_SHIFT = 8.0  # a tint moves the colour at least this far toward the key ...
 TINT_RATIO = 2.0  # ... and at least this many times farther than the fit misses by
 LUMA = np.array([0.299, 0.587, 0.114])
@@ -299,8 +302,13 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
             separated = np.abs(luma_gap) >= LUMA_SEPARATION
             luma_alpha = np.clip((offset @ LUMA) / np.where(separated, luma_gap, 1.0), 0.0, 1.0)
             alpha = np.where(separated, 0.5 * (alpha + luma_alpha), alpha)
-        miss = np.linalg.norm(offset - alpha[:, None] * line, axis=-1)
+        residual = offset - alpha[:, None] * line
+        miss = np.linalg.norm(residual, axis=-1)
         explained = miss <= UNEXPLAINED_RATIO * np.linalg.norm(offset, axis=-1) + UNEXPLAINED_SLACK
+        if fit == "still":
+            # a blend's luma lies between its colour's and the key's; a still keeps luma exact, so a
+            # pixel darker than the line allows (outline ink the interior never shows) is not a blend
+            explained &= np.abs(residual @ LUMA) <= LUMA_MISS_SLACK + NOISE_SIGMAS * sigma_luma
         in_flank = flank[r, c]
         is_blend = explained & (alpha < 1.0) & (in_flank | (miss + margin < opaque_distance))
         # a tint: displaced from its colour toward the key clearly more than the fit misses by, but
