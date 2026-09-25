@@ -2,6 +2,10 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## Unreleased (v2.7.0)
+
+- Add opt-in edge decontamination, `decontam: "palette"`. After the matte, each edge pixel is explained as a blend of the locally measured key background with one colour from a palette learned on the subject's own interior. The colour written is that palette colour at the pixel's observed luma, so thin hair strands and outlines come back in the subject's hue: not green, and not the orange that despill's channel gain produces. Available as `cutout --decontam palette`, `gen --transparent --decontam palette` (chroma keying), `video-frames` / `video-set --decontam palette` (video fit, one palette per clip) and request `chroma.decontam` for the row extractor and `inspect`. The default `off` returns every existing output byte for byte. On a procedural ground-truth set, key contamination at the edge falls from 22.5 % to 0.07 % on stills and from 33 % to 11 % on H.264 frames; halo against the true composite shrinks on dark and white backgrounds, and strand recall rises from 84 % to 99 % (stills) and from 82 % to 91 % (frames). Method, guards and limits: [docs/chroma-alpha.md](docs/chroma-alpha.md).
+
 ## v2.6.0 - Automatic local gait selection and XY motion correction
 
 - In `motion-auto`, an uncertain fine XY search-boundary match can emit the selected frames unchanged only after the existing rendered-cell seam gate and animation checks pass. Reports and the CLI expose the rejected measurement and unapplied correction. Other failures and explicit `motion` registration remain strict.
