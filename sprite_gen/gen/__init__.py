@@ -257,8 +257,13 @@ def generate_image(
     trim_alpha: bool = False,
     keep_session: bool = False,
     workdir: Path | None = None,
+    decontam: str = "off",
 ) -> GenResult:
     """Generate one image and return a GenResult. Raises SystemExit on any failure."""
+    if decontam not in ("off", "auto", "palette"):
+        raise SystemExit(f"gen: unknown --decontam {decontam!r}; expected off|auto|palette")
+    if decontam == "palette" and not transparent:
+        raise SystemExit("gen: --decontam applies to the chroma key of a --transparent image; add --transparent")
     prompt = (prompt or "").strip()
     if not prompt:
         raise SystemExit("gen: empty prompt; pass --prompt or --prompt-file")
@@ -279,6 +284,10 @@ def generate_image(
     strategy_source: str | None = None
     if transparent:
         strategy, strategy_source = resolve_transparency_strategy(backend, alpha_mode, refs=refs)
+        if decontam == "palette" and strategy != TRANSPARENCY_CHROMA:
+            # before the provider is called: a paid generation must not end in this refusal
+            raise SystemExit(f"gen: --decontam removes a chroma key; this image would use {strategy} alpha "
+                             "(pass --alpha-mode chroma to key it instead)")
         if strategy_source == STRATEGY_SOURCE_REFS:
             print(
                 f"[gen] {len(refs)} reference image(s) attached — using chroma keying instead of "
@@ -327,7 +336,8 @@ def generate_image(
                 **chroma_mod.verify_native_alpha(raw, out, white_check=white_check),
             }
         elif strategy == TRANSPARENCY_CHROMA:
-            chroma_stats = chroma_mod.key_transparent(raw, out, key=chroma_key, white_check=white_check)
+            chroma_stats = chroma_mod.key_transparent(raw, out, key=chroma_key, white_check=white_check,
+                                                      decontam=decontam)
             alpha_stats = {"strategy": TRANSPARENCY_CHROMA, "strategy_source": strategy_source, **chroma_stats}
         else:
             shutil.copyfile(raw, out)
@@ -409,6 +419,7 @@ def _run(args: argparse.Namespace) -> int:
         trim_alpha=bool(getattr(args, "trim_alpha", False)),
         keep_session=args.keep_session,
         workdir=args.workdir,
+        decontam=str(getattr(args, "decontam", None) or "off"),
     )
     payload = result.to_dict()
     # `provider` in the payload is always the backend that actually generated the
@@ -510,6 +521,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             "chroma forces chroma keying (e.g. a codex prompt that already carries a key background); "
             "native forces native alpha and is refused on a provider that cannot return alpha"
         ),
+    )
+    parser.add_argument(
+        "--decontam",
+        choices=("off", "auto", "palette"),
+        default="off",
+        help="chroma keying: re-explain key-tinted edges (hair strands, outlines) with the subject's own "
+        "colours after the matte. off (default) publishes the matte as it is; auto runs it where it "
+        "applies (chroma strategy, a subject interior); palette demands it",
     )
     parser.add_argument("--chroma-key", choices=sorted(chroma_mod.KEYS), default="magenta")
     parser.add_argument("--facing", choices=(*facing_mod.FACINGS, "preserve"), default="preserve", help="with --ref: required direction; preserve (default) leaves prompt and pixels unchanged")

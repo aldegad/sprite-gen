@@ -60,6 +60,8 @@ When unsure, let `--chroma-key auto` sample the base. It excludes the detected f
 2. **Soft-alpha unmix** — key-tinted blends near the keyed region are separated into despilled RGB + **partial alpha**: the blend model `observed = (1-k)·subject + k·key` is solved from the key-tint score, so antialiased silhouettes keep their coverage ramp instead of collapsing into a binary staircase. In-band blends (inside `--fringe-key-threshold`) are eligible only at key-distance `<= 2`; out-of-band blends use `--fringe-unmix-reach` (default 4). This preserves deeper key-tinted material while fixing trapped blend pockets between hair strands.
 3. **Trapped-spill despill** — a small connected cluster of key-tinted pixels (≤ `--spill-max-fraction` of the subject, default 0.005) containing at least one strongly tinted pixel is generator spill, wherever it sits: its color is corrected in place with alpha kept (no pinholes). Large key-tinted regions are intentional material and are never touched; marginally warm subject colors (skin) never qualify.
 
+An opt-in fourth pass, edge decontamination (`decontam`, below), then re-explains the edge with the subject's own colours.
+
 The unmix/spill tunables live in the run's `sprite-request.json` under `chroma` (`unmix_reach`, `spill_max_fraction`) — the extractor reads them from there, CLI flags override, and the effective values are written back to the request so every run records what produced it. Then it extracts connected components and writes fresh transparent cells. The pixel-unfake path is unaffected: it binarizes alpha downstream (α ≥ 128 → opaque), so soft-alpha input degrades gracefully. This is intentionally closer to hatch-pet than to simple `magick -transparent`.
 
 If component extraction cannot find the declared frame count, the row is blocked. `--allow-slot-fallback` exists for explicit debugging only; it must be reported as `slots-explicit` and is not the default path.
@@ -75,6 +77,63 @@ Port of perfectpixel-studio's `chroma.go` (MIT, see NOTICE). The default RGB pat
 5. **Self-diagnostic rematte** — an opaque-fraction spike (subject erased) or declared-key residue spike (background survived) triggers a rematte with the declared pure key; the better result wins and the fallback is reported via extraction warnings (never silent).
 
 Select with request `chroma.mode: "ycbcr"` or `--chroma-mode ycbcr`. **The default stays `"rgb"`**: on clean flat-key raws the RGB path's exact-solve unmix already removes key tint completely, while ycbcr's fixed-scale despill leaves a small tinted soft-edge halo — ycbcr is for degraded sources (shaded/gradient backgrounds, JPEG chroma noise), not a general upgrade.
+
+## `decontam` — give the edge the subject's own colour back
+
+The unmix above separates a blend by its key-tint score, and that assumes the subject's own colour carries no tint (grey, white). A saturated subject breaks the assumption. A crimson hair strand blended a third of the way into green scores as barely tinted, so it stays opaque and olive; where the full spill pass does reach it, the `1/(1-k)` gain of `despill_color` turns it orange. Video adds a second loss: H.264 4:2:0 has already averaged the key into the chroma of every strand one or two pixels wide. Its luma survives at full resolution.
+
+`decontam: "palette"` re-explains the edge after the matte (either matte). It learns a 32-colour palette from the subject's confident interior (opaque, deeper than 6 px) and fits every subject pixel within 6 px of the keyed background, and every keyed pixel within 3 px of the subject, as
+
+    observed = alpha · P + (1 − alpha) · B
+
+B is the key background measured locally (mean of keyed pixels within 12 px). P is the palette colour whose line through B passes closest to the observation, and alpha is the projection onto that line. The colour written is P's chroma at the observation's luma: the hue comes from the subject, the light and shade from the pixel. When the subject owns no key-hued material (≤ 0.5 % of its interior carries the key hue, the same test `video-frames --spill auto` runs on its reference still), the palette is key-free, so the output cannot carry the key's hue and no channel is amplified.
+
+| The pixel | Outcome |
+|---|---|
+| no palette colour explains it (a colour the interior never shows), or, in the still fit, the explanation misses its luma (outline ink darker than any blend) | engine bytes |
+| closer to a palette colour as observed than the blend explains it (margin 10, or 3 noise sigmas of the background) | engine bytes; with a key-free palette, a leftover key hue (every keyed channel above every other by more than 8) loses the excess beyond 8 on its keyed channels, which never raises a channel and leaves colours without the key hue alone (a red or a skin tone under magenta is not magenta) |
+| pushed toward the key clearly more than the fit misses by, but not proven partial coverage | colour only |
+| a blend within the unmix reach (`chroma.unmix_reach`, default 4) | alpha and colour |
+| a blend deeper in the 6 px band | colour only, so a key reflection on a solid surface is recoloured rather than made see-through |
+| a keyed pixel within 3 px of the subject that fits a blend above the background's noise floor and chains to the subject | coverage recovered: the faint sides of a strand the hard cut erased |
+
+Interior pixels are never touched, `off` returns the engine's output byte for byte, and everything is integer-exact or a fixed sequence of float64 operations (no random seed, no iteration-order dependence). The palette is a histogram k-means with a greedy weighted farthest-point seed and a fixed iteration count. There is no new dependency.
+
+Licensing: the pass is plain numpy inside this Apache-2.0 repository and installs nothing. Learned matting was considered as an optional install: BiRefNet and ViTMatte (MIT) and MODNet (Apache-2.0) are compatible, while RMBG-2.0 (non-commercial) and Robust Video Matting (GPL-3.0) cannot be dependencies. None was adopted: on the ground-truth set below, the two that were measured (BiRefNet-lite and ViTMatte-S alphas with foreground estimation or this repaint) left more key contamination than this pass, and each needs a model download.
+
+Two fits. `still` chooses P per pixel. `video` chooses P on a 3×3 mean of the observation, whose chroma is blurred anyway, and averages the projection alpha with a luma-only alpha where P and B differ in luma. `video-frames` uses the video fit and learns one palette per clip on the first frame, so the colours an edge may take cannot change from frame to frame.
+
+Three modes: `palette` runs the pass and fails loud where it cannot (no key hue, or no subject pixel deeper than 6 px to learn from); `auto` runs it wherever it applies and records why not elsewhere; `off` leaves the matte as it is.
+
+| Entry point | Default | Flag |
+|---|---|---|
+| `sprite-gen cutout IMAGE` | `off` | `--decontam off\|auto\|palette` (chroma routes; on the white matte `auto` records that it has no key colour and `palette` is refused) |
+| `sprite-gen gen … --transparent` | `off` | `--decontam off\|auto\|palette` (chroma strategy; `auto` leaves native alpha alone, `palette` is refused before the provider is called when it cannot apply) |
+| `sprite-gen video-frames`, `video-set` | `off` | `--decontam off\|auto\|palette` |
+| row extractor (`extract`, `inspect`) | `off` | request `chroma.decontam`, or `--decontam` to override; written back to the request once in play |
+
+Reports record what the pass did under `decontam`: mode, whether it applied (and why not), fit, the palette, and changed / refit / tint / recovered / unexplained pixel counts.
+
+Measured on a procedural ground-truth set (red strands 0.5–3 px wide, outline and interior ink, highlights, translucent wisps, white cloth and a gold accent on a painted green key; a still, and an H.264 4:2:0 round trip at CRF 16). Key contamination counts edge pixels covered in both output and truth whose hue turned 12° or more toward the key (green residue and the despill's warm drift both turn that way), or, on near-grey truth, whose a*/b* moved toward the key by 8. Halo is the mean CIEDE2000 against the true composite on #0A0A0D and on white:
+
+| Source | Path | Key contamination | Halo dark / white | Strand recall |
+|---|---|---|---|---|
+| still | RGB engine (default) | 22.5 % | 6.65 / 7.16 | 84.3 % |
+| still | RGB engine + `decontam` (still fit) | 0.07 % | 1.14 / 1.14 | 99.0 % |
+| still | YCbCr matte (`gen`) | 19.1 % | 9.77 / 9.36 | 77.3 % |
+| still | YCbCr matte + `decontam` | 0.16 % | 1.15 / 1.14 | 99.0 % |
+| H.264 frames | RGB engine + `--spill full` | 33.2 % | 12.79 / 12.43 | 82.1 % |
+| H.264 frames | + `decontam` (video fit) | 10.8 % | 9.38 / 8.73 | 91.4 % |
+
+**Defaults.** Every entry point defaults to `off`, which returns the engine's output byte for byte; pass `--decontam auto` (or `palette`) to use the pass. Stills defaulted to `auto` for a while during development. The full test suite then caught a regression on Grok's darker magenta: the key-hue cap greyed the warm colours of the palette, so a hard-edged brown square lost its opaque edge. The cap is fixed and tested, but the measurements above use a green key, so the default stays `off`. The row extractor stays `off` in any case: its frames are a derived cache that `heal` re-derives from raw, so a changed default would silently rewrite every existing run, and pixel-art rows binarize alpha downstream anyway. `video-frames` / `video-set` stay `off` (see the video numbers above).
+
+Limitations:
+
+- An edge takes one of the subject's interior colours at its observed brightness. A thin feature whose colour appears nowhere inside the subject keeps the engine's pixels.
+- In video a thin strand's chroma is gone before keying, so its colour is chosen from blurred chroma; strands come back in the hair's hue, sometimes a shade darker or paler than drawn.
+- A subject that owns key-coloured material keeps it in its palette, and its edges are repainted with whatever explains them best, key colour included. Keep the default when that material matters.
+- The pixel-unfake path binarizes alpha downstream, so on pixel-art rows only edge colours change.
+- The measurements are on a green key. On magenta the pass is covered by synthetic tests (teal, skin-toned and hard-edged warm subjects, the painted key and Grok's darker one), not by a benchmark.
 
 ## Related
 

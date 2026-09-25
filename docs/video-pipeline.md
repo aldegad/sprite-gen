@@ -205,6 +205,18 @@ count even on an edge. The report names the metric, band and dark-only policy.
 Genuine key-coloured material above the 0.5% share still keeps the conservative
 mode. Tiny accents or dark, edge-only material can fall below that reference test; use `--spill small` when preserving those is essential.
 
+### Edges: `--decontam palette`
+
+`--spill` fixes key colour painted *into* the subject. The strands and outlines at its
+edge are a different problem. H.264 4:2:0 has already averaged the key into the chroma of
+anything one or two pixels wide, and despilling what is left turns thin red strands
+orange. `video-frames --decontam palette` (also `video-set --decontam palette`) re-explains
+each edge pixel as a blend of the local key background with one colour the subject owns,
+and writes that colour at the pixel's observed luma. It uses the video fit and one palette
+per clip, learned on the first frame, so edge colours cannot flicker between palettes. The
+default `off` keeps frames byte-identical. Method, guards and measurements:
+[chroma-alpha.md](chroma-alpha.md#decontam--give-the-edge-the-subjects-own-colour-back).
+
 ## 3b. Canvas shape for raised limbs and wide costumes
 
 `video-set` picks the canvas from the state row alone. Two things that are not a jump or
