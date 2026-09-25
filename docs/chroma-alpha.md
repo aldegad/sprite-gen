@@ -99,6 +99,8 @@ B is the key background measured locally (mean of keyed pixels within 12 px). P 
 
 Interior pixels are never touched, `off` returns the engine's output byte for byte, and everything is integer-exact or a fixed sequence of float64 operations (no random seed, no iteration-order dependence). The palette is a histogram k-means with a greedy weighted farthest-point seed and a fixed iteration count. There is no new dependency.
 
+Licensing: the pass is plain numpy inside this Apache-2.0 repository and installs nothing. Learned matting was considered as an optional install: BiRefNet and ViTMatte (MIT) and MODNet (Apache-2.0) are compatible, while RMBG-2.0 (non-commercial) and Robust Video Matting (GPL-3.0) cannot be dependencies. None was adopted: on the ground-truth set below, the two that were measured (BiRefNet-lite and ViTMatte-S alphas with foreground estimation or this repaint) left more key contamination than this pass, and each needs a model download.
+
 Two fits. `still` chooses P per pixel. `video` chooses P on a 3×3 mean of the observation, whose chroma is blurred anyway, and averages the projection alpha with a luma-only alpha where P and B differ in luma. `video-frames` uses the video fit and learns one palette per clip on the first frame, so the colours an edge may take cannot change from frame to frame.
 
 Three modes: `palette` runs the pass and fails loud where it cannot (no key hue, or no subject pixel deeper than 6 px to learn from); `auto` runs it wherever it applies and records why not elsewhere; `off` leaves the matte as it is.
