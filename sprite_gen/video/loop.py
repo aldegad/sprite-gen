@@ -553,7 +553,20 @@ def ramp_frames(frames: list[Image.Image], wrap_dx: int) -> list[Image.Image]:
     return out
 
 
-def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, max_height: int = STRIP_MAX_HEIGHT, max_width: int = STRIP_MAX_WIDTH, cycle_seconds: float, body_height: int | None = None, anchor: str = "none", kind: str = "periodic") -> tuple[Image.Image, dict[str, Any]]:
+def first_frame_height(path: Path) -> int:
+    """The subject's height in the clip's first frame: the base still's pose as filmed.
+
+    Every clip starts from its still (image-to-video), so this is the same pose in every
+    state of one character — which is what one `--body-height` across states has to measure
+    to give that character one size.
+    """
+    box = Image.open(path).convert("RGBA").getchannel("A").point(lambda v: 255 if v >= 8 else 0).getbbox()
+    if box is None:
+        raise SystemExit(f"video-loop: {path.name}, the clip's first frame, has no subject to measure the standing height on (--body-height)")
+    return box[3] - box[1]
+
+
+def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, max_height: int = STRIP_MAX_HEIGHT, max_width: int = STRIP_MAX_WIDTH, cycle_seconds: float, body_height: int | None = None, anchor: str = "none", kind: str = "periodic", standing_src: int | None = None) -> tuple[Image.Image, dict[str, Any]]:
     """Union-crop (no bottom pad so feet meet the floor), scale, bottom-align, tile horizontally.
 
     The cell count is capped by the strip's PIXEL width (`max_width`) as well as by
@@ -564,16 +577,22 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
     boxes = [b for b in boxes if b]
     if not boxes:
         raise SystemExit("video-loop: every cycle frame is fully transparent")
-    left = max(0, min(b[0] for b in boxes) - 8)
+    # The side margins may reach past the frame: a subject allowed to touch the left or right
+    # edge (video-frames --allow-subject-edge-contact) still gets its 8 transparent columns,
+    # so no cell corner is ever the subject. `crop` fills outside the frame with alpha 0.
+    left = min(b[0] for b in boxes) - 8
     top = max(0, min(b[1] for b in boxes) - 8)
-    right = min(frames[0].width, max(b[2] for b in boxes) + 8)
+    right = max(b[2] for b in boxes) + 8
     bottom = max(b[3] for b in boxes)
     # body_h = the STANDING height: the tallest frame whose feet touch the floor. A median
     # over the whole cycle undercounts a jump (crouch + airborne frames dominate) and then
     # over-scales it — the 2026-09-09 hero read 22 % taller than the walk beside it.
     floor = max(b[3] for b in boxes)
     grounded = [b[3] - b[1] for b in boxes if b[3] >= floor - 4] or [b[3] - b[1] for b in boxes]
-    body_src = max(grounded)
+    # `standing_src` is the caller's own measurement of the standing pose (run_loop: the clip's
+    # first frame). The tallest grounded frame counts whatever is raised overhead — an attack's
+    # windup lifts the weapon above the head — and would shrink that state against the others.
+    body_src = standing_src if standing_src is not None else max(grounded)
     # max_height is a ceiling on the CELL; an explicit body_height is a target for the BODY.
     # Without one, nothing is ever scaled up. With one, a state whose source body is SHORTER
     # than the request has to grow — clamping to 1.0 first made the option a downward clamp
@@ -622,6 +641,9 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
         "kind": kind,
         "loop": kind != "one-shot",
         "body_h": round(body_src * scale),
+        "body_src_h": body_src,  # the standing height as filmed; body_h / body_src_h > 1 means the cells were upscaled
+        "body_ref": "first-frame" if standing_src is not None else "tallest-grounded",
+        "scale": round(scale, 4),
         "delay_ms": round(1000 * cycle_seconds / len(cells), 2),
         "cycle_frames": L,
         "cycle_seconds": round(cycle_seconds, 4),
@@ -866,7 +888,8 @@ def run_loop(
         old.unlink()
     for k, im in enumerate(frames):
         im.save(cycle_dir / f"frame-{k:03d}.png")
-    strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds, body_height=body_height, anchor="feet" if anchor == "feet" else "none", kind=str(cycle.get("kind") or "periodic"))
+    strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds, body_height=body_height, anchor="feet" if anchor == "feet" else "none", kind=str(cycle.get("kind") or "periodic"),
+                                    standing_src=first_frame_height(files[0]) if body_height is not None else None)
     if motion is not None:
         strip_meta["foot_anchor"] = anchor
         strip_meta["motion_anchor"] = motion
@@ -968,7 +991,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--start", type=int, help="fixed cut: first keyed frame of the cycle (with --cycle fixed)")
     parser.add_argument("--length", type=int, help="fixed cut: cycle length in frames (with --cycle fixed)")
     parser.add_argument("--strip-height", type=int, default=STRIP_MAX_HEIGHT, help=f"cell/strip/GIF height cap in px (default {STRIP_MAX_HEIGHT}); the cycle is scaled down to fit, and never up unless --body-height asks for it")
-    parser.add_argument("--body-height", type=int, help="scale so the STANDING height (tallest floor-contact frame) is this many px — the same value across states gives the same character size; --strip-height stays the cap")
+    parser.add_argument("--body-height", type=int, help="scale so the STANDING height (the subject in the clip's first frame, i.e. the base still's pose) is this many px — the same value across states gives the same character size; --strip-height stays the cap")
     parser.add_argument("--anchor", choices=ANCHOR_MODES, default=None, help="motion-auto: automatic stable regions, local repeat selection and XY ramp (walk/run); motion: fixed cut with explicit regions; body (default for walk/run): measure the last-to-first head-and-torso offset once and spread it as a ramp over the cycle; feet: remove in-canvas drift (a straight-line trend) so every cell stands on the mean foot line; none: leave placement as filmed (default for other states)")
     parser.add_argument("--anchor-region", type=motion_anchor.parse_region, action="append", help="motion anchor only: repeat twice with head then torso x0,y0,x1,y1 in the first selected frame; requires --cycle fixed and at least 6 frames")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")

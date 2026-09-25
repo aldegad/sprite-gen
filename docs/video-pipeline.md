@@ -47,6 +47,18 @@ height; wide canvases grow both dimensions to preserve their ratio without shrin
 the still. A still whose corners are not one flat colour
 is refused — a non-flat background cannot be extended without guessing.
 
+**`--fit tight` adds no room.** It is the framing for a fixed body height at a low
+clip resolution: the room above makes the subject a small part of the clip, and a
+`--body-height` target then has to upscale it. Tight drops the empty rows above and
+below the subject (keeping headroom of 4 % of the subject's height), keeps the still's full width,
+and pads to the nearest framing the video model returns — 9:16, 1:1 or 16:9, with the
+midpoints at 3:4 and 4:3 — by adding height above or width on both sides. The subject is never
+scaled or cut, a long, low subject in a square still becomes a 16:9 frame it fills,
+and an upright one keeps its square. A motion that leaves the frame is clipped: pair it
+with `video-frames --allow-subject-edge-contact`. Tight picks its own shape, so it
+refuses `--shape` / `--headroom` / `--lead` / `--trail`; the report says `fit` and
+the `tight` rows it kept.
+
 **The canvas owns key normalization.** Image models paint "`#00FF00`" a little
 differently every run — (8, 166, 25) on 2026-09-11 — and the video model reproduces
 the input colour almost exactly (a pure-key input came back as (16, 239, 11)). So when
@@ -69,6 +81,21 @@ stance … same height every time"). `video-set` carries those templates
 (`MOTION_TEXT` / `VIEW_TEXT`). They describe the gait "for this body type" and never
 name limbs — the first drafts said "bipedal … knees … arms pumping", which prompted a
 quadruped and a legless blob into a contradiction (2026-09-09).
+
+An attack is a timed strike, not a repeat. `MOTION_TEXT["attack"]` asks for the same attack
+twice, each a windup (about 0.5 s), one strike in front (about 0.25 s), a held impact pose
+(about 0.3 s) and a recovery to the exact starting stance (about 0.5 s), with what the subject
+holds kept in the hand nearest the viewer and the body never turning. Its template
+(`ACTION_COMMON_TEXT`) drops the "evenly paced" line, keeps what the subject holds inside the
+frame, and asks for crisp frames without motion blur. `video-set` asks attack clips for 4 s
+(`STATE_DURATION_SECONDS`; every other state keeps 3 s, and `--duration` overrides every state)
+and pins the clip to end on the frame it starts from: `--last-frame` is the canvas itself
+(first-last mode, see [video.md](video.md)), so the strike has to come back to the still.
+
+`build_prompt(direction, state, character, facing, motion=...)` takes a caller's own motion
+paragraph — whole sentences about the subject, such as a request interpreter writes per
+request — in place of the built-in state sentence. The frame, camera, background and design
+rules stay the engine's, and an attack keeps its "twice in a row" sentence.
 
 ## 3. Frames — extract, key, check the edges
 
@@ -127,7 +154,13 @@ tight and points at a taller/wider canvas. When both occur the message names bot
 `residual` can also be reported on the antialiased fringe where a subject genuinely
 touches the edge (a key-tinted blend pixel with low alpha), so a "framed too tight"
 message with a small residual count is still a framing problem, not a key problem.
-`--allow-edge-contact` accepts the clipping on purpose.
+`--allow-edge-contact` turns the whole check off. `--allow-subject-edge-contact`
+accepts only the subject at the edge — the clipping a `--fit tight` canvas chooses —
+and still fails a frame where the key alone reaches the edge, which is a keying defect
+whatever the framing. A frame where the subject touches the edge passes with the
+key-tinted pixels beside it (fringe, or the key reflected on metal): the same reading the
+refusal message gives a mixed contact. Contacts stay in the report either way, with `edge_policy` saying which rule
+applied (`refuse`, `subject-allowed`, `off`).
 
 ## 3a. Spill — key colour the model painted into the subject
 
@@ -297,7 +330,8 @@ Outputs:
 
 - `cycle/frame-NNN.png` — the cycle frames, RGB under alpha 0 scrubbed, detached specks
   below 1 % of the body erased.
-- `<name>.strip.png` + `<name>.strip.json` — a horizontal strip (union-cropped, **no bottom
+- `<name>.strip.png` + `<name>.strip.json` — a horizontal strip (union-cropped with 8 transparent
+  columns on each side even where the subject reaches the frame's side edge, **no bottom
   pad** so feet meet the floor, bottom-aligned, ≤ 64 cells **and ≤ 32 000 px wide** because
   Chrome refuses images near 32 767 px — the cap is on pixels, so a 650 px cell allows 49
   cells and the meta says `subsampled`; ≤ 520 px tall) with `frames · w · h · body_h · delay_ms ·
@@ -306,7 +340,11 @@ Outputs:
   and then over-scales it by ~22 %, 2026-09-09). Scale a jump strip — whose cells include
   air room — by `body_h`, not `h`, and it reads the same size as a walk strip;
   `--body-height N` does that scaling in the pipeline so every state comes out at the same
-  character size (`--strip-height` stays the cap). `delay_ms = cycle_seconds / frames`, so a
+  character size (`--strip-height` stays the cap). With a target, the standing height is
+  measured on the **clip's first frame** instead — the base still's pose, which every clip
+  starts from — because the tallest grounded frame of an attack is its windup with the weapon
+  overhead, and scaling that to N shrank the character against its walk. The sidecar says
+  which (`body_ref`: `first-frame` or `tallest-grounded`) and records `body_src_h` and `scale`. `delay_ms = cycle_seconds / frames`, so a
   24 fps clip yields 41.67 ms cells; render at 24 fps to keep one cell per frame
   (a 30 fps render of 24 fps cells is a 5:4 pulldown and judders).
 - `<name>.gif` — `n_out` frames evenly across the cycle, 1-bit alpha, disposal 2, `loop=0`.
@@ -324,7 +362,13 @@ Outputs:
 `sprite-gen video-set --base side=side.png --base front=front.png --states idle,walk,run,jump,attack --out-dir set/`
 runs canvas → video → frames → loop for every (direction, state). The xAI team quota
 is **2 requests per second** (five parallel starts produced two HTTP 429s): starts are
-staggered (`--start-gap 2`) and a 429 gets a bounded, logged retry (15 s, 30 s). Items
+staggered (`--start-gap 2`) and a 429 gets a bounded, logged retry (15 s, 30 s). Clip length
+is each state's own default (3 s, attack 4 s) unless `--duration` sets one for all, and an
+attack clip is pinned to end on its canvas. States use differently shaped canvases (square, tall, wide),
+so the same character films at different pixel heights; `--body-height N` gives every state's loop the
+same standing-height target and keeps the character one size across the set. At a low
+`--resolution`, `--fit tight` frames every item without room so that target is reached by
+scaling down rather than up, and lets the subject reach the frame edge. Items
 are idempotent (an existing clip is reused unless `--force`); one failure stops only
 its item and is listed in `table.md` with its stage and error. Exit code is non-zero
 when any item failed.

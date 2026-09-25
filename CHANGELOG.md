@@ -2,9 +2,27 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v2.7.0)
+## Unreleased (v2.9.0)
 
 - Add opt-in edge decontamination, `--decontam auto|palette` (request `chroma.decontam` for the row extractor and `inspect`). After the matte, each edge pixel is explained as a blend of the locally measured key background with one colour from a palette learned on the subject's own interior. The colour written is that palette colour at the pixel's observed luma, so thin hair strands and outlines come back in the subject's hue: not green, and not the orange that despill's channel gain produces. `palette` demands the pass and fails where it cannot run; `auto` runs it wherever it applies and records why it did not elsewhere. Available on `cutout`, `gen --transparent` (chroma keying), `video-frames` / `video-set` (video fit, one palette per clip) and the row extractor. Every default stays `off`, which returns existing output byte for byte. On a procedural ground-truth set, key contamination at the edge falls from 22.5 % to 0.07 % on stills and from 33 % to 11 % on H.264 frames; halo against the true composite shrinks on dark and white backgrounds, and strand recall rises from 84 % to 99 % (stills) and from 82 % to 91 % (frames). Method, guards and limits: [docs/chroma-alpha.md](docs/chroma-alpha.md).
+
+## v2.8.1 - Tight clips pass their own edge and corner checks
+
+- `video-frames --allow-subject-edge-contact` fails only on a frame where the key alone reaches the edge. A frame where the subject touches the edge carries key-tinted pixels beside it (its antialiased fringe, or the key reflected on metal) and is accepted with them, the same reading a mixed contact already had in the refusal message. Before, a few such pixels failed a tight clip as leftover background.
+- `video-loop` keeps its 8 transparent columns on both sides of every cell even when the subject reaches the frame's side edge, so no cell corner is the subject and the GIF/WebP corner check holds. A crop that stays inside the frame is unchanged.
+
+## v2.8.0 - Tight framing for a fixed body height
+
+- `video-canvas --fit tight` frames a still with no room for the motion: it drops the empty rows above and below the subject (keeping headroom of 4 % of the subject's height), keeps the still's width, and pads to the nearest framing the video model returns (9:16, 1:1, 16:9). The subject is never scaled or cut. A long, low subject in a square still becomes a 16:9 frame it fills, so a `--body-height` target is reached at a low clip resolution by scaling down rather than up. A motion that leaves the frame is clipped. The default `--fit state` is unchanged, and the report now says which `fit` framed it.
+- `video-frames --allow-subject-edge-contact` accepts the subject at the frame edge and still refuses leftover key background there. The report's `edge_policy` names the rule that applied.
+- `video-set --fit tight` frames every item that way and lets its subject reach the edge. It refuses `--shape`, and a cached canvas framed with another fit is not reused.
+- `--body-height` measures the standing height on the clip's first frame, the base still's pose that every clip starts from. The tallest grounded frame, used before, is an attack's windup with the weapon overhead, and scaling that to the target made the character smaller in its attack than in its walk. The strip sidecar records `body_ref`, `body_src_h` (the standing height as filmed) and `scale`, so a strip whose cells were upscaled says so. Without a target nothing changes.
+
+## v2.7.0 - Timed attack clips pinned to their start
+
+- Attack clips are timed strikes pinned to their start. `MOTION_TEXT["attack"]` asks for the same attack twice, each a windup, one strike in front, a held impact pose and a recovery to the exact starting stance with approximate times, keeps what the subject holds in the hand nearest the viewer, and forbids turning. The attack template drops the "evenly paced" line, keeps what the subject holds inside the frame and asks for crisp frames. `video-set` asks attack clips for 4 s by default (other states keep 3 s; `--duration` still sets one length for all) and passes the canvas as `--last-frame`, so the clip ends where it began. The item report records the clip's `duration` and `last_frame`.
+- `build_prompt(..., motion=...)` accepts a caller's own motion paragraph in place of the built-in state sentence, keeping the engine's frame, camera, background and design rules.
+- `video-set --body-height N` passes one standing-height target to every state's loop (`video-loop --body-height`), so a character comes out the same size in every state even though states use differently shaped canvases.
 
 ## v2.6.0 - Automatic local gait selection and XY motion correction
 
