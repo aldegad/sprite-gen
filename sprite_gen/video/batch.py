@@ -58,6 +58,16 @@ VIEW_TEXT = {
     "front": "seen from the front, facing the viewer directly",
     "back": "seen from directly behind, facing away from the viewer",
 }
+# What stays put while an attack moves, said once: after the built-in attack sentence and after a
+# caller's own motion paragraph alike. A request interpreter writes its motion before the still
+# exists, so it cannot know where the other hand's shield or lantern is drawn; the engine holds it.
+HOLD_TEXT = {
+    "attack": (
+        "Every grip stays exactly as shown in the image: one hand stays one hand, both hands stay both hands, "
+        "and nothing is let go or switched to the other hand. A hand the motion does not use stays where it is "
+        "drawn, with anything it holds, and the body keeps facing the same direction without turning."
+    ),
+}
 MOTION_TEXT = {
     # A side-view full body asked for "a subtle weight sway" and an evenly paced loop steps in place
     # more often than not, so the feet are held and walking is named as what not to do.
@@ -71,12 +81,10 @@ MOTION_TEXT = {
     "run": "moves in place on a treadmill: a fast locomotion cycle for this body type with a bounding rhythm and clear repeating ground contacts.",
     "jump": "performs a modest vertical hop in place over and over: compress, spring up about half the body height, land softly, return to the exact starting stance, repeat at an even rhythm. Same height every time.",
     "attack": (
-        "performs the same melee attack twice in a row with what it is already holding, gripped exactly as in the image "
-        "— one hand stays one hand, both hands stay both hands — (bare hands only if it holds nothing), keeping every "
-        "piece of its gear and outfit exactly as drawn. Each attack is a windup (about 0.5 s), one clean strike in front "
-        "(about 0.25 s), a held impact pose (about 0.3 s), then a recovery to the exact starting stance (about 0.5 s). "
-        "What it holds is never let go, switched to the other hand or taken in an extra hand, and the body keeps facing "
-        "the same direction without turning."
+        "performs the same melee attack twice in a row with what it is already holding (bare hands only if it holds "
+        "nothing), keeping every piece of its gear and outfit exactly as drawn. Each attack is a windup (about 0.5 s), "
+        "one clean strike in front (about 0.25 s), a held impact pose (about 0.3 s), then a recovery to the exact "
+        "starting stance (about 0.5 s). " + HOLD_TEXT["attack"]
     ),
     "cheer": "celebrates in place: rises into a raised, spread-out cheer pose, holds it for a beat, then settles back to the exact starting stance, repeating at an even rhythm.",
     "wave": "waves in place: lifts one side into a friendly wave, sways it a few times, then settles back to the exact starting stance, repeating at an even rhythm.",
@@ -127,7 +135,8 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
 
     `motion` replaces the built-in state sentence with the caller's own description of the
     motion, written as whole sentences about the subject (a request interpreter's output, for
-    instance). The frame, camera, background and design rules stay the engine's.
+    instance). What stays put (`HOLD_TEXT`), the repeat count (`REPEAT_TEXT`) and the frame,
+    camera, background and design rules stay the engine's.
     """
     validate_facing(facing)
     view = VIEW_TEXT.get(direction, f"seen from the {direction}").format(facing=facing)
@@ -142,9 +151,10 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
         if not motion:
             raise SystemExit("video: motion description is empty")
         head = "2D game sprite animation. The character {motion} The character is {view}."
+        hold = f" {HOLD_TEXT[state]}" if state in HOLD_TEXT else ""
         repeat = f" {REPEAT_TEXT[state]}" if state in REPEAT_TEXT else ""
         subject = character.strip().rstrip(".") if character else "The character"
-        return f"2D game sprite animation. {motion}{repeat} {subject} is {view}." + template[len(head):]
+        return f"2D game sprite animation. {motion}{hold}{repeat} {subject} is {view}." + template[len(head):]
     text = template.format(motion=MOTION_TEXT.get(state, f"performs the '{state}' action in place, repeating at an even rhythm."), view=view)
     return text.replace("The character", character, 1) if character else text
 
