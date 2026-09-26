@@ -84,10 +84,15 @@ quadruped and a legless blob into a contradiction (2026-09-09).
 
 An attack is a timed strike, not a repeat. `MOTION_TEXT["attack"]` asks for the same attack
 twice, each a windup (about 0.5 s), one strike in front (about 0.25 s), a held impact pose
-(about 0.3 s) and a recovery to the exact starting stance (about 0.5 s), with what the subject
-holds kept in the grip the image shows — one hand stays one hand, both hands stay both hands,
-never let go, switched or taken in an extra hand — and the body never turning. Naming one hand
-for a weapon the still draws in both hands made the clip let go and grab again mid-attack. Its template
+(about 0.3 s) and a recovery to the exact starting stance (about 0.5 s), then `HOLD_TEXT["attack"]`:
+every grip stays the one the image shows — one hand stays one hand, both hands stay both hands,
+nothing let go or switched to the other hand — a hand the strike does not use stays where it is
+drawn with whatever it holds (a shield, a lantern), and the body never turns. Naming one hand
+for a weapon the still draws in both hands made the clip let go and grab again mid-attack.
+A caller's own motion paragraph (`build_prompt(motion=...)`) gets the same `HOLD_TEXT` sentence
+after it, once, then `REPEAT_TEXT`: a request interpreter writes its motion before the still
+exists and cannot know where the other hand's item is drawn, so it writes the choreography and
+the engine says what stays put. Its template
 (`ACTION_COMMON_TEXT`) drops the "evenly paced" line, keeps what the subject holds inside the
 frame, and asks for crisp frames without motion blur. `video-set` asks attack clips for 4 s
 (`STATE_DURATION_SECONDS`; every other state keeps 3 s, and `--duration` overrides every state)

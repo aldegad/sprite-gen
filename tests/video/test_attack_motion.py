@@ -1,4 +1,4 @@
-"""Attack clips: a timed strike twice, one hand, no turning, pinned to end where they start.
+"""Attack clips: a timed strike twice, the drawn grip, no turning, pinned to end where they start.
 
 A 4 s clip, the frame, camera and background rules without the "evenly paced" line, and a
 caller's own motion paragraph (`build_prompt(motion=...)`) in place of the built-in one.
@@ -18,11 +18,15 @@ FIXTURE = Path(__file__).parents[1] / "fixtures" / "facing" / "left.png"
 
 def test_attack_text_is_timed_keeps_the_drawn_grip_and_is_twice() -> None:
     text = batch_mod.build_prompt("side", "attack", None)
-    for phrase in ("twice in a row", "gripped exactly as in the image", "one hand stays one hand, both hands stay both hands",
+    for phrase in ("twice in a row", "Every grip stays exactly as shown in the image", "one hand stays one hand, both hands stay both hands",
                    "windup (about 0.5 s)", "strike in front (about 0.25 s)", "held impact pose (about 0.3 s)",
-                   "exact starting stance", "never let go, switched to the other hand or taken in an extra hand",
+                   "exact starting stance", "nothing is let go or switched to the other hand",
+                   "A hand the motion does not use stays where it is drawn, with anything it holds",
                    "without turning", "anything it holds always stay fully inside the frame", "no motion blur"):
         assert phrase in text, phrase
+    # what stays put is said once, in the same words a caller's own motion gets
+    assert text.count(batch_mod.HOLD_TEXT["attack"]) == 1
+    assert text.count("stays exactly as shown") == 1 and text.count("without turning") == 1
     # the grip is the image's: a heavy weapon drawn in both hands is not asked into one
     assert "hand nearest the viewer" not in text
     assert "evenly paced" not in text
@@ -34,7 +38,8 @@ def test_attack_text_is_timed_keeps_the_drawn_grip_and_is_twice() -> None:
 def test_a_callers_motion_replaces_the_built_in_sentence() -> None:
     motion = "The knight draws the sword back, then strikes forward and holds the impact pose. It never turns."
     text = batch_mod.build_prompt("side", "attack", "A small knight.", facing="right", motion=motion)
-    assert text.startswith(f"2D game sprite animation. {motion} Perform this attack twice in a row with the same timing each time. "
+    hold = batch_mod.HOLD_TEXT["attack"]
+    assert text.startswith(f"2D game sprite animation. {motion} {hold} Perform this attack twice in a row with the same timing each time. "
                            "A small knight is seen from the exact side, facing right. Stays centered")
     assert text.endswith("no motion blur, no smears and no afterimages.")
     assert "melee attack" not in text  # the built-in attack sentence is not added on top
@@ -42,7 +47,7 @@ def test_a_callers_motion_replaces_the_built_in_sentence() -> None:
     assert "The character is seen from the front" in batch_mod.build_prompt("front", "attack", None, motion=" Strikes.\n Holds. ")
     # a state with no repeat sentence and its own template
     walk = batch_mod.build_prompt("side", "walk", None, motion="The fox trots in place.")
-    assert "Perform this attack" not in walk and walk.endswith("so the animation loops.")
+    assert "Perform this attack" not in walk and hold not in walk and walk.endswith("so the animation loops.")
     with pytest.raises(SystemExit):
         batch_mod.build_prompt("side", "attack", None, motion="  \n ")
 
