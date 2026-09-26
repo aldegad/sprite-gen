@@ -8,6 +8,8 @@
 
 </p>
 
+<p align="center"><b>10월 5일까지 인기투표 중이에요.</b> sprite-gen 을 웹에서 바로 쓰는 <a href="https://spritegen.kumastudio.app">스프라이트젠</a>이 원티드 AI Championship 2026 에 출품했어요. 써 보고 도움이 됐다면 <a href="https://event.wanted.co.kr/ai-championship/2026/projects/1641">한 표</a> 부탁드려요. (원티드 로그인과 휴대폰 인증이 필요해요)</p>
+
 <p align="center">
   <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/hero-v2-party.gif" width="960" alt="움직이는 sprite-gen v2 쇼케이스: 팔라딘, 늑대, 슬라임" /></a>
 </p>
