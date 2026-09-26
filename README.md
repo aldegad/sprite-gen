@@ -8,6 +8,8 @@
 
 </p>
 
+<p align="center"><b>Voting is open until October 5 (KST).</b> The hosted web version, <a href="https://spritegen.kumastudio.app">spritegen</a>, is an entry in Wanted AI Championship 2026. If sprite-gen has saved you time, <a href="https://event.wanted.co.kr/ai-championship/2026/projects/1641">a vote</a> would mean a lot (Wanted login and a Korean phone check required).</p>
+
 <p align="center">
   <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/hero-v2-party.gif" width="960" alt="Animated sprite-gen v2 showcase: paladin, wolf and slime" /></a>
 </p>
