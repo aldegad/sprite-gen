@@ -42,7 +42,7 @@ def test_video_set_duration_defaults_per_state(monkeypatch) -> None:
     assert seen["duration"] is None
     assert batch_mod.DEFAULT_DURATION_SECONDS == 3
     assert batch_mod.duration_for("walk", None) == batch_mod.duration_for("jump", None) == 3
-    assert batch_mod.duration_for("attack", None) == 4
+    assert batch_mod.duration_for("attack", None) == 2
     assert batch_mod.duration_for("attack", 6) == batch_mod.duration_for("walk", 6) == 6
 
 
