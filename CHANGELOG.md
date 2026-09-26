@@ -2,6 +2,12 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## v2.11.0 - An attack is one strike, and its whole clip is the loop
+
+- `MOTION_TEXT["attack"]` asks for one attack (windup, strike, held impact pose, recovery to the exact starting stance) instead of the same attack twice, and `build_prompt(motion=...)` no longer adds a repeat sentence after a caller's paragraph (`REPEAT_TEXT` is empty; `HOLD_TEXT` still follows it once). The clip is pinned to the canvas as before, so it runs stance -> strike -> stance, and `video-set` cuts it whole with `video-loop --cycle pinned`, as it already did an idle (`PINNED_LOOP_STATES` = idle, attack). The attack keeps its own template (`ACTION_TEXT_STATES`). Before, the one-shot or period search cut a two-strike clip into loops that started mid-strike, held both strikes, or kept only the held pose, and some of those passed the seam gate.
+- `video-set` asks attack clips for 2 s (`STATE_DURATION_SECONDS`), down from 4. One strike at the stated timing is about 1.6 s; asked for 3 or 4 s, the clip still struck once and held the impact pose for about half of it.
+- Measured on Grok (subscription), 13 characters pinned to their canvas: 13 of 13 loops at 2 s in 480p and in 720p, 13 of 13 at 3 s, 12 of 13 at 4 s (one clip touched the frame edge); every loop is the whole clip and starts on the ready stance. A 2 s clip is half the video seconds of the 4 s one.
+
 ## v2.10.3 - An attack keeps what the other hand holds where it is drawn
 
 - What stays still in an attack is one sentence, `HOLD_TEXT["attack"]`: every grip stays the one the image shows (one hand stays one hand, both hands stay both hands, nothing let go or switched to the other hand), a hand the strike does not use stays where it is drawn with whatever it holds, and the body keeps facing the same direction. The built-in attack sentence ends with it instead of naming the grip twice, and `build_prompt(motion=...)` now adds it once after a caller's own motion paragraph, before the repeat count. A request interpreter writes its motion before the still exists, so it cannot know where a shield or a lantern is drawn; asked to keep "the shield raised in front", a clip brought a shield drawn behind the body to the front and the strike read as a shield bash. The caller writes the choreography, the engine says what stays put.
