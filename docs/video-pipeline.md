@@ -82,22 +82,27 @@ stance … same height every time"). `video-set` carries those templates
 name limbs — the first drafts said "bipedal … knees … arms pumping", which prompted a
 quadruped and a legless blob into a contradiction (2026-09-09).
 
-An attack is a timed strike, not a repeat. `MOTION_TEXT["attack"]` asks for the same attack
-twice, each a windup (about 0.5 s), one strike in front (about 0.25 s), a held impact pose
-(about 0.3 s) and a recovery to the exact starting stance (about 0.5 s), then `HOLD_TEXT["attack"]`:
+An attack is one timed strike, not a repeat. `MOTION_TEXT["attack"]` asks for one attack: a windup
+(about 0.5 s), one strike in front (about 0.25 s), a held impact pose (about 0.3 s) and a recovery
+to the exact starting stance (about 0.5 s), then `HOLD_TEXT["attack"]`:
 every grip stays the one the image shows — one hand stays one hand, both hands stay both hands,
 nothing let go or switched to the other hand — a hand the strike does not use stays where it is
 drawn with whatever it holds (a shield, a lantern), and the body never turns. Naming one hand
 for a weapon the still draws in both hands made the clip let go and grab again mid-attack.
 A caller's own motion paragraph (`build_prompt(motion=...)`) gets the same `HOLD_TEXT` sentence
-after it, once, then `REPEAT_TEXT`: a request interpreter writes its motion before the still
+after it, once: a request interpreter writes its motion before the still
 exists and cannot know where the other hand's item is drawn, so it writes the choreography and
 the engine says what stays put. Its template
 (`ACTION_COMMON_TEXT`) drops the "evenly paced" line, keeps what the subject holds inside the
-frame, and asks for crisp frames without motion blur. `video-set` asks attack clips for 4 s
+frame, and asks for crisp frames without motion blur. `video-set` asks attack clips for 2 s
 (`STATE_DURATION_SECONDS`; every other state keeps 3 s, and `--duration` overrides every state)
 and pins the clip to end on the frame it starts from: `--last-frame` is the canvas itself
-(first-last mode, see [video.md](video.md)), so the strike has to come back to the still.
+(first-last mode, see [video.md](video.md)), so the strike has to come back to the still. That
+clip is stance -> strike -> stance, so it is cut whole like an idle (`--cycle pinned`,
+`PINNED_LOOP_STATES`): the loop starts on the ready stance and never is a fragment of the strike
+or a seam between two strikes. Asked for the same attack twice and cut by the one-shot or period
+search, a clip gave loops that started mid-strike, held both strikes, or kept only the held pose;
+asked for one attack in 3 or 4 s, it held the impact pose for about half the clip.
 
 An idle holds its feet and is pinned too. `MOTION_TEXT["idle"]` keeps both feet planted flat for
 the whole clip, limits the motion to breathing, a settle of the arms, hair and loose cloth and
@@ -112,7 +117,7 @@ it for a repeat.
 `build_prompt(direction, state, character, facing, motion=...)` takes a caller's own motion
 paragraph — whole sentences about the subject, such as a request interpreter writes per
 request — in place of the built-in state sentence. The frame, camera, background and design
-rules stay the engine's, and an attack keeps its "twice in a row" sentence.
+rules stay the engine's, and an attack keeps its `HOLD_TEXT` sentence after the paragraph.
 
 ## 3. Frames — extract, key, check the edges
 
@@ -401,8 +406,8 @@ Outputs:
 runs canvas → video → frames → loop for every (direction, state). The xAI team quota
 is **2 requests per second** (five parallel starts produced two HTTP 429s): starts are
 staggered (`--start-gap 2`) and a 429 gets a bounded, logged retry (15 s, 30 s). Clip length
-is each state's own default (3 s, attack 4 s) unless `--duration` sets one for all, and an
-attack or idle clip is pinned to end on its canvas (an idle is then cut whole, `--cycle pinned`). States use differently shaped canvases (square, tall, wide),
+is each state's own default (3 s, attack 2 s) unless `--duration` sets one for all, and an
+attack or idle clip is pinned to end on its canvas and cut whole (`--cycle pinned`). States use differently shaped canvases (square, tall, wide),
 so the same character films at different pixel heights; `--body-height N` gives every state's loop the
 same standing-height target and keeps the character one size across the set. At a low
 `--resolution`, `--fit tight` frames every item without room so that target is reached by

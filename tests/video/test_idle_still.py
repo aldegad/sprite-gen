@@ -30,10 +30,10 @@ def test_the_idle_prompt_holds_the_feet_and_asks_for_the_return_not_a_rhythm() -
 
 def test_idle_is_pinned_and_its_whole_clip_is_the_loop() -> None:
     assert "idle" in batch_mod.PIN_LAST_FRAME_STATES
-    assert batch_mod.PINNED_LOOP_STATES == frozenset({"idle"})
-    # an attack is pinned too, but cut as a one-shot with its own template
-    assert "attack" not in batch_mod.PINNED_LOOP_STATES
+    assert batch_mod.PINNED_LOOP_STATES == frozenset({"idle", "attack"})
+    # an attack's whole clip is its loop too (one strike, stance to stance), with its own template
     assert "Crisp, clean frames" in batch_mod.build_prompt("side", "attack", None)
+    assert "Crisp, clean frames" not in batch_mod.build_prompt("side", "idle", None)
     # the other states keep the evenly paced loop
     assert "evenly paced" in batch_mod.build_prompt("side", "walk", None)
 

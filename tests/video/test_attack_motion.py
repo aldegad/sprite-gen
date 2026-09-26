@@ -1,4 +1,4 @@
-"""Attack clips: a timed strike twice, the drawn grip, no turning, pinned to end where they start.
+"""Attack clips: one timed strike, the drawn grip, no turning, pinned to end where they start.
 
 A 4 s clip, the frame, camera and background rules without the "evenly paced" line, and a
 caller's own motion paragraph (`build_prompt(motion=...)`) in place of the built-in one.
@@ -16,9 +16,9 @@ from sprite_gen.video import batch as batch_mod
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "facing" / "left.png"
 
 
-def test_attack_text_is_timed_keeps_the_drawn_grip_and_is_twice() -> None:
+def test_attack_text_is_one_timed_strike_that_keeps_the_drawn_grip() -> None:
     text = batch_mod.build_prompt("side", "attack", None)
-    for phrase in ("twice in a row", "Every grip stays exactly as shown in the image", "one hand stays one hand, both hands stay both hands",
+    for phrase in ("one melee attack", "Every grip stays exactly as shown in the image", "one hand stays one hand, both hands stay both hands",
                    "windup (about 0.5 s)", "strike in front (about 0.25 s)", "held impact pose (about 0.3 s)",
                    "exact starting stance", "nothing is let go or switched to the other hand",
                    "A hand the motion does not use stays where it is drawn, with anything it holds",
@@ -29,6 +29,8 @@ def test_attack_text_is_timed_keeps_the_drawn_grip_and_is_twice() -> None:
     assert text.count("stays exactly as shown") == 1 and text.count("without turning") == 1
     # the grip is the image's: a heavy weapon drawn in both hands is not asked into one
     assert "hand nearest the viewer" not in text
+    # one strike: the whole pinned clip is the loop, so nothing asks for a second one
+    assert "twice" not in text and "Perform this attack" not in text
     assert "evenly paced" not in text
     # the repeating states keep their template, evenly paced line included
     assert "evenly paced" in batch_mod.build_prompt("side", "walk", None)
@@ -39,7 +41,7 @@ def test_a_callers_motion_replaces_the_built_in_sentence() -> None:
     motion = "The knight draws the sword back, then strikes forward and holds the impact pose. It never turns."
     text = batch_mod.build_prompt("side", "attack", "A small knight.", facing="right", motion=motion)
     hold = batch_mod.HOLD_TEXT["attack"]
-    assert text.startswith(f"2D game sprite animation. {motion} {hold} Perform this attack twice in a row with the same timing each time. "
+    assert text.startswith(f"2D game sprite animation. {motion} {hold} "
                            "A small knight is seen from the exact side, facing right. Stays centered")
     assert text.endswith("no motion blur, no smears and no afterimages.")
     assert "melee attack" not in text  # the built-in attack sentence is not added on top
@@ -68,8 +70,8 @@ def test_video_cli_pins_the_last_frame_only_when_asked(tmp_path: Path, monkeypat
     assert seen[1][seen[1].index("--duration") + 1] == "4"
 
 
-@pytest.mark.parametrize("state,duration,pinned", [("attack", 4, True), ("jump", 3, False)])
-def test_video_set_pins_attack_to_its_canvas_for_four_seconds(tmp_path: Path, state: str, duration: int, pinned: bool, monkeypatch) -> None:
+@pytest.mark.parametrize("state,duration,pinned", [("attack", 2, True), ("jump", 3, False)])
+def test_video_set_pins_attack_to_its_canvas_for_two_seconds(tmp_path: Path, state: str, duration: int, pinned: bool, monkeypatch) -> None:
     monkeypatch.setattr(batch_mod.facing_mod.vision, "grok_inspect", lambda *a, **kw: ("right", {}))
     calls: list[dict] = []
 
@@ -93,6 +95,7 @@ def test_video_set_pins_attack_to_its_canvas_for_four_seconds(tmp_path: Path, st
 def test_video_set_gives_every_state_the_same_body_height(tmp_path: Path, monkeypatch) -> None:
     from PIL import Image
     seen: list = []
+    cycles: dict = {}
 
     def fake_canvas(base, out, *, state, shape, facing, headroom, lead, report_path, fit="state"):
         Image.new("RGB", (32, 32), (0, 255, 0)).save(out)
@@ -105,6 +108,7 @@ def test_video_set_gives_every_state_the_same_body_height(tmp_path: Path, monkey
 
     def fake_loop(frames_dir, out_dir, **kw):
         seen.append((kw["state"], kw.get("body_height")))
+        cycles[kw["state"]] = kw.get("cycle_mode")
         return {"cycle": {"kind": "periodic", "length": 24, "period_global": 24, "ratio": 0.2}, "resampled_seam_ratio": 0.3,
                 "n_out": 8, "gif": {"file": "g"}, "webp": {"file": "w"}, "strip": {"path": "s", "drift_px": 0}}
 
@@ -124,6 +128,8 @@ def test_video_set_gives_every_state_the_same_body_height(tmp_path: Path, monkey
                                 video_runner=video, body_height=300)
     assert payload["ok"] == 2 and payload["body_height"] == 300
     assert sorted(seen) == [("attack", 300), ("walk", 300)]
+    # one strike, pinned: the attack's whole clip is its loop; a walk still searches its period
+    assert cycles == {"attack": "pinned", "walk": "auto"}
     import argparse
     parser = argparse.ArgumentParser()
     batch_mod.add_arguments(parser)
