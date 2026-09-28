@@ -10,6 +10,8 @@
 
 <p align="center"><b>10월 5일까지 인기투표 중이에요.</b> sprite-gen(스프라이트젠)이 원티드 AI Championship 2026 에 출품했어요. 써 보고 도움이 됐다면 <a href="https://event.wanted.co.kr/ai-championship/2026/projects/1641">한 표</a> 부탁드려요. (원티드 로그인과 휴대폰 인증이 필요해요)</p>
 
+<p align="center"><sub>개발에 필요한 모델 API 비용을 <a href="https://github.com/sponsors/aldegad">GitHub 후원</a>으로 보탤 수 있어요. 원하시는 금액으로 일회성 또는 월간 후원을 선택할 수 있어요.</sub></p>
+
 <p align="center">
   <a href="https://youtu.be/zVu9YlbPtog"><img src="docs/assets/hero-v2-party.gif" width="960" alt="움직이는 sprite-gen v2 쇼케이스: 팔라딘, 늑대, 슬라임" /></a>
 </p>
