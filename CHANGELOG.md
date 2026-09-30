@@ -2,6 +2,13 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## Unreleased (v2.12.0) - A refusal names the provider's code, and says when it was the content policy
+
+- A provider refusal line now carries the provider's own code after the status: `openai-gen: image request failed (HTTP 400) code=invalid_value; no retry or provider fallback`. The code is `error.code` (or, for xAI's synchronous errors, a top-level `code`) and is printed only when it matches `^[A-Za-z0-9_.:-]{1,64}$`; the rest of the error body is still never printed on the image paths, since it can echo the prompt, a key or a signed URL. The video verbs read the code out of a failed poll's `error` object too.
+- A code the provider documents as a content-policy block turns the line into `<verb>: refused by the provider's content policy (HTTP <n>) code=<code>; no retry or provider fallback`, so a caller can tell "change the request" from an auth, quota or parameter error by one fixed phrase. OpenAI's `moderation_blocked` is the only such code (the image guide calls `error.code` the stable discriminator); its `moderation_details.moderation_stage` follows as `moderation_stage=input|output|unknown`. xAI's `invalid_argument` is not one: it covers moderation and parameter errors alike.
+- An xAI clip that finishes with `video.respect_moderation: false` is now `<verb>: generation <id> refused by the provider's content policy (HTTP 200) respect_moderation=false; nothing was written` instead of "done but reported no video url". The xAI REST image answer has no moderation field, so a grok image refusal carries its code only.
+- `(HTTP <n>)` is unchanged, so anything that finds the status with `\(HTTP (\d{3})\)` reads these lines as before. The policy table is `sprite_gen/gen/refusal.py` `POLICY_CODES`. Line shape: [docs/gen.md](docs/gen.md).
+
 ## v2.11.0 - An attack is one strike, and its whole clip is the loop
 
 - `MOTION_TEXT["attack"]` asks for one attack (windup, strike, held impact pose, recovery to the exact starting stance) instead of the same attack twice, and `build_prompt(motion=...)` no longer adds a repeat sentence after a caller's paragraph (`REPEAT_TEXT` is empty; `HOLD_TEXT` still follows it once). The clip is pinned to the canvas as before, so it runs stance -> strike -> stance, and `video-set` cuts it whole with `video-loop --cycle pinned`, as it already did an idle (`PINNED_LOOP_STATES` = idle, attack). The attack keeps its own template (`ACTION_TEXT_STATES`). Before, the one-shot or period search cut a two-strike clip into loops that started mid-strike, held both strikes, or kept only the held pose, and some of those passed the seam gate.
