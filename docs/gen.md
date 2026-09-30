@@ -141,11 +141,15 @@ with `respect_moderation=false` in place of a code (docs/video.md).
 
 `<body>` is the provider's error body as received, last on the line: JSON on one
 line, anything else as its text (line breaks written as `\n`), nothing when the body
-was empty. Two things in it are masked with `[redacted]` (`refusal.redact`): strings
+was empty. Two things in it are masked with `[redacted]` (`refusal.masked`): strings
 shaped like an API key (`sk-…`, `xai-…`, a `Bearer` value, and the credential the
 request carried; a key the provider already masked stays as it came) and the query
-string of any URL, where a signature lives. The body can repeat the prompt, so a
-product that shows sprite-gen's stderr to its own users decides what to cut there.
+string of any URL wherever the URL starts, where a signature lives. Each string is
+masked as the provider sent it, before the body is put on one line, so only a letter
+or digit of the provider's own text in front makes `sk-`, `xai-` or `bearer` part of
+a word (`task-…`); a line break, a tab or any other character does not. The body can
+repeat the prompt, so a product that shows sprite-gen's stderr to its own users
+decides what to cut there.
 The video verbs print what xAI said the same way, through the same mask. Because the
 body comes after everything else, nothing it says moves the status, reason or code
 a caller reads off the front.

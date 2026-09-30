@@ -16,9 +16,12 @@ quota or parameter errors without knowing any provider's vocabulary.
 `<body>` is the provider's error body as received — JSON on one line, anything
 else as its text — so an open-source tool shows the whole error and the product
 that wraps it decides what its own users see. Only two things are masked
-(`redact`): strings shaped like an API key (the credential the request carried
-among them) and the query string of a URL, where a signature lives. The body comes last, so nothing in it can move what a caller
-reads off the front of the line.
+(`masked`): strings shaped like an API key (the credential the request carried
+among them) and the query string of a URL, where a signature lives. The mask
+runs on each string of the body as the provider sent it, before the body is put
+on one line, so no quote or escape this module writes can hide a key from it.
+The body comes last, so nothing in it can move what a caller reads off the front
+of the line.
 """
 from __future__ import annotations
 
@@ -33,12 +36,13 @@ CONTENT_POLICY = "refused by the provider's content policy"
 
 # A key is a known prefix and a long run of key characters. One the provider
 # already masked (`sk-proj-****…abcd`) carries `*` and is left as it came. Only a
-# letter or digit before the prefix makes it part of a word (`task-…`); after
-# `_` or `-` (`api_key_sk-…`) the key starts there.
+# letter or digit of the provider's text before the prefix makes it part of a
+# word (`task-…`); after `_` or `-` (`api_key_sk-…`), a line break or any other
+# character the key starts there.
 _KEY = re.compile(r"(?<![A-Za-z0-9])(sk|xai)-([A-Za-z0-9_*-]+)")
 _KEY_MIN_LENGTH = 16
 _BEARER = re.compile(r"(?i)(?<![A-Za-z0-9])(bearer\s+)[A-Za-z0-9._~+/=-]{16,}")
-_URL_QUERY = re.compile(r"(?i)\b(https?://[^\s?#\"'<>\\]+)\?[^\s#\"'<>\\]*")
+_URL_QUERY = re.compile(r"(?i)(https?://[^\s?#\"'<>\\]+)\?[^\s#\"'<>\\]*")
 REDACTED = "[redacted]"
 
 # Which provider codes are a content-policy block, per provider; the one table.
@@ -73,6 +77,10 @@ def _key(match: re.Match[str]) -> str:
 def redact(text: str, secret: str | None = None) -> str:
     """`text` with key-shaped strings and URL query strings masked; nothing else.
 
+    `text` is one string as the provider sent it (`masked` hands each one over),
+    never a line this module has quoted, escaped or cut: what stands in front of
+    a key is the provider's own character.
+
     `secret` is the credential the request was sent with: an echo of it is a key
     whatever its shape (a login token need not start with `sk-` or `xai-`).
     """
@@ -83,16 +91,41 @@ def redact(text: str, secret: str | None = None) -> str:
     return _URL_QUERY.sub(lambda m: f"{m.group(1)}?{REDACTED}", text)
 
 
+def masked(body: Any, secret: str | None = None) -> Any:
+    """A copy of a parsed error body with every string in it redacted — dict keys
+    and values, list items, a `RawBody`'s text — and nothing else changed. Mask a
+    body with this before anything serializes, escapes or cuts it.
+
+    A number is left alone unless the credential shows in it; then it becomes
+    the masked text. Two field names of one object that mask to the same text
+    keep the later value: a provider's field names are not key-shaped, so only
+    an entry whose name was masked can drop out.
+    """
+    if isinstance(body, RawBody):
+        return RawBody(redact(body.text, secret))
+    if isinstance(body, str):
+        return redact(body, secret)
+    if isinstance(body, dict):
+        return {masked(key, secret): masked(value, secret) for key, value in body.items()}
+    if isinstance(body, list):
+        return [masked(item, secret) for item in body]
+    if isinstance(body, (int, float)) and not isinstance(body, bool) and secret and len(secret) >= 8:
+        text = json.dumps(body)
+        return redact(text, secret) if secret in text else body
+    return body
+
+
 def said(body: Any, secret: str | None = None) -> str:
-    """`: <body>` for the end of a refusal line — the body as received, on one
-    line and redacted — or "" when the provider sent nothing."""
+    """`: <body>` for the end of a refusal line — the body as received, masked
+    and then put on one line — or "" when the provider sent nothing."""
+    body = masked(body, secret)
     if isinstance(body, RawBody):
         text = body.text.strip().replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
     elif body in (None, {}, ""):
         text = ""
     else:
         text = json.dumps(body, ensure_ascii=False)
-    return f": {redact(text, secret)}" if text else ""
+    return f": {text}" if text else ""
 
 
 def identifier(value: Any) -> str | None:
