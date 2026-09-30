@@ -228,7 +228,7 @@ def http_image(url: str, token: str, data: bytes, content_type: str, *, timeout:
         try:
             return exc.code, json.loads(raw)
         except json.JSONDecodeError:
-            return exc.code, {"raw": raw[:400]}
+            return exc.code, refusal.RawBody(raw)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise SystemExit(
             "openai-gen: request failed or timed out; no automatic retry (the server may have accepted it)"
@@ -288,18 +288,19 @@ class OpenAIProvider:
         )
         started = time.monotonic()
         status, reply = http_image(API_BASE + endpoint, token, data, content_type, timeout=GEN_TIMEOUT_SECONDS)
-        # Error bodies can echo the prompt, a key or a signed URL; do not print them.
-        # Only the provider's code (and the moderation stage) leave, format-checked.
+        # The provider's code (and the moderation stage) go in front, format-checked;
+        # the body the provider sent goes last, as received, with keys and URL
+        # query strings masked (refusal.said).
         refused = _refusal(reply) if status != 200 else None
         if status in (401, 403):
             raise SystemExit(
                 f"openai-gen: credential {AUTH_SOURCE_API_KEY} rejected (HTTP {status}){refused.suffix()}; "
-                f"check the key's value and that its project may call {fields['model']}"
+                f"check the key's value and that its project may call {fields['model']}{refusal.said(reply, token)}"
             )
         if refused is not None:
             raise SystemExit(
                 f"openai-gen: {refused.reason('image request failed')} (HTTP {status}){refused.suffix()}; "
-                "no retry or provider fallback"
+                f"no retry or provider fallback{refusal.said(reply, token)}"
             )
         items = reply.get("data") if isinstance(reply, dict) else None
         if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):

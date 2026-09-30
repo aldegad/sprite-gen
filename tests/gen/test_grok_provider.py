@@ -103,12 +103,14 @@ def test_direct_output_keeps_chroma_pipeline(tmp_path, api):
 
 @pytest.mark.parametrize("status", [400, 401, 403, 429, 500])
 def test_api_failure_keeps_existing_output_and_does_not_retry(tmp_path, api, status):
-    api.update(status=status, body={"error": "synthetic-secret https://signed.invalid/private"})
+    api.update(status=status, body={"error": "synthetic-secret https://signed.invalid/private?sig=abc"})
     out = tmp_path / "existing.png"
     out.write_bytes(b"existing")
     with pytest.raises(SystemExit, match=f"HTTP {status}") as error:
         gen.generate_image("grok", "x", out)
-    assert "synthetic-secret" not in str(error.value)
+    # The body is shown; the key the request carried and the URL's signature are not.
+    assert "synthetic-secret" not in str(error.value) and "sig=abc" not in str(error.value)
+    assert '"error": "[redacted] https://signed.invalid/private?[redacted]"' in str(error.value)
     assert out.read_bytes() == b"existing"
     assert len(api["calls"]) == 1
 
@@ -313,7 +315,7 @@ def test_the_declared_subsets_are_the_servers_own_enums():
     assert set(grok.SUPPORTED_RESOLUTIONS) <= set(gen_base.RESOLUTIONS)
 
 
-# --- refusal lines: the provider code, never the body -----------------------------
+# --- refusal lines: the provider code in front, the body as received last ---------
 
 @pytest.mark.parametrize("body, suffix", [
     ({"error": {"code": "invalid_argument", "message": "synthetic-secret"}}, " code=invalid_argument"),
@@ -327,11 +329,26 @@ def test_a_refused_image_names_the_provider_code_only(tmp_path, api, body, suffi
     api.update(status=400, body=body)
     with pytest.raises(SystemExit) as error:
         gen.generate_image("grok", "x", tmp_path / "out.png")
-    assert str(error.value) == f"grok-gen: image request failed (HTTP 400){suffix}; no retry or provider fallback"
+    assert str(error.value) == (f"grok-gen: image request failed (HTTP 400){suffix}; no retry or provider fallback: "
+                                + json.dumps(body).replace("synthetic-secret", "[redacted]"))
 
 
 def test_a_rejected_credential_names_the_code_too(tmp_path, api):
     api.update(status=401, body={"code": "unauthenticated:bad-credentials", "error": "synthetic-secret"})
     with pytest.raises(SystemExit) as error:
         gen.generate_image("grok", "x", tmp_path / "out.png")
-    assert str(error.value) == "grok-gen: credential XAI_API_KEY rejected (HTTP 401) code=unauthenticated:bad-credentials; check XAI_API_KEY"
+    assert str(error.value) == ("grok-gen: credential XAI_API_KEY rejected (HTTP 401) code=unauthenticated:bad-credentials; "
+                                'check XAI_API_KEY: {"code": "unauthenticated:bad-credentials", "error": "[redacted]"}')
+
+
+def test_an_xai_key_and_a_signed_url_in_the_body_are_masked(tmp_path, api):
+    xai_key = "xai-" + "Synthetic0Key1For2Tests3Only4" * 3
+    api.update(status=400, body={"code": "invalid-argument",
+                                 "error": f"bad key {xai_key} at https://x.invalid/v?token=abc and (HTTP 999) code=decoy"})
+    with pytest.raises(SystemExit) as error:
+        gen.generate_image("grok", "x", tmp_path / "out.png")
+    assert str(error.value) == (
+        "grok-gen: image request failed (HTTP 400) code=invalid-argument; no retry or provider fallback: "
+        '{"code": "invalid-argument", "error": "bad key xai-[redacted] at https://x.invalid/v?[redacted] '
+        'and (HTTP 999) code=decoy"}'
+    )

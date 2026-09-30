@@ -472,6 +472,28 @@ def test_a_failed_poll_names_the_code_inside_its_error_object(tmp_path: Path) ->
     assert "content policy" not in message
 
 
+@pytest.mark.parametrize("scripted", ["post", "poll"])
+def test_what_xai_said_is_shown_with_keys_and_signatures_masked(tmp_path: Path, scripted) -> None:
+    """The image lines' mask (refusal.redact) on the clip lines, which already print the body."""
+    token = "synthetic-login-token"
+    said = (f"echo {token}, key xai-{'Synthetic0Key1For2Tests3Only4' * 3}, "
+            "url https://vidgen.x.ai/v/1.mp4?sig=abc, (HTTP 999) code=decoy")
+    error = {"code": "invalid_argument", "message": said}
+    api = _FakeApi(post=(400, {"error": error})) if scripted == "post" else _FakeApi(polls=[(200, {"status": "failed", "error": error})])
+    request = _request(tmp_path)
+    with pytest.raises(SystemExit) as refused:
+        video.generate_video(request, credential=video.Credential(token, video.AUTH_SOURCE_GROK_LOGIN),
+                             call=api.call, download=api.download, sleep=lambda s: None)
+    message = str(refused.value)
+    front = ("video: generation request refused (HTTP 400) code=invalid_argument: " if scripted == "post"
+             else "video: generation req-1 ended with status='failed' (HTTP 200) code=invalid_argument: ")
+    # A query runs to the next space or quote, so the comma after it goes too.
+    assert message == front + ("error={'code': 'invalid_argument', 'message': 'echo [redacted], key xai-[redacted], "
+                               "url https://vidgen.x.ai/v/1.mp4?[redacted] (HTTP 999) code=decoy'}"
+                               + ("" if scripted == "post" else ", status='failed'"))
+    assert HTTP_STATUS.search(message).group(1) == ("400" if scripted == "post" else "200")
+
+
 @pytest.mark.parametrize(("post", "prefix"), [
     ((400, {"code": "invalid-argument", "error": "synthetic"}), "video: generation request refused (HTTP 400) code=invalid-argument: "),
     ((400, {"error": {"code": "invalid_argument", "message": "synthetic"}}), "video: generation request refused (HTTP 400) code=invalid_argument: "),

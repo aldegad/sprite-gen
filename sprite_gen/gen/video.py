@@ -123,11 +123,13 @@ def _data_url(path: Path) -> str:
     return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
 
-def _error_detail(body: Any) -> str:
+def _error_detail(body: Any, secret: str | None = None) -> str:
+    # What the provider said, with keys and URL query strings masked — the same
+    # mask the image lines use (refusal.redact).
     if not isinstance(body, dict):
-        return str(body)[:300]
+        return refusal.redact(str(body)[:300], secret)
     parts = [f"{key}={body[key]!r}" for key in ("code", "error", "message", "status", "raw") if body.get(key)]
-    return ", ".join(parts) if parts else json.dumps(body)[:300]
+    return refusal.redact(", ".join(parts) if parts else json.dumps(body)[:300], secret)
 
 
 def _redact_host(url: str) -> str | None:
@@ -402,7 +404,7 @@ def _submit_poll_publish(
     status, reply = call("POST", f"{API_BASE}/videos/{endpoint}", credential.token, body)
     if status in (401, 403):
         raise SystemExit(
-            f"{verb}: xAI rejected the credential ({credential.source}) with HTTP {status}: {_error_detail(reply)}\n"
+            f"{verb}: xAI rejected the credential ({credential.source}) with HTTP {status}: {_error_detail(reply, credential.token)}\n"
             + (
                 f"  the grok login token may have been revoked or rotated — run `{GROK_REFRESH_COMMAND}` {GROK_REFRESH_WHERE} or `{GROK_LOGIN_COMMAND}`."
                 if credential.source == AUTH_SOURCE_GROK_LOGIN
@@ -413,7 +415,7 @@ def _submit_poll_publish(
     if status not in (200, 202) or not request_id:
         refused = refusal.read("grok", reply)
         raise SystemExit(
-            f"{verb}: {refused.reason('generation request refused')} (HTTP {status}){refused.suffix()}: {_error_detail(reply)}"
+            f"{verb}: {refused.reason('generation request refused')} (HTTP {status}){refused.suffix()}: {_error_detail(reply, credential.token)}"
         )
 
     deadline = time.monotonic() + (POLL_TIMEOUT_SECONDS if poll_timeout is None else poll_timeout)
@@ -446,7 +448,7 @@ def _submit_poll_publish(
             refused = refusal.read("grok", poll)
             raise SystemExit(
                 f"{verb}: generation {request_id} {refused.reason(f'ended with status={poll_status!r}')} "
-                f"(HTTP {http}){refused.suffix()}: {_error_detail(poll)}"
+                f"(HTTP {http}){refused.suffix()}: {_error_detail(poll, credential.token)}"
             )
         if time.monotonic() >= deadline:
             raise SystemExit(

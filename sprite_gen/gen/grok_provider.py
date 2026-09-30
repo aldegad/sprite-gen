@@ -143,21 +143,23 @@ class GrokProvider:
         started = time.monotonic()
         status, reply = xai.http_json("POST", xai.API_BASE + endpoint, credential.token,
                                       body, timeout=GEN_TIMEOUT_SECONDS)
-        # Error bodies can include prompts, credentials or URLs; do not echo them.
-        # Only the provider's code leaves, format-checked. The REST image answer
-        # has no moderation field (docs.x.ai reference; a 2026-09-30 probe's items
-        # carried `b64_json` and `mime_type` only), so a code is all there is.
+        # The provider's code goes in front, format-checked; the body it sent goes
+        # last, as received, with keys and URL query strings masked (refusal.said).
+        # The REST image answer has no moderation field (docs.x.ai reference; a
+        # 2026-09-30 probe's items carried `b64_json` and `mime_type` only), so a
+        # code is all there is to say why.
         refused = refusal.read(self.name, reply) if status != 200 else None
         if status in (401, 403):
             remedy = (f"run `{xai.GROK_LOGIN_COMMAND}` to renew the login" if credential.source == xai.AUTH_SOURCE_GROK_LOGIN
                       else f"check {xai.AUTH_ENV}")
-            raise SystemExit(f"grok-gen: credential {credential.source} rejected (HTTP {status}){refused.suffix()}; {remedy}")
+            raise SystemExit(f"grok-gen: credential {credential.source} rejected (HTTP {status}){refused.suffix()}; {remedy}"
+                             f"{refusal.said(reply, credential.token)}")
         # The one other thing worth naming is the combination the docs scope to
         # grok-imagine-image-2.0, which another model is entitled to reject.
         if refused is not None:
             scoped = f" (sent with {priced}, documented for {DEFAULT_MODEL})" if priced and body["model"] != DEFAULT_MODEL else ""
             raise SystemExit(f"grok-gen: {refused.reason('image request failed')} (HTTP {status}){refused.suffix()}; "
-                             f"no retry or provider fallback{scoped}")
+                             f"no retry or provider fallback{scoped}{refusal.said(reply, credential.token)}")
         items = reply.get("data") if isinstance(reply, dict) else None
         if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
             raise SystemExit("grok-gen: expected exactly one image in the response; nothing published")
