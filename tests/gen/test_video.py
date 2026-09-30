@@ -514,6 +514,16 @@ def test_a_key_after_an_underscore_or_hyphen_is_masked_and_a_word_ending_in_sk_i
     assert video._error_detail({"message": said}) == f"message={masked!r}"
 
 
+@pytest.mark.parametrize(("said", "masked"), [
+    ("Authorization: Bearer " + "synthetic.token.value-0123456789", "Authorization: Bearer [redacted]"),
+    ("x_Bearer " + "synthetic.token.value-0123456789", "x_Bearer [redacted]"),
+    ("x-bearer " + "synthetic.token.value-0123456789", "x-bearer [redacted]"),
+    ("xbearer " + "synthetic.token.value-0123456789", "xbearer " + "synthetic.token.value-0123456789"),
+], ids=["header", "underscore", "hyphen", "word"])
+def test_a_bearer_value_after_an_underscore_or_hyphen_is_masked_and_a_word_ending_in_bearer_is_not(said, masked) -> None:
+    assert video._error_detail({"message": said}) == f"message={masked!r}"
+
+
 @pytest.mark.parametrize(("post", "prefix"), [
     ((400, {"code": "invalid-argument", "error": "synthetic"}), "video: generation request refused (HTTP 400) code=invalid-argument: "),
     ((400, {"error": {"code": "invalid_argument", "message": "synthetic"}}), "video: generation request refused (HTTP 400) code=invalid_argument: "),
