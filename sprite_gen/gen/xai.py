@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from . import refusal
+
 API_BASE = "https://api.x.ai/v1"
 AUTH_ENV = "XAI_API_KEY"
 AUTH_SOURCE_API_KEY = "XAI_API_KEY"
@@ -147,6 +149,6 @@ def http_json(method: str, url: str, token: str, body: dict | None = None, *, ti
         try:
             return exc.code, json.loads(raw)
         except json.JSONDecodeError:
-            return exc.code, {"raw": raw[:400]}
+            return exc.code, refusal.RawBody(raw)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise SystemExit("xai: request failed or timed out; no automatic retry (the server may have accepted it)") from exc

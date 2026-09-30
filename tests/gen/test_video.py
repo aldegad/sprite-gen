@@ -5,6 +5,7 @@ verified mp4 publishing, and loud failures. No network — the HTTP layer is a f
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -427,3 +428,110 @@ def test_the_cli_announces_on_stderr_leaving_the_report_on_stdout(tmp_path: Path
     assert len([line for line in captured.err.splitlines() if "per-call API charge" in line]) == 1
     assert json.loads(captured.out)["auth_source"] == "XAI_API_KEY"
     assert "console-key" not in captured.err + captured.out  # the key itself is never printed
+
+
+# --- refusal lines: the provider code, and xAI's one content-policy signal ---------
+
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")  # what a caller reads the status with
+
+
+def _refused(tmp_path: Path, api: _FakeApi) -> tuple[str, Path]:
+    request = _request(tmp_path)
+    with pytest.raises(SystemExit) as refused:
+        video.generate_video(request, credential=video.Credential("t", video.AUTH_SOURCE_GROK_LOGIN), call=api.call, download=api.download, sleep=lambda s: None)
+    assert not request.out.exists() and not list(tmp_path.glob("*.part"))
+    assert api.downloads == []
+    return str(refused.value), request.out
+
+
+def test_a_moderated_clip_is_a_content_policy_refusal(tmp_path: Path) -> None:
+    api = _FakeApi(polls=[(200, {"status": "done", "video": {"url": "", "respect_moderation": False}})])
+    message, _ = _refused(tmp_path, api)
+    assert message == ("video: generation req-1 refused by the provider's content policy (HTTP 200) "
+                       "respect_moderation=false; nothing was written")
+    assert HTTP_STATUS.search(message).group(1) == "200"
+
+
+def test_a_moderated_clip_is_refused_even_if_a_url_came_back(tmp_path: Path) -> None:
+    api = _FakeApi(polls=[(200, {"status": "done", "video": {"url": "https://vidgen.x.ai/v/1.mp4", "respect_moderation": False}})])
+    assert "refused by the provider's content policy" in _refused(tmp_path, api)[0]
+
+
+def test_a_clip_that_respects_moderation_publishes(tmp_path: Path) -> None:
+    api = _FakeApi(polls=[(200, {"status": "done", "video": {"url": "https://vidgen.x.ai/v/1.mp4", "duration": 6.0, "respect_moderation": True}})])
+    request = _request(tmp_path)
+    video.generate_video(request, credential=video.Credential("t", video.AUTH_SOURCE_GROK_LOGIN), call=api.call, download=api.download, sleep=lambda s: None)
+    assert request.out.read_bytes() == MP4
+
+
+def test_a_failed_poll_names_the_code_inside_its_error_object(tmp_path: Path) -> None:
+    """`invalid_argument` covers moderation and bad parameters alike, so it is a code, not a policy verdict."""
+    api = _FakeApi(polls=[(200, {"status": "failed", "error": {"code": "invalid_argument", "message": "synthetic"}})])
+    message, _ = _refused(tmp_path, api)
+    assert message.startswith("video: generation req-1 ended with status='failed' (HTTP 200) code=invalid_argument: ")
+    assert "content policy" not in message
+
+
+@pytest.mark.parametrize("scripted", ["post", "poll"])
+def test_what_xai_said_is_shown_with_keys_and_signatures_masked(tmp_path: Path, scripted) -> None:
+    """The image lines' mask (refusal.redact) on the clip lines, which already print the body."""
+    token = "synthetic-login-token"
+    said = (f"echo {token}, key xai-{'Synthetic0Key1For2Tests3Only4' * 3}, "
+            "url https://vidgen.x.ai/v/1.mp4?sig=abc, (HTTP 999) code=decoy")
+    error = {"code": "invalid_argument", "message": said}
+    api = _FakeApi(post=(400, {"error": error})) if scripted == "post" else _FakeApi(polls=[(200, {"status": "failed", "error": error})])
+    request = _request(tmp_path)
+    with pytest.raises(SystemExit) as refused:
+        video.generate_video(request, credential=video.Credential(token, video.AUTH_SOURCE_GROK_LOGIN),
+                             call=api.call, download=api.download, sleep=lambda s: None)
+    message = str(refused.value)
+    front = ("video: generation request refused (HTTP 400) code=invalid_argument: " if scripted == "post"
+             else "video: generation req-1 ended with status='failed' (HTTP 200) code=invalid_argument: ")
+    # A query runs to the next space or quote, so the comma after it goes too.
+    assert message == front + ("error={'code': 'invalid_argument', 'message': 'echo [redacted], key xai-[redacted], "
+                               "url https://vidgen.x.ai/v/1.mp4?[redacted] (HTTP 999) code=decoy'}"
+                               + ("" if scripted == "post" else ", status='failed'"))
+    assert HTTP_STATUS.search(message).group(1) == ("400" if scripted == "post" else "200")
+
+
+@pytest.mark.parametrize("body", [
+    "x" * 285 + " xai-" + "K" * 60,
+    {"detail": "x" * 270 + " xai-" + "K" * 60},
+], ids=["text", "json"])
+def test_a_key_the_300_character_cut_would_split_is_masked_before_the_cut(body) -> None:
+    """Masked, then cut: cut first, the key's tail was shorter than a key and slipped through."""
+    detail = video._error_detail(body)
+    assert "KKKK" not in detail
+    assert "xai-[redacted]" in detail and len(detail) <= 300
+
+
+@pytest.mark.parametrize(("said", "masked"), [
+    ("api_key_sk-" + "Synthetic0Key1For2Tests" * 2, "api_key_sk-[redacted]"),
+    ("token-xai-" + "Synthetic0Key1For2Tests" * 2, "token-xai-[redacted]"),
+    ("task-" + "Synthetic0Key1For2Tests" * 2, "task-" + "Synthetic0Key1For2Tests" * 2),
+], ids=["underscore", "hyphen", "word"])
+def test_a_key_after_an_underscore_or_hyphen_is_masked_and_a_word_ending_in_sk_is_not(said, masked) -> None:
+    assert video._error_detail({"message": said}) == f"message={masked!r}"
+
+
+@pytest.mark.parametrize(("said", "masked"), [
+    ("Authorization: Bearer " + "synthetic.token.value-0123456789", "Authorization: Bearer [redacted]"),
+    ("x_Bearer " + "synthetic.token.value-0123456789", "x_Bearer [redacted]"),
+    ("x-bearer " + "synthetic.token.value-0123456789", "x-bearer [redacted]"),
+    ("xbearer " + "synthetic.token.value-0123456789", "xbearer " + "synthetic.token.value-0123456789"),
+], ids=["header", "underscore", "hyphen", "word"])
+def test_a_bearer_value_after_an_underscore_or_hyphen_is_masked_and_a_word_ending_in_bearer_is_not(said, masked) -> None:
+    assert video._error_detail({"message": said}) == f"message={masked!r}"
+
+
+@pytest.mark.parametrize(("post", "prefix"), [
+    ((400, {"code": "invalid-argument", "error": "synthetic"}), "video: generation request refused (HTTP 400) code=invalid-argument: "),
+    ((400, {"error": {"code": "invalid_argument", "message": "synthetic"}}), "video: generation request refused (HTTP 400) code=invalid_argument: "),
+    ((400, {"error": "synthetic"}), "video: generation request refused (HTTP 400): "),
+    ((400, {"code": "not a code", "error": "synthetic"}), "video: generation request refused (HTTP 400): "),
+    ((429, {"error": {"code": "x" * 65}}), "video: generation request refused (HTTP 429): "),
+])
+def test_a_refused_request_names_a_well_formed_code(tmp_path: Path, post, prefix) -> None:
+    message, _ = _refused(tmp_path, _FakeApi(post=post))
+    assert message.startswith(prefix)
+    assert HTTP_STATUS.search(message).group(1) == str(post[0])

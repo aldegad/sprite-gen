@@ -128,8 +128,27 @@ gpt-image models always answer with inline base64 (the API does not accept
 forward. The payload is decoded, verified as a PNG and published atomically without
 resizing; a missing, malformed or multi-image response fails without replacing an
 existing raw output. HTTP 401/403 names the credential; any other non-200 fails
-with the status only — an error body can echo the prompt or a key, so it is not
-printed.
+with the status, the provider's code and the error body the provider sent.
+
+A refusal line is `<verb>: <reason> (HTTP <n>)[ code=<code>][ key=value ...]; …: <body>`:
+`code=` is the provider's `error.code` when it matches `^[A-Za-z0-9_.:-]{1,64}$`,
+and `<reason>` is `refused by the provider's content policy` when that code is a
+documented policy block (`sprite_gen/gen/refusal.py` `POLICY_CODES`: openai
+`moderation_blocked`, followed by `moderation_stage=input|output|unknown`). The
+`(HTTP <n>)` part never changes shape. The video verbs use the same `code=` and
+reason, and a clip xAI reports with `respect_moderation: false` is that refusal
+with `respect_moderation=false` in place of a code (docs/video.md).
+
+`<body>` is the provider's error body as received, last on the line: JSON on one
+line, anything else as its text (line breaks written as `\n`), nothing when the body
+was empty. Two things in it are masked with `[redacted]` (`refusal.redact`): strings
+shaped like an API key (`sk-…`, `xai-…`, a `Bearer` value, and the credential the
+request carried; a key the provider already masked stays as it came) and the query
+string of any URL, where a signature lives. The body can repeat the prompt, so a
+product that shows sprite-gen's stderr to its own users decides what to cut there.
+The video verbs print what xAI said the same way, through the same mask. Because the
+body comes after everything else, nothing it says moves the status, reason or code
+a caller reads off the front.
 
 `--aspect-ratio` picks the `size`. gpt-image has no long-edge preset, so the ratio
 maps to one concrete size out of a table that satisfies the documented constraints
