@@ -311,3 +311,27 @@ def test_the_declared_subsets_are_the_servers_own_enums():
     # one `--quality` / `--resolution` can actually pass in.
     assert set(grok.SUPPORTED_QUALITIES) <= set(gen_base.QUALITIES)
     assert set(grok.SUPPORTED_RESOLUTIONS) <= set(gen_base.RESOLUTIONS)
+
+
+# --- refusal lines: the provider code, never the body -----------------------------
+
+@pytest.mark.parametrize("body, suffix", [
+    ({"error": {"code": "invalid_argument", "message": "synthetic-secret"}}, " code=invalid_argument"),
+    ({"code": "invalid-argument", "error": "synthetic-secret"}, " code=invalid-argument"),
+    ({"error": "synthetic-secret"}, ""),
+    ({"code": "synthetic secret with spaces", "error": "synthetic-secret"}, ""),
+    # The policy table is per provider: OpenAI's code means nothing coming from xAI.
+    ({"error": {"code": "moderation_blocked"}}, " code=moderation_blocked"),
+])
+def test_a_refused_image_names_the_provider_code_only(tmp_path, api, body, suffix):
+    api.update(status=400, body=body)
+    with pytest.raises(SystemExit) as error:
+        gen.generate_image("grok", "x", tmp_path / "out.png")
+    assert str(error.value) == f"grok-gen: image request failed (HTTP 400){suffix}; no retry or provider fallback"
+
+
+def test_a_rejected_credential_names_the_code_too(tmp_path, api):
+    api.update(status=401, body={"code": "unauthenticated:bad-credentials", "error": "synthetic-secret"})
+    with pytest.raises(SystemExit) as error:
+        gen.generate_image("grok", "x", tmp_path / "out.png")
+    assert str(error.value) == "grok-gen: credential XAI_API_KEY rejected (HTTP 401) code=unauthenticated:bad-credentials; check XAI_API_KEY"

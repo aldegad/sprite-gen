@@ -10,6 +10,7 @@ import base64
 import io
 import json
 import os
+import re
 import subprocess
 import urllib.error
 
@@ -351,3 +352,62 @@ def test_a_grok_resolution_is_refused_rather_than_dropped(tmp_path, api):
     assert "2k" in str(error.value)
     assert api["calls"] == []
     assert not (tmp_path / "out.png").exists()
+
+
+# --- refusal lines: the provider code, never the body -----------------------------
+
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")  # what a caller reads the status with
+
+
+def _refused(tmp_path, api, status, error):
+    api.update(status=status, body={"error": {"message": f"{KEY} synthetic prompt echo", **error}})
+    with pytest.raises(SystemExit) as refused:
+        gen.generate_image("openai", "x", tmp_path / "out.png")
+    message = str(refused.value)
+    assert KEY not in message and "prompt echo" not in message
+    assert HTTP_STATUS.search(message).group(1) == str(status)
+    assert len(api["calls"]) == 1
+    return message
+
+
+@pytest.mark.parametrize("details, stage", [
+    ({"moderation_details": {"moderation_stage": "output", "categories": ["other"]}}, " moderation_stage=output"),
+    ({"moderation_details": {"moderation_stage": "input"}}, " moderation_stage=input"),
+    ({"moderation_details": {"moderation_stage": "unknown"}}, " moderation_stage=unknown"),
+    ({}, ""),
+    ({"moderation_details": None}, ""),
+    ({"moderation_details": {"moderation_stage": "a sentence the body made up"}}, ""),
+])
+def test_a_content_policy_block_says_so_with_its_code(tmp_path, api, details, stage):
+    error = {"code": "moderation_blocked", "type": "image_generation_user_error", "param": None, **details}
+    assert _refused(tmp_path, api, 400, error) == (
+        f"openai-gen: refused by the provider's content policy (HTTP 400) code=moderation_blocked{stage}; "
+        "no retry or provider fallback"
+    )
+
+
+def test_another_code_keeps_the_plain_failure_and_names_the_code(tmp_path, api):
+    assert _refused(tmp_path, api, 400, {"code": "invalid_value", "param": "size"}) == (
+        "openai-gen: image request failed (HTTP 400) code=invalid_value; no retry or provider fallback"
+    )
+
+
+@pytest.mark.parametrize("error", [{}, {"code": None}, {"code": 400}, {"code": "has a space"},
+                                   {"code": "x" * 65}, {"code": ""}, {"code": "quote'd"}])
+def test_no_code_or_a_code_outside_the_format_leaves_the_line_as_it_was(tmp_path, api, error):
+    assert _refused(tmp_path, api, 400, error) == (
+        "openai-gen: image request failed (HTTP 400); no retry or provider fallback"
+    )
+
+
+def test_a_top_level_code_is_not_the_openai_error_code(tmp_path, api):
+    api.update(status=400, body={"code": "moderation_blocked", "error": {"message": "x"}})
+    with pytest.raises(SystemExit) as refused:
+        gen.generate_image("openai", "x", tmp_path / "out.png")
+    assert str(refused.value) == "openai-gen: image request failed (HTTP 400); no retry or provider fallback"
+
+
+def test_a_rejected_key_names_the_code_too(tmp_path, api):
+    assert _refused(tmp_path, api, 401, {"code": "invalid_api_key"}).startswith(
+        "openai-gen: credential OPENAI_API_KEY rejected (HTTP 401) code=invalid_api_key; check the key's value"
+    )

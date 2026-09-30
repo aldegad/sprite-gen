@@ -202,6 +202,12 @@ printed or written** — only the download host (`vidgen.x.ai`).
 
 - Imagine quota is a weekly SuperGrok allowance; when it is exhausted the API
   refuses the POST and the run fails with that message (no retry loop here).
+- A refused request or a failed poll names the provider's code after the status,
+  `(HTTP 400) code=invalid_argument`, read from a top-level `code` or the `error`
+  object. `invalid_argument` covers moderation and bad parameters alike, so it is
+  not called a content-policy refusal; a clip that comes back `done` with
+  `video.respect_moderation: false` is:
+  `<verb>: generation <id> refused by the provider's content policy (HTTP 200) respect_moderation=false; nothing was written`.
 - Duration 1–15 s, resolutions 480p/720p/1080p, the seven aspect ratios above —
   from the xAI video docs as of 2026-09-08. Reference-to-video: ≤ 7 images, 720p
   max; extension: input 2–15 s, 2–10 s added; editing: input ≤ 8.7 s (docs as of

@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from sprite_gen.spec.runio import atomic_write_text
+from . import refusal
 from .base import announce_api_billing
 from .facing import FACINGS, validate as validate_facing
 from sprite_gen.video import facing as facing_mod
@@ -410,7 +411,10 @@ def _submit_poll_publish(
         )
     request_id = reply.get("request_id") if isinstance(reply, dict) else None
     if status not in (200, 202) or not request_id:
-        raise SystemExit(f"{verb}: generation request refused (HTTP {status}): {_error_detail(reply)}")
+        refused = refusal.read("grok", reply)
+        raise SystemExit(
+            f"{verb}: {refused.reason('generation request refused')} (HTTP {status}){refused.suffix()}: {_error_detail(reply)}"
+        )
 
     deadline = time.monotonic() + (POLL_TIMEOUT_SECONDS if poll_timeout is None else poll_timeout)
     polls = 0
@@ -425,13 +429,24 @@ def _submit_poll_publish(
         if http in (200, 202) and poll_status in _DONE_STATUSES:
             final = poll
             video = poll.get("video") or {}
+            # docs.x.ai videos reference: `respect_moderation` is false (and the url
+            # empty) when the clip broke moderation rules — the one xAI signal that
+            # is a content-policy block and nothing else. No provider code exists.
+            if isinstance(video, dict) and video.get("respect_moderation") is False:
+                raise SystemExit(
+                    f"{verb}: generation {request_id} {refusal.CONTENT_POLICY} (HTTP {http}) "
+                    "respect_moderation=false; nothing was written"
+                )
             video_url = video.get("url") if isinstance(video, dict) else None
             duration_reported = video.get("duration") if isinstance(video, dict) else None
             model_reported = poll.get("model")
             break
         if http not in (200, 202) or poll_status in _FAILED_STATUSES:
+            # A failed poll carries `error` as an object `{code, message}`.
+            refused = refusal.read("grok", poll)
             raise SystemExit(
-                f"{verb}: generation {request_id} ended with status={poll_status!r} (HTTP {http}): {_error_detail(poll)}"
+                f"{verb}: generation {request_id} {refused.reason(f'ended with status={poll_status!r}')} "
+                f"(HTTP {http}){refused.suffix()}: {_error_detail(poll)}"
             )
         if time.monotonic() >= deadline:
             raise SystemExit(
