@@ -39,6 +39,7 @@ from typing import Any
 
 from PIL import Image, UnidentifiedImageError
 
+from . import refusal
 from .base import (
     GEN_TIMEOUT_SECONDS,
     QUALITIES,
@@ -87,6 +88,11 @@ SIZES = {
 DEFAULT_SIZE = SIZES["1:1"]
 
 _REFERENCE_MIMES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+
+# `error.moderation_details.moderation_stage` on a `moderation_blocked` answer
+# (image-generation guide, 2026-09-30): whether the prompt/input images or the
+# drawn image was blocked. Only these documented values reach the line.
+MODERATION_STAGES = ("input", "output", "unknown")
 
 
 def resolve_credential(env: dict[str, str] | None = None) -> str:
@@ -229,6 +235,14 @@ def http_image(url: str, token: str, data: bytes, content_type: str, *, timeout:
         ) from exc
 
 
+def _refusal(reply: Any) -> refusal.Refusal:
+    error = reply.get("error") if isinstance(reply, dict) else None
+    moderation = error.get("moderation_details") if isinstance(error, dict) else None
+    stage = moderation.get("moderation_stage") if isinstance(moderation, dict) else None
+    details = (("moderation_stage", stage),) if stage in MODERATION_STAGES else ()
+    return refusal.read("openai", reply, details)
+
+
 def _publish_image(item: dict, path: Path) -> None:
     # gpt-image models always answer with inline base64 — no signed URL to follow
     # and no bearer token to forward.
@@ -274,14 +288,19 @@ class OpenAIProvider:
         )
         started = time.monotonic()
         status, reply = http_image(API_BASE + endpoint, token, data, content_type, timeout=GEN_TIMEOUT_SECONDS)
+        # Error bodies can echo the prompt, a key or a signed URL; do not print them.
+        # Only the provider's code (and the moderation stage) leave, format-checked.
+        refused = _refusal(reply) if status != 200 else None
         if status in (401, 403):
             raise SystemExit(
-                f"openai-gen: credential {AUTH_SOURCE_API_KEY} rejected (HTTP {status}); "
+                f"openai-gen: credential {AUTH_SOURCE_API_KEY} rejected (HTTP {status}){refused.suffix()}; "
                 f"check the key's value and that its project may call {fields['model']}"
             )
-        # Error bodies can echo the prompt, a key or a signed URL; do not print them.
-        if status != 200:
-            raise SystemExit(f"openai-gen: image request failed (HTTP {status}); no retry or provider fallback")
+        if refused is not None:
+            raise SystemExit(
+                f"openai-gen: {refused.reason('image request failed')} (HTTP {status}){refused.suffix()}; "
+                "no retry or provider fallback"
+            )
         items = reply.get("data") if isinstance(reply, dict) else None
         if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
             raise SystemExit("openai-gen: expected exactly one image in the response; nothing published")

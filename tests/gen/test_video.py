@@ -5,6 +5,7 @@ verified mp4 publishing, and loud failures. No network — the HTTP layer is a f
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -427,3 +428,58 @@ def test_the_cli_announces_on_stderr_leaving_the_report_on_stdout(tmp_path: Path
     assert len([line for line in captured.err.splitlines() if "per-call API charge" in line]) == 1
     assert json.loads(captured.out)["auth_source"] == "XAI_API_KEY"
     assert "console-key" not in captured.err + captured.out  # the key itself is never printed
+
+
+# --- refusal lines: the provider code, and xAI's one content-policy signal ---------
+
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")  # what a caller reads the status with
+
+
+def _refused(tmp_path: Path, api: _FakeApi) -> tuple[str, Path]:
+    request = _request(tmp_path)
+    with pytest.raises(SystemExit) as refused:
+        video.generate_video(request, credential=video.Credential("t", video.AUTH_SOURCE_GROK_LOGIN), call=api.call, download=api.download, sleep=lambda s: None)
+    assert not request.out.exists() and not list(tmp_path.glob("*.part"))
+    assert api.downloads == []
+    return str(refused.value), request.out
+
+
+def test_a_moderated_clip_is_a_content_policy_refusal(tmp_path: Path) -> None:
+    api = _FakeApi(polls=[(200, {"status": "done", "video": {"url": "", "respect_moderation": False}})])
+    message, _ = _refused(tmp_path, api)
+    assert message == ("video: generation req-1 refused by the provider's content policy (HTTP 200) "
+                       "respect_moderation=false; nothing was written")
+    assert HTTP_STATUS.search(message).group(1) == "200"
+
+
+def test_a_moderated_clip_is_refused_even_if_a_url_came_back(tmp_path: Path) -> None:
+    api = _FakeApi(polls=[(200, {"status": "done", "video": {"url": "https://vidgen.x.ai/v/1.mp4", "respect_moderation": False}})])
+    assert "refused by the provider's content policy" in _refused(tmp_path, api)[0]
+
+
+def test_a_clip_that_respects_moderation_publishes(tmp_path: Path) -> None:
+    api = _FakeApi(polls=[(200, {"status": "done", "video": {"url": "https://vidgen.x.ai/v/1.mp4", "duration": 6.0, "respect_moderation": True}})])
+    request = _request(tmp_path)
+    video.generate_video(request, credential=video.Credential("t", video.AUTH_SOURCE_GROK_LOGIN), call=api.call, download=api.download, sleep=lambda s: None)
+    assert request.out.read_bytes() == MP4
+
+
+def test_a_failed_poll_names_the_code_inside_its_error_object(tmp_path: Path) -> None:
+    """`invalid_argument` covers moderation and bad parameters alike, so it is a code, not a policy verdict."""
+    api = _FakeApi(polls=[(200, {"status": "failed", "error": {"code": "invalid_argument", "message": "synthetic"}})])
+    message, _ = _refused(tmp_path, api)
+    assert message.startswith("video: generation req-1 ended with status='failed' (HTTP 200) code=invalid_argument: ")
+    assert "content policy" not in message
+
+
+@pytest.mark.parametrize(("post", "prefix"), [
+    ((400, {"code": "invalid-argument", "error": "synthetic"}), "video: generation request refused (HTTP 400) code=invalid-argument: "),
+    ((400, {"error": {"code": "invalid_argument", "message": "synthetic"}}), "video: generation request refused (HTTP 400) code=invalid_argument: "),
+    ((400, {"error": "synthetic"}), "video: generation request refused (HTTP 400): "),
+    ((400, {"code": "not a code", "error": "synthetic"}), "video: generation request refused (HTTP 400): "),
+    ((429, {"error": {"code": "x" * 65}}), "video: generation request refused (HTTP 429): "),
+])
+def test_a_refused_request_names_a_well_formed_code(tmp_path: Path, post, prefix) -> None:
+    message, _ = _refused(tmp_path, _FakeApi(post=post))
+    assert message.startswith(prefix)
+    assert HTTP_STATUS.search(message).group(1) == str(post[0])
