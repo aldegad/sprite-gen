@@ -2,6 +2,12 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## Unreleased (v2.12.1) - The error body is masked as the provider sent it, before it is put on one line
+
+- The error body is now masked string by string, as the provider sent it, before sprite-gen puts it on one line. v2.12.0 masked the finished line, where JSON, `repr` and the line join had already written a line break, a tab or another control or invisible character as `\n`, `\t`, `\x..` or `\u....` (and the video verbs' JSON fallback any non-ASCII character as `\u....`). A key, a `Bearer` value or a URL query right after one of those kept a letter or digit in front of it and was printed as sent, so v2.12.0's "only a letter or digit in front makes `sk-`/`xai-`/`bearer` part of a word" was wrong there. It holds now, and the letter or digit is the provider's own: `task-…` and `xbearer …` are still words, and so is a key after the two characters `\n` or `%0A` the provider wrote itself. A `Bearer` value after a tab or a line break, and the credential the request carried when it holds a quote or a non-ASCII character, are masked too. The API key or login token the request carried was masked in every case, and still is (a number in the body equal to it included).
+- A URL query is masked wherever the URL starts; after `_`, a letter or a non-ASCII letter it was printed as sent.
+- Nothing else in the line changes: a body with nothing to mask prints byte for byte what v2.12.0 printed. When two field names of one error object mask to the same text, the line keeps the later one.
+
 ## v2.12.0 - A refusal names the provider's code, and says when it was the content policy
 
 - A provider refusal line now carries the provider's own code after the status: `openai-gen: image request failed (HTTP 400) code=invalid_value; no retry or provider fallback`. The code is `error.code` (or, for xAI's synchronous errors, a top-level `code`) and is printed only when it matches `^[A-Za-z0-9_.:-]{1,64}$`. The video verbs read the code out of a failed poll's `error` object too.
