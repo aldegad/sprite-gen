@@ -474,7 +474,7 @@ def test_a_failed_poll_names_the_code_inside_its_error_object(tmp_path: Path) ->
 
 @pytest.mark.parametrize("scripted", ["post", "poll"])
 def test_what_xai_said_is_shown_with_keys_and_signatures_masked(tmp_path: Path, scripted) -> None:
-    """The image lines' mask (refusal.redact) on the clip lines, which already print the body."""
+    """The image lines' mask (refusal.masked) on the clip lines, which already print the body."""
     token = "synthetic-login-token"
     said = (f"echo {token}, key xai-{'Synthetic0Key1For2Tests3Only4' * 3}, "
             "url https://vidgen.x.ai/v/1.mp4?sig=abc, (HTTP 999) code=decoy")

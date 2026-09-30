@@ -125,12 +125,14 @@ def _data_url(path: Path) -> str:
 
 def _error_detail(body: Any, secret: str | None = None) -> str:
     # What the provider said, with keys and URL query strings masked — the same
-    # mask the image lines use (refusal.redact). Masked before it is cut, so a
-    # key the cut would split is still whole when the mask looks for it.
+    # mask the image lines use (refusal.masked). Masked before it is quoted,
+    # escaped or cut, so the mask sees each string as xAI sent it and a key the
+    # cut would split is still whole.
+    body = refusal.masked(body, secret)
     if not isinstance(body, dict):
-        return refusal.redact(str(body), secret)[:300]
+        return str(body)[:300]
     parts = [f"{key}={body[key]!r}" for key in ("code", "error", "message", "status", "raw") if body.get(key)]
-    return refusal.redact(", ".join(parts), secret) if parts else refusal.redact(json.dumps(body), secret)[:300]
+    return ", ".join(parts) if parts else json.dumps(body)[:300]
 
 
 def _redact_host(url: str) -> str | None:
