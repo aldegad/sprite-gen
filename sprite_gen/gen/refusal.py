@@ -32,8 +32,10 @@ CODE_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 CONTENT_POLICY = "refused by the provider's content policy"
 
 # A key is a known prefix and a long run of key characters. One the provider
-# already masked (`sk-proj-****…abcd`) carries `*` and is left as it came.
-_KEY = re.compile(r"(?<![A-Za-z0-9_-])(sk|xai)-([A-Za-z0-9_*-]+)")
+# already masked (`sk-proj-****…abcd`) carries `*` and is left as it came. Only a
+# letter or digit before the prefix makes it part of a word (`task-…`); after
+# `_` or `-` (`api_key_sk-…`) the key starts there.
+_KEY = re.compile(r"(?<![A-Za-z0-9])(sk|xai)-([A-Za-z0-9_*-]+)")
 _KEY_MIN_LENGTH = 16
 _BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{16,}")
 _URL_QUERY = re.compile(r"(?i)\b(https?://[^\s?#\"'<>\\]+)\?[^\s#\"'<>\\]*")

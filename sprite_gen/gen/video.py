@@ -125,11 +125,12 @@ def _data_url(path: Path) -> str:
 
 def _error_detail(body: Any, secret: str | None = None) -> str:
     # What the provider said, with keys and URL query strings masked — the same
-    # mask the image lines use (refusal.redact).
+    # mask the image lines use (refusal.redact). Masked before it is cut, so a
+    # key the cut would split is still whole when the mask looks for it.
     if not isinstance(body, dict):
-        return refusal.redact(str(body)[:300], secret)
+        return refusal.redact(str(body), secret)[:300]
     parts = [f"{key}={body[key]!r}" for key in ("code", "error", "message", "status", "raw") if body.get(key)]
-    return refusal.redact(", ".join(parts) if parts else json.dumps(body)[:300], secret)
+    return refusal.redact(", ".join(parts), secret) if parts else refusal.redact(json.dumps(body), secret)[:300]
 
 
 def _redact_host(url: str) -> str | None:

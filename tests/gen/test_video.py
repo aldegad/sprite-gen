@@ -494,6 +494,26 @@ def test_what_xai_said_is_shown_with_keys_and_signatures_masked(tmp_path: Path, 
     assert HTTP_STATUS.search(message).group(1) == ("400" if scripted == "post" else "200")
 
 
+@pytest.mark.parametrize("body", [
+    "x" * 285 + " xai-" + "K" * 60,
+    {"detail": "x" * 270 + " xai-" + "K" * 60},
+], ids=["text", "json"])
+def test_a_key_the_300_character_cut_would_split_is_masked_before_the_cut(body) -> None:
+    """Masked, then cut: cut first, the key's tail was shorter than a key and slipped through."""
+    detail = video._error_detail(body)
+    assert "KKKK" not in detail
+    assert "xai-[redacted]" in detail and len(detail) <= 300
+
+
+@pytest.mark.parametrize(("said", "masked"), [
+    ("api_key_sk-" + "Synthetic0Key1For2Tests" * 2, "api_key_sk-[redacted]"),
+    ("token-xai-" + "Synthetic0Key1For2Tests" * 2, "token-xai-[redacted]"),
+    ("task-" + "Synthetic0Key1For2Tests" * 2, "task-" + "Synthetic0Key1For2Tests" * 2),
+], ids=["underscore", "hyphen", "word"])
+def test_a_key_after_an_underscore_or_hyphen_is_masked_and_a_word_ending_in_sk_is_not(said, masked) -> None:
+    assert video._error_detail({"message": said}) == f"message={masked!r}"
+
+
 @pytest.mark.parametrize(("post", "prefix"), [
     ((400, {"code": "invalid-argument", "error": "synthetic"}), "video: generation request refused (HTTP 400) code=invalid-argument: "),
     ((400, {"error": {"code": "invalid_argument", "message": "synthetic"}}), "video: generation request refused (HTTP 400) code=invalid_argument: "),
