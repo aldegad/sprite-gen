@@ -2,6 +2,11 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## v2.14.0 - A single still can be drawn to a layout guide with crown and floor lines
+
+- `gen --layout-guide` attaches the one-slot form of the row layout guide after any `--ref`: the frame, the inner safe box at the row guide's 9.4 % margin, the centre line, and an orange crown line and a teal floor line one margin inside the safe box (about 19 % and 81 % of the frame height). The prompt says what each line means: the anatomical top of the skull on the orange line, ignoring hair, hats, raised limbs and props; the supporting soles on the teal line, which is a ground-contact line and not a frame edge; nothing of the guide in the output. A still drawn from words tends to fill its frame top to bottom, and an in-place motion then has no room above the head. The lines sit inside the box because on its edges a crown line leaves hair and hats to fill the room above it and a floor line reads as a border the feet float above.
+- The guide is an attached image: openai sends the call to `/images/edits` and bills the guide as image input, and `--transparent` steps down to chroma keying as with any `--ref`. Models differ in how closely they follow it; measure the one you use. The report records the guide's cell in `extra.layout_guide`. Usage: [docs/gen.md](docs/gen.md).
+
 ## v2.13.0 - A front or back walk walks straight, and a walk loop is cut in seconds
 
 - A walk seen from the front or from behind, and a run seen from the front, now have their own sentence (`VIEW_MOTION_TEXT` in `sprite_gen/video/batch.py`): the steps lift and land straight forward and back under the body, toward the viewer or away from it "as if on a treadmill", and the body never turns to the side, steps sideways or crosses its feet. A walk also asks for a calm, natural cycle with small, even steps that never kick a leg out to the side. The walk sentence every view shared asked for "an even left-right or front-back rhythm", and a character facing the viewer read it as stepping sideways: crossed feet, side kicks, a body turned to three-quarters. A side view and a run seen from behind keep the state's sentence.
