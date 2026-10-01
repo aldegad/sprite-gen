@@ -486,10 +486,31 @@ def test_prompt_uses_state_and_view_and_optional_character() -> None:
     assert "The character" in batch_mod.build_prompt("back", "jump", None)
 
 
+def test_front_and_back_gaits_say_which_way_the_steps_go() -> None:
+    for state, direction, opening in (
+        ("walk", "front", "walks in place toward the viewer"),
+        ("walk", "back", "walks in place away from the viewer"),
+        ("run", "front", "runs in place toward the viewer"),
+    ):
+        sentence = batch_mod.VIEW_MOTION_TEXT[(state, direction)]
+        p = batch_mod.build_prompt(direction, state, None)
+        assert p == batch_mod.COMMON_TEXT.format(motion=sentence, view=batch_mod.VIEW_TEXT[direction])
+        assert f"{opening}, as if on a treadmill" in p
+        assert "never turns to the side, never steps sideways and never crosses its feet" in p
+        assert "left-right" not in p and "on a treadmill:" not in p
+    # A side view, a run from behind and every other front or back state keep the state's own sentence.
+    assert batch_mod.MOTION_TEXT["walk"] in batch_mod.build_prompt("side", "walk", None)
+    assert batch_mod.MOTION_TEXT["run"] in batch_mod.build_prompt("side", "run", None)
+    assert batch_mod.MOTION_TEXT["run"] in batch_mod.build_prompt("back", "run", None)
+    assert batch_mod.MOTION_TEXT["idle"] in batch_mod.build_prompt("back", "idle", None)
+    named = batch_mod.build_prompt("back", "walk", "The armored knight")
+    assert named.startswith("2D game sprite animation. The armored knight walks in place away from the viewer")
+
+
 def test_motion_templates_do_not_assume_a_body_plan() -> None:
     # the templates were first written for a biped; a quadruped or a legless blob must not
     # be prompted into a contradiction (2026-09-09 generalization run)
-    for state, text in batch_mod.MOTION_TEXT.items():
+    for state, text in [*batch_mod.MOTION_TEXT.items(), *batch_mod.VIEW_MOTION_TEXT.items()]:
         for word in (
             "bipedal",
             "knees",

@@ -82,6 +82,22 @@ stance … same height every time"). `video-set` carries those templates
 name limbs — the first drafts said "bipedal … knees … arms pumping", which prompted a
 quadruped and a legless blob into a contradiction (2026-09-09).
 
+A walk seen from the front or from behind, and a run seen from the front, take their own
+sentence (`VIEW_MOTION_TEXT`) instead: the steps lift and land straight forward and back
+under the body, toward the viewer or away from it "as if on a treadmill", and the body never
+turns to the side, steps sideways or crosses its feet. The body-neutral walk sentence asks for
+"an even left-right or front-back rhythm", and a character facing the viewer read that as
+stepping sideways: crossed feet, side kicks, a body turned to three-quarters. Measured on
+Grok (subscription), 480p 3 s, nine humanoid characters twice each, judged on frame sheets
+with the variant hidden: a front walk kept its facing and walked in 7 of 18 clips with the
+old sentence and 13 of 18 with the new one (none turned); a front run in 11 of 18 and 15
+of 18. A back walk did as well with either (8 of 10). "on a treadmill" said as a place was
+sometimes drawn under the feet; "as if on a treadmill" was not. A side view and a run seen
+from behind keep the state's sentence (the second was not measured). A walk drawn at a
+three-quarter angle kept that angle in about half the clips (6 of 10) with the old sentence
+and in 5 of 10 with one that said to walk "toward the way its body faces in the image", and
+otherwise mostly turned to a side view: no sentence tried held a three-quarter view.
+
 An attack is one timed strike, not a repeat. `MOTION_TEXT["attack"]` asks for one attack: a windup
 (about 0.5 s), one strike in front (about 0.25 s), a held impact pose (about 0.3 s) and a recovery
 to the exact starting stance (about 0.5 s), then `HOLD_TEXT["attack"]`:
