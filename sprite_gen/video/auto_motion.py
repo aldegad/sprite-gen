@@ -60,8 +60,23 @@ def _reference(a, box):
     return box, mask, centered, norm
 
 
+def _correlate(region, kernel, rows, cols):
+    """Valid-window cross-correlation of one 2-D channel with a 2-D kernel through one FFT pair.
+
+    The transform is the size of the region, so the circular product only wraps for offsets
+    past the last valid window; those are cut off and no wrapped pixel reaches a result.
+    """
+    spectrum = np.fft.rfft2(region) * np.conj(np.fft.rfft2(kernel, s=region.shape))
+    return np.fft.irfft2(spectrum, s=region.shape)[:rows, :cols]
+
+
 def _match(reference, moving, center, radius):
-    """Bounded masked NCC; vectorized across translations, never wrap pixels."""
+    """Bounded masked NCC at every translation, never wrap pixels.
+
+    Per channel, the masked patch sum, squared sum and product with the centered reference
+    are window correlations, so all offsets come out of a few FFTs instead of one gathered
+    copy of the masked patch per offset (that copy was most of a walk loop's time).
+    """
     (x, y, right, bottom), mask, feature, norm = reference
     cx, cy = center
     height, width = mask.shape
@@ -69,12 +84,23 @@ def _match(reference, moving, center, radius):
     ys, ye = max(0, y-cy-radius), min(moving.shape[0]-height, y-cy+radius)
     if xs > xe or ys > ye:
         raise ValueError("automatic motion anchor has no search overlap")
-    windows = np.lib.stride_tricks.sliding_window_view(
-        moving[ys:ye+height, xs:xe+width], (height, width), axis=(0, 1))
-    patches = windows.transpose(0, 1, 3, 4, 2)[:, :, mask, :]
-    centered = patches - patches.mean(axis=2, keepdims=True)
-    denominator = np.sqrt((centered * centered).sum(axis=(2, 3))) * norm
-    costs = 1 - (centered * feature).sum(axis=(2, 3)) / np.maximum(1e-10, denominator)
+    region = moving[ys:ye+height, xs:xe+width].astype(np.float64)
+    rows, cols = ye-ys+1, xe-xs+1
+    weights = mask.astype(np.float64)
+    count = weights.sum()
+    kernel = np.zeros((height, width, region.shape[2]))
+    kernel[mask] = feature
+    product = np.zeros((rows, cols))
+    energy = np.zeros((rows, cols))
+    for channel in range(region.shape[2]):
+        values = region[:, :, channel]
+        total = _correlate(values, weights, rows, cols)
+        # sum((p - mean p) * f) = sum(p * f) - mean p * sum(f); the reference was centered in
+        # float32, so its sum is near zero but not zero, and is kept rather than assumed away.
+        product += _correlate(values, kernel[:, :, channel], rows, cols) - total * kernel[:, :, channel].sum() / count
+        energy += _correlate(values * values, weights, rows, cols) - total * total / count
+    denominator = np.sqrt(np.maximum(energy, 0.0)) * norm
+    costs = 1 - product / np.maximum(1e-10, denominator)
     iy, ix = np.unravel_index(costs.argmin(), costs.shape)
     dx, dy = x-(xs+int(ix)), y-(ys+int(iy))
     if abs(dx-cx) == radius or abs(dy-cy) == radius:

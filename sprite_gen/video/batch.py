@@ -92,6 +92,32 @@ MOTION_TEXT = {
     "cheer": "celebrates in place: rises into a raised, spread-out cheer pose, holds it for a beat, then settles back to the exact starting stance, repeating at an even rhythm.",
     "wave": "waves in place: lifts one side into a friendly wave, sways it a few times, then settles back to the exact starting stance, repeating at an even rhythm.",
 }
+# A walk seen from the front or from behind, and a run seen from the front, in place of the body-neutral
+# sentences above. Asked for "an even left-right or front-back rhythm", a walk that faces the viewer
+# stepped sideways, crossed its feet or turned the body to the side in most of the takes. These say which
+# way the steps go and that the body does not turn. A walk also asks for small, calm steps: without them a
+# front walk still crossed its feet or kicked sideways in about a quarter of the takes. A side view keeps
+# MOTION_TEXT, and so does a run seen from behind, which was not measured. "as if on a treadmill" keeps
+# the treadmill a comparison: said as a place, it was sometimes drawn under the feet.
+VIEW_MOTION_TEXT = {
+    ("walk", "front"): (
+        "walks in place toward the viewer, as if on a treadmill, without coming any closer: a calm, natural walk cycle "
+        "for this body type with small, even steps, each one lifting and landing straight forward and back under the "
+        "body, with clear repeating ground contacts. It never turns to the side, never steps sideways, never kicks a "
+        "leg out to the side and never crosses its feet."
+    ),
+    ("walk", "back"): (
+        "walks in place away from the viewer, as if on a treadmill, without moving any farther away: a calm, natural "
+        "walk cycle for this body type with small, even steps, each one lifting and landing straight forward and back "
+        "under the body, with clear repeating ground contacts. It never turns to the side, never steps sideways, never "
+        "kicks a leg out to the side and never crosses its feet."
+    ),
+    ("run", "front"): (
+        "runs in place toward the viewer, as if on a treadmill, without coming any closer: a fast run cycle for this "
+        "body type in which every stride lifts and lands straight forward and back under the body, with clear "
+        "repeating ground contacts. It never turns to the side, never steps sideways and never crosses its feet."
+    ),
+}
 COMMON_TEXT = (
     "2D game sprite animation. The character {motion} The character is {view}. Stays centered in the frame and does "
     "not move across the screen; the body and hair always stay fully inside the frame with margin. Camera completely "
@@ -158,7 +184,9 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
         repeat = f" {REPEAT_TEXT[state]}" if state in REPEAT_TEXT else ""
         subject = character.strip().rstrip(".") if character else "The character"
         return f"2D game sprite animation. {motion}{hold}{repeat} {subject} is {view}." + template[len(head):]
-    text = template.format(motion=MOTION_TEXT.get(state, f"performs the '{state}' action in place, repeating at an even rhythm."), view=view)
+    built_in = VIEW_MOTION_TEXT.get((state, direction)) or MOTION_TEXT.get(
+        state, f"performs the '{state}' action in place, repeating at an even rhythm.")
+    text = template.format(motion=built_in, view=view)
     return text.replace("The character", character, 1) if character else text
 
 
