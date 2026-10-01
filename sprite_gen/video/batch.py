@@ -94,23 +94,18 @@ MOTION_TEXT = {
 }
 # A walk seen from the front or from behind, and a run seen from the front, in place of the body-neutral
 # sentences above. Asked for "an even left-right or front-back rhythm", a walk that faces the viewer
-# stepped sideways, crossed its feet or turned the body to the side in most of the takes. These say which
-# way the steps go and that the body does not turn. A walk also asks for small, calm steps: without them a
-# front walk still crossed its feet or kicked sideways in about a quarter of the takes. A side view keeps
-# MOTION_TEXT, and so does a run seen from behind, which was not measured. "as if on a treadmill" keeps
-# the treadmill a comparison: said as a place, it was sometimes drawn under the feet.
+# stepped sideways, crossed its feet or turned the body to the side in most of the takes. The walk says
+# only that it walks naturally, which way it faces and that it stays in place: the 2.13 sentence spelled out
+# the steps ("each one lifting and landing straight forward and back") and some takes marched in place,
+# knees up to the waist and arms stiff, while "walks naturally" swung the arms and kept the knees low. How a
+# character walks is the caller's to say; the engine's default stays generic. The run keeps saying which way
+# its strides go and that the body does not turn. A side view keeps MOTION_TEXT, and so does a run seen
+# from behind, which was not measured. "as if on a treadmill" keeps the treadmill a comparison: said as a
+# place, it was sometimes drawn under the feet.
 VIEW_MOTION_TEXT = {
-    ("walk", "front"): (
-        "walks in place toward the viewer, as if on a treadmill, without coming any closer: a calm, natural walk cycle "
-        "for this body type with small, even steps, each one lifting and landing straight forward and back under the "
-        "body, with clear repeating ground contacts. It never turns to the side, never steps sideways, never kicks a "
-        "leg out to the side and never crosses its feet."
-    ),
+    ("walk", "front"): "walks naturally in place, facing the viewer, as if on a treadmill, without coming any closer.",
     ("walk", "back"): (
-        "walks in place away from the viewer, as if on a treadmill, without moving any farther away: a calm, natural "
-        "walk cycle for this body type with small, even steps, each one lifting and landing straight forward and back "
-        "under the body, with clear repeating ground contacts. It never turns to the side, never steps sideways, never "
-        "kicks a leg out to the side and never crosses its feet."
+        "walks naturally in place, facing away from the viewer, as if on a treadmill, without moving any farther away."
     ),
     ("run", "front"): (
         "runs in place toward the viewer, as if on a treadmill, without coming any closer: a fast run cycle for this "
