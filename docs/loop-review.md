@@ -73,6 +73,13 @@ textured regions. It ranks their normalized cross-correlation across time and
 requires both to track throughout the sequence. These are stable image regions,
 not semantic detections of a face, torso, species or limb. Untrackable patches are
 counted as rejected candidates; absence of a usable pair is an explicit failure.
+The correlation at every offset of a search window comes out of FFTs: per channel,
+the masked patch sum, its squared sum and its product with the centered reference are
+window correlations, so the masked patch is never copied out once per offset. The
+costs agree with that direct form to about 1e-6, and two offsets that tie within it
+may swap. On three 3 s walk clips at 544 px the region search took 1.0 to 1.4 s of
+CPU instead of 22.6 to 37.4 s, and full loops cut from the same frames gave the same
+cycle and byte-identical strips.
 
 For selection only, the measured horizontal trajectory is locally fitted and the
 vertical linear trend is removed. Local lag minima can then identify a repeat in

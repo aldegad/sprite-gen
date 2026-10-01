@@ -50,6 +50,51 @@ def test_symmetric_steps_keep_two_phase_occurrences_and_respect_window():
                            periodicity_min=.15, double_tolerance=.25, double_search=3)
 
 
+def gathered_match(reference, moving, center, radius):
+    """The masked NCC written out directly: one gathered masked patch per offset."""
+    (x, y, _, _), mask, feature, norm = reference
+    cx, cy = center
+    height, width = mask.shape
+    xs, xe = max(0, x-cx-radius), min(moving.shape[1]-width, x-cx+radius)
+    ys, ye = max(0, y-cy-radius), min(moving.shape[0]-height, y-cy+radius)
+    windows = np.lib.stride_tricks.sliding_window_view(
+        moving[ys:ye+height, xs:xe+width], (height, width), axis=(0, 1))
+    patches = windows.transpose(0, 1, 3, 4, 2)[:, :, mask, :]
+    centered = patches - patches.mean(axis=2, keepdims=True)
+    denominator = np.sqrt((centered * centered).sum(axis=(2, 3))) * norm
+    costs = 1 - (centered * feature).sum(axis=(2, 3)) / np.maximum(1e-10, denominator)
+    return {(x-(xs+ix), y-(ys+iy)): float(costs[iy, ix]) for iy in range(costs.shape[0]) for ix in range(costs.shape[1])}
+
+
+def test_match_equals_the_gathered_masked_ncc():
+    rng = np.random.default_rng(7)
+    unique = tied = 0
+    for k in range(0, 40, 3):
+        a = auto_motion.motion_anchor._features(walker(0))
+        moving = auto_motion.motion_anchor._features(walker(k))
+        for box in [(48, 30, 70, 50), (44, 60, 72, 84), (50, 100, 66, 126)]:
+            reference = auto_motion._reference(a, box)
+            if reference is None:
+                continue
+            center = tuple(int(v) for v in rng.integers(-3, 4, size=2) + np.array([-k, -round(k*.2)]))
+            try:
+                got = auto_motion._match(reference, moving, center, 12)
+            except ValueError:
+                continue
+            expected = gathered_match(reference, moving, center, 12)
+            best = min(expected.values())
+            # The flat synthetic torso matches itself at several vertical shifts; float noise picks
+            # among an exact tie in either implementation, so any member of the tie is right.
+            ties = [offset for offset, cost in expected.items() if cost <= best + 1e-5]
+            assert tuple(got[0].tolist()) in ties
+            assert abs(got[1]-expected[tuple(got[0].tolist())]) < 1e-6
+            if len(ties) == 1:
+                unique += 1
+            else:
+                tied += 1
+    assert unique >= 12 and tied >= 1
+
+
 def test_region_discovery_refuses_blank_input():
     with pytest.raises(ValueError, match='visible foreground'):
         auto_motion.discover([Image.new('RGBA', (100, 100)) for _ in range(6)], reference_index=0)
