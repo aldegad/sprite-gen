@@ -28,7 +28,7 @@ CLI:
         [--ref REF.png ...] [--transparent [--alpha-mode auto|native|chroma]
         [--chroma-key magenta|green]] [--white-check CHECK.png] [--model ID]
         [--aspect-ratio 1:1] [--quality low|medium|high|xhigh|max|auto]
-        [--resolution 1k|1.5k|2k]
+        [--resolution 1k|1.5k|2k] [--layout-guide]
         [--report REPORT.json] [--keep-session]
 """
 
@@ -86,6 +86,52 @@ HARD_DEFAULT_PROVIDER = "codex"
 # can route a subscription user onto metered credit (구독 우선 불변식 1-2).
 EXPLICIT_ONLY_PROVIDERS = ("openai",)
 _CODEX_PROBE_TIMEOUT_SECONDS = 15
+
+# `--layout-guide`: the one-slot form of the guide `prepare` draws for every row
+# (`draw_guide`, the same 9.4 % safe margin), attached after the caller's refs. A
+# single still drawn without it fills its frame top to bottom, and a tall subject
+# then has nothing above the head for an in-place motion to bob into.
+LAYOUT_GUIDE_LONG_EDGE = 1024
+LAYOUT_GUIDE_NAME = "layout-guide.png"
+LAYOUT_GUIDE_TEXT = (
+    "Layout: the last attached image is a layout guide, not part of the character. It shows the frame, "
+    "its inner safe area (the blue box) and the center line. Draw the whole character inside the inner "
+    "safe area, centered on the center line, with clear empty background between the top of the head "
+    "(hair, hats, ears and raised props included) and the top edge, and between the feet and the bottom "
+    "edge. Keep at least 10% of the image height as empty background above the highest point of the "
+    "character, and at least 5% below the feet. Do not reproduce the layout guide itself: no boxes, guide "
+    "lines, center marks, labels, guide colors or the guide's grey background may appear in the output."
+)
+
+
+def layout_guide_size(aspect_ratio: str | None) -> tuple[int, int]:
+    """The guide's pixels for the requested ratio, long edge {LAYOUT_GUIDE_LONG_EDGE}; square without one.
+
+    Only the proportions matter to the model, so the size is the ratio's own and not a
+    provider's output size (codex has none to ask for).
+    """
+    if aspect_ratio in (None, "", "auto"):
+        return LAYOUT_GUIDE_LONG_EDGE, LAYOUT_GUIDE_LONG_EDGE
+    try:
+        width_part, height_part = str(aspect_ratio).split(":")
+        width, height = float(width_part), float(height_part)
+        if width <= 0 or height <= 0:
+            raise ValueError
+    except ValueError as exc:
+        raise SystemExit(f"gen: --layout-guide cannot read aspect ratio {aspect_ratio!r}") from exc
+    scale = LAYOUT_GUIDE_LONG_EDGE / max(width, height)
+    return round(width * scale), round(height * scale)
+
+
+def draw_layout_guide(path: Path, aspect_ratio: str | None) -> dict[str, Any]:
+    """Draws the one-slot guide at `path` and answers its cell (size and safe margins)."""
+    # Imported here: `prepare` owns the row guide and pulls in the row machinery.
+    from .prepare import draw_guide, normalize_cell
+
+    width, height = layout_guide_size(aspect_ratio)
+    cell = normalize_cell({"width": width, "height": height}, width, None)
+    draw_guide(path, 1, cell)
+    return cell
 
 
 def _make_provider(name: str, *, keep_session: bool):
@@ -258,6 +304,7 @@ def generate_image(
     keep_session: bool = False,
     workdir: Path | None = None,
     decontam: str = "off",
+    layout_guide: bool = False,
 ) -> GenResult:
     """Generate one image and return a GenResult. Raises SystemExit on any failure."""
     if decontam not in ("off", "auto", "palette"):
@@ -283,7 +330,9 @@ def generate_image(
     strategy: str | None = None
     strategy_source: str | None = None
     if transparent:
-        strategy, strategy_source = resolve_transparency_strategy(backend, alpha_mode, refs=refs)
+        # The layout guide is an attached image as much as a --ref is: the same step down applies.
+        attached_for_strategy = [*refs, Path(LAYOUT_GUIDE_NAME)] if layout_guide else refs
+        strategy, strategy_source = resolve_transparency_strategy(backend, alpha_mode, refs=attached_for_strategy)
         if decontam == "palette" and strategy != TRANSPARENCY_CHROMA:
             # before the provider is called: a paid generation must not end in this refusal
             raise SystemExit(f"gen: --decontam removes a chroma key; this image would use {strategy} alpha "
@@ -301,10 +350,18 @@ def generate_image(
     raw = workdir / "raw.png"
 
     try:
+        guide_cell: dict[str, Any] | None = None
+        attached = list(refs)
+        if layout_guide:
+            guide = workdir / LAYOUT_GUIDE_NAME
+            guide_cell = draw_layout_guide(guide, aspect_ratio)
+            # Last, so "the last attached image" in the prompt is the guide whatever the caller attached.
+            attached.append(guide)
+            prompt += "\n\n" + LAYOUT_GUIDE_TEXT
         request = GenRequest(
             prompt=prompt,
             raw=raw,
-            refs=refs,
+            refs=attached,
             model=model,
             aspect_ratio=aspect_ratio,
             quality=quality,
@@ -370,7 +427,8 @@ def generate_image(
             alpha=alpha_stats,
             chroma=chroma_stats,
             extra={**run.extra, **({"trim_alpha": trim_stats} if trim_stats else {}),
-                   **({"facing": facing_report} if facing_report else {})},
+                   **({"facing": facing_report} if facing_report else {}),
+                   **({"layout_guide": guide_cell} if guide_cell else {})},
         )
     finally:
         if owns_workdir:
@@ -420,6 +478,7 @@ def _run(args: argparse.Namespace) -> int:
         keep_session=args.keep_session,
         workdir=args.workdir,
         decontam=str(getattr(args, "decontam", None) or "off"),
+        layout_guide=bool(getattr(args, "layout_guide", False)),
     )
     payload = result.to_dict()
     # `provider` in the payload is always the backend that actually generated the
@@ -534,6 +593,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--facing", choices=(*facing_mod.FACINGS, "preserve"), default="preserve", help="with --ref: required direction; preserve (default) leaves prompt and pixels unchanged")
     parser.add_argument("--facing-fix", choices=facing_mod.FIXES, default="none", help="with --ref and --facing: record only (none, default), or opt into mirror / one regen")
     parser.add_argument("--trim-alpha", action="store_true", help="with --transparent: crop the published PNG to its opaque bbox so the bottom edge is the foot line (margins reported)")
+    parser.add_argument(
+        "--layout-guide",
+        action="store_true",
+        help=(
+            "attach a one-slot layout guide (frame, inner safe area at the row guide's 9.4 %% margin, "
+            "center line) after any --ref and ask for the whole subject inside the safe area, with room "
+            "above the head and below the feet; drawn for --aspect-ratio, square without one"
+        ),
+    )
     parser.add_argument("--white-check", type=Path, help="write a white-composite check image")
     parser.add_argument("--keep-session", action="store_true", help="codex: do not delete the rollout jsonl")
     parser.add_argument("--report", type=Path, help="write the generation report JSON here")
