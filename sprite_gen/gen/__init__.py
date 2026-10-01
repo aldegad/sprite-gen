@@ -88,20 +88,38 @@ EXPLICIT_ONLY_PROVIDERS = ("openai",)
 _CODEX_PROBE_TIMEOUT_SECONDS = 15
 
 # `--layout-guide`: the one-slot form of the guide `prepare` draws for every row
-# (`draw_guide`, the same 9.4 % safe margin), attached after the caller's refs. A
-# single still drawn without it fills its frame top to bottom, and a tall subject
-# then has nothing above the head for an in-place motion to bob into.
+# (`draw_guide`, the same 9.4 % safe margin), attached after the caller's refs, with
+# the anatomy lines of the row guide experiments on it: an orange line where the
+# skull's crown goes and a teal line where the soles stand, each one safe margin
+# INSIDE the safe box. On the box's own edges the lines read as frame edges: hair and
+# hats fill the room above the crown and feet float off a floor taken for a border,
+# so both were moved in by a margin. A single still drawn without the guide fills
+# its frame top to bottom, and a tall subject then has nothing above the head for an
+# in-place motion to bob into; a box alone is read loosely, the lines set the scale.
 LAYOUT_GUIDE_LONG_EDGE = 1024
 LAYOUT_GUIDE_NAME = "layout-guide.png"
-LAYOUT_GUIDE_TEXT = (
-    "Layout: the last attached image is a layout guide, not part of the character. It shows the frame, "
-    "its inner safe area (the blue box) and the center line. Draw the whole character inside the inner "
-    "safe area, centered on the center line, with clear empty background between the top of the head "
-    "(hair, hats, ears and raised props included) and the top edge, and between the feet and the bottom "
-    "edge. Keep at least 10% of the image height as empty background above the highest point of the "
-    "character, and at least 5% below the feet. Do not reproduce the layout guide itself: no boxes, guide "
-    "lines, center marks, labels, guide colors or the guide's grey background may appear in the output."
-)
+CROWN_LINE = "#ff7a00"
+CROWN_MARK = "#ffb15c"
+FLOOR_LINE = "#00a7a7"
+FLOOR_MARK = "#63d6d6"
+def layout_guide_text(cell: dict[str, Any]) -> str:
+    """The prompt's half of the guide: where the two lines are, as shares of the frame height."""
+    height = int(cell["height"])
+    crown = round(100 * int(cell["crown_y"]) / height)
+    floor = round(100 * int(cell["floor_y"]) / height)
+    return (
+        "Layout: the last attached image is a layout guide, not part of the character. It shows the frame, "
+        "its inner safe area (the blue box), the center line, an orange crown line and a teal floor line. "
+        f"Place the anatomical top of the skull on the orange line, {crown}% of the frame height from the top, "
+        f"and the lowest supporting sole on the teal line, {floor}% from the top, centered on the center line: "
+        f"an upright crown-to-floor span of {floor - crown}% of the frame height. Ignore hair tufts, raised "
+        "limbs, hats, accessories and props when identifying the crown; they may rise above the orange line "
+        "but stay inside the blue box. The teal line sits INSIDE the safe area, above the bottom safe padding: "
+        "it is a ground-contact line, not a frame edge. The supporting soles must touch it and may not float "
+        "above it, and the space below it stays empty. The colored lines set the character's scale and height "
+        "in the frame; they are not artwork. Do not reproduce the layout guide itself: no boxes, guide lines, "
+        "center marks, labels, guide colors or the guide's grey background may appear in the output."
+    )
 
 
 def layout_guide_size(aspect_ratio: str | None) -> tuple[int, int]:
@@ -128,10 +146,25 @@ def draw_layout_guide(path: Path, aspect_ratio: str | None) -> dict[str, Any]:
     # Imported here: `prepare` owns the row guide and pulls in the row machinery.
     from .prepare import draw_guide, normalize_cell
 
+    from PIL import Image, ImageDraw
+
     width, height = layout_guide_size(aspect_ratio)
     cell = normalize_cell({"width": width, "height": height}, width, None)
     draw_guide(path, 1, cell)
-    return cell
+    # The anatomy lines one margin inside the safe box's top and bottom edges, as the row experiments
+    # drew them on a 256 px cell (5 px lines, 16 px x 7 px centre marks), scaled to this guide.
+    scale = height / 256
+    margin_x, margin_y = int(cell["safe_margin_x"]), int(cell["safe_margin_y"])
+    crown_y, floor_y = 2 * margin_y, height - 1 - 2 * margin_y
+    center = width // 2
+    line, mark, half = max(1, round(5 * scale)), max(1, round(7 * scale)), round(8 * scale)
+    image = Image.open(path).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    for y, colour, accent in ((crown_y, CROWN_LINE, CROWN_MARK), (floor_y, FLOOR_LINE, FLOOR_MARK)):
+        draw.line((margin_x, y, width - 1 - margin_x, y), fill=colour, width=line)
+        draw.line((center - half, y, center + half, y), fill=accent, width=mark)
+    image.save(path)
+    return {**cell, "crown_y": crown_y, "floor_y": floor_y}
 
 
 def _make_provider(name: str, *, keep_session: bool):
@@ -357,7 +390,7 @@ def generate_image(
             guide_cell = draw_layout_guide(guide, aspect_ratio)
             # Last, so "the last attached image" in the prompt is the guide whatever the caller attached.
             attached.append(guide)
-            prompt += "\n\n" + LAYOUT_GUIDE_TEXT
+            prompt += "\n\n" + layout_guide_text(guide_cell)
         request = GenRequest(
             prompt=prompt,
             raw=raw,

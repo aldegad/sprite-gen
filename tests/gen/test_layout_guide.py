@@ -20,6 +20,8 @@ from sprite_gen.gen.base import GenRequest
 from sprite_gen.gen.prepare import DEFAULT_SAFE_MARGIN_RATIO
 
 SAFE_BLUE = (0x2F, 0x80, 0xED)
+CROWN_ORANGE = (0xFF, 0x7A, 0x00)
+FLOOR_TEAL = (0x00, 0xA7, 0xA7)
 
 
 class _RecordingProvider:
@@ -55,16 +57,25 @@ def test_attaches_a_one_slot_guide_with_the_row_margin_and_asks_for_room_around_
     guide = fake.attached[0].convert("RGB")
     assert guide.size == (1024, 1024)
     margin = int(1024 * DEFAULT_SAFE_MARGIN_RATIO)
-    # The inner safe box sits the row guide's margin in from every edge, on the guide's grey.
-    assert guide.getpixel((300, margin)) == SAFE_BLUE
+    # The inner safe box sits the row guide's margin in from every edge, on the guide's grey; the crown
+    # and floor lines lie one more margin inside it, off its edges.
     assert guide.getpixel((margin, 512)) == SAFE_BLUE
+    assert guide.getpixel((300, margin)) == SAFE_BLUE
+    assert guide.getpixel((300, 2 * margin)) == CROWN_ORANGE
+    assert guide.getpixel((300, 1023 - 2 * margin)) == FLOOR_TEAL
+    assert guide.getpixel((300, 1023 - margin)) == SAFE_BLUE
     assert guide.getpixel((300, margin // 2)) == (0xF6, 0xF6, 0xF6)
     assert request.prompt.startswith("a tall knight, full body\n\n")
-    assert request.prompt.endswith(gen.LAYOUT_GUIDE_TEXT)
+    assert request.prompt.endswith(gen.layout_guide_text(report["extra"]["layout_guide"]))
     assert report["extra"]["layout_guide"] == {
         "shape": "square", "width": 1024, "height": 1024,
         "safe_margin_x": margin, "safe_margin_y": margin, "size": 1024, "safe_margin": margin,
+        "crown_y": 2 * margin, "floor_y": 1023 - 2 * margin,
     }
+    # The lines' places in the words are the ones drawn: 192 / 1024 and 831 / 1024 of the frame.
+    assert "top of the skull on the orange line, 19% of the frame height from the top" in request.prompt
+    assert "lowest supporting sole on the teal line, 81% from the top" in request.prompt
+    assert "span of 62% of the frame height" in request.prompt
     # The report's refs are the caller's; the guide is the report's own field.
     assert report["refs"] == []
 
