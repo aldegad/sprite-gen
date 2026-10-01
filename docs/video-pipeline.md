@@ -101,6 +101,18 @@ three-quarter angle kept that angle in about half the clips (6 of 10) with the o
 and in 5 of 10 with one that said to walk "toward the way its body faces in the image", and
 otherwise mostly turned to a side view: no sentence tried held a three-quarter view.
 
+Since 2.15.0 the walk says less. Spelling the steps out ("each one lifting and landing straight
+forward and back under the body") made some takes march in place, knees lifted to the waist and
+arms held stiff, so a front or back walk now says only that it walks naturally, which way it
+faces and that it stays in place: "walks naturally in place, facing the viewer, as if on a
+treadmill, without coming any closer" (and "facing away from the viewer … without moving any
+farther away"). On one character, 480p 3 s on the API, two clips per sentence: the 2.13
+sentence lifted the knees to the waist in one of two; "walks naturally" swung the arms, kept the
+knees low and kept facing the viewer in both; a third sentence that asked for low heel-to-toe
+steps and a loose arm swing kept the feet low but shuffled. Two clips each is a small sample:
+the default is generic on purpose, because how a character walks (high steps, a stroll, a
+march) is the caller's to say. The front run keeps its sentence.
+
 An attack is one timed strike, not a repeat. `MOTION_TEXT["attack"]` asks for one attack: a windup
 (about 0.5 s), one strike in front (about 0.25 s), a held impact pose (about 0.3 s) and a recovery
 to the exact starting stance (about 0.5 s), then `HOLD_TEXT["attack"]`:

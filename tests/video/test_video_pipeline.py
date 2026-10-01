@@ -488,25 +488,27 @@ def test_prompt_uses_state_and_view_and_optional_character() -> None:
 
 def test_front_and_back_gaits_say_which_way_the_steps_go() -> None:
     for state, direction, opening in (
-        ("walk", "front", "walks in place toward the viewer"),
-        ("walk", "back", "walks in place away from the viewer"),
+        ("walk", "front", "walks naturally in place, facing the viewer"),
+        ("walk", "back", "walks naturally in place, facing away from the viewer"),
         ("run", "front", "runs in place toward the viewer"),
     ):
         sentence = batch_mod.VIEW_MOTION_TEXT[(state, direction)]
         p = batch_mod.build_prompt(direction, state, None)
         assert p == batch_mod.COMMON_TEXT.format(motion=sentence, view=batch_mod.VIEW_TEXT[direction])
         assert f"{opening}, as if on a treadmill" in p
-        assert "It never turns to the side, never steps sideways" in p and "never crosses its feet." in p
         assert "left-right" not in p and "on a treadmill:" not in p
-        # A walk asks for small, calm steps that do not kick out; a run is fast and keeps its stride.
-        assert ("small, even steps" in p and "never kicks a leg out to the side" in p) == (state == "walk")
+        # A walk says only that it walks naturally: how the steps go is the caller's to say. The run
+        # keeps naming its strides and that the body does not turn.
+        if state == "walk":
+            assert sentence.startswith(opening) and sentence.count(".") == 1
+        assert ("It never turns to the side, never steps sideways" in p) == (state == "run")
     # A side view, a run from behind and every other front or back state keep the state's own sentence.
     assert batch_mod.MOTION_TEXT["walk"] in batch_mod.build_prompt("side", "walk", None)
     assert batch_mod.MOTION_TEXT["run"] in batch_mod.build_prompt("side", "run", None)
     assert batch_mod.MOTION_TEXT["run"] in batch_mod.build_prompt("back", "run", None)
     assert batch_mod.MOTION_TEXT["idle"] in batch_mod.build_prompt("back", "idle", None)
     named = batch_mod.build_prompt("back", "walk", "The armored knight")
-    assert named.startswith("2D game sprite animation. The armored knight walks in place away from the viewer")
+    assert named.startswith("2D game sprite animation. The armored knight walks naturally in place, facing away from the viewer")
 
 
 def test_motion_templates_do_not_assume_a_body_plan() -> None:

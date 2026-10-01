@@ -88,7 +88,39 @@ motion around both boundaries, and a supported doubled recurrence when a short
 step falls below the gait floor. Candidate ranking also penalizes drift that a
 single linear correction could not remove. Among scores within 15% of the best,
 the earliest repeat is used; exact cut quantization may differ by one frame from
-the lag minimum. The requested length window is never widened.
+the lag minimum. An explicit `--max-len` is never widened; without one, only the gait
+fallback below looks past the state's window, and only after this search found nothing.
+
+### The gait fallback: a slow walk, or a walk toward the camera
+
+When the local search finds no cycle, `motion-auto` looks once more, for two things a
+front or back gait does that the first search cannot see past:
+
+- **It walked toward the camera, or away from it.** Asked to walk in place, a front walk
+  sometimes comes closer, and the body grows through the clip, so the same pose never matches
+  itself in size. A straight-line fit of the subject's opaque height measures it; at 3 % or
+  more over the clip (`SCALE_DRIFT_MIN`) every frame is scaled back to the first frame's fitted
+  height about its fitted foot point, premultiplied so the soft edge keeps its colour. The
+  search, the cells and the seam gate then all read the scaled-back frames. On the walk clips
+  we have kept, the median change is 0.5 % and nine in ten stay under 2.7 %.
+- **It walked slowly.** A calm walk in long clothing can take longer than half the clip per
+  cycle, the most the first search confirms (a 3 s clip at 24 fps: 36 frames). The second
+  search allows up to 60 % of the clip and at most 2 s (`LONG_CYCLE_FRACTION`,
+  `LONG_CYCLE_SECONDS`; 43 frames for that clip), so a cycle is still seen once whole and
+  repeating for the rest.
+
+Every other gate is the same, the seam limit included. A clip the first search cuts is cut
+exactly as before. The report records the first search's reason, the measured drift, whether
+it was undone and the window (`gait_fallback`); if the second search fails too, the error
+keeps its `no periodic cycle found` start and says what was tried. The scaled-back frames are
+written to `<out-dir>/.gait-fallback-frames` and removed once the strip is built or the run
+fails.
+
+Measured on six stored 3 s front walks that had failed with `no periodic cycle found`: four
+loop now. A long kimono, which hides the legs, walked a 38 to 39 frame cycle (one clip also
+grew 3.9 %, two grew 11 % and 16 %), and a front horse walk grew 6.4 % with a 42 frame cycle.
+Of the other two, one still shows no repeat and one finds a 38 frame candidate that the seam
+gate refuses (2.81).
 
 The selected original frames receive the same integer XY correction described
 below, using regions discovered again in the selected interval. Analysis resampling

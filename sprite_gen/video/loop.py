@@ -39,7 +39,7 @@ from PIL import Image
 from sprite_gen._deps import np
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.gif_utils import save_clean_gif
-from sprite_gen.video import motion_anchor, auto_motion, local_cycle
+from sprite_gen.video import motion_anchor, auto_motion, local_cycle, gait_fallback
 
 ANALYSIS_SIZE = 96  # thumbnail edge for the distance matrix
 STRIP_MAX_CELLS = 64  # upper bound on cells even when they are narrow
@@ -48,6 +48,8 @@ STRIP_MAX_HEIGHT = 520
 SEAM_RATIO_MAX = 2.0  # loop seam / mean adjacent distance inside the cycle
 SPECK_MIN_FRACTION = 0.01  # detached components smaller than this fraction of the body are keying specks
 PERIODICITY_MIN = 0.15  # the period must dip at least 15% below the profile mean (flat profile = no repeat)
+# Where the gait fallback writes the frames it scaled back (removed once the strip is built).
+FALLBACK_FRAMES_DIR = ".gait-fallback-frames"
 GIF_FPS_DEFAULT = 24.0  # GIF/WebP playback density = the source rate: every cycle frame is kept, a fast action never looks slow (12 made a jump read sluggish, 2026-09-09)
 GIF_FRAMES_MIN = 4
 ONE_SHOT_MIN_CONTRAST = 3.0  # one-shot: the excursion peak must stand this far above the rest-pose noise (in MADs)
@@ -830,11 +832,33 @@ def run_loop(
             source_frames = [Image.open(f).convert("RGBA") for f in files]
             D, trajectory, analysis = auto_motion.analyse(source_frames, fps=fps)
             report_base["automatic_motion_analysis"] = analysis
-            cycle = local_cycle.detect(
-                D, trajectory, min_len=lo, max_len=hi, gait_floor=round(prof.min_seconds*fps),
-                periodicity_min=PERIODICITY_MIN, double_tolerance=GAIT_DOUBLE_TOL,
-                double_search=GAIT_DOUBLE_SEARCH,
-            )
+            detect = dict(gait_floor=round(prof.min_seconds*fps), periodicity_min=PERIODICITY_MIN,
+                          double_tolerance=GAIT_DOUBLE_TOL, double_search=GAIT_DOUBLE_SEARCH)
+            try:
+                cycle = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi, **detect)
+            except ValueError as first:
+                # A front or back gait that walked toward the camera, or a slow one: one more
+                # search, recorded (`gait_fallback`), and only after the first found nothing.
+                drift = gait_fallback.scale_drift(source_frames)
+                fallback = {"reason": str(first), "scale_drift": {k: drift[k] for k in ("height_first_px", "height_last_px", "drift")},
+                            "scale_drift_min": gait_fallback.SCALE_DRIFT_MIN, "scale_undone": False}
+                if abs(drift["drift"]) >= gait_fallback.SCALE_DRIFT_MIN:
+                    source_frames = gait_fallback.undo_scale(source_frames, drift)
+                    files = gait_fallback.write_frames(source_frames, [f.name for f in files], out_dir.expanduser().resolve() / FALLBACK_FRAMES_DIR)
+                    D, trajectory, analysis = auto_motion.analyse(source_frames, fps=fps)
+                    report_base["automatic_motion_analysis"] = analysis
+                    fallback["scale_undone"] = True
+                # An explicit --max-len is the caller's ceiling and stays one.
+                hi_long = gait_fallback.long_window(lo, n, fps) if max_len is None else hi
+                fallback["window"] = [lo, hi_long]
+                report_base["gait_fallback"] = fallback
+                try:
+                    cycle = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi_long,
+                                               max_fraction=gait_fallback.LONG_CYCLE_FRACTION if max_len is None else .5,
+                                               **detect)
+                except ValueError as second:
+                    raise ValueError(f"{second} (also with the gait fallback: window [{lo}, {hi_long}], "
+                                     f"scale drift {drift['drift']:+.1%}{', undone' if fallback['scale_undone'] else ''})") from first
         elif cycle_mode == "fixed":
             if start is None or length is None:
                 raise SystemExit("video-loop: --cycle fixed needs --start and --length")
@@ -864,6 +888,7 @@ def run_loop(
                         "regenerate the clip, or pass --cycle one-shot for a single performed action"
                     )
     except (SystemExit, ValueError) as exc:
+        shutil.rmtree(out_dir.expanduser().resolve() / FALLBACK_FRAMES_DIR, ignore_errors=True)
         write_loop_report(target, {**report_base, "status": "failed", "error": str(exc),
                                   "cycle": getattr(exc, "diagnostics", cycle),
                                   "periodic_attempt": periodic_attempt})
@@ -907,6 +932,7 @@ def run_loop(
             )
         except ValueError as exc:
             error = f"video-loop: {exc}"
+            shutil.rmtree(out_dir / FALLBACK_FRAMES_DIR, ignore_errors=True)
             write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle})
             raise SystemExit(error) from exc
         report_base["motion_anchor"] = motion
@@ -917,6 +943,8 @@ def run_loop(
         im.save(cycle_dir / f"frame-{k:03d}.png")
     strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds, body_height=body_height, anchor="feet" if anchor == "feet" else "none", kind=str(cycle.get("kind") or "periodic"),
                                     standing_src=first_frame_height(files[0]) if body_height is not None else None)
+    # The scaled-back frames are read for the last time above; the cycle cells keep them.
+    shutil.rmtree(out_dir / FALLBACK_FRAMES_DIR, ignore_errors=True)
     if motion is not None:
         strip_meta["foot_anchor"] = anchor
         strip_meta["motion_anchor"] = motion
