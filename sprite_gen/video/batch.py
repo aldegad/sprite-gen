@@ -71,6 +71,18 @@ HOLD_TEXT = {
         "drawn, with anything it holds, and the body keeps facing the same direction without turning."
     ),
 }
+# What stays put while a caller's own walk or run moves, by view: in place, and facing the way the image
+# faces. A request interpreter may ask for any gait (a sneak, a march, a stroll); the engine keeps it on the
+# spot and turned the right way, as the built-in gait sentences do. `{facing}` is the side view's.
+GAIT_STATES = frozenset({"walk", "run"})
+GAIT_HOLD_TEXT = {
+    "front": "It stays in place as if on a treadmill, without coming any closer, and keeps facing the viewer the whole time.",
+    "back": (
+        "It stays in place as if on a treadmill, without moving any farther away, and keeps facing away from the viewer "
+        "the whole time."
+    ),
+    "side": "It stays in place as if on a treadmill, without moving across the screen, and keeps facing {facing} the whole time.",
+}
 MOTION_TEXT = {
     # A side-view full body asked for "a subtle weight sway" and an evenly paced loop steps in place
     # more often than not, so the feet are held and walking is named as what not to do.
@@ -80,8 +92,8 @@ MOTION_TEXT = {
         "hair and loose cloth, and one natural blink if the face has eyes. The feet never lift, step, shuffle or slide "
         "— no walking, no marching in place, no turning."
     ),
-    "walk": "moves in place on a treadmill: a steady locomotion cycle for this body type with clear repeating ground contacts and an even left-right or front-back rhythm the body already has.",
-    "run": "moves in place on a treadmill: a fast locomotion cycle for this body type with a bounding rhythm and clear repeating ground contacts.",
+    "walk": "walks naturally in place, as if on a treadmill, without moving across the screen.",
+    "run": "runs naturally in place, as if on a treadmill, without moving across the screen.",
     "jump": "performs a modest vertical hop in place over and over: compress, spring up about half the body height, land softly, return to the exact starting stance, repeat at an even rhythm. Same height every time.",
     "attack": (
         "performs one melee attack with what it is already holding (bare hands only if it holds nothing), keeping "
@@ -92,25 +104,23 @@ MOTION_TEXT = {
     "cheer": "celebrates in place: rises into a raised, spread-out cheer pose, holds it for a beat, then settles back to the exact starting stance, repeating at an even rhythm.",
     "wave": "waves in place: lifts one side into a friendly wave, sways it a few times, then settles back to the exact starting stance, repeating at an even rhythm.",
 }
-# A walk seen from the front or from behind, and a run seen from the front, in place of the body-neutral
-# sentences above. Asked for "an even left-right or front-back rhythm", a walk that faces the viewer
-# stepped sideways, crossed its feet or turned the body to the side in most of the takes. The walk says
-# only that it walks naturally, which way it faces and that it stays in place: the 2.13 sentence spelled out
-# the steps ("each one lifting and landing straight forward and back") and some takes marched in place,
-# knees up to the waist and arms stiff, while "walks naturally" swung the arms and kept the knees low. How a
-# character walks is the caller's to say; the engine's default stays generic. The run keeps saying which way
-# its strides go and that the body does not turn. A side view keeps MOTION_TEXT, and so does a run seen
-# from behind, which was not measured. "as if on a treadmill" keeps the treadmill a comparison: said as a
-# place, it was sometimes drawn under the feet.
+# A walk or run seen from the front or from behind, in place of the side view's sentences above. Every
+# gait says only that it moves naturally, which way it faces and that it stays in place. Asked for "an
+# even left-right or front-back rhythm", a walk that faces the viewer stepped sideways or turned the body
+# (2.13 fixed the facing by naming it); spelling the steps out ("each one lifting and landing straight
+# forward and back") then made some takes march in place, knees up to the waist and arms stiff, while
+# "walks naturally" swung the arms and kept the knees low (2.15). 2.16 gives the run and the side view the
+# same form. How a character walks is the caller's to say (`build_prompt(motion=...)`, held in place by
+# `GAIT_HOLD_TEXT`); the engine's default stays generic. "as if on a treadmill" keeps the treadmill a
+# comparison: said as a place, it was sometimes drawn under the feet.
 VIEW_MOTION_TEXT = {
     ("walk", "front"): "walks naturally in place, facing the viewer, as if on a treadmill, without coming any closer.",
     ("walk", "back"): (
         "walks naturally in place, facing away from the viewer, as if on a treadmill, without moving any farther away."
     ),
-    ("run", "front"): (
-        "runs in place toward the viewer, as if on a treadmill, without coming any closer: a fast run cycle for this "
-        "body type in which every stride lifts and lands straight forward and back under the body, with clear "
-        "repeating ground contacts. It never turns to the side, never steps sideways and never crosses its feet."
+    ("run", "front"): "runs naturally in place, facing the viewer, as if on a treadmill, without coming any closer.",
+    ("run", "back"): (
+        "runs naturally in place, facing away from the viewer, as if on a treadmill, without moving any farther away."
     ),
 }
 COMMON_TEXT = (
@@ -154,19 +164,25 @@ def _staggered_start(gap: float) -> None:
         _last_start[0] = time.monotonic()
 
 
-def build_prompt(direction: str, state: str, character: str | None, facing: str = "right", motion: str | None = None) -> str:
+def build_prompt(direction: str, state: str, character: str | None, facing: str = "right", motion: str | None = None,
+                 pinned: bool | None = None) -> str:
     """The clip prompt for one (direction, state).
 
     `motion` replaces the built-in state sentence with the caller's own description of the
     motion, written as whole sentences about the subject (a request interpreter's output, for
-    instance). What stays put (`HOLD_TEXT`), the repeat count (`REPEAT_TEXT`) and the frame,
-    camera, background and design rules stay the engine's.
+    instance). What stays put (`HOLD_TEXT`; for a walk or run, in place and facing the image's way,
+    `GAIT_HOLD_TEXT`), the repeat count (`REPEAT_TEXT`) and the frame, camera, background and
+    design rules stay the engine's.
+
+    `pinned` says the clip is pinned to end on its first frame (`video --last-frame`): it then asks
+    for the return to the first pose instead of an evenly paced repeat (`PINNED_LOOP_TEXT`). None
+    leaves it to the state (`PINNED_LOOP_STATES`); a caller that pins a walk or run says True.
     """
     validate_facing(facing)
     view = VIEW_TEXT.get(direction, f"seen from the {direction}").format(facing=facing)
     if state in ACTION_TEXT_STATES:
         template = ACTION_COMMON_TEXT
-    elif state in PINNED_LOOP_STATES:
+    elif (state in PINNED_LOOP_STATES) if pinned is None else pinned:
         template = PINNED_LOOP_TEXT
     else:
         template = COMMON_TEXT
@@ -176,6 +192,8 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
             raise SystemExit("video: motion description is empty")
         head = "2D game sprite animation. The character {motion} The character is {view}."
         hold = f" {HOLD_TEXT[state]}" if state in HOLD_TEXT else ""
+        if state in GAIT_STATES and direction in GAIT_HOLD_TEXT:
+            hold += f" {GAIT_HOLD_TEXT[direction].format(facing=facing)}"
         repeat = f" {REPEAT_TEXT[state]}" if state in REPEAT_TEXT else ""
         subject = character.strip().rstrip(".") if character else "The character"
         return f"2D game sprite animation. {motion}{hold}{repeat} {subject} is {view}." + template[len(head):]

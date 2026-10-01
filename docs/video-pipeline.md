@@ -113,6 +113,15 @@ steps and a loose arm swing kept the feet low but shuffled. Two clips each is a 
 the default is generic on purpose, because how a character walks (high steps, a stroll, a
 march) is the caller's to say. The front run keeps its sentence.
 
+Since 2.16.0 every walk and run takes that form, from every view: the side walk "walks
+naturally in place, as if on a treadmill, without moving across the screen" (it said "moves in
+place on a treadmill" as a place and asked for "an even left-right or front-back rhythm"), the
+side run "runs naturally in place …", and the front and back runs "runs naturally in place,
+facing (away from) the viewer, as if on a treadmill …" (the front run spelled its strides out
+and said "toward the viewer" and "without coming any closer" in one clause). On one character,
+480p 3 s on the API: the front run kept facing in 2 of 2, the side run ran in 2 of 2, the back
+run kept facing away in the one clip whose frames passed; the side walk walked in 2 of 2.
+
 An attack is one timed strike, not a repeat. `MOTION_TEXT["attack"]` asks for one attack: a windup
 (about 0.5 s), one strike in front (about 0.25 s), a held impact pose (about 0.3 s) and a recovery
 to the exact starting stance (about 0.5 s), then `HOLD_TEXT["attack"]`:
@@ -148,7 +157,19 @@ it for a repeat.
 `build_prompt(direction, state, character, facing, motion=...)` takes a caller's own motion
 paragraph — whole sentences about the subject, such as a request interpreter writes per
 request — in place of the built-in state sentence. The frame, camera, background and design
-rules stay the engine's, and an attack keeps its `HOLD_TEXT` sentence after the paragraph.
+rules stay the engine's, and an attack keeps its `HOLD_TEXT` sentence after the paragraph. A
+walk or run gets `GAIT_HOLD_TEXT` for its view after the paragraph instead: it stays in place as
+if on a treadmill and keeps facing the viewer, away from the viewer or `{facing}` the whole time,
+so a caller describes the gait (a sneak, a march, a lazy stroll) and the engine keeps it on the
+spot. On one character, one clip each: a march lifted the knees high as asked and stayed in
+place, a lazy stroll seen from behind kept facing away, and a tiptoe sneak kept facing the viewer
+but read only as a slightly hunched walk.
+
+`build_prompt(..., pinned=True)` says the clip is pinned to end on its first frame, so any state
+gets `PINNED_LOOP_TEXT` (the return to the first pose) instead of the evenly paced repeat; left
+out, only `PINNED_LOOP_STATES` do. A caller that retries a walk pinned after no cycle was found
+says True; two such front-walk clips closed on their first frame (seam 0.12 and 0.24 of an
+ordinary step).
 
 ## 3. Frames — extract, key, check the edges
 
