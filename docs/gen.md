@@ -192,6 +192,7 @@ sprite-gen gen \
   [--quality low|medium|high|xhigh|max|auto] # billed effort; openai takes the range, grok takes auto/low/medium
   [--resolution 1k|1.5k|2k]  # grok output-size tier, priced with --quality
   [--model ID] \
+  [--layout-guide]        # attach a one-slot layout guide (safe box, crown and floor lines); see below
   [--report REPORT.json] \
   [--keep-session]        # codex: keep the rollout jsonl instead of deleting it
 ```
@@ -348,6 +349,34 @@ for tighter prompt adherence.
 ## Related
 
 - [docs/README.md](README.md) — documentation index
+
+## `--layout-guide` — room above the head and under the feet
+
+A single still drawn from words tends to fill its frame top to bottom. Animated in place
+(a walk bobs, a jump rises), the head then touches the top of the frame. `--layout-guide`
+draws the one-slot form of the row guide `prepare` writes for every row and attaches it
+after any `--ref`:
+
+- the frame, its inner safe box at the row guide's margin (9.4 % of the frame, as
+  `prepare`'s `DEFAULT_SAFE_MARGIN_RATIO`), and the centre line;
+- an orange **crown line** and a teal **floor line**, each one margin *inside* the safe
+  box (about 19 % and 81 % of the frame height). On the box's own edges a crown line
+  leaves hair and hats to fill the room above it, and a floor line reads as a frame
+  edge that the feet float above.
+
+The prompt gains a paragraph saying what each line means: the anatomical top of the
+skull on the orange line (hair, hats, raised limbs and props ignored, but kept inside
+the box), the supporting soles on the teal line, the two lines as scale and height
+rather than artwork, and nothing of the guide itself in the output. The guide is drawn
+for `--aspect-ratio` (square without one) and the report records the cell it used in
+`extra.layout_guide` (size, safe margins, `crown_y`, `floor_y`); the report's `refs` are
+still the caller's own.
+
+The guide is an attached image, so it changes the call: openai sends it to
+`/images/edits` and bills it as image input, grok sends it as a reference, and
+`--transparent` steps down to chroma keying as it does for any `--ref`. How closely a
+model follows the guide differs from model to model, so measure the one you use
+(`--model`) on your own subjects before relying on it.
 
 ## `--trim-alpha` — the bottom edge is the foot line
 
