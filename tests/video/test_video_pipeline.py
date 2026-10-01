@@ -481,34 +481,60 @@ def test_drop_specks_erases_detached_slivers_only() -> None:
 
 def test_prompt_uses_state_and_view_and_optional_character() -> None:
     p = batch_mod.build_prompt("side", "walk", "The armored knight")
-    assert p.startswith("2D game sprite animation. The armored knight moves in place on a treadmill")
+    assert p.startswith("2D game sprite animation. The armored knight walks naturally in place, as if on a treadmill")
     assert "seen from the exact side" in p
     assert "The character" in batch_mod.build_prompt("back", "jump", None)
 
 
-def test_front_and_back_gaits_say_which_way_the_steps_go() -> None:
+def test_every_gait_walks_or_runs_naturally_in_place() -> None:
+    """Since 2.16.0 every walk and run, from any view, says only that it moves naturally, which way it
+    faces and that it stays in place: spelling the steps out made takes march, and "on a treadmill"
+    said as a place, or "an even left-right rhythm", are gone from every view."""
     for state, direction, opening in (
         ("walk", "front", "walks naturally in place, facing the viewer"),
         ("walk", "back", "walks naturally in place, facing away from the viewer"),
-        ("run", "front", "runs in place toward the viewer"),
+        ("walk", "side", "walks naturally in place"),
+        ("run", "front", "runs naturally in place, facing the viewer"),
+        ("run", "back", "runs naturally in place, facing away from the viewer"),
+        ("run", "side", "runs naturally in place"),
     ):
-        sentence = batch_mod.VIEW_MOTION_TEXT[(state, direction)]
+        sentence = batch_mod.VIEW_MOTION_TEXT.get((state, direction)) or batch_mod.MOTION_TEXT[state]
         p = batch_mod.build_prompt(direction, state, None)
-        assert p == batch_mod.COMMON_TEXT.format(motion=sentence, view=batch_mod.VIEW_TEXT[direction])
-        assert f"{opening}, as if on a treadmill" in p
-        assert "left-right" not in p and "on a treadmill:" not in p
-        # A walk says only that it walks naturally: how the steps go is the caller's to say. The run
-        # keeps naming its strides and that the body does not turn.
-        if state == "walk":
-            assert sentence.startswith(opening) and sentence.count(".") == 1
-        assert ("It never turns to the side, never steps sideways" in p) == (state == "run")
-    # A side view, a run from behind and every other front or back state keep the state's own sentence.
-    assert batch_mod.MOTION_TEXT["walk"] in batch_mod.build_prompt("side", "walk", None)
-    assert batch_mod.MOTION_TEXT["run"] in batch_mod.build_prompt("side", "run", None)
-    assert batch_mod.MOTION_TEXT["run"] in batch_mod.build_prompt("back", "run", None)
+        assert p == batch_mod.COMMON_TEXT.format(motion=sentence, view=batch_mod.VIEW_TEXT[direction].format(facing="right"))
+        assert sentence.startswith(opening) and sentence.count(".") == 1
+        assert ", as if on a treadmill" in p
+        for gone in ("left-right", "on a treadmill:", "lifts and lands", "never turns to the side"):
+            assert gone not in p
     assert batch_mod.MOTION_TEXT["idle"] in batch_mod.build_prompt("back", "idle", None)
     named = batch_mod.build_prompt("back", "walk", "The armored knight")
     assert named.startswith("2D game sprite animation. The armored knight walks naturally in place, facing away from the viewer")
+
+
+def test_a_callers_gait_is_held_in_place_and_facing_the_images_way() -> None:
+    """A request interpreter's own walk or run (a sneak, a march) is followed by the engine's in-place
+    and facing sentence for the view; any other state's paragraph is not."""
+    sneak = "The knight sneaks along on tiptoe, setting each foot down slowly."
+    for direction in ("front", "back", "side"):
+        for state in ("walk", "run"):
+            p = batch_mod.build_prompt(direction, state, "The knight", "left", motion=sneak)
+            hold = batch_mod.GAIT_HOLD_TEXT[direction].format(facing="left")
+            assert p.startswith(f"2D game sprite animation. {sneak} {hold} The knight is {batch_mod.VIEW_TEXT[direction].format(facing='left')}.")
+            assert batch_mod.MOTION_TEXT[state] not in p
+    assert "keeps facing left the whole time" in batch_mod.GAIT_HOLD_TEXT["side"].format(facing="left")
+    jump = batch_mod.build_prompt("front", "jump", None, motion="The knight hops twice.")
+    assert all(text.split(",")[0] not in jump for text in batch_mod.GAIT_HOLD_TEXT.values())
+
+
+def test_pinned_picks_the_return_sentence_for_any_state() -> None:
+    """A walk or run pinned to end on its first frame asks for the return, not an even repeat; left
+    unsaid, only the states pinned by default do."""
+    walk = batch_mod.build_prompt("front", "walk", None, pinned=True)
+    assert "The last frame returns to the exact pose of the first frame" in walk and "evenly paced" not in walk
+    assert "evenly paced" in batch_mod.build_prompt("front", "walk", None)
+    assert batch_mod.build_prompt("side", "idle", None) == batch_mod.build_prompt("side", "idle", None, pinned=True)
+    assert "evenly paced" in batch_mod.build_prompt("side", "idle", None, pinned=False)
+    # An attack keeps its action template whichever way it is pinned.
+    assert batch_mod.build_prompt("side", "attack", None, pinned=False) == batch_mod.build_prompt("side", "attack", None)
 
 
 def test_motion_templates_do_not_assume_a_body_plan() -> None:
