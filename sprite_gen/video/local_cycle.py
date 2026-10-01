@@ -11,9 +11,10 @@ from sprite_gen._deps import np
 
 
 def detect(distances, trajectory, *, min_len, max_len, gait_floor,
-           periodicity_min, double_tolerance, double_search):
+           periodicity_min, double_tolerance, double_search, max_fraction=.5):
     n = len(distances)
-    lo, hi = max(6, min_len), min(max_len, n//2)
+    # A cycle has to be seen repeating: half the clip by default, more for the gait fallback.
+    lo, hi = max(6, min_len), min(max_len, int(n*max_fraction))
     if hi < lo:
         raise ValueError(f"automatic motion cycle window [{lo}, {hi}] has no repeated cycle")
     candidates = []
