@@ -8,10 +8,6 @@ All notable public changes to `sprite-gen` are recorded here. Versions track the
 - Only a failed search reaches this, so a clip that looped before is cut exactly as before, and every gate, the seam limit included, is unchanged. An explicit `--max-len` stays the ceiling. The report records what was tried in `gait_fallback`; when the second search fails too, the error still starts with `video-loop: no periodic cycle found` and says what was tried.
 - Measured on six stored 3 s front walks that had failed with `no periodic cycle found`: four loop now. Three takes of a kimono that hides the legs walked a 27 to 39 frame cycle (one clip grew 3.9 %, two grew 11 % and 16 %), and a front horse walk grew 6.4 % with a 42 frame cycle. One of the other two still shows no repeat; the other finds a 38 frame candidate that the seam gate refuses. On the walk clips we have kept, the median height change is 0.5 % and nine in ten stay under 2.7 %. Method: [docs/loop-review.md](docs/loop-review.md).
 
-![Kimono front walk: the forced cut beside the loops found in the same clips](https://github.com/aldegad/sprite-gen/releases/download/v2.15.0/kimono-walk-loop.webp)
-
-`kimono-walk-loop.mp4` is the same comparison as video.
-
 ## v2.14.0 - A single still can be drawn to a layout guide with crown and floor lines
 
 - `gen --layout-guide` attaches the one-slot form of the row layout guide after any `--ref`: the frame, the inner safe box at the row guide's 9.4 % margin, the centre line, and an orange crown line and a teal floor line one margin inside the safe box (about 19 % and 81 % of the frame height). The prompt says what each line means: the anatomical top of the skull on the orange line, ignoring hair, hats, raised limbs and props; the supporting soles on the teal line, which is a ground-contact line and not a frame edge; nothing of the guide in the output. A still drawn from words tends to fill its frame top to bottom, and an in-place motion then has no room above the head. The lines sit inside the box because on its edges a crown line leaves hair and hats to fill the room above it and a floor line reads as a border the feet float above.
