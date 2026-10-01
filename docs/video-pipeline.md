@@ -85,13 +85,16 @@ quadruped and a legless blob into a contradiction (2026-09-09).
 A walk seen from the front or from behind, and a run seen from the front, take their own
 sentence (`VIEW_MOTION_TEXT`) instead: the steps lift and land straight forward and back
 under the body, toward the viewer or away from it "as if on a treadmill", and the body never
-turns to the side, steps sideways or crosses its feet. The body-neutral walk sentence asks for
-"an even left-right or front-back rhythm", and a character facing the viewer read that as
-stepping sideways: crossed feet, side kicks, a body turned to three-quarters. Measured on
-Grok (subscription), 480p 3 s, nine humanoid characters twice each, judged on frame sheets
-with the variant hidden: a front walk kept its facing and walked in 7 of 18 clips with the
-old sentence and 13 of 18 with the new one (none turned); a front run in 11 of 18 and 15
-of 18. A back walk did as well with either (8 of 10). "on a treadmill" said as a place was
+turns to the side, steps sideways or crosses its feet; a walk also asks for a calm, natural
+cycle with small, even steps that never kick a leg out to the side. The body-neutral walk
+sentence asks for "an even left-right or front-back rhythm", and a character facing the
+viewer read that as stepping sideways: crossed feet, side kicks, a body turned to
+three-quarters. Measured on Grok (subscription), 480p 3 s, nine humanoid characters twice
+each, judged on frame sheets with the variant hidden: a front walk kept its facing and walked
+in 7 of 18 clips with the old sentence and 16 of 18 with the new one. Without the calm-steps
+clause it was 12 to 13 of 18, and five crossed their feet or kicked sideways. A back walk: 8
+of 10 with the old sentence, 10 of 10 with the new one. A front run: 11 of 18 and 15 of 18
+(a run keeps its stride and has no calm-steps clause). "on a treadmill" said as a place was
 sometimes drawn under the feet; "as if on a treadmill" was not. A side view and a run seen
 from behind keep the state's sentence (the second was not measured). A walk drawn at a
 three-quarter angle kept that angle in about half the clips (6 of 10) with the old sentence
