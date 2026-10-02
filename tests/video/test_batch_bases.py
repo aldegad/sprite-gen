@@ -23,7 +23,7 @@ def test_unknown_direction_is_refused_by_name(key, tmp_path):
     with pytest.raises(SystemExit) as exc:
         batch._parse_bases([f"{key}={tmp_path / 's.png'}"])
     message = str(exc.value)
-    assert repr(key) in message and "back, front, side" in message
+    assert repr(key) in message and "back, back_diagonal, front, front_diagonal, side" in message
 
 
 def test_missing_equals_still_refused():

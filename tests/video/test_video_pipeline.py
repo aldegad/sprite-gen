@@ -537,6 +537,48 @@ def test_pinned_picks_the_return_sentence_for_any_state() -> None:
     assert batch_mod.build_prompt("side", "attack", None, pinned=False) == batch_mod.build_prompt("side", "attack", None)
 
 
+def test_a_diagonal_walk_is_pinned_and_named_as_an_isometric_heading() -> None:
+    """The two three-quarter views (2.17.0): a walk or run says where it heads on the screen, as an
+    isometric game reads, keeps the image's angle, and is filmed pinned to its first frame with the
+    return sentence. Any other state in a diagonal is the state's own sentence at that view."""
+    for direction, heading in (("front_diagonal", "heading diagonally toward the viewer and to the right"),
+                               ("back_diagonal", "heading diagonally away from the viewer toward the upper right")):
+        for state in ("walk", "run"):
+            sentence = batch_mod.VIEW_MOTION_TEXT[(state, direction)]
+            p = batch_mod.build_prompt(direction, state, None)
+            assert p == batch_mod.PINNED_LOOP_TEXT.format(motion=sentence, view=batch_mod.VIEW_TEXT[direction])
+            assert heading in sentence and "never turns into a side view" in sentence
+            assert batch_mod.pins_last_frame(state, direction)
+        assert "turned exactly as in the image" in batch_mod.VIEW_TEXT[direction]
+        idle = batch_mod.build_prompt(direction, "idle", None)
+        assert batch_mod.MOTION_TEXT["idle"] in idle and batch_mod.VIEW_TEXT[direction] in idle
+        assert not batch_mod.pins_last_frame("jump", direction)
+    for direction in ("front", "back", "side"):
+        assert not batch_mod.pins_last_frame("walk", direction)
+    assert batch_mod.pins_last_frame("attack", "side") and batch_mod.pins_last_frame("idle", "front")
+
+
+def test_a_diagonal_still_is_told_how_far_to_turn() -> None:
+    """A still at a diagonal is often redrawn from a front or side picture, so its view sentence says the
+    turn (45 degrees), that the head turns with the body and where the feet point, instead of pointing
+    at the image's own angle. Every other view draws with the clip's view sentence."""
+    front = batch_mod.still_view_text("front_diagonal")
+    back = batch_mod.still_view_text("back_diagonal")
+    assert "about 45 degrees to the right" in front and "feet pointing toward the lower right" in front
+    assert "away from the viewer toward the upper right" in back and "not looking back over the" in back
+    assert "turned exactly as in the image" not in front + back
+    assert batch_mod.still_view_text("side", "left") == batch_mod.VIEW_TEXT["side"].format(facing="left")
+    assert batch_mod.still_view_text("front") == batch_mod.VIEW_TEXT["front"]
+
+
+def test_a_callers_diagonal_gait_keeps_the_angle() -> None:
+    sneak = "The knight sneaks along on tiptoe, setting each foot down slowly."
+    for direction, angle in (("front_diagonal", "three-quarter front"), ("back_diagonal", "three-quarter back")):
+        p = batch_mod.build_prompt(direction, "walk", "The knight", motion=sneak)
+        assert f"keeps the exact {angle} angle of the image the whole time" in p
+        assert "The last frame returns to the exact pose of the first frame" in p
+
+
 def test_motion_templates_do_not_assume_a_body_plan() -> None:
     # the templates were first written for a biped; a quadruped or a legless blob must not
     # be prompted into a contradiction (2026-09-09 generalization run)
