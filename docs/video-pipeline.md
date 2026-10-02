@@ -401,7 +401,9 @@ A walk or run loop then has its jump frames repaired before the strip is built: 
 breaks a step 1.4× the loop's median (whole body, or the hair behind it) is replaced by RIFE's
 frame between its two neighbours, at most three and never two side by side (`--repair auto`,
 the default; `--repair off` cuts as filmed). The report's `jump_repair` names the frames. See
-[loop repair](loop-repair.md).
+[loop repair](loop-repair.md). The repaired loop's jolt index and the head's frame-to-frame
+moves are reported (`jolt`); beyond the reference bounds that is a warning line, and a gate
+(`video-loop: loop jolts — …`) only when `--jolt-max` / `--head-step-max` are passed.
 
 ### One-shot actions — `--cycle auto|periodic|one-shot`
 

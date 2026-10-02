@@ -131,6 +131,66 @@ engine replaces the same frames as the experiment on every take tried — Lite s
 [3, 15, 19], Pro back-diagonal NE2 [9], Lite front S2 [0, 11, 14], and nothing in the smooth
 Lite side E2. About 0.7 s a replaced frame on the Mac's GPU.
 
+## 3. The jolt index — reported on every walk, a gate only when asked
+
+A loop whose steps change unevenly jolts even when no single step is a jump. Every walk or run
+loop's report carries `jolt`, measured on the loop as it will play (after section 2's repair):
+
+| Field | What |
+|---|---|
+| `index` | the **jolt index**: for every step, how far its coverage change strays from the mean of its two neighbours' changes; the mean of that over the median step. 0 for even steps; alternating big and small steps read high |
+| `hair_index` | the same inside the hair box |
+| `step_max_over_median` | the largest step over the median (what section 2 repairs) |
+| `head.x`, `head.y` | the head's place frame by frame in % of the body's height over the loop: x (sideways) the coverage centroid of the top fifth, y (up and down) the body's top line. Each: `step_max_pct` (largest move in one frame), `step_median_pct`, `max_over_median`, `range_pct`, `worst_into_frame` |
+| `reference`, `warnings` | the reference bounds (jolt index **0.42**, head sideways step **0.75** % of the body height) and what exceeds them, in words |
+| `gate`, `gated`, `over`, `passed` | the bounds the caller passed, whether they were enforced, what exceeded them |
+| `measured` | `after the jump repair` or `as filmed` |
+
+**By default nothing fails on the jolt.** A loop beyond a reference bound is kept, its report
+lists the reason under `warnings`, and `video-loop` prints a
+`video-loop: warning: … (reference bound; the loop is kept …)` line on stderr. The aim is fewer
+refilms — section 2 repairs what it can without a new clip — and the reference bounds rest on
+too few judged takes to refilm on (below).
+
+**A gate only when asked.** `--jolt-max` and/or `--head-step-max` turn the bound passed into a
+gate on the repaired loop: beyond it the loop fails with
+`video-loop: loop jolts — … regenerate the clip`, which a caller that buys a new clip can match.
+Only the bounds passed are checked. With `--repair off` the loop is cut and reported as filmed,
+never gated. A frame the head cannot be tracked in is named rather than read as smooth.
+
+### Where the reference bounds come from — 46 takes, 2026-10-03
+
+Eight-direction SD set, five generated views, Pro and Lite, four filming rounds (46 loops cut by
+`video-loop --anchor motion-auto`), measured on the strip cells before and after section 2's
+repair. Eleven of them were judged by the maintainer: nine kept for the final sets, two
+refused for how they move — a Lite side walk whose every step alternated (its sibling take was
+"completely natural"), and a Lite back-diagonal walk whose head "jumps".
+
+| After the repair | min | p25 | median | p75 | p90 | max | the 9 kept reach | the 2 refused |
+|---|---|---|---|---|---|---|---|---|
+| jolt index | 0.055 | 0.178 | 0.212 | 0.243 | 0.260 | 0.414 | 0.414 (Pro back diagonal) | 0.237 (side), 0.196 (back diagonal) |
+| head sideways step, % | 0.18 | 0.43 | 0.68 | 0.83 | 1.07 | 1.71 | 0.68 | 0.27 (side), **0.82** (back diagonal) |
+| head top-line step, % | 0.49 | 0.98 | 1.24 | 1.71 | 2.47 | 3.17 | 2.42 (Lite back view) | 0.75, 1.71 |
+
+Before the repair the jolt index's median was 0.258 (max 0.456) and the head sideways step's
+0.70 % (max 2.88 %): the repair lowers both.
+
+Read:
+
+- **The head's sideways step is the only measure that separates the judged takes**: every kept
+  take stays at or under 0.68 %, the back-diagonal take refused for its head moves 0.82 %. The
+  reference 0.75 sits between them.
+- **The jolt index does not separate them.** The refused side walk (0.237) sits inside the kept
+  range, and a kept Pro back-diagonal walk reads 0.414. Any bound under 0.414 would refuse a kept
+  take, so the reference (0.42) sits at the kept takes' edge and flags nothing in this set. An
+  alternating jolt like that side walk's is a known miss of this index.
+- **The top line is reported, not bounded**: a walk seen from behind bobs more (the kept Lite
+  back view reaches 2.42 %), so one bound would flag kept back views or pass the refused one.
+- **Why no gate by default**: at the reference bounds, 18 of the 46 takes exceed one — 16 of 30
+  Lite, 2 of 16 Pro, none of the nine kept. Lite's head sways about three times as far as Pro's,
+  so as a default gate it would refilm about every other Lite walk: the opposite of the aim, on
+  the strength of two refusals. The bounds stay a reference until more takes are judged.
+
 ## Related
 
 - [video-pipeline.md](video-pipeline.md) — the pipeline these repairs run inside

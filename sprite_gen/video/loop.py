@@ -29,6 +29,7 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -821,6 +822,8 @@ def run_loop(
     repair: str = "auto",
     facing: str = "right",
     interpolate: rife_mod.Interpolate | None = None,
+    jolt_max: float | None = None,
+    head_step_max: float | None = None,
 ) -> dict[str, Any]:
     if repair not in REPAIR_MODES:
         raise SystemExit(f"video-loop: unknown --repair {repair!r}; expected one of {', '.join(REPAIR_MODES)}")
@@ -985,6 +988,29 @@ def run_loop(
             report_base["seam_measurement"] = "rendered-cells"
     else:
         report_base["jump_repair"] = {"applied": False, "why": "--repair off" if repair == "off" else f"not a gait state ({state})"}
+    if prof.gait:
+        # The jolt is measured on the loop as it will play — after the repair — and reported on
+        # every walk and run (docs/loop-repair.md section 3). Beyond the reference bounds it is a
+        # warning line; it fails the loop only against a bound the caller passed (--jolt-max /
+        # --head-step-max), and only when the repair ran: --repair off cuts and reports as filmed.
+        jolt = repair_mod.measure_jolt(frames, facing=facing)
+        reference = {"jolt_max": repair_mod.JOLT_REFERENCE, "head_step_max": repair_mod.HEAD_STEP_REFERENCE}
+        warnings = repair_mod.jolt_verdict(jolt, **reference)
+        gated = repair == "auto" and (jolt_max is not None or head_step_max is not None)
+        over = repair_mod.jolt_verdict(jolt, jolt_max=jolt_max, head_step_max=head_step_max) if gated else []
+        report_base["jolt"] = {**jolt, "reference": reference, "warnings": warnings,
+                               "gate": {"jolt_max": jolt_max, "head_step_max": head_step_max} if gated else None,
+                               "gated": gated, "over": over, "passed": not over,
+                               "measured": "after the jump repair" if report_base["jump_repair"].get("replaced") else "as filmed"}
+        if over:
+            error = (f"video-loop: loop jolts — {'; '.join(over)} ({cycle.get('kind', 'periodic')} length {L} frames from {i}"
+                     f"{', after repairing frames ' + str(report_base['jump_repair']['replaced']) if report_base['jump_repair'].get('replaced') else ''}); "
+                     "the motion does not play smoothly — regenerate the clip")
+            shutil.rmtree(out_dir / FALLBACK_FRAMES_DIR, ignore_errors=True)
+            write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle})
+            raise SystemExit(error)
+        for line in warnings:
+            print(f"video-loop: warning: {line} (reference bound; the loop is kept — docs/loop-repair.md)", file=sys.stderr)
     cycle_dir.mkdir(parents=True, exist_ok=True)
     for old in cycle_dir.glob("frame-*.png"):
         old.unlink()
@@ -1111,6 +1137,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--anchor", choices=ANCHOR_MODES, default=None, help="motion-auto: automatic stable regions, local repeat selection and XY ramp (walk/run); motion: fixed cut with explicit regions; body (default for walk/run): measure the last-to-first head-and-torso offset once and spread it as a ramp over the cycle; feet: remove in-canvas drift (a straight-line trend) so every cell stands on the mean foot line; none: leave placement as filmed (default for other states)")
     parser.add_argument("--anchor-region", type=motion_anchor.parse_region, action="append", help="motion anchor only: repeat twice with head then torso x0,y0,x1,y1 in the first selected frame; requires --cycle fixed and at least 6 frames")
     parser.add_argument("--repair", choices=REPAIR_MODES, default="auto", help="auto (default): in a walk or run loop, a frame that follows a jump (a step 1.4x the median, whole body or the hair behind it) is replaced by RIFE's frame between its neighbours, at most 3 and never two side by side, recorded in the report (docs/loop-repair.md); off: cut as filmed")
+    parser.add_argument("--jolt-max", type=float, default=None, help=f"walk/run: fail the repaired loop when its jolt index (how far each step strays from its neighbours' mean, over the median step) exceeds this. Default: no gate — the index is reported and a value over {repair_mod.JOLT_REFERENCE} is a warning line")
+    parser.add_argument("--head-step-max", type=float, default=None, help=f"walk/run: fail the repaired loop when the head's largest sideways move in one frame exceeds this %% of the body height. Default: no gate — reported, and over {repair_mod.HEAD_STEP_REFERENCE} is a warning line")
     parser.add_argument("--facing", choices=FACINGS, default="right", help="which way the body faces in the frames (default right): the hair the jump search watches is behind it")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)
@@ -1128,6 +1156,7 @@ def run(**kwargs: object) -> int:
         anchor=kwargs.get("anchor"),  # None resolves by state inside run_loop
         anchor_regions=kwargs.get("anchor_region"),
         repair=str(kwargs.get("repair") or "auto"), facing=str(kwargs.get("facing") or "right"),
+        jolt_max=kwargs.get("jolt_max"), head_step_max=kwargs.get("head_step_max"),  # type: ignore[arg-type]
     )
     summary = {k: payload[k] for k in ("state", "frames_total", "window", "cycle_seconds", "n_out", "delay_ms", "resampled_seam_ratio", "specks_dropped", "report")}
     summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio", "review_recommended", "half_period_guard")}
@@ -1135,6 +1164,9 @@ def run(**kwargs: object) -> int:
         summary["periodic_attempt"] = payload["periodic_attempt"]["why_rejected"]
     if payload.get("motion_anchor", {}).get("applied") is False:
         summary["motion_anchor"] = payload["motion_anchor"]
+    if payload.get("jolt"):
+        summary["jolt"] = {"index": payload["jolt"]["index"], "warnings": payload["jolt"]["warnings"],
+                           "head_x_step_max_pct": payload["jolt"]["head"].get("x", {}).get("step_max_pct")}
     if payload.get("jump_repair", {}).get("replaced"):
         summary["jump_repair"] = {k: payload["jump_repair"][k] for k in ("replaced", "score_max_before", "score_max_after")}
     summary["strip"] = {k: payload["strip"][k] for k in ("path", "frames", "w", "h", "body_h", "delay_ms")}

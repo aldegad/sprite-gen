@@ -158,3 +158,86 @@ def test_repair_off_cuts_as_filmed_and_says_so(tmp_path):
     rep = _run(tmp_path, _keyed(tmp_path, filmed), repair="off")
     assert rep["jump_repair"] == {"applied": False, "why": "--repair off"}
     assert rep["seam_measurement"] == "source-frames"
+
+
+# --- the jolt index and its gate (docs/loop-repair.md section 3) ---------------------------------
+
+
+def test_jolt_index_is_zero_for_even_steps_and_high_for_alternating_ones():
+    assert repair.jolt_index(np.full(12, 0.3)) == 0.0
+    alternating = np.array([0.2, 0.4] * 6)
+    assert repair.jolt_index(alternating) == pytest.approx(0.2 / 0.3)
+
+
+def _head_pop(frames: list[Image.Image], k: int, dx: int) -> list[Image.Image]:
+    """Frame k with the head (rows 10..30) moved `dx` px sideways."""
+    out = list(frames)
+    a = np.asarray(frames[k]).copy()
+    head = a[10:30].copy()
+    a[10:30] = 0
+    a[10:30] = np.roll(head, dx, axis=1)
+    out[k] = Image.fromarray(a, "RGBA")
+    return out
+
+
+def test_a_head_that_pops_sideways_is_named_by_the_gate():
+    filmed, _ = _loop()
+    smooth = repair.measure_jolt(filmed)
+    assert repair.jolt_verdict(smooth) == []
+    assert smooth["index"] < repair.JOLT_REFERENCE and smooth["head"]["x"]["step_max_pct"] < repair.HEAD_STEP_REFERENCE
+    popped = repair.measure_jolt(_head_pop(filmed, 7, 4))
+    over = repair.jolt_verdict(popped)
+    assert len(over) == 1 and "head moves sideways" in over[0] and "(into frame 7)" in over[0]
+    assert popped["head"]["x"]["worst_into_frame"] == 7
+
+
+def test_a_loop_with_no_head_to_track_says_so_instead_of_passing():
+    filmed, _ = _loop()
+    blank = list(filmed)
+    blank[3] = Image.new("RGBA", filmed[3].size, (0, 0, 0, 0))
+    measured = repair.measure_jolt(blank)
+    assert "skipped" in measured["head"]
+    assert any("could not be tracked" in o for o in repair.jolt_verdict(measured))
+
+
+def test_video_loop_reports_the_jolt_of_the_loop_as_it_plays_after_the_repair(tmp_path):
+    filmed, truth = _loop({10: 12})
+    rep = _run(tmp_path, _keyed(tmp_path, filmed), interpolate=lambda a, b, t: truth[10])
+    jolt = rep["jolt"]
+    assert jolt["measured"] == "after the jump repair" and jolt["warnings"] == [] and jolt["passed"]
+    assert jolt["gated"] is False and jolt["gate"] is None
+    assert jolt["reference"] == {"jolt_max": repair.JOLT_REFERENCE, "head_step_max": repair.HEAD_STEP_REFERENCE}
+    assert set(jolt["head"]["x"]) >= {"step_max_pct", "step_median_pct", "max_over_median", "range_pct"}
+    assert set(jolt["head"]["y"]) >= {"step_max_pct", "step_median_pct", "max_over_median", "range_pct"}
+
+
+def test_by_default_a_jolting_loop_is_kept_with_a_warning_line(tmp_path, capsys):
+    filmed, _ = _loop()
+    popped = _head_pop(filmed, 7, 4)
+    rep = _run(tmp_path, _keyed(tmp_path, popped), interpolate=lambda a, b, t: popped[7])
+    assert rep["status"] == "passed" and rep["jolt"]["passed"] and rep["jolt"]["gated"] is False
+    assert len(rep["jolt"]["warnings"]) == 1 and "head moves sideways" in rep["jolt"]["warnings"][0]
+    assert "video-loop: warning: the head moves sideways" in capsys.readouterr().err
+
+
+def test_a_bound_the_caller_passes_refuses_a_jolting_loop(tmp_path):
+    filmed, _ = _loop()
+    popped = _head_pop(filmed, 7, 4)
+    stays = lambda a, b, t: popped[7]  # an in-between that cannot take the pop out
+    with pytest.raises(SystemExit, match=r"^video-loop: loop jolts — the head moves sideways .* regenerate the clip$"):
+        _run(tmp_path, _keyed(tmp_path, popped), interpolate=stays, head_step_max=repair.HEAD_STEP_REFERENCE)
+    report = json.loads((tmp_path / "w.json").read_text())
+    assert report["status"] == "failed" and report["jolt"]["passed"] is False and report["jolt"]["over"]
+    assert report["jolt"]["gate"] == {"jolt_max": None, "head_step_max": repair.HEAD_STEP_REFERENCE}
+    assert report["jump_repair"]["replaced"] == [7]
+    # only the bound passed is checked: a jolt bound alone lets the head through
+    again = tmp_path / "again"
+    again.mkdir()
+    rep = _run(again, _keyed(again, popped), interpolate=stays, jolt_max=10.0)
+    assert rep["status"] == "passed" and rep["jolt"]["gated"] and rep["jolt"]["warnings"]
+
+
+def test_repair_off_measures_the_jolt_and_does_not_gate_it(tmp_path):
+    filmed, _ = _loop()
+    rep = _run(tmp_path, _keyed(tmp_path, _head_pop(filmed, 7, 4)), repair="off", head_step_max=0.1)
+    assert rep["jolt"]["gated"] is False and rep["jolt"]["warnings"] and rep["status"] == "passed"

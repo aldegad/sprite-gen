@@ -123,3 +123,93 @@ def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, 
     record["stopped"] = stopped
     record["score_max_after"] = round(float(scores["score"].max()), 4)
     return out, record
+
+
+# --- the jolt index (docs/loop-repair.md section 3) ------------------------------------------
+
+# Reference bounds, at the edge of what was kept on the 2026-10-03 takes (section 3): nothing kept
+# exceeds them, and the back-diagonal take refused because "it jumps" does. A loop beyond them is
+# warned about; it fails only when a caller passes a bound (--jolt-max / --head-step-max), because
+# eleven judged takes are too few to refilm on, and at these values 16 of 30 Lite takes would be.
+JOLT_REFERENCE = 0.42  # alpha jolt index; the kept takes reached 0.414 after repair
+HEAD_STEP_REFERENCE = 0.75  # head's sideways move in one frame, % of body height; kept <= 0.68, refused 0.82
+HEAD_BAND = 0.20  # the head is the top fifth of the body's height over the loop
+HEAD_MEDIAN_FLOOR = 0.05  # % of body height: a median step below this is the tracker's rounding
+
+
+def jolt_index(step_values: np.ndarray) -> float:
+    """How far each step strays from the mean of its two neighbours, on average, over the median
+    step. 0 for a loop whose steps change evenly; alternating big and small steps read high."""
+    n = len(step_values)
+    med = float(np.median(step_values))
+    if n < 3 or med <= 0:
+        return 0.0
+    return float(np.mean([abs(step_values[k] - (step_values[k - 1] + step_values[(k + 1) % n]) / 2) for k in range(n)]) / med)
+
+
+def _track_stats(values: np.ndarray) -> dict[str, float]:
+    n = len(values)
+    d = np.abs(np.array([values[(k + 1) % n] - values[k] for k in range(n)]))
+    med = float(np.median(d))
+    return {"step_max_pct": round(float(d.max()), 3), "step_median_pct": round(med, 3),
+            "max_over_median": round(float(d.max()) / max(med, HEAD_MEDIAN_FLOOR), 3),
+            "range_pct": round(float(np.ptp(values)), 3), "worst_into_frame": int((np.argmax(d) + 1) % n)}
+
+
+def head_track(alphas: list[np.ndarray]) -> dict[str, Any]:
+    """The head's place frame by frame, in % of the body's height over the loop: x is the coverage
+    centroid of the top fifth (HEAD_BAND), y the body's top line. A take whose head pops sideways
+    reads here while its coverage change stays ordinary (2026-10-03, Lite back diagonal)."""
+    rows = np.where(np.max(np.stack(alphas), axis=0).max(axis=1) > 0.1)[0]
+    if rows.size == 0:
+        raise ValueError("every loop frame is fully transparent")
+    top, bottom = int(rows.min()), int(rows.max())
+    height = max(1, bottom - top)
+    band = slice(top, top + max(1, int(height * HEAD_BAND)))
+    xs, ys = [], []
+    for a in alphas:
+        b = a[band]
+        mass = float(b.sum())
+        xs.append(float((b.sum(axis=0) * np.arange(b.shape[1])).sum() / mass) if mass > 0 else float("nan"))
+        filled = np.where(a.sum(axis=1) > 0.5)[0]
+        ys.append(float(filled.min()) if filled.size else float("nan"))
+    x = np.array(xs) / height * 100
+    y = np.array(ys) / height * 100
+    if not (np.isfinite(x).all() and np.isfinite(y).all()):
+        raise ValueError("a loop frame has no head to track")
+    return {"body_height_px": height, "x": _track_stats(x), "y": _track_stats(y)}
+
+
+def measure_jolt(frames: list[Image.Image], *, facing: str = "right") -> dict[str, Any]:
+    """The jolt index of a loop as it plays, and the head's frame-to-frame moves."""
+    al = coverage(frames, union_box(frames))
+    whole, hair = steps(al), steps(al, hair_box(facing))
+    med = float(np.median(whole))
+    try:
+        head: dict[str, Any] = head_track(al)
+    except ValueError as exc:
+        head = {"skipped": str(exc)}  # recorded, and the head gate says it could not read it
+    return {
+        "index": round(jolt_index(whole), 4),
+        "hair_index": round(jolt_index(hair), 4),
+        "step_max_over_median": round(float(whole.max()) / med, 4) if med > 0 else None,
+        "head": head,
+    }
+
+
+def jolt_verdict(measured: dict[str, Any], *, jolt_max: float | None = JOLT_REFERENCE,
+                 head_step_max: float | None = HEAD_STEP_REFERENCE) -> list[str]:
+    """What exceeds the bounds, in words; empty when the loop stays inside. A bound of None is not checked."""
+    over = []
+    if jolt_max is not None and measured["index"] > jolt_max:
+        over.append(f"jolt index {measured['index']:.3f} exceeds {jolt_max}")
+    if head_step_max is None:
+        return over
+    if "skipped" in measured["head"]:
+        over.append(f"the head could not be tracked ({measured['head']['skipped']})")
+        return over
+    head = measured["head"]["x"]
+    if head["step_max_pct"] > head_step_max:
+        over.append(f"the head moves sideways {head['step_max_pct']:.2f} % of the body height in one frame "
+                    f"(into frame {head['worst_into_frame']}), over {head_step_max} %")
+    return over
