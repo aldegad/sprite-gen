@@ -190,6 +190,33 @@ out, only `PINNED_LOOP_STATES` do. A caller that retries a walk pinned after no 
 says True; two such front-walk clips closed on their first frame (seam 0.12 and 0.24 of an
 ordinary step).
 
+`build_prompt(..., model=...)` names the clip model. **A Lite walk is calmed**: for
+`grok-imagine-video-1.5-lite` (`LITE_VIDEO_MODELS`) the built-in walk sentence is followed by
+`LITE_WALK_TEXT` — a slow, relaxed walk, small low steps, a gentle arm swing close to the body, no
+bounce, never running. Lite read "walks naturally" bigger than Pro: long, bouncy steps and a wide
+arm swing, a run more than a walk (2026-10-03, one SD character in five views, two takes each);
+with the clause every view walked. A caller's own walk paragraph is left as written. **A Lite
+back-diagonal walk also holds its head** (`LITE_HEAD_TEXT`, after the calm clause): its head swayed
+2.7–3.8 % of the body height side to side against Pro's 0.88 %, and with the sentence four takes
+swayed 1.7–3.1 % (best 1.84 %). It was measured in that view only, so it is said in that view only.
+The measured sentence ended "only the legs, arms and the end of the ponytail move"; the engine's
+says "the ends of the hair", since most characters have no ponytail. Pro prompts are unchanged.
+
+**A front or back walk starts mid-step.** From a standing still the clip model makes the first
+step itself and walks askew — the feet drawn to one line under the body, or the body turned
+three-quarters: 1 of 14 front clips walked straight from a standing still, 14 of 16 from the same
+characters redrawn mid-step (2026-10-02, four characters, blind judged; three rewordings of the walk
+sentence kept 0 of 14 from a standing SD still). `WALK_START_TEXT[direction]` is the redraw sentence for the front and the
+back — the same 2D sprite, same design, caught mid-step with one foot planted under its hip and
+the other lifted a little under its own, hips and shoulders square, arms swinging gently — and
+`walk_start_prompt(direction, key)` adds the background line for a green or magenta key
+(`starts_mid_step(state, direction)` says which clips need it). The design is the reference
+image's to keep: the sentence is drawn with the base still attached. `video-set` does this before
+the canvas (`--walk-start redraw`, the default): one `sprite-gen gen --ref <base>` call per front or
+back walk, on the base's own key, kept as `walk-start.png` with its report and reused while the
+prompt and base are the same; a base on no chroma key is refused with `--walk-start as-given`, which
+films from the base itself. Side and diagonal walks, and every other state, film from the base.
+
 ## 3. Frames — extract, key, check the edges
 
 `ffmpeg` extracts every frame; the clip's real fps is recorded (never assumed). Each
@@ -495,7 +522,9 @@ are idempotent (an existing clip is reused unless `--force`); one failure stops 
 its item and is listed in `table.md` with its stage and error. Exit code is non-zero
 when any item failed.
 
-After the loops are cut, every walk or run filmed in two or more directions is given one cycle
+A front or back walk films from its base redrawn mid-step (`--walk-start redraw`, default; one
+image generation each, `--still-provider` picks the provider; see §2). After the loops are cut,
+every walk or run filmed in two or more directions is given one cycle
 length: each loop is resampled to the set's median length (only the frames that fall between two
 source frames are made, by RIFE) and turned to start on a foot strike (`--align-cycles auto`, the
 default; `off` keeps each loop's own length). The same step stands alone as
