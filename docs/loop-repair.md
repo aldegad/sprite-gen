@@ -191,6 +191,51 @@ Read:
   so as a default gate it would refilm about every other Lite walk: the opposite of the aim, on
   the strength of two refusals. The bounds stay a reference until more takes are judged.
 
+## 4. One cycle for a direction set — `video-cycle-align`, `video-set --align-cycles auto`
+
+Each direction of a walk is filmed on its own and comes out its own length (one Lite set:
+16, 19, 21, 25 and 27 frames). A game that turns a character mid-stride wants every direction the
+same number of frames, starting on the same step.
+
+```bash
+sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-walk/loop \
+  --loop-dir set/back-walk/loop [--length N] [--report set/walk.cycle-align.json]
+```
+
+- **Length**: the median of the set's own lengths (`--length` overrides). The median is the
+  length that needs the fewest made frames across the set; a loop already that long is not
+  touched.
+- **Resample, offset 0**: frame k of a loop of L frames resampled to L* is the source at time
+  k·L/L*, cyclic. A time within 0.03 of a source frame takes that frame as filmed; only a time
+  between two frames is made, by RIFE at that fraction (section 1). An offset of half a frame,
+  which would remake every frame, is not offered (section 2).
+- **Foot strike**: each loop is then turned to start where the body is lowest (its solid top
+  line lowest, smoothed 1-2-1) — both feet down just after a heel lands. A walk has two such
+  moments; the first is taken.
+- **Rebuilt in place**: `cycle/`, `<name>.strip.png` / `.strip.json`, `.gif`, `.webp` are
+  rewritten at the loop's own cell rules (`cell_height_cap`, body-height target, anchor), at the
+  loop's frame rate, so the aligned cycle lasts L*/fps seconds. `strip.json` gains
+  `cycle_align` (`from`, `to`, `taken`, `made_by_rife`, `made_at`, `turned_by`, the seam ratio of
+  the rebuilt cells, and the re-verified GIF/WebP).
+- **The cut as filmed is kept** in `cycle.source/` on the first alignment, and every later
+  alignment reads from there: running it again, or at another length, never resamples a
+  resampled loop. Every loop of the set is resampled before any is rewritten, so a loop that
+  cannot be made leaves the set as it was.
+- Loops at different frame rates are refused (one length in frames would mean different
+  durations), and so is a loop cut before `cell_height_cap` was recorded (cut it again).
+
+`video-set` runs this after its loops are cut, once per walk or run state filmed in two or more
+directions (`--align-cycles auto`, default; `off` keeps each loop's own length). Its report
+carries `cycle_align` per state and `<state>.cycle-align.json`; a failed alignment is listed as
+`cycle-align:<state>` and the loops stay as cut.
+
+How much RIFE that is, on the 2026-10-03 sets (the experiment's `finalize.py`): resampling to
+the median made 18 of 21 frames for a Lite side loop of 27, 20 of 21 for a back-diagonal loop of
+19, and none for the loop already 21 long; Pro, 22 of 24 for a front-diagonal loop of 34. The
+final set showed a Lite back-diagonal walk that jumped; seen at three stages (as filmed, jumps
+repaired, aligned), it jumped at all three, so the take — not the resampling — was the cause
+(maintainer's judgement, 2026-10-03).
+
 ## Related
 
 - [video-pipeline.md](video-pipeline.md) — the pipeline these repairs run inside

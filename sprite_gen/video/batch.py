@@ -28,6 +28,7 @@ from sprite_gen.video import facing as facing_mod
 from sprite_gen.video import canvas as canvas_mod
 from sprite_gen.video import frames as frames_mod
 from sprite_gen.video import loop as loop_mod
+from sprite_gen.video import align as align_mod
 
 START_GAP_SECONDS = 2.0
 # Clip length the batch asks the video model for. 3 s holds two or more cycles of every
@@ -406,6 +407,37 @@ def run_item(
     return result
 
 
+ALIGN_MODES = ("auto", "off")
+
+
+def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpolate: Any = None) -> dict[str, Any]:
+    """One cycle length per gait state across the set's directions (`video-cycle-align`,
+    docs/loop-repair.md section 4). A state filmed in fewer than two directions has nothing to
+    match. A failure is recorded under its state and the batch reports it; the loops stay as cut."""
+    out: dict[str, Any] = {}
+    if mode == "off":
+        return out
+    by_state: dict[str, list[dict[str, Any]]] = {}
+    for r in results:
+        if r.get("ok") and loop_mod.profile_for(r["state"]).gait:
+            by_state.setdefault(r["state"], []).append(r)
+    for state, rows in by_state.items():
+        if len(rows) < 2:
+            continue
+        try:
+            report = align_mod.align_set([Path(r["dir"]) / "loop" for r in rows], interpolate=interpolate,
+                                         report_path=root / f"{state}.cycle-align.json")
+        except SystemExit as exc:
+            out[state] = {"ok": False, "error": str(exc)}
+            continue
+        out[state] = {"ok": True, "length": report["length"], "lengths": report["lengths"], "made_by_rife": report["made_by_rife"],
+                      "report": str(root / f"{state}.cycle-align.json")}
+        for r, row in zip(rows, report["loops"]):
+            r["loop"]["cycle_align"] = {k: row[k] for k in ("from", "to", "made_by_rife", "turned_by", "seam_ratio")}
+            r["loop"]["n_out"] = row["strip"]["frames"]
+    return out
+
+
 def write_table(results: list[dict[str, Any]], path: Path) -> str:
     lines = ["| direction | state | kind | cycle | period | seam | frames | status |", "|---|---|---|---|---|---|---|---|"]
     for r in results:
@@ -443,7 +475,11 @@ def run_set(
     body_height: int | None = None,
     fit: str = "state",
     decontam: str = "off",
+    align_cycles: str = "auto",
+    interpolate: Any = None,
 ) -> dict[str, Any]:
+    if align_cycles not in ALIGN_MODES:
+        raise SystemExit(f"video-set: --align-cycles must be one of {', '.join(ALIGN_MODES)}")
     if anchor == "motion-auto" and any(not loop_mod.profile_for(state).gait for state in states):
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
     if anchor == "motion":
@@ -480,8 +516,10 @@ def run_set(
             results.append(r)
             print(json.dumps({k: r[k] for k in ("item", "ok") if k in r} | ({"error": r["error"]} if not r.get("ok") else {"seam": r["loop"]["seam_ratio"]}), ensure_ascii=False), flush=True)
     results.sort(key=lambda r: [i for i, _, _ in items].index(r["item"]))
+    aligned = align_gaits(results, root, align_cycles, interpolate=interpolate)
     table = write_table(results, root / "table.md")
-    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": [r["item"] for r in results if not r.get("ok")], "items": results}
+    failed = [r["item"] for r in results if not r.get("ok")] + [f"cycle-align:{st}" for st, a in aligned.items() if not a.get("ok")]
+    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": failed, "items": results, "cycle_align": aligned}
     atomic_write_text(root / "set.report.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     print(table)
     return payload
@@ -520,6 +558,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--fit", choices=canvas_mod.FITS, default="state", help="state: each state's room for the motion (default); tight: no room, the subject fills the frame and a motion that leaves it is clipped (use with --body-height at a low --resolution)")
     parser.add_argument("--body-height", type=int, default=None, help="scale every state's loop so the standing height is this many px (video-loop --body-height): one value for the whole set keeps the character the same size across states")
     parser.add_argument("--decontam", choices=frames_mod.DECONTAM_MODES, default="off", help="passed to video-frames: palette re-explains key-tinted edges with the subject's own colours (default off)")
+    parser.add_argument("--align-cycles", choices=ALIGN_MODES, default="auto", help="auto (default): after the loops are cut, every walk/run filmed in two or more directions is resampled to the set's median cycle length and turned to start on a foot strike (video-cycle-align; RIFE makes only the frames between source frames); off: each loop keeps its own length")
     parser.add_argument("--force", action="store_true", help="regenerate clips that already exist")
 
 
@@ -533,7 +572,7 @@ def run(**kwargs: object) -> int:
         facing=str(kwargs.get("facing") or "right"), facing_fix=str(kwargs.get("facing_fix") or "none"),
         shape=(str(kwargs["shape"]) if kwargs.get("shape") else None), anchor=str(kwargs.get("anchor") or "none"), spill=str(kwargs.get("spill") or "auto"),
         body_height=(int(kwargs["body_height"]) if kwargs.get("body_height") else None), fit=str(kwargs.get("fit") or "state"),
-        decontam=str(kwargs.get("decontam") or "off"),
+        decontam=str(kwargs.get("decontam") or "off"), align_cycles=str(kwargs.get("align_cycles") or "auto"),
     )
     return 0 if not payload["failed"] else 1
 

@@ -495,6 +495,14 @@ are idempotent (an existing clip is reused unless `--force`); one failure stops 
 its item and is listed in `table.md` with its stage and error. Exit code is non-zero
 when any item failed.
 
+After the loops are cut, every walk or run filmed in two or more directions is given one cycle
+length: each loop is resampled to the set's median length (only the frames that fall between two
+source frames are made, by RIFE) and turned to start on a foot strike (`--align-cycles auto`, the
+default; `off` keeps each loop's own length). The same step stands alone as
+`sprite-gen video-cycle-align --loop-dir … --loop-dir …`. `set.report.json` carries `cycle_align`
+per state, and a failed alignment is listed as `cycle-align:<state>`. See
+[loop repair](loop-repair.md) section 4.
+
 ## What the rules were measured on
 
 Every threshold above (the 15 % period tolerance, the 2.0 seam gate, the 0.15

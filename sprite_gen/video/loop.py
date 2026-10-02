@@ -684,6 +684,7 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
         "subsampled": L > cap,
         "cell_cap": cap,
         "top_margin_px": top,
+        "cell_height_cap": max_height,  # --strip-height: what a rebuild of these cells (video-cycle-align) scales against
         "body_height_target": body_height,
         "foot_anchor": anchor,  # "none" | "feet" — how the cells were aligned
         "drift_px": drift_px,  # source px of slow in-canvas drift removed across the cycle (0 when not measured)
