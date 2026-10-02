@@ -22,12 +22,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
+from PIL import Image
+
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.gen.facing import FACINGS, validate as validate_facing
 from sprite_gen.video import facing as facing_mod
 from sprite_gen.video import canvas as canvas_mod
 from sprite_gen.video import frames as frames_mod
 from sprite_gen.video import loop as loop_mod
+from sprite_gen.video import align as align_mod
 
 START_GAP_SECONDS = 2.0
 # Clip length the batch asks the video model for. 3 s holds two or more cycles of every
@@ -189,6 +192,28 @@ VIEW_MOTION_TEXT = {
 PINNED_GAIT_VIEWS = DIAGONAL_VIEWS
 
 
+# Clip models that read a walk sentence bigger than it is written. The lower-priced Lite model took
+# "walks naturally" as long, bouncy steps and a wide arm swing — it ran (2026-10-03, an SD girl in
+# five views, two takes each); a calming clause after the walk sentence brought it back to a walk.
+LITE_VIDEO_MODELS = frozenset({"grok-imagine-video-1.5-lite"})
+LITE_WALK_TEXT = (
+    "A slow, relaxed, unhurried walk: small, low steps with the feet barely leaving the ground, a gentle arm swing "
+    "close to the body and no bounce — never running, jogging, skipping or hopping."
+)
+# Lite's back-diagonal walk swayed its head 2.7-3.8 % of the body height side to side against Pro's
+# 0.88 %; with this sentence four takes swayed 1.7-3.1 % (2026-10-03). Measured on that view only.
+LITE_HEAD_TEXT = {
+    "back_diagonal": (
+        "The head stays level and steady over the body the whole time: it does not bob, nod, tilt or sway from side to "
+        "side; only the legs, arms and the ends of the hair move."
+    ),
+}
+
+
+def is_lite(model: str | None) -> bool:
+    return model in LITE_VIDEO_MODELS
+
+
 def pins_last_frame(state: str, direction: str) -> bool:
     """Whether the clip of (state, direction) is filmed ending on its first frame."""
     return state in PIN_LAST_FRAME_STATES or (state in GAIT_STATES and direction in PINNED_GAIT_VIEWS)
@@ -234,7 +259,7 @@ def _staggered_start(gap: float) -> None:
 
 
 def build_prompt(direction: str, state: str, character: str | None, facing: str = "right", motion: str | None = None,
-                 pinned: bool | None = None) -> str:
+                 pinned: bool | None = None, model: str | None = None) -> str:
     """The clip prompt for one (direction, state).
 
     `motion` replaces the built-in state sentence with the caller's own description of the
@@ -247,6 +272,10 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
     for the return to the first pose instead of an evenly paced repeat (`PINNED_LOOP_TEXT`). None
     leaves it to the state and view (`PINNED_LOOP_STATES`, a walk or run in `PINNED_GAIT_VIEWS`);
     a caller that pins any other walk or run says True.
+
+    `model` is the clip model the prompt is for. A Lite walk (`LITE_VIDEO_MODELS`) gets the calming
+    clause after the built-in walk sentence (`LITE_WALK_TEXT`; a caller's own motion is left as
+    written), and a Lite walk in a view where its head sways gets `LITE_HEAD_TEXT`.
     """
     validate_facing(facing)
     view = VIEW_TEXT.get(direction, f"seen from the {direction}").format(facing=facing)
@@ -266,11 +295,72 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
             hold += f" {GAIT_HOLD_TEXT[direction].format(facing=facing)}"
         repeat = f" {REPEAT_TEXT[state]}" if state in REPEAT_TEXT else ""
         subject = character.strip().rstrip(".") if character else "The character"
-        return f"2D game sprite animation. {motion}{hold}{repeat} {subject} is {view}." + template[len(head):]
+        return f"2D game sprite animation. {motion}{hold}{repeat} {subject} is {view}." + template[len(head):] + _lite_text(state, direction, model, built_in=False)
     built_in = VIEW_MOTION_TEXT.get((state, direction)) or MOTION_TEXT.get(
         state, f"performs the '{state}' action in place, repeating at an even rhythm.")
     text = template.format(motion=built_in, view=view)
-    return text.replace("The character", character, 1) if character else text
+    return (text.replace("The character", character, 1) if character else text) + _lite_text(state, direction, model, built_in=True)
+
+
+def _lite_text(state: str, direction: str, model: str | None, *, built_in: bool) -> str:
+    """What a Lite walk adds after the prompt, in the order it was measured: the calm walk, then the head."""
+    if state != "walk" or not is_lite(model):
+        return ""
+    text = f" {LITE_WALK_TEXT}" if built_in else ""
+    if direction in LITE_HEAD_TEXT:
+        text += f" {LITE_HEAD_TEXT[direction]}"
+    return text
+
+
+# A walk seen from the front or from behind starts from a still redrawn mid-step. From a standing
+# still the clip model makes the first step itself and walks askew — the feet drawn to one line, or
+# the body turned three-quarters — 1 of 14 front clips straight; from a mid-step still, 14 of 16
+# (2026-10-02, four characters, blind judged). The sentence redraws the base still with a reference;
+# the design is the reference's to keep, the background the caller's to say (`walk_start_prompt`).
+WALK_START_TEXT = {
+    "front": (
+        "Redraw the character in the attached image as the same 2D game sprite, keeping the design, outfit, colors, body "
+        "proportions and art style exactly as they are. Only the pose changes: the character is caught mid-step while "
+        "walking straight toward the viewer, facing the viewer directly with the hips and shoulders square. One foot is "
+        "planted flat directly under its own hip; the other foot is lifted a little with the knee slightly bent, directly "
+        "under its own hip, so the feet stay hip-width apart with a clear gap between the legs. The arms swing gently "
+        "opposite to the legs, hands as in the image. Full body, centered, seen at eye level, with generous empty margin "
+        "above the head and below the feet."
+    ),
+    "back": (
+        "Redraw the character in the attached image as the same 2D game sprite, keeping the design, outfit, colors, hair, "
+        "body proportions and art style exactly as they are, and keeping the same view: seen directly from behind, the back "
+        "of the character toward the viewer. Only the pose changes: the character is caught mid-step while walking straight "
+        "away from the viewer, with the hips and shoulders square to the viewer and the body not turned to either side. One "
+        "foot is planted flat directly under its own hip; the other foot is lifted a little with the knee slightly bent, "
+        "directly under its own hip, so the feet stay hip-width apart with a clear gap between the legs. The arms swing "
+        "gently opposite to the legs, hands as in the image. Full body, centered, seen at eye level, with generous empty "
+        "margin above the head and below the feet; all of the hair stays well inside the image."
+    ),
+}
+WALK_START_MODES = ("redraw", "as-given")
+KEY_BACKGROUND_TEXT = {
+    "green": ("The entire background is one perfectly flat, uniform pure green chroma-key fill (#00FF00) with no gradient, "
+              "no texture, no shadow and no ground line."),
+    "magenta": ("The entire background is one perfectly flat, uniform pure magenta chroma-key fill (#FF00FF) with no "
+                "gradient, no texture, no shadow and no ground line."),
+}
+
+
+def starts_mid_step(state: str, direction: str) -> bool:
+    """Whether the clip of (state, direction) starts from a still redrawn mid-step (`WALK_START_TEXT`)."""
+    return state == "walk" and direction in WALK_START_TEXT
+
+
+def walk_start_prompt(direction: str, key: str | None = None) -> str:
+    """The redraw sentence for a walk's mid-step start still; with `key` (green / magenta) the background line."""
+    if direction not in WALK_START_TEXT:
+        raise SystemExit(f"video: no mid-step start still for the {direction} view (only {', '.join(WALK_START_TEXT)})")
+    if key is None:
+        return WALK_START_TEXT[direction]
+    if key not in KEY_BACKGROUND_TEXT:
+        raise SystemExit(f"video: a mid-step start still is drawn on a green or magenta key, not {key!r}")
+    return f"{WALK_START_TEXT[direction]} {KEY_BACKGROUND_TEXT[key]}"
 
 
 def run_video_cli(image: Path, prompt: str, out: Path, report: Path, *, duration: int, resolution: str, log: Path, last_frame: Path | None = None) -> int:
@@ -279,6 +369,40 @@ def run_video_cli(image: Path, prompt: str, out: Path, report: Path, *, duration
         cmd += ["--last-frame", str(last_frame)]
     with log.open("w", encoding="utf-8") as fh:
         return subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT, text=True).returncode
+
+
+def run_redraw_cli(base: Path, prompt: str, out: Path, report: Path, *, log: Path, provider: str | None = None) -> int:
+    """`sprite-gen gen` with the base still as the reference: one redrawn still, its report beside it."""
+    cmd = [sys.executable, "-m", "sprite_gen.cli", "gen", "--ref", str(base), "--prompt", prompt, "--out", str(out), "--report", str(report)]
+    if provider:
+        cmd += ["--provider", provider]
+    with log.open("w", encoding="utf-8") as fh:
+        return subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT, text=True).returncode
+
+
+def walk_start_still(base: Path, direction: str, item_dir: Path, *, key: str, force: bool,
+                     runner: Callable[..., int] = run_redraw_cli, provider: str | None = None) -> tuple[Path, dict[str, Any]]:
+    """The base still redrawn mid-step for a front or back walk (`WALK_START_TEXT`), on the base's own key.
+
+    Reused when the same prompt already drew it from the same base (unless `force`)."""
+    with Image.open(base) as im:
+        kind = canvas_mod.resolve_key(canvas_mod.corner_key(im.convert("RGB")), key)
+    if kind not in KEY_BACKGROUND_TEXT:
+        raise SystemExit(f"the {direction} walk starts from a still redrawn mid-step on a green or magenta key, and this "
+                         f"base's corners are not one (key {key}); pass --walk-start as-given to film from the base itself")
+    prompt = walk_start_prompt(direction, kind)
+    out, report = item_dir / "walk-start.png", item_dir / "walk-start.report.json"
+    if out.is_file() and report.is_file() and not force:
+        try:
+            prior = json.loads(report.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            prior = {}
+        if prior.get("prompt") == prompt and [str(Path(r).resolve()) for r in prior.get("refs") or []] == [str(base.resolve())]:
+            return out, {"redrawn": True, "reused": True, "still": str(out), "key": kind}
+    rc = runner(base, prompt, out, report, log=item_dir / "walk-start.log", provider=provider)
+    if rc != 0 or not out.is_file():
+        raise SystemExit(f"the mid-step start still for the {direction} walk was not drawn; see {item_dir / 'walk-start.log'}")
+    return out, {"redrawn": True, "reused": False, "still": str(out), "key": kind, "report": str(report)}
 
 
 def run_item(
@@ -304,7 +428,12 @@ def run_item(
     body_height: int | None = None,
     fit: str = "state",
     decontam: str = "off",
+    walk_start: str = "redraw",
+    redraw_runner: Callable[..., int] = run_redraw_cli,
+    still_provider: str | None = None,
 ) -> dict[str, Any]:
+    if walk_start not in WALK_START_MODES:
+        raise SystemExit(f"video-set: --walk-start must be one of {', '.join(WALK_START_MODES)}")
     if anchor == "motion-auto" and not loop_mod.profile_for(state).gait:
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
     if anchor == "motion":
@@ -351,6 +480,9 @@ def run_item(
         else:
             still = base
             facing_report = None
+            if starts_mid_step(state, direction) and walk_start == "redraw":
+                still, result["walk_start"] = walk_start_still(base, direction, item_dir, key=key, force=force,
+                                                               runner=redraw_runner, provider=still_provider)
             if direction == "side":
                 if prepare_side is not None:
                     still, facing_report = prepare_side(base)
@@ -392,7 +524,8 @@ def run_item(
         result["frames"] = {k: fr[k] for k in ("fps", "frames", "alpha_zero_pct_min", "alpha_zero_pct_max")}
         result["frames"]["spill"] = fr.get("spill", {}).get("mode")
         lp = loop_mod.run_loop(Path(fr["keyed_dir"]), item_dir / "loop", fps=float(fr["fps"]), state=state, min_len=None, max_len=None, n_out=None, seam_max=loop_mod.SEAM_RATIO_MAX, name=item, report_path=item_dir / "loop.report.json", anchor=anchor, body_height=body_height,
-                               cycle_mode="pinned" if state in PINNED_LOOP_STATES else "auto")
+                               cycle_mode="pinned" if state in PINNED_LOOP_STATES else "auto",
+                               facing=facing if direction == "side" else "right")
         result["loop"] = {"kind": lp["cycle"].get("kind", "periodic"), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "drift_px": lp["strip"].get("drift_px", 0), "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
         result["loop"]["review_recommended"] = lp["cycle"].get("review_recommended", False)
         result["loop"]["half_period_guard"] = lp["cycle"].get("half_period_guard")
@@ -403,6 +536,37 @@ def run_item(
         result["ok"] = False
         result["error"] = str(exc)
     return result
+
+
+ALIGN_MODES = ("auto", "off")
+
+
+def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpolate: Any = None) -> dict[str, Any]:
+    """One cycle length per gait state across the set's directions (`video-cycle-align`,
+    docs/loop-repair.md section 4). A state filmed in fewer than two directions has nothing to
+    match. A failure is recorded under its state and the batch reports it; the loops stay as cut."""
+    out: dict[str, Any] = {}
+    if mode == "off":
+        return out
+    by_state: dict[str, list[dict[str, Any]]] = {}
+    for r in results:
+        if r.get("ok") and loop_mod.profile_for(r["state"]).gait:
+            by_state.setdefault(r["state"], []).append(r)
+    for state, rows in by_state.items():
+        if len(rows) < 2:
+            continue
+        try:
+            report = align_mod.align_set([Path(r["dir"]) / "loop" for r in rows], interpolate=interpolate,
+                                         report_path=root / f"{state}.cycle-align.json")
+        except SystemExit as exc:
+            out[state] = {"ok": False, "error": str(exc)}
+            continue
+        out[state] = {"ok": True, "length": report["length"], "lengths": report["lengths"], "made_by_rife": report["made_by_rife"],
+                      "report": str(root / f"{state}.cycle-align.json")}
+        for r, row in zip(rows, report["loops"]):
+            r["loop"]["cycle_align"] = {k: row[k] for k in ("from", "to", "made_by_rife", "turned_by", "seam_ratio")}
+            r["loop"]["n_out"] = row["strip"]["frames"]
+    return out
 
 
 def write_table(results: list[dict[str, Any]], path: Path) -> str:
@@ -442,7 +606,14 @@ def run_set(
     body_height: int | None = None,
     fit: str = "state",
     decontam: str = "off",
+    align_cycles: str = "auto",
+    interpolate: Any = None,
+    walk_start: str = "redraw",
+    redraw_runner: Callable[..., int] = run_redraw_cli,
+    still_provider: str | None = None,
 ) -> dict[str, Any]:
+    if align_cycles not in ALIGN_MODES:
+        raise SystemExit(f"video-set: --align-cycles must be one of {', '.join(ALIGN_MODES)}")
     if anchor == "motion-auto" and any(not loop_mod.profile_for(state).gait for state in states):
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
     if anchor == "motion":
@@ -473,14 +644,16 @@ def run_set(
             return prepared[base]
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
-        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=bases[d], root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=facing, facing_fix=facing_fix, prepare_side=prepare_side, body_height=body_height, fit=fit, decontam=decontam): i for i, d, s in items}
+        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=bases[d], root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=facing, facing_fix=facing_fix, prepare_side=prepare_side, body_height=body_height, fit=fit, decontam=decontam, walk_start=walk_start, redraw_runner=redraw_runner, still_provider=still_provider): i for i, d, s in items}
         for fut in as_completed(futures):
             r = fut.result()
             results.append(r)
             print(json.dumps({k: r[k] for k in ("item", "ok") if k in r} | ({"error": r["error"]} if not r.get("ok") else {"seam": r["loop"]["seam_ratio"]}), ensure_ascii=False), flush=True)
     results.sort(key=lambda r: [i for i, _, _ in items].index(r["item"]))
+    aligned = align_gaits(results, root, align_cycles, interpolate=interpolate)
     table = write_table(results, root / "table.md")
-    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": [r["item"] for r in results if not r.get("ok")], "items": results}
+    failed = [r["item"] for r in results if not r.get("ok")] + [f"cycle-align:{st}" for st, a in aligned.items() if not a.get("ok")]
+    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": failed, "items": results, "cycle_align": aligned}
     atomic_write_text(root / "set.report.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     print(table)
     return payload
@@ -519,6 +692,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--fit", choices=canvas_mod.FITS, default="state", help="state: each state's room for the motion (default); tight: no room, the subject fills the frame and a motion that leaves it is clipped (use with --body-height at a low --resolution)")
     parser.add_argument("--body-height", type=int, default=None, help="scale every state's loop so the standing height is this many px (video-loop --body-height): one value for the whole set keeps the character the same size across states")
     parser.add_argument("--decontam", choices=frames_mod.DECONTAM_MODES, default="off", help="passed to video-frames: palette re-explains key-tinted edges with the subject's own colours (default off)")
+    parser.add_argument("--walk-start", choices=WALK_START_MODES, default="redraw", help="redraw (default): a front or back walk films from its base still redrawn mid-step (one image generation, `sprite-gen gen --ref base`, kept as walk-start.png) — from a standing still the clip model walks askew; as-given: film from the base still itself")
+    parser.add_argument("--still-provider", help="image provider for the mid-step redraw (default: sprite-gen gen's own default)")
+    parser.add_argument("--align-cycles", choices=ALIGN_MODES, default="auto", help="auto (default): after the loops are cut, every walk/run filmed in two or more directions is resampled to the set's median cycle length and turned to start on a foot strike (video-cycle-align; RIFE makes only the frames between source frames); off: each loop keeps its own length")
     parser.add_argument("--force", action="store_true", help="regenerate clips that already exist")
 
 
@@ -532,7 +708,8 @@ def run(**kwargs: object) -> int:
         facing=str(kwargs.get("facing") or "right"), facing_fix=str(kwargs.get("facing_fix") or "none"),
         shape=(str(kwargs["shape"]) if kwargs.get("shape") else None), anchor=str(kwargs.get("anchor") or "none"), spill=str(kwargs.get("spill") or "auto"),
         body_height=(int(kwargs["body_height"]) if kwargs.get("body_height") else None), fit=str(kwargs.get("fit") or "state"),
-        decontam=str(kwargs.get("decontam") or "off"),
+        decontam=str(kwargs.get("decontam") or "off"), align_cycles=str(kwargs.get("align_cycles") or "auto"),
+        walk_start=str(kwargs.get("walk_start") or "redraw"), still_provider=kwargs.get("still_provider"),  # type: ignore[arg-type]
     )
     return 0 if not payload["failed"] else 1
 

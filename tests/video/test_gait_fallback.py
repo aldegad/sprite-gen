@@ -51,7 +51,7 @@ def run(tmp_path, frames, *extra):
     for k, image in enumerate(frames):
         image.save(keyed/f'{k:03}.png')
     output = tmp_path/'out'
-    args = ['--frames-dir', str(keyed), '--out-dir', str(output), '--state', 'walk', '--anchor', 'motion-auto',
+    args = ['--frames-dir', str(keyed), '--out-dir', str(output), '--state', 'walk', '--anchor', 'motion-auto', '--repair', 'off',
             '--report', str(tmp_path/'loop.json'), *extra]
     try:
         code = loop.main(args)

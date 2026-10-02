@@ -63,11 +63,11 @@ def test_run_loop_defaults_to_body_for_gaits_and_none_otherwise(tmp_path: Path):
     keyed.mkdir()
     for k, im in enumerate(_cycle(drift=6, n=24) * 3):
         im.save(keyed / f"frame-{k + 1:04d}.png")
-    walk = loop.run_loop(keyed, tmp_path / "walk", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=1000.0, name="w", report_path=tmp_path / "w.json", cycle_mode="fixed", start=0, length=24)
+    walk = loop.run_loop(keyed, tmp_path / "walk", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=1000.0, name="w", report_path=tmp_path / "w.json", cycle_mode="fixed", start=0, length=24, repair="off")
     assert walk["strip"]["foot_anchor"] == "body" and walk["strip"]["wrap_dx_px"] in (-6, -5)
-    idle = loop.run_loop(keyed, tmp_path / "idle", fps=24.0, state="idle", min_len=None, max_len=None, n_out=None, seam_max=1000.0, name="i", report_path=tmp_path / "i.json", cycle_mode="fixed", start=0, length=24)
+    idle = loop.run_loop(keyed, tmp_path / "idle", fps=24.0, state="idle", min_len=None, max_len=None, n_out=None, seam_max=1000.0, name="i", report_path=tmp_path / "i.json", cycle_mode="fixed", start=0, length=24, repair="off")
     assert idle["strip"]["foot_anchor"] == "none" and "wrap_dx_px" not in idle["strip"]
-    feet = loop.run_loop(keyed, tmp_path / "feet", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=1000.0, name="f", report_path=tmp_path / "f.json", cycle_mode="fixed", start=0, length=24, anchor="feet")
+    feet = loop.run_loop(keyed, tmp_path / "feet", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=1000.0, name="f", report_path=tmp_path / "f.json", cycle_mode="fixed", start=0, length=24, anchor="feet", repair="off")
     assert feet["strip"]["foot_anchor"] == "feet" and "wrap_dx_px" not in feet["strip"]
 
 
