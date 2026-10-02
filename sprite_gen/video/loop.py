@@ -40,6 +40,8 @@ from sprite_gen._deps import np
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.gif_utils import save_clean_gif
 from sprite_gen.video import motion_anchor, auto_motion, local_cycle, gait_fallback
+from sprite_gen.video import repair as repair_mod
+from sprite_gen.video import rife as rife_mod
 
 ANALYSIS_SIZE = 96  # thumbnail edge for the distance matrix
 STRIP_MAX_CELLS = 64  # upper bound on cells even when they are narrow
@@ -80,6 +82,10 @@ ANCHOR_MODES = ("none", "feet", "body", "motion", "motion-auto")
 BODY_ANCHOR_BAND = 0.6  # --anchor body reads the wrap offset from the top 60 % of the first frame's box: head and torso, not the legs
 BODY_ANCHOR_SEARCH = 24  # px either side searched for the last frame's horizontal offset against the first
 FOOT_BAND = 0.08  # fraction of the frame's own height, measured up from its lowest opaque row
+# Jump-frame repair (docs/loop-repair.md section 2). auto: walk and run loops get a RIFE frame in
+# place of each frame that follows a jump; off: the loop is cut as filmed, and says so.
+REPAIR_MODES = ("auto", "off")
+FACINGS = ("right", "left")
 
 
 # A gait's period is a fact about the body, not about how long the clip runs: the
@@ -770,6 +776,28 @@ def write_loop_report(target: Path, payload: dict[str, Any]) -> None:
     atomic_write_text(target, json.dumps(finite(payload), ensure_ascii=False, indent=2, allow_nan=False) + "\n")
 
 
+def _repair_jumps(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *, facing: str) -> tuple[list[Image.Image], dict[str, Any]]:
+    """`repair_mod.repair_jumps`, with RIFE located only once a frame is to be made: a loop
+    without a jump needs no binary. The report names the interpolator that made the frames."""
+    made_by: list[dict[str, str]] = []
+
+    def lazy(a: Image.Image, b: Image.Image, t: float) -> Image.Image:
+        nonlocal interpolate
+        if interpolate is None:
+            located = rife_mod.Rife()
+            made_by.append(located.describe())
+            interpolate = located
+        return interpolate(a, b, t)
+
+    frames, record = repair_mod.repair_jumps(frames, lazy, facing=facing)
+    record["applied"] = bool(record["replaced"])
+    if made_by:
+        record["interpolator"] = {"kind": "rife-ncnn-vulkan", **made_by[0]}
+    elif record["replaced"]:
+        record["interpolator"] = {"kind": "injected"}
+    return frames, record
+
+
 def run_loop(
     frames_dir: Path,
     out_dir: Path,
@@ -790,7 +818,14 @@ def run_loop(
     body_height: int | None = None,
     anchor: str | None = None,
     anchor_regions: list[motion_anchor.Box] | None = None,
+    repair: str = "auto",
+    facing: str = "right",
+    interpolate: rife_mod.Interpolate | None = None,
 ) -> dict[str, Any]:
+    if repair not in REPAIR_MODES:
+        raise SystemExit(f"video-loop: unknown --repair {repair!r}; expected one of {', '.join(REPAIR_MODES)}")
+    if facing not in FACINGS:
+        raise SystemExit(f"video-loop: unknown --facing {facing!r}; expected one of {', '.join(FACINGS)}")
     if anchor is None:
         # gaits drift a few pixels over a cycle and the wrap shows it; in-place states do not
         anchor = "body" if profile_for(state).gait else "none"
@@ -936,6 +971,20 @@ def run_loop(
             write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle})
             raise SystemExit(error) from exc
         report_base["motion_anchor"] = motion
+    if repair == "auto" and prof.gait:
+        report_base["jump_repair"] = None
+        try:
+            frames, report_base["jump_repair"] = _repair_jumps(frames, interpolate, facing=facing)
+        except (ValueError, rife_mod.RifeUnavailable) as exc:
+            error = (f"video-loop: {exc}; the loop has a jump frame to repair — install RIFE, or pass --repair off "
+                     "to cut it as filmed (docs/loop-repair.md)")
+            shutil.rmtree(out_dir / FALLBACK_FRAMES_DIR, ignore_errors=True)
+            write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle})
+            raise SystemExit(error) from exc
+        if report_base["jump_repair"]["replaced"]:
+            report_base["seam_measurement"] = "rendered-cells"
+    else:
+        report_base["jump_repair"] = {"applied": False, "why": "--repair off" if repair == "off" else f"not a gait state ({state})"}
     cycle_dir.mkdir(parents=True, exist_ok=True)
     for old in cycle_dir.glob("frame-*.png"):
         old.unlink()
@@ -972,8 +1021,8 @@ def run_loop(
     seam_idx = [i + j for j in idx]
     resampled_adjacent = float(np.mean([D[seam_idx[k], seam_idx[k + 1]] for k in range(len(seam_idx) - 1)]))
     resampled_seam = float(D[seam_idx[-1], seam_idx[0]])
-    if anchor in ("motion", "motion-auto"):
-        # Gate the actual corrected/resampled strip cells, with the same limit.
+    if report_base["seam_measurement"] == "rendered-cells":
+        # Gate the actual corrected/repaired/resampled strip cells, with the same limit.
         flat = np.stack([_small_features(im) for im in pick])
         resampled_adjacent = float(np.abs(flat[1:] - flat[:-1]).mean())
         resampled_seam = float(np.abs(flat[-1] - flat[0]).mean())
@@ -1061,6 +1110,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--body-height", type=int, help="scale so the STANDING height (the subject in the clip's first frame, i.e. the base still's pose) is this many px — the same value across states gives the same character size; --strip-height stays the cap")
     parser.add_argument("--anchor", choices=ANCHOR_MODES, default=None, help="motion-auto: automatic stable regions, local repeat selection and XY ramp (walk/run); motion: fixed cut with explicit regions; body (default for walk/run): measure the last-to-first head-and-torso offset once and spread it as a ramp over the cycle; feet: remove in-canvas drift (a straight-line trend) so every cell stands on the mean foot line; none: leave placement as filmed (default for other states)")
     parser.add_argument("--anchor-region", type=motion_anchor.parse_region, action="append", help="motion anchor only: repeat twice with head then torso x0,y0,x1,y1 in the first selected frame; requires --cycle fixed and at least 6 frames")
+    parser.add_argument("--repair", choices=REPAIR_MODES, default="auto", help="auto (default): in a walk or run loop, a frame that follows a jump (a step 1.4x the median, whole body or the hair behind it) is replaced by RIFE's frame between its neighbours, at most 3 and never two side by side, recorded in the report (docs/loop-repair.md); off: cut as filmed")
+    parser.add_argument("--facing", choices=FACINGS, default="right", help="which way the body faces in the frames (default right): the hair the jump search watches is behind it")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)
 
@@ -1076,6 +1127,7 @@ def run(**kwargs: object) -> int:
         body_height=kwargs.get("body_height"),  # type: ignore[arg-type]
         anchor=kwargs.get("anchor"),  # None resolves by state inside run_loop
         anchor_regions=kwargs.get("anchor_region"),
+        repair=str(kwargs.get("repair") or "auto"), facing=str(kwargs.get("facing") or "right"),
     )
     summary = {k: payload[k] for k in ("state", "frames_total", "window", "cycle_seconds", "n_out", "delay_ms", "resampled_seam_ratio", "specks_dropped", "report")}
     summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio", "review_recommended", "half_period_guard")}
@@ -1083,6 +1135,8 @@ def run(**kwargs: object) -> int:
         summary["periodic_attempt"] = payload["periodic_attempt"]["why_rejected"]
     if payload.get("motion_anchor", {}).get("applied") is False:
         summary["motion_anchor"] = payload["motion_anchor"]
+    if payload.get("jump_repair", {}).get("replaced"):
+        summary["jump_repair"] = {k: payload["jump_repair"][k] for k in ("replaced", "score_max_before", "score_max_after")}
     summary["strip"] = {k: payload["strip"][k] for k in ("path", "frames", "w", "h", "body_h", "delay_ms")}
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

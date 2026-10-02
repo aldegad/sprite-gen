@@ -33,7 +33,7 @@ def write_source(path, **kwargs):
 def test_real_boundary_match_emits_verified_unchanged_cycle_and_exposes_it(tmp_path, capsys):
     keyed = write_source(tmp_path / "keyed")
     out = tmp_path / "out"
-    args = ["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk"]
+    args = ["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk", "--repair", "off"]
     assert loop.main(args + ["--anchor", "motion-auto"]) == 0
     summary = json.loads(capsys.readouterr().out)
     report = json.loads((out / "loop.loop.report.json").read_text())
@@ -64,7 +64,7 @@ def test_uncertain_match_does_not_accept_bad_uncorrected_seam(tmp_path, monkeypa
     monkeypatch.setattr(motion_anchor, "correct_motion", uncertain)
     out = tmp_path / "out"
     with pytest.raises(SystemExit, match="loop seam ratio"):
-        loop.main(["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk",
+        loop.main(["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk", "--repair", "off",
                    "--anchor", "motion-auto"])
     report = json.loads((out / "loop.loop.report.json").read_text())
     assert report["status"] == "failed" and report["resampled_seam_ratio"] > 2

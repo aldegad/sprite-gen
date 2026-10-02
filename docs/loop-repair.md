@@ -95,6 +95,42 @@ for the same model, and llvmpipe already gives the GPU's frame.
 sprite-gen ships none of these. A deployment that bakes the release zip into an image ships
 the zip's `LICENSE` with it.
 
+## 2. Jump frames — `video-loop --repair auto`
+
+A walk or run loop (`--state walk|run`) is read, after it is cut and anchored, as it will play:
+cyclic, the last frame followed by the first, inside the union box of the body over the loop
+(the strip cells' own crop). For every step k → k+1 two numbers are taken — the mean change of
+coverage over the whole box, and over the hair behind the body, each divided by its own median
+over the loop — and the larger is the step's score.
+
+| Rule | Value | Why |
+|---|---|---|
+| A jump | a score of at least **1.4** (`JUMP_RATIO`) | the ponytail cuts the experiment found sat at 1.5–2.5; a smooth take's worst step sits near 1.3 |
+| The hair box | (0, 0.30)–(0.45, 0.80) of the union box for a right-facing body; mirrored for `--facing left` | below the head and behind the body, where a ponytail cut at the wrong moment jumps |
+| The frame remade | the frame after the jump; but when the step *into* frame k is a jump too and larger than the step after k+1, frame k itself (a single stray frame breaks two steps) | remaking the frame after a stray frame leaves the stray standing |
+| How | RIFE's frame half way between the frame's two neighbours | every other frame stays the video's own |
+| How many | at most **3** (`MAX_REPAIRS`), worst first, scores re-read after each | a loop that needs more is jolting everywhere, not jumping once |
+| Never | a frame next to one already made | two made frames side by side are made from each other and melt the legs |
+
+Re-making every frame (an offset of half a frame) is not offered: it softens the frames that
+were fine, and it was judged "not corrected" (2026-10-03).
+
+The report's `jump_repair` carries `replaced` (cycle frame indices), each round's step, score and
+its whole/hair parts, `score_max_before` / `score_max_after`, why it stopped, and which
+interpolator made the frames. When a frame was replaced the seam gate measures the rendered cells
+(`seam_measurement: rendered-cells`), because the source frames no longer say what plays.
+
+RIFE is located only when a frame is to be made. A loop with a jump and no RIFE fails with the
+install line and `--repair off`, which cuts the loop as filmed and records
+`jump_repair: {"applied": false, "why": "--repair off"}`. Other states are not touched
+(`"why": "not a gait state (…)"`).
+
+Checked on the 2026-10-03 takes (`retime.py` in the experiment folder is the reference): the
+engine replaces the same frames as the experiment on every take tried — Lite side E1
+[0, 16, 8] (score 1.75 → 1.42), Lite back-diagonal NE2 [13, 0] (1.60 → 1.43), Pro side E1
+[3, 15, 19], Pro back-diagonal NE2 [9], Lite front S2 [0, 11, 14], and nothing in the smooth
+Lite side E2. About 0.7 s a replaced frame on the Mac's GPU.
+
 ## Related
 
 - [video-pipeline.md](video-pipeline.md) — the pipeline these repairs run inside

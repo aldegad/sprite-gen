@@ -236,7 +236,7 @@ def test_profiles_scale_windows_with_clip_length() -> None:
 @pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_run_loop_emits_strip_gif_webp_and_verifies(tmp_path: Path) -> None:
     files = _gait_frames(tmp_path, period=12, n=96)
-    rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "out", fps=24.0, state="walk", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="walker", report_path=None)
+    rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "out", fps=24.0, state="walk", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="walker", report_path=None, repair="off")
     # 12 frames at 24 fps is half a second — below the walk gait floor (0.6 s), so the
     # half-period guard doubles it to the two-step 24 and records that it did
     assert rep["cycle"]["period_global"] == 24
@@ -262,7 +262,7 @@ def test_run_loop_seam_gate_fails_loud_on_noise(tmp_path: Path, monkeypatch) -> 
         arr[..., 3][mask] = 255
         Image.fromarray(arr, "RGBA").save(d / f"frame-{t:04d}.png")
     with pytest.raises(SystemExit, match="seam ratio|no periodic cycle"):
-        loop_mod.run_loop(d, tmp_path / "out", fps=24.0, state="walk", min_len=None, max_len=None, n_out=6, seam_max=2.0, name="noise", report_path=None)
+        loop_mod.run_loop(d, tmp_path / "out", fps=24.0, state="walk", min_len=None, max_len=None, n_out=6, seam_max=2.0, name="noise", report_path=None, repair="off")
     assert not (tmp_path / "out" / "noise.gif").exists()
 
 
@@ -313,7 +313,7 @@ def test_run_loop_auto_fails_over_to_one_shot_only_for_action_states(tmp_path: P
     _one_shot_frames(tmp_path)
     # walk must not repeat once: the gate stays a hard failure
     with pytest.raises(SystemExit, match="no periodic cycle"):
-        loop_mod.run_loop(tmp_path / "keyed", tmp_path / "walk", fps=24.0, state="walk", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="w", report_path=None)
+        loop_mod.run_loop(tmp_path / "keyed", tmp_path / "walk", fps=24.0, state="walk", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="w", report_path=None, repair="off")
     # jump may happen once: recorded failover, periodic attempt kept in the report
     rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "jump", fps=24.0, state="jump", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="j", report_path=None)
     assert rep["cycle"]["kind"] == "one-shot" and rep["cycle_mode"] == "auto"
@@ -349,9 +349,9 @@ def test_gif_frame_count_follows_cycle_length_at_a_fixed_playback_rate(tmp_path:
     assert rep["n_out"] == 30 and 80 <= rep["delay_ms"] <= 90
     (tmp_path / "short").mkdir()
     _gait_frames(tmp_path / "short", period=26, n=100, stamp=True)  # 1.08 s
-    rep2 = loop_mod.run_loop(tmp_path / "short" / "keyed", tmp_path / "short-out", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="w", report_path=None, gif_fps=12.0)
+    rep2 = loop_mod.run_loop(tmp_path / "short" / "keyed", tmp_path / "short-out", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="w", report_path=None, gif_fps=12.0, repair="off")
     assert 12 <= rep2["n_out"] <= 14 and abs(rep2["delay_ms"] - rep["delay_ms"]) <= 15  # ~1.1 s at 12 fps; the period may resolve to 24-26
-    explicit = loop_mod.run_loop(tmp_path / "short" / "keyed", tmp_path / "short-out2", fps=24.0, state="walk", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="w8", report_path=None)
+    explicit = loop_mod.run_loop(tmp_path / "short" / "keyed", tmp_path / "short-out2", fps=24.0, state="walk", min_len=None, max_len=None, n_out=8, seam_max=2.0, name="w8", report_path=None, repair="off")
     assert explicit["n_out"] == 8
     assert rep["n_out"] <= rep["cycle"]["length"] and rep2["n_out"] <= rep2["cycle"]["length"]
 
@@ -382,7 +382,7 @@ def test_fixed_cycle_cuts_exactly_and_skips_detection(tmp_path: Path) -> None:
 @pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_strip_height_caps_the_output_size(tmp_path: Path) -> None:
     files = _gait_frames(tmp_path, period=12, n=60, size=(160, 400))
-    rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "h", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="h", report_path=None, strip_height=100)
+    rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "h", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=2.0, name="h", report_path=None, strip_height=100, repair="off")
     assert rep["strip"]["h"] <= 100
     assert Image.open(rep["gif"]["file"] if Path(rep["gif"]["file"]).is_absolute() else tmp_path / "h" / rep["gif"]["file"]).height <= 100
 
@@ -421,14 +421,14 @@ def test_body_height_measures_the_clips_first_frame_not_a_raised_weapon(tmp_path
             im.putpixel((36, y), (120, 120, 120, 255))
         im.save(path)
     rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "out", fps=24.0, state="walk", min_len=None, max_len=None,
-                            n_out=8, seam_max=9.0, name="w", report_path=None, body_height=48)
+                            n_out=8, seam_max=9.0, name="w", report_path=None, body_height=48, repair="off")
     meta = json.loads((tmp_path / "out" / "w.strip.json").read_text())
     assert meta["body_ref"] == "first-frame"
     assert (meta["body_src_h"], meta["scale"], meta["body_h"]) == (48, 1.0, 48)  # the raised frames are 56 tall
     assert rep["strip"]["body_h"] == 48
     # without a target nothing changes: the tallest grounded frame, never scaled up
     loop_mod.run_loop(tmp_path / "keyed", tmp_path / "plain", fps=24.0, state="walk", min_len=None, max_len=None,
-                      n_out=8, seam_max=9.0, name="w", report_path=None)
+                      n_out=8, seam_max=9.0, name="w", report_path=None, repair="off")
     plain = json.loads((tmp_path / "plain" / "w.strip.json").read_text())
     assert plain["body_ref"] == "tallest-grounded" and plain["body_src_h"] == 56
 

@@ -397,6 +397,12 @@ Gates, all fail-loud: no period (profile flat, below the recorded `periodicity_m
 above `--seam-max` (2.0), GIF/WebP re-opened and checked (frame count, `loop=0`,
 transparent corners, no RGB under alpha 0 in the WebP).
 
+A walk or run loop then has its jump frames repaired before the strip is built: a frame that
+breaks a step 1.4× the loop's median (whole body, or the hair behind it) is replaced by RIFE's
+frame between its two neighbours, at most three and never two side by side (`--repair auto`,
+the default; `--repair off` cuts as filmed). The report's `jump_repair` names the frames. See
+[loop repair](loop-repair.md).
+
 ### One-shot actions — `--cycle auto|periodic|one-shot`
 
 A video model asked to jump "over and over" sometimes jumps once and stands for the
