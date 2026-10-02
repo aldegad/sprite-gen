@@ -60,7 +60,34 @@ VIEW_TEXT = {
     "side": "seen from the exact side, facing {facing}",
     "front": "seen from the front, facing the viewer directly",
     "back": "seen from directly behind, facing away from the viewer",
+    # Three-quarter views, as an isometric game's character walks down and up to the right. The clip
+    # starts from a still already drawn at that angle, so the clip's view sentence points at the image.
+    "front_diagonal": "seen from a three-quarter front angle, turned exactly as in the image",
+    "back_diagonal": "seen from a three-quarter back angle, turned exactly as in the image",
 }
+# The view sentence for drawing a still at a view, where it differs from the clip's: a diagonal still is
+# often redrawn from a front or side picture, so "turned exactly as in the image" would keep the picture's
+# angle. It says how far the body turns, that the head turns with it and which way the feet point; said
+# less, a three-quarter back view came out as a side view or looking back over the shoulder.
+STILL_VIEW_TEXT = {
+    "front_diagonal": (
+        "seen from a three-quarter front angle: the whole body and head turned about 45 degrees to the {facing}, halfway "
+        "between facing the viewer and facing {facing}, the face looking the same way as the chest and the feet pointing "
+        "toward the lower {facing}"
+    ),
+    "back_diagonal": (
+        "seen from a three-quarter back angle: the whole body and head turned about 45 degrees away from the viewer toward "
+        "the upper {facing}, halfway between facing away and facing {facing}, the face hidden and not looking back over the "
+        "shoulder, and the feet pointing diagonally up and to the {facing} so the backs of the shoes face the viewer at an angle"
+    ),
+}
+DIAGONAL_VIEWS = frozenset({"front_diagonal", "back_diagonal"})
+
+
+def still_view_text(direction: str, facing: str = "right") -> str:
+    """The view sentence for drawing a still seen from `direction` (`STILL_VIEW_TEXT`, else `VIEW_TEXT`)."""
+    validate_facing(facing)
+    return STILL_VIEW_TEXT.get(direction, VIEW_TEXT[direction]).format(facing=facing)
 # What stays put while an attack moves, said once: after the built-in attack sentence and after a
 # caller's own motion paragraph alike. A request interpreter writes its motion before the still
 # exists, so it cannot know where the other hand's shield or lantern is drawn; the engine holds it.
@@ -82,6 +109,14 @@ GAIT_HOLD_TEXT = {
         "the whole time."
     ),
     "side": "It stays in place as if on a treadmill, without moving across the screen, and keeps facing {facing} the whole time.",
+    "front_diagonal": (
+        "It stays in place as if on a treadmill, without moving across the screen, and keeps the exact three-quarter front "
+        "angle of the image the whole time, never turning into a side view."
+    ),
+    "back_diagonal": (
+        "It stays in place as if on a treadmill, without moving across the screen, and keeps the exact three-quarter back "
+        "angle of the image the whole time, its face hidden, never turning into a side view."
+    ),
 }
 MOTION_TEXT = {
     # A side-view full body asked for "a subtle weight sway" and an evenly paced loop steps in place
@@ -122,7 +157,41 @@ VIEW_MOTION_TEXT = {
     ("run", "back"): (
         "runs naturally in place, facing away from the viewer, as if on a treadmill, without moving any farther away."
     ),
+    # A diagonal says where the character is heading on the screen, the way an isometric game reads, and that it
+    # keeps the image's angle. Asked only to walk "toward the way its body faces in the image", a three-quarter
+    # back walk turned to a side view in 2 of 2 clips; named as a heading up and to the right, in 10 of 10 it
+    # kept the angle (2026-10-02, five people twice each, pinned).
+    ("walk", "front_diagonal"): (
+        "walks naturally in place, as if on a treadmill, heading diagonally toward the viewer and to the right, like a "
+        "character walking down and to the right in an isometric game, without moving across the screen. It keeps the "
+        "exact three-quarter front angle of the image the whole time and never turns into a side view."
+    ),
+    ("walk", "back_diagonal"): (
+        "walks naturally in place, as if on a treadmill, heading diagonally away from the viewer toward the upper right, "
+        "like a character walking up and to the right in an isometric game, without moving across the screen. It keeps "
+        "the exact three-quarter back angle of the image the whole time: its back stays turned toward the viewer at that "
+        "angle and its face stays hidden. It never turns into a side view."
+    ),
+    ("run", "front_diagonal"): (
+        "runs naturally in place, as if on a treadmill, heading diagonally toward the viewer and to the right, like a "
+        "character running down and to the right in an isometric game, without moving across the screen. It keeps the "
+        "exact three-quarter front angle of the image the whole time and never turns into a side view."
+    ),
+    ("run", "back_diagonal"): (
+        "runs naturally in place, as if on a treadmill, heading diagonally away from the viewer toward the upper right, "
+        "like a character running up and to the right in an isometric game, without moving across the screen. It keeps "
+        "the exact three-quarter back angle of the image the whole time: its back stays turned toward the viewer at that "
+        "angle and its face stays hidden. It never turns into a side view."
+    ),
 }
+# Views a walk or run is filmed pinned to its first frame in (`video --last-frame`), with the pinned template:
+# a diagonal walk ended where it began, and its angle with it. Cut as any walk (`video-loop --anchor motion-auto`).
+PINNED_GAIT_VIEWS = DIAGONAL_VIEWS
+
+
+def pins_last_frame(state: str, direction: str) -> bool:
+    """Whether the clip of (state, direction) is filmed ending on its first frame."""
+    return state in PIN_LAST_FRAME_STATES or (state in GAIT_STATES and direction in PINNED_GAIT_VIEWS)
 COMMON_TEXT = (
     "2D game sprite animation. The character {motion} The character is {view}. Stays centered in the frame and does "
     "not move across the screen; the body and hair always stay fully inside the frame with margin. Camera completely "
@@ -176,13 +245,14 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
 
     `pinned` says the clip is pinned to end on its first frame (`video --last-frame`): it then asks
     for the return to the first pose instead of an evenly paced repeat (`PINNED_LOOP_TEXT`). None
-    leaves it to the state (`PINNED_LOOP_STATES`); a caller that pins a walk or run says True.
+    leaves it to the state and view (`PINNED_LOOP_STATES`, a walk or run in `PINNED_GAIT_VIEWS`);
+    a caller that pins any other walk or run says True.
     """
     validate_facing(facing)
     view = VIEW_TEXT.get(direction, f"seen from the {direction}").format(facing=facing)
     if state in ACTION_TEXT_STATES:
         template = ACTION_COMMON_TEXT
-    elif (state in PINNED_LOOP_STATES) if pinned is None else pinned:
+    elif (state in PINNED_LOOP_STATES or (state in GAIT_STATES and direction in PINNED_GAIT_VIEWS)) if pinned is None else pinned:
         template = PINNED_LOOP_TEXT
     else:
         template = COMMON_TEXT
@@ -301,7 +371,7 @@ def run_item(
             attempts: list[int] = []
             for attempt in range(1 + len(RETRY_BACKOFF_SECONDS)):
                 _staggered_start(gap)
-                pin = {"last_frame": canvas_png} if state in PIN_LAST_FRAME_STATES else {}
+                pin = {"last_frame": canvas_png} if pins_last_frame(state, direction) else {}
                 rc = video_runner(canvas_png, prompt, clip, clip_report, duration=duration, resolution=resolution, log=item_dir / "clip.log", **pin)
                 attempts.append(rc)
                 if rc == 0 and clip.exists():
@@ -311,7 +381,7 @@ def run_item(
                     time.sleep(RETRY_BACKOFF_SECONDS[attempt])
                     continue
                 break
-            result["clip"] = {"attempts": attempts, "duration": duration, "last_frame": state in PIN_LAST_FRAME_STATES}
+            result["clip"] = {"attempts": attempts, "duration": duration, "last_frame": pins_last_frame(state, direction)}
             if attempts[-1] != 0 or not clip.exists():
                 raise SystemExit(f"clip generation failed after {len(attempts)} attempt(s); see {item_dir / 'clip.log'}")
 
