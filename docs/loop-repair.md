@@ -142,7 +142,7 @@ loop's report carries `jolt`, measured on the loop as it will play (after sectio
 | `hair_index` | the same inside the hair box |
 | `step_max_over_median` | the largest step over the median (what section 2 repairs) |
 | `head.x`, `head.y` | the head's place frame by frame in % of the body's height over the loop: x (sideways) the coverage centroid of the top fifth, y (up and down) the body's top line. Each: `step_max_pct` (largest move in one frame), `step_median_pct`, `max_over_median`, `range_pct`, `worst_into_frame` |
-| `reference`, `warnings` | the reference bounds (jolt index **0.42**, head sideways step **0.75** % of the body height) and what exceeds them, in words |
+| `reference`, `warnings` | the reference bounds (jolt index **0.43**, head sideways step **0.75** % of the body height) and what exceeds them, in words |
 | `gate`, `gated`, `over`, `passed` | the bounds the caller passed, whether they were enforced, what exceeded them |
 | `measured` | `after the jump repair` or `as filmed` |
 
@@ -181,9 +181,10 @@ Read:
   take stays at or under 0.68 %, the back-diagonal take refused for its head moves 0.82 %. The
   reference 0.75 sits between them.
 - **The jolt index does not separate them.** The refused side walk (0.237) sits inside the kept
-  range, and a kept Pro back-diagonal walk reads 0.414. Any bound under 0.414 would refuse a kept
-  take, so the reference (0.42) sits at the kept takes' edge and flags nothing in this set. An
-  alternating jolt like that side walk's is a known miss of this index.
+  range, and a kept Pro back-diagonal walk reads 0.414 here — 0.4225 on the full-size cut frames
+  `video-loop` itself reads (section 5). Any bound under that would flag a kept take, so the
+  reference (0.43) sits at the kept takes' edge and flags nothing in this set. An alternating jolt
+  like that side walk's is a known miss of this index.
 - **The top line is reported, not bounded**: a walk seen from behind bobs more (the kept Lite
   back view reaches 2.42 %), so one bound would flag kept back views or pass the refused one.
 - **Why no gate by default**: at the reference bounds, 18 of the 46 takes exceed one — 16 of 30
@@ -235,6 +236,43 @@ the median made 18 of 21 frames for a Lite side loop of 27, 20 of 21 for a back-
 final set showed a Lite back-diagonal walk that jumped; seen at three stages (as filmed, jumps
 repaired, aligned), it jumped at all three, so the take — not the resampling — was the cause
 (maintainer's judgement, 2026-10-03).
+
+## 5. Regression — the 2026-10-03 eight-direction set through this engine
+
+The kept picks of both sets (Pro and Lite, five views each) and the refused Lite side take, from
+their keyed frames through `video-loop --state walk --anchor motion-auto --body-height 400
+--strip-height 640` and then `video-cycle-align` per set, on an M4 Max with the Apple GPU. The
+experiment's own scripts (`retime.py`, `finalize.py`) are the reference.
+
+| | Cut (start, length) | Frames repaired | Jump score before → after | Jolt index | Head sideways step, % | Warning |
+|---|---|---|---|---|---|---|
+| Pro front | 26, 23 (same) | [9] (same) | 1.42 → 1.37 | 0.221 | 0.51 | — |
+| Pro front diagonal | 1, 34 (same) | [0, 10] (experiment [0, 11]) | 2.00 → 1.66 | 0.079 | 0.18 | — |
+| Pro side | 23, 24 (same) | [3, 15, 19] (same) | 1.81 → 1.64 | 0.244 | 0.44 | — |
+| Pro back diagonal | 17, 24 (same) | [9] (same) | 2.53 → 2.08 | 0.4225 | 0.19 | — |
+| Pro back | 7, 20 (same) | [6, 12] (same) | 1.72 → 1.44 | 0.245 | 0.42 | — |
+| Lite front | 4, 25 (same) | [0, 11] (experiment [0, 11, 14]) | 1.69 → 1.38 | 0.230 | 0.50 | — |
+| Lite front diagonal | 19, 21 (same) | [8, 18] (same) | 1.42 → 1.33 | 0.175 | 0.69 | — |
+| Lite side | 25, 27 (same) | none (same) | 1.35 | 0.055 | 0.33 | — |
+| Lite back diagonal (refused: "it jumps") | 30, 19 (same) | [13, 0] (same) | 1.60 → 1.42 | 0.192 | **0.82** | head sideways 0.82 % |
+| Lite back | 50, 16 (same) | [15, 3] (same) | 1.82 → 1.50 | 0.163 | 0.57 | — |
+| Lite side, refused take | 39, 23 (same) | [0, 16, 8] (same) | 1.72 → 1.42 | 0.238 | 0.28 | — |
+
+| Set | Lengths as cut | One cycle | Frames made by RIFE (per view) | Experiment |
+|---|---|---|---|---|
+| Pro | 23, 34, 24, 24, 20 | 24 | 65 (23, 22, 0, 0, 20) | 24; 23, 22, 0, 0, 20 |
+| Lite | 25, 21, 27, 19, 16 | 21 | 78 (20, 0, 18, 20, 20) | 21; 20, 0, 18, 20, 20 |
+
+- Every cut is the one the 2.17 engine made; the set lengths and the frames RIFE made match the
+  experiment view by view.
+- The repair replaces the same frames as the experiment in 8 of 10 views. The two that differ are
+  read at full size here and on the scaled-down strip there; both differences are one frame.
+- At the reference bounds the only warning is the Lite back-diagonal take the maintainer refused —
+  for its head, 0.82 % sideways in one frame.
+- About 12–17 s a loop (mostly the motion analysis) and about 1 s per frame RIFE made.
+
+A side-by-side video of the takes as filmed and as this engine leaves them, the numbers, and the
+scripts that made them are kept with the experiment's material in the maintainer's notes.
 
 ## Related
 

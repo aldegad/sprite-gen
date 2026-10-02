@@ -131,7 +131,7 @@ def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, 
 # exceeds them, and the back-diagonal take refused because "it jumps" does. A loop beyond them is
 # warned about; it fails only when a caller passes a bound (--jolt-max / --head-step-max), because
 # eleven judged takes are too few to refilm on, and at these values 16 of 30 Lite takes would be.
-JOLT_REFERENCE = 0.42  # alpha jolt index; the kept takes reached 0.414 after repair
+JOLT_REFERENCE = 0.43  # alpha jolt index; the kept takes reached 0.414 on strip cells, 0.4225 on the cut frames video-loop reads
 HEAD_STEP_REFERENCE = 0.75  # head's sideways move in one frame, % of body height; kept <= 0.68, refused 0.82
 HEAD_BAND = 0.20  # the head is the top fifth of the body's height over the loop
 HEAD_MEDIAN_FLOOR = 0.05  # % of body height: a median step below this is the tracker's rounding
