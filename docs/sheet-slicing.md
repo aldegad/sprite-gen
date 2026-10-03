@@ -80,7 +80,10 @@ during the a cut-in overhaul (2026-07-09):
    cell's main figure is scaled independently so every variant's body
    height equals `--target-height`. Trade-off: a bowed pose (sleep) gets a
    slightly larger body — runtime cut-in renderers assume one scale, so
-   asset-side height consistency wins.
+   asset-side height consistency wins. The figure is scaled with its
+   coverage and its colour taken apart (`resize_cell`,
+   [video-pipeline.md](video-pipeline.md) "Cells"), so the scaled figure has no rim or key tint at its edge that
+   the sliced figure did not have.
 5. **Feet on the baseline.** The main figure's lowest pixel lands on
    `--baseline-y`; effects above the head never shift the feet.
 6. **Fail loud on empty cells.** A cell with no subject after extraction

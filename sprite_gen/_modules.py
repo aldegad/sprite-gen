@@ -55,6 +55,7 @@ MODULE_DOMAIN = {
     'serve_curation': 'serve',
     'serve_compose': 'serve',
     'gif_utils': 'util',
+    'resample': 'util',
 }
 
 
