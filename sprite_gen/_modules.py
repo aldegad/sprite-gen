@@ -26,6 +26,7 @@ MODULE_DOMAIN = {
     'loop': 'video',
     'batch': 'video',
     'align': 'video',
+    'rife_install': 'video',
     'prepare': 'gen',
     'extract': 'frames',
     'cutout': 'frames',

@@ -26,14 +26,6 @@ jobs:
           sudo cp /tmp/libwebp-1.6.0-linux-x86-64/bin/* /usr/local/bin/
           img2webp -h 2>&1 | grep -q -- -exact   # img2webp -version exits 1 without an output file; -h is the honest probe
 
-      - name: Install RIFE for video-loop's jump repair (rife-ncnn-vulkan 20221029 on Mesa llvmpipe, docs/loop-repair.md)
-        run: |
-          sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers unzip
-          curl -fsSL -o /tmp/rife.zip https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-ubuntu.zip
-          echo '1e2c7ee7fa7daa326542d50622f0afedc80cf6f1858bda411d16385ffa5cdf68  /tmp/rife.zip' | sha256sum -c -
-          sudo unzip -q /tmp/rife.zip -d /opt
-          sudo ln -s /opt/rife-ncnn-vulkan-20221029-ubuntu/rife-ncnn-vulkan /usr/local/bin/rife-ncnn-vulkan
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -42,6 +34,13 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install -e ".[dev]"
+
+      # The user's own install path: the pinned zip, its SHA-256, the user data directory, and a
+      # check frame through the binary — here on Mesa llvmpipe (docs/loop-repair.md section 1).
+      - name: Install RIFE for video-loop's jump repair (sprite-gen rife install)
+        run: |
+          sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers
+          .venv/bin/sprite-gen rife install
 
       - name: Quickstart smoke (prepare -> extract -> compose)
         run: |
