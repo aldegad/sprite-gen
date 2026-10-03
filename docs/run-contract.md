@@ -168,7 +168,8 @@ Rules the display depends on:
   pixel-unfake off, so "off = original" is crisp instead of an upscaled cell blur.
   S is **per-row native**: the ceil of the largest component-crop / final-content-bbox
   ratio across the row's frames (bounded by `2048 // cell`), so the twin resample is a
-  mild upscale — never a downscale. The old fixed ×4 cap squeezed high-pitch raws
+  mild upscale — never a downscale (and, like the other places that scaled with LANCZOS, through `resize_cell`:
+  coverage and colour scaled apart, no rim or key tint added at the edge). The old fixed ×4 cap squeezed high-pitch raws
   (synthetic_fixture_b down rows, ~14px pitch) ~3.5× and the "original" view stopped being the
   original (maintainer, 2026-07-23). The
   view prefers `orig/`, falling back to `.plain.png` when no hi-res twin exists. Both

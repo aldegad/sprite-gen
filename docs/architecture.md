@@ -297,7 +297,10 @@ flowchart TD
    reported as `method: slots-explicit`.
 5. `fit_to_cell()` — crop, aspect-preserving downscale (`resample`:
    lanczos | nearest | kcentroid), `align_x`/`align_y` placement, into the
-   cell. On `fit.pixel_unfake` runs this legacy path still runs once per
+   cell. `lanczos` is the smooth shrink: coverage by LANCZOS, colour mixed apart
+   from it (`sprite_gen.util.resample.resize_cell`, the resample of the places
+   that scaled with LANCZOS), so the fitted frame has no rim or key tint at its edge
+   that the keyed frame did not have. On `fit.pixel_unfake` runs this legacy path still runs once per
    frame to produce the `.plain.png` twin (§6.1); the canonical frame goes
    through the pixel-unfake path instead.
 6. `inspect_frames()` — per-frame QA: empty/sparse, edge bleed, chroma-adjacent

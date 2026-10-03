@@ -38,6 +38,7 @@ from pathlib import Path
 from PIL import Image
 
 from sprite_gen.frames.extract import remove_chroma_background
+from sprite_gen.util.resample import resize_cell
 
 CHROMA_KEYS = {
     "magenta": (255, 0, 255),
@@ -231,7 +232,7 @@ def slice_sheet(
             x, y = index % width, index // width
             piece_px[x - x0, y - y0] = pixels[x, y]
         new_size = (max(1, round(piece.size[0] * scale)), max(1, round(piece.size[1] * scale)))
-        piece = piece.resize(new_size, Image.LANCZOS)
+        piece = resize_cell(piece, new_size)
 
         main_center_x = (min(main_xs) + max(main_xs)) / 2
         out = Image.new("RGBA", canvas, (0, 0, 0, 0))
