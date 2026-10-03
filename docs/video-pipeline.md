@@ -529,7 +529,7 @@ Outputs:
   none, and the strands keep LANCZOS's coverage. Colour is no longer sharpened, so a 1 px line
   inside the body comes out a little softer than LANCZOS drew it when a cell is enlarged. The
   GIF and WebP are cut from these cells. The function lives in `sprite_gen/util/resample.py`
-  and is the one resample for a keyed picture: a row frame fitted to its cell and the twin
+  and is the resample of every place that scaled a keyed picture with LANCZOS: a row frame fitted to its cell and the twin
   beside a pixel-unfake frame (`extract`), a sliced sheet's figures (`slice-sheet`) and a
   scene's layers (`scene-render`) go through it too.
 - `<name>.gif` — `n_out` frames evenly across the cycle, 1-bit alpha, disposal 2, `loop=0`.

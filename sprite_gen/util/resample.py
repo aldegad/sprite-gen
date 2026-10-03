@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The one resample for an RGBA cutout: coverage and colour scaled apart.
 
-Every place the engine scales a keyed picture goes through `resize_cell`: a loop's cells
+The places that scaled a keyed picture with LANCZOS go through `resize_cell`: a loop's cells
 (`video-loop`), a row frame fitted to its cell and the twins beside a
 pixel-unfake frame (`extract`), a sliced sheet's figures (`slice-sheet`) and a scene's layers
 (`scene`). docs/video-pipeline.md "Cells".

@@ -82,9 +82,8 @@ during the a cut-in overhaul (2026-07-09):
    slightly larger body — runtime cut-in renderers assume one scale, so
    asset-side height consistency wins. The figure is scaled with its
    coverage and its colour taken apart (`resize_cell`,
-   [video-pipeline.md](video-pipeline.md) "Cells"): a figure is usually
-   brought to the target by a few percent, the scale at which LANCZOS over
-   the keyed RGBA put the most key tint into the edge.
+   [video-pipeline.md](video-pipeline.md) "Cells"), so the scaled figure has no rim or key tint at its edge that
+   the sliced figure did not have.
 5. **Feet on the baseline.** The main figure's lowest pixel lands on
    `--baseline-y`; effects above the head never shift the feet.
 6. **Fail loud on empty cells.** A cell with no subject after extraction
