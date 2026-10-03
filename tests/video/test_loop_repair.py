@@ -2,8 +2,9 @@
 """Jump-frame repair (docs/loop-repair.md section 2): only the frame after a jump is replaced,
 by the interpolator's frame between its two neighbours; at most three, never two side by side;
 the hair watched is behind the body whichever way it faces; and `video-loop` records what it
-replaced, gates the cells as they now play, and refuses — naming `--repair off` — when a frame
-needs making and no RIFE is installed.
+replaced and gates the cells as they now play. When a frame needs making and no RIFE is
+installed, `--repair auto` cuts the loop as filmed with a warning and the install line, and
+`--repair on` refuses.
 
 The interpolator is a stand-in that returns the true in-between of the synthetic loop, so the
 tests need no binary and can say exactly which frame should come back."""
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 
 import numpy as np
@@ -142,15 +144,73 @@ def test_video_loop_records_the_repair_and_plays_the_made_frame(tmp_path):
     assert made == [0.5]
 
 
-def test_a_jump_without_rife_is_refused_naming_repair_off(tmp_path, monkeypatch):
+def _no_rife(monkeypatch, tmp_path: Path) -> None:
+    """No RIFE anywhere the engine looks: no SPRITE_GEN_RIFE, an empty PATH, an empty data directory."""
     monkeypatch.delenv("SPRITE_GEN_RIFE", raising=False)
-    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    # PATH keeps every other tool (img2webp, ffmpeg); only the directories holding a RIFE go
+    path = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d and not (Path(d) / "rife-ncnn-vulkan").exists()]
+    monkeypatch.setenv("PATH", os.pathsep.join(path))
+    monkeypatch.setenv("SPRITE_GEN_DATA_DIR", str(tmp_path / "data"))
+
+
+def test_a_jump_without_rife_is_cut_as_filmed_with_a_warning(tmp_path, monkeypatch, capsys):
+    _no_rife(monkeypatch, tmp_path)
     filmed, _ = _loop({10: 12})
     keyed = _keyed(tmp_path, filmed)
-    with pytest.raises(SystemExit, match=r"--repair off"):
-        _run(tmp_path, keyed)
+    reopened = [Image.open(p).convert("RGBA") for p in sorted(keyed.glob("*.png"))][:N]
+    rep = _run(tmp_path, keyed)
+    assert rep["status"] == "passed"
+    jr = rep["jump_repair"]
+    assert jr["applied"] is False and jr["replaced"] == [] and jr["why"] == "RIFE not installed — cut as filmed"
+    assert jr["install"] == "sprite-gen rife install" and "rife-ncnn-vulkan not found" in jr["rife"]
+    assert jr["score_max_before"] >= repair.JUMP_RATIO and jr["score_max_after"] == jr["score_max_before"]
+    assert rep["seam_measurement"] == "source-frames" and rep["jolt"]["measured"] == "as filmed"
+    on_disk = np.asarray(Image.open(tmp_path / "out" / "cycle" / "frame-010.png"))
+    assert np.array_equal(on_disk, np.asarray(reopened[10]))  # the jump frame stays as filmed
+    warning = [l for l in capsys.readouterr().err.splitlines() if "jump frame was not repaired" in l]
+    assert len(warning) == 1 and "sprite-gen rife install" in warning[0]
+    assert json.loads((tmp_path / "w.json").read_text())["jump_repair"]["applied"] is False
+
+
+def test_a_smooth_walk_without_rife_has_nothing_to_warn_about(tmp_path, monkeypatch, capsys):
+    _no_rife(monkeypatch, tmp_path)
+    filmed, _ = _loop()
+    rep = _run(tmp_path, _keyed(tmp_path, filmed))
+    assert rep["jump_repair"]["replaced"] == [] and "rife" not in rep["jump_repair"]
+    assert "not repaired" not in capsys.readouterr().err
+
+
+def test_repair_on_without_rife_is_refused_with_the_install_line(tmp_path, monkeypatch):
+    _no_rife(monkeypatch, tmp_path)
+    filmed, _ = _loop({10: 12})
+    with pytest.raises(SystemExit, match=r"sprite-gen rife install.*--repair auto"):
+        _run(tmp_path, _keyed(tmp_path, filmed), repair="on")
     report = json.loads((tmp_path / "w.json").read_text())
     assert report["status"] == "failed" and "rife-ncnn-vulkan not found" in report["error"]
+
+
+def test_repair_on_with_rife_repairs_as_auto_does(tmp_path):
+    filmed, truth = _loop({10: 12})
+    rep = _run(tmp_path, _keyed(tmp_path, filmed), repair="on", interpolate=lambda a, b, t: truth[10])
+    assert rep["jump_repair"]["replaced"] == [10] and rep["jump_repair"]["applied"] is True
+
+
+def test_a_rife_that_is_found_and_fails_still_fails_the_loop(tmp_path):
+    from sprite_gen.video import rife
+
+    def broken(a, b, t):
+        raise rife.RifeUnavailable("rife-ncnn-vulkan failed (exit 255): vkCreateInstance failed")
+
+    filmed, _ = _loop({10: 12})
+    with pytest.raises(SystemExit, match=r"vkCreateInstance failed.*--repair off"):
+        _run(tmp_path, _keyed(tmp_path, filmed), interpolate=broken)
+
+
+def test_a_jolt_gate_on_a_loop_left_unrepaired_says_rife_was_missing(tmp_path, monkeypatch):
+    _no_rife(monkeypatch, tmp_path)
+    filmed, _ = _loop({10: 12})
+    with pytest.raises(SystemExit, match=r"regenerate the clip \(the jump repair did not run: RIFE is not installed"):
+        _run(tmp_path, _keyed(tmp_path, filmed), jolt_max=0.01)
 
 
 def test_repair_off_cuts_as_filmed_and_says_so(tmp_path):

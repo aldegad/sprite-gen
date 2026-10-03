@@ -31,6 +31,7 @@ from sprite_gen.video import canvas as canvas_mod
 from sprite_gen.video import frames as frames_mod
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import align as align_mod
+from sprite_gen.video import rife as rife_mod
 
 START_GAP_SECONDS = 2.0
 # Clip length the batch asks the video model for. 3 s holds two or more cycles of every
@@ -531,6 +532,9 @@ def run_item(
         result["loop"]["half_period_guard"] = lp["cycle"].get("half_period_guard")
         if lp.get("motion_anchor", {}).get("applied") is False:
             result["loop"]["motion_anchor"] = lp["motion_anchor"]
+        if "rife" in (lp.get("jump_repair") or {}):
+            # cut as filmed for want of RIFE: the set report lists it under `warnings`
+            result["loop"]["jump_repair"] = {k: lp["jump_repair"][k] for k in ("applied", "why", "score_max_before", "install")}
         result["ok"] = True
     except SystemExit as exc:
         result["ok"] = False
@@ -544,7 +548,9 @@ ALIGN_MODES = ("auto", "off")
 def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpolate: Any = None) -> dict[str, Any]:
     """One cycle length per gait state across the set's directions (`video-cycle-align`,
     docs/loop-repair.md section 4). A state filmed in fewer than two directions has nothing to
-    match. A failure is recorded under its state and the batch reports it; the loops stay as cut."""
+    match. A failure is recorded under its state and the batch reports it; the loops stay as cut.
+    Where a frame is to be made and no RIFE is installed the state is skipped, not failed: each
+    loop keeps its own length, the record says why, and a warning line names the install."""
     out: dict[str, Any] = {}
     if mode == "off":
         return out
@@ -558,10 +564,17 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
         try:
             report = align_mod.align_set([Path(r["dir"]) / "loop" for r in rows], interpolate=interpolate,
                                          report_path=root / f"{state}.cycle-align.json")
+        except rife_mod.RifeNotInstalled as exc:
+            out[state] = {"ok": True, "applied": False, "why": "RIFE not installed — each loop keeps its own length",
+                          "rife": str(exc), "install": rife_mod.INSTALL_COMMAND}
+            print(f"video-set: warning: {state}: cycles not aligned — RIFE is not installed, so each loop keeps its own "
+                  f"length; run `{rife_mod.INSTALL_COMMAND}`, then `sprite-gen video-cycle-align` (docs/loop-repair.md)",
+                  file=sys.stderr)
+            continue
         except SystemExit as exc:
             out[state] = {"ok": False, "error": str(exc)}
             continue
-        out[state] = {"ok": True, "length": report["length"], "lengths": report["lengths"], "made_by_rife": report["made_by_rife"],
+        out[state] = {"ok": True, "applied": True, "length": report["length"], "lengths": report["lengths"], "made_by_rife": report["made_by_rife"],
                       "report": str(root / f"{state}.cycle-align.json")}
         for r, row in zip(rows, report["loops"]):
             r["loop"]["cycle_align"] = {k: row[k] for k in ("from", "to", "made_by_rife", "turned_by", "seam_ratio")}
@@ -577,6 +590,8 @@ def write_table(results: list[dict[str, Any]], path: Path) -> str:
             status = "OK (review gait)" if lp.get("review_recommended") else "OK"
             if lp.get("motion_anchor", {}).get("applied") is False:
                 status = "OK (uncorrected; review gait)"
+            if "jump_repair" in lp:
+                status += " (jump not repaired: no RIFE)"
             lines.append(f"| {r['direction']} | {r['state']} | {lp.get('kind', 'periodic')} | {lp['cycle']} | {lp['period'] if lp['period'] is not None else '-'} | {lp['seam_ratio']:.2f} | {lp['n_out']} | {status} |")
         else:
             lines.append(f"| {r['direction']} | {r['state']} | - | - | - | - | - | FAIL: {r.get('error', '')[:80]} |")
@@ -653,7 +668,12 @@ def run_set(
     aligned = align_gaits(results, root, align_cycles, interpolate=interpolate)
     table = write_table(results, root / "table.md")
     failed = [r["item"] for r in results if not r.get("ok")] + [f"cycle-align:{st}" for st, a in aligned.items() if not a.get("ok")]
-    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": failed, "items": results, "cycle_align": aligned}
+    # What the set left undone for want of RIFE — never a failure, never silent.
+    warnings = ([f"{r['item']}: jump frame not repaired — {r['loop']['jump_repair']['why']}" for r in results if r.get("ok") and "jump_repair" in r["loop"]]
+                + [f"cycle-align:{st}: not aligned — {a['why']}" for st, a in aligned.items() if a.get("applied") is False])
+    if warnings:
+        warnings.append(f"install RIFE with `{rife_mod.INSTALL_COMMAND}` (docs/loop-repair.md)")
+    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": failed, "warnings": warnings, "items": results, "cycle_align": aligned}
     atomic_write_text(root / "set.report.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     print(table)
     return payload
@@ -694,7 +714,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--decontam", choices=frames_mod.DECONTAM_MODES, default="off", help="passed to video-frames: palette re-explains key-tinted edges with the subject's own colours (default off)")
     parser.add_argument("--walk-start", choices=WALK_START_MODES, default="redraw", help="redraw (default): a front or back walk films from its base still redrawn mid-step (one image generation, `sprite-gen gen --ref base`, kept as walk-start.png) — from a standing still the clip model walks askew; as-given: film from the base still itself")
     parser.add_argument("--still-provider", help="image provider for the mid-step redraw (default: sprite-gen gen's own default)")
-    parser.add_argument("--align-cycles", choices=ALIGN_MODES, default="auto", help="auto (default): after the loops are cut, every walk/run filmed in two or more directions is resampled to the set's median cycle length and turned to start on a foot strike (video-cycle-align; RIFE makes only the frames between source frames); off: each loop keeps its own length")
+    parser.add_argument("--align-cycles", choices=ALIGN_MODES, default="auto", help="auto (default): after the loops are cut, every walk/run filmed in two or more directions is resampled to the set's median cycle length and turned to start on a foot strike (video-cycle-align; RIFE makes only the frames between source frames — where no RIFE is installed the alignment is skipped with a warning and recorded); off: each loop keeps its own length")
     parser.add_argument("--force", action="store_true", help="regenerate clips that already exist")
 
 

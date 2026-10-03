@@ -84,9 +84,16 @@ BODY_ANCHOR_BAND = 0.6  # --anchor body reads the wrap offset from the top 60 % 
 BODY_ANCHOR_SEARCH = 24  # px either side searched for the last frame's horizontal offset against the first
 FOOT_BAND = 0.08  # fraction of the frame's own height, measured up from its lowest opaque row
 # Jump-frame repair (docs/loop-repair.md section 2). auto: walk and run loops get a RIFE frame in
-# place of each frame that follows a jump; off: the loop is cut as filmed, and says so.
-REPAIR_MODES = ("auto", "off")
+# place of each frame that follows a jump, and a loop that needs one where no RIFE is installed is
+# cut as filmed with a warning (a walk that cut before RIFE existed still cuts); on: the same, but
+# no RIFE fails the loop — a caller that asked for the repair is never handed less; off: the loop
+# is cut as filmed, and says so.
+REPAIR_MODES = ("auto", "on", "off")
 FACINGS = ("right", "left")
+# Where `video-cycle-align` keeps the cut as filmed (sprite_gen/video/align.py). A new cut makes
+# the kept one stale, so writing the cycle removes it: an alignment after a re-cut (say, once RIFE
+# is installed and the jumps are repaired) reads the new cut, not the old one.
+CYCLE_SOURCE_DIR = "cycle.source"
 
 
 # A gait's period is a fact about the body, not about how long the clip runs: the
@@ -778,9 +785,13 @@ def write_loop_report(target: Path, payload: dict[str, Any]) -> None:
     atomic_write_text(target, json.dumps(finite(payload), ensure_ascii=False, indent=2, allow_nan=False) + "\n")
 
 
-def _repair_jumps(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *, facing: str) -> tuple[list[Image.Image], dict[str, Any]]:
+def _repair_jumps(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *, facing: str,
+                  required: bool) -> tuple[list[Image.Image], dict[str, Any]]:
     """`repair_mod.repair_jumps`, with RIFE located only once a frame is to be made: a loop
-    without a jump needs no binary. The report names the interpolator that made the frames."""
+    without a jump needs no binary. The report names the interpolator that made the frames.
+
+    A frame to make and no RIFE installed: `required` lets `RifeNotInstalled` through; otherwise
+    the loop comes back as filmed and the record says why (`applied: false`, `rife`, `install`)."""
     made_by: list[dict[str, str]] = []
 
     def lazy(a: Image.Image, b: Image.Image, t: float) -> Image.Image:
@@ -791,7 +802,17 @@ def _repair_jumps(frames: list[Image.Image], interpolate: rife_mod.Interpolate |
             interpolate = located
         return interpolate(a, b, t)
 
-    frames, record = repair_mod.repair_jumps(frames, lazy, facing=facing)
+    try:
+        repaired, record = repair_mod.repair_jumps(frames, lazy, facing=facing)
+    except rife_mod.RifeNotInstalled as exc:
+        if required:
+            raise
+        # RIFE is located before the first frame is made, so nothing was replaced yet.
+        worst = round(float(repair_mod.jump_scores(frames, facing=facing)["score"].max()), 4)
+        return frames, {"applied": False, "why": "RIFE not installed — cut as filmed", "rife": str(exc),
+                        "install": rife_mod.INSTALL_COMMAND, "ratio": repair_mod.JUMP_RATIO, "facing": facing,
+                        "score_max_before": worst, "score_max_after": worst, "replaced": []}
+    frames = repaired
     record["applied"] = bool(record["replaced"])
     if made_by:
         record["interpolator"] = {"kind": "rife-ncnn-vulkan", **made_by[0]}
@@ -975,29 +996,35 @@ def run_loop(
             write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle})
             raise SystemExit(error) from exc
         report_base["motion_anchor"] = motion
-    if repair == "auto" and prof.gait:
+    if repair != "off" and prof.gait:
         report_base["jump_repair"] = None
         try:
-            frames, report_base["jump_repair"] = _repair_jumps(frames, interpolate, facing=facing)
+            frames, report_base["jump_repair"] = _repair_jumps(frames, interpolate, facing=facing, required=repair == "on")
         except (ValueError, rife_mod.RifeUnavailable) as exc:
-            error = (f"video-loop: {exc}; the loop has a jump frame to repair — install RIFE, or pass --repair off "
-                     "to cut it as filmed (docs/loop-repair.md)")
+            fix = (f"install RIFE (`{rife_mod.INSTALL_COMMAND}`), or pass --repair auto to cut it as filmed with a warning"
+                   if isinstance(exc, rife_mod.RifeNotInstalled) else "fix RIFE, or pass --repair off to cut it as filmed")
+            error = f"video-loop: {exc}; the loop has a jump frame to repair — {fix} (docs/loop-repair.md)"
             shutil.rmtree(out_dir / FALLBACK_FRAMES_DIR, ignore_errors=True)
             write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle})
             raise SystemExit(error) from exc
         if report_base["jump_repair"]["replaced"]:
             report_base["seam_measurement"] = "rendered-cells"
+        if "rife" in report_base["jump_repair"]:
+            print(f"video-loop: warning: a jump frame was not repaired ({report_base['jump_repair']['score_max_before']:.2f}x "
+                  f"the median step) — RIFE is not installed, so the loop is cut as filmed; run `{rife_mod.INSTALL_COMMAND}` "
+                  "and cut it again (docs/loop-repair.md)", file=sys.stderr)
     else:
         report_base["jump_repair"] = {"applied": False, "why": "--repair off" if repair == "off" else f"not a gait state ({state})"}
     if prof.gait:
         # The jolt is measured on the loop as it will play — after the repair — and reported on
         # every walk and run (docs/loop-repair.md section 3). Beyond the reference bounds it is a
         # warning line; it fails the loop only against a bound the caller passed (--jolt-max /
-        # --head-step-max), and only when the repair ran: --repair off cuts and reports as filmed.
+        # --head-step-max), and never with --repair off, which cuts and reports as filmed. A loop
+        # whose repair could not run (no RIFE) is gated as filmed, and the failure says why.
         jolt = repair_mod.measure_jolt(frames, facing=facing)
         reference = {"jolt_max": repair_mod.JOLT_REFERENCE, "head_step_max": repair_mod.HEAD_STEP_REFERENCE}
         warnings = repair_mod.jolt_verdict(jolt, **reference)
-        gated = repair == "auto" and (jolt_max is not None or head_step_max is not None)
+        gated = repair != "off" and (jolt_max is not None or head_step_max is not None)
         over = repair_mod.jolt_verdict(jolt, jolt_max=jolt_max, head_step_max=head_step_max) if gated else []
         report_base["jolt"] = {**jolt, "reference": reference, "warnings": warnings,
                                "gate": {"jolt_max": jolt_max, "head_step_max": head_step_max} if gated else None,
@@ -1006,7 +1033,8 @@ def run_loop(
         if over:
             error = (f"video-loop: loop jolts — {'; '.join(over)} ({cycle.get('kind', 'periodic')} length {L} frames from {i}"
                      f"{', after repairing frames ' + str(report_base['jump_repair']['replaced']) if report_base['jump_repair'].get('replaced') else ''}); "
-                     "the motion does not play smoothly — regenerate the clip")
+                     "the motion does not play smoothly — regenerate the clip"
+                     f"{' (the jump repair did not run: RIFE is not installed — ' + rife_mod.INSTALL_COMMAND + ')' if 'rife' in report_base['jump_repair'] else ''}")
             shutil.rmtree(out_dir / FALLBACK_FRAMES_DIR, ignore_errors=True)
             write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle})
             raise SystemExit(error)
@@ -1015,6 +1043,7 @@ def run_loop(
     cycle_dir.mkdir(parents=True, exist_ok=True)
     for old in cycle_dir.glob("frame-*.png"):
         old.unlink()
+    shutil.rmtree(out_dir / CYCLE_SOURCE_DIR, ignore_errors=True)
     for k, im in enumerate(frames):
         im.save(cycle_dir / f"frame-{k:03d}.png")
     strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds, body_height=body_height, anchor="feet" if anchor == "feet" else "none", kind=str(cycle.get("kind") or "periodic"),
@@ -1137,7 +1166,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--body-height", type=int, help="scale so the STANDING height (the subject in the clip's first frame, i.e. the base still's pose) is this many px — the same value across states gives the same character size; --strip-height stays the cap")
     parser.add_argument("--anchor", choices=ANCHOR_MODES, default=None, help="motion-auto: automatic stable regions, local repeat selection and XY ramp (walk/run); motion: fixed cut with explicit regions; body (default for walk/run): measure the last-to-first head-and-torso offset once and spread it as a ramp over the cycle; feet: remove in-canvas drift (a straight-line trend) so every cell stands on the mean foot line; none: leave placement as filmed (default for other states)")
     parser.add_argument("--anchor-region", type=motion_anchor.parse_region, action="append", help="motion anchor only: repeat twice with head then torso x0,y0,x1,y1 in the first selected frame; requires --cycle fixed and at least 6 frames")
-    parser.add_argument("--repair", choices=REPAIR_MODES, default="auto", help="auto (default): in a walk or run loop, a frame that follows a jump (a step 1.4x the median, whole body or the hair behind it) is replaced by RIFE's frame between its neighbours, at most 3 and never two side by side, recorded in the report (docs/loop-repair.md); off: cut as filmed")
+    parser.add_argument("--repair", choices=REPAIR_MODES, default="auto", help="auto (default): in a walk or run loop, a frame that follows a jump (a step 1.4x the median, whole body or the hair behind it) is replaced by RIFE's frame between its neighbours, at most 3 and never two side by side, recorded in the report (docs/loop-repair.md); where no RIFE is installed a loop that needs a frame is cut as filmed with a warning (`sprite-gen rife install` adds RIFE); on: the same repair, but no RIFE fails the loop; off: cut as filmed")
     parser.add_argument("--jolt-max", type=float, default=None, help=f"walk/run: fail the repaired loop when its jolt index (how far each step strays from its neighbours' mean, over the median step) exceeds this. Default: no gate — the index is reported and a value over {repair_mod.JOLT_REFERENCE} is a warning line")
     parser.add_argument("--head-step-max", type=float, default=None, help=f"walk/run: fail the repaired loop when the head's largest sideways move in one frame exceeds this %% of the body height. Default: no gate — reported, and over {repair_mod.HEAD_STEP_REFERENCE} is a warning line")
     parser.add_argument("--facing", choices=FACINGS, default="right", help="which way the body faces in the frames (default right): the hair the jump search watches is behind it")

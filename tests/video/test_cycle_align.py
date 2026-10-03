@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 
 import numpy as np
@@ -136,3 +137,52 @@ def test_video_set_aligns_each_gait_filmed_in_two_or_more_directions(tmp_path):
     assert rows[0]["loop"]["cycle_align"]["from"] == 20
     assert (tmp_path / "walk.cycle-align.json").is_file()
     assert batch.align_gaits(rows, tmp_path, "off") == {}
+
+
+def _no_rife(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("SPRITE_GEN_RIFE", raising=False)
+    # PATH keeps every other tool (img2webp, ffmpeg); only the directories holding a RIFE go
+    path = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d and not (Path(d) / "rife-ncnn-vulkan").exists()]
+    monkeypatch.setenv("PATH", os.pathsep.join(path))
+    monkeypatch.setenv("SPRITE_GEN_DATA_DIR", str(tmp_path / "data"))
+
+
+def test_video_cycle_align_without_rife_fails_and_leaves_the_set_as_cut(tmp_path, monkeypatch):
+    dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24), ("N", 28))]
+    before = [(d / "walk.strip.png").read_bytes() for d in dirs]
+    _no_rife(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit, match=r"video-cycle-align: .*rife-ncnn-vulkan not found.*sprite-gen rife install"):
+        align.run(loop_dir=dirs, length=None, report=None)
+    assert [(d / "walk.strip.png").read_bytes() for d in dirs] == before
+
+
+def test_video_set_without_rife_skips_the_alignment_with_a_warning(tmp_path, monkeypatch, capsys):
+    from sprite_gen.video import batch
+
+    rows = []
+    for direction, length in (("front", 20), ("side", 24)):
+        item = tmp_path / f"{direction}-walk"
+        item.mkdir()
+        _cut(item, "loop", length)
+        rows.append({"item": f"{direction}-walk", "direction": direction, "state": "walk", "dir": str(item), "ok": True,
+                     "loop": {"n_out": length}})
+    _no_rife(monkeypatch, tmp_path)
+    out = batch.align_gaits(rows, tmp_path, "auto")
+    assert out["walk"]["ok"] is True and out["walk"]["applied"] is False
+    assert out["walk"]["install"] == "sprite-gen rife install" and "rife-ncnn-vulkan not found" in out["walk"]["rife"]
+    assert [r["loop"]["n_out"] for r in rows] == [20, 24] and "cycle_align" not in rows[0]["loop"]
+    assert not (tmp_path / "walk.cycle-align.json").exists()
+    err = capsys.readouterr().err
+    assert "video-set: warning: walk: cycles not aligned" in err and "sprite-gen rife install" in err
+
+
+def test_cutting_a_loop_again_drops_the_kept_source(tmp_path):
+    """Once RIFE is installed a loop is cut again; the next alignment must read that cut."""
+    dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24))]
+    align.align_set(dirs, interpolate=Recorder())
+    assert (dirs[0] / align.SOURCE_DIR).is_dir()
+    keyed = tmp_path / "S-keyed"
+    loop_mod.run_loop(keyed, dirs[0], fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=1000.0,
+                      name="walk", report_path=None, cycle_mode="fixed", start=0, length=22, anchor="none", repair="off")
+    assert not (dirs[0] / align.SOURCE_DIR).exists()
+    assert align.align_set(dirs, interpolate=Recorder())["lengths"] == [22, 24]

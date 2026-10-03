@@ -15,6 +15,9 @@ that needs the fewest made frames across the set), and a loop already that long 
 The loop directories are `video-loop` output directories. Their first alignment keeps the cut
 as filmed in `cycle.source/`; every later alignment reads from there, so running it again — or
 with another length — never resamples a resampled loop.
+
+A set that needs a made frame where no RIFE is installed raises `rife.RifeNotInstalled` with
+nothing rewritten: this command fails on it, `video-set` skips the alignment with a warning.
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import rife as rife_mod
 
 SNAP = 0.03  # a sample time within this of a source frame takes that frame
-SOURCE_DIR = "cycle.source"
+SOURCE_DIR = loop_mod.CYCLE_SOURCE_DIR  # removed by video-loop whenever it cuts the loop again
 RATE_TOLERANCE = 0.002  # frame rates read back from the strip metadata agree within this
 LOW_ALPHA = 128  # the body's top line for the foot-strike turn: solid pixels only
 
@@ -186,6 +189,8 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         try:
             out, facts = resample(frames, target, lazy)
             start = foot_strike_start(out)
+        except rife_mod.RifeNotInstalled as exc:
+            raise rife_mod.RifeNotInstalled(f"{d}: {exc}") from exc
         except (ValueError, rife_mod.RifeUnavailable) as exc:
             raise SystemExit(f"video-cycle-align: {d}: {exc}; frames between source frames are made by RIFE (docs/loop-repair.md)") from exc
         record = {**facts, "turned_by": start, "fps": round(fps, 4), "source": SOURCE_DIR,
@@ -213,7 +218,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run(**kwargs: object) -> int:
-    report = align_set(list(kwargs["loop_dir"]), length=kwargs.get("length"), report_path=kwargs.get("report"))  # type: ignore[arg-type]
+    try:
+        report = align_set(list(kwargs["loop_dir"]), length=kwargs.get("length"), report_path=kwargs.get("report"))  # type: ignore[arg-type]
+    except rife_mod.RifeNotInstalled as exc:
+        # Asked for by name, so no RIFE is a failure, never a quiet skip (video-set skips with a warning).
+        raise SystemExit(f"video-cycle-align: {exc}; frames between source frames are made by RIFE — "
+                         f"`{rife_mod.INSTALL_COMMAND}` (docs/loop-repair.md)") from exc
     print(json.dumps({k: report[k] for k in ("length", "lengths", "made_by_rife", "cycle_seconds")}
                      | {"loops": [{k: r[k] for k in ("name", "from", "to", "made_by_rife", "turned_by", "seam_ratio")} for r in report["loops"]]},
                      ensure_ascii=False, indent=2))
