@@ -97,7 +97,7 @@ def test_cli_writes_corrected_cycle_and_gates_rendered_cells(tmp_path, corrected
     for k, im in enumerate(source):
         im.save(keyed / f"{k:03}.png")
     out = tmp_path / "output"
-    args = ["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk",
+    args = ["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk", "--repair", "off",
             "--cycle", "fixed", "--start", "0", "--length", "24", "--anchor", "motion",
             "--anchor-region", "55,27,86,60", "--anchor-region", "48,61,94,110"]
     assert loop.main(args) == 0

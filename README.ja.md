@@ -105,7 +105,7 @@ sprite-gen compose-atlas --run-dir <run>                                       #
 sprite-gen curation --run-dir <run>                                            # (任意) 選別、微調整、breathe
 ```
 
-**B · 動画 → ループ** — 一枚の静止画から透過ループへ（`ffmpeg`、`img2webp`、および自分自身の `grok` ログインまたは `XAI_API_KEY` が必要）。
+**B · 動画 → ループ** — 一枚の静止画から透過ループへ（`ffmpeg`、`img2webp`、および自分自身の `grok` ログインまたは `XAI_API_KEY` が必要）。歩き・走りループの飛んだコマの修復と、方向セットの周期合わせは RIFE で行う：`sprite-gen rife install` で一度インストールする。なければそのループは撮影どおりに切り出され、警告が残る（[loop-repair](docs/loop-repair.md)）。
 
 ```bash
 sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --out-dir set/

@@ -35,6 +35,13 @@ jobs:
           python -m venv .venv
           .venv/bin/pip install -e ".[dev]"
 
+      # The user's own install path: the pinned zip, its SHA-256, the user data directory, and a
+      # check frame through the binary — here on Mesa llvmpipe (docs/loop-repair.md section 1).
+      - name: Install RIFE for video-loop's jump repair (sprite-gen rife install)
+        run: |
+          sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers
+          .venv/bin/sprite-gen rife install
+
       - name: Quickstart smoke (prepare -> extract -> compose)
         run: |
           .venv/bin/python scripts/prepare_sprite_run.py --help > /dev/null

@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 2.17.0
+version: 2.18.0
 description: "Generates images and game sprites through GPT or Grok with guided provider choices, separate saved defaults, automatic cleanup and optional curation. Handles sprite requests, ordinary image generation/editing, standalone image-to-video clips (i2v, animate this still, 그록 영상, 이매진 비디오, 스틸 움직여줘, first/last frame, reference-to-video, 영상 이어붙이기, 영상 편집, extend/edit a clip), chroma removal, animation atlases, video loops, 큐레이션뷰, image candidates, 팔레트 스왑, palette swap, recolor, rig layers, engine exports, repeating backgrounds, projected shadows, motion/contact inspection and optional scene composition from existing assets."
 license: Apache-2.0
 depends_on:
@@ -11,6 +11,8 @@ depends_on:
       why: "video-frames (clip -> frames) and video-set"
     - name: img2webp
       why: "video-loop WebP with exact alpha (libwebp); Pillow's animated writer drops -exact"
+    - name: rife-ncnn-vulkan
+      why: "video-loop jump repair and video-cycle-align (RIFE v4.6 in-betweens, release 20221029). Install once with `sprite-gen rife install` (sha256-checked, into the user data directory); SPRITE_GEN_RIFE or PATH override it; Linux without a GPU also needs libvulkan1 mesa-vulkan-drivers. Without it, walk and run loops are cut as filmed with a warning"
   required_scripts:
     - scripts/prepare_sprite_run.py
     - scripts/generate_sprite_image.py
@@ -114,6 +116,10 @@ Scene creation consumes finished assets and remains optional. Asset metadata own
 ## 실행 인터프리터
 
 `SPRITE_GEN_ROOT` is the absolute installed repository path. Use `$SPRITE_GEN_ROOT/.venv/bin/sprite-gen` or `$SPRITE_GEN_ROOT/.venv/bin/python`; do not assume an activated shell. **폴백 금지**: create a missing venv or report the failure, never use an arbitrary global Python. **NumPy 가 없는 인터프리터** fails at package import. Setup and diagnosis: [interpreter](docs/interpreter.md).
+
+## RIFE for walk and run loops
+
+`video-loop` repairs a walk's or run's jump frames and `video-set` gives a direction set one cycle length, both with RIFE in-betweens. Install it once per machine: `$SPRITE_GEN_ROOT/.venv/bin/sprite-gen rife install` (pinned rife-ncnn-vulkan 20221029 and model rife-v4.6, SHA-256 checked, into the user data directory, ending with a check frame; Linux without a GPU first needs `libvulkan1 mesa-vulkan-drivers`). Without it every loop is still cut, as filmed, and says so: a `warning:` line on stderr, `jump_repair.applied: false` in the loop report, `cycle_align.<state>.applied: false` and `warnings` in `set.report.json`. When that happens, tell the user which loops went unrepaired and offer the install; after it, cut those loops again and run `video-cycle-align`. `video-loop --repair on` and `video-cycle-align` fail without RIFE instead. [loop-repair](docs/loop-repair.md).
 
 ## Contracts and advanced tools
 

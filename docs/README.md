@@ -16,6 +16,7 @@ flowchart LR
         direction LR
         b1[video-canvas] --> b2[video] --> b3[video-frames] --> b4[video-loop]
         b5[video-set] -.runs all four.-> b1
+        b4 --> b6[video-cycle-align]
     end
     subgraph C["C · utilities"]
         direction LR
@@ -37,7 +38,7 @@ flowchart LR
 | Pipeline / tool group / workflow | Entry doc | Verbs |
 |---|---|---|
 | **A · atlas rows** — one still becomes a runtime sprite sheet | [run-contract.md](run-contract.md) | `prepare` → `gen` / `gen-set` → `extract` → `compose-atlas`; optional `curation` and recompose |
-| **B · video → loop** — one still becomes transparent motion loops | [video-pipeline.md](video-pipeline.md) | `video-canvas` → `video` → `video-frames` → `video-loop`, `video-set` |
+| **B · video → loop** — one still becomes transparent motion loops | [video-pipeline.md](video-pipeline.md) | `video-canvas` → `video` → `video-frames` → `video-loop`, `video-set`, `video-cycle-align` |
 | **C · utilities** — imported images in, clean cuts out | [sheet-slicing.md](sheet-slicing.md) | `cutout`, `slice-sheet`, `unpack-atlas` |
 | **D · post-processing** — finished sheets, refined | [recolor.md](recolor.md) | `recolor`, `recolor-palette`, `compose-layers`, breathing (compose), `export-pngs`, `export-aseprite` |
 | **E · asset tools** — independent background, shadow and motion tools | [asset-tools.md](asset-tools.md) | `background-tile`, `shadow`, `inspect-motion` |
@@ -77,6 +78,7 @@ grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
 | [video.md](video.md) | `sprite-gen video` / `video-extend` / `video-edit`: stills and clips to mp4 through Grok Imagine (image-to-video, last-frame pin, references, extension, editing) with the user's own credential |
 | [video-pipeline.md](video-pipeline.md) | Pipeline B engine contract: state canvas, keyed frames, true-period and one-shot cycles, strip/GIF/WebP, the batch |
 | [loop-review.md](loop-review.md) | Automatic loop decisions, ambiguous gait review, visual evidence and explicit cut/alignment overrides |
+| [loop-repair.md](loop-repair.md) | RIFE (where it runs, cost, licences, `sprite-gen rife install`, what runs without it), jump-frame repair, the jolt index and its gate, one cycle length per direction set |
 | [frame-interpolation.md](frame-interpolation.md) | Generative in-betweens for sprite frames, recorded as a take |
 | [seamless-video-loop.md](seamless-video-loop.md) | Making a non-looping ambient clip loop forever (RIFE seam bridge) — a different job from pipeline B |
 

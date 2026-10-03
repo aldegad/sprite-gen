@@ -105,7 +105,7 @@ sprite-gen compose-atlas --run-dir <run>                                       #
 sprite-gen curation --run-dir <run>                                            # （可选）挑选、微调、呼吸
 ```
 
-**B · 视频 → 循环** —— 从一张静态图到透明循环（需要 `ffmpeg`、`img2webp`，以及你自己的 `grok` 登录或 `XAI_API_KEY`）。
+**B · 视频 → 循环** —— 从一张静态图到透明循环（需要 `ffmpeg`、`img2webp`，以及你自己的 `grok` 登录或 `XAI_API_KEY`）。行走和奔跑循环的跳帧修复、方向组的周期对齐都用 RIFE：用 `sprite-gen rife install` 安装一次。没有它时，这些循环按拍摄原样裁切，并留下警告（[loop-repair](docs/loop-repair.md)）。
 
 ```bash
 sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --out-dir set/

@@ -234,7 +234,7 @@ def key_frames(
         dst = keyed_dir / src.name
         stats = cutout(src, dst, key=key, spill_max_fraction=spill_max, spill_min_tint=spill_tint,
                        spill_require_hue=spill == "full", decontam=decontam, decontam_fit=DECONTAM_FIT,
-                       decontam_palette=clip_palette)
+                       decontam_palette=clip_palette, decontam_edge_band=EDGE_ROWS)
         image = Image.open(dst).convert("RGBA")
         hist = image.getchannel("A").histogram()
         w, h = image.size
@@ -280,6 +280,7 @@ def key_frames(
             "palette_keyfree": decontam_first["palette_keyfree"],
             "key_material_share": decontam_first["key_material_share"],
             "material_spread": decontam_first["material_spread"],
+            "edge_band": decontam_first["edge_band"],
             "applied_frames": decontam_applied,
             "totals": decontam_totals,
         }

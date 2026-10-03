@@ -190,6 +190,33 @@ out, only `PINNED_LOOP_STATES` do. A caller that retries a walk pinned after no 
 says True; two such front-walk clips closed on their first frame (seam 0.12 and 0.24 of an
 ordinary step).
 
+`build_prompt(..., model=...)` names the clip model. **A Lite walk is calmed**: for
+`grok-imagine-video-1.5-lite` (`LITE_VIDEO_MODELS`) the built-in walk sentence is followed by
+`LITE_WALK_TEXT` — a slow, relaxed walk, small low steps, a gentle arm swing close to the body, no
+bounce, never running. Lite read "walks naturally" bigger than Pro: long, bouncy steps and a wide
+arm swing, a run more than a walk (2026-10-03, one SD character in five views, two takes each);
+with the clause every view walked. A caller's own walk paragraph is left as written. **A Lite
+back-diagonal walk also holds its head** (`LITE_HEAD_TEXT`, after the calm clause): its head swayed
+2.7–3.8 % of the body height side to side against Pro's 0.88 %, and with the sentence four takes
+swayed 1.7–3.1 % (best 1.84 %). It was measured in that view only, so it is said in that view only.
+The measured sentence ended "only the legs, arms and the end of the ponytail move"; the engine's
+says "the ends of the hair", since most characters have no ponytail. Pro prompts are unchanged.
+
+**A front or back walk starts mid-step.** From a standing still the clip model makes the first
+step itself and walks askew — the feet drawn to one line under the body, or the body turned
+three-quarters: 1 of 14 front clips walked straight from a standing still, 14 of 16 from the same
+characters redrawn mid-step (2026-10-02, four characters, blind judged; three rewordings of the walk
+sentence kept 0 of 14 from a standing SD still). `WALK_START_TEXT[direction]` is the redraw sentence for the front and the
+back — the same 2D sprite, same design, caught mid-step with one foot planted under its hip and
+the other lifted a little under its own, hips and shoulders square, arms swinging gently — and
+`walk_start_prompt(direction, key)` adds the background line for a green or magenta key
+(`starts_mid_step(state, direction)` says which clips need it). The design is the reference
+image's to keep: the sentence is drawn with the base still attached. `video-set` does this before
+the canvas (`--walk-start redraw`, the default): one `sprite-gen gen --ref <base>` call per front or
+back walk, on the base's own key, kept as `walk-start.png` with its report and reused while the
+prompt and base are the same; a base on no chroma key is refused with `--walk-start as-given`, which
+films from the base itself. Side and diagonal walks, and every other state, film from the base.
+
 ## 3. Frames — extract, key, check the edges
 
 `ffmpeg` extracts every frame; the clip's real fps is recorded (never assumed). Each
@@ -318,7 +345,9 @@ anything one or two pixels wide, and despilling what is left turns thin red stra
 orange. `video-frames --decontam palette` (also `video-set --decontam palette`) re-explains
 each edge pixel as a blend of the local key background with one colour the subject owns,
 and writes that colour at the pixel's observed luma. It uses the video fit and one palette
-per clip, learned on the first frame, so edge colours cannot flicker between palettes. The
+per clip, learned on the first frame, so edge colours cannot flicker between palettes. Within
+the edge band the edge gate reads, it gives no coverage to a pixel the matte left transparent,
+so it adds no edge contact: a clip with none under `off` has none under `palette`. The
 default `off` keeps frames byte-identical. Method, guards and measurements:
 [chroma-alpha.md](chroma-alpha.md#decontam--give-the-edge-the-subjects-own-colour-back).
 
@@ -396,6 +425,15 @@ for the visual review contract and manual overrides.
 Gates, all fail-loud: no period (profile flat, below the recorded `periodicity_min`), loop seam ratio
 above `--seam-max` (2.0), GIF/WebP re-opened and checked (frame count, `loop=0`,
 transparent corners, no RGB under alpha 0 in the WebP).
+
+A walk or run loop then has its jump frames repaired before the strip is built: a frame that
+breaks a step 1.4× the loop's median (whole body, or the hair behind it) is replaced by RIFE's
+frame between its two neighbours, at most three and never two side by side (`--repair auto`,
+the default; `--repair off` cuts as filmed). The report's `jump_repair` names the frames. RIFE
+is installed once with `sprite-gen rife install`; without it a loop that needs a frame is cut as
+filmed with a warning (`--repair on` fails instead). See [loop repair](loop-repair.md). The repaired loop's jolt index and the head's frame-to-frame
+moves are reported (`jolt`); beyond the reference bounds that is a warning line, and a gate
+(`video-loop: loop jolts — …`) only when `--jolt-max` / `--head-step-max` are passed.
 
 ### One-shot actions — `--cycle auto|periodic|one-shot`
 
@@ -486,6 +524,17 @@ scaling down rather than up, and lets the subject reach the frame edge. Items
 are idempotent (an existing clip is reused unless `--force`); one failure stops only
 its item and is listed in `table.md` with its stage and error. Exit code is non-zero
 when any item failed.
+
+A front or back walk films from its base redrawn mid-step (`--walk-start redraw`, default; one
+image generation each, `--still-provider` picks the provider; see §2). After the loops are cut,
+every walk or run filmed in two or more directions is given one cycle
+length: each loop is resampled to the set's median length (only the frames that fall between two
+source frames are made, by RIFE) and turned to start on a foot strike (`--align-cycles auto`, the
+default; `off` keeps each loop's own length). The same step stands alone as
+`sprite-gen video-cycle-align --loop-dir … --loop-dir …`. `set.report.json` carries `cycle_align`
+per state, and a failed alignment is listed as `cycle-align:<state>`. Without RIFE the alignment
+is skipped with a warning (`applied: false`, and a line under the report's `warnings`), not failed. See
+[loop repair](loop-repair.md) section 4.
 
 ## What the rules were measured on
 

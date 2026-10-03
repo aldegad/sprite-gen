@@ -18,6 +18,8 @@ from sprite_gen.video import batch as video_batch
 from sprite_gen.video import canvas as video_canvas
 from sprite_gen.video import frames as video_frames
 from sprite_gen.video import loop as video_loop
+from sprite_gen.video import align as video_align
+from sprite_gen.video import rife_install
 from sprite_gen.effects import recolor, shadow
 from sprite_gen.scene import render, inspect_scene
 from sprite_gen.serve import serve_compose, serve_curation
@@ -346,6 +348,16 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Directions x states end to end (canvas -> video -> frames -> loop), rate-limit aware, one report per item.",
         video_batch.add_arguments,
         video_batch.run,
+    ),
+    "video-cycle-align": (
+        "One cycle length for every direction of a set: resample each loop to the median length (RIFE between source frames only), start on a foot strike.",
+        video_align.add_arguments,
+        video_align.run,
+    ),
+    "rife": (
+        "install: download the pinned RIFE (rife-ncnn-vulkan, sha256-checked) into the user data directory, where the loop repair finds it.",
+        rife_install.add_arguments,
+        rife_install.run,
     ),
     # The argument surface is `serve_curation.add_arguments` itself, not a copy of it: the
     # webview's own `--help` and this subcommand are the same declaration, so `sprite-gen

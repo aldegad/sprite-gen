@@ -25,6 +25,8 @@ MODULE_DOMAIN = {
     'frames': 'video',
     'loop': 'video',
     'batch': 'video',
+    'align': 'video',
+    'rife_install': 'video',
     'prepare': 'gen',
     'extract': 'frames',
     'cutout': 'frames',
@@ -85,8 +87,8 @@ DOMAIN_TITLE = dict(DOMAINS)
 PIPELINES: list[dict[str, object]] = [
     {"key": "A", "name": "atlas rows", "verbs": ["prepare", "gen", "gen-set", "extract", "compose-atlas", "curation"],
      "chain": "prepare → gen (or gen-set) → extract → compose-atlas; optional curation and recompose", "doc": "docs/run-contract.md"},
-    {"key": "B", "name": "video → loop", "verbs": ["video-canvas", "video", "video-frames", "video-loop", "video-set"],
-     "chain": "video-canvas → video → video-frames → video-loop, or video-set", "doc": "docs/video-pipeline.md"},
+    {"key": "B", "name": "video → loop", "verbs": ["video-canvas", "video", "video-frames", "video-loop", "video-set", "video-cycle-align"],
+     "chain": "video-canvas → video → video-frames → video-loop, or video-set; video-cycle-align across a set", "doc": "docs/video-pipeline.md"},
 ]
 
 TOOL_GROUPS: list[dict[str, object]] = [
