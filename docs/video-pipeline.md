@@ -515,6 +515,20 @@ Outputs:
   which (`body_ref`: `first-frame` or `tallest-grounded`) and records `body_src_h` and `scale`. `delay_ms = cycle_seconds / frames`, so a
   24 fps clip yields 41.67 ms cells; render at 24 fps to keep one cell per frame
   (a 30 fps render of 24 fps cells is a 5:4 pulldown and judders).
+- **Cells** are scaled with their coverage and their colour taken apart (`resize_cell`; a cell
+  at its own size is copied as it is). Coverage keeps LANCZOS's edge, held between the least and
+  the most coverage of the source pixels the colour mixes from, so nothing spills outside the
+  silhouette and nothing opens inside it. Colour is a Hamming mix of premultiplied colour, a
+  filter with no negative lobe, so every pixel's colour is a mix of the colours under it. The
+  strip used LANCZOS over premultiplied RGBA before, which weighs the colours across an edge
+  against each other and divides by the edge's low coverage: on a keyed frame, whose edge holds
+  a light rim and ink with a little of the key's green, it drew a lighter rim and greener ink
+  than the frame had. On the synthetic outlined figure in `tests/video/test_strip_resample.py`
+  (a light rim, green-tinted ink, strands 0.5-1.4 px wide), LANCZOS left 1,462 pixels at 0.97x
+  and 1,750 at 1.03x with a colour none of the source pixels under them had; the split leaves
+  none, and the strands keep LANCZOS's coverage. Colour is no longer sharpened, so a 1 px line
+  inside the body comes out a little softer than LANCZOS drew it when a cell is enlarged. The
+  GIF and WebP are cut from these cells.
 - `<name>.gif` — `n_out` frames evenly across the cycle, 1-bit alpha, disposal 2, `loop=0`.
   `n_out` is a **playback density, not a fixed count**: `round(cycle_seconds × --gif-fps)`
   (default 24 fps = the source rate, so every cycle frame is kept; floor 4, never more than
