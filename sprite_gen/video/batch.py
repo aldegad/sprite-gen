@@ -72,8 +72,21 @@ VIEW_TEXT = {
 # The view sentence for drawing a still at a view, where it differs from the clip's: a diagonal still is
 # often redrawn from a front or side picture, so "turned exactly as in the image" would keep the picture's
 # angle. It says how far the body turns, that the head turns with it and which way the feet point; said
-# less, a three-quarter back view came out as a side view or looking back over the shoulder.
+# less, a three-quarter back view came out as a side view or looking back over the shoulder. A front or
+# back still redrawn from a side picture with the clip's one line kept the picture's turn in the head and
+# chest, so those two say where the head, chest and feet point and not to follow the picture's angle.
 STILL_VIEW_TEXT = {
+    "front": (
+        "seen from the front: the whole body and head turned to face the viewer squarely, the chest, hips and the toes "
+        "of both feet pointing straight at the viewer and the face centred between both ears, looking straight out of "
+        "the image, not turned toward either side even when a reference picture shows the character from another angle"
+    ),
+    "back": (
+        "seen from directly behind: the whole body and head turned fully away from the viewer, the back of the head, "
+        "the shoulders, the hips and the heels of both feet facing straight at the viewer, the face completely hidden "
+        "and not turned toward either side or looking back over the shoulder, even when a reference picture shows the "
+        "character from another angle"
+    ),
     "front_diagonal": (
         "seen from a three-quarter front angle: the whole body and head turned about 45 degrees to the {facing}, halfway "
         "between facing the viewer and facing {facing}, the face looking the same way as the chest and the feet pointing "

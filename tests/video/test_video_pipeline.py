@@ -561,14 +561,33 @@ def test_a_diagonal_walk_is_pinned_and_named_as_an_isometric_heading() -> None:
 def test_a_diagonal_still_is_told_how_far_to_turn() -> None:
     """A still at a diagonal is often redrawn from a front or side picture, so its view sentence says the
     turn (45 degrees), that the head turns with the body and where the feet point, instead of pointing
-    at the image's own angle. Every other view draws with the clip's view sentence."""
+    at the image's own angle. A side still draws with the clip's view sentence."""
     front = batch_mod.still_view_text("front_diagonal")
     back = batch_mod.still_view_text("back_diagonal")
     assert "about 45 degrees to the right" in front and "feet pointing toward the lower right" in front
     assert "away from the viewer toward the upper right" in back and "not looking back over the" in back
     assert "turned exactly as in the image" not in front + back
     assert batch_mod.still_view_text("side", "left") == batch_mod.VIEW_TEXT["side"].format(facing="left")
-    assert batch_mod.still_view_text("front") == batch_mod.VIEW_TEXT["front"]
+
+
+def test_a_front_or_back_still_does_not_follow_the_pictures_angle() -> None:
+    """A front or back still redrawn from a side picture kept the picture's turn in the head and chest with
+    the clip's one line, so its view sentence says where the head, chest and feet point and not to follow
+    the reference's angle. The clip keeps its own line: it starts from a still already drawn at that view."""
+    front = batch_mod.still_view_text("front")
+    back = batch_mod.still_view_text("back", "left")
+    assert front.startswith("seen from the front:") and back.startswith("seen from directly behind:")
+    assert "toes of both feet pointing straight at the viewer" in front
+    assert "face centred between both ears" in front
+    assert "heels of both feet facing straight at the viewer" in back
+    assert "face completely hidden" in back and "not turned toward either side or looking back over the shoulder" in back
+    for sentence in (front, back):
+        assert "even when a reference picture shows the character from another angle" in sentence
+        assert "{" not in sentence
+    assert batch_mod.VIEW_TEXT["front"] == "seen from the front, facing the viewer directly"
+    assert batch_mod.VIEW_TEXT["back"] == "seen from directly behind, facing away from the viewer"
+    clip = batch_mod.build_prompt("front", "idle", "a knight")
+    assert batch_mod.VIEW_TEXT["front"] in clip and front not in clip
 
 
 def test_a_callers_diagonal_gait_keeps_the_angle() -> None:
