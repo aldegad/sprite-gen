@@ -26,6 +26,7 @@ from sprite_gen.spec.runio import (REQUEST_FILENAME, acquire_run_dir_lock, atomi
                               release_run_dir_lock)
 from sprite_gen.frames.segment import separate_fused_poses
 from sprite_gen.spec.subject import SUBJECT_DEFAULT, default_min_used_pixels, sparse_frame_error, subject_kind
+from sprite_gen.util.resample import resize_cell
 
 
 def color_distance(left: tuple[int, int, int], right: tuple[int, int, int]) -> float:
@@ -1297,11 +1298,13 @@ def fit_to_cell(
         new_size = (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale)))
         if resample_name == "kcentroid":
             sprite = _kcentroid_downscale(sprite, new_size[0], new_size[1])
+        elif resample_name == "nearest":
+            sprite = sprite.resize(new_size, Image.Resampling.NEAREST)
         else:
-            sprite = sprite.resize(
-                new_size,
-                Image.Resampling.NEAREST if resample_name == "nearest" else Image.Resampling.LANCZOS,
-            )
+            # "lanczos" names the smooth shrink: LANCZOS coverage, colour mixed apart from it
+            # (resize_cell). LANCZOS over the keyed RGBA itself drew a light rim and key tint
+            # at the edge that the frame did not have.
+            sprite = resize_cell(sprite, new_size)
         cropped = sprite.getbbox()
         if cropped is not None:
             sprite = sprite.crop(cropped)
@@ -2508,7 +2511,7 @@ def fit_component_to_bbox(component: Image.Image, cell_width: int, cell_height: 
     box_w, box_h = max(1, x1 - x0), max(1, y1 - y0)
     ratio = min(box_w / src.width, box_h / src.height)
     tw, th = max(1, round(src.width * ratio)), max(1, round(src.height * ratio))
-    resized = src.resize((tw, th), Image.Resampling.LANCZOS)
+    resized = resize_cell(src, (tw, th))
     left = x0 + (box_w - tw) // 2
     top = y1 - th
     target.alpha_composite(resized, (left, top))

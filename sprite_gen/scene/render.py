@@ -23,6 +23,7 @@ from PIL import Image
 from sprite_gen.scene.model import Scene, load_scene
 from sprite_gen.spec.assets import finite
 from sprite_gen.spec.runio import LOCK_FILENAME, acquire_run_dir_lock, atomic_write_set, release_run_dir_lock
+from sprite_gen.util.resample import resize_cell
 
 
 FORMATS = ("png", "mp4", "gif")
@@ -61,7 +62,7 @@ class Renderer:
             anchor = tuple(a*new/old for a, new, old in zip(seq.anchor, size, seq.size))
             frames = {}
             for source in seq.frames:
-                image = source.resize(size, Image.Resampling.LANCZOS)
+                image = resize_cell(source, size)
                 if layer.repeat_x:
                     image = image.crop((0, 0, round(layer.period*layer.scale), size[1]))
                 if layer.opacity != 1:

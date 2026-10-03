@@ -60,7 +60,7 @@ Canvas origin is top left; positive x is right, positive y is down. Each layer h
 | `loop` | Source loop flag, otherwise true; false holds the final frame after its end |
 | `stride` | Optional verified motion report plus explicit direction; mutually exclusive with `velocity` |
 
-Screen anchor equals `at + (plane_velocity + layer_velocity) * time - (camera.at + camera.velocity * time) * parallax`. Raster dimensions are rounded from source dimensions and scale; the anchor follows the actual resized dimensions. For repeated strips, use the tile's measured period and inspect two or more copies for recognisable joins.
+Screen anchor equals `at + (plane_velocity + layer_velocity) * time - (camera.at + camera.velocity * time) * parallax`. Raster dimensions are rounded from source dimensions and scale; the anchor follows the actual resized dimensions. A layer is scaled with its coverage and its colour taken apart (`resize_cell`, the resample a loop's cells use: [video-pipeline.md](video-pipeline.md) "Cells"), so a keyed sprite gets no lighter rim and no key tint at its edge from being scaled; a layer at scale 1 is its frame, byte for byte. Colour is not sharpened, so a scaled layer with no transparency (a painted background) comes out a little softer than LANCZOS drew it. For repeated strips, use the tile's measured period and inspect two or more copies for recognisable joins.
 
 ## Applying measured stride
 
