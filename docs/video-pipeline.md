@@ -141,6 +141,22 @@ in 10 of 10 each; "toward the way its body faces in the image" kept the front on
 on another character, the back one in 0 of 2. Idle and attack keep their angle in a diagonal (4 of
 4). A diagonal run is weaker: 2 of 4 kept the angle, the others turned toward a side view.
 
+A front or back still redrawn from a picture seen from another side has its own still sentence too:
+with the clip's one line ("seen from the front, facing the viewer directly"),
+a front still redrawn from a side picture could keep part of the picture's turn, the feet frontal
+and the head and chest turned a little toward the side the picture faces. `still_view_text("front")`
+says the whole body and head face the viewer squarely, the chest, hips and toes point straight at
+the viewer, the face is centred between both ears, and it is not turned toward either side even
+when a reference picture shows the character from another angle; `still_view_text("back")` says the
+same from behind, with the face hidden and not looking back over the shoulder. The sentence is used
+whatever the reference's view: a caller does not always know it (an uploaded picture), and on a
+front reference it changed nothing. The clip keeps its one line, since a clip starts from a still
+already drawn at its view. Measured on codex `image_gen` (subscription), five humanoid characters,
+three takes per arm, layout guide on, judged blind on full-resolution crops and with an eye-offset
+metric: from a side reference the old line already drew a frontal face in 15 of 15 by eye (the turn
+did not reproduce on this model), the new sentence in 15 of 15; from behind, both drew a straight
+back in 15 of 15; from a front reference, the old line 14 of 15 and the new 15 of 15.
+
 An attack is one timed strike, not a repeat. `MOTION_TEXT["attack"]` asks for one attack: a windup
 (about 0.5 s), one strike in front (about 0.25 s), a held impact pose (about 0.3 s) and a recovery
 to the exact starting stance (about 0.5 s), then `HOLD_TEXT["attack"]`:
@@ -499,6 +515,20 @@ Outputs:
   which (`body_ref`: `first-frame` or `tallest-grounded`) and records `body_src_h` and `scale`. `delay_ms = cycle_seconds / frames`, so a
   24 fps clip yields 41.67 ms cells; render at 24 fps to keep one cell per frame
   (a 30 fps render of 24 fps cells is a 5:4 pulldown and judders).
+- **Cells** are scaled with their coverage and their colour taken apart (`resize_cell`; a cell
+  at its own size is copied as it is). Coverage keeps LANCZOS's edge, held between the least and
+  the most coverage of the source pixels the colour mixes from, so nothing spills outside the
+  silhouette and nothing opens inside it. Colour is a Hamming mix of premultiplied colour, a
+  filter with no negative lobe, so every pixel's colour is a mix of the colours under it. The
+  strip used LANCZOS over premultiplied RGBA before, which weighs the colours across an edge
+  against each other and divides by the edge's low coverage: on a keyed frame, whose edge holds
+  a light rim and ink with a little of the key's green, it drew a lighter rim and greener ink
+  than the frame had. On the synthetic outlined figure in `tests/video/test_strip_resample.py`
+  (a light rim, green-tinted ink, strands 0.5-1.4 px wide), LANCZOS left 1,462 pixels at 0.97x
+  and 1,750 at 1.03x with a colour none of the source pixels under them had; the split leaves
+  none, and the strands keep LANCZOS's coverage. Colour is no longer sharpened, so a 1 px line
+  inside the body comes out a little softer than LANCZOS drew it when a cell is enlarged. The
+  GIF and WebP are cut from these cells.
 - `<name>.gif` — `n_out` frames evenly across the cycle, 1-bit alpha, disposal 2, `loop=0`.
   `n_out` is a **playback density, not a fixed count**: `round(cycle_seconds × --gif-fps)`
   (default 24 fps = the source rate, so every cycle frame is kept; floor 4, never more than
