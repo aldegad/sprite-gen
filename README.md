@@ -120,7 +120,7 @@ sprite-gen compose-atlas --run-dir <run>                                       #
 sprite-gen curation --run-dir <run>                                            # (optional) pick, nudge, breathe
 ```
 
-**B · video → loop** — one still to transparent loops (needs `ffmpeg`, `img2webp`, and your own `grok` login or `XAI_API_KEY`).
+**B · video → loop** — one still to transparent loops (needs `ffmpeg`, `img2webp`, and your own `grok` login or `XAI_API_KEY`). Walk and run loops have their jump frames repaired and a direction set shares one cycle length through RIFE: install it once with `sprite-gen rife install`. Without it those loops are cut as filmed, with a warning ([loop-repair](docs/loop-repair.md)).
 
 ```bash
 sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --out-dir set/

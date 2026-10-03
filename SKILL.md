@@ -12,7 +12,7 @@ depends_on:
     - name: img2webp
       why: "video-loop WebP with exact alpha (libwebp); Pillow's animated writer drops -exact"
     - name: rife-ncnn-vulkan
-      why: "video-loop jump repair and video-cycle-align (RIFE v4.6 in-betweens, release 20221029; SPRITE_GEN_RIFE names the binary; Linux without a GPU also needs mesa-vulkan-drivers)"
+      why: "video-loop jump repair and video-cycle-align (RIFE v4.6 in-betweens, release 20221029). Install once with `sprite-gen rife install` (sha256-checked, into the user data directory); SPRITE_GEN_RIFE or PATH override it; Linux without a GPU also needs libvulkan1 mesa-vulkan-drivers. Without it, walk and run loops are cut as filmed with a warning"
   required_scripts:
     - scripts/prepare_sprite_run.py
     - scripts/generate_sprite_image.py
@@ -116,6 +116,10 @@ Scene creation consumes finished assets and remains optional. Asset metadata own
 ## 실행 인터프리터
 
 `SPRITE_GEN_ROOT` is the absolute installed repository path. Use `$SPRITE_GEN_ROOT/.venv/bin/sprite-gen` or `$SPRITE_GEN_ROOT/.venv/bin/python`; do not assume an activated shell. **폴백 금지**: create a missing venv or report the failure, never use an arbitrary global Python. **NumPy 가 없는 인터프리터** fails at package import. Setup and diagnosis: [interpreter](docs/interpreter.md).
+
+## RIFE for walk and run loops
+
+`video-loop` repairs a walk's or run's jump frames and `video-set` gives a direction set one cycle length, both with RIFE in-betweens. Install it once per machine: `$SPRITE_GEN_ROOT/.venv/bin/sprite-gen rife install` (pinned rife-ncnn-vulkan 20221029 and model rife-v4.6, SHA-256 checked, into the user data directory, ending with a check frame; Linux without a GPU first needs `libvulkan1 mesa-vulkan-drivers`). Without it every loop is still cut, as filmed, and says so: a `warning:` line on stderr, `jump_repair.applied: false` in the loop report, `cycle_align.<state>.applied: false` and `warnings` in `set.report.json`. When that happens, tell the user which loops went unrepaired and offer the install; after it, cut those loops again and run `video-cycle-align`. `video-loop --repair on` and `video-cycle-align` fail without RIFE instead. [loop-repair](docs/loop-repair.md).
 
 ## Contracts and advanced tools
 

@@ -1,6 +1,6 @@
 # Loop repair — RIFE in-betweens for jump frames, the jolt index, one cycle per set
 
-> Owns: Where RIFE runs and what it costs, jump-frame repair in `video-loop`, the jolt index and its gate, cycle alignment across a direction set · Index: [docs/README.md](README.md)
+> Owns: Where RIFE runs and what it costs, how it is installed and what runs without it, jump-frame repair in `video-loop`, the jolt index and its gate, cycle alignment across a direction set · Index: [docs/README.md](README.md)
 
 A walk loop cut from a generated clip can look right in every still and still hitch when it
 plays: the video model redraws thin hair a little differently every frame, and now and then
@@ -25,11 +25,54 @@ tool, like `ffmpeg` and `img2webp`; nothing is vendored into the package.
 |---|---|
 | `rife-ncnn-vulkan-20221029-ubuntu.zip` | `1e2c7ee7fa7daa326542d50622f0afedc80cf6f1858bda411d16385ffa5cdf68` |
 | `rife-ncnn-vulkan-20221029-macos.zip` | `4a63a1f3c9c715773c57d2ee51df1b315ed20cd6c63103e45c483ecc4400b595` |
+| `rife-ncnn-vulkan-20221029-windows.zip` | `d8e4d772d26cd8006ef0ad0bc82eb191b53c68677d1ae2f42506d74cbbbea606` |
 
-The engine finds it by `SPRITE_GEN_RIFE` (the binary's path) or `rife-ncnn-vulkan` on `PATH`,
-and the model by `SPRITE_GEN_RIFE_MODEL` or `rife-v4.6/` next to the binary. A loop that needs
-a repair and finds no RIFE stops with the install line; it is never cut unrepaired in silence
-(`--repair off` is the explicit way to skip it).
+### Install — `sprite-gen rife install`
+
+```bash
+sprite-gen rife install            # once per machine
+```
+
+It downloads the zip for this platform (macOS, universal; Linux and Windows, x86-64), checks
+the SHA-256 above before anything is unpacked, and keeps only what the engine runs — the
+binary, `rife-v4.6/`, `LICENSE` and `README.md` (and `vcomp140.dll` on Windows), about 35 MB of
+the 430 MB zip. It lands in the user data directory:
+
+| | Install root |
+|---|---|
+| any platform, when set | `$SPRITE_GEN_DATA_DIR/rife` |
+| macOS, Linux | `$XDG_DATA_HOME/sprite-gen/rife`, else `~/.local/share/sprite-gen/rife` |
+| Windows | `%LOCALAPPDATA%\sprite-gen\rife` |
+
+It unpacks into a staging directory and renames it into place, so an interrupted install
+leaves nothing half-written where the engine looks. A finished install of the same zip is left
+alone (`--force` unpacks again). It ends with a check frame: one frame half way between two
+discs through the installed binary, so a Linux machine with the files but no Vulkan driver
+finds out at install time (`--no-check` skips it). `--zip FILE` installs from a zip already
+downloaded (behind a proxy, in an image build), checked the same way; `--dir DIR` installs
+elsewhere and prints the `SPRITE_GEN_RIFE=…` line the engine then needs. Other platforms (Linux
+on ARM, for one) have no release build: build it from the repository and set `SPRITE_GEN_RIFE`.
+
+The engine finds the binary by, in order: `SPRITE_GEN_RIFE` (the binary's path), then
+`rife-ncnn-vulkan` on `PATH`, then the install root above. The model is `SPRITE_GEN_RIFE_MODEL`
+or `rife-v4.6/` next to the binary. When an earlier place holds another RIFE, the install says
+which one the engine runs.
+
+### Without RIFE
+
+RIFE is located only when a frame is to be made, so a smooth walk never needs it. When one is
+to be made and no RIFE is found in those three places, nothing fails by default — a walk that
+cut before RIFE existed still cuts — and nothing is left unsaid:
+
+| Where | Default without RIFE | Asked for by name |
+|---|---|---|
+| `video-loop` jump repair (section 2) | `--repair auto`: the loop is cut as filmed; `jump_repair` reads `applied: false`, `why`, `rife` (what was not found), `install`, and the worst jump's score; one `video-loop: warning:` line on stderr | `--repair on`: fails with the install line |
+| `video-set` cycle alignment (section 4) | `--align-cycles auto`: the state is skipped and every loop keeps its own length; `cycle_align.<state>` reads `applied: false` with `why`, `rife`, `install`; the set report lists it under `warnings`; one `video-set: warning:` line | `video-cycle-align`: fails with the install line |
+
+A RIFE that is found and then fails (a binary that cannot reach Vulkan, say) is an error in every
+mode: the install is there and broken, which a warning would hide. A jolt gate passed to a loop
+whose repair could not run (section 3) reads the loop as filmed, and its failure says the
+repair did not run.
 
 RIFE reads three colour channels and no alpha. A frame is therefore interpolated as two
 images — its colour premultiplied over black, and its coverage as a grey image — and put back
@@ -72,6 +115,9 @@ curl -fsSL -o /tmp/rife.zip https://github.com/nihui/rife-ncnn-vulkan/releases/d
 echo '1e2c7ee7fa7daa326542d50622f0afedc80cf6f1858bda411d16385ffa5cdf68  /tmp/rife.zip' | sha256sum -c -
 unzip -q /tmp/rife.zip -d /opt && ln -s /opt/rife-ncnn-vulkan-20221029-ubuntu/rife-ncnn-vulkan /usr/local/bin/
 ```
+
+`sprite-gen rife install` (after the package, as the image's own user) does the same download,
+hash and unpack, and adds the check frame; CI installs RIFE that way.
 
 Cost on Modal (prices read from modal.com/pricing on 2026-10-03: CPU $0.0000131 per core per
 second, memory $0.00000222 per GiB per second): one repaired frame is two calls, about 6 s; a
@@ -120,10 +166,10 @@ its whole/hair parts, `score_max_before` / `score_max_after`, why it stopped, an
 interpolator made the frames. When a frame was replaced the seam gate measures the rendered cells
 (`seam_measurement: rendered-cells`), because the source frames no longer say what plays.
 
-RIFE is located only when a frame is to be made. A loop with a jump and no RIFE fails with the
-install line and `--repair off`, which cuts the loop as filmed and records
-`jump_repair: {"applied": false, "why": "--repair off"}`. Other states are not touched
-(`"why": "not a gait state (…)"`).
+RIFE is located only when a frame is to be made. A loop with a jump and no RIFE is cut as filmed
+with a warning under `--repair auto`, and fails under `--repair on` (section 1, "Without RIFE").
+`--repair off` cuts the loop as filmed and records `jump_repair: {"applied": false, "why":
+"--repair off"}`. Other states are not touched (`"why": "not a gait state (…)"`).
 
 Checked on the 2026-10-03 takes (`retime.py` in the experiment folder is the reference): the
 engine replaces the same frames as the experiment on every take tried — Lite side E1
@@ -228,7 +274,10 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
 `video-set` runs this after its loops are cut, once per walk or run state filmed in two or more
 directions (`--align-cycles auto`, default; `off` keeps each loop's own length). Its report
 carries `cycle_align` per state and `<state>.cycle-align.json`; a failed alignment is listed as
-`cycle-align:<state>` and the loops stay as cut.
+`cycle-align:<state>` and the loops stay as cut. Without RIFE the alignment is skipped, not
+failed (section 1, "Without RIFE"); install it and run `video-cycle-align` on the set's loops.
+Cutting a loop again with `video-loop` removes its `cycle.source/`, so the next alignment reads
+the new cut.
 
 How much RIFE that is, on the 2026-10-03 sets (the experiment's `finalize.py`): resampling to
 the median made 18 of 21 frames for a Lite side loop of 27, 20 of 21 for a back-diagonal loop of

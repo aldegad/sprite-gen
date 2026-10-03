@@ -2,7 +2,7 @@
 """RIFE runner: it is found or refused by name, and a real binary (when one is installed)
 interpolates an RGBA frame that sits between its two neighbours, alpha included.
 
-The real-binary test runs only where `rife-ncnn-vulkan` is reachable (SPRITE_GEN_RIFE or PATH);
+The real-binary test runs only where `rife-ncnn-vulkan` is reachable (SPRITE_GEN_RIFE, PATH or the install root);
 the locating rules need no binary at all."""
 
 from __future__ import annotations
@@ -106,7 +106,7 @@ def _real_rife_available() -> bool:
     return True
 
 
-@pytest.mark.skipif(not _real_rife_available(), reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH)")
+@pytest.mark.skipif(not _real_rife_available(), reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH / sprite-gen rife install)")
 def test_real_rife_makes_the_frame_between_in_colour_and_alpha():
     interpolate = rife.Rife()
     mid = interpolate(_disc(40), _disc(72), 0.5)

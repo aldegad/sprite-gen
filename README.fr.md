@@ -105,7 +105,7 @@ sprite-gen compose-atlas --run-dir <run>                                       #
 sprite-gen curation --run-dir <run>                                            # (optionnel) choisir, ajuster, breathe
 ```
 
-**B · vidéo → boucle** — d'une image fixe à des boucles transparentes (nécessite `ffmpeg`, `img2webp`, et votre propre connexion `grok` ou `XAI_API_KEY`).
+**B · vidéo → boucle** — d'une image fixe à des boucles transparentes (nécessite `ffmpeg`, `img2webp`, et votre propre connexion `grok` ou `XAI_API_KEY`). Les boucles de marche et de course voient leurs images qui sautent réparées, et un jeu de directions partage une même longueur de cycle, grâce à RIFE : installez-le une fois avec `sprite-gen rife install`. Sans lui, ces boucles sont coupées telles que filmées, avec un avertissement ([loop-repair](docs/loop-repair.md)).
 
 ```bash
 sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --out-dir set/

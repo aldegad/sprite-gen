@@ -113,7 +113,7 @@ sprite-gen compose-atlas --run-dir <run>                                       #
 sprite-gen curation --run-dir <run>                                            # (선택) 고르고, 미세 조정하고, breathe
 ```
 
-**B · 비디오 → 루프** — 정지 이미지 한 장에서 투명 루프로 (`ffmpeg`, `img2webp`, 그리고 본인의 `grok` 로그인 또는 `XAI_API_KEY` 필요).
+**B · 비디오 → 루프** — 정지 이미지 한 장에서 투명 루프로 (`ffmpeg`, `img2webp`, 그리고 본인의 `grok` 로그인 또는 `XAI_API_KEY` 필요). 걷기·달리기 루프의 튀는 칸 수리와 방향 세트의 주기 맞춤은 RIFE 로 한다: `sprite-gen rife install` 로 한 번 설치한다. 없으면 그 루프는 찍힌 그대로 잘리고 경고가 남는다 ([loop-repair](docs/loop-repair.md)).
 
 ```bash
 sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --out-dir set/

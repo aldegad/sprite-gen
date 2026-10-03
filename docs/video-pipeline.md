@@ -429,8 +429,9 @@ transparent corners, no RGB under alpha 0 in the WebP).
 A walk or run loop then has its jump frames repaired before the strip is built: a frame that
 breaks a step 1.4× the loop's median (whole body, or the hair behind it) is replaced by RIFE's
 frame between its two neighbours, at most three and never two side by side (`--repair auto`,
-the default; `--repair off` cuts as filmed). The report's `jump_repair` names the frames. See
-[loop repair](loop-repair.md). The repaired loop's jolt index and the head's frame-to-frame
+the default; `--repair off` cuts as filmed). The report's `jump_repair` names the frames. RIFE
+is installed once with `sprite-gen rife install`; without it a loop that needs a frame is cut as
+filmed with a warning (`--repair on` fails instead). See [loop repair](loop-repair.md). The repaired loop's jolt index and the head's frame-to-frame
 moves are reported (`jolt`); beyond the reference bounds that is a warning line, and a gate
 (`video-loop: loop jolts — …`) only when `--jolt-max` / `--head-step-max` are passed.
 
@@ -531,7 +532,8 @@ length: each loop is resampled to the set's median length (only the frames that 
 source frames are made, by RIFE) and turned to start on a foot strike (`--align-cycles auto`, the
 default; `off` keeps each loop's own length). The same step stands alone as
 `sprite-gen video-cycle-align --loop-dir … --loop-dir …`. `set.report.json` carries `cycle_align`
-per state, and a failed alignment is listed as `cycle-align:<state>`. See
+per state, and a failed alignment is listed as `cycle-align:<state>`. Without RIFE the alignment
+is skipped with a warning (`applied: false`, and a line under the report's `warnings`), not failed. See
 [loop repair](loop-repair.md) section 4.
 
 ## What the rules were measured on
