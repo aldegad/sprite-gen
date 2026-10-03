@@ -345,7 +345,9 @@ anything one or two pixels wide, and despilling what is left turns thin red stra
 orange. `video-frames --decontam palette` (also `video-set --decontam palette`) re-explains
 each edge pixel as a blend of the local key background with one colour the subject owns,
 and writes that colour at the pixel's observed luma. It uses the video fit and one palette
-per clip, learned on the first frame, so edge colours cannot flicker between palettes. The
+per clip, learned on the first frame, so edge colours cannot flicker between palettes. Within
+the edge band the edge gate reads, it gives no coverage to a pixel the matte left transparent,
+so it adds no edge contact: a clip with none under `off` has none under `palette`. The
 default `off` keeps frames byte-identical. Method, guards and measurements:
 [chroma-alpha.md](chroma-alpha.md#decontam--give-the-edge-the-subjects-own-colour-back).
 

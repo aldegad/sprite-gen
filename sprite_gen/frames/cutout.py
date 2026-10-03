@@ -274,7 +274,7 @@ def _matte_route(
 def extract_route(image: Image.Image, kind: str, *, spill_max_fraction: float | None = None,
                   spill_min_tint: float | None = None,
                   spill_require_hue: bool = False, decontam: str = "off", decontam_fit: str = "still",
-                  decontam_palette: dict[str, Any] | None = None,
+                  decontam_palette: dict[str, Any] | None = None, decontam_edge_band: int = 0,
                   background_key: tuple[int, int, int] | None = None) -> tuple[Image.Image, dict[str, Any]]:
     """Magenta/green key background → reuse the verified `extract` chroma engine (no drift).
 
@@ -307,7 +307,7 @@ def extract_route(image: Image.Image, kind: str, *, spill_max_fraction: float | 
     decontam_stats: dict[str, Any] = {}
     if decontam != "off":
         extra.update(decontam=decontam, decontam_fit=decontam_fit, decontam_palette=decontam_palette,
-                     decontam_stats=decontam_stats)
+                     decontam_stats=decontam_stats, decontam_edge_band=decontam_edge_band)
     # the colour detected above, not a second detection of the same borders
     result = remove_chroma_background(
         image, target, _EXTRACT_KEY_THRESHOLD, _EXTRACT_FRINGE_THRESHOLD, _EXTRACT_FRINGE_DELTA,
@@ -339,6 +339,7 @@ def cutout(
     decontam: str = "off",
     decontam_fit: str = "still",
     decontam_palette: dict[str, Any] | None = None,
+    decontam_edge_band: int = 0,
 ) -> dict[str, Any]:
     """Cut a uniform-background imported image to a clean transparent RGBA PNG.
 
@@ -348,8 +349,9 @@ def cutout(
     engine default for either). `decontam` is the engine's edge decontamination
     pass: "off" (the default) keeps the matte as it is; "auto" runs it on chroma routes
     where it applies and records why not elsewhere; "palette" demands it and fails where
-    it cannot run (the white matte has no key colour to remove). Returns a
-    stats dict. Raises SystemExit if the key is unknown, the background cannot be
+    it cannot run (the white matte has no key colour to remove). `decontam_edge_band`
+    keeps what the matte left transparent along the top, left and right edges
+    transparent (`video-frames` passes its edge band). Returns a stats dict. Raises SystemExit if the key is unknown, the background cannot be
     located, or any transparent pixel keeps non-zero RGB (No Silent Fallback).
     """
     if key not in ("auto", "white", "magenta", "green"):
@@ -365,7 +367,7 @@ def cutout(
         result, route_stats = extract_route(image, route, spill_max_fraction=spill_max_fraction,
                                             spill_min_tint=spill_min_tint, spill_require_hue=spill_require_hue,
                                             decontam=decontam, decontam_fit=decontam_fit,
-                                            decontam_palette=decontam_palette)
+                                            decontam_palette=decontam_palette, decontam_edge_band=decontam_edge_band)
     else:
         if decontam == "palette":
             raise SystemExit(f"cutout: --decontam {decontam} needs a chroma key background (magenta/green); "

@@ -28,6 +28,13 @@ Guards, in order of the decision they make:
 - *Background flank.* Keyed pixels within `FLANK_PX` of the subject may regain
   coverage (the faint sides of a strand the hard cut erased), above a noise
   floor measured on the background itself, and only when chained to the subject.
+- *Frame edge.* Within `edge_band` of the frame's top, left and right edges (the
+  band `video-frames` reads as the subject touching the frame or the key surviving
+  the matte), a pixel the matte left transparent stays transparent. A decoded
+  frame's blur runs the subject on into the key as a smooth tail that reads as a
+  faint blend at every distance, the background past the flank as well, so a head
+  a few pixels under the frame edge would get a faint flank there that no floor
+  tells from the tail, and that flank alone would fail a clip the matte passes.
 - *Unexplained.* A pixel no palette colour explains (a small gem of a colour the
   interior never shows) keeps the engine's bytes. In the still fit the blend must
   also reproduce the observed luma, so outline ink darker than any mix of a
@@ -305,7 +312,7 @@ def palette_from_stats(stats: dict[str, Any]) -> dict[str, Any]:
 def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndarray,
                   chroma_key: tuple[int, int, int], *, fit: str = "still", alpha_depth: int = 4,
                   palette: dict[str, Any] | None = None, mode: str = "palette",
-                  source_alpha: np.ndarray | None = None) -> tuple[np.ndarray, dict[str, Any]]:
+                  source_alpha: np.ndarray | None = None, edge_band: int = 0) -> tuple[np.ndarray, dict[str, Any]]:
     """Re-explain the edge of an already keyed image. Returns (RGBA uint8, stats).
 
     `source_rgb` (H, W, 3) is the frame as generated and `source_alpha` (H, W) its own
@@ -313,6 +320,8 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
     the engine's hard-cut background (transparent input included). Interior pixels
     (deeper than `BAND_PX`) are returned byte-identical.
     `palette` is a `subject_palette` result to reuse (a clip's); None learns this frame's.
+    `edge_band` (px) keeps what the matte left transparent along the top, left and right
+    edges transparent (*Frame edge*); 0 leaves the frame edge to the pass like anywhere else.
     `mode="auto"` returns the input unchanged, with the reason in the stats, where the
     pass does not apply; `mode="palette"` raises SystemExit there instead.
     """
@@ -340,6 +349,11 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
     # the still fit reads an edge pixel's colour as evidence of the subject's own material; a decoded
     # video frame's chroma is blurred, so there the colour is no such evidence and the fit decides alone
     material_test = fit == "still"
+    # *Frame edge*: what the matte left transparent along the top, left and right edges stays so
+    held = np.zeros(keyed_mask.shape, dtype=bool)
+    if edge_band > 0:
+        held[:edge_band] = held[:, :edge_band] = held[:, -edge_band:] = True
+        held &= out[..., 3] == 0
 
     far_background = keyed_mask & ~flank
     background = local_background(rgb, far_background, keyed_mask, BACKGROUND_RADIUS)
@@ -425,13 +439,13 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
             settled = hueless & (deep | ((behind_weight[start:start + len(r)] > 0) & (behind_distance <= margin)))
         else:
             settled = np.zeros(len(r), dtype=bool)
-        is_blend = explained & (alpha < 1.0) & (in_flank | (miss + margin < material)) & ~settled
+        is_blend = explained & (alpha < 1.0) & (in_flank | (miss + margin < material)) & ~settled & ~held[r, c]
         # a tint: displaced from its colour toward the key clearly more than the fit misses by, but
         # not by enough to prove partial coverage, and by more than shading any palette colour
         # accounts for. Recoloured, coverage untouched.
         shift = (1.0 - alpha) * np.sqrt((line * line).sum(-1))
         is_tint = (explained & ~is_blend & ~in_flank & (shift >= TINT_SHIFT) & (shift >= TINT_RATIO * miss)
-                   & ~own_colour & ~settled)
+                   & ~own_colour & ~settled & ~held[r, c])
         # coverage: refit within the unmix reach and on the flank; colour only deeper in the band
         refit = (in_flank | (depth[r, c] <= alpha_depth)) & ~is_tint
         floor = np.maximum(MIN_RECOVERED_ALPHA, NOISE_SIGMAS * sigma_luma / np.maximum(np.abs((chosen - bg) @ LUMA), 1e-6))
@@ -447,7 +461,8 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
         blend[start:start + len(r)] = is_blend | is_tint
         tinted[start:start + len(r)] = is_tint
         unexplained[start:start + len(r)] = ~explained
-        own[start:start + len(r)] = material_test & ~is_blend & ~is_tint & ~in_flank & ((material <= margin) | settled)
+        own[start:start + len(r)] = (material_test & ~is_blend & ~is_tint & ~in_flank & ~held[r, c]
+                                     & ((material <= margin) | settled))
 
     alpha8 = np.clip(np.round(alpha_new * 255), 0, 255).astype(np.uint8)
     colour8 = np.clip(np.round(colour_new), 0, 255).astype(np.uint8)
@@ -487,6 +502,7 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
         "band_px": BAND_PX,
         "alpha_depth": int(alpha_depth),
         "flank_px": FLANK_PX,
+        "edge_band": int(edge_band),
         "palette_size": int(len(palette_rgb)),
         "palette_source": "frame" if palette is None else "given",
         "palette": [[int(v) for v in colour] for colour in palette_rgb],
