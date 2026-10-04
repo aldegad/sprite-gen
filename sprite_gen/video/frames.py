@@ -81,29 +81,44 @@ def _require(binary: str) -> str:
 
 
 def probe(clip: Path) -> dict[str, Any]:
+    """The clip's moving picture and what else it carries.
+
+    A clip can hold more than the picture: an audio track (a clip from a video MCP such as
+    ZCRE always has one, and so does `sprite-gen video` unless `--no-audio`) and a cover image,
+    a one-frame mjpeg stream marked `attached_pic`. The frames come from the first video stream
+    that is not a cover (`stream_index`); the audio is counted and never extracted."""
     ffprobe = _require("ffprobe")
     proc = subprocess.run(
-        [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,r_frame_rate,nb_frames",
-         "-show_entries", "format=duration", "-of", "json", str(clip)],
+        [ffprobe, "-v", "error", "-show_entries", "stream=index,codec_type,codec_name,pix_fmt,width,height,r_frame_rate,nb_frames",
+         "-show_entries", "stream_disposition=attached_pic", "-show_entries", "format=duration", "-of", "json", str(clip)],
         capture_output=True, text=True,
     )
     if proc.returncode != 0:
         raise SystemExit(f"video-frames: ffprobe failed on {clip}: {proc.stderr.strip()[:300]}")
     data = json.loads(proc.stdout)
-    stream = (data.get("streams") or [{}])[0]
+    streams = data.get("streams") or []
+    pictures = [s for s in streams if s.get("codec_type") == "video" and not (s.get("disposition") or {}).get("attached_pic")]
+    if not pictures:
+        raise SystemExit(f"video-frames: {clip} has no video stream (only {', '.join(sorted({str(s.get('codec_type')) for s in streams})) or 'nothing'})")
+    stream = pictures[0]
     num, den = (stream.get("r_frame_rate") or "24/1").split("/")
     fps = float(num) / float(den or 1)
     return {"width": stream.get("width"), "height": stream.get("height"), "fps": fps,
             "nb_frames": int(stream["nb_frames"]) if str(stream.get("nb_frames", "")).isdigit() else None,
-            "duration": float(data.get("format", {}).get("duration") or 0)}
+            "duration": float(data.get("format", {}).get("duration") or 0),
+            "stream_index": stream.get("index"), "codec": stream.get("codec_name"), "pix_fmt": stream.get("pix_fmt"),
+            "audio_streams": sum(1 for s in streams if s.get("codec_type") == "audio"),
+            "cover_streams": sum(1 for s in streams if s.get("codec_type") == "video" and (s.get("disposition") or {}).get("attached_pic"))}
 
 
-def extract(clip: Path, raw_dir: Path) -> list[Path]:
+def extract(clip: Path, raw_dir: Path, stream_index: int | None = None) -> list[Path]:
+    """Every frame of the clip's picture as PNG; `stream_index` names that stream (`probe`)."""
     ffmpeg = _require("ffmpeg")
     raw_dir.mkdir(parents=True, exist_ok=True)
     for old in raw_dir.glob("frame-*.png"):
         old.unlink()
-    proc = subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(clip), str(raw_dir / "frame-%04d.png")], capture_output=True, text=True)
+    pick = ["-map", f"0:{stream_index}"] if stream_index is not None else []
+    proc = subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(clip), *pick, str(raw_dir / "frame-%04d.png")], capture_output=True, text=True)
     if proc.returncode != 0:
         raise SystemExit(f"video-frames: ffmpeg failed on {clip}: {proc.stderr.strip()[:300]}")
     files = sorted(raw_dir.glob("frame-*.png"))
@@ -347,7 +362,7 @@ def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool,
     raw_dir = out_dir / "raw"
     keyed_dir = out_dir / "keyed"
     decision = decide_spill(Path(reference).expanduser().resolve(), key) if spill == "auto" else {"mode": spill, "reason": "explicit"}
-    files = extract(clip, raw_dir)
+    files = extract(clip, raw_dir, meta["stream_index"])
     report = key_frames(files, keyed_dir, key=key, check_edges=not allow_edge_contact, spill=decision["mode"], allow_subject=allow_subject_edge_contact, decontam=decontam)
     payload = {"kind": "sprite-gen-video-frames-report", "clip": str(clip), "out_dir": str(out_dir), "raw_dir": str(raw_dir), "keyed_dir": str(keyed_dir), "key": key, "spill": decision, **meta, **report}
     target = (report_path or (out_dir / "frames.report.json")).expanduser().resolve()
@@ -357,7 +372,7 @@ def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool,
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--clip", required=True, type=Path, help="mp4 from `sprite-gen video`")
+    parser.add_argument("--clip", required=True, type=Path, help="mp4 from `sprite-gen video`, or one made elsewhere from a `video-canvas` still (a video MCP such as ZCRE); an audio track and a cover image are left out")
     parser.add_argument("--out-dir", required=True, type=Path, help="writes raw/ and keyed/ here")
     parser.add_argument("--key", choices=("auto", "green", "magenta", "white"), default="auto", help="background key (auto reads the corners)")
     parser.add_argument("--allow-edge-contact", action="store_true", help="accept any opaque pixel at the top/left/right edge (subject and leftover key background alike)")
@@ -374,7 +389,7 @@ def run(**kwargs: object) -> int:
                          spill=str(kwargs.get("spill") or "small"), reference=kwargs.get("reference"),  # type: ignore[arg-type]
                          allow_subject_edge_contact=bool(kwargs.get("allow_subject_edge_contact")),
                          decontam=str(kwargs.get("decontam") or "off"))
-    summary = {k: payload[k] for k in ("clip", "keyed_dir", "fps", "frames", "alpha_zero_pct_min", "alpha_zero_pct_max", "edge_contacts", "edge_policy", "spill", "report")}
+    summary = {k: payload[k] for k in ("clip", "keyed_dir", "width", "height", "fps", "frames", "codec", "pix_fmt", "audio_streams", "alpha_zero_pct_min", "alpha_zero_pct_max", "edge_contacts", "edge_policy", "spill", "report")}
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 

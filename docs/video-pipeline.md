@@ -11,13 +11,15 @@ ones that survived that day.
 
 ```
 still ──video-canvas──▶ canvas.png ──video──▶ clip.mp4 ──video-frames──▶ keyed/*.png ──video-loop──▶ strip · gif · webp
-                                                                                                  └── video-set runs all four per (direction, state)
+                    │                     ▲                                                       └── video-set runs all four per (direction, state)
+                    └──video-prompt──▶ your agent's video MCP (ZCRE)
 ```
 
 | Verb | Module | In → out |
 |---|---|---|
 | `sprite-gen video-canvas` | `sprite_gen/video/canvas.py` | still → padded still (state canvas) + report |
 | `sprite-gen video` | `sprite_gen/gen/video.py` ([gen](video.md)) | still + prompt → mp4 + report |
+| `sprite-gen video-prompt` | `sprite_gen/video/clip_prompt.py` | (direction, state) → the prompt `video-set` sends, for a clip made by a video MCP on your agent ([below](#a-clip-from-a-video-mcp-on-your-agent--zcre)) |
 | `sprite-gen video-frames` | `sprite_gen/video/frames.py` | mp4 → `raw/`, `keyed/` RGBA frames + report |
 | `sprite-gen video-loop` | `sprite_gen/video/loop.py` | keyed frames → `cycle/`, `<name>.strip.png` + `.strip.json`, `<name>.gif`, `<name>.webp` + report |
 | `sprite-gen video-set` | `sprite_gen/video/batch.py` | bases × states → one folder per item, `set.report.json`, `table.md` |
@@ -232,6 +234,47 @@ the canvas (`--walk-start redraw`, the default): one `sprite-gen gen --ref <base
 back walk, on the base's own key, kept as `walk-start.png` with its report and reused while the
 prompt and base are the same; a base on no chroma key is refused with `--walk-start as-given`, which
 films from the base itself. Side and diagonal walks, and every other state, film from the base.
+
+### A clip from a video MCP on your agent — ZCRE
+
+sprite-gen never calls a video MCP. When your own agent (Claude, Codex) has one connected — ZCRE's
+remote MCP (`https://mcp.zcre.ai/mcp`, signed in with your own ZCRE account, paid from your own
+credits, under ZCRE's terms) — the agent makes the clip with that MCP's tools and sprite-gen does the
+rest: `video-prompt` prints the prompt `video-set` would send, and `video-frames` and `video-loop` read
+the mp4 the agent saved. What crosses the boundary is a PNG, a prompt and an mp4.
+
+```bash
+sprite-gen video-canvas --still still.png --state walk --facing right --out item/canvas.png --report item/canvas.report.json
+sprite-gen video-prompt --direction side --state walk --facing right --no-last-frame --json > item/prompt.json
+# the agent, with its ZCRE tools and grok-imagine-video-1.5: prepare_upload for item/canvas.png and the
+# transfer it describes, query_zcre upload to confirm it, query_zcre quote with prompt.json's prompt and
+# duration, the credits shown to the user and approved, create_generation with that quote, query_zcre
+# status until it succeeds, the output saved as item/clip.mp4
+sprite-gen video-frames --clip item/clip.mp4 --out-dir item/frames --spill auto --reference item/canvas.png
+sprite-gen video-loop --frames-dir item/frames/keyed --out-dir item/loop --fps 24 --state walk --cycle auto --facing right --name side-walk
+```
+
+`video-prompt --json` also gives the duration (the state's own, as `video-set`), whether the clip
+ends on the canvas (`last_frame`), the loop cut (`cycle`) and these commands with placeholders; a
+front or back walk adds `start_still`, the mid-step redraw `video-set` makes before its canvas
+(`sprite-gen gen --ref`, your image provider). `--character`, `--motion` and `--model` reach the
+prompt as they reach `build_prompt`. What the ZCRE route supports:
+
+| | Through ZCRE's MCP |
+|---|---|
+| Model | `grok-imagine-video-1.5` (Grok Imagine Pro), image-to-video only. There is no Lite model there, so `LITE_WALK_TEXT` never applies. |
+| End frame | None. `--no-last-frame` refuses what `video-set` films pinned — idle, attack, a walk or run in a diagonal (`pins_last_frame`). `--unpinned` films one anyway, with a warning: the prompt asks for an evenly paced repeat (an attack for one strike), the loop is searched instead of cut whole, and it may not close. Walk, run and jump from the side, front and back are the route. |
+| Resolution | 480p, 720p, 1080p. The clip keeps the canvas's ratio (a 1024² canvas came back 544² at 480p and 960² at 720p). |
+| Audio | Always an AAC track; there is no option to leave it out. `video-frames` reads the picture alone, records `audio_streams`, and the loop outputs carry no sound. |
+| Cover image | The mp4 also holds a one-frame mjpeg cover (`attached_pic`); `video-frames` skips it (`cover_streams`) and reads the first video stream that is not one (`stream_index`). |
+| Picture | H.264 `yuv420p` (4:2:0), 24 fps, as a `sprite-gen video` clip; the frames report records `codec` and `pix_fmt`. |
+| Side facing | `video-set`'s facing observation is not run on this route; check the still faces `--facing`. |
+
+Measured 2026-10-04, one side walk end to end on that route: a 1024² still, `video-canvas` (square,
+1.8 s), 720p 3 s, quoted and charged 52 credits, 33.6 s from submission to `succeeded`; the clip was
+960×960, 24 fps, 73 frames, H.264 `yuv420p` with an AAC track and a cover image; `video-frames` kept
+73 frames and no edge contact, and `video-loop --cycle auto` cut a periodic 20-frame walk (seam 0.72)
+with three frames remade by RIFE and a jolt warning (index 0.85), as a Pro walk can carry.
 
 ## 3. Frames — extract, key, check the edges
 
