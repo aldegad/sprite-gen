@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased - A clip made by a video MCP on your agent (ZCRE) becomes a loop: the prompt comes out, the mp4 goes in
+## v2.21.0 - A clip made by a video MCP on your agent (ZCRE) becomes a loop: the prompt comes out, the mp4 goes in
 
 - **New `sprite-gen video-prompt`** prints the clip prompt `video-set` sends for one (direction, state) — `build_prompt` with `--character`, `--motion` and `--model` — so an agent that makes the clip itself, with a video MCP connected to it, sends the same sentence. `--json` adds the duration (the state's own), whether the clip ends on the canvas (`last_frame`), the loop cut (`cycle`), the canvas, clip, frames and loop steps with placeholders, and for a front or back walk the mid-step redraw (`start_still`). sprite-gen never calls the MCP: the agent uploads the `video-canvas` still, quotes, asks the user, generates and saves the mp4, and `video-frames` and `video-loop` take it from there. [docs/video-pipeline.md](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre).
 - **ZCRE (지크) is that route's first source**: its remote MCP, signed in with your own ZCRE account and credits, has `grok-imagine-video-1.5` (Grok Imagine Pro) for image-to-video, with no end frame and no Lite model. `--no-last-frame` refuses what `video-set` films pinned — idle, attack, a walk or run in a diagonal — and `--unpinned` films one anyway with a warning (the loop is searched instead of cut whole and may not close). Walk, run and jump from the side, front and back are supported.
