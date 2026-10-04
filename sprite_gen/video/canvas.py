@@ -82,8 +82,10 @@ STATE_CANVAS: dict[str, CanvasProfile] = {
 # `--shape wide` is not the attack row. It is forced on a state whose own row is
 # another shape — `video-set --shape wide` on every state of a batch, or a retry after
 # a side-edge contact — and that state may be a jump. 0.35 on 16:9 keeps about the
-# room a jump's tall row leaves above the still (0.35/0.65 ≈ 0.34/0.66 of its
-# height), so forcing wide adds width and never takes height away.
+# room a jump's tall row leaves above a square or upright still (0.35/0.65 ≈
+# 0.34/0.66 of its height). A still wider than it is tall keeps less than the tall
+# row would give it (a 3:2 still about three fifths), because the wide canvas's
+# height follows the still's width there.
 WIDE_OVERRIDE = CanvasProfile(SHAPE_WIDE, 16 / 9, 0.35, 0.28, 0.2, "forced wide: room in front and behind, and a jump's head-room above, whatever the state")
 SHAPE_DEFAULTS: dict[str, CanvasProfile] = {
     SHAPE_SQUARE: STATE_CANVAS["default"],

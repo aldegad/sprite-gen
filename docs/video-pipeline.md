@@ -57,8 +57,9 @@ back before the strike); `--facing left` mirrors the wide layout. A forced shape
 own row, not the state's: `--shape tall` is the jump row, and `--shape wide` is a forced-wide
 row with 35 % above, 28 % in front and 20 % behind — not the attack row. It lands on states
 whose own row is another shape, a jump among them, and 35 % on 16:9 keeps about the room a
-jump's tall row leaves above the still, so forcing wide adds width and never takes height
-away. Headroom is a fraction of the full canvas
+jump's tall row leaves above a square or upright still. A still wider than it is tall keeps
+less above it under forced wide than under the tall row (a 3:2 still about three fifths),
+because there the wide canvas's height follows the still's width. Headroom is a fraction of the full canvas
 height; wide canvases grow both dimensions to preserve their ratio without shrinking
 the still. A still whose corners are not one flat colour
 is refused — a non-flat background cannot be extended without guessing.
