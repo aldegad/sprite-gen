@@ -22,7 +22,9 @@ def scaled_back(scale: float) -> tuple[Image.Image, Image.Image, tuple[float, ..
     """A second frame `1 / scale` the first's height, scaled back about the foot point."""
     src = figure()
     measured = {"height": np.array([100.0, 100.0 / scale]), "foot_x": np.full(2, FOOT[0]), "foot_y": np.full(2, FOOT[1])}
-    first, second = gait_fallback.undo_scale([src, src], measured)
+    # No room added: the colour is the subject here (the room for a part scaled past the edge is
+    # tested in test_gait_fallback.py).
+    first, second = gait_fallback.undo_scale([src, src], measured, pad=(0, 0, 0, 0))
     assert first.tobytes() == src.tobytes()  # the first frame is the reference: not resampled
     inverse = (1 / scale, 0.0, FOOT[0] * (1 - 1 / scale), 0.0, 1 / scale, FOOT[1] * (1 - 1 / scale))
     return src, second, inverse
