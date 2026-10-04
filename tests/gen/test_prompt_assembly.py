@@ -30,7 +30,7 @@ HANDED = {
     "watch+bracelet": ["the black smartwatch=left wrist", "the gold bracelet=left wrist"],
     "watch+ribbon": ["the black smartwatch=left wrist", "the red ribbon=right wrist"],
 }
-SUBJECT = "A small rabbit mascot, 2D game sprite, full body"
+SUBJECT = "A small fox adventurer, 2D game sprite, full body"
 # The caller's own text: what it already says about the key, the turn and the item. `turn` / `item` is
 # the side its words name, to tell an agreeing repeat from a conflict with the options.
 USER_TEXT = {
@@ -48,9 +48,9 @@ MODELS = {"pro": "grok-imagine-video-1.5", "lite": "grok-imagine-video-1.5-lite"
 # --motion: the built-in sentence, the caller's own, one that quotes an engine rule, one that walks the other way
 MOTION = {
     "built-in": {"text": None},
-    "own": {"text": "The rabbit walks with a cheerful bounce, swinging both arms."},
-    "quotes-engine": {"text": "The rabbit walks with a cheerful bounce. Camera completely locked, no zoom, no pan, no reframing."},
-    "says-turn": {"text": "The rabbit walks to the right with a cheerful bounce.", "turn": "right"},
+    "own": {"text": "The fox walks with a cheerful bounce, swinging both arms."},
+    "quotes-engine": {"text": "The fox walks with a cheerful bounce. Camera completely locked, no zoom, no pan, no reframing."},
+    "says-turn": {"text": "The fox walks to the right with a cheerful bounce.", "turn": "right"},
 }
 
 
@@ -84,7 +84,7 @@ def _clip_rows():
     for (view, facing), handed, state, model, motion in itertools.product(_views(), HANDED, STATES, MODELS, MOTION):
         if MOTION[motion]["text"] and state != "walk":
             continue
-        parts = batch.clip_prompt_parts(view, state, "The rabbit mascot", facing=facing or "right",
+        parts = batch.clip_prompt_parts(view, state, "The fox", facing=facing or "right",
                                         motion=MOTION[motion]["text"], model=MODELS[model], handed=_items(handed))
         row = {"user": None, "motion": motion, "facing": facing, "handed": handed, "state": state}
         yield f"clip/{view}@{facing}/{state}/{model}/{motion}/{handed}", parts, row
@@ -163,6 +163,40 @@ def test_no_prompt_says_a_sentence_twice_turns_both_ways_or_asks_for_two_keys(na
         assert "handed" not in conflicts, parts.notes
 
 
+_CLIP_ROWS = [r for r in ROWS if r[0].startswith("clip")]
+# (a part or limb said bare, the same one said to wear an item): never both in one prompt
+_BARE_AND_WORN = [
+    (r"\bThe (\w[\w ]*?) in front of the body stays bare\b", "stays? on the {0} in front of the body"),
+    (r"\bthe (arm|leg) nearer the viewer stays bare\b", "on the {0} nearer the viewer"),
+    (r"\bthe other (arm|leg), on the far side of the body, stays bare\b", "on the {0} on the far side of the body"),
+]
+
+
+@pytest.mark.parametrize("name,parts,row", _CLIP_ROWS, ids=[r[0] for r in _CLIP_ROWS])
+def test_no_clip_calls_a_limb_bare_and_dressed_or_swings_an_arm_that_stands_still(name, parts, row) -> None:
+    text = parts.text
+    for bare, worn in _BARE_AND_WORN:
+        for match in re.finditer(bare, text):
+            assert not re.search(worn.format(re.escape(match.group(1))), text), text
+    # what the walk paragraph and the frame rules both said: in place across the screen, and the view
+    assert len(re.findall(r"\bmov(?:e|ing) across the screen\b", text)) == 1, text
+    for view_words in ("facing the viewer", "facing away from the viewer", "three-quarter front angle", "three-quarter back angle",
+                       "exact side"):
+        assert text.count(view_words) <= 1, (view_words, text)
+    side = "/side@" in name
+    walks = row["state"] in batch.GAIT_STATES
+    if not walks:
+        # only a step swings a limb: an idle, a jump or an attack is never told that an arm swings
+        assert "swing" not in text, text
+    if row["handed"] != "none" and side and walks:
+        # every item is on a wrist here: the far one is named and shows when its arm comes forward
+        far = "the red ribbon" if (row["handed"] == "watch+ribbon" and row["facing"] == "left") else "the black smartwatch"
+        if row["facing"] == "right" or row["handed"] == "watch+ribbon":
+            assert "each time that arm swings forward" in text and far[4:] in text, text
+        assert "The wrist in front of the body stays bare" not in text
+        assert text.count("Both arms swing back and forth with each step") == 1
+
+
 @pytest.mark.parametrize("name,parts,row", [r for r in ROWS if r[0].startswith("still")], ids=[r[0] for r in ROWS if r[0].startswith("still")])
 def test_a_still_carries_the_key_line_unless_its_text_names_a_key(name, parts, row) -> None:
     piece = parts.piece("key-background")
@@ -176,17 +210,17 @@ def test_a_still_carries_the_key_line_unless_its_text_names_a_key(name, parts, r
 # -- the known cases ---------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("prompt,named", [
-    ("a rabbit on a background of pure magenta", "magenta"),
-    ("a rabbit, magenta-colored background", "magenta"),
-    ("a rabbit, magenta coloured backdrop", "magenta"),
+    ("a fox on a background of pure magenta", "magenta"),
+    ("a fox, magenta-colored background", "magenta"),
+    ("a fox, magenta coloured backdrop", "magenta"),
     ("background: solid green", "green"),
-    ("a rabbit keyed on pure magenta", "magenta"),
-    ("a rabbit drawn on a green key", "green"),
-    ("a rabbit, no green screen", None),
-    ("a rabbit without a green background", None),
-    ("a rabbit, not on a magenta background", None),
+    ("a fox keyed on pure magenta", "magenta"),
+    ("a fox drawn on a green key", "green"),
+    ("a fox, no green screen", None),
+    ("a fox without a green background", None),
+    ("a fox, not on a magenta background", None),
     ("no green screen; use a magenta background", "magenta"),
-    ("a rabbit with no shadow, on a magenta background", "magenta"),
+    ("a fox with no shadow, on a magenta background", "magenta"),
     ("a knight holding a green key", None),
     ("a background of trees with green leaves", None),
     ("a hero in a green screen-printed shirt", None),
@@ -202,9 +236,9 @@ def test_a_key_background_is_read_however_it_is_worded_and_not_when_ruled_out(pr
 
 
 def test_a_key_the_text_rules_out_is_not_the_one_the_engine_asks_for() -> None:
-    assert chroma.ruled_out_key_backgrounds("a rabbit, no green screen") == {"green"}
+    assert chroma.ruled_out_key_backgrounds("a fox, no green screen") == {"green"}
     with pytest.raises(SystemExit, match="rules out a green key background"):
-        gen.still_prompt("a rabbit, no green screen", refs=True, key="green")
+        gen.still_prompt("a fox, no green screen", refs=True, key="green")
     # the text names the other key itself: nothing is added, so nothing is refused
     named = gen.still_prompt("no green screen; use a magenta background", refs=True, key="green")
     assert named.piece("key-background").found == "magenta" and not named.piece("key-background").added
@@ -213,20 +247,20 @@ def test_a_key_the_text_rules_out_is_not_the_one_the_engine_asks_for() -> None:
 def test_a_turned_view_says_the_turn_once_and_the_reference_piece_only_pins_the_edge() -> None:
     """With --direction the view sentence says the turn. The reference piece said it again as a full profile
     ("facing left (toward the left edge of the image)"), against a three-quarter view's 45 degrees."""
-    plain = gen.still_prompt("a rabbit", facing="left", refs=True)
+    plain = gen.still_prompt("a fox", facing="left", refs=True)
     assert plain.text.endswith(facing_mod.prompt_suffix("left")) and "must be facing left" in plain.text
     for view in sorted(h.LATERAL_VIEWS):
-        text = gen.still_prompt("a rabbit", view=view, facing="left", refs=True).text
+        text = gen.still_prompt("a fox", view=view, facing="left", refs=True).text
         assert "must be facing" not in text
         assert text.endswith("Left here means toward the left edge of the image, regardless of the reference image's "
                              "orientation. Preserve the subject's design.")
-    front = gen.still_prompt("a rabbit", view="front", refs=True)
+    front = gen.still_prompt("a fox", view="front", refs=True)
     assert front.piece("facing") is None
 
 
 def test_a_correction_takes_the_place_of_the_sentence_it_corrects() -> None:
     """The regeneration's prompt was the first prompt plus the correction: the facing sentence twice."""
-    parts = gen.still_prompt("a rabbit", facing="right", refs=True, key="magenta")
+    parts = gen.still_prompt("a fox", facing="right", refs=True, key="magenta")
     retry = parts.replaced("facing", facing_mod.prompt_suffix("right", retry=True)).text
     assert retry.count("The subject must be facing right") == 1 and retry.count("Preserve the subject's design.") == 1
     assert retry.endswith(facing_mod.prompt_suffix("right", retry=True))
@@ -271,11 +305,11 @@ def test_gen_reports_what_the_callers_text_says_against_the_options(tmp_path, mo
             return ProviderRun(self.name, 1, model="test-image", extra={})
 
     monkeypatch.setattr(gen, "_make_provider", lambda *a, **kw: Backend())
-    result = gen.generate_image("fake", "a rabbit facing left, a black smartwatch on its right wrist",
+    result = gen.generate_image("fake", "a fox facing left, a black smartwatch on its right wrist",
                                 tmp_path / "out.png", view="side", facing="right",
                                 handed=h.parse_all(["the black smartwatch=left wrist"]))
     assert {note["about"] for note in result.extra["prompt_notes"]} == {"facing", "handed"}
     err = capsys.readouterr().err
     assert '[gen] warning: the text says "facing left" and the engine\'s sentence says right' in err
-    quiet = gen.generate_image("fake", "a rabbit", tmp_path / "quiet.png", view="side", facing="right")
+    quiet = gen.generate_image("fake", "a fox", tmp_path / "quiet.png", view="side", facing="right")
     assert "prompt_notes" not in quiet.extra

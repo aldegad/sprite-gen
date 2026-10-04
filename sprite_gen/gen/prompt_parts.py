@@ -90,7 +90,8 @@ ALREADY_SAID: dict[str, Callable[..., tuple[str, str] | None]] = {
 @dataclass(frozen=True)
 class Piece:
     """One engine piece and what became of it: attached whole, attached without the sentences the prompt
-    already had (`why`), or left out (`added` False, `why`, and `found` — the key the prompt named)."""
+    already had (`why`), or left out (`added` False, `why`, and `found` — the key the prompt named). `asked`
+    and `params` are what `add` was given, so `Prompt.replaced` can put the piece on again."""
 
     topic: str
     text: str
@@ -159,8 +160,9 @@ class Prompt:
 
     def note(self, *, facing: str | None = None, handed: list[Any] | None = None, **_: Any) -> None:
         """Note what the caller's text says against, or again after, a piece that turns the subject to `facing`
-        (right, left, or `NO_TURN` for a front or back view) or puts the `handed` items on their sides. `add` calls it for the piece it attaches; a template that
-        carries the turn in its own first text calls it itself."""
+        (right, left, or `NO_TURN` for a front or back view) or puts the `handed` items on their sides. `add`
+        calls it for the piece it attaches; a template that carries the turn in its own first text calls it
+        itself."""
         if facing is not None:
             for words, side in turns_said(self.caller):
                 if facing == NO_TURN:

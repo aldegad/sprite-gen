@@ -500,8 +500,13 @@ def test_every_gait_walks_or_runs_naturally_in_place() -> None:
     ):
         sentence = batch_mod.VIEW_MOTION_TEXT.get((state, direction)) or batch_mod.MOTION_TEXT[state]
         p = batch_mod.build_prompt(direction, state, None)
-        assert p == batch_mod.COMMON_TEXT.format(motion=sentence, view=batch_mod.VIEW_TEXT[direction].format(facing="right"))
+        # a front or back gait says which way it faces itself, so the view sentence is not said after it
+        template = batch_mod.COMMON_TEXT if direction == "side" else batch_mod.COMMON_TEXT.replace(batch_mod.VIEW_SENTENCE, "")
+        assert p == template.format(motion=sentence, view=batch_mod.VIEW_TEXT[direction].format(facing="right"))
+        assert ("The character is seen from" in p) is (direction == "side")
         assert sentence.startswith(opening) and sentence.count(".") == 1
+        # that it does not move across the screen is the frame sentence's, once
+        assert p.count("move across the screen") + p.count("moving across the screen") == 1
         assert ", as if on a treadmill" in p
         for gone in ("left-right", "on a treadmill:", "lifts and lands", "never turns to the side"):
             assert gone not in p
@@ -518,9 +523,13 @@ def test_a_callers_gait_is_held_in_place_and_facing_the_images_way() -> None:
         for state in ("walk", "run"):
             p = batch_mod.build_prompt(direction, state, "The knight", "left", motion=sneak)
             hold = batch_mod.GAIT_HOLD_TEXT[direction].format(facing="left")
-            assert p.startswith(f"2D game sprite animation. {sneak} {hold} The knight is {batch_mod.VIEW_TEXT[direction].format(facing='left')}.")
+            # the side view's facing is its view sentence's; a front or back hold says the view itself
+            view = f" The knight is {batch_mod.VIEW_TEXT[direction].format(facing='left')}." if direction == "side" else ""
+            assert p.startswith(f"2D game sprite animation. {sneak} {hold}{view} Stays centered in the frame")
             assert batch_mod.MOTION_TEXT[state] not in p
-    assert "keeps facing left the whole time" in batch_mod.GAIT_HOLD_TEXT["side"].format(facing="left")
+            assert p.count("move across the screen") + p.count("moving across the screen") == 1
+    assert batch_mod.GAIT_HOLD_TEXT["side"] == "It stays in place as if on a treadmill."
+    assert "keeps facing the viewer the whole time" in batch_mod.GAIT_HOLD_TEXT["front"]
     jump = batch_mod.build_prompt("front", "jump", None, motion="The knight hops twice.")
     assert all(text.split(",")[0] not in jump for text in batch_mod.GAIT_HOLD_TEXT.values())
 
@@ -546,7 +555,9 @@ def test_a_diagonal_walk_is_pinned_and_named_as_an_isometric_heading() -> None:
         for state in ("walk", "run"):
             sentence = batch_mod.VIEW_MOTION_TEXT[(state, direction)].format(facing="right")
             p = batch_mod.build_prompt(direction, state, None)
-            assert p == batch_mod.PINNED_LOOP_TEXT.format(motion=sentence, view=batch_mod.VIEW_TEXT[direction])
+            # the gait sentence keeps the image's angle itself: the view sentence is not said after it
+            assert p == batch_mod.PINNED_LOOP_TEXT.replace(batch_mod.VIEW_SENTENCE, "").format(motion=sentence)
+            assert "The character is seen from" not in p and p.count("three-quarter") == 1
             assert heading in sentence and "never turns into a side view" in sentence
             assert batch_mod.pins_last_frame(state, direction)
         assert "turned exactly as in the image" in batch_mod.VIEW_TEXT[direction]

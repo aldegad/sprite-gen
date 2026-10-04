@@ -87,6 +87,10 @@ def plan_prompt(*, direction: str, state: str, facing: str = "right", character:
         "warnings": warnings,
         **({"notes": parts.notes} if parts.notes else {}),
     }
+    needs = handed_mod.first_frame_needs(handed or [], direction, canvas_facing if direction in handed_mod.LATERAL_VIEWS else None,
+                                         gait=state in batch_mod.GAIT_STATES)
+    if needs:
+        record["still_needs"] = needs
     if mid_step:
         record["start_still"] = {
             "why": "a front or back walk films from its still redrawn mid-step; from a standing still the clip model walks askew",
@@ -122,6 +126,8 @@ def run(**kwargs: object) -> int:
     )
     for line in record["warnings"]:
         print(f"video-prompt: warning: {line}", file=sys.stderr)
+    for line in record.get("still_needs", []):
+        print(f"video-prompt: the still: {line}", file=sys.stderr)
     print(json.dumps(record, ensure_ascii=False, indent=2) if kwargs.get("json") else record["prompt"])
     return 0
 
