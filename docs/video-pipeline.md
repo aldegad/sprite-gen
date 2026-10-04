@@ -153,8 +153,9 @@ the viewer and to the right … three-quarter front angle" for the front one). I
 its first frame (`PINNED_GAIT_VIEWS`, `pins_last_frame`) with the return sentence, and cut as any
 walk (`--anchor motion-auto`). The view is said once: a walk or run seen from the front, from behind
 or at a diagonal says it in the gait sentence ("facing the viewer", "keeps the exact three-quarter
-back angle of the image"), so its prompt leaves the view sentence out (`GAIT_SAYS_VIEW`); a side gait
-keeps it ("The character is seen from the exact side, facing right."), and so does every other state,
+back angle of the image"), so its prompt leaves the view sentence out (`GAIT_SAYS_VIEW`) and, with
+`--motion`, names `--character` on the gait hold instead ("The knight stays in place as if on a
+treadmill …"); a side gait keeps it ("The character is seen from the exact side, facing right."), and so does every other state,
 whose view sentence points at the image ("seen from a
 three-quarter back angle, turned exactly as in the image"); a still drawn at a diagonal from another
 picture takes `STILL_VIEW_TEXT` instead (`still_view_text`), which says the whole body and head turn

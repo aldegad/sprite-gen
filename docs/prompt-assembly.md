@@ -43,7 +43,11 @@ sentence's ("does not move across the screen"); the side and diagonal gait sente
 longer add "without moving across the screen". A walk or run seen from the front, from behind or at
 a diagonal says its view in the gait sentence or hold ("facing the viewer", "keeps the exact
 three-quarter back angle of the image"), so the view sentence is left out of its prompt
-(`batch.GAIT_SAYS_VIEW`); a side gait keeps the view sentence, which carries the facing.
+(`batch.GAIT_SAYS_VIEW`); a side gait keeps the view sentence, which carries the facing. With a
+caller's own motion paragraph, `--character` is named on the sentence that says the view: the view
+sentence, or where that is left out, the gait hold ("A small fox adventurer in a green cloak stays in
+place as if on a treadmill, without coming any closer, and keeps facing the viewer the whole time.").
+A clip prompt that would go out without the character is an error, not a prompt.
 
 `video --direction side` holds the side view ("The subject stays in exact side view, facing left. No
 turning around.") only for a prompt that does not say it already: a `video-prompt` or `video-set`

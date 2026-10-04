@@ -3,7 +3,8 @@
 
 A prompt is the caller's text plus the engine's pieces (`sprite_gen.gen.prompt_parts`). The table below
 is every still, clip, start-still and correction prompt the options can make; each one is checked for a
-sentence said twice, for words that turn the subject both ways, and for more than one key background.
+sentence said twice, for words that turn the subject both ways, for more than one key background, and
+for anything asked for (the caller's text, `--character`, a handed item, the key line) that never reached it.
 A new option is a new row in a table here, not a new test.
 
 The checks are written here, apart from the engine's own (`prompt_parts`), so they do not agree with it
@@ -43,6 +44,8 @@ USER_TEXT = {
     "says-item-side": {"text": f"{SUBJECT}, wearing a black smartwatch on its left wrist.", "item": "left"},
     "says-other-item-side": {"text": f"{SUBJECT}, wearing a black smartwatch on its right wrist.", "item": "right"},
 }
+# --character: words the motion paragraphs below never use, so a clip that names the character got them from here
+CHARACTER = "A small fox adventurer in a green cloak"
 STATES = ("idle", "walk", "run", "jump", "attack", "cheer")
 MODELS = {"pro": "grok-imagine-video-1.5", "lite": "grok-imagine-video-1.5-lite"}
 # --motion: the built-in sentence, the caller's own, one that quotes an engine rule, one that walks the other way
@@ -84,9 +87,9 @@ def _clip_rows():
     for (view, facing), handed, state, model, motion in itertools.product(_views(), HANDED, STATES, MODELS, MOTION):
         if MOTION[motion]["text"] and state != "walk":
             continue
-        parts = batch.clip_prompt_parts(view, state, "The fox", facing=facing or "right",
+        parts = batch.clip_prompt_parts(view, state, CHARACTER, facing=facing or "right",
                                         motion=MOTION[motion]["text"], model=MODELS[model], handed=_items(handed))
-        row = {"user": None, "motion": motion, "facing": facing, "handed": handed, "state": state}
+        row = {"user": None, "motion": motion, "facing": facing, "handed": handed, "state": state, "character": CHARACTER}
         yield f"clip/{view}@{facing}/{state}/{model}/{motion}/{handed}", parts, row
         if view == "side":  # handed on to `sprite-gen video --direction side`
             yield (f"clip+video/{view}@{facing}/{state}/{model}/{motion}/{handed}",
@@ -96,11 +99,11 @@ def _clip_rows():
 def _start_still_rows():
     for view, key, handed in itertools.product(batch.WALK_START_TEXT, chroma.KEY_BACKGROUND_TEXT, HANDED):
         text = batch.walk_start_prompt(view, key, _items(handed))
-        row = {"user": None, "facing": None, "handed": handed}
+        row = {"user": None, "facing": None, "handed": handed, "key": key}
         yield f"start-still/{view}/{key}/{handed}", prompt_parts.Prompt(text, caller=""), row
         # handed back to `gen --ref --transparent --direction --handed`, as an agent reading `video-prompt` may
         again = gen.still_prompt(text, view=view, handed=_items(handed), refs=True, key=key)
-        yield f"start-still+gen/{view}/{key}/{handed}", again, row
+        yield f"start-still+gen/{view}/{key}/{handed}", again, {**row, "own": text}
 
 
 ROWS = [*_still_rows(), *_clip_rows(), *_start_still_rows()]
@@ -195,6 +198,37 @@ def test_no_clip_calls_a_limb_bare_and_dressed_or_swings_an_arm_that_stands_stil
             assert "each time that arm swings forward" in text and far[4:] in text, text
         assert "The wrist nearer the viewer stays bare" not in text and "wrist in front of the body" not in text
         assert text.count("Both arms swing back and forth with each step") == 1
+
+
+@pytest.mark.parametrize("name,parts,row", ROWS, ids=[name for name, _, _ in ROWS])
+def test_every_part_asked_for_reaches_the_prompt(name, parts, row) -> None:
+    """What the caller wrote and what the options ask for is in the prompt, whatever the engine left out as said
+    twice. Since f899101 a front, back or diagonal walk with a caller's motion paragraph dropped its view sentence,
+    and with it the only place `--character` was said."""
+    text = " ".join(parts.text.split())
+    asked = [USER_TEXT[row["user"]]["text"]] if row["user"] else []
+    asked += [MOTION[row["motion"]]["text"]] if row.get("motion") and MOTION[row["motion"]]["text"] else []
+    asked += [row["character"]] if row.get("character") else []
+    asked += [row["own"]] if row.get("own") else []
+    for item in _items(row["handed"]) or []:
+        # the one item left unnamed on purpose: on the far side of a side view where nothing steps it into sight,
+        # since a clip prompt that names a hidden item draws it on the near arm (docs/video-pipeline.md)
+        hidden = (name.startswith("clip") and "/side@" in name and row["state"] not in batch.GAIT_STATES
+                  and h.placement(item.side, "side", row["facing"])["depth"] == "far")
+        if hidden:
+            assert _ARTICLE.sub("", item.item) not in text, text
+        else:
+            asked.append(_ARTICLE.sub("", item.item))
+    for words in asked:
+        assert " ".join(words.split()) in text, (words, text)
+    if row.get("key"):
+        assert chroma.KEY_BACKGROUND_TEXT[row["key"]] in text, text
+    if name.startswith("still") and parts.piece("key-background") is not None:
+        named = USER_TEXT[row["user"]].get("key")
+        assert (chroma.KEY_BACKGROUND_TEXT["magenta"] in text) or named, text
+
+
+_ARTICLE = re.compile(r"^(?:the|a|an)\s+", re.IGNORECASE)
 
 
 @pytest.mark.parametrize("name,parts,row", [r for r in ROWS if r[0].startswith("still")], ids=[r[0] for r in ROWS if r[0].startswith("still")])
@@ -313,3 +347,12 @@ def test_gen_reports_what_the_callers_text_says_against_the_options(tmp_path, mo
     assert '[gen] warning: the text says "facing left" and the engine\'s sentence says right' in err
     quiet = gen.generate_image("fake", "a fox", tmp_path / "quiet.png", view="side", facing="right")
     assert "prompt_notes" not in quiet.extra
+
+
+def test_video_prompt_names_the_character_in_every_view_of_a_callers_walk() -> None:
+    """f899101: a front, back or diagonal walk or run with --motion left its view sentence out, and with it
+    --character; the prompt went out without the character and no warning said so."""
+    for view, state in itertools.product(h.VIEWS, batch.GAIT_STATES):
+        record = clip_prompt.plan_prompt(direction=view, state=state, character=CHARACTER, facing="right",
+                                         motion=MOTION["own"]["text"])
+        assert record["prompt"].count(CHARACTER) == 1, record["prompt"]

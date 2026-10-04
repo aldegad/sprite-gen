@@ -523,8 +523,11 @@ def test_a_callers_gait_is_held_in_place_and_facing_the_images_way() -> None:
         for state in ("walk", "run"):
             p = batch_mod.build_prompt(direction, state, "The knight", "left", motion=sneak)
             hold = batch_mod.GAIT_HOLD_TEXT[direction].format(facing="left")
-            # the side view's facing is its view sentence's; a front or back hold says the view itself
+            # the side view's facing is its view sentence's; a front or back hold says the view itself, and so
+            # names the character in place of "It"
             view = f" The knight is {batch_mod.VIEW_TEXT[direction].format(facing='left')}." if direction == "side" else ""
+            if direction != "side":
+                hold = hold.replace("It ", "The knight ", 1)
             assert p.startswith(f"2D game sprite animation. {sneak} {hold}{view} Stays centered in the frame")
             assert batch_mod.MOTION_TEXT[state] not in p
             assert p.count("move across the screen") + p.count("moving across the screen") == 1

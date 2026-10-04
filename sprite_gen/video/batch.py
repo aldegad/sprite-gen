@@ -146,6 +146,11 @@ GAIT_HOLD_TEXT = {
 # view's gait says only that it stays in place, so its view sentence stays and carries the facing.
 GAIT_SAYS_VIEW = frozenset({"front", "back", "front_diagonal", "back_diagonal"})
 VIEW_SENTENCE = " The character is {view}."
+# With a caller's own motion paragraph, `--character` is named on the engine sentence that says the view: the
+# view sentence, or where that is left out, the gait hold ("A small fox ... stays in place ..." for "It stays").
+# Every view that leaves its view sentence out has a gait hold to name it on.
+GAIT_HOLD_SUBJECT = "It "
+assert GAIT_SAYS_VIEW <= GAIT_HOLD_TEXT.keys() and all(text.startswith(GAIT_HOLD_SUBJECT) for text in GAIT_HOLD_TEXT.values())
 MOTION_TEXT = {
     # A side-view full body asked for "a subtle weight sway" and an evenly paced loop steps in place
     # more often than not, so the feet are held and walking is named as what not to do.
@@ -333,15 +338,18 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
         if not motion:
             raise SystemExit("video: motion description is empty")
         head = "2D game sprite animation. The character {motion}"
-        subject = character.strip().rstrip(".") if character else "The character"
+        subject = character.strip().rstrip(".") if character else None
         parts = prompt_parts.Prompt(f"2D game sprite animation. {motion}", caller=f"{motion} {character or ''}", sep=" ")
         if state in HOLD_TEXT:
             parts.add("hold", HOLD_TEXT[state])
         if state in GAIT_STATES and direction in GAIT_HOLD_TEXT:
-            parts.add("gait-hold", GAIT_HOLD_TEXT[direction].format(facing=facing))
+            hold = GAIT_HOLD_TEXT[direction].format(facing=facing)
+            if says_view and subject:  # the hold says the view: it names the character (`GAIT_HOLD_SUBJECT`)
+                hold = f"{subject} {hold[len(GAIT_HOLD_SUBJECT):]}"
+            parts.add("gait-hold", hold)
         if state in REPEAT_TEXT:
             parts.add("repeat", REPEAT_TEXT[state])
-        frame = template[len(head):].replace(VIEW_SENTENCE, f" {subject} is {view}.", 1)
+        frame = template[len(head):].replace(VIEW_SENTENCE, f" {subject or 'The character'} is {view}.", 1)
         parts.add("frame", frame.strip(), facing=turned or prompt_parts.NO_TURN)
     else:
         built_in = (VIEW_MOTION_TEXT[(state, direction)].format(facing=facing) if (state, direction) in VIEW_MOTION_TEXT
@@ -350,6 +358,8 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
         parts = prompt_parts.Prompt(text.replace("The character", character, 1) if character else text,
                                     caller=character or "", sep=" ")
         parts.note(facing=turned or prompt_parts.NO_TURN)
+    if character and character.strip().rstrip(".") not in parts.text:
+        raise AssertionError(f"video: the {state} {direction} clip prompt lost the character ({character!r})")
     for topic, text in _lite_pieces(state, direction, model, built_in=motion is None):
         parts.add(topic, text)
     if handed:
