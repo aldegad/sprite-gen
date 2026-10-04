@@ -64,7 +64,13 @@ class CanvasProfile:
 # states fall through to `default`.
 STATE_CANVAS: dict[str, CanvasProfile] = {
     "jump": CanvasProfile(SHAPE_TALL, 3 / 4, 0.34, 0.0, 0.0, "airborne frames need head-room; hair clipped at 1:1"),
-    "attack": CanvasProfile(SHAPE_WIDE, 16 / 9, 0.35, 0.28, 0.2, "weapon swings rise overhead and extend in front; a long weapon drawn back reaches behind"),
+    # Head-room 0.20, not more: at least a quarter of the still's height goes above it,
+    # which with the still's own margin over the crown holds a weapon raised about a
+    # third of the body above the head. More room only shrinks the body in the clip —
+    # the loop then scales it up to the delivery height instead of down. Lead and
+    # trail stay: for a square or upright still at this head-room the 16:9 ratio, not
+    # the lead, sets the width.
+    "attack": CanvasProfile(SHAPE_WIDE, 16 / 9, 0.20, 0.28, 0.2, "a weapon raised overhead needs room above, a swing extends in front, and a long weapon drawn back reaches behind"),
     "projectile": CanvasProfile(SHAPE_WIDE, 16 / 9, 0.0, 0.34, 0.0, "projectile travels away from the body"),
     # Raised-limb celebrations leave a square frame at the top corners; wide with a
     # symmetric margin keeps them inside (lead applies in front, the rest pads the back).
@@ -73,10 +79,18 @@ STATE_CANVAS: dict[str, CanvasProfile] = {
     "celebrate": CanvasProfile(SHAPE_WIDE, 16 / 9, 0.0, 0.30, 0.0, "same envelope as cheer"),
     "default": CanvasProfile(SHAPE_SQUARE, 1.0, 0.0, 0.0, 0.0, "in-place motion fits the still's own frame"),
 }
+# `--shape wide` is not the attack row. It is forced on a state whose own row is
+# another shape — `video-set --shape wide` on every state of a batch, or a retry after
+# a side-edge contact — and that state may be a jump. 0.35 on 16:9 keeps about the
+# room a jump's tall row leaves above a square or upright still (0.35/0.65 ≈
+# 0.34/0.66 of its height). A still wider than it is tall keeps less than the tall
+# row would give it (a 3:2 still about three fifths), because the wide canvas's
+# height follows the still's width there.
+WIDE_OVERRIDE = CanvasProfile(SHAPE_WIDE, 16 / 9, 0.35, 0.28, 0.2, "forced wide: room in front and behind, and a jump's head-room above, whatever the state")
 SHAPE_DEFAULTS: dict[str, CanvasProfile] = {
     SHAPE_SQUARE: STATE_CANVAS["default"],
     SHAPE_TALL: STATE_CANVAS["jump"],
-    SHAPE_WIDE: STATE_CANVAS["attack"],
+    SHAPE_WIDE: WIDE_OVERRIDE,
 }
 CORNER_TOLERANCE = 24  # max per-channel spread across the four corners for a "flat" background
 FITS = ("state", "tight")  # state: the table's room for the motion; tight: none
