@@ -25,6 +25,7 @@ from typing import Any, Callable
 from PIL import Image
 
 from sprite_gen.spec.runio import atomic_write_text
+from sprite_gen.gen.chroma import KEY_BACKGROUND_TEXT
 from sprite_gen.gen.facing import FACINGS, validate as validate_facing
 from sprite_gen.gen import handedness as handed_mod
 from sprite_gen.gen.handedness import Handed
@@ -368,12 +369,6 @@ WALK_START_TEXT = {
     ),
 }
 WALK_START_MODES = ("redraw", "as-given")
-KEY_BACKGROUND_TEXT = {
-    "green": ("The entire background is one perfectly flat, uniform pure green chroma-key fill (#00FF00) with no gradient, "
-              "no texture, no shadow and no ground line."),
-    "magenta": ("The entire background is one perfectly flat, uniform pure magenta chroma-key fill (#FF00FF) with no "
-                "gradient, no texture, no shadow and no ground line."),
-}
 
 
 def starts_mid_step(state: str, direction: str) -> bool:

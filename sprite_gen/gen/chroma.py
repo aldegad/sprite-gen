@@ -15,6 +15,7 @@ output is published.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,35 @@ KEYS: dict[str, dict[str, tuple[int, int, int]]] = {
     "magenta": {"target": (255, 0, 255)},
     "green": {"target": (0, 255, 0)},
 }
+
+# The sentence that asks a model for a key background, per key. A still redrawn from a
+# reference for a clip (`video.batch.walk_start_prompt`) and a ref run whose transparency
+# `auto` planned as a chroma key (`gen.generate_image`) both end their prompt with it.
+KEY_BACKGROUND_TEXT = {
+    "green": ("The entire background is one perfectly flat, uniform pure green chroma-key fill (#00FF00) with no gradient, "
+              "no texture, no shadow and no ground line."),
+    "magenta": ("The entire background is one perfectly flat, uniform pure magenta chroma-key fill (#FF00FF) with no "
+                "gradient, no texture, no shadow and no ground line."),
+}
+
+
+def _key_background_pattern(key: str) -> re.Pattern[str]:
+    hex_code = "".join(f"{channel:02x}" for channel in KEYS[key]["target"])
+    return re.compile(rf"(?<![0-9a-z])#?{hex_code}(?![0-9a-z])"
+                      rf"|\b{key}\s+(?:chroma[- ]?key|key|screen|background|backdrop)\b", re.IGNORECASE)
+
+
+def named_key_background(prompt: str) -> str | None:
+    """The key a prompt already asks for as its background, or None.
+
+    A prompt names a key when it carries the key's hex code (`#FF00FF`, `00ff00`) or the key's
+    name right before "background", "backdrop", "chroma key", "key" or "screen" ("a green
+    screen", "magenta chroma-key background"). A colour in the subject ("a green frog on
+    white") is not a key. The first key named wins; the matte reads the key off the borders,
+    so a prompt naming the other key than `--chroma-key` is keyed on the one drawn.
+    """
+    found = [(match.start(), key) for key in KEYS if (match := _key_background_pattern(key).search(prompt))]
+    return min(found)[1] if found else None
 
 
 # What a generated raw is, before a planned chroma key runs on it (`classify_raw_alpha`).
@@ -63,21 +93,23 @@ def classify_raw_alpha(path: Path) -> dict[str, Any]:
     if alpha is None:
         return {**stats, "verdict": RAW_ALPHA_NONE, "alpha_zero_pct": 0.0, "border_alpha_zero_pct": 0.0}
     total = width * height
-    alpha_zero_pct = round(alpha.histogram()[0] / total * 100, 2) if total else 0.0
+    alpha_zero = alpha.histogram()[0]
     edges = [(0, 0, width, 1), (0, height - 1, width, height),
              (0, 1, 1, height - 1), (width - 1, 1, width, height - 1)]
     edges = [box for box in edges if box[2] > box[0] and box[3] > box[1]]
     border_total = sum((r - l) * (b - t) for l, t, r, b in edges)
     border_zero = sum(alpha.crop(box).histogram()[0] for box in edges)
-    border_alpha_zero_pct = round(border_zero / border_total * 100, 2) if border_total else 0.0
-    if alpha_zero_pct == 0.0:
+    # judged on the counts, reported rounded: a single alpha-0 pixel is not "none"
+    alpha_zero_pct = alpha_zero / total * 100 if total else 0.0
+    border_alpha_zero_pct = border_zero / border_total * 100 if border_total else 0.0
+    if alpha_zero == 0:
         verdict = RAW_ALPHA_NONE
     elif alpha_zero_pct >= RAW_ALPHA_MIN_ZERO_PCT and border_alpha_zero_pct >= RAW_ALPHA_MIN_BORDER_ZERO_PCT:
         verdict = RAW_ALPHA_REAL
     else:
         verdict = RAW_ALPHA_AMBIGUOUS
-    return {**stats, "verdict": verdict, "alpha_zero_pct": alpha_zero_pct,
-            "border_alpha_zero_pct": border_alpha_zero_pct}
+    return {**stats, "verdict": verdict, "alpha_zero_pct": round(alpha_zero_pct, 2),
+            "border_alpha_zero_pct": round(border_alpha_zero_pct, 2)}
 
 
 def write_white_check(image: Image.Image, path: Path) -> None:

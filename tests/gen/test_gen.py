@@ -688,7 +688,7 @@ def test_ref_run_publishes_a_real_alpha_raw_without_keying_its_outline(
     fake, rc, out, report = _ref_run(tmp_path, monkeypatch, _real_alpha_raw())
 
     assert rc == 0
-    assert fake.requests[0].native_alpha is False  # still planned as a key: the prompt is unchanged
+    assert fake.requests[0].native_alpha is False  # still planned as a key: no transparency request
     published = Image.open(out)
     assert published.getpixel(_OUTLINE_PX) == _OUTLINE + (255,)
     assert published.getpixel(_CREAM_PX) == _CREAM + (255,)
@@ -745,15 +745,138 @@ def test_ref_run_keys_an_ambiguous_raw_and_warns(tmp_path: Path, monkeypatch, ca
     assert "warning: the raw has some transparent pixels" in capsys.readouterr().err
 
 
-def test_ref_run_with_decontam_palette_refuses_a_real_alpha_raw(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("decontam", ["palette", "auto"])
+def test_ref_run_with_decontam_skips_it_on_a_real_alpha_raw(tmp_path: Path, monkeypatch, capsys, decontam) -> None:
+    # The generation is paid for and its alpha is good: there is no key to decontaminate,
+    # so the pass is skipped, said on stderr and recorded — not refused after the call.
     fake = _FakeNativeProvider(_real_alpha_raw())
     monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
     ref = tmp_path / "ref.png"
     ref.write_bytes(_png_bytes())
     out = tmp_path / "asset.png"
-    with pytest.raises(SystemExit, match="has no key to remove"):
-        gen.generate_image("fake", "a mushroom", out, refs=[ref], transparent=True, decontam="palette")
-    assert not out.exists()
+    result = gen.generate_image("fake", "a mushroom", out, refs=[ref], transparent=True, decontam=decontam)
+
+    assert result.alpha["strategy_source"] == "refs-attached-raw-alpha"
+    assert result.alpha["decontam"]["requested"] == decontam
+    assert "has no key to remove" in result.alpha["decontam"]["skipped"]
+    assert Image.open(out).getpixel(_OUTLINE_PX) == _OUTLINE + (255,)
+    err = capsys.readouterr().err
+    assert f"--decontam {decontam} skipped" in err
+    assert ("warning: --decontam" in err) is (decontam == "palette")
+
+
+def test_ref_run_with_decontam_palette_still_decontaminates_a_keyed_raw(tmp_path: Path, monkeypatch) -> None:
+    fake = _FakeNativeProvider(_key_background_raw())
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(_png_bytes())
+    result = gen.generate_image("fake", "a mushroom", tmp_path / "asset.png", refs=[ref], transparent=True,
+                                decontam="palette")
+    assert result.alpha["strategy_source"] == "refs-attached"
+    assert "skipped" not in result.alpha["decontam"]
+
+
+# `auto`'s step down plans a key, so the prompt must ask for one: a ref prompt with no key
+# background came back on white (2026-10-04), and keying white takes the outline's light
+# neighbours and the cream with it. The engine adds the line unless the prompt names a key.
+class _PromptFollowingProvider(_FakeNativeProvider):
+    """Draws the figure on the key the prompt asks for, or on white when it asks for none."""
+
+    def generate(self, request: GenRequest, workdir: Path):
+        key = chroma_mod.named_key_background(request.prompt)
+        ground = chroma_mod.KEYS[key]["target"] if key else (255, 255, 255)
+        self.image = _outlined_figure(Image.new("RGB", (64, 64), ground))
+        return super().generate(request, workdir)
+
+
+def test_ref_run_adds_the_key_background_line_to_a_prompt_without_one(tmp_path: Path, monkeypatch, capsys) -> None:
+    fake = _PromptFollowingProvider()
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(_png_bytes())
+    out = tmp_path / "asset.png"
+    report = tmp_path / "report.json"
+
+    assert gen.run(**_gen_kwargs(out, report, ref=[ref])) == 0
+
+    prompt = fake.requests[0].prompt
+    assert prompt.startswith("a mushroom")
+    assert prompt.endswith(chroma_mod.KEY_BACKGROUND_TEXT["magenta"])
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["alpha"]["key_background"] == {"injected": True, "key": "magenta"}
+    assert payload["prompt"] == prompt
+    published = Image.open(out)
+    assert published.getpixel((0, 0)) == (0, 0, 0, 0)
+    assert published.getpixel(_OUTLINE_PX) == _OUTLINE + (255,)
+    assert published.getpixel(_CREAM_PX) == _CREAM + (255,)
+    assert "added a magenta key background line" in capsys.readouterr().err
+
+
+def test_ref_run_adds_the_line_in_the_chosen_key(tmp_path: Path, monkeypatch) -> None:
+    fake = _PromptFollowingProvider()
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(_png_bytes())
+    result = gen.generate_image("fake", "a magenta mushroom", tmp_path / "asset.png", refs=[ref],
+                                transparent=True, chroma_key="green")
+    assert fake.requests[0].prompt.endswith(chroma_mod.KEY_BACKGROUND_TEXT["green"])
+    assert result.alpha["key_background"] == {"injected": True, "key": "green"}
+    assert result.chroma["key"] == "green"
+
+
+@pytest.mark.parametrize(
+    ("prompt", "named"),
+    [
+        ("a mushroom. " + chroma_mod.KEY_BACKGROUND_TEXT["magenta"], "magenta"),
+        ("a mushroom on a flat #ff00ff background", "magenta"),
+        ("a mushroom on a pure magenta chroma-key background", "magenta"),
+        ("a mushroom in front of a green screen", "green"),
+    ],
+    ids=["engine-line", "hex", "name", "other-key"],
+)
+def test_ref_run_keeps_a_key_background_the_prompt_already_names(
+    tmp_path: Path, monkeypatch, prompt: str, named: str
+) -> None:
+    fake = _PromptFollowingProvider()
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(_png_bytes())
+    result = gen.generate_image("fake", prompt, tmp_path / "asset.png", refs=[ref], transparent=True)
+    assert fake.requests[0].prompt == prompt
+    assert result.alpha["key_background"] == {"injected": False, "key": named}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"alpha_mode": "chroma"}, {"alpha_mode": "native"}, {"ref": []}, {"transparent": False}],
+    ids=["explicit-chroma", "explicit-native", "no-ref", "opaque"],
+)
+def test_only_autos_ref_step_down_adds_the_key_line(tmp_path: Path, monkeypatch, overrides) -> None:
+    fake = _FakeNativeProvider()
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(_png_bytes())
+    out = tmp_path / "asset.png"
+    report = tmp_path / "report.json"
+    gen.run(**_gen_kwargs(out, report, **{"ref": [ref], **overrides}))
+    assert fake.requests[0].prompt == "a mushroom"
+    alpha = json.loads(report.read_text(encoding="utf-8")).get("alpha") or {}
+    assert "key_background" not in alpha
+
+
+@pytest.mark.parametrize(
+    ("prompt", "named"),
+    [
+        ("a green frog on a white background", None),
+        ("a magenta mushroom, red cap", None),
+        ("draw it on #00FF00", "green"),
+        ("FF00FF", "magenta"),
+        ("a colour FF00FFAA nearby", None),
+        ("a green backdrop; #FF00FF elsewhere", "green"),
+    ],
+)
+def test_named_key_background(prompt: str, named: str | None) -> None:
+    assert chroma_mod.named_key_background(prompt) == named
 
 
 def test_explicit_chroma_keys_even_a_real_alpha_raw(tmp_path: Path, monkeypatch) -> None:
@@ -792,6 +915,17 @@ def test_classify_raw_alpha_needs_a_transparent_border(tmp_path: Path) -> None:
     stats = chroma_mod.classify_raw_alpha(path)
     assert stats["alpha_zero_pct"] == 36.0
     assert stats["border_alpha_zero_pct"] == 0.0
+    assert stats["verdict"] == "ambiguous"
+
+
+def test_classify_raw_alpha_judges_before_rounding(tmp_path: Path) -> None:
+    # One alpha-0 pixel in 200 x 200 is 0.0025 %, reported as 0.0 but not "no alpha".
+    image = Image.new("RGBA", (200, 200), (255, 0, 255, 255))
+    image.putpixel((0, 0), (0, 0, 0, 0))
+    path = tmp_path / "raw.png"
+    image.save(path)
+    stats = chroma_mod.classify_raw_alpha(path)
+    assert stats["alpha_zero_pct"] == 0.0
     assert stats["verdict"] == "ambiguous"
 
 

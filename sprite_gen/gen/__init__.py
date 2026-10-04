@@ -190,6 +190,9 @@ def _make_provider(name: str, *, keep_session: bool):
 # 2026-10-04: a transparent `--ref` is answered with alpha) is published on its own
 # alpha, measured as a native one (STRATEGY_SOURCE_REFS_RAW_ALPHA), because keying
 # it again mattes the outline away. A checkerboard or key background is still keyed.
+# Because the key is the engine's plan, the engine asks for it: a prompt that names no
+# key background gets the chosen key's line (`chroma.KEY_BACKGROUND_TEXT`), since a ref
+# prompt without one came back on white and keying white takes the outline with it.
 STRATEGY_SOURCE_PROVIDER = "provider-default"
 STRATEGY_SOURCE_REFS = "refs-attached"
 STRATEGY_SOURCE_REFS_RAW_ALPHA = "refs-attached-raw-alpha"
@@ -374,6 +377,7 @@ def generate_image(
     # (native asks for alpha) and the post-process (chroma keys it out).
     strategy: str | None = None
     strategy_source: str | None = None
+    key_background: dict[str, Any] | None = None
     if transparent:
         # The layout guide is an attached image as much as a --ref is: the same step down applies.
         attached_for_strategy = [*refs, Path(LAYOUT_GUIDE_NAME)] if layout_guide else refs
@@ -383,10 +387,19 @@ def generate_image(
             raise SystemExit(f"gen: --decontam removes a chroma key; this image would use {strategy} alpha "
                              "(pass --alpha-mode chroma to key it instead)")
         if strategy_source == STRATEGY_SOURCE_REFS:
+            # The key is the engine's plan, so the engine asks for it: a ref prompt with no key
+            # background is answered on white or another light ground, and keying that takes the
+            # outline and light fills with it (2026-10-04). A key the prompt already names stays.
+            named_key = chroma_mod.named_key_background(prompt)
+            if named_key is None:
+                prompt += "\n\n" + chroma_mod.KEY_BACKGROUND_TEXT[chroma_key]
+            key_background = {"injected": named_key is None, "key": named_key or chroma_key}
             print(
                 f"[gen] {len(refs)} reference image(s) attached — using chroma keying instead of "
                 f"{backend.name}'s native alpha (native output with refs is unstable, 2026-09-08); "
-                "a result that already has a transparent background keeps its own alpha. "
+                + (f"added a {chroma_key} key background line to the prompt; " if named_key is None
+                   else f"the prompt already asks for a {named_key} key background; ")
+                + "a result that already has a transparent background keeps its own alpha. "
                 "Pass --alpha-mode native to force it.",
                 file=sys.stderr,
             )
@@ -432,16 +445,20 @@ def generate_image(
         # Only the key `auto` planned because of the refs is checked against the raw; an
         # explicit --alpha-mode chroma is the caller's own key and runs as asked.
         raw_alpha: dict[str, Any] | None = None
+        decontam_skipped: dict[str, Any] | None = None
         if strategy_source == STRATEGY_SOURCE_REFS:
             raw_alpha = chroma_mod.classify_raw_alpha(raw)
             if raw_alpha["verdict"] == chroma_mod.RAW_ALPHA_REAL:
-                if decontam == "palette":
-                    raise SystemExit(
-                        f"gen: --decontam palette removes a chroma key, but the raw came back with a "
-                        f"transparent background ({raw_alpha['alpha_zero_pct']}% alpha 0) and has no key "
-                        "to remove; run again without --decontam palette, or with --alpha-mode chroma "
-                        "and a key background in the prompt"
-                    )
+                if decontam != "off":
+                    # The generation is paid for and its alpha is good: decontam has no key to
+                    # remove, so it is skipped and said, not refused (see the refusal before the call).
+                    decontam_skipped = {
+                        "requested": decontam,
+                        "skipped": f"the raw came back with a transparent background "
+                                   f"({raw_alpha['alpha_zero_pct']}% alpha 0) and has no key to remove",
+                    }
+                    print(f"[gen] {'warning: ' if decontam == 'palette' else ''}--decontam {decontam} skipped: "
+                          f"{decontam_skipped['skipped']}", file=sys.stderr)
                 strategy, strategy_source = TRANSPARENCY_NATIVE, STRATEGY_SOURCE_REFS_RAW_ALPHA
                 print(
                     f"[gen] the raw came back with a transparent background ({raw_alpha['alpha_zero_pct']}% "
@@ -457,7 +474,11 @@ def generate_image(
                     "of the border); keyed as planned — check the outline, or pass --alpha-mode native"
                 )
                 print(f"[gen] warning: {raw_alpha['warning']}", file=sys.stderr)
-        raw_alpha_stats = {"raw_alpha": raw_alpha} if raw_alpha is not None else {}
+        ref_stats = {
+            **({"key_background": key_background} if key_background is not None else {}),
+            **({"raw_alpha": raw_alpha} if raw_alpha is not None else {}),
+            **({"decontam": decontam_skipped} if decontam_skipped is not None else {}),
+        }
 
         chroma_stats: dict[str, Any] | None = None
         alpha_stats: dict[str, Any] | None = None
@@ -466,14 +487,14 @@ def generate_image(
             alpha_stats = {
                 "strategy": TRANSPARENCY_NATIVE,
                 "strategy_source": strategy_source,
-                **raw_alpha_stats,
+                **ref_stats,
                 **chroma_mod.verify_native_alpha(raw, out, white_check=white_check),
             }
         elif strategy == TRANSPARENCY_CHROMA:
             chroma_stats = chroma_mod.key_transparent(raw, out, key=chroma_key, white_check=white_check,
                                                       decontam=decontam)
             alpha_stats = {"strategy": TRANSPARENCY_CHROMA, "strategy_source": strategy_source,
-                           **raw_alpha_stats, **chroma_stats}
+                           **ref_stats, **chroma_stats}
         else:
             shutil.copyfile(raw, out)
         verify_png(out)
@@ -681,7 +702,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=ALPHA_MODE_AUTO,
         help=(
             "transparency strategy for --transparent: auto = the provider's declared strategy "
-            "(native on codex and openai, but chroma whenever --ref is attached — native alpha with refs is unstable); "
+            "(native on codex and openai, but chroma whenever --ref is attached — native alpha with refs is unstable — "
+            "with the --chroma-key background line added to a prompt that names no key); "
             "chroma forces chroma keying (e.g. a codex prompt that already carries a key background); "
             "native forces native alpha and is refused on a provider that cannot return alpha"
         ),
