@@ -113,6 +113,8 @@ one wrist or a pin on one side, offer to draw them instead with `--handed` and c
 | Optional scene placement, lighting, camera and render | `scene-render`, `scene-inspect` | [scene](docs/scene.md) |
 | Defaults | `defaults show`, `defaults save`, `defaults clear` | [user-workflow](docs/user-workflow.md#one-settings-owner) |
 
+`gen --transparent` with `--ref` plans a chroma key (adding the key's background line to a prompt that names none), and publishes a result that already came back transparent on its own alpha instead of keying its outline away; `alpha.strategy_source` in the report says which (`refs-attached` keyed, `refs-attached-raw-alpha` not) — [gen](docs/gen.md#transparent-output--strategy-per-provider).
+
 Use existing automatic pipeline stages for background removal, extraction, alignment and export. Do not ask users to select each script. For a direct utility request, run that utility; no unrelated generation questions are needed. Preserve the row pipeline and component extraction for image sprites. One-shot grid generation and fixed cell cutting are not an alternative sprite-generation route.
 
 For attack repeat coverage, observed one-shot returns and structured loop failure reports, follow [video-pipeline](docs/video-pipeline.md#one-shot-actions--cycle-autoperiodicone-shot).
