@@ -112,6 +112,8 @@ sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --
 # par élément : video-canvas → video → video-frames → video-loop ; set/table.md nomme chaque résultat
 ```
 
+Vous générez vos clips avec un MCP vidéo connecté à votre agent ? Avec celui de ZCRE (지크), l'agent crée le clip sur votre propre compte ZCRE et sprite-gen le découpe : `sprite-gen video-prompt --direction side --state walk --no-last-frame` affiche le prompt, puis `video-frames` et `video-loop` prennent le mp4. Marche, course et saut uniquement, car Grok Imagine 1.5 de ZCRE n'a pas d'image de fin ([comment](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre)).
+
 **C · utilitaires** — chacun est autonome.
 
 ```bash

@@ -112,6 +112,8 @@ sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --
 # 每项依次：video-canvas → video → video-frames → video-loop；set/table.md 列出每个结果的名称
 ```
 
+通过连接到智能体的视频 MCP 生成片段？使用 ZCRE（지크）的 MCP 时，智能体用你自己的 ZCRE 账户生成片段，sprite-gen 负责切割：`sprite-gen video-prompt --direction side --state walk --no-last-frame` 输出提示词，`video-frames` 和 `video-loop` 接收 mp4。ZCRE 的 Grok Imagine 1.5 没有结束帧，因此仅支持行走、奔跑和跳跃（[方法](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre)）。
+
 **C · 实用工具** —— 每个都可独立使用。
 
 ```bash

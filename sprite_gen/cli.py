@@ -18,6 +18,7 @@ from sprite_gen.video import batch as video_batch
 from sprite_gen.video import canvas as video_canvas
 from sprite_gen.video import frames as video_frames
 from sprite_gen.video import loop as video_loop
+from sprite_gen.video import clip_prompt as video_prompt
 from sprite_gen.video import align as video_align
 from sprite_gen.video import rife_install
 from sprite_gen.effects import recolor, shadow
@@ -333,6 +334,12 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Pad a base still into the canvas a motion state needs (tall for jumps, wide for attacks, square otherwise).",
         video_canvas.add_arguments,
         video_canvas.run,
+    ),
+    # The prompt alone, for a clip made by a video MCP on the user's agent (ZCRE); the engine never calls it.
+    "video-prompt": (
+        "Print the clip prompt video-set would send for one (direction, state), for a clip made elsewhere (a video MCP such as ZCRE); --json adds the duration, end-frame pin and loop cut.",
+        video_prompt.add_arguments,
+        video_prompt.run,
     ),
     "video-frames": (
         "Extract a clip's frames and key the chroma out into RGBA frames (edge-contact checked).",
