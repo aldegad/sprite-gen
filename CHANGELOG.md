@@ -2,6 +2,10 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## Unreleased - A follow-through that would fold its region can take the largest gain that does not
+
+- **New `video-follow --on-fold lower`**: a move that would fold a region over itself is no longer only refused. The move is the gain times the move at gain 1, so the gain at which a region folds is known (2 · radius / (π · move at gain 1)); `lower` takes the largest gain under it, in steps of 0.01 and no more than `--gain`, one gain for the strip set by the region with the smallest radius, and names it on stderr. It never goes under 1, the mass as measured: a region too small for that is still refused, and the message names the largest gain that would not fold. The record says what was asked and what was used (`gain_requested`, `gain`, `on_fold`, and `fold`: lowered or not, the move asked for, the move at gain 1, per region the smaller radius, how near the used move is to folding it, and the gain at which it folds). The default stays `--on-fold refuse`: the same strip, GIF, WebP and refusal message as 2.24.0, byte for byte; the record only gains those keys. [docs/video-pipeline.md](docs/video-pipeline.md#6-follow-through--video-follow).
+
 ## v2.25.0 - Every view of an aligned walk starts as the same foot lands, read off the legs, and RIFE leaves no black between crossing legs
 
 - **Output change: every frame RIFE makes, and where every aligned loop starts.** Frames made by RIFE (`video-cycle-align`, `video-set --align-cycles auto`, `video-loop` jump repair) are drawn differently wherever the legs cross or the flow is unsure; frames taken as filmed are untouched. Every loop `video-cycle-align` turns may start on a different frame: on its legs instead of its top edge, and, with views, on one foot for the whole set. A loop already aligned starts where the new rule says the next time it is aligned (it is read from `cycle.source/`).

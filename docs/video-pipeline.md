@@ -810,7 +810,7 @@ bounce. `video-follow` puts that follow-through back on a cut loop:
 
 ```bash
 sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [--region …] \
-  [--gain 2.5] [--freq 2.4] [--zeta 0.6] [--board follow.png]
+  [--gain 2.5] [--on-fold refuse|lower] [--freq 2.4] [--zeta 0.6] [--board follow.png]
 ```
 
 - **The region** is an ellipse over the part in the strip's first cell, in cell pixels
@@ -829,11 +829,23 @@ sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [-
   at the centre and 0 at the rim (cos²), sampled as premultiplied bilinear colour; outside it no
   pixel changes. A move so large that the weight's slope folds the picture over
   (offset × π / (2 · radius) ≥ 1) is refused: lower `--gain` or give the region larger radii.
+- **`--on-fold lower`** lowers the gain for you instead of refusing. The move is the gain times
+  the move at gain 1, so the gain at which a region folds is 2 · radius / (π · move at gain 1),
+  and the strip takes the largest gain under it, in steps of 0.01 and no more than `--gain`. One
+  gain for the strip, set by the region with the smallest radius: every part hangs on the same
+  body and answers the same motion, and the recorded `gain` is then the `--gain` that gives this
+  strip by itself. It does not go under 1, the mass as measured: a region too small for that is
+  refused (the message names the largest gain that would not fold), so a follow-through is never
+  quietly weaker than the motion it answers. The default stays `refuse`, with the same output and
+  the same message as 2.24.0; a strip that does not fold is the same under either.
 - **What it writes**: the strip, GIF and WebP over the loop's own (both animations re-opened and
   checked as `video-loop` checks them), and `follow` in `<name>.strip.json` (the regions, the
-  settings, the body's bob, `dx_px`/`dy_px` per cell, `reach_px`). `cycle/` is left as cut. The
-  strip as it was is kept as `follow.source.png`; running `video-follow` again reads from it, so a
-  second run never moves a moved strip. `--board` writes the cells before and after where the part
+  settings, the body's bob, `dx_px`/`dy_px` per cell, `reach_px`; `gain` is the gain used and
+  `gain_requested` the one asked for, and `fold` says whether it was lowered, the move asked for,
+  the move at gain 1, and per region its smaller radius, how near the used move is to folding it
+  (`ratio`, under 1) and the gain at which it folds). A lowered gain is also named on stderr.
+  `cycle/` is left as cut. The strip as it was is kept as `follow.source.png`; running
+  `video-follow` again reads from it, so a second run never moves a moved strip. `--board` writes the cells before and after where the part
   sits lowest and highest, on white.
 - **Order**: after `video-cycle-align`. An alignment rebuilds the strip from the cut, removes
   `follow.source.png` and the `follow` record, and says so (`follow_cleared` in its loop row); a
