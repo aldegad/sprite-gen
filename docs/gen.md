@@ -193,6 +193,8 @@ sprite-gen gen \
   [--resolution 1k|1.5k|2k]  # grok output-size tier, priced with --quality
   [--model ID] \
   [--layout-guide]        # attach a one-slot layout guide (safe box, crown and floor lines); see below
+  [--direction side|front|back|front_diagonal|back_diagonal [--facing right|left]] # add the engine's view sentence
+  [--handed "the black smartwatch=left wrist" ...]  # with --direction: where an item on one side is in that view
   [--report REPORT.json] \
   [--keep-session]        # codex: keep the rollout jsonl instead of deleting it
 ```
@@ -212,6 +214,12 @@ Backward-compatible wrapper: `$SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT
   codex→grok default fallback occurred), plus the provider `extra` block
   (`auth_source`, `transport`, `endpoint`, and the knobs the request actually
   carried).
+
+- **`--direction`** adds the view sentence a sprite still is drawn with (`still_view_text`; a side or
+  diagonal view also takes `--facing`, a front or back view refuses it) and records `extra.view`.
+  **`--handed`** adds, per item, which of the character's own sides it is on and where that side is in
+  the view; with it, `--facing-fix mirror` is refused and `regen` never mirrors. See
+  [video-pipeline](video-pipeline.md#handedness--an-item-on-one-side).
 
 ## `--quality` and `--resolution` — the two billed knobs
 
@@ -262,8 +270,48 @@ strategy it can execute, and `--alpha-mode auto` (the default) follows it:
   "refs-attached"` (`provider-default` / `explicit` otherwise). The measurement is
   codex's; openai's edit path is not separately measured and inherits the same
   conservative default. `--alpha-mode native`
-  still forces native alpha with refs — and fails loud on an RGB result. So a ref run's
-  prompt must carry the chroma key, exactly as the sprite-row pipeline already does.
+  still forces native alpha with refs — and fails loud on an RGB result.
+- **The step down asks for its key.** A planned key needs a key background in the
+  prompt, so the engine adds the `--chroma-key` key's line
+  (`chroma.KEY_BACKGROUND_TEXT`, the sentence a clip's mid-step redraw also ends on)
+  to a prompt that names no key, and leaves a prompt that does as it is — no second
+  line. A prompt names a key with the key's hex code (`#FF00FF`, `00ff00`) or the
+  key's name right before "background", "backdrop", "chroma key", "key" or "screen"
+  (`chroma.named_key_background`); a colour in the subject ("a green frog") is not a
+  key. A prompt that names the other key is left on it: the matte reads the key off
+  the borders. `alpha.key_background` records `{"injected": true|false, "key": …}`,
+  stderr says which, and the report's `prompt` is the prompt sent. Without the line a
+  reference on white came back on opaque white (3/3, 2026-10-04) and keying white took
+  the outline and the cream fills with it. With it (the same prompt otherwise, three
+  takes on that RGB reference and two on the transparent one), all five came back on
+  a magenta key and were keyed with the outline and cream whole. Only `auto`'s step
+  down adds the line: `--alpha-mode chroma` is the caller's own key and prompt, and a
+  native run asks for alpha instead.
+- **A ref run whose raw already has a transparent background is not keyed.** The key
+  is planned before the model runs, but the raw is read before it is applied
+  (`chroma.classify_raw_alpha`): a raw with an alpha band, at least 5 % of its pixels
+  at alpha 0 and at least half of its one-pixel border at alpha 0 is `real-alpha`, and
+  it is published on its own alpha through the `native` check
+  (`alpha.strategy: "native"`, `alpha.strategy_source: "refs-attached-raw-alpha"`).
+  Keying it reads the RGB left under alpha 0 as the background colour and mattes the
+  outline and light fills away. A raw with no alpha band or no alpha-0 pixel — a drawn
+  checkerboard, a key background, an opaque RGBA — is `no-alpha` and keyed as before
+  (`strategy_source: "refs-attached"`). Alpha 0 that misses either bar is `ambiguous`:
+  keyed as before, with a `warning` in the report and on stderr. The verdict and its
+  numbers are in `alpha.raw_alpha` on every ref run that planned the key. The check
+  belongs to `auto`'s step down only — `--alpha-mode chroma` keys whatever comes back.
+  A `real-alpha` raw has no key to remove, so `--decontam` is skipped on it, not
+  refused after the paid call: `alpha.decontam` records `{"requested": …, "skipped":
+  …}` and stderr says so (a warning for `palette`, which demands the pass). The check
+  is the counts, not the rounded percentages: a raw with a single alpha-0 pixel is
+  `ambiguous`, reported as `0.0`.
+  Measured 2026-10-04 (codex `image_gen`, subscription, one transparent front still as
+  the reference, three takes per arm): with the step down's prompt (no transparency
+  request, no key colour), a transparent (RGBA) reference came back with real alpha
+  3/3 and an RGB one (the same still on white) on an opaque white background 3/3; with
+  the native request (`--alpha-mode native`), both came back with real alpha 3/3 —
+  no checkerboard in 6 runs, against 5 of 6 on 2026-09-08. The step down is kept
+  until a larger measurement replaces that one.
 - `--alpha-mode chroma` on codex is for prompts that already carry a key background
   (the sprite-row pipeline today): the native request is **not** added to the prompt
   and the raw is keyed like a grok run.

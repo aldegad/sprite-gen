@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 2.21.0
+version: 2.22.0
 description: "Generates images and game sprites through GPT or Grok with guided provider choices, separate saved defaults, automatic cleanup and optional curation. Handles sprite requests, ordinary image generation/editing, standalone image-to-video clips (i2v, animate this still, 그록 영상, 이매진 비디오, 스틸 움직여줘, first/last frame, reference-to-video, 영상 이어붙이기, 영상 편집, extend/edit a clip), clips from a video MCP on the agent (ZCRE, 지크 MCP), chroma removal, animation atlases, video loops, 큐레이션뷰, image candidates, 팔레트 스왑, palette swap, recolor, rig layers, engine exports, repeating backgrounds, projected shadows, motion/contact inspection and optional scene composition from existing assets."
 license: Apache-2.0
 depends_on:
@@ -73,7 +73,8 @@ it never changes the requested direction. Image correction requires explicit opt
 | `gen --facing` | `preserve` (default), `right`, `left` | With `--ref`, an explicit direction adds a prompt requirement and checks the generated still. |
 | `gen --facing-fix` | `none` (default), `mirror`, `regen` | Record without correction; opt into mirroring an observed opposite or regenerating once and rechecking. A still-opposite regeneration is mirrored. |
 | `video --direction` | `side`, `front`, `back`, `front_diagonal`, `back_diagonal`; unset by default | `side` opts into facing inspection and a matching prompt requirement; the others skip it. The two diagonals are three-quarter views turned right (`VIEW_TEXT`); a walk or run in one is filmed pinned (`pins_last_frame`). |
-| `video --facing`, `video-set --facing` | `right` (default), `left` | Required side direction. |
+| `video --facing`, `video-set --facing` | `right` (default), `left`; `video-set` also `right,left` | Required side direction. `right,left` films every side and diagonal view both ways, each from its own still (`--base side@left=…`); none is mirrored. |
+| `gen --direction`, `--handed`; `video-prompt` / `video-set --handed` | a view; `"<item>=<left\|right> [part]"` | An item on one of the character's own sides: the still and clip prompts say where it is in each view, and mirroring is refused. |
 | `video --facing-fix`, `video-set --facing-fix` | `none` (default), `mirror` | Record the observation; opt into mirroring an observed opposite in a copy. Batch side inspection is enabled by default. |
 
 Direction is requested through the generation and motion prompts, which cannot guarantee model compliance.
@@ -83,6 +84,10 @@ under `extra.facing`; video reports and batch items use `facing`. `final_directi
 or a value derived from it, not independent verification; `final_direction_source` identifies which.
 An uncertain or failed inspection records `unknown` and its reason and continues without correction;
 front-facing observations also remain unchanged. Mirroring does not preserve left/right accessory handedness.
+It stays the default, since drawing the left-facing views costs as much again; for a character with a watch on
+one wrist or a pin on one side, offer to draw them instead with `--handed` and check them with `handed-check`
+(a colour-marked item, frame by frame; `--board` for the eye) —
+[handedness](docs/video-pipeline.md#handedness--an-item-on-one-side).
 
 ## Execution routes
 
@@ -107,6 +112,8 @@ front-facing observations also remain unchanged. Mirroring does not preserve lef
 | Duplicate poses, foot contact and stride measurement | `inspect-motion` | [asset-tools](docs/asset-tools.md#motion-and-contact-evidence) |
 | Optional scene placement, lighting, camera and render | `scene-render`, `scene-inspect` | [scene](docs/scene.md) |
 | Defaults | `defaults show`, `defaults save`, `defaults clear` | [user-workflow](docs/user-workflow.md#one-settings-owner) |
+
+`gen --transparent` with `--ref` plans a chroma key (adding the key's background line to a prompt that names none), and publishes a result that already came back transparent on its own alpha instead of keying its outline away; `alpha.strategy_source` in the report says which (`refs-attached` keyed, `refs-attached-raw-alpha` not) — [gen](docs/gen.md#transparent-output--strategy-per-provider).
 
 Use existing automatic pipeline stages for background removal, extraction, alignment and export. Do not ask users to select each script. For a direct utility request, run that utility; no unrelated generation questions are needed. Preserve the row pipeline and component extraction for image sprites. One-shot grid generation and fixed cell cutting are not an alternative sprite-generation route.
 

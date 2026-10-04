@@ -114,6 +114,8 @@ sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --
 
 Vous générez vos clips avec un MCP vidéo connecté à votre agent ? Avec celui de ZCRE (지크), l'agent crée le clip sur votre propre compte ZCRE et sprite-gen le découpe : `sprite-gen video-prompt --direction side --state walk --no-last-frame` affiche le prompt, puis `video-frames` et `video-loop` prennent le mp4. Marche, course et saut uniquement, car Grok Imagine 1.5 de ZCRE n'a pas d'image de fin ([comment](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre)).
 
+Une montre à un seul poignet, une barrette d'un seul côté de la tête ? Retournée, une vue tournée vers la droite met l'objet de l'autre côté : dessinez donc les vues tournées vers la gauche. `sprite-gen gen --direction side --facing left --handed "the black smartwatch=left wrist"` dit où est l'objet dans cette vue, `video-set --facing right,left --handed …` filme chaque vue de profil et de trois-quarts dans les deux sens à partir de sa propre image, et `sprite-gen handed-check` vérifie image par image qu'un objet marqué par sa couleur est du bon côté. Le retournement reste le défaut, car dessiner les vues de gauche coûte autant une seconde fois ([comment](docs/video-pipeline.md#handedness--an-item-on-one-side)).
+
 **C · utilitaires** — chacun est autonome.
 
 ```bash

@@ -38,13 +38,28 @@ is a property of the motion state, owned by one table (`STATE_CANVAS`):
 | State | Shape | Ratio | Room | Why |
 |---|---|---|---|---|
 | `jump` | tall | 3:4 | 34 % head-room above the still | airborne frames need height |
-| `attack` | wide | 16:9 | 35 % above the still, at least 28 % in front (facing side), 20 % behind | weapon swings rise overhead and extend in front; a long weapon drawn back reaches behind |
+| `attack` | wide | 16:9 | 20 % above the still, at least 28 % in front (facing side), 20 % behind | a weapon raised overhead needs room above, a swing extends in front, and a long weapon drawn back reaches behind |
 | `projectile` | wide | 16:9 | 34 % in front | the projectile travels away |
 | everything else | square | 1:1 | — | in-place motion fits the still |
 
+The attack's room above is 20 %, not more. On a square or upright still that puts at least
+a quarter of the still's height above it, and with the still's own margin over the crown
+(8 % of its height is enough) that holds a weapon raised about a third of the body above
+the head. More room only made the body a smaller part of the clip, so `video-loop
+--body-height` scaled it up to the delivery height; at 20 % it scales down. A still cropped
+at the crown gets only the quarter — pass `--headroom 0.26` or more for an overhead swing.
+At this headroom the 16:9 ratio, not `--lead`, sets the width of a square still's canvas,
+so a smaller lead changes nothing.
+
 `--shape tall|wide|square` overrides the row; `--headroom` / `--lead` / `--trail` tune the room
 (`--trail` is the empty fraction of the width kept behind the subject, for a weapon drawn
-back before the strike); `--facing left` mirrors the wide layout. Headroom is a fraction of the full canvas
+back before the strike); `--facing left` mirrors the wide layout. A forced shape is that shape's
+own row, not the state's: `--shape tall` is the jump row, and `--shape wide` is a forced-wide
+row with 35 % above, 28 % in front and 20 % behind — not the attack row. It lands on states
+whose own row is another shape, a jump among them, and 35 % on 16:9 keeps about the room a
+jump's tall row leaves above a square or upright still. A still wider than it is tall keeps
+less above it under forced wide than under the tall row (a 3:2 still about three fifths),
+because there the wide canvas's height follows the still's width. Headroom is a fraction of the full canvas
 height; wide canvases grow both dimensions to preserve their ratio without shrinking
 the still. A still whose corners are not one flat colour
 is refused — a non-flat background cannot be extended without guessing.
@@ -126,7 +141,8 @@ run kept facing away in the one clip whose frames passed; the side walk walked i
 
 Since 2.17.0 there are two three-quarter views, `front_diagonal` and `back_diagonal`: turned to the
 right, the way an isometric game's character walks down and up to the right (turned over, they face
-left). A walk or run in one says where it heads on the screen in those words: "walks naturally in
+left; a character with an item on one side has them drawn facing left instead, see
+[handedness](#handedness--an-item-on-one-side)). A walk or run in one says where it heads on the screen in those words: "walks naturally in
 place, as if on a treadmill, heading diagonally away from the viewer toward the upper right, like a
 character walking up and to the right in an isometric game, without moving across the screen. It
 keeps the exact three-quarter back angle of the image the whole time: its back stays turned toward
@@ -276,6 +292,94 @@ Measured 2026-10-04, one side walk end to end on that route: a 1024² still, `vi
 73 frames and no edge contact, and `video-loop --cycle auto` cut a periodic 20-frame walk (seam 0.72)
 with three frames remade by RIFE and a jolt warning (index 0.85), as a Pro walk can carry.
 
+### Handedness — an item on one side
+
+A watch on one wrist, a pin on one side of the head, a bag on one shoulder: a right-facing view turned
+over puts the item on the other side. Mirroring stays the default — five views make eight directions —
+because drawing the left-facing views costs as much again. For a character whose item must stay put,
+draw them instead, and say where the item is.
+
+**The item, once.** `--handed "<item>=<left|right> [body part]"` names an item and the character's own
+side it is on (`handedness.parse`; repeatable): `"the black smartwatch=left wrist"`. The engine works
+out where that side is in each view (`handedness.placement`):
+
+| view | own left side, turned right | own left side, turned left |
+|---|---|---|
+| `front` | the picture's right | (not turned) |
+| `back` | the picture's left | (not turned) |
+| `side` | the far side, behind the body | the near side, toward the viewer |
+| `front_diagonal` | the picture's right, far side | the picture's right, near side |
+| `back_diagonal` | the picture's left, far side | the picture's left, near side |
+
+The own right side is the mirror of every row. A side view has no picture side — both arms cross the
+middle of the body — only near and far.
+
+**The still.** `sprite-gen gen --direction <view> [--facing right|left] --handed …` adds the engine's
+view sentence (`still_view_text`, the one a diagonal or front still is drawn with) and, per item, the
+handedness sentence (`handedness.text`): the item is on the own left wrist only and the right wrist has
+none; where that wrist is in this view (at the picture's right, on the far side; or, facing right,
+behind the body, hidden or a sliver); and that these sentences decide the side whatever an attached
+picture shows. A side or diagonal view needs `--facing`, a front or back view takes none. With
+`--handed`, `--facing-fix mirror` is refused and `regen` never falls back to mirroring a still-opposite
+retry: a mirror moves the item. Do not attach a picture whose item is on the other side — a mirrored
+still, or a side picture drawn the wrong way: check it with `handed-check` first. A front or back
+picture, where the item's side is plain, is the safe reference.
+
+**The clip.** `video-prompt --handed …` and `video-set --handed …` end the clip prompt with where the
+item stays (`build_prompt(handed=...)`). The clip starts from a still already drawn with the item in
+place, so the sentence anchors to the image and names the item once, positively, where it shows: "The
+black smartwatch stays on the wrist at the right of the picture, nearer the viewer for the whole clip,
+exactly as in the image, and on no other wrist." Where the item is hidden — the far side of a side
+view — the item is not named at all: "The wrist in front of the body stays bare, exactly as in the
+image, for the whole clip." A clip prompt that names a hidden item, and lists what the near arm must
+not wear, draws it on the near arm. A far arm that swings into view can still grow a bare band in a
+near-side view; holding the arms still (`--motion`) is the caller's choice, and `handed-check --strap`
+finds it. A front or back walk's mid-step redraw (`walk_start_prompt`, `video-prompt`'s `start_still`)
+ends with the still's handedness sentences too: redrawn from the base alone, the model may put the item
+on the other wrist.
+
+**Left-facing views, drawn.** `video-set --facing right,left` films every side and diagonal view both
+ways, each from its own still: `--base side@right=E.png --base side@left=W.png --base
+front_diagonal@right=SE.png --base front_diagonal@left=SW.png …` (front and back once, as before). A
+turned view with no still for one facing is refused, naming the `gen --direction … --facing …` call
+that draws it — the engine never turns one over for the other. Items are named `side-left-walk`, the
+table reads `side (left)`, each side still is inspected for its own facing into its own copy
+(`side-left.facing.png`), every gait is aligned across all eight (`--align-cycles auto`), and a
+left-facing diagonal is canvassed, prompted ("heading diagonally toward the viewer and to the left")
+and cut (`video-loop --facing left`) as a left one. One facing keeps the item names and table as before.
+
+**The check.** `sprite-gen handed-check --strip <loop>.strip.png --direction <view> [--facing …]
+--handed … --marker '#RRGGBB'` (or `--image`, `--frames-dir`) finds the item by a saturated colour
+nothing else on the character has — a watch's screen — and checks every frame:
+
+- a view with a picture side: every blob of that hue is on that side of the body's centre (the mean x
+  of its opaque pixels);
+- every view: the item in at most one place (blobs within 2 % of the body height are one; one smaller
+  than a quarter of the largest is a speck — a clip's colour blocks tint outlines toward the item's
+  hue — recorded and drawn, not judged);
+- the near side of a side or diagonal view: the item shows in at least half the frames — in a side view,
+  against `--reference`, as more than a sliver (its largest blob larger than half the item seen whole):
+  a side view has no picture side, so a far sliver turned over must not count as the near item shown;
+- the far side of a side view: no blob larger than half the item seen whole on `--reference` (a keyed
+  front or back picture).
+
+Without `--reference` neither side-view size rule is checked; the report says so (`far_hidden` /
+`near_whole`: `checked: false`) and a near frame counts as shown by any blob.
+
+`--strap '#RRGGBB' --zone TOP,BOTTOM` adds the item's band seen without its marker: pixels of that
+colour in those rows of the body (fractions of its height), eroded so outlines drop out, wider and
+taller than 1.6 % of the body height and away from every marker blob, are another place the item
+shows. It is opt-in because dark colours are common — outlines, a hat, motion smear on the legs — and
+the zone is the character's wrist height. `--board` draws every frame with its blobs ringed (green as
+expected, red not) and bands boxed, for what pixels cannot judge: an unmarked item, an item hidden on
+the wrong hand. The exit code is 1 on a failure.
+
+A set that made its left-facing views by mirroring fails: a front view turned over puts the item on
+the wrong side; a side view facing right (item hidden on the far arm, or a sliver of it) turned over
+hides it, or leaves the sliver, on the near arm — the sliver is caught against `--reference` only; a
+diagonal turned over moves it across the picture. `tests/qa/test_handed_check.py` draws each view as it
+should look, passes it, and fails it turned over.
+
 ## 3. Frames — extract, key, check the edges
 
 `ffmpeg` extracts every frame; the clip's real fps is recorded (never assumed). Each
@@ -418,7 +522,9 @@ wider than the body (a skirt, a veil, a held object). Both fail `video-frames`'s
 edge-contact check — the clip was made, the frames were cut, and the run stops at the
 gate. The state table now routes `cheer`, `wave` and `celebrate` to the wide canvas, and
 `video-set --shape wide` forces it for every state of a batch when the costume is the
-reason. The same `--shape` is what `video-canvas` already took for a single still.
+reason. The same `--shape` is what `video-canvas` already took for a single still. The
+forced canvas is the forced-wide row (35 % above), so a jump in that batch keeps its
+head-room; an attack in it gets that row too, not its own 20 %.
 
 ## 4. Loop — period first, seam second, then the gait floor
 

@@ -48,6 +48,7 @@ from sprite_gen.spec.runio import atomic_write_text
 
 from . import chroma as chroma_mod
 from . import facing as facing_mod
+from . import handedness as handed_mod
 from .base import (
     QUALITIES,
     RESOLUTIONS,
@@ -184,8 +185,17 @@ def _make_provider(name: str, *, keep_session: bool):
 # alpha source, so `auto` does not gamble on it — the decision is made before the
 # model runs, printed, and recorded in the report (`alpha.strategy_source`).
 # An explicit `--alpha-mode native` still forces it (and fails loud on RGB).
+# The key planned this way is applied only to a raw that needs it: a raw that came
+# back with a real transparent background anyway (`chroma.classify_raw_alpha`,
+# 2026-10-04: a transparent `--ref` is answered with alpha) is published on its own
+# alpha, measured as a native one (STRATEGY_SOURCE_REFS_RAW_ALPHA), because keying
+# it again mattes the outline away. A checkerboard or key background is still keyed.
+# Because the key is the engine's plan, the engine asks for it: a prompt that names no
+# key background gets the chosen key's line (`chroma.KEY_BACKGROUND_TEXT`), since a ref
+# prompt without one came back on white and keying white takes the outline with it.
 STRATEGY_SOURCE_PROVIDER = "provider-default"
 STRATEGY_SOURCE_REFS = "refs-attached"
+STRATEGY_SOURCE_REFS_RAW_ALPHA = "refs-attached-raw-alpha"
 STRATEGY_SOURCE_EXPLICIT = "explicit"
 
 
@@ -325,6 +335,8 @@ def generate_image(
     refs: list[Path] | None = None,
     facing: str | None = None,
     facing_fix: str = "none",
+    view: str | None = None,
+    handed: list[handed_mod.Handed] | None = None,
     model: str | None = None,
     aspect_ratio: str | None = None,
     quality: str | None = None,
@@ -349,12 +361,15 @@ def generate_image(
         raise SystemExit("gen: empty prompt; pass --prompt or --prompt-file")
     if facing is not None:
         facing_mod.validate(facing, facing_fix)
+    view_text = _view_text(view, facing, facing_fix, handed)
     out = out.expanduser().resolve()
     refs = [Path(r).expanduser().resolve() for r in (refs or [])]
     for ref in refs:
         if not ref.is_file():
             raise SystemExit(f"gen: reference image not found: {ref}")
 
+    if view_text:
+        prompt += "\n\n" + view_text
     if refs and facing is not None:
         prompt += "\n\n" + facing_mod.prompt_suffix(facing)
     backend = _make_provider(provider, keep_session=keep_session)
@@ -362,6 +377,7 @@ def generate_image(
     # (native asks for alpha) and the post-process (chroma keys it out).
     strategy: str | None = None
     strategy_source: str | None = None
+    key_background: dict[str, Any] | None = None
     if transparent:
         # The layout guide is an attached image as much as a --ref is: the same step down applies.
         attached_for_strategy = [*refs, Path(LAYOUT_GUIDE_NAME)] if layout_guide else refs
@@ -371,9 +387,19 @@ def generate_image(
             raise SystemExit(f"gen: --decontam removes a chroma key; this image would use {strategy} alpha "
                              "(pass --alpha-mode chroma to key it instead)")
         if strategy_source == STRATEGY_SOURCE_REFS:
+            # The key is the engine's plan, so the engine asks for it: a ref prompt with no key
+            # background is answered on white or another light ground, and keying that takes the
+            # outline and light fills with it (2026-10-04). A key the prompt already names stays.
+            named_key = chroma_mod.named_key_background(prompt)
+            if named_key is None:
+                prompt += "\n\n" + chroma_mod.KEY_BACKGROUND_TEXT[chroma_key]
+            key_background = {"injected": named_key is None, "key": named_key or chroma_key}
             print(
                 f"[gen] {len(refs)} reference image(s) attached — using chroma keying instead of "
-                f"{backend.name}'s native alpha (native output with refs is unstable, 2026-09-08). "
+                f"{backend.name}'s native alpha (native output with refs is unstable, 2026-09-08); "
+                + (f"added a {chroma_key} key background line to the prompt; " if named_key is None
+                   else f"the prompt already asks for a {named_key} key background; ")
+                + "a result that already has a transparent background keeps its own alpha. "
                 "Pass --alpha-mode native to force it.",
                 file=sys.stderr,
             )
@@ -412,9 +438,47 @@ def generate_image(
         facing_report = None
         if refs and facing is not None:
             request, run, facing_report = facing_mod.prepare_correction(
-                backend, request, run, workdir, facing=facing, fix=facing_fix)
+                backend, request, run, workdir, facing=facing, fix=facing_fix, mirror_ok=not handed)
             raw = request.raw
         raw_bytes = verify_png(raw)
+
+        # Only the key `auto` planned because of the refs is checked against the raw; an
+        # explicit --alpha-mode chroma is the caller's own key and runs as asked.
+        raw_alpha: dict[str, Any] | None = None
+        decontam_skipped: dict[str, Any] | None = None
+        if strategy_source == STRATEGY_SOURCE_REFS:
+            raw_alpha = chroma_mod.classify_raw_alpha(raw)
+            if raw_alpha["verdict"] == chroma_mod.RAW_ALPHA_REAL:
+                if decontam != "off":
+                    # The generation is paid for and its alpha is good: decontam has no key to
+                    # remove, so it is skipped and said, not refused (see the refusal before the call).
+                    decontam_skipped = {
+                        "requested": decontam,
+                        "skipped": f"the raw came back with a transparent background "
+                                   f"({raw_alpha['alpha_zero_pct']}% alpha 0) and has no key to remove",
+                    }
+                    print(f"[gen] {'warning: ' if decontam == 'palette' else ''}--decontam {decontam} skipped: "
+                          f"{decontam_skipped['skipped']}", file=sys.stderr)
+                strategy, strategy_source = TRANSPARENCY_NATIVE, STRATEGY_SOURCE_REFS_RAW_ALPHA
+                print(
+                    f"[gen] the raw came back with a transparent background ({raw_alpha['alpha_zero_pct']}% "
+                    f"alpha 0, {raw_alpha['border_alpha_zero_pct']}% of the border) — publishing its own "
+                    "alpha instead of keying it.",
+                    file=sys.stderr,
+                )
+            elif raw_alpha["verdict"] == chroma_mod.RAW_ALPHA_AMBIGUOUS:
+                raw_alpha["warning"] = (
+                    f"the raw has some transparent pixels ({raw_alpha['alpha_zero_pct']}% alpha 0, "
+                    f"{raw_alpha['border_alpha_zero_pct']}% of the border) but not a transparent background "
+                    f"(needs {chroma_mod.RAW_ALPHA_MIN_ZERO_PCT}% and {chroma_mod.RAW_ALPHA_MIN_BORDER_ZERO_PCT}% "
+                    "of the border); keyed as planned — check the outline, or pass --alpha-mode native"
+                )
+                print(f"[gen] warning: {raw_alpha['warning']}", file=sys.stderr)
+        ref_stats = {
+            **({"key_background": key_background} if key_background is not None else {}),
+            **({"raw_alpha": raw_alpha} if raw_alpha is not None else {}),
+            **({"decontam": decontam_skipped} if decontam_skipped is not None else {}),
+        }
 
         chroma_stats: dict[str, Any] | None = None
         alpha_stats: dict[str, Any] | None = None
@@ -423,12 +487,14 @@ def generate_image(
             alpha_stats = {
                 "strategy": TRANSPARENCY_NATIVE,
                 "strategy_source": strategy_source,
+                **ref_stats,
                 **chroma_mod.verify_native_alpha(raw, out, white_check=white_check),
             }
         elif strategy == TRANSPARENCY_CHROMA:
             chroma_stats = chroma_mod.key_transparent(raw, out, key=chroma_key, white_check=white_check,
                                                       decontam=decontam)
-            alpha_stats = {"strategy": TRANSPARENCY_CHROMA, "strategy_source": strategy_source, **chroma_stats}
+            alpha_stats = {"strategy": TRANSPARENCY_CHROMA, "strategy_source": strategy_source,
+                           **ref_stats, **chroma_stats}
         else:
             shutil.copyfile(raw, out)
         verify_png(out)
@@ -461,11 +527,36 @@ def generate_image(
             chroma=chroma_stats,
             extra={**run.extra, **({"trim_alpha": trim_stats} if trim_stats else {}),
                    **({"facing": facing_report} if facing_report else {}),
+                   **({"view": {"direction": view, "facing": facing if view in handed_mod.LATERAL_VIEWS else None,
+                                "handed": [vars(h) for h in handed or []]}} if view else {}),
                    **({"layout_guide": guide_cell} if guide_cell else {})},
         )
     finally:
         if owns_workdir:
             shutil.rmtree(workdir, ignore_errors=True)
+
+
+def _view_text(view: str | None, facing: str | None, facing_fix: str, handed: list[handed_mod.Handed] | None) -> str:
+    """`--direction`: the engine's sentence for drawing the still at that view, turned to `facing` (the side
+    and diagonal views), then where each `--handed` item is in it (`handedness.text`)."""
+    if view is None:
+        if handed:
+            raise SystemExit("gen: --handed needs --direction: where an item shows depends on the view")
+        return ""
+    handed_mod.validate_view(view, facing)
+    if view not in handed_mod.LATERAL_VIEWS and facing is not None:
+        raise SystemExit(f"gen: the {view} view is not turned to a side; drop --facing")
+    if handed and facing_fix == "mirror":
+        raise SystemExit("gen: --facing-fix mirror turns the picture over and moves every --handed item to the other "
+                         "side; use regen (it never mirrors with --handed) or none")
+    # The view sentences are the video pipeline's (a still is drawn for the clip that starts from it).
+    from sprite_gen.video.batch import still_view_text
+
+    text = still_view_text(view, facing or "right")
+    text = text[0].upper() + text[1:] + "."
+    if handed:
+        text += " " + handed_mod.text(handed, view, facing)
+    return text
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -499,6 +590,8 @@ def _run(args: argparse.Namespace) -> int:
         refs=args.ref,
         facing=None if args.facing == "preserve" else args.facing,
         facing_fix=args.facing_fix,
+        view=getattr(args, "direction", None),
+        handed=handed_mod.parse_all(list(getattr(args, "handed", None) or [])) or None,
         model=args.model,
         aspect_ratio=args.aspect_ratio,
         quality=args.quality,
@@ -609,7 +702,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=ALPHA_MODE_AUTO,
         help=(
             "transparency strategy for --transparent: auto = the provider's declared strategy "
-            "(native on codex and openai, but chroma whenever --ref is attached — native alpha with refs is unstable); "
+            "(native on codex and openai, but chroma whenever --ref is attached — native alpha with refs is unstable — "
+            "with the --chroma-key background line added to a prompt that names no key); "
             "chroma forces chroma keying (e.g. a codex prompt that already carries a key background); "
             "native forces native alpha and is refused on a provider that cannot return alpha"
         ),
@@ -625,6 +719,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--chroma-key", choices=sorted(chroma_mod.KEYS), default="magenta")
     parser.add_argument("--facing", choices=(*facing_mod.FACINGS, "preserve"), default="preserve", help="with --ref: required direction; preserve (default) leaves prompt and pixels unchanged")
     parser.add_argument("--facing-fix", choices=facing_mod.FIXES, default="none", help="with --ref and --facing: record only (none, default), or opt into mirror / one regen")
+    parser.add_argument("--direction", choices=handed_mod.VIEWS, help="draw the still at this sprite view: the engine's view sentence is added to the prompt (side and diagonal views also take --facing right|left)")
+    parser.add_argument("--handed", action="append", default=[], metavar="ITEM=SIDE [PART]", help="with --direction: an asymmetric item on one of the character's own sides, e.g. 'the black smartwatch=left wrist' (repeatable); the prompt says where it is in this view, and the still is never mirrored")
     parser.add_argument("--trim-alpha", action="store_true", help="with --transparent: crop the published PNG to its opaque bbox so the bottom edge is the foot line (margins reported)")
     parser.add_argument(
         "--layout-guide",

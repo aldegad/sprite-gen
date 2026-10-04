@@ -12,6 +12,7 @@ from sprite_gen.background import tile
 from sprite_gen.curate import anchor
 from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, compose_layers, export_aseprite, export_pngs
 from sprite_gen.qa import correction_loop, inspect, preview, score, motion
+from sprite_gen.qa import handed as handed_check
 from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
 from sprite_gen.gen import gen_set, prepare, video
 from sprite_gen.video import batch as video_batch
@@ -355,6 +356,12 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Directions x states end to end (canvas -> video -> frames -> loop), rate-limit aware, one report per item.",
         video_batch.add_arguments,
         video_batch.run,
+    ),
+    # Handedness (docs/video-pipeline.md#handedness--an-item-on-one-side): an asymmetric item's side, checked by its colour per frame.
+    "handed-check": (
+        "Check that a colour-marked asymmetric item (a watch on one wrist) is on the side its handedness puts it in every frame of a still or loop; a board for the eye.",
+        handed_check.add_arguments,
+        handed_check.run,
     ),
     "video-cycle-align": (
         "One cycle length for every direction of a set: resample each loop to the median length (RIFE between source frames only), start on a foot strike.",
