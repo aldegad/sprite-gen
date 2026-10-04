@@ -120,6 +120,8 @@ sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --
 # 항목별로: video-canvas → video → video-frames → video-loop; set/table.md 가 모든 결과의 이름을 담는다
 ```
 
+에이전트에 연결된 영상 MCP 로 클립을 만든다면: 지크(ZCRE) MCP 로 에이전트가 사용자 본인의 ZCRE 계정에서 클립을 만들고 sprite-gen 이 그 클립을 자른다. `sprite-gen video-prompt --direction side --state walk --no-last-frame` 가 프롬프트를 내고, 받은 mp4 는 `video-frames`·`video-loop` 가 받는다. ZCRE 의 Grok Imagine 1.5 에는 끝 프레임이 없어 걷기·달리기·점프만 된다([방법](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre)).
+
 **C · 유틸리티** — 각각 독립적으로 쓴다.
 
 ```bash

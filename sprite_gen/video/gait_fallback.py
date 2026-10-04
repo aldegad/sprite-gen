@@ -22,6 +22,7 @@ from pathlib import Path
 from PIL import Image
 
 from sprite_gen._deps import np
+from sprite_gen.util.resample import transform_cell
 
 # Height change over the clip, from the fitted trend, at which the frames are scaled back.
 # Nine in ten walk clips stay under it (median 0.5 %): their change is a head bob and hair.
@@ -66,8 +67,9 @@ def scale_drift(frames: list[Image.Image]) -> dict:
 def undo_scale(frames: list[Image.Image], measured: dict) -> list[Image.Image]:
     """Each frame scaled to the first frame's fitted height about its fitted foot point.
 
-    Premultiplied while it is resampled, so the soft edge does not pick up the colour that
-    sits under fully transparent pixels.
+    Coverage and colour are resampled apart (`transform_cell`), so the soft edge neither picks
+    up the colour under fully transparent pixels nor rings into a colour the frame did not have:
+    BICUBIC over the keyed frame drew a light rim and a key tint around the outline.
     """
     height, foot_x, foot_y = measured["height"], measured["foot_x"], measured["foot_y"]
     out = []
@@ -76,9 +78,7 @@ def undo_scale(frames: list[Image.Image], measured: dict) -> list[Image.Image]:
         ax, ay = float(foot_x[k]), float(foot_y[k])
         # Output (x, y) reads input anchor + (x - anchor) / s.
         inverse = (1 / s, 0.0, ax * (1 - 1 / s), 0.0, 1 / s, ay * (1 - 1 / s))
-        resampled = frame.convert("RGBa").transform(frame.size, Image.Transform.AFFINE, inverse,
-                                                    resample=Image.Resampling.BICUBIC)
-        out.append(resampled.convert("RGBA"))
+        out.append(transform_cell(frame, frame.size, inverse))
     return out
 
 

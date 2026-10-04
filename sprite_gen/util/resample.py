@@ -4,7 +4,9 @@
 The places that scaled a keyed picture with LANCZOS go through `resize_cell`: a loop's cells
 (`video-loop`), a row frame fitted to its cell and the twins beside a
 pixel-unfake frame (`extract`), a sliced sheet's figures (`slice-sheet`) and a scene's layers
-(`scene`). docs/video-pipeline.md "Cells".
+(`scene`). The places that mapped one with a BICUBIC affine go through `transform_cell`: the
+gait fallback's scaled-back frames (`video-loop`) and a curated transform on a smooth row
+(`curation.apply_transform`). docs/video-pipeline.md "Cells".
 """
 from __future__ import annotations
 
@@ -62,6 +64,37 @@ def resize_cell(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     mix = np.stack([scaled(src[..., c] * alpha, Image.Resampling.HAMMING) for c in range(3)], axis=-1)
     low, high = _window_extrema(alpha, _support_bounds(image.height, h, 1.0), _support_bounds(image.width, w, 1.0))
     cover = np.clip(scaled(alpha, Image.Resampling.LANCZOS), low, high)
+    cover = np.where(mix_alpha > 1e-3, np.round(cover), 0)
+    colour = np.where((cover > 0)[..., None], np.round(mix / np.maximum(mix_alpha, 1e-3)[..., None]), 0)
+    out = np.dstack([np.clip(colour, 0, 255), np.clip(cover, 0, 255)]).astype(np.uint8)
+    return Image.fromarray(out, "RGBA")
+
+
+def transform_cell(image: Image.Image, size: tuple[int, int], inverse: tuple[float, ...]) -> Image.Image:
+    """`resize_cell` for an affine map: one RGBA cell moved, scaled, rotated or sheared into `size`.
+
+    `inverse` is Pillow's AFFINE data, the output -> input map. BICUBIC over premultiplied RGBA
+    rings the way LANCZOS does (a smaller negative lobe, the same division by low coverage at
+    the edge), so coverage and colour are mapped apart here too. Coverage keeps BICUBIC's edge,
+    held to the range of the 2 x 2 source pixels the colour mixes from; colour is a BILINEAR mix
+    of premultiplied colour, a filter with no negative lobe. docs/video-pipeline.md "Cells"."""
+    w, h = size
+    src = np.asarray(image.convert("RGBA"), dtype=np.float32)
+    alpha = src[..., 3]
+    a, b, c, d, e, f = inverse
+
+    def mapped(channel: np.ndarray, resample: Image.Resampling, dx: float = 0.0, dy: float = 0.0) -> np.ndarray:
+        layer = Image.fromarray(np.ascontiguousarray(channel), "F")
+        return np.asarray(layer.transform(size, Image.Transform.AFFINE, (a, b, c + dx, d, e, f + dy), resample=resample),
+                          dtype=np.float32)
+
+    mix_alpha = mapped(alpha, Image.Resampling.BILINEAR)
+    mix = np.stack([mapped(src[..., k] * alpha, Image.Resampling.BILINEAR) for k in range(3)], axis=-1)
+    # The four source pixels BILINEAR reads sit half a pixel either side of the mapped centre;
+    # NEAREST at those four offsets reads exactly them (nothing outside the source: alpha 0).
+    corners = [mapped(alpha, Image.Resampling.NEAREST, dx, dy) for dx in (-0.5, 0.5) for dy in (-0.5, 0.5)]
+    low, high = np.minimum.reduce(corners), np.maximum.reduce(corners)
+    cover = np.clip(mapped(alpha, Image.Resampling.BICUBIC), low, high)
     cover = np.where(mix_alpha > 1e-3, np.round(cover), 0)
     colour = np.where((cover > 0)[..., None], np.round(mix / np.maximum(mix_alpha, 1e-3)[..., None]), 0)
     out = np.dstack([np.clip(colour, 0, 255), np.clip(cover, 0, 255)]).astype(np.uint8)

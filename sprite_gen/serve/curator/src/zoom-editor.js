@@ -1049,7 +1049,7 @@ function openZoom(stateName, idx, keepWidth) {
 
     // 굽기가 해부를 확정하는 프레임 = 재생 첫 슬롯. 신선도 판정은 이 프레임으로만 한다
     // (프레임마다 보면 깜빡임처럼 정상적으로 다른 프레임까지 거부해 프리뷰가 죽는다).
-    // 그림이 아니라 **키**다. 굽기(BICUBIC)와 캔버스(NEAREST)는 같은 원본·같은 변형에도
+    // 그림이 아니라 **키**다. 굽기(`transform_cell`)와 캔버스(NEAREST)는 같은 원본·같은 변형에도
     // 다른 픽셀을 만들어서, 여기서 프레임을 다시 그려 지문을 찍으면 영구 불일치가 된다.
     const breatheRef = () => breatheReferenceKey(stateName);
 

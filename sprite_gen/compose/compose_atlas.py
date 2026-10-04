@@ -100,7 +100,7 @@ def _run(args: argparse.Namespace):
     # missing — a plain bake must never silently fall back to pixel.
     variants = {state: frame_variant(curation, state) for state in states}
     # pixel-variant rows of a fit.pixel_unfake run re-snap curated transforms to the
-    # logical grid (plain rows keep the smooth BICUBIC bake — they are not grid art).
+    # logical grid (plain rows keep the smooth bake, `transform_cell` — they are not grid art).
     snap_scale = pixel_snap_scale(request)
 
     # 아틀라스 셀 재사용 (maintainer 승인 2026-07-16): 같은 (원본 프레임, 변형, 픽셀편집)으로

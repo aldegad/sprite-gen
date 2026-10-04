@@ -183,6 +183,8 @@ def encode_frames(work: Path, scene: Scene, formats: set, settings: dict):
         if gif["fps"] != scene.fps:
             filters.append(f"fps={gif['fps']}")
         if gif["width"] != scene.width:
+            # LANCZOS stays here: the frames are opaque composites, so nothing is divided by a
+            # low coverage (the ring `resize_cell` removes from keyed layers cannot form).
             filters.append(f"scale={gif['width']}:-1:flags=lanczos")
         chain = ",".join(filters)
         pal, dest = work / "palette.png", work / "scene.gif"

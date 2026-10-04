@@ -218,4 +218,5 @@ printed or written** — only the download host (`vidgen.x.ai`).
 
 ## Related
 
+- [video-pipeline.md](video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre) — a clip your agent makes with a video MCP (ZCRE) instead of this command
 - [docs/README.md](README.md) — documentation index
