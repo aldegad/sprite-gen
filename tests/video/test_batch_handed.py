@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from PIL import Image, ImageDraw
 
 from sprite_gen.gen import handedness as h
 from sprite_gen.video import batch
@@ -115,3 +116,25 @@ def test_cli_threads_both_facings_and_items(monkeypatch, tmp_path) -> None:
                        "--handed", "the black smartwatch=left wrist"]) == 0
     assert seen[0]["facing"] == "right,left" and seen[0]["handed"] == WATCH
     assert set(seen[0]["bases"]) == {"side@right", "side@left"}
+
+
+def test_a_front_walk_redrawn_mid_step_is_told_where_the_item_is(tmp_path, offline) -> None:
+    """The front and back walks film from the still redrawn mid-step; that redraw says the item's side too,
+    so a redraw from the reference alone does not move it, and its clip prompt is anchored to that still."""
+    redraws: list[str] = []
+
+    def paint(base, prompt, out, report, *, log, provider=None):
+        redraws.append(prompt)
+        out.write_bytes(base.read_bytes())
+        report.write_text(json.dumps({"prompt": prompt, "refs": [str(base)]}))
+        return 0
+
+    base = Image.new("RGB", (96, 128), (0, 255, 0))
+    ImageDraw.Draw(base).rectangle((36, 20, 59, 109), fill=(120, 60, 40))
+    base.save(tmp_path / "front.png")
+    result = batch.run_set(bases={"front": tmp_path / "front.png"}, states=["walk"], root=tmp_path, character=None,
+                           duration=3, resolution="720p", key="green", concurrency=1, force=False, gap=0,
+                           video_runner=_video({}), redraw_runner=paint, align_cycles="off", handed=WATCH)
+    assert result["ok"] == 1 and result["items"][0]["walk_start"]["redrawn"] is True
+    assert redraws == [batch.walk_start_prompt("front", result["items"][0]["walk_start"]["key"], WATCH)]
+    assert redraws[0].endswith(h.text(WATCH, "front")) and "at the right of the picture" in redraws[0]

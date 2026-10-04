@@ -319,7 +319,9 @@ view — the item is not named at all: "The wrist in front of the body stays bar
 image, for the whole clip." A clip prompt that names a hidden item, and lists what the near arm must
 not wear, draws it on the near arm. A far arm that swings into view can still grow a bare band in a
 near-side view; holding the arms still (`--motion`) is the caller's choice, and `handed-check --strap`
-finds it.
+finds it. A front or back walk's mid-step redraw (`walk_start_prompt`, `video-prompt`'s `start_still`)
+ends with the still's handedness sentences too: redrawn from the base alone, the model may put the item
+on the other wrist.
 
 **Left-facing views, drawn.** `video-set --facing right,left` films every side and diagonal view both
 ways, each from its own still: `--base side@right=E.png --base side@left=W.png --base
@@ -340,9 +342,14 @@ nothing else on the character has — a watch's screen — and checks every fram
 - every view: the item in at most one place (blobs within 2 % of the body height are one; one smaller
   than a quarter of the largest is a speck — a clip's colour blocks tint outlines toward the item's
   hue — recorded and drawn, not judged);
-- the near side of a side or diagonal view: the item shows in at least half the frames;
+- the near side of a side or diagonal view: the item shows in at least half the frames — in a side view,
+  against `--reference`, as more than a sliver (its largest blob larger than half the item seen whole):
+  a side view has no picture side, so a far sliver turned over must not count as the near item shown;
 - the far side of a side view: no blob larger than half the item seen whole on `--reference` (a keyed
-  front or back picture); without one this rule is reported unchecked.
+  front or back picture).
+
+Without `--reference` neither side-view size rule is checked; the report says so (`far_hidden` /
+`near_whole`: `checked: false`) and a near frame counts as shown by any blob.
 
 `--strap '#RRGGBB' --zone TOP,BOTTOM` adds the item's band seen without its marker: pixels of that
 colour in those rows of the body (fractions of its height), eroded so outlines drop out, wider and
@@ -353,9 +360,10 @@ expected, red not) and bands boxed, for what pixels cannot judge: an unmarked it
 the wrong hand. The exit code is 1 on a failure.
 
 A set that made its left-facing views by mirroring fails: a front view turned over puts the item on
-the wrong side; a side view facing right (item hidden on the far arm) turned over hides it on the near
-arm; a diagonal turned over moves it across the picture. `tests/qa/test_handed_check.py` draws each
-view as it should look, passes it, and fails it turned over.
+the wrong side; a side view facing right (item hidden on the far arm, or a sliver of it) turned over
+hides it, or leaves the sliver, on the near arm — the sliver is caught against `--reference` only; a
+diagonal turned over moves it across the picture. `tests/qa/test_handed_check.py` draws each view as it
+should look, passes it, and fails it turned over.
 
 ## 3. Frames — extract, key, check the edges
 

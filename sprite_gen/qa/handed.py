@@ -13,7 +13,11 @@ each blob's centre is compared with the body's own centre (the mean x of its opa
 - the near side of a side or diagonal view: the item must show in at least half the frames;
 - the far side of a side view: the item is hidden or a sliver — no blob may be larger than half the
   item seen whole, measured on `--reference` pictures of the same character (front or back, the item
-  in full view). Without a reference this one rule is not checked, and the report says so.
+  in full view);
+- the near side of a side view, against `--reference`: a frame shows the item only when it is more than
+  that sliver. A side view has no picture side, so size is all that tells the near wrist from the far
+  one: a far sliver turned over to face the other way must not count as the near item shown.
+  Without a reference neither size rule is checked (`far_hidden` / `near_whole`), and the report says so.
 
 The screen colour cannot see the item's band without its marker — a watch's bare strap on the other arm.
 `--strap` names the band's colour (usually dark) and `--zone` the rows the item sits in (black is common:
@@ -22,8 +26,9 @@ taller than an outline, is another place the item shows. Specks of the marker's 
 blocks leave on outlines are recorded and not judged.
 
 A picture turned over moves the item: a front view turned over puts it on the wrong side, a side view
-facing right (the item on the far arm, hidden) turned over to face left hides it on the near arm. So a
-set that made its left-hand views by mirroring fails here (`tests/qa/test_handed_check.py` proves it).
+facing right (the item on the far arm, hidden or a sliver) turned over to face left hides it, or leaves only
+that sliver, on the near arm. So a set that made its left-hand views by mirroring fails here — a side view's
+sliver only against `--reference` (`tests/qa/test_handed_check.py` proves it).
 Pixels cannot judge everything — an unmarked item, an item drawn on the wrong hand where it stays hidden —
 so `--board` draws every frame with its blobs ringed (green as expected, red not) for a person to look at.
 """
@@ -229,16 +234,24 @@ def check(frames: list[Image.Image], *, item: handed_mod.Handed, view: str, faci
         rows.append({**m, "bad": bad})
         if bad:
             fails.append({"frame": i, "why": bad})
-    shown = sum(1 for r in rows if r["blobs"])
+    # A side view has no picture side, so near and far differ only in size: on the near side a frame shows the
+    # item when its largest blob is more than a sliver (the far side's own limit), or a far sliver turned over
+    # would count as the near item shown.
+    sized = view == "side" and expect["depth"] == "near" and full is not None
+    shown = sum(1 for r in rows if r["blobs"] and (not sized or r["blobs"][0]["ratio"] > FAR_MAX * full))
     rules: dict[str, Any] = {}
     if expect["picture"]:
         rules["picture_side"] = expect["picture"]
     if expect["depth"] == "near":
         rules["near_shown"] = {"min": NEAR_SHOWN_MIN, "shown": shown, "frames": len(rows),
                                "ok": shown >= NEAR_SHOWN_MIN * len(rows)}
-    if view == "side" and expect["depth"] == "far":
-        rules["far_hidden"] = ({"checked": False, "why": "no --reference: the item seen whole is unknown"} if full is None
-                               else {"checked": True, "full_ratio": round(full, 6), "max": FAR_MAX})
+    if view == "side":
+        size = ({"checked": False, "why": "no --reference: the item seen whole is unknown"} if full is None
+                else {"checked": True, "full_ratio": round(full, 6)})
+        if expect["depth"] == "far":
+            rules["far_hidden"] = {**size, **({"max": FAR_MAX} if full is not None else {})}
+        else:
+            rules["near_whole"] = {**size, **({"min": FAR_MAX} if full is not None else {})}
     ok = not fails and rules.get("near_shown", {}).get("ok", True)
     return {
         "kind": "sprite-gen-handed-check",
@@ -325,7 +338,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--marker", required=True, help="#RRGGBB: a saturated colour of the item that nothing else on the character has")
     parser.add_argument("--strap", help="#RRGGBB: the item's band colour (a watch strap, usually dark); a band of it with no marker on it, away from the marker, counts as another place the item shows. Use with --zone")
     parser.add_argument("--zone", default="0,1", help="TOP,BOTTOM: the rows the item sits in, as fractions of the body's height from its top (default 0,1, the whole body); e.g. 0.5,0.9 for a wrist")
-    parser.add_argument("--reference", action="append", type=Path, default=[], help="a keyed front or back picture of the same character with the item in full view (repeatable): a side view's far item must stay smaller than half of it")
+    parser.add_argument("--reference", action="append", type=Path, default=[], help="a keyed front or back picture of the same character with the item in full view (repeatable): in a side view the far item must stay smaller than half of it, and the near item counts as shown only when larger")
     parser.add_argument("--report", type=Path, help="write the report JSON here")
     parser.add_argument("--board", type=Path, help="write the review board PNG here")
 
@@ -344,15 +357,17 @@ def run(**kwargs: object) -> int:
         atomic_write_text(Path(str(kwargs["report"])), json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     summary = {k: report[k] for k in ("view", "facing", "expect", "frames", "frames_shown", "ok")}
     summary["fails"] = len(report["fails"])
-    if report["rules"].get("far_hidden", {}).get("checked") is False:
-        summary["unchecked"] = report["rules"]["far_hidden"]["why"]
+    for rule in ("far_hidden", "near_whole"):
+        if report["rules"].get(rule, {}).get("checked") is False:
+            summary["unchecked"] = f"{rule}: {report['rules'][rule]['why']}"
     print(json.dumps(summary, ensure_ascii=False))
     if not report["ok"]:
         for f in report["fails"][:10]:
             print(f"handed-check: frame {f['frame']}: {'; '.join(f['why'])}", file=sys.stderr)
         if report["rules"].get("near_shown", {}).get("ok") is False:
             r = report["rules"]["near_shown"]
-            print(f"handed-check: on the near side the item shows in {r['shown']} of {r['frames']} frames", file=sys.stderr)
+            whole = " more than a sliver" if report["rules"].get("near_whole", {}).get("checked") else ""
+            print(f"handed-check: on the near side the item shows{whole} in {r['shown']} of {r['frames']} frames", file=sys.stderr)
     return 0 if report["ok"] else 1
 
 

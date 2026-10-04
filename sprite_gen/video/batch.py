@@ -381,15 +381,19 @@ def starts_mid_step(state: str, direction: str) -> bool:
     return state == "walk" and direction in WALK_START_TEXT
 
 
-def walk_start_prompt(direction: str, key: str | None = None) -> str:
-    """The redraw sentence for a walk's mid-step start still; with `key` (green / magenta) the background line."""
+def walk_start_prompt(direction: str, key: str | None = None, handed: list[Handed] | None = None) -> str:
+    """The redraw sentence for a walk's mid-step start still; with `key` (green / magenta) the background line,
+    then with `handed` where each asymmetric item is in this view (`handedness.text`, the still's sentences)."""
     if direction not in WALK_START_TEXT:
         raise SystemExit(f"video: no mid-step start still for the {direction} view (only {', '.join(WALK_START_TEXT)})")
-    if key is None:
-        return WALK_START_TEXT[direction]
-    if key not in KEY_BACKGROUND_TEXT:
-        raise SystemExit(f"video: a mid-step start still is drawn on a green or magenta key, not {key!r}")
-    return f"{WALK_START_TEXT[direction]} {KEY_BACKGROUND_TEXT[key]}"
+    text = WALK_START_TEXT[direction]
+    if key is not None:
+        if key not in KEY_BACKGROUND_TEXT:
+            raise SystemExit(f"video: a mid-step start still is drawn on a green or magenta key, not {key!r}")
+        text += f" {KEY_BACKGROUND_TEXT[key]}"
+    if handed:
+        text += " " + handed_mod.text(handed, direction)
+    return text
 
 
 def run_video_cli(image: Path, prompt: str, out: Path, report: Path, *, duration: int, resolution: str, log: Path, last_frame: Path | None = None) -> int:
@@ -410,8 +414,10 @@ def run_redraw_cli(base: Path, prompt: str, out: Path, report: Path, *, log: Pat
 
 
 def walk_start_still(base: Path, direction: str, item_dir: Path, *, key: str, force: bool,
-                     runner: Callable[..., int] = run_redraw_cli, provider: str | None = None) -> tuple[Path, dict[str, Any]]:
-    """The base still redrawn mid-step for a front or back walk (`WALK_START_TEXT`), on the base's own key.
+                     runner: Callable[..., int] = run_redraw_cli, provider: str | None = None,
+                     handed: list[Handed] | None = None) -> tuple[Path, dict[str, Any]]:
+    """The base still redrawn mid-step for a front or back walk (`WALK_START_TEXT`), on the base's own key,
+    told where each `handed` item is (a redraw from a reference alone can move it to the other side).
 
     Reused when the same prompt already drew it from the same base (unless `force`)."""
     with Image.open(base) as im:
@@ -419,7 +425,7 @@ def walk_start_still(base: Path, direction: str, item_dir: Path, *, key: str, fo
     if kind not in KEY_BACKGROUND_TEXT:
         raise SystemExit(f"the {direction} walk starts from a still redrawn mid-step on a green or magenta key, and this "
                          f"base's corners are not one (key {key}); pass --walk-start as-given to film from the base itself")
-    prompt = walk_start_prompt(direction, kind)
+    prompt = walk_start_prompt(direction, kind, handed)
     out, report = item_dir / "walk-start.png", item_dir / "walk-start.report.json"
     if out.is_file() and report.is_file() and not force:
         try:
@@ -515,7 +521,7 @@ def run_item(
             facing_report = None
             if starts_mid_step(state, direction) and walk_start == "redraw":
                 still, result["walk_start"] = walk_start_still(base, direction, item_dir, key=key, force=force,
-                                                               runner=redraw_runner, provider=still_provider)
+                                                               runner=redraw_runner, provider=still_provider, handed=handed)
             if direction == "side":
                 if prepare_side is not None:
                     still, facing_report = prepare_side(base)

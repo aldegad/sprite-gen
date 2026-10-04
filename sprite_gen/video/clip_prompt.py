@@ -86,7 +86,7 @@ def plan_prompt(*, direction: str, state: str, facing: str = "right", character:
     if mid_step:
         record["start_still"] = {
             "why": "a front or back walk films from its still redrawn mid-step; from a standing still the clip model walks askew",
-            "prompt": batch_mod.walk_start_prompt(direction, key),
+            "prompt": batch_mod.walk_start_prompt(direction, key, handed),
             "command": "sprite-gen gen --ref <still.png> --prompt-file <start-prompt.txt> --out <dir>/walk-start.png --report <dir>/walk-start.report.json",
         }
     return record

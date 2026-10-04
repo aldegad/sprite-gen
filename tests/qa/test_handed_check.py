@@ -62,6 +62,7 @@ def test_each_view_drawn_as_its_handedness_says_passes(view, facing) -> None:
     report = check(loop(DRAWN[(view, facing)]), view, facing)
     assert report["ok"], report["fails"]
     assert report["expect"] == h.placement("left", view, facing)
+    assert check(loop(DRAWN[(view, facing)]), view, facing, references=[figure("right")])["ok"]
 
 
 @pytest.mark.parametrize("view,facing,as_view,as_facing", [
@@ -92,6 +93,26 @@ def test_the_wrong_wrist_in_a_side_view_needs_a_reference_to_be_caught() -> None
     assert not caught["ok"] and "on the far side" in caught["fails"][0]["why"][0]
     sliver = check([figure("near", screen=4)], "side", "right", references=[figure("right")])
     assert sliver["ok"]
+
+
+def test_a_far_sliver_turned_over_is_not_the_near_item_shown() -> None:
+    """Facing right, the far wrist's watch may show as a sliver as the arm swings. Turned over to face left,
+    that sliver is on the arm behind the body — the own right wrist, the wrong one — and the near wrist is
+    bare. A side view has no picture side, so only size against a reference tells the two apart; without
+    one the near side's size is reported unchecked, not passed as checked."""
+    reference = [figure("right")]
+    right = [figure("near", swing=s, screen=4) for s in (0, 2, 4, 6, 4, 2)]
+    assert check(right, "side", "right", references=reference)["ok"]
+    mirrored = [ImageOps.mirror(f) for f in right]
+    caught = check(mirrored, "side", "left", references=reference)
+    assert not caught["ok"] and caught["fails"] == []
+    assert caught["rules"]["near_shown"] == {"min": 0.5, "shown": 0, "frames": 6, "ok": False}
+    assert caught["rules"]["near_whole"]["checked"] is True and caught["frames_shown"] == 0
+    unchecked = check(mirrored, "side", "left")
+    assert unchecked["rules"]["near_whole"] == {"checked": False, "why": "no --reference: the item seen whole is unknown"}
+    # the near watch drawn in full counts as shown against the same reference
+    drawn = check(loop("near"), "side", "left", references=reference)
+    assert drawn["ok"] and drawn["rules"]["near_shown"]["shown"] == 6
 
 
 def test_the_item_in_two_places_fails_and_a_split_screen_is_one() -> None:
