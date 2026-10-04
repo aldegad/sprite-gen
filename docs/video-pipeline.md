@@ -10,8 +10,8 @@ hand on 2026-09-08 (15 loops: 3 directions × 5 states) and the rules below are 
 ones that survived that day.
 
 ```
-still ──video-canvas──▶ canvas.png ──video──▶ clip.mp4 ──video-frames──▶ keyed/*.png ──video-loop──▶ strip · gif · webp
-                    │                     ▲                                                       └── video-set runs all four per (direction, state)
+still ──video-canvas──▶ canvas.png ──video──▶ clip.mp4 ──video-frames──▶ keyed/*.png ──video-loop──▶ strip · gif · webp ──video-cycle-align──▶ one cycle length (a set)
+                    │                     ▲                                                       └── video-set runs all four per (direction, state), then aligns each walk or run across its directions
                     └──video-prompt──▶ your agent's video MCP (ZCRE)
 ```
 
@@ -23,6 +23,7 @@ still ──video-canvas──▶ canvas.png ──video──▶ clip.mp4 ─�
 | `sprite-gen video-frames` | `sprite_gen/video/frames.py` | mp4 → `raw/`, `keyed/` RGBA frames + report |
 | `sprite-gen video-loop` | `sprite_gen/video/loop.py` | keyed frames → `cycle/`, `<name>.strip.png` + `.strip.json`, `<name>.gif`, `<name>.webp` + report |
 | `sprite-gen video-set` | `sprite_gen/video/batch.py` | bases × states → one folder per item, `set.report.json`, `table.md` |
+| `sprite-gen video-cycle-align` | `sprite_gen/video/align.py` | the loop directories of one walk or run, one per direction → one cycle length, each loop turned to start on a foot strike, + report ([loop repair](loop-repair.md) section 4) |
 | `sprite-gen video-follow` | `sprite_gen/video/follow.py` | a loop directory + an ellipse → the strip, GIF and WebP with that region following the body ([section 6](#6-follow-through--video-follow)) |
 
 Wrappers: `scripts/video_canvas.py`, `scripts/video_frames.py`, `scripts/video_loop.py`,
@@ -257,8 +258,12 @@ films from the base itself. Side and diagonal walks, and every other state, film
 sprite-gen never calls a video MCP. When your own agent (Claude, Codex) has one connected — ZCRE's
 remote MCP (`https://mcp.zcre.ai/mcp`, signed in with your own ZCRE account, paid from your own
 credits, under ZCRE's terms) — the agent makes the clip with that MCP's tools and sprite-gen does the
-rest: `video-prompt` prints the prompt `video-set` would send, and `video-frames` and `video-loop` read
-the mp4 the agent saved. What crosses the boundary is a PNG, a prompt and an mp4.
+rest, stage by stage, with the verbs `video-set` runs: `video-prompt` prints the prompt `video-set`
+would send, `video-frames` and `video-loop` cut each mp4 the agent saved, and for a walk or run cut in
+two or more directions `video-cycle-align` gives them one cycle length, each turned to start on a
+foot strike ([loop repair](loop-repair.md) section 4). `video-set` itself is not run on this route, so
+what it does for a set happens only when you run it. What crosses the boundary is a PNG, a prompt and
+an mp4.
 
 ```bash
 sprite-gen video-canvas --still still.png --state walk --facing right --out item/canvas.png --report item/canvas.report.json
@@ -268,17 +273,34 @@ sprite-gen video-prompt --direction side --state walk --facing right --no-last-f
 # duration, the credits shown to the user and approved, create_generation with that quote, query_zcre
 # status until it succeeds, the output saved as item/clip.mp4
 sprite-gen video-frames --clip item/clip.mp4 --out-dir item/frames --spill auto --reference item/canvas.png
-sprite-gen video-loop --frames-dir item/frames/keyed --out-dir item/loop --fps 24 --state walk --cycle auto --facing right --name side-walk
+sprite-gen video-loop --frames-dir item/frames/keyed --out-dir item/loop --fps <fps in item/frames/frames.report.json> --state walk --cycle auto --anchor motion-auto --facing right --name side-walk
+# a set, once the walk is cut in every direction (each as above, in its own folder):
+sprite-gen video-cycle-align --loop-dir front/loop --loop-dir side/loop --loop-dir back/loop --view front --view side@right --view back --report walk.cycle-align.json
 ```
+
+A walk or run is cut with `--anchor motion-auto`. A clip on this route has no end frame to bring it
+back to its first frame's size, and `motion-auto` is the anchor that measures the size over the clip
+and holds it before the cycle search
+([section 4](#4-loop--period-first-seam-second-then-the-gait-floor)); `video-loop`'s own default for a
+walk or run, `body`, does not. A jump takes no `--anchor`: `motion-auto` is refused for a state that
+is not a walk or run. `--fps` is the frames report's own, never a number written in by hand.
+
+The set stage is the same step `video-set` runs after its loops are cut (`--align-cycles auto`, its
+default): one `--loop-dir` per direction of the same walk or run, one `--view` each in the same
+order, so that every loop starts as the same own foot lands wherever its view can tell the feet
+apart. A frame that falls between two source frames is made by RIFE, and the command fails where one
+is needed and RIFE is not installed; `--between nearest` makes none.
 
 `--character` or `--motion` words that turn the subject another way than `--facing`, or put a
 `--handed` item on its other side, come back in `warnings`; the prompt is the same either way
 ([prompt-assembly](prompt-assembly.md)).
 
 `video-prompt --json` also gives the duration (the state's own, as `video-set`), whether the clip
-ends on the canvas (`last_frame`), the loop cut (`cycle`) and these commands with placeholders; a
-front or back walk adds `start_still`, the mid-step redraw `video-set` makes before its canvas
-(`sprite-gen gen --ref`, your image provider). `--character`, `--motion` and `--model` reach the
+ends on the canvas (`last_frame`), the loop cut (`cycle`) and the canvas, clip, frames and loop
+commands with placeholders; a front or back walk adds `start_still`, the mid-step redraw `video-set`
+makes before its canvas (`sprite-gen gen --ref`, your image provider). Its `loop` command names no
+`--anchor` and it lists no set command: add `--anchor motion-auto` for a walk or run, and run
+`video-cycle-align` for a set, as above. `--character`, `--motion` and `--model` reach the
 prompt as they reach `build_prompt`. What the ZCRE route supports:
 
 | | Through ZCRE's MCP |
@@ -290,11 +312,13 @@ prompt as they reach `build_prompt`. What the ZCRE route supports:
 | Cover image | The mp4 also holds a one-frame mjpeg cover (`attached_pic`); `video-frames` skips it (`cover_streams`) and reads the first video stream that is not one (`stream_index`). |
 | Picture | H.264 `yuv420p` (4:2:0), 24 fps, as a `sprite-gen video` clip; the frames report records `codec` and `pix_fmt`. |
 | Side facing | `video-set`'s facing observation is not run on this route; check the still faces `--facing`. |
+| Set | `video-set`'s cycle alignment (`--align-cycles auto`) is not run on this route: once a walk or run is cut in two or more directions, run `video-cycle-align` on their loop directories, with each one's `--view`. |
+| Size | A clip here has no end frame, so a walk or run may grow or shrink as it plays: cut it with `--anchor motion-auto`, which holds the size before the search (section 4). `video-loop`'s default anchor for a walk or run, `body`, does not hold it. |
 
 Measured 2026-10-04, one side walk end to end on that route: a 1024² still, `video-canvas` (square,
 1.8 s), 720p 3 s, quoted and charged 52 credits, 33.6 s from submission to `succeeded`; the clip was
 960×960, 24 fps, 73 frames, H.264 `yuv420p` with an AAC track and a cover image; `video-frames` kept
-73 frames and no edge contact, and `video-loop --cycle auto` cut a periodic 20-frame walk (seam 0.72)
+73 frames and no edge contact, and `video-loop --cycle auto`, at its default anchor (`body`), cut a periodic 20-frame walk (seam 0.72)
 with three frames remade by RIFE and a jolt warning (index 0.85), as a Pro walk can carry.
 
 ### Handedness — an item on one side
@@ -639,14 +663,32 @@ for the visual review contract and manual overrides.
 A walk or run filmed from its first frame only (no end frame) often grows or shrinks as it plays:
 a front walk comes a little closer with every step, a back walk goes away. The loop is then cut on
 frames that change size, so the frame one cycle after the first is not the first's size and the
-loop pops at the wrap. A straight-line fit of the subject's opaque height over the clip measures
-it (`gait_fallback.scale_drift`); at 1 % or more (`SIZE_HOLD_MIN`) every frame is scaled back to
-the first frame's fitted height about its fitted foot point before the cycle search, so the
-search, the seam and the cells all read frames of one size. Below 1 % the fit is a head bob and
-hair and the frames are searched as filmed. The report says what was measured and done
-(`size_hold`: `drift`, `applied`, `padding_ltrb`). `--size-hold off` searches the frames as
-filmed, as before 2.24.0. Measured on one front catwalk filmed from its first frame (+2.0 % over
-3 s): the engine's seam ratio of the cut went from 1.44 to 1.19.
+loop pops at the wrap. The change is read one cycle on (`gait_fallback.cycle_drift`): the lag at
+which the pose, cut out about its feet, matches itself best (in the state's window, at most half
+the clip), and each frame's height (to a fraction of a pixel: the rows' coverage summed) against
+the frames one, two, … of those lags later. The median of those changes per frame, carried over
+the clip, is the `drift`. At 1 % or more (`SIZE_HOLD_MIN`) every frame is scaled back to the
+first frame's size about its fitted foot point before the cycle search, so the search, the seam
+and the cells all read frames of one size. Below 1 % the frames are searched as filmed.
+
+Why one cycle on, and not a line through the clip (2.24.0): a clip that starts from a standing
+pose and settles into the walk over its first steps (knees bending, the body leaning in) is a few
+pixels shorter from then on, and a line through every frame reads that one change of pose as a
+body that shrinks the whole way, and held it. The same pose a cycle later is the same size
+unless the body really changes, and the few frames of the first pose do not move a median of the
+rest. The other way round, a settle can
+pull the line flat over a walk that does grow; one cycle on, that growth is still read and held.
+On a synthetic walker that stands 6 px taller for its first frames and then walks at one size,
+the line read −2.2 % and the hold, so scaled, then found no cycle at all; one cycle on reads 0
+and the clip is cut as filmed (`tests/video/test_gait_fallback.py`).
+
+The report says what was measured and done (`size_hold`: `drift`, `applied`, `padding_ltrb`, and
+the evidence: `method: one-cycle-on`, `lag`, `pose_match` — the pose's mismatch at that lag over
+its mean across the window, 0 for an exact repeat — `pairs`, `per_lag`, the change over one lag,
+and `drift_fitted_line`, what a line through the clip would have read). `--size-hold off` searches
+the frames as filmed, as before 2.24.0. When the hold came in (2.24.0, read off the line) it was
+measured on one front catwalk filmed from its first frame (+2.0 % over 3 s): the engine's seam
+ratio of the cut went from 1.44 to 1.19.
 
 **Nothing is cut when a frame is scaled up.** A clip that shrinks is scaled up about its feet,
 and when the feet also rose in the frame (a back walk going away toward the horizon) the crown
@@ -810,7 +852,7 @@ bounce. `video-follow` puts that follow-through back on a cut loop:
 
 ```bash
 sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [--region …] \
-  [--gain 2.5] [--freq 2.4] [--zeta 0.6] [--board follow.png]
+  [--gain 2.5] [--on-fold refuse|lower] [--freq 2.4] [--zeta 0.6] [--board follow.png]
 ```
 
 - **The region** is an ellipse over the part in the strip's first cell, in cell pixels
@@ -829,11 +871,23 @@ sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [-
   at the centre and 0 at the rim (cos²), sampled as premultiplied bilinear colour; outside it no
   pixel changes. A move so large that the weight's slope folds the picture over
   (offset × π / (2 · radius) ≥ 1) is refused: lower `--gain` or give the region larger radii.
+- **`--on-fold lower`** lowers the gain for you instead of refusing. The move is the gain times
+  the move at gain 1, so the gain at which a region folds is 2 · radius / (π · move at gain 1),
+  and the strip takes the largest gain under it, in steps of 0.01 and no more than `--gain`. One
+  gain for the strip, set by the region with the smallest radius: every part hangs on the same
+  body and answers the same motion, and the recorded `gain` is then the `--gain` that gives this
+  strip by itself. It does not go under 1, the mass as measured: a region too small for that is
+  refused (the message names the largest gain that would not fold), so a follow-through is never
+  quietly weaker than the motion it answers. The default stays `refuse`, with the same output and
+  the same message as 2.24.0; a strip that does not fold is the same under either.
 - **What it writes**: the strip, GIF and WebP over the loop's own (both animations re-opened and
   checked as `video-loop` checks them), and `follow` in `<name>.strip.json` (the regions, the
-  settings, the body's bob, `dx_px`/`dy_px` per cell, `reach_px`). `cycle/` is left as cut. The
-  strip as it was is kept as `follow.source.png`; running `video-follow` again reads from it, so a
-  second run never moves a moved strip. `--board` writes the cells before and after where the part
+  settings, the body's bob, `dx_px`/`dy_px` per cell, `reach_px`; `gain` is the gain used and
+  `gain_requested` the one asked for, and `fold` says whether it was lowered, the move asked for,
+  the move at gain 1, and per region its smaller radius, how near the used move is to folding it
+  (`ratio`, under 1) and the gain at which it folds). A lowered gain is also named on stderr.
+  `cycle/` is left as cut. The strip as it was is kept as `follow.source.png`; running
+  `video-follow` again reads from it, so a second run never moves a moved strip. `--board` writes the cells before and after where the part
   sits lowest and highest, on white.
 - **Order**: after `video-cycle-align`. An alignment rebuilds the strip from the cut, removes
   `follow.source.png` and the `follow` record, and says so (`follow_cleared` in its loop row); a

@@ -11,6 +11,8 @@ This document owns the conversation flow. `sprite_gen/workflow/catalog.py` owns 
 
 Inspect the request before asking anything. Pass choices already named by the user as explicit arguments. An existing sprite base image skips base-image generation and its provider question. An image request may still attach references to `gen --ref` for editing.
 
+A clip from a video MCP on the agent (ZCRE) is a third way to animate the base. `workflow` does not offer it: its motion methods are the two above, so a request that names the MCP goes to that row of the [SKILL](../SKILL.md) execution routes. The Grok video method has one step, `video-set`, which runs its own canvas, clip, frames, loop and set alignment. On the MCP route each stage is a verb the agent runs: `video-canvas` → `video-prompt --no-last-frame` → the agent's MCP tools → `video-frames` → `video-loop` (`--anchor motion-auto` for a walk or run) → `video-cycle-align`, once a walk or run is cut in two or more directions ([video-pipeline](video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre)).
+
 ```bash
 $SPRITE_GEN_ROOT/.venv/bin/sprite-gen workflow --kind sprite
 $SPRITE_GEN_ROOT/.venv/bin/sprite-gen workflow --kind image

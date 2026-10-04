@@ -903,9 +903,12 @@ def run_loop(
                 # frame one cycle on is not the size of the first and the loop pops at the wrap. Hold
                 # the clip at its first frame's size before the search (`size_hold`), so the cut is
                 # chosen on frames of one size. The gait fallback below then finds nothing to undo.
-                measured = gait_fallback.scale_drift(source_frames)
+                # The change is read one cycle on, so a first pose that settles into the walk is
+                # not taken for a body that shrinks (gait_fallback.cycle_drift).
+                measured = gait_fallback.cycle_drift(source_frames, min_lag=lo, max_lag=hi)
                 hold: dict[str, Any] = {"applied": False, "min": gait_fallback.SIZE_HOLD_MIN,
-                                        **{k: measured[k] for k in ("height_first_px", "height_last_px", "drift")}}
+                                        **{k: measured[k] for k in ("height_first_px", "height_last_px", "drift", "method",
+                                                                    "lag", "pairs", "per_lag", "pose_match", "drift_fitted_line")}}
                 if abs(measured["drift"]) >= gait_fallback.SIZE_HOLD_MIN:
                     pad = gait_fallback.undo_padding(source_frames, measured)
                     source_frames = gait_fallback.undo_scale(source_frames, measured, pad=pad)
@@ -1197,7 +1200,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--jolt-max", type=float, default=None, help=f"walk/run: fail the repaired loop when its jolt index (how far each step strays from its neighbours' mean, over the median step) exceeds this. Default: no gate — the index is reported and a value over {repair_mod.JOLT_REFERENCE} is a warning line")
     parser.add_argument("--head-step-max", type=float, default=None, help=f"walk/run: fail the repaired loop when the head's largest sideways move in one frame exceeds this %% of the body height. Default: no gate — reported, and over {repair_mod.HEAD_STEP_REFERENCE} is a warning line")
     parser.add_argument("--facing", choices=FACINGS, default="right", help="which way the body faces in the frames (default right): the hair the jump search watches is behind it")
-    parser.add_argument("--size-hold", choices=SIZE_HOLD_MODES, default="auto", help="--anchor motion-auto: auto (default) scales a clip whose fitted height changes by 1 %% or more back to its first frame's size before the cycle search, so the loop's last frame is the size of its first (recorded as size_hold); off: search the frames as filmed")
+    parser.add_argument("--size-hold", choices=SIZE_HOLD_MODES, default="auto", help="--anchor motion-auto: auto (default) scales a clip whose height, read one cycle on (the same pose a cycle later), changes by 1 %% or more over the clip back to its first frame's size before the cycle search, so the loop's last frame is the size of its first (recorded as size_hold, with the evidence); off: search the frames as filmed")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)
 
