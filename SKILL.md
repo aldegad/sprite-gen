@@ -100,6 +100,7 @@ hold the arms still, and check the loop with `handed-check --state walk`.
 | Standalone video / animate a still, pin a last frame, reference images | `video` (`--image`, `--last-frame`, `--reference`) | [video](docs/video.md) |
 | Continue or edit an existing clip | `video-extend`, `video-edit` | [video](docs/video.md) |
 | Grok video sprites | `video-set` | [video-pipeline](docs/video-pipeline.md) |
+| A soft part of a walk loop follows the body (a chest, a belly): an ellipse in the first cell, after `video-cycle-align` | `video-follow` | [video-pipeline](docs/video-pipeline.md#6-follow-through--video-follow) |
 | Video sprites from a clip your agent makes with a connected video MCP (ZCRE, 지크) | `video-canvas`, `video-prompt --no-last-frame`, the agent's own MCP tools (quote, user approval, generate, save the mp4), then `video-frames`, `video-loop`. sprite-gen never calls the MCP. Walk, run and jump only: ZCRE's `grok-imagine-video-1.5` has no end frame, so idle, attack and diagonal walks are refused unless `--unpinned` | [video-pipeline](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre) |
 | Ordinary image or edit | `gen --provider codex` or `gen --provider grok` (subscription routes) | [gen](docs/gen.md) |
 | Image generation with no login available (server, container, SaaS) | `gen --provider openai` — server/SaaS route on `OPENAI_API_KEY`, **billed per call**, never a default or a fallback | [gen](docs/gen.md#subscription-first--openai-is-named-or-it-does-not-run) |
