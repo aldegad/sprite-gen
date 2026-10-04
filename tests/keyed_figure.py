@@ -4,7 +4,8 @@
 The figure is area-sampled: a dark-outlined body (a skin half and a white half), a light rim
 outside part of the outline, green-tinted ink along another part, a 1 px line across the body,
 a hair cap with strands 0.5-1.4 px wide — the edge a keyer leaves. Shared by the tests of every
-place the engine scales a keyed picture (`sprite_gen.util.resample.resize_cell`).
+place the engine scales or maps a keyed picture (`sprite_gen.util.resample.resize_cell`,
+`transform_cell`).
 """
 from __future__ import annotations
 
@@ -104,3 +105,26 @@ def colour_outside(src: Image.Image, out: Image.Image) -> int:
     seen = o[..., 3] >= 38
     outside = ((o[..., :3] < lo - 1) | (o[..., :3] > hi + 1)).any(axis=-1)
     return int(np.count_nonzero(seen & outside))
+
+
+def colour_outside_mapped(src: Image.Image, out: Image.Image, inverse: tuple[float, ...]) -> int:
+    """`colour_outside` for an affine map (Pillow's AFFINE data, output -> input): the colour range
+    of the visible source pixels among the 2 x 2 around each output pixel's mapped centre."""
+    s = np.asarray(src).astype(int)
+    pad = np.zeros((s.shape[0] + 2, s.shape[1] + 2, 4), int)
+    pad[1:-1, 1:-1] = s
+    a, b, c, d, e, f = inverse
+    v, u = np.mgrid[0 : out.height, 0 : out.width] + 0.5
+    x0 = np.floor(a * u + b * v + c - 0.5).astype(int)
+    y0 = np.floor(d * u + e * v + f - 0.5).astype(int)
+    lo = np.full((out.height, out.width, 3), 256)
+    hi = np.full((out.height, out.width, 3), -1)
+    for dy in (0, 1):
+        for dx in (0, 1):
+            px = pad[np.clip(y0 + dy, -1, s.shape[0]) + 1, np.clip(x0 + dx, -1, s.shape[1]) + 1]
+            seen = (px[..., 3] > 0)[..., None]
+            lo = np.where(seen, np.minimum(lo, px[..., :3]), lo)
+            hi = np.where(seen, np.maximum(hi, px[..., :3]), hi)
+    o = np.asarray(out).astype(int)
+    outside = ((o[..., :3] < lo - 1) | (o[..., :3] > hi + 1)).any(axis=-1)
+    return int(np.count_nonzero((o[..., 3] >= 38) & outside))

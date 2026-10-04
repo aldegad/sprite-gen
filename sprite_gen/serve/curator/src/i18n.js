@@ -63,7 +63,7 @@ const STR = {
     breatheTorsoHint: "drag the torso half-width — outside these lines counts as appendage (arms/wings): pushed sideways, never stretched. Drag inward to protect more.",
     breatheFail: "breathe failed: ",
     breatheResample: (rows) =>
-      `heads-up: ${rows} has a rotate/scale transform. the bake resamples BICUBIC, this canvas `
+      `heads-up: ${rows} has a rotate/scale transform. the bake resamples smoothly, this canvas `
       + `NEAREST — the exported file will differ from the GIF by a few edge pixels.`,
     opProgress: (p, pct) => `re-deriving ${p.done}/${p.total} (${pct}%) — ${p.label} · ${p.phase}`,
     healTitle: "Updating frames for the new engine",
@@ -233,7 +233,7 @@ const STR = {
     breatheTorsoHint: "몸통 반폭을 드래그 — 이 선 바깥은 부속(팔·날개)으로 취급되어 늘어나지 않고 밀리기만 합니다. 안쪽으로 끌수록 보호가 넓어집니다.",
     breatheFail: "호흡 실패: ",
     breatheResample: (rows) =>
-      `참고: ${rows} 에 회전/확대 변형이 걸려 있다. 굽기는 BICUBIC, 이 캔버스는 NEAREST 로 `
+      `참고: ${rows} 에 회전/확대 변형이 걸려 있다. 굽기는 부드럽게, 이 캔버스는 NEAREST 로 `
       + `리샘플하므로 내보낸 파일이 GIF 와 가장자리 몇 px 다르다.`,
     opProgress: (p, pct) => `재추출 ${p.done}/${p.total} (${pct}%) — ${p.label} · ${p.phase === "components" ? "컴포넌트" : "픽셀 언페이크"}`,
     healTitle: "엔진 갱신 반영 중 — 프레임 재계산",

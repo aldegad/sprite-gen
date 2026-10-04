@@ -129,7 +129,7 @@ function breatheCanon(v) {
 }
 
 // 파이썬 `breathe.reference_key` 미러 — **픽셀을 안 읽는다.**
-// 굽기는 BICUBIC(`apply_transform`), 웹뷰 캔버스는 NEAREST 라 같은 원본·같은 변형에도
+// 굽기는 부드러운 리샘플(`apply_transform`), 웹뷰 캔버스는 NEAREST 라 같은 원본·같은 변형에도
 // 두 쪽이 만드는 그림이 다르다. 결과 픽셀을 해시하던 옛 지문이 회전·확대가 걸린 줄에서
 // 영구 불일치였던 이유다 (validator 실측 2026-07-26).
 // 파이썬 `curation.normalize_transform` 미러 — 항상 7키 전체.

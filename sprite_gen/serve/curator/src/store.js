@@ -347,7 +347,7 @@ function breatheGeometryFrame(stateName, fallbackIdx) {
 
 // 이 줄의 기준 프레임에 **정수 이동이 아닌** 변형이 걸려 있나.
 //
-// 굽기는 `apply_transform` 에서 BICUBIC 으로 리샘플하고(`snap_scale` 없는 런 = 기본 런
+// 굽기는 `apply_transform` 에서 부드럽게 리샘플하고(`transform_cell`, `snap_scale` 없는 런 = 기본 런
 // 전부) 이 웹뷰는 `imageSmoothingEnabled=false` 캔버스, 즉 NEAREST 다. 회전·확대가
 // 걸리면 같은 입력에도 두 쪽 그림이 다르다 (실측: rotate 3° 에서 12/12 위상 최대
 // 1803px 상이). 원인은 표시 파이프라인이라 호흡이 고칠 수 있는 게 아니지만, `row-export`
@@ -365,7 +365,7 @@ function breatheResamplesDifferently(stateName) {
 // 파이썬 `breathe.reference_key` 의 재료를 사이드카에서 모은다 — **줄의 기준 프레임**
 // (`playList[0]`, 굽기의 `images[0]`) 하나에 대해서만.
 //
-// 픽셀을 안 읽는다: 굽기는 BICUBIC 으로 리샘플하고 캔버스는 NEAREST 라 결과 픽셀은
+// 픽셀을 안 읽는다: 굽기는 부드럽게 리샘플하고 캔버스는 NEAREST 라 결과 픽셀은
 // 구조적으로 다르다. 여기 들어가는 값은 전부 사이드카(사람의 의도)와 서버가 준 스탬프다.
 // 재료가 하나라도 없으면 **null 을 돌려 거부시킨다** — 없는 값을 기본값으로 메우면
 // 서로 다른 프레임이 같은 키를 갖는다.

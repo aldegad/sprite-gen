@@ -423,7 +423,7 @@ def reference_key(*, state: str, variant: str, request_stamp: str, source_index:
     """기준 프레임의 **정체성** — 그 프레임을 만드는 입력들로만 만든다. 픽셀은 안 읽는다.
 
     예전엔 이게 *변형 결과 RGBA* 의 해시였다. 그런데 굽기는 `apply_transform` 에서
-    **BICUBIC** 으로 리샘플하고(`snap_scale` 없는 런 = 기본 런 전부) 웹뷰 캔버스는
+    부드럽게 리샘플하고(당시 BICUBIC, 지금 `transform_cell`; `snap_scale` 없는 런 = 기본 런 전부) 웹뷰 캔버스는
     `imageSmoothingEnabled=false`, 즉 **NEAREST** 다. 같은 원본에 같은 변형을 걸어도 두 쪽이
     만드는 그림이 다르니 지문은 **영구 불일치**였다 — 회전·확대가 걸린 줄은 프리뷰가 영원히
     원본으로 떨어지고 영상 내보내기가 영구 차단됐으며, 안내대로 "해부를 갱신" 해도 라우트가
