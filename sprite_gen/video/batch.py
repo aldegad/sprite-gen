@@ -121,8 +121,7 @@ HOLD_TEXT = {
 }
 # What stays put while a caller's own walk or run moves, by view: in place, and facing the way the image
 # faces. A request interpreter may ask for any gait (a sneak, a march, a stroll); the engine keeps it on the
-# spot and turned the right way, as the built-in gait sentences do. That it does not move across the screen
-# is the frame sentence's to say (`COMMON_TEXT`), and a side view's facing the view sentence's.
+# spot and turned the right way, as the built-in gait sentences do. `{facing}` is the side view's.
 GAIT_STATES = frozenset({"walk", "run"})
 GAIT_HOLD_TEXT = {
     "front": "It stays in place as if on a treadmill, without coming any closer, and keeps facing the viewer the whole time.",
@@ -130,27 +129,16 @@ GAIT_HOLD_TEXT = {
         "It stays in place as if on a treadmill, without moving any farther away, and keeps facing away from the viewer "
         "the whole time."
     ),
-    "side": "It stays in place as if on a treadmill.",
+    "side": "It stays in place as if on a treadmill, without moving across the screen, and keeps facing {facing} the whole time.",
     "front_diagonal": (
-        "It stays in place as if on a treadmill and keeps the exact three-quarter front angle of the image the whole time, "
-        "never turning into a side view."
+        "It stays in place as if on a treadmill, without moving across the screen, and keeps the exact three-quarter front "
+        "angle of the image the whole time, never turning into a side view."
     ),
     "back_diagonal": (
-        "It stays in place as if on a treadmill and keeps the exact three-quarter back angle of the image the whole time, "
-        "its face hidden, never turning into a side view."
+        "It stays in place as if on a treadmill, without moving across the screen, and keeps the exact three-quarter back "
+        "angle of the image the whole time, its face hidden, never turning into a side view."
     ),
 }
-# Views whose walk or run says the view itself, in the gait sentence (`VIEW_MOTION_TEXT`) or the gait hold above:
-# "facing the viewer", "keeps the exact three-quarter back angle of the image". Their clip prompt leaves the
-# view sentence ("The character is seen from ...") out, which said the same thing a second time. A side
-# view's gait says only that it stays in place, so its view sentence stays and carries the facing.
-GAIT_SAYS_VIEW = frozenset({"front", "back", "front_diagonal", "back_diagonal"})
-VIEW_SENTENCE = " The character is {view}."
-# With a caller's own motion paragraph, `--character` is named on the engine sentence that says the view: the
-# view sentence, or where that is left out, the gait hold ("A small fox ... stays in place ..." for "It stays").
-# Every view that leaves its view sentence out has a gait hold to name it on.
-GAIT_HOLD_SUBJECT = "It "
-assert GAIT_SAYS_VIEW <= GAIT_HOLD_TEXT.keys() and all(text.startswith(GAIT_HOLD_SUBJECT) for text in GAIT_HOLD_TEXT.values())
 MOTION_TEXT = {
     # A side-view full body asked for "a subtle weight sway" and an evenly paced loop steps in place
     # more often than not, so the feet are held and walking is named as what not to do.
@@ -160,8 +148,8 @@ MOTION_TEXT = {
         "hair and loose cloth, and one natural blink if the face has eyes. The feet never lift, step, shuffle or slide "
         "— no walking, no marching in place, no turning."
     ),
-    "walk": "walks naturally in place, as if on a treadmill.",
-    "run": "runs naturally in place, as if on a treadmill.",
+    "walk": "walks naturally in place, as if on a treadmill, without moving across the screen.",
+    "run": "runs naturally in place, as if on a treadmill, without moving across the screen.",
     "jump": "performs a modest vertical hop in place over and over: compress, spring up about half the body height, land softly, return to the exact starting stance, repeat at an even rhythm. Same height every time.",
     "attack": (
         "performs one melee attack with what it is already holding (bare hands only if it holds nothing), keeping "
@@ -180,8 +168,7 @@ MOTION_TEXT = {
 # "walks naturally" swung the arms and kept the knees low (2.15). 2.16 gives the run and the side view the
 # same form. How a character walks is the caller's to say (`build_prompt(motion=...)`, held in place by
 # `GAIT_HOLD_TEXT`); the engine's default stays generic. "as if on a treadmill" keeps the treadmill a
-# comparison: said as a place, it was sometimes drawn under the feet. A side or diagonal gait no longer adds
-# "without moving across the screen": the frame sentence says it ("does not move across the screen").
+# comparison: said as a place, it was sometimes drawn under the feet.
 VIEW_MOTION_TEXT = {
     ("walk", "front"): "walks naturally in place, facing the viewer, as if on a treadmill, without coming any closer.",
     ("walk", "back"): (
@@ -198,23 +185,23 @@ VIEW_MOTION_TEXT = {
     # view drawn facing left heads down or up and to the left (it said "to the right" whatever the facing).
     ("walk", "front_diagonal"): (
         "walks naturally in place, as if on a treadmill, heading diagonally toward the viewer and to the {facing}, like a "
-        "character walking down and to the {facing} in an isometric game. It keeps the "
+        "character walking down and to the {facing} in an isometric game, without moving across the screen. It keeps the "
         "exact three-quarter front angle of the image the whole time and never turns into a side view."
     ),
     ("walk", "back_diagonal"): (
         "walks naturally in place, as if on a treadmill, heading diagonally away from the viewer toward the upper {facing}, "
-        "like a character walking up and to the {facing} in an isometric game. It keeps "
+        "like a character walking up and to the {facing} in an isometric game, without moving across the screen. It keeps "
         "the exact three-quarter back angle of the image the whole time: its back stays turned toward the viewer at that "
         "angle and its face stays hidden. It never turns into a side view."
     ),
     ("run", "front_diagonal"): (
         "runs naturally in place, as if on a treadmill, heading diagonally toward the viewer and to the {facing}, like a "
-        "character running down and to the {facing} in an isometric game. It keeps the "
+        "character running down and to the {facing} in an isometric game, without moving across the screen. It keeps the "
         "exact three-quarter front angle of the image the whole time and never turns into a side view."
     ),
     ("run", "back_diagonal"): (
         "runs naturally in place, as if on a treadmill, heading diagonally away from the viewer toward the upper {facing}, "
-        "like a character running up and to the {facing} in an isometric game. It keeps "
+        "like a character running up and to the {facing} in an isometric game, without moving across the screen. It keeps "
         "the exact three-quarter back angle of the image the whole time: its back stays turned toward the viewer at that "
         "angle and its face stays hidden. It never turns into a side view."
     ),
@@ -307,7 +294,7 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
     motion, written as whole sentences about the subject (a request interpreter's output, for
     instance). What stays put (`HOLD_TEXT`; for a walk or run, in place and facing the image's way,
     `GAIT_HOLD_TEXT`), the repeat count (`REPEAT_TEXT`) and the frame, camera, background and
-    design rules stay the engine's, and a rule the paragraph already quotes is not said again.
+    design rules stay the engine's.
 
     `pinned` says the clip is pinned to end on its first frame (`video --last-frame`): it then asks
     for the return to the first pose instead of an evenly paced repeat (`PINNED_LOOP_TEXT`). None
@@ -318,8 +305,9 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
     clause after the built-in walk sentence (`LITE_WALK_TEXT`; a caller's own motion is left as
     written), and a Lite walk in a view where its head sways gets `LITE_HEAD_TEXT`.
 
-    `handed` lists the character's asymmetric items (`handedness.parse`): the prompt ends with where each
-    one stays, anchored to the first frame (`handedness.text(clip=True)`).
+    Without `handed` the prompt is 2.22.0's, to the byte (`tests/gen/test_prompt_freeze.py`). `handed` lists
+    the character's asymmetric items (`handedness.parse`): the prompt ends with where each one stays, anchored
+    to the first frame (`handedness.text(clip=True)`), the one piece `prompt_parts.Prompt.add` checks.
     """
     validate_facing(facing)
     view = VIEW_TEXT.get(direction, f"seen from the {direction}").format(facing=facing)
@@ -330,49 +318,42 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
         template = PINNED_LOOP_TEXT
     else:
         template = COMMON_TEXT
-    says_view = state in GAIT_STATES and direction in GAIT_SAYS_VIEW
-    if says_view:
-        template = template.replace(VIEW_SENTENCE, "")
     if motion is not None:
         motion = " ".join(motion.split())
         if not motion:
             raise SystemExit("video: motion description is empty")
-        head = "2D game sprite animation. The character {motion}"
-        subject = character.strip().rstrip(".") if character else None
-        parts = prompt_parts.Prompt(f"2D game sprite animation. {motion}", caller=f"{motion} {character or ''}", sep=" ")
-        if state in HOLD_TEXT:
-            parts.add("hold", HOLD_TEXT[state])
+        head = "2D game sprite animation. The character {motion} The character is {view}."
+        hold = f" {HOLD_TEXT[state]}" if state in HOLD_TEXT else ""
         if state in GAIT_STATES and direction in GAIT_HOLD_TEXT:
-            hold = GAIT_HOLD_TEXT[direction].format(facing=facing)
-            if says_view and subject:  # the hold says the view: it names the character (`GAIT_HOLD_SUBJECT`)
-                hold = f"{subject} {hold[len(GAIT_HOLD_SUBJECT):]}"
-            parts.add("gait-hold", hold)
-        if state in REPEAT_TEXT:
-            parts.add("repeat", REPEAT_TEXT[state])
-        frame = template[len(head):].replace(VIEW_SENTENCE, f" {subject or 'The character'} is {view}.", 1)
-        parts.add("frame", frame.strip(), facing=turned or prompt_parts.NO_TURN)
+            hold += f" {GAIT_HOLD_TEXT[direction].format(facing=facing)}"
+        repeat = f" {REPEAT_TEXT[state]}" if state in REPEAT_TEXT else ""
+        subject = character.strip().rstrip(".") if character else "The character"
+        text = (f"2D game sprite animation. {motion}{hold}{repeat} {subject} is {view}." + template[len(head):]
+                + _lite_text(state, direction, model, built_in=False))
+        caller = f"{motion} {character or ''}"
     else:
         built_in = (VIEW_MOTION_TEXT[(state, direction)].format(facing=facing) if (state, direction) in VIEW_MOTION_TEXT
                     else MOTION_TEXT.get(state, f"performs the '{state}' action in place, repeating at an even rhythm."))
         text = template.format(motion=built_in, view=view)
-        parts = prompt_parts.Prompt(text.replace("The character", character, 1) if character else text,
-                                    caller=character or "", sep=" ")
-        parts.note(facing=turned or prompt_parts.NO_TURN)
-    if character and character.strip().rstrip(".") not in parts.text:
-        raise AssertionError(f"video: the {state} {direction} clip prompt lost the character ({character!r})")
-    for topic, text in _lite_pieces(state, direction, model, built_in=motion is None):
-        parts.add(topic, text)
+        text = ((text.replace("The character", character, 1) if character else text)
+                + _lite_text(state, direction, model, built_in=True))
+        caller = character or ""
+    parts = prompt_parts.Prompt(text, caller=caller, sep=" ")
+    # the caller's words against the view the engine's sentence turns the clip to (a note, never an edit)
+    parts.note(facing=turned or prompt_parts.NO_TURN)
     if handed:
         parts.add("handed", handed_mod.text(handed, direction, turned, clip=True, gait=state in GAIT_STATES), handed=handed)
     return parts
 
 
-def _lite_pieces(state: str, direction: str, model: str | None, *, built_in: bool) -> list[tuple[str, str]]:
+def _lite_text(state: str, direction: str, model: str | None, *, built_in: bool) -> str:
     """What a Lite walk adds after the prompt, in the order it was measured: the calm walk, then the head."""
     if state != "walk" or not is_lite(model):
-        return []
-    return ([("lite-walk", LITE_WALK_TEXT)] if built_in else []) + (
-        [("lite-head", LITE_HEAD_TEXT[direction])] if direction in LITE_HEAD_TEXT else [])
+        return ""
+    text = f" {LITE_WALK_TEXT}" if built_in else ""
+    if direction in LITE_HEAD_TEXT:
+        text += f" {LITE_HEAD_TEXT[direction]}"
+    return text
 
 
 # A walk seen from the front or from behind starts from a still redrawn mid-step. From a standing
@@ -414,11 +395,12 @@ def walk_start_prompt(direction: str, key: str | None = None, handed: list[Hande
     then with `handed` where each asymmetric item is in this view (`handedness.text`, the still's sentences)."""
     if direction not in WALK_START_TEXT:
         raise SystemExit(f"video: no mid-step start still for the {direction} view (only {', '.join(WALK_START_TEXT)})")
-    parts = prompt_parts.Prompt(WALK_START_TEXT[direction], caller="", sep=" ")
+    text = WALK_START_TEXT[direction]
     if key is not None:
         if key not in KEY_BACKGROUND_TEXT:
             raise SystemExit(f"video: a mid-step start still is drawn on a green or magenta key, not {key!r}")
-        parts.add("key-background", KEY_BACKGROUND_TEXT[key], key=key)
+        text += f" {KEY_BACKGROUND_TEXT[key]}"
+    parts = prompt_parts.Prompt(text, caller="", sep=" ")
     if handed:
         parts.add("handed", handed_mod.text(handed, direction), handed=handed)
     return parts.text

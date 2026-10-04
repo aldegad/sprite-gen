@@ -483,9 +483,8 @@ def _submit_poll_publish(
 
 
 def side_view_prompt(prompt: str, facing: str) -> prompt_parts.Prompt:
-    """`--direction side`: the prompt with the side view held for the whole clip. A prompt that already says
-    the side view and this facing (`video-prompt`'s, `video-set`'s) is left as it is; one that says the other
-    facing is refused."""
+    """`--direction side`: the prompt with the side view held for the whole clip, after whatever the prompt
+    already says (2.22.0's prompt to the byte). Words in the prompt that turn the subject are noted."""
     parts = prompt_parts.Prompt(prompt)
     parts.add("side-view", f"The subject stays in exact side view, facing {facing}. No turning around.", facing=facing)
     return parts
@@ -515,7 +514,6 @@ def generate_video(
 
     facing_report = None
     if request.direction == "side":
-        # before the facing inspection: a prompt that holds the other facing is refused unpaid
         parts = side_view_prompt(request.prompt, request.facing)
         for line in prompt_parts.note_lines(parts):
             print(f"[video] {line}", file=sys.stderr)

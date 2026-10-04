@@ -41,61 +41,23 @@ KEY_BACKGROUND_TEXT = {
 }
 
 
-# Words a prompt puts between a key's name and "background", either way round: "a pure magenta flat
-# background", "a background of solid green".
-_KEY_FILLER = r"(?:(?:an?|the|one|single|pure|solid|flat|plain|uniform|bright|vivid|perfectly|completely|entirely|fully)[\s,]+)*"
-_KEY_GROUND = r"(?:background|backdrop|screen|chroma[- ]?key)"
-# What rules a key out: a negation right before the key's name, with nothing between them but small
-# words ("no green screen", "without a magenta background", "never on #00FF00"). A negation of
-# something else in the same clause does not ("no shadow, on a magenta background").
-_KEY_NEGATION = re.compile(
-    r"\b(?:no|not|never|without|avoid(?:ing|s)?|instead of|rather than|\w+n't)\s+"
-    r"(?:(?:an?|the|any|on|in|against|over|with|use|using|be|to|pure|solid|flat|plain|uniform|bright)\s+){0,4}$",
-    re.IGNORECASE)
-
-
 def _key_background_pattern(key: str) -> re.Pattern[str]:
     hex_code = "".join(f"{channel:02x}" for channel in KEYS[key]["target"])
-    name = rf"{key}(?:[- ]colou?red)?"
-    return re.compile(
-        rf"(?<![0-9a-z])#?{hex_code}(?![0-9a-z])"
-        # the name, then the ground: "green screen", "magenta-colored background", "magenta chroma-key fill"
-        rf"|\b{name}[\s,]+(?:(?:flat|solid|plain|uniform|pure|key)[\s,]+)*{_KEY_GROUND}\b(?!-)"
-        # the ground, then the name: "background of pure magenta", "backdrop: solid green"
-        rf"|\b(?:background|backdrop)\s*(?:is|of|in|as|[:=])?\s+{_KEY_FILLER}{name}\b"
-        # "keyed on magenta", "on a green key"
-        rf"|\bkeyed\s+(?:on|to|against)\s+{_KEY_FILLER}{name}\b"
-        rf"|\b(?:on|against|over)\s+{_KEY_FILLER}{name}\s+key\b",
-        re.IGNORECASE)
-
-
-def _key_backgrounds(prompt: str) -> list[tuple[int, str, bool]]:
-    """(where, key, ruled out) for every place `prompt` names a key as its background."""
-    found = []
-    for key in KEYS:
-        for match in _key_background_pattern(key).finditer(prompt):
-            found.append((match.start(), key, bool(_KEY_NEGATION.search(prompt[:match.start()]))))
-    return sorted(found)
+    return re.compile(rf"(?<![0-9a-z])#?{hex_code}(?![0-9a-z])"
+                      rf"|\b{key}\s+(?:chroma[- ]?key|key|screen|background|backdrop)\b", re.IGNORECASE)
 
 
 def named_key_background(prompt: str) -> str | None:
     """The key a prompt already asks for as its background, or None.
 
-    A prompt names a key when it carries the key's hex code (`#FF00FF`, `00ff00`), the key's name
-    before "background", "backdrop", "screen" or "chroma key" ("a green screen", "a magenta-colored
-    background", "magenta chroma-key fill"), the name after one ("a background of pure magenta"), or
-    "keyed on magenta" / "on a green key". A colour in the subject ("a green frog on white", "holding
-    a green key") is not a key, and neither is one the prompt rules out ("no green screen", "without
-    a magenta background": `ruled_out_key_backgrounds`). The first key asked for wins; the matte
-    reads the key off the borders, so a prompt naming the other key than `--chroma-key` is keyed on
-    the one drawn.
+    A prompt names a key when it carries the key's hex code (`#FF00FF`, `00ff00`) or the key's
+    name right before "background", "backdrop", "chroma key", "key" or "screen" ("a green
+    screen", "magenta chroma-key background"). A colour in the subject ("a green frog on
+    white") is not a key. The first key named wins; the matte reads the key off the borders,
+    so a prompt naming the other key than `--chroma-key` is keyed on the one drawn.
     """
-    return next((key for _, key, ruled_out in _key_backgrounds(prompt) if not ruled_out), None)
-
-
-def ruled_out_key_backgrounds(prompt: str) -> set[str]:
-    """The keys a prompt says its background is not ("no green screen")."""
-    return {key for _, key, ruled_out in _key_backgrounds(prompt) if ruled_out}
+    found = [(match.start(), key) for key in KEYS if (match := _key_background_pattern(key).search(prompt))]
+    return min(found)[1] if found else None
 
 
 # What a generated raw is, before a planned chroma key runs on it (`classify_raw_alpha`).

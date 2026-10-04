@@ -220,12 +220,11 @@ Backward-compatible wrapper: `$SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT
   **`--handed`** adds, per item, which of the character's own sides it is on and where that side is in
   the view; with it, `--facing-fix mirror` is refused and `regen` never mirrors. See
   [video-pipeline](video-pipeline.md#handedness--an-item-on-one-side).
-- **Each engine sentence is said once.** The view, the turn over a reference, the handed item, the
-  key background and the layout guide are attached in one place, which leaves out what the prompt
-  already says: with `--direction` the reference piece no longer repeats the turn, a facing correction
-  replaces the sentence it corrects, and a key background the prompt names gets no second line. Where
-  your own text says the opposite of an option ("facing left" with `--facing right`) it is left as
-  written and stderr warns; the report lists it under `extra.prompt_notes`. See
+- **The engine's sentences go on after yours, as written.** The view, the turn over a reference, the
+  handed item, the key background and the layout guide are attached in one place; without `--handed`
+  the prompt is 2.22.0's, byte for byte. Leave out of your text what an option says. Where your own
+  text says the opposite of an option ("facing left" with `--facing right`) it is left as written and
+  stderr warns; the report lists it under `extra.prompt_notes`. See
   [prompt-assembly](prompt-assembly.md).
 
 ## `--quality` and `--resolution` — the two billed knobs
@@ -282,15 +281,14 @@ strategy it can execute, and `--alpha-mode auto` (the default) follows it:
   prompt, so the engine adds the `--chroma-key` key's line
   (`chroma.KEY_BACKGROUND_TEXT`, the sentence a clip's mid-step redraw also ends on)
   to a prompt that names no key, and leaves a prompt that does as it is — no second
-  line. A prompt names a key with the key's hex code (`#FF00FF`, `00ff00`), the key's
-  name before "background", "backdrop", "screen" or "chroma key" ("a green screen",
-  "magenta-colored background"), the name after one ("a background of pure magenta"),
-  or "keyed on magenta" / "on a green key" (`chroma.named_key_background`). A colour in
-  the subject ("a green frog", "holding a green key") is not a key, and neither is one
-  the prompt rules out ("no green screen"): that prompt gets the line. A prompt that
-  rules out the very key `--chroma-key` chose is refused before the model runs — pass
-  the other key. A prompt that names the other key is left on it: the matte reads the
-  key off the borders. `alpha.key_background` records `{"injected": true|false, "key": …}`,
+  line. A prompt names a key with the key's hex code (`#FF00FF`, `00ff00`) or the
+  key's name right before "background", "backdrop", "chroma key", "key" or "screen"
+  (`chroma.named_key_background`); a colour in the subject ("a green frog") is not a
+  key. A prompt that names the other key is left on it: the matte reads the key off
+  the borders. Write the key as "a magenta background" or "#FF00FF": "no green screen"
+  reads as naming green, and "a background of pure magenta" is not read
+  ([prompt-assembly](prompt-assembly.md#known-faults-kept-for-now)).
+  `alpha.key_background` records `{"injected": true|false, "key": …}`,
   stderr says which, and the report's `prompt` is the prompt sent. Without the line a
   reference on white came back on opaque white (3/3, 2026-10-04) and keying white took
   the outline and the cream fills with it. With it (the same prompt otherwise, three

@@ -12,12 +12,12 @@ each blob's centre is compared with the body's own centre (the mean x of its opa
   of the larger; smaller ones are specks of compression tint) fails in every view;
 - the near side of a diagonal view: the item must show in at least half the frames; of a side view, in at
   least three quarters (a near arm is in view the whole walk; a far arm's item shows about half of it);
-- the far side of a side view, an item on an arm or a leg (`handedness.limb`): the limb swings out in front
-  of the body with each step and the item shows then, whole. Every blob must be in front of the body —
-  on the facing side of its centre by at least a tenth of the body's height — and with `--state walk` or
-  `run` it must show in at least a quarter of the frames. An item that also shows at or behind the body's
-  centre is on the near limb, the wrong one;
-- the far side of a side view, an item that does not swing (a pin on the far side of the head): hidden or a
+- the far side of a side view, an item on the swinging end of an arm (a wrist, a hand: `handedness.limb`):
+  the arm swings out in front of the body with each step and the item shows then, whole. Every blob must
+  be in front of the body — on the facing side of its centre by at least a tenth of the body's height — and
+  with `--state walk` or `run` it must show in at least a quarter of the frames. An item that also shows at
+  or behind the body's centre is on the near arm, the wrong one;
+- the far side of a side view, any other item (a pin on the far side of the head, an anklet): hidden or a
   sliver — no blob may be larger than half the item seen whole, measured on `--reference` pictures of the
   same character (front or back, the item in full view);
 - the near side of a side view, against `--reference`: a frame shows the item only when it is more than
@@ -377,7 +377,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--marker", required=True, help="#RRGGBB: a saturated colour of the item that nothing else on the character has")
     parser.add_argument("--strap", help="#RRGGBB: the item's band colour (a watch strap, usually dark); a band of it with no marker on it, away from the marker, counts as another place the item shows. Use with --zone")
     parser.add_argument("--zone", default="0,1", help="TOP,BOTTOM: the rows the item sits in, as fractions of the body's height from its top (default 0,1, the whole body); e.g. 0.5,0.9 for a wrist")
-    parser.add_argument("--state", help="the loop's motion state (walk, run, idle, ...): in a walk or run of a side view, an item on the far arm or leg must show while that limb swings forward")
+    parser.add_argument("--state", help="the loop's motion state (walk, run, idle, ...): in a walk or run of a side view, an item on the far wrist or hand must show while that arm swings forward")
     parser.add_argument("--reference", action="append", type=Path, default=[], help="a keyed front or back picture of the same character with the item in full view (repeatable): in a side view the far item must stay smaller than half of it, and the near item counts as shown only when larger")
     parser.add_argument("--report", type=Path, help="write the report JSON here")
     parser.add_argument("--board", type=Path, help="write the review board PNG here")

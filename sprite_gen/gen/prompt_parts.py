@@ -1,16 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Attaching the engine's sentences to a prompt: the one place that checks what is already said.
+"""Attaching the engine's sentences to a prompt: the one place pieces go on.
 
 A prompt is the caller's own text and then the engine's pieces: the view sentence, the turn over a
-reference, where a handed item is, the key background line, the layout guide; for a clip the hold, the
-frame and camera rules, a Lite model's sentences and the side view's hold. Every piece goes on through
-`Prompt.add`, and a piece the prompt already says is not said again:
+reference, where a handed item is, the key background line, the layout guide; for a clip the side view's
+hold. Every piece goes on through `Prompt.add`, and each goes on only where its condition holds:
 
-- a sentence the prompt already carries, word for word, is dropped from the piece (a start still's prompt
-  handed back to `gen --direction --handed`, a caller's motion paragraph that quotes an engine rule, two
-  items whose sentences come out the same);
-- a piece whose topic the prompt already covers is left out whole (`ALREADY_SAID`: a key background the
-  caller named, a side view the clip prompt already holds), and one the prompt rules out is refused.
+- every piece but the handed one goes on as 2.22.0 attached it. The prompts a character with no handed
+  item is drawn and filmed from are frozen at 2.22.0, to the byte (`tests/gen/test_prompt_freeze.py`); a
+  change to them waits for a before-and-after comparison on the app's default clip model;
+- the key background line is left out when the prompt already names a key background (`ALREADY_SAID`), as
+  2.22.0 did;
+- the handed piece (`ONCE_ONLY`) drops a sentence the prompt already carries, word for word: a start still's
+  prompt handed back to `gen --direction --handed` already has it. Its arm sentences (the arms swing, the far
+  arm's item shows when that arm comes forward) are there only for an item on an arm
+  (`handedness.limb`).
 
 The caller's text is never edited. Where it and a piece disagree (`facing left` in the text, `--facing
 right` on the command) or it repeats what a piece says, `Prompt.notes` says which words, and the verb
@@ -20,10 +23,10 @@ prints them: the engine cannot tell which of the two the caller meant.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
-from .chroma import named_key_background, ruled_out_key_backgrounds
+from .chroma import named_key_background
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
@@ -56,42 +59,24 @@ def turns_said(text: str) -> list[tuple[str, str]]:
     return [(match.group(0), match.group(1).lower()) for match in _TURN.finditer(text)]
 
 
-def _key_said(prompt: "Prompt", *, key: str | None = None, **_: Any) -> tuple[str, str] | None:
+def _key_said(prompt: "Prompt", **_: Any) -> tuple[str, str] | None:
     named = named_key_background(prompt.text)
-    if named:
-        return f"the prompt already asks for a {named} key background", named
-    if key is not None and key in ruled_out_key_backgrounds(prompt.text):
-        raise SystemExit(f"prompt: the text rules out a {key} key background and the engine would ask for one; "
-                         "choose the other key or drop the line from the prompt")
-    return None
-
-
-_SIDE_VIEW = re.compile(r"\bseen from the exact side, facing (left|right)\b", re.IGNORECASE)
-
-
-def _side_view_said(prompt: "Prompt", *, facing: str | None = None, **_: Any) -> tuple[str, str] | None:
-    held = {match.group(1).lower() for match in _SIDE_VIEW.finditer(prompt.text)}
-    if not held:
-        return None
-    if facing in ("left", "right") and held != {facing}:
-        raise SystemExit(f"prompt: the text says the side view faces {' and '.join(sorted(held))} and the engine "
-                         f"would hold it facing {facing}; ask for the prompt and the clip with the same facing")
-    return "the prompt already says the side view and its facing", facing or ""
+    return (f"the prompt already asks for a {named} key background", named) if named else None
 
 
 # topic -> what in the prompt makes a piece on that topic unnecessary: (why, what was found), or None.
-# A check raises SystemExit where the prompt says the opposite of the piece in the engine's own words.
 ALREADY_SAID: dict[str, Callable[..., tuple[str, str] | None]] = {
     "key-background": _key_said,
-    "side-view": _side_view_said,
 }
+# Topics whose sentences the prompt already carries are dropped from the piece. Only the handed piece: every
+# other piece is said as 2.22.0 said it, a repeat included.
+ONCE_ONLY = frozenset({"handed"})
 
 
 @dataclass(frozen=True)
 class Piece:
     """One engine piece and what became of it: attached whole, attached without the sentences the prompt
-    already had (`why`), or left out (`added` False, `why`, and `found` — the key the prompt named). `asked`
-    and `params` are what `add` was given, so `Prompt.replaced` can put the piece on again."""
+    already had (`why`), or left out (`added` False, `why`, and `found` — the key the prompt named)."""
 
     topic: str
     text: str
@@ -99,8 +84,6 @@ class Piece:
     added: bool
     why: str = ""
     found: str = ""
-    asked: str = ""
-    params: dict[str, Any] = field(default_factory=dict, compare=False)
 
 
 class Prompt:
@@ -122,16 +105,16 @@ class Prompt:
         return next((piece for piece in self.pieces if piece.topic == topic), None)
 
     def add(self, topic: str, text: str, *, sep: str | None = None, **params: Any) -> Piece:
-        """Attach `text` as the piece on `topic` unless the prompt already says it. `params` are what the piece
-        claims (`facing`, `key`, `handed`): they feed `ALREADY_SAID` and the notes on the caller's text."""
+        """Attach `text` as the piece on `topic`: left out where `ALREADY_SAID` finds it said, without the sentences
+        the prompt already has for a `ONCE_ONLY` topic, else as given. `params` are what the piece claims
+        (`facing`, `key`, `handed`): they feed `ALREADY_SAID` and the notes on the caller's text."""
         sep = self.sep if sep is None else sep
-        asked = text
         why = found = ""
         said = ALREADY_SAID[topic](self, **params) if topic in ALREADY_SAID else None
         if said:
             why, found = said
             text = ""
-        elif text:
+        elif text and topic in ONCE_ONLY:
             have = {_same(sentence) for sentence in sentences(self.text)}
             kept = []
             for sentence in sentences(text):
@@ -141,22 +124,11 @@ class Prompt:
             if len(kept) != len(sentences(text)):
                 why = "the prompt already has " + ("these sentences" if not kept else "some of these sentences")
                 text = " ".join(kept)
-        piece = Piece(topic=topic, text=text, sep=sep, added=bool(text), why=why, found=found, asked=asked, params=params)
+        piece = Piece(topic=topic, text=text, sep=sep, added=bool(text), why=why, found=found)
         self.pieces.append(piece)
         if piece.added:
             self.note(**params)
         return piece
-
-    def replaced(self, topic: str, text: str, **params: Any) -> "Prompt":
-        """The same prompt with the piece on `topic` taken out and `text` said last in its place (a correction
-        of a sentence replaces it; said after it, the prompt would carry the sentence twice)."""
-        out = Prompt(self.own, caller=self.caller, sep=self.sep)
-        old = self.piece(topic)
-        for piece in self.pieces:
-            if piece.topic != topic:
-                out.add(piece.topic, piece.asked, sep=piece.sep, **piece.params)
-        out.add(topic, text, **{**(old.params if old else {}), **params})
-        return out
 
     def note(self, *, facing: str | None = None, handed: list[Any] | None = None, **_: Any) -> None:
         """Note what the caller's text says against, or again after, a piece that turns the subject to `facing`

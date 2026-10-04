@@ -134,6 +134,18 @@ def test_a_far_part_that_does_not_swing_keeps_the_hidden_rule() -> None:
     assert not caught["ok"] and "on the far side" in caught["fails"][0]["why"][0]
 
 
+@pytest.mark.parametrize("spec", ["the red anklet=left ankle", "the brass pauldron=left shoulder", "the red ribbon=left ear"])
+def test_a_far_item_off_the_wrist_keeps_the_hidden_rule(spec) -> None:
+    """Only a wrist, hand, forearm or elbow swings its item into view (`handedness.limb`, the table the prompts
+    read): an anklet, a shoulder piece or an ear ribbon on the far side stays hidden or a sliver, as in 2.22.0."""
+    item = h.parse(spec)
+    frames = loop("near")
+    report = handed.check(frames, item=item, view="side", facing="right", marker=BLUE, state="walk",
+                          references=[figure("right")])
+    assert "far_hidden" in report["rules"] and "far_in_front" not in report["rules"] and "far_shown" not in report["rules"]
+    assert not report["ok"] and "on the far side" in report["fails"][0]["why"][0]
+
+
 def test_a_far_sliver_turned_over_is_not_the_near_item_shown() -> None:
     """Facing right, the far wrist's watch may show as a sliver as the arm swings. Turned over to face left,
     that sliver is on the arm behind the body — the own right wrist, the wrong one — and the near wrist is

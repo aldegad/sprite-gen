@@ -1,9 +1,25 @@
-# Prompt assembly — the caller's text, then the engine's pieces, each said once
+# Prompt assembly — the caller's text, then the engine's pieces
 
 A prompt the engine sends is the caller's own text and then the engine's sentences. Every engine
 sentence is a **piece** with a topic, and every piece goes on through one place
-(`sprite_gen/gen/prompt_parts.py`, `Prompt.add`). That place checks what the prompt already says, so
-a piece is not said twice and two pieces do not disagree. The caller's text is never edited.
+(`sprite_gen/gen/prompt_parts.py`, `Prompt.add`). The caller's text is never edited.
+
+**A piece goes on only where its condition holds.** The arm sentences go on only for a `--handed`
+item on a wrist, a hand, a forearm or an elbow (`handedness.limb`, one table).
+
+## Without `--handed`, 2.22.0's prompts
+
+The prompts a character with no handed item is drawn and filmed from are 2.22.0's, byte for byte:
+clips (built-in or `--motion`, every model and pin), `video-prompt`, stills (view, facing,
+reference, key line, layout guide, the `--facing-fix regen` regeneration), `video --direction side`
+and the mid-step redraw. `tests/gen/test_prompt_freeze.py` compares every prompt string in that table
+with `tests/fixtures/prompts-v2.22.0.json.gz`, drawn from the 2.22.0 tag's source by
+`tests/gen/prompt_freeze_table.py`. The notes and warnings printed beside a prompt are not part of
+that comparison. A change to these prompts is made only after a before-and-after comparison on the
+app's default clip model shows it is better.
+
+`--handed` adds its piece and changes nothing else: the prompt is the one without it, with the handed
+sentences put in (`tests/gen/test_prompt_assembly.py`).
 
 ## The pieces
 
@@ -18,66 +34,39 @@ a piece is not said twice and two pieces do not disagree. The caller's text is n
 | key background | `--transparent --ref` when `auto` plans a key | `chroma.KEY_BACKGROUND_TEXT` |
 | layout guide | `--layout-guide` | `gen.layout_guide_text` |
 
-With `--direction`, the view sentence says the turn, so the facing piece says only what it does not:
-"Left here means toward the left edge of the image, regardless of the reference image's
-orientation. Preserve the subject's design." Without `--direction` it says the turn itself ("The
-subject must be facing left (toward the left edge of the image), …"). Said after a three-quarter
-view sentence, that full-profile wording asked for a different turn than the view's 45 degrees.
+A facing correction (`--facing-fix regen`) regenerates with the correction ("CORRECTION REQUIRED: …")
+said after the first prompt (`facing.prepare_correction`).
 
-A facing correction (`--facing-fix regen`) regenerates with the facing piece **replaced** by its
-correction ("CORRECTION REQUIRED: …"), said last. It is not added after the sentence it corrects.
-
-**A clip** (`video-prompt`, `video-set`, `batch.clip_prompt_parts`):
-
-| Piece | When | Sentence from |
-|---|---|---|
-| motion | always | the state's own (`MOTION_TEXT`, `VIEW_MOTION_TEXT`), or the caller's `--motion` |
-| hold, gait hold, repeat | a caller's `--motion` | `HOLD_TEXT`, `GAIT_HOLD_TEXT`, `REPEAT_TEXT` |
-| view, frame, camera, background, design, rhythm | always | `VIEW_TEXT` in `COMMON_TEXT` / `PINNED_LOOP_TEXT` / `ACTION_COMMON_TEXT` |
-| Lite walk, Lite head | a Lite model's walk | `LITE_WALK_TEXT`, `LITE_HEAD_TEXT` |
-| handed | `--handed` | `handedness.text(clip=True)` |
-| side view | `sprite-gen video --direction side` | `video.side_view_prompt` |
-
-The walk paragraph says a thing once too. That a gait does not move across the screen is the frame
-sentence's ("does not move across the screen"); the side and diagonal gait sentences and holds no
-longer add "without moving across the screen". A walk or run seen from the front, from behind or at
-a diagonal says its view in the gait sentence or hold ("facing the viewer", "keeps the exact
-three-quarter back angle of the image"), so the view sentence is left out of its prompt
-(`batch.GAIT_SAYS_VIEW`); a side gait keeps the view sentence, which carries the facing. With a
-caller's own motion paragraph, `--character` is named on the sentence that says the view: the view
-sentence, or where that is left out, the gait hold ("A small fox adventurer in a green cloak stays in
-place as if on a treadmill, without coming any closer, and keeps facing the viewer the whole time.").
-A clip prompt that would go out without the character is an error, not a prompt.
-
-`video --direction side` holds the side view ("The subject stays in exact side view, facing left. No
-turning around.") only for a prompt that does not say it already: a `video-prompt` or `video-set`
-prompt does ("seen from the exact side, facing left") and is sent as it is.
+**A clip** (`video-prompt`, `video-set`, `batch.clip_prompt_parts`): the motion paragraph (the state's
+own, `MOTION_TEXT` / `VIEW_MOTION_TEXT`, or the caller's `--motion` with `HOLD_TEXT`, `GAIT_HOLD_TEXT`
+and `REPEAT_TEXT`), the view, frame, camera, background, design and rhythm rules (`VIEW_TEXT` in
+`COMMON_TEXT` / `PINNED_LOOP_TEXT` / `ACTION_COMMON_TEXT`) and a Lite model's walk sentences
+(`LITE_WALK_TEXT`, `LITE_HEAD_TEXT`), as 2.22.0 put them together; then the handed piece
+(`handedness.text(clip=True)`). `sprite-gen video --direction side` adds the side view's hold after
+the prompt (`video.side_view_prompt`).
 
 The handed piece of a clip is one sentence per wrist (or other part), not per item: two items on one
 wrist share it, and with an item on each wrist neither sentence calls the other wrist bare. In a
-side view's walk or run it says the far arm's item shows each time that arm swings forward
-([handedness](video-pipeline.md#handedness--an-item-on-one-side)).
+side view's walk or run with an item on a wrist, a hand, a forearm or an elbow it says the arms swing
+(`handedness.ARMS_SWING_TEXT`, the one place that sentence lives) and that the far arm's item shows
+each time that arm swings forward
+([handedness](video-pipeline.md#handedness--an-item-on-one-side)). An item anywhere else — an ear,
+the head, a tail, the body, a leg, a shoulder — gets only where it is, and no arm sentence.
 
 **A front or back walk's start still** (`batch.walk_start_prompt`): the mid-step redraw sentence,
 the key background line, then the still's handed sentences.
 
 ## What "already said" means
 
-- **The same sentence.** A sentence the prompt already carries, word for word, is dropped from the
-  piece. A start-still prompt handed back to `gen --direction --handed` keeps one copy of the handed
-  sentences; a `--motion` paragraph that quotes an engine rule ("Camera completely locked, …") is
-  not followed by the rule again.
-- **The same topic** (`prompt_parts.ALREADY_SAID`). A key background the prompt names leaves the key
-  line out. It is read from the hex code (`#FF00FF`, `00ff00`), the key's name before "background",
-  "backdrop", "screen" or "chroma key" ("a green screen", "magenta-colored background"), the name
-  after one ("a background of pure magenta", "background: solid green"), or "keyed on magenta" /
-  "on a green key" (`chroma.named_key_background`). A colour in the subject is not a key ("a green
-  frog", "holding a green key"), and neither is one the prompt rules out ("no green screen",
-  "without a magenta background").
-- **The opposite, in the engine's own words, is refused** before anything is generated: a prompt
-  that rules out the key the engine would ask for ("no green screen" with `--chroma-key green`), and
-  a clip prompt that says the side view faces one way sent to `video --direction side --facing` the
-  other.
+- **A key background** (`prompt_parts.ALREADY_SAID`): a still's prompt that names one leaves the key
+  line out. It is read from the hex code (`#FF00FF`, `00ff00`) or the key's name right before
+  "background", "backdrop", "chroma key", "key" or "screen" (`chroma.named_key_background`), as
+  in 2.22.0.
+- **The handed piece** (`prompt_parts.ONCE_ONLY`): a sentence the prompt already carries, word for
+  word, is dropped from it. A start-still prompt handed back to `gen --direction --handed` keeps one
+  copy of the handed sentences.
+
+Every other piece is said as 2.22.0 said it, even where the prompt already says it.
 
 ## The caller's own words
 
@@ -92,13 +81,37 @@ The engine cannot tell which of two statements the caller meant, so it reports a
 
 `gen` prints them as `[gen] warning: …` / `[gen] note: …` and records them in the report's
 `extra.prompt_notes`. `video-prompt --json` puts conflicts in `warnings` and all of them in `notes`.
-`video-set` records them per item as `prompt_notes`.
+`video-set` records them per item as `prompt_notes`. The prompt itself is the same with or without
+them.
 
-## The check
+## Known faults kept for now
 
+2.22.0's prompts have faults the freeze keeps until a before-and-after comparison says to change
+them, most urgent first:
+
+1. A key background is read only as above: "no green screen" reads as asking for green (a
+   `--transparent --ref` run then gets no key line and may come back on a light ground), and "a
+   background of pure magenta" or "magenta-colored background" is not read (the key line goes on a
+   second time).
+2. With `--ref --direction --facing` the facing piece says the turn again after the view sentence,
+   as a full profile ("The subject must be facing left (toward the left edge of the image)"),
+   against a three-quarter view's 45 degrees.
+3. A `--motion` paragraph that quotes an engine rule is followed by the rule again.
+4. A `--facing-fix regen` regeneration carries the facing sentence twice: the first and the
+   correction.
+5. `video --direction side` adds its hold to a prompt that already has it, and to one that faces the
+   other way.
+6. A walk or run says "in place" and its view twice: the side and diagonal gait sentences end
+   "without moving across the screen" as the frame sentence does, and a front, back or diagonal one
+   says its view in the gait sentence and again in the view sentence.
+
+## The checks
+
+`tests/gen/test_prompt_freeze.py` holds every prompt string without `--handed` to 2.22.0's.
 `tests/gen/test_prompt_assembly.py` draws every prompt in the option table as text, with no
-generation: five views, both facings, no item / one / two on one wrist / one on each wrist, a
-caller's text that names the key, the turn or the item's side or does not, every state, both clip
-models, a caller's own motion, the facing correction, the start still and the hand-offs between
-verbs. Each prompt is checked for a sentence said twice, words that turn the subject both ways, and
-more than one key background. A new option is a new row in that file's tables.
+generation: five views, both facings, no item / one / two on one wrist / one on each wrist / one on an
+ear, a caller's text that names the key, the turn or the item's side or does not, every state, both
+clip models, a caller's own motion, the start still and the hand-offs between verbs. Each is checked
+for the prompt without `--handed` plus the handed piece and nothing else, a handed sentence said
+twice, a part called bare and dressed at once, an arm sentence where no wrist item is or no step
+swings it, and the notes. A new option is a new row in that file's tables.

@@ -131,10 +131,8 @@ the default is generic on purpose, because how a character walks (high steps, a 
 march) is the caller's to say. The front run keeps its sentence.
 
 Since 2.16.0 every walk and run takes that form, from every view: the side walk "walks
-naturally in place, as if on a treadmill" (it said "moves in place on a treadmill" as a place
-and asked for "an even left-right or front-back rhythm"; until 2.22.0 it also ended "without
-moving across the screen", which the frame sentence says — "does not move across the screen" —
-so a side or diagonal gait no longer says it a second time), the
+naturally in place, as if on a treadmill, without moving across the screen" (it said "moves in
+place on a treadmill" as a place and asked for "an even left-right or front-back rhythm"), the
 side run "runs naturally in place …", and the front and back runs "runs naturally in place,
 facing (away from) the viewer, as if on a treadmill …" (the front run spelled its strides out
 and said "toward the viewer" and "without coming any closer" in one clause). On one character,
@@ -146,17 +144,12 @@ right, the way an isometric game's character walks down and up to the right (tur
 left; a character with an item on one side has them drawn facing left instead, see
 [handedness](#handedness--an-item-on-one-side)). A walk or run in one says where it heads on the screen in those words: "walks naturally in
 place, as if on a treadmill, heading diagonally away from the viewer toward the upper right, like a
-character walking up and to the right in an isometric game. It
+character walking up and to the right in an isometric game, without moving across the screen. It
 keeps the exact three-quarter back angle of the image the whole time: its back stays turned toward
 the viewer at that angle and its face stays hidden. It never turns into a side view." (and "toward
 the viewer and to the right … three-quarter front angle" for the front one). It is filmed pinned to
 its first frame (`PINNED_GAIT_VIEWS`, `pins_last_frame`) with the return sentence, and cut as any
-walk (`--anchor motion-auto`). The view is said once: a walk or run seen from the front, from behind
-or at a diagonal says it in the gait sentence ("facing the viewer", "keeps the exact three-quarter
-back angle of the image"), so its prompt leaves the view sentence out (`GAIT_SAYS_VIEW`) and, with
-`--motion`, names `--character` on the gait hold instead ("The knight stays in place as if on a
-treadmill …"); a side gait keeps it ("The character is seen from the exact side, facing right."), and so does every other state,
-whose view sentence points at the image ("seen from a
+walk (`--anchor motion-auto`). The clip's view sentence points at the image ("seen from a
 three-quarter back angle, turned exactly as in the image"); a still drawn at a diagonal from another
 picture takes `STILL_VIEW_TEXT` instead (`still_view_text`), which says the whole body and head turn
 about 45 degrees and which way the feet point — told less, a three-quarter back view came out as a
@@ -219,8 +212,7 @@ paragraph — whole sentences about the subject, such as a request interpreter w
 request — in place of the built-in state sentence. The frame, camera, background and design
 rules stay the engine's, and an attack keeps its `HOLD_TEXT` sentence after the paragraph. A
 walk or run gets `GAIT_HOLD_TEXT` for its view after the paragraph instead: it stays in place as
-if on a treadmill and keeps facing the viewer or away from the viewer the whole time (a diagonal
-keeps the image's angle; a side view's facing is its view sentence's, said once),
+if on a treadmill and keeps facing the viewer, away from the viewer or `{facing}` the whole time,
 so a caller describes the gait (a sneak, a march, a lazy stroll) and the engine keeps it on the
 spot. On one character, one clip each: a march lifted the knees high as asked and stayed in
 place, a lazy stroll seen from behind kept facing away, and a tiptoe sneak kept facing the viewer
@@ -278,10 +270,9 @@ sprite-gen video-frames --clip item/clip.mp4 --out-dir item/frames --spill auto 
 sprite-gen video-loop --frames-dir item/frames/keyed --out-dir item/loop --fps 24 --state walk --cycle auto --facing right --name side-walk
 ```
 
-The prompt is sent as printed. `sprite-gen video --direction side` does not add its side-view hold to
-it (it already says "seen from the exact side, facing right"), and refuses it when `--facing` is the
-other way. `--character` or `--motion` words that turn the subject another way than `--facing`, or put
-a `--handed` item on its other side, come back in `warnings` ([prompt-assembly](prompt-assembly.md)).
+`--character` or `--motion` words that turn the subject another way than `--facing`, or put a
+`--handed` item on its other side, come back in `warnings`; the prompt is the same either way
+([prompt-assembly](prompt-assembly.md)).
 
 `video-prompt --json` also gives the duration (the state's own, as `video-set`), whether the clip
 ends on the canvas (`last_frame`), the loop cut (`cycle`) and these commands with placeholders; a
@@ -338,12 +329,14 @@ item is on the other side — a mirrored still, or a side picture drawn the wron
 `handed-check` first. A front or back picture, where the item's side is plain, is the safe reference.
 
 **The far arm of a side view.** A side view hides the far side behind the body, except for what swings
-out from behind it: an arm or a leg (`handedness.limb` reads the body part — wrist, hand, arm, ankle,
-foot, …). A walking character's far arm comes forward of the body with every step, and what it wears
-shows then. So an item on a far limb is said to show wherever that limb is out in front of the body
-and to be hidden where the body covers it; a far part that does not swing (a pin on the far side of
-the head) is still said hidden. 2.22.0 said every far item hidden and never named it in the clip, and
-a watch on the far wrist was then in no frame of the side walk.
+out from behind it. A walking character's far arm comes forward of the body with every step, and what
+its wrist or hand wears shows then. So an item on a wrist, a hand, a forearm or an elbow
+(`handedness.limb`, the one table: `SWINGING_ARM_PARTS`) is said, on the far arm, to show wherever that
+arm is out in front of the body and to be hidden where the body covers it. Every other far item — on an
+ear, the head, a tail, the body, a leg, a shoulder, the upper arm — is said hidden, as in 2.22.0, and
+gets no arm sentence: a far shoulder stays behind the body as the character walks, and a leg's item
+showing as it steps forward was never filmed. 2.22.0 said every far item hidden and never named it in
+the clip, and a watch on the far wrist was then in no frame of the side walk.
 
 A clip keeps what its first frame shows and makes up what it hides. For a walk or run with an item on
 the far arm, draw the side still **mid-stride with both arms in view**, and say the pose in your
@@ -354,14 +347,15 @@ prompt — the engine's sentence says where the item shows, not how the characte
 > near arm swings back past the body and shows whole
 
 `video-prompt --json` names this under `still_needs` (and on stderr), and `video-set` under each
-item's `still_needs`, whenever a walk or run has an item on the far limb of a side view.
+item's `still_needs`, whenever a walk or run has an item on the far wrist or hand of a side view.
 
 **The clip.** `video-prompt --handed …` and `video-set --handed …` end the clip prompt with where the
 item stays (`build_prompt(handed=...)`). The clip starts from a still already drawn with the item in
 place, so the sentence anchors to the image and names the item once, positively, where it shows: "The
 black smartwatch stays on the wrist at the right of the picture, nearer the viewer, for the whole clip,
-exactly as in the image, and on no other wrist." In a side view's walk or run the arms are said to
-swing ("Both arms swing back and forth with each step, opposite to the legs."), and then:
+exactly as in the image, and on no other wrist." In a side view's walk or run with an item on a wrist,
+a hand, a forearm or an elbow, the arms are said to swing (`handedness.ARMS_SWING_TEXT`: "Both arms
+swing back and forth with each step, opposite to the legs."), and then:
 
 - on the far arm: "The black smartwatch stays on the wrist that wears it in the image, on the arm on
   the far side of the body, and shows each time that arm swings forward; the arm nearer the viewer
@@ -372,7 +366,7 @@ swing ("Both arms swing back and forth with each step, opposite to the legs."), 
 
 No sentence holds an arm still: the arms swing with the walk. The other arm is said bare, never as a
 list of what it must not wear — a clip prompt that lists that draws it there. Where nothing brings the
-far side into view — a part that does not swing, or a state that does not step (idle, attack) — the
+far side into view — any other part, or a state that does not step (idle, attack) — the
 item is not named at all: "The wrist nearer the viewer stays bare, exactly as in the image, for the
 whole clip." A side view names the near part "nearer the viewer", not "in front of the body": in a
 mid-stride still the far arm is the one in front of the body. Items on the same wrist share one sentence, and with an item on each wrist neither is
@@ -405,14 +399,15 @@ nothing else on the character has — a watch's screen — and checks every fram
   arm is forward, and in a side view that share is what tells the two apart. Against `--reference` a
   frame counts only when the item is more than a sliver (its largest blob larger than half the item
   seen whole);
-- the far side of a side view, an item on an arm or a leg: every blob is out in front of the body —
-  on the facing side of the body's centre by at least a tenth of the body's height (`far_in_front`).
-  An item that shows at or behind the centre is on the near limb, the wrong one. With `--state walk`
-  or `run` it must also show in at least a quarter of the frames (`far_shown`); without `--state`, or
-  for a state that does not step, that is reported unchecked. Against `--reference` a sliver is not
-  judged for where it is;
-- the far side of a side view, an item that does not swing: no blob larger than half the item seen
-  whole on `--reference` (a keyed front or back picture; `far_hidden`).
+- the far side of a side view, an item on a wrist, a hand, a forearm or an elbow (`handedness.limb`):
+  every blob is out in front of the body — on the facing side of the body's centre by at least a tenth
+  of the body's height (`far_in_front`). An item that shows at or behind the centre is on the near arm,
+  the wrong one. With `--state walk` or `run` it must also show in at least a quarter of the frames
+  (`far_shown`); without `--state`, or for a state that does not step, that is reported unchecked.
+  Against `--reference` a sliver is not judged for where it is;
+- the far side of a side view, any other item (an anklet, a shoulder piece, a pin on the head): no
+  blob larger than half the item seen whole on `--reference` (a keyed front or back picture;
+  `far_hidden`).
 
 Without `--reference` the size rules are not checked; the report says so (`far_hidden` /
 `near_whole`: `checked: false`) and a frame counts as shown by any blob.

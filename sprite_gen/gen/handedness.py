@@ -22,11 +22,14 @@ A view turned to the right shows the character's right side; turned to the left,
 own right side is the mirror of every row. A side view puts both arms over the middle of the body,
 so it has no picture side, only near and far.
 
-The far side of a side view is hidden behind the body, except for what swings out from behind it:
-an arm or a leg (`limb`). A walking character's far arm comes forward of the body with every step,
-and what it wears shows then. An item on a far limb is therefore drawn and filmed as showing
-whenever that limb is out in front of the body, and the near limb stays bare. Said as hidden, and
-never named in the clip, a watch on the far wrist was in no frame of a walk at all (2.22.0).
+The far side of a side view is hidden behind the body, except for what swings out from behind it.
+A walking character's far arm comes forward of the body with every step, and what its wrist or hand
+wears shows then. An item there (`limb`: `SWINGING_ARM_PARTS`) is therefore drawn and filmed as
+showing whenever that arm is out in front of the body, and the near arm stays bare; a walk or run
+with one also says the arms swing (`ARMS_SWING_TEXT`). Said as hidden, and never named in the clip,
+a watch on the far wrist was in no frame of a walk at all (2.22.0). Every other part (an ear, the
+head, a tail, the body, a leg, a shoulder, the upper arm) keeps the 2.22.0 sentences: hidden on the far
+side, and no arm sentence for it.
 """
 
 from __future__ import annotations
@@ -37,9 +40,11 @@ VIEWS = ("side", "front", "back", "front_diagonal", "back_diagonal")
 # Views turned toward a side of the picture: each is drawn facing right or left.
 LATERAL_VIEWS = frozenset({"side", "front_diagonal", "back_diagonal"})
 SIDES = ("left", "right")
-# Body parts on a limb that swings with a step: in a side view the far one comes out in front of the body.
-ARM_WORDS = frozenset({"wrist", "hand", "arm", "forearm", "elbow", "palm", "finger", "fingers", "thumb", "knuckles"})
-LEG_WORDS = frozenset({"ankle", "foot", "leg", "knee", "shin", "calf", "thigh", "heel", "toes"})
+# The one table of which parts get the arm sentences: the wrist and the parts around it, which a walking
+# side view's far arm carries out in front of the body (the case filmed: a watch on the far wrist). A
+# shoulder or an upper arm stays behind the body, and a leg's item showing as it steps forward was never
+# filmed, so those keep the 2.22.0 sentences.
+SWINGING_ARM_PARTS = frozenset({"wrist", "hand", "forearm", "elbow", "palm", "finger", "fingers", "thumb", "knuckles"})
 # A side walk or run with an item on an arm: the arms are said to swing, never held still. An arm held at
 # the body keeps the item off the other arm but walks stiffly, and a far arm that does not swing never
 # brings its item into view.
@@ -65,10 +70,10 @@ class Handed:
 
 
 def limb(part: str) -> str | None:
-    """"arm" or "leg" when `part` is on a limb that swings with a step ("wrist", "upper arm", "ankle"), else None
-    (a side of the head, a shoulder, a hip: on the far side these stay behind the body)."""
-    words = set(part.lower().split())
-    return "arm" if words & ARM_WORDS else "leg" if words & LEG_WORDS else None
+    """"arm" when `part` is on the swinging end of an arm (`SWINGING_ARM_PARTS`: "wrist", "left hand"), else None
+    (an ear, the head, a tail, a leg, a shoulder: on the far side these stay behind the body, and an item there
+    gets no arm sentence)."""
+    return "arm" if set(part.lower().split()) & SWINGING_ARM_PARTS else None
 
 
 def parse(spec: str) -> Handed:
@@ -150,11 +155,11 @@ def _clip_clause(group: list[Handed], view: str, facing: str | None, *, gait: bo
     """The items on one part of one side (`group`), in a clip. The clip starts from a still already drawn with
     them in place, so the sentence anchors to the image and says them positively, once, where they show.
 
-    A side view's far limb in a walk or run (`gait`) shows what it wears each time it swings forward, and the
-    sentence says so: left unnamed, a watch on the far wrist was in no frame of the walk. The near limb is said
-    bare (`other_bare`: nothing of the caller's is on it), never as a list of what it must not wear — a clip
-    prompt that lists that draws it there. Where nothing brings the far side into view (a part that does not
-    swing, a state that does not step) the items are not named at all, only that the near part stays bare.
+    A side view's far arm in a walk or run (`gait`) shows what its wrist or hand wears each time it swings forward
+    (`limb`), and the sentence says so: left unnamed, a watch on the far wrist was in no frame of the walk. The
+    near arm is said bare (`other_bare`: nothing of the caller's is on it), never as a list of what it must not
+    wear — a clip prompt that lists that draws it there. Where nothing brings the far side into view (any other part, a state
+    that does not step) the items are not named at all, only that the near part stays bare.
     """
     h = group[0]
     at = placement(h.side, view, facing)
@@ -208,7 +213,7 @@ def text(items: list[Handed], view: str, facing: str | None = None, *, clip: boo
             groups.setdefault((h.side, h.part), []).append(h)
         clauses = [_clip_clause(group, view, facing, gait=gait, other_bare=(group[0].other, part) not in groups)
                    for (_, part), group in groups.items()]
-        if gait and view == "side" and any(limb(h.part) == "arm" for h in items):
+        if gait and view == "side" and any(limb(h.part) for h in items):
             # the far arm's item shows only if the arms swing: said outright, once, before where the items are
             clauses.insert(0, ARMS_SWING_TEXT)
         return " ".join(clause for clause in clauses if clause)

@@ -70,9 +70,9 @@ it never changes the requested direction. Image correction requires explicit opt
 
 | Command option | Values and default | Behavior |
 |---|---|---|
-| `gen --facing` | `preserve` (default), `right`, `left` | With `--ref`, an explicit direction adds a prompt requirement and checks the generated still. With `--direction` the view sentence says the turn and this piece only pins the image edge ([prompt-assembly](docs/prompt-assembly.md)). |
+| `gen --facing` | `preserve` (default), `right`, `left` | With `--ref`, an explicit direction adds a prompt requirement and checks the generated still. |
 | `gen --facing-fix` | `none` (default), `mirror`, `regen` | Record without correction; opt into mirroring an observed opposite or regenerating once and rechecking. A still-opposite regeneration is mirrored. |
-| `video --direction` | `side`, `front`, `back`, `front_diagonal`, `back_diagonal`; unset by default | `side` opts into facing inspection and a matching prompt requirement (not repeated on a `video-prompt` prompt, which already says it; refused when that prompt faces the other way); the others skip it. The two diagonals are three-quarter views turned right (`VIEW_TEXT`); a walk or run in one is filmed pinned (`pins_last_frame`). |
+| `video --direction` | `side`, `front`, `back`, `front_diagonal`, `back_diagonal`; unset by default | `side` opts into facing inspection and a matching prompt requirement; the others skip it. The two diagonals are three-quarter views turned right (`VIEW_TEXT`); a walk or run in one is filmed pinned (`pins_last_frame`). |
 | `video --facing`, `video-set --facing` | `right` (default), `left`; `video-set` also `right,left` | Required side direction. `right,left` films every side and diagonal view both ways, each from its own still (`--base side@left=…`); none is mirrored. |
 | `gen --direction`, `--handed`; `video-prompt` / `video-set --handed` | a view; `"<item>=<left\|right> [part]"` | An item on one of the character's own sides: the still and clip prompts say where it is in each view, and mirroring is refused. |
 | `video --facing-fix`, `video-set --facing-fix` | `none` (default), `mirror` | Record the observation; opt into mirroring an observed opposite in a copy. Batch side inspection is enabled by default. |
@@ -87,8 +87,8 @@ front-facing observations also remain unchanged. Mirroring does not preserve lef
 It stays the default, since drawing the left-facing views costs as much again; for a character with a watch on
 one wrist or a pin on one side, offer to draw them instead with `--handed` and check them with `handed-check`
 (a colour-marked item, frame by frame; `--board` for the eye) —
-[handedness](docs/video-pipeline.md#handedness--an-item-on-one-side). In a side view an item on the far arm
-shows each time that arm swings forward, never hidden for the whole walk: draw that side still mid-stride with
+[handedness](docs/video-pipeline.md#handedness--an-item-on-one-side). In a side view an item on the far wrist
+or hand shows each time that arm swings forward, never hidden for the whole walk: draw that side still mid-stride with
 the far arm out in front of the body and the item in view (`video-prompt` says so under `still_needs`), do not
 hold the arms still, and check the loop with `handed-check --state walk`.
 
@@ -116,7 +116,7 @@ hold the arms still, and check the loop with `handed-check --state walk`.
 | Optional scene placement, lighting, camera and render | `scene-render`, `scene-inspect` | [scene](docs/scene.md) |
 | Defaults | `defaults show`, `defaults save`, `defaults clear` | [user-workflow](docs/user-workflow.md#one-settings-owner) |
 
-Say a thing once: what an option says, leave out of the prompt. `--direction`, `--facing`, `--handed`, the key background and `video --direction side` each add their own sentence, in one place that drops what the prompt already has. Your prompt carries the subject, its design and its pose. Text that says the opposite of an option ("facing left" with `--facing right`, the item on the other wrist) is sent as written with a warning (`extra.prompt_notes`, `video-prompt`'s `warnings`): fix the prompt, do not send it — [prompt-assembly](docs/prompt-assembly.md).
+Say a thing once: what an option says, leave out of the prompt. `--direction`, `--facing`, `--handed`, the key background and `video --direction side` each add their own sentence after your text, in one place; without `--handed` every prompt is 2.22.0's, byte for byte, and only the handed sentences are left out where your text already has them. Your prompt carries the subject, its design and its pose. Text that says the opposite of an option ("facing left" with `--facing right`, the item on the other wrist) is sent as written with a warning (`extra.prompt_notes`, `video-prompt`'s `warnings`): fix the prompt, do not send it — [prompt-assembly](docs/prompt-assembly.md).
 
 `gen --transparent` with `--ref` plans a chroma key (adding the key's background line to a prompt that names none), and publishes a result that already came back transparent on its own alpha instead of keying its outline away; `alpha.strategy_source` in the report says which (`refs-attached` keyed, `refs-attached-raw-alpha` not) — [gen](docs/gen.md#transparent-output--strategy-per-provider).
 

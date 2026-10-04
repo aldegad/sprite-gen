@@ -448,10 +448,8 @@ def generate_image(
         verify_png(raw)
         facing_report = None
         if refs and facing is not None:
-            retry = parts.replaced("facing", facing_mod.prompt_suffix(facing, retry=True, view=view is not None))
             request, run, facing_report = facing_mod.prepare_correction(
-                backend, request, run, workdir, facing=facing, fix=facing_fix, retry_prompt=retry.text,
-                mirror_ok=not handed)
+                backend, request, run, workdir, facing=facing, fix=facing_fix, mirror_ok=not handed)
             raw = request.raw
         raw_bytes = verify_png(raw)
 
@@ -567,13 +565,12 @@ def _check_view(view: str | None, facing: str | None, facing_fix: str, handed: l
 def still_prompt(prompt: str, *, view: str | None = None, facing: str | None = None,
                  handed: list[handed_mod.Handed] | None = None, refs: bool = False, key: str | None = None,
                  layout: dict[str, Any] | None = None) -> prompt_parts.Prompt:
-    """The prompt a still is drawn from: the caller's text, then the engine's pieces, each said once
-    (`prompt_parts.Prompt.add`). In order:
+    """The prompt a still is drawn from: the caller's text, then the engine's pieces (`prompt_parts.Prompt.add`;
+    without `handed`, 2.22.0's prompt to the byte). In order:
 
     - `view` (`--direction`): the sentence for drawing the still at that view, turned to `facing` (the side and
       diagonal views), then where each `handed` item is in it (`handedness.text`);
-    - with `refs` and a `facing`: the turn over the reference (`facing.prompt_suffix`) — only which edge of the
-      image the side is when the view sentence already said the turn;
+    - with `refs` and a `facing`: the turn over the reference (`facing.prompt_suffix`);
     - `key` (green / magenta, a ref run `auto` planned to key): the key background line, unless the prompt
       names a key background already;
     - `layout` (the `--layout-guide` cell): where the guide's lines are.
@@ -588,7 +585,7 @@ def still_prompt(prompt: str, *, view: str | None = None, facing: str | None = N
         if handed:
             parts.add("handed", handed_mod.text(handed, view, facing), sep=" ", handed=handed)
     if refs and facing is not None:
-        parts.add("facing", facing_mod.prompt_suffix(facing, view=view is not None), facing=facing)
+        parts.add("facing", facing_mod.prompt_suffix(facing), facing=facing)
     if key is not None:
         parts.add("key-background", chroma_mod.KEY_BACKGROUND_TEXT[key], key=key)
     if layout is not None:
