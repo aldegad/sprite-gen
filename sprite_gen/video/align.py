@@ -124,8 +124,12 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     strip, strip_meta = loop_mod.build_strip(
         frames, max_height=int(meta["cell_height_cap"]), cycle_seconds=cycle_seconds, body_height=meta.get("body_height_target"),
         anchor="feet" if meta.get("foot_anchor") == "feet" else "none", kind=str(meta["kind"]), standing_src=standing)
-    # what build_strip does not own (how the cut was anchored) is carried over as it was
-    merged = {**{k: v for k, v in meta.items() if k not in strip_meta and k != "cycle_align"}, **strip_meta}
+    # what build_strip does not own (how the cut was anchored) is carried over as it was; a
+    # follow-through moved the old cycle's cells, so it is cleared and the record says so
+    if "follow" in meta or (loop_dir / loop_mod.FOLLOW_SOURCE).exists():
+        record["follow_cleared"] = True
+    (loop_dir / loop_mod.FOLLOW_SOURCE).unlink(missing_ok=True)
+    merged = {**{k: v for k, v in meta.items() if k not in strip_meta and k not in ("cycle_align", "follow")}, **strip_meta}
     if meta.get("foot_anchor") and meta.get("foot_anchor") != "feet":
         merged["foot_anchor"] = meta["foot_anchor"]
     cells = [strip.crop((k * strip_meta["w"], 0, (k + 1) * strip_meta["w"], strip_meta["h"])) for k in range(strip_meta["frames"])]

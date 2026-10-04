@@ -27,6 +27,7 @@ MODULE_DOMAIN = {
     'loop': 'video',
     'batch': 'video',
     'align': 'video',
+    'follow': 'video',
     'rife_install': 'video',
     'clip_prompt': 'video',
     'prepare': 'gen',
@@ -90,8 +91,8 @@ DOMAIN_TITLE = dict(DOMAINS)
 PIPELINES: list[dict[str, object]] = [
     {"key": "A", "name": "atlas rows", "verbs": ["prepare", "gen", "gen-set", "extract", "compose-atlas", "curation"],
      "chain": "prepare → gen (or gen-set) → extract → compose-atlas; optional curation and recompose", "doc": "docs/run-contract.md"},
-    {"key": "B", "name": "video → loop", "verbs": ["video-canvas", "video", "video-prompt", "video-frames", "video-loop", "video-set", "video-cycle-align", "handed-check"],
-     "chain": "video-canvas → video (or video-prompt + a video MCP) → video-frames → video-loop, or video-set; video-cycle-align across a set; handed-check for an item on one side", "doc": "docs/video-pipeline.md"},
+    {"key": "B", "name": "video → loop", "verbs": ["video-canvas", "video", "video-prompt", "video-frames", "video-loop", "video-set", "video-cycle-align", "video-follow", "handed-check"],
+     "chain": "video-canvas → video (or video-prompt + a video MCP) → video-frames → video-loop, or video-set; video-cycle-align across a set; video-follow for a soft part's follow-through; handed-check for an item on one side", "doc": "docs/video-pipeline.md"},
 ]
 
 TOOL_GROUPS: list[dict[str, object]] = [
