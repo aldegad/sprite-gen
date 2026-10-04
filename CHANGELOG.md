@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v2.23.0)
+## v2.23.0 - Every prompt part is said once, and a walking side view shows the far arm's item each time that arm swings forward
 
 - **Every engine sentence goes on a prompt through one place, and none is said twice** (`sprite_gen/gen/prompt_parts.py`, `Prompt.add`). A prompt is the caller's text and then the engine's pieces — the view, the turn over a reference, a handed item, the key background, the layout guide; for a clip the hold, the frame and camera rules, a Lite model's sentences and the side view's hold. Each piece was attached where it was made, so some were said twice and some disagreed. A sentence the prompt already has is now dropped, a piece whose topic the prompt covers is left out, and one the prompt rules out is refused. `gen.still_prompt`, `batch.clip_prompt_parts`, `walk_start_prompt` and `video.side_view_prompt` build on it. [docs/prompt-assembly.md](docs/prompt-assembly.md).
 - **Fix: a reference still with `--direction` said the turn twice, the second time as a full profile.** After the view sentence, the reference piece said "The subject must be facing left (toward the left edge of the image)", which asked a three-quarter view for a side view's turn. With `--direction` it now says only what the view sentence does not: "Left here means toward the left edge of the image, regardless of the reference image's orientation. Preserve the subject's design." A reference run with `--facing` alone is unchanged.
