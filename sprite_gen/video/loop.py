@@ -90,11 +90,15 @@ FOOT_BAND = 0.08  # fraction of the frame's own height, measured up from its low
 # no RIFE fails the loop — a caller that asked for the repair is never handed less; off: the loop
 # is cut as filmed, and says so.
 REPAIR_MODES = ("auto", "on", "off")
+SIZE_HOLD_MODES = ("auto", "off")
 FACINGS = ("right", "left")
 # Where `video-cycle-align` keeps the cut as filmed (sprite_gen/video/align.py). A new cut makes
 # the kept one stale, so writing the cycle removes it: an alignment after a re-cut (say, once RIFE
 # is installed and the jumps are repaired) reads the new cut, not the old one.
 CYCLE_SOURCE_DIR = "cycle.source"
+# The strip as it was before `video-follow` moved a region of it; a later follow-through reads
+# from it, and a new cut or alignment removes it (docs/video-pipeline.md section 6).
+FOLLOW_SOURCE = "follow.source.png"
 
 
 # A gait's period is a fact about the body, not about how long the clip runs: the
@@ -847,7 +851,10 @@ def run_loop(
     interpolate: rife_mod.Interpolate | None = None,
     jolt_max: float | None = None,
     head_step_max: float | None = None,
+    size_hold: str = "auto",
 ) -> dict[str, Any]:
+    if size_hold not in SIZE_HOLD_MODES:
+        raise SystemExit(f"video-loop: unknown --size-hold {size_hold!r}; expected one of {', '.join(SIZE_HOLD_MODES)}")
     if repair not in REPAIR_MODES:
         raise SystemExit(f"video-loop: unknown --repair {repair!r}; expected one of {', '.join(REPAIR_MODES)}")
     if facing not in FACINGS:
@@ -891,6 +898,22 @@ def run_loop(
     try:
         if anchor == "motion-auto":
             source_frames = [Image.open(f).convert("RGBA") for f in files]
+            if size_hold == "auto":
+                # A walk or run filmed from its first frame only grows or shrinks as it plays, so the
+                # frame one cycle on is not the size of the first and the loop pops at the wrap. Hold
+                # the clip at its first frame's size before the search (`size_hold`), so the cut is
+                # chosen on frames of one size. The gait fallback below then finds nothing to undo.
+                measured = gait_fallback.scale_drift(source_frames)
+                hold: dict[str, Any] = {"applied": False, "min": gait_fallback.SIZE_HOLD_MIN,
+                                        **{k: measured[k] for k in ("height_first_px", "height_last_px", "drift")}}
+                if abs(measured["drift"]) >= gait_fallback.SIZE_HOLD_MIN:
+                    pad = gait_fallback.undo_padding(source_frames, measured)
+                    source_frames = gait_fallback.undo_scale(source_frames, measured, pad=pad)
+                    files = gait_fallback.write_frames(source_frames, [f.name for f in files], out_dir.expanduser().resolve() / FALLBACK_FRAMES_DIR)
+                    hold.update(applied=True, padding_ltrb=list(pad))
+                report_base["size_hold"] = hold
+            else:
+                report_base["size_hold"] = {"applied": False, "why": "--size-hold off"}
             D, trajectory, analysis = auto_motion.analyse(source_frames, fps=fps)
             report_base["automatic_motion_analysis"] = analysis
             detect = dict(gait_floor=round(prof.min_seconds*fps), periodicity_min=PERIODICITY_MIN,
@@ -904,7 +927,8 @@ def run_loop(
                 fallback = {"reason": str(first), "scale_drift": {k: drift[k] for k in ("height_first_px", "height_last_px", "drift")},
                             "scale_drift_min": gait_fallback.SCALE_DRIFT_MIN, "scale_undone": False}
                 if abs(drift["drift"]) >= gait_fallback.SCALE_DRIFT_MIN:
-                    source_frames = gait_fallback.undo_scale(source_frames, drift)
+                    fallback["padding_ltrb"] = list(gait_fallback.undo_padding(source_frames, drift))
+                    source_frames = gait_fallback.undo_scale(source_frames, drift, pad=tuple(fallback["padding_ltrb"]))
                     files = gait_fallback.write_frames(source_frames, [f.name for f in files], out_dir.expanduser().resolve() / FALLBACK_FRAMES_DIR)
                     D, trajectory, analysis = auto_motion.analyse(source_frames, fps=fps)
                     report_base["automatic_motion_analysis"] = analysis
@@ -1045,6 +1069,8 @@ def run_loop(
     for old in cycle_dir.glob("frame-*.png"):
         old.unlink()
     shutil.rmtree(out_dir / CYCLE_SOURCE_DIR, ignore_errors=True)
+    # A new cut makes a follow-through over the old strip stale (`video-follow` reads this source).
+    (out_dir / FOLLOW_SOURCE).unlink(missing_ok=True)
     for k, im in enumerate(frames):
         im.save(cycle_dir / f"frame-{k:03d}.png")
     strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds, body_height=body_height, anchor="feet" if anchor == "feet" else "none", kind=str(cycle.get("kind") or "periodic"),
@@ -1171,6 +1197,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--jolt-max", type=float, default=None, help=f"walk/run: fail the repaired loop when its jolt index (how far each step strays from its neighbours' mean, over the median step) exceeds this. Default: no gate — the index is reported and a value over {repair_mod.JOLT_REFERENCE} is a warning line")
     parser.add_argument("--head-step-max", type=float, default=None, help=f"walk/run: fail the repaired loop when the head's largest sideways move in one frame exceeds this %% of the body height. Default: no gate — reported, and over {repair_mod.HEAD_STEP_REFERENCE} is a warning line")
     parser.add_argument("--facing", choices=FACINGS, default="right", help="which way the body faces in the frames (default right): the hair the jump search watches is behind it")
+    parser.add_argument("--size-hold", choices=SIZE_HOLD_MODES, default="auto", help="--anchor motion-auto: auto (default) scales a clip whose fitted height changes by 1 %% or more back to its first frame's size before the cycle search, so the loop's last frame is the size of its first (recorded as size_hold); off: search the frames as filmed")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)
 
@@ -1188,6 +1215,7 @@ def run(**kwargs: object) -> int:
         anchor_regions=kwargs.get("anchor_region"),
         repair=str(kwargs.get("repair") or "auto"), facing=str(kwargs.get("facing") or "right"),
         jolt_max=kwargs.get("jolt_max"), head_step_max=kwargs.get("head_step_max"),  # type: ignore[arg-type]
+        size_hold=str(kwargs.get("size_hold") or "auto"),
     )
     summary = {k: payload[k] for k in ("state", "frames_total", "window", "cycle_seconds", "n_out", "delay_ms", "resampled_seam_ratio", "specks_dropped", "report")}
     summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio", "review_recommended", "half_period_guard")}

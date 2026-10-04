@@ -94,7 +94,10 @@ fallback below looks past the state's window, and only after this search found n
 ### The gait fallback: a slow walk, or a walk toward the camera
 
 When the local search finds no cycle, `motion-auto` looks once more, for two things a
-front or back gait does that the first search cannot see past:
+front or back gait does that the first search cannot see past. (Since 2.24.0 a clip that changes
+size by 1 % or more is held at its first frame's size before the first search —
+[video-pipeline.md](video-pipeline.md) section 4, `size_hold` — so the fallback below finds
+nothing left to scale back unless `--size-hold off` was passed.)
 
 - **It walked toward the camera, or away from it.** Asked to walk in place, a front walk
   sometimes comes closer, and the body grows through the clip, so the same pose never matches

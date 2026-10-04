@@ -277,7 +277,9 @@ carries `cycle_align` per state and `<state>.cycle-align.json`; a failed alignme
 `cycle-align:<state>` and the loops stay as cut. Without RIFE the alignment is skipped, not
 failed (section 1, "Without RIFE"); install it and run `video-cycle-align` on the set's loops.
 Cutting a loop again with `video-loop` removes its `cycle.source/`, so the next alignment reads
-the new cut.
+the new cut. An alignment also clears a follow-through (`video-follow`, which moved the old
+cells): `follow.source.png` and the strip's `follow` record are removed and the loop's row says
+`follow_cleared`; run `video-follow` again after it.
 
 How much RIFE that is, on the 2026-10-03 sets (the experiment's `finalize.py`): resampling to
 the median made 18 of 21 frames for a Lite side loop of 27, 20 of 21 for a back-diagonal loop of

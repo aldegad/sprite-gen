@@ -23,6 +23,7 @@ still ──video-canvas──▶ canvas.png ──video──▶ clip.mp4 ─�
 | `sprite-gen video-frames` | `sprite_gen/video/frames.py` | mp4 → `raw/`, `keyed/` RGBA frames + report |
 | `sprite-gen video-loop` | `sprite_gen/video/loop.py` | keyed frames → `cycle/`, `<name>.strip.png` + `.strip.json`, `<name>.gif`, `<name>.webp` + report |
 | `sprite-gen video-set` | `sprite_gen/video/batch.py` | bases × states → one folder per item, `set.report.json`, `table.md` |
+| `sprite-gen video-follow` | `sprite_gen/video/follow.py` | a loop directory + an ellipse → the strip, GIF and WebP with that region following the body ([section 6](#6-follow-through--video-follow)) |
 
 Wrappers: `scripts/video_canvas.py`, `scripts/video_frames.py`, `scripts/video_loop.py`,
 `scripts/video_set.py`. Binaries: `ffmpeg`/`ffprobe` (frames), `img2webp` from libwebp
@@ -634,6 +635,26 @@ anatomical left/right contacts. The report records `half_period_guard.reason =
 "ambiguous-harmonic"` and `cycle.review_recommended = true`. See [loop review](loop-review.md)
 for the visual review contract and manual overrides.
 
+**The size is held before the search** (`--anchor motion-auto`, `--size-hold auto`, the default).
+A walk or run filmed from its first frame only (no end frame) often grows or shrinks as it plays:
+a front walk comes a little closer with every step, a back walk goes away. The loop is then cut on
+frames that change size, so the frame one cycle after the first is not the first's size and the
+loop pops at the wrap. A straight-line fit of the subject's opaque height over the clip measures
+it (`gait_fallback.scale_drift`); at 1 % or more (`SIZE_HOLD_MIN`) every frame is scaled back to
+the first frame's fitted height about its fitted foot point before the cycle search, so the
+search, the seam and the cells all read frames of one size. Below 1 % the fit is a head bob and
+hair and the frames are searched as filmed. The report says what was measured and done
+(`size_hold`: `drift`, `applied`, `padding_ltrb`). `--size-hold off` searches the frames as
+filmed, as before 2.24.0. Measured on one front catwalk filmed from its first frame (+2.0 % over
+3 s): the engine's seam ratio of the cut went from 1.44 to 1.19.
+
+**Nothing is cut when a frame is scaled up.** A clip that shrinks is scaled up about its feet,
+and when the feet also rose in the frame (a back walk going away toward the horizon) the crown
+lands above the frame. Every frame is first widened by the room the furthest one reaches past
+each edge (`gait_fallback.undo_padding`, the same for every frame; `padding_ltrb` in the
+report), so no part is lost. A frame that needs no room keeps its size and bytes. The gait
+fallback's own scale-back (below) widens the same way.
+
 Gates, all fail-loud: no period (profile flat, below the recorded `periodicity_min`), loop seam ratio
 above `--seam-max` (2.0), GIF/WebP re-opened and checked (frame count, `loop=0`,
 transparent corners, no RGB under alpha 0 in the WebP).
@@ -776,6 +797,44 @@ default; `off` keeps each loop's own length). The same step stands alone as
 per state, and a failed alignment is listed as `cycle-align:<state>`. Without RIFE the alignment
 is skipped with a warning (`applied: false`, and a line under the report's `warnings`), not failed. See
 [loop repair](loop-repair.md) section 4.
+
+## 6. Follow-through — `video-follow`
+
+A clip model draws a walk's body moving, but a soft part hanging off it (a chest, a belly, a
+pouch on a strap) mostly moves with the body as one piece, even when the prompt asks it to
+bounce. `video-follow` puts that follow-through back on a cut loop:
+
+```bash
+sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [--region …] \
+  [--gain 2.5] [--freq 2.4] [--zeta 0.6] [--board follow.png]
+```
+
+- **The region** is an ellipse over the part in the strip's first cell, in cell pixels
+  (`cx,cy,rx,ry`; repeatable). It is carried with the body's bob from cell to cell. Somebody has
+  to say where it is — the engine does not find it: look at the first cell (or ask a vision model
+  for the four numbers once per direction; a mirrored direction takes the mirror's region).
+- **The motion** is the body's own: the crown's row (up and down) and the middle of the head
+  (side to side), read off the cells. The part is a damped mass on the body — its offset x from
+  where the body carries it answers x'' + 2ζωx' + ω²x = −body'' — solved in the loop's periodic
+  steady state per harmonic of the cycle (the first six), so it lags the bob and settles, with no
+  kick at a foot strike, and the last frame leads into the first. `--freq` (2.4 Hz) and `--zeta`
+  (0.6) set the part; `--gain` (2.5) scales the physical answer and nothing else. On a front
+  walk with a 12 px bob in a 600 px body that is a move of about ±5 px; `--gain 1` is the mass as
+  measured, `0` gives back the strip as it was.
+- **Only the region moves.** Inside it every pixel is moved by the offset times a weight that is 1
+  at the centre and 0 at the rim (cos²), sampled as premultiplied bilinear colour; outside it no
+  pixel changes. A move so large that the weight's slope folds the picture over
+  (offset × π / (2 · radius) ≥ 1) is refused: lower `--gain` or give the region larger radii.
+- **What it writes**: the strip, GIF and WebP over the loop's own (both animations re-opened and
+  checked as `video-loop` checks them), and `follow` in `<name>.strip.json` (the regions, the
+  settings, the body's bob, `dx_px`/`dy_px` per cell, `reach_px`). `cycle/` is left as cut. The
+  strip as it was is kept as `follow.source.png`; running `video-follow` again reads from it, so a
+  second run never moves a moved strip. `--board` writes the cells before and after where the part
+  sits lowest and highest, on white.
+- **Order**: after `video-cycle-align`. An alignment rebuilds the strip from the cut, removes
+  `follow.source.png` and the `follow` record, and says so (`follow_cleared` in its loop row); a
+  new cut with `video-loop` removes them too. Run `video-follow` again after either.
+- A one-shot (`kind: one-shot`) is refused: the follow-through is a loop's steady state.
 
 ## What the rules were measured on
 
