@@ -120,7 +120,7 @@ sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --
 # 항목별로: video-canvas → video → video-frames → video-loop; set/table.md 가 모든 결과의 이름을 담는다
 ```
 
-에이전트에 연결된 영상 MCP 로 클립을 만든다면: 지크(ZCRE) MCP 로 에이전트가 사용자 본인의 ZCRE 계정에서 클립을 만들고 sprite-gen 이 그 클립을 자른다. `sprite-gen video-prompt --direction side --state walk --no-last-frame` 가 프롬프트를 내고, 받은 mp4 는 `video-frames`·`video-loop` 가 받는다. ZCRE 의 Grok Imagine 1.5 에는 끝 프레임이 없어 걷기·달리기·점프만 된다([방법](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre)).
+에이전트에 연결된 영상 MCP 로 클립을 만든다면: 지크(ZCRE) MCP 로 에이전트가 사용자 본인의 ZCRE 계정에서 클립을 만들고 sprite-gen 이 그 클립을 자른다. `sprite-gen video-prompt --direction side --state walk --no-last-frame` 가 프롬프트를 내고, 받은 mp4 는 `video-frames`·`video-loop` 가 받고, 여러 방향으로 자른 걷기는 `video-cycle-align` 이 한 주기 길이로 맞춘다. ZCRE 의 Grok Imagine 1.5 에는 끝 프레임이 없어 걷기·달리기·점프만 된다([방법](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre)).
 
 한쪽 손목의 시계, 머리 한쪽의 핀처럼 좌우가 다른 캐릭터라면: 오른쪽을 보는 그림을 뒤집으면 소품이 반대쪽으로 가니 왼쪽을 보는 방향은 따로 그린다. `sprite-gen gen --direction side --facing left --handed "the black smartwatch=left wrist"` 가 그 방향에서 소품이 어디 있는지 문장으로 넣고, `video-set --facing right,left --handed …` 가 옆·대각 방향을 각자 그린 스틸로 양쪽 다 찍으며, `sprite-gen handed-check` 가 색으로 표시된 소품이 맞는 쪽에 있는지 프레임마다 확인한다. 왼쪽을 따로 그리면 그만큼 값이 더 들어 기본은 지금처럼 반전이다([방법](docs/video-pipeline.md#handedness--an-item-on-one-side)).
 

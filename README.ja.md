@@ -112,7 +112,7 @@ sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --
 # 項目ごとに: video-canvas → video → video-frames → video-loop; set/table.md が全結果に名前を付ける
 ```
 
-エージェントに接続した動画 MCP でクリップを作る場合: ZCRE（지크）の MCP なら、エージェントがあなた自身の ZCRE アカウントでクリップを作り、sprite-gen がそれを切り出します。`sprite-gen video-prompt --direction side --state walk --no-last-frame` がプロンプトを出し、`video-frames` と `video-loop` が mp4 を受け取ります。ZCRE の Grok Imagine 1.5 には終了フレームがないため、歩き・走り・ジャンプのみです（[手順](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre)）。
+エージェントに接続した動画 MCP でクリップを作る場合: ZCRE（지크）の MCP なら、エージェントがあなた自身の ZCRE アカウントでクリップを作り、sprite-gen がそれを切り出します。`sprite-gen video-prompt --direction side --state walk --no-last-frame` がプロンプトを出し、`video-frames` と `video-loop` が mp4 を受け取り、複数の方向で切り出した歩行は `video-cycle-align` が同じサイクル長に揃えます。ZCRE の Grok Imagine 1.5 には終了フレームがないため、歩き・走り・ジャンプのみです（[手順](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre)）。
 
 片方の手首の時計や頭の片側のピンのように左右が違うキャラクターなら: 右向きの絵を反転すると小物が反対側に移るので、左向きは別に描きます。`sprite-gen gen --direction side --facing left --handed "the black smartwatch=left wrist"` がその向きで小物がどこにあるかをプロンプトに書き、`video-set --facing right,left --handed …` が横と斜めの向きをそれぞれ描いたスチルから両向き撮り、`sprite-gen handed-check` が色で目印をつけた小物が正しい側にあるかをフレームごとに確かめます。左向きを描くとその分費用がかかるため、既定は今まで通り反転です（[手順](docs/video-pipeline.md#handedness--an-item-on-one-side)）。
 

@@ -1,6 +1,6 @@
 # Motion Continuity QA (BLOCKING) — sprite-gen reference
 
-> Owns: Motion Continuity — the blocking judgement of a row as motion · Index: [docs/README.md](README.md)
+> Owns: Motion Continuity of an image row (Pipeline A, atlas rows) — the blocking judgement of a row as motion. A video loop (Pipeline B) is repaired and aligned by the engine before any new clip: [loop-repair](loop-repair.md), [loop-review](loop-review.md) · Index: [docs/README.md](README.md)
 
 > `SKILL.md` 허브에서 분리한 시나리오 상세. 추출·아틀라스 QA 를 통과한 행을 **모션으로서** 판정할 때 이 문서를 따른다. Motion Continuity 는 BLOCKING 이다 — 판정 기준 전체가 여기 있다.
 
@@ -27,7 +27,9 @@ The GIF is exported through the clean transparent GIF path (dedicated transparen
 
 ## 실패 시
 
-If a row fails motion continuity (static bobbing, jitter, anatomy break, identity drift, or a hard loop seam), **regenerate that row**. Do not repair motion by drawing or re-timing frames locally.
+If an image row fails motion continuity (static bobbing, jitter, anatomy break, identity drift, or a hard loop seam), **regenerate that row**. Do not repair motion by drawing or re-timing frames locally.
+
+This rule is for image rows. A video loop's jump frames, its cut and its set length are the engine's to repair ([loop-repair](loop-repair.md), [loop-review](loop-review.md)); a new clip comes after those, for what they cannot reach.
 
 Record the per-state motion verdict in `qa-notes.md`.
 

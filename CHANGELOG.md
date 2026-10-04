@@ -2,6 +2,10 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
+## Unreleased
+
+- **Docs: a clip from a video MCP on your agent goes through the set stage and the size hold.** That route stopped at `video-loop`, so what `video-set` does for a set was left out. It now cuts a walk or run with `--anchor motion-auto` (the anchor that holds a clip with no end frame at its first frame's size; `video-loop`'s default for a walk, `body`, does not), takes `--fps` from the frames report, and ends with `video-cycle-align --view …` once a walk or run is cut in two or more directions (`SKILL.md` routes, [docs/video-pipeline.md](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre) with `Set` and `Size` rows in its ZCRE table, [docs/user-workflow.md](docs/user-workflow.md), the READMEs). `video-cycle-align` is in the pipeline's diagram and verb table. `SKILL.md` forbids replacing any engine stage — extraction, the loop cut, set alignment, loop repair — with a script of your own: the engine's own options first, the defect reported, a new clip only for what no stage can reach. [docs/qa-motion.md](docs/qa-motion.md) says its "regenerate that row" is for image rows; a video loop is repaired and aligned by the engine first. No code or output changes.
+
 ## v2.25.0 - Every view of an aligned walk starts as the same foot lands, read off the legs, and RIFE leaves no black between crossing legs
 
 - **Output change: every frame RIFE makes, and where every aligned loop starts.** Frames made by RIFE (`video-cycle-align`, `video-set --align-cycles auto`, `video-loop` jump repair) are drawn differently wherever the legs cross or the flow is unsure; frames taken as filmed are untouched. Every loop `video-cycle-align` turns may start on a different frame: on its legs instead of its top edge, and, with views, on one foot for the whole set. A loop already aligned starts where the new rule says the next time it is aligned (it is read from `cycle.source/`).
