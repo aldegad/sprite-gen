@@ -85,7 +85,7 @@ def test_the_clip_sentence_anchors_to_the_image_and_never_names_a_hidden_item(vi
     assert "exactly as in the image" in clip and "for the whole clip" in clip and "attached picture" not in clip
     picture, depth = OWN_LEFT[(view, facing)]
     if view == "side" and depth == "far":
-        assert clip == "The wrist in front of the body stays bare, exactly as in the image, for the whole clip."
+        assert clip == "The wrist nearer the viewer stays bare, exactly as in the image, for the whole clip."
         assert "watch" not in clip
     else:
         assert clip.startswith("The black smartwatch stays on the wrist ")
@@ -93,7 +93,7 @@ def test_the_clip_sentence_anchors_to_the_image_and_never_names_a_hidden_item(vi
         if picture:
             assert f"at the {picture} of the picture" in clip
         if view == "side":
-            assert "the wrist in front of the body" in clip
+            assert "the wrist nearer the viewer" in clip and "in front of the body" not in clip
 
 
 def test_a_far_part_that_does_not_swing_stays_hidden() -> None:
@@ -104,7 +104,7 @@ def test_a_far_part_that_does_not_swing_stays_hidden() -> None:
     assert "on the far side, behind the body, so the star pin is hidden or at most a sliver of it shows" in h.text(pin, "side", "right")
     for gait in (False, True):
         clip = h.text(pin, "side", "right", clip=True, gait=gait)
-        assert clip == "The side of the head in front of the body stays bare, exactly as in the image, for the whole clip."
+        assert clip == "The side of the head nearer the viewer stays bare, exactly as in the image, for the whole clip."
 
 
 def test_a_walk_shows_the_far_arms_item_when_that_arm_swings_forward() -> None:
@@ -123,7 +123,7 @@ def test_a_walk_shows_the_far_arms_item_when_that_arm_swings_forward() -> None:
                     "swings out in front of it.")
     # no sentence holds an arm still, and a state that does not step keeps the 2.22.0 sentence
     assert "still" not in far + near and "for the whole clip" not in far + near
-    assert h.text(watch, "side", "right", clip=True) == "The wrist in front of the body stays bare, exactly as in the image, for the whole clip."
+    assert h.text(watch, "side", "right", clip=True) == "The wrist nearer the viewer stays bare, exactly as in the image, for the whole clip."
     assert "shows each time that arm swings forward" in batch_mod.build_prompt("side", "walk", None, handed=watch)
     assert "shows each time that arm swings forward" in batch_mod.build_prompt("side", "run", None, handed=watch)
     assert "swing" not in batch_mod.build_prompt("side", "idle", None, handed=watch)

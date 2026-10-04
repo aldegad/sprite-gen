@@ -166,7 +166,7 @@ def test_no_prompt_says_a_sentence_twice_turns_both_ways_or_asks_for_two_keys(na
 _CLIP_ROWS = [r for r in ROWS if r[0].startswith("clip")]
 # (a part or limb said bare, the same one said to wear an item): never both in one prompt
 _BARE_AND_WORN = [
-    (r"\bThe (\w[\w ]*?) in front of the body stays bare\b", "stays? on the {0} in front of the body"),
+    (r"\bThe (\w[\w ]*?) nearer the viewer stays bare\b", "stays? on the {0} nearer the viewer"),
     (r"\bthe (arm|leg) nearer the viewer stays bare\b", "on the {0} nearer the viewer"),
     (r"\bthe other (arm|leg), on the far side of the body, stays bare\b", "on the {0} on the far side of the body"),
 ]
@@ -193,7 +193,7 @@ def test_no_clip_calls_a_limb_bare_and_dressed_or_swings_an_arm_that_stands_stil
         far = "the red ribbon" if (row["handed"] == "watch+ribbon" and row["facing"] == "left") else "the black smartwatch"
         if row["facing"] == "right" or row["handed"] == "watch+ribbon":
             assert "each time that arm swings forward" in text and far[4:] in text, text
-        assert "The wrist in front of the body stays bare" not in text
+        assert "The wrist nearer the viewer stays bare" not in text and "wrist in front of the body" not in text
         assert text.count("Both arms swing back and forth with each step") == 1
 
 

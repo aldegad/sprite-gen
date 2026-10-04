@@ -372,8 +372,9 @@ swing ("Both arms swing back and forth with each step, opposite to the legs."), 
 No sentence holds an arm still: the arms swing with the walk. The other arm is said bare, never as a
 list of what it must not wear — a clip prompt that lists that draws it there. Where nothing brings the
 far side into view — a part that does not swing, or a state that does not step (idle, attack) — the
-item is not named at all: "The wrist in front of the body stays bare, exactly as in the image, for the
-whole clip." Items on the same wrist share one sentence, and with an item on each wrist neither is
+item is not named at all: "The wrist nearer the viewer stays bare, exactly as in the image, for the
+whole clip." A side view names the near part "nearer the viewer", not "in front of the body": in a
+mid-stride still the far arm is the one in front of the body. Items on the same wrist share one sentence, and with an item on each wrist neither is
 called bare. `handed-check --strap` finds a bare band that a clip still grows on the other arm. A front
 or back walk's mid-step redraw (`walk_start_prompt`, `video-prompt`'s `start_still`) ends with the
 still's handedness sentences too: redrawn from the base alone, the model may put the item on the other

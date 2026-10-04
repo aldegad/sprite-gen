@@ -121,9 +121,9 @@ def _view_clause(h: Handed, view: str, facing: str | None, items: list[Handed]) 
     if view == "side":
         if at["depth"] == "near":
             return (f"Facing {facing}, the character's own {h.side} side is toward the viewer: its {h.where()} is the near "
-                    f"one, in front of the body, and {h.item} on it shows clearly.")
-        lead = (f"Facing {facing}, the character's own {h.other} side is toward the viewer: the near {h.part or 'side'}, in "
-                f"front of the body, is its own {h.where(h.other)}, with {none}; the {h.where()} with {h.item} is on the far ")
+                    f"one, nearer the viewer, and {h.item} on it shows clearly.")
+        lead = (f"Facing {facing}, the character's own {h.other} side is toward the viewer: the near {h.part or 'side'}, on the "
+                f"side nearer the viewer, is its own {h.where(h.other)}, with {none}; the {h.where()} with {h.item} is on the far ")
         swings = limb(h.part)
         if swings:
             # the far limb is in view whenever it is forward of the body, and its item with it
@@ -171,9 +171,10 @@ def _clip_clause(group: list[Handed], view: str, facing: str | None, *, gait: bo
         return (f"{_names(group)} {stay} on the {part} that wears {they} in the image, on the {swings} nearer the "
                 f"viewer{bare}.")
     if view == "side" and at["depth"] == "far":
-        return f"The {part} in front of the body stays bare, exactly as in the image, for the whole clip." if other_bare else ""
+        # "nearer the viewer", not "in front of the body": mid-stride, the far arm is the one in front of the body
+        return f"The {part} nearer the viewer stays bare, exactly as in the image, for the whole clip." if other_bare else ""
     if view == "side":
-        where = f"the {part} in front of the body"
+        where = f"the {part} nearer the viewer"
     elif at["depth"] is None:
         where = f"the {part} at the {at['picture']} of the picture"
     else:
