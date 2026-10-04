@@ -639,14 +639,32 @@ for the visual review contract and manual overrides.
 A walk or run filmed from its first frame only (no end frame) often grows or shrinks as it plays:
 a front walk comes a little closer with every step, a back walk goes away. The loop is then cut on
 frames that change size, so the frame one cycle after the first is not the first's size and the
-loop pops at the wrap. A straight-line fit of the subject's opaque height over the clip measures
-it (`gait_fallback.scale_drift`); at 1 % or more (`SIZE_HOLD_MIN`) every frame is scaled back to
-the first frame's fitted height about its fitted foot point before the cycle search, so the
-search, the seam and the cells all read frames of one size. Below 1 % the fit is a head bob and
-hair and the frames are searched as filmed. The report says what was measured and done
-(`size_hold`: `drift`, `applied`, `padding_ltrb`). `--size-hold off` searches the frames as
-filmed, as before 2.24.0. Measured on one front catwalk filmed from its first frame (+2.0 % over
-3 s): the engine's seam ratio of the cut went from 1.44 to 1.19.
+loop pops at the wrap. The change is read one cycle on (`gait_fallback.cycle_drift`): the lag at
+which the pose, cut out about its feet, matches itself best (in the state's window, at most half
+the clip), and each frame's height (to a fraction of a pixel: the rows' coverage summed) against
+the frames one, two, … of those lags later. The median of those changes per frame, carried over
+the clip, is the `drift`. At 1 % or more (`SIZE_HOLD_MIN`) every frame is scaled back to the
+first frame's size about its fitted foot point before the cycle search, so the search, the seam
+and the cells all read frames of one size. Below 1 % the frames are searched as filmed.
+
+Why one cycle on, and not a line through the clip (2.24.0): a clip that starts from a standing
+pose and settles into the walk over its first steps (knees bending, the body leaning in) is a few
+pixels shorter from then on, and a line through every frame reads that one change of pose as a
+body that shrinks the whole way, and held it. The same pose a cycle later is the same size
+unless the body really changes, and the few frames of the first pose do not move a median of the
+rest. The other way round, a settle can
+pull the line flat over a walk that does grow; one cycle on, that growth is still read and held.
+On a synthetic walker that stands 6 px taller for its first frames and then walks at one size,
+the line read −2.2 % and the hold, so scaled, then found no cycle at all; one cycle on reads 0
+and the clip is cut as filmed (`tests/video/test_gait_fallback.py`).
+
+The report says what was measured and done (`size_hold`: `drift`, `applied`, `padding_ltrb`, and
+the evidence: `method: one-cycle-on`, `lag`, `pose_match` — the pose's mismatch at that lag over
+its mean across the window, 0 for an exact repeat — `pairs`, `per_lag`, the change over one lag,
+and `drift_fitted_line`, what a line through the clip would have read). `--size-hold off` searches
+the frames as filmed, as before 2.24.0. When the hold came in (2.24.0, read off the line) it was
+measured on one front catwalk filmed from its first frame (+2.0 % over 3 s): the engine's seam
+ratio of the cut went from 1.44 to 1.19.
 
 **Nothing is cut when a frame is scaled up.** A clip that shrinks is scaled up about its feet,
 and when the feet also rose in the frame (a back walk going away toward the horizon) the crown

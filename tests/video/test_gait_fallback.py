@@ -45,6 +45,23 @@ def walker(k, *, period=24, grow=0.0, frames=73):
                                         resample=Image.Resampling.BICUBIC).convert('RGBA')
 
 
+def settling(k, *, settle=10, rise=6, grow=0.0, frames=73):
+    """A walker that stands tall on straight legs in its first frame and settles into the walk: its
+    legs start `rise` px longer and ease to their walking length over `settle` frames. The body
+    above the hips does not move, and nothing changes size."""
+    image = walker(k, grow=grow, frames=frames)
+    lift = round(rise*0.5*(1+math.cos(math.pi*min(k, settle)/settle)), 2)
+    if lift <= 0:
+        return image
+    hips = FOOT[1]-41
+    legs = image.crop((0, hips, image.width, FOOT[1]))
+    out = image.copy()
+    out.paste((0, 0, 0, 0), (0, hips, image.width, image.height))
+    stretched = legs.convert('RGBa').resize((image.width, round((FOOT[1]-hips+lift)*SS)), Image.Resampling.BICUBIC)
+    out.alpha_composite(stretched.resize((image.width, FOOT[1]-hips+math.ceil(lift)), Image.Resampling.BOX).convert('RGBA'), (0, hips))
+    return out
+
+
 def run(tmp_path, frames, *extra):
     keyed = tmp_path/'keyed'
     keyed.mkdir()
@@ -137,6 +154,52 @@ def test_a_clip_that_keeps_its_size_is_not_held(tmp_path):
     assert report['size_hold']['applied'] is False
     assert abs(report['size_hold']['drift']) < gait_fallback.SIZE_HOLD_MIN
     assert 'padding_ltrb' not in report['size_hold']
+
+
+def test_the_size_is_read_one_cycle_on():
+    grows = gait_fallback.cycle_drift([walker(k, grow=0.025) for k in range(73)], min_lag=12, max_lag=36)
+    # The pose matches itself one cycle on; each height is compared with the frames one, two and
+    # three cycles later (49 + 25 + 1 pairs), and a cycle on it is 24/72 of the clip's growth more.
+    assert grows['method'] == 'one-cycle-on' and grows['lag'] == 24 and grows['pairs'] == 49+25+1
+    # (The drawn walker grows 2.5 %; a soft crown's coverage does not follow a sub-pixel move
+    # exactly, so its height reads a few tenths of a percent off either way.)
+    assert 1.007 < grows['per_lag'] < 1.011 and 0.021 < grows['drift'] < 0.032
+    assert abs(grows['drift']-grows['drift_fitted_line']) < 0.005
+    still = gait_fallback.cycle_drift([walker(k) for k in range(73)], min_lag=12, max_lag=36)
+    assert still['lag'] == 24 and still['per_lag'] == 1.0 and still['drift'] == 0.0
+    # A clip too short to show a cycle twice has nothing one cycle on to compare with.
+    short = gait_fallback.cycle_drift([walker(k, grow=0.2) for k in range(20)], min_lag=12, max_lag=36)
+    assert short['lag'] is None and short['drift'] == 0.0
+
+
+def test_a_first_pose_that_settles_into_the_walk_is_not_held(tmp_path):
+    # Stood tall, then walking: a line through every frame reads a body that shrinks; one cycle on,
+    # every pose is the size it was.
+    frames = [settling(k) for k in range(73)]
+    assert gait_fallback.scale_drift(frames)['drift'] <= -gait_fallback.SIZE_HOLD_MIN
+    code, report, output = run(tmp_path, frames)
+    assert code == 0
+    hold = report['size_hold']
+    assert hold['applied'] is False and abs(hold['drift']) < gait_fallback.SIZE_HOLD_MIN
+    assert hold['drift_fitted_line'] <= -gait_fallback.SIZE_HOLD_MIN and hold['lag'] == 24
+    (tmp_path/'off').mkdir()
+    code_off, _, output_off = run(tmp_path/'off', frames, '--size-hold', 'off')
+    assert code_off == 0
+    # Not held, the cut is the cut of the frames as filmed.
+    assert (output/'loop.strip.png').read_bytes() == (output_off/'loop.strip.png').read_bytes()
+
+
+def test_a_settle_does_not_hide_a_walk_that_grows(tmp_path):
+    # The settle pulls the fitted line down by as much as the walk grows: a line reads under 1 %.
+    frames = [settling(k, grow=0.025) for k in range(73)]
+    assert abs(gait_fallback.scale_drift(frames)['drift']) < gait_fallback.SIZE_HOLD_MIN
+    code, report, output = run(tmp_path, frames)
+    assert code == 0 and abs(report['cycle']['length']-24) <= 1
+    hold = report['size_hold']
+    assert hold['applied'] is True and 0.02 < hold['drift'] < 0.03
+    cells = sorted((output/'cycle').glob('frame-*.png'))
+    heights = gait_fallback.subject_boxes([Image.open(p).convert('RGBA') for p in cells])
+    assert np.ptp(heights[:, 3]-heights[:, 1]) <= 6
 
 
 def walking_away(k, frames=73):
