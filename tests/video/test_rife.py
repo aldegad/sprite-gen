@@ -117,3 +117,57 @@ def test_real_rife_makes_the_frame_between_in_colour_and_alpha():
     rgb = np.asarray(mid)[..., :3][a > 0.9]
     assert np.abs(rgb.mean(axis=0) - (200, 60, 40)).max() < 12  # unpremultiplied back to the body colour
     assert interpolate.made == 1
+
+
+@pytest.mark.skipif(not _real_rife_available(), reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH / sprite-gen rife install)")
+def test_real_rife_between_crossing_legs_adds_no_black():
+    """Two outlined legs walk through each other (the near one forward, the far one back): the frame
+    between must not be darker inside the body than either neighbour. 2.24 premultiplied the colour
+    over black and left 6 % of the body dark at t=0.5 here."""
+    interpolate = rife.Rife()
+    a, b = _legs(36, 70), _legs(60, 46)
+    for t in (0.25, 0.5, 0.75):
+        assert rife.smear(interpolate(a, b, t), a, b)["dark_excess"] <= 0
+
+
+def _legs(x_near: int, x_far: int) -> Image.Image:
+    """Hips and two legs with a 1 px black outline, on transparency: the near leg white and drawn
+    over the far one, which is shaded."""
+    im = np.zeros((96, 128, 4), dtype=np.uint8)
+    for x, grey in ((x_far, 200), (x_near, 245)):
+        im[16:86, x - 8:x + 8] = (20, 20, 20, 255)
+        im[17:85, x - 7:x + 7] = (grey, grey, grey, 255)
+    im[10:18, 30:90] = (20, 20, 20, 255)
+    im[11:17, 31:89] = (230, 230, 230, 255)
+    return Image.fromarray(im, "RGBA")
+
+
+def test_where_the_colour_and_coverage_runs_disagree_the_body_shows_not_black(monkeypatch, tmp_path):
+    """RIFE warps the colour and the coverage in two runs. A stand-in returns the colour run as
+    the first frame and the coverage run as the second, so where the second covers what the first
+    leaves bare the two disagree — the overlap of crossing legs. That must read as the body."""
+    a, b = _legs(40, 64), _legs(64, 52)
+    calls = []
+
+    def stand_in(binary, model, x, y, t, tmp):
+        calls.append(1)
+        return x if len(calls) % 2 else y
+
+    monkeypatch.setattr(rife, "_call", stand_in)
+    made = rife.between(a, b, 0.5, binary=tmp_path, model=tmp_path, tmp=tmp_path)
+    m = np.asarray(made).astype(int)
+    bare_in_a = np.asarray(a)[..., 3] == 0
+    covered = (m[..., 3] >= 128) & bare_in_a
+    inside = covered & (np.asarray(b)[..., 0] >= 190)  # b's leg fill, where a had nothing
+    assert inside.sum() > 0
+    luma = m[..., :3] @ np.array([0.299, 0.587, 0.114])
+    assert luma[inside].min() >= 190  # the body's own light fill, not the black 2.24 put there
+
+
+def test_smear_counts_a_black_blot_and_not_a_moved_dark_part():
+    a, b = _legs(40, 64), _legs(48, 64)
+    moved = _legs(44, 64)
+    assert rife.smear(moved, a, b)["dark_excess"] <= 0
+    blot = np.asarray(moved).copy()
+    blot[40:60, 58:70, :3] = 0
+    assert rife.smear(Image.fromarray(blot, "RGBA"), a, b)["dark_excess"] > 0.01

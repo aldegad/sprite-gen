@@ -2,10 +2,14 @@
 """RIFE in-betweens for RGBA sprite frames, through the external `rife-ncnn-vulkan` binary.
 
 Where it runs, what it costs and why this build: docs/loop-repair.md section 1. RIFE reads
-three colour channels and no alpha, so a frame is interpolated as two images — its colour
-premultiplied over black and its coverage as a grey image — and put back together
-unpremultiplied. Interpolating the straight colour instead would drag the key's black under
-alpha 0 into the edge; interpolating RGBA as RGB would lose the coverage outright.
+three colour channels and no alpha, so a frame is interpolated as two images — its colour and
+its coverage as a grey image — and put back together. The two are two runs of the flow, and
+where legs cross they do not agree: the coverage says body where the colour run still carries
+what lay around the body. So around the body the colour image holds the body's own colour,
+pushed out from inside its outline (`bleed`): a disagreement there reads as the body, not as the
+black a frame premultiplied over black put under it (2.24 and before: a black smear between
+crossing legs). Inside the coverage the colour is the frame's own, outline included.
+`smear` measures what a made frame has that neither neighbour has (docs/loop-repair.md section 4).
 
 The binary's own CPU path (`-g -1`) returns a wrong frame with rife-v4.6 on both macOS and
 Linux (measured 2026-10-03: mean error 39 against 3.3 through Vulkan), so it is never passed;
@@ -30,7 +34,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 from sprite_gen._deps import np
 
@@ -39,6 +43,13 @@ MODEL = "rife-v4.6"
 RELEASE = "20221029"
 # Coverage RIFE leaves under this is its own blur, not body: dropped so no halo is invented.
 ALPHA_FLOOR = 2 / 255
+# The colour pushed out around the body is read this far inside its solid edge (a fraction of the
+# body's height, at least a pixel): past a drawn outline, so a disagreement reads as the body's
+# fill, not its outline: 0.008 is 6 px on an 800 px body, past an outline a few pixels wide.
+BLEED_DEPTH = 0.008
+# `smear`: a pixel is dark under this luma (0..1), and part-covered between these alphas.
+DARK_LUMA = 70 / 255
+PARTIAL_ALPHA = (0.1, 0.9)
 CALL_TIMEOUT_SECONDS = 120
 
 Interpolate = Callable[[Image.Image, Image.Image, float], Image.Image]
@@ -128,19 +139,70 @@ def _call(binary: Path, model: Path, a: Image.Image, b: Image.Image, t: float, t
         return im.convert("RGB")
 
 
+def _push_pull(rgb: np.ndarray, known: np.ndarray) -> np.ndarray:
+    """`rgb` with every pixel where `known` is 0 filled by the weighted colour around it, coarse to
+    fine (each level averages 2x2 blocks of the known colour; an unknown pixel takes its block's)."""
+    if known.min() > 0 or min(known.shape) <= 1:
+        return rgb
+    h, w = known.shape
+    pad = ((0, h % 2), (0, w % 2))
+    weighted, weight = np.pad(rgb * known[..., None], pad + ((0, 0),)), np.pad(known, pad)
+    wsum, csum = (x[0::2, 0::2] + x[1::2, 0::2] + x[0::2, 1::2] + x[1::2, 1::2] for x in (weight, weighted))
+    coarse = _push_pull(np.where(wsum[..., None] > 0, csum / np.maximum(wsum[..., None], 1e-9), 0.0), np.minimum(wsum, 1.0))
+    up = coarse.repeat(2, axis=0).repeat(2, axis=1)[:h, :w]
+    return np.where(known[..., None] > 0, rgb, up)
+
+
+def bleed(frame: np.ndarray) -> np.ndarray:
+    """The colour image of an RGBA frame (0..1) RIFE is given: the frame's own colour wherever it
+    has coverage, and around it the colour from BLEED_DEPTH inside its solid edge, pushed out."""
+    alpha = frame[..., 3]
+    solid = alpha >= 0.5
+    rows = np.nonzero(solid.any(axis=1))[0]
+    if rows.size == 0:
+        return np.where(alpha[..., None] > 0, frame[..., :3], 0.0)
+    depth = max(1, round((rows[-1] - rows[0] + 1) * BLEED_DEPTH))
+    core = np.asarray(Image.fromarray(np.uint8(solid) * 255).filter(ImageFilter.MinFilter(2 * depth + 1))) > 0
+    if not core.any():  # a body thinner than its outline: read at its edge
+        core = solid
+    fill = _push_pull(frame[..., :3], core.astype(np.float32))
+    return np.where(alpha[..., None] > 0, frame[..., :3], fill)
+
+
 def between(a: Image.Image, b: Image.Image, t: float, *, binary: Path, model: Path, tmp: Path) -> Image.Image:
     """The RGBA frame at fraction `t` (0..1) of the way from `a` to `b`."""
     if a.size != b.size:
         raise ValueError(f"rife: frames differ in size ({a.size} vs {b.size})")
     fa, fb = (np.asarray(f.convert("RGBA"), dtype=np.float32) / 255.0 for f in (a, b))
-    prem = [Image.fromarray(np.uint8(np.clip(x[..., :3] * x[..., 3:4], 0, 1) * 255 + 0.5), "RGB") for x in (fa, fb)]
+    colour = [Image.fromarray(np.uint8(np.clip(bleed(x), 0, 1) * 255 + 0.5), "RGB") for x in (fa, fb)]
     cov = [Image.fromarray(np.uint8(x[..., 3] * 255 + 0.5), "L").convert("RGB") for x in (fa, fb)]
-    color = np.asarray(_call(binary, model, prem[0], prem[1], t, tmp), dtype=np.float32) / 255.0
+    rgb = np.asarray(_call(binary, model, colour[0], colour[1], t, tmp), dtype=np.float32) / 255.0
     alpha = np.asarray(_call(binary, model, cov[0], cov[1], t, tmp).convert("L"), dtype=np.float32) / 255.0
     alpha = np.where(alpha < ALPHA_FLOOR, 0.0, alpha)
-    rgb = np.where(alpha[..., None] > 0, color / np.maximum(alpha[..., None], 1e-6), 0.0)
-    out = np.dstack([np.clip(rgb, 0, 1), alpha])
-    return Image.fromarray(np.uint8(out * 255 + 0.5), "RGBA")
+    out = np.dstack([np.where(alpha[..., None] > 0, rgb, 0.0), alpha])
+    return Image.fromarray(np.uint8(np.clip(out, 0, 1) * 255 + 0.5), "RGBA")
+
+
+def _smear_counts(frame: Image.Image) -> tuple[int, int, int]:
+    """(dark pixels inside the solid body, one pixel in from its edge; solid pixels; part-covered pixels)."""
+    x = np.asarray(frame.convert("RGBA"), dtype=np.float32) / 255.0
+    solid = x[..., 3] >= 0.5
+    inner = np.asarray(Image.fromarray(np.uint8(solid) * 255).filter(ImageFilter.MinFilter(3))) > 0
+    luma = x[..., 0] * 0.299 + x[..., 1] * 0.587 + x[..., 2] * 0.114
+    lo, hi = PARTIAL_ALPHA
+    return int((inner & (luma < DARK_LUMA)).sum()), int(solid.sum()), int(((x[..., 3] > lo) & (x[..., 3] < hi)).sum())
+
+
+def smear(made: Image.Image, a: Image.Image, b: Image.Image) -> dict[str, float]:
+    """What a made frame has that neither of its two neighbours has, as fractions of its solid
+    pixels: `dark_excess`, dark pixels inside the body beyond the darker neighbour's count (a black
+    smear raises it; a moved dark part — a hat, a watch — keeps its count), and `partial_excess`,
+    part-covered pixels beyond the more ragged neighbour's (a limb RIFE could not follow, drawn as
+    a pale ghost). Zero or less: nothing added."""
+    dm, sm, pm = _smear_counts(made)
+    (da, _, pa), (db, _, pb) = _smear_counts(a), _smear_counts(b)
+    solid = max(1, sm)
+    return {"dark_excess": round((dm - max(da, db)) / solid, 5), "partial_excess": round((pm - max(pa, pb)) / solid, 5)}
 
 
 class Rife:
