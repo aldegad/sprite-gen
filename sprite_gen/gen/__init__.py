@@ -184,8 +184,14 @@ def _make_provider(name: str, *, keep_session: bool):
 # alpha source, so `auto` does not gamble on it — the decision is made before the
 # model runs, printed, and recorded in the report (`alpha.strategy_source`).
 # An explicit `--alpha-mode native` still forces it (and fails loud on RGB).
+# The key planned this way is applied only to a raw that needs it: a raw that came
+# back with a real transparent background anyway (`chroma.classify_raw_alpha`,
+# 2026-10-04: a transparent `--ref` is answered with alpha) is published on its own
+# alpha, measured as a native one (STRATEGY_SOURCE_REFS_RAW_ALPHA), because keying
+# it again mattes the outline away. A checkerboard or key background is still keyed.
 STRATEGY_SOURCE_PROVIDER = "provider-default"
 STRATEGY_SOURCE_REFS = "refs-attached"
+STRATEGY_SOURCE_REFS_RAW_ALPHA = "refs-attached-raw-alpha"
 STRATEGY_SOURCE_EXPLICIT = "explicit"
 
 
@@ -373,7 +379,8 @@ def generate_image(
         if strategy_source == STRATEGY_SOURCE_REFS:
             print(
                 f"[gen] {len(refs)} reference image(s) attached — using chroma keying instead of "
-                f"{backend.name}'s native alpha (native output with refs is unstable, 2026-09-08). "
+                f"{backend.name}'s native alpha (native output with refs is unstable, 2026-09-08); "
+                "a result that already has a transparent background keeps its own alpha. "
                 "Pass --alpha-mode native to force it.",
                 file=sys.stderr,
             )
@@ -416,6 +423,36 @@ def generate_image(
             raw = request.raw
         raw_bytes = verify_png(raw)
 
+        # Only the key `auto` planned because of the refs is checked against the raw; an
+        # explicit --alpha-mode chroma is the caller's own key and runs as asked.
+        raw_alpha: dict[str, Any] | None = None
+        if strategy_source == STRATEGY_SOURCE_REFS:
+            raw_alpha = chroma_mod.classify_raw_alpha(raw)
+            if raw_alpha["verdict"] == chroma_mod.RAW_ALPHA_REAL:
+                if decontam == "palette":
+                    raise SystemExit(
+                        f"gen: --decontam palette removes a chroma key, but the raw came back with a "
+                        f"transparent background ({raw_alpha['alpha_zero_pct']}% alpha 0) and has no key "
+                        "to remove; run again without --decontam palette, or with --alpha-mode chroma "
+                        "and a key background in the prompt"
+                    )
+                strategy, strategy_source = TRANSPARENCY_NATIVE, STRATEGY_SOURCE_REFS_RAW_ALPHA
+                print(
+                    f"[gen] the raw came back with a transparent background ({raw_alpha['alpha_zero_pct']}% "
+                    f"alpha 0, {raw_alpha['border_alpha_zero_pct']}% of the border) — publishing its own "
+                    "alpha instead of keying it.",
+                    file=sys.stderr,
+                )
+            elif raw_alpha["verdict"] == chroma_mod.RAW_ALPHA_AMBIGUOUS:
+                raw_alpha["warning"] = (
+                    f"the raw has some transparent pixels ({raw_alpha['alpha_zero_pct']}% alpha 0, "
+                    f"{raw_alpha['border_alpha_zero_pct']}% of the border) but not a transparent background "
+                    f"(needs {chroma_mod.RAW_ALPHA_MIN_ZERO_PCT}% and {chroma_mod.RAW_ALPHA_MIN_BORDER_ZERO_PCT}% "
+                    "of the border); keyed as planned — check the outline, or pass --alpha-mode native"
+                )
+                print(f"[gen] warning: {raw_alpha['warning']}", file=sys.stderr)
+        raw_alpha_stats = {"raw_alpha": raw_alpha} if raw_alpha is not None else {}
+
         chroma_stats: dict[str, Any] | None = None
         alpha_stats: dict[str, Any] | None = None
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -423,12 +460,14 @@ def generate_image(
             alpha_stats = {
                 "strategy": TRANSPARENCY_NATIVE,
                 "strategy_source": strategy_source,
+                **raw_alpha_stats,
                 **chroma_mod.verify_native_alpha(raw, out, white_check=white_check),
             }
         elif strategy == TRANSPARENCY_CHROMA:
             chroma_stats = chroma_mod.key_transparent(raw, out, key=chroma_key, white_check=white_check,
                                                       decontam=decontam)
-            alpha_stats = {"strategy": TRANSPARENCY_CHROMA, "strategy_source": strategy_source, **chroma_stats}
+            alpha_stats = {"strategy": TRANSPARENCY_CHROMA, "strategy_source": strategy_source,
+                           **raw_alpha_stats, **chroma_stats}
         else:
             shutil.copyfile(raw, out)
         verify_png(out)

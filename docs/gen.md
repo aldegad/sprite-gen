@@ -264,6 +264,27 @@ strategy it can execute, and `--alpha-mode auto` (the default) follows it:
   conservative default. `--alpha-mode native`
   still forces native alpha with refs — and fails loud on an RGB result. So a ref run's
   prompt must carry the chroma key, exactly as the sprite-row pipeline already does.
+- **A ref run whose raw already has a transparent background is not keyed.** The key
+  is planned before the model runs, but the raw is read before it is applied
+  (`chroma.classify_raw_alpha`): a raw with an alpha band, at least 5 % of its pixels
+  at alpha 0 and at least half of its one-pixel border at alpha 0 is `real-alpha`, and
+  it is published on its own alpha through the `native` check
+  (`alpha.strategy: "native"`, `alpha.strategy_source: "refs-attached-raw-alpha"`).
+  Keying it reads the RGB left under alpha 0 as the background colour and mattes the
+  outline and light fills away. A raw with no alpha band or no alpha-0 pixel — a drawn
+  checkerboard, a key background, an opaque RGBA — is `no-alpha` and keyed as before
+  (`strategy_source: "refs-attached"`). Alpha 0 that misses either bar is `ambiguous`:
+  keyed as before, with a `warning` in the report and on stderr. The verdict and its
+  numbers are in `alpha.raw_alpha` on every ref run that planned the key. The check
+  belongs to `auto`'s step down only — `--alpha-mode chroma` keys whatever comes back —
+  and `--decontam palette` refuses a `real-alpha` raw, which has no key to remove.
+  Measured 2026-10-04 (codex `image_gen`, subscription, one transparent front still as
+  the reference, three takes per arm): with the step down's prompt (no transparency
+  request, no key colour), a transparent (RGBA) reference came back with real alpha
+  3/3 and an RGB one (the same still on white) on an opaque white background 3/3; with
+  the native request (`--alpha-mode native`), both came back with real alpha 3/3 —
+  no checkerboard in 6 runs, against 5 of 6 on 2026-09-08. The step down is kept
+  until a larger measurement replaces that one.
 - `--alpha-mode chroma` on codex is for prompts that already carry a key background
   (the sprite-row pipeline today): the native request is **not** added to the prompt
   and the raw is keyed like a grok run.

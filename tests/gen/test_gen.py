@@ -636,6 +636,165 @@ def test_explicit_native_still_runs_with_refs(tmp_path: Path, monkeypatch) -> No
     assert payload["alpha"]["strategy_source"] == "explicit"
 
 
+# Three raws a ref run can come back with (2026-10-04): a real cut-out (a transparent
+# --ref is answered with alpha), a drawn checkerboard and a painted key background.
+# The figure is a dark outline around an orange body with a cream belly — the two
+# colours a second key took off the real cut-out.
+_OUTLINE, _BODY, _CREAM = (20, 20, 20), (240, 140, 40), (245, 230, 200)
+_OUTLINE_PX, _CREAM_PX = (17, 32), (32, 37)
+
+
+def _outlined_figure(background: Image.Image) -> Image.Image:
+    from PIL import ImageDraw
+
+    alpha = (255,) if background.mode == "RGBA" else ()
+    draw = ImageDraw.Draw(background)
+    draw.ellipse((16, 12, 48, 52), fill=_OUTLINE + alpha)
+    draw.ellipse((19, 15, 45, 49), fill=_BODY + alpha)
+    draw.ellipse((26, 30, 38, 44), fill=_CREAM + alpha)
+    return background
+
+
+def _real_alpha_raw() -> Image.Image:
+    return _outlined_figure(Image.new("RGBA", (64, 64), (0, 0, 0, 0)))
+
+
+def _checkerboard_raw() -> Image.Image:
+    board = Image.new("RGB", (64, 64))
+    for y in range(64):
+        for x in range(64):
+            board.putpixel((x, y), (204, 204, 204) if (x // 8 + y // 8) % 2 else (255, 255, 255))
+    return _outlined_figure(board)
+
+
+def _key_background_raw() -> Image.Image:
+    return _outlined_figure(Image.new("RGB", (64, 64), (255, 0, 255)))
+
+
+def _ref_run(tmp_path: Path, monkeypatch, raw: Image.Image, **overrides):
+    fake = _FakeNativeProvider(raw)
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(_png_bytes(color=(0, 0, 0, 0)))
+    out = tmp_path / "asset.png"
+    report = tmp_path / "report.json"
+    rc = gen.run(**_gen_kwargs(out, report, ref=[ref], **overrides))
+    return fake, rc, out, report
+
+
+def test_ref_run_publishes_a_real_alpha_raw_without_keying_its_outline(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    fake, rc, out, report = _ref_run(tmp_path, monkeypatch, _real_alpha_raw())
+
+    assert rc == 0
+    assert fake.requests[0].native_alpha is False  # still planned as a key: the prompt is unchanged
+    published = Image.open(out)
+    assert published.getpixel(_OUTLINE_PX) == _OUTLINE + (255,)
+    assert published.getpixel(_CREAM_PX) == _CREAM + (255,)
+    assert published.getchannel("A").tobytes() == _real_alpha_raw().getchannel("A").tobytes()
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["alpha"]["strategy"] == "native"
+    assert payload["alpha"]["strategy_source"] == "refs-attached-raw-alpha"
+    assert payload["alpha"]["method"] == "native"
+    assert payload["alpha"]["raw_alpha"]["verdict"] == "real-alpha"
+    assert payload["alpha"]["raw_alpha"]["border_alpha_zero_pct"] == 100.0
+    assert payload["chroma"] is None
+    assert "publishing its own alpha" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("raw", [_checkerboard_raw, _key_background_raw], ids=["checkerboard", "key-background"])
+def test_ref_run_still_keys_a_raw_with_no_alpha(tmp_path: Path, monkeypatch, raw) -> None:
+    fake, rc, out, report = _ref_run(tmp_path, monkeypatch, raw())
+
+    assert rc == 0
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["alpha"]["strategy"] == "chroma"
+    assert payload["alpha"]["strategy_source"] == "refs-attached"
+    assert payload["alpha"]["method"] == "ycbcr"
+    assert payload["alpha"]["raw_alpha"] == {
+        "mode": "RGB", "has_alpha_band": False, "verdict": "no-alpha",
+        "alpha_zero_pct": 0.0, "border_alpha_zero_pct": 0.0,
+    }
+    assert payload["chroma"]["key"] == "magenta"
+    assert Image.open(out).getpixel((0, 0)) == (0, 0, 0, 0)  # the background was keyed out
+
+
+def test_key_background_ref_run_keeps_its_outline(tmp_path: Path, monkeypatch) -> None:
+    _, _, out, _ = _ref_run(tmp_path, monkeypatch, _key_background_raw())
+    published = Image.open(out)
+    assert published.getpixel(_OUTLINE_PX) == _OUTLINE + (255,)
+    assert published.getpixel(_CREAM_PX) == _CREAM + (255,)
+
+
+def test_ref_run_keys_an_ambiguous_raw_and_warns(tmp_path: Path, monkeypatch, capsys) -> None:
+    # A key background with a few transparent pixels in one corner: alpha 0 that is
+    # not a transparent background. Keyed as planned, and the report says why.
+    raw = _outlined_figure(Image.new("RGBA", (64, 64), (255, 0, 255, 255)))
+    for y in range(3):
+        for x in range(3):
+            raw.putpixel((x, y), (0, 0, 0, 0))
+    _, rc, _, report = _ref_run(tmp_path, monkeypatch, raw)
+
+    assert rc == 0
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["alpha"]["strategy"] == "chroma"
+    assert payload["alpha"]["strategy_source"] == "refs-attached"
+    assert payload["alpha"]["raw_alpha"]["verdict"] == "ambiguous"
+    assert "keyed as planned" in payload["alpha"]["raw_alpha"]["warning"]
+    assert "warning: the raw has some transparent pixels" in capsys.readouterr().err
+
+
+def test_ref_run_with_decontam_palette_refuses_a_real_alpha_raw(tmp_path: Path, monkeypatch) -> None:
+    fake = _FakeNativeProvider(_real_alpha_raw())
+    monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: fake)
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(_png_bytes())
+    out = tmp_path / "asset.png"
+    with pytest.raises(SystemExit, match="has no key to remove"):
+        gen.generate_image("fake", "a mushroom", out, refs=[ref], transparent=True, decontam="palette")
+    assert not out.exists()
+
+
+def test_explicit_chroma_keys_even_a_real_alpha_raw(tmp_path: Path, monkeypatch) -> None:
+    # --alpha-mode chroma is the caller's own key: the raw check belongs to auto's step down only.
+    _, rc, _, report = _ref_run(tmp_path, monkeypatch, _real_alpha_raw(), alpha_mode="chroma")
+    assert rc == 0
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["alpha"]["strategy"] == "chroma"
+    assert payload["alpha"]["strategy_source"] == "explicit"
+    assert "raw_alpha" not in payload["alpha"]
+
+
+@pytest.mark.parametrize(
+    ("image", "verdict"),
+    [
+        (Image.new("RGB", (16, 16), (255, 0, 255)), "no-alpha"),
+        (Image.new("RGBA", (16, 16), (255, 0, 255, 255)), "no-alpha"),
+        (Image.new("LA", (16, 16), (0, 0)), "real-alpha"),
+    ],
+    ids=["rgb", "opaque-rgba", "transparent-la"],
+)
+def test_classify_raw_alpha_reads_the_alpha_band(tmp_path: Path, image: Image.Image, verdict: str) -> None:
+    path = tmp_path / "raw.png"
+    image.save(path)
+    assert chroma_mod.classify_raw_alpha(path)["verdict"] == verdict
+
+
+def test_classify_raw_alpha_needs_a_transparent_border(tmp_path: Path) -> None:
+    # Plenty of alpha 0, all of it inside an opaque frame: not a transparent background.
+    image = Image.new("RGBA", (20, 20), (255, 0, 255, 255))
+    for y in range(4, 16):
+        for x in range(4, 16):
+            image.putpixel((x, y), (0, 0, 0, 0))
+    path = tmp_path / "raw.png"
+    image.save(path)
+    stats = chroma_mod.classify_raw_alpha(path)
+    assert stats["alpha_zero_pct"] == 36.0
+    assert stats["border_alpha_zero_pct"] == 0.0
+    assert stats["verdict"] == "ambiguous"
+
+
 def test_provider_without_a_declared_strategy_fails_loud(tmp_path: Path, monkeypatch) -> None:
     class _Undeclared(_FakeProvider):
         name = "undeclared"

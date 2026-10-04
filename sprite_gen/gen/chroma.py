@@ -30,6 +30,56 @@ KEYS: dict[str, dict[str, tuple[int, int, int]]] = {
 }
 
 
+# What a generated raw is, before a planned chroma key runs on it (`classify_raw_alpha`).
+# A drawn checkerboard or a painted key background is an RGB picture: it has no alpha
+# band, or an alpha band with nothing transparent in it, and only keying can make it
+# transparent. A real cut-out has an alpha band whose zeros are the background, so they
+# cover a real part of the picture and reach its edge — keying that picture again
+# reads the RGB left under alpha 0 as the background colour and mattes the subject's
+# own outline and light fills away (2026-10-04, a fox's outline and cream belly).
+RAW_ALPHA_REAL = "real-alpha"
+RAW_ALPHA_NONE = "no-alpha"
+RAW_ALPHA_AMBIGUOUS = "ambiguous"
+RAW_ALPHA_MIN_ZERO_PCT = 5.0
+RAW_ALPHA_MIN_BORDER_ZERO_PCT = 50.0
+
+
+def classify_raw_alpha(path: Path) -> dict[str, Any]:
+    """Say whether a generated raw already carries a real transparent background.
+
+    `verdict` is `real-alpha` when the PNG has an alpha band, at least
+    RAW_ALPHA_MIN_ZERO_PCT % of its pixels are alpha 0 and at least
+    RAW_ALPHA_MIN_BORDER_ZERO_PCT % of its one-pixel border is alpha 0; `no-alpha`
+    when it has no alpha band or no alpha-0 pixel (a checkerboard, a key background,
+    an opaque RGBA); `ambiguous` for alpha-0 pixels that miss either bar. The alpha
+    band is the one `verify_native_alpha` reads, so a `real-alpha` raw is one it accepts.
+    """
+    with Image.open(path) as source:
+        mode = source.mode
+        has_alpha = "A" in source.getbands()
+        alpha = source.getchannel("A") if has_alpha else None
+        width, height = source.size
+    stats: dict[str, Any] = {"mode": mode, "has_alpha_band": has_alpha}
+    if alpha is None:
+        return {**stats, "verdict": RAW_ALPHA_NONE, "alpha_zero_pct": 0.0, "border_alpha_zero_pct": 0.0}
+    total = width * height
+    alpha_zero_pct = round(alpha.histogram()[0] / total * 100, 2) if total else 0.0
+    edges = [(0, 0, width, 1), (0, height - 1, width, height),
+             (0, 1, 1, height - 1), (width - 1, 1, width, height - 1)]
+    edges = [box for box in edges if box[2] > box[0] and box[3] > box[1]]
+    border_total = sum((r - l) * (b - t) for l, t, r, b in edges)
+    border_zero = sum(alpha.crop(box).histogram()[0] for box in edges)
+    border_alpha_zero_pct = round(border_zero / border_total * 100, 2) if border_total else 0.0
+    if alpha_zero_pct == 0.0:
+        verdict = RAW_ALPHA_NONE
+    elif alpha_zero_pct >= RAW_ALPHA_MIN_ZERO_PCT and border_alpha_zero_pct >= RAW_ALPHA_MIN_BORDER_ZERO_PCT:
+        verdict = RAW_ALPHA_REAL
+    else:
+        verdict = RAW_ALPHA_AMBIGUOUS
+    return {**stats, "verdict": verdict, "alpha_zero_pct": alpha_zero_pct,
+            "border_alpha_zero_pct": border_alpha_zero_pct}
+
+
 def write_white_check(image: Image.Image, path: Path) -> None:
     bg = Image.new("RGBA", image.size, (255, 255, 255, 255))
     bg.alpha_composite(image)
