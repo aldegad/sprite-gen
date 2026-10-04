@@ -17,7 +17,8 @@ WATCH = h.parse("the black smartwatch=left wrist")
 BLUE = (30, 90, 235)
 W, H = 200, 320
 # Where the watch is drawn for each (view, facing): on the arm at the picture's left / right, on the
-# near arm (a side view, in front of the body) or nowhere (a side view, behind the body).
+# near arm (a side view, in front of the body) or nowhere (a side view, behind the body). "far" is the far
+# arm of a right-facing side view swung forward, out in front of the body, the watch in view on it.
 DRAWN = {
     ("front", None): "right", ("back", None): "left",
     ("front_diagonal", "right"): "right", ("front_diagonal", "left"): "right",
@@ -38,6 +39,8 @@ def figure(where: str, *, swing: int = 0, screen: int = 12, outline_split: bool 
     arms = {"left": (40 + swing, 110, 62 + swing, 210), "right": (138 - swing, 110, 160 - swing, 210)}
     if where == "near":
         arms = {"near": (92 + swing, 120, 112 + swing, 215)}
+    if where == "far":
+        arms = {"far": (140 + swing, 120, 162 + swing, 215)}
     for box in arms.values():
         d.rectangle(box, fill=(235, 235, 235, 255), outline=(20, 20, 20, 255), width=2)
     if where in arms:
@@ -83,16 +86,52 @@ def test_a_mirrored_view_fails(view, facing, as_view, as_facing) -> None:
     assert not report["ok"]
 
 
-def test_the_wrong_wrist_in_a_side_view_needs_a_reference_to_be_caught() -> None:
-    """Facing right, the left wrist is the far one: a full screen on the near arm is the wrong wrist.
-    Only the item seen whole (a front reference) tells a sliver from a full screen."""
+def test_the_wrong_wrist_in_a_side_view_is_caught_by_where_it_shows() -> None:
+    """Facing right, the left wrist is the far one. A far arm's watch shows only out in front of the body, where
+    the arm swings forward; a full screen over the body's centre is on the near arm, the wrong wrist."""
     frames = loop("near")
-    unchecked = check(frames, "side", "right")
-    assert unchecked["ok"] and unchecked["rules"]["far_hidden"]["checked"] is False
-    caught = check(frames, "side", "right", references=[figure("right")])
-    assert not caught["ok"] and "on the far side" in caught["fails"][0]["why"][0]
+    caught = check(frames, "side", "right")
+    assert not caught["ok"] and "the item is on the near arm" in caught["fails"][0]["why"][0]
+    assert not check(frames, "side", "right", references=[figure("right")])["ok"]
+    # against a reference, a sliver of the far watch peeking past the body is not judged for where it is
     sliver = check([figure("near", screen=4)], "side", "right", references=[figure("right")])
     assert sliver["ok"]
+
+
+def test_a_far_arms_watch_in_view_while_the_arm_is_forward_passes() -> None:
+    """The far wrist's watch, whole, in the frames where that arm is out in front of the body: what a side walk
+    should look like. 2.22.0 failed every such frame ("in full view on the far side") against a reference."""
+    walk = [figure("hidden")] * 3 + [figure("far", swing=s) for s in (0, 3, 6)]
+    for references in (None, [figure("right")]):
+        report = check(walk, "side", "right", references=references, state="walk")
+        assert report["ok"], report["fails"]
+        assert report["rules"]["far_shown"] == {"checked": True, "min": 0.25, "shown": 3, "frames": 6, "ok": True}
+        assert report["rules"]["far_in_front"]["limb"] == "arm" and "far_hidden" not in report["rules"]
+        assert report["per_frame"][3]["blobs"][0]["ahead"] >= handed.FAR_FRONT_MIN
+    # turned over to face left it is the near arm's, and shows in too few frames for one
+    mirrored = check([ImageOps.mirror(f) for f in walk], "side", "left", state="walk")
+    assert not mirrored["ok"] and mirrored["rules"]["near_shown"] == {"min": 0.75, "shown": 3, "frames": 6, "ok": False}
+
+
+def test_a_walk_that_never_shows_the_far_arms_watch_fails_and_other_states_are_not_judged() -> None:
+    hidden = loop("hidden")
+    walk = check(hidden, "side", "right", state="walk")
+    assert not walk["ok"] and walk["fails"] == [] and walk["rules"]["far_shown"]["ok"] is False
+    assert check([figure("hidden")] * 7 + [figure("far")], "side", "right", state="run")["ok"] is False  # 1 of 8
+    idle = check(hidden, "side", "right", state="idle")
+    assert idle["ok"] and idle["rules"]["far_shown"]["checked"] is False and "idle" in idle["rules"]["far_shown"]["why"]
+    unsaid = check(hidden, "side", "right")
+    assert unsaid["ok"] and "no --state" in unsaid["rules"]["far_shown"]["why"]
+
+
+def test_a_far_part_that_does_not_swing_keeps_the_hidden_rule() -> None:
+    """A pin on the far side of the head stays behind it: in full view there, it is on the wrong side."""
+    pin = h.parse("the star pin=left side of the head")
+    frames = loop("near")
+    unchecked = handed.check(frames, item=pin, view="side", facing="right", marker=BLUE, state="walk")
+    assert unchecked["ok"] and unchecked["rules"]["far_hidden"]["checked"] is False and "far_shown" not in unchecked["rules"]
+    caught = handed.check(frames, item=pin, view="side", facing="right", marker=BLUE, references=[figure("right")])
+    assert not caught["ok"] and "on the far side" in caught["fails"][0]["why"][0]
 
 
 def test_a_far_sliver_turned_over_is_not_the_near_item_shown() -> None:
@@ -106,7 +145,7 @@ def test_a_far_sliver_turned_over_is_not_the_near_item_shown() -> None:
     mirrored = [ImageOps.mirror(f) for f in right]
     caught = check(mirrored, "side", "left", references=reference)
     assert not caught["ok"] and caught["fails"] == []
-    assert caught["rules"]["near_shown"] == {"min": 0.5, "shown": 0, "frames": 6, "ok": False}
+    assert caught["rules"]["near_shown"] == {"min": 0.75, "shown": 0, "frames": 6, "ok": False}
     assert caught["rules"]["near_whole"]["checked"] is True and caught["frames_shown"] == 0
     unchecked = check(mirrored, "side", "left")
     assert unchecked["rules"]["near_whole"] == {"checked": False, "why": "no --reference: the item seen whole is unknown"}
@@ -132,7 +171,9 @@ def test_the_item_in_two_places_fails_and_a_split_screen_is_one() -> None:
 def test_a_near_item_hidden_in_most_frames_fails() -> None:
     frames = [figure("near")] + [figure("hidden")] * 3
     report = check(frames, "side", "left")
-    assert not report["ok"] and report["rules"]["near_shown"] == {"min": 0.5, "shown": 1, "frames": 4, "ok": False}
+    assert not report["ok"] and report["rules"]["near_shown"] == {"min": 0.75, "shown": 1, "frames": 4, "ok": False}
+    # a diagonal's near side keeps the half: its picture side tells the arms apart
+    assert check([figure("right")] * 2 + [figure("hidden")] * 2, "front_diagonal", "left")["rules"]["near_shown"]["min"] == 0.5
 
 
 def test_unusable_inputs_are_refused() -> None:

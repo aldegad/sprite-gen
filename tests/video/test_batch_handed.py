@@ -63,7 +63,7 @@ def test_both_facings_film_every_turned_view_twice_from_its_own_still(tmp_path, 
         assert canvas["facing"] == turned
         direction = item["direction"]
         assert prompts[name] == batch.build_prompt(direction, "walk", None, facing=turned, handed=WATCH)
-        assert prompts[name].endswith(h.text(WATCH, direction, turned, clip=True))
+        assert prompts[name].endswith(h.text(WATCH, direction, turned, clip=True, gait=True))
     assert "and to the left" in prompts["front_diagonal-left-walk"]
     assert "to the right" not in prompts["front_diagonal-left-walk"]
     # each side still is inspected for its own facing, into its own copy, never turned over

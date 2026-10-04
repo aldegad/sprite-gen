@@ -49,6 +49,7 @@ from sprite_gen.spec.runio import atomic_write_text
 from . import chroma as chroma_mod
 from . import facing as facing_mod
 from . import handedness as handed_mod
+from . import prompt_parts
 from .base import (
     QUALITIES,
     RESOLUTIONS,
@@ -142,21 +143,33 @@ def layout_guide_size(aspect_ratio: str | None) -> tuple[int, int]:
     return round(width * scale), round(height * scale)
 
 
-def draw_layout_guide(path: Path, aspect_ratio: str | None) -> dict[str, Any]:
-    """Draws the one-slot guide at `path` and answers its cell (size and safe margins)."""
+def layout_guide_cell(aspect_ratio: str | None) -> dict[str, Any]:
+    """The one-slot guide's cell for the requested ratio: its size, safe margins and the two anatomy lines,
+    one margin inside the safe box's top and bottom edges. What `layout_guide_text` says and
+    `draw_layout_guide` draws."""
     # Imported here: `prepare` owns the row guide and pulls in the row machinery.
-    from .prepare import draw_guide, normalize_cell
-
-    from PIL import Image, ImageDraw
+    from .prepare import normalize_cell
 
     width, height = layout_guide_size(aspect_ratio)
     cell = normalize_cell({"width": width, "height": height}, width, None)
-    draw_guide(path, 1, cell)
-    # The anatomy lines one margin inside the safe box's top and bottom edges, as the row experiments
-    # drew them on a 256 px cell (5 px lines, 16 px x 7 px centre marks), scaled to this guide.
+    margin_y = int(cell["safe_margin_y"])
+    return {**cell, "crown_y": 2 * margin_y, "floor_y": height - 1 - 2 * margin_y}
+
+
+def draw_layout_guide(path: Path, aspect_ratio: str | None) -> dict[str, Any]:
+    """Draws the one-slot guide at `path` and answers its cell (`layout_guide_cell`)."""
+    from .prepare import draw_guide
+
+    from PIL import Image, ImageDraw
+
+    cell = layout_guide_cell(aspect_ratio)
+    width, height = int(cell["width"]), int(cell["height"])
+    draw_guide(path, 1, {key: value for key, value in cell.items() if key not in ("crown_y", "floor_y")})
+    # The anatomy lines as the row experiments drew them on a 256 px cell (5 px lines, 16 px x 7 px
+    # centre marks), scaled to this guide.
     scale = height / 256
-    margin_x, margin_y = int(cell["safe_margin_x"]), int(cell["safe_margin_y"])
-    crown_y, floor_y = 2 * margin_y, height - 1 - 2 * margin_y
+    margin_x = int(cell["safe_margin_x"])
+    crown_y, floor_y = int(cell["crown_y"]), int(cell["floor_y"])
     center = width // 2
     line, mark, half = max(1, round(5 * scale)), max(1, round(7 * scale)), round(8 * scale)
     image = Image.open(path).convert("RGB")
@@ -165,7 +178,7 @@ def draw_layout_guide(path: Path, aspect_ratio: str | None) -> dict[str, Any]:
         draw.line((margin_x, y, width - 1 - margin_x, y), fill=colour, width=line)
         draw.line((center - half, y, center + half, y), fill=accent, width=mark)
     image.save(path)
-    return {**cell, "crown_y": crown_y, "floor_y": floor_y}
+    return cell
 
 
 def _make_provider(name: str, *, keep_session: bool):
@@ -361,23 +374,18 @@ def generate_image(
         raise SystemExit("gen: empty prompt; pass --prompt or --prompt-file")
     if facing is not None:
         facing_mod.validate(facing, facing_fix)
-    view_text = _view_text(view, facing, facing_fix, handed)
+    _check_view(view, facing, facing_fix, handed)
     out = out.expanduser().resolve()
     refs = [Path(r).expanduser().resolve() for r in (refs or [])]
     for ref in refs:
         if not ref.is_file():
             raise SystemExit(f"gen: reference image not found: {ref}")
 
-    if view_text:
-        prompt += "\n\n" + view_text
-    if refs and facing is not None:
-        prompt += "\n\n" + facing_mod.prompt_suffix(facing)
     backend = _make_provider(provider, keep_session=keep_session)
     # Decided before the model runs: the strategy shapes the transport prompt
     # (native asks for alpha) and the post-process (chroma keys it out).
     strategy: str | None = None
     strategy_source: str | None = None
-    key_background: dict[str, Any] | None = None
     if transparent:
         # The layout guide is an attached image as much as a --ref is: the same step down applies.
         attached_for_strategy = [*refs, Path(LAYOUT_GUIDE_NAME)] if layout_guide else refs
@@ -386,23 +394,27 @@ def generate_image(
             # before the provider is called: a paid generation must not end in this refusal
             raise SystemExit(f"gen: --decontam removes a chroma key; this image would use {strategy} alpha "
                              "(pass --alpha-mode chroma to key it instead)")
-        if strategy_source == STRATEGY_SOURCE_REFS:
-            # The key is the engine's plan, so the engine asks for it: a ref prompt with no key
-            # background is answered on white or another light ground, and keying that takes the
-            # outline and light fills with it (2026-10-04). A key the prompt already names stays.
-            named_key = chroma_mod.named_key_background(prompt)
-            if named_key is None:
-                prompt += "\n\n" + chroma_mod.KEY_BACKGROUND_TEXT[chroma_key]
-            key_background = {"injected": named_key is None, "key": named_key or chroma_key}
-            print(
-                f"[gen] {len(refs)} reference image(s) attached — using chroma keying instead of "
-                f"{backend.name}'s native alpha (native output with refs is unstable, 2026-09-08); "
-                + (f"added a {chroma_key} key background line to the prompt; " if named_key is None
-                   else f"the prompt already asks for a {named_key} key background; ")
-                + "a result that already has a transparent background keeps its own alpha. "
-                "Pass --alpha-mode native to force it.",
-                file=sys.stderr,
-            )
+    # The key is the engine's plan when `auto` stepped down for the refs, so the engine asks for it: a
+    # ref prompt with no key background is answered on white or another light ground, and keying that
+    # takes the outline and light fills with it (2026-10-04). A key the prompt already names stays.
+    parts = still_prompt(prompt, view=view, facing=facing, handed=handed, refs=bool(refs),
+                         key=chroma_key if strategy_source == STRATEGY_SOURCE_REFS else None,
+                         layout=layout_guide_cell(aspect_ratio) if layout_guide else None)
+    prompt = parts.text
+    for line in prompt_parts.note_lines(parts):
+        print(f"[gen] {line}", file=sys.stderr)
+    key_background: dict[str, Any] | None = None
+    if (key_piece := parts.piece("key-background")) is not None:
+        key_background = {"injected": key_piece.added, "key": key_piece.found or chroma_key}
+        print(
+            f"[gen] {len(refs)} reference image(s) attached — using chroma keying instead of "
+            f"{backend.name}'s native alpha (native output with refs is unstable, 2026-09-08); "
+            + (f"added a {chroma_key} key background line to the prompt; " if key_piece.added
+               else f"the prompt already asks for a {key_piece.found} key background; ")
+            + "a result that already has a transparent background keeps its own alpha. "
+            "Pass --alpha-mode native to force it.",
+            file=sys.stderr,
+        )
     owns_workdir = workdir is None
     workdir = Path(workdir).expanduser().resolve() if workdir else Path(tempfile.mkdtemp(prefix="sprite-gen-gen-"))
     workdir.mkdir(parents=True, exist_ok=True)
@@ -416,7 +428,6 @@ def generate_image(
             guide_cell = draw_layout_guide(guide, aspect_ratio)
             # Last, so "the last attached image" in the prompt is the guide whatever the caller attached.
             attached.append(guide)
-            prompt += "\n\n" + layout_guide_text(guide_cell)
         request = GenRequest(
             prompt=prompt,
             raw=raw,
@@ -437,8 +448,10 @@ def generate_image(
         verify_png(raw)
         facing_report = None
         if refs and facing is not None:
+            retry = parts.replaced("facing", facing_mod.prompt_suffix(facing, retry=True, view=view is not None))
             request, run, facing_report = facing_mod.prepare_correction(
-                backend, request, run, workdir, facing=facing, fix=facing_fix, mirror_ok=not handed)
+                backend, request, run, workdir, facing=facing, fix=facing_fix, retry_prompt=retry.text,
+                mirror_ok=not handed)
             raw = request.raw
         raw_bytes = verify_png(raw)
 
@@ -529,34 +542,58 @@ def generate_image(
                    **({"facing": facing_report} if facing_report else {}),
                    **({"view": {"direction": view, "facing": facing if view in handed_mod.LATERAL_VIEWS else None,
                                 "handed": [vars(h) for h in handed or []]}} if view else {}),
-                   **({"layout_guide": guide_cell} if guide_cell else {})},
+                   **({"layout_guide": guide_cell} if guide_cell else {}),
+                   **({"prompt_notes": parts.notes} if parts.notes else {})},
         )
     finally:
         if owns_workdir:
             shutil.rmtree(workdir, ignore_errors=True)
 
 
-def _view_text(view: str | None, facing: str | None, facing_fix: str, handed: list[handed_mod.Handed] | None) -> str:
-    """`--direction`: the engine's sentence for drawing the still at that view, turned to `facing` (the side
-    and diagonal views), then where each `--handed` item is in it (`handedness.text`)."""
+def _check_view(view: str | None, facing: str | None, facing_fix: str, handed: list[handed_mod.Handed] | None) -> None:
+    """Refuse a `--direction` / `--facing` / `--handed` combination that cannot be drawn, before anything runs."""
     if view is None:
         if handed:
             raise SystemExit("gen: --handed needs --direction: where an item shows depends on the view")
-        return ""
+        return
     handed_mod.validate_view(view, facing)
     if view not in handed_mod.LATERAL_VIEWS and facing is not None:
         raise SystemExit(f"gen: the {view} view is not turned to a side; drop --facing")
     if handed and facing_fix == "mirror":
         raise SystemExit("gen: --facing-fix mirror turns the picture over and moves every --handed item to the other "
                          "side; use regen (it never mirrors with --handed) or none")
-    # The view sentences are the video pipeline's (a still is drawn for the clip that starts from it).
-    from sprite_gen.video.batch import still_view_text
 
-    text = still_view_text(view, facing or "right")
-    text = text[0].upper() + text[1:] + "."
-    if handed:
-        text += " " + handed_mod.text(handed, view, facing)
-    return text
+
+def still_prompt(prompt: str, *, view: str | None = None, facing: str | None = None,
+                 handed: list[handed_mod.Handed] | None = None, refs: bool = False, key: str | None = None,
+                 layout: dict[str, Any] | None = None) -> prompt_parts.Prompt:
+    """The prompt a still is drawn from: the caller's text, then the engine's pieces, each said once
+    (`prompt_parts.Prompt.add`). In order:
+
+    - `view` (`--direction`): the sentence for drawing the still at that view, turned to `facing` (the side and
+      diagonal views), then where each `handed` item is in it (`handedness.text`);
+    - with `refs` and a `facing`: the turn over the reference (`facing.prompt_suffix`) — only which edge of the
+      image the side is when the view sentence already said the turn;
+    - `key` (green / magenta, a ref run `auto` planned to key): the key background line, unless the prompt
+      names a key background already;
+    - `layout` (the `--layout-guide` cell): where the guide's lines are.
+    """
+    parts = prompt_parts.Prompt(prompt)
+    if view is not None:
+        # The view sentences are the video pipeline's (a still is drawn for the clip that starts from it).
+        from sprite_gen.video.batch import still_view_text
+
+        text = still_view_text(view, facing or "right")
+        parts.add("view", text[0].upper() + text[1:] + ".", facing=facing or prompt_parts.NO_TURN)
+        if handed:
+            parts.add("handed", handed_mod.text(handed, view, facing), sep=" ", handed=handed)
+    if refs and facing is not None:
+        parts.add("facing", facing_mod.prompt_suffix(facing, view=view is not None), facing=facing)
+    if key is not None:
+        parts.add("key-background", chroma_mod.KEY_BACKGROUND_TEXT[key], key=key)
+    if layout is not None:
+        parts.add("layout", layout_guide_text(layout))
+    return parts
 
 
 def _run(args: argparse.Namespace) -> int:
