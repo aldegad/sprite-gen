@@ -38,13 +38,27 @@ is a property of the motion state, owned by one table (`STATE_CANVAS`):
 | State | Shape | Ratio | Room | Why |
 |---|---|---|---|---|
 | `jump` | tall | 3:4 | 34 % head-room above the still | airborne frames need height |
-| `attack` | wide | 16:9 | 35 % above the still, at least 28 % in front (facing side), 20 % behind | weapon swings rise overhead and extend in front; a long weapon drawn back reaches behind |
+| `attack` | wide | 16:9 | 20 % above the still, at least 28 % in front (facing side), 20 % behind | a weapon raised overhead needs room above, a swing extends in front, and a long weapon drawn back reaches behind |
 | `projectile` | wide | 16:9 | 34 % in front | the projectile travels away |
 | everything else | square | 1:1 | — | in-place motion fits the still |
 
+The attack's room above is 20 %, not more. On a square or upright still that puts at least
+a quarter of the still's height above it, and with the still's own margin over the crown
+(8 % of its height is enough) that holds a weapon raised about a third of the body above
+the head. More room only made the body a smaller part of the clip, so `video-loop
+--body-height` scaled it up to the delivery height; at 20 % it scales down. A still cropped
+at the crown gets only the quarter — pass `--headroom 0.26` or more for an overhead swing.
+At this headroom the 16:9 ratio, not `--lead`, sets the width of a square still's canvas,
+so a smaller lead changes nothing.
+
 `--shape tall|wide|square` overrides the row; `--headroom` / `--lead` / `--trail` tune the room
 (`--trail` is the empty fraction of the width kept behind the subject, for a weapon drawn
-back before the strike); `--facing left` mirrors the wide layout. Headroom is a fraction of the full canvas
+back before the strike); `--facing left` mirrors the wide layout. A forced shape is that shape's
+own row, not the state's: `--shape tall` is the jump row, and `--shape wide` is a forced-wide
+row with 35 % above, 28 % in front and 20 % behind — not the attack row. It lands on states
+whose own row is another shape, a jump among them, and 35 % on 16:9 keeps about the room a
+jump's tall row leaves above the still, so forcing wide adds width and never takes height
+away. Headroom is a fraction of the full canvas
 height; wide canvases grow both dimensions to preserve their ratio without shrinking
 the still. A still whose corners are not one flat colour
 is refused — a non-flat background cannot be extended without guessing.
@@ -418,7 +432,9 @@ wider than the body (a skirt, a veil, a held object). Both fail `video-frames`'s
 edge-contact check — the clip was made, the frames were cut, and the run stops at the
 gate. The state table now routes `cheer`, `wave` and `celebrate` to the wide canvas, and
 `video-set --shape wide` forces it for every state of a batch when the costume is the
-reason. The same `--shape` is what `video-canvas` already took for a single still.
+reason. The same `--shape` is what `video-canvas` already took for a single still. The
+forced canvas is the forced-wide row (35 % above), so a jump in that batch keeps its
+head-room; an attack in it gets that row too, not its own 20 %.
 
 ## 4. Loop — period first, seam second, then the gait floor
 
