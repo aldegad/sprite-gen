@@ -193,6 +193,8 @@ sprite-gen gen \
   [--resolution 1k|1.5k|2k]  # grok output-size tier, priced with --quality
   [--model ID] \
   [--layout-guide]        # attach a one-slot layout guide (safe box, crown and floor lines); see below
+  [--direction side|front|back|front_diagonal|back_diagonal [--facing right|left]] # add the engine's view sentence
+  [--handed "the black smartwatch=left wrist" ...]  # with --direction: where an item on one side is in that view
   [--report REPORT.json] \
   [--keep-session]        # codex: keep the rollout jsonl instead of deleting it
 ```
@@ -212,6 +214,12 @@ Backward-compatible wrapper: `$SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT
   codex→grok default fallback occurred), plus the provider `extra` block
   (`auth_source`, `transport`, `endpoint`, and the knobs the request actually
   carried).
+
+- **`--direction`** adds the view sentence a sprite still is drawn with (`still_view_text`; a side or
+  diagonal view also takes `--facing`, a front or back view refuses it) and records `extra.view`.
+  **`--handed`** adds, per item, which of the character's own sides it is on and where that side is in
+  the view; with it, `--facing-fix mirror` is refused and `regen` never mirrors. See
+  [video-pipeline](video-pipeline.md#handedness--an-item-on-one-side).
 
 ## `--quality` and `--resolution` — the two billed knobs
 

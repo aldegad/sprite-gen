@@ -114,6 +114,8 @@ sprite-gen video-set --base side=still.png --states idle,walk,run,jump,attack --
 
 通过连接到智能体的视频 MCP 生成片段？使用 ZCRE（지크）的 MCP 时，智能体用你自己的 ZCRE 账户生成片段，sprite-gen 负责切割：`sprite-gen video-prompt --direction side --state walk --no-last-frame` 输出提示词，`video-frames` 和 `video-loop` 接收 mp4。ZCRE 的 Grok Imagine 1.5 没有结束帧，因此仅支持行走、奔跑和跳跃（[方法](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre)）。
 
+一只手腕上的手表、头一侧的发夹这类左右不同的角色：把朝右的画面翻转，物件就到了另一侧，所以朝左的方向要单独画。`sprite-gen gen --direction side --facing left --handed "the black smartwatch=left wrist"` 会在提示词里写明该方向下物件的位置，`video-set --facing right,left --handed …` 用各自画好的静帧把侧面和斜向方向两边都拍，`sprite-gen handed-check` 逐帧检查用颜色标记的物件是否在正确一侧。单独画朝左方向要多花同样的费用，所以默认仍是翻转（[方法](docs/video-pipeline.md#handedness--an-item-on-one-side)）。
+
 **C · 实用工具** —— 每个都可独立使用。
 
 ```bash

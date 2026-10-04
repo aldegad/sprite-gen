@@ -73,7 +73,8 @@ it never changes the requested direction. Image correction requires explicit opt
 | `gen --facing` | `preserve` (default), `right`, `left` | With `--ref`, an explicit direction adds a prompt requirement and checks the generated still. |
 | `gen --facing-fix` | `none` (default), `mirror`, `regen` | Record without correction; opt into mirroring an observed opposite or regenerating once and rechecking. A still-opposite regeneration is mirrored. |
 | `video --direction` | `side`, `front`, `back`, `front_diagonal`, `back_diagonal`; unset by default | `side` opts into facing inspection and a matching prompt requirement; the others skip it. The two diagonals are three-quarter views turned right (`VIEW_TEXT`); a walk or run in one is filmed pinned (`pins_last_frame`). |
-| `video --facing`, `video-set --facing` | `right` (default), `left` | Required side direction. |
+| `video --facing`, `video-set --facing` | `right` (default), `left`; `video-set` also `right,left` | Required side direction. `right,left` films every side and diagonal view both ways, each from its own still (`--base side@left=…`); none is mirrored. |
+| `gen --direction`, `--handed`; `video-prompt` / `video-set --handed` | a view; `"<item>=<left\|right> [part]"` | An item on one of the character's own sides: the still and clip prompts say where it is in each view, and mirroring is refused. |
 | `video --facing-fix`, `video-set --facing-fix` | `none` (default), `mirror` | Record the observation; opt into mirroring an observed opposite in a copy. Batch side inspection is enabled by default. |
 
 Direction is requested through the generation and motion prompts, which cannot guarantee model compliance.
@@ -83,6 +84,10 @@ under `extra.facing`; video reports and batch items use `facing`. `final_directi
 or a value derived from it, not independent verification; `final_direction_source` identifies which.
 An uncertain or failed inspection records `unknown` and its reason and continues without correction;
 front-facing observations also remain unchanged. Mirroring does not preserve left/right accessory handedness.
+It stays the default, since drawing the left-facing views costs as much again; for a character with a watch on
+one wrist or a pin on one side, offer to draw them instead with `--handed` and check them with `handed-check`
+(a colour-marked item, frame by frame; `--board` for the eye) —
+[handedness](docs/video-pipeline.md#handedness--an-item-on-one-side).
 
 ## Execution routes
 
