@@ -117,7 +117,7 @@ grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
 
 | Doc | Owns |
 |---|---|
-| [qa-motion.md](qa-motion.md) | Motion Continuity — the blocking judgement of a row as motion |
+| [qa-motion.md](qa-motion.md) | Motion Continuity of an image row (Pipeline A) — the blocking judgement of a row as motion |
 
 ## Runtime & process
 
