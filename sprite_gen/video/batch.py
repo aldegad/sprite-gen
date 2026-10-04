@@ -28,6 +28,7 @@ from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.gen.chroma import KEY_BACKGROUND_TEXT
 from sprite_gen.gen.facing import FACINGS, validate as validate_facing
 from sprite_gen.gen import handedness as handed_mod
+from sprite_gen.gen import prompt_parts
 from sprite_gen.gen.handedness import Handed
 from sprite_gen.video import facing as facing_mod
 from sprite_gen.video import canvas as canvas_mod
@@ -278,7 +279,16 @@ def _staggered_start(gap: float) -> None:
 
 def build_prompt(direction: str, state: str, character: str | None, facing: str = "right", motion: str | None = None,
                  pinned: bool | None = None, model: str | None = None, handed: list[Handed] | None = None) -> str:
-    """The clip prompt for one (direction, state).
+    """The clip prompt for one (direction, state): `clip_prompt_parts(...).text`."""
+    return clip_prompt_parts(direction, state, character, facing=facing, motion=motion, pinned=pinned, model=model,
+                             handed=handed).text
+
+
+def clip_prompt_parts(direction: str, state: str, character: str | None, facing: str = "right", motion: str | None = None,
+                      pinned: bool | None = None, model: str | None = None,
+                      handed: list[Handed] | None = None) -> prompt_parts.Prompt:
+    """The clip prompt for one (direction, state), as its pieces (`prompt_parts.Prompt`: `.text` is the
+    prompt, `.notes` what the caller's own words say against or again after the engine's).
 
     `motion` replaces the built-in state sentence with the caller's own description of the
     motion, written as whole sentences about the subject (a request interpreter's output, for
@@ -295,11 +305,13 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
     clause after the built-in walk sentence (`LITE_WALK_TEXT`; a caller's own motion is left as
     written), and a Lite walk in a view where its head sways gets `LITE_HEAD_TEXT`.
 
-    `handed` lists the character's asymmetric items (`handedness.parse`): the prompt ends with where each
-    one stays, anchored to the first frame and never named where it is hidden (`handedness.text(clip=True)`).
+    Without `handed` the prompt is 2.22.0's, to the byte (`tests/gen/test_prompt_freeze.py`). `handed` lists
+    the character's asymmetric items (`handedness.parse`): the prompt ends with where each one stays, anchored
+    to the first frame (`handedness.text(clip=True)`), the one piece `prompt_parts.Prompt.add` checks.
     """
     validate_facing(facing)
     view = VIEW_TEXT.get(direction, f"seen from the {direction}").format(facing=facing)
+    turned = facing if direction in handed_mod.LATERAL_VIEWS else None
     if state in ACTION_TEXT_STATES:
         template = ACTION_COMMON_TEXT
     elif (state in PINNED_LOOP_STATES or (state in GAIT_STATES and direction in PINNED_GAIT_VIEWS)) if pinned is None else pinned:
@@ -316,20 +328,22 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
             hold += f" {GAIT_HOLD_TEXT[direction].format(facing=facing)}"
         repeat = f" {REPEAT_TEXT[state]}" if state in REPEAT_TEXT else ""
         subject = character.strip().rstrip(".") if character else "The character"
-        return (f"2D game sprite animation. {motion}{hold}{repeat} {subject} is {view}." + template[len(head):]
-                + _lite_text(state, direction, model, built_in=False) + _handed_text(handed, direction, facing))
-    built_in = (VIEW_MOTION_TEXT[(state, direction)].format(facing=facing) if (state, direction) in VIEW_MOTION_TEXT
-                else MOTION_TEXT.get(state, f"performs the '{state}' action in place, repeating at an even rhythm."))
-    text = template.format(motion=built_in, view=view)
-    return ((text.replace("The character", character, 1) if character else text)
-            + _lite_text(state, direction, model, built_in=True) + _handed_text(handed, direction, facing))
-
-
-def _handed_text(handed: list[Handed] | None, direction: str, facing: str) -> str:
-    """Where each asymmetric item is in this view, said last (`handedness.text`); nothing without one."""
-    if not handed:
-        return ""
-    return " " + handed_mod.text(handed, direction, facing if direction in handed_mod.LATERAL_VIEWS else None, clip=True)
+        text = (f"2D game sprite animation. {motion}{hold}{repeat} {subject} is {view}." + template[len(head):]
+                + _lite_text(state, direction, model, built_in=False))
+        caller = f"{motion} {character or ''}"
+    else:
+        built_in = (VIEW_MOTION_TEXT[(state, direction)].format(facing=facing) if (state, direction) in VIEW_MOTION_TEXT
+                    else MOTION_TEXT.get(state, f"performs the '{state}' action in place, repeating at an even rhythm."))
+        text = template.format(motion=built_in, view=view)
+        text = ((text.replace("The character", character, 1) if character else text)
+                + _lite_text(state, direction, model, built_in=True))
+        caller = character or ""
+    parts = prompt_parts.Prompt(text, caller=caller, sep=" ")
+    # the caller's words against the view the engine's sentence turns the clip to (a note, never an edit)
+    parts.note(facing=turned or prompt_parts.NO_TURN)
+    if handed:
+        parts.add("handed", handed_mod.text(handed, direction, turned, clip=True, gait=state in GAIT_STATES), handed=handed)
+    return parts
 
 
 def _lite_text(state: str, direction: str, model: str | None, *, built_in: bool) -> str:
@@ -386,9 +400,10 @@ def walk_start_prompt(direction: str, key: str | None = None, handed: list[Hande
         if key not in KEY_BACKGROUND_TEXT:
             raise SystemExit(f"video: a mid-step start still is drawn on a green or magenta key, not {key!r}")
         text += f" {KEY_BACKGROUND_TEXT[key]}"
+    parts = prompt_parts.Prompt(text, caller="", sep=" ")
     if handed:
-        text += " " + handed_mod.text(handed, direction)
-    return text
+        parts.add("handed", handed_mod.text(handed, direction), handed=handed)
+    return parts.text
 
 
 def run_video_cli(image: Path, prompt: str, out: Path, report: Path, *, duration: int, resolution: str, log: Path, last_frame: Path | None = None) -> int:
@@ -480,7 +495,14 @@ def run_item(
     if direction in handed_mod.LATERAL_VIEWS:
         result["turned"] = facing
     try:
-        prompt = build_prompt(direction, state, character, facing=facing, handed=handed)
+        parts = clip_prompt_parts(direction, state, character, facing=facing, handed=handed)
+        prompt = parts.text
+        if parts.notes:
+            result["prompt_notes"] = parts.notes
+        needs = handed_mod.first_frame_needs(handed or [], direction, facing if direction in handed_mod.LATERAL_VIEWS else None,
+                                             gait=state in GAIT_STATES)
+        if needs:
+            result["still_needs"] = needs
         clip = item_dir / "clip.mp4"
         clip_report = item_dir / "clip.report.json"
         reuse_clip = clip.exists() and clip_report.exists() and not force

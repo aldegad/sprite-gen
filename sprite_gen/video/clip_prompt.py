@@ -55,8 +55,11 @@ def plan_prompt(*, direction: str, state: str, facing: str = "right", character:
         pinned = False
         warnings.append(f"{direction} {state} filmed without its end-frame pin: the loop is searched, not cut whole, and may not close")
     pins = wants_pin and last_frame
-    prompt = batch_mod.build_prompt(direction, state, character, facing=facing, motion=motion, pinned=pinned, model=model,
-                                    handed=handed)
+    parts = batch_mod.clip_prompt_parts(direction, state, character, facing=facing, motion=motion, pinned=pinned,
+                                        model=model, handed=handed)
+    prompt = parts.text
+    # the caller's own words (--character, --motion) against the engine's: a conflict is a warning
+    warnings += [note["text"] for note in parts.notes if note["kind"] == "conflict"]
     cycle = "pinned" if pins and state in batch_mod.PINNED_LOOP_STATES else "auto"
     # as video-set places and cuts: a side or diagonal view takes the facing, front and back face right
     canvas_facing = loop_facing = facing if direction in handed_mod.LATERAL_VIEWS else "right"
@@ -82,7 +85,12 @@ def plan_prompt(*, direction: str, state: str, facing: str = "right", character:
             "loop": f"sprite-gen video-loop --frames-dir <dir>/frames/keyed --out-dir <dir>/loop --fps <fps in frames.report.json> --state {state} --cycle {cycle} --facing {loop_facing} --name {direction}-{state}",
         },
         "warnings": warnings,
+        **({"notes": parts.notes} if parts.notes else {}),
     }
+    needs = handed_mod.first_frame_needs(handed or [], direction, canvas_facing if direction in handed_mod.LATERAL_VIEWS else None,
+                                         gait=state in batch_mod.GAIT_STATES)
+    if needs:
+        record["still_needs"] = needs
     if mid_step:
         record["start_still"] = {
             "why": "a front or back walk films from its still redrawn mid-step; from a standing still the clip model walks askew",
@@ -118,6 +126,8 @@ def run(**kwargs: object) -> int:
     )
     for line in record["warnings"]:
         print(f"video-prompt: warning: {line}", file=sys.stderr)
+    for line in record.get("still_needs", []):
+        print(f"video-prompt: the still: {line}", file=sys.stderr)
     print(json.dumps(record, ensure_ascii=False, indent=2) if kwargs.get("json") else record["prompt"])
     return 0
 

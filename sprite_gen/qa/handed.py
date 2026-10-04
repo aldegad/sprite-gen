@@ -10,14 +10,20 @@ each blob's centre is compared with the body's own centre (the mean x of its opa
 - a view with a picture side (front, back, the diagonals): every blob must be on that side;
 - the item in two places (two blobs farther apart than a link distance, the smaller at least a quarter
   of the larger; smaller ones are specks of compression tint) fails in every view;
-- the near side of a side or diagonal view: the item must show in at least half the frames;
-- the far side of a side view: the item is hidden or a sliver — no blob may be larger than half the
-  item seen whole, measured on `--reference` pictures of the same character (front or back, the item
-  in full view);
+- the near side of a diagonal view: the item must show in at least half the frames; of a side view, in at
+  least three quarters (a near arm is in view the whole walk; a far arm's item shows about half of it);
+- the far side of a side view, an item on the swinging end of an arm (a wrist, a hand: `handedness.limb`):
+  the arm swings out in front of the body with each step and the item shows then, whole. Every blob must
+  be in front of the body — on the facing side of its centre by at least a tenth of the body's height — and
+  with `--state walk` or `run` it must show in at least a quarter of the frames. An item that also shows at
+  or behind the body's centre is on the near arm, the wrong one;
+- the far side of a side view, any other item (a pin on the far side of the head, an anklet): hidden or a
+  sliver — no blob may be larger than half the item seen whole, measured on `--reference` pictures of the
+  same character (front or back, the item in full view);
 - the near side of a side view, against `--reference`: a frame shows the item only when it is more than
-  that sliver. A side view has no picture side, so size is all that tells the near wrist from the far
-  one: a far sliver turned over to face the other way must not count as the near item shown.
-  Without a reference neither size rule is checked (`far_hidden` / `near_whole`), and the report says so.
+  that sliver, so a far sliver turned over to face the other way does not count as the near item shown.
+  Against a reference a sliver is also not judged for where it is. Without one the size rules are not
+  checked (`far_hidden` / `near_whole`), and the report says so.
 
 The screen colour cannot see the item's band without its marker — a watch's bare strap on the other arm.
 `--strap` names the band's colour (usually dark) and `--zone` the rows the item sits in (black is common:
@@ -25,10 +31,11 @@ outlines, a hat, motion smear on the legs); a band of that colour outside every 
 taller than an outline, is another place the item shows. Specks of the marker's hue that a clip's colour
 blocks leave on outlines are recorded and not judged.
 
-A picture turned over moves the item: a front view turned over puts it on the wrong side, a side view
-facing right (the item on the far arm, hidden or a sliver) turned over to face left hides it, or leaves only
-that sliver, on the near arm. So a set that made its left-hand views by mirroring fails here — a side view's
-sliver only against `--reference` (`tests/qa/test_handed_check.py` proves it).
+A picture turned over moves the item: a front view turned over puts it on the wrong side; a side walk facing
+right (the item on the far arm, in view while that arm is forward) turned over to face left shows it in too
+few frames for a near arm; one facing left (the item on the near arm, crossing the body) turned over to face
+right shows it behind the body's centre. So a set that made its left-hand views by mirroring fails here
+(`tests/qa/test_handed_check.py` proves it).
 Pixels cannot judge everything — an unmarked item, an item drawn on the wrong hand where it stays hidden —
 so `--board` draws every frame with its blobs ringed (green as expected, red not) for a person to look at.
 """
@@ -76,10 +83,21 @@ STRAP_TOL = 55
 STRAP_ERODE = 0.004
 STRAP_MIN_SIDE = 0.016
 STRAP_GAP = 0.024
-# At least this share of the frames must show the item on the near side of a side or diagonal view.
+# At least this share of the frames must show the item on the near side of a diagonal view.
 NEAR_SHOWN_MIN = 0.5
+# ... and of a side view, where the share is all that tells a near limb from a far one that swings into view:
+# a near limb is in view for the whole walk, a far limb's item for the half of it the limb is forward.
+SIDE_NEAR_SHOWN_MIN = 0.75
 # On the far side of a side view, a blob larger than this share of the item seen whole is not a sliver.
 FAR_MAX = 0.5
+# A far limb's item shows while the limb is out past the front of the body: its centre at least this share of
+# the body's height in front of the body's centre. A near limb's item crosses the centre both ways as it
+# swings, and stays close to the centre on a limb held at the body.
+FAR_FRONT_MIN = 0.1
+# In a walk or run, a far limb's item must show in at least this share of the frames: it is in view for about
+# half of each step, and a walk that never shows it has lost it.
+FAR_SHOWN_MIN = 0.25
+GAIT_STATES = ("walk", "run")
 
 
 def parse_marker(value: str) -> tuple[int, int, int]:
@@ -201,9 +219,11 @@ def full_ratio(references: list[Image.Image], marker: tuple[int, int, int],
 
 def check(frames: list[Image.Image], *, item: handed_mod.Handed, view: str, facing: str | None,
           marker: tuple[int, int, int], references: list[Image.Image] | None = None,
-          strap: tuple[int, int, int] | None = None, zone: tuple[float, float] = (0.0, 1.0)) -> dict[str, Any]:
+          strap: tuple[int, int, int] | None = None, zone: tuple[float, float] = (0.0, 1.0),
+          state: str | None = None) -> dict[str, Any]:
     """Every frame against `handedness.placement(item.side, view, facing)`; `ok` is the verdict. With `strap`,
-    a band without its marker counts as a place the item shows (`STRAP_TOL`)."""
+    a band without its marker counts as a place the item shows (`STRAP_TOL`). `state` is the loop's motion
+    state: in a walk or run, a far limb's item must show while the limb swings forward (`FAR_SHOWN_MIN`)."""
     if not 0 <= zone[0] < zone[1] <= 1:
         raise SystemExit(f"handed-check: --zone is TOP,BOTTOM as fractions of the body's height, 0 <= TOP < BOTTOM <= 1, got {zone}")
     if not frames:
@@ -212,6 +232,8 @@ def check(frames: list[Image.Image], *, item: handed_mod.Handed, view: str, faci
         facing = None
     expect = handed_mod.placement(item.side, view, facing)
     full = full_ratio(references or [], marker, zone)
+    # a far limb in a side view swings out in front of the body; any other far part stays behind it
+    swings = handed_mod.limb(item.part) if view == "side" and expect["depth"] == "far" else None
     rows, fails = [], []
     for i, frame in enumerate(frames):
         m = measure(frame, marker, strap=strap, zone=zone)
@@ -229,7 +251,14 @@ def check(frames: list[Image.Image], *, item: handed_mod.Handed, view: str, faci
             b["ratio"] = round(b["area"] / m["body_area"], 6)
             if expect["picture"] and b["side"] != expect["picture"]:
                 bad.append(f"on the picture's {b['side']}, expected its {expect['picture']}")
-            if view == "side" and expect["depth"] == "far" and full is not None and b["ratio"] > FAR_MAX * full:
+            whole = full is None or b["ratio"] > FAR_MAX * full
+            if swings and whole:
+                ahead = (b["x"] - m["centre_x"]) * (1 if facing == "right" else -1) / m["body_height"]
+                b["ahead"] = round(ahead, 3)
+                if ahead < FAR_FRONT_MIN:
+                    bad.append(f"at or behind the body's centre ({ahead:+.2f} of the body's height in front of it, at "
+                               f"least {FAR_FRONT_MIN} for a far {swings} swung forward): the item is on the near {swings}")
+            elif view == "side" and expect["depth"] == "far" and not swings and full is not None and whole:
                 bad.append(f"in full view ({b['ratio'] / full:.0%} of the whole item) on the far side")
         rows.append({**m, "bad": bad})
         if bad:
@@ -237,25 +266,35 @@ def check(frames: list[Image.Image], *, item: handed_mod.Handed, view: str, faci
     # A side view has no picture side, so near and far differ only in size: on the near side a frame shows the
     # item when its largest blob is more than a sliver (the far side's own limit), or a far sliver turned over
     # would count as the near item shown.
-    sized = view == "side" and expect["depth"] == "near" and full is not None
+    sized = view == "side" and (expect["depth"] == "near" or swings) and full is not None
     shown = sum(1 for r in rows if r["blobs"] and (not sized or r["blobs"][0]["ratio"] > FAR_MAX * full))
     rules: dict[str, Any] = {}
     if expect["picture"]:
         rules["picture_side"] = expect["picture"]
     if expect["depth"] == "near":
-        rules["near_shown"] = {"min": NEAR_SHOWN_MIN, "shown": shown, "frames": len(rows),
-                               "ok": shown >= NEAR_SHOWN_MIN * len(rows)}
+        near_min = SIDE_NEAR_SHOWN_MIN if view == "side" else NEAR_SHOWN_MIN
+        rules["near_shown"] = {"min": near_min, "shown": shown, "frames": len(rows), "ok": shown >= near_min * len(rows)}
     if view == "side":
         size = ({"checked": False, "why": "no --reference: the item seen whole is unknown"} if full is None
                 else {"checked": True, "full_ratio": round(full, 6)})
-        if expect["depth"] == "far":
+        if swings:
+            rules["far_in_front"] = {"limb": swings, "min": FAR_FRONT_MIN, "of": "body height, toward the facing side"}
+            if state in GAIT_STATES:
+                rules["far_shown"] = {"checked": True, "min": FAR_SHOWN_MIN, "shown": shown, "frames": len(rows),
+                                      "ok": shown >= FAR_SHOWN_MIN * len(rows)}
+            else:
+                why = ("no --state: only a walk or run swings the far limb into view" if state is None
+                       else f"a {state} does not swing the far {swings} into view")
+                rules["far_shown"] = {"checked": False, "why": why, "shown": shown, "frames": len(rows)}
+        elif expect["depth"] == "far":
             rules["far_hidden"] = {**size, **({"max": FAR_MAX} if full is not None else {})}
         else:
             rules["near_whole"] = {**size, **({"min": FAR_MAX} if full is not None else {})}
-    ok = not fails and rules.get("near_shown", {}).get("ok", True)
+    ok = not fails and rules.get("near_shown", {}).get("ok", True) and rules.get("far_shown", {}).get("ok", True)
     return {
         "kind": "sprite-gen-handed-check",
         "item": vars(item), "view": view, "facing": facing, "expect": expect,
+        **({"state": state} if state else {}),
         "marker": "#%02x%02x%02x" % marker, **({"strap": "#%02x%02x%02x" % strap} if strap else {}),
         "zone": list(zone), "rules": rules,
         "frames": len(rows), "frames_shown": shown, "fails": fails, "ok": bool(ok),
@@ -338,6 +377,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--marker", required=True, help="#RRGGBB: a saturated colour of the item that nothing else on the character has")
     parser.add_argument("--strap", help="#RRGGBB: the item's band colour (a watch strap, usually dark); a band of it with no marker on it, away from the marker, counts as another place the item shows. Use with --zone")
     parser.add_argument("--zone", default="0,1", help="TOP,BOTTOM: the rows the item sits in, as fractions of the body's height from its top (default 0,1, the whole body); e.g. 0.5,0.9 for a wrist")
+    parser.add_argument("--state", help="the loop's motion state (walk, run, idle, ...): in a walk or run of a side view, an item on the far wrist or hand must show while that arm swings forward")
     parser.add_argument("--reference", action="append", type=Path, default=[], help="a keyed front or back picture of the same character with the item in full view (repeatable): in a side view the far item must stay smaller than half of it, and the near item counts as shown only when larger")
     parser.add_argument("--report", type=Path, help="write the report JSON here")
     parser.add_argument("--board", type=Path, help="write the review board PNG here")
@@ -350,16 +390,18 @@ def run(**kwargs: object) -> int:
     report = check(frames, item=handed_mod.parse(str(kwargs["handed"])), view=str(kwargs["direction"]),
                    facing=kwargs.get("facing"), marker=parse_marker(str(kwargs["marker"])), references=references,  # type: ignore[arg-type]
                    strap=parse_marker(str(kwargs["strap"])) if kwargs.get("strap") else None,
-                   zone=parse_zone(str(kwargs.get("zone") or "0,1")))
+                   zone=parse_zone(str(kwargs.get("zone") or "0,1")),
+                   state=str(kwargs["state"]) if kwargs.get("state") else None)
     if kwargs.get("board"):
         report["board"] = str(board(frames, report, Path(str(kwargs["board"]))))
     if kwargs.get("report"):
         atomic_write_text(Path(str(kwargs["report"])), json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     summary = {k: report[k] for k in ("view", "facing", "expect", "frames", "frames_shown", "ok")}
     summary["fails"] = len(report["fails"])
-    for rule in ("far_hidden", "near_whole"):
-        if report["rules"].get(rule, {}).get("checked") is False:
-            summary["unchecked"] = f"{rule}: {report['rules'][rule]['why']}"
+    unchecked = [f"{rule}: {report['rules'][rule]['why']}" for rule in ("far_hidden", "near_whole", "far_shown")
+                 if report["rules"].get(rule, {}).get("checked") is False]
+    if unchecked:
+        summary["unchecked"] = "; ".join(unchecked)
     print(json.dumps(summary, ensure_ascii=False))
     if not report["ok"]:
         for f in report["fails"][:10]:
@@ -368,6 +410,10 @@ def run(**kwargs: object) -> int:
             r = report["rules"]["near_shown"]
             whole = " more than a sliver" if report["rules"].get("near_whole", {}).get("checked") else ""
             print(f"handed-check: on the near side the item shows{whole} in {r['shown']} of {r['frames']} frames", file=sys.stderr)
+        if report["rules"].get("far_shown", {}).get("ok") is False:
+            r = report["rules"]["far_shown"]
+            print(f"handed-check: on the far {report['rules']['far_in_front']['limb']} the item shows in {r['shown']} of "
+                  f"{r['frames']} frames of the {report['state']}; it must show while that limb swings forward", file=sys.stderr)
     return 0 if report["ok"] else 1
 
 

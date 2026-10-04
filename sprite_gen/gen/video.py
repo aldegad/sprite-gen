@@ -55,7 +55,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from sprite_gen.spec.runio import atomic_write_text
-from . import refusal
+from . import prompt_parts, refusal
 from .base import announce_api_billing
 from .facing import FACINGS, validate as validate_facing
 from sprite_gen.video import facing as facing_mod
@@ -482,6 +482,14 @@ def _submit_poll_publish(
     )
 
 
+def side_view_prompt(prompt: str, facing: str) -> prompt_parts.Prompt:
+    """`--direction side`: the prompt with the side view held for the whole clip, after whatever the prompt
+    already says (2.22.0's prompt to the byte). Words in the prompt that turn the subject are noted."""
+    parts = prompt_parts.Prompt(prompt)
+    parts.add("side-view", f"The subject stays in exact side view, facing {facing}. No turning around.", facing=facing)
+    return parts
+
+
 def generate_video(
     request: VideoRequest,
     *,
@@ -506,12 +514,14 @@ def generate_video(
 
     facing_report = None
     if request.direction == "side":
+        parts = side_view_prompt(request.prompt, request.facing)
+        for line in prompt_parts.note_lines(parts):
+            print(f"[video] {line}", file=sys.stderr)
+        request = replace(request, prompt=parts.text)
         corrected = out.with_suffix(".facing.png")
         facing_report = facing_mod.prepare_still(image, corrected, facing=request.facing,
                                                  fix=request.facing_fix, credential=credential, call=call)
         image = corrected
-        request = replace(request, prompt=request.prompt +
-                          f"\n\nThe subject stays in exact side view, facing {request.facing}. No turning around.")
     body = _build_generation_body(request, image, last_frame, references)
     published = _submit_poll_publish(
         verb="video", endpoint="generations", body=body, out=out, credential=credential,

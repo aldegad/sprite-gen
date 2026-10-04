@@ -270,6 +270,10 @@ sprite-gen video-frames --clip item/clip.mp4 --out-dir item/frames --spill auto 
 sprite-gen video-loop --frames-dir item/frames/keyed --out-dir item/loop --fps 24 --state walk --cycle auto --facing right --name side-walk
 ```
 
+`--character` or `--motion` words that turn the subject another way than `--facing`, or put a
+`--handed` item on its other side, come back in `warnings`; the prompt is the same either way
+([prompt-assembly](prompt-assembly.md)).
+
 `video-prompt --json` also gives the duration (the state's own, as `video-set`), whether the clip
 ends on the canvas (`last_frame`), the loop cut (`cycle`) and these commands with placeholders; a
 front or back walk adds `start_still`, the mid-step redraw `video-set` makes before its canvas
@@ -317,26 +321,59 @@ middle of the body — only near and far.
 **The still.** `sprite-gen gen --direction <view> [--facing right|left] --handed …` adds the engine's
 view sentence (`still_view_text`, the one a diagonal or front still is drawn with) and, per item, the
 handedness sentence (`handedness.text`): the item is on the own left wrist only and the right wrist has
-none; where that wrist is in this view (at the picture's right, on the far side; or, facing right,
-behind the body, hidden or a sliver); and that these sentences decide the side whatever an attached
-picture shows. A side or diagonal view needs `--facing`, a front or back view takes none. With
-`--handed`, `--facing-fix mirror` is refused and `regen` never falls back to mirroring a still-opposite
-retry: a mirror moves the item. Do not attach a picture whose item is on the other side — a mirrored
-still, or a side picture drawn the wrong way: check it with `handed-check` first. A front or back
-picture, where the item's side is plain, is the safe reference.
+none; where that wrist is in this view (at the picture's right, on the far side); and that these
+sentences decide the side whatever an attached picture shows. A side or diagonal view needs `--facing`,
+a front or back view takes none. With `--handed`, `--facing-fix mirror` is refused and `regen` never
+falls back to mirroring a still-opposite retry: a mirror moves the item. Do not attach a picture whose
+item is on the other side — a mirrored still, or a side picture drawn the wrong way: check it with
+`handed-check` first. A front or back picture, where the item's side is plain, is the safe reference.
+
+**The far arm of a side view.** A side view hides the far side behind the body, except for what swings
+out from behind it. A walking character's far arm comes forward of the body with every step, and what
+its wrist or hand wears shows then. So an item on a wrist, a hand, a forearm or an elbow
+(`handedness.limb`, the one table: `SWINGING_ARM_PARTS`) is said, on the far arm, to show wherever that
+arm is out in front of the body and to be hidden where the body covers it. Every other far item — on an
+ear, the head, a tail, the body, a leg, a shoulder, the upper arm — is said hidden, as in 2.22.0, and
+gets no arm sentence: a far shoulder stays behind the body as the character walks, and a leg's item
+showing as it steps forward was never filmed. 2.22.0 said every far item hidden and never named it in
+the clip, and a watch on the far wrist was then in no frame of the side walk.
+
+A clip keeps what its first frame shows and makes up what it hides. For a walk or run with an item on
+the far arm, draw the side still **mid-stride with both arms in view**, and say the pose in your
+prompt — the engine's sentence says where the item shows, not how the character stands:
+
+> caught in the middle of a walking stride: the far arm swings forward, its forearm and hand out in
+> front of the chest, clear of the body's outline, with the watch on that wrist in plain sight; the
+> near arm swings back past the body and shows whole
+
+`video-prompt --json` names this under `still_needs` (and on stderr), and `video-set` under each
+item's `still_needs`, whenever a walk or run has an item on the far wrist or hand of a side view.
 
 **The clip.** `video-prompt --handed …` and `video-set --handed …` end the clip prompt with where the
 item stays (`build_prompt(handed=...)`). The clip starts from a still already drawn with the item in
 place, so the sentence anchors to the image and names the item once, positively, where it shows: "The
-black smartwatch stays on the wrist at the right of the picture, nearer the viewer for the whole clip,
-exactly as in the image, and on no other wrist." Where the item is hidden — the far side of a side
-view — the item is not named at all: "The wrist in front of the body stays bare, exactly as in the
-image, for the whole clip." A clip prompt that names a hidden item, and lists what the near arm must
-not wear, draws it on the near arm. A far arm that swings into view can still grow a bare band in a
-near-side view; holding the arms still (`--motion`) is the caller's choice, and `handed-check --strap`
-finds it. A front or back walk's mid-step redraw (`walk_start_prompt`, `video-prompt`'s `start_still`)
-ends with the still's handedness sentences too: redrawn from the base alone, the model may put the item
-on the other wrist.
+black smartwatch stays on the wrist at the right of the picture, nearer the viewer, for the whole clip,
+exactly as in the image, and on no other wrist." In a side view's walk or run with an item on a wrist,
+a hand, a forearm or an elbow, the arms are said to swing (`handedness.ARMS_SWING_TEXT`: "Both arms
+swing back and forth with each step, opposite to the legs."), and then:
+
+- on the far arm: "The black smartwatch stays on the wrist that wears it in the image, on the arm on
+  the far side of the body, and shows each time that arm swings forward; the arm nearer the viewer
+  stays bare, exactly as in the image."
+- on the near arm: "The black smartwatch stays on the wrist that wears it in the image, on the arm
+  nearer the viewer; the other arm, on the far side of the body, stays bare both where it shows behind
+  the body and where it swings out in front of it."
+
+No sentence holds an arm still: the arms swing with the walk. The other arm is said bare, never as a
+list of what it must not wear — a clip prompt that lists that draws it there. Where nothing brings the
+far side into view — any other part, or a state that does not step (idle, attack) — the
+item is not named at all: "The wrist nearer the viewer stays bare, exactly as in the image, for the
+whole clip." A side view names the near part "nearer the viewer", not "in front of the body": in a
+mid-stride still the far arm is the one in front of the body. Items on the same wrist share one sentence, and with an item on each wrist neither is
+called bare. `handed-check --strap` finds a bare band that a clip still grows on the other arm. A front
+or back walk's mid-step redraw (`walk_start_prompt`, `video-prompt`'s `start_still`) ends with the
+still's handedness sentences too: redrawn from the base alone, the model may put the item on the other
+wrist.
 
 **Left-facing views, drawn.** `video-set --facing right,left` films every side and diagonal view both
 ways, each from its own still: `--base side@right=E.png --base side@left=W.png --base
@@ -349,7 +386,7 @@ left-facing diagonal is canvassed, prompted ("heading diagonally toward the view
 and cut (`video-loop --facing left`) as a left one. One facing keeps the item names and table as before.
 
 **The check.** `sprite-gen handed-check --strip <loop>.strip.png --direction <view> [--facing …]
---handed … --marker '#RRGGBB'` (or `--image`, `--frames-dir`) finds the item by a saturated colour
+[--state walk] --handed … --marker '#RRGGBB'` (or `--image`, `--frames-dir`) finds the item by a saturated colour
 nothing else on the character has — a watch's screen — and checks every frame:
 
 - a view with a picture side: every blob of that hue is on that side of the body's centre (the mean x
@@ -357,14 +394,23 @@ nothing else on the character has — a watch's screen — and checks every fram
 - every view: the item in at most one place (blobs within 2 % of the body height are one; one smaller
   than a quarter of the largest is a speck — a clip's colour blocks tint outlines toward the item's
   hue — recorded and drawn, not judged);
-- the near side of a side or diagonal view: the item shows in at least half the frames — in a side view,
-  against `--reference`, as more than a sliver (its largest blob larger than half the item seen whole):
-  a side view has no picture side, so a far sliver turned over must not count as the near item shown;
-- the far side of a side view: no blob larger than half the item seen whole on `--reference` (a keyed
-  front or back picture).
+- the near side of a diagonal view: the item shows in at least half the frames; of a side view, in at
+  least three quarters — a near arm is in view the whole walk, a far arm's item for the half of it the
+  arm is forward, and in a side view that share is what tells the two apart. Against `--reference` a
+  frame counts only when the item is more than a sliver (its largest blob larger than half the item
+  seen whole);
+- the far side of a side view, an item on a wrist, a hand, a forearm or an elbow (`handedness.limb`):
+  every blob is out in front of the body — on the facing side of the body's centre by at least a tenth
+  of the body's height (`far_in_front`). An item that shows at or behind the centre is on the near arm,
+  the wrong one. With `--state walk` or `run` it must also show in at least a quarter of the frames
+  (`far_shown`); without `--state`, or for a state that does not step, that is reported unchecked.
+  Against `--reference` a sliver is not judged for where it is;
+- the far side of a side view, any other item (an anklet, a shoulder piece, a pin on the head): no
+  blob larger than half the item seen whole on `--reference` (a keyed front or back picture;
+  `far_hidden`).
 
-Without `--reference` neither side-view size rule is checked; the report says so (`far_hidden` /
-`near_whole`: `checked: false`) and a near frame counts as shown by any blob.
+Without `--reference` the size rules are not checked; the report says so (`far_hidden` /
+`near_whole`: `checked: false`) and a frame counts as shown by any blob.
 
 `--strap '#RRGGBB' --zone TOP,BOTTOM` adds the item's band seen without its marker: pixels of that
 colour in those rows of the body (fractions of its height), eroded so outlines drop out, wider and
@@ -375,10 +421,11 @@ expected, red not) and bands boxed, for what pixels cannot judge: an unmarked it
 the wrong hand. The exit code is 1 on a failure.
 
 A set that made its left-facing views by mirroring fails: a front view turned over puts the item on
-the wrong side; a side view facing right (item hidden on the far arm, or a sliver of it) turned over
-hides it, or leaves the sliver, on the near arm — the sliver is caught against `--reference` only; a
-diagonal turned over moves it across the picture. `tests/qa/test_handed_check.py` draws each view as it
-should look, passes it, and fails it turned over.
+the wrong side; a side walk facing right (the item on the far arm, in view while that arm is forward)
+turned over shows it in too few frames for a near arm; one facing left (the item on the near arm,
+crossing the body) turned over shows it behind the body's centre; a diagonal turned over moves it
+across the picture. `tests/qa/test_handed_check.py` draws each view as it should look, passes it, and
+fails it turned over.
 
 ## 3. Frames — extract, key, check the edges
 

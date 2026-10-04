@@ -75,6 +75,7 @@ grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
 | Doc | Owns |
 |---|---|
 | [gen.md](gen.md) | `sprite-gen gen` / `gen-set`: providers, default resolution, transparency strategy per provider, row usage |
+| [prompt-assembly.md](prompt-assembly.md) | What the engine adds to a still or clip prompt and when: the pieces, the 2.22.0 freeze without `--handed`, what counts as already said, and the notes on the caller's own words |
 | [video.md](video.md) | `sprite-gen video` / `video-extend` / `video-edit`: stills and clips to mp4 through Grok Imagine (image-to-video, last-frame pin, references, extension, editing) with the user's own credential |
 | [video-pipeline.md](video-pipeline.md) | Pipeline B engine contract: state canvas, keyed frames, true-period and one-shot cycles, strip/GIF/WebP, the batch |
 | [loop-review.md](loop-review.md) | Automatic loop decisions, ambiguous gait review, visual evidence and explicit cut/alignment overrides |

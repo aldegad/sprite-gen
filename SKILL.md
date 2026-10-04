@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 2.22.0
+version: 2.23.0
 description: "Generates images and game sprites through GPT or Grok with guided provider choices, separate saved defaults, automatic cleanup and optional curation. Handles sprite requests, ordinary image generation/editing, standalone image-to-video clips (i2v, animate this still, 그록 영상, 이매진 비디오, 스틸 움직여줘, first/last frame, reference-to-video, 영상 이어붙이기, 영상 편집, extend/edit a clip), clips from a video MCP on the agent (ZCRE, 지크 MCP), chroma removal, animation atlases, video loops, 큐레이션뷰, image candidates, 팔레트 스왑, palette swap, recolor, rig layers, engine exports, repeating backgrounds, projected shadows, motion/contact inspection and optional scene composition from existing assets."
 license: Apache-2.0
 depends_on:
@@ -87,7 +87,10 @@ front-facing observations also remain unchanged. Mirroring does not preserve lef
 It stays the default, since drawing the left-facing views costs as much again; for a character with a watch on
 one wrist or a pin on one side, offer to draw them instead with `--handed` and check them with `handed-check`
 (a colour-marked item, frame by frame; `--board` for the eye) —
-[handedness](docs/video-pipeline.md#handedness--an-item-on-one-side).
+[handedness](docs/video-pipeline.md#handedness--an-item-on-one-side). In a side view an item on the far wrist
+or hand shows each time that arm swings forward, never hidden for the whole walk: draw that side still mid-stride with
+the far arm out in front of the body and the item in view (`video-prompt` says so under `still_needs`), do not
+hold the arms still, and check the loop with `handed-check --state walk`.
 
 ## Execution routes
 
@@ -112,6 +115,8 @@ one wrist or a pin on one side, offer to draw them instead with `--handed` and c
 | Duplicate poses, foot contact and stride measurement | `inspect-motion` | [asset-tools](docs/asset-tools.md#motion-and-contact-evidence) |
 | Optional scene placement, lighting, camera and render | `scene-render`, `scene-inspect` | [scene](docs/scene.md) |
 | Defaults | `defaults show`, `defaults save`, `defaults clear` | [user-workflow](docs/user-workflow.md#one-settings-owner) |
+
+Say a thing once: what an option says, leave out of the prompt. `--direction`, `--facing`, `--handed`, the key background and `video --direction side` each add their own sentence after your text, in one place; without `--handed` every prompt is 2.22.0's, byte for byte, and only the handed sentences are left out where your text already has them. Your prompt carries the subject, its design and its pose. Text that says the opposite of an option ("facing left" with `--facing right`, the item on the other wrist) is sent as written with a warning (`extra.prompt_notes`, `video-prompt`'s `warnings`): fix the prompt, do not send it — [prompt-assembly](docs/prompt-assembly.md).
 
 `gen --transparent` with `--ref` plans a chroma key (adding the key's background line to a prompt that names none), and publishes a result that already came back transparent on its own alpha instead of keying its outline away; `alpha.strategy_source` in the report says which (`refs-attached` keyed, `refs-attached-raw-alpha` not) — [gen](docs/gen.md#transparent-output--strategy-per-provider).
 

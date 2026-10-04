@@ -220,6 +220,12 @@ Backward-compatible wrapper: `$SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT
   **`--handed`** adds, per item, which of the character's own sides it is on and where that side is in
   the view; with it, `--facing-fix mirror` is refused and `regen` never mirrors. See
   [video-pipeline](video-pipeline.md#handedness--an-item-on-one-side).
+- **The engine's sentences go on after yours, as written.** The view, the turn over a reference, the
+  handed item, the key background and the layout guide are attached in one place; without `--handed`
+  the prompt is 2.22.0's, byte for byte. Leave out of your text what an option says. Where your own
+  text says the opposite of an option ("facing left" with `--facing right`) it is left as written and
+  stderr warns; the report lists it under `extra.prompt_notes`. See
+  [prompt-assembly](prompt-assembly.md).
 
 ## `--quality` and `--resolution` — the two billed knobs
 
@@ -279,7 +285,10 @@ strategy it can execute, and `--alpha-mode auto` (the default) follows it:
   key's name right before "background", "backdrop", "chroma key", "key" or "screen"
   (`chroma.named_key_background`); a colour in the subject ("a green frog") is not a
   key. A prompt that names the other key is left on it: the matte reads the key off
-  the borders. `alpha.key_background` records `{"injected": true|false, "key": …}`,
+  the borders. Write the key as "a magenta background" or "#FF00FF": "no green screen"
+  reads as naming green, and "a background of pure magenta" is not read
+  ([prompt-assembly](prompt-assembly.md#known-faults-kept-for-now)).
+  `alpha.key_background` records `{"injected": true|false, "key": …}`,
   stderr says which, and the report's `prompt` is the prompt sent. Without the line a
   reference on white came back on opaque white (3/3, 2026-10-04) and keying white took
   the outline and the cream fills with it. With it (the same prompt otherwise, three
