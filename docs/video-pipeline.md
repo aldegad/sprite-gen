@@ -791,10 +791,14 @@ A front or back walk films from its base redrawn mid-step (`--walk-start redraw`
 image generation each, `--still-provider` picks the provider; see §2). After the loops are cut,
 every walk or run filmed in two or more directions is given one cycle
 length: each loop is resampled to the set's median length (only the frames that fall between two
-source frames are made, by RIFE) and turned to start on a foot strike (`--align-cycles auto`, the
-default; `off` keeps each loop's own length). The same step stands alone as
-`sprite-gen video-cycle-align --loop-dir … --loop-dir …`. `set.report.json` carries `cycle_align`
-per state, and a failed alignment is listed as `cycle-align:<state>`. Without RIFE the alignment
+source frames are made, by RIFE; `--align-between nearest` takes the nearer source frame instead)
+and turned to start as the same own foot lands in every view — read off the legs, never off an
+ear or a hat's point, and the foot told apart by the item's own view and facing (`--align-cycles
+auto`, the default; `off` keeps each loop's own length). The same step stands alone as
+`sprite-gen video-cycle-align --loop-dir … --view …`. `set.report.json` carries `cycle_align`
+per state (with `start_foot` per item), a failed alignment is listed as `cycle-align:<state>`,
+and a made frame with a smear or a loop whose foot could not be named is a line under
+`warnings`. Without RIFE the alignment
 is skipped with a warning (`applied: false`, and a line under the report's `warnings`), not failed. See
 [loop repair](loop-repair.md) section 4.
 

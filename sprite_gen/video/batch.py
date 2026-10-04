@@ -647,7 +647,15 @@ def resolve_bases(bases: dict[str, Path], facings: tuple[str, ...]) -> list[tupl
 ALIGN_MODES = ("auto", "off")
 
 
-def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpolate: Any = None) -> dict[str, Any]:
+def _align_view(r: dict[str, Any]) -> str | None:
+    """An item's view as `video-cycle-align --view` takes it, or None where it is not one the
+    start-foot cue knows (a lateral view whose facing was not recorded)."""
+    if r["direction"] not in handed_mod.VIEWS or (r["direction"] in handed_mod.LATERAL_VIEWS and not r.get("turned")):
+        return None
+    return r["direction"] + (f"@{r['turned']}" if r["direction"] in handed_mod.LATERAL_VIEWS else "")
+
+
+def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpolate: Any = None, between: str = "rife") -> dict[str, Any]:
     """One cycle length per gait state across the set's directions (`video-cycle-align`,
     docs/loop-repair.md section 4). A state filmed in fewer than two directions has nothing to
     match. A failure is recorded under its state and the batch reports it; the loops stay as cut.
@@ -665,7 +673,8 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
             continue
         try:
             report = align_mod.align_set([Path(r["dir"]) / "loop" for r in rows], interpolate=interpolate,
-                                         report_path=root / f"{state}.cycle-align.json")
+                                         report_path=root / f"{state}.cycle-align.json", between=between,
+                                         views=[_align_view(r) for r in rows])
         except rife_mod.RifeNotInstalled as exc:
             out[state] = {"ok": True, "applied": False, "why": "RIFE not installed — each loop keeps its own length",
                           "rife": str(exc), "install": rife_mod.INSTALL_COMMAND}
@@ -676,10 +685,12 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
         except SystemExit as exc:
             out[state] = {"ok": False, "error": str(exc)}
             continue
-        out[state] = {"ok": True, "applied": True, "length": report["length"], "lengths": report["lengths"], "made_by_rife": report["made_by_rife"],
-                      "report": str(root / f"{state}.cycle-align.json")}
+        out[state] = {"ok": True, "applied": True, "length": report["length"], "lengths": report["lengths"], "between": report["between"],
+                      "made_by_rife": report["made_by_rife"], "warnings": report["warnings"], "report": str(root / f"{state}.cycle-align.json")}
+        for line in report["warnings"]:
+            print(f"video-set: warning: {state}: {line}", file=sys.stderr)
         for r, row in zip(rows, report["loops"]):
-            r["loop"]["cycle_align"] = {k: row[k] for k in ("from", "to", "made_by_rife", "turned_by", "seam_ratio")}
+            r["loop"]["cycle_align"] = {k: row[k] for k in ("from", "to", "made_by_rife", "turned_by", "turned_on", "start_foot", "seam_ratio")}
             r["loop"]["n_out"] = row["strip"]["frames"]
     return out
 
@@ -729,6 +740,7 @@ def run_set(
     fit: str = "state",
     decontam: str = "off",
     align_cycles: str = "auto",
+    align_between: str = "rife",
     interpolate: Any = None,
     walk_start: str = "redraw",
     redraw_runner: Callable[..., int] = run_redraw_cli,
@@ -783,7 +795,7 @@ def run_set(
             results.append(r)
             print(json.dumps({k: r[k] for k in ("item", "ok") if k in r} | ({"error": r["error"]} if not r.get("ok") else {"seam": r["loop"]["seam_ratio"]}), ensure_ascii=False), flush=True)
     results.sort(key=lambda r: [i for i, *_ in items].index(r["item"]))
-    aligned = align_gaits(results, root, align_cycles, interpolate=interpolate)
+    aligned = align_gaits(results, root, align_cycles, interpolate=interpolate, between=align_between)
     table = write_table(results, root / "table.md", both=both)
     failed = [r["item"] for r in results if not r.get("ok")] + [f"cycle-align:{st}" for st, a in aligned.items() if not a.get("ok")]
     # What the set left undone for want of RIFE — never a failure, never silent.
@@ -791,6 +803,7 @@ def run_set(
                 + [f"cycle-align:{st}: not aligned — {a['why']}" for st, a in aligned.items() if a.get("applied") is False])
     if warnings:
         warnings.append(f"install RIFE with `{rife_mod.INSTALL_COMMAND}` (docs/loop-repair.md)")
+    warnings += [f"cycle-align:{st}: {line}" for st, a in aligned.items() for line in a.get("warnings", [])]
     payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), **({"handed": [vars(h) for h in handed]} if handed else {}), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": failed, "warnings": warnings, "items": results, "cycle_align": aligned}
     atomic_write_text(root / "set.report.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     print(table)
@@ -834,6 +847,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--walk-start", choices=WALK_START_MODES, default="redraw", help="redraw (default): a front or back walk films from its base still redrawn mid-step (one image generation, `sprite-gen gen --ref base`, kept as walk-start.png) — from a standing still the clip model walks askew; as-given: film from the base still itself")
     parser.add_argument("--still-provider", help="image provider for the mid-step redraw (default: sprite-gen gen's own default)")
     parser.add_argument("--align-cycles", choices=ALIGN_MODES, default="auto", help="auto (default): after the loops are cut, every walk/run filmed in two or more directions is resampled to the set's median cycle length and turned to start on a foot strike (video-cycle-align; RIFE makes only the frames between source frames — where no RIFE is installed the alignment is skipped with a warning and recorded); off: each loop keeps its own length")
+    parser.add_argument("--align-between", choices=align_mod.BETWEEN, default="rife", help="how the alignment fills a time between two source frames (video-cycle-align --between): rife (default) makes the frame, nearest takes the nearer source frame")
     parser.add_argument("--force", action="store_true", help="regenerate clips that already exist")
 
 
@@ -848,6 +862,7 @@ def run(**kwargs: object) -> int:
         shape=(str(kwargs["shape"]) if kwargs.get("shape") else None), anchor=str(kwargs.get("anchor") or "none"), spill=str(kwargs.get("spill") or "auto"),
         body_height=(int(kwargs["body_height"]) if kwargs.get("body_height") else None), fit=str(kwargs.get("fit") or "state"),
         decontam=str(kwargs.get("decontam") or "off"), align_cycles=str(kwargs.get("align_cycles") or "auto"),
+        align_between=str(kwargs.get("align_between") or "rife"),
         walk_start=str(kwargs.get("walk_start") or "redraw"), still_provider=kwargs.get("still_provider"),  # type: ignore[arg-type]
         handed=handed_mod.parse_all(list(kwargs.get("handed") or [])) or None,  # type: ignore[arg-type]
     )
