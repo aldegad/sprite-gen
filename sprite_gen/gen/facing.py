@@ -44,10 +44,22 @@ def validate(facing: str, fix: str = "none") -> None:
         raise SystemExit(f"facing: expected mirror, regen or none, got {fix!r}")
 
 
-def prompt_suffix(facing: str, *, retry: bool = False) -> str:
+def prompt_suffix(facing: str, *, retry: bool = False, view: bool = False) -> str:
+    """The sentence that turns a subject drawn from a reference: which way, whatever way the reference is turned.
+
+    `view`: the prompt already carries a view sentence that says the turn (`gen --direction`). The piece then
+    says only what that sentence does not — which edge of the image the side is, over the reference — instead
+    of the turn a second time; "facing left (toward the left edge)" after a three-quarter view sentence also
+    asked for a full profile. `retry` is the correction after a drawing that came out turned the other way:
+    it takes the first sentence's place in the prompt (`prompt_parts.Prompt.replaced`), not a line after it.
+    """
     validate(facing)
+    lead = "CORRECTION REQUIRED: redraw the subject's orientation. " if retry else ""
+    if view:
+        return (lead + f"{facing.capitalize()} here means toward the {facing} edge of the image, regardless of the "
+                "reference image's orientation. Preserve the subject's design.")
     return (
-        ("CORRECTION REQUIRED: redraw the subject's orientation. " if retry else "")
+        lead
         + f"The subject must be facing {facing} (toward the {facing} edge of the image), "
         "regardless of the reference image's orientation. Preserve the subject's design."
     )
@@ -101,8 +113,12 @@ def inspect(backend, path: Path, workdir: Path) -> dict:
     return observation
 
 
-def prepare_correction(backend, request, run, workdir: Path, *, facing: str, fix: str, mirror_ok: bool = True):
+def prepare_correction(backend, request, run, workdir: Path, *, facing: str, fix: str, retry_prompt: str,
+                       mirror_ok: bool = True):
     """Observe raw; recheck one regeneration and mirror a remaining opposite.
+
+    `retry_prompt` is the whole prompt of the regeneration: the request's, with its facing sentence
+    replaced by the correction (`prompt_suffix(retry=True)`).
 
     A non-lateral or failed recheck preserves the regenerated image with an
     explicit reason. At most two vision calls and one regeneration are made.
@@ -122,8 +138,7 @@ def prepare_correction(backend, request, run, workdir: Path, *, facing: str, fix
     else:
         regenerated = workdir / "facing-regen.png"
         regenerated.unlink(missing_ok=True)
-        retry_request = replace(request, raw=regenerated,
-                                prompt=request.prompt + "\n\n" + prompt_suffix(facing, retry=True))
+        retry_request = replace(request, raw=regenerated, prompt=retry_prompt)
         retry_run = backend.generate(retry_request, workdir)
         verify_png(regenerated)
         # Keep both calls' billing evidence; top-level usage still describes the
