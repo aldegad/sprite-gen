@@ -26,6 +26,8 @@ from PIL import Image
 
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.gen.facing import FACINGS, validate as validate_facing
+from sprite_gen.gen import handedness as handed_mod
+from sprite_gen.gen.handedness import Handed
 from sprite_gen.video import facing as facing_mod
 from sprite_gen.video import canvas as canvas_mod
 from sprite_gen.video import frames as frames_mod
@@ -177,26 +179,27 @@ VIEW_MOTION_TEXT = {
     # A diagonal says where the character is heading on the screen, the way an isometric game reads, and that it
     # keeps the image's angle. Asked only to walk "toward the way its body faces in the image", a three-quarter
     # back walk turned to a side view in 2 of 2 clips; named as a heading up and to the right, in 10 of 10 it
-    # kept the angle (2026-10-02, five people twice each, pinned).
+    # kept the angle (2026-10-02, five people twice each, pinned). `{facing}` is the way the view is turned: a
+    # view drawn facing left heads down or up and to the left (it said "to the right" whatever the facing).
     ("walk", "front_diagonal"): (
-        "walks naturally in place, as if on a treadmill, heading diagonally toward the viewer and to the right, like a "
-        "character walking down and to the right in an isometric game, without moving across the screen. It keeps the "
+        "walks naturally in place, as if on a treadmill, heading diagonally toward the viewer and to the {facing}, like a "
+        "character walking down and to the {facing} in an isometric game, without moving across the screen. It keeps the "
         "exact three-quarter front angle of the image the whole time and never turns into a side view."
     ),
     ("walk", "back_diagonal"): (
-        "walks naturally in place, as if on a treadmill, heading diagonally away from the viewer toward the upper right, "
-        "like a character walking up and to the right in an isometric game, without moving across the screen. It keeps "
+        "walks naturally in place, as if on a treadmill, heading diagonally away from the viewer toward the upper {facing}, "
+        "like a character walking up and to the {facing} in an isometric game, without moving across the screen. It keeps "
         "the exact three-quarter back angle of the image the whole time: its back stays turned toward the viewer at that "
         "angle and its face stays hidden. It never turns into a side view."
     ),
     ("run", "front_diagonal"): (
-        "runs naturally in place, as if on a treadmill, heading diagonally toward the viewer and to the right, like a "
-        "character running down and to the right in an isometric game, without moving across the screen. It keeps the "
+        "runs naturally in place, as if on a treadmill, heading diagonally toward the viewer and to the {facing}, like a "
+        "character running down and to the {facing} in an isometric game, without moving across the screen. It keeps the "
         "exact three-quarter front angle of the image the whole time and never turns into a side view."
     ),
     ("run", "back_diagonal"): (
-        "runs naturally in place, as if on a treadmill, heading diagonally away from the viewer toward the upper right, "
-        "like a character running up and to the right in an isometric game, without moving across the screen. It keeps "
+        "runs naturally in place, as if on a treadmill, heading diagonally away from the viewer toward the upper {facing}, "
+        "like a character running up and to the {facing} in an isometric game, without moving across the screen. It keeps "
         "the exact three-quarter back angle of the image the whole time: its back stays turned toward the viewer at that "
         "angle and its face stays hidden. It never turns into a side view."
     ),
@@ -273,7 +276,7 @@ def _staggered_start(gap: float) -> None:
 
 
 def build_prompt(direction: str, state: str, character: str | None, facing: str = "right", motion: str | None = None,
-                 pinned: bool | None = None, model: str | None = None) -> str:
+                 pinned: bool | None = None, model: str | None = None, handed: list[Handed] | None = None) -> str:
     """The clip prompt for one (direction, state).
 
     `motion` replaces the built-in state sentence with the caller's own description of the
@@ -290,6 +293,9 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
     `model` is the clip model the prompt is for. A Lite walk (`LITE_VIDEO_MODELS`) gets the calming
     clause after the built-in walk sentence (`LITE_WALK_TEXT`; a caller's own motion is left as
     written), and a Lite walk in a view where its head sways gets `LITE_HEAD_TEXT`.
+
+    `handed` lists the character's asymmetric items (`handedness.parse`): the prompt ends with where each
+    one stays, anchored to the first frame and never named where it is hidden (`handedness.text(clip=True)`).
     """
     validate_facing(facing)
     view = VIEW_TEXT.get(direction, f"seen from the {direction}").format(facing=facing)
@@ -309,11 +315,20 @@ def build_prompt(direction: str, state: str, character: str | None, facing: str 
             hold += f" {GAIT_HOLD_TEXT[direction].format(facing=facing)}"
         repeat = f" {REPEAT_TEXT[state]}" if state in REPEAT_TEXT else ""
         subject = character.strip().rstrip(".") if character else "The character"
-        return f"2D game sprite animation. {motion}{hold}{repeat} {subject} is {view}." + template[len(head):] + _lite_text(state, direction, model, built_in=False)
-    built_in = VIEW_MOTION_TEXT.get((state, direction)) or MOTION_TEXT.get(
-        state, f"performs the '{state}' action in place, repeating at an even rhythm.")
+        return (f"2D game sprite animation. {motion}{hold}{repeat} {subject} is {view}." + template[len(head):]
+                + _lite_text(state, direction, model, built_in=False) + _handed_text(handed, direction, facing))
+    built_in = (VIEW_MOTION_TEXT[(state, direction)].format(facing=facing) if (state, direction) in VIEW_MOTION_TEXT
+                else MOTION_TEXT.get(state, f"performs the '{state}' action in place, repeating at an even rhythm."))
     text = template.format(motion=built_in, view=view)
-    return (text.replace("The character", character, 1) if character else text) + _lite_text(state, direction, model, built_in=True)
+    return ((text.replace("The character", character, 1) if character else text)
+            + _lite_text(state, direction, model, built_in=True) + _handed_text(handed, direction, facing))
+
+
+def _handed_text(handed: list[Handed] | None, direction: str, facing: str) -> str:
+    """Where each asymmetric item is in this view, said last (`handedness.text`); nothing without one."""
+    if not handed:
+        return ""
+    return " " + handed_mod.text(handed, direction, facing if direction in handed_mod.LATERAL_VIEWS else None, clip=True)
 
 
 def _lite_text(state: str, direction: str, model: str | None, *, built_in: bool) -> str:
@@ -366,15 +381,19 @@ def starts_mid_step(state: str, direction: str) -> bool:
     return state == "walk" and direction in WALK_START_TEXT
 
 
-def walk_start_prompt(direction: str, key: str | None = None) -> str:
-    """The redraw sentence for a walk's mid-step start still; with `key` (green / magenta) the background line."""
+def walk_start_prompt(direction: str, key: str | None = None, handed: list[Handed] | None = None) -> str:
+    """The redraw sentence for a walk's mid-step start still; with `key` (green / magenta) the background line,
+    then with `handed` where each asymmetric item is in this view (`handedness.text`, the still's sentences)."""
     if direction not in WALK_START_TEXT:
         raise SystemExit(f"video: no mid-step start still for the {direction} view (only {', '.join(WALK_START_TEXT)})")
-    if key is None:
-        return WALK_START_TEXT[direction]
-    if key not in KEY_BACKGROUND_TEXT:
-        raise SystemExit(f"video: a mid-step start still is drawn on a green or magenta key, not {key!r}")
-    return f"{WALK_START_TEXT[direction]} {KEY_BACKGROUND_TEXT[key]}"
+    text = WALK_START_TEXT[direction]
+    if key is not None:
+        if key not in KEY_BACKGROUND_TEXT:
+            raise SystemExit(f"video: a mid-step start still is drawn on a green or magenta key, not {key!r}")
+        text += f" {KEY_BACKGROUND_TEXT[key]}"
+    if handed:
+        text += " " + handed_mod.text(handed, direction)
+    return text
 
 
 def run_video_cli(image: Path, prompt: str, out: Path, report: Path, *, duration: int, resolution: str, log: Path, last_frame: Path | None = None) -> int:
@@ -395,8 +414,10 @@ def run_redraw_cli(base: Path, prompt: str, out: Path, report: Path, *, log: Pat
 
 
 def walk_start_still(base: Path, direction: str, item_dir: Path, *, key: str, force: bool,
-                     runner: Callable[..., int] = run_redraw_cli, provider: str | None = None) -> tuple[Path, dict[str, Any]]:
-    """The base still redrawn mid-step for a front or back walk (`WALK_START_TEXT`), on the base's own key.
+                     runner: Callable[..., int] = run_redraw_cli, provider: str | None = None,
+                     handed: list[Handed] | None = None) -> tuple[Path, dict[str, Any]]:
+    """The base still redrawn mid-step for a front or back walk (`WALK_START_TEXT`), on the base's own key,
+    told where each `handed` item is (a redraw from a reference alone can move it to the other side).
 
     Reused when the same prompt already drew it from the same base (unless `force`)."""
     with Image.open(base) as im:
@@ -404,7 +425,7 @@ def walk_start_still(base: Path, direction: str, item_dir: Path, *, key: str, fo
     if kind not in KEY_BACKGROUND_TEXT:
         raise SystemExit(f"the {direction} walk starts from a still redrawn mid-step on a green or magenta key, and this "
                          f"base's corners are not one (key {key}); pass --walk-start as-given to film from the base itself")
-    prompt = walk_start_prompt(direction, kind)
+    prompt = walk_start_prompt(direction, kind, handed)
     out, report = item_dir / "walk-start.png", item_dir / "walk-start.report.json"
     if out.is_file() and report.is_file() and not force:
         try:
@@ -445,6 +466,7 @@ def run_item(
     walk_start: str = "redraw",
     redraw_runner: Callable[..., int] = run_redraw_cli,
     still_provider: str | None = None,
+    handed: list[Handed] | None = None,
 ) -> dict[str, Any]:
     if walk_start not in WALK_START_MODES:
         raise SystemExit(f"video-set: --walk-start must be one of {', '.join(WALK_START_MODES)}")
@@ -455,12 +477,15 @@ def run_item(
     validate_facing(facing, facing_fix)
     if facing_fix not in facing_mod.FIXES:
         raise SystemExit("video-set: --facing-fix must be mirror or none")
+    _refuse_mirror_with_handed(facing_fix, handed)
     duration = duration_for(state, duration)
     item_dir = root / item
     item_dir.mkdir(parents=True, exist_ok=True)
     result: dict[str, Any] = {"item": item, "direction": direction, "state": state, "dir": str(item_dir)}
+    if direction in handed_mod.LATERAL_VIEWS:
+        result["turned"] = facing
     try:
-        prompt = build_prompt(direction, state, character, facing=facing)
+        prompt = build_prompt(direction, state, character, facing=facing, handed=handed)
         clip = item_dir / "clip.mp4"
         clip_report = item_dir / "clip.report.json"
         reuse_clip = clip.exists() and clip_report.exists() and not force
@@ -496,7 +521,7 @@ def run_item(
             facing_report = None
             if starts_mid_step(state, direction) and walk_start == "redraw":
                 still, result["walk_start"] = walk_start_still(base, direction, item_dir, key=key, force=force,
-                                                               runner=redraw_runner, provider=still_provider)
+                                                               runner=redraw_runner, provider=still_provider, handed=handed)
             if direction == "side":
                 if prepare_side is not None:
                     still, facing_report = prepare_side(base)
@@ -539,7 +564,7 @@ def run_item(
         result["frames"]["spill"] = fr.get("spill", {}).get("mode")
         lp = loop_mod.run_loop(Path(fr["keyed_dir"]), item_dir / "loop", fps=float(fr["fps"]), state=state, min_len=None, max_len=None, n_out=None, seam_max=loop_mod.SEAM_RATIO_MAX, name=item, report_path=item_dir / "loop.report.json", anchor=anchor, body_height=body_height,
                                cycle_mode="pinned" if state in PINNED_LOOP_STATES else "auto",
-                               facing=facing if direction == "side" else "right")
+                               facing=facing if direction in handed_mod.LATERAL_VIEWS else "right")
         result["loop"] = {"kind": lp["cycle"].get("kind", "periodic"), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "drift_px": lp["strip"].get("drift_px", 0), "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
         result["loop"]["review_recommended"] = lp["cycle"].get("review_recommended", False)
         result["loop"]["half_period_guard"] = lp["cycle"].get("half_period_guard")
@@ -553,6 +578,53 @@ def run_item(
         result["ok"] = False
         result["error"] = str(exc)
     return result
+
+
+def _refuse_mirror_with_handed(facing_fix: str, handed: list[Handed] | None) -> None:
+    if handed and facing_fix == "mirror":
+        raise SystemExit("video-set: --facing-fix mirror turns the picture over and moves every --handed item to the "
+                         "other side; draw the still facing the requested way instead (docs/video-pipeline.md#handedness--an-item-on-one-side)")
+
+
+def facings_of(facing: str) -> tuple[str, ...]:
+    """`--facing`: right, left, or both as `right,left` — every lateral view is then filmed both ways."""
+    out = tuple(dict.fromkeys(f.strip() for f in str(facing).split(",") if f.strip()))
+    if not out or any(f not in FACINGS for f in out):
+        raise SystemExit(f"video-set: --facing must be right, left or right,left, got {facing!r}")
+    return out
+
+
+def resolve_bases(bases: dict[str, Path], facings: tuple[str, ...]) -> list[tuple[str, str | None, Path]]:
+    """`--base` keys -> (direction, facing, still). A lateral view (`handedness.LATERAL_VIEWS`) takes the set's
+    facing, or `view@facing` names it; filmed both ways, every lateral view needs a still for each facing, drawn
+    that way: the engine never turns one over for the other. Front and back have no facing."""
+    out: list[tuple[str, str | None, Path]] = []
+    for key, path in bases.items():
+        direction, _, named = key.partition("@")
+        if direction not in VIEW_TEXT:
+            raise SystemExit(f"video-set: --base direction must be one of {', '.join(sorted(VIEW_TEXT))}, got {direction!r}")
+        if direction not in handed_mod.LATERAL_VIEWS:
+            if named:
+                raise SystemExit(f"video-set: the {direction} view is not turned to a side; drop @{named}")
+            out.append((direction, None, path))
+        elif named:
+            if named not in facings:
+                raise SystemExit(f"video-set: --base {key} faces {named}, and the set is filmed facing {','.join(facings)}")
+            out.append((direction, named, path))
+        elif len(facings) > 1:
+            raise SystemExit(f"video-set: filmed facing right and left, the {direction} view needs a still for each: "
+                             f"--base {direction}@right=… --base {direction}@left=…")
+        else:
+            out.append((direction, facings[0], path))
+    seen = [(d, f) for d, f, _ in out]
+    if len(set(seen)) != len(seen):
+        raise SystemExit("video-set: a direction is given twice for the same facing")
+    for d in {d for d, f, _ in out if f is not None}:
+        missing = [f for f in facings if (d, f) not in seen]
+        if missing:
+            raise SystemExit(f"video-set: the {d} view has no still facing {missing[0]} (--base {d}@{missing[0]}=…); draw "
+                             f"it that way (gen --direction {d} --facing {missing[0]}) — the engine does not mirror one")
+    return out
 
 
 ALIGN_MODES = ("auto", "off")
@@ -595,7 +667,12 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
     return out
 
 
-def write_table(results: list[dict[str, Any]], path: Path) -> str:
+def _view_label(r: dict[str, Any], both: bool) -> str:
+    return f"{r['direction']} ({r['turned']})" if both and r.get("turned") else r["direction"]
+
+
+def write_table(results: list[dict[str, Any]], path: Path, *, both: bool = False) -> str:
+    """`both`: the set is filmed facing right and left, so a lateral view's row names its facing."""
     lines = ["| direction | state | kind | cycle | period | seam | frames | status |", "|---|---|---|---|---|---|---|---|"]
     for r in results:
         if r.get("ok"):
@@ -605,9 +682,9 @@ def write_table(results: list[dict[str, Any]], path: Path) -> str:
                 status = "OK (uncorrected; review gait)"
             if "jump_repair" in lp:
                 status += " (jump not repaired: no RIFE)"
-            lines.append(f"| {r['direction']} | {r['state']} | {lp.get('kind', 'periodic')} | {lp['cycle']} | {lp['period'] if lp['period'] is not None else '-'} | {lp['seam_ratio']:.2f} | {lp['n_out']} | {status} |")
+            lines.append(f"| {_view_label(r, both)} | {r['state']} | {lp.get('kind', 'periodic')} | {lp['cycle']} | {lp['period'] if lp['period'] is not None else '-'} | {lp['seam_ratio']:.2f} | {lp['n_out']} | {status} |")
         else:
-            lines.append(f"| {r['direction']} | {r['state']} | - | - | - | - | - | FAIL: {r.get('error', '')[:80]} |")
+            lines.append(f"| {_view_label(r, both)} | {r['state']} | - | - | - | - | - | FAIL: {r.get('error', '')[:80]} |")
     text = "\n".join(lines) + "\n"
     atomic_write_text(path, text)
     return text
@@ -639,54 +716,65 @@ def run_set(
     walk_start: str = "redraw",
     redraw_runner: Callable[..., int] = run_redraw_cli,
     still_provider: str | None = None,
+    handed: list[Handed] | None = None,
 ) -> dict[str, Any]:
+    """`bases` maps a view to its still; `facing` is right, left or `right,left` (`facings_of`), and a view filmed
+    both ways is keyed `view@right` and `view@left` (`resolve_bases`). `handed` (`handedness.parse`) puts each
+    asymmetric item's side into every clip prompt; it refuses `facing_fix` mirror, which would move it."""
     if align_cycles not in ALIGN_MODES:
         raise SystemExit(f"video-set: --align-cycles must be one of {', '.join(ALIGN_MODES)}")
     if anchor == "motion-auto" and any(not loop_mod.profile_for(state).gait for state in states):
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
     if anchor == "motion":
         raise SystemExit("video-set: motion anchor requires reviewed regions; use video-loop --cycle fixed")
-    validate_facing(facing, facing_fix)
+    facings = facings_of(facing)
+    validate_facing(facings[0], facing_fix)
     if facing_fix not in facing_mod.FIXES:
         raise SystemExit("video-set: --facing-fix must be mirror or none")
+    _refuse_mirror_with_handed(facing_fix, handed)
     if fit == "tight" and shape is not None:
         raise SystemExit("video-set: --fit tight picks each canvas's shape itself; drop --shape")
     root = root.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
-    for direction, base in bases.items():
+    views = resolve_bases(bases, facings)
+    both = len(facings) > 1
+    for direction, turned, base in views:
         if not base.is_file():
             raise SystemExit(f"video-set: base still for '{direction}' not found: {base}")
-    items = [(f"{d}-{s}", d, s) for d in bases for s in states]
+    # (item, direction, state, facing, base); a set filmed both ways names a lateral item's facing
+    items = [(f"{d}-{f}-{s}" if both and f else f"{d}-{s}", d, s, f or facings[0], b) for d, f, b in views for s in states]
     results: list[dict[str, Any]] = []
     # States share a base. A run-local lock ensures exactly one vision call per
-    # side still, even when several state workers reach it together.
-    prepared: dict[Path, tuple[Path, dict]] = {}
+    # side still and facing, even when several state workers reach it together.
+    prepared: dict[tuple[Path, str], tuple[Path, dict]] = {}
     prepare_lock = threading.Lock()
 
-    def prepare_side(base: Path) -> tuple[Path, dict]:
-        with prepare_lock:
-            if base not in prepared:
-                corrected = root / "side.facing.png"
-                report = facing_mod.prepare_still(base, corrected, facing=facing, fix=facing_fix)
-                prepared[base] = (corrected, report)
-            return prepared[base]
+    def side_preparer(turned: str) -> Callable[[Path], tuple[Path, dict]]:
+        def prepare_side(base: Path) -> tuple[Path, dict]:
+            with prepare_lock:
+                if (base, turned) not in prepared:
+                    corrected = root / (f"side-{turned}.facing.png" if both else "side.facing.png")
+                    report = facing_mod.prepare_still(base, corrected, facing=turned, fix=facing_fix)
+                    prepared[(base, turned)] = (corrected, report)
+                return prepared[(base, turned)]
+        return prepare_side
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
-        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=bases[d], root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=facing, facing_fix=facing_fix, prepare_side=prepare_side, body_height=body_height, fit=fit, decontam=decontam, walk_start=walk_start, redraw_runner=redraw_runner, still_provider=still_provider): i for i, d, s in items}
+        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=b, root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=f, facing_fix=facing_fix, prepare_side=side_preparer(f), body_height=body_height, fit=fit, decontam=decontam, walk_start=walk_start, redraw_runner=redraw_runner, still_provider=still_provider, handed=handed): i for i, d, s, f, b in items}
         for fut in as_completed(futures):
             r = fut.result()
             results.append(r)
             print(json.dumps({k: r[k] for k in ("item", "ok") if k in r} | ({"error": r["error"]} if not r.get("ok") else {"seam": r["loop"]["seam_ratio"]}), ensure_ascii=False), flush=True)
-    results.sort(key=lambda r: [i for i, _, _ in items].index(r["item"]))
+    results.sort(key=lambda r: [i for i, *_ in items].index(r["item"]))
     aligned = align_gaits(results, root, align_cycles, interpolate=interpolate)
-    table = write_table(results, root / "table.md")
+    table = write_table(results, root / "table.md", both=both)
     failed = [r["item"] for r in results if not r.get("ok")] + [f"cycle-align:{st}" for st, a in aligned.items() if not a.get("ok")]
     # What the set left undone for want of RIFE — never a failure, never silent.
     warnings = ([f"{r['item']}: jump frame not repaired — {r['loop']['jump_repair']['why']}" for r in results if r.get("ok") and "jump_repair" in r["loop"]]
                 + [f"cycle-align:{st}: not aligned — {a['why']}" for st, a in aligned.items() if a.get("applied") is False])
     if warnings:
         warnings.append(f"install RIFE with `{rife_mod.INSTALL_COMMAND}` (docs/loop-repair.md)")
-    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": failed, "warnings": warnings, "items": results, "cycle_align": aligned}
+    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), **({"handed": [vars(h) for h in handed]} if handed else {}), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": failed, "warnings": warnings, "items": results, "cycle_align": aligned}
     atomic_write_text(root / "set.report.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     print(table)
     return payload
@@ -699,7 +787,7 @@ def _parse_bases(values: list[str]) -> dict[str, Path]:
             raise SystemExit(f"video-set: --base expects direction=path, got {v!r}")
         d, p = v.split("=", 1)
         d = d.strip()
-        if d not in VIEW_TEXT:
+        if d.partition("@")[0] not in VIEW_TEXT:
             raise SystemExit(f"video-set: --base direction must be one of {', '.join(sorted(VIEW_TEXT))}, got {d!r}")
         bases[d] = Path(p).expanduser().resolve()
     if not bases:
@@ -708,9 +796,10 @@ def _parse_bases(values: list[str]) -> dict[str, Path]:
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--base", action="append", default=[], help="direction=still.png (repeatable: side=..., front=..., back=...)")
-    parser.add_argument("--facing", choices=FACINGS, default="right", help="side-view facing for both prompt and canvas (default right); ignored for front/back")
-    parser.add_argument("--facing-fix", choices=facing_mod.FIXES, default="none", help="side inputs: record only (none, default), or opt into mirror")
+    parser.add_argument("--base", action="append", default=[], help="direction=still.png (repeatable: side=..., front=..., back=...); filmed facing right,left, a side or diagonal view takes one still per facing: side@right=..., side@left=...")
+    parser.add_argument("--facing", default="right", help="which way the side and diagonal views face, for both prompt and canvas: right (default), left, or right,left to film each of them both ways from a still drawn each way (no mirroring); ignored for front/back")
+    parser.add_argument("--facing-fix", choices=facing_mod.FIXES, default="none", help="side inputs: record only (none, default), or opt into mirror (refused with --handed)")
+    parser.add_argument("--handed", action="append", default=[], metavar="ITEM=SIDE [PART]", help="an asymmetric item on one of the character's own sides, e.g. 'the black smartwatch=left wrist' (repeatable): every clip prompt says where it is in its view and that it stays there")
     parser.add_argument("--states", default="idle,walk,run,jump,attack", help="comma list of motion states")
     parser.add_argument("--out-dir", required=True, type=Path, help="batch root; one folder per direction-state")
     parser.add_argument("--character", help="short subject phrase used in the prompts (e.g. 'The armored knight')")
@@ -743,6 +832,7 @@ def run(**kwargs: object) -> int:
         body_height=(int(kwargs["body_height"]) if kwargs.get("body_height") else None), fit=str(kwargs.get("fit") or "state"),
         decontam=str(kwargs.get("decontam") or "off"), align_cycles=str(kwargs.get("align_cycles") or "auto"),
         walk_start=str(kwargs.get("walk_start") or "redraw"), still_provider=kwargs.get("still_provider"),  # type: ignore[arg-type]
+        handed=handed_mod.parse_all(list(kwargs.get("handed") or [])) or None,  # type: ignore[arg-type]
     )
     return 0 if not payload["failed"] else 1
 

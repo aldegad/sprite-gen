@@ -544,7 +544,7 @@ def test_a_diagonal_walk_is_pinned_and_named_as_an_isometric_heading() -> None:
     for direction, heading in (("front_diagonal", "heading diagonally toward the viewer and to the right"),
                                ("back_diagonal", "heading diagonally away from the viewer toward the upper right")):
         for state in ("walk", "run"):
-            sentence = batch_mod.VIEW_MOTION_TEXT[(state, direction)]
+            sentence = batch_mod.VIEW_MOTION_TEXT[(state, direction)].format(facing="right")
             p = batch_mod.build_prompt(direction, state, None)
             assert p == batch_mod.PINNED_LOOP_TEXT.format(motion=sentence, view=batch_mod.VIEW_TEXT[direction])
             assert heading in sentence and "never turns into a side view" in sentence
@@ -556,6 +556,16 @@ def test_a_diagonal_walk_is_pinned_and_named_as_an_isometric_heading() -> None:
     for direction in ("front", "back", "side"):
         assert not batch_mod.pins_last_frame("walk", direction)
     assert batch_mod.pins_last_frame("attack", "side") and batch_mod.pins_last_frame("idle", "front")
+
+
+@pytest.mark.parametrize("direction", ["front_diagonal", "back_diagonal"])
+@pytest.mark.parametrize("state", ["walk", "run"])
+def test_a_diagonal_facing_left_heads_left(direction, state) -> None:
+    """Regression: a diagonal drawn facing left was filmed with a walk heading "to the right" — the gait
+    sentence ignored `facing`. Facing left, it heads down or up and to the left, and says right nowhere."""
+    left = batch_mod.build_prompt(direction, state, None, facing="left")
+    assert "and to the left" in left and "to the right" not in left and "upper right" not in left
+    assert left == batch_mod.build_prompt(direction, state, None, facing="right").replace("right", "left")
 
 
 def test_a_diagonal_still_is_told_how_far_to_turn() -> None:

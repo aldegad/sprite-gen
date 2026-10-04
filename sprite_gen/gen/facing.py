@@ -101,11 +101,13 @@ def inspect(backend, path: Path, workdir: Path) -> dict:
     return observation
 
 
-def prepare_correction(backend, request, run, workdir: Path, *, facing: str, fix: str):
+def prepare_correction(backend, request, run, workdir: Path, *, facing: str, fix: str, mirror_ok: bool = True):
     """Observe raw; recheck one regeneration and mirror a remaining opposite.
 
     A non-lateral or failed recheck preserves the regenerated image with an
     explicit reason. At most two vision calls and one regeneration are made.
+    `mirror_ok=False` (a character with a handed item) never mirrors: a still-opposite
+    regeneration is kept as drawn and recorded as unresolved.
     """
     observation = inspect(backend, request.raw, workdir)
     report = {**observation, "requested": facing, "fix": fix, "action": "none",
@@ -131,7 +133,9 @@ def prepare_correction(backend, request, run, workdir: Path, *, facing: str, fix
                       final_direction_source="regeneration-recheck",
                       regeneration={"model": retry_run.model, "elapsed_seconds": retry_run.elapsed_seconds,
                                     "prompt": retry_request.prompt, "extra": retry_run.extra, "recheck": recheck})
-        if recheck["direction"] == opposite:
+        if recheck["direction"] == opposite and not mirror_ok:
+            report["reason"] = "regeneration-facing-unresolved:opposite; not mirrored, it would move a handed item"
+        elif recheck["direction"] == opposite:
             report.update(fallback="mirror", final_direction=facing,
                           final_direction_source="mirror-of-recheck")
         elif recheck["direction"] != facing:

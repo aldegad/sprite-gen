@@ -48,6 +48,7 @@ from sprite_gen.spec.runio import atomic_write_text
 
 from . import chroma as chroma_mod
 from . import facing as facing_mod
+from . import handedness as handed_mod
 from .base import (
     QUALITIES,
     RESOLUTIONS,
@@ -331,6 +332,8 @@ def generate_image(
     refs: list[Path] | None = None,
     facing: str | None = None,
     facing_fix: str = "none",
+    view: str | None = None,
+    handed: list[handed_mod.Handed] | None = None,
     model: str | None = None,
     aspect_ratio: str | None = None,
     quality: str | None = None,
@@ -355,12 +358,15 @@ def generate_image(
         raise SystemExit("gen: empty prompt; pass --prompt or --prompt-file")
     if facing is not None:
         facing_mod.validate(facing, facing_fix)
+    view_text = _view_text(view, facing, facing_fix, handed)
     out = out.expanduser().resolve()
     refs = [Path(r).expanduser().resolve() for r in (refs or [])]
     for ref in refs:
         if not ref.is_file():
             raise SystemExit(f"gen: reference image not found: {ref}")
 
+    if view_text:
+        prompt += "\n\n" + view_text
     if refs and facing is not None:
         prompt += "\n\n" + facing_mod.prompt_suffix(facing)
     backend = _make_provider(provider, keep_session=keep_session)
@@ -419,7 +425,7 @@ def generate_image(
         facing_report = None
         if refs and facing is not None:
             request, run, facing_report = facing_mod.prepare_correction(
-                backend, request, run, workdir, facing=facing, fix=facing_fix)
+                backend, request, run, workdir, facing=facing, fix=facing_fix, mirror_ok=not handed)
             raw = request.raw
         raw_bytes = verify_png(raw)
 
@@ -500,11 +506,36 @@ def generate_image(
             chroma=chroma_stats,
             extra={**run.extra, **({"trim_alpha": trim_stats} if trim_stats else {}),
                    **({"facing": facing_report} if facing_report else {}),
+                   **({"view": {"direction": view, "facing": facing if view in handed_mod.LATERAL_VIEWS else None,
+                                "handed": [vars(h) for h in handed or []]}} if view else {}),
                    **({"layout_guide": guide_cell} if guide_cell else {})},
         )
     finally:
         if owns_workdir:
             shutil.rmtree(workdir, ignore_errors=True)
+
+
+def _view_text(view: str | None, facing: str | None, facing_fix: str, handed: list[handed_mod.Handed] | None) -> str:
+    """`--direction`: the engine's sentence for drawing the still at that view, turned to `facing` (the side
+    and diagonal views), then where each `--handed` item is in it (`handedness.text`)."""
+    if view is None:
+        if handed:
+            raise SystemExit("gen: --handed needs --direction: where an item shows depends on the view")
+        return ""
+    handed_mod.validate_view(view, facing)
+    if view not in handed_mod.LATERAL_VIEWS and facing is not None:
+        raise SystemExit(f"gen: the {view} view is not turned to a side; drop --facing")
+    if handed and facing_fix == "mirror":
+        raise SystemExit("gen: --facing-fix mirror turns the picture over and moves every --handed item to the other "
+                         "side; use regen (it never mirrors with --handed) or none")
+    # The view sentences are the video pipeline's (a still is drawn for the clip that starts from it).
+    from sprite_gen.video.batch import still_view_text
+
+    text = still_view_text(view, facing or "right")
+    text = text[0].upper() + text[1:] + "."
+    if handed:
+        text += " " + handed_mod.text(handed, view, facing)
+    return text
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -538,6 +569,8 @@ def _run(args: argparse.Namespace) -> int:
         refs=args.ref,
         facing=None if args.facing == "preserve" else args.facing,
         facing_fix=args.facing_fix,
+        view=getattr(args, "direction", None),
+        handed=handed_mod.parse_all(list(getattr(args, "handed", None) or [])) or None,
         model=args.model,
         aspect_ratio=args.aspect_ratio,
         quality=args.quality,
@@ -664,6 +697,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--chroma-key", choices=sorted(chroma_mod.KEYS), default="magenta")
     parser.add_argument("--facing", choices=(*facing_mod.FACINGS, "preserve"), default="preserve", help="with --ref: required direction; preserve (default) leaves prompt and pixels unchanged")
     parser.add_argument("--facing-fix", choices=facing_mod.FIXES, default="none", help="with --ref and --facing: record only (none, default), or opt into mirror / one regen")
+    parser.add_argument("--direction", choices=handed_mod.VIEWS, help="draw the still at this sprite view: the engine's view sentence is added to the prompt (side and diagonal views also take --facing right|left)")
+    parser.add_argument("--handed", action="append", default=[], metavar="ITEM=SIDE [PART]", help="with --direction: an asymmetric item on one of the character's own sides, e.g. 'the black smartwatch=left wrist' (repeatable); the prompt says where it is in this view, and the still is never mirrored")
     parser.add_argument("--trim-alpha", action="store_true", help="with --transparent: crop the published PNG to its opaque bbox so the bottom edge is the foot line (margins reported)")
     parser.add_argument(
         "--layout-guide",
