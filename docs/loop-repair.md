@@ -283,15 +283,23 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
 - **Foot strike**: each loop is then turned to start as a heel lands (`align.foot_strike`), read
   off one signal smoothed 1-2-1 — never off the frame's top edge, which a long ear, a hat's
   point or an antenna owns and which flops on its own rhythm:
-  - `stride`, where the width of the foot band (the lowest 8 % of the frame) swings by 15 % of
-    the body's height or more — a side or diagonal walk. The feet are widest apart as the front
-    heel lands.
-  - `reach`, where instead the lowest solid row swings by 1.5 % or more — a front or back walk,
-    whose feet pass one behind the other: the foot nearer the viewer is drawn lowest, and lowest
-    when the feet are furthest apart.
-  - `body_low`, where neither moves — a body with no legs to read: its top line lowest, the top
-    line being the first row whose longest solid run is at least half the frame's widest, so a
-    narrow ear or antenna is passed over.
+  - `stride` — a side or diagonal walk: the width of the foot band (the lowest 8 % of the frame)
+    is widest as the front heel lands.
+  - `reach` — a front or back walk, whose feet pass one behind the other: the foot nearer the
+    viewer is drawn lowest, and lowest when the feet are furthest apart, so the lowest solid row is.
+  - `body_low` — a body with no legs to read: its top line lowest, the top line being the first
+    row whose longest solid run is at least half the frame's widest, so a narrow ear or antenna is
+    passed over.
+
+  With a view (`--view`, below) the view picks the signal, and the swings only say whether there
+  are legs to read: a side or diagonal view turns on `stride` where the foot band swings by 15 %
+  of the body's height or the lowest row by 1.5 %; a front or back view turns on `reach` where the
+  lowest row swings by 1.5 %. A short-legged figure's swings mislead a threshold either way: from
+  the front its foot band widens past 15 % as the foot behind lifts out of the band, mid-step, and
+  from the side a short step opens the feet by less than 15 %. Without a view the picture alone
+  says: `stride` where the foot band swings by 15 % or more, else `reach` where the lowest row
+  swings by 1.5 %, else `body_low` (and the report says no view was given). A loop with a view and
+  no legs to read has `foot_why` with both swings.
 
   A body that hardly bobs still turns on its legs; the body's bob is read only where there are
   no legs. The loop row says which (`turned_on`) and the two swings (`stride_swing`,

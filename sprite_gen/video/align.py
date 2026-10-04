@@ -47,7 +47,8 @@ RATE_TOLERANCE = 0.002  # frame rates read back from the strip metadata agree wi
 LOW_ALPHA = 128  # the foot-strike turn reads solid pixels only
 # The foot-strike turn (docs/loop-repair.md section 4). A walk seen from the side or a diagonal opens
 # its feet by a good part of its height each step; from the front or back its foot band hardly
-# changes width, but the foot nearer the viewer is drawn lower by a few hundredths of it.
+# changes width, but the foot nearer the viewer is drawn lower by a few hundredths of it. With a
+# view the view picks the signal and these only say whether there are legs to read (`foot_strike`).
 STRIDE_MIN = 0.15  # the foot band's swing (of the body's height) that says the feet open along the picture
 REACH_MIN = 0.015  # the lowest row's swing (of the body's height) that says a foot steps toward the viewer
 BODY_RUN = 0.5  # the body's top line: the first row at least half as wide as the frame's widest
@@ -225,12 +226,18 @@ def foot_strike(frames: list[Image.Image], *, view: str | None = None, foot: str
     """Where a loop starts: the frame a heel has just landed, read off one signal smoothed over its
     neighbours (1-2-1), never off the frame's top edge, which a long ear or a hat's point owns.
 
-    - `stride`: seen from the side or a diagonal the feet are widest apart as the front heel
-      lands; used where the stride swings by STRIDE_MIN of the body's height or more.
+    - `stride`: seen from the side or a diagonal the feet are widest apart as the front heel lands.
     - `reach`: seen from the front or back the feet pass one behind the other and the stride
       hardly moves, but the foot nearest the viewer is drawn lowest, and lowest when the feet are
-      furthest apart — as the heel lands; used where the lowest row swings by REACH_MIN or more.
-    - `body_low`: neither — a body with no legs to read — starts where its top line is lowest.
+      furthest apart — as the heel lands.
+    - `body_low`: a body with no legs to read starts where its top line is lowest.
+
+    With the loop's `view` the view picks the signal and the swings only say whether there are legs
+    to read: a side or diagonal view turns on the stride where either swing says legs (the stride by
+    STRIDE_MIN of the body's height, or the lowest row by REACH_MIN); a front or back view turns on
+    the reach where the lowest row swings by REACH_MIN, since its foot band widens as a foot is
+    lifted out of it, mid-step, not as a heel lands. Without a view the picture alone says: the
+    stride where it swings by STRIDE_MIN, else the reach where it swings by REACH_MIN.
 
     A walk has two such moments a cycle, half a cycle apart: the larger, and the frame half a cycle
     on (not the other peak: one step can stride much less than the other, or not peak at all).
@@ -242,7 +249,14 @@ def foot_strike(frames: list[Image.Image], *, view: str | None = None, foot: str
     sig = strike_signals(frames)
     height = float(np.median(sig["height"]))
     swing = {k: float(max(sig[k]) - min(sig[k])) / (1.0 if k == "stride" else height) for k in ("stride", "reach")}
-    by = "stride" if swing["stride"] >= STRIDE_MIN else "reach" if swing["reach"] >= REACH_MIN else "body_low"
+    least = {"stride": STRIDE_MIN, "reach": REACH_MIN}
+    legs = [k for k in least if swing[k] >= least[k]]
+    name, _, facing = (view or "").partition("@")
+    if view is None:
+        by = legs[0] if legs else "body_low"
+    else:
+        handed_mod.validate_view(name, facing or None)
+        by = ("stride" if legs else "body_low") if name in handed_mod.LATERAL_VIEWS else ("reach" if "reach" in legs else "body_low")
     signal = sig["top" if by == "body_low" else by]
     n = len(signal)
     smooth = [(signal[(k - 1) % n] + 2 * signal[k] + signal[(k + 1) % n]) / 4 for k in range(n)]
@@ -252,10 +266,9 @@ def foot_strike(frames: list[Image.Image], *, view: str | None = None, foot: str
                            "strikes": [first, second], "start_foot": None}
     if view is None:
         return {**out, "foot_why": "no view given for this loop"}
-    name, _, facing = view.partition("@")
-    handed_mod.validate_view(name, facing or None)
     if by == "body_low":
-        return {**out, "foot_why": "no legs to read"}
+        return {**out, "foot_why": f"no legs to read: the foot band swings {swing['stride']:.3f} of the body's height "
+                                    f"(legs from {STRIDE_MIN}), the lowest row {swing['reach']:.3f} (from {REACH_MIN})"}
     found = strike_foot(frames, (first, second), name, facing or None)
     if found["feet"] is None:
         return {**out, "foot": found, "foot_why": found["why"]}

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from sprite_gen.video import align
 from sprite_gen.video import loop as loop_mod
@@ -154,6 +154,58 @@ def test_a_foot_the_view_cannot_tell_is_not_named():
     assert any(turned[strike["start"]] is f for f in (turned[7], turned[1]))  # still on a strike
     unseen = align.foot_strike(turned)
     assert unseen["start_foot"] is None and unseen["foot_why"] == "no view given for this loop"
+
+
+def _chibi(phase: float, *, view: str, step: float = 22, lift: int = 8, persp: int = 6, apart: int = 14) -> Image.Image:
+    """An earless walker with short legs under a big head, at `phase` (radians): its own right heel
+    lands at 0, its left at pi. Each leg swings `step` degrees either way about the hip; the stance
+    leg stays planted, so the hip rides lowest as a heel lands, and the foot behind lifts by `lift`
+    px mid-step. `front`: the feet `apart` px either side of the middle, its right foot on the
+    picture's left, the foot stepping toward the viewer drawn up to `persp` px lower. `side`: faces
+    right, its near right leg drawn light and `persp` px lower over the shaded far left leg."""
+    img = Image.new("RGBA", (300, 360))
+    draw = ImageDraw.Draw(img)
+    ground, leg, head, a = 340, 42, 50, math.radians(step)
+    swing = {"right": a * math.cos(phase), "left": -a * math.cos(phase)}
+    stance = "right" if phase % (2 * math.pi) < math.pi else "left"
+    hip, mid = ground - leg * math.cos(swing[stance]), 150
+    for own in ("left", "right") if view == "side" else ("right", "left"):
+        lifted = lift * abs(math.sin(phase)) if own != stance else 0
+        if view == "side":
+            fx, fy, tone = mid + leg * math.sin(swing[own]), ground - lifted - (persp if own == "left" else 0), 210 if own == "right" else 140
+        else:
+            fx, fy, tone = mid - apart if own == "right" else mid + apart, ground - lifted + persp * (math.sin(swing[own]) / math.sin(a) - 1), 200
+        draw.line([(mid if view == "side" else fx, hip), (fx, fy - 6)], fill=(tone, tone, tone, 255), width=7)
+        draw.rectangle([fx - 9, fy - 8, fx + 9, fy], fill=(tone - 60, tone - 60, tone - 60, 255))
+    torso = int(leg * 0.9)
+    draw.rectangle([mid - 22, hip - torso, mid + 22, hip], fill=(230, 200, 180, 255))
+    draw.ellipse([mid - head, hip - torso - 2 * head, mid + head, hip - torso], fill=(240, 210, 190, 255))
+    return img
+
+
+@pytest.mark.parametrize("view, figure, kw, by", [
+    ("front", "front", {"lift": 8, "persp": 6}, "reach"),  # its feet lift out of the foot band: the band swings like a side stride
+    ("front", "front", {"lift": 12, "persp": 6}, "reach"),
+    ("front", "front", {"lift": 4, "persp": 10}, "reach"),
+    ("front", "front", {"lift": 20, "persp": 0, "apart": 16}, "body_low"),  # no foot drawn nearer: the band's swing is a lift, not a strike
+    ("side@right", "side", {"step": 10, "persp": 6}, "stride"),  # a short step under STRIDE_MIN still opens the feet as a heel lands
+    ("side@right", "side", {"step": 14, "persp": 3, "lift": 12}, "stride"),
+])
+def test_the_view_picks_the_signal_so_a_short_legged_walk_starts_on_a_strike(view, figure, kw, by):
+    """A short-legged walk's swings mislead the thresholds: from the front its stride swings past
+    STRIDE_MIN as the foot behind lifts out of the band, and from the side a short step swings under
+    it. The view says which signal the step is on; the start is on a strike (or one frame after it,
+    the heel just landed), and a foot it names is the one landing there."""
+    frames = [_chibi(2 * math.pi * k / 12, view=figure, **kw) for k in range(12)]
+    turned = frames[5:] + frames[:5]  # its right heel lands at turned[7], its left at turned[1]
+    strike = align.foot_strike(turned, view=view)
+    assert strike["by"] == by, strike
+    landed = {"right": 7, "left": 1}
+    near = min(landed, key=lambda f: min((strike["start"] - landed[f]) % 12, (landed[f] - strike["start"]) % 12))
+    assert (strike["start"] - landed[near]) % 12 in (0, 1), strike
+    assert strike["start_foot"] in (None, near), strike
+    if by == "body_low":
+        assert strike["foot_why"].startswith("no legs to read"), strike
 
 
 def _cut(tmp_path: Path, name: str, length: int) -> Path:
