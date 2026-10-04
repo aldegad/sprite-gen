@@ -19,7 +19,9 @@ the body's bob. Inside it every pixel is moved by the offset times a weight that
 centre and falls to 0 at the rim (cos²); outside it no pixel changes. The move is sampled as
 premultiplied bilinear colour, so an edge never picks up the colour under a transparent pixel.
 A move so large that the weight's slope folds the picture over (offset × π / (2 · radius) ≥ 1)
-is refused.
+is refused. `--on-fold lower` takes the largest gain that does not fold instead (the offset
+grows in a straight line with the gain, so that gain is known without a search), and never one
+under 1, the mass as measured: a region too small for that is still refused.
 
 The strip as it was before is kept as `follow.source.png` beside it; running the command again
 reads from there, so a second follow-through never moves a moved strip. `video-loop` (a new
@@ -33,6 +35,7 @@ import argparse
 import json
 import math
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +49,9 @@ from sprite_gen.video import loop as loop_mod
 FREQ_DEFAULT = 2.4  # Hz: a slow, soft part
 ZETA_DEFAULT = 0.6  # damping ratio: it lags and settles, with no ringing
 GAIN_DEFAULT = 2.5  # times the physical answer
+GAIN_MEASURED = 1.0  # the mass as measured: `--on-fold lower` does not go under it
+GAIN_STEP = 0.01  # a lowered gain is a whole number of these, so the report's `gain` is the `--gain` to pass
+ON_FOLD_MODES = ("refuse", "lower")
 HARMONICS = 6  # of the cycle, for the body's motion: a step's shape, not its noise
 ALPHA_SOLID = 128
 HEAD_SHARE = 0.07  # of the body's height under the crown: where the head's middle is read
@@ -94,6 +100,30 @@ def follow_offsets(motion: np.ndarray, fps: float, *, freq: float, zeta: float, 
     return gain * np.fft.irfft(spectrum * response, n)
 
 
+def fold_ratio(reach: float, radius: float) -> float:
+    """How near a move of `reach` px is to folding a region whose smaller radius is `radius`: at 1
+    the steepest part of the weight (cos², slope π / (2 · radius)) stops the picture, past it the
+    picture runs backwards."""
+    return reach * math.pi / (2 * radius)
+
+
+def gain_limit(reach_per_gain: float, radius: float) -> float | None:
+    """The gain at which a region of that radius folds; no gain folds it when the body is still."""
+    return 2 * radius / (math.pi * reach_per_gain) if reach_per_gain > 0 else None
+
+
+def lowered_gain(gain: float, reach_per_gain: float, radius: float) -> float:
+    """The largest gain, in steps of GAIN_STEP and no more than `gain`, that `fold_ratio` passes."""
+    limit = gain_limit(reach_per_gain, radius)
+    if limit is None:
+        return gain
+    steps = math.ceil(limit / GAIN_STEP) - 1  # under the limit, never on it
+    # The step count is rounded from floats: the one test that decides is `fold_ratio` itself.
+    while steps > 0 and fold_ratio(steps * GAIN_STEP * reach_per_gain, radius) >= 1:
+        steps -= 1
+    return min(gain, round(steps * GAIN_STEP, 2))
+
+
 def _sample(premultiplied: np.ndarray, sx: np.ndarray, sy: np.ndarray) -> np.ndarray:
     h, w = premultiplied.shape[:2]
     x0 = np.clip(np.floor(sx).astype(int), 0, w - 2)
@@ -131,7 +161,8 @@ def move_regions(cell: Image.Image, regions: list[tuple[float, float, float, flo
 
 
 def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]], *, gain: float = GAIN_DEFAULT,
-                freq: float = FREQ_DEFAULT, zeta: float = ZETA_DEFAULT, board: Path | None = None) -> dict[str, Any]:
+                freq: float = FREQ_DEFAULT, zeta: float = ZETA_DEFAULT, board: Path | None = None,
+                on_fold: str = "refuse") -> dict[str, Any]:
     loop_dir = loop_dir.expanduser().resolve()
     metas = sorted(loop_dir.glob("*.strip.json"))
     if len(metas) != 1:
@@ -145,6 +176,8 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
         raise SystemExit("video-follow: at least one --region cx,cy,rx,ry")
     if gain < 0 or freq <= 0 or not 0 < zeta:
         raise SystemExit("video-follow: --gain must be 0 or more, --freq and --zeta above 0")
+    if on_fold not in ON_FOLD_MODES:
+        raise SystemExit(f"video-follow: unknown --on-fold {on_fold!r}; expected one of {', '.join(ON_FOLD_MODES)}")
     strip_path = loop_dir / f"{name}.strip.png"
     source = loop_dir / SOURCE
     if not source.exists():
@@ -167,9 +200,24 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
     dx = follow_offsets(cols, fps, freq=freq, zeta=zeta, gain=gain)
     reach = float(np.max(np.hypot(dx, dy)))
     smallest = min(min(rx, ry) for _, _, rx, ry in regions)
-    if reach * math.pi / (2 * smallest) >= 1:
-        raise SystemExit(f"video-follow: a move of {reach:.1f} px folds a region of radius {smallest:g} px over itself; "
-                         "lower --gain or give the region larger radii")
+    requested, reach_requested = gain, reach
+    # The offset is the gain times the answer at gain 1, so one move decides every gain.
+    reach_per_gain = float(np.max(np.hypot(follow_offsets(cols, fps, freq=freq, zeta=zeta, gain=1.0),
+                                           follow_offsets(rows, fps, freq=freq, zeta=zeta, gain=1.0))))
+    if fold_ratio(reach, smallest) >= 1:
+        if on_fold == "refuse":
+            raise SystemExit(f"video-follow: a move of {reach:.1f} px folds a region of radius {smallest:g} px over itself; "
+                             "lower --gain or give the region larger radii")
+        # One gain for the strip, set by the smallest region: every part hangs on the same body and
+        # answers the same motion, and the report's `gain` is then the `--gain` that gives this strip.
+        gain = lowered_gain(requested, reach_per_gain, smallest)
+        if gain < GAIN_MEASURED:
+            raise SystemExit(f"video-follow: a move of {reach:.1f} px folds a region of radius {smallest:g} px over itself, and "
+                             f"--on-fold lower would have to go under --gain {GAIN_MEASURED:g} (the mass as measured moves "
+                             f"{reach_per_gain:.1f} px; the largest gain that does not fold is {gain:g}); give the region larger radii")
+        dy = follow_offsets(rows, fps, freq=freq, zeta=zeta, gain=gain)
+        dx = follow_offsets(cols, fps, freq=freq, zeta=zeta, gain=gain)
+        reach = float(np.max(np.hypot(dx, dy)))
     out = [move_regions(c, regions, (cols[k] - cols[0], rows[k] - rows[0]), (dx[k], dy[k])) for k, c in enumerate(cells)]
     joined = Image.new("RGBA", (w * n, h), (0, 0, 0, 0))
     for k, c in enumerate(out):
@@ -186,6 +234,14 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
         "body_bob_px": [round(float(np.ptp(cols)), 2), round(float(np.ptp(rows)), 2)],
         "dx_px": np.round(dx, 2).tolist(), "dy_px": np.round(dy, 2).tolist(),
         "reach_px": round(reach, 2),
+        "gain_requested": requested, "on_fold": on_fold,
+        "fold": {
+            "lowered": gain != requested, "ratio": round(fold_ratio(reach, smallest), 3),
+            "reach_requested_px": round(reach_requested, 2), "reach_per_gain_px": round(reach_per_gain, 3),
+            "regions": [{"radius_px": min(rx, ry), "ratio": round(fold_ratio(reach, min(rx, ry)), 3),
+                         "gain_limit": None if (limit := gain_limit(reach_per_gain, min(rx, ry))) is None else round(limit, 3)}
+                        for _, _, rx, ry in regions],
+        },
         "gif": loop_mod.verify_animation(gif_path, expect_frames=n, check_stale=False),
         "webp": loop_mod.verify_animation(webp_path, expect_frames=n, check_stale=True),
     }
@@ -217,6 +273,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--region", action="append", type=parse_region, required=True,
                         help="cx,cy,rx,ry: an ellipse over the soft part in the strip's first cell, in cell pixels (repeatable)")
     parser.add_argument("--gain", type=float, default=GAIN_DEFAULT, help=f"times the physical answer (default {GAIN_DEFAULT:g}; 1 is the mass as measured, 0 leaves the strip as it was)")
+    parser.add_argument("--on-fold", choices=ON_FOLD_MODES, default="refuse",
+                        help=f"a move that folds a region over itself: refuse (default), or lower — take the largest gain that does not fold "
+                             f"(one gain for the strip, set by the smallest region; never under {GAIN_MEASURED:g}, the mass as measured: that is still refused)")
     parser.add_argument("--freq", type=float, default=FREQ_DEFAULT, help=f"the part's own frequency in Hz (default {FREQ_DEFAULT:g})")
     parser.add_argument("--zeta", type=float, default=ZETA_DEFAULT, help=f"damping ratio (default {ZETA_DEFAULT:g}: lags and settles, no ringing)")
     parser.add_argument("--board", type=Path, help="write a before/after picture at the frames where the part sits lowest and highest")
@@ -225,8 +284,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(**kwargs: object) -> int:
     result = follow_loop(Path(str(kwargs["loop_dir"])), list(kwargs["region"]),  # type: ignore[arg-type]
                          gain=float(kwargs.get("gain", GAIN_DEFAULT)), freq=float(kwargs.get("freq", FREQ_DEFAULT)),  # type: ignore[arg-type]
-                         zeta=float(kwargs.get("zeta", ZETA_DEFAULT)), board=kwargs.get("board"))  # type: ignore[arg-type]
-    print(json.dumps({k: result[k] for k in ("strip", "regions", "gain", "body_bob_px", "reach_px")}
+                         zeta=float(kwargs.get("zeta", ZETA_DEFAULT)), board=kwargs.get("board"),  # type: ignore[arg-type]
+                         on_fold=str(kwargs.get("on_fold") or "refuse"))
+    if result["fold"]["lowered"]:
+        print(f"video-follow: --gain {result['gain_requested']:g} folds a region (a move of {result['fold']['reach_requested_px']:g} px); "
+              f"lowered to --gain {result['gain']:g}", file=sys.stderr)
+    print(json.dumps({k: result[k] for k in ("strip", "regions", "gain", "gain_requested", "on_fold", "body_bob_px", "reach_px")}
                      | ({"board": result["board"]} if "board" in result else {}), ensure_ascii=False, indent=2))
     return 0
 

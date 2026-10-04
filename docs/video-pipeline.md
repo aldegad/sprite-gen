@@ -663,14 +663,32 @@ for the visual review contract and manual overrides.
 A walk or run filmed from its first frame only (no end frame) often grows or shrinks as it plays:
 a front walk comes a little closer with every step, a back walk goes away. The loop is then cut on
 frames that change size, so the frame one cycle after the first is not the first's size and the
-loop pops at the wrap. A straight-line fit of the subject's opaque height over the clip measures
-it (`gait_fallback.scale_drift`); at 1 % or more (`SIZE_HOLD_MIN`) every frame is scaled back to
-the first frame's fitted height about its fitted foot point before the cycle search, so the
-search, the seam and the cells all read frames of one size. Below 1 % the fit is a head bob and
-hair and the frames are searched as filmed. The report says what was measured and done
-(`size_hold`: `drift`, `applied`, `padding_ltrb`). `--size-hold off` searches the frames as
-filmed, as before 2.24.0. Measured on one front catwalk filmed from its first frame (+2.0 % over
-3 s): the engine's seam ratio of the cut went from 1.44 to 1.19.
+loop pops at the wrap. The change is read one cycle on (`gait_fallback.cycle_drift`): the lag at
+which the pose, cut out about its feet, matches itself best (in the state's window, at most half
+the clip), and each frame's height (to a fraction of a pixel: the rows' coverage summed) against
+the frames one, two, … of those lags later. The median of those changes per frame, carried over
+the clip, is the `drift`. At 1 % or more (`SIZE_HOLD_MIN`) every frame is scaled back to the
+first frame's size about its fitted foot point before the cycle search, so the search, the seam
+and the cells all read frames of one size. Below 1 % the frames are searched as filmed.
+
+Why one cycle on, and not a line through the clip (2.24.0): a clip that starts from a standing
+pose and settles into the walk over its first steps (knees bending, the body leaning in) is a few
+pixels shorter from then on, and a line through every frame reads that one change of pose as a
+body that shrinks the whole way, and held it. The same pose a cycle later is the same size
+unless the body really changes, and the few frames of the first pose do not move a median of the
+rest. The other way round, a settle can
+pull the line flat over a walk that does grow; one cycle on, that growth is still read and held.
+On a synthetic walker that stands 6 px taller for its first frames and then walks at one size,
+the line read −2.2 % and the hold, so scaled, then found no cycle at all; one cycle on reads 0
+and the clip is cut as filmed (`tests/video/test_gait_fallback.py`).
+
+The report says what was measured and done (`size_hold`: `drift`, `applied`, `padding_ltrb`, and
+the evidence: `method: one-cycle-on`, `lag`, `pose_match` — the pose's mismatch at that lag over
+its mean across the window, 0 for an exact repeat — `pairs`, `per_lag`, the change over one lag,
+and `drift_fitted_line`, what a line through the clip would have read). `--size-hold off` searches
+the frames as filmed, as before 2.24.0. When the hold came in (2.24.0, read off the line) it was
+measured on one front catwalk filmed from its first frame (+2.0 % over 3 s): the engine's seam
+ratio of the cut went from 1.44 to 1.19.
 
 **Nothing is cut when a frame is scaled up.** A clip that shrinks is scaled up about its feet,
 and when the feet also rose in the frame (a back walk going away toward the horizon) the crown
@@ -834,7 +852,7 @@ bounce. `video-follow` puts that follow-through back on a cut loop:
 
 ```bash
 sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [--region …] \
-  [--gain 2.5] [--freq 2.4] [--zeta 0.6] [--board follow.png]
+  [--gain 2.5] [--on-fold refuse|lower] [--freq 2.4] [--zeta 0.6] [--board follow.png]
 ```
 
 - **The region** is an ellipse over the part in the strip's first cell, in cell pixels
@@ -853,11 +871,23 @@ sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [-
   at the centre and 0 at the rim (cos²), sampled as premultiplied bilinear colour; outside it no
   pixel changes. A move so large that the weight's slope folds the picture over
   (offset × π / (2 · radius) ≥ 1) is refused: lower `--gain` or give the region larger radii.
+- **`--on-fold lower`** lowers the gain for you instead of refusing. The move is the gain times
+  the move at gain 1, so the gain at which a region folds is 2 · radius / (π · move at gain 1),
+  and the strip takes the largest gain under it, in steps of 0.01 and no more than `--gain`. One
+  gain for the strip, set by the region with the smallest radius: every part hangs on the same
+  body and answers the same motion, and the recorded `gain` is then the `--gain` that gives this
+  strip by itself. It does not go under 1, the mass as measured: a region too small for that is
+  refused (the message names the largest gain that would not fold), so a follow-through is never
+  quietly weaker than the motion it answers. The default stays `refuse`, with the same output and
+  the same message as 2.24.0; a strip that does not fold is the same under either.
 - **What it writes**: the strip, GIF and WebP over the loop's own (both animations re-opened and
   checked as `video-loop` checks them), and `follow` in `<name>.strip.json` (the regions, the
-  settings, the body's bob, `dx_px`/`dy_px` per cell, `reach_px`). `cycle/` is left as cut. The
-  strip as it was is kept as `follow.source.png`; running `video-follow` again reads from it, so a
-  second run never moves a moved strip. `--board` writes the cells before and after where the part
+  settings, the body's bob, `dx_px`/`dy_px` per cell, `reach_px`; `gain` is the gain used and
+  `gain_requested` the one asked for, and `fold` says whether it was lowered, the move asked for,
+  the move at gain 1, and per region its smaller radius, how near the used move is to folding it
+  (`ratio`, under 1) and the gain at which it folds). A lowered gain is also named on stderr.
+  `cycle/` is left as cut. The strip as it was is kept as `follow.source.png`; running
+  `video-follow` again reads from it, so a second run never moves a moved strip. `--board` writes the cells before and after where the part
   sits lowest and highest, on white.
 - **Order**: after `video-cycle-align`. An alignment rebuilds the strip from the cut, removes
   `follow.source.png` and the `follow` record, and says so (`follow_cleared` in its loop row); a

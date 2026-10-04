@@ -1,6 +1,7 @@
 """`video-follow`: a region of a walk loop follows the body's bob, on a synthetic walker."""
 import json
 import math
+import re
 
 import numpy as np
 import pytest
@@ -120,6 +121,118 @@ def test_a_move_that_would_fold_the_region_is_refused(loop_dir):
     cx, cy, _, _ = chest_region(loop_dir)
     with pytest.raises(SystemExit, match='folds a region'):
         follow.follow_loop(loop_dir, [(cx, cy, 2, 2)], gain=50)
+
+
+def test_the_default_refusal_reads_as_it_did(loop_dir):
+    cx, cy, _, _ = chest_region(loop_dir)
+    as_cut = (loop_dir/'walk.strip.png').read_bytes()
+    with pytest.raises(SystemExit) as refused:
+        follow.follow_loop(loop_dir, [(cx, cy, 2, 2)], gain=50)
+    assert re.fullmatch(r'video-follow: a move of \d+\.\d px folds a region of radius 2 px over itself; '
+                        r'lower --gain or give the region larger radii', str(refused.value))
+    assert (loop_dir/'walk.strip.png').read_bytes() == as_cut
+    assert 'follow' not in json.loads((loop_dir/'walk.strip.json').read_text())
+
+
+def small_region(loop_dir, share):
+    """A region on the chest whose smaller radius folds at `share` of the default gain."""
+    cx, cy, rx, _ = chest_region(loop_dir)
+    reach = follow.follow_loop(loop_dir, [(cx, cy, 40, 40)])['reach_px']
+    return (cx, cy, rx, share*reach*math.pi/2)
+
+
+def folds_nowhere(rec, meta):
+    """Every cell's picture runs forwards: along the move, the sample point never turns back."""
+    h, w = meta['h'], meta['w']
+    yy, xx = np.mgrid[0:h, 0:w].astype(float)
+    worst = 0.0
+    for dx, dy in zip(rec['dx_px'], rec['dy_px']):
+        weight = np.zeros((h, w))
+        for cx, cy, rx, ry in rec['regions']:
+            r = np.sqrt(((xx-cx)/rx)**2+((yy-cy)/ry)**2)
+            weight = np.maximum(weight, np.where(r < 1, np.cos(r*math.pi/2)**2, 0))
+        gy, gx = np.gradient(weight)
+        worst = max(worst, float(np.max(dx*gx+dy*gy)))
+    return worst < 1, worst
+
+
+def test_lower_takes_the_largest_gain_that_does_not_fold(loop_dir):
+    region = small_region(loop_dir, 0.7)  # folds at 0.7 of the default gain: 1.75
+    with pytest.raises(SystemExit, match='folds a region'):
+        follow.follow_loop(loop_dir, [region])
+    result = follow.follow_loop(loop_dir, [region], on_fold='lower')
+    meta = json.loads((loop_dir/'walk.strip.json').read_text())
+    rec = meta['follow']
+    assert rec['gain_requested'] == follow.GAIN_DEFAULT and rec['on_fold'] == 'lower' and rec['fold']['lowered'] is True
+    assert result['gain'] == rec['gain']
+    # Under the request, not under the mass as measured, and the largest that passes: the next step folds.
+    limit = rec['fold']['regions'][0]['gain_limit']
+    assert 1.70 < limit < 1.80 and follow.GAIN_MEASURED <= rec['gain'] < limit <= rec['gain']+follow.GAIN_STEP+1e-9
+    assert 0.99 <= rec['fold']['ratio'] < 1
+    assert rec['fold']['regions'][0]['radius_px'] == pytest.approx(region[3])
+    assert rec['reach_px'] < rec['fold']['reach_requested_px']
+    assert rec['reach_px'] == pytest.approx(rec['gain']*rec['fold']['reach_per_gain_px'], abs=0.02)
+    ok, worst = folds_nowhere(rec, meta)
+    assert ok, worst
+    lowered = (loop_dir/'walk.strip.png').read_bytes()
+    assert lowered != (loop_dir/follow.SOURCE).read_bytes()
+    # The report's gain is the --gain that gives this strip; one step more is refused.
+    follow.follow_loop(loop_dir, [region], gain=rec['gain'])
+    assert (loop_dir/'walk.strip.png').read_bytes() == lowered
+    assert json.loads((loop_dir/'walk.strip.json').read_text())['follow']['fold']['lowered'] is False
+    with pytest.raises(SystemExit, match='folds a region'):
+        follow.follow_loop(loop_dir, [region], gain=rec['gain']+follow.GAIN_STEP)
+
+
+def test_the_smallest_region_sets_the_one_gain(loop_dir):
+    small = small_region(loop_dir, 0.7)
+    cx, cy, rx, ry = chest_region(loop_dir)
+    alone = follow.follow_loop(loop_dir, [small], on_fold='lower')
+    both = follow.follow_loop(loop_dir, [(cx, cy+30, rx, ry), small], on_fold='lower')
+    assert both['gain'] == alone['gain']
+    large, little = both['fold']['regions']
+    assert large['gain_limit'] > follow.GAIN_DEFAULT > little['gain_limit']
+    assert large['ratio'] < little['ratio'] < 1
+
+
+def test_lower_does_not_go_under_the_mass_as_measured(loop_dir):
+    region = small_region(loop_dir, 0.3)  # folds at 0.75: under gain 1
+    as_cut = (loop_dir/'walk.strip.png').read_bytes()
+    meta = (loop_dir/'walk.strip.json').read_text()
+    with pytest.raises(SystemExit) as refused:
+        follow.follow_loop(loop_dir, [region], on_fold='lower')
+    assert 'folds a region' in str(refused.value) and 'under --gain 1' in str(refused.value)
+    assert (loop_dir/'walk.strip.png').read_bytes() == as_cut
+    assert (loop_dir/'walk.strip.json').read_text() == meta
+    # A request already under 1 that folds is refused too: lowering only goes down.
+    with pytest.raises(SystemExit, match='under --gain 1'):
+        follow.follow_loop(loop_dir, [small_region(loop_dir, 0.3)], gain=0.9, on_fold='lower')
+
+
+def test_lower_changes_nothing_when_nothing_folds(loop_dir):
+    region = chest_region(loop_dir)
+    refuse = follow.follow_loop(loop_dir, [region])
+    strip = (loop_dir/'walk.strip.png').read_bytes()
+    lower = follow.follow_loop(loop_dir, [region], on_fold='lower')
+    assert (loop_dir/'walk.strip.png').read_bytes() == strip
+    assert lower['gain'] == lower['gain_requested'] == refuse['gain'] == follow.GAIN_DEFAULT
+    assert lower['fold']['lowered'] is False and lower['dy_px'] == refuse['dy_px']
+    assert lower['fold']['ratio'] < 1 and lower['fold']['reach_requested_px'] == lower['reach_px']
+
+
+def test_the_command_takes_on_fold_and_says_what_it_lowered_to(loop_dir, capsys):
+    region = small_region(loop_dir, 0.7)
+    text = ','.join(f'{v:.3f}' for v in region)
+    with pytest.raises(SystemExit, match='folds a region'):
+        follow.main(['--loop-dir', str(loop_dir), '--region', text])
+    capsys.readouterr()
+    assert follow.main(['--loop-dir', str(loop_dir), '--region', text, '--on-fold', 'lower']) == 0
+    out, err = capsys.readouterr()
+    printed = json.loads(out)
+    assert printed['gain_requested'] == 2.5 and printed['on_fold'] == 'lower' and 1 <= printed['gain'] < 2.5
+    assert f"lowered to --gain {printed['gain']:g}" in err
+    with pytest.raises(SystemExit, match='unknown --on-fold'):
+        follow.follow_loop(loop_dir, [region], on_fold='quietly')
 
 
 def test_bad_regions_are_refused(loop_dir):
