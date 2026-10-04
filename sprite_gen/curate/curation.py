@@ -160,6 +160,7 @@ from PIL import Image
 
 from sprite_gen.spec.layout import raw_rel
 from sprite_gen.spec.runio import load_request
+from sprite_gen.util.resample import transform_cell
 
 CURATION_FILENAME = "curation.json"
 SCHEMA_VERSION = 1
@@ -1118,7 +1119,9 @@ def apply_transform(
     c = -(ia * cout_x + ib * cout_y) + cin_x
     f = -(id_ * cout_x + ie * cout_y) + cin_y
     if not snap_scale:
-        return src.transform((cw, ch), Image.AFFINE, (ia, ib, c, id_, ie, f), resample=Image.BICUBIC)
+        # Coverage and colour mapped apart: BICUBIC over the keyed frame drew a light rim and a
+        # key tint around the outline (docs/video-pipeline.md "Cells").
+        return transform_cell(src, (cw, ch), (ia, ib, c, id_, ie, f))
     out = src.transform((cw, ch), Image.AFFINE, (ia, ib, c, id_, ie, f), resample=Image.NEAREST)
     if snap_scale > 1:
         logical_w, logical_h = max(1, cw // snap_scale), max(1, ch // snap_scale)

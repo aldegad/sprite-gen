@@ -574,7 +574,19 @@ Outputs:
   GIF and WebP are cut from these cells. The function lives in `sprite_gen/util/resample.py`
   and is the resample of every place that scaled a keyed picture with LANCZOS: a row frame fitted to its cell and the twin
   beside a pixel-unfake frame (`extract`), a sliced sheet's figures (`slice-sheet`) and a
-  scene's layers (`scene-render`) go through it too.
+  scene's layers (`scene-render`) go through it too. Its twin for an affine map,
+  `transform_cell`, does the same for the places that moved, scaled, rotated or sheared a keyed
+  picture with BICUBIC: the gait fallback's scaled-back frames (`video-loop`, "The gait
+  fallback" in [loop-review.md](loop-review.md)) and a curated transform on a smooth row
+  (`curation.apply_transform`). Coverage keeps BICUBIC's edge, held to the coverage of the
+  2 x 2 source pixels the colour mixes from, and colour is a BILINEAR mix of premultiplied
+  colour. BICUBIC has the same negative lobe, smaller: on the synthetic figure it left 1,088 to
+  1,864 pixels with a colour none of the four source pixels under them had when a frame was
+  scaled back by 0.84x to 1.19x, and 840 to 2,102 for a half-pixel move, a 10° rotation, a
+  0.75x shrink, a shear and a 1.3x grow with a 15° rotation; `transform_cell` leaves none. The
+  same cost applies: colour is not sharpened. A pixel row's curated transform samples NEAREST
+  and is untouched. The scene GIF's ffmpeg downscale stays LANCZOS: it scales opaque composited
+  frames, where nothing is divided by a low coverage.
 - `<name>.gif` — `n_out` frames evenly across the cycle, 1-bit alpha, disposal 2, `loop=0`.
   `n_out` is a **playback density, not a fixed count**: `round(cycle_seconds × --gif-fps)`
   (default 24 fps = the source rate, so every cycle frame is kept; floor 4, never more than

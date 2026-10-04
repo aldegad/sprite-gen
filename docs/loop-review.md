@@ -100,7 +100,9 @@ front or back gait does that the first search cannot see past:
   sometimes comes closer, and the body grows through the clip, so the same pose never matches
   itself in size. A straight-line fit of the subject's opaque height measures it; at 3 % or
   more over the clip (`SCALE_DRIFT_MIN`) every frame is scaled back to the first frame's fitted
-  height about its fitted foot point, premultiplied so the soft edge keeps its colour. The
+  height about its fitted foot point, with its coverage and its colour mapped apart
+  (`transform_cell`, [video-pipeline.md](video-pipeline.md) "Cells") so the soft edge keeps its
+  colour and gets no lighter rim or key tint from the resample. The
   search, the cells and the seam gate then all read the scaled-back frames. On the walk clips
   we have kept, the median change is 0.5 % and nine in ten stay under 2.7 %.
 - **It walked slowly.** A calm walk in long clothing can take longer than half the clip per
