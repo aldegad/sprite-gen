@@ -1028,7 +1028,7 @@ def run_loop(
             try:
                 moved = moved_alpha(source_frames, analysis)
                 cycle = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi, signals=leg_signals(source_frames),
-                                           wrap_pop=wrap_pop_on(moved), held_edge=HeldEdge(moved), **detect)
+                                           wrap_pop=wrap_pop_on(moved), held_edge=HeldEdge(moved), length_cap=max_len, **detect)
             except ValueError as first:
                 # A front or back gait that walked toward the camera, or a slow one: one more
                 # search, recorded (`gait_fallback`), and only after the first found nothing.
@@ -1051,7 +1051,7 @@ def run_loop(
                     cycle = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi_long,
                                                max_fraction=gait_fallback.LONG_CYCLE_FRACTION if max_len is None else .5,
                                                signals=leg_signals(source_frames), wrap_pop=wrap_pop_on(moved),
-                                               held_edge=HeldEdge(moved), **detect)
+                                               held_edge=HeldEdge(moved), length_cap=max_len, **detect)
                 except ValueError as second:
                     failed = ValueError(f"{second} (also with the gait fallback: window [{lo}, {hi_long}], "
                                         f"scale drift {drift['drift']:+.1%}{', undone' if fallback['scale_undone'] else ''})")

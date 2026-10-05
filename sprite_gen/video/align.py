@@ -723,7 +723,9 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
                   **{key: strike[key] for key in ("foot", "foot_why", "foot_given", "foot_unnamed_why", "foot_disagrees") if key in strike},
                   "stride_swing": strike["stride_swing"], "reach_swing": strike["reach_swing"],
                   "fps": round(fps, 4), "source": SOURCE_DIR, "cycles_given": given.get(i), "cycle_screen": screens[i],
-                  **({"cycle_taken": taken[i]} if i in taken else {}), "cycles_kept": kept[i],
+                  **({"cycle_taken": taken[i]} if i in taken else {}),
+                  # only on a loop its cutter declared more than one cycle long: every other loop's record is as before
+                  **({"cycles_kept": kept[i]} if "cycles" in loops[i][2] else {}),
                   "made_at": [(k - start) % len(out) for k in facts["made_at"]]}
         if "nearest_at" in facts:
             record["nearest_at"] = sorted((k - start) % len(out) for k in facts["nearest_at"])

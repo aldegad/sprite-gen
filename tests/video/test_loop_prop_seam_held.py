@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -66,10 +67,10 @@ def _keyed(root: Path, **kw) -> Path:
     return keyed
 
 
-def _cut(root: Path, keyed: Path) -> dict:
+def _cut(root: Path, keyed: Path, *extra: str) -> dict:
     out = root / "out"
     assert loop.main(["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk",
-                      "--anchor", "motion-auto", "--repair", "off"]) == 0
+                      "--anchor", "motion-auto", "--repair", "off", *extra]) == 0
     return json.loads((out / "loop.loop.report.json").read_text())
 
 
@@ -138,6 +139,21 @@ def test_a_held_part_no_window_closes_is_kept_on_the_top_bands_choice_and_warned
     assert len(lines) == 1 and "right side" in lines[0]
 
 
+def test_an_explicit_max_len_is_not_widened_by_a_window_two_cycles_long(tmp_path):
+    """--max-len 25 is the caller's ceiling: the windows two steps long (47-49 frames) that would close
+    the staff are over it and are not read. The cut is the top band's, one step long, and the jolt says
+    the held part does not close and why nothing longer was looked at."""
+    report = _cut(tmp_path, _keyed(tmp_path), "--max-len", "25")
+    cycle = report["cycle"]
+    assert cycle["length"] <= 25 and "cycles" not in cycle
+    held_edge = cycle["seam_pop"]["held_edge"]
+    assert held_edge["two_cycle_capped"] == {"max_len": 25, "lengths_over": [2 * STEP - 1, 2 * STEP + 1]}
+    assert "two_cycle" not in held_edge and held_edge["chosen"]["closes"] is False
+    assert "cycles" not in json.loads((tmp_path / "out" / "loop.strip.json").read_text())
+    (line,) = [line for line in report["jolt"]["warnings"] if "held part does not close" in line]
+    assert "over --max-len 25" in line
+
+
 def test_a_walk_whose_top_does_not_pop_reads_nothing_below_it(tmp_path):
     report = _cut(tmp_path, _keyed(tmp_path, staff=False))
     shape = report["cycle"]["seam_pop"]
@@ -203,6 +219,10 @@ def test_held_edge_verdict_speaks_only_for_a_held_side_that_does_not_close():
     (line,) = repair.held_edge_verdict({"held_edge": {"side": "right", "reference": 1.2,
                                                        "chosen": {"start": 0, "length": 23, "skipped": "the clip has no two frames"}}})
     assert "could not be read at this cut" in line
+    capped = {"held_edge": {**misses["held_edge"], "two_cycle_capped": {"max_len": 25, "lengths_over": [45, 47]}}}
+    (line,) = repair.held_edge_verdict(capped)
+    assert "no window one cycle long closes it" in line and "(45-47 frames) are over --max-len 25" in line
+    assert "beat of its own" not in line
 
 
 # --- choosing on it ---------------------------------------------------------------------------
@@ -262,6 +282,25 @@ def test_shape_rank_takes_two_cycles_when_no_one_cycle_cut_closes_and_never_an_u
     assert record["chosen"] == {"start": 12, "length": 47, "pop": 0.0, "cycles": 2}
 
 
+def test_shape_rank_reads_no_window_two_cycles_long_over_the_length_cap():
+    table = {(10, 48): 0.9, (12, 47): 0.4, (20, 49): 0.3}
+    # Under a cap of 46 no window two cycles long is read: the top band's choice, and the record says why.
+    candidates = [dict(r) for r in ROWS]
+    fake = _FakeHeld(dict(table))
+    chosen, record = local_cycle._shape_rank(candidates, candidates[0], _pop({(0, 24): 14.0}), fake, length_cap=46)
+    assert (chosen["start"], chosen["length"]) == (3, 24) and "cycles" not in chosen
+    assert all(length <= 46 for _, length in fake.read)
+    held = record["held_edge"]
+    assert held["two_cycle_capped"] == {"max_len": 46, "lengths_over": [47, 49]} and "two_cycle" not in held
+    # A cap of 48 reads 47 and 48 only: (20, 49) is over it, so (12, 47) is taken.
+    candidates = [dict(r) for r in ROWS]
+    fake = _FakeHeld(dict(table))
+    chosen, record = local_cycle._shape_rank(candidates, candidates[0], _pop({(0, 24): 14.0}), fake, length_cap=48)
+    assert (chosen["start"], chosen["length"], chosen["cycles"]) == (12, 47, 2)
+    assert record["held_edge"]["two_cycle"]["lengths"] == [47, 48] and max(length for _, length in fake.read) == 48
+    assert record["held_edge"]["two_cycle_capped"] == {"max_len": 48, "lengths_over": [49, 49]}
+
+
 def test_shape_rank_without_a_closing_window_keeps_the_top_bands_choice_and_records_it():
     candidates = [dict(r) for r in ROWS]
     chosen, record = local_cycle._shape_rank(candidates, candidates[0], _pop({(0, 24): 14.0}), _FakeHeld({}, frames=60))
@@ -294,7 +333,7 @@ def test_cycle_align_keeps_a_two_cycle_loop_two_cycles_at_twice_the_set_length(h
     two, one = out["loops"]
     target = round(float(np.median([lengths[0] / 2, lengths[1]])))
     assert out["length"] == target and two["to"] == 2 * target and one["to"] == target
-    assert two["cycles_kept"] == 2 and one["cycles_kept"] == 1
+    assert two["cycles_kept"] == 2 and "cycles_kept" not in one
     assert all(e["status"] == "declared" for e in out["suspects"] if e["dir"] == str((root / "out").resolve()))
     assert json.loads((root / "out" / "loop.strip.json").read_text())["cycles"] == 2
     assert "cycles" not in json.loads((one_step / "out" / "loop.strip.json").read_text())
@@ -302,3 +341,28 @@ def test_cycle_align_keeps_a_two_cycle_loop_two_cycles_at_twice_the_set_length(h
     out = align.align_set([root / "out", one_step / "out"], between="nearest", cycles={str(root / "out"): 2})
     assert out["loops"][0]["cycles_kept"] == 1 and "cycle_taken" in out["loops"][0]
     assert "cycles" not in json.loads((root / "out" / "loop.strip.json").read_text())
+
+
+# What v2.35.0 wrote for a loop cut one cycle long (no `cycles` in its strip metadata): aligning it
+# writes exactly these, so a set without a held part is rewritten as before.
+STRIP_KEYS_2350 = {"body_h", "body_height_target", "body_ref", "body_src_h", "cell_cap", "cell_height_cap", "cycle_align",
+                   "cycle_drawings", "cycle_frames", "cycle_seconds", "delay_ms", "drawings", "drift_px", "foot_anchor",
+                   "foot_sway_px", "foot_x", "frames", "h", "kind", "loop", "motion_anchor", "scale", "state", "subsampled",
+                   "top_margin_px", "w"}
+CYCLE_ALIGN_KEYS_2350 = {"between", "cycle_screen", "cycles_given", "drawings", "foot_why", "fps", "from", "made_at",
+                         "made_by_rife", "nearest_at", "reach_swing", "retake", "seam_ratio", "source", "start_foot",
+                         "start_foot_source", "stride_swing", "strikes", "taken", "to", "turned_by", "turned_on", "view"}
+
+
+def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path):
+    src = tmp_path / "src"
+    _cut(src, _keyed(src, staff=False))
+    dirs = []
+    for name in ("a", "b"):
+        shutil.copytree(src / "out", tmp_path / name)
+        dirs.append(tmp_path / name)
+    out = align.align_set(dirs, between="nearest")
+    assert all("cycles_kept" not in row for row in out["loops"])
+    for d in dirs:
+        meta = json.loads((d / "loop.strip.json").read_text())
+        assert set(meta) == STRIP_KEYS_2350 and set(meta["cycle_align"]) == CYCLE_ALIGN_KEYS_2350

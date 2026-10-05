@@ -65,13 +65,14 @@ def _held(measured):
     return {'skipped': measured['skipped']} if 'skipped' in measured else {'seam': measured['seam'], 'closes': measured['closes']}
 
 
-def _held_rank(candidates, calm, chosen, wrap_pop, held_edge):
+def _held_rank(candidates, calm, chosen, wrap_pop, held_edge, length_cap=None):
     """Below the top band (`held_edge`, repair.held_edge on the side the popping first choice holds its
     part): among the calm candidates, those whose held side closes, the same score tolerance, then the
     smallest held seam. When no one-cycle candidate closes it, windows twice a candidate's length
     (`cycles` 2): a part swinging once in two cycles closes only there. Such a window is two cycles of
     a repeat the search confirmed, not itself seen repeating; it is taken when its held side closes and
-    its top does not pop, the smallest held seam first. Returns (picked or None, record)."""
+    its top does not pop, the smallest held seam first. A window longer than `length_cap` (an explicit
+    --max-len) is not one. Returns (picked or None, record)."""
     side = held_edge.side(chosen['start'], chosen['length'])
     if 'skipped' in side:
         return None, {'method': 'held-side-edge-v1', 'skipped': side['skipped']}
@@ -95,6 +96,13 @@ def _held_rank(candidates, calm, chosen, wrap_pop, held_edge):
         record.update(cycles=1, chosen={'start': picked['start'], 'length': picked['length'], 'seam': picked['held_edge'], 'closes': True})
         return picked, record
     lengths = sorted({2*row['length']+d for row in candidates for d in (-1, 0, 1)})
+    if length_cap is not None:
+        over = [length for length in lengths if length > length_cap]
+        lengths = [length for length in lengths if length <= length_cap]
+        if over:
+            record['two_cycle_capped'] = {'max_len': length_cap, 'lengths_over': [over[0], over[-1]]}
+        if not lengths:
+            return None, record
     windows = []
     counts = {'measured': 0, 'unread': 0, 'top_pops': 0}
     for length in lengths:
@@ -121,7 +129,7 @@ def _held_rank(candidates, calm, chosen, wrap_pop, held_edge):
     return None, record
 
 
-def _shape_rank(candidates, chosen, wrap_pop, held_edge=None):
+def _shape_rank(candidates, chosen, wrap_pop, held_edge=None, length_cap=None):
     """Choose again when the chosen cut's top pops at the wrap (`wrap_pop`, repair.seam_pop on the
     analysed frames): among the candidates whose top was read and does not pop, the same score
     tolerance, then the smallest pop. Nothing is measured past the first choice when it does not pop,
@@ -131,7 +139,7 @@ def _shape_rank(candidates, chosen, wrap_pop, held_edge=None):
     With `held_edge` (loop.HeldEdge), a popping first choice has its held part read below the top too
     (`_held_rank`): a cut whose held side closes is taken first, one or two cycles long. Where none
     closes, the choice is the top band's, and `held_edge.chosen` records that it does not close (the
-    jolt warns, repair.held_edge_verdict)."""
+    jolt warns, repair.held_edge_verdict). A two-cycle window is never longer than `length_cap`."""
     first = wrap_pop(chosen['start'], chosen['length'])
     record = {'method': 'top-band-wrap-v1', 'reference': first['reference'],
               'first_choice': {'start': chosen['start'], 'length': chosen['length'], **_read(first)},
@@ -150,7 +158,7 @@ def _shape_rank(candidates, chosen, wrap_pop, held_edge=None):
     record.update(measured=len(candidates)-unread, unread=unread)
     held = None
     if held_edge is not None:
-        picked, held = _held_rank(candidates, calm, chosen, wrap_pop, held_edge)
+        picked, held = _held_rank(candidates, calm, chosen, wrap_pop, held_edge, length_cap)
         record['held_edge'] = held
         if picked is not None:
             record.update(applied=True, chosen={'start': picked['start'], 'length': picked['length'], 'pop': picked['seam_pop'],
@@ -172,12 +180,14 @@ def _shape_rank(candidates, chosen, wrap_pop, held_edge=None):
 
 def detect(distances, trajectory, *, min_len, max_len, gait_floor,
            periodicity_min, double_tolerance, double_search, max_fraction=.5, signals=None, wrap_pop=None,
-           held_edge=None):
+           held_edge=None, length_cap=None):
     """`wrap_pop(start, length)`, when given, is the top band's jump at that cut's wrap
     (repair.seam_pop): a chosen cut that pops is chosen again (`_shape_rank`), and a search that finds
     nothing raises with the windows it refused, popping ones last (`ValueError.diagnostics`).
     `held_edge` (loop.HeldEdge) reads the held side below the top of a cut chosen again; the cut it
-    takes may be two cycles long (`cycles` 2 in the result)."""
+    takes may be two cycles long (`cycles` 2 in the result), but never longer than `length_cap`, an
+    explicit --max-len: the caller's ceiling on the cut, which `max_len` alone does not mark (the
+    state's default window is one too)."""
     n = len(distances)
     # A cycle has to be seen repeating: half the clip by default, more for the gait fallback.
     lo, hi = max(6, min_len), min(max_len, int(n*max_fraction))
@@ -271,7 +281,7 @@ def detect(distances, trajectory, *, min_len, max_len, gait_floor,
                  key=lambda row: (row['start'], row['score'], row['length']))
     shape = None
     if wrap_pop is not None:
-        chosen, shape = _shape_rank(candidates, chosen, wrap_pop, held_edge)
+        chosen, shape = _shape_rank(candidates, chosen, wrap_pop, held_edge, length_cap)
     radius, js = _around(chosen['start'], chosen['length'])
     profile = _profile(distances, js, radius, lo, hi)
     fundamental = period_mod.screen(

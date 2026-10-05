@@ -319,9 +319,15 @@ def held_edge_verdict(shape: dict[str, Any] | None) -> list[str]:
                 "closes below its top is not known"]
     if chosen["closes"]:
         return []
-    return [f"the held part does not close at the wrap on the {held['side']} side of the silhouette, below its top: "
-            f"{chosen['seam']:.2f}x its rows' median step (over {held['reference']:g}); no window one or two cycles long "
-            "closes it — it swings on a beat of its own"]
+    line = (f"the held part does not close at the wrap on the {held['side']} side of the silhouette, below its top: "
+            f"{chosen['seam']:.2f}x its rows' median step (over {held['reference']:g}); ")
+    capped = held.get("two_cycle_capped")
+    if capped:
+        # An explicit --max-len is the caller's ceiling: windows two cycles long past it are not read.
+        low, high = capped["lengths_over"]
+        return [line + f"no window one cycle long closes it, and windows two cycles long ({low}-{high} frames) are over "
+                f"--max-len {capped['max_len']}, so they were not read"]
+    return [line + "no window one or two cycles long closes it — it swings on a beat of its own"]
 
 
 def measure_jolt(frames: list[Image.Image], *, facing: str = "right") -> dict[str, Any]:

@@ -342,12 +342,18 @@ A cut with fewer than two clip frames on either side has nothing to read its wra
    that cannot be read is not taken) is cut, the smallest held seam first: `cycle.cycles` is **2**,
    `cycle.period_local` half its length, `cycle.seam_pop.chosen.cycles` 2 and `strip.json` `cycles: 2`.
    `two_cycle` records the lengths tried and how many were `measured`, `unread`, `top_pops` and
-   `closing`.
+   `closing`. An explicit `--max-len` is the caller's ceiling on the cut and stays one: a window two
+   steps long over it is not read (`two_cycle_capped`: `max_len`, `lengths_over`), and where every
+   such length is over it, nothing two steps long is read at all. The state's default window is no
+   ceiling here: without `--max-len` every length is read.
 3. If no window one or two steps long closes it, the top band's choice stands (as above),
    `held_edge.chosen` records its seam, and `jolt.warnings` and stderr gain
    `video-loop: warning: the held part does not close at the wrap on the right side of the
    silhouette, below its top: 5.50x its rows' median step (over 1.2); no window one or two cycles
-   long closes it — it swings on a beat of its own`. A side that could not be read is said as well.
+   long closes it — it swings on a beat of its own`. Where `--max-len` kept windows two steps long
+   from being read, the line ends `no window one cycle long closes it, and windows two cycles long
+   (47-49 frames) are over --max-len 25, so they were not read` instead. A side that could not be
+   read is said as well.
 
 A first choice whose top does not pop reads nothing here: a walk without a part held above its head
 is cut, written and warned about exactly as before.
@@ -383,7 +389,9 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   cuts two steps where a held part closes only there (section 3, "The held side") and marks it
   `cycles: 2` in `strip.json`. The alignment does not stop on it: its length counts per cycle toward
   the set's length, and it is resampled to twice that length, keeping both cycles (`cycles_kept` on
-  its row and in its `strip.json` `cycle_align`; its suspects carry `status: "declared"`). A
+  its row and in its `strip.json` `cycle_align`; its suspects carry `status: "declared"`). Only a
+  loop whose `strip.json` declares `cycles` gets `cycles_kept`: every other loop's row, `strip.json`
+  and cells are written as before, byte for byte. A
   `--cycles` count given for it is still the last word: `--cycles <loop>=2` takes one cycle out of
   it (the held part then swings back at that cut's wrap), `=1` aligns it at the set's length.
 - **Two cycles in one loop are stopped, and counted by whoever looks**: one length for the set is
