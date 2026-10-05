@@ -13,6 +13,8 @@ import math
 from sprite_gen._deps import np
 from sprite_gen.video import period as period_mod
 
+REFUSED_SHOWN = 12  # refused windows a failed search reports, as many as a found cycle's candidates
+
 
 def _around(start, length):
     """The frames whose repeats are compared for a cut at `start`: a quarter of the cut either side."""
@@ -30,22 +32,75 @@ def _profile(distances, js, radius, lo, hi):
     return profile
 
 
+def _measure(distances, trajectory, start, length, profile):
+    """The parts of a window's score, for a window the search refused (`refused`): the same sums as
+    a candidate's, so a refused window and a candidate read alike."""
+    step = float(np.diag(distances[start:start+length, start:start+length], 1).mean())
+    if step <= 1e-10 or length not in profile:
+        return None
+    ratio = float(distances[start+length-1, start])/step
+    x = np.arange(length)
+    segment = trajectory[start:start+length]
+    residual = float(np.abs(segment-np.polyval(np.polyfit(x, segment, 1), x)).mean())
+    error = profile[length]
+    return {'start': start, 'length': length, 'score': error/step + .3*abs(math.log(max(.01, ratio))) + residual,
+            'ratio': ratio, 'context_repeat_over_step': error/step, 'drift_line_residual_analysis_px': residual}
+
+
+def _shape_rank(candidates, chosen, wrap_pop):
+    """Choose again when the chosen cut's top pops at the wrap (`wrap_pop`, repair.seam_pop on the
+    analysed frames): among the candidates that do not pop, the same score tolerance, then the
+    smallest pop. Nothing is measured past the first choice when it does not pop, so a cut without
+    a thin part swinging on its own beat is chosen exactly as before."""
+    first = wrap_pop(chosen['start'], chosen['length'])
+    record = {'method': 'top-band-wrap-v1', 'reference': first['reference'],
+              'first_choice': {'start': chosen['start'], 'length': chosen['length'], 'pop': first['pop']},
+              'applied': False}
+    if not first['pops']:
+        return chosen, record
+    calm = []
+    for row in candidates:
+        measured = wrap_pop(row['start'], row['length'])
+        row['seam_pop'] = measured['pop']
+        if not measured['pops']:
+            calm.append(row)
+    record['measured'] = len(candidates)
+    if not calm:
+        record['why'] = 'every candidate pops at the wrap; the first choice is kept'
+        return chosen, record
+    cutoff = min(row['score'] for row in calm)*1.15+1e-8
+    picked = min((row for row in calm if row['score'] <= cutoff),
+                 key=lambda row: (row['seam_pop'], row['score'], row['start'], row['length']))
+    record.update(applied=True, chosen={'start': picked['start'], 'length': picked['length'], 'pop': picked['seam_pop']})
+    return picked, record
+
+
 def detect(distances, trajectory, *, min_len, max_len, gait_floor,
-           periodicity_min, double_tolerance, double_search, max_fraction=.5, signals=None):
+           periodicity_min, double_tolerance, double_search, max_fraction=.5, signals=None, wrap_pop=None):
+    """`wrap_pop(start, length)`, when given, is the top band's jump at that cut's wrap
+    (repair.seam_pop): a chosen cut that pops is chosen again (`_shape_rank`), and a search that finds
+    nothing raises with the windows it refused, popping ones last (`ValueError.diagnostics`)."""
     n = len(distances)
     # A cycle has to be seen repeating: half the clip by default, more for the gait fallback.
     lo, hi = max(6, min_len), min(max_len, int(n*max_fraction))
     if hi < lo:
         raise ValueError(f"automatic motion cycle window [{lo}, {hi}] has no repeated cycle")
     candidates = []
+    refused = []
     for length in range(max(lo, gait_floor), hi+1):
         radius = max(2, length//4)
         for start in range(n-length-radius-1):
             _, js = _around(start, length)
             profile = _profile(distances, js, radius, lo, hi)
+
+            def refuse(why, start=start, length=length, profile=profile):
+                row = _measure(distances, trajectory, start, length, profile)
+                if row is not None:
+                    refused.append({**row, 'refused': why})
             minima = [lag for lag in profile if lag-1 in profile and lag+1 in profile
                       and profile[lag] <= min(profile[lag-1], profile[lag+1]) and lag <= hi]
             if not minima:
+                refuse('no local repeat minimum')
                 continue
             deepest = min(profile[lag] for lag in minima)
             period = min(lag for lag in minima if profile[lag] <= deepest*1.15+1e-4)
@@ -53,26 +108,31 @@ def detect(distances, trajectory, *, min_len, max_len, gait_floor,
             if period < gait_floor:
                 doubles = [lag for lag in minima if abs(lag-2*period) <= double_search and lag >= gait_floor]
                 if not doubles:
+                    refuse('one step: no repeat near twice it')
                     continue
                 doubled = min(doubles, key=profile.get)
                 if profile[doubled] > profile[period]*(1+double_tolerance)+1e-4:
+                    refuse('one step: twice it repeats worse')
                     continue
                 guard = {'applied': True, 'from': period, 'to': doubled,
                          'gait_floor': gait_floor, 'reason': 'local-two-step-repeat'}
                 period = doubled
             # Allow one frame of cut quantization around the measured local lag.
             if abs(length-period) > 1 or profile.get(length, math.inf) > profile[period]*1.15+1e-4:
+                refuse(f'the local repeat is {period} frames')
                 continue
             baseline = float(np.mean(list(profile.values())))
             error = profile[length]
             depth = 1-error/baseline if baseline > 0 else 0
             step = float(np.diag(distances[start:start+length, start:start+length], 1).mean())
             if depth < periodicity_min or step <= 1e-10 or error/step > 2:
+                refuse('repeat too shallow' if depth < periodicity_min else 'repeat error over two steps')
                 continue
             # A still/rest segment matching another still is not a repeated gait.
             first_motion = float(distances[js[:-1], js[1:]].mean())
             second_motion = float(distances[js[:-1]+length, js[1:]+length].mean())
             if min(first_motion, second_motion) < .25*step:
+                refuse('a still segment')
                 continue
             ratio = float(distances[start+length-1, start])/step
             x = np.arange(length)
@@ -87,12 +147,31 @@ def detect(distances, trajectory, *, min_len, max_len, gait_floor,
                 'drift_line_residual_analysis_px': residual, 'half_period_guard': guard,
             })
     if not candidates:
-        raise ValueError("no periodic cycle found — no supported local two-step repeat after drift analysis")
+        exc = ValueError("no periodic cycle found — no supported local two-step repeat after drift analysis")
+        # The windows the search measured and refused, best first: a caller that must deliver anyway
+        # (a forced cut) takes one the engine measured instead of the whole clip.
+        refused.sort(key=lambda row: (row['score'], row['start'], row['length']))
+        shown = refused[:REFUSED_SHOWN]
+        if wrap_pop is not None:
+            pops = {}
+            for row in shown:
+                measured = wrap_pop(row['start'], row['length'])
+                row['seam_pop'] = measured['pop']
+                pops[row['start'], row['length']] = measured['pops']
+            shown.sort(key=lambda row: (pops[row['start'], row['length']], row['score'], row['start'], row['length']))
+        exc.diagnostics = {'kind': 'periodic', 'method': 'local-repeat-drift-v1', 'status': 'refused',
+                           'window': [lo, hi], 'refused_count': len(refused),
+                           'order': 'score' + (', windows whose top pops at the wrap last' if wrap_pop is not None else ''),
+                           'candidates': shown}
+        raise exc
     candidates.sort(key=lambda row: (row['score'], row['start'], row['length']))
     # Equivalent-quality candidates: prefer the earliest demonstrated repeat.
     cutoff = candidates[0]['score']*1.15+1e-8
     chosen = min((r for r in candidates if r['score'] <= cutoff),
                  key=lambda row: (row['start'], row['score'], row['length']))
+    shape = None
+    if wrap_pop is not None:
+        chosen, shape = _shape_rank(candidates, chosen, wrap_pop)
     radius, js = _around(chosen['start'], chosen['length'])
     profile = _profile(distances, js, radius, lo, hi)
     fundamental = period_mod.screen(
@@ -105,4 +184,5 @@ def detect(distances, trajectory, *, min_len, max_len, gait_floor,
         'review_recommended': True, 'candidate_count': len(candidates),
         'best_score': candidates[0]['score'], 'equivalent_score_tolerance': .15,
         'candidates': candidates[:12],
+        **({'seam_pop': shape} if shape is not None else {}),
     }
