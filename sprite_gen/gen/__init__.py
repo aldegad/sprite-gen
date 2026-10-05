@@ -45,6 +45,8 @@ from pathlib import Path
 from typing import Any
 
 from sprite_gen.spec.runio import atomic_write_text
+from sprite_gen.video import body_plan as body_mod
+from sprite_gen.video.body_plan import Body
 
 from . import chroma as chroma_mod
 from . import facing as facing_mod
@@ -350,6 +352,7 @@ def generate_image(
     facing_fix: str = "none",
     view: str | None = None,
     handed: list[handed_mod.Handed] | None = None,
+    body_plan: list[Body] | None = None,
     model: str | None = None,
     aspect_ratio: str | None = None,
     quality: str | None = None,
@@ -374,7 +377,7 @@ def generate_image(
         raise SystemExit("gen: empty prompt; pass --prompt or --prompt-file")
     if facing is not None:
         facing_mod.validate(facing, facing_fix)
-    _check_view(view, facing, facing_fix, handed)
+    _check_view(view, facing, facing_fix, handed, body_plan)
     out = out.expanduser().resolve()
     refs = [Path(r).expanduser().resolve() for r in (refs or [])]
     for ref in refs:
@@ -397,7 +400,7 @@ def generate_image(
     # The key is the engine's plan when `auto` stepped down for the refs, so the engine asks for it: a
     # ref prompt with no key background is answered on white or another light ground, and keying that
     # takes the outline and light fills with it (2026-10-04). A key the prompt already names stays.
-    parts = still_prompt(prompt, view=view, facing=facing, handed=handed, refs=bool(refs),
+    parts = still_prompt(prompt, view=view, facing=facing, handed=handed, body_plan=body_plan, refs=bool(refs),
                          key=chroma_key if strategy_source == STRATEGY_SOURCE_REFS else None,
                          layout=layout_guide_cell(aspect_ratio) if layout_guide else None)
     prompt = parts.text
@@ -539,7 +542,8 @@ def generate_image(
             extra={**run.extra, **({"trim_alpha": trim_stats} if trim_stats else {}),
                    **({"facing": facing_report} if facing_report else {}),
                    **({"view": {"direction": view, "facing": facing if view in handed_mod.LATERAL_VIEWS else None,
-                                "handed": [vars(h) for h in handed or []]}} if view else {}),
+                                "handed": [vars(h) for h in handed or []],
+                                **({"body_plan": [vars(b) for b in body_plan]} if body_plan else {})}} if view else {}),
                    **({"layout_guide": guide_cell} if guide_cell else {}),
                    **({"prompt_notes": parts.notes} if parts.notes else {})},
         )
@@ -548,11 +552,16 @@ def generate_image(
             shutil.rmtree(workdir, ignore_errors=True)
 
 
-def _check_view(view: str | None, facing: str | None, facing_fix: str, handed: list[handed_mod.Handed] | None) -> None:
-    """Refuse a `--direction` / `--facing` / `--handed` combination that cannot be drawn, before anything runs."""
+def _check_view(view: str | None, facing: str | None, facing_fix: str, handed: list[handed_mod.Handed] | None,
+                body_plan: list[Body] | None = None) -> None:
+    """Refuse a `--direction` / `--facing` / `--handed` / `--body-plan` combination that cannot be drawn, before
+    anything runs."""
     if view is None:
         if handed:
             raise SystemExit("gen: --handed needs --direction: where an item shows depends on the view")
+        if body_plan:
+            raise SystemExit("gen: --body-plan needs --direction: it changes the view sentence, which only "
+                             "--direction adds")
         return
     handed_mod.validate_view(view, facing)
     if view not in handed_mod.LATERAL_VIEWS and facing is not None:
@@ -563,24 +572,28 @@ def _check_view(view: str | None, facing: str | None, facing_fix: str, handed: l
 
 
 def still_prompt(prompt: str, *, view: str | None = None, facing: str | None = None,
-                 handed: list[handed_mod.Handed] | None = None, refs: bool = False, key: str | None = None,
+                 handed: list[handed_mod.Handed] | None = None, body_plan: list[Body] | None = None,
+                 refs: bool = False, key: str | None = None,
                  layout: dict[str, Any] | None = None) -> prompt_parts.Prompt:
     """The prompt a still is drawn from: the caller's text, then the engine's pieces (`prompt_parts.Prompt.add`;
-    without `handed`, 2.22.0's prompt to the byte). In order:
+    without `handed` or `body_plan`, 2.22.0's prompt to the byte). In order:
 
     - `view` (`--direction`): the sentence for drawing the still at that view, turned to `facing` (the side and
-      diagonal views), then where each `handed` item is in it (`handedness.text`);
+      diagonal views; a `body_plan` that is not one biped gets it without the feet, chest, hips, shoulders and
+      shoes and with what it stands on, `still_view_text`), then where each `handed` item is in it
+      (`handedness.text`);
     - with `refs` and a `facing`: the turn over the reference (`facing.prompt_suffix`);
     - `key` (green / magenta, a ref run `auto` planned to key): the key background line, unless the prompt
       names a key background already;
     - `layout` (the `--layout-guide` cell): where the guide's lines are.
     """
-    parts = prompt_parts.Prompt(prompt)
+    figures = body_mod.figures(body_plan)
+    parts = prompt_parts.Prompt(prompt, caller=f"{prompt} {figures}" if figures else None)
     if view is not None:
         # The view sentences are the video pipeline's (a still is drawn for the clip that starts from it).
         from sprite_gen.video.batch import still_view_text
 
-        text = still_view_text(view, facing or "right")
+        text = still_view_text(view, facing or "right", body_plan)
         parts.add("view", text[0].upper() + text[1:] + ".", facing=facing or prompt_parts.NO_TURN)
         if handed:
             parts.add("handed", handed_mod.text(handed, view, facing), sep=" ", handed=handed)
@@ -626,6 +639,7 @@ def _run(args: argparse.Namespace) -> int:
         facing_fix=args.facing_fix,
         view=getattr(args, "direction", None),
         handed=handed_mod.parse_all(list(getattr(args, "handed", None) or [])) or None,
+        body_plan=body_mod.parse_all(list(getattr(args, "body_plan", None) or [])) or None,
         model=args.model,
         aspect_ratio=args.aspect_ratio,
         quality=args.quality,
@@ -755,6 +769,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--facing-fix", choices=facing_mod.FIXES, default="none", help="with --ref and --facing: record only (none, default), or opt into mirror / one regen")
     parser.add_argument("--direction", choices=handed_mod.VIEWS, help="draw the still at this sprite view: the engine's view sentence is added to the prompt (side and diagonal views also take --facing right|left)")
     parser.add_argument("--handed", action="append", default=[], metavar="ITEM=SIDE [PART]", help="with --direction: an asymmetric item on one of the character's own sides, e.g. 'the black smartwatch=left wrist' (repeatable); the prompt says where it is in this view, and the still is never mirrored")
+    parser.add_argument("--body-plan", action="append", default=[], metavar="PLAN | FIGURE=PLAN", help="with --direction: what the character stands on, biped (default), quadruped or legless; a scene of several figures names each, e.g. 'the man=biped' 'the horse=quadruped' (repeatable): the view sentence names no part the body lacks, as video-set --body-plan")
     parser.add_argument("--trim-alpha", action="store_true", help="with --transparent: crop the published PNG to its opaque bbox so the bottom edge is the foot line (margins reported)")
     parser.add_argument(
         "--layout-guide",

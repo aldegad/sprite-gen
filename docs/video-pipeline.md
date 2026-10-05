@@ -255,17 +255,18 @@ films from the base itself. Side and diagonal walks, and every other state, film
 
 ### A body that is not a person — `--body-plan`
 
-The measured sentences above were measured on people, and four of them name what only a person has:
+The measured sentences above were measured on people, and five of them name what only a person has:
 the Lite walk calm swings the arms (`LITE_WALK_TEXT`), the Lite back-diagonal head hold moves the
 arms (`LITE_HEAD_TEXT`), the idle plants both feet and settles the chest, shoulders and arms
-(`MOTION_TEXT["idle"]`), and the front or back mid-step redraw puts one foot under each hip with the
-arms swinging (`WALK_START_TEXT`). Said of a horse, a pig or a dog, they walk it on a person's legs or
+(`MOTION_TEXT["idle"]`), the front or back mid-step redraw puts one foot under each hip with the
+arms swinging (`WALK_START_TEXT`), and the view sentence the still is drawn with points the chest,
+hips and the toes or heels of both feet at the viewer, or the backs of the shoes (`STILL_VIEW_TEXT`). Said of a horse, a pig or a dog, they walk it on a person's legs or
 stand it up on two. The walk and run sentences themselves name no limb (since 2.0.0's "`video-set`
-motion templates no longer assume a biped"); these four came later (idle 2.9.0, the rest 2.18.0) and
-were said to every body.
+motion templates no longer assume a biped"); these came later and were said to every body.
 
-`video-set --body-plan`, `video-prompt --body-plan` and `build_prompt(body_plan=...)`,
-`walk_start_prompt(body_plan=...)` name what the subject stands on (`sprite_gen/video/body_plan.py`):
+`video-set --body-plan`, `video-prompt --body-plan`, `gen --direction --body-plan` and
+`build_prompt(body_plan=...)`, `walk_start_prompt(body_plan=...)`, `still_view_text(body_plan=...)`,
+`gen.still_prompt(body_plan=...)` name what the subject stands on (`sprite_gen/video/body_plan.py`):
 `biped` (the default), `quadruped` or `legless` for the character, or one `<figure>=<plan>` per figure
 of a scene (`--body-plan "the man=biped" --body-plan "the horse=quadruped"`). No body plan, or one
 biped, keeps every prompt byte for byte. Any other body gets:
@@ -276,12 +277,15 @@ biped, keeps every prompt byte for byte. Any other body gets:
 | idle | `IDLE_TEXT_ANY_BODY`: the same stillness, standing or resting as in the image, no feet counted, no chest, shoulders or arms |
 | Lite walk calm | `LITE_WALK_TEXT_LEGGED` (no arm swing; never trotting or galloping) or, with a figure without legs, `LITE_WALK_TEXT_LEGLESS` (no steps or feet) |
 | Lite back-diagonal head hold | `LITE_HEAD_TEXT_ANY_BODY`: what moves is what it moves on and its loose ends (a tail, a mane, hair) |
+| the still's view sentence (`still_view_text`, `gen --direction`) | `STILL_VIEW_TEXT_ANY_BODY` for the front, back and diagonal views (where the body and head point; no feet, chest, hips, shoulders or shoes), the side view's `VIEW_TEXT` as it is, each ending in what it stands on (`body_plan.still_text`): ", standing on all four legs, not rearing onto its hind legs" / ", resting on its base without legs, never growing any" / ", each figure with the body it has: the man on two legs; the horse on all four legs, never rising onto its hind legs" |
 | front or back mid-step redraw | `WALK_START_TEXT_ANY_BODY`: one leg lifted, the others planted, then what it stands on; a body without legs has no step to catch and films from its base (`starts_mid_step` is false, `video-prompt` gives no `start_still`) |
 
 Only the biped sentences were measured on clips; the others say no part the body lacks and are not
 yet measured. `--handed` keeps its own sentences (its arm sentences are for an item on an arm), and an
-attack's grip sentence (`HOLD_TEXT["attack"]`) still speaks of hands. `video-set` and `video-prompt
---json` record the plan as `body_plan`.
+attack's grip sentence (`HOLD_TEXT["attack"]`) still speaks of hands. `video-set`, `video-prompt
+--json` and `gen`'s `extra.view` record the plan as `body_plan`. An app that draws the still itself
+with `still_view_text` and films with `build_prompt` passes the same `body_plan` to both: the clip
+starts from that still.
 
 ### A clip from a video MCP on your agent — ZCRE
 

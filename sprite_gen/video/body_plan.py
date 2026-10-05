@@ -4,7 +4,8 @@
 The engine's measured walk and idle sentences were measured on people, and some name what only a person
 has: the Lite walk's arm swing (`batch.LITE_WALK_TEXT`), the arms in the Lite back-diagonal head hold
 (`LITE_HEAD_TEXT`), the idle's two feet, chest, shoulders and arms (`MOTION_TEXT["idle"]`), and the front
-or back walk's mid-step redraw, one foot under each hip and the arms swinging (`WALK_START_TEXT`). Said of a
+or back walk's mid-step redraw, one foot under each hip and the arms swinging (`WALK_START_TEXT`), and the
+front, back and diagonal still a clip starts from, both feet, chest, hips and shoes (`STILL_VIEW_TEXT`). Said of a
 horse, they walk it on a person's legs or stand it up on two. The caller names the body plan (`parse`,
 `--body-plan`): one for the character ("quadruped"), or one per figure in a scene ("the man=biped",
 "the horse=quadruped").
@@ -14,6 +15,10 @@ horse, they walk it on a person's legs or stand it up on two. The caller names t
 | biped | two legs | the measured sentences, as without a body (the default) |
 | quadruped | four legs | it stays on all four legs and never rises onto its hind legs |
 | legless | no legs | it has no legs and never grows any; no mid-step redraw (no step to catch) |
+
+The still a clip starts from is drawn with a view sentence (`batch.still_view_text`, `gen --direction`)
+that counts a person's feet and names the chest, hips, shoulders and shoes; a body that is not one biped
+gets it without them, ending in what it stands on (`still_text`).
 
 No body, or one biped, is the 2.22.0 prompt to the byte (`tests/gen/test_prompt_freeze.py`). Any other
 body gets the sentences without the parts it lacks and, after the motion sentence, what it stands on
@@ -37,6 +42,12 @@ SCENE_TEXT = {
 ONE_TEXT = {
     "quadruped": "It stays on all four legs, as in the image, and never rises onto its hind legs.",
     "legless": "It has no legs, as in the image, and never grows legs or feet.",
+}
+# One figure, at the end of the view sentence a still is drawn with (`still_text`): the still may be drawn
+# from words alone, so it says what the body stands on rather than "as in the image".
+STILL_ONE_TEXT = {
+    "quadruped": "standing on all four legs, not rearing onto its hind legs",
+    "legless": "resting on its base without legs, never growing any",
 }
 
 
@@ -89,6 +100,16 @@ def text(bodies: list[Body] | None) -> str:
         return ONE_TEXT[bodies[0].plan]
     return "Each figure keeps the body it has in the image: " + "; ".join(
         f"{b.figure} {SCENE_TEXT[b.plan]}" for b in bodies) + "."
+
+
+def still_text(bodies: list[Body] | None) -> str:
+    """What the subject stands on, at the end of a still's view sentence (lower case, no full stop); "" for
+    no body or one biped."""
+    if not bodies or (not scene(bodies) and bodies[0].plan == "biped"):
+        return ""
+    if not scene(bodies):
+        return STILL_ONE_TEXT[bodies[0].plan]
+    return "each figure with the body it has: " + "; ".join(f"{b.figure} {SCENE_TEXT[b.plan]}" for b in bodies)
 
 
 def figures(bodies: list[Body] | None) -> str:

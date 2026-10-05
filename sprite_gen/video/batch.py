@@ -104,13 +104,44 @@ STILL_VIEW_TEXT = {
         "shoulder, and the feet pointing diagonally up and to the {facing} so the backs of the shoes face the viewer at an angle"
     ),
 }
+# The same views for a body that is not one biped (`body_plan`): where the body and head point, with no feet
+# counted and no chest, hips, shoulders or shoes, so a horse's still is not drawn standing on two feet.
+# `{body}` is the character's or every figure's; then what it stands on (`body_plan.still_text`). Not measured.
+STILL_VIEW_TEXT_ANY_BODY = {
+    "front": (
+        "seen from the front: {body} turned to face the viewer squarely, the face centred and looking straight out of "
+        "the image, not turned toward either side even when a reference picture shows it from another angle"
+    ),
+    "back": (
+        "seen from directly behind: {body} turned fully away from the viewer, the back of the body and of the head "
+        "facing straight at the viewer, the face completely hidden and not turned toward either side or looking back, "
+        "even when a reference picture shows it from another angle"
+    ),
+    "front_diagonal": (
+        "seen from a three-quarter front angle: {body} turned about 45 degrees to the {facing}, halfway between facing "
+        "the viewer and facing {facing}, the face looking the same way as the body and the front of the body pointing "
+        "toward the lower {facing}"
+    ),
+    "back_diagonal": (
+        "seen from a three-quarter back angle: {body} turned about 45 degrees away from the viewer toward the upper "
+        "{facing}, halfway between facing away and facing {facing}, the face hidden and not looking back, and the "
+        "body pointing diagonally up and to the {facing} so its back faces the viewer at an angle"
+    ),
+}
 DIAGONAL_VIEWS = frozenset({"front_diagonal", "back_diagonal"})
 
 
-def still_view_text(direction: str, facing: str = "right") -> str:
-    """The view sentence for drawing a still seen from `direction` (`STILL_VIEW_TEXT`, else `VIEW_TEXT`)."""
+def still_view_text(direction: str, facing: str = "right", body_plan: list[Body] | None = None) -> str:
+    """The view sentence for drawing a still seen from `direction` (`STILL_VIEW_TEXT`, else `VIEW_TEXT`); for a
+    `body_plan` that is not one biped, `STILL_VIEW_TEXT_ANY_BODY` and what it stands on (`body_plan.still_text`).
+    None, or one biped, is the sentence to the byte."""
     validate_facing(facing)
-    return STILL_VIEW_TEXT.get(direction, VIEW_TEXT[direction]).format(facing=facing)
+    stands_on = body_mod.still_text(body_plan)
+    if not stands_on:
+        return STILL_VIEW_TEXT.get(direction, VIEW_TEXT[direction]).format(facing=facing)
+    body = "every figure's whole body and head" if body_mod.scene(body_plan) else "the whole body and head"
+    view = STILL_VIEW_TEXT_ANY_BODY.get(direction, VIEW_TEXT[direction]).format(facing=facing, body=body)
+    return f"{view}, {stands_on}"
 # What stays put while an attack moves, said once: after the built-in attack sentence and after a
 # caller's own motion paragraph alike. A request interpreter writes its motion before the still
 # exists, so it cannot know where the other hand's shield or lantern is drawn; the engine holds it.
