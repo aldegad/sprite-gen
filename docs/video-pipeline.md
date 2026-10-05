@@ -289,7 +289,9 @@ The set stage is the same step `video-set` runs after its loops are cut (`--alig
 default): one `--loop-dir` per direction of the same walk or run, one `--view` each in the same
 order, so that every loop starts as the same own foot lands wherever its view can tell the feet
 apart. A frame that falls between two source frames is made by RIFE, and the command fails where one
-is needed and RIFE is not installed; `--between nearest` makes none.
+is needed and RIFE is not installed; `--between nearest` makes none. A frame RIFE made that melted
+(lost its outline where legs crossed too far) is replaced by the nearer source frame and named
+(`--between auto`, the default; [loop repair](loop-repair.md) section 4).
 
 `--character` or `--motion` words that turn the subject another way than `--facing`, or put a
 `--handed` item on its other side, come back in `warnings`; the prompt is the same either way
@@ -876,13 +878,14 @@ A front or back walk films from its base redrawn mid-step (`--walk-start redraw`
 image generation each, `--still-provider` picks the provider; see §2). After the loops are cut,
 every walk or run filmed in two or more directions is given one cycle
 length: each loop is resampled to the set's median length (only the frames that fall between two
-source frames are made, by RIFE; `--align-between nearest` takes the nearer source frame instead)
+source frames are made, by RIFE, and one that melted takes the nearer source frame instead (`--align-between
+auto`, the default; `rife` keeps every made frame, `nearest` makes none))
 and turned to start as the same own foot lands in every view — read off the legs, never off an
 ear or a hat's point, and the foot told apart by the item's own view and facing (`--align-cycles
 auto`, the default; `off` keeps each loop's own length). The same step stands alone as
 `sprite-gen video-cycle-align --loop-dir … --view …`. `set.report.json` carries `cycle_align`
 per state (with `start_foot` per item), a failed alignment is listed as `cycle-align:<state>`,
-and a made frame with a smear or a loop whose foot could not be named is a line under
+and a made frame with a smear, one that melted and was replaced, or a loop whose foot could not be named is a line under
 `warnings`. Two cases skip the alignment with a warning instead of failing it (`applied: false`,
 `reason`, and a line under the report's `warnings`): no RIFE (`rife-not-installed`), and a loop
 that may hold more than one cycle (`cycle-suspects`, the loops under `suspects`; count them, then

@@ -6,10 +6,11 @@ set measured 16 to 27 frames). A game that turns a character mid-stride wants ev
 to be the same number of frames and to start on the same step. So every loop of the set is
 resampled to the set's median length L*: frame k of the new loop is the source loop at time
 k·L/L* (cyclic, offset 0), so a time that lands on a source frame takes that frame as filmed
-and only the times between two frames are made by RIFE (or, `--between nearest`, take the nearer
-source frame). Then each loop is turned to start as a heel lands — read off the stride, the
-lowest row or the body's top line (`foot_strike`), never off the frame's top edge, which a long
-ear owns. docs/loop-repair.md section 4.
+and only the times between two frames are made by RIFE — each kept unless it smeared or lost its
+outline, where the nearer source frame is taken instead (`--between auto`, the default; `rife`
+keeps every made frame and warns, `nearest` makes none). Then each loop is turned to start as a
+heel lands — read off the stride, the lowest row or the body's top line (`foot_strike`), never off
+the frame's top edge, which a long ear owns. docs/loop-repair.md section 4.
 
 Every frame between two source frames softens a little, so the length is the median (the one
 that needs the fewest made frames across the set), and a loop already that long is not touched.
@@ -70,7 +71,8 @@ FOOT_MARGIN = 0.01
 # A cue that does not swing with the step is the drawing's own flicker: its once-a-cycle swing (first
 # harmonic) must be at least this share of its spread over the cycle.
 CUE_RHYTHM = 0.25
-BETWEEN = ("rife", "nearest")  # how a time between two source frames is filled (resample)
+BETWEEN = ("auto", "rife", "nearest")  # how a time between two source frames is filled (resample)
+DEFAULT_BETWEEN = "auto"
 # A set with a loop the two-cycle screen suspects and no --cycles for it: fail (default) stops the
 # set before anything is rewritten, warn aligns it as it is and names the loop in the warnings.
 MULTI_CYCLE = ("fail", "warn")
@@ -78,15 +80,30 @@ CYCLES = (1, 2, 3)  # what --cycles <loop>=k may say a loop holds
 # A made frame whose dark pixels inside the body exceed both neighbours' by this fraction of its
 # solid pixels is named in the report's warnings: a smear, not a dark part that moved.
 SMEAR_WARN = 0.001
+# A made frame whose coverage edge has no outline beyond both neighbours' by this fraction of its
+# edge (`rife.smear`'s `outline_loss`) has melted: legs that crossed too far for the flow became one
+# shape of fill, or a limb a pale ghost. Outlined legs crossing too far melt at 32 %, a short step
+# the flow follows stays under 3 % (tests/video/test_rife.py; docs/loop-repair.md section 4).
+OUTLINE_WARN = 0.05
+
+
+def faults(measure: dict[str, float]) -> list[str]:
+    """What is wrong with a made frame, by its `rife.smear` measure: `smear` (dark beyond both
+    neighbours, SMEAR_WARN) and `outline` (outline lost beyond both, OUTLINE_WARN)."""
+    return ([*(["smear"] if measure["dark_excess"] > SMEAR_WARN else []),
+             *(["outline"] if measure["outline_loss"] > OUTLINE_WARN else [])])
 
 
 def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Interpolate | None,
-             *, between: str = "rife") -> tuple[list[Image.Image], dict[str, Any]]:
+             *, between: str = DEFAULT_BETWEEN) -> tuple[list[Image.Image], dict[str, Any]]:
     """`frames` as one cycle, resampled to `length` frames at times k·L/length (offset 0).
 
-    A time between two source frames is made by `interpolate` (`between` rife), with what it added
-    measured (`rife.smear`), or takes the nearer source frame (`between` nearest: nothing is made,
-    the motion keeps the filmed frames at up to half a frame off their time)."""
+    A time between two source frames is made by `interpolate`, with what it added and the outline it
+    lost measured (`rife.smear`) and judged (`faults`); `between` auto keeps a made frame with no
+    fault and takes the nearer source frame where it has one, rife keeps every made frame, nearest
+    makes none and takes the nearer source frame (the motion keeps the filmed frames at up to half a
+    frame off their time). Every made frame is listed in `smear` with its `method`: rife (kept) or
+    nearest (the nearer source frame taken instead)."""
     count = len(frames)
     if length < 2:
         raise ValueError(f"cycle length {length} is too short")
@@ -100,25 +117,30 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
         t = k * count / length
         i = int(np.floor(t))
         frac = t - i
+        nearer = frames[(i + (frac >= 0.5)) % count]
         if frac < SNAP:
             out.append(frames[i % count])
         elif frac > 1 - SNAP:
             out.append(frames[(i + 1) % count])
         elif between == "nearest":
-            out.append(frames[(i + (frac >= 0.5)) % count])
+            out.append(nearer)
             nearest_at.append(k)
         else:
             if interpolate is None:
                 raise ValueError(f"frame {k} of {length} falls between source frames and no interpolator is available")
             a, b = frames[i % count], frames[(i + 1) % count]
-            out.append(interpolate(a, b, frac))
-            made_at.append(k)
-            smears.append({"at": k, **rife_mod.smear(out[-1], a, b)})
+            made = interpolate(a, b, frac)
+            measure = rife_mod.smear(made, a, b)
+            wrong = faults(measure)
+            keep = between == "rife" or not wrong
+            out.append(made if keep else nearer)
+            (made_at if keep else nearest_at).append(k)
+            smears.append({"at": k, "method": "rife" if keep else "nearest", **measure, "faults": wrong})
     facts: dict[str, Any] = {"from": count, "to": length, "between": between, "taken": length - len(made_at),
                              "made_by_rife": len(made_at), "made_at": made_at}
-    if between == "nearest":
+    if between != "rife":
         facts["nearest_at"] = nearest_at
-    else:
+    if between != "nearest":
         facts["smear"] = smears
     return out, facts
 
@@ -420,8 +442,20 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     return merged
 
 
+def _fault_line(name: str, m: dict[str, Any]) -> str:
+    """A made frame's faults, in words, and what became of it."""
+    what = [*([f"has {100 * m['dark_excess']:.2f} % more dark pixels inside the body than either source frame beside it — a smear"]
+              if "smear" in m["faults"] else []),
+            *([f"lost its outline on {100 * m['outline_loss']:.2f} % of its edge beyond either source frame beside it — "
+               "a melted or ghost limb"] if "outline" in m["faults"] else [])]
+    if m["method"] == "nearest":
+        return f"{name}: frame {m['at']}: RIFE's frame " + "; ".join(what) + ", so the nearer source frame was taken there (--between auto)"
+    return (f"{name}: frame {m['at']} (made by RIFE) " + "; ".join(what)
+            + "; see it in cycle/, or align with --between auto (the nearer source frame there) or --between nearest")
+
+
 def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: rife_mod.Interpolate | None = None,
-              report_path: Path | None = None, between: str = "rife", views: list[str | None] | None = None,
+              report_path: Path | None = None, between: str = DEFAULT_BETWEEN, views: list[str | None] | None = None,
               start_foot: str = START_FOOT, multi_cycle: str = "fail", cycles: dict[str, int] | None = None,
               state: str | None = None) -> dict[str, Any]:
     """Resample every loop of a set to one length (default: the median), turned to a foot strike —
@@ -492,7 +526,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         # holds one cycle, or the number it holds (each loop's `settle` lists the choices).
         rerun = ["sprite-gen video-cycle-align", *(f"--loop-dir {d}" for d, *_ in loops),
                  *(f"--view {v}" for v in (views or []) if v is not None), *([f"--length {length}"] if length is not None else []),
-                 *([f"--between {between}"] if between != "rife" else []), *([f"--start-foot {start_foot}"] if start_foot != START_FOOT else []),
+                 *([f"--between {between}"] if between != DEFAULT_BETWEEN else []), *([f"--start-foot {start_foot}"] if start_foot != START_FOOT else []),
                  *([f"--state {state}"] if state else []), *([f"--report {report_path}"] if report_path is not None else []),
                  *(f"--cycles {loops[i][0]}={k}" for i, k in sorted(given.items())),
                  *(f"--cycles {e['dir']}=<{'|'.join(s.rpartition('=')[2] for s in e['settle'])}>" for e in stopped)]
@@ -550,9 +584,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         merged = _rebuild(d, meta_path, meta, out, fps, record)
         rows.append({"dir": str(d), "name": meta_path.name[: -len(".strip.json")], **{k: v for k, v in record.items() if k not in ("gif", "webp")},
                      "strip": {k: merged[k] for k in ("frames", "w", "h", "body_h", "delay_ms")}})
-    warnings = [f"{r['name']}: frame {m['at']} (made by RIFE) has {100 * m['dark_excess']:.2f} % more dark pixels inside the body "
-                f"than either source frame beside it — a smear; see it in cycle/, or align with --between nearest"
-                for r in rows for m in r.get("smear", []) if m["dark_excess"] > SMEAR_WARN]
+    warnings = [_fault_line(r["name"], m) for r in rows for m in r.get("smear", []) if m["faults"]]
     warnings = cycle_warnings + warnings
     if len(rows) > 1 and views is None:
         warnings.append("no view given (--view): each loop starts on its larger strike, whichever foot that is")
@@ -566,8 +598,9 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
               "cycles_given": {str(loops[i][0]): k for i, k in given.items()},
               "fps": round(fps, 4), "cycle_seconds": round(target / fps, 4),
               "interpolator": ({"kind": "rife-ncnn-vulkan", **located[0]} if located else
-                               {"kind": "injected"} if any(r["made_by_rife"] for r in rows) else None),
-              "made_by_rife": sum(r["made_by_rife"] for r in rows), "loops": rows}
+                               {"kind": "injected"} if any(r.get("smear") for r in rows) else None),
+              "made_by_rife": sum(r["made_by_rife"] for r in rows),
+              "replaced": sum(1 for r in rows for m in r.get("smear", []) if m["method"] == "nearest"), "loops": rows}
     if report_path is not None:
         loop_mod.write_loop_report(report_path.expanduser().resolve(), report)
     return report
@@ -591,9 +624,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                              "`suspects`; warn aligns it as it is and names it in the warnings")
     parser.add_argument("--state", help="the set's motion state (walk, run), for loops cut before video-loop wrote it in the strip metadata: "
                                         "its gait floor is the shortest cycle the screen looks for")
-    parser.add_argument("--between", choices=BETWEEN, default="rife",
-                        help="a time between two source frames: rife (default) makes that frame, its smear measured per frame in the report; "
-                             "nearest takes the nearer source frame — nothing made, no RIFE needed, the motion up to half a frame off its time")
+    parser.add_argument("--between", choices=BETWEEN, default=DEFAULT_BETWEEN,
+                        help="a time between two source frames: auto (default) makes that frame with RIFE and keeps it unless it smeared "
+                             "or lost its outline (a melted limb), where the nearer source frame is taken and named in the warnings; rife "
+                             "keeps every made frame and warns on those; nearest takes the nearer source frame — nothing made, no RIFE "
+                             "needed, the motion up to half a frame off its time. Every made frame is measured in the report (`smear`)")
 
 
 def parse_cycles(values: list[str]) -> dict[str, int]:
@@ -612,7 +647,7 @@ def parse_cycles(values: list[str]) -> dict[str, int]:
 def run(**kwargs: object) -> int:
     try:
         report = align_set(list(kwargs["loop_dir"]), length=kwargs.get("length"), report_path=kwargs.get("report"),  # type: ignore[arg-type]
-                           between=str(kwargs.get("between") or "rife"), views=kwargs.get("view"),  # type: ignore[arg-type]
+                           between=str(kwargs.get("between") or DEFAULT_BETWEEN), views=kwargs.get("view"),  # type: ignore[arg-type]
                            start_foot=str(kwargs.get("start_foot") or START_FOOT),
                            multi_cycle=str(kwargs.get("multi_cycle") or "fail"), cycles=parse_cycles(list(kwargs.get("cycles") or [])),  # type: ignore[arg-type]
                            state=kwargs.get("state"))  # type: ignore[arg-type]
@@ -622,7 +657,7 @@ def run(**kwargs: object) -> int:
                          f"`{rife_mod.INSTALL_COMMAND}` (docs/loop-repair.md)") from exc
     for line in report["warnings"]:
         print(f"video-cycle-align: warning: {line}", file=sys.stderr)
-    print(json.dumps({k: report[k] for k in ("length", "lengths", "cycles_given", "between", "made_by_rife", "cycle_seconds")}
+    print(json.dumps({k: report[k] for k in ("length", "lengths", "cycles_given", "between", "made_by_rife", "replaced", "cycle_seconds")}
                      | {"loops": [{k: r[k] for k in ("name", "from", "to", "made_by_rife", "turned_by", "turned_on", "start_foot", "seam_ratio")} for r in report["loops"]]},
                      ensure_ascii=False, indent=2))
     return 0
