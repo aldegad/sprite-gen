@@ -723,6 +723,12 @@ def run_item(
             result["loop"]["fundamental"] = {"period": lp["cycle"]["fundamental"]["period"],
                                              "suspects": [{k: row.get(k) for k in ("period", "cycles", "pose", "steps")}
                                                           for row in lp["cycle"]["fundamental"]["suspects"]]}
+        if "steps" in lp["cycle"]:
+            # the cut's steps are known: its frame count is two steps — one cycle — not twice its siblings' one
+            result["loop"]["steps"] = lp["cycle"]["steps"]["count"]
+        if (lp["cycle"].get("step_screen") or {}).get("suspect"):
+            # the cut may be one step of a cycle twice as long (recorded, not cut again)
+            result["loop"]["step_screen"] = {k: lp["cycle"]["step_screen"][k] for k in ("lag", "ratio", "depth", "coverage")}
         if lp.get("motion_anchor", {}).get("applied") is False:
             result["loop"]["motion_anchor"] = lp["motion_anchor"]
         if "rife" in (lp.get("jump_repair") or {}):
@@ -833,9 +839,15 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
                   file=sys.stderr)
             continue
         except align_mod.CycleSuspects as exc:
-            names = ", ".join(Path(e["dir"]).parent.name if Path(e["dir"]).name == "loop" else e["name"] for e in exc.suspects if e["status"] == "stopped")
+            def said(entries: list[dict[str, Any]]) -> str:
+                return ", ".join(Path(e["dir"]).parent.name if Path(e["dir"]).name == "loop" else e["name"] for e in entries)
+            stopped = [e for e in exc.suspects if e["status"] == "stopped"]
+            held = [e for e in stopped if e["candidates"]]
+            step = [e for e in stopped if "one_step" in e]
             out[state] = {"ok": True, "applied": False, "reason": "cycle-suspects",
-                          "why": f"{names} may hold more than one cycle — each loop keeps its own length until its cycles are counted",
+                          "why": " and ".join([*([f"{said(held)} may hold more than one cycle"] if held else []),
+                                               *([f"{said(step)} may be one step (cut it again with video-loop --steps 1 if it is)"] if step else [])])
+                                 + " — each loop keeps its own length until its cycles are counted",
                           "suspects": exc.suspects, "command": exc.command, "report": str(root / f"{state}.cycle-align.json")}
             print(f"video-set: warning: {state}: cycles not aligned — {out[state]['why']}; count them and run "
                   f"`sprite-gen video-cycle-align --cycles <loop>=<k>` ({exc}) (docs/loop-repair.md section 4)", file=sys.stderr)
@@ -885,7 +897,9 @@ def write_table(results: list[dict[str, Any]], path: Path, *, both: bool = False
                 status = "OK (uncorrected; review gait)"
             if "jump_repair" in lp:
                 status += " (jump not repaired: no RIFE)"
-            lines.append(f"| {_view_label(r, both)} | {r['state']} | {lp.get('kind', 'periodic')} | {lp['cycle']} | {lp['period'] if lp['period'] is not None else '-'} | {lp['seam_ratio']:.2f} | {lp['n_out']} | {status} |")
+            # a cut whose steps are known is two of them; one the step screen suspects may be one
+            cycle = f"{lp['cycle']}" + (f" ({lp['steps']} steps)" if lp.get("steps") else " (one step?)" if lp.get("step_screen") else "")
+            lines.append(f"| {_view_label(r, both)} | {r['state']} | {lp.get('kind', 'periodic')} | {cycle} | {lp['period'] if lp['period'] is not None else '-'} | {lp['seam_ratio']:.2f} | {lp['n_out']} | {status} |")
         else:
             lines.append(f"| {_view_label(r, both)} | {r['state']} | - | - | - | - | - | FAIL: {r.get('error', '')[:80]} |")
     text = "\n".join(lines) + "\n"

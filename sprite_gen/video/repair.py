@@ -321,13 +321,16 @@ def held_edge_verdict(shape: dict[str, Any] | None) -> list[str]:
         return []
     line = (f"the held part does not close at the wrap on the {held['side']} side of the silhouette, below its top: "
             f"{chosen['seam']:.2f}x its rows' median step (over {held['reference']:g}); ")
-    capped = held.get("two_cycle_capped")
+    capped = held.get("two_step_capped")
     if capped:
-        # An explicit --max-len is the caller's ceiling: windows two cycles long past it are not read.
+        # An explicit --max-len is the caller's ceiling: windows two lengths long past it are not read.
         low, high = capped["lengths_over"]
-        return [line + f"no window one cycle long closes it, and windows two cycles long ({low}-{high} frames) are over "
+        return [line + f"no window one length long closes it, and windows two lengths long ({low}-{high} frames) are over "
                 f"--max-len {capped['max_len']}, so they were not read"]
-    return [line + "no window one or two cycles long closes it — it swings on a beat of its own"]
+    if not held.get("two_step", {}).get("read", True):
+        # The steps were counted (video-loop --steps): the cut is the count's, nothing longer is read.
+        return [line + "no window of the counted length closes it"]
+    return [line + "no window one or two lengths long closes it — it swings on a beat of its own"]
 
 
 def measure_jolt(frames: list[Image.Image], *, facing: str = "right") -> dict[str, Any]:

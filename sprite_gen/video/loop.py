@@ -90,6 +90,14 @@ ONE_SHOT_MIN_LEN = 4  # a one-shot's length is the clip's own fact; only a degen
 GAIT_DOUBLE_TOL = 0.25
 GAIT_DOUBLE_SEARCH = 3  # frames either side of 2x the step where the full gait's own minimum may sit
 GAIT_NEAR_EXACT_STEP_FRACTION = 0.10  # no ambiguity extension when repeat error is tiny compared with a playback step
+# `--steps`: how many steps the cut `--anchor motion-auto` takes holds, as counted by whoever looked at
+# it (docs/loop-repair.md section 3, "The step screen"). 1 cuts again two of its lengths long, 2 keeps it.
+STEPS = (1, 2)
+# A cut two steps long (one cycle) that the clip holds less than this share of a cycle past is cut and
+# warned about (`cycle.coverage`): its repeat is barely in the clip, and the seam gate says whether it
+# closes. The search itself sees a window repeat only with a quarter of its length past it in the clip,
+# so a cut under this was taken on the count alone (local_cycle.counted).
+COVERAGE_MIN = 0.25
 ANCHOR_MODES = ("none", "feet", "body", "motion", "motion-auto")
 BODY_ANCHOR_BAND = 0.6  # --anchor body reads the wrap offset from the top 60 % of the first frame's box: head and torso, not the legs
 BODY_ANCHOR_SEARCH = 24  # px either side searched for the last frame's horizontal offset against the first
@@ -923,6 +931,47 @@ class HeldEdge:
             return {"skipped": str(exc), "reference": repair_mod.HELD_EDGE_REFERENCE}
 
 
+def _counted(cycle: dict[str, Any], steps: int, *, D: np.ndarray, trajectory: np.ndarray, frames: list[Image.Image],
+             moved: list[np.ndarray], detect: dict[str, Any]) -> dict[str, Any]:
+    """The cut once its steps are counted (`--steps`): 2 keeps it; 1 cuts again in the window two of
+    its lengths long, [2L-1, 2L+1], as long as the caller's ceiling — not half the clip — with the same
+    search (a repeat seen in the clip, the top band and the held side read again) save that the cut whose
+    wrap the clip itself plays is taken among the equivalent ones (`local_cycle._closure`), and no window
+    twice that. A clip too short to see such a window repeat is cut all the same, the count standing
+    for the repeat (`local_cycle.counted`, `unseen` says why); `cycle.coverage` and the seam gate say the
+    rest. Recorded `steps` (`first_cut`: the cut counted)."""
+    first = {"start": cycle["start"], "length": cycle["length"]}
+    if steps == 2:
+        cycle["steps"] = {"count": 2, "by": "given", "given": 2}
+        return cycle
+    lo, hi = 2 * first["length"] - 1, 2 * first["length"] + 1
+    signals = leg_signals(frames)
+    try:
+        found = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi, length_cap=hi, signals=signals,
+                                   wrap_pop=wrap_pop_on(moved), held_edge=HeldEdge(moved), double=False, closure=True, **detect)
+    except ValueError as unseen:
+        # Too short a clip to see the cycle repeat: the count stands for it (`cycle.coverage` says how short).
+        try:
+            found = local_cycle.counted(D, trajectory, min_len=lo, max_len=hi, periodicity_min=detect["periodicity_min"], signals=signals)
+        except ValueError as exc:
+            failed = ValueError(f"--steps 1: the cut of {first['length']} frames from {first['start']} is one step, and the clip "
+                                f"({len(D)} frames) has no window {lo}-{hi} frames long to cut: {exc}")
+            failed.diagnostics = {**getattr(unseen, "diagnostics", {}), "steps": {"given": 1, "first_cut": first, "window": [lo, hi]}}  # type: ignore[attr-defined]
+            raise failed from exc
+        found["unseen"] = str(unseen)
+    found["steps"] = {"count": 2, "by": "given", "given": 1, "first_cut": first, "window": [lo, hi]}
+    return found
+
+
+def coverage_verdict(cycle: dict[str, Any]) -> list[str]:
+    """A cut two steps long whose clip holds under COVERAGE_MIN of a cycle past it, in words; empty
+    otherwise (and for a cut whose steps are not known)."""
+    if "steps" not in cycle or cycle["coverage"] >= COVERAGE_MIN:
+        return []
+    return [f"the cut is two steps long ({cycle['length']} frames, one cycle) and the clip holds {cycle['coverage']:.2f} of a cycle "
+            f"past it (under {COVERAGE_MIN:g}): its repeat is barely seen — the seam says whether it closes; a longer take shows it repeat"]
+
+
 def run_loop(
     frames_dir: Path,
     out_dir: Path,
@@ -949,7 +998,10 @@ def run_loop(
     jolt_max: float | None = None,
     head_step_max: float | None = None,
     size_hold: str = "auto",
+    steps: int | None = None,
 ) -> dict[str, Any]:
+    if steps is not None and steps not in STEPS:
+        raise SystemExit(f"video-loop: --steps {steps}: the cut holds {' or '.join(map(str, STEPS))} steps here")
     if size_hold not in SIZE_HOLD_MODES:
         raise SystemExit(f"video-loop: unknown --size-hold {size_hold!r}; expected one of {', '.join(SIZE_HOLD_MODES)}")
     if repair not in REPAIR_MODES:
@@ -968,6 +1020,8 @@ def run_loop(
     if anchor == "motion-auto" and (cycle_mode not in ("auto", "periodic") or not profile_for(state).gait
                                      or start is not None or length is not None):
         raise SystemExit("video-loop: --anchor motion-auto requires walk/run with automatic or periodic selection; no fixed cut")
+    if steps is not None and anchor != "motion-auto":
+        raise SystemExit("video-loop: --steps counts the steps in the cut --anchor motion-auto takes; pass --anchor motion-auto")
     if cycle_mode not in CYCLE_MODES:
         raise SystemExit(f"video-loop: unknown --cycle {cycle_mode!r}; expected one of {', '.join(CYCLE_MODES)}")
     frames_dir = frames_dir.expanduser().resolve()
@@ -1059,6 +1113,8 @@ def run_loop(
                     if hasattr(second, "diagnostics"):
                         failed.diagnostics = second.diagnostics  # type: ignore[attr-defined]
                     raise failed from first
+            if steps is not None:
+                cycle = _counted(cycle, steps, D=D, trajectory=trajectory, frames=source_frames, moved=moved, detect=detect)
         elif cycle_mode == "fixed":
             if start is None or length is None:
                 raise SystemExit("video-loop: --cycle fixed needs --start and --length")
@@ -1097,6 +1153,9 @@ def run_loop(
             raise SystemExit(f"video-loop: {exc}") from exc
         raise
     i, L = cycle["start"], cycle["length"]
+    if "steps" in cycle:
+        # A cut two steps long is one cycle: how much of a second the clip holds past it.
+        cycle["coverage"] = round((n - L) / L, 4)
     # The same, over the cut alone: a clip held for part of its length is held where the cut is.
     report_base["cycle_drawings"] = held_mod.measure_cycle(clip_steps, start=i, length=L, fps=fps)
     # playback density, not a fixed count: a long cycle gets more frames so every state plays at
@@ -1170,6 +1229,7 @@ def run_loop(
         warnings += repair_mod.seam_pop_verdict(jolt, head_step_max=repair_mod.HEAD_STEP_REFERENCE)
         # The held side below the top, read on the source frames when the cut was chosen again (local_cycle).
         warnings += repair_mod.held_edge_verdict(cycle.get("seam_pop"))
+        warnings += coverage_verdict(cycle)
         gated = repair != "off" and (jolt_max is not None or head_step_max is not None)
         over = repair_mod.jolt_verdict(jolt, jolt_max=jolt_max, head_step_max=head_step_max) if gated else []
         report_base["jolt"] = {**jolt, "reference": reference, "warnings": warnings,
@@ -1201,10 +1261,10 @@ def run_loop(
     if state:
         # `video-cycle-align` reads the gait floor of this state when it screens a loop for two cycles.
         strip_meta["state"] = str(state).strip().lower()
-    if cycle.get("cycles", 1) > 1:
-        # A cut two cycles long, taken so a part swinging once in two closes (local_cycle._held_rank):
-        # `video-cycle-align` keeps both, at twice the set's length, instead of asking for a count.
-        strip_meta["cycles"] = cycle["cycles"]
+    if "steps" in cycle:
+        # A cut whose steps are known — counted (`--steps`) or two candidate lengths taken so a held part
+        # closes (local_cycle._held_rank): `video-cycle-align` reads a return half way as its step.
+        strip_meta["steps"] = cycle["steps"]["count"]
     # `video-cycle-align` reads the hold here, over the cut (`cycle_drawings`) and over the clip
     # (`drawings`, where the cut is too short to read): read on the keyed steps, since `--anchor
     # motion-auto` moves each frame of a pair apart in the cut it writes (sprite_gen/video/held.py).
@@ -1332,6 +1392,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--head-step-max", type=float, default=None, help=f"walk/run: fail the repaired loop when the head's largest sideways move in one frame exceeds this %% of the body height. Default: no gate — reported, and over {repair_mod.HEAD_STEP_REFERENCE} is a warning line")
     parser.add_argument("--facing", choices=FACINGS, default="right", help="which way the body faces in the frames (default right): the hair the jump search watches is behind it")
     parser.add_argument("--size-hold", choices=SIZE_HOLD_MODES, default="auto", help="--anchor motion-auto: auto (default) scales a clip whose height, read one cycle on (the same pose a cycle later), changes by 1 %% or more over the clip back to its first frame's size before the cycle search, so the loop's last frame is the size of its first (recorded as size_hold, with the evidence); off: search the frames as filmed")
+    parser.add_argument("--steps", type=int, choices=STEPS, default=None,
+                        help="--anchor motion-auto: how many steps the cut it takes without this holds, as counted by whoever looked "
+                             "at the loop (how often each foot lands) — the report's `cycle.step_screen` names a cut that may be one "
+                             "step. 1: the cut is one step, so the walk is cut again two of its lengths long (the window [2L-1, 2L+1], "
+                             "not bounded by half the clip), recorded `cycle.steps`; 2: the cut is kept, recorded. Either way the strip "
+                             "metadata says `steps: 2`, which `video-cycle-align` reads")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)
 
@@ -1349,7 +1415,7 @@ def run(**kwargs: object) -> int:
         anchor_regions=kwargs.get("anchor_region"),
         repair=str(kwargs.get("repair") or "auto"), facing=str(kwargs.get("facing") or "right"),
         jolt_max=kwargs.get("jolt_max"), head_step_max=kwargs.get("head_step_max"),  # type: ignore[arg-type]
-        size_hold=str(kwargs.get("size_hold") or "auto"),
+        size_hold=str(kwargs.get("size_hold") or "auto"), steps=kwargs.get("steps"),  # type: ignore[arg-type]
     )
     summary = {k: payload[k] for k in ("state", "frames_total", "window", "cycle_seconds", "n_out", "delay_ms", "resampled_seam_ratio", "specks_dropped", "report")}
     summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio", "review_recommended", "half_period_guard", "fundamental")}
@@ -1364,8 +1430,11 @@ def run(**kwargs: object) -> int:
                            "seam_pop": payload["jolt"]["seam_pop"].get("pop")}
     if payload["cycle"].get("seam_pop", {}).get("applied"):
         summary["cycle"]["seam_pop"] = payload["cycle"]["seam_pop"]
-    if payload["cycle"].get("cycles", 1) > 1:
-        summary["cycle"]["cycles"] = payload["cycle"]["cycles"]
+    if "steps" in payload["cycle"]:
+        summary["cycle"]["steps"] = payload["cycle"]["steps"]
+        summary["cycle"]["coverage"] = payload["cycle"]["coverage"]
+    if "step_screen" in payload["cycle"]:
+        summary["cycle"]["step_screen"] = payload["cycle"]["step_screen"]
     if payload.get("jump_repair", {}).get("replaced"):
         summary["jump_repair"] = {k: payload["jump_repair"][k] for k in ("replaced", "score_max_before", "score_max_after")}
     summary["strip"] = {k: payload["strip"][k] for k in ("path", "frames", "w", "h", "body_h", "delay_ms")}

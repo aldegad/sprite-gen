@@ -78,7 +78,7 @@ def test_motion_auto_does_not_cut_where_the_staff_jumps(tmp_path):
     # One step long, or two where the staff below the tip closes only there: a staff swaying every 61
     # frames turns back at the wrap of every one-step cut whose tip closes (docs/loop-repair.md
     # section 3, "The held side"), and a window two steps long is marked so.
-    if cycle.get("cycles") == 2:
+    if "steps" in cycle:
         assert cycle["length"] in (2 * STEP - 1, 2 * STEP, 2 * STEP + 1)
     else:
         assert cycle["length"] in (STEP - 1, STEP, STEP + 1)

@@ -177,3 +177,85 @@ def screen(period: int, *, D: np.ndarray, prof: dict[int, float], minima: list[i
 def local_minima(prof: dict[int, float]) -> list[int]:
     """The lags of `prof` no deeper than either neighbour."""
     return [lag for lag in prof if lag - 1 in prof and lag + 1 in prof and prof[lag] <= prof[lag - 1] and prof[lag] <= prof[lag + 1]]
+
+
+# The other way round (docs/loop-repair.md section 3, "The step screen"): a walk filmed slower than its
+# window can hold is cut one step long — the legs drawn alike, the step repeats in pixels — and nothing
+# shorter than the cut is there to suspect. The lag twice the cut, read over the whole clip, repeats
+# better than the cut itself where the arms or a held part tell the two steps apart.
+STEP_SEARCH = 3  # frames either side of twice the cut where the cycle's own lag may sit
+STEP_PAIRS_MIN = 4  # frame pairs a lag must have in the clip to be read
+STEP_RATIO_MAX = 0.85  # the lag twice the cut over the cut's own lag, same frames: at or under this, a suspect
+
+
+def leg_peaks(values: list[float]) -> list[int]:
+    """The step signal's peaks over a cut read as a ring: 1-2-1 smoothed, a frame that is the largest
+    within a sixth of the ring either side, first of a plateau, standing 30 % of the signal's range over
+    the least there. A cycle shows two, a step one. Recorded, never decided by."""
+    v = np.asarray(values, dtype=float)
+    n = len(v)
+    if n < 3:
+        return []
+    s = np.array([(v[k - 1] + 2 * v[k] + v[(k + 1) % n]) / 4 for k in range(n)])
+    r, spread = max(1, n // 6), float(s.max() - s.min())
+    out = []
+    for k in range(n):
+        near = [s[(k + d) % n] for d in range(-r, r + 1)]
+        if s[k] == max(near) and s[(k - 1) % n] < s[k] and s[k] - min(near) >= 0.3 * spread:
+            out.append(k)
+    return out
+
+
+def step_screen(D: np.ndarray, *, start: int, length: int, periodicity_min: float,
+                signals: dict[str, list[float]] | None) -> dict[str, Any]:
+    """Whether a gait's cut (`start`, `length`) may be one step of a cycle twice as long — never what
+    is cut. Over the whole clip (not the search window): the lag within STEP_SEARCH of twice the cut
+    whose mean distance is least (`lag`), and, over every frame with both lags in the clip (`pairs`),
+    its distance over the cut's own (`ratio`); how far that lag dips under the clip's profile from half
+    the cut to the lags read (`depth`); how much of a second cycle the clip holds past one cycle of that
+    lag, `coverage` (n − lag) / lag; and the step signal's peaks over the cut (`leg_peaks`, a record
+    only). A **suspect** repeats at the lag (`depth` at least `periodicity_min`) and better than at the
+    cut (`ratio` at most STEP_RATIO_MAX). A true cycle repeats about as well a cycle on (its drift makes
+    it a little worse); a step repeats better two cut lengths on, where the arms and a held part come
+    back too. Pixels cannot tell a cycle on a frame count that is not whole (it repeats better at its
+    double, being whole there) from a step, so only someone who counts the steps settles it — and the
+    count comes back as `video-loop --steps`."""
+    n = len(D)
+    record: dict[str, Any] = {"method": "two-cut-lengths-v1", "length": length,
+                              "searched": [2 * length - STEP_SEARCH, 2 * length + STEP_SEARCH],
+                              "ratio_max": STEP_RATIO_MAX, "periodicity_min": periodicity_min}
+    if signals is None:
+        record["leg_peaks"] = {"by": None, "why": "no frames to read the legs from"}
+    else:
+        legs = legs_mod.step_signal({k: v[start:start + length] for k, v in signals.items()})
+        record["leg_peaks"] = ({"by": legs["by"], "count": len(leg_peaks(legs["values"]))} if legs.get("by") is not None
+                               else {"by": None, "why": legs["why"]})
+
+    def mean(lag: int) -> float:
+        return float(D[np.arange(n - lag), np.arange(lag, n)].mean())
+
+    lags = [lag for lag in range(2 * length - STEP_SEARCH, 2 * length + STEP_SEARCH + 1) if n - lag >= STEP_PAIRS_MIN]
+    if not lags:
+        record.update(lag=None, suspect=False,
+                      why=f"the clip ({n} frames) holds fewer than {STEP_PAIRS_MIN} frame pairs {record['searched'][0]} or more frames apart: "
+                          "twice the cut is not read")
+        return record
+    profile = {lag: mean(lag) for lag in range(max(2, length // 2), lags[-1] + 1)}
+    lag = min(lags, key=lambda k: (profile[k], k))
+    js = np.arange(n - lag)
+    at_cut, at_lag = float(D[js, js + length].mean()), float(D[js, js + lag].mean())
+    baseline = float(np.mean(list(profile.values())))
+    ratio = round(at_lag / at_cut, 4) if at_cut > 0 else None
+    depth = round((baseline - profile[lag]) / baseline, 4) if baseline > 0 else 0.0
+    record.update(lag=lag, pairs=int(js.size), ratio=ratio, depth=depth, coverage=round((n - lag) / lag, 4))
+    if depth < periodicity_min:
+        record.update(suspect=False, why=f"{lag} frames on dips {depth:.2f} under the clip's profile, under {periodicity_min:.2f}: not a repeat")
+    elif ratio is None or ratio > STEP_RATIO_MAX:
+        record.update(suspect=False, why=f"{lag} frames on repeats {ratio}x as far as the cut's own {length}, over {STEP_RATIO_MAX}: "
+                                         "no better two cut lengths on")
+    else:
+        record.update(suspect=True, why=f"{lag} frames on repeats {ratio:.2f}x as far as the cut's own {length} (at most {STEP_RATIO_MAX}) "
+                                        f"and dips {depth:.2f} under the clip's profile: the cut may be one step of a cycle {lag} frames "
+                                        "long, or a cycle that repeats better at its double — pixels cannot tell; count the steps in "
+                                        "the loop (video-loop --steps)")
+    return record
