@@ -49,6 +49,7 @@ from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.gif_utils import save_clean_gif
 from sprite_gen.util.resample import resize_cell
 from sprite_gen.video import motion_anchor, auto_motion, local_cycle, gait_fallback
+from sprite_gen.video import held as held_mod
 from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import period as period_mod
 from sprite_gen.video import repair as repair_mod
@@ -922,6 +923,10 @@ def run_loop(
         "seam_max": seam_max,
         "anchor": anchor,
         "seam_measurement": "rendered-cells" if anchor in ("motion", "motion-auto") else "source-frames",
+        # How many drawings the clip shows a second, and whether it shows each for two or three frames
+        # (sprite_gen/video/held.py) — over the whole clip as keyed, before any cut. A record for
+        # `video-cycle-align`, which says when a held clip stretched to the set's length must be filmed again.
+        "drawings": held_mod.measure([float(D[k, k + 1]) for k in range(n - 1)], fps=fps),
     }
     cycle = None
     try:
@@ -1113,6 +1118,9 @@ def run_loop(
     if state:
         # `video-cycle-align` reads the gait floor of this state when it screens a loop for two cycles.
         strip_meta["state"] = str(state).strip().lower()
+    # `video-cycle-align` reads the clip's hold here: a cut cycle is too short to read it on, and
+    # `--anchor motion-auto` moves each frame of a pair apart (sprite_gen/video/held.py).
+    strip_meta["drawings"] = {k: report_base["drawings"][k] for k in ("hold", "drawings_per_second", "contrast", "frames")}
     if motion is not None:
         strip_meta["foot_anchor"] = anchor
         strip_meta["motion_anchor"] = motion
@@ -1255,6 +1263,7 @@ def run(**kwargs: object) -> int:
     )
     summary = {k: payload[k] for k in ("state", "frames_total", "window", "cycle_seconds", "n_out", "delay_ms", "resampled_seam_ratio", "specks_dropped", "report")}
     summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio", "review_recommended", "half_period_guard", "fundamental")}
+    summary["drawings"] = {k: payload["drawings"][k] for k in ("hold", "drawings_per_second")}
     if payload["periodic_attempt"]:
         summary["periodic_attempt"] = payload["periodic_attempt"]["why_rejected"]
     if payload.get("motion_anchor", {}).get("applied") is False:

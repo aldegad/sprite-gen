@@ -345,6 +345,46 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   steps as filmed, up to half a frame off its time, and the loop shows fewer distinct drawings a
   second than `rife` — but no melted one. A clip drawn on twos has a long step between drawings
   everywhere, so it is replaced most; the frames that land on a small step stay RIFE's.
+- **Held drawings — a take to film again** (`retake`, reason `held-drawings`): a loop whose
+  clip shows each drawing for two or three frames has a gap between drawings two or three frames
+  wide. Played at its own rate that is limited animation, 12 or 8 drawings a second. Made longer,
+  or merely resampled, the frames in each gap are made across a step two or three times as long
+  as an every-frame clip's, and where the legs swap places inside it — the near leg passing behind
+  — no interpolator draws them: a flow model blends the two drawings into a ghost or a melted
+  shape, which `auto` replaces with the nearer source frame, and that drawing is held a frame
+  longer: the loop halts there. A better interpolator is not the fix; a take drawn every frame is.
+  - **The hold is the clip's**: `video-loop` measures it over the whole clip as keyed and writes
+    it into `strip.json` (`drawings`: `hold`, `drawings_per_second`, `contrast`, `frames`; [video
+    pipeline](video-pipeline.md) section 4). The alignment reads it there (`source: "clip"`, the
+    cycle's drawings its frames at the clip's rate), and keeps it through a rebuild. A cut cycle is
+    too short to read a rhythm on reliably, and `--anchor motion-auto` shifts each cut frame, so a
+    pair's repeat may no longer read as one; only a loop cut before the record is measured on its
+    own cycle, read as a ring (`source: "cycle"`).
+  - **The rule**: a loop is named when its source is held (`hold` 2 or 3), the set's length leaves
+    it under **13 drawings a second** (`align.RETAKE_DRAWINGS_MIN`), and **one or more** frames
+    between its drawings were not made (`align.RETAKE_UNMADE_MIN`) — taken from the nearer source
+    frame (`auto`'s replacements, every made time under `nearest`) or made with a fault and kept
+    (`rife`). Each loop row carries `drawings` and `retake` (the record, or `null`): `reason`,
+    `hold`, `source`, `drawings` (in the cycle), `drawings_per_second_filmed`,
+    `drawings_per_second` (at the set's length), `frames_per_drawing` (the gap, in frames of the
+    aligned loop), `unmade`, and the `limits`. The report's `retake` lists every such loop (`dir`,
+    `name` and the same numbers), a warning line names it ("film this direction again
+    (held-drawings) — …", by its directory where two loops share a strip name), and `video-set`
+    carries both into its record.
+  - **Not named**: a held loop at its own length (nothing is made — on twos it plays at 12 a
+    second, as filmed), a held loop whose made frames all kept their outline, a held loop squeezed
+    to 13 drawings a second or more (its drawings come closer than on twos), and a loop drawn every
+    frame with a replaced frame (one soft step, not a gap the take cannot fill).
+  - **Exit code and words**: the set is still aligned and written (`applied: true`, exit 0) — the
+    loop is the best this take allows, and the caller decides: a pipeline with a retake budget
+    films that direction again and aligns the set anew; one without delivers it with the warning.
+    Nothing passes quietly: the line is on stderr and in `warnings`, and `retake` is the
+    machine-readable reason.
+  - **Why 13**: a clip on twos shows 12 drawings a second. At that rate or slower each frame not
+    made is a drawing held a frame longer at the moment the legs cross, which reads as a halt; a
+    line a little above 12 keeps a cut that is not all pairs, or a cycle made a frame or two
+    longer, on the same side. The lines are references, not measured optima, and a loop near them
+    is worth a look either way.
 - **Foot strike**: each loop is then turned to start as a heel lands (`align.foot_strike`), read
   off one signal smoothed 1-2-1 — never off the frame's top edge, which a long ear, a hat's
   point or an antenna owns and which flops on its own rhythm:
@@ -396,7 +436,7 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   rewritten at the loop's own cell rules (`cell_height_cap`, body-height target, anchor), at the
   loop's frame rate, so the aligned cycle lasts L*/fps seconds. `strip.json` gains
   `cycle_align` (`from`, `to`, `between`, `taken`, `made_by_rife`, `made_at`, `smear` and/or
-  `nearest_at`, `turned_by`, `turned_on`, `view`, `start_foot`, the seam ratio of the rebuilt
+  `nearest_at`, `drawings`, `retake`, `turned_by`, `turned_on`, `view`, `start_foot`, the seam ratio of the rebuilt
   cells, and the re-verified GIF/WebP).
 - **The cut as filmed is kept** in `cycle.source/` on the first alignment, and every later
   alignment reads from there: running it again, or at another length, never resamples a
