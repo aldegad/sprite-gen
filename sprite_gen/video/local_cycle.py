@@ -47,26 +47,43 @@ def _measure(distances, trajectory, start, length, profile):
             'ratio': ratio, 'context_repeat_over_step': error/step, 'drift_line_residual_analysis_px': residual}
 
 
+def _read(measured):
+    """A cut's pop as `cycle.seam_pop` records it: the jump, or why its top band could not be read."""
+    return {'skipped': measured['skipped']} if 'skipped' in measured else {'pop': measured['pop']}
+
+
+def _mark(row, measured):
+    """A window row's pop: `seam_pop`, or None with `seam_pop_skipped` (why) when its top band could
+    not be read — an unread window is neither taken as closing nor as popping."""
+    row['seam_pop'] = measured.get('pop')
+    if 'skipped' in measured:
+        row['seam_pop_skipped'] = measured['skipped']
+
+
 def _shape_rank(candidates, chosen, wrap_pop):
     """Choose again when the chosen cut's top pops at the wrap (`wrap_pop`, repair.seam_pop on the
-    analysed frames): among the candidates that do not pop, the same score tolerance, then the
-    smallest pop. Nothing is measured past the first choice when it does not pop, so a cut without
-    a thin part swinging on its own beat is chosen exactly as before."""
+    analysed frames): among the candidates whose top was read and does not pop, the same score
+    tolerance, then the smallest pop. Nothing is measured past the first choice when it does not pop,
+    or when its top could not be read (kept, `skipped`), so a cut without a thin part swinging on its
+    own beat is chosen exactly as before. A candidate whose top could not be read is not chosen."""
     first = wrap_pop(chosen['start'], chosen['length'])
     record = {'method': 'top-band-wrap-v1', 'reference': first['reference'],
-              'first_choice': {'start': chosen['start'], 'length': chosen['length'], 'pop': first['pop']},
+              'first_choice': {'start': chosen['start'], 'length': chosen['length'], **_read(first)},
               'applied': False}
-    if not first['pops']:
+    if 'skipped' in first or not first['pops']:
         return chosen, record
     calm = []
+    unread = 0
     for row in candidates:
         measured = wrap_pop(row['start'], row['length'])
-        row['seam_pop'] = measured['pop']
-        if not measured['pops']:
+        _mark(row, measured)
+        if 'skipped' in measured:
+            unread += 1
+        elif not measured['pops']:
             calm.append(row)
-    record['measured'] = len(candidates)
+    record.update(measured=len(candidates)-unread, unread=unread)
     if not calm:
-        record['why'] = 'every candidate pops at the wrap; the first choice is kept'
+        record['why'] = 'every candidate whose top was read pops at the wrap; the first choice is kept'
         return chosen, record
     cutoff = min(row['score'] for row in calm)*1.15+1e-8
     picked = min((row for row in calm if row['score'] <= cutoff),
@@ -153,15 +170,17 @@ def detect(distances, trajectory, *, min_len, max_len, gait_floor,
         refused.sort(key=lambda row: (row['score'], row['start'], row['length']))
         shown = refused[:REFUSED_SHOWN]
         if wrap_pop is not None:
-            pops = {}
+            # Those whose top closes first, then those whose top could not be read, then those that pop.
+            rank = {}
             for row in shown:
                 measured = wrap_pop(row['start'], row['length'])
-                row['seam_pop'] = measured['pop']
-                pops[row['start'], row['length']] = measured['pops']
-            shown.sort(key=lambda row: (pops[row['start'], row['length']], row['score'], row['start'], row['length']))
+                _mark(row, measured)
+                rank[row['start'], row['length']] = 1 if 'skipped' in measured else 2 if measured['pops'] else 0
+            shown.sort(key=lambda row: (rank[row['start'], row['length']], row['score'], row['start'], row['length']))
         exc.diagnostics = {'kind': 'periodic', 'method': 'local-repeat-drift-v1', 'status': 'refused',
                            'window': [lo, hi], 'refused_count': len(refused),
-                           'order': 'score' + (', windows whose top pops at the wrap last' if wrap_pop is not None else ''),
+                           'order': 'score' + (', windows whose top could not be read after those whose top closes,'
+                                               ' windows whose top pops at the wrap last' if wrap_pop is not None else ''),
                            'candidates': shown}
         raise exc
     candidates.sort(key=lambda row: (row['score'], row['start'], row['length']))

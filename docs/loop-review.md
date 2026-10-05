@@ -94,8 +94,8 @@ single linear correction could not remove. Among scores within 15% of the best,
 the earliest repeat is used; exact cut quantization may differ by one frame from
 the lag minimum. When the top of the silhouette jumps into that cut's first frame —
 a staff or flag held above the head, swinging on its own beat — the candidates are measured
-and the cut is chosen again among those whose top closes ([loop repair](loop-repair.md)
-section 3, "The seam pop"; `cycle.seam_pop`). A first choice whose top closes is kept and
+and the cut is chosen again among those whose top was read and closes ([loop repair](loop-repair.md)
+section 3, "The seam pop"; `cycle.seam_pop`). A first choice whose top closes, or cannot be read, is kept and
 nothing more is measured. An explicit `--max-len` is never widened; without one, only the gait
 fallback below looks past the state's window, and only after this search found nothing.
 
@@ -131,7 +131,8 @@ keeps its `no periodic cycle found` start and says what was tried. The failed re
 then names the windows the search measured and refused (`status: "refused"`, `window`,
 `refused_count`, and up to 12 `candidates`: `start`, `length`, `score`, `ratio`,
 `context_repeat_over_step`, `drift_line_residual_analysis_px`, `seam_pop`, and `refused`, why),
-best score first and those whose top jumps at the wrap last, so a caller that must deliver
+best score first, those whose top could not be read (`seam_pop: null`, `seam_pop_skipped`) after
+those whose top closes, and those whose top jumps at the wrap last, so a caller that must deliver
 anyway (a forced `--cycle fixed`) cuts one the engine measured rather than the whole clip. The scaled-back frames are
 written to `<out-dir>/.gait-fallback-frames` and removed once the strip is built or the run
 fails.

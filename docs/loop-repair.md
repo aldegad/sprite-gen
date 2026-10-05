@@ -279,9 +279,15 @@ plays:
   chooses from (moved by the analysis translation, `loop.wrap_pop_on`), for its first choice only.
   If that pops, every candidate is measured, and among those that do not pop it takes the scores
   within the usual 15 % of the best and the smallest pop (`cycle.seam_pop`: `first_choice`,
-  `applied`, `measured`, `chosen`). A first choice that does not pop is kept, and nothing past it
-  is measured, so a loop without such a part is cut exactly as before. If every candidate pops,
+  `applied`, `measured`, `unread`, `chosen`). A first choice that does not pop is kept, and nothing past it
+  is measured, so a loop without such a part is cut exactly as before. If every candidate read pops,
   the first choice is kept (`why`) and the warning below says so.
+- **A cut whose top cannot be read is not one that closes.** A frame with nothing in the top band
+  (a tip flung far above the rest in one frame) leaves the cut without a jump to read: it is
+  recorded `skipped` (why) in place of `pop` — `first_choice.skipped`, or on a candidate row
+  `seam_pop: null` with `seam_pop_skipped` — and counted under `unread`, apart from `measured`.
+  It is never chosen on; a first choice that cannot be read is kept, nothing past it is measured,
+  and `jolt.warnings` says the head could not be tracked.
 - **A pop that stays is a warning line** — `video-loop: warning: the top of the silhouette jumps
   into the loop's first frame up or down … (over 10x): a part held above the head swings on its
   own beat and does not close at this cut`, in `jolt.warnings` like the bounds above. A sideways

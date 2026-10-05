@@ -880,9 +880,9 @@ def wrap_pop_on(frames: list[Image.Image], analysis: dict[str, Any]) -> Any:
             try:
                 measured[start, length] = repair_mod.seam_pop([a.astype(np.float32) / 255.0 for a in moved[start:start + length]])
             except ValueError as exc:
-                # A frame with nothing in the top band: no jump read, so nothing is chosen on it.
-                measured[start, length] = {"skipped": str(exc), "reference": repair_mod.SEAM_POP_REFERENCE,
-                                           "pop": 0.0, "pops": False}
+                # A frame with nothing in the top band: no jump read, and no pop to rank it by —
+                # `local_cycle` neither takes it as closing nor as popping (`skipped`, why).
+                measured[start, length] = {"skipped": str(exc), "reference": repair_mod.SEAM_POP_REFERENCE}
         return measured[start, length]
     return pop
 

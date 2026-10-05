@@ -30,11 +30,13 @@ def _tip(k: int, phase: float) -> float:
     return AMP * math.sin(2 * math.pi * k / SWAY + phase)
 
 
-def _walker(k: int, *, phase: float = 1.0, legs=None, tip_dy: float = 0.0, staff: bool = True) -> Image.Image:
-    im = Image.new("RGBA", (280, 220))
+def _walker(k: int, *, phase: float = 1.0, legs=None, tip_dy: float = 0.0, staff: bool = True,
+            room: int = 0) -> Image.Image:
+    """`room` px more canvas above the walker, for a tip raised higher than the usual canvas holds."""
+    im = Image.new("RGBA", (280, 220 + room))
     d = ImageDraw.Draw(im)
     x = 45 + k
-    y = 58 + round(k * .2) + round(3 * math.sin(k * 2 * math.pi / STEP))
+    y = 58 + room + round(k * .2) + round(3 * math.sin(k * 2 * math.pi / STEP))
     d.rectangle((x, y, x + 28, y + 30), fill=(210, 150, 60, 255))
     d.rectangle((x + 20, y + 8, x + 24, y + 12), fill=(10, 30, 50, 255))
     d.rectangle((x - 3, y + 32, x + 30, y + 78), fill=(20, 90, 180, 255))
@@ -84,6 +86,78 @@ def test_motion_auto_does_not_cut_where_the_staff_jumps(tmp_path):
     assert shape["chosen"] == {"start": cycle["start"], "length": cycle["length"], "pop": shape["chosen"]["pop"]}
     assert report["jolt"]["seam_pop"]["pops"] is False
     assert not any("jumps into the loop's first frame" in line for line in report["jolt"]["warnings"])
+
+
+def test_a_window_whose_top_cannot_be_read_is_not_taken_as_closing(tmp_path):
+    """One frame (50) has the staff's tip flung 90 px up: every window holding it has a frame with nothing
+    in the top band, and its pop cannot be read. Such a window is neither calm nor chosen; before, it was
+    recorded as pop 0 and chosen (29/24, the tip's wrap 8x its largest step) over a read one that closes."""
+    keyed = _keyed(tmp_path, [_walker(k, room=100, tip_dy=-90 if k == 50 else 0) for k in range(73)])
+    out = tmp_path / "out"
+    assert loop.main(["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk",
+                      "--anchor", "motion-auto", "--repair", "off"]) == 0
+    report = json.loads((out / "loop.loop.report.json").read_text())
+    cycle = report["cycle"]
+    assert not cycle["start"] <= 50 < cycle["start"] + cycle["length"]
+    assert _wrap_over_step(cycle["start"], cycle["length"], 1.0) <= 1.5
+    shape = cycle["seam_pop"]
+    assert shape["applied"] is True and shape["first_choice"]["pop"] > repair.SEAM_POP_REFERENCE
+    assert shape["unread"] > 0 and shape["measured"] + shape["unread"] == cycle["candidate_count"]
+    assert isinstance(shape["chosen"]["pop"], float) and "skipped" not in shape["chosen"]
+    assert report["jolt"]["seam_pop"]["pops"] is False
+    unread = [r for r in cycle["candidates"] if r.get("seam_pop_skipped")]
+    assert all(r["seam_pop"] is None for r in unread)
+
+
+def _fake_pop(table):
+    """A `wrap_pop` reading a table: (start, length) -> pop, or a reason string for a top it cannot read."""
+    def pop(start, length):
+        value = table[start, length]
+        if isinstance(value, str):
+            return {"skipped": value, "reference": repair.SEAM_POP_REFERENCE}
+        return {"pop": value, "pops": value > repair.SEAM_POP_REFERENCE, "reference": repair.SEAM_POP_REFERENCE}
+    return pop
+
+
+def test_shape_rank_keeps_an_unread_first_choice_and_never_chooses_an_unread_candidate():
+    rows = [{"start": 0, "length": 24, "score": 1.0}, {"start": 3, "length": 24, "score": 1.01},
+            {"start": 6, "length": 24, "score": 1.05}]
+    chosen, record = local_cycle._shape_rank([dict(r) for r in rows], dict(rows[0]),
+                                             _fake_pop({(0, 24): "a loop frame has no head to track"}))
+    assert chosen["start"] == 0 and record["applied"] is False
+    assert record["first_choice"] == {"start": 0, "length": 24, "skipped": "a loop frame has no head to track"}
+    candidates = [dict(r) for r in rows]
+    chosen, record = local_cycle._shape_rank(candidates, candidates[0], _fake_pop(
+        {(0, 24): 14.0, (3, 24): "a loop frame has no head to track", (6, 24): 0.0}))
+    assert chosen["start"] == 6 and record["chosen"] == {"start": 6, "length": 24, "pop": 0.0}
+    assert record["measured"] == 2 and record["unread"] == 1
+    assert candidates[1]["seam_pop"] is None and candidates[1]["seam_pop_skipped"]
+    # Nothing read closes: the first choice is kept, not the unread one.
+    candidates = [dict(r) for r in rows]
+    chosen, record = local_cycle._shape_rank(candidates, candidates[0], _fake_pop(
+        {(0, 24): 14.0, (3, 24): "a loop frame has no head to track", (6, 24): 12.0}))
+    assert chosen["start"] == 0 and record["applied"] is False and "why" in record
+
+
+def test_a_refused_window_whose_top_cannot_be_read_is_not_listed_as_closing():
+    values = np.arange(80) + np.sin(np.arange(80))
+    D = np.abs(values[:, None] - values[None, :]).astype(np.float32)
+    kinds = {}
+
+    def pop(start, length):
+        kind = kinds.setdefault((start, length), ("pops", "unread", "calm")[len(kinds) % 3])
+        if kind == "unread":
+            return {"skipped": "a loop frame has no head to track", "reference": repair.SEAM_POP_REFERENCE}
+        value = 14.0 if kind == "pops" else 0.0
+        return {"pop": value, "pops": kind == "pops", "reference": repair.SEAM_POP_REFERENCE}
+    with pytest.raises(ValueError, match="no periodic cycle") as caught:
+        local_cycle.detect(D, np.zeros(80), min_len=12, max_len=36, gait_floor=14,
+                           periodicity_min=.15, double_tolerance=.25, double_search=3, wrap_pop=pop)
+    rows = caught.value.diagnostics["candidates"]
+    order = [kinds[r["start"], r["length"]] for r in rows]
+    assert order == sorted(order, key=("calm", "unread", "pops").index) and "unread" in order
+    for r in rows:
+        assert (r["seam_pop"] is None) == (kinds[r["start"], r["length"]] == "unread") == ("seam_pop_skipped" in r)
 
 
 def test_a_cut_without_a_part_on_its_own_beat_is_chosen_as_before(tmp_path):
