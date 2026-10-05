@@ -694,7 +694,11 @@ was 17). `video-loop` therefore:
    changes few pixels and hardly moves it. `--anchor motion-auto` also weighs the top
    of the silhouette at the wrap and chooses again when it jumps, and every walk or run
    reports that jump and warns on it ([loop repair](loop-repair.md) section 3,
-   "The seam pop").
+   "The seam pop"). Once the top jumps, the held part is read below its top too, and a staff
+   that closes only on two steps is cut two steps long — one cycle (`cycle.steps`, "The held
+   side"). The cut taken is screened for one step of a cycle twice as long, over the whole clip
+   (`cycle.step_screen`, "The step screen"); nothing is cut on it, and `--steps` is the count
+   that cuts again.
 
 This neighbourhood check measures temporal consistency, not anatomical leg
 identity. A consistently repeated malformed motion can still score well; visual
@@ -707,7 +711,9 @@ to be confirmed). The other states are fractions of the clip length: idle 60–9
 (breathing is slow and not periodic — the lowest seam is a long window, and idle is
 exempt from the periodicity gate), jump 11–45 %. Attack keeps the 11 % floor and
 searches up to 2.5 seconds while retaining at least 0.5 seconds (and at least eight
-frames) of observed repeat context. `--min-len/--max-len` override the window.
+frames) of observed repeat context. `--min-len/--max-len` override the window — on every path that
+sets a cut's length, the gait fallback, `--steps` and the one-shot failover included; a cut outside
+them fails rather than being written.
 Attack's periodicity floor is `0.15 + 0.85 * max(0, 1 - (n - lag) / lag)`:
 less than a full period of comparison requires a deeper dip. Reports include both
 available pairs and the every-other-frame profile sample count. This is a coverage
@@ -768,7 +774,12 @@ swings the stride twice a step; a diagonal view's two steps open the feet unequa
 `review_recommended` keeps its meaning (the ambiguous-harmonic retention above). The record is for
 the set stage: `video-cycle-align` screens every loop by the same rule, stops a set on a suspect,
 and takes one cycle out of a loop only when told how many it holds (`--cycles`, [loop
-repair](loop-repair.md) section 4). The local search of `--anchor motion-auto` records the same.
+repair](loop-repair.md) section 4). The local search of `--anchor motion-auto` records the same. A
+loop whose steps are known (`steps: 2` in `strip.json`: cut two steps long so a held part closes, or
+cut again on a count with `video-loop --steps`) returns half way at its second step; the set stage
+reads that return as the step it is, not a second cycle. The screen also looks the other way there:
+a cut that may be one step of a cycle twice as long (`cycle.step_screen`, read over the whole clip)
+stops the set the same way, and only a count — `video-loop --steps 1` — cuts it again.
 The rule leans one way on purpose: a suspect costs a look, a miss a loop that plays twice as fast.
 A run's half step repeats as well as most of its strides do, so a run set is suspected nearly
 every time and stops until its loops are counted; a walk's half step is under its floor more

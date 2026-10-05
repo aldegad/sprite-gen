@@ -96,8 +96,21 @@ the lag minimum. When the top of the silhouette jumps into that cut's first fram
 a staff or flag held above the head, swinging on its own beat — the candidates are measured
 and the cut is chosen again among those whose top was read and closes ([loop repair](loop-repair.md)
 section 3, "The seam pop"; `cycle.seam_pop`). A first choice whose top closes, or cannot be read, is kept and
-nothing more is measured. An explicit `--max-len` is never widened; without one, only the gait
-fallback below looks past the state's window, and only after this search found nothing.
+nothing more is measured. Once it pops, the held part is read below its top as well, on the side
+the top band sits on: a cut whose shaft closes under the hand is taken first, and where no cut one
+step long closes it, a window two steps long — one cycle — is (`cycle.steps`, `strip.json`
+`steps: 2`; [loop repair](loop-repair.md) section 3, "The held side"). An explicit `--max-len` is
+never widened, nor cut back to half the clip: an explicit window is the window, on every path that
+sets a length (the count of steps and the one-shot failover below included), and a cut outside it
+fails ([loop repair](loop-repair.md) section 3, "The step screen"). Without one, only
+the gait fallback below looks past the state's window, and only after this search found nothing.
+
+A walk slower than the window can hold — its legs drawn alike — is found one step long, and the
+search has nothing to refuse it on: the step repeats. So the cut is screened the other way, over
+the whole clip (`cycle.step_screen`): where twice it repeats better than it, the report names it a
+suspect and nothing else changes. Look at the loop and count its steps (how often each foot lands);
+`video-loop --steps 1` cuts it again two of its lengths long, `--steps 2` keeps it and says so
+([loop repair](loop-repair.md) section 3, "The step screen").
 
 ### The gait fallback: a slow walk, or a walk toward the camera
 
