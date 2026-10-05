@@ -55,10 +55,12 @@ the head, a tail, the body, a leg, a shoulder — gets only where it is, and no 
 
 **A body that is not a person** (`--body-plan`, `video/body_plan.py`): with no body plan, or one
 biped, nothing changes. A quadruped, a body without legs or a scene of several figures has the idle,
-the Lite walk sentences, the mid-step redraw and the still's view sentence (`gen --direction
---body-plan`) said without the parts it lacks, and what it stands on said after the motion paragraph
-or at the end of the view sentence
-([body plan](video-pipeline.md#a-body-that-is-not-a-person----body-plan)).
+the attack and its hold (`HOLD_TEXT`, after a caller's `--motion` too), the Lite walk sentences, the
+mid-step redraw and the still's view sentence (`gen --direction --body-plan`) said without the parts it
+lacks, and what it stands on said after the motion paragraph or at the end of the view sentence
+([body plan](video-pipeline.md#a-body-that-is-not-a-person----body-plan)). The sheet rows `prepare
+--body-plan` writes take the same plan
+([sheet rows](video-pipeline.md#the-sheet-rows--prepare---body-plan)).
 
 **A front or back walk's start still** (`batch.walk_start_prompt`): the mid-step redraw sentence,
 the key background line, then the still's handed sentences.

@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 2.32.0
+version: 2.33.0
 description: "Generates images and game sprites through GPT or Grok with guided provider choices, separate saved defaults, automatic cleanup and optional curation. Handles sprite requests, ordinary image generation/editing, standalone image-to-video clips (i2v, animate this still, 그록 영상, 이매진 비디오, 스틸 움직여줘, first/last frame, reference-to-video, 영상 이어붙이기, 영상 편집, extend/edit a clip), clips from a video MCP on the agent (ZCRE, 지크 MCP), chroma removal, animation atlases, video loops, 큐레이션뷰, image candidates, 팔레트 스왑, palette swap, recolor, rig layers, engine exports, repeating backgrounds, projected shadows, motion/contact inspection and optional scene composition from existing assets."
 license: Apache-2.0
 depends_on:
@@ -75,7 +75,7 @@ it never changes the requested direction. Image correction requires explicit opt
 | `video --direction` | `side`, `front`, `back`, `front_diagonal`, `back_diagonal`; unset by default | `side` opts into facing inspection and a matching prompt requirement; the others skip it. The two diagonals are three-quarter views turned right (`VIEW_TEXT`); a walk or run in one is filmed pinned (`pins_last_frame`). |
 | `video --facing`, `video-set --facing` | `right` (default), `left`; `video-set` also `right,left` | Required side direction. `right,left` films every side and diagonal view both ways, each from its own still (`--base side@left=…`); none is mirrored. |
 | `gen --direction`, `--handed`; `video-prompt` / `video-set --handed` | a view; `"<item>=<left\|right> [part]"` | An item on one of the character's own sides: the still and clip prompts say where it is in each view, and mirroring is refused. |
-| `video-prompt` / `video-set` / `gen --direction --body-plan` | `biped` (default), `quadruped`, `legless`; or `"<figure>=<plan>"` per figure of a scene | What the subject stands on: no clip, redraw or still view prompt names a part it lacks (a horse is not walked on a person's legs or stood up), and a scene says it per figure. |
+| `video-prompt` / `video-set` / `gen --direction` / `prepare --body-plan` | `biped` (default), `quadruped`, `legless`; or `"<figure>=<plan>"` per figure of a scene | What the subject stands on: no clip, attack, redraw, still view or sheet row prompt names a part it lacks (a horse is not walked on a person's legs, stood up, given arms in a walk sheet or told to strike with its hands), and a scene says it per figure. |
 | `video --facing-fix`, `video-set --facing-fix` | `none` (default), `mirror` | Record the observation; opt into mirroring an observed opposite in a copy. Batch side inspection is enabled by default. |
 
 Direction is requested through the generation and motion prompts, which cannot guarantee model compliance.

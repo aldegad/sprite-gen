@@ -66,3 +66,20 @@ def test_the_default_walk_keeps_its_treadmill_and_screen_sentences(frozen, drawn
     assert "The character is seen from the exact side, facing right." in side
     front = drawn["clip/front@right/walk/built-in/default/pinned=None/no-character"]
     assert "The character is seen from the front" in front
+
+
+PREPARE_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "prepare-rows-v2.32.0.json.gz"
+
+
+@pytest.mark.parametrize("body_plan", [None, ["biped"]], ids=["no-body-plan", "biped"])
+def test_every_sheet_row_with_no_body_plan_or_one_biped_is_2_32_0s_byte_for_byte(body_plan) -> None:
+    """The rows `prepare` writes (`prepare_freeze_table.py`) were frozen at 2.32.0 when the body plan reached
+    them: a run with no body plan, or `--body-plan biped`, writes every row prompt as 2.32.0 did."""
+    import prepare_freeze_table as rows
+
+    frozen = rows.read(PREPARE_FIXTURE)
+    drawn = rows.draw(**({"body_plan": body_plan} if body_plan else {}))
+    assert sorted(drawn) == sorted(frozen) and len(frozen) == 52
+    changed = [name for name in frozen if drawn[name] != frozen[name]]
+    assert not changed, (f"{len(changed)} of {len(frozen)} sheet rows differ from 2.32.0; first:\n"
+                         + _first_difference(changed[0], frozen[changed[0]], drawn[changed[0]]))

@@ -24,6 +24,8 @@ from sprite_gen.frames.extract import color_distance
 from sprite_gen.compose.layers import require_valid_layer_request
 from sprite_gen.spec.layout import TAXONOMY, guide_rel, prompt_rel, raw_rel
 from sprite_gen.spec.subject import SUBJECTS
+from sprite_gen.video import body_plan as body_mod
+from sprite_gen.video.body_plan import Body
 
 
 # Default safe margin is proportional to the cell dimension (floored), not a fixed
@@ -133,6 +135,50 @@ STATE_REQUIREMENTS = {
         "Show the jump through pose and vertical body position only: anticipation, lift, airborne peak, descent, settle.",
         "Do not draw ground shadows, contact shadows, oval shadows, landing marks, dust, smears, or motion marks under the character.",
     ],
+}
+
+# The rows above were measured on people, and the walk, run and wave rows name what only a person has: an
+# arm, a shoulder, a hand, a foot. Said of a horse, a walk sheet swings its arms. A body that is not one
+# biped (`--body-plan`, `sprite_gen.video.body_plan`) gets these in their place: no part named, the motion
+# left to whatever the body moves on, and every row then says what it stands on (`body_plan.text`). The
+# wave lifts one side, as the clip's wave does (`batch.MOTION_TEXT["wave"]`). Not measured on a sheet.
+_GAIT_ANY_BODY = "the movement of the body, whatever it moves on, loose parts such as hair, a mane or a tail, and props only"
+_NO_TRAILS = STATE_REQUIREMENTS["walk"][2]
+_DIAGONAL_ANY_BODY = {
+    "front": "Use alternating contact phases of whatever it moves on so the two sides clearly trade forward reach.",
+    "back": "Use alternating contact phases of whatever it moves on so the two sides clearly trade backward/forward reach.",
+}
+STATE_REQUIREMENTS_ANY_BODY = {
+    **{state: [rows[0], rows[1], _DIAGONAL_ANY_BODY[state.split("-")[1]], rows[3]]
+       for state, rows in STATE_REQUIREMENTS.items() if state.startswith(("running-front-", "running-back-"))},
+    "running-right": [f"Show rightward locomotion through {_GAIT_ANY_BODY}.", STATE_REQUIREMENTS["running-right"][1], _NO_TRAILS],
+    "running-left": [
+        f"Show leftward locomotion through {_GAIT_ANY_BODY}.",
+        STATE_REQUIREMENTS["running-left"][1],
+        "If an additional rightward gait row is attached, use it only as a motion-rhythm reference for motion phase and body bounce; do not copy its facing direction or redraw the character from that row.",
+        _NO_TRAILS,
+    ],
+    "run": [f"Show locomotion through {_GAIT_ANY_BODY}.", STATE_REQUIREMENTS["run"][1], _NO_TRAILS],
+    "walk": [f"Show locomotion through {_GAIT_ANY_BODY}.", STATE_REQUIREMENTS["walk"][1], _NO_TRAILS],
+    "frontwalk": [
+        "Show front-view walking through alternating steps of whatever it walks on and body-height changes.",
+        "This is difficult: make the contact and passing poses visibly different without changing identity.",
+        _NO_TRAILS,
+    ],
+    "45_frontwalk": [
+        "Show three-quarter-front walking through alternating steps of whatever it walks on and body-height changes.",
+        "This is difficult: make the contact and passing poses visibly different without changing identity.",
+        _NO_TRAILS,
+    ],
+    "wave": [
+        "Show the wave through the pose of the one side that lifts only: lowered, lifted, swaying, returning.",
+        "Keep the body planted where it stands or rests unless the action explicitly requests stepping.",
+        "Do not draw wave marks, motion arcs, lines, sparkles, symbols, or floating effects around the waving side.",
+    ],
+}
+# A default action that names a person's parts, for a body that is not one biped (`normalize_states`).
+DEFAULT_ACTIONS_ANY_BODY = {
+    "wave": "friendly wave gesture lifting one side; the waving side changes clearly while the body stays planted",
 }
 
 CHROMA_CANDIDATES = [
@@ -435,8 +481,10 @@ def choose_chroma_key(reference: Path | None, requested: str) -> dict[str, Any]:
     return result
 
 
-def normalize_states(raw: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+def normalize_states(raw: dict[str, Any] | None, bodies: list[Body] | None = None) -> dict[str, dict[str, Any]]:
+    """`bodies` (`--body-plan`) that are not one biped take `DEFAULT_ACTIONS_ANY_BODY` where a state names no action."""
     source = raw or DEFAULT_STATES
+    defaults = DEFAULT_ACTIONS_ANY_BODY if not body_mod.biped(bodies) else {}
     normalized: dict[str, dict[str, Any]] = {}
     for state, entry in source.items():
         if not isinstance(entry, dict):
@@ -448,7 +496,9 @@ def normalize_states(raw: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
             "frames": frames,
             "fps": int(entry.get("fps", DEFAULT_STATES.get(state, {}).get("fps", 6))),
             "loop": bool(entry.get("loop", True)),
-            "action": str(entry.get("action", DEFAULT_STATES.get(state, {}).get("action", state))),
+            # with no states asked for, the default states' actions are defaults too
+            "action": str(entry.get("action") if raw and "action" in entry
+                          else defaults.get(state, DEFAULT_STATES.get(state, {}).get("action", state))),
         }
         # A row's track kind is request truth (docs/layer-tracks.md §3.2) and is
         # carried only when declared: an undeclared row IS `base`, and writing
@@ -467,7 +517,7 @@ def normalize_states(raw: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
 # rule is written down, and `dropped_key_notes` makes every drop observable
 # instead of silent.
 REQUEST_KEYS_CARRIED = ("cell", "states", "style",
-                        "directions", "fit", "rig", "layers")
+                        "directions", "fit", "rig", "layers", "body_plan")
 # Written by prepare itself, from CLI flags and from measuring the base image. An
 # incoming copy is not carried either, but it is restated rather than lost, so the
 # note names it separately: `character` comes from --character-id/--description/
@@ -702,7 +752,8 @@ def directional_parts(state: str) -> tuple[str, str] | None:
     return match.group(1), match.group(2)
 
 
-def directional_requirements(state: str) -> list[str]:
+def directional_requirements(state: str, any_body: bool = False) -> list[str]:
+    """`any_body`: a body that is not one biped, read by its silhouette rather than a person's shoulders, hands and feet."""
     parts = directional_parts(state)
     if not parts:
         return []
@@ -714,7 +765,9 @@ def directional_requirements(state: str) -> list[str]:
     requirements = [
         f"Lock the whole row to a 45-degree {body_view} view facing {camera_side} and slightly {toward}.",
         f"Do not average this into a straight front, straight back, or pure side-view sprite.",
-        f"Make {camera_side} readable through face/body orientation, hair silhouette, shoulder overlap, hand/foot placement, and prop angle.",
+        (f"Make {camera_side} readable through face/body orientation, the silhouette of hair, a mane or a tail, the overlap of near and far parts, and prop angle."
+         if any_body else
+         f"Make {camera_side} readable through face/body orientation, hair silhouette, shoulder overlap, hand/foot placement, and prop angle."),
         "If a 4-direction reference sheet is attached, use it as the direction SSoT for facing only; do not copy its pose or state.",
         "If a single target-direction anchor is attached, its facing direction is authoritative and overrides any paired-row reference.",
     ]
@@ -750,6 +803,27 @@ def draw_guide(path: Path, frames: int, cell: dict[str, Any]) -> None:
     image.save(path)
 
 
+# The anchor lock's motion words: a person's (`ANCHOR_LOCK`), and for a body that is not one biped the same
+# without the arms, shoulders, feet or legs it may lack (`ANCHOR_LOCK_ANY_BODY`).
+ANCHOR_LOCK = {
+    "budget": "limb contacts, arm counter-swing, body height, torso lean, head bob, hair bounce",
+    "rotate": "the body, feet, shoulders, face angle, and gaze",
+    "phase": "leg phase",
+    "contacts": "foot contacts",
+}
+ANCHOR_LOCK_ANY_BODY = {
+    "budget": "the contacts of whatever it moves on, body height, body lean, head bob, the bounce of hair, a mane or a tail",
+    "rotate": "the body, face angle, and gaze",
+    "phase": "step phase",
+    "contacts": "contacts",
+}
+
+
+def request_bodies(request: dict[str, Any]) -> list[Body] | None:
+    """The run's body plan (`sprite-request.json` `body_plan`, `--body-plan`); None when it names none."""
+    return [Body(**body) for body in request.get("body_plan") or []] or None
+
+
 def row_prompt(request: dict[str, Any], state: str, entry: dict[str, Any]) -> str:
     cell = request["cell"]
     chroma = request["chroma_key"]
@@ -759,11 +833,17 @@ def row_prompt(request: dict[str, Any], state: str, entry: dict[str, Any]) -> st
     cell_height = int(cell["height"])
     safe_margin_x = int(cell["safe_margin_x"])
     safe_margin_y = int(cell["safe_margin_y"])
+    bodies = request_bodies(request)
+    any_body = not body_mod.biped(bodies)
+    stands_on = body_mod.text(bodies)
     state_requirements = [
         *direction_prefix_requirements(request, state),
-        *directional_requirements(state),
-        *STATE_REQUIREMENTS.get(state, []),
+        *directional_requirements(state, any_body),
+        *(STATE_REQUIREMENTS_ANY_BODY.get(state, STATE_REQUIREMENTS.get(state, [])) if any_body
+          else STATE_REQUIREMENTS.get(state, [])),
+        *([stands_on] if stands_on else []),
     ]
+    anchor_lock = ANCHOR_LOCK_ANY_BODY if any_body else ANCHOR_LOCK
     state_requirement_text = ""
     if state_requirements:
         state_requirement_text = "\n\nState-specific requirements:\n" + "\n".join(
@@ -798,11 +878,11 @@ Animation action: {entry["action"]}.
 Anchor lock:
 - Accepted idle/direction anchors own character identity, outfit details, colors, face design, asymmetric markings, and side-specific accessories for final action rows.
 - Base character images and original character sheets are pre-idle sources only. Do not reinterpret or reintroduce base-character details inside a direction-anchor action row.
-- This row owns motion only. Spend the variation budget on limb contacts, arm counter-swing, body height, torso lean, head bob, hair bounce, and loop continuity.
+- This row owns motion only. Spend the variation budget on {anchor_lock["budget"]}, and loop continuity.
 - Do not redesign or reinterpret identity details while animating. Keep face, hair shape, markings, palette, outline weight, body proportions, outfit, props, and silhouette copied from the approved anchors.
 - Preserve side-specific features exactly as the approved anchors show them. Do not solve hairpin side, earring side, logos, handed props, scars, one-sided markings, asymmetric clothing, or lighting cues from scratch inside the row.
-- When generating a paired left/right row, use the paired row reference only for timing, scale, and animation intensity. Rotate the body, feet, shoulders, face angle, and gaze to the target facing, but keep identity details attached according to the accepted target-direction anchor.
-- For cyclic locomotion, do not let a single running/walking pose anchor determine every frame's leg phase. When a multi-pose motion reference is attached, use it for foot contacts.
+- When generating a paired left/right row, use the paired row reference only for timing, scale, and animation intensity. Rotate {anchor_lock["rotate"]} to the target facing, but keep identity details attached according to the accepted target-direction anchor.
+- For cyclic locomotion, do not let a single running/walking pose anchor determine every frame's {anchor_lock["phase"]}. When a multi-pose motion reference is attached, use it for {anchor_lock["contacts"]}.
 - Prefer a subtler animation over any change that mutates the character identity.
 {state_requirement_text}
 
@@ -824,6 +904,26 @@ Layout requirements:
 - Preserve the same silhouette, face, proportions, palette, material, and props across every frame.
 
 Output only the sprite strip image."""
+
+
+BODY_PLAN_HELP = ("what the character stands on: biped (default), quadruped or legless; a scene of several figures "
+                  "names each, e.g. 'the man=biped' 'the horse=quadruped' (repeatable; overrides the request's "
+                  "body_plan): no row prompt names a part the body lacks, as video-set --body-plan")
+
+
+def parse_body_plan(cli: list[str] | None, raw: Any) -> list[Body] | None:
+    """`--body-plan` if given, else the request's `body_plan` (specs, or `{"plan", "figure"}` as
+    `sprite-request.json` records it)."""
+    if cli:
+        return body_mod.parse_all(list(cli)) or None
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise SystemExit(f"request body_plan must be a list, got {raw!r}")
+    specs = [str(item) if not isinstance(item, dict)
+             else f"{item['figure']}={item.get('plan')}" if item.get("figure") else str(item.get("plan"))
+             for item in raw]
+    return body_mod.parse_all(specs) or None
 
 
 def _outline_config(value: str):
@@ -872,6 +972,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fit-pitch-hint", type=int, default=None, help="pixel unfake fallback pixel pitch when per-frame detection is inconclusive")
     parser.add_argument("--directions", help="comma list of generated directions (e.g. down,side,up); states must be named <direction>_<state>; missing <direction>_idle anchors are synthesized and a generation plan is written")
     parser.add_argument("--mirror", help="comma list of target=source pairs covered by runtime mirroring instead of generation (e.g. left=side)")
+    parser.add_argument("--body-plan", action="append", default=[], metavar="PLAN | FIGURE=PLAN", help=BODY_PLAN_HELP)
     parser.add_argument("--request", type=Path)
     parser.add_argument("--request-json")
     parser.add_argument("--force", action="store_true")
@@ -903,7 +1004,8 @@ def _run(args: argparse.Namespace):
         raise SystemExit(f"output dir exists and is not empty: {out_dir}; pass --force")
 
     raw_request = load_request(args.request, args.request_json)
-    states = normalize_states(raw_request.get("states"))
+    bodies = parse_body_plan(args.body_plan, raw_request.get("body_plan"))
+    states = normalize_states(raw_request.get("states"), bodies)
     # 방향 계약: CLI 가 request JSON 을 override 한다 (fit 과 동일 규칙)
     raw_directions = dict(raw_request.get("directions") or {})
     if args.directions:
@@ -971,6 +1073,9 @@ def _run(args: argparse.Namespace):
         request["subject"] = subject
     if directions:
         request["directions"] = directions
+    # Body plan: recorded only when named, so a run without one keeps its request as it was.
+    if bodies:
+        request["body_plan"] = [vars(body) for body in bodies]
     # 파일 택소노미 계약: 신규 런 기본. 방향 계약과 결합 시 raw/frames/guides/prompts
     # 가 <direction>/<pose> 로 나뉜다 (layout.py SSoT). legacy 런은 필드 없음 = flat.
     request["layout"] = TAXONOMY

@@ -27,7 +27,7 @@ from sprite_gen.effects import recolor, shadow
 from sprite_gen.scene import render, inspect_scene
 from sprite_gen.serve import serve_compose, serve_curation
 from sprite_gen.spec import migrate_breathe, migrate_request
-from sprite_gen.gen.prepare import STYLE_DEFAULT, _outline_config
+from sprite_gen.gen.prepare import BODY_PLAN_HELP, STYLE_DEFAULT, _outline_config
 from sprite_gen.spec.subject import SUBJECTS
 from sprite_gen.workflow import guide, preferences
 
@@ -83,6 +83,7 @@ def _add_prepare(p: argparse.ArgumentParser) -> None:
     p.add_argument("--fit-detail-bias", action=argparse.BooleanOptionalAction, default=None)
     p.add_argument("--fit-outline", type=_outline_config, default=None, metavar="{on,off,STRENGTH}")
     p.add_argument("--fit-pitch-hint", type=int, default=None)
+    p.add_argument("--body-plan", action="append", default=[], metavar="PLAN | FIGURE=PLAN", help=BODY_PLAN_HELP)
     p.add_argument("--request", type=Path)
     p.add_argument("--request-json")
     p.add_argument("--force", action="store_true")

@@ -5,10 +5,12 @@ The engine's measured walk and idle sentences were measured on people, and some 
 has: the Lite walk's arm swing (`batch.LITE_WALK_TEXT`), the arms in the Lite back-diagonal head hold
 (`LITE_HEAD_TEXT`), the idle's two feet, chest, shoulders and arms (`MOTION_TEXT["idle"]`), and the front
 or back walk's mid-step redraw, one foot under each hip and the arms swinging (`WALK_START_TEXT`), and the
-front, back and diagonal still a clip starts from, both feet, chest, hips and shoes (`STILL_VIEW_TEXT`). Said of a
-horse, they walk it on a person's legs or stand it up on two. The caller names the body plan (`parse`,
-`--body-plan`): one for the character ("quadruped"), or one per figure in a scene ("the man=biped",
-"the horse=quadruped").
+front, back and diagonal still a clip starts from, both feet, chest, hips and shoes (`STILL_VIEW_TEXT`), the
+attack's bare hands and grip (`MOTION_TEXT["attack"]`, `HOLD_TEXT["attack"]`), and the sheet rows `prepare` writes
+(`prepare.STATE_REQUIREMENTS`: a walk's arm and leg, a front walk's shoulder, a wave's hand). Said of a
+horse, they walk it on a person's legs, stand it up on two or strike with its hands. The caller names the body plan (`parse`,
+`--body-plan`, also `prepare --body-plan`): one for the character ("quadruped"), or one per figure in a scene
+("the man=biped", "the horse=quadruped").
 
 | plan | stands on | the engine says |
 |---|---|---|
@@ -20,7 +22,7 @@ The still a clip starts from is drawn with a view sentence (`batch.still_view_te
 that counts a person's feet and names the chest, hips, shoulders and shoes; a body that is not one biped
 gets it without them, ending in what it stands on (`still_text`).
 
-No body, or one biped, is the 2.22.0 prompt to the byte (`tests/gen/test_prompt_freeze.py`). Any other
+No body, or one biped, is the 2.22.0 prompt (a sheet row, 2.32.0's) to the byte (`tests/gen/test_prompt_freeze.py`). Any other
 body gets the sentences without the parts it lacks and, after the motion sentence, what it stands on
 (`text`); a scene of several figures says it per figure. Only the biped sentences were measured; the
 others say no part the body lacks and are not yet measured on a clip.
