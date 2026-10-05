@@ -701,11 +701,12 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
             out[state] = {"ok": False, "error": str(exc)}
             continue
         out[state] = {"ok": True, "applied": True, "length": report["length"], "lengths": report["lengths"], "between": report["between"],
-                      "made_by_rife": report["made_by_rife"], "replaced": report["replaced"], "warnings": report["warnings"], "report": str(root / f"{state}.cycle-align.json")}
+                      "made_by_rife": report["made_by_rife"], "replaced": report["replaced"], "retake": report["retake"],
+                      "warnings": report["warnings"], "report": str(root / f"{state}.cycle-align.json")}
         for line in report["warnings"]:
             print(f"video-set: warning: {state}: {line}", file=sys.stderr)
         for r, row in zip(rows, report["loops"]):
-            r["loop"]["cycle_align"] = {k: row[k] for k in ("from", "to", "made_by_rife", "turned_by", "turned_on", "start_foot", "seam_ratio")}
+            r["loop"]["cycle_align"] = {k: row[k] for k in ("from", "to", "made_by_rife", "turned_by", "turned_on", "start_foot", "seam_ratio", "retake")}
             r["loop"]["n_out"] = row["strip"]["frames"]
     return out
 

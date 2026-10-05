@@ -15,6 +15,12 @@ the frame's top edge, which a long ear owns. docs/loop-repair.md section 4.
 Every frame between two source frames softens a little, so the length is the median (the one
 that needs the fewest made frames across the set), and a loop already that long is not touched.
 
+A loop whose clip holds each drawing for two or three frames (`held_drawings`, sprite_gen/video/
+held.py), that the length leaves at under RETAKE_DRAWINGS_MIN drawings a second, with frames
+between them that could not be made, is aligned all the same — and named in the report's `retake`
+(reason `held-drawings`, with its numbers) and in a warning: the gap is wider than any interpolator
+bridges, and only a new take fixes it.
+
 The loop directories are `video-loop` output directories. Their first alignment keeps the cut
 as filmed in `cycle.source/`; every later alignment reads from there, so running it again — or
 with another length — never resamples a resampled loop.
@@ -50,6 +56,7 @@ from sprite_gen._deps import np
 from sprite_gen.gen import handedness as handed_mod
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.gif_utils import save_clean_gif
+from sprite_gen.video import held as held_mod
 from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import period as period_mod
@@ -85,6 +92,59 @@ SMEAR_WARN = 0.001
 # shape of fill, or a limb a pale ghost. Outlined legs crossing too far melt at 32 %, a short step
 # the flow follows stays under 3 % (tests/video/test_rife.py; docs/loop-repair.md section 4).
 OUTLINE_WARN = 0.05
+# A loop whose source holds its drawings (two or three frames each, sprite_gen/video/held.py) and that
+# the set's length leaves at fewer than this many drawings a second, with at least UNMADE_MIN of the
+# frames between them not made (taken from the nearer source frame, or kept with a fault), is a take
+# to film again: the reason `held-drawings` in the report (`retake`). A clip on twos shows 12 a
+# second; at that rate or slower, each frame that could not be made holds a drawing a frame longer
+# where the legs cross, and the loop halts there. A loop squeezed well past it shows its drawings
+# closer than on twos, and is not named (docs/loop-repair.md section 4).
+RETAKE_DRAWINGS_MIN = 13.0
+RETAKE_UNMADE_MIN = 1
+RETAKE_REASON = "held-drawings"
+
+
+def held_drawings(frames: list[Image.Image], *, fps: float, clip: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Whether a loop's drawings are held, and how many its cycle holds (`held.measure`).
+
+    `clip` is the record `video-loop` wrote in the strip metadata (`drawings`), read over the whole
+    clip as keyed: its hold, and its drawings a second over the cycle's frames (`source` clip). The cut
+    cycle is the fallback for a loop cut before that record (`source` cycle, read as a ring): it is
+    short, and `--anchor motion-auto` shifts each cut frame, so a pair's repeat may no longer read as one."""
+    n = len(frames)
+    if clip and clip.get("hold"):
+        per_second = float(clip["drawings_per_second"])
+        return {"source": "clip", "hold": clip["hold"], "contrast": clip.get("contrast"), "frames": n, "fps": fps,
+                "drawings_per_second": per_second, "drawings": round(per_second * n / fps, 2)}
+    D = _ring(frames)
+    return {"source": "cycle", **held_mod.measure([float(D[k, (k + 1) % n]) for k in range(n)], fps=fps, cyclic=True)}
+
+
+def retake(drawings: dict[str, Any], facts: dict[str, Any], *, fps: float) -> dict[str, Any] | None:
+    """The reason to film a loop again, with its numbers, or None. `drawings` is the source's
+    `held_drawings`, `facts` its `resample` facts: a held source stretched to under
+    RETAKE_DRAWINGS_MIN drawings a second, with RETAKE_UNMADE_MIN or more frames between them not made
+    — taken from the nearer source frame (`nearest_at`), or made with a fault and kept (`--between rife`)."""
+    if not drawings.get("hold") or drawings["hold"] < 2:
+        return None
+    seconds = facts["to"] / fps
+    per_second = drawings["drawings"] / seconds
+    unmade = len(facts.get("nearest_at", [])) + sum(1 for m in facts.get("smear", []) if m["method"] == "rife" and m["faults"])
+    if per_second >= RETAKE_DRAWINGS_MIN or unmade < RETAKE_UNMADE_MIN:
+        return None
+    return {"reason": RETAKE_REASON, "hold": drawings["hold"], "source": drawings["source"], "drawings": drawings["drawings"],
+            "drawings_per_second_filmed": drawings["drawings_per_second"], "drawings_per_second": round(per_second, 3),
+            "frames_per_drawing": round(facts["to"] / drawings["drawings"], 3), "unmade": unmade,
+            "limits": {"drawings_per_second_min": RETAKE_DRAWINGS_MIN, "unmade_min": RETAKE_UNMADE_MIN}}
+
+
+def _retake_line(name: str, r: dict[str, Any]) -> str:
+    """A loop to film again, in words."""
+    return (f"{name}: film this direction again ({r['reason']}) — its clip shows each drawing for {r['hold']} frames "
+            f"({r['drawings']:g} drawings in the cycle, {r['drawings_per_second_filmed']:g} a second as filmed); at the set's length "
+            f"that is {r['drawings_per_second']:g} drawings a second, {r['frames_per_drawing']:g} frames apart, and {r['unmade']} "
+            "frame(s) between them could not be made, so the loop halts there. A new take that draws every frame "
+            "fixes it; no interpolator draws legs that swap places across a gap this wide (docs/loop-repair.md section 4)")
 
 
 def faults(measure: dict[str, float]) -> list[str]:
@@ -568,7 +628,9 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         except (ValueError, rife_mod.RifeUnavailable) as exc:
             raise SystemExit(f"video-cycle-align: {d}: {exc}; frames between source frames are made by RIFE (docs/loop-repair.md)") from exc
         start = strike["start"]
-        record = {**facts, "turned_by": start, "turned_on": strike["by"], "view": view, "start_foot": strike["start_foot"],
+        drawings = held_drawings(frames, fps=fps, clip=loops[i][2].get("drawings"))
+        again = retake(drawings, facts, fps=fps)
+        record = {**facts, "drawings": drawings, "retake": again, "turned_by": start, "turned_on": strike["by"], "view": view, "start_foot": strike["start_foot"],
                   **({"foot": strike["foot"]} if "foot" in strike else {}), **({"foot_why": strike["foot_why"]} if "foot_why" in strike else {}),
                   "stride_swing": strike["stride_swing"], "reach_swing": strike["reach_swing"],
                   "fps": round(fps, 4), "source": SOURCE_DIR, "cycles_given": given.get(i), "cycle_screen": screens[i],
@@ -585,7 +647,10 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         rows.append({"dir": str(d), "name": meta_path.name[: -len(".strip.json")], **{k: v for k, v in record.items() if k not in ("gif", "webp")},
                      "strip": {k: merged[k] for k in ("frames", "w", "h", "body_h", "delay_ms")}})
     warnings = [_fault_line(r["name"], m) for r in rows for m in r.get("smear", []) if m["faults"]]
-    warnings = cycle_warnings + warnings
+    retakes = [{"dir": r["dir"], "name": r["name"], **r["retake"]} for r in rows if r["retake"]]
+    # A loop to film again is named by its directory where two loops share a strip name (each `walk`).
+    shared = len({r["name"] for r in rows}) < len(rows)
+    warnings = cycle_warnings + [_retake_line(r["dir"] if shared else r["name"], r["retake"]) for r in rows if r["retake"]] + warnings
     if len(rows) > 1 and views is None:
         warnings.append("no view given (--view): each loop starts on its larger strike, whichever foot that is")
     else:
@@ -593,7 +658,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
                      if r["view"] is not None and r["start_foot"] is None]
     report = {"kind": "sprite-gen-video-cycle-align-report", "applied": True, "length": target,
               "length_rule": "requested" if length is not None else "median",
-              "between": between, "start_foot": start_foot, "warnings": warnings,
+              "between": between, "start_foot": start_foot, "retake": retakes, "warnings": warnings,
               "lengths": lengths, "multi_cycle": multi_cycle, "suspects": suspects,
               "cycles_given": {str(loops[i][0]): k for i, k in given.items()},
               "fps": round(fps, 4), "cycle_seconds": round(target / fps, 4),
@@ -657,7 +722,7 @@ def run(**kwargs: object) -> int:
                          f"`{rife_mod.INSTALL_COMMAND}` (docs/loop-repair.md)") from exc
     for line in report["warnings"]:
         print(f"video-cycle-align: warning: {line}", file=sys.stderr)
-    print(json.dumps({k: report[k] for k in ("length", "lengths", "cycles_given", "between", "made_by_rife", "replaced", "cycle_seconds")}
+    print(json.dumps({k: report[k] for k in ("length", "lengths", "cycles_given", "between", "made_by_rife", "replaced", "retake", "cycle_seconds")}
                      | {"loops": [{k: r[k] for k in ("name", "from", "to", "made_by_rife", "turned_by", "turned_on", "start_foot", "seam_ratio")} for r in report["loops"]]},
                      ensure_ascii=False, indent=2))
     return 0
