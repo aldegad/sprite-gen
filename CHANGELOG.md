@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v2.32.0) - A horse is not told a person's walk
+## v2.32.0 - A horse is not told a person's walk
 
 - **Fix: an animal's walk and idle named a person's arms and feet.** The walk and run sentences have named no limb since 2.0.0 ("`video-set` motion templates no longer assume a biped"), but four sentences added later were measured on people and said to every body: the Lite walk calm ("a gentle arm swing close to the body", 2.18.0), the Lite back-diagonal head hold ("only the legs, arms and the ends of the hair move", 2.18.0), the idle ("both feet planted flat", chest, shoulders and arms, 2.9.0) and the front or back walk's mid-step redraw ("one foot … directly under its own hip … the arms swing", 2.18.0). Said of a horse, they walk it on a person's legs or stand it up on two. Not a regression of the 2.0.0 fix: these paths came after it.
 - **Fix: the still a front, back or diagonal clip starts from counted a person's feet.** The view sentence a still is drawn with (`still_view_text`, `gen --direction`; an app that draws its own still takes it too) said "the chest, hips and the toes of both feet" (front), "the shoulders, the hips and the heels of both feet" (back), "the face looking the same way as the chest" (front diagonal) and "the backs of the shoes" (back diagonal). The clip starts from that still, so a horse drawn on two feet stands up before the walk begins.
