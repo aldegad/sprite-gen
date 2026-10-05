@@ -143,11 +143,14 @@ def _rest_then_short_hop(tmp_path: Path, *, n: int = 80, hop: tuple[int, int] = 
 def test_one_shot_accepts_a_short_excursion_below_the_periodic_window(tmp_path: Path) -> None:
     files = _rest_then_short_hop(tmp_path)
     D = loop_mod.distance_matrix(files)
-    # 5 active frames + 2 rest each side = 9 < the periodic lower bound of 16
-    cycle = loop_mod.detect_one_shot(D, min_len=16, max_len=70)
+    # 5 active frames + 2 rest each side = 9 < the periodic lower bound of 16: run_loop does not pass
+    # that bound to the one-shot search (only ONE_SHOT_MIN_LEN, or an explicit --min-len — loop.CutWindow)
+    cycle = loop_mod.detect_one_shot(D, min_len=loop_mod.ONE_SHOT_MIN_LEN, max_len=70)
     assert cycle["kind"] == "one-shot"
     assert cycle["length"] == 9
     assert cycle["excursion"] == [40, 44]
+    # an explicit floor is the floor
+    assert loop_mod.detect_one_shot(D, min_len=16, max_len=70)["length"] >= 16
 
 
 def test_feet_anchor_undoes_in_canvas_drift_and_reports_it(tmp_path: Path) -> None:

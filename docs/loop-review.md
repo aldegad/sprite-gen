@@ -100,7 +100,9 @@ nothing more is measured. Once it pops, the held part is read below its top as w
 the top band sits on: a cut whose shaft closes under the hand is taken first, and where no cut one
 step long closes it, a window two steps long — one cycle — is (`cycle.steps`, `strip.json`
 `steps: 2`; [loop repair](loop-repair.md) section 3, "The held side"). An explicit `--max-len` is
-never widened, nor cut back to half the clip: an explicit window is the window. Without one, only
+never widened, nor cut back to half the clip: an explicit window is the window, on every path that
+sets a length (the count of steps and the one-shot failover below included), and a cut outside it
+fails ([loop repair](loop-repair.md) section 3, "The step screen"). Without one, only
 the gait fallback below looks past the state's window, and only after this search found nothing.
 
 A walk slower than the window can hold — its legs drawn alike — is found one step long, and the

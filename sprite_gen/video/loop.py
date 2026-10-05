@@ -181,6 +181,50 @@ def profile_for(state: str | None) -> LoopProfile:
     return STATE_PROFILES.get((state or "").strip().lower(), STATE_PROFILES["default"])
 
 
+@dataclass(frozen=True)
+class CutWindow:
+    """The cut's length window, worked out once (`of`) and read by every search that sets a length.
+
+    `lo`/`hi` are the first search's window: the state's, save where the caller set a bound
+    (`min_len`/`max_len`, --min-len/--max-len). A search that looks elsewhere asks this for its own
+    window — the gait fallback and the one-shot failover past the state's ceiling (`past`), a count of
+    steps two lengths on (`within`), a window two steps long (`max_len`, local_cycle's `length_cap`) —
+    and gets it inside the caller's bounds: an explicit bound is never widened, and no search sets one
+    of its own. `hold` is the last word on any cut, whatever chose it."""
+    lo: int
+    hi: int
+    min_len: int | None = None
+    max_len: int | None = None
+
+    @classmethod
+    def of(cls, prof: LoopProfile, n: int, fps: float, min_len: int | None, max_len: int | None) -> "CutWindow":
+        lo_default, hi_default = prof.window(n, fps)
+        lo = min_len if min_len is not None else lo_default
+        return cls(lo, max_len if max_len is not None else max(lo + 2, hi_default), min_len, max_len)
+
+    def within(self, lo: int, hi: int) -> tuple[int, int]:
+        """A search's own window [lo, hi] inside the caller's bounds (empty when lo > hi comes back)."""
+        return (lo if self.min_len is None else max(lo, self.min_len),
+                hi if self.max_len is None else min(hi, self.max_len))
+
+    def past(self, hi: int) -> int:
+        """The ceiling of a search past the state's window: `hi`, or the caller's own where it set one."""
+        return hi if self.max_len is None else self.max_len
+
+    def said(self) -> str:
+        """The bounds the caller set, as given on the command line."""
+        return " ".join(f"--{flag} {v}" for flag, v in (("min-len", self.min_len), ("max-len", self.max_len)) if v is not None)
+
+    def hold(self, cycle: dict[str, Any]) -> None:
+        """Raise when a cut is outside the caller's bounds: two explicit instructions that disagree are
+        a failure, never one of them followed without a word."""
+        length = cycle["length"]
+        if (self.min_len is not None and length < self.min_len) or (self.max_len is not None and length > self.max_len):
+            exc = ValueError(f"the cut is {length} frames long ({cycle.get('kind', 'cut')} from frame {cycle['start']}), outside {self.said()}")
+            exc.diagnostics = {**cycle, "window_refused": {"min_len": self.min_len, "max_len": self.max_len}}  # type: ignore[attr-defined]
+            raise exc
+
+
 def _load_small(path: Path) -> np.ndarray:
     return _small_features(Image.open(path).convert("RGBA"))
 
@@ -400,13 +444,16 @@ def detect_one_shot(D: np.ndarray, *, min_len: int, max_len: int, frame_mass: np
     at frame zero or n-1 is never repaired by padding. The existing contrast /
     moved-mass floors still reject stand jitter; return distance must additionally
     be at most a quarter of the departure. No seam threshold is relaxed.
+    No cut is shorter than `min_len` (nor ONE_SHOT_MIN_LEN) or longer than `max_len`; `run_loop`
+    passes ONE_SHOT_MIN_LEN unless the caller set --min-len (`CutWindow`).
     """
     n = len(D)
     adjacent = np.diag(D, 1)
     candidates = []
     max_moved = 0.0
+    shortest = max(ONE_SHOT_MIN_LEN, min_len)
     for start in range(n - ONE_SHOT_MIN_LEN + 1):
-        for end in range(start + ONE_SHOT_MIN_LEN - 1, min(n, start + max_len)):
+        for end in range(start + shortest - 1, min(n, start + max_len)):
             seam = float(D[start, end])
             e = (D[start] + D[end]) / 2
             peak_at = start + int(np.argmax(e[start:end + 1]))
@@ -931,20 +978,32 @@ class HeldEdge:
             return {"skipped": str(exc), "reference": repair_mod.HELD_EDGE_REFERENCE}
 
 
-def _counted(cycle: dict[str, Any], steps: int, *, D: np.ndarray, trajectory: np.ndarray, frames: list[Image.Image],
-             moved: list[np.ndarray], detect: dict[str, Any]) -> dict[str, Any]:
+def _counted(cycle: dict[str, Any], steps: int, *, window: CutWindow, D: np.ndarray, trajectory: np.ndarray,
+             frames: list[Image.Image], moved: list[np.ndarray], detect: dict[str, Any]) -> dict[str, Any]:
     """The cut once its steps are counted (`--steps`): 2 keeps it; 1 cuts again in the window two of
-    its lengths long, [2L-1, 2L+1], as long as the caller's ceiling — not half the clip — with the same
-    search (a repeat seen in the clip, the top band and the held side read again) save that the cut whose
-    wrap the clip itself plays is taken among the equivalent ones (`local_cycle._closure`), and no window
-    twice that. A clip too short to see such a window repeat is cut all the same, the count standing
-    for the repeat (`local_cycle.counted`, `unseen` says why); `cycle.coverage` and the seam gate say the
-    rest. Recorded `steps` (`first_cut`: the cut counted)."""
+    its lengths long, [2L-1, 2L+1], inside the caller's bounds (`window.within`) — not half the clip —
+    with the same search (a repeat seen in the clip, the top band and the held side read again) save that
+    the cut whose wrap the clip itself plays is taken among the equivalent ones (`local_cycle._closure`),
+    and no window twice that. Where the caller's bounds leave none of [2L-1, 2L+1], the count and the
+    bounds disagree: a failure, neither followed. Where they leave part of it, that part is read
+    (`steps.window`, beside `steps.counted_window`). A clip too short to see such a window repeat is cut
+    all the same, the count standing for the repeat (`local_cycle.counted`, `unseen` says why);
+    `cycle.coverage` and the seam gate say the rest. Recorded `steps` (`first_cut`: the cut counted)."""
     first = {"start": cycle["start"], "length": cycle["length"]}
     if steps == 2:
         cycle["steps"] = {"count": 2, "by": "given", "given": 2}
         return cycle
-    lo, hi = 2 * first["length"] - 1, 2 * first["length"] + 1
+    counted_window = [2 * first["length"] - 1, 2 * first["length"] + 1]
+    lo, hi = window.within(*counted_window)
+    record = {"count": 2, "by": "given", "given": 1, "first_cut": first, "window": [lo, hi]}
+    if [lo, hi] != counted_window:
+        record["counted_window"] = counted_window
+    if lo > hi:
+        exc = ValueError(f"--steps 1: the cut of {first['length']} frames from {first['start']} is one step, so the cycle is "
+                         f"{counted_window[0]}-{counted_window[1]} frames long, and {window.said()} leaves none of that: the count "
+                         f"and the window disagree — drop one, or give a window that holds the cycle")
+        exc.diagnostics = {**cycle, "steps": {**record, "window": None, "refused": f"outside {window.said()}"}}  # type: ignore[attr-defined]
+        raise exc
     signals = leg_signals(frames)
     try:
         found = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi, length_cap=hi, signals=signals,
@@ -956,11 +1015,23 @@ def _counted(cycle: dict[str, Any], steps: int, *, D: np.ndarray, trajectory: np
         except ValueError as exc:
             failed = ValueError(f"--steps 1: the cut of {first['length']} frames from {first['start']} is one step, and the clip "
                                 f"({len(D)} frames) has no window {lo}-{hi} frames long to cut: {exc}")
-            failed.diagnostics = {**getattr(unseen, "diagnostics", {}), "steps": {"given": 1, "first_cut": first, "window": [lo, hi]}}  # type: ignore[attr-defined]
+            failed.diagnostics = {**getattr(unseen, "diagnostics", {}), "steps": record}  # type: ignore[attr-defined]
             raise failed from exc
         found["unseen"] = str(unseen)
-    found["steps"] = {"count": 2, "by": "given", "given": 1, "first_cut": first, "window": [lo, hi]}
+    found["steps"] = record
     return found
+
+
+def _one_shot(D: np.ndarray, window: CutWindow, hi: int, masses: np.ndarray) -> dict[str, Any]:
+    """`detect_one_shot` in its window: ONE_SHOT_MIN_LEN to `hi`, inside the caller's bounds. Where the
+    caller set one and no one-shot fits, the refusal says the window it searched."""
+    shortest, longest = window.within(ONE_SHOT_MIN_LEN, hi)
+    try:
+        return detect_one_shot(D, min_len=shortest, max_len=longest, frame_mass=masses)
+    except CycleSelectionError as exc:
+        if not window.said():
+            raise
+        raise CycleSelectionError(f"{exc} — in {shortest}-{longest} frames, inside {window.said()}", exc.diagnostics) from exc
 
 
 def coverage_verdict(cycle: dict[str, Any]) -> list[str]:
@@ -1030,9 +1101,9 @@ def run_loop(
         raise SystemExit(f"video-loop: need at least 6 keyed frames in {frames_dir}, found {len(files)}")
     prof = profile_for(state)
     n = len(files)
-    lo_default, hi_default = prof.window(n, fps)
-    lo = min_len if min_len is not None else lo_default
-    hi = max_len if max_len is not None else max(lo + 2, hi_default)
+    # Every search below reads its window off this one (`CutWindow`): none sets a bound of its own.
+    window = CutWindow.of(prof, n, fps, min_len, max_len)
+    lo, hi = window.lo, window.hi
     D = distance_matrix(files)
     # The clip's steps as keyed, before `--anchor motion-auto` reads its own distance or moves a frame:
     # the hold is read on them, over the clip and over the cut (sprite_gen/video/held.py).
@@ -1082,7 +1153,7 @@ def run_loop(
             try:
                 moved = moved_alpha(source_frames, analysis)
                 cycle = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi, signals=leg_signals(source_frames),
-                                           wrap_pop=wrap_pop_on(moved), held_edge=HeldEdge(moved), length_cap=max_len, **detect)
+                                           wrap_pop=wrap_pop_on(moved), held_edge=HeldEdge(moved), length_cap=window.max_len, **detect)
             except ValueError as first:
                 # A front or back gait that walked toward the camera, or a slow one: one more
                 # search, recorded (`gait_fallback`), and only after the first found nothing.
@@ -1097,15 +1168,15 @@ def run_loop(
                     report_base["automatic_motion_analysis"] = analysis
                     fallback["scale_undone"] = True
                 # An explicit --max-len is the caller's ceiling and stays one.
-                hi_long = gait_fallback.long_window(lo, n, fps) if max_len is None else hi
+                hi_long = window.past(gait_fallback.long_window(lo, n, fps))
                 fallback["window"] = [lo, hi_long]
                 report_base["gait_fallback"] = fallback
                 try:
                     moved = moved_alpha(source_frames, analysis)
                     cycle = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi_long,
-                                               max_fraction=gait_fallback.LONG_CYCLE_FRACTION if max_len is None else .5,
+                                               max_fraction=gait_fallback.LONG_CYCLE_FRACTION,
                                                signals=leg_signals(source_frames), wrap_pop=wrap_pop_on(moved),
-                                               held_edge=HeldEdge(moved), length_cap=max_len, **detect)
+                                               held_edge=HeldEdge(moved), length_cap=window.max_len, **detect)
                 except ValueError as second:
                     failed = ValueError(f"{second} (also with the gait fallback: window [{lo}, {hi_long}], "
                                         f"scale drift {drift['drift']:+.1%}{', undone' if fallback['scale_undone'] else ''})")
@@ -1114,13 +1185,13 @@ def run_loop(
                         failed.diagnostics = second.diagnostics  # type: ignore[attr-defined]
                     raise failed from first
             if steps is not None:
-                cycle = _counted(cycle, steps, D=D, trajectory=trajectory, frames=source_frames, moved=moved, detect=detect)
+                cycle = _counted(cycle, steps, window=window, D=D, trajectory=trajectory, frames=source_frames, moved=moved, detect=detect)
         elif cycle_mode == "fixed":
             if start is None or length is None:
                 raise SystemExit("video-loop: --cycle fixed needs --start and --length")
             cycle = fixed_cycle(D, start=start, length=length)
         elif cycle_mode == "one-shot":
-            cycle = detect_one_shot(D, min_len=lo, max_len=hi, frame_mass=masses)
+            cycle = _one_shot(D, window, hi, masses)
         elif cycle_mode == "pinned":
             cycle = pinned_cycle(D, seam_max=seam_max)
         else:
@@ -1138,12 +1209,15 @@ def run_loop(
                     # explicit, recorded failover: the action happened once (allowed for this state),
                     # so cut rest -> excursion -> rest instead. The periodic attempt stays in the report.
                     periodic_attempt = {**cycle, "window": [lo, hi], "why_rejected": flat}
-                    cycle = detect_one_shot(D, min_len=lo, max_len=max(hi, round(n * 0.9)), frame_mass=masses)
+                    # A one-shot may run past the periodic window — not past the caller's ceiling.
+                    cycle = _one_shot(D, window, max(hi, round(n * 0.9)), masses)
                 else:
                     raise SystemExit(
                         f"video-loop: no periodic cycle found — {flat}; the motion does not repeat, widen the window, "
                         "regenerate the clip, or pass --cycle one-shot for a single performed action"
                     )
+        # Whatever chose the cut — a search, a count, --cycle fixed or pinned — it is inside the caller's bounds.
+        window.hold(cycle)
     except (SystemExit, ValueError) as exc:
         shutil.rmtree(out_dir.expanduser().resolve() / FALLBACK_FRAMES_DIR, ignore_errors=True)
         write_loop_report(target, {**report_base, "status": "failed", "error": str(exc),
@@ -1375,8 +1449,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--fps", type=float, default=24.0, help="frame rate of the keyed frames (from the frames report)")
     parser.add_argument("--state", help="motion state (idle/walk/run/jump/attack) — selects the detection window")
-    parser.add_argument("--min-len", type=int, help="override: minimum cycle length in frames")
-    parser.add_argument("--max-len", type=int, help="override: maximum cycle length in frames")
+    parser.add_argument("--min-len", type=int, help="override: minimum cycle length in frames, on every path that sets one (a cut shorter fails)")
+    parser.add_argument("--max-len", type=int, help="override: maximum cycle length in frames, on every path that sets one (a cut longer fails)")
     parser.add_argument("--n-out", type=int, help="frames in the GIF/WebP (default: cycle seconds x --gif-fps)")
     parser.add_argument("--gif-fps", type=float, default=GIF_FPS_DEFAULT, help=f"GIF/WebP playback density (default {GIF_FPS_DEFAULT:g}); every state plays at this rate regardless of cycle length")
     parser.add_argument("--seam-max", type=float, default=SEAM_RATIO_MAX, help=f"loop seam gate (default {SEAM_RATIO_MAX})")
@@ -1396,7 +1470,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                         help="--anchor motion-auto: how many steps the cut it takes without this holds, as counted by whoever looked "
                              "at the loop (how often each foot lands) — the report's `cycle.step_screen` names a cut that may be one "
                              "step. 1: the cut is one step, so the walk is cut again two of its lengths long (the window [2L-1, 2L+1], "
-                             "not bounded by half the clip), recorded `cycle.steps`; 2: the cut is kept, recorded. Either way the strip "
+                             "not bounded by half the clip but held inside --min-len/--max-len: a window that leaves none of it "
+                             "fails), recorded `cycle.steps`; 2: the cut is kept, recorded. Either way the strip "
                              "metadata says `steps: 2`, which `video-cycle-align` reads")
     parser.add_argument("--name", default="loop", help="basename for strip/gif/webp outputs")
     parser.add_argument("--report", type=Path)

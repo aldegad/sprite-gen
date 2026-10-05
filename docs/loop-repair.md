@@ -419,14 +419,15 @@ exactly as with no screen at all.
 the cut it takes without `--steps` holds.
 
 - **`--steps 1`**: the cut is one step, so the walk is cut again two of its lengths long. The
-  window is [2L − 1, 2L + 1] for the cut's length L, as given — not bounded by half the clip — and
-  searched as any window (a repeat seen in the clip, the top band and the held side read again, but
+  window is [2L − 1, 2L + 1] for the cut's length L — not bounded by half the clip, but held inside an
+  explicit `--min-len`/`--max-len` (below) — and searched as any window (a repeat seen in the clip, the top band and the held side read again, but
   no window twice that); among the equivalent cuts the one whose wrap the clip itself plays is taken
   (`choice: "closure"`: its last frame against the clip's frame before its first, and the step into
   it, over its playback step), not the earliest. A clip too short to see a window that long repeat is
   cut all the same — the count stands for the repeat — at the window whose wrap the clip plays
   (`method: "counted-window-v1"`, `unseen` saying why the search found none). `cycle.steps` is
-  `{"count": 2, "by": "given", "given": 1, "first_cut": {start, length}, "window": [lo, hi]}`.
+  `{"count": 2, "by": "given", "given": 1, "first_cut": {start, length}, "window": [lo, hi]}`, with
+  `counted_window` beside `window` where an explicit window left only part of [2L − 1, 2L + 1].
 - **`--steps 2`**: the cut is a cycle already; it is kept, and recorded `{"count": 2, "by":
   "given", "given": 2}`.
 
@@ -441,7 +442,17 @@ warned about.
 
 An explicit `--min-len`/`--max-len` window is the window as given too: the half-clip bound holds
 only for the state's default window. v2.35.0 cut it back, so `--min-len 41 --max-len 43` on a
-73-frame clip asked for the window [41, 36] and found no cycle.
+73-frame clip asked for the window [41, 36] and found no cycle. And it is the window on every path
+that sets a cut's length — the first search, a window two steps long (the held side), the count
+(`--steps 1`), the gait fallback, the one-shot failover — each of which reads its window off one
+place (`loop.CutWindow`) and none of which sets a bound of its own; whatever chose the cut, even
+`--cycle fixed` or `pinned`, a cut outside an explicit bound fails (`CutWindow.hold`, `the cut is …
+frames long (…), outside --max-len N`). A count and a window that leave no length in common are two
+instructions that disagree, and neither is followed: `--steps 1` on a 21-frame step with
+`--max-len 25` fails with `the cut of 21 frames from 18 is one step, so the cycle is 41-43 frames
+long, and --max-len 25 leaves none of that: the count and the window disagree — drop one, or give a
+window that holds the cycle` (the failed report's `cycle.steps`: `counted_window`, `window: null`,
+`refused`). Where they share part of it, that part is read (`--max-len 42`: [41, 42]).
 
 - **What it does not see**: a walk whose arms are drawn alike as well — then a step is a cycle in
   every pixel and `ratio` reads 1; a cut whose twice is past the clip; and a cut on any path but

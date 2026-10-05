@@ -711,7 +711,9 @@ to be confirmed). The other states are fractions of the clip length: idle 60–9
 (breathing is slow and not periodic — the lowest seam is a long window, and idle is
 exempt from the periodicity gate), jump 11–45 %. Attack keeps the 11 % floor and
 searches up to 2.5 seconds while retaining at least 0.5 seconds (and at least eight
-frames) of observed repeat context. `--min-len/--max-len` override the window.
+frames) of observed repeat context. `--min-len/--max-len` override the window — on every path that
+sets a cut's length, the gait fallback, `--steps` and the one-shot failover included; a cut outside
+them fails rather than being written.
 Attack's periodicity floor is `0.15 + 0.85 * max(0, 1 - (n - lag) / lag)`:
 less than a full period of comparison requires a deeper dip. Reports include both
 available pairs and the every-other-frame profile sample count. This is a coverage
