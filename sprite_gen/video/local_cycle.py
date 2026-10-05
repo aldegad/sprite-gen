@@ -4,14 +4,34 @@
 A changing cadence can contain a good cycle without one period fitting the
 whole clip. Require a local lag minimum, repeat depth, motion context, and the
 same two-step duration prior; an isolated matching endpoint is insufficient.
+The local period taken is screened for two or three cycles and the finding
+recorded (`fundamental`, sprite_gen/video/period.py), never cut shorter; the
+legs are read off `signals` (`legs.strike_signals` of the analysed frames).
 """
 from __future__ import annotations
 import math
 from sprite_gen._deps import np
+from sprite_gen.video import period as period_mod
+
+
+def _around(start, length):
+    """The frames whose repeats are compared for a cut at `start`: a quarter of the cut either side."""
+    radius = max(2, length//4)
+    return radius, np.arange(max(0, start-radius), start+radius+1)
+
+
+def _profile(distances, js, radius, lo, hi):
+    n = len(distances)
+    profile = {}
+    for lag in range(max(2, lo//2), hi+2):
+        observed = js[js+lag < n]
+        if len(observed) >= radius+1:
+            profile[lag] = float(distances[observed, observed+lag].mean())
+    return profile
 
 
 def detect(distances, trajectory, *, min_len, max_len, gait_floor,
-           periodicity_min, double_tolerance, double_search, max_fraction=.5):
+           periodicity_min, double_tolerance, double_search, max_fraction=.5, signals=None):
     n = len(distances)
     # A cycle has to be seen repeating: half the clip by default, more for the gait fallback.
     lo, hi = max(6, min_len), min(max_len, int(n*max_fraction))
@@ -21,12 +41,8 @@ def detect(distances, trajectory, *, min_len, max_len, gait_floor,
     for length in range(max(lo, gait_floor), hi+1):
         radius = max(2, length//4)
         for start in range(n-length-radius-1):
-            js = np.arange(max(0, start-radius), start+radius+1)
-            profile = {}
-            for lag in range(max(2, lo//2), hi+2):
-                observed = js[js+lag < n]
-                if len(observed) >= radius+1:
-                    profile[lag] = float(distances[observed, observed+lag].mean())
+            _, js = _around(start, length)
+            profile = _profile(distances, js, radius, lo, hi)
             minima = [lag for lag in profile if lag-1 in profile and lag+1 in profile
                       and profile[lag] <= min(profile[lag-1], profile[lag+1]) and lag <= hi]
             if not minima:
@@ -77,8 +93,14 @@ def detect(distances, trajectory, *, min_len, max_len, gait_floor,
     cutoff = candidates[0]['score']*1.15+1e-8
     chosen = min((r for r in candidates if r['score'] <= cutoff),
                  key=lambda row: (row['start'], row['score'], row['length']))
+    radius, js = _around(chosen['start'], chosen['length'])
+    profile = _profile(distances, js, radius, lo, hi)
+    fundamental = period_mod.screen(
+        chosen['period_local'], D=distances, prof=profile, minima=period_mod.local_minima(profile),
+        mean=float(np.mean(list(profile.values()))), lowest=max(lo, gait_floor), periodicity_min=periodicity_min,
+        signals=signals, gait=True, js=js, floor_why='the gait floor')
     return {
-        **chosen, 'kind': 'periodic', 'method': 'local-repeat-drift-v1',
+        **chosen, 'fundamental': fundamental, 'kind': 'periodic', 'method': 'local-repeat-drift-v1',
         'period_global': None, 'periodicity_min': periodicity_min,
         'review_recommended': True, 'candidate_count': len(candidates),
         'best_score': candidates[0]['score'], 'equivalent_score_tolerance': .15,
