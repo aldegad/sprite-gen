@@ -660,15 +660,23 @@ def _align_view(r: dict[str, Any]) -> str | None:
     return r["direction"] + (f"@{r['turned']}" if r["direction"] in handed_mod.LATERAL_VIEWS else "")
 
 
-def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpolate: Any = None, between: str = align_mod.DEFAULT_BETWEEN) -> dict[str, Any]:
+def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpolate: Any = None, between: str = align_mod.DEFAULT_BETWEEN,
+                feet: dict[str, str] | None = None) -> dict[str, Any]:
     """One cycle length per gait state across the set's directions (`video-cycle-align`,
     docs/loop-repair.md section 4). A state filmed in fewer than two directions has nothing to
     match. A failure is recorded under its state and the batch reports it; the loops stay as cut.
     Two cases skip the state instead of failing it, each loop keeping its own length, the record
     saying why (`reason`) and a warning line naming what settles it: a frame is to be made and no
     RIFE is installed (`rife-not-installed`), or a loop may hold two or three cycles and nobody has
-    counted them (`cycle-suspects`, the loops under `suspects`; `video-cycle-align --cycles`)."""
+    counted them (`cycle-suspects`, the loops under `suspects`; `video-cycle-align --cycles`).
+
+    `feet` maps an item to the own foot that lands on its loop's first strike (`--align-foot`,
+    `video-cycle-align --foot`), handed to its state's alignment. A state that names loops whose foot
+    nobody named carries them under `unnamed_feet`; a foot given for an item no alignment took (the
+    item failed, or its state was not aligned) is named in its state's `feet_unused` and a warning."""
     out: dict[str, Any] = {}
+    feet = dict(feet or {})
+    asked: dict[str, dict[str, str]] = {}
     if mode == "off":
         return out
     by_state: dict[str, list[dict[str, Any]]] = {}
@@ -678,10 +686,12 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
     for state, rows in by_state.items():
         if len(rows) < 2:
             continue
+        asked[state] = {r["item"]: feet.pop(r["item"]) for r in rows if r["item"] in feet}
+        told = {str(Path(r["dir"]) / "loop"): asked[state][r["item"]] for r in rows if r["item"] in asked[state]}
         try:
             report = align_mod.align_set([Path(r["dir"]) / "loop" for r in rows], interpolate=interpolate,
                                          report_path=root / f"{state}.cycle-align.json", between=between,
-                                         views=[_align_view(r) for r in rows], state=state)
+                                         views=[_align_view(r) for r in rows], state=state, feet=told)
         except rife_mod.RifeNotInstalled as exc:
             out[state] = {"ok": True, "applied": False, "reason": "rife-not-installed", "why": "RIFE not installed — each loop keeps its own length",
                           "rife": str(exc), "install": rife_mod.INSTALL_COMMAND}
@@ -702,12 +712,28 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
             continue
         out[state] = {"ok": True, "applied": True, "length": report["length"], "lengths": report["lengths"], "between": report["between"],
                       "made_by_rife": report["made_by_rife"], "replaced": report["replaced"], "retake": report["retake"],
+                      "unnamed_feet": report["unnamed_feet"], "feet_given": report["feet_given"],
                       "warnings": report["warnings"], "report": str(root / f"{state}.cycle-align.json")}
         for line in report["warnings"]:
             print(f"video-set: warning: {state}: {line}", file=sys.stderr)
         for r, row in zip(rows, report["loops"]):
-            r["loop"]["cycle_align"] = {k: row[k] for k in ("from", "to", "made_by_rife", "turned_by", "turned_on", "start_foot", "seam_ratio", "retake")}
+            r["loop"]["cycle_align"] = {k: row[k] for k in ("from", "to", "made_by_rife", "turned_by", "turned_on", "start_foot", "start_foot_source",
+                                                            "seam_ratio", "retake")}
             r["loop"]["n_out"] = row["strip"]["frames"]
+    # a foot told for an item no alignment took (its state not aligned, or the item failed) is never dropped quietly
+    for state, told_items in asked.items():
+        if told_items and not out[state].get("applied"):
+            out[state]["feet_unused"] = told_items
+    for item, foot in feet.items():
+        r = next((r for r in results if r["item"] == item), None)
+        if r is None:
+            raise SystemExit(f"video-set: --align-foot {item}={foot} names no item of the set")
+        why = f"{item} failed" if not r.get("ok") else f"{r['state']} was not aligned (filmed in fewer than two directions)"
+        out.setdefault(r["state"], {"ok": True, "applied": False, "why": why}).setdefault("feet_unused", {})[item] = foot
+    for state, a in out.items():
+        if a.get("feet_unused"):
+            print(f"video-set: warning: {state}: --align-foot {', '.join(f'{i}={f}' for i, f in a['feet_unused'].items())} not applied "
+                  f"({a.get('why') or a.get('error') or 'the item failed'})", file=sys.stderr)
     return out
 
 
@@ -762,10 +788,13 @@ def run_set(
     redraw_runner: Callable[..., int] = run_redraw_cli,
     still_provider: str | None = None,
     handed: list[Handed] | None = None,
+    align_feet: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """`bases` maps a view to its still; `facing` is right, left or `right,left` (`facings_of`), and a view filmed
     both ways is keyed `view@right` and `view@left` (`resolve_bases`). `handed` (`handedness.parse`) puts each
-    asymmetric item's side into every clip prompt; it refuses `facing_fix` mirror, which would move it."""
+    asymmetric item's side into every clip prompt; it refuses `facing_fix` mirror, which would move it.
+    `align_feet` (`--align-foot`) maps an item of a walk or run filmed in two or more directions to the
+    own foot that lands on its loop's first strike (`align_gaits`); any other item is refused up front."""
     if align_cycles not in ALIGN_MODES:
         raise SystemExit(f"video-set: --align-cycles must be one of {', '.join(ALIGN_MODES)}")
     if anchor == "motion-auto" and any(not loop_mod.profile_for(state).gait for state in states):
@@ -788,6 +817,12 @@ def run_set(
             raise SystemExit(f"video-set: base still for '{direction}' not found: {base}")
     # (item, direction, state, facing, base); a set filmed both ways names a lateral item's facing
     items = [(f"{d}-{f}-{s}" if both and f else f"{d}-{s}", d, s, f or facings[0], b) for d, f, b in views for s in states]
+    aligned_items = [i for i, _, s, _, _ in items if align_cycles == "auto" and loop_mod.profile_for(s).gait
+                     and sum(1 for _, _, s2, _, _ in items if s2 == s) >= 2]
+    for item, foot in (align_feet or {}).items():
+        if item not in aligned_items:
+            raise SystemExit(f"video-set: --align-foot {item}={foot}: {item} is not an item the set aligns (a walk or run filmed in two or "
+                             f"more directions, --align-cycles auto): {', '.join(aligned_items) or 'none'}")
     results: list[dict[str, Any]] = []
     # States share a base. A run-local lock ensures exactly one vision call per
     # side still and facing, even when several state workers reach it together.
@@ -811,7 +846,7 @@ def run_set(
             results.append(r)
             print(json.dumps({k: r[k] for k in ("item", "ok") if k in r} | ({"error": r["error"]} if not r.get("ok") else {"seam": r["loop"]["seam_ratio"]}), ensure_ascii=False), flush=True)
     results.sort(key=lambda r: [i for i, *_ in items].index(r["item"]))
-    aligned = align_gaits(results, root, align_cycles, interpolate=interpolate, between=align_between)
+    aligned = align_gaits(results, root, align_cycles, interpolate=interpolate, between=align_between, feet=align_feet)
     table = write_table(results, root / "table.md", both=both)
     failed = [r["item"] for r in results if not r.get("ok")] + [f"cycle-align:{st}" for st, a in aligned.items() if not a.get("ok")]
     # What the set left undone for want of RIFE — never a failure, never silent.
@@ -824,6 +859,8 @@ def run_set(
                  f"(the loops under `suspects` in {a['report']}, docs/loop-repair.md section 4)"
                  for st, a in aligned.items() if a.get("reason") == "cycle-suspects"]
     warnings += [f"cycle-align:{st}: {line}" for st, a in aligned.items() for line in a.get("warnings", [])]
+    warnings += [f"cycle-align:{st}: --align-foot {item}={foot} not applied ({a.get('why') or a.get('error') or 'the item failed'})"
+                 for st, a in aligned.items() for item, foot in a.get("feet_unused", {}).items()]
     payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), **({"handed": [vars(h) for h in handed]} if handed else {}), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": failed, "warnings": warnings, "items": results, "cycle_align": aligned}
     atomic_write_text(root / "set.report.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     print(table)
@@ -868,6 +905,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--still-provider", help="image provider for the mid-step redraw (default: sprite-gen gen's own default)")
     parser.add_argument("--align-cycles", choices=ALIGN_MODES, default="auto", help="auto (default): after the loops are cut, every walk/run filmed in two or more directions is resampled to the set's median cycle length and turned to start on a foot strike (video-cycle-align; RIFE makes only the frames between source frames — where no RIFE is installed the alignment is skipped with a warning and recorded); off: each loop keeps its own length")
     parser.add_argument("--align-between", choices=align_mod.BETWEEN, default=align_mod.DEFAULT_BETWEEN, help="how the alignment fills a time between two source frames (video-cycle-align --between): auto (default) makes the frame with RIFE and takes the nearer source frame where it smeared or lost its outline, rife keeps every made frame, nearest takes the nearer source frame")
+    parser.add_argument("--align-foot", action="append", default=[], metavar="ITEM=left|right",
+                        help="which own foot lands on the first strike of an item's loop (e.g. front-walk=left), for a loop the "
+                             "alignment report lists under `unnamed_feet` (video-cycle-align --foot; repeatable): that loop starts as "
+                             "the set's start foot lands, recorded start_foot_source given")
     parser.add_argument("--force", action="store_true", help="regenerate clips that already exist")
 
 
@@ -885,6 +926,7 @@ def run(**kwargs: object) -> int:
         align_between=str(kwargs.get("align_between") or align_mod.DEFAULT_BETWEEN),
         walk_start=str(kwargs.get("walk_start") or "redraw"), still_provider=kwargs.get("still_provider"),  # type: ignore[arg-type]
         handed=handed_mod.parse_all(list(kwargs.get("handed") or [])) or None,  # type: ignore[arg-type]
+        align_feet=align_mod.parse_feet(list(kwargs.get("align_foot") or []), prog="video-set", flag="--align-foot"),
     )
     return 0 if not payload["failed"] else 1
 
