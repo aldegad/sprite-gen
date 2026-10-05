@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased - A held loop is judged on the cycle cut out of its clip, not on the whole clip
+## v2.30.0 - A held loop is judged on the cycle cut out of its clip, not on the whole clip
 
 - **Output change: which loops `video-cycle-align` names for a retake** (`held-drawings`). The hold was read over the whole clip and given to the cut cycle, so a clip held for part of its length and drawn every frame for the rest was judged by the clip: a cycle cut from its every-frame part and stretched could be named (the clip reads as held), and one cut from its held part was passed (the clip reads as drawn every frame). `video-loop` now also reads the hold over the cut, on the clip's own steps as keyed from the cut's first frame into the frame after its last (`cycle_drawings` in the loop report and in `strip.json`: `start`, `length`, `steps`, `hold`, `drawings_per_second`, `contrast`), and the alignment uses it (`drawings.source: "span"`, with the clip's reading under `drawings.clip`). A cut of fewer than 12 steps (`held.SPAN_MIN_STEPS`, one window of the clip's reading) is not read on its own: the clip's reading stands (`source: "clip"`), and the row's `span_why` says so, as it does for a loop cut by 2.29.0. A clip held or drawn every frame throughout reads the same over its cut as over the whole: the cut, the strip, the GIF and the WebP are unchanged, and the loop report and `strip.json` gain `cycle_drawings`. [docs/loop-repair.md](docs/loop-repair.md#4-one-cycle-for-a-direction-set--video-cycle-align-video-set---align-cycles-auto).
 
