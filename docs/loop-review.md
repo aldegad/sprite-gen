@@ -21,6 +21,10 @@ request remains 3 seconds; it does not determine the playback speed.
   when it fits the window and passes the periodicity gate. Keeping two real repetitions
   is preferable to discarding a potentially distinct phase. This may produce a two-cycle
   loop of a genuine short gait; frames keep their original timing.
+- Nothing is cut shorter than the period found. A half or a third of it that repeats is
+  recorded as a suspect (`cycle.fundamental.suspects`); look at
+  whether the loop shows one stride or two, and tell `video-cycle-align` with `--cycles`
+  ([loop repair](loop-repair.md) section 4).
 - Near-exact short repeats, implausible longer repeats, and non-gait states are not
   extended by that ambiguity policy. There is no character-specific frame count.
 - Alpha, frame counts and seam metrics are checked before the output is accepted.
