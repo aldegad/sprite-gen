@@ -755,6 +755,25 @@ filmed with a warning (`--repair on` fails instead). See [loop repair](loop-repa
 moves are reported (`jolt`); beyond the reference bounds that is a warning line, and a gate
 (`video-loop: loop jolts — …`) only when `--jolt-max` / `--head-step-max` are passed.
 
+**Held drawings: recorded on every loop.** A video model may film a walk at 12 drawings a second
+inside a 24 fps clip, each drawing shown for two frames ("on twos", or three: "on threes"). The
+report's `drawings` says so, read over the whole clip as keyed, before any cut
+(`sprite_gen/video/held.py`): `hold` (1 every frame a drawing, 2 or 3; `null` with a `why` for a
+clip too short or still), `drawings` and `drawings_per_second`, `held_steps`, and `contrast` per
+hold — the held steps over the change steps, the evidence. `strip.json` carries the same record
+(`drawings`: `hold`, `drawings_per_second`, `contrast`, `frames`) for `video-cycle-align`. The second frame of a pair is rarely a
+byte copy: the model redraws it a little, so its step is small, not zero, and a rule that calls a
+step held under a fraction of the median step misses it (with half the steps held the median falls
+between the two kinds). So the judgement reads the rhythm: for a hold of 2 or 3, in windows of 12
+steps, the phase whose every second (or third) step is the change, its held steps' median over its
+change steps' median; under 0.3 the clip is held, and each step is then held when it is under the
+geometric midpoint of the two kinds' means. A motion filmed every frame has no such rhythm — its
+steps swell and shrink with the stride over a dozen frames — and a clip whose steps alternate long
+and short but move every frame reads above it; so does a frame repeated now and then (a 20 fps
+clip carried at 24). Nothing is refused here: played at its own rate a held loop is ordinary
+limited animation. It matters when `video-cycle-align` stretches it ([loop repair](loop-repair.md)
+section 4, "Held drawings").
+
 ### One-shot actions — `--cycle auto|periodic|one-shot`
 
 A video model asked to jump "over and over" sometimes jumps once and stands for the
@@ -886,7 +905,9 @@ auto`, the default; `off` keeps each loop's own length). The same step stands al
 `sprite-gen video-cycle-align --loop-dir … --view …`. `set.report.json` carries `cycle_align`
 per state (with `start_foot` per item), a failed alignment is listed as `cycle-align:<state>`,
 and a made frame with a smear, one that melted and was replaced, or a loop whose foot could not be named is a line under
-`warnings`. Two cases skip the alignment with a warning instead of failing it (`applied: false`,
+`warnings`. A held loop stretched past what an interpolator bridges is named for a new take: the
+state's `retake` (reason `held-drawings`, with its numbers; per item under `cycle_align.retake`) and
+a warning line ([loop repair](loop-repair.md) section 4, "Held drawings"). Two cases skip the alignment with a warning instead of failing it (`applied: false`,
 `reason`, and a line under the report's `warnings`): no RIFE (`rife-not-installed`), and a loop
 that may hold more than one cycle (`cycle-suspects`, the loops under `suspects`; count them, then
 `video-cycle-align --cycles <loop>=<k>`). See [loop repair](loop-repair.md) section 4.
