@@ -393,6 +393,11 @@ recorded per row.
 
 One row by hand is the same call `gen-set` makes: `--provider codex` (or `grok`) with
 `prompts/<state>.txt`, writing `raw/<state>.png`.
+The row prompts are `prepare`'s, and were measured on people: a walk row moves "body, arm, leg", a
+front walk "alternating leg, arm, shoulder", a wave "arm pose only". For a body that is not one biped,
+`prepare --body-plan quadruped` (or `legless`, or `"<figure>=<plan>"` per figure) writes every row
+without a part the body lacks and says what it stands on
+([sheet rows](video-pipeline.md#the-sheet-rows--prepare---body-plan)).
 The row prompts still carry the request chroma key on the background and frame
 extraction removes it downstream — rows are generated **without** `--transparent`, so
 the native strategy does not apply to them yet (moving rows to native alpha is a

@@ -193,6 +193,22 @@ MOTION_TEXT = {
     "cheer": "celebrates in place: rises into a raised, spread-out cheer pose, holds it for a beat, then settles back to the exact starting stance, repeating at an even rhythm.",
     "wave": "waves in place: lifts one side into a friendly wave, sways it a few times, then settles back to the exact starting stance, repeating at an even rhythm.",
 }
+# The attack's hold and sentence for a body that is not one biped (`body_plan`): what it holds keeps how it is
+# held, with no hand counted, and with nothing held it attacks with its own body — which part strikes is the
+# body's to say (`--motion`), not the engine's to guess (a bite, a head-butt, a forefoot). Not measured on a clip.
+HOLD_TEXT_ANY_BODY = {
+    "attack": (
+        "Anything it holds or carries stays exactly as shown in the image, held the same way, and nothing is dropped "
+        "or moved to another place. A part the motion does not use stays where it is drawn, with anything it holds, "
+        "and the body keeps facing the same direction without turning."
+    ),
+}
+ATTACK_TEXT_ANY_BODY = (
+    "performs one melee attack with what it is already holding, or with its own body if it holds nothing, keeping "
+    "every piece of its gear and outfit exactly as drawn: a windup (about 0.5 s), one clean strike in front "
+    "(about 0.25 s), a held impact pose (about 0.3 s), then a recovery to the exact starting stance (about 0.5 s). "
+    + HOLD_TEXT_ANY_BODY["attack"]
+)
 # The idle for a body that is not one biped (`body_plan`): the same stillness, with no feet counted and no
 # chest, shoulders or arms named, so a horse is not stood up on two feet. Not measured on a clip.
 IDLE_TEXT_ANY_BODY = (
@@ -365,7 +381,8 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
 
     `body_plan` (`body_plan.parse_all`) says what the subject stands on, one plan or one per figure of a scene.
     None, or one biped, keeps the sentences measured on people; any other body gets them without a part it
-    lacks (`IDLE_TEXT_ANY_BODY`, `LITE_WALK_TEXT_LEGGED` / `_LEGLESS`, `LITE_HEAD_TEXT_ANY_BODY`) and, after the
+    lacks (`IDLE_TEXT_ANY_BODY`, `ATTACK_TEXT_ANY_BODY` / `HOLD_TEXT_ANY_BODY`, `LITE_WALK_TEXT_LEGGED` / `_LEGLESS`,
+    `LITE_HEAD_TEXT_ANY_BODY`) and, after the
     motion sentence or the caller's paragraph, what it stands on (`body_plan.text`).
 
     Without `handed` or `body_plan` the prompt is 2.22.0's, to the byte (`tests/gen/test_prompt_freeze.py`). `handed` lists
@@ -388,7 +405,8 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
         if not motion:
             raise SystemExit("video: motion description is empty")
         head = "2D game sprite animation. The character {motion} The character is {view}."
-        hold = f" {HOLD_TEXT[state]}" if state in HOLD_TEXT else ""
+        holds = HOLD_TEXT if body_mod.biped(body_plan) else HOLD_TEXT_ANY_BODY
+        hold = f" {holds[state]}" if state in holds else ""
         if state in GAIT_STATES and direction in GAIT_HOLD_TEXT:
             hold += f" {GAIT_HOLD_TEXT[direction].format(facing=facing)}"
         repeat = f" {REPEAT_TEXT[state]}" if state in REPEAT_TEXT else ""
@@ -399,6 +417,7 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
     else:
         built_in = (VIEW_MOTION_TEXT[(state, direction)].format(facing=facing) if (state, direction) in VIEW_MOTION_TEXT
                     else IDLE_TEXT_ANY_BODY if state == "idle" and not body_mod.biped(body_plan)
+                    else ATTACK_TEXT_ANY_BODY if state == "attack" and not body_mod.biped(body_plan)
                     else MOTION_TEXT.get(state, f"performs the '{state}' action in place, repeating at an even rhythm."))
         text = template.format(motion=built_in + stands_on, view=view)
         text = ((text.replace("The character", character, 1) if character else text)

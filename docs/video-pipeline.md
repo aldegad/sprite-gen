@@ -264,7 +264,8 @@ hips and the toes or heels of both feet at the viewer, or the backs of the shoes
 stand it up on two. The walk and run sentences themselves name no limb (since 2.0.0's "`video-set`
 motion templates no longer assume a biped"); these came later and were said to every body.
 
-`video-set --body-plan`, `video-prompt --body-plan`, `gen --direction --body-plan` and
+`video-set --body-plan`, `video-prompt --body-plan`, `gen --direction --body-plan`, `prepare
+--body-plan` and
 `build_prompt(body_plan=...)`, `walk_start_prompt(body_plan=...)`, `still_view_text(body_plan=...)`,
 `gen.still_prompt(body_plan=...)` name what the subject stands on (`sprite_gen/video/body_plan.py`):
 `biped` (the default), `quadruped` or `legless` for the character, or one `<figure>=<plan>` per figure
@@ -275,17 +276,44 @@ biped, keeps every prompt byte for byte. Any other body gets:
 |---|---|
 | after the motion sentence (or the caller's `--motion`) | what it stands on (`body_plan.text`): "It stays on all four legs, as in the image, and never rises onto its hind legs." / "It has no legs, as in the image, and never grows legs or feet." / "Each figure keeps the body it has in the image: the man on two legs; the horse on all four legs, never rising onto its hind legs." |
 | idle | `IDLE_TEXT_ANY_BODY`: the same stillness, standing or resting as in the image, no feet counted, no chest, shoulders or arms |
+| attack | `ATTACK_TEXT_ANY_BODY`: the same timed strike "with what it is already holding, or with its own body if it holds nothing", then `HOLD_TEXT_ANY_BODY["attack"]`: anything it holds stays held the same way, a part the strike does not use stays where it is drawn, no hand counted. Which part strikes (a bite, a head-butt, a forefoot) is not guessed: a caller who knows says it with `--motion`, which gets `HOLD_TEXT_ANY_BODY` after it |
 | Lite walk calm | `LITE_WALK_TEXT_LEGGED` (no arm swing; never trotting or galloping) or, with a figure without legs, `LITE_WALK_TEXT_LEGLESS` (no steps or feet) |
 | Lite back-diagonal head hold | `LITE_HEAD_TEXT_ANY_BODY`: what moves is what it moves on and its loose ends (a tail, a mane, hair) |
 | the still's view sentence (`still_view_text`, `gen --direction`) | `STILL_VIEW_TEXT_ANY_BODY` for the front, back and diagonal views (where the body and head point; no feet, chest, hips, shoulders or shoes), the side view's `VIEW_TEXT` as it is, each ending in what it stands on (`body_plan.still_text`): ", standing on all four legs, not rearing onto its hind legs" / ", resting on its base without legs, never growing any" / ", each figure with the body it has: the man on two legs; the horse on all four legs, never rising onto its hind legs" |
 | front or back mid-step redraw | `WALK_START_TEXT_ANY_BODY`: one leg lifted, the others planted, then what it stands on; a body without legs has no step to catch and films from its base (`starts_mid_step` is false, `video-prompt` gives no `start_still`) |
 
 Only the biped sentences were measured on clips; the others say no part the body lacks and are not
-yet measured. `--handed` keeps its own sentences (its arm sentences are for an item on an arm), and an
-attack's grip sentence (`HOLD_TEXT["attack"]`) still speaks of hands. `video-set`, `video-prompt
---json` and `gen`'s `extra.view` record the plan as `body_plan`. An app that draws the still itself
-with `still_view_text` and films with `build_prompt` passes the same `body_plan` to both: the clip
-starts from that still.
+yet measured. `--handed` keeps its own sentences (its arm sentences are for an item on an arm).
+`video-set`, `video-prompt --json` and `gen`'s `extra.view` record the plan as `body_plan`. An app
+that draws the still itself with `still_view_text` and films with `build_prompt` passes the same
+`body_plan` to both: the clip starts from that still.
+
+#### The sheet rows — `prepare --body-plan`
+
+The rows `prepare` writes for an image model (`prompts/<state>.txt`, [atlas workflow](atlas-workflow.md))
+were measured on people too. The walk and run rows moved "body, arm, leg, hair, and prop", the front and
+three-quarter-front walks "alternating leg, arm, shoulder", the diagonal runs traded "foot-contact phases"
+of "the left and right legs", the wave was "arm pose only: arm down, arm raised, hand tilted" (its default
+action "friendly hand wave gesture"), every row's anchor lock spent its motion on "arm counter-swing" and
+turned "the body, feet, shoulders", and a diagonal row read its facing by "shoulder overlap, hand/foot
+placement". `prepare --body-plan` (the same plans and scene form; repeatable; over the request's
+`body_plan`) gives a body that is not one biped:
+
+| Row sentence | for a body that is not one biped |
+|---|---|
+| walk, run, `running-right` / `-left` (`STATE_REQUIREMENTS`) | `STATE_REQUIREMENTS_ANY_BODY`: locomotion through "the movement of the body, whatever it moves on, loose parts such as hair, a mane or a tail, and props only" |
+| `frontwalk`, `45_frontwalk` | "alternating steps of whatever it walks on and body-height changes"; "the contact and passing poses" |
+| the diagonal runs | "alternating contact phases of whatever it moves on so the two sides clearly trade forward reach" |
+| wave | the one side that lifts, as the clip's wave does (`MOTION_TEXT["wave"]`): "lowered, lifted, swaying, returning", the body planted where it stands or rests; the default action `DEFAULT_ACTIONS_ANY_BODY["wave"]` where the request names none |
+| anchor lock (`ANCHOR_LOCK`) | `ANCHOR_LOCK_ANY_BODY`: "the contacts of whatever it moves on, body height, body lean, head bob, the bounce of hair, a mane or a tail"; rotate "the body, face angle, and gaze"; "step phase", "contacts" |
+| a diagonal row's facing | "the silhouette of hair, a mane or a tail, the overlap of near and far parts" |
+| every row, last state requirement | what it stands on (`body_plan.text`), as after a clip's motion sentence |
+
+The run records the plan in `sprite-request.json` as `body_plan` (absent without one), and a run
+prepared again from that request keeps it. No body plan, or one biped, writes every row prompt as
+2.32.0 did, byte for byte (`tests/fixtures/prepare-rows-v2.32.0.json.gz`, `tests/gen/test_prompt_freeze.py`).
+The new rows are not yet measured on an image model. A request's own `action` is its own words and is
+never rewritten.
 
 ### A clip from a video MCP on your agent — ZCRE
 
