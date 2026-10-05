@@ -203,6 +203,7 @@ loop's report carries `jolt`, measured on the loop as it will play (after sectio
 | `step_max_over_median` | the largest step over the median (what section 2 repairs) |
 | `head.x`, `head.y` | the head's place frame by frame in % of the body's height over the loop: x (sideways) the coverage centroid of the top fifth, y (up and down) the body's top line. Each: `step_max_pct` (largest move in one frame), `step_median_pct`, `max_over_median`, `range_pct`, `worst_into_frame` |
 | `reference`, `warnings` | the reference bounds (jolt index **0.43**, head sideways step **0.75** % of the body height) and what exceeds them, in words |
+| `seam_pop` | the top band's jump into the loop's first frame over the loop's median step ("The seam pop" below); a pop over its bound adds a line to `warnings` |
 | `gate`, `gated`, `over`, `passed` | the bounds the caller passed, whether they were enforced, what exceeded them |
 | `measured` | `after the jump repair` or `as filmed` |
 
@@ -246,11 +247,60 @@ Read:
   reference (0.43) sits at the kept takes' edge and flags nothing in this set. An alternating jolt
   like that side walk's is a known miss of this index.
 - **The top line is reported, not bounded**: a walk seen from behind bobs more (the kept Lite
-  back view reaches 2.42 %), so one bound would flag kept back views or pass the refused one.
+  back view reaches 2.42 %), so one bound would flag kept back views or pass the refused one Only its
+  step into the first frame is weighed, against the loop's own steps (below).
 - **Why no gate by default**: at the reference bounds, 18 of the 46 takes exceed one — 16 of 30
   Lite, 2 of 16 Pro, none of the nine kept. Lite's head sways about three times as far as Pro's,
   so as a default gate it would refilm about every other Lite walk: the opposite of the aim, on
   the strength of two refusals. The bounds stay a reference until more takes are judged.
+
+### The seam pop — a part held above the head, swinging on its own beat
+
+A staff, a flag or a raised spear can sway on a beat of its own, slower than the steps. A cut one
+step long then ends with it somewhere else: the body closes at the wrap and the held part jumps.
+The seam ratio does not see it — it is an area measure, and a thin rod moved many times its usual
+step changes few pixels — and the head's sideways bound above sees it only when the jump is large
+in absolute terms. What sees it is the top band of `head.x`/`head.y`: on a body holding something
+higher than its head, that band is the tip of what it holds.
+
+Every walk and run loop's `jolt` carries `seam_pop` (`repair.seam_pop`), measured on the loop as it
+plays:
+
+| Field | What |
+|---|---|
+| `x`, `y` | per axis of the top band: `wrap_pct` (its step from the last frame into the first, % of the body height), `step_median_pct` (the loop's median step), `wrap_over_median` (the wrap over the median, the median a pixel at least: a step under a pixel is the tracker's rounding) and `wrap_is_largest` |
+| `pop` | the larger `wrap_over_median` of the axes whose largest step is the wrap; 0 when neither's is |
+| `reference`, `pops` | the bound (**10**, `repair.SEAM_POP_REFERENCE`) and whether `pop` exceeds it |
+
+- **Only the wrap, and only when it is the largest step.** The question is whether the cut closes,
+  not whether the top moves: a walk seen from behind bobs, and hair redrawn every frame jumps
+  inside the loop as much as at the wrap — for either the wrap is ordinary, and `pop` stays 0.
+- **`--anchor motion-auto` chooses again.** The search measures the same thing on the frames it
+  chooses from (moved by the analysis translation, `loop.wrap_pop_on`), for its first choice only.
+  If that pops, every candidate is measured, and among those that do not pop it takes the scores
+  within the usual 15 % of the best and the smallest pop (`cycle.seam_pop`: `first_choice`,
+  `applied`, `measured`, `unread`, `chosen`). A first choice that does not pop is kept, and nothing past it
+  is measured, so a loop without such a part is cut exactly as before. If every candidate read pops,
+  the first choice is kept (`why`) and the warning below says so.
+- **A cut whose top cannot be read is not one that closes.** A frame with nothing in the top band
+  (a tip flung far above the rest in one frame) leaves the cut without a jump to read: it is
+  recorded `skipped` (why) in place of `pop` — `first_choice.skipped`, or on a candidate row
+  `seam_pop: null` with `seam_pop_skipped` — and counted under `unread`, apart from `measured`.
+  It is never chosen on; a first choice that cannot be read is kept, nothing past it is measured,
+  and `jolt.warnings` says the head could not be tracked.
+- **A pop that stays is a warning line** — `video-loop: warning: the top of the silhouette jumps
+  into the loop's first frame up or down … (over 10x): a part held above the head swings on its
+  own beat and does not close at this cut`, in `jolt.warnings` like the bounds above. A sideways
+  jump into frame 0 that the head bound already names is not said twice. A fixed or `--cycle
+  periodic` cut is not chosen again; the warning is all it gets. Nothing fails on it.
+- **The bound** sits between walks holding a staff that swings on its own beat and walks without
+  one, both on the cut as it plays and on the source frames the cut is chosen from. The synthetic
+  walker of `tests/video/test_loop_prop_seam.py` — steps every 24 frames, a staff above its head swaying every 61 — reads 12 to 18 at the cuts the area
+  measure alone chose, and 0 at the cuts chosen again.
+- **What it does not see**: a held part that never reaches the top band (a spear held level, a
+  sword at the hip), and the lower end of a staff whose top closes while the shaft still swings
+  about the hand. A clip like that may need a cut two steps long, which the search does not make;
+  `--cycle fixed` cuts one ([loop review](loop-review.md)).
 
 ## 4. One cycle for a direction set — `video-cycle-align`, `video-set --align-cycles auto`
 
