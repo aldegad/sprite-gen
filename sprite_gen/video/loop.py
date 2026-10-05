@@ -913,6 +913,9 @@ def run_loop(
     lo = min_len if min_len is not None else lo_default
     hi = max_len if max_len is not None else max(lo + 2, hi_default)
     D = distance_matrix(files)
+    # The clip's steps as keyed, before `--anchor motion-auto` reads its own distance or moves a frame:
+    # the hold is read on them, over the clip and over the cut (sprite_gen/video/held.py).
+    clip_steps = [float(D[k, k + 1]) for k in range(n - 1)]
     masses = frame_masses(files)
     periodic_attempt: dict[str, Any] | None = None
     target = (report_path or (out_dir / f"{name}.loop.report.json")).expanduser().resolve()
@@ -926,7 +929,7 @@ def run_loop(
         # How many drawings the clip shows a second, and whether it shows each for two or three frames
         # (sprite_gen/video/held.py) — over the whole clip as keyed, before any cut. A record for
         # `video-cycle-align`, which says when a held clip stretched to the set's length must be filmed again.
-        "drawings": held_mod.measure([float(D[k, k + 1]) for k in range(n - 1)], fps=fps),
+        "drawings": held_mod.measure(clip_steps, fps=fps),
     }
     cycle = None
     try:
@@ -1019,6 +1022,8 @@ def run_loop(
             raise SystemExit(f"video-loop: {exc}") from exc
         raise
     i, L = cycle["start"], cycle["length"]
+    # The same, over the cut alone: a clip held for part of its length is held where the cut is.
+    report_base["cycle_drawings"] = held_mod.measure_cycle(clip_steps, start=i, length=L, fps=fps)
     # playback density, not a fixed count: a long cycle gets more frames so every state plays at
     # ~gif_fps (a fixed 12 made a 2.5 s jump hold each frame 210 ms while a 1.1 s walk held 90 ms)
     if n_out is None:
@@ -1118,9 +1123,12 @@ def run_loop(
     if state:
         # `video-cycle-align` reads the gait floor of this state when it screens a loop for two cycles.
         strip_meta["state"] = str(state).strip().lower()
-    # `video-cycle-align` reads the clip's hold here: a cut cycle is too short to read it on, and
-    # `--anchor motion-auto` moves each frame of a pair apart (sprite_gen/video/held.py).
+    # `video-cycle-align` reads the hold here, over the cut (`cycle_drawings`) and over the clip
+    # (`drawings`, where the cut is too short to read): read on the keyed steps, since `--anchor
+    # motion-auto` moves each frame of a pair apart in the cut it writes (sprite_gen/video/held.py).
     strip_meta["drawings"] = {k: report_base["drawings"][k] for k in ("hold", "drawings_per_second", "contrast", "frames")}
+    strip_meta["cycle_drawings"] = {k: report_base["cycle_drawings"][k] for k in ("start", "length", "steps", "hold", "drawings_per_second", "contrast")
+                                    } | ({"why": report_base["cycle_drawings"]["why"]} if "why" in report_base["cycle_drawings"] else {})
     if motion is not None:
         strip_meta["foot_anchor"] = anchor
         strip_meta["motion_anchor"] = motion

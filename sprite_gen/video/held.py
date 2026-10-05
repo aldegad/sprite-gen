@@ -22,6 +22,10 @@ a frame repeated now and then, as a 20 fps clip carried at 24 repeats one in six
 not at all), the median over the windows. A hold whose contrast is under CONTRAST_MAX is the clip's
 hold; each step is then held when it is nearer the held steps than the change steps (under the
 geometric midpoint of their means), and the drawings are the frames that begin one.
+
+A clip may hold its drawings for only part of its length. `measure_cycle` reads the cycle cut out of
+it on the clip's own steps over the cut (one window's worth at least, SPAN_MIN_STEPS), so a loop is
+held where it was cut, not where most of its clip was.
 """
 
 from __future__ import annotations
@@ -39,6 +43,9 @@ WINDOW = 12  # steps per window: six drawings on twos, four on threes; a phase t
 # every frame whose steps alternate long and short stays above a third (docs/loop-repair.md section 4).
 CONTRAST_MAX = 0.3
 MIN_STEPS = 6  # fewer steps than this say nothing about a rhythm of two or three
+# A cut cycle is read on its own steps when it has at least one window of them: the same evidence the
+# clip's reading weighs in each window. Under it the clip's reading stands, and the record says why.
+SPAN_MIN_STEPS = WINDOW
 
 
 def _contrast(steps: np.ndarray, hold: int) -> tuple[float, list[np.ndarray], list[np.ndarray]] | None:
@@ -71,15 +78,17 @@ def _contrast(steps: np.ndarray, hold: int) -> tuple[float, list[np.ndarray], li
     return float(np.median(scores)), held, change
 
 
-def measure(steps: Sequence[float], *, fps: float, cyclic: bool = False) -> dict[str, Any]:
+def measure(steps: Sequence[float], *, fps: float, cyclic: bool = False, span: bool = False) -> dict[str, Any]:
     """Whether a run of frames holds its drawings, and how many drawings it shows a second.
 
     `steps` are the distances between neighbouring frames: n - 1 of them for n frames, or n read as a
-    ring (`cyclic`, the last step from the last frame back to the first). The rhythm is read on the
-    steps in order (a ring's closing step is left out of it: a cut may close mid-pair), the drawings
-    are counted on all of them. `hold` is 1 (every frame a drawing), 2 or 3."""
+    ring (`cyclic`, the last step from the last frame back to the first), or n read in the clip
+    (`span`, the last step from the last frame into the frame after it: a cut cycle, `measure_cycle`).
+    The rhythm is read on the steps in order (a ring's closing step is left out of it: a cut may close
+    mid-pair; a span's last step is the clip's own and is read), the drawings are counted on all of
+    them. `hold` is 1 (every frame a drawing), 2 or 3."""
     s = np.asarray(steps, dtype=np.float64)
-    frames = len(s) if cyclic else len(s) + 1
+    frames = len(s) if cyclic or span else len(s) + 1
     inner = s[:-1] if cyclic else s
     seconds = frames / fps
     base: dict[str, Any] = {"frames": frames, "fps": fps, "steps": len(s), "contrast": {}}
@@ -99,6 +108,23 @@ def measure(steps: Sequence[float], *, fps: float, cyclic: bool = False) -> dict
     mid = math.sqrt(max(float(np.concatenate(held).mean()), change_mean * 1e-3) * change_mean)
     held_steps = int((s < mid).sum())
     changes = len(s) - held_steps
-    drawings = max(1, changes) if cyclic else changes + 1
+    drawings = max(1, changes) if cyclic or span else changes + 1
     return {**base, "hold": hold, "held_steps": held_steps, "drawings": drawings,
             "drawings_per_second": round(drawings / seconds, 3), "held_below": round(mid, 6)}
+
+
+def measure_cycle(clip_steps: Sequence[float], *, start: int, length: int, fps: float) -> dict[str, Any]:
+    """The hold of the cycle cut out of a clip, read on the clip's own steps over the cut: the steps
+    from frame k to the next, k in [start, start + length) — the last into the frame after the cut,
+    which a cycle returns to — or one fewer where the cut ends the clip. A clip held for part of its
+    length and drawn every frame for the rest is held where the cut is held, whatever the whole clip
+    reads as. `clip_steps` are the clip's n - 1 neighbouring steps, as keyed and before any anchor
+    moves a frame. A cut of fewer than SPAN_MIN_STEPS steps is not read (`hold` None, `why`)."""
+    end = min(start + length, len(clip_steps))
+    whole = end - start == length
+    span = list(clip_steps[start:end])
+    if len(span) < SPAN_MIN_STEPS:
+        return {"start": start, "length": length, "frames": length, "fps": fps, "steps": len(span), "contrast": {}, "hold": None,
+                "held_steps": None, "drawings": None, "drawings_per_second": None,
+                "why": f"{len(span)} steps, under {SPAN_MIN_STEPS}: too few to read the cut's rhythm on its own"}
+    return {"start": start, "length": length, **measure(span, fps=fps, span=whole)}

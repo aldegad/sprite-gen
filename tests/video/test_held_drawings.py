@@ -143,7 +143,7 @@ def test_a_held_loop_stretched_past_what_an_interpolator_bridges_is_named_for_a_
     by = {Path(r["dir"]).name: r for r in report["loops"]}
     assert by["NE"]["drawings"]["hold"] == 2 and by["SW"]["drawings"]["hold"] == 2 and by["E"]["drawings"]["hold"] == 1
     retake = by["NE"]["retake"]
-    assert retake["reason"] == "held-drawings" and retake["hold"] == 2 and retake["source"] == "clip" and retake["drawings"] == 8
+    assert retake["reason"] == "held-drawings" and retake["hold"] == 2 and retake["source"] == "span" and retake["drawings"] == 8
     assert retake["drawings_per_second"] == pytest.approx(8.0) and retake["frames_per_drawing"] == pytest.approx(3.0)
     assert retake["unmade"] == len(by["NE"]["nearest_at"]) > 0
     # on twos at its own length nothing is made; drawn every frame, a replaced frame is no reason to film again
@@ -193,7 +193,7 @@ def test_the_clips_hold_is_read_from_the_strip_and_the_cycle_is_the_fallback(tmp
     meta = json.loads((dirs[0] / "walk.strip.json").read_text())
     assert meta["drawings"]["hold"] == 2 and meta["drawings"]["drawings_per_second"] == pytest.approx(12.0)
     report = align.align_set(dirs, interpolate=_cross_fade, length=24)
-    assert [r["drawings"]["source"] for r in report["loops"]] == ["clip", "clip"]
+    assert [r["drawings"]["source"] for r in report["loops"]] == ["span", "span"]  # the cut's own steps, over the clip's
     again = json.loads((dirs[0] / "walk.strip.json").read_text())
     assert again["drawings"] == meta["drawings"]  # an alignment keeps the clip's record for the next one
     for d in dirs:
@@ -204,6 +204,71 @@ def test_the_clips_hold_is_read_from_the_strip_and_the_cycle_is_the_fallback(tmp
     row = next(r for r in old["loops"] if Path(r["dir"]).name == "NE")
     assert row["drawings"]["source"] == "cycle" and row["drawings"]["hold"] == 2 and row["drawings"]["drawings"] == 8
     assert row["retake"]["reason"] == "held-drawings" and row["retake"]["source"] == "cycle"
+
+
+def _partly_held(frames: int, held_frames: int, *, held_first: bool, cycle: int = 16) -> list[Image.Image]:
+    """A clip on twos for `held_frames` frames (its first, or its last) and drawn every frame for the rest."""
+    def held_at(k: int) -> bool:
+        return k < held_frames if held_first else k >= frames - held_frames
+    return [_walker(2 * math.pi * (k - k % 2) / cycle, redraw=6 * (k % 2)) if held_at(k) else _walker(2 * math.pi * k / cycle)
+            for k in range(frames)]
+
+
+def _cut_at(tmp_path: Path, name: str, frames: list[Image.Image], start: int, length: int) -> Path:
+    keyed = _keyed(tmp_path, name, frames)
+    out = tmp_path / name
+    loop_mod.run_loop(keyed, out, fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=1000.0,
+                      name="walk", report_path=None, cycle_mode="fixed", start=start, length=length, anchor="none", repair="off")
+    return out
+
+
+@pytest.mark.parametrize("held_frames, start, clip_hold, cut_hold, named", [
+    (48, 56, 2, 1, False),  # held for most of the clip, the cut every frame: the clip reads as held, the cut is not
+    (24, 4, 1, 2, True),    # every frame for most of the clip, the cut held: the clip reads as drawn every frame, the cut is held
+])
+def test_a_clip_held_for_part_of_its_length_is_read_where_it_was_cut(tmp_path, held_frames, start, clip_hold, cut_hold, named):
+    """A cycle of 16 cut out of an 88-frame clip on twos for its first `held_frames` frames, stretched to
+    24. Whether it is filmed again follows the cut: the clip's reading, over both kinds, would name a
+    cycle drawn every frame and pass a held one."""
+    d = _cut_at(tmp_path, "NE", _partly_held(88, held_frames, held_first=True), start, 16)
+    meta = json.loads((d / "walk.strip.json").read_text())
+    assert meta["drawings"]["hold"] == clip_hold  # the clip's reading is kept as it was
+    assert meta["cycle_drawings"]["hold"] == cut_hold and (meta["cycle_drawings"]["start"], meta["cycle_drawings"]["length"]) == (start, 16)
+    report = align.align_set([d, _cut(tmp_path, "S", 24, 1)], interpolate=_cross_fade, length=24)
+    row = next(r for r in report["loops"] if Path(r["dir"]).name == "NE")
+    assert row["drawings"]["source"] == "span" and row["drawings"]["hold"] == cut_hold and row["drawings"]["clip"]["hold"] == clip_hold
+    assert row["drawings"]["drawings"] == (8 if cut_hold == 2 else 16)
+    if named:
+        assert row["retake"]["reason"] == "held-drawings" and row["retake"]["source"] == "span"
+        assert row["retake"]["drawings"] == 8 and row["retake"]["drawings_per_second"] == pytest.approx(8.0)
+    else:
+        assert row["retake"] is None and report["retake"] == []
+
+
+def test_the_cut_is_read_on_the_clips_steps_into_the_frame_after_it():
+    """On twos from frame 1, a cut that starts mid-pair: its 16 steps in the clip, the last into the frame
+    after the cut, hold 8 drawings. A cut that ends the clip reads one step fewer."""
+    feats = np.stack([loop_mod._small_features(f) for f in [_walker(0.0)] + _clip(16, 40, 2)])
+    steps = [float(v) for v in np.abs(feats[1:] - feats[:-1]).mean(axis=1)]
+    m = held.measure_cycle(steps, start=1, length=16, fps=24.0)
+    assert (m["hold"], m["drawings"], m["frames"], m["steps"]) == (2, 8, 16, 16) and m["drawings_per_second"] == pytest.approx(12.0)
+    end = held.measure_cycle(steps, start=len(steps) + 1 - 16, length=16, fps=24.0)
+    assert end["steps"] == 15 and end["frames"] == 16 and end["hold"] == 2
+
+
+def test_a_cut_too_short_to_read_leaves_the_clips_reading_and_says_so(tmp_path):
+    """A cycle of fewer steps than one window (held.SPAN_MIN_STEPS) is not read on its own: the
+    alignment takes the clip's hold, and the record says why."""
+    short = held.SPAN_MIN_STEPS - 2
+    m = held.measure_cycle([1.0, 0.1] * 20, start=0, length=short, fps=24.0)
+    assert m["hold"] is None and "too few" in m["why"]
+    d = _cut_at(tmp_path, "NE", _clip(short, 72, 2), 0, short)
+    meta = json.loads((d / "walk.strip.json").read_text())
+    assert meta["cycle_drawings"]["hold"] is None and "too few" in meta["cycle_drawings"]["why"]
+    row = align.held_drawings([Image.new("RGBA", (4, 4))] * short, fps=24.0, clip=meta["drawings"], cut=meta["cycle_drawings"])
+    assert row["source"] == "clip" and row["hold"] == 2 and "too few" in row["span_why"]
+    before = align.held_drawings([Image.new("RGBA", (4, 4))] * short, fps=24.0, clip=meta["drawings"])
+    assert before["source"] == "clip" and "cut before" in before["span_why"]  # a strip written before the cut's record
 
 
 def test_video_cycle_align_warns_and_prints_the_retake_with_exit_zero(tmp_path, capsys, monkeypatch):

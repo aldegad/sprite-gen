@@ -353,14 +353,24 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   — no interpolator draws them: a flow model blends the two drawings into a ghost or a melted
   shape, which `auto` replaces with the nearer source frame, and that drawing is held a frame
   longer: the loop halts there. A better interpolator is not the fix; a take drawn every frame is.
-  - **The hold is the clip's**: `video-loop` measures it over the whole clip as keyed and writes
-    it into `strip.json` (`drawings`: `hold`, `drawings_per_second`, `contrast`, `frames`; [video
-    pipeline](video-pipeline.md) section 4). The alignment reads it there (`source: "clip"`, the
-    cycle's drawings its frames at the clip's rate), and keeps it through a rebuild. A cut cycle is
-    too short to read a rhythm on reliably, and `--anchor motion-auto` shifts each cut frame, so a
-    pair's repeat may no longer read as one; only a loop cut before the record is measured on its
-    own cycle, read as a ring (`source: "cycle"`).
-  - **The rule**: a loop is named when its source is held (`hold` 2 or 3), the set's length leaves
+  - **The hold is the cut's**: `video-loop` measures it on the clip's steps as keyed, before any
+    anchor moves a frame, twice, and writes both into `strip.json` ([video
+    pipeline](video-pipeline.md) section 4): over the cut (`cycle_drawings`: `start`, `length`,
+    `steps`, `hold`, `drawings_per_second`, `contrast`, and a `why` where it was not read) and over
+    the whole clip (`drawings`: `hold`, `drawings_per_second`, `contrast`, `frames`). The alignment
+    reads the cut's (`source: "span"`, the cycle's drawings its frames at the cut's rate, the
+    clip's reading beside it under `clip`): a clip held for part of its length and drawn every
+    frame for the rest is held where it was cut, so a cycle cut from its every-frame part is not
+    named because the clip reads as held, and one cut from its held part is not passed because the
+    clip reads as drawn every frame. The cut's steps run from its first frame into the frame after
+    its last, which the cycle returns to, so a cut that starts mid-pair reads as the pairs it holds.
+    A cut of fewer than 12 steps (`held.SPAN_MIN_STEPS`, one window of the clip's reading) is not
+    read on its own: the clip's reading stands (`source: "clip"`), and the row's `span_why` says
+    why — as it does for a loop cut before the cut's record. Both are kept through a rebuild. The
+    cut frames themselves are not read while a record exists: `--anchor motion-auto` shifts each,
+    so a pair's repeat may no longer read as one; only a loop cut before either record is measured
+    on its own cycle, read as a ring (`source: "cycle"`).
+  - **The rule**: a loop is named when its cut is held (`hold` 2 or 3), the set's length leaves
     it under **13 drawings a second** (`align.RETAKE_DRAWINGS_MIN`), and **one or more** frames
     between its drawings were not made (`align.RETAKE_UNMADE_MIN`) — taken from the nearer source
     frame (`auto`'s replacements, every made time under `nearest`) or made with a fault and kept

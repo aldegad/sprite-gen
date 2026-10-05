@@ -760,8 +760,12 @@ inside a 24 fps clip, each drawing shown for two frames ("on twos", or three: "o
 report's `drawings` says so, read over the whole clip as keyed, before any cut
 (`sprite_gen/video/held.py`): `hold` (1 every frame a drawing, 2 or 3; `null` with a `why` for a
 clip too short or still), `drawings` and `drawings_per_second`, `held_steps`, and `contrast` per
-hold — the held steps over the change steps, the evidence. `strip.json` carries the same record
-(`drawings`: `hold`, `drawings_per_second`, `contrast`, `frames`) for `video-cycle-align`. The second frame of a pair is rarely a
+hold — the held steps over the change steps, the evidence. `cycle_drawings` is the same reading over
+the cut alone, on the clip's steps from the cut's first frame into the frame after its last (`start`,
+`length`, `steps`; `null` with a `why` under 12 steps, one window). `strip.json` carries both
+(`drawings`: `hold`, `drawings_per_second`, `contrast`, `frames`; `cycle_drawings`: `start`,
+`length`, `steps`, `hold`, `drawings_per_second`, `contrast`, `why`) for `video-cycle-align`, which
+reads the cut's: a clip may hold its drawings for only part of its length. The second frame of a pair is rarely a
 byte copy: the model redraws it a little, so its step is small, not zero, and a rule that calls a
 step held under a fraction of the median step misses it (with half the steps held the median falls
 between the two kinds). So the judgement reads the rhythm: for a hold of 2 or 3, in windows of 12
