@@ -660,7 +660,7 @@ def _align_view(r: dict[str, Any]) -> str | None:
     return r["direction"] + (f"@{r['turned']}" if r["direction"] in handed_mod.LATERAL_VIEWS else "")
 
 
-def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpolate: Any = None, between: str = "rife") -> dict[str, Any]:
+def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpolate: Any = None, between: str = align_mod.DEFAULT_BETWEEN) -> dict[str, Any]:
     """One cycle length per gait state across the set's directions (`video-cycle-align`,
     docs/loop-repair.md section 4). A state filmed in fewer than two directions has nothing to
     match. A failure is recorded under its state and the batch reports it; the loops stay as cut.
@@ -701,7 +701,7 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
             out[state] = {"ok": False, "error": str(exc)}
             continue
         out[state] = {"ok": True, "applied": True, "length": report["length"], "lengths": report["lengths"], "between": report["between"],
-                      "made_by_rife": report["made_by_rife"], "warnings": report["warnings"], "report": str(root / f"{state}.cycle-align.json")}
+                      "made_by_rife": report["made_by_rife"], "replaced": report["replaced"], "warnings": report["warnings"], "report": str(root / f"{state}.cycle-align.json")}
         for line in report["warnings"]:
             print(f"video-set: warning: {state}: {line}", file=sys.stderr)
         for r, row in zip(rows, report["loops"]):
@@ -755,7 +755,7 @@ def run_set(
     fit: str = "state",
     decontam: str = "off",
     align_cycles: str = "auto",
-    align_between: str = "rife",
+    align_between: str = align_mod.DEFAULT_BETWEEN,
     interpolate: Any = None,
     walk_start: str = "redraw",
     redraw_runner: Callable[..., int] = run_redraw_cli,
@@ -866,7 +866,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--walk-start", choices=WALK_START_MODES, default="redraw", help="redraw (default): a front or back walk films from its base still redrawn mid-step (one image generation, `sprite-gen gen --ref base`, kept as walk-start.png) — from a standing still the clip model walks askew; as-given: film from the base still itself")
     parser.add_argument("--still-provider", help="image provider for the mid-step redraw (default: sprite-gen gen's own default)")
     parser.add_argument("--align-cycles", choices=ALIGN_MODES, default="auto", help="auto (default): after the loops are cut, every walk/run filmed in two or more directions is resampled to the set's median cycle length and turned to start on a foot strike (video-cycle-align; RIFE makes only the frames between source frames — where no RIFE is installed the alignment is skipped with a warning and recorded); off: each loop keeps its own length")
-    parser.add_argument("--align-between", choices=align_mod.BETWEEN, default="rife", help="how the alignment fills a time between two source frames (video-cycle-align --between): rife (default) makes the frame, nearest takes the nearer source frame")
+    parser.add_argument("--align-between", choices=align_mod.BETWEEN, default=align_mod.DEFAULT_BETWEEN, help="how the alignment fills a time between two source frames (video-cycle-align --between): auto (default) makes the frame with RIFE and takes the nearer source frame where it smeared or lost its outline, rife keeps every made frame, nearest takes the nearer source frame")
     parser.add_argument("--force", action="store_true", help="regenerate clips that already exist")
 
 
@@ -881,7 +881,7 @@ def run(**kwargs: object) -> int:
         shape=(str(kwargs["shape"]) if kwargs.get("shape") else None), anchor=str(kwargs.get("anchor") or "none"), spill=str(kwargs.get("spill") or "auto"),
         body_height=(int(kwargs["body_height"]) if kwargs.get("body_height") else None), fit=str(kwargs.get("fit") or "state"),
         decontam=str(kwargs.get("decontam") or "off"), align_cycles=str(kwargs.get("align_cycles") or "auto"),
-        align_between=str(kwargs.get("align_between") or "rife"),
+        align_between=str(kwargs.get("align_between") or align_mod.DEFAULT_BETWEEN),
         walk_start=str(kwargs.get("walk_start") or "redraw"), still_provider=kwargs.get("still_provider"),  # type: ignore[arg-type]
         handed=handed_mod.parse_all(list(kwargs.get("handed") or [])) or None,  # type: ignore[arg-type]
     )

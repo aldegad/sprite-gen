@@ -9,7 +9,8 @@ what lay around the body. So around the body the colour image holds the body's o
 pushed out from inside its outline (`bleed`): a disagreement there reads as the body, not as the
 black a frame premultiplied over black put under it (2.24 and before: a black smear between
 crossing legs). Inside the coverage the colour is the frame's own, outline included.
-`smear` measures what a made frame has that neither neighbour has (docs/loop-repair.md section 4).
+`smear` measures what a made frame has that neither neighbour has, and the outline it lost where
+the flow failed and melted a limb into the fill (docs/loop-repair.md section 4).
 
 The binary's own CPU path (`-g -1`) returns a wrong frame with rife-v4.6 on both macOS and
 Linux (measured 2026-10-03: mean error 39 against 3.3 through Vulkan), so it is never passed;
@@ -50,6 +51,10 @@ BLEED_DEPTH = 0.008
 # `smear`: a pixel is dark under this luma (0..1), and part-covered between these alphas.
 DARK_LUMA = 70 / 255
 PARTIAL_ALPHA = (0.1, 0.9)
+# `smear`'s outline: a pixel of the coverage's edge (alpha from PARTIAL_ALPHA's floor) is outlined
+# when a dark solid pixel lies within this many pixels of it. A drawn outline sits on the edge, under
+# an antialiased pixel or two, whatever the frame's size.
+OUTLINE_REACH = 2
 CALL_TIMEOUT_SECONDS = 120
 
 Interpolate = Callable[[Image.Image, Image.Image, float], Image.Image]
@@ -183,26 +188,39 @@ def between(a: Image.Image, b: Image.Image, t: float, *, binary: Path, model: Pa
     return Image.fromarray(np.uint8(np.clip(out, 0, 1) * 255 + 0.5), "RGBA")
 
 
-def _smear_counts(frame: Image.Image) -> tuple[int, int, int]:
-    """(dark pixels inside the solid body, one pixel in from its edge; solid pixels; part-covered pixels)."""
+def _mask(mask: np.ndarray, size: int, op: type) -> np.ndarray:
+    return np.asarray(Image.fromarray(np.uint8(mask) * 255).filter(op(size))) > 0
+
+
+def _smear_counts(frame: Image.Image) -> tuple[int, int, int, int, int]:
+    """(dark pixels inside the solid body, one pixel in from its edge; solid pixels; part-covered
+    pixels; pixels on the coverage's edge; those of them with no outline within OUTLINE_REACH)."""
     x = np.asarray(frame.convert("RGBA"), dtype=np.float32) / 255.0
     solid = x[..., 3] >= 0.5
-    inner = np.asarray(Image.fromarray(np.uint8(solid) * 255).filter(ImageFilter.MinFilter(3))) > 0
+    inner = _mask(solid, 3, ImageFilter.MinFilter)
     luma = x[..., 0] * 0.299 + x[..., 1] * 0.587 + x[..., 2] * 0.114
     lo, hi = PARTIAL_ALPHA
-    return int((inner & (luma < DARK_LUMA)).sum()), int(solid.sum()), int(((x[..., 3] > lo) & (x[..., 3] < hi)).sum())
+    covered = x[..., 3] >= lo
+    edge = covered & ~_mask(covered, 3, ImageFilter.MinFilter)
+    outlined = _mask(solid & (luma < DARK_LUMA), 2 * OUTLINE_REACH + 1, ImageFilter.MaxFilter)
+    return (int((inner & (luma < DARK_LUMA)).sum()), int(solid.sum()), int(((x[..., 3] > lo) & (x[..., 3] < hi)).sum()),
+            int(edge.sum()), int((edge & ~outlined).sum()))
 
 
 def smear(made: Image.Image, a: Image.Image, b: Image.Image) -> dict[str, float]:
-    """What a made frame has that neither of its two neighbours has, as fractions of its solid
-    pixels: `dark_excess`, dark pixels inside the body beyond the darker neighbour's count (a black
-    smear raises it; a moved dark part — a hat, a watch — keeps its count), and `partial_excess`,
-    part-covered pixels beyond the more ragged neighbour's (a limb RIFE could not follow, drawn as
-    a pale ghost). Zero or less: nothing added."""
-    dm, sm, pm = _smear_counts(made)
-    (da, _, pa), (db, _, pb) = _smear_counts(a), _smear_counts(b)
+    """What a made frame has that neither of its two neighbours has: `dark_excess`, dark pixels
+    inside the body beyond the darker neighbour's count (a black smear raises it; a moved dark
+    part — a hat, a watch — keeps its count), and `partial_excess`, part-covered pixels beyond the
+    more ragged neighbour's, both as fractions of its solid pixels; and `outline_loss`, the edge of
+    its coverage that has no outline beyond the less outlined neighbour's, as a fraction of its edge
+    (where legs crossing too far for the flow melt into one shape of fill, or a limb is left a pale
+    ghost, the outline is gone; a frame drawn without outlines loses none against neighbours that
+    have none). Zero or less: nothing added, no outline lost."""
+    dm, sm, pm, em, um = _smear_counts(made)
+    (da, _, pa, _, ua), (db, _, pb, _, ub) = _smear_counts(a), _smear_counts(b)
     solid = max(1, sm)
-    return {"dark_excess": round((dm - max(da, db)) / solid, 5), "partial_excess": round((pm - max(pa, pb)) / solid, 5)}
+    return {"dark_excess": round((dm - max(da, db)) / solid, 5), "partial_excess": round((pm - max(pa, pb)) / solid, 5),
+            "outline_loss": round((um - max(ua, ub)) / max(1, em), 5)}
 
 
 class Rife:

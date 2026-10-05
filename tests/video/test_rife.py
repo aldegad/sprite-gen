@@ -171,3 +171,63 @@ def test_smear_counts_a_black_blot_and_not_a_moved_dark_part():
     blot = np.asarray(moved).copy()
     blot[40:60, 58:70, :3] = 0
     assert rife.smear(Image.fromarray(blot, "RGBA"), a, b)["dark_excess"] > 0.01
+
+
+def _walker(front: float, back: float) -> Image.Image:
+    """A body over two legs swung from the hip to these angles (degrees, 0 straight down), each a
+    capsule with a 2 px black outline on transparency; the far leg shaded, the near drawn over it."""
+    from PIL import ImageDraw
+
+    w, h = 128, 192
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    hip, length, r = (w // 2, int(h * 0.55)), int(h * 0.36), int(w * 0.09)
+    for angle, fill in ((back, (215, 205, 200, 255)), (front, (250, 240, 235, 255))):
+        a = np.radians(angle)
+        foot = (hip[0] + length * np.sin(a), hip[1] + length * np.cos(a))
+        for radius, colour in ((r, (20, 20, 20, 255)), (r - 2, fill)):
+            d.line([hip, foot], fill=colour, width=2 * radius)
+            d.ellipse([foot[0] - radius, foot[1] - radius, foot[0] + radius, foot[1] + radius], fill=colour)
+    body = [w * 0.25, h * 0.15, w * 0.75, h * 0.62]
+    d.ellipse(body, fill=(20, 20, 20, 255))
+    d.ellipse([body[0] + 2, body[1] + 2, body[2] - 2, body[3] - 2], fill=(250, 240, 235, 255))
+    return im
+
+
+def test_outline_loss_reads_a_melted_limb_and_not_a_moved_one():
+    """A frame whose legs became one shape of fill (the outline gone where they meet the air) loses
+    its outline; legs drawn half way lose none, and art drawn without outlines loses none."""
+    a, b = _walker(20, -20), _walker(-5, 5)
+    assert rife.smear(_walker(8, -8), a, b)["outline_loss"] <= 0.01
+    melted = np.asarray(_walker(8, -8)).copy()
+    legs = melted[110:, :]
+    dark = (legs[..., 3] > 0) & (legs[..., :3].max(axis=-1) < 70)
+    legs[dark] = (240, 230, 225, 255)
+    m = rife.smear(Image.fromarray(melted, "RGBA"), a, b)
+    assert m["outline_loss"] > 0.05 and m["dark_excess"] < 0
+    flat = [Image.fromarray(np.where(np.asarray(f)[..., 3:] > 0, (240, 230, 225, 255), 0).astype(np.uint8), "RGBA")
+            for f in (a, b, Image.fromarray(melted, "RGBA"))]
+    assert rife.smear(flat[2], flat[0], flat[1])["outline_loss"] <= 0.01
+
+
+@pytest.mark.skipif(not _real_rife_available(), reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH / sprite-gen rife install)")
+def test_real_rife_melts_legs_crossing_too_far_and_alignment_takes_the_nearer_frame_there():
+    """Outlined legs that cross a long way between two drawings (a clip drawn on twos) come out of
+    RIFE as one shape with no outline where they meet the air (measured 32 % of the edge at t=0.5);
+    a short step comes out outlined (under 3 % at any t). `--between auto` takes the nearer source
+    frame for the first and keeps RIFE's for the second; `rife` keeps both and names the first."""
+    from sprite_gen.video import align
+
+    interpolate = rife.Rife()
+    far, near = (_walker(20, -20), _walker(-5, 5)), (_walker(10, -10), _walker(4, -4))
+    assert rife.smear(interpolate(*far, 0.5), *far)["outline_loss"] > align.OUTLINE_WARN
+    for t in (0.25, 0.5, 0.75):
+        assert rife.smear(interpolate(*near, t), *near)["outline_loss"] < align.OUTLINE_WARN
+    out, facts = align.resample(list(far), 4, interpolate)  # times 0, 0.5, 1, 1.5: both made at t=0.5
+    assert facts["between"] == "auto" and facts["made_by_rife"] == 0 and facts["nearest_at"] == [1, 3]
+    assert out[1] is far[1] and out[3] is far[0]
+    assert [(m["method"], m["faults"]) for m in facts["smear"]] == [("nearest", ["outline"])] * 2
+    kept, facts = align.resample(list(far), 4, interpolate, between="rife")
+    assert facts["made_at"] == [1, 3] and all(m["faults"] == ["outline"] and m["method"] == "rife" for m in facts["smear"])
+    out, facts = align.resample(list(near), 4, interpolate)
+    assert facts["made_at"] == [1, 3] and facts["nearest_at"] == [] and all(not m["faults"] for m in facts["smear"])

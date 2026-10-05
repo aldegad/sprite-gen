@@ -4,7 +4,9 @@ length at times k·L/L*, a time on a source frame keeping that frame as filmed a
 between frames made by the interpolator; each loop turned to start where the body is lowest; the
 cut as filmed kept in `cycle.source/`, so a second alignment reads the source, not its own output.
 
-The interpolator is a stand-in that records what it was asked for and cross-fades."""
+The interpolator is a stand-in that records what it was asked for and cross-fades. A cross-fade
+is two half-covered ghosts with no outline, which `--between auto` (the default) judges melted and
+replaces, so a test of the resampling itself asks for `rife`, which keeps every made frame."""
 
 from __future__ import annotations
 
@@ -45,7 +47,7 @@ class Recorder:
 def test_resample_keeps_every_frame_that_lands_on_a_source_frame():
     frames = [_walker(2 * math.pi * k / 6) for k in range(6)]
     rec = Recorder()
-    out, facts = align.resample(frames, 12, rec)
+    out, facts = align.resample(frames, 12, rec, between="rife")
     assert {k: v for k, v in facts.items() if k != "smear"} == {"from": 6, "to": 12, "between": "rife", "taken": 6, "made_by_rife": 6,
                                                                 "made_at": [1, 3, 5, 7, 9, 11]}
     assert [m["at"] for m in facts["smear"]] == [1, 3, 5, 7, 9, 11]
@@ -222,7 +224,7 @@ def _cut(tmp_path: Path, name: str, length: int) -> Path:
 def test_a_set_is_aligned_to_its_median_length_and_a_second_run_reads_the_source(tmp_path):
     dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24), ("N", 28))]
     rec = Recorder()
-    report = align.align_set(dirs, interpolate=rec, report_path=tmp_path / "align.json")
+    report = align.align_set(dirs, interpolate=rec, report_path=tmp_path / "align.json", between="rife")
     assert report["length"] == 24 and report["lengths"] == [20, 24, 28] and report["length_rule"] == "median"
     by = {Path(r["dir"]).name: r for r in report["loops"]}
     assert by["E"]["made_by_rife"] == 0 and by["E"]["taken"] == 24
@@ -239,7 +241,7 @@ def test_a_set_is_aligned_to_its_median_length_and_a_second_run_reads_the_source
         assert lowest == 0
     assert len(list((dirs[0] / align.SOURCE_DIR).glob("frame-*.png"))) == 20
     first = (dirs[0] / "walk.strip.png").read_bytes()
-    again = align.align_set(dirs, interpolate=Recorder())
+    again = align.align_set(dirs, interpolate=Recorder(), between="rife")
     assert again["lengths"] == [20, 24, 28]  # read from cycle.source, not the aligned cycle
     assert (dirs[0] / "walk.strip.png").read_bytes() == first
     assert json.loads((tmp_path / "align.json").read_text())["kind"] == "sprite-gen-video-cycle-align-report"
@@ -334,12 +336,57 @@ def test_a_made_frame_darker_than_both_neighbours_is_named_in_the_warnings(tmp_p
         return Image.fromarray(made, "RGBA")
 
     dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24))]
-    report = align.align_set(dirs, interpolate=smudge)
+    report = align.align_set(dirs, interpolate=smudge, between="rife")
     smears = [w for w in report["warnings"] if "more dark pixels inside the body" in w]
     assert len(smears) == report["made_by_rife"] > 0
     row = next(r for r in report["loops"] if Path(r["dir"]).name == "S")
     assert len(row["smear"]) == row["made_by_rife"] and min(m["dark_excess"] for m in row["smear"]) > align.SMEAR_WARN
     assert [m["at"] for m in row["smear"]] == sorted(row["made_at"])
+
+
+def _melt(a: Image.Image, b: Image.Image, t: float) -> Image.Image:
+    """A stand-in RIFE that lost the dark foot: the frame between drawn whole, its dark grey taken
+    into the body's blue — the outline around the foot gone, nothing darker added."""
+    made = np.asarray(Image.blend(a, b, t)).copy()
+    made[..., 3] = np.where(made[..., 3] >= 64, 255, 0)
+    made[(made[..., 3] > 0) & (made[..., :3].max(axis=-1) < 130)] = (90, 90, 200, 255)
+    return Image.fromarray(made, "RGBA")
+
+
+def test_a_made_frame_that_lost_its_outline_is_replaced_by_the_nearer_source_frame_and_named(tmp_path):
+    """--between auto (the default): every made frame is measured, and one that lost its outline
+    takes the nearer source frame instead, named in the warnings and in its row (`method`
+    nearest); --between rife keeps it and names it."""
+    dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24))]
+    report = align.align_set(dirs, interpolate=_melt, report_path=tmp_path / "align.json")
+    row = next(r for r in report["loops"] if Path(r["dir"]).name == "S")
+    assert report["between"] == "auto" and report["made_by_rife"] == 0 and row["made_at"] == []
+    assert len(row["smear"]) == len(row["nearest_at"]) > 0
+    assert report["replaced"] == sum(len(r["smear"]) for r in report["loops"])
+    assert all(m["method"] == "nearest" and m["faults"] == ["outline"] and m["outline_loss"] > align.OUTLINE_WARN for m in row["smear"])
+    assert sorted(m["at"] for m in row["smear"]) == row["nearest_at"]
+    named = [w for w in report["warnings"] if "lost its outline" in w and "the nearer source frame was taken there" in w]
+    assert len(named) == report["replaced"]
+    assert report["interpolator"] == {"kind": "injected"}
+    source = [Image.open(p).convert("RGBA").tobytes() for p in sorted((dirs[0] / align.SOURCE_DIR).glob("frame-*.png"))]
+    cells = [Image.open(p).convert("RGBA").tobytes() for p in sorted((dirs[0] / "cycle").glob("frame-*.png"))]
+    assert all(cells[k] in source for k in row["nearest_at"])  # a filmed frame, as filmed
+    kept = align.align_set(dirs, interpolate=_melt, between="rife")
+    row = next(r for r in kept["loops"] if Path(r["dir"]).name == "S")
+    assert kept["replaced"] == 0 and len(row["made_at"]) == len(row["smear"]) > 0 and "nearest_at" not in row
+    assert len([w for w in kept["warnings"] if "lost its outline" in w and "--between auto" in w]) == kept["made_by_rife"]
+
+
+def test_a_made_frame_that_keeps_its_outline_is_kept_under_auto(tmp_path):
+    def drawn(a: Image.Image, b: Image.Image, t: float) -> Image.Image:
+        return a.copy()  # a frame RIFE followed: whole, outlined as its neighbours
+
+    dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24))]
+    report = align.align_set(dirs, interpolate=drawn)
+    row = next(r for r in report["loops"] if Path(r["dir"]).name == "S")
+    assert report["replaced"] == 0 and row["nearest_at"] == [] and len(row["made_at"]) == len(row["smear"]) > 0
+    assert all(m["method"] == "rife" and m["faults"] == [] for m in row["smear"])
+    assert not any("lost its outline" in w for w in report["warnings"])
 
 
 def test_video_set_without_rife_skips_the_alignment_with_a_warning(tmp_path, monkeypatch, capsys):

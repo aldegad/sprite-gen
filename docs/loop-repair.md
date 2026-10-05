@@ -88,7 +88,10 @@ inside its solid edge — past a drawn outline — pushed out over the transpare
 fine. A disagreement then reads as the body's fill. Where the frame has coverage its colour is
 its own, outline included, and it is taken from the colour run as it comes out (no division by
 the coverage). A limb RIFE cannot follow at all still comes out pale and soft, never black;
-`rife.smear` measures both (section 4).
+and where two drawings are too far apart for the flow — legs crossing a long way, as a clip
+drawn on twos gives between its drawings — the legs come out as one shape of fill with no
+outline between them or around them. `rife.smear` measures all three, and a set alignment takes
+the nearer source frame where a made frame melted (section 4).
 
 ### Where — measured 2026-10-03
 
@@ -258,7 +261,7 @@ same number of frames, starting on the same step.
 ```bash
 sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-walk/loop \
   --loop-dir set/back-walk/loop [--view front --view side@right --view back] [--start-foot right] \
-  [--between rife|nearest] [--length N] [--cycles back-walk=2] [--multi-cycle fail|warn] \
+  [--between auto|rife|nearest] [--length N] [--cycles back-walk=2] [--multi-cycle fail|warn] \
   [--state walk] [--report set/walk.cycle-align.json]
 ```
 
@@ -301,18 +304,47 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   k·L/L*, cyclic. A time within 0.03 of a source frame takes that frame as filmed; only a time
   between two frames is made, by RIFE at that fraction (section 1). An offset of half a frame,
   which would remake every frame, is not offered (section 2).
-- **Between two source frames** (`--between`): `rife` (default) makes the frame; `nearest` takes
-  the nearer source frame, so nothing is made and no RIFE is needed, and the motion keeps the
-  filmed frames at up to half a frame off their time (a loop stretched longer shows a frame
+- **Between two source frames** (`--between`): `auto` (default) makes the frame with RIFE,
+  measures it (below) and keeps it unless it has a fault, where the nearer source frame is taken
+  instead and named; `rife` keeps every made frame and names the faulty ones; `nearest` takes the
+  nearer source frame every time, so nothing is made and no RIFE is needed, and the motion keeps
+  the filmed frames at up to half a frame off their time (a loop stretched longer shows a frame
   twice, which the GIF and WebP hold as one frame of twice the delay). `video-set` passes
-  `--align-between`.
-- **Smear, per made frame**: `cycle_align.smear` lists, for every frame RIFE made, what it has
-  that neither source frame beside it has, as fractions of its solid pixels: `dark_excess`, dark
-  pixels (luma under 70/255) inside the body beyond the darker neighbour's count — a black smear
-  raises it, a dark part that only moved (a hat, a watch) does not — and `partial_excess`,
-  part-covered pixels beyond the more ragged neighbour's (a pale, soft limb). A frame whose
-  `dark_excess` is over 0.1 % is named in the report's `warnings` (and on stderr, and in
-  `video-set`'s `warnings`); look at it in `cycle/`, or align with `--between nearest`.
+  `--align-between`. `auto` runs RIFE for every frame between two source frames, as `rife` does,
+  and needs it installed the same way.
+- **Smear and melt, per made frame**: `cycle_align.smear` lists every frame RIFE made, with its
+  `method` — `rife` (kept) or `nearest` (the nearer source frame taken instead) — its `faults`,
+  and what it has that neither source frame beside it has (`rife.smear`):
+  - `dark_excess`: dark pixels (luma under 70/255) inside the body beyond the darker neighbour's
+    count, as a fraction of its solid pixels — a black smear raises it, a dark part that only
+    moved (a hat, a watch) does not. Over 0.1 % it is the fault `smear`.
+  - `outline_loss`: of the frame's coverage edge (alpha from 0.1, so a pale ghost limb's edge
+    counts), the share with no dark solid pixel within 2 px, beyond the less outlined
+    neighbour's, as a fraction of its edge. Legs that crossed too far for the flow melt into one
+    shape of fill and lose their outline where they meet the air; a limb left as a ghost has none.
+    Over 5 % it is the fault `outline`. A step the flow follows keeps its outline; a figure drawn
+    without outlines loses none against neighbours that have none, and is not judged by it.
+  - `partial_excess`: part-covered pixels beyond the more ragged neighbour's, as a fraction of
+    its solid pixels. Reported, not judged: a melted frame and a clean one read alike on it.
+
+  Every fault is a line in the report's `warnings` (and on stderr, and in `video-set`'s
+  `warnings`), whichever `--between`: under `auto` it says the nearer source frame was taken
+  there; under `rife` that the frame is kept, to look at in `cycle/`. The report counts the
+  frames kept from RIFE (`made_by_rife`) and those replaced (`replaced`); a loop row lists both
+  (`made_at`, `nearest_at`).
+
+  Why `outline_loss` and not the dark count's other side: a frame half way between two drawings
+  has fewer dark pixels than the darker one wherever the two differ — a watch half hidden, an
+  outline between overlapping legs — so a clean frame reads below zero too. On two outlined legs
+  (`tests/video/test_rife.py`) RIFE's clean frames of a short step read `dark_excess` −1.3 %,
+  lower than its melted frame of a long crossing (−1.1 %); `outline_loss` reads under 3 % for the
+  short step at every fraction and 32 % for the melted frame. The 5 % line is where a frame stops
+  reading as a little soft at a foot and starts reading as melted; it is a reference, not a
+  measured optimum, and frames near it are worth a look either way.
+- **What `auto` costs**: a frame replaced shows the nearer source frame, so the motion there
+  steps as filmed, up to half a frame off its time, and the loop shows fewer distinct drawings a
+  second than `rife` — but no melted one. A clip drawn on twos has a long step between drawings
+  everywhere, so it is replaced most; the frames that land on a small step stay RIFE's.
 - **Foot strike**: each loop is then turned to start as a heel lands (`align.foot_strike`), read
   off one signal smoothed 1-2-1 — never off the frame's top edge, which a long ear, a hat's
   point or an antenna owns and which flops on its own rhythm:
@@ -363,7 +395,7 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
 - **Rebuilt in place**: `cycle/`, `<name>.strip.png` / `.strip.json`, `.gif`, `.webp` are
   rewritten at the loop's own cell rules (`cell_height_cap`, body-height target, anchor), at the
   loop's frame rate, so the aligned cycle lasts L*/fps seconds. `strip.json` gains
-  `cycle_align` (`from`, `to`, `between`, `taken`, `made_by_rife`, `made_at`, `smear` or
+  `cycle_align` (`from`, `to`, `between`, `taken`, `made_by_rife`, `made_at`, `smear` and/or
   `nearest_at`, `turned_by`, `turned_on`, `view`, `start_foot`, the seam ratio of the rebuilt
   cells, and the re-verified GIF/WebP).
 - **The cut as filmed is kept** in `cycle.source/` on the first alignment, and every later
