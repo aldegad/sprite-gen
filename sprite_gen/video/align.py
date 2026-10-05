@@ -36,6 +36,12 @@ it is, `--cycles <loop>=k` takes one cycle — a k-th of it, from the start whos
 is the most like it — out of the loop as filmed (`take_cycle`) and aligns that. Nothing changes the
 number of cycles in a loop but `--cycles`.
 
+A loop `video-loop` cut two cycles long on purpose — a part it holds swings once in two cycles and
+closes only there (its strip metadata says `cycles`, docs/loop-repair.md section 3, "The held side")
+— is counted already: it is not a suspect to stop on, its length counts per cycle toward the set's,
+and it is resampled to that many times the set's length, keeping its cycles (`cycles_kept`). A
+`--cycles` count for it is still the last word.
+
 Where a loop's view cannot tell its feet apart (`start_foot` null, with `foot_why`), it starts on its
 larger strike, and the report names it under `unnamed_feet` with its two strike frames as they now
 stand in `cycle/` (`candidates`, the first being the frame it starts on) — for whoever looks, a
@@ -530,7 +536,9 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     if "follow" in meta or (loop_dir / loop_mod.FOLLOW_SOURCE).exists():
         record["follow_cleared"] = True
     (loop_dir / loop_mod.FOLLOW_SOURCE).unlink(missing_ok=True)
-    merged = {**{k: v for k, v in meta.items() if k not in strip_meta and k not in ("cycle_align", "follow")}, **strip_meta}
+    merged = {**{k: v for k, v in meta.items() if k not in strip_meta and k not in ("cycle_align", "follow", "cycles")}, **strip_meta}
+    if record.get("cycles_kept", 1) > 1:
+        merged["cycles"] = record["cycles_kept"]
     if meta.get("foot_anchor") and meta.get("foot_anchor") != "feet":
         merged["foot_anchor"] = meta["foot_anchor"]
     cells = [strip.crop((k * strip_meta["w"], 0, (k + 1) * strip_meta["w"], strip_meta["h"])) for k in range(strip_meta["frames"])]
@@ -631,13 +639,20 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
     given = _resolve_cycles(cycles, loops)
     told = _resolve_loops("--foot", feet, loops, handed_mod.SIDES)
     screens = [cycle_screen(frames, fps=fps, state=state or meta.get("state")) for (_, _, meta, _), frames in zip(loops, sources)]
+    # Cycles a loop keeps: what its cutter declared (`cycles`, a cut two cycles long on purpose) unless
+    # a --cycles count says otherwise.
+    kept = {i: int(meta.get("cycles") or 1) for i, (_, _, meta, _) in enumerate(loops)}
     suspects: list[dict[str, Any]] = []
     taken: dict[int, dict[str, Any]] = {}
     cycle_warnings: list[str] = []
     for i, ((d, meta_path, _, _), screen) in enumerate(zip(loops, screens)):
         k = given.get(i)
+        if k is not None:
+            kept[i] = 1
         if screen["suspects"]:
-            status = "stopped" if k is None and multi_cycle == "fail" else "warned" if k is None else "counted"
+            declared = k is None and kept[i] > 1
+            status = ("declared" if declared else "stopped" if k is None and multi_cycle == "fail"
+                      else "warned" if k is None else "counted")
             suspects.append({"dir": str(d), "name": meta_path.name[: -len(".strip.json")], "length": len(sources[i]),
                              "status": status, "cycles_given": k,
                              "candidates": [{key: row[key] for key in ("period", "seconds", "divisor", "cycles", "periodicity", "pose",
@@ -676,7 +691,8 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
                        f"{max(row['cycles'] for row in e['candidates'])} times as fast as the rest if it does"
                        for e in suspects if e["status"] == "warned"]
     lengths = [len(f) for f in sources]
-    target = length if length is not None else round(statistics.median(lengths))
+    # A loop kept two cycles long counts one cycle's length toward the set's, and is made that many times as long.
+    target = length if length is not None else round(statistics.median(n / kept[i] for i, n in enumerate(lengths)))
     located: list[dict[str, str]] = []
 
     def lazy(a: Image.Image, b: Image.Image, t: float) -> Image.Image:
@@ -691,7 +707,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
     aligned = []
     for i, ((d, *_), frames, view) in enumerate(zip(loops, sources, views or [None] * len(loops))):
         try:
-            out, facts = resample(frames, target, lazy, between=between)
+            out, facts = resample(frames, target * kept[i], lazy, between=between)
             strike = foot_strike(out, view=view, foot=start_foot, given=told.get(i))
         except rife_mod.RifeNotInstalled as exc:
             raise rife_mod.RifeNotInstalled(f"{d}: {exc}") from exc
@@ -703,16 +719,16 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         record = {**facts, "drawings": drawings, "retake": again, "turned_by": start, "turned_on": strike["by"], "view": view, "start_foot": strike["start_foot"],
                   "start_foot_source": strike["start_foot_source"],
                   # the two strikes as they stand in the rebuilt cycle/: the larger first
-                  "strikes": [(k - start) % target for k in strike["strikes"]],
+                  "strikes": [(k - start) % len(out) for k in strike["strikes"]],
                   **{key: strike[key] for key in ("foot", "foot_why", "foot_given", "foot_unnamed_why", "foot_disagrees") if key in strike},
                   "stride_swing": strike["stride_swing"], "reach_swing": strike["reach_swing"],
                   "fps": round(fps, 4), "source": SOURCE_DIR, "cycles_given": given.get(i), "cycle_screen": screens[i],
-                  **({"cycle_taken": taken[i]} if i in taken else {}),
-                  "made_at": [(k - start) % target for k in facts["made_at"]]}
+                  **({"cycle_taken": taken[i]} if i in taken else {}), "cycles_kept": kept[i],
+                  "made_at": [(k - start) % len(out) for k in facts["made_at"]]}
         if "nearest_at" in facts:
-            record["nearest_at"] = sorted((k - start) % target for k in facts["nearest_at"])
+            record["nearest_at"] = sorted((k - start) % len(out) for k in facts["nearest_at"])
         if "smear" in facts:
-            record["smear"] = sorted(({**m, "at": (m["at"] - start) % target} for m in facts["smear"]), key=lambda m: m["at"])
+            record["smear"] = sorted(({**m, "at": (m["at"] - start) % len(out)} for m in facts["smear"]), key=lambda m: m["at"])
         aligned.append((out[start:] + out[:start], record))
     rows = []
     for (d, meta_path, meta, _), (out, record) in zip(loops, aligned):

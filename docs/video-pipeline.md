@@ -694,7 +694,8 @@ was 17). `video-loop` therefore:
    changes few pixels and hardly moves it. `--anchor motion-auto` also weighs the top
    of the silhouette at the wrap and chooses again when it jumps, and every walk or run
    reports that jump and warns on it ([loop repair](loop-repair.md) section 3,
-   "The seam pop").
+   "The seam pop"). Once the top jumps, the held part is read below its top too, and a staff
+   that closes only on two steps is cut two steps long (`cycle.cycles: 2`, "The held side").
 
 This neighbourhood check measures temporal consistency, not anatomical leg
 identity. A consistently repeated malformed motion can still score well; visual
@@ -768,7 +769,9 @@ swings the stride twice a step; a diagonal view's two steps open the feet unequa
 `review_recommended` keeps its meaning (the ambiguous-harmonic retention above). The record is for
 the set stage: `video-cycle-align` screens every loop by the same rule, stops a set on a suspect,
 and takes one cycle out of a loop only when told how many it holds (`--cycles`, [loop
-repair](loop-repair.md) section 4). The local search of `--anchor motion-auto` records the same.
+repair](loop-repair.md) section 4). The local search of `--anchor motion-auto` records the same. A
+loop that search cut two cycles long on purpose (a held part that closes only there, `cycles: 2` in
+`strip.json`) is counted already: the set stage keeps both cycles at twice the set's length.
 The rule leans one way on purpose: a suspect costs a look, a miss a loop that plays twice as fast.
 A run's half step repeats as well as most of its strides do, so a run set is suspected nearly
 every time and stops until its loops are counted; a walk's half step is under its floor more

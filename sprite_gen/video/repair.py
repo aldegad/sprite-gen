@@ -141,6 +141,19 @@ HEAD_MEDIAN_FLOOR = 0.05  # % of body height: a median step below this is the tr
 # the cut is chosen from. Above it the cut is chosen again (`--anchor motion-auto`), and a pop that
 # stays is a warning line.
 SEAM_POP_REFERENCE = 10.0
+# The held side's seam (docs/loop-repair.md section 3, "The held side"): a held part that swings on
+# its own beat misses below its top too — under the hand, where the top band does not reach. Read
+# on the silhouette's outer edge on the side the top band sits on, row by row: how far the cut's
+# wrap is from the clip's own way on there, in place and in speed, over that row's median step in
+# the loop; the HELD_EDGE_QUANTILE-th percentile of the rows. Under HELD_EDGE_REFERENCE the held
+# side closes. On a walk without a held part the edge is the hair or an arm, and the same reading
+# runs as high as on a staff that does not close, so it is read only on a cut whose top band pops
+# (`--anchor motion-auto` chooses again there), where the top band has found the held part and its
+# side. The bound sits between cuts that close a held staff and cuts where it swings back at the wrap.
+HELD_EDGE_REFERENCE = 1.2
+HELD_EDGE_QUANTILE = 80
+HELD_EDGE_FLOOR = 0.005  # of the body height, a pixel at least: a row's median step under it is the edge's rounding
+HELD_EDGE_ALPHA = 128  # alpha at or above this is the edge (0..255)
 
 
 def jolt_index(step_values: np.ndarray) -> float:
@@ -223,6 +236,92 @@ def seam_pop(alphas: list[np.ndarray]) -> dict[str, Any]:
     record["pop"] = round(pop, 3)
     record["pops"] = pop > SEAM_POP_REFERENCE
     return record
+
+
+def held_side(masks: list[np.ndarray]) -> str:
+    """The side of the body the top band (HEAD_BAND) sits on, "left" or "right": where a part held
+    higher than the head is held. `masks` are a cut's frames, True where the body is."""
+    stack = np.stack(masks)
+    rows = np.where(stack.any(axis=(0, 2)))[0]
+    if rows.size == 0:
+        raise ValueError("every loop frame is fully transparent")
+    top, bottom = int(rows.min()), int(rows.max())
+    band = stack[:, top:top + max(1, int(max(1, bottom - top) * HEAD_BAND))]
+    cols = np.arange(stack.shape[2])
+    body, tip = stack.sum(axis=(0, 1)), band.sum(axis=(0, 1))
+    return "right" if float((tip * cols).sum()) / float(tip.sum()) >= float((body * cols).sum()) / float(body.sum()) else "left"
+
+
+def side_edges(masks: list[np.ndarray], side: str) -> np.ndarray:
+    """(frames, rows): each row's outermost body column on `side`, NaN where the row is empty."""
+    stack = np.stack(masks)
+    filled = stack.any(axis=2)
+    if side == "right":
+        edge = stack.shape[2] - 1 - stack[:, :, ::-1].argmax(axis=2)
+    else:
+        edge = stack.argmax(axis=2)
+    out = edge.astype(np.float64)
+    out[~filled] = np.nan
+    return out
+
+
+def held_edge(edges: np.ndarray, start: int, length: int) -> dict[str, Any]:
+    """The held side's seam of a cut (start, length) of a clip whose side edges are `edges`
+    (`side_edges`), section 3, "The held side".
+
+    A loop closes where its last frame is the frame before its first and its first the frame after its
+    last: per row, the cut's first frame against the clip's frame after its last, its last against the
+    clip's frame before its first, and the step into and out of each against the clip's own (a part
+    that comes back to its place moving the other way swings back at the wrap). Their mean over the
+    row's median step in the loop, a floor of HELD_EDGE_FLOOR; the HELD_EDGE_QUANTILE-th percentile
+    over the rows is `seam`, and the held side `closes` under HELD_EDGE_REFERENCE. Raises ValueError
+    for a cut with fewer than two clip frames on either side, or no row to read."""
+    n = len(edges)
+    s, L = start, length
+    if s < 2 or s + L + 1 >= n:
+        raise ValueError("the clip has no two frames either side of the cut to read its wrap against")
+    loop = edges[s:s + L]
+    rows = np.where(np.isfinite(loop).any(axis=0))[0]
+    if rows.size == 0:
+        raise ValueError("every loop frame is fully transparent")
+    steps = np.abs(np.diff(np.vstack([loop, loop[:1]]), axis=0))
+    terms = np.stack([np.abs(edges[s] - edges[s + L]),
+                      np.abs((edges[s + 1] - edges[s]) - (edges[s + L + 1] - edges[s + L])),
+                      np.abs(edges[s + L - 1] - edges[s - 1]),
+                      np.abs((edges[s + L - 1] - edges[s + L - 2]) - (edges[s - 1] - edges[s - 2]))])
+    with np.errstate(invalid="ignore"):
+        counted = np.isfinite(steps).sum(axis=0)
+        median = np.where(counted > 0, np.nanmedian(np.where(counted > 0, steps, 0.0), axis=0), np.nan)
+        read = np.isfinite(terms).sum(axis=0)
+        mean = np.where(read > 0, np.nansum(terms, axis=0) / np.maximum(read, 1), np.nan)
+    floor = max(1.0, HELD_EDGE_FLOOR * float(rows.max() - rows.min()))
+    ratio = mean / np.maximum(median, floor)
+    ratio = ratio[np.isfinite(ratio)]
+    if ratio.size == 0:
+        raise ValueError("no row has the held side's edge in the frames its wrap is read on")
+    seam = round(float(np.percentile(ratio, HELD_EDGE_QUANTILE)), 3)
+    return {"seam": seam, "closes": seam < HELD_EDGE_REFERENCE, "rows": int(ratio.size), "reference": HELD_EDGE_REFERENCE}
+
+
+def held_edge_verdict(shape: dict[str, Any] | None) -> list[str]:
+    """The held side of a cut chosen again on its top band (`cycle.seam_pop.held_edge`), in words, when
+    the chosen cut does not close it or it could not be read; empty otherwise (and for a cut whose top
+    band did not pop, where it is not read)."""
+    held = (shape or {}).get("held_edge")
+    if not held:
+        return []
+    if "skipped" in held:
+        return [f"the top of the silhouette jumps at the first choice, and the side its held part is on could not be read "
+                f"({held['skipped']}): whether the part closes below its top at this cut is not known"]
+    chosen = held["chosen"]
+    if "skipped" in chosen:
+        return [f"the held part's side ({held['side']}) could not be read at this cut ({chosen['skipped']}): whether it "
+                "closes below its top is not known"]
+    if chosen["closes"]:
+        return []
+    return [f"the held part does not close at the wrap on the {held['side']} side of the silhouette, below its top: "
+            f"{chosen['seam']:.2f}x its rows' median step (over {held['reference']:g}); no window one or two cycles long "
+            "closes it — it swings on a beat of its own"]
 
 
 def measure_jolt(frames: list[Image.Image], *, facing: str = "right") -> dict[str, Any]:

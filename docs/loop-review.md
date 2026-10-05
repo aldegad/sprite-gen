@@ -96,7 +96,10 @@ the lag minimum. When the top of the silhouette jumps into that cut's first fram
 a staff or flag held above the head, swinging on its own beat — the candidates are measured
 and the cut is chosen again among those whose top was read and closes ([loop repair](loop-repair.md)
 section 3, "The seam pop"; `cycle.seam_pop`). A first choice whose top closes, or cannot be read, is kept and
-nothing more is measured. An explicit `--max-len` is never widened; without one, only the gait
+nothing more is measured. Once it pops, the held part is read below its top as well, on the side
+the top band sits on: a cut whose shaft closes under the hand is taken first, and where no cut one
+step long closes it, a window two steps long is (`cycle.cycles: 2`; [loop repair](loop-repair.md)
+section 3, "The held side"). An explicit `--max-len` is never widened; without one, only the gait
 fallback below looks past the state's window, and only after this search found nothing.
 
 ### The gait fallback: a slow walk, or a walk toward the camera

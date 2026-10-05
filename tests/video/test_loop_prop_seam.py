@@ -75,7 +75,13 @@ def test_motion_auto_does_not_cut_where_the_staff_jumps(tmp_path):
                       "--anchor", "motion-auto", "--repair", "off"]) == 0
     report = json.loads((out / "loop.loop.report.json").read_text())
     cycle = report["cycle"]
-    assert cycle["length"] in (STEP - 1, STEP, STEP + 1)
+    # One step long, or two where the staff below the tip closes only there: a staff swaying every 61
+    # frames turns back at the wrap of every one-step cut whose tip closes (docs/loop-repair.md
+    # section 3, "The held side"), and a window two steps long is marked so.
+    if cycle.get("cycles") == 2:
+        assert cycle["length"] in (2 * STEP - 1, 2 * STEP, 2 * STEP + 1)
+    else:
+        assert cycle["length"] in (STEP - 1, STEP, STEP + 1)
     # The cut closes the staff too: its tip at the wrap moves no more than a step inside the loop moves it.
     assert _wrap_over_step(cycle["start"], cycle["length"], 1.0) <= 1.5
     # The first choice, by the area measure alone, ended with the tip elsewhere; it was chosen again.
@@ -83,7 +89,7 @@ def test_motion_auto_does_not_cut_where_the_staff_jumps(tmp_path):
     assert shape["applied"] is True and shape["first_choice"]["pop"] > repair.SEAM_POP_REFERENCE
     first = shape["first_choice"]
     assert _wrap_over_step(first["start"], first["length"], 1.0) > 3
-    assert shape["chosen"] == {"start": cycle["start"], "length": cycle["length"], "pop": shape["chosen"]["pop"]}
+    assert {k: shape["chosen"][k] for k in ("start", "length")} == {"start": cycle["start"], "length": cycle["length"]}
     assert report["jolt"]["seam_pop"]["pops"] is False
     assert not any("jumps into the loop's first frame" in line for line in report["jolt"]["warnings"])
 

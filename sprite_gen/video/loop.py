@@ -856,11 +856,10 @@ def _repair_jumps(frames: list[Image.Image], interpolate: rife_mod.Interpolate |
     return frames, record
 
 
-def wrap_pop_on(frames: list[Image.Image], analysis: dict[str, Any]) -> Any:
-    """`repair.seam_pop` of a cut (start, length) of `frames`, each moved by the analysis translation
-    `auto_motion.analyse` measured (its drift taken out, the way the cut will be corrected): the
-    top band's jump at the wrap, for `local_cycle.detect` to rank its candidates by. Alpha only,
-    cropped once to the clip's subject; a cut's value is kept once measured."""
+def moved_alpha(frames: list[Image.Image], analysis: dict[str, Any]) -> list[np.ndarray]:
+    """The alpha of every frame, each moved by the analysis translation `auto_motion.analyse` measured
+    (its drift taken out, the way the cut will be corrected), cropped once to the clip's subject:
+    what `wrap_pop_on` and `HeldEdge` read a cut on."""
     shifts = np.rint(np.asarray(analysis["analysis_only_translation_xy"], dtype=np.float64)).astype(int)
     pad = int(np.abs(shifts).max()) + 1
     boxes = [f.getchannel("A").point(lambda v: 255 if v >= repair_mod.ALPHA_SOLID else 0).getbbox() for f in frames]
@@ -873,6 +872,13 @@ def wrap_pop_on(frames: list[Image.Image], analysis: dict[str, Any]) -> Any:
         crop = np.asarray(f.getchannel("A").crop(box))
         a[pad + dy:pad + dy + crop.shape[0], pad + dx:pad + dx + crop.shape[1]] = crop
         moved.append(a)
+    return moved
+
+
+def wrap_pop_on(moved: list[np.ndarray]) -> Any:
+    """`repair.seam_pop` of a cut (start, length) of the moved alpha (`moved_alpha`): the top band's
+    jump at the wrap, for `local_cycle.detect` to rank its candidates by. A cut's value is kept once
+    measured."""
     measured: dict[tuple[int, int], dict[str, Any]] = {}
 
     def pop(start: int, length: int) -> dict[str, Any]:
@@ -885,6 +891,36 @@ def wrap_pop_on(frames: list[Image.Image], analysis: dict[str, Any]) -> Any:
                 measured[start, length] = {"skipped": str(exc), "reference": repair_mod.SEAM_POP_REFERENCE}
         return measured[start, length]
     return pop
+
+
+class HeldEdge:
+    """The held side of the moved alpha (`moved_alpha`), read by `local_cycle` only once a cut's top
+    band pops: `side` of a cut (`repair.held_side`, or `skipped`) and `seam` of a cut on a side
+    (`repair.held_edge`, or `skipped` with why). A side's edges are read once, on first use."""
+
+    reference = repair_mod.HELD_EDGE_REFERENCE
+
+    def __init__(self, moved: list[np.ndarray]):
+        self.moved = moved
+        self.frames = len(moved)
+        self._edges: dict[str, np.ndarray] = {}
+
+    def _masks(self, start: int, stop: int) -> list[np.ndarray]:
+        return [a >= repair_mod.HELD_EDGE_ALPHA for a in self.moved[start:stop]]
+
+    def side(self, start: int, length: int) -> dict[str, Any]:
+        try:
+            return {"side": repair_mod.held_side(self._masks(start, start + length))}
+        except ValueError as exc:
+            return {"skipped": str(exc)}
+
+    def seam(self, start: int, length: int, side: str) -> dict[str, Any]:
+        if side not in self._edges:
+            self._edges[side] = repair_mod.side_edges(self._masks(0, self.frames), side)
+        try:
+            return repair_mod.held_edge(self._edges[side], start, length)
+        except ValueError as exc:
+            return {"skipped": str(exc), "reference": repair_mod.HELD_EDGE_REFERENCE}
 
 
 def run_loop(
@@ -990,8 +1026,9 @@ def run_loop(
             detect = dict(gait_floor=round(prof.min_seconds*fps), periodicity_min=PERIODICITY_MIN,
                           double_tolerance=GAIT_DOUBLE_TOL, double_search=GAIT_DOUBLE_SEARCH)
             try:
+                moved = moved_alpha(source_frames, analysis)
                 cycle = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi, signals=leg_signals(source_frames),
-                                           wrap_pop=wrap_pop_on(source_frames, analysis), **detect)
+                                           wrap_pop=wrap_pop_on(moved), held_edge=HeldEdge(moved), **detect)
             except ValueError as first:
                 # A front or back gait that walked toward the camera, or a slow one: one more
                 # search, recorded (`gait_fallback`), and only after the first found nothing.
@@ -1010,9 +1047,11 @@ def run_loop(
                 fallback["window"] = [lo, hi_long]
                 report_base["gait_fallback"] = fallback
                 try:
+                    moved = moved_alpha(source_frames, analysis)
                     cycle = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi_long,
                                                max_fraction=gait_fallback.LONG_CYCLE_FRACTION if max_len is None else .5,
-                                               signals=leg_signals(source_frames), wrap_pop=wrap_pop_on(source_frames, analysis), **detect)
+                                               signals=leg_signals(source_frames), wrap_pop=wrap_pop_on(moved),
+                                               held_edge=HeldEdge(moved), **detect)
                 except ValueError as second:
                     failed = ValueError(f"{second} (also with the gait fallback: window [{lo}, {hi_long}], "
                                         f"scale drift {drift['drift']:+.1%}{', undone' if fallback['scale_undone'] else ''})")
@@ -1129,6 +1168,8 @@ def run_loop(
         reference = {"jolt_max": repair_mod.JOLT_REFERENCE, "head_step_max": repair_mod.HEAD_STEP_REFERENCE}
         warnings = repair_mod.jolt_verdict(jolt, **reference)
         warnings += repair_mod.seam_pop_verdict(jolt, head_step_max=repair_mod.HEAD_STEP_REFERENCE)
+        # The held side below the top, read on the source frames when the cut was chosen again (local_cycle).
+        warnings += repair_mod.held_edge_verdict(cycle.get("seam_pop"))
         gated = repair != "off" and (jolt_max is not None or head_step_max is not None)
         over = repair_mod.jolt_verdict(jolt, jolt_max=jolt_max, head_step_max=head_step_max) if gated else []
         report_base["jolt"] = {**jolt, "reference": reference, "warnings": warnings,
@@ -1160,6 +1201,10 @@ def run_loop(
     if state:
         # `video-cycle-align` reads the gait floor of this state when it screens a loop for two cycles.
         strip_meta["state"] = str(state).strip().lower()
+    if cycle.get("cycles", 1) > 1:
+        # A cut two cycles long, taken so a part swinging once in two closes (local_cycle._held_rank):
+        # `video-cycle-align` keeps both, at twice the set's length, instead of asking for a count.
+        strip_meta["cycles"] = cycle["cycles"]
     # `video-cycle-align` reads the hold here, over the cut (`cycle_drawings`) and over the clip
     # (`drawings`, where the cut is too short to read): read on the keyed steps, since `--anchor
     # motion-auto` moves each frame of a pair apart in the cut it writes (sprite_gen/video/held.py).
@@ -1319,6 +1364,8 @@ def run(**kwargs: object) -> int:
                            "seam_pop": payload["jolt"]["seam_pop"].get("pop")}
     if payload["cycle"].get("seam_pop", {}).get("applied"):
         summary["cycle"]["seam_pop"] = payload["cycle"]["seam_pop"]
+    if payload["cycle"].get("cycles", 1) > 1:
+        summary["cycle"]["cycles"] = payload["cycle"]["cycles"]
     if payload.get("jump_repair", {}).get("replaced"):
         summary["jump_repair"] = {k: payload["jump_repair"][k] for k in ("replaced", "score_max_before", "score_max_after")}
     summary["strip"] = {k: payload["strip"][k] for k in ("path", "frames", "w", "h", "body_h", "delay_ms")}

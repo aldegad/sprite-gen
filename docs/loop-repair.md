@@ -281,7 +281,8 @@ plays:
   within the usual 15 % of the best and the smallest pop (`cycle.seam_pop`: `first_choice`,
   `applied`, `measured`, `unread`, `chosen`). A first choice that does not pop is kept, and nothing past it
   is measured, so a loop without such a part is cut exactly as before. If every candidate read pops,
-  the first choice is kept (`why`) and the warning below says so.
+  the first choice is kept (`why`) and the warning below says so. Once the first choice pops, the held
+  part is read below its top too, and the cut may come out two steps long ("The held side" below).
 - **A cut whose top cannot be read is not one that closes.** A frame with nothing in the top band
   (a tip flung far above the rest in one frame) leaves the cut without a jump to read: it is
   recorded `skipped` (why) in place of `pop` — `first_choice.skipped`, or on a candidate row
@@ -298,9 +299,72 @@ plays:
   walker of `tests/video/test_loop_prop_seam.py` — steps every 24 frames, a staff above its head swaying every 61 — reads 12 to 18 at the cuts the area
   measure alone chose, and 0 at the cuts chosen again.
 - **What it does not see**: a held part that never reaches the top band (a spear held level, a
-  sword at the hip), and the lower end of a staff whose top closes while the shaft still swings
-  about the hand. A clip like that may need a cut two steps long, which the search does not make;
-  `--cycle fixed` cuts one ([loop review](loop-review.md)).
+  sword at the hip). The lower end of a staff whose top closes while the shaft still swings about the
+  hand is read by the held side below, behind this pop.
+
+### The held side — a staff that closes at the top and swings below the hand
+
+A staff that turns about the hand once in two steps comes back to the same place at the top band
+half its turn later, moving the other way. A cut one step long taken there closes the top —
+`seam_pop` reads nothing — and the shaft under the hand swings back at the wrap. No cut one step
+long closes such a staff; a cut two steps long does.
+
+Nothing that reads the whole silhouette sees it on its own. On a walk without a held part the
+silhouette's outer edges are hair, an arm or a foot, and a local jump at the wrap — read per tile,
+per row edge, on thin parts only, or as a repeat one cycle on against two — reads as high on some
+walks without a staff as on a staff that does not close. So the held side is read **only behind
+the seam pop**: on a search whose first choice popped at the top, where the top band has found that
+something is held, and on which side of the body.
+
+`repair.held_edge`, on the frames the search chooses from (moved by the analysis translation,
+`loop.HeldEdge`):
+
+| Step | What |
+|---|---|
+| side | the side of the body's centre the top band sits on, for the popping first choice (`repair.held_side`) |
+| edge | per row of the silhouette, its outermost column on that side (`repair.side_edges`) |
+| per row | a loop closes where its last frame is the clip's frame before its first, and its first the clip's frame after its last: those two places, and the steps into and out of each against the clip's own steps there (a part back in its place but moving the other way swings back at the wrap), their mean over the row's median step inside the loop — a floor of 0.5 % of the body height, a pixel at least |
+| `seam` | the 80th percentile over the rows; the held side `closes` under **1.2** (`repair.HELD_EDGE_REFERENCE`) |
+
+A cut with fewer than two clip frames on either side has nothing to read its wrap against: it is
+`skipped` (why), counted under `unread`, and never chosen.
+
+`--anchor motion-auto`, once its first choice pops (`cycle.seam_pop.held_edge`: `side`, `reference`,
+`measured`, `unread`, `cycles`, `chosen`, and `two_cycle` when it looked there):
+
+1. Among the candidates whose top does not pop, those whose held side closes: the scores within the
+   usual 15 % of the best, then the smallest held seam (`cycles: 1`). A candidate row carries
+   `held_edge` (`null` with `held_edge_skipped` where it could not be read).
+2. If no candidate one step long closes it: **windows twice a candidate's length** (every length
+   2L − 1 to 2L + 1 for a candidate length L, at every start the clip holds). Such a window is two
+   cycles of a repeat the search confirmed, not itself seen repeating — a three-second clip cannot
+   show a window two steps long twice. One whose held side closes and whose top does not pop (a top
+   that cannot be read is not taken) is cut, the smallest held seam first: `cycle.cycles` is **2**,
+   `cycle.period_local` half its length, `cycle.seam_pop.chosen.cycles` 2 and `strip.json` `cycles: 2`.
+   `two_cycle` records the lengths tried and how many were `measured`, `unread`, `top_pops` and
+   `closing`.
+3. If no window one or two steps long closes it, the top band's choice stands (as above),
+   `held_edge.chosen` records its seam, and `jolt.warnings` and stderr gain
+   `video-loop: warning: the held part does not close at the wrap on the right side of the
+   silhouette, below its top: 5.50x its rows' median step (over 1.2); no window one or two cycles
+   long closes it — it swings on a beat of its own`. A side that could not be read is said as well.
+
+A first choice whose top does not pop reads nothing here: a walk without a part held above its head
+is cut, written and warned about exactly as before.
+
+The bound sits between cuts that close a held staff and cuts where it swings back at the wrap. The
+synthetic walker of `tests/video/test_loop_prop_seam_held.py` — steps every 24 frames, a staff
+turning about the hand every 48 — reads 2.0 to 5.2 at every cut one step long whose top closes and
+0 at the window two steps long taken; with the staff swinging every step instead it reads 0 to 0.5,
+and the cut stays one step long. Below a staff on a beat neither one step nor two closes (every 37
+frames) every cut one step long whose top closes reads 4.25 or more and no window two steps long
+closes: the top band's cut stands, and it is warned about.
+
+- **What it does not see**: a held part on the other side of the body from the top band (the top
+  band names the side), and a held part whose cut needs more than two steps. A window two steps long
+  needs the clip to hold it with two frames either side: a three-second clip of 30-frame steps has
+  few starts for one. `--cycle fixed` cuts any window ([loop review](loop-review.md)); a two-step
+  cut made that way is not marked `cycles: 2`, and the set alignment asks for its count.
 
 ## 4. One cycle for a direction set — `video-cycle-align`, `video-set --align-cycles auto`
 
@@ -315,6 +379,13 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   [--foot side-walk=left] [--state walk] [--report set/walk.cycle-align.json]
 ```
 
+- **A loop cut two steps long on purpose is counted already.** `video-loop --anchor motion-auto`
+  cuts two steps where a held part closes only there (section 3, "The held side") and marks it
+  `cycles: 2` in `strip.json`. The alignment does not stop on it: its length counts per cycle toward
+  the set's length, and it is resampled to twice that length, keeping both cycles (`cycles_kept` on
+  its row and in its `strip.json` `cycle_align`; its suspects carry `status: "declared"`). A
+  `--cycles` count given for it is still the last word: `--cycles <loop>=2` takes one cycle out of
+  it (the held part then swings back at that cut's wrap), `=1` aligns it at the set's length.
 - **Two cycles in one loop are stopped, and counted by whoever looks**: one length for the set is
   one beat only if every loop holds one cycle. A loop that holds two strides, resampled to the
   set's length, walks twice as fast as the rest, arms and legs alike — and pixels cannot tell it
