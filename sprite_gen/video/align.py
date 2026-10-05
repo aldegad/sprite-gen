@@ -79,9 +79,14 @@ LOW_ALPHA, STRIDE_MIN, REACH_MIN, BODY_RUN = legs_mod.LOW_ALPHA, legs_mod.STRIDE
 START_FOOT = "right"  # every loop of a set starts as this own foot lands, where its view can tell
 SHADE_BAND = 0.15  # the shade cue reads the feet and lower legs: the lowest 15 % of the body
 # The two strikes must differ by this to name a foot (`strike_foot`): shade in luma (0..1), depth in
-# body heights. A smaller difference is the drawing, not the feet, and the foot is left unnamed.
-SHADE_MARGIN = 0.015
+# body heights. A smaller difference is the drawing as much as the feet, and the foot is left unnamed
+# (`low-margin`) for whoever looks (`unnamed_feet`): a foot named wrong turns the loop half a cycle off
+# with nobody asked, an unnamed one costs one look. The shade's margin is set above the margins at which
+# it has named a foot wrong on drawn walks and under those at which it named them right
+# (docs/loop-repair.md section 4).
+SHADE_MARGIN = 0.025
 FOOT_MARGIN = 0.01
+LOW_MARGIN = "low-margin"  # how `foot_why` starts where the two strikes differ by less than the margin
 # A cue that does not swing with the step is the drawing's own flicker: its once-a-cycle swing (first
 # harmonic) must be at least this share of its spread over the cycle.
 CUE_RHYTHM = 0.25
@@ -272,7 +277,7 @@ def strike_foot(frames: list[Image.Image], strikes: tuple[int, int], view: str, 
     The cue must follow the step — its once-a-cycle swing at least CUE_RHYTHM of its spread over
     the cycle — and, read over each strike frame and its two neighbours, the two strikes must differ
     by FOOT_MARGIN (depth, of the body's height) or SHADE_MARGIN (luma); otherwise the foot is not
-    named."""
+    named, `why` starting LOW_MARGIN."""
     n = len(frames)
     lateral = view in handed_mod.LATERAL_VIEWS
     cue = (lambda f: _shade_cue(f, facing)) if lateral else _depth_cue  # type: ignore[arg-type]
@@ -286,8 +291,10 @@ def strike_foot(frames: list[Image.Image], strikes: tuple[int, int], view: str, 
                               "margin": round(margin, 4), "rhythm": round(rhythm, 3)}
     if rhythm < CUE_RHYTHM:
         return {**record, "feet": None, "why": f"the {record['cue']} does not follow the step (rhythm {rhythm:.2f})"}
-    if margin < (SHADE_MARGIN if lateral else FOOT_MARGIN):
-        return {**record, "feet": None, "why": f"the two strikes look alike in {record['cue']} ({margin:.4f})"}
+    least = SHADE_MARGIN if lateral else FOOT_MARGIN
+    if margin < least:
+        return {**record, "feet": None, "why": f"{LOW_MARGIN}: the two strikes differ by {margin:.4f} in {record['cue']}, "
+                                               f"under the {least:g} it takes to name a foot"}
     hi = 0 if values[0] > values[1] else 1
     at = {s: handed_mod.placement(s, view, facing) for s in handed_mod.SIDES}
     if lateral:

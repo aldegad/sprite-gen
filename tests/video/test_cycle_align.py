@@ -72,14 +72,14 @@ def _old_top_line_start(frames: list[Image.Image]) -> int:
     return max(range(n), key=lambda k: tops[(k - 1) % n] + 2 * tops[k] + tops[(k + 1) % n])
 
 
-def _figure(phase: float, *, view: str, legs: bool = True, bob_px: int = 2, shaded: bool = True) -> Image.Image:
+def _figure(phase: float, *, view: str, legs: bool = True, bob_px: int = 2, shaded: bool = True, far_darker: int = 60) -> Image.Image:
     """A drawn walker at `phase` (radians): its own right heel lands at 0, its left at pi. The body
     bobs lowest (by `bob_px`) a sixth of a step after a heel lands; two thin ears on top flop on their
     own rhythm, lowest half a step after it, and further than the body bobs.
 
     `side`: faces right, its feet swing apart along the ground; the right leg is the near one, drawn
-    light over the far left leg, which is shaded (`shaded`). `front`: the feet stay side by side, its
-    right foot on the picture's left, and the foot stepping toward the viewer is drawn lower. With no
+    light over the far left leg, which is shaded (`shaded`) `far_darker` levels darker. `front`: the
+    feet stay side by side, its right foot on the picture's left, and the foot stepping toward the viewer is drawn lower. With no
     legs the body sits on the ground and squats as it bobs."""
     a = np.zeros((H, W, 4), dtype=np.uint8)
     bob = round(bob_px * (1 + math.cos(2 * phase - math.pi / 3)) / 2)
@@ -90,9 +90,8 @@ def _figure(phase: float, *, view: str, legs: bool = True, bob_px: int = 2, shad
         a[top - 26 + flop:top, x:x + 4] = (240, 180, 190, 255)  # an ear: a narrow run
     if legs:
         if view == "side":
-            for sign, leg, foot in ((-1, 150, 50), (1, 210, 110)):  # far left leg first, near right leg over it
-                if not shaded:
-                    leg, foot = 210, 110
+            shade = far_darker if shaded else 0
+            for sign, leg, foot in ((-1, 210 - shade, 110 - shade), (1, 210, 110)):  # far left leg first, near right leg over it
                 fx = 50 + round(sign * 18 * math.cos(phase))
                 a[top + 58:106, fx - 3:fx + 3] = (leg, leg, leg, 255)
                 a[100:106, fx - 7:fx + 7] = (foot, foot, foot, 255)

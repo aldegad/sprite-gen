@@ -354,9 +354,10 @@ apart. A frame that falls between two source frames is made by RIFE, and the com
 is needed and RIFE is not installed; `--between nearest` makes none. A frame RIFE made that melted
 (lost its outline where legs crossed too far) is replaced by the nearer source frame and named
 (`--between auto`, the default; [loop repair](loop-repair.md) section 4). A loop whose view cannot
-tell its feet apart starts on its larger strike and is listed under the report's `unnamed_feet` with
-its two strike frames in `cycle/`: look at the first, say which own foot lands there, and run the same
-alignment again with `--foot <loop>=left|right` — that loop alone turns to start on the set's foot
+tell its feet apart — or tells them apart by too small a margin (`foot_why` `low-margin`) — starts
+on its larger strike and is listed under the report's `unnamed_feet` with its two strike frames in
+`cycle/`: look at the first, say which own foot lands there, and run the same alignment again with
+`--foot <loop>=left|right` — that loop alone turns to start on the set's foot
 (`start_foot_source: "given"`).
 
 `--character` or `--motion` words that turn the subject another way than `--facing`, or put a
