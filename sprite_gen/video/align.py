@@ -36,6 +36,13 @@ it is, `--cycles <loop>=k` takes one cycle — a k-th of it, from the start whos
 is the most like it — out of the loop as filmed (`take_cycle`) and aligns that. Nothing changes the
 number of cycles in a loop but `--cycles`.
 
+Where a loop's view cannot tell its feet apart (`start_foot` null, with `foot_why`), it starts on its
+larger strike, and the report names it under `unnamed_feet` with its two strike frames as they now
+stand in `cycle/` (`candidates`, the first being the frame it starts on) — for whoever looks, a
+person or a vision model. The answer comes back the same way as a count: `--foot <loop>=left|right`
+says which own foot lands on the first candidate, and that loop alone starts as `--start-foot` lands
+(half a cycle on, where the other foot lands first), recorded `start_foot_source: "given"`.
+
 A set that needs a made frame where no RIFE is installed raises `rife.RifeNotInstalled` with
 nothing rewritten: this command fails on it, `video-set` skips the alignment with a warning.
 """
@@ -297,7 +304,8 @@ def foot_strike_start(frames: list[Image.Image], *, view: str | None = None) -> 
     return foot_strike(frames, view=view)["start"]
 
 
-def foot_strike(frames: list[Image.Image], *, view: str | None = None, foot: str = START_FOOT) -> dict[str, Any]:
+def foot_strike(frames: list[Image.Image], *, view: str | None = None, foot: str = START_FOOT,
+                given: str | None = None) -> dict[str, Any]:
     """Where a loop starts: the frame a heel has just landed, read off one signal smoothed over its
     neighbours (1-2-1), never off the frame's top edge, which a long ear or a hat's point owns.
 
@@ -318,9 +326,17 @@ def foot_strike(frames: list[Image.Image], *, view: str | None = None, foot: str
     on (not the other peak: one step can stride much less than the other, or not peak at all).
     With the loop's `view` (`side@right`, `front`, …) the one where `foot` lands is taken
     (`strike_foot`); without a view, or where the view's cue cannot tell, the larger, the first on
-    a tie, and `start_foot` is None with the reason."""
+    a tie, and `start_foot` is None with the reason.
+
+    `given` is the own foot that lands on the larger strike (`strikes[0]`) as whoever looked at the
+    loop saw it (`--foot`): the loop starts where `foot` lands — that strike or the one half a cycle
+    on — with `start_foot_source` "given", whatever the view's cue says; where the cue named the feet
+    otherwise, `foot_disagrees` says so. `start_foot_source` is "engine" where the cue named them,
+    None where nobody did."""
     if foot not in handed_mod.SIDES:
         raise ValueError(f"foot must be left or right, not {foot!r}")
+    if given is not None and given not in handed_mod.SIDES:
+        raise ValueError(f"the given foot must be left or right, not {given!r}")
     sig = strike_signals(frames)
     swing = legs_mod.swings(sig)
     legs = legs_mod.legs_by(sig)
@@ -336,17 +352,28 @@ def foot_strike(frames: list[Image.Image], *, view: str | None = None, foot: str
     first = max(range(n), key=lambda k: smooth[k])
     second = (first + n // 2) % n
     out: dict[str, Any] = {"start": first, "by": by, "stride_swing": round(swing["stride"], 4), "reach_swing": round(swing["reach"], 4),
-                           "strikes": [first, second], "start_foot": None}
+                           "strikes": [first, second], "start_foot": None, "start_foot_source": None}
     if view is None:
-        return {**out, "foot_why": "no view given for this loop"}
-    if by == "body_low":
-        return {**out, "foot_why": f"no legs to read: the foot band swings {swing['stride']:.3f} of the body's height "
-                                    f"(legs from {STRIDE_MIN}), the lowest row {swing['reach']:.3f} (from {REACH_MIN})"}
-    found = strike_foot(frames, (first, second), name, facing or None)
-    if found["feet"] is None:
-        return {**out, "foot": found, "foot_why": found["why"]}
-    start = (first, second)[found["feet"].index(foot)]
-    return {**out, "start": start, "start_foot": foot, "foot": found}
+        read: dict[str, Any] = {**out, "foot_why": "no view given for this loop"}
+    elif by == "body_low":
+        read = {**out, "foot_why": f"no legs to read: the foot band swings {swing['stride']:.3f} of the body's height "
+                                   f"(legs from {STRIDE_MIN}), the lowest row {swing['reach']:.3f} (from {REACH_MIN})"}
+    else:
+        found = strike_foot(frames, (first, second), name, facing or None)
+        if found["feet"] is None:
+            read = {**out, "foot": found, "foot_why": found["why"]}
+        else:
+            read = {**out, "start": (first, second)[found["feet"].index(foot)], "start_foot": foot, "start_foot_source": "engine", "foot": found}
+    if given is None:
+        return read
+    feet = [given, next(s for s in handed_mod.SIDES if s != given)]
+    told = {**{k: v for k, v in read.items() if k != "foot_why"}, "start": (first, second)[feet.index(foot)], "start_foot": foot,
+            "start_foot_source": "given", "foot_given": feet}
+    if read["start_foot"] is None:
+        told["foot_unnamed_why"] = read["foot_why"]
+    elif read["foot"]["feet"] != feet:
+        told["foot_disagrees"] = read["foot"]["feet"]
+    return told
 
 
 def _ring(frames: list[Image.Image]) -> np.ndarray:
@@ -419,25 +446,33 @@ def _suspect_line(entry: dict[str, Any]) -> str:
     return f"{entry['dir']}: may hold " + "; or ".join(parts)
 
 
-def _resolve_cycles(cycles: dict[str, int] | None, loops: list[tuple[Path, Path, dict[str, Any], float]]) -> dict[int, int]:
-    """`--cycles` keys to loop positions: a key names a loop by its directory, its strip's name, its
-    directory's name or — for a directory named `loop` (a video-set item) — its parent's name, and
-    must name exactly one."""
-    out: dict[int, int] = {}
-    for key, k in (cycles or {}).items():
-        if k not in CYCLES:
-            raise SystemExit(f"video-cycle-align: --cycles {key}={k}: a loop holds {', '.join(map(str, CYCLES))} cycles here")
+def _resolve_loops(flag: str, given: dict[str, Any] | None, loops: list[tuple[Path, Path, dict[str, Any], float]],
+                   allowed: tuple[Any, ...]) -> dict[int, Any]:
+    """`--cycles` or `--foot` keys to loop positions: a key names a loop by its directory, its strip's
+    name, its directory's name or — for a directory named `loop` (a video-set item) — its parent's
+    name, and must name exactly one; its value must be one of `allowed`."""
+    out: dict[int, Any] = {}
+    for key, value in (given or {}).items():
+        if value not in allowed:
+            raise SystemExit(f"video-cycle-align: {flag} {key}={value}: "
+                             + (f"a loop holds {', '.join(map(str, CYCLES))} cycles here" if flag == "--cycles"
+                                else f"the foot that lands on the loop's first strike is one of {', '.join(allowed)}"))
         path = Path(key).expanduser()
         hits = [i for i, (d, meta_path, _, _) in enumerate(loops)
                 if (path.exists() and path.resolve() == d)
                 or key in (meta_path.name[: -len(".strip.json")], d.name) or (d.name == "loop" and key == d.parent.name)]
         hits = sorted(set(hits))
         if len(hits) != 1:
-            raise SystemExit(f"video-cycle-align: --cycles {key}={k} names {len(hits)} of the --loop-dir given; name one by its directory")
+            raise SystemExit(f"video-cycle-align: {flag} {key}={value} names {len(hits)} of the --loop-dir given; name one by its directory")
         if hits[0] in out:
-            raise SystemExit(f"video-cycle-align: --cycles names {loops[hits[0]][0]} twice")
-        out[hits[0]] = k
+            raise SystemExit(f"video-cycle-align: {flag} names {loops[hits[0]][0]} twice")
+        out[hits[0]] = value
     return out
+
+
+def _resolve_cycles(cycles: dict[str, int] | None, loops: list[tuple[Path, Path, dict[str, Any], float]]) -> dict[int, int]:
+    """`--cycles` keys to loop positions (`_resolve_loops`)."""
+    return _resolve_loops("--cycles", cycles, loops, CYCLES)
 
 
 def _loop_files(loop_dir: Path) -> tuple[Path, dict[str, Any]]:
@@ -512,6 +547,16 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     return merged
 
 
+def _unnamed_foot(row: dict[str, Any]) -> dict[str, Any]:
+    """A loop whose foot nobody named, for whoever looks: its two strikes as frames of the rebuilt
+    `cycle/` (the first is the frame it starts on), why the engine could not say, and the `--foot`
+    arguments that settle it — which own foot lands on the first."""
+    cycle = Path(row["dir"]) / "cycle"
+    return {"dir": row["dir"], "name": row["name"], "view": row["view"], "foot_why": row["foot_why"],
+            "candidates": [{"strike": n, "frame": k, "path": str(cycle / f"frame-{k:03d}.png")} for n, k in enumerate(row["strikes"])],
+            "settle": [f"--foot {row['dir']}={s}" for s in handed_mod.SIDES]}
+
+
 def _fault_line(name: str, m: dict[str, Any]) -> str:
     """A made frame's faults, in words, and what became of it."""
     what = [*([f"has {100 * m['dark_excess']:.2f} % more dark pixels inside the body than either source frame beside it — a smear"]
@@ -527,7 +572,7 @@ def _fault_line(name: str, m: dict[str, Any]) -> str:
 def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: rife_mod.Interpolate | None = None,
               report_path: Path | None = None, between: str = DEFAULT_BETWEEN, views: list[str | None] | None = None,
               start_foot: str = START_FOOT, multi_cycle: str = "fail", cycles: dict[str, int] | None = None,
-              state: str | None = None) -> dict[str, Any]:
+              state: str | None = None, feet: dict[str, str] | None = None) -> dict[str, Any]:
     """Resample every loop of a set to one length (default: the median), turned to a foot strike —
     where `views` (one per loop: `front`, `back`, `side@right`, `front_diagonal@left`, …) lets it,
     the strike of the same own foot (`start_foot`) in every loop.
@@ -537,7 +582,13 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
     to the number of cycles it holds, as someone who looked counted them: 1 aligns it as it is, more
     takes one cycle out of it (`take_cycle`). A suspect with no count stops the set before anything
     is rewritten (`multi_cycle` fail: `CycleSuspects`, the report written with `applied` false) or is
-    aligned as it is with a warning (warn)."""
+    aligned as it is with a warning (warn).
+
+    `feet` maps a loop (named as `cycles` does) to the own foot that lands on its larger strike, as
+    whoever looked saw it (`--foot`): that loop starts where `start_foot` lands, recorded
+    `start_foot_source` "given" (`foot_strike`). A loop whose foot nobody named is listed under the
+    report's `unnamed_feet`, with its two strike frames in the rebuilt `cycle/` (`candidates`) and the
+    `--foot` arguments that settle it."""
     if len(loop_dirs) < 1:
         raise SystemExit("video-cycle-align: at least one --loop-dir")
     if views is not None and len(views) != len(loop_dirs):
@@ -571,6 +622,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         except ValueError as exc:
             raise SystemExit(f"video-cycle-align: {exc}") from exc
     given = _resolve_cycles(cycles, loops)
+    told = _resolve_loops("--foot", feet, loops, handed_mod.SIDES)
     screens = [cycle_screen(frames, fps=fps, state=state or meta.get("state")) for (_, _, meta, _), frames in zip(loops, sources)]
     suspects: list[dict[str, Any]] = []
     taken: dict[int, dict[str, Any]] = {}
@@ -599,6 +651,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
                  *([f"--between {between}"] if between != DEFAULT_BETWEEN else []), *([f"--start-foot {start_foot}"] if start_foot != START_FOOT else []),
                  *([f"--state {state}"] if state else []), *([f"--report {report_path}"] if report_path is not None else []),
                  *(f"--cycles {loops[i][0]}={k}" for i, k in sorted(given.items())),
+                 *(f"--foot {loops[i][0]}={f}" for i, f in sorted(told.items())),
                  *(f"--cycles {e['dir']}=<{'|'.join(s.rpartition('=')[2] for s in e['settle'])}>" for e in stopped)]
         command = " ".join(rerun)
         message = ("video-cycle-align: " + "; ".join(_suspect_line(e) for e in stopped)
@@ -610,7 +663,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
             loop_mod.write_loop_report(report_path.expanduser().resolve(), {
                 "kind": "sprite-gen-video-cycle-align-report", "applied": False, "refused": "cycle-suspects", "why": message, "command": command,
                 "multi_cycle": multi_cycle, "lengths": [len(f) for f in sources], "fps": round(fps, 4), "suspects": suspects,
-                "cycles_given": {str(loops[i][0]): k for i, k in given.items()}})
+                "cycles_given": {str(loops[i][0]): k for i, k in given.items()}, "feet_given": {str(loops[i][0]): f for i, f in told.items()}})
         raise CycleSuspects(message, suspects, command)
     cycle_warnings += [f"{_suspect_line(e)}; aligned as it is (--multi-cycle warn) — at the set's length it plays "
                        f"{max(row['cycles'] for row in e['candidates'])} times as fast as the rest if it does"
@@ -632,7 +685,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
     for i, ((d, *_), frames, view) in enumerate(zip(loops, sources, views or [None] * len(loops))):
         try:
             out, facts = resample(frames, target, lazy, between=between)
-            strike = foot_strike(out, view=view, foot=start_foot)
+            strike = foot_strike(out, view=view, foot=start_foot, given=told.get(i))
         except rife_mod.RifeNotInstalled as exc:
             raise rife_mod.RifeNotInstalled(f"{d}: {exc}") from exc
         except (ValueError, rife_mod.RifeUnavailable) as exc:
@@ -641,7 +694,10 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         drawings = held_drawings(frames, fps=fps, clip=loops[i][2].get("drawings"), cut=loops[i][2].get("cycle_drawings"))
         again = retake(drawings, facts, fps=fps)
         record = {**facts, "drawings": drawings, "retake": again, "turned_by": start, "turned_on": strike["by"], "view": view, "start_foot": strike["start_foot"],
-                  **({"foot": strike["foot"]} if "foot" in strike else {}), **({"foot_why": strike["foot_why"]} if "foot_why" in strike else {}),
+                  "start_foot_source": strike["start_foot_source"],
+                  # the two strikes as they stand in the rebuilt cycle/: the larger first
+                  "strikes": [(k - start) % target for k in strike["strikes"]],
+                  **{key: strike[key] for key in ("foot", "foot_why", "foot_given", "foot_unnamed_why", "foot_disagrees") if key in strike},
                   "stride_swing": strike["stride_swing"], "reach_swing": strike["reach_swing"],
                   "fps": round(fps, 4), "source": SOURCE_DIR, "cycles_given": given.get(i), "cycle_screen": screens[i],
                   **({"cycle_taken": taken[i]} if i in taken else {}),
@@ -661,16 +717,21 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
     # A loop to film again is named by its directory where two loops share a strip name (each `walk`).
     shared = len({r["name"] for r in rows}) < len(rows)
     warnings = cycle_warnings + [_retake_line(r["dir"] if shared else r["name"], r["retake"]) for r in rows if r["retake"]] + warnings
-    if len(rows) > 1 and views is None:
-        warnings.append("no view given (--view): each loop starts on its larger strike, whichever foot that is")
-    else:
-        warnings += [f"{r['name']}: starts on its larger strike, foot not named — {r['foot_why']}" for r in rows
-                     if r["view"] is not None and r["start_foot"] is None]
+    unnamed = [_unnamed_foot(r) for r in rows if r["start_foot"] is None]
+    if len(rows) > 1 and views is None and unnamed:
+        warnings.append("no view given (--view): each loop " + ("not named by --foot " if told else "")
+                        + "starts on its larger strike, whichever foot that is (`unnamed_feet`)")
+    warnings += [f"{r['dir'] if shared else r['name']}: starts on its larger strike, foot not named — {r['foot_why']}; look at "
+                 f"cycle/frame-{r['strikes'][0]:03d}.png and say which own foot lands there: --foot {r['dir']}=left|right"
+                 for r in rows if r["start_foot"] is None and r["view"] is not None]
+    warnings += [f"{r['dir'] if shared else r['name']}: --foot says {r['foot_given'][0]} lands on its larger strike, its view's "
+                 f"{r['foot']['cue']} said {r['foot_disagrees'][0]}; started as given" for r in rows if r.get("foot_disagrees")]
     report = {"kind": "sprite-gen-video-cycle-align-report", "applied": True, "length": target,
               "length_rule": "requested" if length is not None else "median",
               "between": between, "start_foot": start_foot, "retake": retakes, "warnings": warnings,
-              "lengths": lengths, "multi_cycle": multi_cycle, "suspects": suspects,
+              "lengths": lengths, "multi_cycle": multi_cycle, "suspects": suspects, "unnamed_feet": unnamed,
               "cycles_given": {str(loops[i][0]): k for i, k in given.items()},
+              "feet_given": {str(loops[i][0]): f for i, f in told.items()},
               "fps": round(fps, 4), "cycle_seconds": round(target / fps, 4),
               "interpolator": ({"kind": "rife-ncnn-vulkan", **located[0]} if located else
                                {"kind": "injected"} if any(r.get("smear") for r in rows) else None),
@@ -693,6 +754,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                         help="how many cycles a loop holds, as counted by whoever looked at it (repeatable; LOOP is its --loop-dir, its "
                              "strip's name or its directory's name): 1 aligns it as it is; 2 or 3 takes one cycle out of it as filmed "
                              "(cycle.source/) and aligns that. Only this changes the number of cycles in a loop")
+    parser.add_argument("--foot", action="append", default=[], metavar="LOOP=left|right",
+                        help="which own foot lands on a loop's first strike candidate, as seen by whoever looked at it, for a loop the "
+                             "report lists under `unnamed_feet` (repeatable; LOOP is named as for --cycles): that loop starts as "
+                             "--start-foot lands, recorded start_foot_source given")
     parser.add_argument("--multi-cycle", choices=MULTI_CYCLE, default="fail",
                         help="a loop that may hold two or three cycles (a half or a third of it returns to a pose on the motion's path) "
                              "and has no --cycles: fail (default) stops the set before anything is rewritten, the report naming it under "
@@ -719,21 +784,36 @@ def parse_cycles(values: list[str]) -> dict[str, int]:
     return out
 
 
+def parse_feet(values: list[str], *, prog: str = "video-cycle-align", flag: str = "--foot") -> dict[str, str]:
+    """`--foot LOOP=left|right` values as {LOOP: foot}."""
+    out: dict[str, str] = {}
+    for v in values:
+        key, sep, foot = v.rpartition("=")
+        if not sep or not key or foot not in handed_mod.SIDES:
+            raise SystemExit(f"{prog}: {flag} expects LOOP=left|right (the own foot that lands on the loop's first strike), got {v!r}")
+        if key in out:
+            raise SystemExit(f"{prog}: {flag} names {key} twice")
+        out[key] = foot
+    return out
+
+
 def run(**kwargs: object) -> int:
     try:
         report = align_set(list(kwargs["loop_dir"]), length=kwargs.get("length"), report_path=kwargs.get("report"),  # type: ignore[arg-type]
                            between=str(kwargs.get("between") or DEFAULT_BETWEEN), views=kwargs.get("view"),  # type: ignore[arg-type]
                            start_foot=str(kwargs.get("start_foot") or START_FOOT),
                            multi_cycle=str(kwargs.get("multi_cycle") or "fail"), cycles=parse_cycles(list(kwargs.get("cycles") or [])),  # type: ignore[arg-type]
-                           state=kwargs.get("state"))  # type: ignore[arg-type]
+                           state=kwargs.get("state"), feet=parse_feet(list(kwargs.get("foot") or [])))  # type: ignore[arg-type]
     except rife_mod.RifeNotInstalled as exc:
         # Asked for by name, so no RIFE is a failure, never a quiet skip (video-set skips with a warning).
         raise SystemExit(f"video-cycle-align: {exc}; frames between source frames are made by RIFE — "
                          f"`{rife_mod.INSTALL_COMMAND}` (docs/loop-repair.md)") from exc
     for line in report["warnings"]:
         print(f"video-cycle-align: warning: {line}", file=sys.stderr)
-    print(json.dumps({k: report[k] for k in ("length", "lengths", "cycles_given", "between", "made_by_rife", "replaced", "retake", "cycle_seconds")}
-                     | {"loops": [{k: r[k] for k in ("name", "from", "to", "made_by_rife", "turned_by", "turned_on", "start_foot", "seam_ratio")} for r in report["loops"]]},
+    print(json.dumps({k: report[k] for k in ("length", "lengths", "cycles_given", "feet_given", "between", "made_by_rife", "replaced", "retake",
+                                             "unnamed_feet", "cycle_seconds")}
+                     | {"loops": [{k: r[k] for k in ("name", "from", "to", "made_by_rife", "turned_by", "turned_on", "start_foot", "start_foot_source",
+                                                     "seam_ratio")} for r in report["loops"]]},
                      ensure_ascii=False, indent=2))
     return 0
 

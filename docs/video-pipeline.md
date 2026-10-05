@@ -291,7 +291,11 @@ order, so that every loop starts as the same own foot lands wherever its view ca
 apart. A frame that falls between two source frames is made by RIFE, and the command fails where one
 is needed and RIFE is not installed; `--between nearest` makes none. A frame RIFE made that melted
 (lost its outline where legs crossed too far) is replaced by the nearer source frame and named
-(`--between auto`, the default; [loop repair](loop-repair.md) section 4).
+(`--between auto`, the default; [loop repair](loop-repair.md) section 4). A loop whose view cannot
+tell its feet apart starts on its larger strike and is listed under the report's `unnamed_feet` with
+its two strike frames in `cycle/`: look at the first, say which own foot lands there, and run the same
+alignment again with `--foot <loop>=left|right` — that loop alone turns to start on the set's foot
+(`start_foot_source: "given"`).
 
 `--character` or `--motion` words that turn the subject another way than `--facing`, or put a
 `--handed` item on its other side, come back in `warnings`; the prompt is the same either way
@@ -907,7 +911,8 @@ and turned to start as the same own foot lands in every view — read off the le
 ear or a hat's point, and the foot told apart by the item's own view and facing (`--align-cycles
 auto`, the default; `off` keeps each loop's own length). The same step stands alone as
 `sprite-gen video-cycle-align --loop-dir … --view …`. `set.report.json` carries `cycle_align`
-per state (with `start_foot` per item), a failed alignment is listed as `cycle-align:<state>`,
+per state (with `start_foot` and `start_foot_source` per item, and the loops whose foot nobody named
+under `unnamed_feet`, told back with `--align-foot <item>=left|right`), a failed alignment is listed as `cycle-align:<state>`,
 and a made frame with a smear, one that melted and was replaced, or a loop whose foot could not be named is a line under
 `warnings`. A held loop stretched past what an interpolator bridges is named for a new take: the
 state's `retake` (reason `held-drawings`, with its numbers; per item under `cycle_align.retake`) and

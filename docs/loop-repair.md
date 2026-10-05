@@ -262,7 +262,7 @@ same number of frames, starting on the same step.
 sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-walk/loop \
   --loop-dir set/back-walk/loop [--view front --view side@right --view back] [--start-foot right] \
   [--between auto|rife|nearest] [--length N] [--cycles back-walk=2] [--multi-cycle fail|warn] \
-  [--state walk] [--report set/walk.cycle-align.json]
+  [--foot side-walk=left] [--state walk] [--report set/walk.cycle-align.json]
 ```
 
 - **Two cycles in one loop are stopped, and counted by whoever looks**: one length for the set is
@@ -441,12 +441,32 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   not all name their foot may not start on one foot. Without `--view` no foot is named and the
   report says that once. A character drawn without shading on the far leg leaves its side and
   diagonal views unnamed; mirroring a loop afterwards (a left view made from a right one) swaps
-  its own feet.
+  its own feet. Every loop row says who named its foot: `start_foot_source` `"engine"` (the view's
+  cue), `"given"` (`--foot`, below) or `null` (nobody), and `strikes` — its two strikes as frames of
+  the rebuilt `cycle/`, the larger first.
+- **A foot the engine cannot name is told, one loop at a time**: each loop whose foot is not named
+  is listed in the report's **`unnamed_feet`** — per loop `dir`, `name`, `view`, `foot_why`,
+  `candidates` (the two strikes: `strike` 0 and 1, `frame` in `cycle/`, `path` to that frame; the
+  first is the frame the loop now starts on, the second half a cycle on) and `settle` (the two
+  `--foot` arguments). Whoever looks — a person, the agent, or a vision call shown the two frames —
+  says which own foot lands on the first candidate, and that comes back as
+  **`--foot <loop>=left|right`** (repeatable; `<loop>` is named as for `--cycles`: the `--loop-dir`,
+  its strip's name, its directory's name, or a `video-set` item's name). That loop alone starts as
+  `--start-foot` lands — on the first candidate if it is that foot, half a cycle on if it is the
+  other — and every other loop comes out byte for byte as it would have. The row records
+  `start_foot_source: "given"`, `foot_given` (the feet at the two strikes) and, where the engine had
+  not named it, `foot_unnamed_why`; the report records `feet_given`. A foot given for a loop the
+  view did name is still taken, and where it disagrees the row carries `foot_disagrees` (the cue's
+  reading) and a warning says so. A `--foot` that names no loop, two loops, or something other than
+  `left`/`right` is refused before anything is rewritten. The answer is about the loop as filmed —
+  the strikes are read from `cycle.source/` resampled again — so it holds for every later alignment
+  at the same length, and like `--cycles` it is not remembered: the next alignment needs the same
+  `--foot`. The algorithm that names feet is not changed by it.
 - **Rebuilt in place**: `cycle/`, `<name>.strip.png` / `.strip.json`, `.gif`, `.webp` are
   rewritten at the loop's own cell rules (`cell_height_cap`, body-height target, anchor), at the
   loop's frame rate, so the aligned cycle lasts L*/fps seconds. `strip.json` gains
   `cycle_align` (`from`, `to`, `between`, `taken`, `made_by_rife`, `made_at`, `smear` and/or
-  `nearest_at`, `drawings`, `retake`, `turned_by`, `turned_on`, `view`, `start_foot`, the seam ratio of the rebuilt
+  `nearest_at`, `drawings`, `retake`, `turned_by`, `turned_on`, `view`, `start_foot`, `start_foot_source`, `strikes`, the seam ratio of the rebuilt
   cells, and the re-verified GIF/WebP).
 - **The cut as filmed is kept** in `cycle.source/` on the first alignment, and every later
   alignment reads from there: running it again, or at another length, never resamples a
@@ -462,6 +482,11 @@ carries `cycle_align` per state and `<state>.cycle-align.json`; a failed alignme
 failed (section 1, "Without RIFE"); install it and run `video-cycle-align` on the set's loops.
 A set stopped on a suspect is skipped the same way (`reason: "cycle-suspects"`, the loops under
 `suspects`, a warning naming them): count their cycles and run `video-cycle-align --cycles`.
+A state whose loops leave a foot unnamed carries them under `cycle_align.<state>.unnamed_feet`; the
+answer goes back as `video-set --align-foot <item>=left|right` (the item's name, e.g. `side-walk`;
+only an item of a walk or run filmed in two or more directions is taken, any other is refused before
+filming), or as `video-cycle-align --foot` on the set's loops. A foot given for an item that failed,
+or whose state was not aligned, is named in that state's `feet_unused` and a warning.
 Cutting a loop again with `video-loop` removes its `cycle.source/`, so the next alignment reads
 the new cut. An alignment also clears a follow-through (`video-follow`, which moved the old
 cells): `follow.source.png` and the strip's `follow` record are removed and the loop's row says
