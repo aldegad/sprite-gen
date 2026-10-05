@@ -585,6 +585,11 @@ def run_item(
         result["loop"] = {"kind": lp["cycle"].get("kind", "periodic"), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "drift_px": lp["strip"].get("drift_px", 0), "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
         result["loop"]["review_recommended"] = lp["cycle"].get("review_recommended", False)
         result["loop"]["half_period_guard"] = lp["cycle"].get("half_period_guard")
+        if (lp["cycle"].get("fundamental") or {}).get("suspects"):
+            # a half or a third of the cut repeats: it may hold that many cycles (recorded, not cut)
+            result["loop"]["fundamental"] = {"period": lp["cycle"]["fundamental"]["period"],
+                                             "suspects": [{k: row.get(k) for k in ("period", "cycles", "pose", "steps")}
+                                                          for row in lp["cycle"]["fundamental"]["suspects"]]}
         if lp.get("motion_anchor", {}).get("applied") is False:
             result["loop"]["motion_anchor"] = lp["motion_anchor"]
         if "rife" in (lp.get("jump_repair") or {}):
@@ -659,8 +664,10 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
     """One cycle length per gait state across the set's directions (`video-cycle-align`,
     docs/loop-repair.md section 4). A state filmed in fewer than two directions has nothing to
     match. A failure is recorded under its state and the batch reports it; the loops stay as cut.
-    Where a frame is to be made and no RIFE is installed the state is skipped, not failed: each
-    loop keeps its own length, the record says why, and a warning line names the install."""
+    Two cases skip the state instead of failing it, each loop keeping its own length, the record
+    saying why (`reason`) and a warning line naming what settles it: a frame is to be made and no
+    RIFE is installed (`rife-not-installed`), or a loop may hold two or three cycles and nobody has
+    counted them (`cycle-suspects`, the loops under `suspects`; `video-cycle-align --cycles`)."""
     out: dict[str, Any] = {}
     if mode == "off":
         return out
@@ -674,13 +681,21 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
         try:
             report = align_mod.align_set([Path(r["dir"]) / "loop" for r in rows], interpolate=interpolate,
                                          report_path=root / f"{state}.cycle-align.json", between=between,
-                                         views=[_align_view(r) for r in rows])
+                                         views=[_align_view(r) for r in rows], state=state)
         except rife_mod.RifeNotInstalled as exc:
-            out[state] = {"ok": True, "applied": False, "why": "RIFE not installed — each loop keeps its own length",
+            out[state] = {"ok": True, "applied": False, "reason": "rife-not-installed", "why": "RIFE not installed — each loop keeps its own length",
                           "rife": str(exc), "install": rife_mod.INSTALL_COMMAND}
             print(f"video-set: warning: {state}: cycles not aligned — RIFE is not installed, so each loop keeps its own "
                   f"length; run `{rife_mod.INSTALL_COMMAND}`, then `sprite-gen video-cycle-align` (docs/loop-repair.md)",
                   file=sys.stderr)
+            continue
+        except align_mod.CycleSuspects as exc:
+            names = ", ".join(Path(e["dir"]).parent.name if Path(e["dir"]).name == "loop" else e["name"] for e in exc.suspects if e["status"] == "stopped")
+            out[state] = {"ok": True, "applied": False, "reason": "cycle-suspects",
+                          "why": f"{names} may hold more than one cycle — each loop keeps its own length until its cycles are counted",
+                          "suspects": exc.suspects, "command": exc.command, "report": str(root / f"{state}.cycle-align.json")}
+            print(f"video-set: warning: {state}: cycles not aligned — {out[state]['why']}; count them and run "
+                  f"`sprite-gen video-cycle-align --cycles <loop>=<k>` ({exc}) (docs/loop-repair.md section 4)", file=sys.stderr)
             continue
         except SystemExit as exc:
             out[state] = {"ok": False, "error": str(exc)}
@@ -800,9 +815,13 @@ def run_set(
     failed = [r["item"] for r in results if not r.get("ok")] + [f"cycle-align:{st}" for st, a in aligned.items() if not a.get("ok")]
     # What the set left undone for want of RIFE — never a failure, never silent.
     warnings = ([f"{r['item']}: jump frame not repaired — {r['loop']['jump_repair']['why']}" for r in results if r.get("ok") and "jump_repair" in r["loop"]]
-                + [f"cycle-align:{st}: not aligned — {a['why']}" for st, a in aligned.items() if a.get("applied") is False])
+                + [f"cycle-align:{st}: not aligned — {a['why']}" for st, a in aligned.items() if a.get("reason") == "rife-not-installed"])
     if warnings:
         warnings.append(f"install RIFE with `{rife_mod.INSTALL_COMMAND}` (docs/loop-repair.md)")
+    # What the set left for someone to count — never a failure, never silent.
+    warnings += [f"cycle-align:{st}: not aligned — {a['why']}; count them, then `sprite-gen video-cycle-align --cycles <loop>=<k>` "
+                 f"(the loops under `suspects` in {a['report']}, docs/loop-repair.md section 4)"
+                 for st, a in aligned.items() if a.get("reason") == "cycle-suspects"]
     warnings += [f"cycle-align:{st}: {line}" for st, a in aligned.items() for line in a.get("warnings", [])]
     payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), **({"handed": [vars(h) for h in handed]} if handed else {}), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": failed, "warnings": warnings, "items": results, "cycle_align": aligned}
     atomic_write_text(root / "set.report.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")

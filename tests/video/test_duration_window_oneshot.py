@@ -75,7 +75,7 @@ def test_run_loop_reports_the_gait_window_from_the_profile(tmp_path: Path, monke
     _gait_frames(tmp_path, period=12, n=72)
     seen: dict = {}
 
-    def fake_detect(D, *, min_len, max_len, gait_floor=None):
+    def fake_detect(D, *, min_len, max_len, gait_floor=None, signals=None):
         seen.update(lo=min_len, hi=max_len)
         raise SystemExit("stop here")
 

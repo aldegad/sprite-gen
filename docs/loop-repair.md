@@ -258,8 +258,41 @@ same number of frames, starting on the same step.
 ```bash
 sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-walk/loop \
   --loop-dir set/back-walk/loop [--view front --view side@right --view back] [--start-foot right] \
-  [--between rife|nearest] [--length N] [--report set/walk.cycle-align.json]
+  [--between rife|nearest] [--length N] [--cycles back-walk=2] [--multi-cycle fail|warn] \
+  [--state walk] [--report set/walk.cycle-align.json]
 ```
+
+- **Two cycles in one loop are stopped, and counted by whoever looks**: one length for the set is
+  one beat only if every loop holds one cycle. A loop that holds two strides, resampled to the
+  set's length, walks twice as fast as the rest, arms and legs alike — and pixels cannot tell it
+  from a loop of one stride whose two steps look alike ([video pipeline](video-pipeline.md)
+  section 4, "The fundamental period"). So before anything is resampled each loop is screened as a
+  ring (`align.cycle_screen`, the rule `video-loop` records by, `period.verdict`): a half or a
+  third of it that repeats and is no shorter than the state's gait floor makes the loop a
+  **suspect** — whatever its pose, which is recorded as evidence. A run set stops nearly every
+  time. The state is the one `video-loop` writes in
+  `strip.json` (`state`); `--state` gives it for loops cut before.
+  - A set with a suspect is **stopped before anything is rewritten** (`--multi-cycle fail`, the
+    default): the message and the report name each loop, where it returns (frames and seconds),
+    the evidence (`pose`, `steps`), the arguments that settle it, and the command to run once
+    they are counted (`command`: the same alignment with `--cycles <loop>=<1|2>` for each, to
+    fill in). With no vision call to ask, the agent looks at the loop's frames and gives the count. The report is written with
+    `applied: false`, `refused: "cycle-suspects"` and `suspects` (per loop: `dir`, `name`,
+    `length`, `status`, `candidates`, `settle`); `align.CycleSuspects` carries the same list.
+  - **`--cycles <loop>=k`** is the count that comes back (repeatable; `<loop>` is the
+    `--loop-dir`, its strip's name, its directory's name, or for a `video-set` item's `loop`
+    directory the item's name). `1`: it holds one cycle, aligned as it is. `2` or `3`: one cycle is
+    taken out of the loop as filmed (`cycle.source/`) — round(L/k) frames, from the start whose
+    frame one cycle on is the most like it, read as a ring (`align.take_cycle`) — and that is what
+    is resampled; the loop row records `cycles_given` and `cycle_taken` (`from`, `start`,
+    `length`, `exact`, `repeat_over_step`, `seam_ratio`). `video-loop` is not run again, and a
+    later alignment reads the same filmed frames. A count given where the screen found nothing at
+    1/k is still honoured, with a warning.
+  - Nothing else changes how many cycles a loop holds: without `--cycles` every loop is resampled
+    from all its filmed frames.
+  - `--multi-cycle warn` aligns a suspect set as it is, a warning per suspect.
+  - Who counts: a person looking at the loop, or a vision call asked how often each foot lands.
+    A loop counted once is not remembered — the next alignment needs the same `--cycles`.
 
 - **Length**: the median of the set's own lengths (`--length` overrides). The median is the
   length that needs the fewest made frames across the set; a loop already that long is not
@@ -345,6 +378,8 @@ directions (`--align-cycles auto`, default; `off` keeps each loop's own length).
 carries `cycle_align` per state and `<state>.cycle-align.json`; a failed alignment is listed as
 `cycle-align:<state>` and the loops stay as cut. Without RIFE the alignment is skipped, not
 failed (section 1, "Without RIFE"); install it and run `video-cycle-align` on the set's loops.
+A set stopped on a suspect is skipped the same way (`reason: "cycle-suspects"`, the loops under
+`suspects`, a warning naming them): count their cycles and run `video-cycle-align --cycles`.
 Cutting a loop again with `video-loop` removes its `cycle.source/`, so the next alignment reads
 the new cut. An alignment also clears a follow-through (`video-follow`, which moved the old
 cells): `follow.source.png` and the strip's `follow` record are removed and the loop's row says

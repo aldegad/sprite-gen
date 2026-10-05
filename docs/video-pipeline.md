@@ -659,6 +659,49 @@ anatomical left/right contacts. The report records `half_period_guard.reason =
 "ambiguous-harmonic"` and `cycle.review_recommended = true`. See [loop review](loop-review.md)
 for the visual review contract and manual overrides.
 
+**The fundamental period: recorded, never cut on the pixels' word.** A motion that repeats every
+P frames repeats every 2P as well, and 2P can be the better repeat: a clip drawn on twos (a new
+drawing every other frame) whose cycle is an odd number of frames shows each cycle half a drawing
+off the one before, so the profile dips deeper two cycles on than one, and the minimum taken above
+is two cycles. Played alone that loop is clean; resampled to the length of a set whose other loops
+hold one cycle ([loop repair](loop-repair.md) section 4) it walks at twice their speed.
+
+The engine does not cut it shorter. Half a gait cycle on, the legs are back in place with near and
+far swapped; where the two legs are drawn alike (one colour of trousers, white fur) that one step
+and a true cycle half a drawing late are **the same picture**. Every rule tried that took the half
+as a cycle — an absolute pixel distance, the legs' step count, the pose on the motion's path — cut
+some one-stride walk or run to its half step, and the leg signal fails both ways (a heel kick
+swings the stride twice a step; a diagonal view's two steps open the feet unequally). So
+`video-loop` cuts the period it always cut, and only **records** what a half or a third of it shows
+(`cycle.fundamental`, `sprite_gen/video/period.py`):
+
+- each candidate is the profile's own minimum within a frame of P/2 and P/3 (`checked`: `period`,
+  `of`, `divisor`, `cycles`), no shorter than the gait floor (walk 0.6 s, run 0.35 s; other states
+  the window's floor — under the floor a repeat is one step, the half-period guard's case);
+- it is measured: `periodicity` (its dip below the profile's mean), `pose` (how far the frame one
+  candidate on lies off the motion's own path — over the short spans (a, b) around a frame, the
+  least `D[a][x] + D[x][b] − D[a][b]` — over that frame's own distance, both in playback steps;
+  `off_path`, `distance`), and, for the record only, the legs' `steps` and `follow`
+  (`sprite_gen/video/legs.py`, the signal the foot-strike turn reads);
+- one rule, `period.verdict`, decides (`verdict`, `why`): a candidate that repeats — dips 0.15 or
+  more below the profile's mean — is a `suspect`, and the suspects are listed (`suspects`). That is
+  the whole rule. Nothing says "this is a cycle", and nothing says "this is not one": the pose and
+  the legs are evidence for whoever looks, never a reason to refuse. A rule that refused "another
+  pose" (pose 0.8 or over) missed most two-stride loops whose second stride was redrawn a little
+  differently — moved a pixel, a few per cent lighter, the foot kicked higher — because in pixels
+  that is off the motion's path just as a step with the legs swapped is.
+
+`review_recommended` keeps its meaning (the ambiguous-harmonic retention above). The record is for
+the set stage: `video-cycle-align` screens every loop by the same rule, stops a set on a suspect,
+and takes one cycle out of a loop only when told how many it holds (`--cycles`, [loop
+repair](loop-repair.md) section 4). The local search of `--anchor motion-auto` records the same.
+The rule leans one way on purpose: a suspect costs a look, a miss a loop that plays twice as fast.
+A run's half step repeats as well as most of its strides do, so a run set is suspected nearly
+every time and stops until its loops are counted; a walk's half step is under its floor more
+often. What still escapes it is a second stride that drifts across the picture in steps of four
+pixels or more without the body anchor's ramp, and any loop whose half is under the gait floor
+(a walk faster than 0.6 s a step).
+
 **The size is held before the search** (`--anchor motion-auto`, `--size-hold auto`, the default).
 A walk or run filmed from its first frame only (no end frame) often grows or shrinks as it plays:
 a front walk comes a little closer with every step, a back walk goes away. The loop is then cut on
@@ -840,9 +883,10 @@ auto`, the default; `off` keeps each loop's own length). The same step stands al
 `sprite-gen video-cycle-align --loop-dir … --view …`. `set.report.json` carries `cycle_align`
 per state (with `start_foot` per item), a failed alignment is listed as `cycle-align:<state>`,
 and a made frame with a smear or a loop whose foot could not be named is a line under
-`warnings`. Without RIFE the alignment
-is skipped with a warning (`applied: false`, and a line under the report's `warnings`), not failed. See
-[loop repair](loop-repair.md) section 4.
+`warnings`. Two cases skip the alignment with a warning instead of failing it (`applied: false`,
+`reason`, and a line under the report's `warnings`): no RIFE (`rife-not-installed`), and a loop
+that may hold more than one cycle (`cycle-suspects`, the loops under `suspects`; count them, then
+`video-cycle-align --cycles <loop>=<k>`). See [loop repair](loop-repair.md) section 4.
 
 ## 6. Follow-through — `video-follow`
 
