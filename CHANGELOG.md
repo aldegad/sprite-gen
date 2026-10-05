@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v2.33.0) - A horse's sheet does not swing its arms, and it does not strike with its hands
+## v2.33.0 - A horse's sheet does not swing its arms, and it does not strike with its hands
 
 - **Fix: the sheet rows `prepare` writes gave every body a person's arms, shoulders and hands.** 2.32.0's body plan reached the clip's walk, idle and still but not the rows an image model draws a sheet from: the walk and run rows moved "body, arm, leg, hair, and prop", the front and three-quarter-front walks "alternating leg, arm, shoulder", the diagonal runs traded "foot-contact phases" of "the left and right legs", the wave was "arm pose only: arm down, arm raised, hand tilted" (default action "friendly hand wave gesture"), every row's anchor lock spent its motion on "arm counter-swing" and turned "the body, feet, shoulders", and a diagonal row read its facing by "shoulder overlap, hand/foot placement". A horse's walk sheet came with arms.
 - **Fix: an animal's attack was made with its hands.** The clip's attack (`MOTION_TEXT["attack"]`) struck "with what it is already holding (bare hands only if it holds nothing)", and its hold (`HOLD_TEXT["attack"]`, after a caller's `--motion` too) said "one hand stays one hand, both hands stay both hands … A hand the motion does not use stays where it is drawn", whatever the body.
