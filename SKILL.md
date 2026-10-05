@@ -75,6 +75,7 @@ it never changes the requested direction. Image correction requires explicit opt
 | `video --direction` | `side`, `front`, `back`, `front_diagonal`, `back_diagonal`; unset by default | `side` opts into facing inspection and a matching prompt requirement; the others skip it. The two diagonals are three-quarter views turned right (`VIEW_TEXT`); a walk or run in one is filmed pinned (`pins_last_frame`). |
 | `video --facing`, `video-set --facing` | `right` (default), `left`; `video-set` also `right,left` | Required side direction. `right,left` films every side and diagonal view both ways, each from its own still (`--base side@left=…`); none is mirrored. |
 | `gen --direction`, `--handed`; `video-prompt` / `video-set --handed` | a view; `"<item>=<left\|right> [part]"` | An item on one of the character's own sides: the still and clip prompts say where it is in each view, and mirroring is refused. |
+| `video-prompt` / `video-set --body-plan` | `biped` (default), `quadruped`, `legless`; or `"<figure>=<plan>"` per figure of a scene | What the subject stands on: no clip or redraw prompt names a part it lacks (a horse is not walked on a person's legs or stood up), and a scene says it per figure. |
 | `video --facing-fix`, `video-set --facing-fix` | `none` (default), `mirror` | Record the observation; opt into mirroring an observed opposite in a copy. Batch side inspection is enabled by default. |
 
 Direction is requested through the generation and motion prompts, which cannot guarantee model compliance.

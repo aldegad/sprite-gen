@@ -253,6 +253,36 @@ back walk, on the base's own key, kept as `walk-start.png` with its report and r
 prompt and base are the same; a base on no chroma key is refused with `--walk-start as-given`, which
 films from the base itself. Side and diagonal walks, and every other state, film from the base.
 
+### A body that is not a person — `--body-plan`
+
+The measured sentences above were measured on people, and four of them name what only a person has:
+the Lite walk calm swings the arms (`LITE_WALK_TEXT`), the Lite back-diagonal head hold moves the
+arms (`LITE_HEAD_TEXT`), the idle plants both feet and settles the chest, shoulders and arms
+(`MOTION_TEXT["idle"]`), and the front or back mid-step redraw puts one foot under each hip with the
+arms swinging (`WALK_START_TEXT`). Said of a horse, a pig or a dog, they walk it on a person's legs or
+stand it up on two. The walk and run sentences themselves name no limb (since 2.0.0's "`video-set`
+motion templates no longer assume a biped"); these four came later (idle 2.9.0, the rest 2.18.0) and
+were said to every body.
+
+`video-set --body-plan`, `video-prompt --body-plan` and `build_prompt(body_plan=...)`,
+`walk_start_prompt(body_plan=...)` name what the subject stands on (`sprite_gen/video/body_plan.py`):
+`biped` (the default), `quadruped` or `legless` for the character, or one `<figure>=<plan>` per figure
+of a scene (`--body-plan "the man=biped" --body-plan "the horse=quadruped"`). No body plan, or one
+biped, keeps every prompt byte for byte. Any other body gets:
+
+| Sentence | for a body that is not one biped |
+|---|---|
+| after the motion sentence (or the caller's `--motion`) | what it stands on (`body_plan.text`): "It stays on all four legs, as in the image, and never rises onto its hind legs." / "It has no legs, as in the image, and never grows legs or feet." / "Each figure keeps the body it has in the image: the man on two legs; the horse on all four legs, never rising onto its hind legs." |
+| idle | `IDLE_TEXT_ANY_BODY`: the same stillness, standing or resting as in the image, no feet counted, no chest, shoulders or arms |
+| Lite walk calm | `LITE_WALK_TEXT_LEGGED` (no arm swing; never trotting or galloping) or, with a figure without legs, `LITE_WALK_TEXT_LEGLESS` (no steps or feet) |
+| Lite back-diagonal head hold | `LITE_HEAD_TEXT_ANY_BODY`: what moves is what it moves on and its loose ends (a tail, a mane, hair) |
+| front or back mid-step redraw | `WALK_START_TEXT_ANY_BODY`: one leg lifted, the others planted, then what it stands on; a body without legs has no step to catch and films from its base (`starts_mid_step` is false, `video-prompt` gives no `start_still`) |
+
+Only the biped sentences were measured on clips; the others say no part the body lacks and are not
+yet measured. `--handed` keeps its own sentences (its arm sentences are for an item on an arm), and an
+attack's grip sentence (`HOLD_TEXT["attack"]`) still speaks of hands. `video-set` and `video-prompt
+--json` record the plan as `body_plan`.
+
 ### A clip from a video MCP on your agent — ZCRE
 
 sprite-gen never calls a video MCP. When your own agent (Claude, Codex) has one connected — ZCRE's
@@ -306,7 +336,7 @@ ends on the canvas (`last_frame`), the loop cut (`cycle`) and the canvas, clip, 
 commands with placeholders; a front or back walk adds `start_still`, the mid-step redraw `video-set`
 makes before its canvas (`sprite-gen gen --ref`, your image provider). Its `loop` command names no
 `--anchor` and it lists no set command: add `--anchor motion-auto` for a walk or run, and run
-`video-cycle-align` for a set, as above. `--character`, `--motion` and `--model` reach the
+`video-cycle-align` for a set, as above. `--character`, `--motion`, `--model` and `--body-plan` reach the
 prompt as they reach `build_prompt`. What the ZCRE route supports:
 
 | | Through ZCRE's MCP |

@@ -25,6 +25,8 @@ from sprite_gen.gen.facing import FACINGS
 from sprite_gen.gen import handedness as handed_mod
 from sprite_gen.gen.handedness import Handed
 from sprite_gen.video import batch as batch_mod
+from sprite_gen.video import body_plan as body_mod
+from sprite_gen.video.body_plan import Body
 
 DEFAULT_MODEL = "grok-imagine-video-1.5"
 START_STILL_KEYS = ("green", "magenta")
@@ -33,9 +35,10 @@ START_STILL_KEYS = ("green", "magenta")
 def plan_prompt(*, direction: str, state: str, facing: str = "right", character: str | None = None,
                 motion: str | None = None, model: str = DEFAULT_MODEL, last_frame: bool = True,
                 unpinned: bool = False, duration: int | None = None, key: str = "green",
-                handed: list[Handed] | None = None) -> dict[str, Any]:
+                handed: list[Handed] | None = None, body_plan: list[Body] | None = None) -> dict[str, Any]:
     """The prompt `video-set` would send for (direction, state), and how its clip is to be cut. `handed`
-    (`handedness.parse`) adds where each asymmetric item is in this view, as `video-set --handed` does."""
+    (`handedness.parse`) adds where each asymmetric item is in this view, as `video-set --handed` does;
+    `body_plan` (`body_plan.parse_all`) what the subject stands on, as `video-set --body-plan` does."""
     if direction not in batch_mod.VIEW_TEXT:
         raise SystemExit(f"video-prompt: --direction must be one of {', '.join(sorted(batch_mod.VIEW_TEXT))}, got {direction!r}")
     if key not in START_STILL_KEYS:
@@ -56,14 +59,14 @@ def plan_prompt(*, direction: str, state: str, facing: str = "right", character:
         warnings.append(f"{direction} {state} filmed without its end-frame pin: the loop is searched, not cut whole, and may not close")
     pins = wants_pin and last_frame
     parts = batch_mod.clip_prompt_parts(direction, state, character, facing=facing, motion=motion, pinned=pinned,
-                                        model=model, handed=handed)
+                                        model=model, handed=handed, body_plan=body_plan)
     prompt = parts.text
     # the caller's own words (--character, --motion) against the engine's: a conflict is a warning
     warnings += [note["text"] for note in parts.notes if note["kind"] == "conflict"]
     cycle = "pinned" if pins and state in batch_mod.PINNED_LOOP_STATES else "auto"
     # as video-set places and cuts: a side or diagonal view takes the facing, front and back face right
     canvas_facing = loop_facing = facing if direction in handed_mod.LATERAL_VIEWS else "right"
-    mid_step = batch_mod.starts_mid_step(state, direction)
+    mid_step = batch_mod.starts_mid_step(state, direction, body_plan)
     still = "<dir>/walk-start.png" if mid_step else "<still.png>"
     duration = batch_mod.duration_for(state, duration)
     end = ", end frame <dir>/canvas.png" if pins else ""
@@ -73,6 +76,7 @@ def plan_prompt(*, direction: str, state: str, facing: str = "right", character:
         "state": state,
         "facing": facing,
         **({"handed": [vars(h) for h in handed]} if handed else {}),
+        **({"body_plan": [vars(b) for b in body_plan]} if body_plan else {}),
         "model": model,
         "prompt": prompt,
         "duration": duration,
@@ -94,7 +98,7 @@ def plan_prompt(*, direction: str, state: str, facing: str = "right", character:
     if mid_step:
         record["start_still"] = {
             "why": "a front or back walk films from its still redrawn mid-step; from a standing still the clip model walks askew",
-            "prompt": batch_mod.walk_start_prompt(direction, key, handed),
+            "prompt": batch_mod.walk_start_prompt(direction, key, handed, body_plan),
             "command": "sprite-gen gen --ref <still.png> --prompt-file <start-prompt.txt> --out <dir>/walk-start.png --report <dir>/walk-start.report.json",
         }
     return record
@@ -105,6 +109,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--state", required=True, help="motion state (idle/walk/run/jump/attack/...)")
     parser.add_argument("--facing", choices=FACINGS, default="right", help="side or diagonal view: which way it faces (default right)")
     parser.add_argument("--handed", action="append", default=[], metavar="ITEM=SIDE [PART]", help="an asymmetric item on one of the character's own sides, e.g. 'the black smartwatch=left wrist' (repeatable): the prompt says where it is in this view")
+    parser.add_argument("--body-plan", action="append", default=[], metavar="PLAN | FIGURE=PLAN", help="what the character stands on: biped (default), quadruped or legless; a scene of several figures names each, e.g. 'the man=biped' 'the horse=quadruped' (repeatable), as video-set --body-plan")
     parser.add_argument("--character", help="short subject phrase used in the prompt (e.g. 'The armored knight')")
     parser.add_argument("--motion", help="the caller's own motion paragraph in place of the state's sentence (build_prompt(motion=...))")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"clip model the prompt is for (default {DEFAULT_MODEL}); a Lite model calms a walk")
@@ -123,6 +128,7 @@ def run(**kwargs: object) -> int:
         unpinned=bool(kwargs.get("unpinned")), duration=(int(kwargs["duration"]) if kwargs.get("duration") else None),  # type: ignore[arg-type]
         key=str(kwargs.get("key") or "green"),
         handed=handed_mod.parse_all(list(kwargs.get("handed") or [])) or None,  # type: ignore[arg-type]
+        body_plan=body_mod.parse_all(list(kwargs.get("body_plan") or [])) or None,  # type: ignore[arg-type]
     )
     for line in record["warnings"]:
         print(f"video-prompt: warning: {line}", file=sys.stderr)
