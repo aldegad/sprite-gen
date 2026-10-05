@@ -433,10 +433,16 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
 
   The cue must follow the step — its once-a-cycle swing (first harmonic) at least a quarter of
   its spread over the cycle, or it is the drawing's own flicker — and, averaged over each strike
-  frame and its two neighbours, the two strikes must differ by 0.015 in luma (shade) or 1 % of
-  the body's height (depth); otherwise the foot is not named. A view seen from behind a diagonal
-  can shade its legs too evenly for this, and is then left unnamed rather than guessed. A loop row carries `view`, `start_foot` and `foot` (the cue, the strikes, their values,
-  the margin, the feet); a loop whose foot is not named starts on its larger strike with
+  frame and its two neighbours, the two strikes must differ by 0.025 in luma (shade,
+  `align.SHADE_MARGIN`) or 1 % of the body's height (depth, `align.FOOT_MARGIN`); otherwise the
+  foot is not named and `foot_why` starts **`low-margin`** (with the margin and the bar). A view seen
+  from behind a diagonal can shade its legs too evenly for this, and is then left unnamed rather than
+  guessed. The shade's bar is set from drawn walks whose feet were checked by eye: it lies above the
+  margins at which the shade named a foot wrong and under those at which it named one right. A foot
+  named wrong turns the loop half a cycle off with nobody asked; a foot left unnamed costs one look
+  (a person or a vision call, `unnamed_feet` below), so a margin near the bar is left for the look.
+  A loop row carries `view`, `start_foot` and `foot` (the cue, the strikes, their values, the
+  margin, the feet); a loop whose foot is not named starts on its larger strike with
   `start_foot: null` and `foot_why`, and the report's `warnings` say so — a set whose loops do
   not all name their foot may not start on one foot. Without `--view` no foot is named and the
   report says that once. A character drawn without shading on the far leg leaves its side and
@@ -445,7 +451,9 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   cue), `"given"` (`--foot`, below) or `null` (nobody), and `strikes` — its two strikes as frames of
   the rebuilt `cycle/`, the larger first.
 - **A foot the engine cannot name is told, one loop at a time**: each loop whose foot is not named
-  is listed in the report's **`unnamed_feet`** — per loop `dir`, `name`, `view`, `foot_why`,
+  — its view's cue does not follow the step, parts the strikes by less than the margin
+  (`low-margin`), or there are no legs to read — is listed in the report's **`unnamed_feet`**:
+  per loop `dir`, `name`, `view`, `foot_why`,
   `candidates` (the two strikes: `strike` 0 and 1, `frame` in `cycle/`, `path` to that frame; the
   first is the frame the loop now starts on, the second half a cycle on) and `settle` (the two
   `--foot` arguments). Whoever looks — a person, the agent, or a vision call shown the two frames —
