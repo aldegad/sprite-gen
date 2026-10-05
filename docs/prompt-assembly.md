@@ -28,7 +28,7 @@ sentences put in (`tests/gen/test_prompt_assembly.py`).
 | Piece | When | Sentence from |
 |---|---|---|
 | the caller's text | always | `--prompt` / `--prompt-file` |
-| view | `--direction` | `batch.still_view_text` |
+| view | `--direction` (with `--body-plan`, the sentence for that body) | `batch.still_view_text` |
 | handed | `--direction --handed` | `handedness.text` |
 | facing | `--ref` with `--facing` | `facing.prompt_suffix` |
 | key background | `--transparent --ref` when `auto` plans a key | `chroma.KEY_BACKGROUND_TEXT` |
@@ -52,6 +52,13 @@ side view's walk or run with an item on a wrist, a hand, a forearm or an elbow i
 each time that arm swings forward
 ([handedness](video-pipeline.md#handedness--an-item-on-one-side)). An item anywhere else — an ear,
 the head, a tail, the body, a leg, a shoulder — gets only where it is, and no arm sentence.
+
+**A body that is not a person** (`--body-plan`, `video/body_plan.py`): with no body plan, or one
+biped, nothing changes. A quadruped, a body without legs or a scene of several figures has the idle,
+the Lite walk sentences, the mid-step redraw and the still's view sentence (`gen --direction
+--body-plan`) said without the parts it lacks, and what it stands on said after the motion paragraph
+or at the end of the view sentence
+([body plan](video-pipeline.md#a-body-that-is-not-a-person----body-plan)).
 
 **A front or back walk's start still** (`batch.walk_start_prompt`): the mid-step redraw sentence,
 the key background line, then the still's handed sentences.

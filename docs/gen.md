@@ -195,6 +195,7 @@ sprite-gen gen \
   [--layout-guide]        # attach a one-slot layout guide (safe box, crown and floor lines); see below
   [--direction side|front|back|front_diagonal|back_diagonal [--facing right|left]] # add the engine's view sentence
   [--handed "the black smartwatch=left wrist" ...]  # with --direction: where an item on one side is in that view
+  [--body-plan quadruped | --body-plan "the horse=quadruped" ...]  # with --direction: the view for that body
   [--report REPORT.json] \
   [--keep-session]        # codex: keep the rollout jsonl instead of deleting it
 ```
@@ -217,6 +218,10 @@ Backward-compatible wrapper: `$SPRITE_GEN_ROOT/.venv/bin/python $SPRITE_GEN_ROOT
 
 - **`--direction`** adds the view sentence a sprite still is drawn with (`still_view_text`; a side or
   diagonal view also takes `--facing`, a front or back view refuses it) and records `extra.view`.
+  **`--body-plan`** (with `--direction`; `quadruped`, `legless`, or `"<figure>=<plan>"` per figure of a
+  scene) says that view without the feet, chest, hips, shoulders and shoes a person's still is drawn
+  with, ending in what the body stands on; see
+  [video-pipeline](video-pipeline.md#a-body-that-is-not-a-person----body-plan).
   **`--handed`** adds, per item, which of the character's own sides it is on and where that side is in
   the view; with it, `--facing-fix mirror` is refused and `regen` never mirrors. See
   [video-pipeline](video-pipeline.md#handedness--an-item-on-one-side).
