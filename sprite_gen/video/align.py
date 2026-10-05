@@ -15,7 +15,7 @@ the frame's top edge, which a long ear owns. docs/loop-repair.md section 4.
 Every frame between two source frames softens a little, so the length is the median (the one
 that needs the fewest made frames across the set), and a loop already that long is not touched.
 
-A loop whose clip holds each drawing for two or three frames (`held_drawings`, sprite_gen/video/
+A loop whose cut holds each drawing for two or three frames (`held_drawings`, sprite_gen/video/
 held.py), that the length leaves at under RETAKE_DRAWINGS_MIN drawings a second, with frames
 between them that could not be made, is aligned all the same — and named in the report's `retake`
 (reason `held-drawings`, with its numbers) and in a warning: the gap is wider than any interpolator
@@ -104,18 +104,28 @@ RETAKE_UNMADE_MIN = 1
 RETAKE_REASON = "held-drawings"
 
 
-def held_drawings(frames: list[Image.Image], *, fps: float, clip: dict[str, Any] | None = None) -> dict[str, Any]:
+def held_drawings(frames: list[Image.Image], *, fps: float, clip: dict[str, Any] | None = None,
+                  cut: dict[str, Any] | None = None) -> dict[str, Any]:
     """Whether a loop's drawings are held, and how many its cycle holds (`held.measure`).
 
-    `clip` is the record `video-loop` wrote in the strip metadata (`drawings`), read over the whole
-    clip as keyed: its hold, and its drawings a second over the cycle's frames (`source` clip). The cut
-    cycle is the fallback for a loop cut before that record (`source` cycle, read as a ring): it is
-    short, and `--anchor motion-auto` shifts each cut frame, so a pair's repeat may no longer read as one."""
+    `cut` and `clip` are the records `video-loop` wrote in the strip metadata, both read on the clip's
+    steps as keyed: `cycle_drawings` over the cut (`source` span) and `drawings` over the whole clip
+    (`source` clip) — the hold and the drawings a second, over the cycle's frames. The cut's is the
+    loop's: a clip held for part of its length is held where it was cut. The clip's stands where the
+    cut was too short to read, or was cut before that record (`span_why` says which). The cut cycle
+    is the fallback for a loop cut before either record (`source` cycle, read as a ring): it is short,
+    and `--anchor motion-auto` shifts each cut frame, so a pair's repeat may no longer read as one."""
     n = len(frames)
     if clip and clip.get("hold"):
+        whole = {"hold": clip["hold"], "drawings_per_second": clip["drawings_per_second"], "contrast": clip.get("contrast")}
+        if cut and cut.get("hold"):
+            per_second = float(cut["drawings_per_second"])
+            return {"source": "span", "hold": cut["hold"], "contrast": cut.get("contrast"), "start": cut["start"], "length": cut["length"],
+                    "frames": n, "fps": fps, "drawings_per_second": per_second, "drawings": round(per_second * n / fps, 2), "clip": whole}
         per_second = float(clip["drawings_per_second"])
         return {"source": "clip", "hold": clip["hold"], "contrast": clip.get("contrast"), "frames": n, "fps": fps,
-                "drawings_per_second": per_second, "drawings": round(per_second * n / fps, 2)}
+                "drawings_per_second": per_second, "drawings": round(per_second * n / fps, 2),
+                "span_why": cut.get("why", "the cut was not read") if cut else "no record of the cut's own steps (cut before it was kept)"}
     D = _ring(frames)
     return {"source": "cycle", **held_mod.measure([float(D[k, (k + 1) % n]) for k in range(n)], fps=fps, cyclic=True)}
 
@@ -140,7 +150,7 @@ def retake(drawings: dict[str, Any], facts: dict[str, Any], *, fps: float) -> di
 
 def _retake_line(name: str, r: dict[str, Any]) -> str:
     """A loop to film again, in words."""
-    return (f"{name}: film this direction again ({r['reason']}) — its clip shows each drawing for {r['hold']} frames "
+    return (f"{name}: film this direction again ({r['reason']}) — its {'clip' if r['source'] == 'clip' else 'cut'} shows each drawing for {r['hold']} frames "
             f"({r['drawings']:g} drawings in the cycle, {r['drawings_per_second_filmed']:g} a second as filmed); at the set's length "
             f"that is {r['drawings_per_second']:g} drawings a second, {r['frames_per_drawing']:g} frames apart, and {r['unmade']} "
             "frame(s) between them could not be made, so the loop halts there. A new take that draws every frame "
@@ -628,7 +638,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         except (ValueError, rife_mod.RifeUnavailable) as exc:
             raise SystemExit(f"video-cycle-align: {d}: {exc}; frames between source frames are made by RIFE (docs/loop-repair.md)") from exc
         start = strike["start"]
-        drawings = held_drawings(frames, fps=fps, clip=loops[i][2].get("drawings"))
+        drawings = held_drawings(frames, fps=fps, clip=loops[i][2].get("drawings"), cut=loops[i][2].get("cycle_drawings"))
         again = retake(drawings, facts, fps=fps)
         record = {**facts, "drawings": drawings, "retake": again, "turned_by": start, "turned_on": strike["by"], "view": view, "start_foot": strike["start_foot"],
                   **({"foot": strike["foot"]} if "foot" in strike else {}), **({"foot_why": strike["foot_why"]} if "foot_why" in strike else {}),
