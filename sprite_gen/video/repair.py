@@ -135,6 +135,12 @@ JOLT_REFERENCE = 0.43  # alpha jolt index; the kept takes reached 0.414 on strip
 HEAD_STEP_REFERENCE = 0.75  # head's sideways move in one frame, % of body height; kept <= 0.68, refused 0.82
 HEAD_BAND = 0.20  # the head is the top fifth of the body's height over the loop
 HEAD_MEDIAN_FLOOR = 0.05  # % of body height: a median step below this is the tracker's rounding
+# The top band's step into the loop's first frame, over the loop's median step, beyond which the
+# wrap pops (docs/loop-repair.md section 3, "The seam pop"). It sits between walks holding a part
+# that sways on its own beat and walks without one, on the cut as it plays and on the source frames
+# the cut is chosen from. Above it the cut is chosen again (`--anchor motion-auto`), and a pop that
+# stays is a warning line.
+SEAM_POP_REFERENCE = 10.0
 
 
 def jolt_index(step_values: np.ndarray) -> float:
@@ -160,6 +166,12 @@ def head_track(alphas: list[np.ndarray]) -> dict[str, Any]:
     """The head's place frame by frame, in % of the body's height over the loop: x is the coverage
     centroid of the top fifth (HEAD_BAND), y the body's top line. A take whose head pops sideways
     reads here while its coverage change stays ordinary (2026-10-03, Lite back diagonal)."""
+    x, y, height = _head_series(alphas)
+    return {"body_height_px": height, "x": _track_stats(x), "y": _track_stats(y)}
+
+
+def _head_series(alphas: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, int]:
+    """`head_track`'s two places per frame (% of the body height) and the body height in px."""
     rows = np.where(np.max(np.stack(alphas), axis=0).max(axis=1) > 0.1)[0]
     if rows.size == 0:
         raise ValueError("every loop frame is fully transparent")
@@ -177,7 +189,40 @@ def head_track(alphas: list[np.ndarray]) -> dict[str, Any]:
     y = np.array(ys) / height * 100
     if not (np.isfinite(x).all() and np.isfinite(y).all()):
         raise ValueError("a loop frame has no head to track")
-    return {"body_height_px": height, "x": _track_stats(x), "y": _track_stats(y)}
+    return x, y, height
+
+
+def seam_pop(alphas: list[np.ndarray]) -> dict[str, Any]:
+    """How far the top of the silhouette jumps into the loop's first frame (docs/loop-repair.md
+    section 3, "The seam pop").
+
+    The top band `head_track` reads is the head, or the tip of whatever the body holds higher than its
+    head — a staff, a flag, a raised spear. A thin part like that can sway on its own beat, slower than
+    the steps: a cut one step long then ends with it somewhere else, and it jumps at the wrap while
+    the body closes. The seam ratio is an area measure and hardly sees a thin part move: a tip that
+    jumps many times its usual step changes few pixels.
+
+    Per axis, the wrap's step (last frame -> first) over the loop's median step, a pixel at least: a
+    step under a pixel is the tracker's rounding. It pops when the wrap is that axis' largest step
+    and exceeds SEAM_POP_REFERENCE times the median; `pop` is the larger of the two, 0 when neither
+    axis has its largest step at the wrap. A loop whose top jitters more inside than at the wrap
+    (hair redrawn every frame) has its wrap ordinary for it."""
+    x, y, height = _head_series(alphas)
+    floor = max(HEAD_MEDIAN_FLOOR, 100.0 / height)
+    record: dict[str, Any] = {"body_height_px": height, "reference": SEAM_POP_REFERENCE}
+    pop = 0.0
+    for axis, values in (("x", x), ("y", y)):
+        n = len(values)
+        d = np.abs(np.array([values[(k + 1) % n] - values[k] for k in range(n)]))
+        over = float(d[-1]) / max(float(np.median(d)), floor)
+        worst = bool(d[-1] >= d.max())
+        record[axis] = {"wrap_pct": round(float(d[-1]), 3), "step_median_pct": round(float(np.median(d)), 3),
+                        "wrap_over_median": round(over, 3), "wrap_is_largest": worst}
+        if worst:
+            pop = max(pop, over)
+    record["pop"] = round(pop, 3)
+    record["pops"] = pop > SEAM_POP_REFERENCE
+    return record
 
 
 def measure_jolt(frames: list[Image.Image], *, facing: str = "right") -> dict[str, Any]:
@@ -187,14 +232,36 @@ def measure_jolt(frames: list[Image.Image], *, facing: str = "right") -> dict[st
     med = float(np.median(whole))
     try:
         head: dict[str, Any] = head_track(al)
+        pop: dict[str, Any] = seam_pop(al)
     except ValueError as exc:
         head = {"skipped": str(exc)}  # recorded, and the head gate says it could not read it
+        pop = {"skipped": str(exc)}
     return {
         "index": round(jolt_index(whole), 4),
         "hair_index": round(jolt_index(hair), 4),
         "step_max_over_median": round(float(whole.max()) / med, 4) if med > 0 else None,
         "head": head,
+        "seam_pop": pop,
     }
+
+
+def seam_pop_verdict(measured: dict[str, Any], *, head_step_max: float | None = HEAD_STEP_REFERENCE) -> list[str]:
+    """The top band's jump into the loop's first frame, in words, when it pops (section 3, "The seam
+    pop"); empty otherwise. A sideways jump the head bound already names (`jolt_verdict`, into frame
+    0) is not said twice."""
+    pop = measured.get("seam_pop") or {}
+    if "skipped" in pop or not pop.get("pops"):
+        return []
+    head = measured["head"].get("x", {})
+    said = head_step_max is not None and head.get("step_max_pct", 0) > head_step_max and head.get("worst_into_frame") == 0
+    axes = [(axis, pop[axis]) for axis in ("y", "x") if pop[axis]["wrap_is_largest"]
+            and pop[axis]["wrap_over_median"] > pop["reference"] and not (axis == "x" and said)]
+    if not axes:
+        return []
+    words = {"x": "sideways", "y": "up or down"}
+    return ["the top of the silhouette jumps into the loop's first frame "
+            + ", ".join(f"{words[a]} {v['wrap_pct']:.2f} % of the body height, {v['wrap_over_median']:.1f}x its median step" for a, v in axes)
+            + f" (over {pop['reference']:g}x): a part held above the head swings on its own beat and does not close at this cut"]
 
 
 def jolt_verdict(measured: dict[str, Any], *, jolt_max: float | None = JOLT_REFERENCE,

@@ -856,6 +856,37 @@ def _repair_jumps(frames: list[Image.Image], interpolate: rife_mod.Interpolate |
     return frames, record
 
 
+def wrap_pop_on(frames: list[Image.Image], analysis: dict[str, Any]) -> Any:
+    """`repair.seam_pop` of a cut (start, length) of `frames`, each moved by the analysis translation
+    `auto_motion.analyse` measured (its drift taken out, the way the cut will be corrected): the
+    top band's jump at the wrap, for `local_cycle.detect` to rank its candidates by. Alpha only,
+    cropped once to the clip's subject; a cut's value is kept once measured."""
+    shifts = np.rint(np.asarray(analysis["analysis_only_translation_xy"], dtype=np.float64)).astype(int)
+    pad = int(np.abs(shifts).max()) + 1
+    boxes = [f.getchannel("A").point(lambda v: 255 if v >= repair_mod.ALPHA_SOLID else 0).getbbox() for f in frames]
+    boxes = [b for b in boxes if b]
+    box = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+    w, h = box[2] - box[0] + 2 * pad, box[3] - box[1] + 2 * pad
+    moved = []
+    for f, (dx, dy) in zip(frames, shifts):
+        a = np.zeros((h, w), dtype=np.uint8)
+        crop = np.asarray(f.getchannel("A").crop(box))
+        a[pad + dy:pad + dy + crop.shape[0], pad + dx:pad + dx + crop.shape[1]] = crop
+        moved.append(a)
+    measured: dict[tuple[int, int], dict[str, Any]] = {}
+
+    def pop(start: int, length: int) -> dict[str, Any]:
+        if (start, length) not in measured:
+            try:
+                measured[start, length] = repair_mod.seam_pop([a.astype(np.float32) / 255.0 for a in moved[start:start + length]])
+            except ValueError as exc:
+                # A frame with nothing in the top band: no jump read, and no pop to rank it by —
+                # `local_cycle` neither takes it as closing nor as popping (`skipped`, why).
+                measured[start, length] = {"skipped": str(exc), "reference": repair_mod.SEAM_POP_REFERENCE}
+        return measured[start, length]
+    return pop
+
+
 def run_loop(
     frames_dir: Path,
     out_dir: Path,
@@ -959,7 +990,8 @@ def run_loop(
             detect = dict(gait_floor=round(prof.min_seconds*fps), periodicity_min=PERIODICITY_MIN,
                           double_tolerance=GAIT_DOUBLE_TOL, double_search=GAIT_DOUBLE_SEARCH)
             try:
-                cycle = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi, signals=leg_signals(source_frames), **detect)
+                cycle = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi, signals=leg_signals(source_frames),
+                                           wrap_pop=wrap_pop_on(source_frames, analysis), **detect)
             except ValueError as first:
                 # A front or back gait that walked toward the camera, or a slow one: one more
                 # search, recorded (`gait_fallback`), and only after the first found nothing.
@@ -980,10 +1012,14 @@ def run_loop(
                 try:
                     cycle = local_cycle.detect(D, trajectory, min_len=lo, max_len=hi_long,
                                                max_fraction=gait_fallback.LONG_CYCLE_FRACTION if max_len is None else .5,
-                                               signals=leg_signals(source_frames), **detect)
+                                               signals=leg_signals(source_frames), wrap_pop=wrap_pop_on(source_frames, analysis), **detect)
                 except ValueError as second:
-                    raise ValueError(f"{second} (also with the gait fallback: window [{lo}, {hi_long}], "
-                                     f"scale drift {drift['drift']:+.1%}{', undone' if fallback['scale_undone'] else ''})") from first
+                    failed = ValueError(f"{second} (also with the gait fallback: window [{lo}, {hi_long}], "
+                                        f"scale drift {drift['drift']:+.1%}{', undone' if fallback['scale_undone'] else ''})")
+                    # The windows the wider search measured and refused go into the report's `cycle`.
+                    if hasattr(second, "diagnostics"):
+                        failed.diagnostics = second.diagnostics  # type: ignore[attr-defined]
+                    raise failed from first
         elif cycle_mode == "fixed":
             if start is None or length is None:
                 raise SystemExit("video-loop: --cycle fixed needs --start and --length")
@@ -1092,6 +1128,7 @@ def run_loop(
         jolt = repair_mod.measure_jolt(frames, facing=facing)
         reference = {"jolt_max": repair_mod.JOLT_REFERENCE, "head_step_max": repair_mod.HEAD_STEP_REFERENCE}
         warnings = repair_mod.jolt_verdict(jolt, **reference)
+        warnings += repair_mod.seam_pop_verdict(jolt, head_step_max=repair_mod.HEAD_STEP_REFERENCE)
         gated = repair != "off" and (jolt_max is not None or head_step_max is not None)
         over = repair_mod.jolt_verdict(jolt, jolt_max=jolt_max, head_step_max=head_step_max) if gated else []
         report_base["jolt"] = {**jolt, "reference": reference, "warnings": warnings,
@@ -1278,7 +1315,10 @@ def run(**kwargs: object) -> int:
         summary["motion_anchor"] = payload["motion_anchor"]
     if payload.get("jolt"):
         summary["jolt"] = {"index": payload["jolt"]["index"], "warnings": payload["jolt"]["warnings"],
-                           "head_x_step_max_pct": payload["jolt"]["head"].get("x", {}).get("step_max_pct")}
+                           "head_x_step_max_pct": payload["jolt"]["head"].get("x", {}).get("step_max_pct"),
+                           "seam_pop": payload["jolt"]["seam_pop"].get("pop")}
+    if payload["cycle"].get("seam_pop", {}).get("applied"):
+        summary["cycle"]["seam_pop"] = payload["cycle"]["seam_pop"]
     if payload.get("jump_repair", {}).get("replaced"):
         summary["jump_repair"] = {k: payload["jump_repair"][k] for k in ("replaced", "score_max_before", "score_max_after")}
     summary["strip"] = {k: payload["strip"][k] for k in ("path", "frames", "w", "h", "body_h", "delay_ms")}

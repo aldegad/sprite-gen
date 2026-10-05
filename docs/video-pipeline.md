@@ -690,6 +690,11 @@ was 17). `video-loop` therefore:
    ranking. `cycle.selection` records the half-open source-pair range, repeat
    error, normalised error, wrap penalty and combined score; `next_frame_distance`
    retains the single-frame diagnostic. Fixed cuts do not use this ranking.
+   The seam is an area measure: a thin part (a staff, a flag) that jumps at the wrap
+   changes few pixels and hardly moves it. `--anchor motion-auto` also weighs the top
+   of the silhouette at the wrap and chooses again when it jumps, and every walk or run
+   reports that jump and warns on it ([loop repair](loop-repair.md) section 3,
+   "The seam pop").
 
 This neighbourhood check measures temporal consistency, not anatomical leg
 identity. A consistently repeated malformed motion can still score well; visual
@@ -872,7 +877,9 @@ animation gates apply. `--cycle periodic` refuses a weak periodic candidate;
 `--cycle one-shot` forces return detection. Stationary clips, jitter and actions
 without an observed return fail loud. Selection and seam refusals write the requested
 report before exiting: `status = "failed"`, error, window, candidate start/length,
-seam numerator/denominator and repetition/return evidence. Undefined ratios are JSON
+seam numerator/denominator and repetition/return evidence. A walk or run refused by the
+`--anchor motion-auto` search names the windows it measured and refused, best first
+([loop review](loop-review.md), "The gait fallback"). Undefined ratios are JSON
 `null`; success records `status = "passed"`. `--cycle fixed --start N --length L` skips detection and cuts exactly
 those frames — for a clip that holds too few repeats for the periodicity gate but whose
 cycle is known (the 2026-09-09 reel jump: 2.3 hops in 145 frames). It is an explicit
