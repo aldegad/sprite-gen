@@ -89,7 +89,7 @@ def test_forced_wide_keeps_035_and_never_takes_height_from_a_jump() -> None:
     forced = canvas.profile_for("jump", shape="wide")
     assert forced is canvas.WIDE_OVERRIDE and forced is not canvas.STATE_CANVAS["attack"]
     assert (forced.shape, forced.headroom, forced.lead, forced.trail) == (canvas.SHAPE_WIDE, 0.35, 0.28, 0.2)
-    assert canvas.profile_for("walk", shape="wide") is forced
+    assert canvas.profile_for("idle", shape="wide") is forced  # a walk or run has its own wide row (no head-room)
     still = _figure(1024, 120, 1000)
     tall, tall_rep = canvas.pad_canvas(still, canvas.profile_for("jump"))
     wide, wide_rep = canvas.pad_canvas(still, forced)

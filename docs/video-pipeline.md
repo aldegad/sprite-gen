@@ -61,7 +61,12 @@ row with 35 % above, 28 % in front and 20 % behind — not the attack row. It la
 whose own row is another shape, a jump among them, and 35 % on 16:9 keeps about the room a
 jump's tall row leaves above a square or upright still. A still wider than it is tall keeps
 less above it under forced wide than under the tall row (a 3:2 still about three fifths),
-because there the wide canvas's height follows the still's width. Headroom is a fraction of the full canvas
+because there the wide canvas's height follows the still's width. A walk or run forced wide
+has a row of its own (`STATE_SHAPE_CANVAS`): the same 28 % in front and 20 % behind, and nothing
+above — its feet stay on the ground. Above a square still the jump's 35 % set the width as well
+(1575 rows on 16:9 are 2800 columns, 1216 of them in front of the still), and a walker that small
+in its frame is one a video model may reframe in its first frames (section 4, "A lead-in"). A
+square still forced wide as a walk is 1969 × 1108. Headroom is a fraction of the full canvas
 height; wide canvases grow both dimensions to preserve their ratio without shrinking
 the still. A still whose corners are not one flat colour
 is refused — a non-flat background cannot be extended without guessing.
@@ -587,10 +592,25 @@ survives untouched on (8, 162, 24), (5, 200, 10) or pure-key backgrounds. Choose
 away from the subject's hues ([chroma-alpha.md](chroma-alpha.md)) — that rule now covers
 the painted key's darker variants too.
 
-The report also carries per-frame alpha coverage and an **edge-contact check**: any
-opaque pixel in the top/left/right 4-pixel bands fails the run. Each contact pixel is
-classified by its *raw* colour — the declared key's hue family is **`residual`**
-(background the matte did not erase), anything else is **`subject`** — and the two
+Every keyed frame first has its **specks** erased (`drop_specks`): a piece of the frame — its
+opaque pixels, corners joining them — under 1 % of the frame's largest piece, the body
+(`SPECK_MIN_FRACTION`, at least 8 px), and more than a tenth of the body's height away from it
+(`SPECK_APART`). That is a fleck the model drew drifting across the background, which survived the
+matte. Small pieces near the body stay: the outline's loose pixels, a shadow drawn under a shoe,
+a part of a shoe the matte cut loose. A frame with no speck is not written again; each report
+row says how many its frame lost (`specks`) and the report totals them (`specks.dropped`,
+`specks.frames`). Without this a fleck that crossed an edge band in one frame was read as the
+subject framed too tight, and `--anchor motion-auto`, which never cleans a frame, kept it in
+the loop's cells and widened them to reach it.
+
+The report also carries per-frame alpha coverage and an **edge-contact check**, read after the
+specks are gone: any opaque pixel in the top/left/right 4-pixel bands fails the run. Each contact pixel is
+classified by its *raw* colour and the piece of the keyed frame it is in (its opaque pixels, corners
+joining them, as the specks are read): the declared key's hue family in a piece with nothing else in
+it is **`residual`** (background the matte did not erase); anything else is **`subject`** — a
+key-tinted pixel joined to the subject included, since a body that reaches a band brings its
+antialiased rim, the key blended into it, there first, and on a frame where only that rim is in the
+band, read by its colour alone, the clip was refused as leftover background. The two
 defects fail with different messages: residual-only contact points at `video-canvas`
 (normalize the base still and regenerate); subject contact means the model framed too
 tight and points at a taller/wider canvas. When both occur the message names both.
@@ -684,7 +704,8 @@ gate. The state table now routes `cheer`, `wave` and `celebrate` to the wide can
 `video-set --shape wide` forces it for every state of a batch when the costume is the
 reason. The same `--shape` is what `video-canvas` already took for a single still. The
 forced canvas is the forced-wide row (35 % above), so a jump in that batch keeps its
-head-room; an attack in it gets that row too, not its own 20 %.
+head-room; an attack in it gets that row too, not its own 20 %. A walk or run gets its own wide
+row, with nothing above (section 1).
 
 ## 4. Loop — period first, seam second, then the gait floor
 
@@ -837,6 +858,29 @@ the frames as filmed, as before 2.24.0. When the hold came in (2.24.0, read off 
 measured on one front catwalk filmed from its first frame (+2.0 % over 3 s): the engine's seam
 ratio of the cut went from 1.44 to 1.19.
 
+**A lead-in is left out of the search** (walk and run, `--cycle auto` or `periodic`). A video
+model may reframe a small subject in a clip's first frames: the body grows (or shrinks) by a third
+or more in under half a second, then walks at its new size. Searched with those frames, the
+motion analysis reads the reframing as the clip's motion and the walk's repeat is lost; the gait
+fallback, which then scaled by a line through the clip, read the step as a steady growth and
+shrank the walk. So the clip's sizes are read one cycle on (`gait_fallback.cycle_drift`, the
+hold's model, a median over the whole clip). A clip opens on a lead-in when its first frame's
+height and size (the square root of the frame's summed coverage) are both off that model by 10 % or
+more, the same way (`LEAD_IN_MIN`): a reframing scales the whole body and moves both, a pose moves
+one — an item held up from the second frame on makes the first frame shorter and no lighter, legs
+spread in a side step add size and no height. The lead-in (`gait_fallback.lead_in`) runs on while
+the height stays that far off, that way; a walk's own frames stray from the model by a few percent. The search — the size hold, the motion
+analysis, the cycle search and the gait fallback — reads the clip after it as a clip of its own,
+its window included. What it finds, and what it refuses, is said in the clip's own frame numbers:
+every `start` and `context_pair_range` in the report's `cycle`, refused candidates too, so a cut
+taken again from them (`--cycle fixed --start`) is the frames they name. The report records it on
+every walk and run (`lead_in`: `frames`, 0 for none; `height_change`, the walk's height where the
+lead-in ends over the first frame's, less 1; `first_off` and `first_off_size`; `search_from`, the
+first frame the search read). A cut the caller names (`fixed`, `pinned`) is the caller's frames, lead-in or not. A clip
+too short to read its size one cycle on has no lead-in (`why`). On a synthetic walker filmed at
+0.63 of its size and reframed over 9 frames, the search as filmed found no cycle, nor did the
+fallback; after its 5-frame lead-in it cuts the 24-frame walk (`tests/video/test_edge_speck_lead_in.py`).
+
 **Nothing is cut when a frame is scaled up.** A clip that shrinks is scaled up about its feet,
 and when the feet also rose in the frame (a back walk going away toward the horizon) the crown
 lands above the frame. Every frame is first widened by the room the furthest one reaches past
@@ -946,8 +990,23 @@ Outputs:
   character size (`--strip-height` stays the cap). With a target, the standing height is
   measured on the **clip's first frame** instead — the base still's pose, which every clip
   starts from — because the tallest grounded frame of an attack is its windup with the weapon
-  overhead, and scaling that to N shrank the character against its walk. The sidecar says
-  which (`body_ref`: `first-frame` or `tallest-grounded`) and records `body_src_h` and `scale`. `delay_ms = cycle_seconds / frames`, so a
+  overhead, and scaling that to N shrank the character against its walk. A video model may
+  reframe the subject after the first frame — a lead-in (section 4), or less — and then the walk
+  is filmed at another size than that pose: read on the first frame, filmed small, the standing
+  height scaled the walk up, a lead-in's into the cell cap. So a walk or run cut for a
+  `--body-height` has its size read against the first frame's (`gait_fallback.size_change`) on
+  three lengths at once: the height, the mass (the square root of the summed coverage) and the
+  breadth (the widest row of the upper half of the body), each the middle of the cut's frames
+  over the first frame's. A pose moves them apart — a walk is shorter than its standing pose and
+  broader, an item held up is taller and no heavier — and a reframing moves all three the same
+  way, so the cut's change of size is the least of the three when all go one way, and none when
+  they part. It is the cautious reading: a reframing smaller than what the pose itself moves one
+  of the lengths by, the other way, stays a pose (a small shrink under a walk's broader body,
+  for one). At 1 % or more (`SIZE_HOLD_MIN`) the standing height is read on the cut's own first
+  frame (`body_ref: cut-first-frame`, and `body_ref_frame`, the clip frame it was read on). The
+  report records the reading (`cut_size`: `change`, `height`, `mass`, `breadth`, `min`). The
+  sidecar says which frame (`body_ref`: `first-frame`, `cut-first-frame` or
+  `tallest-grounded`) and records `body_src_h` and `scale`. `delay_ms = cycle_seconds / frames`, so a
   24 fps clip yields 41.67 ms cells; render at 24 fps to keep one cell per frame
   (a 30 fps render of 24 fps cells is a 5:4 pulldown and judders).
 - **Cells** are scaled with their coverage and their colour taken apart (`resize_cell`; a cell

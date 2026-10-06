@@ -408,17 +408,24 @@ def color_dist(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
 
 
 def test_edge_contact_split_reads_grok_magenta_residue_as_residual() -> None:
-    """`video-frames` edge classification uses the same border rule: leftover Grok magenta is residue, hot pink is subject."""
+    """`video-frames` edge classification uses the same border rule: leftover Grok magenta is residue, hot pink is subject.
+    A residue is a piece of the keyed frame with nothing but the key's colour in it; joined to the subject, the same
+    pixels are its rim."""
     from sprite_gen.video.frames import classify_edge_contact
 
     raw = Image.new("RGB", (40, 40), (110, 70, 50))
     keyed = Image.new("RGBA", (40, 40), (110, 70, 50, 255))
     for x in range(0, 10):
         raw.putpixel((x, 0), (216, 46, 147))
-        raw.putpixel((x, 1), HOT_PINK)
+        raw.putpixel((x, 2), HOT_PINK)
+    joined = classify_edge_contact(raw, keyed, MAGENTA)
+    assert joined == {"subject": 40 * 40 - (40 - 4 * 2) * (40 - 4), "residual": 0}  # every band pixel is opaque subject
+    for x in range(0, 11):  # a transparent row and column cut the residue off
+        keyed.putpixel((x, 1), (0, 0, 0, 0))
+    keyed.putpixel((10, 0), (0, 0, 0, 0))
     split = classify_edge_contact(raw, keyed, MAGENTA)
     assert split["residual"] == 10
-    assert split["subject"] == 40 * 40 - 10 - (40 - 4 * 2) * (40 - 4)  # every other band pixel is opaque subject
+    assert split["subject"] == 40 * 40 - 10 - 12 - (40 - 4 * 2) * (40 - 4)  # every other opaque band pixel is subject
 
 
 # --- real stills (opt-in) ---------------------------------------------------------------

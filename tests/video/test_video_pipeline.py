@@ -472,7 +472,7 @@ def test_drop_specks_erases_detached_slivers_only() -> None:
             im.putpixel((x, y), (200, 0, 0, 255))
     im.putpixel((0, 0), (200, 0, 0, 255))  # a 1-px speck
     im.putpixel((1, 0), (200, 0, 0, 255))
-    out, dropped = loop_mod._drop_specks(im, 0.01)
+    out, dropped = frames_mod.drop_specks(im, alpha_over=16, diagonal=False, apart=0)  # the loop cut's reading
     assert dropped == 1 and out.getpixel((0, 0))[3] == 0 and out.getpixel((20, 20))[3] == 255
 
 

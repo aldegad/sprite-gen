@@ -24,7 +24,24 @@ clip: a clip that starts from a standing pose and settles into the walk over its
 reads that one change of pose as a body that shrinks all the way. The same pose a cycle later
 is the same size unless the body really grows or shrinks, so the hold compares each frame's
 height with the frames whole pose-matched lags later and takes the middle of those changes; the
-few frames of the first pose do not move a median of the rest.
+few frames of the first pose do not move a median of the rest. The second search scales back by
+the same reading, so both hold one size model.
+
+A clip can also open on a **lead-in**: the video model reframes a small subject in its first
+frames, so the body grows (or shrinks) by a third or more in under half a second and then walks
+at its new size. The one-cycle-on model, a median over the whole clip, holds the walk's size. A
+clip opens on a lead-in (`lead_in`) when its first frame's height and size are both off that model
+by `LEAD_IN_MIN` or more, the same way: a reframing scales the whole body, so it moves both, and a
+pose moves one — an item held up from the second frame on lengthens the body and adds next to
+nothing to its mass, legs spread in a side step add mass and no height. The lead-in runs on while
+the height stays that far off, that way; the height is the steadier of the two through a walk. A
+walk's own frames stray from the model by a few percent; a reframing starts tens of percent off it.
+
+A reframing too small to open a lead-in still films the walk at another size than the clip's first
+frame, which is where `--body-height` reads the standing height. `size_change` reads how much larger
+(or smaller) a cut is filmed than that frame, on three lengths of the body at once (`body_size`: its
+height, its mass, the breadth of its upper half), and counts only what all three agree on: a pose
+moves them apart, a reframing moves them together.
 """
 from __future__ import annotations
 
@@ -36,14 +53,22 @@ from sprite_gen._deps import np
 from sprite_gen.util import lsq
 from sprite_gen.util.resample import transform_cell
 
-# Height change over the clip, from the fitted trend, at which the frames are scaled back.
-# Nine in ten walk clips stay under it (median 0.5 %): their change is a head bob and hair.
+# Height change over the clip, read one cycle on (`cycle_drift`), at which the second search scales
+# the frames back. Nine in ten walk clips stay under it (median 0.5 %): their change is a head bob and hair.
 SCALE_DRIFT_MIN = 0.03
 # Height change over the clip at which a walk or run is held at its first frame's size before the
 # first cycle search (`video-loop --size-hold auto`). Below it the fitted trend is a head bob and
 # hair; above it a clip filmed from its first frame only grows or shrinks enough that the loop's
 # last frame is a different size from its first, and the loop pops at the wrap.
 SIZE_HOLD_MIN = 0.01
+# How far off the one-cycle-on model a frame is when it is not yet walking at the clip's size: a first frame
+# whose height and size are both this far off, the same way, opens a lead-in, and the frames whose height
+# stays this far off, that way, are in it (`lead_in`).
+LEAD_IN_MIN = 0.1
+# The part of the body, from its crown down, whose widest row is its breadth (`body_size`): the head, the
+# shoulders and the arms down to the hands — where a walk swings its arms, so a walking pose is broader
+# than the standing one it is shorter than, and the two lengths part on a pose.
+BREADTH_PART = 0.5
 # The longest cycle the second search accepts, as a share of the clip and in seconds.
 LONG_CYCLE_FRACTION = 0.6
 LONG_CYCLE_SECONDS = 2.0
@@ -162,6 +187,75 @@ def cycle_drift(frames: list[Image.Image], *, min_lag: int, max_lag: int) -> dic
             "pose_match": round(profile[lag] / mean, 3) if mean > 0 else None,
             "drift": round(float(rate ** (n - 1) - 1), 4), "height_first_px": round(float(height[0]), 2),
             "height_last_px": round(float(height[-1]), 2), "height": height}
+
+
+def lead_in(frames: list[Image.Image], *, min_lag: int, max_lag: int) -> dict:
+    """The frames the clip opens on before its subject walks at the clip's size. There are some when the
+    first frame's height (`coverage_heights`) and size (the square root of its summed coverage) are
+    both off the one-cycle-on model (`cycle_drift`; its growth, the size's own level) by LEAD_IN_MIN
+    or more, the same way; from the first, every frame whose height stays that far off, that way, is
+    one. `frames` is how many (0: none), `height_change` the model's height where the lead-in ends
+    over the first frame's, less 1 (+0.5: the body grew by half), `first_off` and `first_off_size`
+    how far the first frame's height and size are off the model. A frame with no subject ends it. A
+    clip too short to show a cycle twice has no model to read it on: no lead-in, and `why` says so."""
+    heights = coverage_heights(frames)
+    measured = cycle_drift(frames, min_lag=min_lag, max_lag=max_lag)
+    base = {"min": LEAD_IN_MIN, "method": "one-cycle-on"}
+    if measured["lag"] is None:
+        return {"frames": 0, "height_change": 0.0, "first_off": None, "first_off_size": None, **base,
+                "why": "no lag in range: the clip is too short to read its size one cycle on"}
+    model = measured["height"]
+    growth = model / model[0]
+    sizes = np.sqrt([float(np.asarray(frame.getchannel("A"), np.float64).sum()) / 255 for frame in frames])
+    off = heights / model - 1
+    off_size = sizes / (float(np.median(sizes / growth)) * growth) - 1
+    count = 0
+    way = np.sign(off[0]) if np.isfinite(off[0]) else 0.0
+    if abs(off[0]) >= LEAD_IN_MIN and abs(off_size[0]) >= LEAD_IN_MIN and np.sign(off_size[0]) == way:
+        while count < len(frames) - 1 and np.isfinite(off[count]) and way * off[count] >= LEAD_IN_MIN:
+            count += 1
+    change = float(model[count] / heights[0] - 1) if count and heights[0] > 0 else 0.0
+    return {"frames": count, "height_change": round(change, 4),
+            "first_off": round(float(off[0]), 4) if np.isfinite(off[0]) else None,
+            "first_off_size": round(float(off_size[0]), 4), **base}
+
+
+def body_size(frame: Image.Image) -> tuple[float, float, float] | None:
+    """Three lengths of the subject as drawn, each of which a frame filmed 5 % larger reads 5 % longer:
+    its height (its rows, as `loop.standing_height` reads them), its mass (the square root of its summed
+    coverage) and its breadth (the widest row, by summed coverage, of its upper `BREADTH_PART`). A frame
+    with no subject is None."""
+    alpha = np.asarray(frame.getchannel("A"), np.float64)
+    rows = np.nonzero((alpha >= 8).any(axis=1))[0]
+    if not len(rows):
+        return None
+    top, height = int(rows[0]), int(rows[-1]) + 1 - int(rows[0])
+    coverage = alpha.sum(axis=1) / 255
+    upper = coverage[top: top + max(1, round(BREADTH_PART * height))]
+    return float(height), float(np.sqrt(coverage.sum())), float(upper.max())
+
+
+def size_change(first: tuple[float, float, float] | None, cut: list[tuple[float, float, float] | None]) -> dict:
+    """How much larger the cut is filmed than the clip's first frame (`body_size` of each): +0.07 is 7 %
+    larger, 0 the same size.
+
+    The first frame is the standing pose and the cut is the walk, so every length differs between them by
+    the pose alone: a walk is shorter than its standing pose (knees bend) and broader (arms swing, legs
+    part), and its mass goes either way. A reframing scales the body whole, so it moves the height, the
+    mass and the breadth by the same part, the same way. Each length of the cut is the middle of its
+    frames' (one frame's legs are apart, the next one's together) over the first frame's, less 1
+    (`height`, `mass`, `breadth`); `change` is the least of the three when all go one way, and 0 when
+    they part — what cannot be the pose, so a reframing smaller than what the pose moves one length by,
+    the other way, reads 0 as well. A first frame, or a cut, with no subject reads 0, and `why` says so."""
+    base = {"min": SIZE_HOLD_MIN, "method": "least-of-height-mass-breadth"}
+    sizes = [size for size in cut if size is not None]
+    if first is None or not sizes:
+        return {"change": 0.0, "height": None, "mass": None, "breadth": None, **base,
+                "why": "no subject in the clip's first frame" if first is None else "no subject in the cut"}
+    off = np.median(np.asarray(sizes, np.float64), axis=0) / np.asarray(first, np.float64) - 1
+    change = float(np.sign(off[0]) * np.abs(off).min()) if (off > 0).all() or (off < 0).all() else 0.0
+    return {"change": round(change, 4), "height": round(float(off[0]), 4), "mass": round(float(off[1]), 4),
+            "breadth": round(float(off[2]), 4), **base}
 
 
 def undo_padding(frames: list[Image.Image], measured: dict) -> tuple[int, int, int, int]:
