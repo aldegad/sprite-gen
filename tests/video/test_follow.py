@@ -141,6 +141,18 @@ def small_region(loop_dir, share):
     return (cx, cy, rx, share*reach*math.pi/2)
 
 
+def head_region(loop_dir, share):
+    """A round region on the crown, clear of the chest, whose radius folds at `share` of the default gain.
+
+    On the head's top edge, so its move changes pixels: inside the flat head nothing would."""
+    radius = small_region(loop_dir, share)[3]
+    meta = json.loads((loop_dir/'walk.strip.json').read_text())
+    first = cells(loop_dir/'walk.strip.png', meta)[0]
+    head = np.all(np.abs(first[..., :3].astype(int)-(210, 150, 60)) < 40, axis=-1) & (first[..., 3] > 200)
+    ys, xs = np.nonzero(head)
+    return ((xs.min()+xs.max())/2, float(ys.min()), radius, radius)
+
+
 def folds_nowhere(rec, meta):
     """Every cell's picture runs forwards: along the move, the sample point never turns back."""
     h, w = meta['h'], meta['w']
@@ -148,9 +160,11 @@ def folds_nowhere(rec, meta):
     worst = 0.0
     for dx, dy in zip(rec['dx_px'], rec['dy_px']):
         weight = np.zeros((h, w))
-        for cx, cy, rx, ry in rec['regions']:
+        for (cx, cy, rx, ry), entry in zip(rec['regions'], rec['fold']['regions']):
+            # A region that took a gain of its own moves by that share of the strip's move.
+            share = entry.get('gain', rec['gain'])/rec['gain']
             r = np.sqrt(((xx-cx)/rx)**2+((yy-cy)/ry)**2)
-            weight = np.maximum(weight, np.where(r < 1, np.cos(r*math.pi/2)**2, 0))
+            weight = np.maximum(weight, share*np.where(r < 1, np.cos(r*math.pi/2)**2, 0))
         gy, gx = np.gradient(weight)
         worst = max(worst, float(np.max(dx*gx+dy*gy)))
     return worst < 1, worst
@@ -184,15 +198,109 @@ def test_lower_takes_the_largest_gain_that_does_not_fold(loop_dir):
         follow.follow_loop(loop_dir, [region], gain=rec['gain']+follow.GAIN_STEP)
 
 
-def test_the_smallest_region_sets_the_one_gain(loop_dir):
+def moved_alone(loop_dir, region, **kw):
+    """The strip with `region` moved by itself, and the pixels that moved."""
+    follow.follow_loop(loop_dir, [region], on_fold='lower', **kw)
+    meta = json.loads((loop_dir/'walk.strip.json').read_text())
+    strip = np.asarray(Image.open(loop_dir/'walk.strip.png').convert('RGBA'))
+    source = np.asarray(Image.open(loop_dir/follow.SOURCE).convert('RGBA'))
+    return strip, (strip != source).any(axis=-1), meta['follow']
+
+
+def test_each_region_takes_its_own_gain(loop_dir):
+    small = head_region(loop_dir, 0.7)  # folds at 1.75
+    chest = chest_region(loop_dir)  # does not fold at the default gain
+    little_alone, little_moved, alone = moved_alone(loop_dir, small)
+    chest_alone, chest_moved, chest_rec = moved_alone(loop_dir, chest)
+    assert alone['fold']['lowered'] is True and follow.GAIN_MEASURED <= alone['gain'] < follow.GAIN_DEFAULT
+    assert little_moved.any() and chest_moved.any() and not (little_moved & chest_moved).any()
+    both = follow.follow_loop(loop_dir, [chest, small], on_fold='lower')
+    large, little = both['fold']['regions']
+    # The chest moves at the gain asked for; the small region at the gain it takes alone.
+    assert both['gain'] == large['gain'] == both['gain_requested'] == follow.GAIN_DEFAULT
+    assert little['gain'] == alone['gain'] and large['held'] is little['held'] is False
+    assert both['fold']['lowered'] is True
+    assert large['gain_limit'] > follow.GAIN_DEFAULT > little['gain_limit']
+    assert little['ratio'] == alone['fold']['ratio'] and 0.99 <= little['ratio'] < 1 and large['ratio'] < 1
+    assert both['fold']['ratio'] == max(large['ratio'], little['ratio'])
+    # The strip's move is the chest's, as when the chest moves alone.
+    assert (both['dx_px'], both['dy_px'], both['reach_px']) == (chest_rec['dx_px'], chest_rec['dy_px'], chest_rec['reach_px'])
+    meta = json.loads((loop_dir/'walk.strip.json').read_text())
+    strip = np.asarray(Image.open(loop_dir/'walk.strip.png').convert('RGBA'))
+    source = np.asarray(Image.open(loop_dir/follow.SOURCE).convert('RGBA'))
+    # Each region's pixels are as when it moves alone at its own gain; nothing else changed.
+    assert np.array_equal(strip[little_moved], little_alone[little_moved])
+    assert np.array_equal(strip[chest_moved], chest_alone[chest_moved])
+    assert np.array_equal(strip[~(little_moved | chest_moved)], source[~(little_moved | chest_moved)])
+    ok, worst = folds_nowhere(meta['follow'], meta)
+    assert ok, worst
+
+
+def test_overlapping_regions_of_different_gains_fold_nowhere(loop_dir):
+    # A small region on the chest takes a lower gain than a large one over it: where they overlap the
+    # larger move wins, and the move is nowhere steeper than either region's own.
     small = small_region(loop_dir, 0.7)
     cx, cy, rx, ry = chest_region(loop_dir)
-    alone = follow.follow_loop(loop_dir, [small], on_fold='lower')
-    both = follow.follow_loop(loop_dir, [(cx, cy+30, rx, ry), small], on_fold='lower')
-    assert both['gain'] == alone['gain']
-    large, little = both['fold']['regions']
-    assert large['gain_limit'] > follow.GAIN_DEFAULT > little['gain_limit']
-    assert large['ratio'] < little['ratio'] < 1
+    result = follow.follow_loop(loop_dir, [(cx, cy+6, rx+6, ry+6), small], on_fold='lower')
+    large, little = result['fold']['regions']
+    assert large['gain'] == follow.GAIN_DEFAULT > little['gain'] >= follow.GAIN_MEASURED
+    meta = json.loads((loop_dir/'walk.strip.json').read_text())
+    ok, worst = folds_nowhere(meta['follow'], meta)
+    assert ok, worst
+
+
+def test_a_region_too_small_to_move_is_held_and_the_rest_move(loop_dir):
+    # One gain for the strip, set by its smallest region, refused the whole strip for a region under the
+    # mass as measured: the chest did not move because of an ear.
+    chest = chest_region(loop_dir)
+    ear = head_region(loop_dir, 0.3)  # folds at 0.75: under the mass as measured
+    chest_alone, chest_moved, _ = moved_alone(loop_dir, chest)
+    result = follow.follow_loop(loop_dir, [chest, ear], on_fold='lower')
+    meta = json.loads((loop_dir/'walk.strip.json').read_text())
+    rec = meta['follow']
+    moving, held = rec['fold']['regions']
+    assert held['held'] is True and held['gain'] == 0 and held['ratio'] == 0 and held['gain_limit'] < follow.GAIN_MEASURED
+    assert moving['held'] is False and moving['gain'] == rec['gain'] == follow.GAIN_DEFAULT
+    assert rec['fold']['lowered'] is True and result['gain'] == rec['gain']
+    # The held region does not move: the strip is the chest's alone, byte for byte.
+    assert np.array_equal(np.asarray(Image.open(loop_dir/'walk.strip.png').convert('RGBA')), chest_alone)
+    # A gain asked for under 1 that does not fold the chest still moves it; only the ear is held.
+    low = follow.follow_loop(loop_dir, [chest, ear], gain=0.9, on_fold='lower')
+    assert [e['gain'] for e in low['fold']['regions']] == [0.9, 0] and [e['held'] for e in low['fold']['regions']] == [False, True]
+    # Refusing is still the default: the ear folds at the gain asked for.
+    with pytest.raises(SystemExit, match='folds a region of radius'):
+        follow.follow_loop(loop_dir, [chest, ear])
+
+
+def test_a_strip_whose_every_region_is_held_is_refused(loop_dir):
+    ear, other = head_region(loop_dir, 0.3), small_region(loop_dir, 0.2)
+    as_cut = (loop_dir/'walk.strip.png').read_bytes()
+    meta = (loop_dir/'walk.strip.json').read_text()
+    with pytest.raises(SystemExit) as refused:
+        follow.follow_loop(loop_dir, [other, ear], on_fold='lower')
+    # Named by the largest region, the last to fold: if it is held, so is every other.
+    assert re.fullmatch(rf'video-follow: a move of \d+\.\d px folds a region of radius {ear[3]:g} px over itself '
+                        r'\(the largest of 2 regions: every one folds\), and --on-fold lower would have to go under --gain 1 '
+                        r'\(the mass as measured moves \d+\.\d px; the largest gain that does not fold is 0\.\d+\); give the region larger radii',
+                        str(refused.value))
+    assert (loop_dir/'walk.strip.png').read_bytes() == as_cut
+    assert (loop_dir/'walk.strip.json').read_text() == meta
+
+
+def test_regions_that_take_one_gain_are_written_as_one_gain(loop_dir):
+    # Two regions of the same smaller radius fold at the same gain: the record is the one-gain record,
+    # with no gain of its own per region, and the strip is the one that gain asked for gives.
+    a, b = small_region(loop_dir, 0.7), head_region(loop_dir, 0.7)
+    result = follow.follow_loop(loop_dir, [a, b], on_fold='lower')
+    rec = json.loads((loop_dir/'walk.strip.json').read_text())['follow']
+    assert rec['fold']['lowered'] is True and follow.GAIN_MEASURED <= rec['gain'] < follow.GAIN_DEFAULT
+    assert [sorted(e) for e in rec['fold']['regions']] == [['gain_limit', 'radius_px', 'ratio']]*2
+    assert sorted(rec) == ['body_bob_px', 'body_px', 'dx_px', 'dy_px', 'fold', 'freq_hz', 'gain', 'gain_requested', 'gif',
+                           'harmonics', 'on_fold', 'reach_px', 'regions', 'source', 'webp', 'zeta']
+    assert sorted(rec['fold']) == ['lowered', 'ratio', 'reach_per_gain_px', 'reach_requested_px', 'regions']
+    lowered = (loop_dir/'walk.strip.png').read_bytes()
+    follow.follow_loop(loop_dir, [a, b], gain=result['gain'])
+    assert (loop_dir/'walk.strip.png').read_bytes() == lowered
 
 
 def test_lower_does_not_go_under_the_mass_as_measured(loop_dir):
@@ -230,9 +338,24 @@ def test_the_command_takes_on_fold_and_says_what_it_lowered_to(loop_dir, capsys)
     out, err = capsys.readouterr()
     printed = json.loads(out)
     assert printed['gain_requested'] == 2.5 and printed['on_fold'] == 'lower' and 1 <= printed['gain'] < 2.5
-    assert f"lowered to --gain {printed['gain']:g}" in err
+    assert f"lowered to --gain {printed['gain']:g}" in err and 'region_gains' not in printed
     with pytest.raises(SystemExit, match='unknown --on-fold'):
         follow.follow_loop(loop_dir, [region], on_fold='quietly')
+
+
+def test_the_command_names_the_regions_it_lowered_and_held(loop_dir, capsys):
+    regions = [chest_region(loop_dir), small_region(loop_dir, 0.7), head_region(loop_dir, 0.3)]
+    texts = [','.join(f'{v:.3f}' for v in r) for r in regions]
+    names = ['--region '+','.join(f'{float(v):g}' for v in t.split(',')) for t in texts]
+    capsys.readouterr()
+    assert follow.main(['--loop-dir', str(loop_dir), '--on-fold', 'lower', *(x for t in texts for x in ('--region', t))]) == 0
+    out, err = capsys.readouterr()
+    printed = json.loads(out)
+    chest, small, ear = printed['region_gains']
+    assert printed['gain'] == chest == 2.5 and 1 <= small < 2.5 and ear == 0
+    lowered, held = err.strip().splitlines()
+    assert lowered.startswith(f'video-follow: --gain 2.5 folds {names[1]} (a move of ') and lowered.endswith(f'lowered to --gain {small:g} for it')
+    assert held.startswith(f'video-follow: {names[2]} folds at --gain 0.') and held.endswith('under 1 (the mass as measured): it is held, and does not move')
 
 
 def test_bad_regions_are_refused(loop_dir):
