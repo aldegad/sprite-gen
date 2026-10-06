@@ -17,8 +17,9 @@ with `tests/fixtures/prompts-v2.22.0.json.gz`, drawn from the 2.22.0 tag's sourc
 `tests/gen/prompt_freeze_table.py`. The notes and warnings printed beside a prompt are not part of
 that comparison. A change to these prompts is made only after a before-and-after comparison on the
 app's default clip model shows it is better. Such a change is listed in the test (`MEASURED`) with the
-words 2.22.0 sent, and every frozen prompt that holds them is compared with the new words in their
-place: nothing else in it may move. So far: the two diagonal stills' view sentences
+words 2.22.0 sent and the words measured in their place, and every frozen prompt that holds the old
+words is compared with the measured ones: nothing else in it may move, and the measured words cannot
+change again without a new comparison. So far: the two diagonal stills' view sentences
 (`STILL_VIEW_TEXT["front_diagonal"]`, `["back_diagonal"]`), compared on the still model
 ([video-pipeline](video-pipeline.md#2-clip--sprite-gen-video)).
 

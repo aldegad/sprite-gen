@@ -12,8 +12,9 @@ stderr and `extra.prompt_notes`, `video-prompt` `warnings` and `notes`, `video-s
 part of the freeze and may differ.
 
 A sentence changed on purpose since, after a before-and-after comparison on the app's own model, is listed in
-`MEASURED` with the words 2.22.0 sent: a frozen prompt that holds it is compared with the new sentence in its
-place, and nothing else in that prompt, or in any other, may move.
+`MEASURED` with the words 2.22.0 sent and the words that were measured in their place: a frozen prompt that holds
+the old words is compared with the measured ones, and nothing else in that prompt, or in any other, may move. A
+measured sentence changed again without a new comparison fails here like any other prompt.
 """
 
 from __future__ import annotations
@@ -24,7 +25,6 @@ from pathlib import Path
 import pytest
 
 import prompt_freeze_table as table
-from sprite_gen.video import batch
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "prompts-v2.22.0.json.gz"
 GROUPS = ("clip", "video-prompt", "start-still", "still", "video-side")
@@ -43,8 +43,33 @@ DIAGONAL_STILLS_2_22_0 = {
         "shoulder, and the feet pointing diagonally up and to the {facing} so the backs of the shoes face the viewer at an angle"
     ),
 }
-MEASURED = tuple((was.format(facing=facing), batch.still_view_text(view, facing))
-                 for view, was in DIAGONAL_STILLS_2_22_0.items() for facing in ("right", "left"))
+# The words measured in their place: `{other}` is the side opposite `{facing}`.
+DIAGONAL_STILLS_MEASURED = {
+    "front_diagonal": (
+        "seen from a three-quarter front angle: the whole body turned about 45 degrees to the {facing}, halfway between "
+        "facing the viewer and facing {facing}, not a front view with only the head turned: the chest and hips turn as far "
+        "as the head, so the middle of the chest and of the waist sits about three quarters of the way across the body "
+        "toward its {facing} edge, the shoulder and the side of the chest on the {other} of the picture, nearer the "
+        "viewer, are seen broad, the shoulder and arm on the {facing} of the picture are partly hidden behind the body and "
+        "the chest looks narrower than from the front, and the legs stand at the same angle, the far foot on the {facing} "
+        "of the picture set a little higher and partly behind the near leg, both toes pointing toward the lower {facing}, "
+        "the face looking the same way as the chest, even when a reference picture shows the character from another angle"
+    ),
+    "back_diagonal": (
+        "seen from a three-quarter back angle: the whole body turned about 45 degrees away from the viewer toward the upper "
+        "{facing}, halfway between facing away and facing {facing}, not a back view with only the head turned: the back and "
+        "hips turn as far as the head, so the middle of the back and of the waist sits about three quarters of the way "
+        "across the body toward its {other} edge, the shoulder and the side of the body on the {facing} of the picture, "
+        "nearer the viewer, are seen broad, the shoulder and arm on the {other} of the picture are partly hidden behind the "
+        "body and the back looks narrower than from straight behind, and the legs stand at the same angle, the far foot on "
+        "the {other} of the picture set a little higher and partly behind the near leg, the feet pointing diagonally up and "
+        "to the {facing} so the backs of the shoes face the viewer at an angle, the face hidden and not looking back over "
+        "the shoulder, even when a reference picture shows the character from another angle"
+    ),
+}
+MEASURED = tuple((was.format(facing=facing), DIAGONAL_STILLS_MEASURED[view].format(facing=facing, other=other))
+                 for view, was in DIAGONAL_STILLS_2_22_0.items()
+                 for facing, other in (("right", "left"), ("left", "right")))
 
 
 def _as_measured(prompt: str) -> str:
