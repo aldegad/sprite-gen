@@ -574,10 +574,63 @@ def test_a_diagonal_still_is_told_how_far_to_turn() -> None:
     at the image's own angle. A side still draws with the clip's view sentence."""
     front = batch_mod.still_view_text("front_diagonal")
     back = batch_mod.still_view_text("back_diagonal")
-    assert "about 45 degrees to the right" in front and "feet pointing toward the lower right" in front
+    assert "about 45 degrees to the right" in front and "toes pointing toward the lower right" in front
     assert "away from the viewer toward the upper right" in back and "not looking back over the" in back
     assert "turned exactly as in the image" not in front + back
     assert batch_mod.still_view_text("side", "left") == batch_mod.VIEW_TEXT["side"].format(facing="left")
+
+
+@pytest.mark.parametrize("facing", ["right", "left"])
+def test_a_front_diagonal_still_turns_its_body_and_legs_not_only_its_head(facing) -> None:
+    """Regression: the turn, the head and the shoes alone are met by a front-diagonal still that turns only its head,
+    the chest and the legs standing as from the front. The sentence says what that angle shows: the chest and hips
+    turn with the head, the middle of the chest three quarters of the way toward the far edge, the near side broad
+    and the far shoulder and arm partly hidden, the legs at that angle with the far foot higher and behind, and not
+    to follow a reference picture's angle. Turned left, it is the same sentence with the two sides swapped."""
+    other = "left" if facing == "right" else "right"
+    still = batch_mod.still_view_text("front_diagonal", facing)
+    assert still.startswith(f"seen from a three-quarter front angle: the whole body turned about 45 degrees to the {facing},")
+    assert "not a front view with only the head turned: the chest and hips turn as far as the head" in still
+    assert ("the middle of the chest and of the waist sits about three quarters of the way across the body toward its "
+            f"{facing} edge") in still
+    assert f"the shoulder and the side of the chest on the {other} of the picture, nearer the viewer, are seen broad" in still
+    assert f"the shoulder and arm on the {facing} of the picture are partly hidden behind the body" in still
+    assert "the chest looks narrower than from the front" in still
+    assert (f"the legs stand at the same angle, the far foot on the {facing} of the picture set a little higher and "
+            "partly behind the near leg") in still
+    assert f"both toes pointing toward the lower {facing}" in still
+    assert still.endswith("the face looking the same way as the chest, even when a reference picture shows the "
+                          "character from another angle")
+    assert "{" not in still and still.count(other) == 1
+    swapped = still.replace(facing, "\0").replace(other, facing).replace("\0", other)
+    assert batch_mod.still_view_text("front_diagonal", other) == swapped
+    # The clip keeps pointing at the image: it starts from the still already drawn at that angle.
+    assert batch_mod.VIEW_TEXT["front_diagonal"] == "seen from a three-quarter front angle, turned exactly as in the image"
+    assert still not in batch_mod.build_prompt("front_diagonal", "walk", "The knight", facing=facing)
+
+
+@pytest.mark.parametrize("facing", ["right", "left"])
+def test_a_back_diagonal_still_turns_its_back_and_legs_not_only_its_head(facing) -> None:
+    """Regression: the back diagonal said the same few words, which a still seen from straight behind with only its
+    head turned meets. Turned toward the upper right, the far side is the picture's left: the middle of the back
+    sits toward that edge, the far shoulder and arm are partly hidden there and the far foot is set higher there;
+    the near side, toward the way it faces, is seen broad. The face stays hidden and the heels show, as before."""
+    other = "left" if facing == "right" else "right"
+    still = batch_mod.still_view_text("back_diagonal", facing)
+    assert still.startswith("seen from a three-quarter back angle: the whole body turned about 45 degrees away from the "
+                            f"viewer toward the upper {facing},")
+    assert "not a back view with only the head turned: the back and hips turn as far as the head" in still
+    assert ("the middle of the back and of the waist sits about three quarters of the way across the body toward its "
+            f"{other} edge") in still
+    assert f"the shoulder and the side of the body on the {facing} of the picture, nearer the viewer, are seen broad" in still
+    assert f"the shoulder and arm on the {other} of the picture are partly hidden behind the body" in still
+    assert f"the far foot on the {other} of the picture set a little higher and partly behind the near leg" in still
+    assert f"the feet pointing diagonally up and to the {facing} so the backs of the shoes face the viewer at an angle" in still
+    assert "the face hidden and not looking back over the shoulder" in still
+    assert still.endswith("even when a reference picture shows the character from another angle") and "{" not in still
+    swapped = still.replace(facing, "\0").replace(other, facing).replace("\0", other)
+    assert batch_mod.still_view_text("back_diagonal", other) == swapped
+    assert batch_mod.VIEW_TEXT["back_diagonal"] == "seen from a three-quarter back angle, turned exactly as in the image"
 
 
 def test_a_front_or_back_still_does_not_follow_the_pictures_angle() -> None:

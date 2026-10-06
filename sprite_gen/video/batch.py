@@ -81,6 +81,12 @@ VIEW_TEXT = {
 # less, a three-quarter back view came out as a side view or looking back over the shoulder. A front or
 # back still redrawn from a side picture with the clip's one line kept the picture's turn in the head and
 # chest, so those two say where the head, chest and feet point and not to follow the picture's angle.
+# The turn, the head and the feet alone leave the chest (or back) and the legs unsaid: a still that turns only
+# its head and shoes meets those words. So the diagonals say what that angle shows: the middle of the chest (or
+# back) about three quarters of the way across toward the far edge, the near shoulder and side seen broad, the
+# far shoulder and arm partly hidden, the legs at the same angle with the far foot higher and behind, and not to
+# follow a reference's angle (docs/video-pipeline.md). `{other}` is the side opposite `{facing}`: the near side
+# of a front diagonal, the far side of a back one.
 STILL_VIEW_TEXT = {
     "front": (
         "seen from the front: the whole body and head turned to face the viewer squarely, the chest, hips and the toes "
@@ -94,19 +100,32 @@ STILL_VIEW_TEXT = {
         "character from another angle"
     ),
     "front_diagonal": (
-        "seen from a three-quarter front angle: the whole body and head turned about 45 degrees to the {facing}, halfway "
-        "between facing the viewer and facing {facing}, the face looking the same way as the chest and the feet pointing "
-        "toward the lower {facing}"
+        "seen from a three-quarter front angle: the whole body turned about 45 degrees to the {facing}, halfway between "
+        "facing the viewer and facing {facing}, not a front view with only the head turned: the chest and hips turn as far "
+        "as the head, so the middle of the chest and of the waist sits about three quarters of the way across the body "
+        "toward its {facing} edge, the shoulder and the side of the chest on the {other} of the picture, nearer the "
+        "viewer, are seen broad, the shoulder and arm on the {facing} of the picture are partly hidden behind the body and "
+        "the chest looks narrower than from the front, and the legs stand at the same angle, the far foot on the {facing} "
+        "of the picture set a little higher and partly behind the near leg, both toes pointing toward the lower {facing}, "
+        "the face looking the same way as the chest, even when a reference picture shows the character from another angle"
     ),
     "back_diagonal": (
-        "seen from a three-quarter back angle: the whole body and head turned about 45 degrees away from the viewer toward "
-        "the upper {facing}, halfway between facing away and facing {facing}, the face hidden and not looking back over the "
-        "shoulder, and the feet pointing diagonally up and to the {facing} so the backs of the shoes face the viewer at an angle"
+        "seen from a three-quarter back angle: the whole body turned about 45 degrees away from the viewer toward the upper "
+        "{facing}, halfway between facing away and facing {facing}, not a back view with only the head turned: the back and "
+        "hips turn as far as the head, so the middle of the back and of the waist sits about three quarters of the way "
+        "across the body toward its {other} edge, the shoulder and the side of the body on the {facing} of the picture, "
+        "nearer the viewer, are seen broad, the shoulder and arm on the {other} of the picture are partly hidden behind the "
+        "body and the back looks narrower than from straight behind, and the legs stand at the same angle, the far foot on "
+        "the {other} of the picture set a little higher and partly behind the near leg, the feet pointing diagonally up and "
+        "to the {facing} so the backs of the shoes face the viewer at an angle, the face hidden and not looking back over "
+        "the shoulder, even when a reference picture shows the character from another angle"
     ),
 }
 # The same views for a body that is not one biped (`body_plan`): where the body and head point, with no feet
 # counted and no chest, hips, shoulders or shoes, so a horse's still is not drawn standing on two feet.
 # `{body}` is the character's or every figure's; then what it stands on (`body_plan.still_text`). Not measured.
+# The diagonals here keep their few words and take none of the person's middle-line and leg clauses, which count
+# a chest, shoulders and two feet.
 STILL_VIEW_TEXT_ANY_BODY = {
     "front": (
         "seen from the front: {body} turned to face the viewer squarely, the face centred and looking straight out of "
@@ -138,7 +157,8 @@ def still_view_text(direction: str, facing: str = "right", body_plan: list[Body]
     validate_facing(facing)
     stands_on = body_mod.still_text(body_plan)
     if not stands_on:
-        return STILL_VIEW_TEXT.get(direction, VIEW_TEXT[direction]).format(facing=facing)
+        other = "left" if facing == "right" else "right"
+        return STILL_VIEW_TEXT.get(direction, VIEW_TEXT[direction]).format(facing=facing, other=other)
     body = "every figure's whole body and head" if body_mod.scene(body_plan) else "the whole body and head"
     view = STILL_VIEW_TEXT_ANY_BODY.get(direction, VIEW_TEXT[direction]).format(facing=facing, body=body)
     return f"{view}, {stands_on}"
