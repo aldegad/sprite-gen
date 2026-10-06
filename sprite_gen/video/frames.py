@@ -14,8 +14,10 @@ a little off and part of that background survives the matte, the edge band is
 "touched" by leftover *background* (2026-09-11: a (8, 162, 24) green read as
 "framed too tight"). The check therefore classifies every contact pixel by its
 raw colour — the declared key's hue signature (`extract.is_border_key_candidate`,
-the border rule: an edge pixel is border evidence) is **residual background**,
-anything else is the **subject** — and the two fail
+the border rule: an edge pixel is border evidence) in a piece of the keyed frame that
+holds nothing else is **residual background**; anything else is the **subject**, a
+key-tinted pixel joined to the subject included (its antialiased rim, the key blended
+into it, reaches the band first) — and the two fail
 with different messages: residual points at `video-canvas` normalization of the
 base still, subject contact at a taller/wider canvas.
 
@@ -51,7 +53,7 @@ from PIL import Image
 from sprite_gen._deps import np
 from sprite_gen.frames.cutout import cutout
 from sprite_gen.frames.decontam import palette_from_stats
-from sprite_gen.frames.extract import is_border_key_candidate
+from sprite_gen.frames.extract import _border_key_candidate_field, _key_channel_split
 from sprite_gen.frames.extract import _SPILL_FULL_MIN_TINT, DEFAULT_UNMIX_REACH
 from sprite_gen.spec.runio import atomic_write_text
 
@@ -236,26 +238,37 @@ def classify_edge_contact(raw: Image.Image, keyed: Image.Image, chroma_key: tupl
     """Split the opaque edge-band pixels into `subject` and `residual` (leftover key background).
 
     A contact pixel whose *raw* colour carries the declared key's hue signature
-    (`is_border_key_candidate`) is background the matte failed to erase, not the
-    subject. Without a chroma key
+    (`is_border_key_candidate`) is either background the matte failed to erase or the subject's
+    own rim: a body reaching the band brings its antialiased edge, the key blended into it, there
+    first. It is residual only when the opaque piece of the keyed frame it belongs to — its opaque
+    pixels, corners joining them, the pieces `drop_specks` reads — holds no pixel off the key's
+    signature: background on its own. Joined to one, it is the subject's. Without a chroma key
     (matte route) every contact is the subject.
     """
-    alpha = keyed.convert("RGBA").getchannel("A").load()
-    rgb = raw.convert("RGB").load()
-    w, h = keyed.size
-    band = set()
-    band.update((x, y) for y in range(min(EDGE_ROWS, h)) for x in range(w))
-    band.update((x, y) for x in range(min(EDGE_ROWS, w)) for y in range(h))
-    band.update((x, y) for x in range(max(0, w - EDGE_ROWS), w) for y in range(h))
-    subject = residual = 0
-    for x, y in band:
-        if alpha[x, y] <= 0:
-            continue
-        if chroma_key is not None and is_border_key_candidate(rgb[x, y], chroma_key):
-            residual += 1
-        else:
-            subject += 1
-    return {"subject": subject, "residual": residual}
+    alpha = np.asarray(keyed.convert("RGBA"))[..., 3]
+    h, w = alpha.shape
+    band = np.zeros((h, w), dtype=bool)
+    band[:EDGE_ROWS, :] = True
+    band[:, :EDGE_ROWS] = True
+    band[:, max(0, w - EDGE_ROWS):] = True
+    opaque = alpha > 0
+    contact = band & opaque
+    total = int(contact.sum())
+    keyed_channels, unkeyed_channels = _key_channel_split(chroma_key) if chroma_key is not None else ([], [])
+    if not total or not keyed_channels:
+        return {"subject": total, "residual": 0}
+    keyish = _border_key_candidate_field(np.asarray(raw.convert("RGB"), dtype=np.int32), keyed_channels, unkeyed_channels)
+    suspect = contact & keyish
+    if not suspect.any():
+        return {"subject": total, "residual": 0}
+    ys, starts, stops, labels, _ = _components(opaque, diagonal=True)
+    piece = np.zeros((h, w), dtype=np.int64)
+    for y, x0, x1, label in zip(ys, starts, stops, labels):
+        piece[y, x0:x1] = label
+    owned = np.zeros(len(ys), dtype=bool)  # pieces holding a pixel off the key's signature
+    owned[piece[opaque & ~keyish]] = True
+    residual = int((suspect & ~owned[piece]).sum())
+    return {"subject": total - residual, "residual": residual}
 
 
 def _reference_window(reference: Path, key: str) -> tuple[str, Image.Image | None, tuple[int, int, int] | None, dict[str, Any]]:

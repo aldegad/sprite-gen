@@ -2,7 +2,8 @@
 """A fleck far from the body is not the subject touching the edge, a clip's first frames that reframe a
 small subject are not part of its walk, and a walk forced wide gets no room above.
 
-* `video-frames` erases a speck — a small piece far from the body — before the edge check reads the frame.
+* `video-frames` erases a speck — a small piece far from the body — before the edge check reads the frame, and
+  reads a key-tinted pixel in the edge band as the subject's rim when its piece holds the subject too.
 * `video-loop` reads a walk's lead-in (the first frames off the walk's size) and searches the clip after it;
   what it finds, and what it refuses, is said in the clip's own frame numbers. The gait fallback scales back
   by the size read one cycle on, as the hold does. A cut after a lead-in reads the standing height on its
@@ -113,6 +114,60 @@ def test_a_motion_auto_loop_of_a_clip_with_a_fleck_is_cut_without_it(tmp_path):
     walker_width = walks.walker(0).getchannel("A").getbbox()
     assert out["strip"]["w"] <= walker_width[2] - walker_width[0] + 2 * 8 + 8  # the walker, its margins, a little sway
     assert all(row["specks"] == 1 for row in report["rows"])
+
+
+# --- the edge check's rim --------------------------------------------------------------------------------------
+
+
+GREEN = (0, 255, 0)
+RIM = (30, 160, 20)  # the key's hue (a dark crown blended into green), which the matte keeps
+
+
+def _green(tmp_path: Path, n: int, paint) -> list[Path]:
+    """`n` frames of a 30 x 84 body on green, `paint(k, image)` adding to frame k."""
+    d = tmp_path / "raw"
+    d.mkdir()
+    files = []
+    for k in range(n):
+        image = Image.new("RGB", (80, 100), GREEN)
+        image.paste(BODY, (25, 10, 55, 94))
+        paint(k, image)
+        files.append(d / f"frame-{k:04d}.png")
+        image.save(files[-1])
+    return files
+
+
+def test_a_body_whose_rim_alone_reaches_the_edge_touches_it(tmp_path):
+    # Frame 1 rises 6 px: only the key-tinted rim over its crown reaches the top band. Read alone by its colour,
+    # that rim was leftover background and refused even where the subject is allowed at the edge.
+    def rise(k, image):
+        top = 4 if k == 1 else 10
+        image.paste(GREEN, (25, 0, 55, 10))
+        image.paste(BODY, (25, top, 55, 94))
+        image.paste(RIM, (25, top - 4, 55, top))
+    files = _green(tmp_path, 3, rise)
+    report = frames_mod.key_frames(files, tmp_path / "keyed", key="green", allow_subject=True)
+    assert [c["frame"] for c in report["edge_contacts"]] == ["frame-0001.png"]
+    contact = report["edge_contacts"][0]
+    assert contact["top"] > 0 and contact["subject"] == contact["top"] and contact["residual"] == 0
+    # Refused by default as what it is: the subject framed too tight.
+    with pytest.raises(SystemExit, match="framed too tight") as refused:
+        frames_mod.key_frames(files, tmp_path / "keyed2", key="green")
+    assert "leftover" not in str(refused.value)
+
+
+def test_key_coloured_background_apart_from_the_body_is_still_residual(tmp_path):
+    # A strip of the key's colour against the left edge, 21 px from the body and too large to be a speck: background.
+    def strip(k, image):
+        if k == 1:
+            image.paste(RIM, (0, 40, 4, 60))
+    files = _green(tmp_path, 3, strip)
+    with pytest.raises(SystemExit, match="leftover chroma background") as refused:
+        frames_mod.key_frames(files, tmp_path / "keyed", key="green", allow_subject=True)
+    assert "framed too tight" not in str(refused.value)
+    keyed = Image.open(tmp_path / "keyed" / "frame-0001.png")
+    split = frames_mod.classify_edge_contact(Image.open(files[1]), keyed, GREEN)
+    assert split["subject"] == 0 and split["residual"] > 0
 
 
 # --- a walk's lead-in -----------------------------------------------------------------------------------------

@@ -586,8 +586,12 @@ the loop's cells and widened them to reach it.
 
 The report also carries per-frame alpha coverage and an **edge-contact check**, read after the
 specks are gone: any opaque pixel in the top/left/right 4-pixel bands fails the run. Each contact pixel is
-classified by its *raw* colour — the declared key's hue family is **`residual`**
-(background the matte did not erase), anything else is **`subject`** — and the two
+classified by its *raw* colour and the piece of the keyed frame it is in (its opaque pixels, corners
+joining them, as the specks are read): the declared key's hue family in a piece with nothing else in
+it is **`residual`** (background the matte did not erase); anything else is **`subject`** — a
+key-tinted pixel joined to the subject included, since a body that reaches a band brings its
+antialiased rim, the key blended into it, there first, and on a frame where only that rim is in the
+band, read by its colour alone, the clip was refused as leftover background. The two
 defects fail with different messages: residual-only contact points at `video-canvas`
 (normalize the base still and regenerate); subject contact means the model framed too
 tight and points at a taller/wider canvas. When both occur the message names both.
