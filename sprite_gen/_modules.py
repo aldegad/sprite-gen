@@ -29,6 +29,8 @@ MODULE_DOMAIN = {
     'align': 'video',
     'follow': 'video',
     'compare': 'video',
+    'restoration': 'video',
+    'source': 'video',
     'rife_install': 'video',
     'clip_prompt': 'video',
     'prepare': 'gen',

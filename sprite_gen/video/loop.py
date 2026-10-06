@@ -1291,6 +1291,12 @@ def run_loop(
             write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle})
             raise SystemExit(error) from exc
         report_base["motion_anchor"] = motion
+    if anchor in ("none", "body"):
+        from sprite_gen.video.source import RECIPE
+        report_base["source_projection"] = {
+            "recipe": RECIPE, "wrap_dx_px": wrap_dx,
+            "before_repair_pixels_sha256": [evidence_mod.digest(f.tobytes()) for f in frames],
+        }
     if repair != "off" and prof.gait:
         report_base["jump_repair"] = None
         try:
