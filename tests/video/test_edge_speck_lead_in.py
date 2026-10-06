@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A fleck far from the body is not the subject touching the edge.
+"""A fleck far from the body is not the subject touching the edge, and a clip's first frames that reframe a
+small subject are not part of its walk.
 
 * `video-frames` erases a speck — a small piece far from the body — before the edge check reads the frame.
+* `video-loop` reads a walk's lead-in (the first frames off the walk's size) and searches the clip after it;
+  what it finds, and what it refuses, is said in the clip's own frame numbers. The gait fallback scales back
+  by the size read one cycle on, as the hold does. A cut after a lead-in reads the standing height on its
+  own first frame.
 """
 from __future__ import annotations
 
@@ -107,3 +112,111 @@ def test_a_motion_auto_loop_of_a_clip_with_a_fleck_is_cut_without_it(tmp_path):
                         repair="off")
     walker_width = walks.walker(0).getchannel("A").getbbox()
     assert out["strip"]["w"] <= walker_width[2] - walker_width[0] + 2 * 8 + 8  # the walker, its margins, a little sway
+
+
+# --- a walk's lead-in -----------------------------------------------------------------------------------------
+
+
+def zoomed(k: int, *, period: int = 24, frames: int = 9, start: float = 0.63) -> Image.Image:
+    """The walker, filmed small and reframed over its first `frames` frames to its walking size: scaled from
+    `start` about its feet, easing out (x1.59 over 0.4 s at the defaults)."""
+    image = walks.walker(k, period=period)
+    t = min(1.0, k / frames)
+    s = start + (1 - start) * (1 - (1 - t) ** 2)
+    if s >= 1:
+        return image
+    ax, ay = walks.FOOT
+    return image.convert("RGBa").transform(image.size, Image.Transform.AFFINE, (1 / s, 0, ax * (1 - 1 / s), 0, 1 / s, ay * (1 - 1 / s)),
+                                           resample=Image.Resampling.BICUBIC).convert("RGBA")
+
+
+def test_a_lead_in_is_the_first_frames_off_the_walks_size():
+    lead = gait_fallback.lead_in([zoomed(k) for k in range(73)], min_lag=12, max_lag=36)
+    assert 4 <= lead["frames"] <= 7 and lead["first_off"] < -0.3 and 0.45 < lead["height_change"] < 0.65
+    shrinking = gait_fallback.lead_in([zoomed(k, start=1.5) for k in range(73)], min_lag=12, max_lag=36)
+    assert shrinking["frames"] >= 3 and shrinking["first_off"] > 0.3 and shrinking["height_change"] < -0.25
+    # A walk, a walk toward the camera, a first pose that settles into the walk: none has a lead-in.
+    for clip in ([walks.walker(k) for k in range(73)], [walks.walker(k, grow=0.2) for k in range(73)],
+                 [walks.settling(k) for k in range(73)]):
+        found = gait_fallback.lead_in(clip, min_lag=12, max_lag=36)
+        assert found["frames"] == 0 and abs(found["first_off"]) < gait_fallback.LEAD_IN_MIN
+    short = gait_fallback.lead_in([zoomed(k) for k in range(20)], min_lag=12, max_lag=36)
+    assert short["frames"] == 0 and "too short" in short["why"]
+
+
+def test_the_search_reads_the_walk_after_its_lead_in(tmp_path):
+    # Searched as filmed, the reframing hides the walk's repeat and the gait fallback fails too.
+    code, report, _ = walks.run(tmp_path, [zoomed(k) for k in range(73)], "--size-hold", "off")
+    assert code == 0
+    lead = report["lead_in"]
+    assert 4 <= lead["frames"] <= 7 and lead["search_from"] == lead["frames"]
+    cycle = report["cycle"]
+    assert abs(cycle["length"] - 24) <= 1 and "gait_fallback" not in report
+    # Every frame number is the clip's own: a caller cuts again from them on the whole clip.
+    assert cycle["start"] >= lead["frames"] and all(row["start"] >= lead["frames"] for row in cycle["candidates"])
+    assert report["window"] == list(loop.profile_for("walk").window(73 - lead["frames"], 24.0))
+
+
+def test_a_refusal_after_a_lead_in_names_windows_in_the_clips_frames(tmp_path):
+    # Too slow a walk to repeat: refused, with the windows measured — every one after the lead-in, numbered
+    # as the clip is, which `--cycle fixed --start` cuts on.
+    code, report, _ = walks.run(tmp_path, [zoomed(k, period=200) for k in range(73)], "--size-hold", "off")
+    assert str(code).startswith("video-loop: no periodic cycle found")
+    lead = report["lead_in"]["frames"]
+    assert lead >= 4
+    starts = [row["start"] for row in report["cycle"]["candidates"]]
+    assert starts and min(starts) >= lead
+
+
+def test_the_gait_fallback_scales_back_by_the_size_read_one_cycle_on(tmp_path):
+    # A walker that settles from its standing first pose and grows 5 %: a line through every frame reads
+    # under 3 % and the frames were searched as filmed; one cycle on, the growth is read and scaled back.
+    frames = [walks.settling(k, grow=0.05) for k in range(73)]
+    assert gait_fallback.scale_drift(frames)["drift"] < gait_fallback.SCALE_DRIFT_MIN
+    code, report, output = walks.run(tmp_path, frames, "--size-hold", "off")
+    assert code == 0 and abs(report["cycle"]["length"] - 24) <= 1
+    fallback = report["gait_fallback"]
+    assert fallback["scale_undone"] is True and fallback["scale_drift"]["method"] == "one-cycle-on"
+    assert fallback["scale_drift"]["drift"] > gait_fallback.SCALE_DRIFT_MIN
+    cells = sorted((output / "cycle").glob("frame-*.png"))
+    boxes = gait_fallback.subject_boxes([Image.open(p).convert("RGBA") for p in cells])
+    assert np.ptp(boxes[:, 3] - boxes[:, 1]) <= 2
+
+
+def _height(path: Path) -> int:
+    box = Image.open(path).convert("RGBA").getchannel("A").point(lambda v: 255 if v >= 8 else 0).getbbox()
+    return box[3] - box[1]
+
+
+def _fixed(tmp_path: Path, clip: list[Image.Image], start: int) -> tuple[dict, dict, Path]:
+    keyed = tmp_path / "keyed"
+    keyed.mkdir()
+    for k, image in enumerate(clip):
+        image.save(keyed / f"{k:03}.png")
+    out = loop.run_loop(keyed, tmp_path / "out", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None,
+                        seam_max=1000.0, name="w", report_path=None, cycle_mode="fixed", start=start, length=24,
+                        body_height=120, anchor="body", repair="off")
+    return out, json.loads((tmp_path / "out" / "w.strip.json").read_text()), keyed
+
+
+def test_a_cut_after_a_lead_in_reads_the_standing_height_on_its_own_first_frame(tmp_path):
+    # Read on the first frame, filmed small, the standing height scaled the walk up by half again.
+    out, meta, keyed = _fixed(tmp_path, [zoomed(k) for k in range(73)], 12)
+    assert out["lead_in"]["frames"] >= 4 and out["lead_in"]["search_from"] == 0  # a named cut is the caller's frames
+    assert meta["body_ref"] == "cut-first-frame" and meta["body_ref_frame"] == 12
+    assert meta["body_src_h"] == _height(keyed / "012.png") > _height(keyed / "000.png") + 30
+    assert meta["scale"] == round(120 / meta["body_src_h"], 4)
+    # `video-cycle-align` rebuilds the strip at the same standing height.
+    for name in ("a", "b"):
+        shutil.copytree(tmp_path / "out", tmp_path / name)
+    align.align_set([tmp_path / "a", tmp_path / "b"], between="nearest")
+    aligned = json.loads((tmp_path / "a" / "w.strip.json").read_text())
+    assert (aligned["body_ref"], aligned["body_ref_frame"], aligned["body_src_h"], aligned["scale"]) == \
+        ("cut-first-frame", 12, meta["body_src_h"], meta["scale"])
+
+
+def test_a_cut_of_a_clip_with_no_lead_in_reads_its_first_frame_as_before(tmp_path):
+    out, meta, keyed = _fixed(tmp_path, [walks.walker(k) for k in range(73)], 12)
+    assert out["lead_in"]["frames"] == 0
+    assert meta["body_ref"] == "first-frame" and "body_ref_frame" not in meta
+    assert meta["body_src_h"] == _height(keyed / "000.png")

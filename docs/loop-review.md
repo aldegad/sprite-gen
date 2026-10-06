@@ -127,15 +127,17 @@ When the local search finds no cycle, `motion-auto` looks once more, for two thi
 front or back gait does that the first search cannot see past. (Since 2.24.0 a clip that changes
 size by 1 % or more, read one cycle on, is held at its first frame's size before the first
 search — [video-pipeline.md](video-pipeline.md) section 4, `size_hold` — so the fallback below
-seldom finds anything left to scale back unless `--size-hold off` was passed. It still reads the
-line through the clip, so a clip the hold left as filmed, whose line reads 3 % or more, is scaled
-back here if the first search found no cycle.)
+seldom finds anything left to scale back unless `--size-hold off` was passed. It reads the size
+the way the hold does, one cycle on, so the two never disagree about a clip. A clip's lead-in —
+its first frames, where the video model reframed a small subject — is left out of both searches,
+[video-pipeline.md](video-pipeline.md) section 4, "A lead-in".)
 
 - **It walked toward the camera, or away from it.** Asked to walk in place, a front walk
   sometimes comes closer, and the body grows through the clip, so the same pose never matches
-  itself in size. A straight-line fit of the subject's opaque height measures it (the exact line,
-  `sprite_gen.util.lsq`, as for the size hold); at 3 % or
-  more over the clip (`SCALE_DRIFT_MIN`) every frame is scaled back to the first frame's fitted
+  itself in size. The change read one cycle on measures it (`gait_fallback.cycle_drift`, as for
+  the size hold; it was a straight line through the clip before, which a first pose settling into
+  the walk pulls flat over a body that does grow); at 3 % or
+  more over the clip (`SCALE_DRIFT_MIN`) every frame is scaled back to the first frame's
   height about its fitted foot point, with its coverage and its colour mapped apart
   (`transform_cell`, [video-pipeline.md](video-pipeline.md) "Cells") so the soft edge keeps its
   colour and gets no lighter rim or key tint from the resample. The

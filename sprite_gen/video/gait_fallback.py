@@ -24,7 +24,15 @@ clip: a clip that starts from a standing pose and settles into the walk over its
 reads that one change of pose as a body that shrinks all the way. The same pose a cycle later
 is the same size unless the body really grows or shrinks, so the hold compares each frame's
 height with the frames whole pose-matched lags later and takes the middle of those changes; the
-few frames of the first pose do not move a median of the rest.
+few frames of the first pose do not move a median of the rest. The second search scales back by
+the same reading, so both hold one size model.
+
+A clip can also open on a **lead-in**: the video model reframes a small subject in its first
+frames, so the body grows (or shrinks) by a third or more in under half a second and then walks
+at its new size. The one-cycle-on model, a median over the whole clip, holds the walk's size;
+the frames off it by `LEAD_IN_MIN` or more from the first one on are the lead-in (`lead_in`). A
+walk's own frames stray from it by a head bob and hair, a few percent; a reframing starts tens
+of percent off it.
 """
 from __future__ import annotations
 
@@ -36,14 +44,17 @@ from sprite_gen._deps import np
 from sprite_gen.util import lsq
 from sprite_gen.util.resample import transform_cell
 
-# Height change over the clip, from the fitted trend, at which the frames are scaled back.
-# Nine in ten walk clips stay under it (median 0.5 %): their change is a head bob and hair.
+# Height change over the clip, read one cycle on (`cycle_drift`), at which the second search scales
+# the frames back. Nine in ten walk clips stay under it (median 0.5 %): their change is a head bob and hair.
 SCALE_DRIFT_MIN = 0.03
 # Height change over the clip at which a walk or run is held at its first frame's size before the
 # first cycle search (`video-loop --size-hold auto`). Below it the fitted trend is a head bob and
 # hair; above it a clip filmed from its first frame only grows or shrinks enough that the loop's
 # last frame is a different size from its first, and the loop pops at the wrap.
 SIZE_HOLD_MIN = 0.01
+# A frame whose height is off the one-cycle-on model by this much is not yet walking at the clip's size:
+# the first frames off it by this much are a lead-in (`lead_in`).
+LEAD_IN_MIN = 0.1
 # The longest cycle the second search accepts, as a share of the clip and in seconds.
 LONG_CYCLE_FRACTION = 0.6
 LONG_CYCLE_SECONDS = 2.0
@@ -162,6 +173,29 @@ def cycle_drift(frames: list[Image.Image], *, min_lag: int, max_lag: int) -> dic
             "pose_match": round(profile[lag] / mean, 3) if mean > 0 else None,
             "drift": round(float(rate ** (n - 1) - 1), 4), "height_first_px": round(float(height[0]), 2),
             "height_last_px": round(float(height[-1]), 2), "height": height}
+
+
+def lead_in(frames: list[Image.Image], *, min_lag: int, max_lag: int) -> dict:
+    """The frames the clip opens on before its subject walks at the clip's size: from the first, every
+    frame whose height (`coverage_heights`) is off the one-cycle-on model (`cycle_drift`) by
+    LEAD_IN_MIN or more. `frames` is how many (0: none), `height_change` the model's height where the
+    lead-in ends over the first frame's, less 1 (+0.5: the body grew by half), `first_off` how far the
+    first frame is off the model. A frame with no subject ends it. A clip too short to show a cycle
+    twice has no model to read it on: no lead-in, and `why` says so."""
+    heights = coverage_heights(frames)
+    measured = cycle_drift(frames, min_lag=min_lag, max_lag=max_lag)
+    if measured["lag"] is None:
+        return {"frames": 0, "height_change": 0.0, "first_off": None, "min": LEAD_IN_MIN, "method": "one-cycle-on",
+                "why": "no lag in range: the clip is too short to read its size one cycle on"}
+    model = measured["height"]
+    off = heights / model - 1
+    count = 0
+    while count < len(frames) - 1 and np.isfinite(off[count]) and abs(off[count]) >= LEAD_IN_MIN:
+        count += 1
+    change = float(model[count] / heights[0] - 1) if count and heights[0] > 0 else 0.0
+    return {"frames": count, "height_change": round(change, 4),
+            "first_off": round(float(off[0]), 4) if np.isfinite(off[0]) else None,
+            "min": LEAD_IN_MIN, "method": "one-cycle-on"}
 
 
 def undo_padding(frames: list[Image.Image], measured: dict) -> tuple[int, int, int, int]:

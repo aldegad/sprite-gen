@@ -584,10 +584,11 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     for k, im in enumerate(frames):
         im.save(cycle_dir / f"frame-{k:03d}.png")
     cycle_seconds = len(frames) / fps
-    standing = meta.get("body_src_h") if meta.get("body_ref") == "first-frame" else None
+    standing = meta.get("body_src_h") if meta.get("body_ref") in ("first-frame", "cut-first-frame") else None
     strip, strip_meta = loop_mod.build_strip(
         frames, max_height=int(meta["cell_height_cap"]), cycle_seconds=cycle_seconds, body_height=meta.get("body_height_target"),
-        anchor="feet" if meta.get("foot_anchor") == "feet" else "none", kind=str(meta["kind"]), standing_src=standing)
+        anchor="feet" if meta.get("foot_anchor") == "feet" else "none", kind=str(meta["kind"]), standing_src=standing,
+        standing_frame=int(meta.get("body_ref_frame") or 0))
     # what build_strip does not own (how the cut was anchored) is carried over as it was; a
     # follow-through moved the old cycle's cells, so it is cleared and the record says so
     if "follow" in meta or (loop_dir / loop_mod.FOLLOW_SOURCE).exists():

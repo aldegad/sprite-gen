@@ -829,6 +829,26 @@ the frames as filmed, as before 2.24.0. When the hold came in (2.24.0, read off 
 measured on one front catwalk filmed from its first frame (+2.0 % over 3 s): the engine's seam
 ratio of the cut went from 1.44 to 1.19.
 
+**A lead-in is left out of the search** (walk and run, `--cycle auto` or `periodic`). A video
+model may reframe a small subject in a clip's first frames: the body grows (or shrinks) by a third
+or more in under half a second, then walks at its new size. Searched with those frames, the
+motion analysis reads the reframing as the clip's motion and the walk's repeat is lost; the gait
+fallback, which then scaled by a line through the clip, read the step as a steady growth and
+shrank the walk. So the clip's sizes are read one cycle on (`gait_fallback.cycle_drift`, the
+hold's model, a median over the whole clip), and the frames from the first on that are off that
+model by 10 % or more (`LEAD_IN_MIN`; a walk's own frames stray from it by a head bob, a few
+percent) are the lead-in (`gait_fallback.lead_in`). The search — the size hold, the motion
+analysis, the cycle search and the gait fallback — reads the clip after it as a clip of its own,
+its window included. What it finds, and what it refuses, is said in the clip's own frame numbers:
+every `start` and `context_pair_range` in the report's `cycle`, refused candidates too, so a cut
+taken again from them (`--cycle fixed --start`) is the frames they name. The report records it on
+every walk and run (`lead_in`: `frames`, 0 for none; `height_change`, the walk's height where the
+lead-in ends over the first frame's, less 1; `first_off`; `search_from`, the first frame the search
+read). A cut the caller names (`fixed`, `pinned`) is the caller's frames, lead-in or not. A clip
+too short to read its size one cycle on has no lead-in (`why`). On a synthetic walker filmed at
+0.63 of its size and reframed over 9 frames, the search as filmed found no cycle, nor did the
+fallback; after its 5-frame lead-in it cuts the 24-frame walk (`tests/video/test_edge_speck_lead_in.py`).
+
 **Nothing is cut when a frame is scaled up.** A clip that shrinks is scaled up about its feet,
 and when the feet also rose in the frame (a back walk going away toward the horizon) the crown
 lands above the frame. Every frame is first widened by the room the furthest one reaches past
@@ -938,8 +958,12 @@ Outputs:
   character size (`--strip-height` stays the cap). With a target, the standing height is
   measured on the **clip's first frame** instead — the base still's pose, which every clip
   starts from — because the tallest grounded frame of an attack is its windup with the weapon
-  overhead, and scaling that to N shrank the character against its walk. The sidecar says
-  which (`body_ref`: `first-frame` or `tallest-grounded`) and records `body_src_h` and `scale`. `delay_ms = cycle_seconds / frames`, so a
+  overhead, and scaling that to N shrank the character against its walk. A walk or run that opens
+  on a lead-in (section 4) films that pose at another scale than the walk, so there the standing
+  height is read on the cut's own first frame (`body_ref: cut-first-frame`, and `body_ref_frame`,
+  the clip frame it was read on); read on the first frame, filmed small, it scaled the walk up into
+  the cell cap. The sidecar says which (`body_ref`: `first-frame`, `cut-first-frame` or
+  `tallest-grounded`) and records `body_src_h` and `scale`. `delay_ms = cycle_seconds / frames`, so a
   24 fps clip yields 41.67 ms cells; render at 24 fps to keep one cell per frame
   (a 30 fps render of 24 fps cells is a 5:4 pulldown and judders).
 - **Cells** are scaled with their coverage and their colour taken apart (`resize_cell`; a cell
