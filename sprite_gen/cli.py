@@ -22,6 +22,9 @@ from sprite_gen.video import loop as video_loop
 from sprite_gen.video import clip_prompt as video_prompt
 from sprite_gen.video import align as video_align
 from sprite_gen.video import follow as video_follow
+from sprite_gen.video import compare as video_compare
+from sprite_gen.video import restoration as video_restoration
+from sprite_gen.video import source as video_source
 from sprite_gen.video import rife_install
 from sprite_gen.effects import recolor, shadow
 from sprite_gen.scene import render, inspect_scene
@@ -353,6 +356,21 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Find the true period in keyed frames and emit one seamless cycle: strip + meta, transparent GIF, WebP.",
         video_loop.add_arguments,
         video_loop.run,
+    ),
+    "video-loop-compare": (
+        "Compare final loop strip/meta bytes; report improvement, regression or unverified evidence.",
+        video_compare.add_arguments,
+        video_compare.run,
+    ),
+    "video-source-manifest": (
+        "Record actual clip, canvas and ordered keyed bytes from an existing extraction for source verification.",
+        video_source.add_arguments,
+        video_source.run,
+    ),
+    "video-loop-repair": (
+        "Restore one damaged cell of the current cut from verified source pixels; preserve timing and normal cells.",
+        video_restoration.add_arguments,
+        video_restoration.run,
     ),
     "video-set": (
         "Directions x states end to end (canvas -> video -> frames -> loop), rate-limit aware, one report per item.",
