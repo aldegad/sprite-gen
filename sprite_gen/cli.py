@@ -22,6 +22,7 @@ from sprite_gen.video import loop as video_loop
 from sprite_gen.video import clip_prompt as video_prompt
 from sprite_gen.video import align as video_align
 from sprite_gen.video import follow as video_follow
+from sprite_gen.video import follow_inspect as video_follow_inspect
 from sprite_gen.video import rife_install
 from sprite_gen.effects import recolor, shadow
 from sprite_gen.scene import render, inspect_scene
@@ -374,6 +375,12 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "A soft part of a looping body follows the body's motion: an ellipse of the strip moved as a damped mass on the body's own bob (after video-cycle-align).",
         video_follow.add_arguments,
         video_follow.run,
+    ),
+    # The same request as video-follow, answered by the same code, written down instead of over the loop.
+    "video-follow-inspect": (
+        "Where video-follow carries each region in every cell and what it would change there, with nothing moved: a record and two boards of every cell, for whoever says what is inside an ellipse.",
+        video_follow_inspect.add_arguments,
+        video_follow_inspect.run,
     ),
     "rife": (
         "install: download the pinned RIFE (rife-ncnn-vulkan, sha256-checked) into the user data directory, where the loop repair finds it.",
