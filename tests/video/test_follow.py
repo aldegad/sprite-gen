@@ -358,6 +358,56 @@ def test_the_command_names_the_regions_it_lowered_and_held(loop_dir, capsys):
     assert held.startswith(f'video-follow: {names[2]} folds at --gain 0.') and held.endswith('under 1 (the mass as measured): it is held, and does not move')
 
 
+def outputs(loop_dir):
+    """What a follow-through writes over the loop, by name."""
+    return {name: (loop_dir/name).read_bytes() for name in ('walk.strip.png', 'walk.gif', 'walk.webp', 'walk.strip.json')}
+
+
+def test_numpy_numbers_write_what_the_command_line_writes(loop_dir):
+    # The command line gives floats. Numpy numbers from a caller wrote the strip, the GIF and the WebP and then
+    # failed on the record (an int64 has no JSON form): a moved strip beside a record that does not say so.
+    chest = tuple(float(round(v)) for v in chest_region(loop_dir))
+    head = tuple(float(round(v)) for v in head_region(loop_dir, 0.7))  # folds at the default gain; the chest does not
+    given = follow.follow_loop(loop_dir, [chest, head], on_fold='lower')
+    assert 'held' in given['fold']['regions'][0]  # the regions took gains of their own
+    written = outputs(loop_dir)
+    for kind in (np.int64, np.int32, np.float32, np.float64, int):
+        result = follow.follow_loop(loop_dir, [tuple(kind(v) for v in r) for r in (chest, head)], on_fold='lower')
+        assert outputs(loop_dir) == written, kind
+        assert json.dumps(result) == json.dumps(given), kind
+    # The regions as the rows of an array, and the settings as numpy numbers.
+    result = follow.follow_loop(loop_dir, np.asarray([chest, head], dtype=np.int64), gain=np.float32(follow.GAIN_DEFAULT),
+                                freq=np.float64(follow.FREQ_DEFAULT), zeta=np.float64(follow.ZETA_DEFAULT), on_fold='lower')
+    assert outputs(loop_dir) == written and json.dumps(result) == json.dumps(given)
+
+
+@pytest.mark.parametrize('failure', ['record', 'animation'])
+@pytest.mark.parametrize('followed', [False, True])
+def test_a_run_that_fails_leaves_the_loop_as_it_was(loop_dir, monkeypatch, failure, followed):
+    # The strip and its animations were written over the loop's before the record was: a record that did not
+    # serialise, or an animation that failed its check, left them moved beside a record that does not say so.
+    region = chest_region(loop_dir)
+    if followed:
+        follow.follow_loop(loop_dir, [region])
+    before, names = outputs(loop_dir), sorted(p.name for p in loop_dir.iterdir())
+    as_cut = (loop_dir/follow.SOURCE).read_bytes() if followed else before['walk.strip.png']
+    check = loop.verify_animation
+
+    def failing(path, **kw):
+        report = check(path, **kw)
+        if failure == 'animation' and path.suffix == '.webp':
+            raise SystemExit(f'video-loop: {path.name} failed verification: forced')
+        return report | ({'forced': object()} if failure == 'record' else {})
+
+    monkeypatch.setattr(loop, 'verify_animation', failing)
+    with pytest.raises(TypeError if failure == 'record' else SystemExit):
+        follow.follow_loop(loop_dir, [region], gain=1.5)
+    assert outputs(loop_dir) == before
+    # Nothing is left beside the loop but the strip as cut, kept as on any refusal.
+    assert sorted(p.name for p in loop_dir.iterdir()) == sorted({*names, follow.SOURCE})
+    assert (loop_dir/follow.SOURCE).read_bytes() == as_cut
+
+
 def test_bad_regions_are_refused(loop_dir):
     with pytest.raises(SystemExit, match='outside'):
         follow.follow_loop(loop_dir, [(9999, 10, 5, 5)])

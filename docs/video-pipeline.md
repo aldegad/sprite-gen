@@ -1060,6 +1060,9 @@ sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [-
   the nearest any region came to folding. A lowered gain is also named on stderr — per region,
   with the `--region` it was given, where they differ — and so is a held region; the printed
   summary then carries `region_gains`.
+  All four are written and checked beside the loop first and moved over its files only once the
+  record is written too, so a run that fails on the way — an animation that fails its check, a
+  record that does not serialise — leaves the strip, GIF, WebP and record as they were.
   `cycle/` is left as cut. The strip as it was is kept as `follow.source.png`; running
   `video-follow` again reads from it, so a second run never moves a moved strip. `--board` writes the cells before and after where the part
   sits lowest and highest, on white.

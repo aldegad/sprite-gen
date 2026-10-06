@@ -35,8 +35,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -175,6 +177,11 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
                 freq: float = FREQ_DEFAULT, zeta: float = ZETA_DEFAULT, board: Path | None = None,
                 on_fold: str = "refuse") -> dict[str, Any]:
     loop_dir = loop_dir.expanduser().resolve()
+    # The numbers go into the record, which is JSON, and into the cells' arithmetic: a numpy number from a
+    # caller (an int64 has no JSON form) is read as the float the command line gives, so every caller of the
+    # same numbers writes the same strip and record.
+    regions = [tuple(float(v) for v in region) for region in regions]
+    gain, freq, zeta = float(gain), float(freq), float(zeta)
     metas = sorted(loop_dir.glob("*.strip.json"))
     if len(metas) != 1:
         raise SystemExit(f"video-follow: {loop_dir}: expected one <name>.strip.json from video-loop, found {len(metas)}")
@@ -228,7 +235,7 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
         gains = [lowered_gain(requested, reach_per_gain, radius) if fold else requested for radius, fold in zip(radii, folds)]
         # One that would have to go under the mass as measured does not move at all; the strip is
         # refused only when that is every region.
-        held = [bool(fold and g < GAIN_MEASURED) for fold, g in zip(folds, gains)]  # numpy radii compare to numpy bools
+        held = [fold and g < GAIN_MEASURED for fold, g in zip(folds, gains)]
         if all(held):
             k = radii.index(max(radii))  # the largest folds at the largest gain: if it is held, every region is
             every = f" (the largest of {len(regions)} regions: every one folds)" if len(regions) > 1 else ""
@@ -251,33 +258,43 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
     joined = Image.new("RGBA", (w * n, h), (0, 0, 0, 0))
     for k, c in enumerate(out):
         joined.alpha_composite(c, (k * w, 0))
-    joined.save(strip_path)
     delay_ms = max(20, round(float(meta["delay_ms"])))
     gif_path, webp_path = loop_dir / f"{name}.gif", loop_dir / f"{name}.webp"
-    save_clean_gif(out, gif_path, duration_ms=delay_ms, loop=0, alpha_threshold=128)
-    loop_mod.write_webp(out, webp_path, delay_ms=delay_ms, workdir=loop_dir / ".webp-frames")
-    shutil.rmtree(loop_dir / ".webp-frames", ignore_errors=True)
-    record = {
-        "regions": [list(r) for r in regions], "gain": gain, "freq_hz": freq, "zeta": zeta, "harmonics": HARMONICS,
-        "source": SOURCE, "body_px": height0,
-        "body_bob_px": [round(float(np.ptp(cols)), 2), round(float(np.ptp(rows)), 2)],
-        "dx_px": np.round(dx, 2).tolist(), "dy_px": np.round(dy, 2).tolist(),
-        "reach_px": round(reach, 2),
-        "gain_requested": requested, "on_fold": on_fold,
-        "fold": {
-            "lowered": any(g != requested for g in gains), "ratio": round(max(ratios), 3),
-            "reach_requested_px": round(reach_requested, 2), "reach_per_gain_px": round(reach_per_gain, 3),
-            # Where the regions took gains of their own, each says the gain it moved by and whether it
-            # was held still (gain 0); where they all took one, the strip's `gain` is every region's.
-            "regions": [{"radius_px": radius, "ratio": round(ratio, 3),
-                         "gain_limit": None if (limit := gain_limit(reach_per_gain, radius)) is None else round(limit, 3)}
-                        | ({} if len(set(gains)) == 1 else {"gain": g, "held": hold})
-                        for radius, ratio, g, hold in zip(radii, ratios, gains, held)],
-        },
-        "gif": loop_mod.verify_animation(gif_path, expect_frames=n, check_stale=False),
-        "webp": loop_mod.verify_animation(webp_path, expect_frames=n, check_stale=True),
-    }
-    atomic_write_text(meta_path, json.dumps({**meta, "follow": record}, indent=2) + "\n")
+    # Written and checked beside the loop first, each under its own name, and moved over the loop's files
+    # only once the record is written too: a run that fails on the way (an animation that fails its check, a
+    # record that does not serialise) leaves the strip, its animations and its record as they were. Staged as
+    # files, not as payloads in memory (runio.atomic_write_set): img2webp writes a file, and the check reads one.
+    stage = Path(tempfile.mkdtemp(prefix=".follow.", dir=loop_dir))
+    try:
+        staged = {path: stage / path.name for path in (strip_path, gif_path, webp_path, meta_path)}
+        joined.save(staged[strip_path])
+        save_clean_gif(out, staged[gif_path], duration_ms=delay_ms, loop=0, alpha_threshold=128)
+        loop_mod.write_webp(out, staged[webp_path], delay_ms=delay_ms, workdir=stage / ".webp-frames")
+        record = {
+            "regions": [list(r) for r in regions], "gain": gain, "freq_hz": freq, "zeta": zeta, "harmonics": HARMONICS,
+            "source": SOURCE, "body_px": height0,
+            "body_bob_px": [round(float(np.ptp(cols)), 2), round(float(np.ptp(rows)), 2)],
+            "dx_px": np.round(dx, 2).tolist(), "dy_px": np.round(dy, 2).tolist(),
+            "reach_px": round(reach, 2),
+            "gain_requested": requested, "on_fold": on_fold,
+            "fold": {
+                "lowered": any(g != requested for g in gains), "ratio": round(max(ratios), 3),
+                "reach_requested_px": round(reach_requested, 2), "reach_per_gain_px": round(reach_per_gain, 3),
+                # Where the regions took gains of their own, each says the gain it moved by and whether it
+                # was held still (gain 0); where they all took one, the strip's `gain` is every region's.
+                "regions": [{"radius_px": radius, "ratio": round(ratio, 3),
+                             "gain_limit": None if (limit := gain_limit(reach_per_gain, radius)) is None else round(limit, 3)}
+                            | ({} if len(set(gains)) == 1 else {"gain": g, "held": hold})
+                            for radius, ratio, g, hold in zip(radii, ratios, gains, held)],
+            },
+            "gif": loop_mod.verify_animation(staged[gif_path], expect_frames=n, check_stale=False),
+            "webp": loop_mod.verify_animation(staged[webp_path], expect_frames=n, check_stale=True),
+        }
+        atomic_write_text(staged[meta_path], json.dumps({**meta, "follow": record}, indent=2) + "\n")
+        for path, written in staged.items():  # the record last, as it was written last
+            os.replace(written, path)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
     if board is not None:
         _board(cells, out, dy, board)
         record["board"] = str(board)
