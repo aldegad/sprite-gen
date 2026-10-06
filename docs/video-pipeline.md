@@ -153,13 +153,32 @@ the viewer and to the right … three-quarter front angle" for the front one). I
 its first frame (`PINNED_GAIT_VIEWS`, `pins_last_frame`) with the return sentence, and cut as any
 walk (`--anchor motion-auto`). The clip's view sentence points at the image ("seen from a
 three-quarter back angle, turned exactly as in the image"); a still drawn at a diagonal from another
-picture takes `STILL_VIEW_TEXT` instead (`still_view_text`), which says the whole body and head turn
-about 45 degrees and which way the feet point — told less, a three-quarter back view came out as a
+picture takes `STILL_VIEW_TEXT` instead (`still_view_text`), which says that the whole body turns
+about 45 degrees, what that angle shows of the chest or back and of the legs (the next paragraph),
+and which way the feet point — told less, a three-quarter back view came out as a
 side view or looking back over the shoulder. Measured on the API, 480p 3 s, pinned, five humanoid
 characters twice each, judged on frame sheets: the front and the back diagonal walk kept their angle
 in 10 of 10 each; "toward the way its body faces in the image" kept the front one in 4 to 5 of 5 and,
 on another character, the back one in 0 of 2. Idle and attack keep their angle in a diagonal (4 of
 4). A diagonal run is weaker: 2 of 4 kept the angle, the others turned toward a side view.
+
+**What a diagonal still shows of its turn.** Through 2.36.0 the diagonal still sentences said only
+the turn, the head and the feet ("the whole body and head turned about 45 degrees … the feet
+pointing toward the lower right"), and a still that turns only its head and shoes, the chest (back)
+and the legs standing as from the front (straight behind), meets those words. The sentences now say
+what the angle shows: not a front (back) view with only the head turned; the middle of the chest
+(back) and of the waist about three quarters of the way across the body toward its far edge; the
+shoulder and side nearer the viewer seen broad; the far shoulder and arm partly hidden behind the
+body; the legs at the same angle, the far foot set a little higher and partly behind the near leg;
+and not to follow a reference picture's angle. The far side of a front diagonal is the side it
+faces, of a back diagonal the other one, so `STILL_VIEW_TEXT` takes `{other}` (the side opposite
+`{facing}`) beside `{facing}`, and facing left is the same sentence with the two sides swapped. The
+clip's view sentence is unchanged: a clip starts from the still. The body plan's sentences
+(`STILL_VIEW_TEXT_ANY_BODY`) are unchanged too: they count no chest, shoulders or feet and take none
+of these clauses. The words were chosen by a before-and-after comparison on the still model; its
+measurements are kept in private evidence and none is recorded here.
+`tests/gen/test_prompt_freeze.py` holds the old words and the new (`MEASURED`): a further rewording
+fails there until it is compared again ([prompt-assembly](prompt-assembly.md)).
 
 A front or back still redrawn from a picture seen from another side has its own still sentence too:
 with the clip's one line ("seen from the front, facing the viewer directly"),

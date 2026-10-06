@@ -16,7 +16,11 @@ and the mid-step redraw. `tests/gen/test_prompt_freeze.py` compares every prompt
 with `tests/fixtures/prompts-v2.22.0.json.gz`, drawn from the 2.22.0 tag's source by
 `tests/gen/prompt_freeze_table.py`. The notes and warnings printed beside a prompt are not part of
 that comparison. A change to these prompts is made only after a before-and-after comparison on the
-app's default clip model shows it is better.
+app's default clip model shows it is better. Such a change is listed in the test (`MEASURED`) with the
+words 2.22.0 sent, and every frozen prompt that holds them is compared with the new words in their
+place: nothing else in it may move. So far: the two diagonal stills' view sentences
+(`STILL_VIEW_TEXT["front_diagonal"]`, `["back_diagonal"]`), compared on the still model
+([video-pipeline](video-pipeline.md#2-clip--sprite-gen-video)).
 
 `--handed` adds its piece and changes nothing else: the prompt is the one without it, with the handed
 sentences put in (`tests/gen/test_prompt_assembly.py`).
