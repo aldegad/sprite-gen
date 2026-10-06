@@ -7,12 +7,17 @@ fine match. The caller must still gate the rendered, uncorrected output.
 """
 from __future__ import annotations
 
+import math
+
 from PIL import Image
 from sprite_gen._deps import np
 from sprite_gen.video import motion_anchor
 
 ANALYSIS_EDGE = 184
 SAMPLE_COUNT = 9
+# Two offsets' match costs closer than this are a tie: FFT rounding differs between machines by
+# ~1e-14, two different pictures by far more than this.
+MATCH_TIE = 1e-9
 
 
 def correct_cycle(frames, regions, *, coarse_dx):
@@ -101,8 +106,13 @@ def _match(reference, moving, center, radius):
         energy += _correlate(values * values, weights, rows, cols) - total * total / count
     denominator = np.sqrt(np.maximum(energy, 0.0)) * norm
     costs = 1 - product / np.maximum(1e-10, denominator)
-    iy, ix = np.unravel_index(costs.argmin(), costs.shape)
-    dx, dy = x-(xs+int(ix)), y-(ys+int(iy))
+    # A patch on a flat fill matches equally at several offsets, and FFT rounding — not the same on
+    # every machine — would pick among them. Costs within MATCH_TIE are one match; the evidence does
+    # not decide between them, so the prior does: the offset nearest the centre the search was put on.
+    tied = np.argwhere(costs <= costs.min()+MATCH_TIE)
+    iy, ix = min(((int(iy), int(ix)) for iy, ix in tied),
+                 key=lambda at: ((x-(xs+at[1])-cx)**2+(y-(ys+at[0])-cy)**2, at))
+    dx, dy = x-(xs+ix), y-(ys+iy)
     if abs(dx-cx) == radius or abs(dy-cy) == radius:
         raise ValueError("automatic motion anchor match reached search boundary")
     return np.array([dx, dy]), float(costs[iy, ix])
@@ -149,7 +159,9 @@ def discover(frames: list[Image.Image], *, reference_index: int) -> tuple[list, 
             smoothness = float(np.abs(np.diff(positions, n=2, axis=0)).mean()/body_h)
             quality = float(np.mean(errors)+.25*np.quantile(errors, .9)+.05*smoothness)
             candidates.append({'box': box, 'quality': quality, 'sample_costs': errors})
-    candidates.sort(key=lambda row: (row['quality'], row['box']))
+    # Qualities are sums of match costs, so two regions that both track exactly tie but for FFT
+    # rounding; read on MATCH_TIE's grain, such a tie is ordered by the box, the same on every machine.
+    candidates.sort(key=lambda row: (round(row['quality']/MATCH_TIE), row['box']))
     if not candidates or candidates[0]['quality'] > .8:
         raise ValueError("automatic motion anchor found no stable textured region")
     chosen = []
@@ -194,6 +206,20 @@ def discover(frames: list[Image.Image], *, reference_index: int) -> tuple[list, 
     return regions, report
 
 
+def _line(t, values):
+    """(slope, intercept) of the least-squares line through (t, values), t whole numbers.
+
+    Written out with exactly rounded sums rather than np.polyfit, whose LAPACK solve rounds
+    differently from machine to machine: the line moves the analysis frames by a fraction of a
+    pixel, and a last-bit change there can tip a bilinear sample to the next 8-bit level."""
+    t = [int(v) for v in t]
+    values = [float(v) for v in values]
+    n, st, stt = len(t), sum(t), sum(v*v for v in t)
+    sv, stv = math.fsum(values), math.fsum(a*b for a, b in zip(t, values))
+    det = n*stt-st*st
+    return (n*stv-st*sv)/det, (stt*sv-st*stv)/det
+
+
 def analyse(frames: list[Image.Image], *, fps: float) -> tuple[np.ndarray, np.ndarray, dict]:
     _, report = discover(frames, reference_index=len(frames)//2)
     size = tuple(report['analysis_size'])
@@ -206,10 +232,10 @@ def analyse(frames: list[Image.Image], *, fps: float) -> tuple[np.ndarray, np.nd
     trajectory = []
     for k in range(n):
         js = np.arange(max(0, k-radius), min(n, k+radius+1))
-        trajectory.append(float(np.polyfit(js-k, positions[js, 0], 1)[1]))
+        trajectory.append(_line(js-k, positions[js, 0])[1])
     trajectory = np.asarray(trajectory)
     trajectory -= trajectory[n//2]
-    dy_slope = float(np.polyfit(np.arange(n), positions[:, 1], 1)[0])
+    dy_slope = _line(range(n), positions[:, 1])[0]
     shifts = np.column_stack((trajectory, dy_slope*(np.arange(n)-n//2)))
     pad = int(np.ceil(np.abs(shifts).max()))+4
     normalized = []

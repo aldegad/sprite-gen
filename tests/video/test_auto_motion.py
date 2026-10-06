@@ -83,8 +83,9 @@ def test_match_equals_the_gathered_masked_ncc():
                 continue
             expected = gathered_match(reference, moving, center, 12)
             best = min(expected.values())
-            # The flat synthetic torso matches itself at several vertical shifts; float noise picks
-            # among an exact tie in either implementation, so any member of the tie is right.
+            # The flat synthetic torso matches itself at several vertical shifts. The direct form
+            # rounds in float32, so its tie is read loosely; the FFT form takes, among its own tie
+            # (MATCH_TIE), the offset nearest the centre it searched around.
             ties = [offset for offset, cost in expected.items() if cost <= best + 1e-5]
             assert tuple(got[0].tolist()) in ties
             assert abs(got[1]-expected[tuple(got[0].tolist())]) < 1e-6
@@ -93,6 +94,64 @@ def test_match_equals_the_gathered_masked_ncc():
             else:
                 tied += 1
     assert unique >= 12 and tied >= 1
+
+
+def _rounding(monkeypatch, seed):
+    """FFT rounding as another machine might do it: every correlation off by up to 1e-12 of its
+    largest value — more than numpy's FFTs differ by between machines (~1e-14), far under MATCH_TIE."""
+    rng = np.random.default_rng(seed)
+    correlate = auto_motion._correlate
+
+    def noisy(region, kernel, rows, cols):
+        out = correlate(region, kernel, rows, cols)
+        return out + rng.uniform(-1e-12, 1e-12, out.shape)*max(1.0, float(np.abs(out).max()))
+    monkeypatch.setattr(auto_motion, '_correlate', noisy)
+
+
+def test_match_takes_the_tied_offset_nearest_the_centre_whatever_the_rounding(monkeypatch):
+    """The flat torso slides: several offsets match it alike. Which one is taken is the prior's word
+    (nearest the centre searched around), never the rounding's — on v2.36.0 the rounding picked."""
+    a = auto_motion.motion_anchor._features(walker(0))
+    moving = auto_motion.motion_anchor._features(walker(9))
+    reference = auto_motion._reference(a, (44, 60, 72, 84))
+    center = (-9, -1)
+    expected = gathered_match(reference, moving, center, 12)
+    best = min(expected.values())
+    ties = [offset for offset, cost in expected.items() if cost <= best + 1e-5]
+    assert len(ties) >= 3
+    nearest = min(ties, key=lambda o: ((o[0]-center[0])**2+(o[1]-center[1])**2, -o[1], -o[0]))
+    taken = set()
+    for seed in range(8):
+        _rounding(monkeypatch, seed)
+        taken.add(tuple(auto_motion._match(reference, moving, center, 12)[0].tolist()))
+        monkeypatch.undo()
+    assert taken == {nearest}
+
+
+def test_region_discovery_is_the_same_whatever_the_rounding(monkeypatch):
+    """Regions that track the synthetic walker exactly tie on quality but for the rounding: the
+    regions, their order and every tracked offset are the same under any of it."""
+    frames = [walker(k) for k in range(40)]
+    seen = set()
+    for seed in range(4):
+        _rounding(monkeypatch, seed)
+        regions, report = auto_motion.discover(frames, reference_index=20)
+        seen.add((tuple(map(tuple, regions)), tuple(map(tuple, report['tracking_xy']))))
+        monkeypatch.undo()
+    assert len(seen) == 1
+
+
+def test_line_is_the_least_squares_line_and_the_same_in_any_order():
+    """analyse's drift line: np.polyfit's, but written out with exactly rounded sums, so the order the
+    points are summed in — which differs between machines' LAPACK — cannot reach its last bit."""
+    rng = np.random.default_rng(3)
+    t = np.arange(-12, 13)
+    values = rng.normal(40, 9, len(t)).round(1)*0.7
+    slope, intercept = auto_motion._line(t, values)
+    np.testing.assert_allclose([slope, intercept], np.polyfit(t, values, 1), rtol=0, atol=1e-12)
+    for seed in range(20):
+        order = np.random.default_rng(seed).permutation(len(t))
+        assert auto_motion._line(t[order], values[order]) == (slope, intercept)
 
 
 def test_region_discovery_refuses_blank_input():

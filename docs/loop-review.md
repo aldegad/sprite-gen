@@ -80,13 +80,21 @@ counted as rejected candidates; absence of a usable pair is an explicit failure.
 The correlation at every offset of a search window comes out of FFTs: per channel,
 the masked patch sum, its squared sum and its product with the centered reference are
 window correlations, so the masked patch is never copied out once per offset. The
-costs agree with that direct form to about 1e-6, and two offsets that tie within it
-may swap. On three 3 s walk clips at 544 px the region search took 1.0 to 1.4 s of
-CPU instead of 22.6 to 37.4 s, and full loops cut from the same frames gave the same
-cycle and byte-identical strips.
+costs agree with that direct form to about 1e-6. On three 3 s walk clips at 544 px the
+region search took 1.0 to 1.4 s of CPU instead of 22.6 to 37.4 s, and full loops cut from
+the same frames gave the same cycle and byte-identical strips.
+
+FFT rounding is not the same on every machine (numpy's builds differ by about 1e-14), and
+a patch on a flat fill slides: several offsets match it alike. Costs within 1e-9 of the
+lowest (`auto_motion.MATCH_TIE`) are one match, and the offset nearest the centre the
+search was put on is taken; regions whose qualities tie on that grain are ranked by their
+box. Before this the rounding chose, and a synthetic walk was cut at another start on
+Linux than on macOS from the same pixels.
 
 For selection only, the measured horizontal trajectory is locally fitted and the
-vertical linear trend is removed. Local lag minima can then identify a repeat in
+vertical linear trend is removed (least-squares lines with exactly rounded sums, not
+np.polyfit, whose LAPACK solve rounds differently between machines: the line moves the
+analysis frames by a fraction of a pixel, and its last bit can tip a bilinear sample). Local lag minima can then identify a repeat in
 a clip with changing drift or cadence. Selection requires repeat depth, active
 motion around both boundaries, and a supported doubled recurrence when a short
 step falls below the gait floor. Candidate ranking also penalizes drift that a
