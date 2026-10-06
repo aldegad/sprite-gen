@@ -841,16 +841,19 @@ or more in under half a second, then walks at its new size. Searched with those 
 motion analysis reads the reframing as the clip's motion and the walk's repeat is lost; the gait
 fallback, which then scaled by a line through the clip, read the step as a steady growth and
 shrank the walk. So the clip's sizes are read one cycle on (`gait_fallback.cycle_drift`, the
-hold's model, a median over the whole clip), and the frames from the first on that are off that
-model by 10 % or more (`LEAD_IN_MIN`; a walk's own frames stray from it by a head bob, a few
-percent) are the lead-in (`gait_fallback.lead_in`). The search — the size hold, the motion
+hold's model, a median over the whole clip). A clip opens on a lead-in when its first frame's
+height and size (the square root of the frame's summed coverage) are both off that model by 10 % or
+more, the same way (`LEAD_IN_MIN`): a reframing scales the whole body and moves both, a pose moves
+one — an item held up from the second frame on makes the first frame shorter and no lighter, legs
+spread in a side step add size and no height. The lead-in (`gait_fallback.lead_in`) runs on while
+the height stays that far off, that way; a walk's own frames stray from the model by a few percent. The search — the size hold, the motion
 analysis, the cycle search and the gait fallback — reads the clip after it as a clip of its own,
 its window included. What it finds, and what it refuses, is said in the clip's own frame numbers:
 every `start` and `context_pair_range` in the report's `cycle`, refused candidates too, so a cut
 taken again from them (`--cycle fixed --start`) is the frames they name. The report records it on
 every walk and run (`lead_in`: `frames`, 0 for none; `height_change`, the walk's height where the
-lead-in ends over the first frame's, less 1; `first_off`; `search_from`, the first frame the search
-read). A cut the caller names (`fixed`, `pinned`) is the caller's frames, lead-in or not. A clip
+lead-in ends over the first frame's, less 1; `first_off` and `first_off_size`; `search_from`, the
+first frame the search read). A cut the caller names (`fixed`, `pinned`) is the caller's frames, lead-in or not. A clip
 too short to read its size one cycle on has no lead-in (`why`). On a synthetic walker filmed at
 0.63 of its size and reframed over 9 frames, the search as filmed found no cycle, nor did the
 fallback; after its 5-frame lead-in it cuts the 24-frame walk (`tests/video/test_edge_speck_lead_in.py`).
