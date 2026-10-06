@@ -7,10 +7,9 @@ fine match. The caller must still gate the rendered, uncorrected output.
 """
 from __future__ import annotations
 
-import math
-
 from PIL import Image
 from sprite_gen._deps import np
+from sprite_gen.util import lsq
 from sprite_gen.video import motion_anchor
 
 ANALYSIS_EDGE = 184
@@ -206,20 +205,6 @@ def discover(frames: list[Image.Image], *, reference_index: int) -> tuple[list, 
     return regions, report
 
 
-def _line(t, values):
-    """(slope, intercept) of the least-squares line through (t, values), t whole numbers.
-
-    Written out with exactly rounded sums rather than np.polyfit, whose LAPACK solve rounds
-    differently from machine to machine: the line moves the analysis frames by a fraction of a
-    pixel, and a last-bit change there can tip a bilinear sample to the next 8-bit level."""
-    t = [int(v) for v in t]
-    values = [float(v) for v in values]
-    n, st, stt = len(t), sum(t), sum(v*v for v in t)
-    sv, stv = math.fsum(values), math.fsum(a*b for a, b in zip(t, values))
-    det = n*stt-st*st
-    return (n*stv-st*sv)/det, (stt*sv-st*stv)/det
-
-
 def analyse(frames: list[Image.Image], *, fps: float) -> tuple[np.ndarray, np.ndarray, dict]:
     _, report = discover(frames, reference_index=len(frames)//2)
     size = tuple(report['analysis_size'])
@@ -232,10 +217,10 @@ def analyse(frames: list[Image.Image], *, fps: float) -> tuple[np.ndarray, np.nd
     trajectory = []
     for k in range(n):
         js = np.arange(max(0, k-radius), min(n, k+radius+1))
-        trajectory.append(_line(js-k, positions[js, 0])[1])
+        trajectory.append(lsq.line(js-k, positions[js, 0])[1])
     trajectory = np.asarray(trajectory)
     trajectory -= trajectory[n//2]
-    dy_slope = _line(range(n), positions[:, 1])[0]
+    dy_slope = lsq.line(range(n), positions[:, 1])[0]
     shifts = np.column_stack((trajectory, dy_slope*(np.arange(n)-n//2)))
     pad = int(np.ceil(np.abs(shifts).max()))+4
     normalized = []

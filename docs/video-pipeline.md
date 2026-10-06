@@ -823,7 +823,11 @@ and when the feet also rose in the frame (a back walk going away toward the hori
 lands above the frame. Every frame is first widened by the room the furthest one reaches past
 each edge (`gait_fallback.undo_padding`, the same for every frame; `padding_ltrb` in the
 report), so no part is lost. A frame that needs no room keeps its size and bytes. The gait
-fallback's own scale-back (below) widens the same way.
+fallback's own scale-back (below) widens the same way. The foot point is a least-squares line
+with exactly rounded sums (`sprite_gen.util.lsq`, as are the fallback's fitted heights), the same to
+the last bit on every machine. With np.polyfit, whose last bit differs between LAPACK builds, feet
+that stand on the frame's bottom edge read a hair past it or short of it, and whether the frames
+got 2 px of room below — and so the frames the cut is searched on — turned on that bit.
 
 Gates, all fail-loud: no period (profile flat, below the recorded `periodicity_min`), loop seam ratio
 above `--seam-max` (2.0), GIF/WebP re-opened and checked (frame count, `loop=0`,

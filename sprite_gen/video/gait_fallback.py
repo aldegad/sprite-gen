@@ -33,6 +33,7 @@ from pathlib import Path
 from PIL import Image
 
 from sprite_gen._deps import np
+from sprite_gen.util import lsq
 from sprite_gen.util.resample import transform_cell
 
 # Height change over the clip, from the fitted trend, at which the frames are scaled back.
@@ -61,11 +62,17 @@ def subject_boxes(frames: list[Image.Image]) -> np.ndarray:
 
 
 def _trend(values: np.ndarray) -> np.ndarray:
+    """The least-squares line through the known values, read at every frame. It is the exact line
+    (`sprite_gen.util.lsq`), not np.polyfit's, whose last bit differs from machine to machine: the
+    foot point and height it gives scale the frames back and size the room they need, so that bit
+    could tip a resampled pixel, and feet standing on the frame's edge read a hair past it — on
+    which side decided whether the frames got 2 px of room."""
     t = np.arange(len(values), dtype=np.float64)
     known = ~np.isnan(values)
     if known.sum() < 2:
         return np.full(len(values), np.nanmean(values) if known.any() else np.nan)
-    return np.polyval(np.polyfit(t[known], values[known], 1), t)
+    slope, intercept = lsq.line(t[known], values[known])
+    return slope*t+intercept
 
 
 def scale_drift(frames: list[Image.Image]) -> dict:
