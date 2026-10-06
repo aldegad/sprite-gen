@@ -92,9 +92,10 @@ box. Before this the rounding chose, and a synthetic walk was cut at another sta
 Linux than on macOS from the same pixels.
 
 For selection only, the measured horizontal trajectory is locally fitted and the
-vertical linear trend is removed (least-squares lines with exactly rounded sums, not
-np.polyfit, whose LAPACK solve rounds differently between machines: the line moves the
-analysis frames by a fraction of a pixel, and its last bit can tip a bilinear sample). Local lag minima can then identify a repeat in
+vertical linear trend is removed (least-squares lines with exactly rounded sums,
+`sprite_gen.util.lsq`, not np.polyfit, whose LAPACK solve rounds differently between machines:
+the line moves the analysis frames by a fraction of a pixel, and its last bit can tip a bilinear
+sample). Local lag minima can then identify a repeat in
 a clip with changing drift or cadence. Selection requires repeat depth, active
 motion around both boundaries, and a supported doubled recurrence when a short
 step falls below the gait floor. Candidate ranking also penalizes drift that a
@@ -132,7 +133,8 @@ back here if the first search found no cycle.)
 
 - **It walked toward the camera, or away from it.** Asked to walk in place, a front walk
   sometimes comes closer, and the body grows through the clip, so the same pose never matches
-  itself in size. A straight-line fit of the subject's opaque height measures it; at 3 % or
+  itself in size. A straight-line fit of the subject's opaque height measures it (the exact line,
+  `sprite_gen.util.lsq`, as for the size hold); at 3 % or
   more over the clip (`SCALE_DRIFT_MIN`) every frame is scaled back to the first frame's fitted
   height about its fitted foot point, with its coverage and its colour mapped apart
   (`transform_cell`, [video-pipeline.md](video-pipeline.md) "Cells") so the soft edge keeps its

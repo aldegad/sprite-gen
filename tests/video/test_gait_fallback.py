@@ -1,4 +1,5 @@
 """The gait fallback: a slow walk and a walk toward the camera, on synthetic frames."""
+import hashlib
 import json
 import math
 
@@ -90,6 +91,52 @@ def test_drift_is_measured_on_the_fitted_height_and_undone_about_the_feet():
     assert np.all(np.abs(boxes[:, 3]-FOOT[1]) <= 2)
     # Nothing to undo on a walker that stays its size.
     assert abs(gait_fallback.scale_drift([walker(k) for k in range(73)])['drift']) < 0.02
+
+
+def other_lapack(monkeypatch, seed):
+    """np.polyfit as another machine's LAPACK might solve it: every coefficient off by up to 1e-12 of
+    itself, seed by seed. Machines differ by less (on the 10-05 grid, lines a few 1e-13 px apart);
+    a line read exactly is unmoved by any of it."""
+    rng = np.random.default_rng(seed)
+    polyfit = np.polyfit
+
+    def solved_elsewhere(x, y, deg, *args, **kwargs):
+        coef = polyfit(x, y, deg, *args, **kwargs)
+        return coef*(1+rng.uniform(-1e-12, 1e-12, np.shape(coef)))
+    monkeypatch.setattr(np, 'polyfit', solved_elsewhere)
+
+
+def test_a_body_that_keeps_its_place_and_size_reads_them_exactly():
+    """A line through equal values is that value: the fitted foot point and height of a walker that
+    neither moves nor grows are its box's, to the bit, so nothing about them is left to rounding."""
+    frames = [walker(0)]*73
+    x0, y0, x1, y1 = gait_fallback.subject_boxes(frames[:1])[0]
+    measured = gait_fallback.scale_drift(frames)
+    assert np.all(measured['foot_y'] == y1) and np.all(measured['foot_x'] == (x0+x1)/2)
+    assert np.all(measured['height'] == y1-y0) and measured['drift'] == 0
+
+
+def test_the_size_hold_is_the_same_whatever_the_lapack_rounding(monkeypatch):
+    """Feet that stand on the frame's bottom edge in every frame: the hold scales about them, so
+    nothing reaches past that edge and no room is added below. The foot point is read off a fitted
+    line; np.polyfit's last bit put it a hair past the edge or short of it, and the frames got 2 px
+    of room below or none (v2.36.0). On the exact line the foot point, the room and every held pixel
+    are the same under any rounding."""
+    full = [walker(k, grow=0.03) for k in range(73)]
+    floor = int(np.nanmax(gait_fallback.subject_boxes(full)[:, 3]))
+    frames = [im.crop((0, 0, im.width, floor)) for im in full]
+    assert np.all(gait_fallback.subject_boxes(frames)[:, 3] == floor)
+    seen = set()
+    for seed in range(8):
+        other_lapack(monkeypatch, seed)
+        measured = gait_fallback.cycle_drift(frames, min_lag=12, max_lag=36)
+        pad = gait_fallback.undo_padding(frames, measured)
+        held = gait_fallback.undo_scale(frames, measured, pad=pad)
+        seen.add((pad, measured['foot_x'].tobytes(), measured['foot_y'].tobytes(),
+                  hashlib.sha256(b''.join(im.tobytes() for im in held)).hexdigest()))
+        monkeypatch.undo()
+    assert len(seen) == 1
+    assert next(iter(seen))[0][3] == 0
 
 
 def test_a_clip_the_first_search_cuts_is_cut_without_the_fallback(tmp_path):
