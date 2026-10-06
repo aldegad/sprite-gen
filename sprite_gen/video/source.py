@@ -140,11 +140,6 @@ class Projection:
     record: dict[str, Any]
 
 
-def restored_cells(report: dict[str, Any]) -> list[int]:
-    receipt = report.get("restoration", {})
-    return receipt.get("restored_cells", [receipt["target"]] if "target" in receipt else [])
-
-
 def project(baseline: Any, source: Source) -> tuple[Projection | None, str | None]:
     """Prove one shared crop against all cells outside the recorded repair hints."""
     from sprite_gen.video import loop
@@ -193,13 +188,6 @@ def project(baseline: Any, source: Source) -> tuple[Projection | None, str | Non
     if (not isinstance(hints, list) or any(type(k) is not int or not 0 <= k < n for k in hints)
             or len(set(hints)) != len(hints) or len(hints) > n // 2):
         return None, "repair-locations-unverified"
-    restored = restored_cells(report)
-    if (not isinstance(restored, list) or any(type(k) is not int or k not in hints for k in restored)
-            or len(set(restored)) != len(restored)):
-        return None, "restoration-locations-unverified"
-    # On a later request, already restored cells are part of the normal cells
-    # whose pixels must exactly match the same projection, not fresh targets.
-    hints = [k for k in hints if k not in restored]
     keep = [k for k in range(n) if k not in hints]
     frames = []
     for frame in source.frames[start:start + n]:

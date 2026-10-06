@@ -266,7 +266,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             parser.add_argument(f"--{side}-{artifact}", required=True, type=Path)
         for artifact in ("gif", "webp"):
             parser.add_argument(f"--{side}-{artifact}", type=Path)
-    from sprite_gen.video import source
+    from sprite_gen.video import restoration, source
+    for artifact in restoration.ARTIFACTS:
+        parser.add_argument(f"--origin-{artifact}", type=Path)
     source.add_inputs(parser, required=False)
     parser.add_argument("--repair-evidence", type=Path)
     parser.add_argument("--report", required=True, type=Path)
@@ -276,16 +278,19 @@ def run(**kwargs: Any) -> int:
     output = Path(kwargs["report"])
     paths = {s: {k: Path(kwargs[f"{s}_{k}"]) for k in ("strip", "meta", "report")} for s in ("baseline", "candidate")}
     try:
-        from sprite_gen.video import source
-        restoration_mode = any(kwargs.get(k) is not None for k in (*source.INPUTS, "repair_evidence"))
+        from sprite_gen.video import restoration, source
+        origin = {k: kwargs.get(f"origin_{k}") for k in restoration.ARTIFACTS}
+        restoration_mode = any(kwargs.get(k) is not None for k in (*source.INPUTS, "repair_evidence")) or any(origin.values())
         protected = [p for row in paths.values() for p in row.values()]
         if restoration_mode:
-            from sprite_gen.video import restoration
             inputs = source.input_paths(kwargs)
-            if any(kwargs.get(f"{s}_{k}") is None for s in paths for k in ("gif", "webp")) or not kwargs.get("repair_evidence"):
-                raise ValueError("source comparison requires baseline/candidate GIF, WebP and repair evidence")
+            # The origin is never guessed from the current baseline, not even on a first request.
+            if (any(kwargs.get(f"{s}_{k}") is None for s in paths for k in ("gif", "webp"))
+                    or None in origin.values() or not kwargs.get("repair_evidence")):
+                raise ValueError("source comparison requires the origin's five files, baseline/candidate GIF and WebP, and repair evidence")
             for side in paths:
                 paths[side].update({k: Path(kwargs[f"{side}_{k}"]) for k in ("gif", "webp")})
+            paths["origin"] = {k: Path(p) for k, p in origin.items()}
             evidence_path = Path(kwargs["repair_evidence"])
             protected += [*inputs.values(), evidence_path, *inputs["source_frames_dir"].glob("*.png")]
             protected += [p for row in paths.values() for p in row.values()]
@@ -296,7 +301,8 @@ def run(**kwargs: Any) -> int:
         if restoration_mode:
             a, ap = restoration.read_loop(paths["baseline"])
             b, bp = restoration.read_loop(paths["candidate"])
-            payload = restoration.compare(a, b, source.Source.read(**inputs), baseline_playback=ap, candidate_playback=bp,
+            payload = restoration.compare(restoration.read_loop(paths["origin"])[0], a, b, source.Source.read(**inputs),
+                                          baseline_playback=ap, candidate_playback=bp,
                                           repair_evidence=_json(evidence_path.read_bytes(), "repair evidence"))
         else:
             payload = compare(Loop.read(**paths["baseline"]), Loop.read(**paths["candidate"]))
