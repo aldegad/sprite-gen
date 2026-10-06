@@ -66,5 +66,6 @@ Run the local release gate before a release:
 safedeps gates run --root . --strict
 ```
 
-GitHub security workflows and branch protection are opt-in for this repository
-because they can spend runner minutes or change remote governance.
+GitHub-hosted CI is not used for this repository: the test gates and the release
+build run on the maintainer's own Linux runner through `scripts/linux_lane.sh`
+(see [docs/release.md](docs/release.md)).

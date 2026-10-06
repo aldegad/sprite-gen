@@ -61,7 +61,12 @@ row with 35 % above, 28 % in front and 20 % behind — not the attack row. It la
 whose own row is another shape, a jump among them, and 35 % on 16:9 keeps about the room a
 jump's tall row leaves above a square or upright still. A still wider than it is tall keeps
 less above it under forced wide than under the tall row (a 3:2 still about three fifths),
-because there the wide canvas's height follows the still's width. Headroom is a fraction of the full canvas
+because there the wide canvas's height follows the still's width. A walk or run forced wide
+has a row of its own (`STATE_SHAPE_CANVAS`): the same 28 % in front and 20 % behind, and nothing
+above — its feet stay on the ground. Above a square still the jump's 35 % set the width as well
+(1575 rows on 16:9 are 2800 columns, 1216 of them in front of the still), and a walker that small
+in its frame is one a video model may reframe in its first frames (section 4, "A lead-in"). A
+square still forced wide as a walk is 1969 × 1108. Headroom is a fraction of the full canvas
 height; wide canvases grow both dimensions to preserve their ratio without shrinking
 the still. A still whose corners are not one flat colour
 is refused — a non-flat background cannot be extended without guessing.
@@ -153,13 +158,32 @@ the viewer and to the right … three-quarter front angle" for the front one). I
 its first frame (`PINNED_GAIT_VIEWS`, `pins_last_frame`) with the return sentence, and cut as any
 walk (`--anchor motion-auto`). The clip's view sentence points at the image ("seen from a
 three-quarter back angle, turned exactly as in the image"); a still drawn at a diagonal from another
-picture takes `STILL_VIEW_TEXT` instead (`still_view_text`), which says the whole body and head turn
-about 45 degrees and which way the feet point — told less, a three-quarter back view came out as a
+picture takes `STILL_VIEW_TEXT` instead (`still_view_text`), which says that the whole body turns
+about 45 degrees, what that angle shows of the chest or back and of the legs (the next paragraph),
+and which way the feet point — told less, a three-quarter back view came out as a
 side view or looking back over the shoulder. Measured on the API, 480p 3 s, pinned, five humanoid
 characters twice each, judged on frame sheets: the front and the back diagonal walk kept their angle
 in 10 of 10 each; "toward the way its body faces in the image" kept the front one in 4 to 5 of 5 and,
 on another character, the back one in 0 of 2. Idle and attack keep their angle in a diagonal (4 of
 4). A diagonal run is weaker: 2 of 4 kept the angle, the others turned toward a side view.
+
+**What a diagonal still shows of its turn.** Through 2.36.0 the diagonal still sentences said only
+the turn, the head and the feet ("the whole body and head turned about 45 degrees … the feet
+pointing toward the lower right"), and a still that turns only its head and shoes, the chest (back)
+and the legs standing as from the front (straight behind), meets those words. The sentences now say
+what the angle shows: not a front (back) view with only the head turned; the middle of the chest
+(back) and of the waist about three quarters of the way across the body toward its far edge; the
+shoulder and side nearer the viewer seen broad; the far shoulder and arm partly hidden behind the
+body; the legs at the same angle, the far foot set a little higher and partly behind the near leg;
+and not to follow a reference picture's angle. The far side of a front diagonal is the side it
+faces, of a back diagonal the other one, so `STILL_VIEW_TEXT` takes `{other}` (the side opposite
+`{facing}`) beside `{facing}`, and facing left is the same sentence with the two sides swapped. The
+clip's view sentence is unchanged: a clip starts from the still. The body plan's sentences
+(`STILL_VIEW_TEXT_ANY_BODY`) are unchanged too: they count no chest, shoulders or feet and take none
+of these clauses. The words were chosen by a before-and-after comparison on the still model; its
+measurements are kept in private evidence and none is recorded here.
+`tests/gen/test_prompt_freeze.py` holds the old words and the new (`MEASURED`): a further rewording
+fails there until it is compared again ([prompt-assembly](prompt-assembly.md)).
 
 A front or back still redrawn from a picture seen from another side has its own still sentence too:
 with the clip's one line ("seen from the front, facing the viewer directly"),
@@ -568,10 +592,25 @@ survives untouched on (8, 162, 24), (5, 200, 10) or pure-key backgrounds. Choose
 away from the subject's hues ([chroma-alpha.md](chroma-alpha.md)) — that rule now covers
 the painted key's darker variants too.
 
-The report also carries per-frame alpha coverage and an **edge-contact check**: any
-opaque pixel in the top/left/right 4-pixel bands fails the run. Each contact pixel is
-classified by its *raw* colour — the declared key's hue family is **`residual`**
-(background the matte did not erase), anything else is **`subject`** — and the two
+Every keyed frame first has its **specks** erased (`drop_specks`): a piece of the frame — its
+opaque pixels, corners joining them — under 1 % of the frame's largest piece, the body
+(`SPECK_MIN_FRACTION`, at least 8 px), and more than a tenth of the body's height away from it
+(`SPECK_APART`). That is a fleck the model drew drifting across the background, which survived the
+matte. Small pieces near the body stay: the outline's loose pixels, a shadow drawn under a shoe,
+a part of a shoe the matte cut loose. A frame with no speck is not written again; each report
+row says how many its frame lost (`specks`) and the report totals them (`specks.dropped`,
+`specks.frames`). Without this a fleck that crossed an edge band in one frame was read as the
+subject framed too tight, and `--anchor motion-auto`, which never cleans a frame, kept it in
+the loop's cells and widened them to reach it.
+
+The report also carries per-frame alpha coverage and an **edge-contact check**, read after the
+specks are gone: any opaque pixel in the top/left/right 4-pixel bands fails the run. Each contact pixel is
+classified by its *raw* colour and the piece of the keyed frame it is in (its opaque pixels, corners
+joining them, as the specks are read): the declared key's hue family in a piece with nothing else in
+it is **`residual`** (background the matte did not erase); anything else is **`subject`** — a
+key-tinted pixel joined to the subject included, since a body that reaches a band brings its
+antialiased rim, the key blended into it, there first, and on a frame where only that rim is in the
+band, read by its colour alone, the clip was refused as leftover background. The two
 defects fail with different messages: residual-only contact points at `video-canvas`
 (normalize the base still and regenerate); subject contact means the model framed too
 tight and points at a taller/wider canvas. When both occur the message names both.
@@ -665,7 +704,8 @@ gate. The state table now routes `cheer`, `wave` and `celebrate` to the wide can
 `video-set --shape wide` forces it for every state of a batch when the costume is the
 reason. The same `--shape` is what `video-canvas` already took for a single still. The
 forced canvas is the forced-wide row (35 % above), so a jump in that batch keeps its
-head-room; an attack in it gets that row too, not its own 20 %.
+head-room; an attack in it gets that row too, not its own 20 %. A walk or run gets its own wide
+row, with nothing above (section 1).
 
 ## 4. Loop — period first, seam second, then the gait floor
 
@@ -694,7 +734,11 @@ was 17). `video-loop` therefore:
    changes few pixels and hardly moves it. `--anchor motion-auto` also weighs the top
    of the silhouette at the wrap and chooses again when it jumps, and every walk or run
    reports that jump and warns on it ([loop repair](loop-repair.md) section 3,
-   "The seam pop").
+   "The seam pop"). Once the top jumps, the held part is read below its top too, and a staff
+   that closes only on two steps is cut two steps long — one cycle (`cycle.steps`, "The held
+   side"). The cut taken is screened for one step of a cycle twice as long, over the whole clip
+   (`cycle.step_screen`, "The step screen"); nothing is cut on it, and `--steps` is the count
+   that cuts again.
 
 This neighbourhood check measures temporal consistency, not anatomical leg
 identity. A consistently repeated malformed motion can still score well; visual
@@ -707,7 +751,9 @@ to be confirmed). The other states are fractions of the clip length: idle 60–9
 (breathing is slow and not periodic — the lowest seam is a long window, and idle is
 exempt from the periodicity gate), jump 11–45 %. Attack keeps the 11 % floor and
 searches up to 2.5 seconds while retaining at least 0.5 seconds (and at least eight
-frames) of observed repeat context. `--min-len/--max-len` override the window.
+frames) of observed repeat context. `--min-len/--max-len` override the window — on every path that
+sets a cut's length, the gait fallback, `--steps` and the one-shot failover included; a cut outside
+them fails rather than being written.
 Attack's periodicity floor is `0.15 + 0.85 * max(0, 1 - (n - lag) / lag)`:
 less than a full period of comparison requires a deeper dip. Reports include both
 available pairs and the every-other-frame profile sample count. This is a coverage
@@ -768,7 +814,12 @@ swings the stride twice a step; a diagonal view's two steps open the feet unequa
 `review_recommended` keeps its meaning (the ambiguous-harmonic retention above). The record is for
 the set stage: `video-cycle-align` screens every loop by the same rule, stops a set on a suspect,
 and takes one cycle out of a loop only when told how many it holds (`--cycles`, [loop
-repair](loop-repair.md) section 4). The local search of `--anchor motion-auto` records the same.
+repair](loop-repair.md) section 4). The local search of `--anchor motion-auto` records the same. A
+loop whose steps are known (`steps: 2` in `strip.json`: cut two steps long so a held part closes, or
+cut again on a count with `video-loop --steps`) returns half way at its second step; the set stage
+reads that return as the step it is, not a second cycle. The screen also looks the other way there:
+a cut that may be one step of a cycle twice as long (`cycle.step_screen`, read over the whole clip)
+stops the set the same way, and only a count — `video-loop --steps 1` — cuts it again.
 The rule leans one way on purpose: a suspect costs a look, a miss a loop that plays twice as fast.
 A run's half step repeats as well as most of its strides do, so a run set is suspected nearly
 every time and stops until its loops are counted; a walk's half step is under its floor more
@@ -807,12 +858,39 @@ the frames as filmed, as before 2.24.0. When the hold came in (2.24.0, read off 
 measured on one front catwalk filmed from its first frame (+2.0 % over 3 s): the engine's seam
 ratio of the cut went from 1.44 to 1.19.
 
+**A lead-in is left out of the search** (walk and run, `--cycle auto` or `periodic`). A video
+model may reframe a small subject in a clip's first frames: the body grows (or shrinks) by a third
+or more in under half a second, then walks at its new size. Searched with those frames, the
+motion analysis reads the reframing as the clip's motion and the walk's repeat is lost; the gait
+fallback, which then scaled by a line through the clip, read the step as a steady growth and
+shrank the walk. So the clip's sizes are read one cycle on (`gait_fallback.cycle_drift`, the
+hold's model, a median over the whole clip). A clip opens on a lead-in when its first frame's
+height and size (the square root of the frame's summed coverage) are both off that model by 10 % or
+more, the same way (`LEAD_IN_MIN`): a reframing scales the whole body and moves both, a pose moves
+one — an item held up from the second frame on makes the first frame shorter and no lighter, legs
+spread in a side step add size and no height. The lead-in (`gait_fallback.lead_in`) runs on while
+the height stays that far off, that way; a walk's own frames stray from the model by a few percent. The search — the size hold, the motion
+analysis, the cycle search and the gait fallback — reads the clip after it as a clip of its own,
+its window included. What it finds, and what it refuses, is said in the clip's own frame numbers:
+every `start` and `context_pair_range` in the report's `cycle`, refused candidates too, so a cut
+taken again from them (`--cycle fixed --start`) is the frames they name. The report records it on
+every walk and run (`lead_in`: `frames`, 0 for none; `height_change`, the walk's height where the
+lead-in ends over the first frame's, less 1; `first_off` and `first_off_size`; `search_from`, the
+first frame the search read). A cut the caller names (`fixed`, `pinned`) is the caller's frames, lead-in or not. A clip
+too short to read its size one cycle on has no lead-in (`why`). On a synthetic walker filmed at
+0.63 of its size and reframed over 9 frames, the search as filmed found no cycle, nor did the
+fallback; after its 5-frame lead-in it cuts the 24-frame walk (`tests/video/test_edge_speck_lead_in.py`).
+
 **Nothing is cut when a frame is scaled up.** A clip that shrinks is scaled up about its feet,
 and when the feet also rose in the frame (a back walk going away toward the horizon) the crown
 lands above the frame. Every frame is first widened by the room the furthest one reaches past
 each edge (`gait_fallback.undo_padding`, the same for every frame; `padding_ltrb` in the
 report), so no part is lost. A frame that needs no room keeps its size and bytes. The gait
-fallback's own scale-back (below) widens the same way.
+fallback's own scale-back (below) widens the same way. The foot point is a least-squares line
+with exactly rounded sums (`sprite_gen.util.lsq`, as are the fallback's fitted heights), the same to
+the last bit on every machine. With np.polyfit, whose last bit differs between LAPACK builds, feet
+that stand on the frame's bottom edge read a hair past it or short of it, and whether the frames
+got 2 px of room below — and so the frames the cut is searched on — turned on that bit.
 
 Gates, all fail-loud: no period (profile flat, below the recorded `periodicity_min`), loop seam ratio
 above `--seam-max` (2.0), GIF/WebP re-opened and checked (frame count, `loop=0`,
@@ -912,8 +990,23 @@ Outputs:
   character size (`--strip-height` stays the cap). With a target, the standing height is
   measured on the **clip's first frame** instead — the base still's pose, which every clip
   starts from — because the tallest grounded frame of an attack is its windup with the weapon
-  overhead, and scaling that to N shrank the character against its walk. The sidecar says
-  which (`body_ref`: `first-frame` or `tallest-grounded`) and records `body_src_h` and `scale`. `delay_ms = cycle_seconds / frames`, so a
+  overhead, and scaling that to N shrank the character against its walk. A video model may
+  reframe the subject after the first frame — a lead-in (section 4), or less — and then the walk
+  is filmed at another size than that pose: read on the first frame, filmed small, the standing
+  height scaled the walk up, a lead-in's into the cell cap. So a walk or run cut for a
+  `--body-height` has its size read against the first frame's (`gait_fallback.size_change`) on
+  three lengths at once: the height, the mass (the square root of the summed coverage) and the
+  breadth (the widest row of the upper half of the body), each the middle of the cut's frames
+  over the first frame's. A pose moves them apart — a walk is shorter than its standing pose and
+  broader, an item held up is taller and no heavier — and a reframing moves all three the same
+  way, so the cut's change of size is the least of the three when all go one way, and none when
+  they part. It is the cautious reading: a reframing smaller than what the pose itself moves one
+  of the lengths by, the other way, stays a pose (a small shrink under a walk's broader body,
+  for one). At 1 % or more (`SIZE_HOLD_MIN`) the standing height is read on the cut's own first
+  frame (`body_ref: cut-first-frame`, and `body_ref_frame`, the clip frame it was read on). The
+  report records the reading (`cut_size`: `change`, `height`, `mass`, `breadth`, `min`). The
+  sidecar says which frame (`body_ref`: `first-frame`, `cut-first-frame` or
+  `tallest-grounded`) and records `body_src_h` and `scale`. `delay_ms = cycle_seconds / frames`, so a
   24 fps clip yields 41.67 ms cells; render at 24 fps to keep one cell per frame
   (a 30 fps render of 24 fps cells is a 5:4 pulldown and judders).
 - **Cells** are scaled with their coverage and their colour taken apart (`resize_cell`; a cell
@@ -1006,8 +1099,32 @@ sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [-
   (`cx,cy,rx,ry`; repeatable). It is carried with the body's bob from cell to cell. Somebody has
   to say where it is — the engine does not find it: look at the first cell (or ask a vision model
   for the four numbers once per direction; a mirrored direction takes the mirror's region).
-- **The motion** is the body's own: the crown's row (up and down) and the middle of the head
-  (side to side), read off the cells. The part is a damped mass on the body — its offset x from
+- **The motion** is the body's own: how far each cell's body lies from the first cell's, up and
+  down and side to side. The silhouette (alpha ≥ 128) is worn down: worn by r, a pixel stays when
+  the square of side 2·r + 1 around it is all body. Its depth is the most the first cell can be
+  worn down by and still keep a pixel, plus one; worn by a quarter of that, what swings on the
+  body and is thinner than it (a tail, a ponytail, an ear, a sword or a rod held up, the legs and
+  arms) is gone and the head and torso are left. Each cell is laid where its silhouette, worn by
+  every whole number of pixels from a quarter to half of that depth, overlaps the first cell's,
+  worn alike, most — the overlaps of every level counted in whole pixels and summed, a tie going
+  to the smaller move. A pixel counts once for each level it is still in, so the deepest of the
+  body counts most and a part that comes and goes cannot outweigh it, while a torso that is
+  shallower in one cell (an arm swung away from it, long hair lifted off it) still counts at its
+  shallower levels. A part as thick as the body outlasts the wearing — ears as wide as the head —
+  and a cell that has it elsewhere than the first cell does, laid on the first cell alone, lies
+  ears on ears with its body tens of pixels off. So the cells are laid twice. Laid on the first
+  cell, each is moved back by its lay and the cells are counted: per level and pixel, how many
+  more of them are in that level there than are not (none, where no more are). The head and
+  torso are in every cell at one place and count the whole number of cells; what swings — ears
+  up in some cells and flopped onto the face in others, a leg forward and back — is at any one
+  place in half of the cells or fewer and counts nothing. Each cell is then laid on that count
+  as it was on the first cell, and its lay less the first cell's own is the motion. A thick part
+  that keeps one place in most of the cells is body to this read, which sees outlines only. The
+  top of the body was read before: whatever came to the top was the
+  motion, and a tail tip, a flopping ear or a sword raised over the head made it jump by the
+  part's whole swing from one cell to the next. A cell with nothing in it a quarter as deep as the first
+  cell's body is refused, and so is a strip with no part of the body at one place in more than
+  half of its cells. The part is a damped mass on the body — its offset x from
   where the body carries it answers x'' + 2ζωx' + ω²x = −body'' — solved in the loop's periodic
   steady state per harmonic of the cycle (the first six), so it lags the bob and settles, with no
   kick at a foot strike, and the last frame leads into the first. `--freq` (2.4 Hz) and `--zeta`
@@ -1018,21 +1135,37 @@ sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [-
   at the centre and 0 at the rim (cos²), sampled as premultiplied bilinear colour; outside it no
   pixel changes. A move so large that the weight's slope folds the picture over
   (offset × π / (2 · radius) ≥ 1) is refused: lower `--gain` or give the region larger radii.
-- **`--on-fold lower`** lowers the gain for you instead of refusing. The move is the gain times
-  the move at gain 1, so the gain at which a region folds is 2 · radius / (π · move at gain 1),
-  and the strip takes the largest gain under it, in steps of 0.01 and no more than `--gain`. One
-  gain for the strip, set by the region with the smallest radius: every part hangs on the same
-  body and answers the same motion, and the recorded `gain` is then the `--gain` that gives this
-  strip by itself. It does not go under 1, the mass as measured: a region too small for that is
-  refused (the message names the largest gain that would not fold), so a follow-through is never
-  quietly weaker than the motion it answers. The default stays `refuse`, with the same output and
-  the same message as 2.24.0; a strip that does not fold is the same under either.
+- **`--on-fold lower`** lowers the gain for you instead of refusing, region by region. The move
+  is the gain times the move at gain 1, so the gain at which a region folds is
+  2 · radius / (π · move at gain 1), and a region that folds at `--gain` takes the largest gain
+  under that, in steps of 0.01; a region that does not fold keeps `--gain`. Every part hangs on
+  the same body and answers the same motion, but how far a part can move before it folds is its
+  own size, so a small part (an ear) does not hold a large one (a chest) back. No region goes under 1, the
+  mass as measured: one that would have to is **held** — it does not move at all, so a
+  follow-through is never quietly weaker than the motion it answers — and named, on stderr and in
+  the record. The strip is refused only when every region is held (the message names the largest
+  region and the largest gain that would not fold it). Where regions of different gains overlap,
+  the larger move wins; the move there is nowhere steeper than either region's own, so nothing
+  folds. A strip whose regions all take one gain — one region, or regions that fold alike, or
+  none that folds — is written as one gain for the strip writes it, byte for byte, and its `gain` is
+  then the `--gain` that gives this strip by itself. The default stays `refuse`, with the same
+  message as 2.24.0; a strip that does not fold is the same under either.
 - **What it writes**: the strip, GIF and WebP over the loop's own (both animations re-opened and
   checked as `video-loop` checks them), and `follow` in `<name>.strip.json` (the regions, the
-  settings, the body's bob, `dx_px`/`dy_px` per cell, `reach_px`; `gain` is the gain used and
+  settings, the body's height in the first cell `body_px`, the first and last level it was worn
+  down to `body_worn_px`, the body's bob `body_bob_px` (side to side, up and down), `dx_px`/`dy_px` per cell, `reach_px`; `gain` is the gain used and
   `gain_requested` the one asked for, and `fold` says whether it was lowered, the move asked for,
   the move at gain 1, and per region its smaller radius, how near the used move is to folding it
-  (`ratio`, under 1) and the gain at which it folds). A lowered gain is also named on stderr.
+  (`ratio`, under 1) and the gain at which it folds). Where the regions took gains of their own,
+  each region's entry also says the gain it moved by (`gain`, 0 when held) and whether it was
+  held (`held`); the strip's `gain` is then the largest of them, `dx_px`/`dy_px` and `reach_px`
+  are that gain's (a region moves by its own gain over that one times them), and `fold.ratio` is
+  the nearest any region came to folding. A lowered gain is also named on stderr — per region,
+  with the `--region` it was given, where they differ — and so is a held region; the printed
+  summary then carries `region_gains`.
+  All four are written and checked beside the loop first and moved over its files only once the
+  record is written too, so a run that fails on the way — an animation that fails its check, a
+  record that does not serialise — leaves the strip, GIF, WebP and record as they were.
   `cycle/` is left as cut. The strip as it was is kept as `follow.source.png`; running
   `video-follow` again reads from it, so a second run never moves a moved strip. `--board` writes the cells before and after where the part
   sits lowest and highest, on white.

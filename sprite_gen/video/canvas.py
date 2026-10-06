@@ -6,7 +6,8 @@ image-to-video (2026-09-08 실측: a `3:4` request still returned 960x960). So t
 canvas is decided HERE, on the still: a jump needs head-room above (tall), an
 attack needs room above and in front, a projectile needs room in front (wide), everything else stays square.
 The state -> canvas table below is the single owner of that rule; `--shape`
-overrides it per call.
+overrides it per call, with the state's own row for that shape where it has one (a walk or run
+forced wide gets no head-room).
 
 `--fit tight` is the other way to frame: no room is added for the motion. The
 empty rows above and below the subject are dropped (a little headroom stays),
@@ -87,6 +88,17 @@ STATE_CANVAS: dict[str, CanvasProfile] = {
 # row would give it (a 3:2 still about three fifths), because the wide canvas's
 # height follows the still's width there.
 WIDE_OVERRIDE = CanvasProfile(SHAPE_WIDE, 16 / 9, 0.35, 0.28, 0.2, "forced wide: room in front and behind, and a jump's head-room above, whatever the state")
+# A walk or run forced wide keeps the room in front and behind and gets none above: its feet do
+# not leave the ground. Above a square still the jump's head-room set the canvas's width too —
+# 1575 rows on 16:9 are 2800 columns, 1216 of them in front of the still — and a subject that
+# small in its frame is one a video model may reframe in its first frames (`video-loop`'s
+# lead-in). The same 16:9 with no head-room gives a square still 1969 x 1108.
+GAIT_WIDE = CanvasProfile(SHAPE_WIDE, 16 / 9, 0.0, 0.28, 0.2, "forced wide for a walk or run: room in front and behind, none above — its feet stay on the ground")
+# A state's own row for a forced shape, read before the shape's default (`profile_for`).
+STATE_SHAPE_CANVAS: dict[tuple[str, str], CanvasProfile] = {
+    ("walk", SHAPE_WIDE): GAIT_WIDE,
+    ("run", SHAPE_WIDE): GAIT_WIDE,
+}
 SHAPE_DEFAULTS: dict[str, CanvasProfile] = {
     SHAPE_SQUARE: STATE_CANVAS["default"],
     SHAPE_TALL: STATE_CANVAS["jump"],
@@ -102,12 +114,13 @@ KEYS = ("auto", "green", "magenta", "white")  # auto: the corners decide; white:
 
 
 def profile_for(state: str | None, shape: str | None = None) -> CanvasProfile:
-    """Resolve the canvas profile: an explicit `shape` wins, else the state's row, else default."""
+    """Resolve the canvas profile: an explicit `shape` wins — the state's own row for that shape
+    (`STATE_SHAPE_CANVAS`), else the shape's default — else the state's row, else default."""
+    key = (state or "").strip().lower()
     if shape is not None:
         if shape not in SHAPES:
             raise SystemExit(f"video-canvas: unknown --shape {shape!r}; expected one of {', '.join(SHAPES)}")
-        return SHAPE_DEFAULTS[shape]
-    key = (state or "").strip().lower()
+        return STATE_SHAPE_CANVAS.get((key, shape), SHAPE_DEFAULTS[shape])
     return STATE_CANVAS.get(key, STATE_CANVAS["default"])
 
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Render the GitHub release body for one tag out of `CHANGELOG.md`.
 
-`.github/workflows/release.yml` calls this when a `v*` tag is pushed, so the release
+`scripts/release_publish.py` calls this after a `v*` tag is pushed, so the release
 page is built from the file that already describes the release instead of from whatever
 the person cutting the tag remembers to paste. A tag with no `## vX.Y.Z` section — or a
 section with no content — is a failure here, not an empty release page.

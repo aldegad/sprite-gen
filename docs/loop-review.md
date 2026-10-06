@@ -80,13 +80,22 @@ counted as rejected candidates; absence of a usable pair is an explicit failure.
 The correlation at every offset of a search window comes out of FFTs: per channel,
 the masked patch sum, its squared sum and its product with the centered reference are
 window correlations, so the masked patch is never copied out once per offset. The
-costs agree with that direct form to about 1e-6, and two offsets that tie within it
-may swap. On three 3 s walk clips at 544 px the region search took 1.0 to 1.4 s of
-CPU instead of 22.6 to 37.4 s, and full loops cut from the same frames gave the same
-cycle and byte-identical strips.
+costs agree with that direct form to about 1e-6. On three 3 s walk clips at 544 px the
+region search took 1.0 to 1.4 s of CPU instead of 22.6 to 37.4 s, and full loops cut from
+the same frames gave the same cycle and byte-identical strips.
+
+FFT rounding is not the same on every machine (numpy's builds differ by about 1e-14), and
+a patch on a flat fill slides: several offsets match it alike. Costs within 1e-9 of the
+lowest (`auto_motion.MATCH_TIE`) are one match, and the offset nearest the centre the
+search was put on is taken; regions whose qualities tie on that grain are ranked by their
+box. Before this the rounding chose, and a synthetic walk was cut at another start on
+Linux than on macOS from the same pixels.
 
 For selection only, the measured horizontal trajectory is locally fitted and the
-vertical linear trend is removed. Local lag minima can then identify a repeat in
+vertical linear trend is removed (least-squares lines with exactly rounded sums,
+`sprite_gen.util.lsq`, not np.polyfit, whose LAPACK solve rounds differently between machines:
+the line moves the analysis frames by a fraction of a pixel, and its last bit can tip a bilinear
+sample). Local lag minima can then identify a repeat in
 a clip with changing drift or cadence. Selection requires repeat depth, active
 motion around both boundaries, and a supported doubled recurrence when a short
 step falls below the gait floor. Candidate ranking also penalizes drift that a
@@ -96,8 +105,21 @@ the lag minimum. When the top of the silhouette jumps into that cut's first fram
 a staff or flag held above the head, swinging on its own beat — the candidates are measured
 and the cut is chosen again among those whose top was read and closes ([loop repair](loop-repair.md)
 section 3, "The seam pop"; `cycle.seam_pop`). A first choice whose top closes, or cannot be read, is kept and
-nothing more is measured. An explicit `--max-len` is never widened; without one, only the gait
-fallback below looks past the state's window, and only after this search found nothing.
+nothing more is measured. Once it pops, the held part is read below its top as well, on the side
+the top band sits on: a cut whose shaft closes under the hand is taken first, and where no cut one
+step long closes it, a window two steps long — one cycle — is (`cycle.steps`, `strip.json`
+`steps: 2`; [loop repair](loop-repair.md) section 3, "The held side"). An explicit `--max-len` is
+never widened, nor cut back to half the clip: an explicit window is the window, on every path that
+sets a length (the count of steps and the one-shot failover below included), and a cut outside it
+fails ([loop repair](loop-repair.md) section 3, "The step screen"). Without one, only
+the gait fallback below looks past the state's window, and only after this search found nothing.
+
+A walk slower than the window can hold — its legs drawn alike — is found one step long, and the
+search has nothing to refuse it on: the step repeats. So the cut is screened the other way, over
+the whole clip (`cycle.step_screen`): where twice it repeats better than it, the report names it a
+suspect and nothing else changes. Look at the loop and count its steps (how often each foot lands);
+`video-loop --steps 1` cuts it again two of its lengths long, `--steps 2` keeps it and says so
+([loop repair](loop-repair.md) section 3, "The step screen").
 
 ### The gait fallback: a slow walk, or a walk toward the camera
 
@@ -105,14 +127,17 @@ When the local search finds no cycle, `motion-auto` looks once more, for two thi
 front or back gait does that the first search cannot see past. (Since 2.24.0 a clip that changes
 size by 1 % or more, read one cycle on, is held at its first frame's size before the first
 search — [video-pipeline.md](video-pipeline.md) section 4, `size_hold` — so the fallback below
-seldom finds anything left to scale back unless `--size-hold off` was passed. It still reads the
-line through the clip, so a clip the hold left as filmed, whose line reads 3 % or more, is scaled
-back here if the first search found no cycle.)
+seldom finds anything left to scale back unless `--size-hold off` was passed. It reads the size
+the way the hold does, one cycle on, so the two never disagree about a clip. A clip's lead-in —
+its first frames, where the video model reframed a small subject — is left out of both searches,
+[video-pipeline.md](video-pipeline.md) section 4, "A lead-in".)
 
 - **It walked toward the camera, or away from it.** Asked to walk in place, a front walk
   sometimes comes closer, and the body grows through the clip, so the same pose never matches
-  itself in size. A straight-line fit of the subject's opaque height measures it; at 3 % or
-  more over the clip (`SCALE_DRIFT_MIN`) every frame is scaled back to the first frame's fitted
+  itself in size. The change read one cycle on measures it (`gait_fallback.cycle_drift`, as for
+  the size hold; it was a straight line through the clip before, which a first pose settling into
+  the walk pulls flat over a body that does grow); at 3 % or
+  more over the clip (`SCALE_DRIFT_MIN`) every frame is scaled back to the first frame's
   height about its fitted foot point, with its coverage and its colour mapped apart
   (`transform_cell`, [video-pipeline.md](video-pipeline.md) "Cells") so the soft edge keeps its
   colour and gets no lighter rim or key tint from the resample. The

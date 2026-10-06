@@ -81,6 +81,12 @@ VIEW_TEXT = {
 # less, a three-quarter back view came out as a side view or looking back over the shoulder. A front or
 # back still redrawn from a side picture with the clip's one line kept the picture's turn in the head and
 # chest, so those two say where the head, chest and feet point and not to follow the picture's angle.
+# The turn, the head and the feet alone leave the chest (or back) and the legs unsaid: a still that turns only
+# its head and shoes meets those words. So the diagonals say what that angle shows: the middle of the chest (or
+# back) about three quarters of the way across toward the far edge, the near shoulder and side seen broad, the
+# far shoulder and arm partly hidden, the legs at the same angle with the far foot higher and behind, and not to
+# follow a reference's angle (docs/video-pipeline.md). `{other}` is the side opposite `{facing}`: the near side
+# of a front diagonal, the far side of a back one.
 STILL_VIEW_TEXT = {
     "front": (
         "seen from the front: the whole body and head turned to face the viewer squarely, the chest, hips and the toes "
@@ -94,19 +100,32 @@ STILL_VIEW_TEXT = {
         "character from another angle"
     ),
     "front_diagonal": (
-        "seen from a three-quarter front angle: the whole body and head turned about 45 degrees to the {facing}, halfway "
-        "between facing the viewer and facing {facing}, the face looking the same way as the chest and the feet pointing "
-        "toward the lower {facing}"
+        "seen from a three-quarter front angle: the whole body turned about 45 degrees to the {facing}, halfway between "
+        "facing the viewer and facing {facing}, not a front view with only the head turned: the chest and hips turn as far "
+        "as the head, so the middle of the chest and of the waist sits about three quarters of the way across the body "
+        "toward its {facing} edge, the shoulder and the side of the chest on the {other} of the picture, nearer the "
+        "viewer, are seen broad, the shoulder and arm on the {facing} of the picture are partly hidden behind the body and "
+        "the chest looks narrower than from the front, and the legs stand at the same angle, the far foot on the {facing} "
+        "of the picture set a little higher and partly behind the near leg, both toes pointing toward the lower {facing}, "
+        "the face looking the same way as the chest, even when a reference picture shows the character from another angle"
     ),
     "back_diagonal": (
-        "seen from a three-quarter back angle: the whole body and head turned about 45 degrees away from the viewer toward "
-        "the upper {facing}, halfway between facing away and facing {facing}, the face hidden and not looking back over the "
-        "shoulder, and the feet pointing diagonally up and to the {facing} so the backs of the shoes face the viewer at an angle"
+        "seen from a three-quarter back angle: the whole body turned about 45 degrees away from the viewer toward the upper "
+        "{facing}, halfway between facing away and facing {facing}, not a back view with only the head turned: the back and "
+        "hips turn as far as the head, so the middle of the back and of the waist sits about three quarters of the way "
+        "across the body toward its {other} edge, the shoulder and the side of the body on the {facing} of the picture, "
+        "nearer the viewer, are seen broad, the shoulder and arm on the {other} of the picture are partly hidden behind the "
+        "body and the back looks narrower than from straight behind, and the legs stand at the same angle, the far foot on "
+        "the {other} of the picture set a little higher and partly behind the near leg, the feet pointing diagonally up and "
+        "to the {facing} so the backs of the shoes face the viewer at an angle, the face hidden and not looking back over "
+        "the shoulder, even when a reference picture shows the character from another angle"
     ),
 }
 # The same views for a body that is not one biped (`body_plan`): where the body and head point, with no feet
 # counted and no chest, hips, shoulders or shoes, so a horse's still is not drawn standing on two feet.
 # `{body}` is the character's or every figure's; then what it stands on (`body_plan.still_text`). Not measured.
+# The diagonals here keep their few words and take none of the person's middle-line and leg clauses, which count
+# a chest, shoulders and two feet.
 STILL_VIEW_TEXT_ANY_BODY = {
     "front": (
         "seen from the front: {body} turned to face the viewer squarely, the face centred and looking straight out of "
@@ -138,7 +157,8 @@ def still_view_text(direction: str, facing: str = "right", body_plan: list[Body]
     validate_facing(facing)
     stands_on = body_mod.still_text(body_plan)
     if not stands_on:
-        return STILL_VIEW_TEXT.get(direction, VIEW_TEXT[direction]).format(facing=facing)
+        other = "left" if facing == "right" else "right"
+        return STILL_VIEW_TEXT.get(direction, VIEW_TEXT[direction]).format(facing=facing, other=other)
     body = "every figure's whole body and head" if body_mod.scene(body_plan) else "the whole body and head"
     view = STILL_VIEW_TEXT_ANY_BODY.get(direction, VIEW_TEXT[direction]).format(facing=facing, body=body)
     return f"{view}, {stands_on}"
@@ -723,6 +743,12 @@ def run_item(
             result["loop"]["fundamental"] = {"period": lp["cycle"]["fundamental"]["period"],
                                              "suspects": [{k: row.get(k) for k in ("period", "cycles", "pose", "steps")}
                                                           for row in lp["cycle"]["fundamental"]["suspects"]]}
+        if "steps" in lp["cycle"]:
+            # the cut's steps are known: its frame count is two steps — one cycle — not twice its siblings' one
+            result["loop"]["steps"] = lp["cycle"]["steps"]["count"]
+        if (lp["cycle"].get("step_screen") or {}).get("suspect"):
+            # the cut may be one step of a cycle twice as long (recorded, not cut again)
+            result["loop"]["step_screen"] = {k: lp["cycle"]["step_screen"][k] for k in ("lag", "ratio", "depth", "coverage")}
         if lp.get("motion_anchor", {}).get("applied") is False:
             result["loop"]["motion_anchor"] = lp["motion_anchor"]
         if "rife" in (lp.get("jump_repair") or {}):
@@ -833,9 +859,15 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
                   file=sys.stderr)
             continue
         except align_mod.CycleSuspects as exc:
-            names = ", ".join(Path(e["dir"]).parent.name if Path(e["dir"]).name == "loop" else e["name"] for e in exc.suspects if e["status"] == "stopped")
+            def said(entries: list[dict[str, Any]]) -> str:
+                return ", ".join(Path(e["dir"]).parent.name if Path(e["dir"]).name == "loop" else e["name"] for e in entries)
+            stopped = [e for e in exc.suspects if e["status"] == "stopped"]
+            held = [e for e in stopped if e["candidates"]]
+            step = [e for e in stopped if "one_step" in e]
             out[state] = {"ok": True, "applied": False, "reason": "cycle-suspects",
-                          "why": f"{names} may hold more than one cycle — each loop keeps its own length until its cycles are counted",
+                          "why": " and ".join([*([f"{said(held)} may hold more than one cycle"] if held else []),
+                                               *([f"{said(step)} may be one step (cut it again with video-loop --steps 1 if it is)"] if step else [])])
+                                 + " — each loop keeps its own length until its cycles are counted",
                           "suspects": exc.suspects, "command": exc.command, "report": str(root / f"{state}.cycle-align.json")}
             print(f"video-set: warning: {state}: cycles not aligned — {out[state]['why']}; count them and run "
                   f"`sprite-gen video-cycle-align --cycles <loop>=<k>` ({exc}) (docs/loop-repair.md section 4)", file=sys.stderr)
@@ -885,7 +917,9 @@ def write_table(results: list[dict[str, Any]], path: Path, *, both: bool = False
                 status = "OK (uncorrected; review gait)"
             if "jump_repair" in lp:
                 status += " (jump not repaired: no RIFE)"
-            lines.append(f"| {_view_label(r, both)} | {r['state']} | {lp.get('kind', 'periodic')} | {lp['cycle']} | {lp['period'] if lp['period'] is not None else '-'} | {lp['seam_ratio']:.2f} | {lp['n_out']} | {status} |")
+            # a cut whose steps are known is two of them; one the step screen suspects may be one
+            cycle = f"{lp['cycle']}" + (f" ({lp['steps']} steps)" if lp.get("steps") else " (one step?)" if lp.get("step_screen") else "")
+            lines.append(f"| {_view_label(r, both)} | {r['state']} | {lp.get('kind', 'periodic')} | {cycle} | {lp['period'] if lp['period'] is not None else '-'} | {lp['seam_ratio']:.2f} | {lp['n_out']} | {status} |")
         else:
             lines.append(f"| {_view_label(r, both)} | {r['state']} | - | - | - | - | - | FAIL: {r.get('error', '')[:80]} |")
     text = "\n".join(lines) + "\n"

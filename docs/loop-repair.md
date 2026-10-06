@@ -281,7 +281,8 @@ plays:
   within the usual 15 % of the best and the smallest pop (`cycle.seam_pop`: `first_choice`,
   `applied`, `measured`, `unread`, `chosen`). A first choice that does not pop is kept, and nothing past it
   is measured, so a loop without such a part is cut exactly as before. If every candidate read pops,
-  the first choice is kept (`why`) and the warning below says so.
+  the first choice is kept (`why`) and the warning below says so. Once the first choice pops, the held
+  part is read below its top too, and the cut may come out two steps long ("The held side" below).
 - **A cut whose top cannot be read is not one that closes.** A frame with nothing in the top band
   (a tip flung far above the rest in one frame) leaves the cut without a jump to read: it is
   recorded `skipped` (why) in place of `pop` — `first_choice.skipped`, or on a candidate row
@@ -298,9 +299,165 @@ plays:
   walker of `tests/video/test_loop_prop_seam.py` — steps every 24 frames, a staff above its head swaying every 61 — reads 12 to 18 at the cuts the area
   measure alone chose, and 0 at the cuts chosen again.
 - **What it does not see**: a held part that never reaches the top band (a spear held level, a
-  sword at the hip), and the lower end of a staff whose top closes while the shaft still swings
-  about the hand. A clip like that may need a cut two steps long, which the search does not make;
-  `--cycle fixed` cuts one ([loop review](loop-review.md)).
+  sword at the hip). The lower end of a staff whose top closes while the shaft still swings about the
+  hand is read by the held side below, behind this pop.
+
+### The held side — a staff that closes at the top and swings below the hand
+
+A staff turns about the hand as the arm that holds it swings: once a cycle, two steps. One step on
+it is back in the same place at the top band, moving the other way. Where the legs are drawn alike
+the search reads that step as the cycle (the legs are back in place, near and far swapped), and a
+cut one step long taken there closes the top — `seam_pop` reads nothing — while the shaft under the
+hand swings back at the wrap. No cut one step long closes such a staff; a cut two steps long — the
+cycle — does.
+
+Nothing that reads the whole silhouette sees it on its own. On a walk without a held part the
+silhouette's outer edges are hair, an arm or a foot, and a local jump at the wrap — read per tile,
+per row edge, on thin parts only, or as a repeat one cycle on against two — reads as high on some
+walks without a staff as on a staff that does not close. So the held side is read **only behind
+the seam pop**: on a search whose first choice popped at the top, where the top band has found that
+something is held, and on which side of the body.
+
+`repair.held_edge`, on the frames the search chooses from (moved by the analysis translation,
+`loop.HeldEdge`):
+
+| Step | What |
+|---|---|
+| side | the side of the body's centre the top band sits on, for the popping first choice (`repair.held_side`) |
+| edge | per row of the silhouette, its outermost column on that side (`repair.side_edges`) |
+| per row | a loop closes where its last frame is the clip's frame before its first, and its first the clip's frame after its last: those two places, and the steps into and out of each against the clip's own steps there (a part back in its place but moving the other way swings back at the wrap), their mean over the row's median step inside the loop — a floor of 0.5 % of the body height, a pixel at least |
+| `seam` | the 80th percentile over the rows; the held side `closes` under **1.2** (`repair.HELD_EDGE_REFERENCE`) |
+
+A cut with fewer than two clip frames on either side has nothing to read its wrap against: it is
+`skipped` (why), counted under `unread`, and never chosen.
+
+`--anchor motion-auto`, once its first choice pops (`cycle.seam_pop.held_edge`: `side`, `reference`,
+`measured`, `unread`, `doubled`, `chosen`, and `two_step` when it looked there):
+
+1. Among the candidates whose top does not pop, those whose held side closes: the scores within the
+   usual 15 % of the best, then the smallest held seam (`doubled: false`). A candidate row carries
+   `held_edge` (`null` with `held_edge_skipped` where it could not be read).
+2. If no candidate closes it: **windows twice a candidate's length** (every length 2L − 1 to 2L + 1
+   for a candidate length L, at every start the clip holds). The candidate was one step; such a
+   window is two — **one cycle** — of a repeat the search confirmed, not itself seen repeating: a
+   three-second clip cannot show a window that long twice. One whose held side closes and whose top
+   does not pop (a top that cannot be read is not taken) is cut, the smallest held seam first
+   (`doubled: true`). The report says what it is: `cycle.steps` is `{"count": 2, "by": "held-edge",
+   "step_lengths": [...]}` — the candidate lengths it is two of, each one step — `cycle.period_local`
+   is its own length (it is screened as the one cycle it is), `cycle.coverage` says how much of a
+   second cycle the clip holds past it ("The step screen" below), `cycle.seam_pop.chosen.steps` is 2
+   and `strip.json` says `steps: 2`, which the set alignment reads (section 4). `two_step` records
+   the lengths tried and how many were `measured`, `unread`, `top_pops` and `closing`. An explicit
+   `--max-len` is the caller's ceiling on the cut and stays one: a window two lengths long over it is
+   not read (`two_step_capped`: `max_len`, `lengths_over`), and where every such length is over it,
+   nothing two lengths long is read at all. The state's default window is no ceiling here: without
+   `--max-len` every length is read.
+3. If no window one or two lengths long closes it, the top band's choice stands (as above),
+   `held_edge.chosen` records its seam, and `jolt.warnings` and stderr gain
+   `video-loop: warning: the held part does not close at the wrap on the right side of the
+   silhouette, below its top: 5.50x its rows' median step (over 1.2); no window one or two lengths
+   long closes it — it swings on a beat of its own`. Where `--max-len` kept windows two lengths long
+   from being read, the line ends `no window one length long closes it, and windows two lengths long
+   (47-49 frames) are over --max-len 25, so they were not read` instead; where the steps were counted
+   (`--steps`, below), `no window of the counted length closes it`. A side that could not be read is
+   said as well.
+
+A first choice whose top does not pop reads nothing here: a walk without a part held above its head
+is cut, written and warned about exactly as before.
+
+The bound sits between cuts that close a held staff and cuts where it swings back at the wrap. The
+synthetic walker of `tests/video/test_loop_prop_seam_held.py` — legs back every 24 frames, a staff
+turning about the hand every 48 — reads 2.0 to 5.2 at every cut one step long whose top closes and
+0 at the window two steps long taken; with the staff swinging every step instead it reads 0 to 0.5,
+and the cut stays one step long. Below a staff on a beat neither one step nor two closes (every 37
+frames) every cut one step long whose top closes reads 4.25 or more and no window two steps long
+closes: the top band's cut stands, and it is warned about.
+
+- **What it does not see**: a held part on the other side of the body from the top band (the top
+  band names the side), and a held part whose cut needs more than two steps. A window two steps long
+  needs the clip to hold it with two frames either side: a three-second clip of 30-frame steps has
+  few starts for one. A one-step cut without a held part above the head is the step screen's
+  (below). `--cycle fixed` cuts any window ([loop review](loop-review.md)); a two-step cut made that
+  way carries no `steps`, and the set alignment asks for its count.
+
+### The step screen — a slow walk cut one step long
+
+The walk window is 0.5 to 1.6 s, and at most half the clip: a cycle has to be seen repeating. A
+slow walk can take longer than that a cycle, and then its cycle is outside the window. Where the legs are drawn alike, one step on they are back in place with near and far
+swapped, so the search finds the step as the repeat and cuts it. The loop walks on one leg: its arms
+— and anything they hold — jump at the wrap, a set aligned with it plays one step where the other
+directions play two, and nothing said so: the two-cycle screen looks only below the cut ("The
+fundamental period", [video pipeline](video-pipeline.md) section 4), and the gait fallback's longer
+window runs only when the first search finds nothing.
+
+`--anchor motion-auto` screens the cut it takes the other way, over the whole clip rather than the
+window (`cycle.step_screen`, `period.step_screen`):
+
+| Field | What |
+|---|---|
+| `lag` | within 3 frames of twice the cut (`searched`), the lag whose mean distance over the clip is least (at least 4 frame pairs) |
+| `pairs`, `ratio` | over every frame with both lags in the clip, the distance `lag` on over the distance one cut on |
+| `depth` | how far `lag` dips under the clip's lag profile from half the cut up |
+| `coverage` | (n − `lag`) / `lag`: how much of a second cycle the clip holds past one of that length |
+| `leg_peaks` | the step signal's peaks over the cut (`legs.step_signal`, read as a ring) — a record only, never decided by |
+| `suspect`, `why` | a repeat at `lag` (`depth` at least 0.15, `periodicity_min`) that is better than at the cut (`ratio` at most **0.85**, `period.STEP_RATIO_MAX`) |
+
+A true cycle repeats about as well a cycle on as at its own length (its drift makes the longer lag a
+little worse: `ratio` 1.0 and up); a step repeats better two cut lengths on, where the arms come
+back too. **Nothing is cut on it.** Pixels cannot tell a step from a cycle on a frame count that is
+not whole — a cycle of 23.5 frames cut at 24 repeats better at 47, being whole there — so the screen
+only names the cut, and the count comes from whoever looks at the loop (how often each foot lands:
+by eye, or a vision call). Its images, `strip.json`, warnings and stderr are what they were without
+it; the report's `cycle`, and the summary `video-loop` prints, gain `step_screen`. A twice-the-cut
+lag past the clip (fewer than 4 pairs) is not read: `lag` null, not a suspect. The synthetic walker
+of `tests/video/test_one_step_cut.py` — a 42-frame cycle, legs drawn alike and arms shaded apart, 73
+frames — is cut at 21 (`ratio` 0.48, a suspect); the same drawing on a 25-frame cycle is cut at 25
+(`ratio` 1.53), and on 23.5 frames at 24 (`ratio` 0.66: a suspect that is a cycle), each written
+exactly as with no screen at all.
+
+**`video-loop --steps 1|2`** is the count coming back, with `--anchor motion-auto`: how many steps
+the cut it takes without `--steps` holds.
+
+- **`--steps 1`**: the cut is one step, so the walk is cut again two of its lengths long. The
+  window is [2L − 1, 2L + 1] for the cut's length L — not bounded by half the clip, but held inside an
+  explicit `--min-len`/`--max-len` (below) — and searched as any window (a repeat seen in the clip, the top band and the held side read again, but
+  no window twice that); among the equivalent cuts the one whose wrap the clip itself plays is taken
+  (`choice: "closure"`: its last frame against the clip's frame before its first, and the step into
+  it, over its playback step), not the earliest. A clip too short to see a window that long repeat is
+  cut all the same — the count stands for the repeat — at the window whose wrap the clip plays
+  (`method: "counted-window-v1"`, `unseen` saying why the search found none). `cycle.steps` is
+  `{"count": 2, "by": "given", "given": 1, "first_cut": {start, length}, "window": [lo, hi]}`, with
+  `counted_window` beside `window` where an explicit window left only part of [2L − 1, 2L + 1].
+- **`--steps 2`**: the cut is a cycle already; it is kept, and recorded `{"count": 2, "by":
+  "given", "given": 2}`.
+
+Either way `strip.json` says `steps: 2` and the report records `cycle.coverage`, (n − L) / L. A cut
+two steps long whose clip holds under **0.25** of a cycle past it (`loop.COVERAGE_MIN`) is cut and
+warned about, not refused: `the cut is two steps long (42 frames, one cycle) and the clip holds 0.19
+of a cycle past it (under 0.25): its repeat is barely seen — the seam says whether it closes; a
+longer take shows it repeat`. Whether it closes is the seam gate's word, as for any cut. On the
+synthetic walker `--steps 1` cuts 15/42, the arm's wrap 0 where the one-step cut's was 7.6 times
+its largest step inside the loop; at 50 frames the counted window 8/42 (coverage 0.19) is cut and
+warned about.
+
+An explicit `--min-len`/`--max-len` window is the window as given too: the half-clip bound holds
+only for the state's default window. v2.35.0 cut it back, so `--min-len 41 --max-len 43` on a
+73-frame clip asked for the window [41, 36] and found no cycle. And it is the window on every path
+that sets a cut's length — the first search, a window two steps long (the held side), the count
+(`--steps 1`), the gait fallback, the one-shot failover — each of which reads its window off one
+place (`loop.CutWindow`) and none of which sets a bound of its own; whatever chose the cut, even
+`--cycle fixed` or `pinned`, a cut outside an explicit bound fails (`CutWindow.hold`, `the cut is …
+frames long (…), outside --max-len N`). A count and a window that leave no length in common are two
+instructions that disagree, and neither is followed: `--steps 1` on a 21-frame step with
+`--max-len 25` fails with `the cut of 21 frames from 18 is one step, so the cycle is 41-43 frames
+long, and --max-len 25 leaves none of that: the count and the window disagree — drop one, or give a
+window that holds the cycle` (the failed report's `cycle.steps`: `counted_window`, `window: null`,
+`refused`). Where they share part of it, that part is read (`--max-len 42`: [41, 42]).
+
+- **What it does not see**: a walk whose arms are drawn alike as well — then a step is a cycle in
+  every pixel and `ratio` reads 1; a cut whose twice is past the clip; and a cut on any path but
+  `--anchor motion-auto` (`--steps` needs it). A set loop whose cut's report is not beside it is not
+  screened at the set stage (section 4).
 
 ## 4. One cycle for a direction set — `video-cycle-align`, `video-set --align-cycles auto`
 
@@ -315,6 +472,26 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   [--foot side-walk=left] [--state walk] [--report set/walk.cycle-align.json]
 ```
 
+- **A loop whose steps are counted is one cycle.** A cut two steps long — taken so a held part
+  closes (section 3, "The held side") or cut again on a count (`video-loop --steps`, "The step
+  screen") — says `steps: 2` in `strip.json`. It returns half way, at its second step, and that
+  return is no second cycle: the suspect it makes is recorded with `status: "steps"` (its `steps`,
+  its `candidates`) and does not stop the set, and the loop is resampled to the set's length like
+  every other. A `--cycles` count given for it is still the last word: `--cycles <loop>=2` takes one
+  half out of it (one step — its `steps` is dropped from `strip.json`), `=1` aligns it as it is.
+- **A loop that may be one step is stopped too.** Nothing in the loop shows it — its next step is not
+  in it — so the screen is the one `video-loop --anchor motion-auto` ran over the whole clip
+  (section 3, "The step screen"). The alignment reads it from the cut's report beside the loop
+  (`align.cut_report`: a `sprite-gen-video-loop-report`, passed, in the loop's directory or the one
+  above it — a `video-set` item keeps it there — whose strip is the loop's and whose cut is the one
+  `strip.json` records in `cycle_drawings`). A loop whose cut was suspected, and whose steps nobody
+  counted, is a suspect the same way (`one_step`: `length`, `lag`, `seconds`, `ratio`, `depth`,
+  `pairs`, `coverage`, `leg_peaks`, `why`, `report`): stopped under `--multi-cycle fail`, aligned and
+  named in the warnings under `warn` (`plays one step where the rest play two, if it is one`). The
+  alignment cannot settle it — the next step is not in the loop: count its steps, and if it is one,
+  cut it again with `video-loop … --steps 1` (the arguments are in its report) and align the set
+  anew; if it is two, `--cycles <loop>=1` aligns it as it is. A loop with no report beside it is not
+  screened this way.
 - **Two cycles in one loop are stopped, and counted by whoever looks**: one length for the set is
   one beat only if every loop holds one cycle. A loop that holds two strides, resampled to the
   set's length, walks twice as fast as the rest, arms and legs alike — and pixels cannot tell it

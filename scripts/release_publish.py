@@ -2,9 +2,11 @@
 """Publish the GitHub release page for a tag, or rehearse it without touching anything.
 
 The gate this closes: a `vX.Y.Z` tag can be pushed, changelogged and announced while the
-release page is never created, leaving an older version as Latest. `.github/workflows/
-release.yml` runs this on every `v*` tag push, and the same file runs it with `--dry-run`
-on `workflow_dispatch` so the decision path can be rehearsed on a branch.
+release page is never created, leaving an older version as Latest. The release chain runs this
+right after the tag is pushed (docs/release.md), and `--dry-run` rehearses the same decision on
+a branch. GitHub-hosted CI is not used: the wheel and sdist come from the Linux lane
+(`scripts/linux_lane.sh --artifact <dir>`, on the maintainer's runner) and are attached with
+`--prebuilt <dir>`, so the machine that publishes builds nothing.
 
 Three outcomes, and no fourth:
 
@@ -18,15 +20,15 @@ Three outcomes, and no fourth:
 other failure (no token, no network, a 5xx) stops the run instead of being read as "not
 there yet" and answered with a create.
 
-Standard library only, same as `release_notes.py`; `gh` and `python -m build` are the
+Standard library only, same as `release_notes.py`; `gh`, `git` and `python -m build` are the
 only external commands.
 
     .venv/bin/python scripts/release_publish.py --tag v2.5.3 --dry-run
+    .venv/bin/python scripts/release_publish.py --tag v2.5.3 --prebuilt <lane artifact dir>
 """
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import sys
 import tempfile
@@ -93,11 +95,44 @@ def checksum_distribution(dist_dir: Path) -> list[Path]:
     return [*archives, sums]
 
 
-def _emit(text: str, summary_path: str | None) -> None:
-    print(text)
-    if summary_path:
-        with open(summary_path, "a", encoding="utf-8") as handle:
-            handle.write(text + "\n")
+def take_prebuilt(prebuilt: Path, tag: str, *, cwd: Path) -> list[Path]:
+    """The wheel, sdist and SHA256SUMS a lane built for this tag's commit — checked, not rebuilt.
+
+    Nothing is attached unless the directory holds exactly one wheel and one sdist of the
+    tag's version plus SHA256SUMS and SOURCE_SHA, SHA256SUMS matches both archives, and
+    SOURCE_SHA names the commit the tag points to in this checkout. A build of another commit,
+    a stray file or a changed archive stops the release instead of riding along.
+    """
+    import hashlib
+
+    version = release_notes.version_of(tag)
+    if not prebuilt.is_dir():
+        raise PublishError(f"{prebuilt} is not a directory")
+    names = sorted(p.name for p in prebuilt.iterdir())
+    wheels = [n for n in names if n.endswith(".whl")]
+    sdists = [n for n in names if n.endswith(".tar.gz")]
+    if len(wheels) != 1 or len(sdists) != 1 or set(names) != {*wheels, *sdists, "SHA256SUMS", "SOURCE_SHA"}:
+        raise PublishError(
+            f"{prebuilt} must hold exactly one wheel, one sdist, SHA256SUMS and SOURCE_SHA; "
+            f"it holds {names}")
+    wheel, sdist = wheels[0], sdists[0]
+    if f"-{version}-" not in wheel or not sdist.endswith(f"-{version}.tar.gz"):
+        raise PublishError(f"{wheel} and {sdist} are not version {version}")
+    proc = _run(["git", "rev-parse", "--verify", "--quiet", f"{tag}^{{commit}}"], cwd=cwd)
+    if proc.returncode != 0:
+        raise PublishError(f"{tag} is not a tag in {cwd}; tag the release commit first")
+    tag_commit = proc.stdout.strip()
+    source = (prebuilt / "SOURCE_SHA").read_text(encoding="utf-8").strip()
+    if source != tag_commit:
+        raise PublishError(f"{prebuilt} was built from {source or '(nothing)'}, but {tag} is {tag_commit}")
+    listed = {}
+    for line in (prebuilt / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
+        digest, _, name = line.partition("  ")
+        listed[name] = digest
+    actual = {n: hashlib.sha256((prebuilt / n).read_bytes()).hexdigest() for n in (wheel, sdist)}
+    if listed != actual:
+        raise PublishError(f"SHA256SUMS in {prebuilt} does not match its archives")
+    return [prebuilt / wheel, prebuilt / sdist, prebuilt / "SHA256SUMS"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -114,10 +149,16 @@ def main(argv: list[str] | None = None) -> int:
                         help="where the wheel and sdist go (default: <checkout>/dist)")
     parser.add_argument("--skip-build", action="store_true",
                         help="attach only the GIFs; for rehearsing the decision alone")
+    parser.add_argument("--prebuilt", type=Path, default=None,
+                        help="attach the wheel, sdist and SHA256SUMS that "
+                             "`scripts/linux_lane.sh --artifact` built for the tag's commit "
+                             "instead of building here")
     parser.add_argument("--gh", default="gh", help="the gh executable to call")
     args = parser.parse_args(argv)
+    if args.prebuilt is not None and (args.skip_build or args.dist_dir is not None):
+        parser.error("--prebuilt takes the place of a build here; "
+                     "it does not combine with --skip-build or --dist-dir")
 
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
     checkout = args.checkout.resolve()
     dist_dir = (args.dist_dir or checkout / "dist").resolve()
 
@@ -130,24 +171,25 @@ def main(argv: list[str] | None = None) -> int:
             branch=args.branch,
         )
         if release_exists(args.gh, args.tag, repo=args.repo, cwd=checkout):
-            _emit(f"{args.tag} already has a release page on {args.repo}; "
-                  f"body and assets left untouched.", summary)
+            print(f"{args.tag} already has a release page on {args.repo}; "
+                  f"body and assets left untouched.")
             return 0
 
         assets = [str(checkout / rel) for rel in page["assets"]]
         if args.skip_build:
             built: list[Path] = []
+        elif args.prebuilt is not None:
+            built = take_prebuilt(args.prebuilt.resolve(), args.tag, cwd=checkout)
         else:
             built = build_distribution(dist_dir, cwd=checkout)
         assets = [str(p) for p in built] + assets
 
         if args.dry_run:
             listing = "\n".join(f"  {a}" for a in assets) or "  (none)"
-            _emit(
+            print(
                 f"DRY RUN — {args.tag} has no release page on {args.repo}. Would create:\n"
                 f"\ntitle: {page['title']}\n\nassets:\n{listing}\n\nbody:\n{'-' * 60}\n"
-                f"{page['body']}\n{'-' * 60}\n\nNothing was created, uploaded or tagged.",
-                summary,
+                f"{page['body']}\n{'-' * 60}\n\nNothing was created, uploaded or tagged."
             )
             return 0
 
@@ -161,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
             raise PublishError(f"gh release create failed:\n{(proc.stderr or proc.stdout).strip()}")
         if not release_exists(args.gh, args.tag, repo=args.repo, cwd=checkout):
             raise PublishError(f"gh release create reported success but {args.tag} has no page")
-        _emit(f"published {args.repo} {args.tag}: {proc.stdout.strip()}", summary)
+        print(f"published {args.repo} {args.tag}: {proc.stdout.strip()}")
         return 0
     except (release_notes.ReleaseNotesError, PublishError, OSError) as exc:
         print(f"release_publish: {exc}", file=sys.stderr)
