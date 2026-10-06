@@ -74,6 +74,118 @@ def test_the_region_moves_with_the_bob_and_nothing_else_does(loop_dir):
     assert (loop_dir/follow.SOURCE).exists()
 
 
+def with_top(k, kind, period=24):
+    """The walker with something thin swinging over its head: a tail from the hip whose tip rises above
+    the crown for part of the cycle, or a sword held up and swung over the head from side to side."""
+    im = walker(k, period)
+    d = ImageDraw.Draw(im)
+    bob = round(3*math.sin(4*math.pi*k/period))
+    phase = 2*math.pi*k/period
+    if kind == 'tail':
+        d.line((108, 100+bob, 125+25*math.cos(phase), 12+14*math.sin(phase)), fill=(120, 70, 30, 255), width=3)
+    else:
+        d.line((102, 40+bob, 80+45*math.sin(phase), 4+6*(1-math.cos(phase))), fill=(200, 200, 220, 255), width=4)
+    return im
+
+
+def strip_dir(path, draw, n=24):
+    """A loop directory holding one cycle of `draw(k)` as a strip, as video-loop leaves one."""
+    cells = [draw(k) for k in range(n)]
+    w, h = cells[0].size
+    strip = Image.new('RGBA', (w*n, h))
+    for k, c in enumerate(cells):
+        strip.paste(c, (k*w, 0))
+    path.mkdir()
+    strip.save(path/'walk.strip.png')
+    (path/'walk.strip.json').write_text(json.dumps({'kind': 'periodic', 'frames': n, 'w': w, 'h': h, 'delay_ms': 1000/24}))
+    return path
+
+
+@pytest.mark.parametrize('kind', ['tail', 'sword'])
+def test_what_swings_over_the_head_does_not_move_the_body(tmp_path, kind):
+    # The motion was read off the top of the body, so whatever came to the top was the body: a tail tip
+    # rising over the head made the read jump across the cell, a sword held up made the body follow its tip.
+    chest = (80.0, 83.0, 22.0, 17.0)  # the soft part, as walker draws it in cell 0
+    bare = follow.follow_loop(strip_dir(tmp_path/'bare', walker), [chest], on_fold='lower')
+    topped = follow.follow_loop(strip_dir(tmp_path/kind, lambda k: with_top(k, kind)), [chest], on_fold='lower')
+    # The head and torso bob 3 px up and down twice a cycle and do not move across.
+    assert bare['body_bob_px'] == [0.0, 6.0]
+    for key in ('body_bob_px', 'dx_px', 'dy_px', 'reach_px', 'gain', 'fold'):
+        assert topped[key] == bare[key], key
+    # The chest moves alike under both: what the follow-through changed in the chest is the same pixels.
+    moved = [np.asarray(Image.open(p/'walk.strip.png').convert('RGBA')) for p in (tmp_path/'bare', tmp_path/kind)]
+    source = [np.asarray(Image.open(p/follow.SOURCE).convert('RGBA')) for p in (tmp_path/'bare', tmp_path/kind)]
+    changed = [(m != s).any(axis=-1) for m, s in zip(moved, source)]
+    assert changed[0].any() and np.array_equal(changed[0], changed[1])
+    assert np.array_equal(moved[0][changed[0]], moved[1][changed[1]])
+
+
+def test_a_cell_with_no_core_is_refused(tmp_path):
+    # A cell whose body is nowhere a quarter as deep as cell 0's has nothing to lay on cell 0's.
+    def draw(k):
+        if k != 5:
+            return walker(k)
+        im = Image.new('RGBA', (160, 200))
+        ImageDraw.Draw(im).line((80, 20, 80, 190), fill=(20, 90, 180, 255), width=5)
+        return im
+    loop_dir = strip_dir(tmp_path/'thin', draw)
+    as_cut = (loop_dir/'walk.strip.png').read_bytes()
+    with pytest.raises(SystemExit, match=r"^video-follow: cell 5 has no body as deep as a quarter of cell 0's \(\d+ px\)$"):
+        follow.follow_loop(loop_dir, [(80.0, 83.0, 22.0, 17.0)])
+    assert (loop_dir/'walk.strip.png').read_bytes() == as_cut
+    assert 'follow' not in json.loads((loop_dir/'walk.strip.json').read_text())
+
+
+def bunny(k, ears, period=24):
+    """A front bunny, its head, torso and legs one column that bobs twice a cycle, with or without lop ears out
+    to both sides of its head: each more than half as thick as the column is wide and nearly as long, swinging
+    down and back up once a cycle."""
+    im = Image.new('RGBA', (210, 240))
+    d = ImageDraw.Draw(im)
+    bob = round(3*math.sin(4*math.pi*k/period))
+    d.rectangle((70, 30+bob, 140, 225+bob), fill=(250, 250, 250, 255))  # head, torso and legs
+    d.ellipse((85, 110+bob, 125, 150+bob), fill=(230, 90, 120, 255))  # the soft part
+    if ears:
+        droop = round(60*(1-math.cos(2*math.pi*k/period)))
+        d.rectangle((10, 32+bob+droop, 70, 72+bob+droop), fill=(235, 235, 240, 255))
+        d.rectangle((140, 32+bob+droop, 200, 72+bob+droop), fill=(235, 235, 240, 255))
+    return im
+
+
+def test_ears_as_thick_as_the_body_do_not_move_it(tmp_path):
+    # Ears this thick outlast the wearing, and a cell laid on cell 0 alone lies ears on ears: in the cells where
+    # the ears had swung less than their own thickness from where cell 0 has them the body was read as dropping
+    # with them, by up to 30 px, and as jumping back in the next cell. Laid again on what the cells have in
+    # common, the ears are at one place in too few cells to count.
+    chest = (105.0, 130.0, 24.0, 24.0)  # the soft part, as bunny draws it in cell 0
+    bare = follow.follow_loop(strip_dir(tmp_path/'bare', lambda k: bunny(k, ears=False)), [chest], on_fold='lower')
+    eared = follow.follow_loop(strip_dir(tmp_path/'eared', lambda k: bunny(k, ears=True)), [chest], on_fold='lower')
+    assert bare['body_bob_px'] == [0.0, 6.0]
+    for key in ('body_bob_px', 'dx_px', 'dy_px', 'reach_px', 'gain', 'fold'):
+        assert eared[key] == bare[key], key
+    moved = [np.asarray(Image.open(p/'walk.strip.png').convert('RGBA')) for p in (tmp_path/'bare', tmp_path/'eared')]
+    source = [np.asarray(Image.open(p/follow.SOURCE).convert('RGBA')) for p in (tmp_path/'bare', tmp_path/'eared')]
+    changed = [(m != s).any(axis=-1) for m, s in zip(moved, source)]
+    assert changed[0].any() and np.array_equal(changed[0], changed[1])
+    assert np.array_equal(moved[0][changed[0]], moved[1][changed[1]])
+
+
+def test_cells_with_no_body_in_common_are_refused(tmp_path):
+    # What the cells have in common is what more than half of them have at one place. A bar in cell 0 and a
+    # block at a different place along it in each other cell: no place is in more than two of the four.
+    def draw(k):
+        im = Image.new('RGBA', (160, 200))
+        box = (20, 80, 140, 120) if k == 0 else (20+40*(k-1), 80, 60+40*(k-1), 120)
+        ImageDraw.Draw(im).rectangle(box, fill=(20, 90, 180, 255))
+        return im
+    loop_dir = strip_dir(tmp_path/'apart', draw, n=4)
+    as_cut = (loop_dir/'walk.strip.png').read_bytes()
+    with pytest.raises(SystemExit, match=r'^video-follow: no part of the body is at one place in more than half of the cells$'):
+        follow.follow_loop(loop_dir, [(80.0, 100.0, 22.0, 17.0)])
+    assert (loop_dir/'walk.strip.png').read_bytes() == as_cut
+    assert 'follow' not in json.loads((loop_dir/'walk.strip.json').read_text())
+
+
 def test_the_part_lags_and_settles_without_a_kick():
     # One cycle of a smooth bob: the answer is as smooth (no frame-to-frame jump far beyond the rest)
     # and closes on itself, since it is the loop's steady state.
@@ -295,8 +407,8 @@ def test_regions_that_take_one_gain_are_written_as_one_gain(loop_dir):
     rec = json.loads((loop_dir/'walk.strip.json').read_text())['follow']
     assert rec['fold']['lowered'] is True and follow.GAIN_MEASURED <= rec['gain'] < follow.GAIN_DEFAULT
     assert [sorted(e) for e in rec['fold']['regions']] == [['gain_limit', 'radius_px', 'ratio']]*2
-    assert sorted(rec) == ['body_bob_px', 'body_px', 'dx_px', 'dy_px', 'fold', 'freq_hz', 'gain', 'gain_requested', 'gif',
-                           'harmonics', 'on_fold', 'reach_px', 'regions', 'source', 'webp', 'zeta']
+    assert sorted(rec) == ['body_bob_px', 'body_px', 'body_worn_px', 'dx_px', 'dy_px', 'fold', 'freq_hz', 'gain', 'gain_requested',
+                           'gif', 'harmonics', 'on_fold', 'reach_px', 'regions', 'source', 'webp', 'zeta']
     assert sorted(rec['fold']) == ['lowered', 'ratio', 'reach_per_gain_px', 'reach_requested_px', 'regions']
     lowered = (loop_dir/'walk.strip.png').read_bytes()
     follow.follow_loop(loop_dir, [a, b], gain=result['gain'])

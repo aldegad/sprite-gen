@@ -6,9 +6,17 @@ a pouch on a strap) mostly moves with the body as one piece, even when the promp
 bounce: at sprite size it reads as rigid. This puts that follow-through back after the loop is
 cut.
 
-Each frame of the strip is a cell of one cycle. The body's motion is read off the cells: the
-row of the crown (up and down) and the middle of the head (side to side). A part hung on the
-body is a damped mass: its offset x from where the body carries it answers the body's own
+Each frame of the strip is a cell of one cycle. The body's motion is read off the cells: how far
+each cell's body lies from the first cell's. The silhouette is worn down from a quarter to half
+of its depth in the first cell, so what swings on the body — a tail, a ponytail, an ear, a sword
+or a rod held up, the legs and arms — is worn away and the head and torso are left; each cell is
+laid where it overlaps the first cell most, worn alike, a pixel counting once for every level it
+is still in, and then laid again on what the cells so laid have in common: what more than half of
+them have at one place, so a part as thick as the body that is elsewhere in another cell (ears as
+wide as the head, up in one cell and on the face in the next) does not pull that cell onto itself.
+(Read off the top of the body instead, the motion was whatever came to the top: a
+tail tip or a raised sword made it jump by the part's whole swing from one cell to the next.) A part
+hung on the body is a damped mass: its offset x from where the body carries it answers the body's own
 acceleration, x'' + 2·ζ·ω·x' + ω²·x = −body''. The loop repeats, so the answer is the periodic
 steady state, solved per harmonic of the cycle: no start-up, no kick at a foot strike, and the
 last frame leads into the first. `--gain` scales that physical answer and nothing else; it is
@@ -57,7 +65,7 @@ GAIN_STEP = 0.01  # a lowered gain is a whole number of these, so the report's `
 ON_FOLD_MODES = ("refuse", "lower")
 HARMONICS = 6  # of the cycle, for the body's motion: a step's shape, not its noise
 ALPHA_SOLID = 128
-HEAD_SHARE = 0.07  # of the body's height under the crown: where the head's middle is read
+WORN_FROM, WORN_TO = 0.25, 0.5  # of the body's depth in the first cell: the levels its silhouette is worn down to
 SOURCE = loop_mod.FOLLOW_SOURCE
 
 
@@ -71,23 +79,157 @@ def parse_region(text: str) -> tuple[float, float, float, float]:
     return cx, cy, rx, ry
 
 
-def body_motion(cells: list[Image.Image]) -> tuple[np.ndarray, np.ndarray, int]:
-    """Per cell: the crown's row and the head's middle column; and the body's height in cell 0."""
-    rows, cols = [], []
-    height0 = 0
+def _run_depth(solid: np.ndarray, axis: int) -> np.ndarray:
+    """Per solid pixel, how far along `axis` the nearest clear pixel is (1 beside one; past the cell's edge is clear)."""
+    m = np.moveaxis(solid, axis, -1)
+    n = m.shape[-1]
+    at = np.broadcast_to(np.arange(n), m.shape)
+    before = np.maximum.accumulate(np.where(m, -1, at), axis=-1)
+    after = np.minimum.accumulate(np.where(m, n, at)[..., ::-1], axis=-1)[..., ::-1]
+    return np.moveaxis(np.where(m, np.minimum(at - before, after - at), 0), -1, axis)
+
+
+def wear(solid: np.ndarray, r: int) -> np.ndarray:
+    """`solid` worn down by r: the pixels whose square of side 2·r + 1 around them is solid."""
+    return _run_depth(_run_depth(solid, 1) > r, 0) > r
+
+
+def depth(solid: np.ndarray) -> int:
+    """How deep the body is at its deepest: the most it is worn down by and still has a pixel, plus one."""
+    lo, hi = 0, (min(solid.shape) + 1) // 2  # worn by lo something is left; worn by hi nothing is
+    if not solid.any():
+        return 0
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        lo, hi = (mid, hi) if wear(solid, mid).any() else (lo, mid)
+    return lo + 1
+
+
+def _levels(solid: np.ndarray, worn: range) -> tuple[np.ndarray, int, int] | None:
+    """`solid` worn down by each of `worn`, as one number per pixel: how many of those levels the pixel is still
+    in. Each level lies inside the one before, so level i is where that number is over i. Cut to the box of the
+    first level, with that box's top and left; None when nothing is left of `solid` worn down by the first."""
+    level = wear(solid, worn[0])
+    if not level.any():
+        return None
+    ys, xs = np.nonzero(level.any(axis=1))[0], np.nonzero(level.any(axis=0))[0]
+    level = level[ys[0]: ys[-1] + 1, xs[0]: xs[-1] + 1]
+    inside = level.astype(np.int32)
+    for _ in worn[1:]:
+        # Worn down by one more pixel: a square of side 2·r + 3 is one of side 2·r + 1 grown by one each way.
+        across = np.pad(level, 1)
+        level = across[1:-1, :-2] & across[1:-1, 1:-1] & across[1:-1, 2:]
+        down = np.pad(level, 1)
+        level = down[:-2, 1:-1] & down[1:-1, 1:-1] & down[2:, 1:-1]
+        inside += level
+    return inside, int(ys[0]), int(xs[0])
+
+
+def _fft_length(n: int) -> int:
+    """The first length from n on with no prime factor over 5: an FFT of it is fast."""
+    while True:
+        m = n
+        for p in (2, 3, 5):
+            while m % p == 0:
+                m //= p
+        if m == 1:
+            return n
+        n += 1
+
+
+def _overlay(onto: tuple[list[np.ndarray], int, int], levels: tuple[np.ndarray, int, int]) -> tuple[int, int]:
+    """The shift (dx, dy) of a cell from what it is laid on: where `onto` — per level a whole number at every
+    pixel, with its top and left — moved by it, lands on the cell's own levels most, the numbers that land on
+    the cell's pixels summed at every level and the levels summed."""
+    (a, ya, xa), (b, yb, xb) = onto, levels
+    # Long enough that no move wraps round (a.h + b.h - 1 each way, and so on), and fast.
+    height, width = a[0].shape[0] + b.shape[0] - 1, a[0].shape[1] + b.shape[1] - 1
+    shape = (_fft_length(height), _fft_length(width))
+    # overlap[i, j]: what of `onto` lands on the cell's same level moved by (j - (a.w - 1), i - (a.h - 1)),
+    # summed over the levels, for every move that meets.
+    spectrum = sum(np.fft.rfft2((b > i).astype(np.float64), shape) * np.fft.rfft2(la[::-1, ::-1].astype(np.float64), shape)
+                   for i, la in enumerate(a))
+    # Sums of whole numbers are whole numbers: rounded, the FFT's own rounding (not the same on every machine)
+    # is gone, so a tie is a tie on every machine, and it goes to the move nearest none.
+    overlap = np.rint(np.fft.irfft2(spectrum, shape)[:height, :width]).astype(np.int64)
+    shifts = [(int(j) - (a[0].shape[1] - 1) + xb - xa, int(i) - (a[0].shape[0] - 1) + yb - ya)
+              for i, j in np.argwhere(overlap == overlap.max())]
+    return min(shifts, key=lambda s: (s[0] ** 2 + s[1] ** 2, s[1], s[0]))
+
+
+def _common(levels: list[tuple[np.ndarray, int, int]], lays: list[tuple[int, int]],
+            count: int) -> tuple[list[np.ndarray], int, int] | None:
+    """What the cells' bodies have in common, each cell moved back by its lay: per level (`count` of them) and
+    pixel, how many more of the cells are in that level there than are not (none, where no more are), cut to
+    the box of what is left, with that box's top and left; None when no pixel is in more than half of the cells.
+
+    The head and torso are in every cell at one place and count the whole number of cells. What swings and is
+    thick enough to outlast the wearing — an ear as wide as the head, up in some cells and flopped onto the
+    face in others; a leg forward and back — is at any one place in half of the cells or fewer, and counts
+    nothing. A thick part that keeps one place in most of the cells counts as the body does: outlines alone
+    do not tell the two apart."""
+    tops = [top - dy for (_, top, _), (_, dy) in zip(levels, lays)]
+    lefts = [left - dx for (_, _, left), (dx, _) in zip(levels, lays)]
+    top, left = min(tops), min(lefts)
+    height = max(t + inside.shape[0] for t, (inside, _, _) in zip(tops, levels)) - top
+    width = max(l + inside.shape[1] for l, (inside, _, _) in zip(lefts, levels)) - left
+    cells_in = np.zeros((count, height, width), np.int32)
+    level = np.arange(count)[:, None, None]
+    for (inside, _, _), t, l in zip(levels, tops, lefts):
+        cells_in[:, t - top: t - top + inside.shape[0], l - left: l - left + inside.shape[1]] += inside > level
+    more = np.maximum(0, 2 * cells_in - len(levels))
+    # Each level lies inside the one before, in every cell: the first level's box holds them all.
+    ys, xs = np.nonzero(more[0].any(axis=1))[0], np.nonzero(more[0].any(axis=0))[0]
+    if not len(ys):
+        return None
+    return list(more[:, ys[0]: ys[-1] + 1, xs[0]: xs[-1] + 1]), top + int(ys[0]), left + int(xs[0])
+
+
+def body_motion(cells: list[Image.Image]) -> tuple[np.ndarray, np.ndarray, int, list[int]]:
+    """Per cell: how far its body lies from cell 0's, down and across (px); the body's height in cell 0,
+    and the first and last level its silhouette is worn down to.
+
+    The top of the body is whatever comes to the top — a tail tip, a ponytail, an ear, a sword held
+    up — and read there the motion jumps from cell to cell. What swings on the body is thinner than
+    the body it swings on: worn down by a quarter of the body's depth it is gone, and what is left
+    is the head and torso. Each cell is laid where its silhouette, worn down by every whole number
+    of pixels from a quarter to half of that depth, overlaps cell 0's, worn alike, most, the
+    overlaps of every level summed: a pixel counts once for each level it is still in, so the
+    deepest of the body counts most and nothing that comes and goes outweighs it, and a torso that
+    is shallower in one cell (an arm swung away from it) still counts at its shallower levels.
+
+    That lay answers to everything left in cell 0, and a part as thick as the body is left: where
+    ears as wide as the head stand up in cell 0 and flop onto the face in another cell, the cell
+    is laid ears on ears, the body tens of pixels off. So the cells are laid a second time, on what
+    they have in common as first laid (`_common`), and that lay, less cell 0's own, is the motion:
+    the ears are at one place in too few cells to count, and the cell lies head on head and torso
+    on torso."""
+    solids = []
     for k, cell in enumerate(cells):
         solid = np.asarray(cell.getchannel("A")) >= ALPHA_SOLID
-        ys = np.nonzero(solid.any(axis=1))[0]
-        if not len(ys):
+        if not solid.any():
             raise ValueError(f"cell {k} has no solid body")
-        top, bottom = int(ys[0]), int(ys[-1])
-        if k == 0:
-            height0 = bottom - top
-        band = solid[top: top + max(8, round(HEAD_SHARE * (bottom - top)))]
-        xs = np.nonzero(band.any(axis=0))[0]
-        rows.append(top)
-        cols.append((xs[0] + xs[-1]) / 2)
-    return np.asarray(rows, float), np.asarray(cols, float), height0
+        solids.append(solid)
+    ys = np.nonzero(solids[0].any(axis=1))[0]
+    height0 = int(ys[-1] - ys[0])
+    deepest = depth(solids[0])
+    first = int(WORN_FROM * deepest)
+    worn = range(first, max(first + 1, int(WORN_TO * deepest)))
+    levels = []
+    for k, solid in enumerate(solids):
+        level = _levels(solid, worn)
+        if level is None:
+            raise ValueError(f"cell {k} has no body as deep as a quarter of cell 0's ({worn[0]} px)")
+        levels.append(level)
+    inside0, top0, left0 = levels[0]
+    lays = [_overlay(([inside0 > i for i in range(len(worn))], top0, left0), level) for level in levels]
+    common = _common(levels, lays, len(worn))
+    if common is None:
+        raise ValueError("no part of the body is at one place in more than half of the cells")
+    lays = [_overlay(common, level) for level in levels]
+    dx0, dy0 = lays[0]
+    return (np.asarray([dy - dy0 for _, dy in lays], float), np.asarray([dx - dx0 for dx, _ in lays], float),
+            height0, [worn[0], worn[-1]])
 
 
 def follow_offsets(motion: np.ndarray, fps: float, *, freq: float, zeta: float, gain: float) -> np.ndarray:
@@ -211,7 +353,7 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
     cells = [strip.crop((k * w, 0, (k + 1) * w, h)) for k in range(n)]
     fps = 1000.0 / float(meta["delay_ms"])
     try:
-        rows, cols, height0 = body_motion(cells)
+        rows, cols, height0, worn = body_motion(cells)
     except ValueError as exc:
         raise SystemExit(f"video-follow: {exc}") from exc
     dy = follow_offsets(rows, fps, freq=freq, zeta=zeta, gain=gain)
@@ -272,7 +414,7 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
         loop_mod.write_webp(out, staged[webp_path], delay_ms=delay_ms, workdir=stage / ".webp-frames")
         record = {
             "regions": [list(r) for r in regions], "gain": gain, "freq_hz": freq, "zeta": zeta, "harmonics": HARMONICS,
-            "source": SOURCE, "body_px": height0,
+            "source": SOURCE, "body_px": height0, "body_worn_px": worn,
             "body_bob_px": [round(float(np.ptp(cols)), 2), round(float(np.ptp(rows)), 2)],
             "dx_px": np.round(dx, 2).tolist(), "dy_px": np.round(dy, 2).tolist(),
             "reach_px": round(reach, 2),

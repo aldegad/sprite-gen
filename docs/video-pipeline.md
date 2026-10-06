@@ -1099,8 +1099,32 @@ sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [-
   (`cx,cy,rx,ry`; repeatable). It is carried with the body's bob from cell to cell. Somebody has
   to say where it is — the engine does not find it: look at the first cell (or ask a vision model
   for the four numbers once per direction; a mirrored direction takes the mirror's region).
-- **The motion** is the body's own: the crown's row (up and down) and the middle of the head
-  (side to side), read off the cells. The part is a damped mass on the body — its offset x from
+- **The motion** is the body's own: how far each cell's body lies from the first cell's, up and
+  down and side to side. The silhouette (alpha ≥ 128) is worn down: worn by r, a pixel stays when
+  the square of side 2·r + 1 around it is all body. Its depth is the most the first cell can be
+  worn down by and still keep a pixel, plus one; worn by a quarter of that, what swings on the
+  body and is thinner than it (a tail, a ponytail, an ear, a sword or a rod held up, the legs and
+  arms) is gone and the head and torso are left. Each cell is laid where its silhouette, worn by
+  every whole number of pixels from a quarter to half of that depth, overlaps the first cell's,
+  worn alike, most — the overlaps of every level counted in whole pixels and summed, a tie going
+  to the smaller move. A pixel counts once for each level it is still in, so the deepest of the
+  body counts most and a part that comes and goes cannot outweigh it, while a torso that is
+  shallower in one cell (an arm swung away from it, long hair lifted off it) still counts at its
+  shallower levels. A part as thick as the body outlasts the wearing — ears as wide as the head —
+  and a cell that has it elsewhere than the first cell does, laid on the first cell alone, lies
+  ears on ears with its body tens of pixels off. So the cells are laid twice. Laid on the first
+  cell, each is moved back by its lay and the cells are counted: per level and pixel, how many
+  more of them are in that level there than are not (none, where no more are). The head and
+  torso are in every cell at one place and count the whole number of cells; what swings — ears
+  up in some cells and flopped onto the face in others, a leg forward and back — is at any one
+  place in half of the cells or fewer and counts nothing. Each cell is then laid on that count
+  as it was on the first cell, and its lay less the first cell's own is the motion. A thick part
+  that keeps one place in most of the cells is body to this read, which sees outlines only. The
+  top of the body was read before: whatever came to the top was the
+  motion, and a tail tip, a flopping ear or a sword raised over the head made it jump by the
+  part's whole swing from one cell to the next. A cell with nothing in it a quarter as deep as the first
+  cell's body is refused, and so is a strip with no part of the body at one place in more than
+  half of its cells. The part is a damped mass on the body — its offset x from
   where the body carries it answers x'' + 2ζωx' + ω²x = −body'' — solved in the loop's periodic
   steady state per harmonic of the cycle (the first six), so it lags the bob and settles, with no
   kick at a foot strike, and the last frame leads into the first. `--freq` (2.4 Hz) and `--zeta`
@@ -1123,12 +1147,13 @@ sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [-
   region and the largest gain that would not fold it). Where regions of different gains overlap,
   the larger move wins; the move there is nowhere steeper than either region's own, so nothing
   folds. A strip whose regions all take one gain — one region, or regions that fold alike, or
-  none that folds — is written as before this was per region, byte for byte, and its `gain` is
+  none that folds — is written as one gain for the strip writes it, byte for byte, and its `gain` is
   then the `--gain` that gives this strip by itself. The default stays `refuse`, with the same
-  output and the same message as 2.24.0; a strip that does not fold is the same under either.
+  message as 2.24.0; a strip that does not fold is the same under either.
 - **What it writes**: the strip, GIF and WebP over the loop's own (both animations re-opened and
   checked as `video-loop` checks them), and `follow` in `<name>.strip.json` (the regions, the
-  settings, the body's bob, `dx_px`/`dy_px` per cell, `reach_px`; `gain` is the gain used and
+  settings, the body's height in the first cell `body_px`, the first and last level it was worn
+  down to `body_worn_px`, the body's bob `body_bob_px` (side to side, up and down), `dx_px`/`dy_px` per cell, `reach_px`; `gain` is the gain used and
   `gain_requested` the one asked for, and `fold` says whether it was lowered, the move asked for,
   the move at gain 1, and per region its smaller radius, how near the used move is to folding it
   (`ratio`, under 1) and the gain at which it folds). Where the regions took gains of their own,
