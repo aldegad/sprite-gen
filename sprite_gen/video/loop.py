@@ -833,19 +833,20 @@ def write_webp(frames: list[Image.Image], out: Path, *, delay_ms: int, workdir: 
 
 
 def verify_animation(path: Path, *, expect_frames: int, check_stale: bool) -> dict[str, Any]:
-    im = Image.open(path)
-    n = getattr(im, "n_frames", 1)
-    loop = im.info.get("loop")
-    corners_ok = True
-    stale = 0
-    for k in range(n):
-        im.seek(k)
-        f = im.convert("RGBA")
-        w, h = f.size
-        corners_ok &= all(f.getpixel(c)[3] == 0 for c in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)))
-        if check_stale:
-            stale += sum(1 for p in f.get_flattened_data() if p[3] == 0 and (p[0] or p[1] or p[2]))
-    report = {"file": path.name, "format": im.format, "n_frames": n, "loop": loop, "size": list(im.size), "corners_transparent": corners_ok, "stale_rgb_under_alpha0": stale, "bytes": path.stat().st_size}
+    # Closed on the way out: `video-follow` checks its animations before it moves them over the loop's.
+    with Image.open(path) as im:
+        n = getattr(im, "n_frames", 1)
+        loop = im.info.get("loop")
+        corners_ok = True
+        stale = 0
+        for k in range(n):
+            im.seek(k)
+            f = im.convert("RGBA")
+            w, h = f.size
+            corners_ok &= all(f.getpixel(c)[3] == 0 for c in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)))
+            if check_stale:
+                stale += sum(1 for p in f.get_flattened_data() if p[3] == 0 and (p[0] or p[1] or p[2]))
+        report = {"file": path.name, "format": im.format, "n_frames": n, "loop": loop, "size": list(im.size), "corners_transparent": corners_ok, "stale_rgb_under_alpha0": stale, "bytes": path.stat().st_size}
     problems = []
     if n != expect_frames:
         problems.append(f"{n} frames, expected {expect_frames}")
