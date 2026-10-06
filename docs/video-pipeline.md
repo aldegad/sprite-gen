@@ -1029,21 +1029,33 @@ sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [-
   at the centre and 0 at the rim (cos²), sampled as premultiplied bilinear colour; outside it no
   pixel changes. A move so large that the weight's slope folds the picture over
   (offset × π / (2 · radius) ≥ 1) is refused: lower `--gain` or give the region larger radii.
-- **`--on-fold lower`** lowers the gain for you instead of refusing. The move is the gain times
-  the move at gain 1, so the gain at which a region folds is 2 · radius / (π · move at gain 1),
-  and the strip takes the largest gain under it, in steps of 0.01 and no more than `--gain`. One
-  gain for the strip, set by the region with the smallest radius: every part hangs on the same
-  body and answers the same motion, and the recorded `gain` is then the `--gain` that gives this
-  strip by itself. It does not go under 1, the mass as measured: a region too small for that is
-  refused (the message names the largest gain that would not fold), so a follow-through is never
-  quietly weaker than the motion it answers. The default stays `refuse`, with the same output and
-  the same message as 2.24.0; a strip that does not fold is the same under either.
+- **`--on-fold lower`** lowers the gain for you instead of refusing, region by region. The move
+  is the gain times the move at gain 1, so the gain at which a region folds is
+  2 · radius / (π · move at gain 1), and a region that folds at `--gain` takes the largest gain
+  under that, in steps of 0.01; a region that does not fold keeps `--gain`. Every part hangs on
+  the same body and answers the same motion, but how far a part can move before it folds is its
+  own size, so a small part (an ear) does not hold a large one (a chest) back. No region goes under 1, the
+  mass as measured: one that would have to is **held** — it does not move at all, so a
+  follow-through is never quietly weaker than the motion it answers — and named, on stderr and in
+  the record. The strip is refused only when every region is held (the message names the largest
+  region and the largest gain that would not fold it). Where regions of different gains overlap,
+  the larger move wins; the move there is nowhere steeper than either region's own, so nothing
+  folds. A strip whose regions all take one gain — one region, or regions that fold alike, or
+  none that folds — is written as before this was per region, byte for byte, and its `gain` is
+  then the `--gain` that gives this strip by itself. The default stays `refuse`, with the same
+  output and the same message as 2.24.0; a strip that does not fold is the same under either.
 - **What it writes**: the strip, GIF and WebP over the loop's own (both animations re-opened and
   checked as `video-loop` checks them), and `follow` in `<name>.strip.json` (the regions, the
   settings, the body's bob, `dx_px`/`dy_px` per cell, `reach_px`; `gain` is the gain used and
   `gain_requested` the one asked for, and `fold` says whether it was lowered, the move asked for,
   the move at gain 1, and per region its smaller radius, how near the used move is to folding it
-  (`ratio`, under 1) and the gain at which it folds). A lowered gain is also named on stderr.
+  (`ratio`, under 1) and the gain at which it folds). Where the regions took gains of their own,
+  each region's entry also says the gain it moved by (`gain`, 0 when held) and whether it was
+  held (`held`); the strip's `gain` is then the largest of them, `dx_px`/`dy_px` and `reach_px`
+  are that gain's (a region moves by its own gain over that one times them), and `fold.ratio` is
+  the nearest any region came to folding. A lowered gain is also named on stderr — per region,
+  with the `--region` it was given, where they differ — and so is a held region; the printed
+  summary then carries `region_gains`.
   `cycle/` is left as cut. The strip as it was is kept as `follow.source.png`; running
   `video-follow` again reads from it, so a second run never moves a moved strip. `--board` writes the cells before and after where the part
   sits lowest and highest, on white.

@@ -19,9 +19,10 @@ the body's bob. Inside it every pixel is moved by the offset times a weight that
 centre and falls to 0 at the rim (cos²); outside it no pixel changes. The move is sampled as
 premultiplied bilinear colour, so an edge never picks up the colour under a transparent pixel.
 A move so large that the weight's slope folds the picture over (offset × π / (2 · radius) ≥ 1)
-is refused. `--on-fold lower` takes the largest gain that does not fold instead (the offset
-grows in a straight line with the gain, so that gain is known without a search), and never one
-under 1, the mass as measured: a region too small for that is still refused.
+is refused. `--on-fold lower` gives each region the largest gain that does not fold it instead
+(the offset grows in a straight line with the gain, so that gain is known without a search), and
+never one under 1, the mass as measured: a region too small for that is held — it does not move,
+and the record names it — and the strip is refused only when every region is.
 
 The strip as it was before is kept as `follow.source.png` beside it; running the command again
 reads from there, so a second follow-through never moves a moved strip. `video-loop` (a new
@@ -135,22 +136,32 @@ def _sample(premultiplied: np.ndarray, sx: np.ndarray, sy: np.ndarray) -> np.nda
     return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
 
 
-def move_regions(cell: Image.Image, regions: list[tuple[float, float, float, float]], shift: tuple[float, float],
-                 offset: tuple[float, float]) -> Image.Image:
-    """`cell` with each region moved by `offset` (dx, dy), its centre carried by `shift`."""
+def move_regions(cell: Image.Image, moves: list[tuple[list[tuple[float, float, float, float]], tuple[float, float]]],
+                 shift: tuple[float, float]) -> Image.Image:
+    """`cell` with each group of regions moved by its own offset (dx, dy), their centres carried by `shift`.
+
+    The groups' offsets are one motion times their gains, so where regions of different groups
+    overlap the larger move wins: the move is the largest of the groups' weighted moves, which is
+    nowhere steeper than the steepest group's own."""
     src = np.asarray(cell.convert("RGBA"), dtype=np.float32)
     h, w = src.shape[:2]
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-    weight = np.zeros((h, w), np.float32)
-    for cx, cy, rx, ry in regions:
-        r = np.sqrt(((xx - cx - shift[0]) / rx) ** 2 + ((yy - cy - shift[1]) / ry) ** 2)
-        weight = np.maximum(weight, np.where(r < 1, np.cos(r * math.pi / 2) ** 2, 0))
-    inside = weight > 0
+    weights = []
+    for regions, _ in moves:
+        weight = np.zeros((h, w), np.float32)
+        for cx, cy, rx, ry in regions:
+            r = np.sqrt(((xx - cx - shift[0]) / rx) ** 2 + ((yy - cy - shift[1]) / ry) ** 2)
+            weight = np.maximum(weight, np.where(r < 1, np.cos(r * math.pi / 2) ** 2, 0))
+        weights.append(weight)
+    inside = np.logical_or.reduce([weight > 0 for weight in weights])
     if not inside.any():
         return cell.copy()
+    largest = np.argmax(np.stack([math.hypot(*offset) * weight for (_, offset), weight in zip(moves, weights)]), axis=0)[None]
+    move_x = np.take_along_axis(np.stack([offset[0] * weight for (_, offset), weight in zip(moves, weights)]), largest, 0)[0]
+    move_y = np.take_along_axis(np.stack([offset[1] * weight for (_, offset), weight in zip(moves, weights)]), largest, 0)[0]
     pm = src.copy()
     pm[..., :3] *= pm[..., 3:4] / 255
-    moved = _sample(pm, xx - offset[0] * weight, yy - offset[1] * weight)
+    moved = _sample(pm, xx - move_x, yy - move_y)
     alpha = np.clip(np.round(moved[..., 3:4]), 0, 255)
     # Colour is read back from the premultiplied mix, and none is kept where the coverage
     # rounds to nothing (the WebP check refuses colour under alpha 0).
@@ -199,26 +210,44 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
     dy = follow_offsets(rows, fps, freq=freq, zeta=zeta, gain=gain)
     dx = follow_offsets(cols, fps, freq=freq, zeta=zeta, gain=gain)
     reach = float(np.max(np.hypot(dx, dy)))
-    smallest = min(min(rx, ry) for _, _, rx, ry in regions)
+    radii = [min(rx, ry) for _, _, rx, ry in regions]
+    smallest = min(radii)
     requested, reach_requested = gain, reach
     # The offset is the gain times the answer at gain 1, so one move decides every gain.
     reach_per_gain = float(np.max(np.hypot(follow_offsets(cols, fps, freq=freq, zeta=zeta, gain=1.0),
                                            follow_offsets(rows, fps, freq=freq, zeta=zeta, gain=1.0))))
+    gains, held = [requested] * len(regions), [False] * len(regions)
     if fold_ratio(reach, smallest) >= 1:
         if on_fold == "refuse":
             raise SystemExit(f"video-follow: a move of {reach:.1f} px folds a region of radius {smallest:g} px over itself; "
                              "lower --gain or give the region larger radii")
-        # One gain for the strip, set by the smallest region: every part hangs on the same body and
-        # answers the same motion, and the report's `gain` is then the `--gain` that gives this strip.
-        gain = lowered_gain(requested, reach_per_gain, smallest)
-        if gain < GAIN_MEASURED:
-            raise SystemExit(f"video-follow: a move of {reach:.1f} px folds a region of radius {smallest:g} px over itself, and "
+        # A gain for each region: every part hangs on the same body and answers the same motion, but
+        # how far it moves before it folds is its own size, so a small part (an ear) does not hold a
+        # large one (a chest) back. A region that does not fold keeps the gain asked for.
+        folds = [fold_ratio(reach, radius) >= 1 for radius in radii]
+        gains = [lowered_gain(requested, reach_per_gain, radius) if fold else requested for radius, fold in zip(radii, folds)]
+        # One that would have to go under the mass as measured does not move at all; the strip is
+        # refused only when that is every region.
+        held = [bool(fold and g < GAIN_MEASURED) for fold, g in zip(folds, gains)]  # numpy radii compare to numpy bools
+        if all(held):
+            k = radii.index(max(radii))  # the largest folds at the largest gain: if it is held, every region is
+            every = f" (the largest of {len(regions)} regions: every one folds)" if len(regions) > 1 else ""
+            raise SystemExit(f"video-follow: a move of {reach:.1f} px folds a region of radius {radii[k]:g} px over itself{every}, and "
                              f"--on-fold lower would have to go under --gain {GAIN_MEASURED:g} (the mass as measured moves "
-                             f"{reach_per_gain:.1f} px; the largest gain that does not fold is {gain:g}); give the region larger radii")
-        dy = follow_offsets(rows, fps, freq=freq, zeta=zeta, gain=gain)
-        dx = follow_offsets(cols, fps, freq=freq, zeta=zeta, gain=gain)
-        reach = float(np.max(np.hypot(dx, dy)))
-    out = [move_regions(c, regions, (cols[k] - cols[0], rows[k] - rows[0]), (dx[k], dy[k])) for k, c in enumerate(cells)]
+                             f"{reach_per_gain:.1f} px; the largest gain that does not fold is {gains[k]:g}); give the region larger radii")
+        gains = [0.0 if hold else g for g, hold in zip(gains, held)]
+    # One move per gain: a region's offset is its gain times the answer at gain 1. The strip's `gain`
+    # is the largest any region moves by, and `dx_px`/`dy_px` and `reach_px` are that gain's.
+    moves = {g: (follow_offsets(cols, fps, freq=freq, zeta=zeta, gain=g), follow_offsets(rows, fps, freq=freq, zeta=zeta, gain=g))
+             for g, hold in zip(gains, held) if not hold}
+    reaches = {g: float(np.max(np.hypot(*move))) for g, move in moves.items()}
+    gain = max(moves)
+    dx, dy = moves[gain]
+    reach = reaches[gain]
+    ratios = [0.0 if hold else fold_ratio(reaches[g], radius) for radius, g, hold in zip(radii, gains, held)]
+    groups = [([r for r, rg, hold in zip(regions, gains, held) if rg == g and not hold], move) for g, move in moves.items()]
+    out = [move_regions(c, [(group, (mx[k], my[k])) for group, (mx, my) in groups], (cols[k] - cols[0], rows[k] - rows[0]))
+           for k, c in enumerate(cells)]
     joined = Image.new("RGBA", (w * n, h), (0, 0, 0, 0))
     for k, c in enumerate(out):
         joined.alpha_composite(c, (k * w, 0))
@@ -236,11 +265,14 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
         "reach_px": round(reach, 2),
         "gain_requested": requested, "on_fold": on_fold,
         "fold": {
-            "lowered": gain != requested, "ratio": round(fold_ratio(reach, smallest), 3),
+            "lowered": any(g != requested for g in gains), "ratio": round(max(ratios), 3),
             "reach_requested_px": round(reach_requested, 2), "reach_per_gain_px": round(reach_per_gain, 3),
-            "regions": [{"radius_px": min(rx, ry), "ratio": round(fold_ratio(reach, min(rx, ry)), 3),
-                         "gain_limit": None if (limit := gain_limit(reach_per_gain, min(rx, ry))) is None else round(limit, 3)}
-                        for _, _, rx, ry in regions],
+            # Where the regions took gains of their own, each says the gain it moved by and whether it
+            # was held still (gain 0); where they all took one, the strip's `gain` is every region's.
+            "regions": [{"radius_px": radius, "ratio": round(ratio, 3),
+                         "gain_limit": None if (limit := gain_limit(reach_per_gain, radius)) is None else round(limit, 3)}
+                        | ({} if len(set(gains)) == 1 else {"gain": g, "held": hold})
+                        for radius, ratio, g, hold in zip(radii, ratios, gains, held)],
         },
         "gif": loop_mod.verify_animation(gif_path, expect_frames=n, check_stale=False),
         "webp": loop_mod.verify_animation(webp_path, expect_frames=n, check_stale=True),
@@ -274,8 +306,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                         help="cx,cy,rx,ry: an ellipse over the soft part in the strip's first cell, in cell pixels (repeatable)")
     parser.add_argument("--gain", type=float, default=GAIN_DEFAULT, help=f"times the physical answer (default {GAIN_DEFAULT:g}; 1 is the mass as measured, 0 leaves the strip as it was)")
     parser.add_argument("--on-fold", choices=ON_FOLD_MODES, default="refuse",
-                        help=f"a move that folds a region over itself: refuse (default), or lower — take the largest gain that does not fold "
-                             f"(one gain for the strip, set by the smallest region; never under {GAIN_MEASURED:g}, the mass as measured: that is still refused)")
+                        help=f"a move that folds a region over itself: refuse (default), or lower — each region takes the largest gain that does "
+                             f"not fold it, never under {GAIN_MEASURED:g} (the mass as measured): a region that would have to is held still and "
+                             "named in the record, and the strip is refused only when every region is")
     parser.add_argument("--freq", type=float, default=FREQ_DEFAULT, help=f"the part's own frequency in Hz (default {FREQ_DEFAULT:g})")
     parser.add_argument("--zeta", type=float, default=ZETA_DEFAULT, help=f"damping ratio (default {ZETA_DEFAULT:g}: lags and settles, no ringing)")
     parser.add_argument("--board", type=Path, help="write a before/after picture at the frames where the part sits lowest and highest")
@@ -286,10 +319,22 @@ def run(**kwargs: object) -> int:
                          gain=float(kwargs.get("gain", GAIN_DEFAULT)), freq=float(kwargs.get("freq", FREQ_DEFAULT)),  # type: ignore[arg-type]
                          zeta=float(kwargs.get("zeta", ZETA_DEFAULT)), board=kwargs.get("board"),  # type: ignore[arg-type]
                          on_fold=str(kwargs.get("on_fold") or "refuse"))
-    if result["fold"]["lowered"]:
-        print(f"video-follow: --gain {result['gain_requested']:g} folds a region (a move of {result['fold']['reach_requested_px']:g} px); "
+    fold = result["fold"]
+    own = "held" in fold["regions"][0]  # the regions took gains of their own
+    if own:
+        for (cx, cy, rx, ry), entry in zip(result["regions"], fold["regions"]):
+            name = f"--region {cx:g},{cy:g},{rx:g},{ry:g}"
+            if entry["held"]:
+                print(f"video-follow: {name} folds at --gain {entry['gain_limit']:g}, under {GAIN_MEASURED:g} (the mass as measured): "
+                      "it is held, and does not move", file=sys.stderr)
+            elif entry["gain"] != result["gain_requested"]:
+                print(f"video-follow: --gain {result['gain_requested']:g} folds {name} (a move of {fold['reach_requested_px']:g} px); "
+                      f"lowered to --gain {entry['gain']:g} for it", file=sys.stderr)
+    elif fold["lowered"]:
+        print(f"video-follow: --gain {result['gain_requested']:g} folds a region (a move of {fold['reach_requested_px']:g} px); "
               f"lowered to --gain {result['gain']:g}", file=sys.stderr)
     print(json.dumps({k: result[k] for k in ("strip", "regions", "gain", "gain_requested", "on_fold", "body_bob_px", "reach_px")}
+                     | ({"region_gains": [entry["gain"] for entry in fold["regions"]]} if own else {})
                      | ({"board": result["board"]} if "board" in result else {}), ensure_ascii=False, indent=2))
     return 0
 
