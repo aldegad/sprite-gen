@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A fleck far from the body is not the subject touching the edge, and a clip's first frames that reframe a
-small subject are not part of its walk.
+"""A fleck far from the body is not the subject touching the edge, a clip's first frames that reframe a
+small subject are not part of its walk, and a walk forced wide gets no room above.
 
 * `video-frames` erases a speck — a small piece far from the body — before the edge check reads the frame.
 * `video-loop` reads a walk's lead-in (the first frames off the walk's size) and searches the clip after it;
   what it finds, and what it refuses, is said in the clip's own frame numbers. The gait fallback scales back
   by the size read one cycle on, as the hold does. A cut after a lead-in reads the standing height on its
   own first frame.
+* `video-canvas --shape wide` gives a walk or run room in front and behind and none above.
 """
 from __future__ import annotations
 
@@ -220,3 +221,37 @@ def test_a_cut_of_a_clip_with_no_lead_in_reads_its_first_frame_as_before(tmp_pat
     assert out["lead_in"]["frames"] == 0
     assert meta["body_ref"] == "first-frame" and "body_ref_frame" not in meta
     assert meta["body_src_h"] == _height(keyed / "000.png")
+
+
+# --- a walk forced wide ---------------------------------------------------------------------------------------
+
+
+def test_a_walk_or_run_forced_wide_gets_no_room_above():
+    still = Image.new("RGB", (1024, 1024), (0, 255, 0))
+    still.paste((180, 60, 30), (400, 100, 600, 1000))
+    for state in ("walk", "run"):
+        profile = canvas.profile_for(state, shape="wide")
+        assert profile is canvas.GAIT_WIDE and (profile.headroom, profile.lead, profile.trail) == (0.0, 0.28, 0.2)
+        _, report = canvas.pad_canvas(still, profile)
+        # 16:9 over the still's own height, the room in front and behind as forced wide gives any state.
+        assert report["canvas"] == [1969, 1108] and report["offset"] == [394, 84]
+        assert report["canvas"][0] == round(1024 / (1 - 0.28 - 0.2))
+    # A jump, or a state with no wide row of its own, keeps the jump's head-room.
+    for state in ("jump", "idle", None):
+        assert canvas.profile_for(state, shape="wide") is canvas.WIDE_OVERRIDE
+    _, jump = canvas.pad_canvas(still, canvas.profile_for("jump", shape="wide"))
+    assert jump["canvas"] == [2800, 1575]
+    # Unforced, a walk is square as before.
+    assert canvas.profile_for("walk") is canvas.STATE_CANVAS["default"]
+    assert math.isclose(canvas.GAIT_WIDE.ratio, 16 / 9)
+
+
+@pytest.mark.parametrize("state", ["walk", "run"])
+def test_video_canvas_wide_for_a_gait_from_the_command_line(tmp_path, state):
+    still = tmp_path / "still.png"
+    image = Image.new("RGB", (512, 512), (0, 255, 0))
+    image.paste((180, 60, 30), (200, 50, 300, 500))
+    image.save(still)
+    payload = canvas.run_canvas(still, tmp_path / "c.png", state=state, shape="wide", facing="right", headroom=None,
+                                lead=None, report_path=None)
+    assert payload["headroom"] == 0.0 and payload["canvas"] == [985, 554] and payload["why"] == canvas.GAIT_WIDE.why

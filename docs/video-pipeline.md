@@ -61,7 +61,12 @@ row with 35 % above, 28 % in front and 20 % behind — not the attack row. It la
 whose own row is another shape, a jump among them, and 35 % on 16:9 keeps about the room a
 jump's tall row leaves above a square or upright still. A still wider than it is tall keeps
 less above it under forced wide than under the tall row (a 3:2 still about three fifths),
-because there the wide canvas's height follows the still's width. Headroom is a fraction of the full canvas
+because there the wide canvas's height follows the still's width. A walk or run forced wide
+has a row of its own (`STATE_SHAPE_CANVAS`): the same 28 % in front and 20 % behind, and nothing
+above — its feet stay on the ground. Above a square still the jump's 35 % set the width as well
+(1575 rows on 16:9 are 2800 columns, 1216 of them in front of the still), and a walker that small
+in its frame is one a video model may reframe in its first frames (section 4, "A lead-in"). A
+square still forced wide as a walk is 1969 × 1108. Headroom is a fraction of the full canvas
 height; wide canvases grow both dimensions to preserve their ratio without shrinking
 the still. A still whose corners are not one flat colour
 is refused — a non-flat background cannot be extended without guessing.
@@ -676,7 +681,8 @@ gate. The state table now routes `cheer`, `wave` and `celebrate` to the wide can
 `video-set --shape wide` forces it for every state of a batch when the costume is the
 reason. The same `--shape` is what `video-canvas` already took for a single still. The
 forced canvas is the forced-wide row (35 % above), so a jump in that batch keeps its
-head-room; an attack in it gets that row too, not its own 20 %.
+head-room; an attack in it gets that row too, not its own 20 %. A walk or run gets its own wide
+row, with nothing above (section 1).
 
 ## 4. Loop — period first, seam second, then the gait floor
 
