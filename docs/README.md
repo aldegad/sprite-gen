@@ -60,6 +60,7 @@ grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
 |---|---|
 | [run-contract.md](run-contract.md) | The atlas pipeline's normative contract: stages, the run-dir folder tree, curation-view display, atomic extract, concurrency scope |
 | [architecture.md](architecture.md) | How the code is laid out: domains, stage ownership, the numeric SSoT, the cell model, extraction internals, runtime manifest |
+| [loop-comparison.md](loop-comparison.md) | Final loop artifact digests, comparable quality axes and explicit unknown verdicts |
 
 ## Request authoring (pipeline A inputs)
 

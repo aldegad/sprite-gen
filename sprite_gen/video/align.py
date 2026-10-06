@@ -78,6 +78,7 @@ from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import period as period_mod
 from sprite_gen.video import rife as rife_mod
+from sprite_gen.video.interpolation_quality import SMEAR_WARN, OUTLINE_WARN, faults
 
 SNAP = 0.03  # a sample time within this of a source frame takes that frame
 SOURCE_DIR = loop_mod.CYCLE_SOURCE_DIR  # removed by video-loop whenever it cuts the loop again
@@ -106,14 +107,6 @@ DEFAULT_BETWEEN = "auto"
 # set before anything is rewritten, warn aligns it as it is and names the loop in the warnings.
 MULTI_CYCLE = ("fail", "warn")
 CYCLES = (1, 2, 3)  # what --cycles <loop>=k may say a loop holds
-# A made frame whose dark pixels inside the body exceed both neighbours' by this fraction of its
-# solid pixels is named in the report's warnings: a smear, not a dark part that moved.
-SMEAR_WARN = 0.001
-# A made frame whose coverage edge has no outline beyond both neighbours' by this fraction of its
-# edge (`rife.smear`'s `outline_loss`) has melted: legs that crossed too far for the flow became one
-# shape of fill, or a limb a pale ghost. Outlined legs crossing too far melt at 32 %, a short step
-# the flow follows stays under 3 % (tests/video/test_rife.py; docs/loop-repair.md section 4).
-OUTLINE_WARN = 0.05
 # A loop whose source holds its drawings (two or three frames each, sprite_gen/video/held.py) and that
 # the set's length leaves at fewer than this many drawings a second, with at least UNMADE_MIN of the
 # frames between them not made (taken from the nearer source frame, or kept with a fault), is a take
@@ -177,13 +170,6 @@ def _retake_line(name: str, r: dict[str, Any]) -> str:
             f"that is {r['drawings_per_second']:g} drawings a second, {r['frames_per_drawing']:g} frames apart, and {r['unmade']} "
             "frame(s) between them could not be made, so the loop halts there. A new take that draws every frame "
             "fixes it; no interpolator draws legs that swap places across a gap this wide (docs/loop-repair.md section 4)")
-
-
-def faults(measure: dict[str, float]) -> list[str]:
-    """What is wrong with a made frame, by its `rife.smear` measure: `smear` (dark beyond both
-    neighbours, SMEAR_WARN) and `outline` (outline lost beyond both, OUTLINE_WARN)."""
-    return ([*(["smear"] if measure["dark_excess"] > SMEAR_WARN else []),
-             *(["outline"] if measure["outline_loss"] > OUTLINE_WARN else [])])
 
 
 def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Interpolate | None,

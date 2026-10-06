@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import repair
@@ -90,7 +90,7 @@ def test_a_smooth_loop_is_left_alone_and_needs_no_interpolator():
 def test_at_most_three_and_never_next_to_a_made_frame():
     filmed, truth = _loop({3: 14, 9: 13, 15: 12, 20: 11})
     out, record = repair.repair_jumps(filmed, TrueMiddle(filmed, truth))
-    assert len(record["replaced"]) == 3 and record["stopped"] == "3 frames replaced"
+    assert len(record["replaced"]) == 3 and record["stopped"] == "3 interpolation calls used"
     assert record["replaced"][0] == 3 and set(record["replaced"]) < {3, 9, 15, 20}  # worst first, only stray frames
 
     filmed, truth = _loop({8: 14, 9: 14})  # two jump frames side by side
@@ -107,6 +107,51 @@ def test_the_hair_watched_is_behind_the_body_whichever_way_it_faces():
     left_filmed, _ = _loop({12: 6}, side="right")  # tail on the right = behind a left-facing body
     assert repair.jump_scores(left_filmed, facing="left")["hair"].max() >= repair.JUMP_RATIO
     assert repair.hair_box("left") == (0.55, 0.30, 1.0, 0.80)
+
+
+def test_blocked_worst_target_does_not_hide_an_independent_jump():
+    filmed, truth = _loop({8: 14, 9: 14, 18: 10})
+    fake = TrueMiddle(filmed, truth)
+    out, record = repair.repair_jumps(filmed, fake)
+    assert 18 in record["replaced"] and out[18] is truth[18]
+    assert record["blocked"] and len(fake.calls) <= repair.MAX_REPAIRS
+    assert all((k + 1) % N not in record["replaced"] for k in record["replaced"])
+
+
+def test_bad_outline_proposals_preserve_originals_and_consume_the_call_budget():
+    filmed, truth = _loop({3: 14, 9: 13, 15: 12, 20: 11})
+    for frame in filmed + truth:
+        d = ImageDraw.Draw(frame)
+        d.rectangle((50, 30, 69, 99), outline=(10, 10, 10, 255), width=2)
+        d.rectangle((48, 10, 71, 29), outline=(10, 10, 10, 255), width=2)
+    before = [f.tobytes() for f in filmed]
+    fake = TrueMiddle(filmed, truth)
+
+    def melted(a, b, t):
+        pixels = np.asarray(fake(a, b, t)).copy()
+        dark = (pixels[..., :3].max(axis=2) < 70) & (pixels[..., 3] > 0)
+        pixels[dark, :3] = (200, 180, 150)
+        return Image.fromarray(pixels, "RGBA")
+
+    out, record = repair.repair_jumps(filmed, melted)
+    assert record["replaced"] == []
+    assert record["attempts"] == len(fake.calls) == repair.MAX_REPAIRS
+    assert len({r["target"] for r in record["rounds"]}) == repair.MAX_REPAIRS
+    assert all(r["outcome"] == "rejected" and "outline" in r["faults"] for r in record["rounds"])
+    assert [f.tobytes() for f in out] == before == [f.tobytes() for f in filmed]
+
+
+def test_circular_adjacency_and_zero_call_budget():
+    filmed, truth = _loop({0: 16, N - 1: 15, 12: 10})
+    fake = TrueMiddle(filmed, truth)
+    _, record = repair.repair_jumps(filmed, fake)
+    made = record["replaced"]
+    assert 12 in made and not (0 in made and N - 1 in made)
+    assert all((k + 1) % N not in made for k in made)
+    no_calls = TrueMiddle(filmed, truth)
+    out, record = repair.repair_jumps(filmed, no_calls, max_frames=0)
+    assert not no_calls.calls and record["attempts"] == 0
+    assert all(a is b for a, b in zip(out, filmed))
 
 
 def _keyed(tmp_path: Path, frames: list[Image.Image]) -> Path:
