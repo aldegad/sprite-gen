@@ -37,7 +37,6 @@ import os
 import shutil
 import subprocess
 import sys
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -54,13 +53,13 @@ from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import period as period_mod
 from sprite_gen.video import repair as repair_mod
 from sprite_gen.video import rife as rife_mod
+from sprite_gen.video.frames import drop_specks
 
 ANALYSIS_SIZE = 96  # thumbnail edge for the distance matrix
 STRIP_MAX_CELLS = 64  # upper bound on cells even when they are narrow
 STRIP_MAX_WIDTH = 32000  # Chrome refuses images wider than ~32767 px; the cap is on PIXELS — a 650 px cell allows only 49 cells (2026-09-09 wolf idle: 64 cells = 41,664 px, unrenderable)
 STRIP_MAX_HEIGHT = 520
 SEAM_RATIO_MAX = 2.0  # loop seam / mean adjacent distance inside the cycle
-SPECK_MIN_FRACTION = 0.01  # detached components smaller than this fraction of the body are keying specks
 PERIODICITY_MIN = 0.15  # the period must dip at least 15% below the profile mean (flat profile = no repeat)
 # Where the gait fallback writes the frames it scaled back (removed once the strip is built).
 FALLBACK_FRAMES_DIR = ".gait-fallback-frames"
@@ -551,40 +550,6 @@ def pinned_cycle(D: np.ndarray, *, seam_max: float) -> dict[str, Any]:
     return {"kind": "pinned", "start": 0, "length": length, "seam": seam, "inner_mean_adjacent": inner,
             "ratio": seam / inner if inner > 0 else math.inf, "pin_error": pin_error,
             "pin_tolerance": max(seam_max * inner, PIN_NOISE_MAX), "period_global": None, "periodicity": None}
-
-
-def _drop_specks(image: Image.Image, min_fraction: float) -> tuple[Image.Image, int]:
-    """Erase detached alpha components smaller than `min_fraction` of the largest one."""
-    a = np.asarray(image)[..., 3] > 16
-    H, W = a.shape
-    seen = np.zeros_like(a, dtype=bool)
-    comps: list[list[tuple[int, int]]] = []
-    for y in range(H):
-        for x in range(W):
-            if a[y, x] and not seen[y, x]:
-                q = deque([(y, x)])
-                seen[y, x] = True
-                pts: list[tuple[int, int]] = []
-                while q:
-                    cy, cx = q.popleft()
-                    pts.append((cy, cx))
-                    for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                        ny, nx = cy + dy, cx + dx
-                        if 0 <= ny < H and 0 <= nx < W and a[ny, nx] and not seen[ny, nx]:
-                            seen[ny, nx] = True
-                            q.append((ny, nx))
-                comps.append(pts)
-    if not comps:
-        return image, 0
-    big = max(len(c) for c in comps)
-    px = image.load()
-    dropped = 0
-    for c in comps:
-        if len(c) < max(8, big * min_fraction):
-            for y, x in c:
-                px[x, y] = (0, 0, 0, 0)
-            dropped += 1
-    return image, dropped
 
 
 def _scrub(image: Image.Image) -> int:
@@ -1245,10 +1210,12 @@ def run_loop(
     scrubbed = specks = 0
     for k, f in enumerate(files[i : i + L]):
         im = Image.open(f).convert("RGBA")
-        # Motion review is pixel preserving: cleanup belongs to the keyed input.
+        # Motion review is pixel preserving: cleanup belongs to the keyed input (`video-frames` erases
+        # the specks far from the body). The other cuts erase every loose piece of solid pixels under
+        # the speck size, wherever it is: the outline's islands and a drawn shadow as well.
         if anchor not in ("motion", "motion-auto"):
             scrubbed += _scrub(im)
-            im, d = _drop_specks(im, SPECK_MIN_FRACTION)
+            im, d = drop_specks(im, alpha_over=16, diagonal=False, apart=0)
             specks += d
         frames.append(im)
 

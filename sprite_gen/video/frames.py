@@ -24,6 +24,16 @@ from a `video-canvas --fit tight` frame is clipped on purpose, but a frame where
 leftover key background reaches the edge is still a keying defect. A frame where the
 subject touches the edge carries key-tinted fringe pixels beside it and is accepted with
 them. The contacts stay in the report.
+
+A **speck** is not the subject either: a fleck the model drew drifting across the background,
+well away from the body, that survived the matte. Every keyed frame has its specks erased
+(`drop_specks`) before the edge check reads it, so a few pale pixels drifting through the edge
+band far from the body are erased rather than read as the subject framed too tight. A speck is
+small — under `SPECK_MIN_FRACTION` of the frame's largest component, the body — and far: more
+than `SPECK_APART` of the body's height from it. Its pixels are every opaque one (what the edge
+check reads), corners joining them. Near the body, small detached pieces are the subject's own
+and stay: the outline's loose pixels one transparent pixel off, a shadow drawn under a shoe, a
+shoe's part the matte cut loose. How many each frame lost is in its report row (`specks`).
 """
 
 from __future__ import annotations
@@ -65,6 +75,13 @@ SPILL_REFERENCE_MAX = 0.005  # the still's own key material ≤ the engine's sma
 SPILL_REFERENCE_MARGIN = 1
 SPILL_REFERENCE_MAX_PIXELS = 6_000_000
 EDGE_MAX_PIXELS = 0  # any opaque pixel on the top/left/right edge band = contact
+# Specks (`drop_specks`). A component under SPECK_MIN_FRACTION of the frame's largest one, or under
+# SPECK_MIN_PX, is small; more than SPECK_APART of the largest one's height from it, far. `video-loop`
+# reads the size by the same two numbers when it erases the loose pieces of a cut (`drop_specks` with
+# its own reading, see run_loop).
+SPECK_MIN_FRACTION = 0.01
+SPECK_MIN_PX = 8
+SPECK_APART = 0.1
 # Edge decontamination (`sprite_gen.frames.decontam`). A decoded frame's chroma is blurred by
 # 4:2:0 while its luma is not, so frames use the video fit. One palette serves the whole clip,
 # learned on the first frame, so the colours an edge may take cannot change between frames.
@@ -125,6 +142,83 @@ def extract(clip: Path, raw_dir: Path, stream_index: int | None = None) -> list[
     if not files:
         raise SystemExit(f"video-frames: ffmpeg wrote no frames for {clip}")
     return files
+
+
+def _components(solid: np.ndarray, *, diagonal: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The components of a boolean picture, as runs of each row: (row, first column, column past the
+    last, component of the run, pixels per component). A run touches a run of the row above when their
+    columns overlap (4-connected), or with `diagonal` also when they meet at a corner (8-connected)."""
+    reach = 1 if diagonal else 0
+    rows, width = solid.shape
+    edges = np.diff(np.pad(solid.astype(np.int8), ((0, 0), (1, 1))), axis=1)
+    ys, starts = np.nonzero(edges == 1)
+    stops = np.nonzero(edges == -1)[1]
+    parent = list(range(len(ys)))
+
+    def root(k: int) -> int:
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    bounds = np.searchsorted(ys, np.arange(rows + 1))
+    for y in range(1, rows):
+        a, a_end = int(bounds[y - 1]), int(bounds[y])
+        b, b_end = a_end, int(bounds[y + 1])
+        while a < a_end and b < b_end:
+            if starts[a] < stops[b] + reach and starts[b] < stops[a] + reach:
+                ra, rb = root(a), root(b)
+                if ra != rb:
+                    parent[max(ra, rb)] = min(ra, rb)
+            if stops[a] < stops[b]:
+                a += 1
+            else:
+                b += 1
+    labels = np.array([root(k) for k in range(len(ys))], dtype=np.int64)
+    sizes = np.bincount(labels, weights=stops - starts, minlength=len(ys)).astype(np.int64)
+    return ys, starts, stops, labels, sizes
+
+
+def _near(mask: np.ndarray, reach: int) -> np.ndarray:
+    """Every pixel within `reach` px of `mask`, each way and diagonally (a square of side 2 reach + 1)."""
+    for axis in (0, 1):
+        n = mask.shape[axis]
+        total = np.cumsum(np.pad(mask.astype(np.int32), [(reach + 1, reach) if a == axis else (0, 0) for a in (0, 1)]), axis=axis)
+        mask = (np.take(total, np.arange(2 * reach + 1, 2 * reach + 1 + n), axis=axis)
+                - np.take(total, np.arange(n), axis=axis)) > 0
+    return mask
+
+
+def drop_specks(image: Image.Image, *, alpha_over: int = 0, diagonal: bool = True,
+                apart: float = SPECK_APART) -> tuple[Image.Image, int]:
+    """Erase the specks: (the image, components erased). A component is the pixels over `alpha_over`,
+    joined side by side (and at corners with `diagonal`); a speck is one under SPECK_MIN_FRACTION of
+    the largest, or under SPECK_MIN_PX, whose every pixel is more than `apart` of the largest one's
+    height from it (0: wherever it is). An image with no speck comes back as it was given, the same
+    object; otherwise a copy with the specks' pixels set to (0, 0, 0, 0)."""
+    rgba = np.asarray(image.convert("RGBA"))
+    ys, starts, stops, labels, sizes = _components(rgba[..., 3] > alpha_over, diagonal=diagonal)
+    if not len(ys):
+        return image, 0
+    largest = int(sizes.argmax())
+    small = sizes < max(SPECK_MIN_PX, int(sizes[largest]) * SPECK_MIN_FRACTION)
+    small[np.setdiff1d(np.arange(len(sizes)), labels)] = False  # only the roots are components
+    if small.any() and apart > 0:
+        body = labels == largest
+        reach = int(apart * (int(ys[body].max()) - int(ys[body].min()) + 1))
+        near = np.zeros(rgba.shape[:2], dtype=bool)
+        for y, x0, x1 in zip(ys[body], starts[body], stops[body]):
+            near[y, x0:x1] = True
+        near = _near(near, reach)
+        for y, x0, x1, label in zip(ys, starts, stops, labels):
+            if small[label] and near[y, x0:x1].any():
+                small[label] = False
+    if not small.any():
+        return image, 0
+    out = rgba.copy()
+    for y, x0, x1 in zip(ys[small[labels]], starts[small[labels]], stops[small[labels]]):
+        out[y, x0:x1] = 0
+    return Image.fromarray(out, "RGBA"), int(small.sum())
 
 
 def edge_contact(image: Image.Image) -> dict[str, int]:
@@ -251,10 +345,14 @@ def key_frames(
                        spill_require_hue=spill == "full", decontam=decontam, decontam_fit=DECONTAM_FIT,
                        decontam_palette=clip_palette, decontam_edge_band=EDGE_ROWS)
         image = Image.open(dst).convert("RGBA")
+        # The specks go before anything reads the frame: the edge band, the coverage, the loop.
+        image, specks = drop_specks(image)
+        if specks:
+            image.save(dst)
         hist = image.getchannel("A").histogram()
         w, h = image.size
         alpha_zero_pct = round(100 * hist[0] / (w * h), 2)
-        row = {"frame": src.name, "alpha_zero_pct": alpha_zero_pct, "route": stats.get("route")}
+        row = {"frame": src.name, "alpha_zero_pct": alpha_zero_pct, "route": stats.get("route"), "specks": specks}
         if decontam != "off":
             done = stats["decontam"]
             if done.get("applied"):
@@ -282,6 +380,8 @@ def key_frames(
         "frames": len(rows),
         "alpha_zero_pct_min": min(r["alpha_zero_pct"] for r in rows),
         "alpha_zero_pct_max": max(r["alpha_zero_pct"] for r in rows),
+        "specks": {"dropped": sum(r["specks"] for r in rows), "frames": sum(1 for r in rows if r["specks"]),
+                   "min_fraction": SPECK_MIN_FRACTION, "min_px": SPECK_MIN_PX, "apart": SPECK_APART},
         "edge_contacts": contacts,
         "edge_policy": "off" if not check_edges else ("subject-allowed" if allow_subject else "refuse"),
         "rows": rows,

@@ -568,8 +568,19 @@ survives untouched on (8, 162, 24), (5, 200, 10) or pure-key backgrounds. Choose
 away from the subject's hues ([chroma-alpha.md](chroma-alpha.md)) — that rule now covers
 the painted key's darker variants too.
 
-The report also carries per-frame alpha coverage and an **edge-contact check**: any
-opaque pixel in the top/left/right 4-pixel bands fails the run. Each contact pixel is
+Every keyed frame first has its **specks** erased (`drop_specks`): a piece of the frame — its
+opaque pixels, corners joining them — under 1 % of the frame's largest piece, the body
+(`SPECK_MIN_FRACTION`, at least 8 px), and more than a tenth of the body's height away from it
+(`SPECK_APART`). That is a fleck the model drew drifting across the background, which survived the
+matte. Small pieces near the body stay: the outline's loose pixels, a shadow drawn under a shoe,
+a part of a shoe the matte cut loose. A frame with no speck is not written again; each report
+row says how many its frame lost (`specks`) and the report totals them (`specks.dropped`,
+`specks.frames`). Without this a fleck that crossed an edge band in one frame was read as the
+subject framed too tight, and `--anchor motion-auto`, which never cleans a frame, kept it in
+the loop's cells and widened them to reach it.
+
+The report also carries per-frame alpha coverage and an **edge-contact check**, read after the
+specks are gone: any opaque pixel in the top/left/right 4-pixel bands fails the run. Each contact pixel is
 classified by its *raw* colour — the declared key's hue family is **`residual`**
 (background the matte did not erase), anything else is **`subject`** — and the two
 defects fail with different messages: residual-only contact points at `video-canvas`
