@@ -654,8 +654,8 @@ def standing_height(path: Path, frame: int = 0) -> int:
 
     Every clip starts from its still (image-to-video), so this is the same pose in every
     state of one character — which is what one `--body-height` across states has to measure
-    to give that character one size. A clip that opens on a lead-in is read on the cut's first
-    frame instead (run_loop): its first frame is at another scale.
+    to give that character one size. A walk or run whose cut is filmed at another size than the
+    clip's first frame is read on the cut's first frame instead (run_loop).
     """
     box = Image.open(path).convert("RGBA").getchannel("A").point(lambda v: 255 if v >= 8 else 0).getbbox()
     if box is None:
@@ -688,8 +688,8 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
     floor = max(b[3] for b in boxes)
     grounded = [b[3] - b[1] for b in boxes if b[3] >= floor - 4] or [b[3] - b[1] for b in boxes]
     # `standing_src` is the caller's own measurement of the standing pose (run_loop: the clip's
-    # first frame, or the cut's first — clip frame `standing_frame` — where the clip opens on a
-    # lead-in). The tallest grounded frame counts whatever is raised overhead — an attack's
+    # first frame, or the cut's first — clip frame `standing_frame` — where the cut is filmed at
+    # another size than it). The tallest grounded frame counts whatever is raised overhead — an attack's
     # windup lifts the weapon above the head — and would shrink that state against the others.
     body_src = standing_src if standing_src is not None else max(grounded)
     # max_height is a ceiling on the CELL; an explicit body_height is a target for the BODY.
@@ -1247,8 +1247,13 @@ def run_loop(
     cycle_dir = out_dir / "cycle"
     frames: list[Image.Image] = []
     scrubbed = specks = 0
+    # A walk or run cut for a `--body-height` has its frames' sizes read as filmed, for the standing height below.
+    sized = body_height is not None and prof.gait
+    cut_sizes = []
     for k, f in enumerate(files[i : i + L]):
         im = Image.open(f).convert("RGBA")
+        if sized:
+            cut_sizes.append(gait_fallback.body_size(im))
         # Motion review is pixel preserving: cleanup belongs to the keyed input (`video-frames` erases
         # the specks far from the body). The other cuts erase every loose piece of solid pixels under
         # the speck size, wherever it is: the outline's islands and a drawn shadow as well.
@@ -1335,9 +1340,16 @@ def run_loop(
     (out_dir / FOLLOW_SOURCE).unlink(missing_ok=True)
     for k, im in enumerate(frames):
         im.save(cycle_dir / f"frame-{k:03d}.png")
-    # The standing height is the base still's pose as filmed, the clip's first frame — but a clip that opens
-    # on a lead-in films that pose at another scale than the walk: there it is read on the cut's own first frame.
-    standing_frame = i if lead is not None and lead["frames"] else 0
+    # The standing height is the base still's pose as filmed, the clip's first frame — but a video model that
+    # reframes the subject after it films that pose at another size than the walk. Where the cut is filmed
+    # SIZE_HOLD_MIN or more larger or smaller than the first frame (gait_fallback.size_change: what its height,
+    # mass and breadth all agree on, so not a pose), the standing height is read on the cut's own first frame.
+    # A lead-in is such a reframing, and so is one too small to open a lead-in.
+    standing_frame = 0
+    if sized:
+        report_base["cut_size"] = gait_fallback.size_change(gait_fallback.body_size(Image.open(files[0]).convert("RGBA")), cut_sizes)
+        if abs(report_base["cut_size"]["change"]) >= gait_fallback.SIZE_HOLD_MIN:
+            standing_frame = i
     strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds, body_height=body_height, anchor="feet" if anchor == "feet" else "none", kind=str(cycle.get("kind") or "periodic"),
                                     standing_src=standing_height(files[standing_frame], standing_frame) if body_height is not None else None,
                                     standing_frame=standing_frame)

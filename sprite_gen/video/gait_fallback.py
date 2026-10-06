@@ -36,6 +36,12 @@ pose moves one — an item held up from the second frame on lengthens the body a
 nothing to its mass, legs spread in a side step add mass and no height. The lead-in runs on while
 the height stays that far off, that way; the height is the steadier of the two through a walk. A
 walk's own frames stray from the model by a few percent; a reframing starts tens of percent off it.
+
+A reframing too small to open a lead-in still films the walk at another size than the clip's first
+frame, which is where `--body-height` reads the standing height. `size_change` reads how much larger
+(or smaller) a cut is filmed than that frame, on three lengths of the body at once (`body_size`: its
+height, its mass, the breadth of its upper half), and counts only what all three agree on: a pose
+moves them apart, a reframing moves them together.
 """
 from __future__ import annotations
 
@@ -59,6 +65,10 @@ SIZE_HOLD_MIN = 0.01
 # whose height and size are both this far off, the same way, opens a lead-in, and the frames whose height
 # stays this far off, that way, are in it (`lead_in`).
 LEAD_IN_MIN = 0.1
+# The part of the body, from its crown down, whose widest row is its breadth (`body_size`): the head, the
+# shoulders and the arms down to the hands — where a walk swings its arms, so a walking pose is broader
+# than the standing one it is shorter than, and the two lengths part on a pose.
+BREADTH_PART = 0.5
 # The longest cycle the second search accepts, as a share of the clip and in seconds.
 LONG_CYCLE_FRACTION = 0.6
 LONG_CYCLE_SECONDS = 2.0
@@ -208,6 +218,44 @@ def lead_in(frames: list[Image.Image], *, min_lag: int, max_lag: int) -> dict:
     return {"frames": count, "height_change": round(change, 4),
             "first_off": round(float(off[0]), 4) if np.isfinite(off[0]) else None,
             "first_off_size": round(float(off_size[0]), 4), **base}
+
+
+def body_size(frame: Image.Image) -> tuple[float, float, float] | None:
+    """Three lengths of the subject as drawn, each of which a frame filmed 5 % larger reads 5 % longer:
+    its height (its rows, as `loop.standing_height` reads them), its mass (the square root of its summed
+    coverage) and its breadth (the widest row, by summed coverage, of its upper `BREADTH_PART`). A frame
+    with no subject is None."""
+    alpha = np.asarray(frame.getchannel("A"), np.float64)
+    rows = np.nonzero((alpha >= 8).any(axis=1))[0]
+    if not len(rows):
+        return None
+    top, height = int(rows[0]), int(rows[-1]) + 1 - int(rows[0])
+    coverage = alpha.sum(axis=1) / 255
+    upper = coverage[top: top + max(1, round(BREADTH_PART * height))]
+    return float(height), float(np.sqrt(coverage.sum())), float(upper.max())
+
+
+def size_change(first: tuple[float, float, float] | None, cut: list[tuple[float, float, float] | None]) -> dict:
+    """How much larger the cut is filmed than the clip's first frame (`body_size` of each): +0.07 is 7 %
+    larger, 0 the same size.
+
+    The first frame is the standing pose and the cut is the walk, so every length differs between them by
+    the pose alone: a walk is shorter than its standing pose (knees bend) and broader (arms swing, legs
+    part), and its mass goes either way. A reframing scales the body whole, so it moves the height, the
+    mass and the breadth by the same part, the same way. Each length of the cut is the middle of its
+    frames' (one frame's legs are apart, the next one's together) over the first frame's, less 1
+    (`height`, `mass`, `breadth`); `change` is the least of the three when all go one way, and 0 when
+    they part — what cannot be the pose, so a reframing smaller than what the pose moves one length by,
+    the other way, reads 0 as well. A first frame, or a cut, with no subject reads 0, and `why` says so."""
+    base = {"min": SIZE_HOLD_MIN, "method": "least-of-height-mass-breadth"}
+    sizes = [size for size in cut if size is not None]
+    if first is None or not sizes:
+        return {"change": 0.0, "height": None, "mass": None, "breadth": None, **base,
+                "why": "no subject in the clip's first frame" if first is None else "no subject in the cut"}
+    off = np.median(np.asarray(sizes, np.float64), axis=0) / np.asarray(first, np.float64) - 1
+    change = float(np.sign(off[0]) * np.abs(off).min()) if (off > 0).all() or (off < 0).all() else 0.0
+    return {"change": round(change, 4), "height": round(float(off[0]), 4), "mass": round(float(off[1]), 4),
+            "breadth": round(float(off[2]), 4), **base}
 
 
 def undo_padding(frames: list[Image.Image], measured: dict) -> tuple[int, int, int, int]:

@@ -971,11 +971,22 @@ Outputs:
   character size (`--strip-height` stays the cap). With a target, the standing height is
   measured on the **clip's first frame** instead — the base still's pose, which every clip
   starts from — because the tallest grounded frame of an attack is its windup with the weapon
-  overhead, and scaling that to N shrank the character against its walk. A walk or run that opens
-  on a lead-in (section 4) films that pose at another scale than the walk, so there the standing
-  height is read on the cut's own first frame (`body_ref: cut-first-frame`, and `body_ref_frame`,
-  the clip frame it was read on); read on the first frame, filmed small, it scaled the walk up into
-  the cell cap. The sidecar says which (`body_ref`: `first-frame`, `cut-first-frame` or
+  overhead, and scaling that to N shrank the character against its walk. A video model may
+  reframe the subject after the first frame — a lead-in (section 4), or less — and then the walk
+  is filmed at another size than that pose: read on the first frame, filmed small, the standing
+  height scaled the walk up, a lead-in's into the cell cap. So a walk or run cut for a
+  `--body-height` has its size read against the first frame's (`gait_fallback.size_change`) on
+  three lengths at once: the height, the mass (the square root of the summed coverage) and the
+  breadth (the widest row of the upper half of the body), each the middle of the cut's frames
+  over the first frame's. A pose moves them apart — a walk is shorter than its standing pose and
+  broader, an item held up is taller and no heavier — and a reframing moves all three the same
+  way, so the cut's change of size is the least of the three when all go one way, and none when
+  they part. It is the cautious reading: a reframing smaller than what the pose itself moves one
+  of the lengths by, the other way, stays a pose (a small shrink under a walk's broader body,
+  for one). At 1 % or more (`SIZE_HOLD_MIN`) the standing height is read on the cut's own first
+  frame (`body_ref: cut-first-frame`, and `body_ref_frame`, the clip frame it was read on). The
+  report records the reading (`cut_size`: `change`, `height`, `mass`, `breadth`, `min`). The
+  sidecar says which frame (`body_ref`: `first-frame`, `cut-first-frame` or
   `tallest-grounded`) and records `body_src_h` and `scale`. `delay_ms = cycle_seconds / frames`, so a
   24 fps clip yields 41.67 ms cells; render at 24 fps to keep one cell per frame
   (a 30 fps render of 24 fps cells is a 5:4 pulldown and judders).

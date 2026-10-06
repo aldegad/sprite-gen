@@ -6,8 +6,9 @@ small subject are not part of its walk, and a walk forced wide gets no room abov
   reads a key-tinted pixel in the edge band as the subject's rim when its piece holds the subject too.
 * `video-loop` reads a walk's lead-in (the first frames off the walk's size) and searches the clip after it;
   what it finds, and what it refuses, is said in the clip's own frame numbers. The gait fallback scales back
-  by the size read one cycle on, as the hold does. A cut after a lead-in reads the standing height on its
-  own first frame.
+  by the size read one cycle on, as the hold does. A cut filmed at another size than the clip's first frame —
+  after a lead-in, or after a reframing too small to open one — reads the standing height on its own first
+  frame; a pose the first frame lacks is not another size.
 * `video-canvas --shape wide` gives a walk or run room in front and behind and none above.
 """
 from __future__ import annotations
@@ -270,6 +271,7 @@ def test_a_cut_after_a_lead_in_reads_the_standing_height_on_its_own_first_frame(
     assert meta["scale"] == round(120 / meta["body_src_h"], 4)
     assert meta["body_ref"] == "cut-first-frame" and meta["body_ref_frame"] == 12
     assert out["lead_in"]["frames"] >= 4 and out["lead_in"]["search_from"] == 0  # a named cut is the caller's frames
+    assert out["cut_size"]["change"] > 0.5 and out["cut_size"]["min"] == gait_fallback.SIZE_HOLD_MIN
     # `video-cycle-align` rebuilds the strip at the same standing height.
     for name in ("a", "b"):
         shutil.copytree(tmp_path / "out", tmp_path / name)
@@ -283,7 +285,73 @@ def test_a_cut_of_a_clip_with_no_lead_in_reads_its_first_frame_as_before(tmp_pat
     out, meta, keyed = _fixed(tmp_path, [walks.walker(k) for k in range(73)], 12)
     assert meta["body_ref"] == "first-frame" and "body_ref_frame" not in meta
     assert meta["body_src_h"] == _height(keyed / "000.png")
+    assert out["lead_in"]["frames"] == 0 and out["cut_size"]["change"] == 0
+
+
+@pytest.mark.parametrize("start, first, change", [(0.93, 112, 0.063), (1.07, 129, -0.068)])
+def test_a_cut_filmed_at_another_size_than_the_first_frame_reads_the_standing_height_on_its_own_first_frame(tmp_path, start, first, change):
+    # Reframed by 7 % over its first 9 frames, the walker opens no lead-in (under LEAD_IN_MIN), and its walk is
+    # filmed 7 % larger (or smaller) than its first frame: read there, the standing height delivered the walk
+    # 7 % too large (or small).
+    out, meta, keyed = _fixed(tmp_path, [zoomed(k, start=start) for k in range(73)], 12)
     assert out["lead_in"]["frames"] == 0
+    assert abs(_height(keyed / "000.png") - first) <= 1 and meta["body_src_h"] == _height(keyed / "012.png") == 120
+    assert (meta["body_ref"], meta["body_ref_frame"], meta["scale"]) == ("cut-first-frame", 12, 1.0)
+    size = out["cut_size"]
+    assert size["change"] == pytest.approx(change, abs=0.01)
+    # ... the least of what the height, the mass and the breadth say, which all go the one way.
+    assert abs(size["change"]) == min(abs(size[k]) for k in ("height", "mass", "breadth")) >= gait_fallback.SIZE_HOLD_MIN
+    assert len({size[k] > 0 for k in ("height", "mass", "breadth")}) == 1
+
+
+def _item_held_up(k: int) -> Image.Image:
+    image = walks.walker(k)
+    if k:
+        image.paste((120, 120, 120, 255), (140, 30, 142, 48))
+    return image
+
+
+def _arm_swung_out(k: int) -> Image.Image:
+    image = walks.walker(k)
+    if k:
+        image.paste((20, 90, 180, 255), (155, 90, 167, 96))
+    return image
+
+
+@pytest.mark.parametrize("pose", [walks.settling, _item_held_up, _arm_swung_out])
+def test_a_pose_the_first_frame_lacks_is_not_another_size(tmp_path, pose):
+    # The first frame stands tall on straight legs and settles into the walk (5 % shorter, lighter, as broad);
+    # or the walk holds an item up that the first frame does not (17 % taller, no heavier); or swings an arm
+    # out (a third broader, as tall). Each moves one or two of the height, the mass and the breadth, and a
+    # reframing moves all three the same way: the standing height stays the first frame's.
+    out, meta, keyed = _fixed(tmp_path, [pose(k) for k in range(73)], 12)
+    assert meta["body_ref"] == "first-frame" and "body_ref_frame" not in meta
+    assert meta["body_src_h"] == _height(keyed / "000.png")
+    size = out["cut_size"]
+    assert size["change"] == 0 and out["lead_in"]["frames"] == 0
+    moved = {k for k in ("height", "mass", "breadth") if abs(size[k]) >= gait_fallback.SIZE_HOLD_MIN}
+    assert moved == {walks.settling: {"height", "mass"}, _item_held_up: {"height"}, _arm_swung_out: {"breadth"}}[pose]
+
+
+def test_the_size_of_a_cut_is_what_its_height_mass_and_breadth_all_agree_on():
+    size, first = gait_fallback.size_change, (100.0, 50.0, 30.0)
+    larger = size(first, [(107.0, 53.0, 32.0)])
+    assert (larger["change"], larger["height"], larger["mass"], larger["breadth"]) == (0.06, 0.07, 0.06, 0.0667)
+    assert size(first, [(93.0, 46.0, 29.0)])["change"] == -0.0333
+    # Shorter and lighter but as broad, or shorter and broader: a pose.
+    assert size(first, [(96.0, 49.0, 30.0)])["change"] == 0 and size(first, [(97.0, 53.0, 33.0)])["change"] == 0
+    # Each length of the cut is the middle of its frames': one frame's stride is not the cut's size.
+    assert size(first, [first, (110.0, 55.0, 33.0), first])["change"] == 0
+    assert size(first, [(110.0, 55.0, 33.0), first, (110.0, 55.0, 33.0), None])["change"] == 0.1
+    # Nothing to read it on: no change, and why.
+    assert gait_fallback.body_size(Image.new("RGBA", (40, 40))) is None
+    assert size(None, [first])["change"] == 0 and "first frame" in size(None, [first])["why"]
+    assert size(first, [None])["change"] == 0 and "cut" in size(first, [None])["why"]
+    # A frame's three lengths: its rows, the square root of its coverage, the widest row of its upper half.
+    block = Image.new("RGBA", (60, 60))
+    block.paste((200, 0, 0, 255), (10, 10, 30, 50))
+    block.paste((200, 0, 0, 255), (5, 40, 45, 50))  # broader below the middle: not its breadth
+    assert gait_fallback.body_size(block) == (40.0, math.sqrt(20 * 30 + 40 * 10), 20.0)
 
 
 # --- a walk forced wide ---------------------------------------------------------------------------------------
