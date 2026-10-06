@@ -123,7 +123,10 @@ STILL_VIEW_TEXT = {
 }
 # The same views for a body that is not one biped (`body_plan`): where the body and head point, with no feet
 # counted and no chest, hips, shoulders or shoes, so a horse's still is not drawn standing on two feet.
-# `{body}` is the character's or every figure's; then what it stands on (`body_plan.still_text`). Not measured.
+# `{body}` is the character's or every figure's; then what it stands on (`body_plan.still_text`). Not measured,
+# but for the back: a four-legged back still drawn from a three-quarter reference came out turned, its head to one
+# side and its tail to the other, and the clip filmed from it turned further and showed a flank; said square and
+# symmetric left to right, it was drawn straight behind in every try (2.38.0).
 # The diagonals here keep their few words and take none of the person's middle-line and leg clauses, which count
 # a chest, shoulders and two feet.
 STILL_VIEW_TEXT_ANY_BODY = {
@@ -133,8 +136,10 @@ STILL_VIEW_TEXT_ANY_BODY = {
     ),
     "back": (
         "seen from directly behind: {body} turned fully away from the viewer, the back of the body and of the head "
-        "facing straight at the viewer, the face completely hidden and not turned toward either side or looking back, "
-        "even when a reference picture shows it from another angle"
+        "facing straight at the viewer, square to the viewer and symmetric left to right, with the back of the head "
+        "centred above the body, neither side of the body showing more than the other and any tail rising from the "
+        "middle, the face completely hidden and not turned toward either side or looking back, even when a reference "
+        "picture shows it from another angle"
     ),
     "front_diagonal": (
         "seen from a three-quarter front angle: {body} turned about 45 degrees to the {facing}, halfway between facing "
@@ -190,6 +195,24 @@ GAIT_HOLD_TEXT = {
     "back_diagonal": (
         "It stays in place as if on a treadmill, without moving across the screen, and keeps the exact three-quarter back "
         "angle of the image the whole time, its face hidden, never turning into a side view."
+    ),
+}
+# A walk or run seen from behind, for a body that is not one biped (`body_plan`): said after what it stands on.
+# A four-legged walk filmed from behind turned partway through the clip until a flank showed, and swayed from side
+# to side; with this and the still drawn square (`STILL_VIEW_TEXT_ANY_BODY["back"]`) it held square (2.38.0). Said
+# without the tail, the body held square but the tail swung from side to side on its own beat and the walk found no
+# loop, so the tail is held too.
+# A person's back walk is unchanged: it starts from a still redrawn mid-step with the body square (`WALK_START_TEXT`).
+BACK_GAIT_TEXT_ANY_BODY = {
+    "one": (
+        "Its body stays level, square to the viewer and straight the whole time, never turning or angling to either "
+        "side, so neither side of it comes into view, and it does not sway from side to side; any tail stays raised "
+        "where it is in the image, only its tip swaying a little."
+    ),
+    "scene": (
+        "Every figure stays level, square to the viewer and straight the whole time, never turning or angling to either "
+        "side, so no figure's side comes into view, and none sways from side to side; any tail stays raised where it is "
+        "in the image, only its tip swaying a little."
     ),
 }
 MOTION_TEXT = {
@@ -403,7 +426,8 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
     None, or one biped, keeps the sentences measured on people; any other body gets them without a part it
     lacks (`IDLE_TEXT_ANY_BODY`, `ATTACK_TEXT_ANY_BODY` / `HOLD_TEXT_ANY_BODY`, `LITE_WALK_TEXT_LEGGED` / `_LEGLESS`,
     `LITE_HEAD_TEXT_ANY_BODY`) and, after the
-    motion sentence or the caller's paragraph, what it stands on (`body_plan.text`).
+    motion sentence or the caller's paragraph, what it stands on (`body_plan.text`); a walk or run seen from behind
+    then says it stays square and does not sway (`BACK_GAIT_TEXT_ANY_BODY`).
 
     Without `handed` or `body_plan` the prompt is 2.22.0's, to the byte (`tests/gen/test_prompt_freeze.py`). `handed` lists
     the character's asymmetric items (`handedness.parse`): the prompt ends with where each one stays, anchored
@@ -420,6 +444,8 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
         template = COMMON_TEXT
     stands_on = body_mod.text(body_plan)
     stands_on = f" {stands_on}" if stands_on else ""
+    if direction == "back" and state in GAIT_STATES and not body_mod.biped(body_plan):
+        stands_on += f" {BACK_GAIT_TEXT_ANY_BODY['scene' if body_mod.scene(body_plan) else 'one']}"
     if motion is not None:
         motion = " ".join(motion.split())
         if not motion:

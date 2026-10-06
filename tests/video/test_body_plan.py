@@ -98,6 +98,25 @@ SNAPSHOTS = {
         'looking straight out of the image, not turned toward either side even when a reference picture shows it '
         'from another angle, standing on all four legs, not rearing onto its hind legs'
     ),
+    'horse/back/walk': (
+        '2D game sprite animation. A brown horse walks naturally in place, facing away from the viewer, as if on a '
+        'treadmill, without moving any farther away. It stays on all four legs, as in the image, and never rises onto '
+        'its hind legs. Its body stays level, square to the viewer and straight the whole time, never turning or '
+        'angling to either side, so neither side of it comes into view, and it does not sway from side to side; any '
+        'tail stays raised where it is in the image, only its tip swaying a little. The character is '
+        'seen from directly behind, facing away from the viewer. Stays centered in the frame and does not move across '
+        'the screen; the body and hair always stay fully inside the frame with margin. Camera completely locked, no '
+        'zoom, no pan, no reframing. The background stays a perfectly flat, pure chroma-key fill for the whole clip — '
+        'no shadows, no ground line, no particles, no lighting changes, no effects. Keep the design, colors and '
+        'proportions exactly as in the image. Consistent, evenly paced motion so the animation loops.'
+    ),
+    'horse/back/still': (
+        'seen from directly behind: the whole body and head turned fully away from the viewer, the back of the body '
+        'and of the head facing straight at the viewer, square to the viewer and symmetric left to right, with the back'
+        ' of the head centred above the body, neither side of the body showing more than the other and any tail rising'
+        ' from the middle, the face completely hidden and not turned toward either side or looking back, even when a '
+        'reference picture shows it from another angle, standing on all four legs, not rearing onto its hind legs'
+    ),
     'scene/back_diagonal/still': (
         'seen from a three-quarter back angle: every figure\'s whole body and head turned about 45 degrees away from '
         'the viewer toward the upper right, halfway between facing away and facing right, the face hidden and not '
@@ -207,6 +226,22 @@ def test_the_body_plan_says_what_it_stands_on_after_the_motion_and_before_the_vi
     assert horse.index("runs naturally") < horse.index(bp.ONE_TEXT["quadruped"]) < horse.index("is seen from the front")
     told = batch.build_prompt("side", "walk", "A brown horse", motion="It trots lightly.", body_plan=QUADRUPED)
     assert told.startswith(f"2D game sprite animation. It trots lightly. {bp.ONE_TEXT['quadruped']} It stays in place")
+
+
+@pytest.mark.parametrize("body_plan, key", [(QUADRUPED, "one"), (LEGLESS, "one"), (SCENE, "scene")])
+def test_only_a_walk_or_run_seen_from_behind_is_held_square(body_plan, key) -> None:
+    """The back of a body that is not one person turned and swayed as it walked: a walk or run from behind says it
+    stays square, after what it stands on, in the built-in sentence and after a caller's paragraph alike. No other
+    view or state says it, and a person's prompts do not (`test_one_biped_or_none_keeps_every_prompt_byte_for_byte`)."""
+    square = batch.BACK_GAIT_TEXT_ANY_BODY[key]
+    stands_on = bp.text(body_plan)
+    for view, state, motion in itertools.product(batch.VIEW_TEXT, (*STATES, "attack"), (None, "It ambles along.")):
+        prompt = batch.build_prompt(view, state, "A brown horse", motion=motion, body_plan=body_plan)
+        if view == "back" and state in batch.GAIT_STATES:
+            assert f"{stands_on} {square} " in prompt
+        else:
+            assert square not in prompt
+    assert all(square not in batch.build_prompt("back", state, "The knight") for state in batch.GAIT_STATES)
 
 
 def test_a_body_without_legs_has_no_mid_step_redraw() -> None:

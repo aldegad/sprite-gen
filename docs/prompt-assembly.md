@@ -62,7 +62,8 @@ the head, a tail, the body, a leg, a shoulder — gets only where it is, and no 
 biped, nothing changes. A quadruped, a body without legs or a scene of several figures has the idle,
 the attack and its hold (`HOLD_TEXT`, after a caller's `--motion` too), the Lite walk sentences, the
 mid-step redraw and the still's view sentence (`gen --direction --body-plan`) said without the parts it
-lacks, and what it stands on said after the motion paragraph or at the end of the view sentence
+lacks, and what it stands on said after the motion paragraph or at the end of the view sentence;
+a walk or run seen from behind then says the body stays square and does not sway (`BACK_GAIT_TEXT_ANY_BODY`)
 ([body plan](video-pipeline.md#a-body-that-is-not-a-person----body-plan)). The sheet rows `prepare
 --body-plan` writes take the same plan
 ([sheet rows](video-pipeline.md#the-sheet-rows--prepare---body-plan)).
