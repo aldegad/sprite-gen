@@ -1,27 +1,58 @@
-# 릴리즈 — 태그를 push 하면 릴리즈 페이지가 생긴다
+# 릴리즈 — 태그를 push 하고, 레인이 빌드한 것으로 릴리즈 페이지를 낸다
 
-> Owns: How a vX.Y.Z tag becomes a release page, what the workflow attaches, and what stays manual · Index: [docs/README.md](README.md)
+> Owns: How a vX.Y.Z tag becomes a release page, what the lane builds and the publisher attaches, and what stays manual · Index: [docs/README.md](README.md)
 
-릴리즈 페이지는 손으로 만들지 않는다. `vX.Y.Z` 태그가 push 되면 `.github/workflows/release.yml`
-이 그 태그의 `CHANGELOG.md` 절을 본문으로 페이지를 만든다. 사람이 `gh release create` 를 기억할
-필요가 없게 하는 것이 목적이다 — v2.5.3 이 태그·CHANGELOG·README 까지 올라간 채 릴리즈 페이지만
-빠져서, 릴리즈 목록에는 v2.5.2 가 Latest 로 남아 있었던 적이 있다.
+릴리즈 페이지는 손으로 만들지 않는다. `vX.Y.Z` 태그를 push 한 뒤 `scripts/release_publish.py` 가
+그 태그의 `CHANGELOG.md` 절을 본문으로 페이지를 만든다. 사람이 `gh release create` 의 인자를
+기억할 필요가 없게 하는 것이 목적이다 — v2.5.3 이 태그·CHANGELOG·README 까지 올라간 채 릴리즈
+페이지만 빠져서, 릴리즈 목록에는 v2.5.2 가 Latest 로 남아 있었던 적이 있다.
+
+GitHub-hosted CI(GitHub Actions)는 쓰지 않는다. 테스트 게이트와 wheel·sdist 빌드는 메인테이너의
+리눅스 러너에서 `scripts/linux_lane.sh` 가 돌리고, 페이지를 내는 기계는 아무것도 빌드하지 않고
+레인이 만든 것을 붙인다.
+
+레인이 통과했다는 것은 한 번의 실행이 exit 0 으로 끝났거나, 같은 커밋에서 `--rife-unmeasured "<이유>"`
+실행(exit 3, RIFE 를 재지 못했다고 끝에 적는다)과 `--rife-only` 실행(exit 0)이 둘 다 끝났다는
+뜻이다. RIFE 는 rife-ncnn-vulkan 을 돌릴 수 있는 Vulkan 드라이버가 있어야 잴 수 있다 — WSL1 의 Mesa
+lavapipe 에서는 첫 업로드에서 죽는다 — 그래서 그런 호스트에서는 RIFE 를 떼어 내되 조용히 건너뛰지는
+않는다.
+
+**미결 (2026-10-06)**: GitHub CI 를 걷어낸 뒤로 리눅스 RIFE(`--rife-only`)는 아직 한 번도 재지 못했다 —
+마지막 측정은 v2.35.0 의 CI 다. 진짜 리눅스 커널의 x86-64 호스트가 준비되면 이 변경이 들어간 커밋과
+다음 릴리즈(v2.36.0) 커밋에서 `--rife-only` 를 돌려 채운다. 채우면 이 문단을 지운다.
 
 ## 한 묶음
 
 1. **릴리즈 커밋** — `CHANGELOG.md` 의 `## Unreleased (vX.Y.Z)` 절을 `## vX.Y.Z - <제목>` 으로
    바꾸고, `pyproject.toml` 의 `version` 과 `SKILL.md` 의 `version:` 을 그 버전으로 맞춘다
    (둘의 일치는 `tests/packaging/test_version_ssot.py` 가 강제한다).
-2. **PR 로 `main` 머지** — `main` 은 보호 브랜치라 직접 push 가 거부된다. CI 가 초록이어야 한다.
+2. **PR 로 `main` 머지** — `main` 은 보호 브랜치라 직접 push 가 거부된다. 머지할 커밋에서 리눅스
+   레인이 통과해야 한다(위 정의) — 러너에서 그 커밋의 깨끗한 클론으로 `scripts/linux_lane.sh`.
 3. **태그 push** — 코드네임 접두사 없는 `vX.Y.Z` 로.
 
    ```bash
    git tag vX.Y.Z && git push origin vX.Y.Z
    ```
 
-4. **워크플로가 릴리즈를 만든다** — 태그가 가리키는 커밋에서 wheel·sdist·`SHA256SUMS` 를 빌드하고,
-   그 버전의 CHANGELOG 절을 본문으로, 절이 이름 댄 GIF 를 자산으로 붙여 릴리즈를 생성한다.
-5. **확인은 `gh release view`** — 태그를 push 한 것으로 끝이 아니다. 이게 성공해야 릴리즈가 끝난 것이다.
+4. **러너에서 태그 커밋을 패키징한다** — 태그가 가리키는 커밋의 깨끗한 클론에서, 체크아웃 밖의 빈
+   디렉터리로.
+
+   ```bash
+   scripts/linux_lane.sh --artifact <빈 디렉터리>
+   ```
+
+   게이트를 통과한 뒤에만 wheel·sdist·`SHA256SUMS`·`SOURCE_SHA`(그 커밋) 네 파일을 쓴다
+   (`--rife-unmeasured` 와 함께 쓰면 같은 커밋의 `--rife-only` 도 통과해야 레인이 통과한 것이다).
+   그 디렉터리를 페이지를 낼 기계로 가져온다.
+5. **페이지를 낸다** — 태그가 있는 체크아웃에서.
+
+   ```bash
+   .venv/bin/python scripts/release_publish.py --tag vX.Y.Z --prebuilt <가져온 디렉터리>
+   ```
+
+   `SOURCE_SHA` 가 태그 커밋이고 `SHA256SUMS` 가 두 아카이브와 맞을 때만 붙인다. 그 버전의
+   CHANGELOG 절을 본문으로, 절이 이름 댄 GIF 를 자산으로 함께 붙여 릴리즈를 생성한다.
+6. **확인은 `gh release view`** — 태그를 push 한 것으로 끝이 아니다. 이게 성공해야 릴리즈가 끝난 것이다.
 
    ```bash
    gh release view vX.Y.Z --repo aldegad/sprite-gen
@@ -29,14 +60,14 @@
 
 ## 이미 있는 릴리즈는 건드리지 않는다
 
-이미 페이지가 있는 태그로 워크플로가 다시 돌면 **아무것도 만들지 않고 아무것도 고치지 않고** 통과한다
-(`… already has a release page …; body and assets left untouched.`). 실패한 잡을 다시 돌려도 공개된
-페이지를 덮어쓰지 않는다는 뜻이고, 반대로 **이미 공개된 페이지의 본문·자산을 워크플로로 고칠 수는 없다**
-— 고칠 일이 생기면 `gh release edit` / `gh release upload` 로 직접 한다.
+이미 페이지가 있는 태그로 스크립트를 다시 돌리면 **아무것도 만들지 않고 아무것도 고치지 않고**
+통과한다(`… already has a release page …; body and assets left untouched.`). 실패한 실행을 다시
+돌려도 공개된 페이지를 덮어쓰지 않는다는 뜻이고, 반대로 **이미 공개된 페이지의 본문·자산을 이
+스크립트로 고칠 수는 없다** — 고칠 일이 생기면 `gh release edit` / `gh release upload` 로 직접 한다.
 
 ## 쇼케이스 GIF 는 레포에 커밋된 것만 붙는다
 
-워크플로가 자산으로 첨부하는 GIF 는 **두 조건을 모두 만족한 것뿐**이다:
+스크립트가 자산으로 첨부하는 GIF 는 **두 조건을 모두 만족한 것뿐**이다:
 
 - 그 버전의 CHANGELOG 절이 `docs/assets/<이름>.gif` 로 이름을 댄다 (본문의 맨 `<이름>.gif` 도
   `docs/assets/` 안에 그 파일이 있으면 같은 것으로 본다), **그리고**
@@ -52,34 +83,38 @@ gh release upload vX.Y.Z <clip>.gif --repo aldegad/sprite-gen
 본문에서 그 클립을 보여주려면 릴리즈 다운로드 URL
 (`https://github.com/aldegad/sprite-gen/releases/download/vX.Y.Z/<clip>.gif`)로 임베드하고,
 공개 후 그 URL 이 200 인지 확인한다. 반대로 CHANGELOG 절이 `docs/assets/…` 경로를 이름 댔는데 그
-파일이 체크아웃에 없으면, 죽은 이미지가 달린 페이지를 내보내는 대신 **잡이 실패한다.**
+파일이 체크아웃에 없으면, 죽은 이미지가 달린 페이지를 내보내는 대신 **스크립트가 멈춘다.**
 
 ## 태그 없이 미리 돌려보기
 
-`workflow_dispatch` 로 같은 스크립트를 `--dry-run` 으로 돌릴 수 있다. 태그도, 릴리즈도, 업로드도
-없이 제목·본문·첨부 목록만 잡 요약에 찍는다. 이 경로는 **dispatch 한 ref 의 CHANGELOG** 를 읽는다
-(입력한 태그의 것이 아니라) — 릴리즈 커밋을 준비하는 브랜치에서 본문을 미리 읽어보라는 뜻이다.
-GitHub 은 기본 브랜치에 있는 워크플로만 dispatch 하므로, 이 파일이 `main` 에 들어간 뒤부터 쓸 수 있다.
+`--dry-run` 으로 같은 판정을 돌린다. 태그도, 릴리즈도, 업로드도 없이 제목·본문·첨부 목록만 찍는다.
+`--checkout` 의 `CHANGELOG.md` 를 읽으므로, 릴리즈 커밋을 준비하는 브랜치에서 본문을 미리 읽어 볼 수
+있다. `--prebuilt` 없이 돌리면 그 자리에서 빌드하므로, 빌드하지 않는 기계에서는 `--skip-build`(GIF
+만 붙는 목록)로 판정만 본다.
 
-## 잡이 빨갛게 죽는 경우
+## 스크립트가 멈추는 경우
 
 전부 "조용히 이상한 페이지" 대신 실패를 고른 지점이다.
 
 - 태그에 해당하는 `## vX.Y.Z` 절이 `CHANGELOG.md` 에 없다 (있는 절 목록을 같이 찍는다).
 - 그 절이 비어 있다.
 - 절이 이름 댄 `docs/assets/…gif` 가 체크아웃에 없다.
-- 빌드 디렉터리가 비어 있지 않다 — 낡은 아카이브가 이번 릴리즈 자산으로 섞여 올라가는 것을 막는다.
+- `--prebuilt` 디렉터리가 wheel 하나·sdist 하나·`SHA256SUMS`·`SOURCE_SHA` 말고 다른 것을 담고
+  있거나, 아카이브 버전이 태그와 다르거나, `SOURCE_SHA` 가 태그 커밋이 아니거나, `SHA256SUMS` 가
+  아카이브와 맞지 않는다 — 다른 커밋의 빌드나 낡은 아카이브가 이번 릴리즈 자산으로 섞이는 것을 막는다.
+- 그 자리에서 빌드할 때 빌드 디렉터리가 비어 있지 않다 — 같은 이유다.
 - `gh` 가 "릴리즈가 있다/없다" 를 답하지 못했다 (토큰 없음, 네트워크 끊김, 5xx). **모르는 답은
   '없음' 으로 읽지 않는다** — 그대로 멈춘다.
 
 ## `release not found` 는 "레포 없음" 이기도 하다
 
 `gh release view` 는 **없는 레포·권한 없는 레포**에 대고 물어도 똑같이 `release not found` 로 답한다.
-"릴리즈가 아직 없다" 와 "레포 이름을 잘못 썼다" 가 같은 문장인 셈이다. 워크플로에서는 `--repo` 가
-`aldegad/sprite-gen` 으로 고정이고 잡 자신의 토큰을 쓰므로 이 모호함에 도달하지 않고, 도달하더라도
-뒤따르는 생성이 크게 실패한다. 손으로 확인할 때만 주의하면 된다 — `--repo` 오타가 "아직 릴리즈가
-없네" 로 읽힌다. `gh` 의 입자도 한계이지 스크립트가 고칠 수 있는 것이 아니다.
+"릴리즈가 아직 없다" 와 "레포 이름을 잘못 썼다" 가 같은 문장인 셈이다. 스크립트의 기본 `--repo` 는
+`aldegad/sprite-gen` 이라 보통은 이 모호함에 도달하지 않고, 도달하더라도 뒤따르는 생성이 크게
+실패한다. `--repo` 를 손으로 줄 때만 주의하면 된다 — 오타가 "아직 릴리즈가 없네" 로 읽힌다. `gh` 의
+입자도 한계이지 스크립트가 고칠 수 있는 것이 아니다.
 
 ## Related
 
 - [docs/README.md](README.md) — documentation index
+- `scripts/linux_lane.sh` — the test gates and the release build, on the maintainer's Linux runner

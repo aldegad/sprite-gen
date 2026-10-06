@@ -20,14 +20,13 @@ def _version_tuple(version: str) -> tuple[int, int]:
 
 
 def _ci_python_versions() -> list[str]:
-    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    """The Python the gates run on: the Linux lane's pin (GitHub-hosted CI is not used)."""
+    lane = (ROOT / "scripts" / "linux_lane.sh").read_text(encoding="utf-8")
 
-    matrix = re.search(r"python-version:\s*\[(?P<versions>[^\]]+)\]", workflow)
-    assert matrix, "CI must declare the setup-python matrix on one line"
-    versions = re.findall(r'"(\d+\.\d+)"', matrix.group("versions"))
-    assert versions, "CI Python matrix must include at least one version"
+    pinned = re.findall(r"^PINNED_PYTHON=(\d+\.\d+)$", lane, re.MULTILINE)
+    assert pinned, "the lane must pin its Python on a PINNED_PYTHON=<major>.<minor> line"
 
-    return versions
+    return pinned
 
 
 def test_ci_versions_are_supported_and_documented() -> None:

@@ -24,6 +24,6 @@ CLAUDE.md
 .kuma/
 .wrangler/
 
-# build artifacts the release workflow produces
+# build artifacts of an in-place release build (scripts/release_publish.py without --prebuilt)
 /build/
 /dist/

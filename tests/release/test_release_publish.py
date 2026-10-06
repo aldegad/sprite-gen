@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The release workflow's decision: publish once, never twice, never on a guess.
+"""The release publisher's decision: publish once, never twice, never on a guess.
 
 `gh` is replaced by a stub that records every call and keeps its "is there a release?"
 answer in a file, so a second run sees exactly what a real re-run would see. Fixtures are
@@ -171,3 +171,89 @@ def test_a_dist_directory_with_stale_archives_is_refused(harness: Harness, tmp_p
     assert proc.returncode == 2
     assert "not empty" in proc.stderr
     assert not harness.published()
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+        cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _tagged(harness: Harness) -> str:
+    """Make the throwaway checkout a repository whose v1.3.0 tag is its only commit."""
+    _git(harness.checkout, "init", "-q")
+    _git(harness.checkout, "add", "-A")
+    _git(harness.checkout, "commit", "-q", "-m", "release")
+    _git(harness.checkout, "tag", "v1.3.0")
+    return _git(harness.checkout, "rev-parse", "HEAD")
+
+
+def _lane_artifact(directory: Path, source_sha: str) -> Path:
+    """What `scripts/linux_lane.sh --artifact` leaves: a wheel, an sdist, SHA256SUMS, SOURCE_SHA."""
+    import hashlib
+
+    directory.mkdir()
+    lines = []
+    for name, body in (("sprite_gen-1.3.0-py3-none-any.whl", b"wheel"),
+                       ("sprite_gen-1.3.0.tar.gz", b"sdist")):
+        (directory / name).write_bytes(body)
+        lines.append(f"{hashlib.sha256(body).hexdigest()}  {name}\n")
+    (directory / "SHA256SUMS").write_text("".join(lines), encoding="utf-8")
+    (directory / "SOURCE_SHA").write_text(source_sha + "\n", encoding="utf-8")
+    return directory
+
+
+def _run_prebuilt(harness: Harness, prebuilt: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(PUBLISH), "--tag", "v1.3.0", "--repo", "example/example",
+         "--checkout", str(harness.checkout), "--gh", str(harness.gh), "--prebuilt", str(prebuilt),
+         *args],
+        capture_output=True, text=True,
+        env={**os.environ, "GH_STUB_STATE": str(harness.state), "GH_STUB_LOG": str(harness.log)})
+
+
+def test_a_lane_build_of_the_tag_commit_is_attached_without_building(harness: Harness, tmp_path: Path) -> None:
+    prebuilt = _lane_artifact(tmp_path / "lane", _tagged(harness))
+    proc = _run_prebuilt(harness, prebuilt)
+    assert proc.returncode == 0, proc.stderr
+    created = [c for c in harness.calls if c.startswith("release create")]
+    assert len(created) == 1, harness.calls
+    for name in ("sprite_gen-1.3.0-py3-none-any.whl", "sprite_gen-1.3.0.tar.gz", "SHA256SUMS", "wave-cube.gif"):
+        assert name in created[0], name
+    assert not (harness.checkout / "dist").exists(), "nothing is built where the release is published"
+
+
+def test_a_lane_build_of_another_commit_is_refused(harness: Harness, tmp_path: Path) -> None:
+    _tagged(harness)
+    prebuilt = _lane_artifact(tmp_path / "lane", "0" * 40)
+    proc = _run_prebuilt(harness, prebuilt)
+    assert proc.returncode == 2
+    assert "was built from" in proc.stderr
+    assert not harness.published()
+
+
+def test_a_lane_build_whose_archive_changed_is_refused(harness: Harness, tmp_path: Path) -> None:
+    prebuilt = _lane_artifact(tmp_path / "lane", _tagged(harness))
+    (prebuilt / "sprite_gen-1.3.0.tar.gz").write_bytes(b"sdist, changed after the lane")
+    proc = _run_prebuilt(harness, prebuilt)
+    assert proc.returncode == 2
+    assert "does not match" in proc.stderr
+    assert not harness.published()
+
+
+def test_a_lane_artifact_with_a_stray_file_is_refused(harness: Harness, tmp_path: Path) -> None:
+    """Everything in the directory would be attached, so it must hold exactly the lane's four files."""
+    prebuilt = _lane_artifact(tmp_path / "lane", _tagged(harness))
+    (prebuilt / "sprite_gen-0.0.1-py3-none-any.whl").write_bytes(b"stale")
+    proc = _run_prebuilt(harness, prebuilt)
+    assert proc.returncode == 2
+    assert "exactly one wheel" in proc.stderr
+    assert not harness.published()
+
+
+def test_prebuilt_does_not_combine_with_a_build_here(harness: Harness, tmp_path: Path) -> None:
+    prebuilt = _lane_artifact(tmp_path / "lane", _tagged(harness))
+    proc = _run_prebuilt(harness, prebuilt, "--skip-build")
+    assert proc.returncode == 2
+    assert "--prebuilt" in proc.stderr
+    assert harness.calls == []
