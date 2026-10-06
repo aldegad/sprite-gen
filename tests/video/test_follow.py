@@ -136,6 +136,56 @@ def test_a_cell_with_no_core_is_refused(tmp_path):
     assert 'follow' not in json.loads((loop_dir/'walk.strip.json').read_text())
 
 
+def bunny(k, ears, period=24):
+    """A front bunny, its head, torso and legs one column that bobs twice a cycle, with or without lop ears out
+    to both sides of its head: each more than half as thick as the column is wide and nearly as long, swinging
+    down and back up once a cycle."""
+    im = Image.new('RGBA', (210, 240))
+    d = ImageDraw.Draw(im)
+    bob = round(3*math.sin(4*math.pi*k/period))
+    d.rectangle((70, 30+bob, 140, 225+bob), fill=(250, 250, 250, 255))  # head, torso and legs
+    d.ellipse((85, 110+bob, 125, 150+bob), fill=(230, 90, 120, 255))  # the soft part
+    if ears:
+        droop = round(60*(1-math.cos(2*math.pi*k/period)))
+        d.rectangle((10, 32+bob+droop, 70, 72+bob+droop), fill=(235, 235, 240, 255))
+        d.rectangle((140, 32+bob+droop, 200, 72+bob+droop), fill=(235, 235, 240, 255))
+    return im
+
+
+def test_ears_as_thick_as_the_body_do_not_move_it(tmp_path):
+    # Ears this thick outlast the wearing, and a cell laid on cell 0 alone lies ears on ears: in the cells where
+    # the ears had swung less than their own thickness from where cell 0 has them the body was read as dropping
+    # with them, by up to 30 px, and as jumping back in the next cell. Laid again on what the cells have in
+    # common, the ears are at one place in too few cells to count.
+    chest = (105.0, 130.0, 24.0, 24.0)  # the soft part, as bunny draws it in cell 0
+    bare = follow.follow_loop(strip_dir(tmp_path/'bare', lambda k: bunny(k, ears=False)), [chest], on_fold='lower')
+    eared = follow.follow_loop(strip_dir(tmp_path/'eared', lambda k: bunny(k, ears=True)), [chest], on_fold='lower')
+    assert bare['body_bob_px'] == [0.0, 6.0]
+    for key in ('body_bob_px', 'dx_px', 'dy_px', 'reach_px', 'gain', 'fold'):
+        assert eared[key] == bare[key], key
+    moved = [np.asarray(Image.open(p/'walk.strip.png').convert('RGBA')) for p in (tmp_path/'bare', tmp_path/'eared')]
+    source = [np.asarray(Image.open(p/follow.SOURCE).convert('RGBA')) for p in (tmp_path/'bare', tmp_path/'eared')]
+    changed = [(m != s).any(axis=-1) for m, s in zip(moved, source)]
+    assert changed[0].any() and np.array_equal(changed[0], changed[1])
+    assert np.array_equal(moved[0][changed[0]], moved[1][changed[1]])
+
+
+def test_cells_with_no_body_in_common_are_refused(tmp_path):
+    # What the cells have in common is what more than half of them have at one place. A bar in cell 0 and a
+    # block at a different place along it in each other cell: no place is in more than two of the four.
+    def draw(k):
+        im = Image.new('RGBA', (160, 200))
+        box = (20, 80, 140, 120) if k == 0 else (20+40*(k-1), 80, 60+40*(k-1), 120)
+        ImageDraw.Draw(im).rectangle(box, fill=(20, 90, 180, 255))
+        return im
+    loop_dir = strip_dir(tmp_path/'apart', draw, n=4)
+    as_cut = (loop_dir/'walk.strip.png').read_bytes()
+    with pytest.raises(SystemExit, match=r'^video-follow: no part of the body is at one place in more than half of the cells$'):
+        follow.follow_loop(loop_dir, [(80.0, 100.0, 22.0, 17.0)])
+    assert (loop_dir/'walk.strip.png').read_bytes() == as_cut
+    assert 'follow' not in json.loads((loop_dir/'walk.strip.json').read_text())
+
+
 def test_the_part_lags_and_settles_without_a_kick():
     # One cycle of a smooth bob: the answer is as smooth (no frame-to-frame jump far beyond the rest)
     # and closes on itself, since it is the loop's steady state.

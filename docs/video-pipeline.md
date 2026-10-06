@@ -1032,10 +1032,21 @@ sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [-
   to the smaller move. A pixel counts once for each level it is still in, so the deepest of the
   body counts most and a part that comes and goes cannot outweigh it, while a torso that is
   shallower in one cell (an arm swung away from it, long hair lifted off it) still counts at its
-  shallower levels. The top of the body was read before: whatever came to the top was the
+  shallower levels. A part as thick as the body outlasts the wearing — ears as wide as the head —
+  and a cell that has it elsewhere than the first cell does, laid on the first cell alone, lies
+  ears on ears with its body tens of pixels off. So the cells are laid twice. Laid on the first
+  cell, each is moved back by its lay and the cells are counted: per level and pixel, how many
+  more of them are in that level there than are not (none, where no more are). The head and
+  torso are in every cell at one place and count the whole number of cells; what swings — ears
+  up in some cells and flopped onto the face in others, a leg forward and back — is at any one
+  place in half of the cells or fewer and counts nothing. Each cell is then laid on that count
+  as it was on the first cell, and its lay less the first cell's own is the motion. A thick part
+  that keeps one place in most of the cells is body to this read, which sees outlines only. The
+  top of the body was read before: whatever came to the top was the
   motion, and a tail tip, a flopping ear or a sword raised over the head made it jump by the
   part's whole swing from one cell to the next. A cell with nothing in it a quarter as deep as the first
-  cell's body is refused. The part is a damped mass on the body — its offset x from
+  cell's body is refused, and so is a strip with no part of the body at one place in more than
+  half of its cells. The part is a damped mass on the body — its offset x from
   where the body carries it answers x'' + 2ζωx' + ω²x = −body'' — solved in the loop's periodic
   steady state per harmonic of the cycle (the first six), so it lags the bob and settles, with no
   kick at a foot strike, and the last frame leads into the first. `--freq` (2.4 Hz) and `--zeta`

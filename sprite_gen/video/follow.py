@@ -11,7 +11,10 @@ each cell's body lies from the first cell's. The silhouette is worn down from a 
 of its depth in the first cell, so what swings on the body — a tail, a ponytail, an ear, a sword
 or a rod held up, the legs and arms — is worn away and the head and torso are left; each cell is
 laid where it overlaps the first cell most, worn alike, a pixel counting once for every level it
-is still in. (Read off the top of the body instead, the motion was whatever came to the top: a
+is still in, and then laid again on what the cells so laid have in common: what more than half of
+them have at one place, so a part as thick as the body that is elsewhere in another cell (ears as
+wide as the head, up in one cell and on the face in the next) does not pull that cell onto itself.
+(Read off the top of the body instead, the motion was whatever came to the top: a
 tail tip or a raised sword made it jump by the part's whole swing from one cell to the next.) A part
 hung on the body is a damped mass: its offset x from where the body carries it answers the body's own
 acceleration, x'' + 2·ζ·ω·x' + ω²·x = −body''. The loop repeats, so the answer is the periodic
@@ -102,23 +105,24 @@ def depth(solid: np.ndarray) -> int:
     return lo + 1
 
 
-def _levels(solid: np.ndarray, worn: range) -> tuple[list[np.ndarray], int, int] | None:
-    """`solid` worn down by each of `worn`, cut to the box of the first (each lies inside the one before),
-    and that box's top and left; None when nothing is left of it worn down by the first."""
-    first = wear(solid, worn[0])
-    if not first.any():
+def _levels(solid: np.ndarray, worn: range) -> tuple[np.ndarray, int, int] | None:
+    """`solid` worn down by each of `worn`, as one number per pixel: how many of those levels the pixel is still
+    in. Each level lies inside the one before, so level i is where that number is over i. Cut to the box of the
+    first level, with that box's top and left; None when nothing is left of `solid` worn down by the first."""
+    level = wear(solid, worn[0])
+    if not level.any():
         return None
-    ys, xs = np.nonzero(first.any(axis=1))[0], np.nonzero(first.any(axis=0))[0]
-    level = first[ys[0]: ys[-1] + 1, xs[0]: xs[-1] + 1]
-    levels = [level]
+    ys, xs = np.nonzero(level.any(axis=1))[0], np.nonzero(level.any(axis=0))[0]
+    level = level[ys[0]: ys[-1] + 1, xs[0]: xs[-1] + 1]
+    inside = level.astype(np.int32)
     for _ in worn[1:]:
         # Worn down by one more pixel: a square of side 2·r + 3 is one of side 2·r + 1 grown by one each way.
         across = np.pad(level, 1)
         level = across[1:-1, :-2] & across[1:-1, 1:-1] & across[1:-1, 2:]
         down = np.pad(level, 1)
         level = down[:-2, 1:-1] & down[1:-1, 1:-1] & down[2:, 1:-1]
-        levels.append(level)
-    return levels, int(ys[0]), int(xs[0])
+        inside += level
+    return inside, int(ys[0]), int(xs[0])
 
 
 def _fft_length(n: int) -> int:
@@ -133,23 +137,52 @@ def _fft_length(n: int) -> int:
         n += 1
 
 
-def _overlay(levels0: tuple[list[np.ndarray], int, int], levels: tuple[list[np.ndarray], int, int]) -> tuple[int, int]:
-    """The shift (dx, dy) of a cell from cell 0: where cell 0's levels, moved by it, land on the cell's own most,
-    the pixels that land counted at every level and summed."""
-    (a, ya, xa), (b, yb, xb) = levels0, levels
+def _overlay(onto: tuple[list[np.ndarray], int, int], levels: tuple[np.ndarray, int, int]) -> tuple[int, int]:
+    """The shift (dx, dy) of a cell from what it is laid on: where `onto` — per level a whole number at every
+    pixel, with its top and left — moved by it, lands on the cell's own levels most, the numbers that land on
+    the cell's pixels summed at every level and the levels summed."""
+    (a, ya, xa), (b, yb, xb) = onto, levels
     # Long enough that no move wraps round (a.h + b.h - 1 each way, and so on), and fast.
-    shape = (_fft_length(a[0].shape[0] + b[0].shape[0] - 1), _fft_length(a[0].shape[1] + b[0].shape[1] - 1))
-    # overlap[i, j]: how many pixels of each of cell 0's levels land on the cell's same level moved by
-    # (j - (a.w - 1), i - (a.h - 1)), summed over the levels, for every move that meets.
-    spectrum = sum(np.fft.rfft2(lb.astype(np.float64), shape) * np.fft.rfft2(la[::-1, ::-1].astype(np.float64), shape)
-                   for la, lb in zip(a, b))
-    # Counts of pixels are whole numbers: rounded, the FFT's own rounding (not the same on every machine) is
-    # gone, so a tie is a tie on every machine, and it goes to the move nearest none.
-    overlap = np.fft.irfft2(spectrum, shape)[: a[0].shape[0] + b[0].shape[0] - 1, : a[0].shape[1] + b[0].shape[1] - 1]
-    overlap = np.rint(overlap).astype(np.int64)
+    height, width = a[0].shape[0] + b.shape[0] - 1, a[0].shape[1] + b.shape[1] - 1
+    shape = (_fft_length(height), _fft_length(width))
+    # overlap[i, j]: what of `onto` lands on the cell's same level moved by (j - (a.w - 1), i - (a.h - 1)),
+    # summed over the levels, for every move that meets.
+    spectrum = sum(np.fft.rfft2((b > i).astype(np.float64), shape) * np.fft.rfft2(la[::-1, ::-1].astype(np.float64), shape)
+                   for i, la in enumerate(a))
+    # Sums of whole numbers are whole numbers: rounded, the FFT's own rounding (not the same on every machine)
+    # is gone, so a tie is a tie on every machine, and it goes to the move nearest none.
+    overlap = np.rint(np.fft.irfft2(spectrum, shape)[:height, :width]).astype(np.int64)
     shifts = [(int(j) - (a[0].shape[1] - 1) + xb - xa, int(i) - (a[0].shape[0] - 1) + yb - ya)
               for i, j in np.argwhere(overlap == overlap.max())]
     return min(shifts, key=lambda s: (s[0] ** 2 + s[1] ** 2, s[1], s[0]))
+
+
+def _common(levels: list[tuple[np.ndarray, int, int]], lays: list[tuple[int, int]],
+            count: int) -> tuple[list[np.ndarray], int, int] | None:
+    """What the cells' bodies have in common, each cell moved back by its lay: per level (`count` of them) and
+    pixel, how many more of the cells are in that level there than are not (none, where no more are), cut to
+    the box of what is left, with that box's top and left; None when no pixel is in more than half of the cells.
+
+    The head and torso are in every cell at one place and count the whole number of cells. What swings and is
+    thick enough to outlast the wearing — an ear as wide as the head, up in some cells and flopped onto the
+    face in others; a leg forward and back — is at any one place in half of the cells or fewer, and counts
+    nothing. A thick part that keeps one place in most of the cells counts as the body does: outlines alone
+    do not tell the two apart."""
+    tops = [top - dy for (_, top, _), (_, dy) in zip(levels, lays)]
+    lefts = [left - dx for (_, _, left), (dx, _) in zip(levels, lays)]
+    top, left = min(tops), min(lefts)
+    height = max(t + inside.shape[0] for t, (inside, _, _) in zip(tops, levels)) - top
+    width = max(l + inside.shape[1] for l, (inside, _, _) in zip(lefts, levels)) - left
+    cells_in = np.zeros((count, height, width), np.int32)
+    level = np.arange(count)[:, None, None]
+    for (inside, _, _), t, l in zip(levels, tops, lefts):
+        cells_in[:, t - top: t - top + inside.shape[0], l - left: l - left + inside.shape[1]] += inside > level
+    more = np.maximum(0, 2 * cells_in - len(levels))
+    # Each level lies inside the one before, in every cell: the first level's box holds them all.
+    ys, xs = np.nonzero(more[0].any(axis=1))[0], np.nonzero(more[0].any(axis=0))[0]
+    if not len(ys):
+        return None
+    return list(more[:, ys[0]: ys[-1] + 1, xs[0]: xs[-1] + 1]), top + int(ys[0]), left + int(xs[0])
 
 
 def body_motion(cells: list[Image.Image]) -> tuple[np.ndarray, np.ndarray, int, list[int]]:
@@ -163,7 +196,14 @@ def body_motion(cells: list[Image.Image]) -> tuple[np.ndarray, np.ndarray, int, 
     of pixels from a quarter to half of that depth, overlaps cell 0's, worn alike, most, the
     overlaps of every level summed: a pixel counts once for each level it is still in, so the
     deepest of the body counts most and nothing that comes and goes outweighs it, and a torso that
-    is shallower in one cell (an arm swung away from it) still counts at its shallower levels."""
+    is shallower in one cell (an arm swung away from it) still counts at its shallower levels.
+
+    That lay answers to everything left in cell 0, and a part as thick as the body is left: where
+    ears as wide as the head stand up in cell 0 and flop onto the face in another cell, the cell
+    is laid ears on ears, the body tens of pixels off. So the cells are laid a second time, on what
+    they have in common as first laid (`_common`), and that lay, less cell 0's own, is the motion:
+    the ears are at one place in too few cells to count, and the cell lies head on head and torso
+    on torso."""
     solids = []
     for k, cell in enumerate(cells):
         solid = np.asarray(cell.getchannel("A")) >= ALPHA_SOLID
@@ -175,16 +215,21 @@ def body_motion(cells: list[Image.Image]) -> tuple[np.ndarray, np.ndarray, int, 
     deepest = depth(solids[0])
     first = int(WORN_FROM * deepest)
     worn = range(first, max(first + 1, int(WORN_TO * deepest)))
-    levels0 = _levels(solids[0], worn)
-    rows, cols = [], []
+    levels = []
     for k, solid in enumerate(solids):
-        levels = _levels(solid, worn)
-        if levels is None:
+        level = _levels(solid, worn)
+        if level is None:
             raise ValueError(f"cell {k} has no body as deep as a quarter of cell 0's ({worn[0]} px)")
-        dx, dy = _overlay(levels0, levels)
-        rows.append(dy)
-        cols.append(dx)
-    return np.asarray(rows, float), np.asarray(cols, float), height0, [worn[0], worn[-1]]
+        levels.append(level)
+    inside0, top0, left0 = levels[0]
+    lays = [_overlay(([inside0 > i for i in range(len(worn))], top0, left0), level) for level in levels]
+    common = _common(levels, lays, len(worn))
+    if common is None:
+        raise ValueError("no part of the body is at one place in more than half of the cells")
+    lays = [_overlay(common, level) for level in levels]
+    dx0, dy0 = lays[0]
+    return (np.asarray([dy - dy0 for _, dy in lays], float), np.asarray([dx - dx0 for dx, _ in lays], float),
+            height0, [worn[0], worn[-1]])
 
 
 def follow_offsets(motion: np.ndarray, fps: float, *, freq: float, zeta: float, gain: float) -> np.ndarray:
