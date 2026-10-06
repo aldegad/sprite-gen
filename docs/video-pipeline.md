@@ -1015,7 +1015,14 @@ Outputs:
   at its own size is copied as it is). Coverage keeps LANCZOS's edge, held between the least and
   the most coverage of the source pixels the colour mixes from, so nothing spills outside the
   silhouette and nothing opens inside it. Colour is a Hamming mix of premultiplied colour, a
-  filter with no negative lobe, so every pixel's colour is a mix of the colours under it. The
+  filter with no negative lobe, so every pixel's colour is a mix of the colours under it. Each
+  channel therefore stays within the colours under it, but the key hue's excess (green:
+  `G - max(R, B)`) does not: a colour led by red mixed with one led by blue is led by neither as
+  far, so a cell can carry a little more key hue than any source pixel under it. Every filter
+  that mixes colours does this, in a cell and again wherever the cell is scaled later; the
+  resample knows no key and caps nothing (`tests/video/test_strip_resample.py`). The one
+  operation that compares a cell with the key bar, source restoration, handles it itself
+  ([loop-comparison.md](loop-comparison.md#what-a-restored-cell-is)). The
   strip used LANCZOS over premultiplied RGBA before, which weighs the colours across an edge
   against each other and divides by the edge's low coverage: on a keyed frame, whose edge holds
   a light rim and ink with a little of the key's green, it drew a lighter rim and greener ink

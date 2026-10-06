@@ -80,17 +80,41 @@ def test_a_cell_at_its_own_size_is_untouched() -> None:
     assert out is not src and out.tobytes() == src.tobytes()
 
 
-@pytest.mark.parametrize("scale", (0.37, 0.5, 0.9662, 1.0256, 1.5, 2.3))
-def test_coverage_clamp_reads_every_pixel_the_colour_filter_mixes(scale: float) -> None:
-    n_src = 41
-    n_out = round(n_src * scale)
-    lo, hi = resample._support_bounds(n_src, n_out, 1.0)
-    for x in range(n_src):
-        impulse = np.zeros((1, n_src), np.float32)
-        impulse[0, x] = 1.0
-        response = np.asarray(Image.fromarray(impulse).resize((n_out, 1), Image.Resampling.HAMMING))[0]
-        for u in np.nonzero(response > 1e-6)[0]:
-            assert lo[u] <= x <= hi[u], (scale, x, u, lo[u], hi[u])
+def test_mix_windows_hold_every_pixel_the_colour_filter_mixes() -> None:
+    # Every pair of lengths up to 48, shrinking and enlarging, and a few long ones: one impulse per
+    # source column, as the rows of one picture, scaled along the columns only.
+    pairs = [(n_src, n_out) for n_src in range(2, 49) for n_out in range(1, 2 * n_src + 1)]
+    for n_src, n_out in [*pairs, (720, 256), (256, 720), (997, 431), (431, 997)]:
+        (_, _), (lo, hi) = resample.mix_windows((n_src, 1), (n_out, 1))
+        impulses = Image.fromarray(np.eye(n_src, dtype=np.float32))
+        response = np.asarray(impulses.resize((n_out, n_src), Image.Resampling.HAMMING))
+        x, u = np.nonzero(response > 1e-6)
+        assert ((lo[u] <= x) & (x <= hi[u])).all(), (n_src, n_out)
+
+
+def test_a_mix_can_carry_more_key_hue_than_the_colours_under_it() -> None:
+    # Each channel of a cell stays inside the colours under it. The key hue's excess (green:
+    # G - max(R, B)) does not: a colour led by red mixed with one led by blue is led by neither
+    # as far. `resize_cell` leaves the mix as it is; it knows no key and caps nothing.
+    def over_the_bar(image: Image.Image) -> int:
+        a = np.asarray(image).astype(int)
+        return int(np.count_nonzero((a[..., 3] > 0) & (a[..., 1] - np.maximum(a[..., 0], a[..., 2]) > 8)))
+
+    def stripes(one: tuple[int, ...], other: tuple[int, ...]) -> Image.Image:
+        image = Image.new("RGBA", (60, 40), one)
+        for x in range(5, 60, 10):
+            image.paste(other, (x, 0, x + 5, 40))
+        return image
+
+    crossed = stripes((120, 114, 90, 255), (90, 114, 120, 255))  # led by red, led by blue
+    same = stripes((120, 114, 90, 255), (150, 130, 60, 255))  # both led by red
+    assert over_the_bar(crossed) == over_the_bar(same) == 0
+    for size in ((30, 20), (58, 39), (61, 41), (90, 60)):
+        cell = resample.resize_cell(crossed, size)
+        assert over_the_bar(cell) > 0, size
+        assert colour_outside(crossed, cell) == 0, size
+        assert over_the_bar(resample.resize_cell(same, size)) == 0, size
+    assert over_the_bar(resample.resize_cell(crossed, crossed.size)) == 0
 
 
 @pytest.mark.parametrize("anchor", ("none", "feet"))

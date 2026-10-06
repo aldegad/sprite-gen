@@ -460,7 +460,16 @@ def _edge_contact_message(contacts: list[dict[str, Any]]) -> str:
     return message
 
 
-def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool, report_path: Path | None, spill: str = "small", reference: Path | None = None, allow_subject_edge_contact: bool = False, decontam: str = "off") -> dict[str, Any]:
+def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool, report_path: Path | None, spill: str = "small", reference: Path | None = None, allow_subject_edge_contact: bool = False, decontam: str = "off", source_manifest: Path | None = None) -> dict[str, Any]:
+    if source_manifest is not None and reference is None:
+        raise SystemExit("video-frames: --source-manifest needs --reference (the source canvas)")
+    if source_manifest is not None:
+        target = (report_path or out_dir / "frames.report.json").expanduser().resolve()
+        receipt = Path(source_manifest).expanduser().resolve()
+        if (receipt in (target, clip.expanduser().resolve(), Path(reference).expanduser().resolve())
+                or receipt.is_relative_to((out_dir / "keyed").expanduser().resolve())
+                or receipt.is_relative_to((out_dir / "raw").expanduser().resolve())):
+            raise SystemExit("video-frames: source manifest cannot overwrite source files or report")
     if spill not in SPILL_MODES:
         raise SystemExit(f"video-frames: unknown --spill {spill!r}; expected one of {', '.join(SPILL_MODES)}")
     if spill == "auto" and reference is None:
@@ -479,7 +488,17 @@ def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool,
     report = key_frames(files, keyed_dir, key=key, check_edges=not allow_edge_contact, spill=decision["mode"], allow_subject=allow_subject_edge_contact, decontam=decontam)
     payload = {"kind": "sprite-gen-video-frames-report", "clip": str(clip), "out_dir": str(out_dir), "raw_dir": str(raw_dir), "keyed_dir": str(keyed_dir), "key": key, "spill": decision, **meta, **report}
     target = (report_path or (out_dir / "frames.report.json")).expanduser().resolve()
+    if source_manifest is not None:
+        from sprite_gen.video.evidence import engine_identity
+        payload["producer"] = engine_identity()
     atomic_write_text(target, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    if source_manifest is not None:
+        from sprite_gen.video import source
+        Path(source_manifest).parent.mkdir(parents=True, exist_ok=True)
+        record = source.manifest(clip=clip, canvas=Path(reference), frames_report=target,
+                                 files=sorted(keyed_dir.glob("*.png")),
+                                 timestamps=source.timestamps(clip, meta["stream_index"]))
+        atomic_write_text(Path(source_manifest), json.dumps(record, indent=2, allow_nan=False) + "\n")
     payload["report"] = str(target)
     return payload
 
@@ -491,6 +510,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--allow-edge-contact", action="store_true", help="accept any opaque pixel at the top/left/right edge (subject and leftover key background alike)")
     parser.add_argument("--allow-subject-edge-contact", action="store_true", help="accept the subject touching the top/left/right edge (a `video-canvas --fit tight` clip) but still refuse leftover key background there")
     parser.add_argument("--report", type=Path, help="report JSON (default <out-dir>/frames.report.json)")
+    parser.add_argument("--source-manifest", type=Path, help="write exact clip/canvas/keyed-file digests and source timestamps (requires --reference)")
     parser.add_argument("--spill", choices=SPILL_MODES, default="small", help="small: correct only small key-tinted clusters (default); full: every key tint in the subject is spill; auto: decide from --reference")
     parser.add_argument("--reference", type=Path, help="the still the clip was made from (required by --spill auto)")
     parser.add_argument("--decontam", choices=DECONTAM_MODES, default="off", help="off: the matte as is (default); palette: re-explain key-tinted edges with the subject's own colours (one palette per clip, video fit); auto: the same where it applies, reasons recorded where not")
@@ -501,7 +521,7 @@ def run(**kwargs: object) -> int:
                          allow_edge_contact=bool(kwargs.get("allow_edge_contact")), report_path=kwargs.get("report"),  # type: ignore[arg-type]
                          spill=str(kwargs.get("spill") or "small"), reference=kwargs.get("reference"),  # type: ignore[arg-type]
                          allow_subject_edge_contact=bool(kwargs.get("allow_subject_edge_contact")),
-                         decontam=str(kwargs.get("decontam") or "off"))
+                         decontam=str(kwargs.get("decontam") or "off"), source_manifest=kwargs.get("source_manifest"))  # type: ignore[arg-type]
     summary = {k: payload[k] for k in ("clip", "keyed_dir", "width", "height", "fps", "frames", "codec", "pix_fmt", "audio_streams", "alpha_zero_pct_min", "alpha_zero_pct_max", "edge_contacts", "edge_policy", "spill", "report")}
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

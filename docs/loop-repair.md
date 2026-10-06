@@ -168,17 +168,31 @@ over the loop — and the larger is the step's score.
 | A jump | a score of at least **1.4** (`JUMP_RATIO`) | the ponytail cuts the experiment found sat at 1.5–2.5; a smooth take's worst step sits near 1.3 |
 | The hair box | (0, 0.30)–(0.45, 0.80) of the union box for a right-facing body; mirrored for `--facing left` | below the head and behind the body, where a ponytail cut at the wrong moment jumps |
 | The frame remade | the frame after the jump; but when the step *into* frame k is a jump too and larger than the step after k+1, frame k itself (a single stray frame breaks two steps) | remaking the frame after a stray frame leaves the stray standing |
-| How | RIFE's frame half way between the frame's two neighbours | every other frame stays the video's own |
-| How many | at most **3** (`MAX_REPAIRS`), worst first, scores re-read after each | a loop that needs more is jolting everywhere, not jumping once |
+| How | propose RIFE's frame half way between the two neighbours, inspect it, then adopt it only without interpolation faults | a rejected proposal keeps the original middle frame; every other frame stays the video's own |
+| How many | at most **3 calls** (`MAX_REPAIRS`), rejected proposals included, worst eligible target first | a loop that needs more is jolting everywhere, not jumping once |
 | Never | a frame next to one already made | two made frames side by side are made from each other and melt the legs |
 
 Re-making every frame (an offset of half a frame) is not offered: it softens the frames that
 were fine, and it was judged "not corrected" (2026-10-03).
 
-The report's `jump_repair` carries `replaced` (cycle frame indices), each round's step, score and
-its whole/hair parts, `score_max_before` / `score_max_after`, why it stopped, and which
-interpolator made the frames. When a frame was replaced the seam gate measures the rendered cells
+Blocked targets are skipped while independent candidates remain. Scores are re-read
+after adoption; a rejected target is never retried in that run. The circular last/first
+adjacency rule and call budget still apply. The shared `interpolation_quality` policy
+is the same one used by cycle alignment: `dark_excess > 0.001` or
+`outline_loss > 0.05` rejects a proposal. An empty proposal is also rejected.
+The original middle frame is retained, not a duplicate of either neighbour.
+
+The report's `jump_repair` carries `replaced` (cycle frame indices), `attempts`,
+`blocked` targets, and each round's step, target, score, whole/hair parts,
+`original` and `proposal` measurements, `faults`, and `outcome` (`accepted` or
+`rejected`). It also records `score_max_before` / `score_max_after`, why it stopped,
+and which interpolator made the proposals. Rejection is not overall quality failure
+or success: original drawing changes and normal gait motion can remain.
+When a frame was replaced the seam gate measures the rendered cells
 (`seam_measurement: rendered-cells`), because the source frames no longer say what plays.
+
+To compare an active result with a final candidate after all processing, use
+[`video-loop-compare`](loop-comparison.md); a seam pass alone is not an improvement.
 
 RIFE is located only when a frame is to be made. A loop with a jump and no RIFE is cut as filmed
 with a warning under `--repair auto`, and fails under `--repair on` (section 1, "Without RIFE").
