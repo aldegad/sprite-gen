@@ -138,6 +138,7 @@ class Source:
 class Projection:
     frames: list[Image.Image]
     record: dict[str, Any]
+    cropped: list[Image.Image]  # what each cell was resampled from: the cleaned, ramped source frame cut to the crop
 
 
 def project(baseline: Any, source: Source) -> tuple[Projection | None, str | None]:
@@ -244,7 +245,8 @@ def project(baseline: Any, source: Source) -> tuple[Projection | None, str | Non
     if not hits:
         return None, "legacy-source-correspondence-unverified"
     crop = hits[0]
-    projected = [resize_cell(frame.crop(crop), (w, h)) for frame in frames]
+    cropped = [frame.crop(crop) for frame in frames]
+    projected = [resize_cell(frame, (w, h)) for frame in cropped]
     receipt = {"recipe": RECIPE, "crop": crop, "cell": [w, h], "wrap_dx_px": dx,
                "source": source.record["source"], "inputs": source.artifacts,
                "measurement_engine": evidence.engine_identity(),
@@ -252,7 +254,7 @@ def project(baseline: Any, source: Source) -> tuple[Projection | None, str | Non
                "samples": list(range(start, start + n)), "pts_seconds": pts[start:start + n],
                "unmodified_cells": keep, "repair_hints": hints, "exact_projections": 1,
                "reference_pixels_sha256": [evidence.digest(f.tobytes()) for f in projected]}
-    return Projection(projected, receipt), None
+    return Projection(projected, receipt, cropped), None
 
 
 def add_arguments(parser: Any) -> None:

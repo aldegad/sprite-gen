@@ -8,16 +8,23 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
 from sprite_gen.video import evidence, source, restoration, playback, loop
 from sprite_gen.cli import main
 from sprite_gen.util.gif_utils import save_clean_gif
+from sprite_gen.util.resample import resize_cell
 from sprite_gen.video.compare import Loop
 
 W, H, N = 64, 80, 12
 FILL = (210, 160, 110, 255)
+METRIC, POLICY = 'source-restoration-v3', 'key-protected-source-copy-one-step-cap-v1'
+# Two colours under the green key's bar (hue excess -6 each), one led by red and one by blue:
+# their even mix (105, 114, 105) is one step over it. ROSE and IRIS are the same for magenta.
+WARM, COOL = (120, 114, 90, 255), (90, 114, 120, 255)
+ROSE, IRIS = (124, 100, 94, 255), (94, 100, 124, 255)
 
 
 def frames():
@@ -36,9 +43,9 @@ def frames():
     return result
 
 
-def damage(im):
+def damage(im, zoom=1):
     made = im.copy()
-    for y in range(8, 58):
+    for y in range(8*zoom, 58*zoom):
         for x in range(made.width):
             if made.getpixel((x,y))[:3] in ((20,20,20),(30,30,30)):
                 made.putpixel((x,y),FILL)
@@ -67,33 +74,56 @@ def cells(paths):
     return restoration.read_loop(paths)[0].frames
 
 
-@pytest.fixture
-def case(tmp_path):
+def build(tmp_path, zoom=1, key='green', paint=None):
+    """A loop with two damaged cells and its keyed source, `zoom` times the cell's size.
+
+    At zoom 1 a cell is a copy of its frame; at 2 every cell is a resample, as a delivered loop's are.
+    `paint` draws on chosen source frames before the loop is cut from them.
+    """
     if not shutil.which('ffmpeg') or not loop.img2webp_supports_exact():
         pytest.skip('ffmpeg and img2webp >=1.5 required')
-    fs = frames()
+    fs = [f.resize((W*zoom,H*zoom),Image.Resampling.NEAREST) for f in frames()]
+    for k,draw in (paint or {}).items(): draw(fs[k])
     src_dir=tmp_path/'keyed'
     src_dir.mkdir()
     for k,f in enumerate(fs): f.save(src_dir/f'frame-{k:04}.png')
     canvas=src_dir/'frame-0000.png'
     freport=tmp_path/'frames.json'
-    freport.write_text(json.dumps({'kind':'sprite-gen-video-frames-report','fps':24.,'frames':12,'width':64,'height':80,'stream_index':0,'key':'green'}))
+    freport.write_text(json.dumps({'kind':'sprite-gen-video-frames-report','fps':24.,'frames':12,'width':W*zoom,'height':H*zoom,'stream_index':0,'key':key}))
     manifest=tmp_path/'source.json'
     inputs=dict(source_manifest=manifest,source_frames_dir=src_dir,source_canvas=canvas,source_frames_report=freport)
     mp4=tmp_path/'clip.mp4'
     subprocess.run(['ffmpeg','-v','error','-framerate','24','-i',str(src_dir/'frame-%04d.png'),'-c:v','libx264','-pix_fmt','yuv420p',str(mp4)],check=True)
     inputs['source_clip']=mp4
     manifest.write_text(json.dumps(source.manifest(clip=mp4,canvas=canvas,frames_report=freport,files=sorted(src_dir.glob('*.png')),timestamps=source.timestamps(mp4,0))))
-    clean=[cleaned(f) for f in fs]
-    bad=list(clean); bad[2]=damage(clean[2]); bad[8]=damage(clean[8])
+    clean=[resize_cell(cleaned(f),(W,H)) for f in fs]
+    bad=list(clean)
+    for k in (2,8): bad[k]=resize_cell(damage(cleaned(fs[k]),zoom),(W,H))
     paths={k:tmp_path/('b'+ext) for k,ext in [('strip','.png'),('meta','.json'),('report','.loop.json'),('gif','.gif'),('webp','.webp')]}
-    m={'frames':12,'w':64,'h':80,'delay_ms':41.67,'cycle_seconds':.5,'cycle_frames':12,'subsampled':False,'loop':True,'scale':1.,'source_rect':[0,0,64,80],'sample_indices':list(range(12)),'foot_anchor':'none'}
+    m={'frames':12,'w':64,'h':80,'delay_ms':41.67,'cycle_seconds':.5,'cycle_frames':12,'subsampled':False,'loop':True,'scale':1/zoom,'source_rect':[0,0,W*zoom,H*zoom],'sample_indices':list(range(12)),'foot_anchor':'none'}
     src=source.Source.read(**inputs)
     m['source_cut']={'source':src.record['source'],'start':0,'length':12,'samples':list(range(12))}
     report={'kind':'sprite-gen-video-loop-report','status':'passed','fps':24.,'frames_total':12,'source':src.record['source'],'cycle':{'start':0,'length':12},'anchor':'none','jump_repair':{'replaced':[2,8]},'strip':m,'n_out':12,'delay_ms':42}
     paths['meta'].write_text(json.dumps(m)); paths['report'].write_text(json.dumps(report))
     write_strip(paths,bad)
     return paths, inputs, clean
+
+
+@pytest.fixture
+def case(tmp_path):
+    return build(tmp_path)
+
+
+@pytest.fixture
+def scaled(tmp_path,request):
+    return build(tmp_path,zoom=2,key=getattr(request,'param','green'))
+
+
+def seam_patch(left,right):
+    """On a twice-size keyed frame: two colours inside the body that meet within one cell column (27, rows 25-30)."""
+    def paint(f):
+        f.paste(left,(48,48,55,64)); f.paste(right,(55,48,64,64))
+    return paint
 
 
 def repair(case,tmp_path,index=1,*,baseline=None,origin=None,out=None):
@@ -130,16 +160,16 @@ def repaint_source(case, index, paint):
 
 def test_source_restoration_preserves_normal_motion_and_timing(case,tmp_path):
     result=repair(case,tmp_path)
-    assert result['status']=='candidate' and result['schema_version']==2
+    assert result['status']=='candidate' and result['schema_version']==3
     assert result['origin_artifacts']==result['baseline_artifacts']
     comparison=compare_result(case,result)
     assert comparison['verdict']=='improved', comparison['reasons']
-    assert (comparison['metric_version'],comparison['schema_version'])==('source-restoration-v2',3)
+    assert (comparison['metric_version'],comparison['policy_version'],comparison['schema_version'])==(METRIC,POLICY,4)
     target=result['target']
     a,b=cells(case[0]),cells(outputs(result))
     assert all(x.tobytes()==y.tobytes() for k,(x,y) in enumerate(zip(a,b)) if k!=target)
-    # Nothing is protected here, so the copy is the whole source cell.
-    assert result['partial']['protected']['count']==0
+    # Nothing is protected or capped here, so the copy is the whole source cell.
+    assert result['partial']['protected']['count']==result['partial']['capped']['count']==0
     assert b[target].tobytes()==case[2][target].tobytes()
     axis=comparison['axes']['introduced_partial']
     assert axis['raw_candidate'][target]>axis['raw_baseline'][target]
@@ -261,7 +291,7 @@ def test_cli_real_json_needs_the_origin(case,tmp_path,capsys):
     assert not (tmp_path/'guessed').exists() and not report.exists()
     assert main(['video-loop-repair',*baseline,*origin,*src,'--out-dir',str(tmp_path/'cli'),'--report',str(report)])==0
     r=json.loads(report.read_bytes())
-    assert (r['schema_version'],r['metric_version'])==(2,'source-restoration-v2')
+    assert (r['schema_version'],r['metric_version'],r['policy_version'])==(3,METRIC,POLICY)
     candidate=[a for k,p in r['outputs'].items() for a in ('--candidate-'+k,p)]
     comparison=tmp_path/'comparison.json'
     with pytest.raises(SystemExit,match='origin'):
@@ -269,7 +299,7 @@ def test_cli_real_json_needs_the_origin(case,tmp_path,capsys):
     assert not comparison.exists()
     assert main(['video-loop-compare',*baseline,*origin,*candidate,*src,'--repair-evidence',str(report),'--report',str(comparison)])==0
     c=json.loads(comparison.read_bytes())
-    assert c['verdict']=='improved' and c['schema_version']==3 and c['metric_version']=='source-restoration-v2'
+    assert c['verdict']=='improved' and c['schema_version']==4 and c['metric_version']==METRIC
     assert set(c['candidate']['artifacts'])==set(c['origin']['artifacts'])=={'strip','meta','report','gif','webp'}
     assert c['origin']['artifacts']==r['origin_artifacts']
 
@@ -282,10 +312,11 @@ def test_key_spill_stays_out_and_the_rest_of_the_cell_is_restored(case,tmp_path)
     assert {r['comparison']['verdict'] for r in outcomes.values()}=={'improved'}
     r=outcomes[2]
     assert r['partial']['protected']['count']==16 and r['partial']['alpha_equals_source']
-    assert r['partial']['protected_pixels']['alpha_conflicts']==0
+    assert r['partial']['protected_pixels']['alpha_conflicts']==0 and r['partial']['capped']['count']==0
     assert r['partial']['protected_pixels']['pixels'][0]=={
         'x':25,'y':25,'origin_rgba':list(FILL),'source_rgba':[180,205,120,255],
-        'origin_key_weight':0,'source_key_weight':255*(205-180-8),'alpha_equal':True}
+        'origin_key_weight':0,'source_key_weight':255*(205-180-8),
+        'source_key_excess':205-180,'source_window_key_weight':255*(205-180-8),'alpha_equal':True}
     made,before,tinted=cells(outputs(r))[2],cells(case[0])[2],cleaned(tinted)
     for y in range(H):
         for x in range(W):
@@ -307,7 +338,8 @@ def test_protected_pixel_with_other_coverage_ends_that_proposal_only(case,tmp_pa
     assert r['proposal_id'] and 'comparison' not in r and 'candidate_artifacts' not in r
     assert r['partial']['protected_pixels']=={'count':1,'alpha_conflicts':1,'listed':1,'pixels':[{
         'x':15,'y':y,'origin_rgba':list(FILL),'source_rgba':[30,60,30,170],
-        'origin_key_weight':0,'source_key_weight':170*(60-30-8),'alpha_equal':False}]}
+        'origin_key_weight':0,'source_key_weight':170*(60-30-8),
+        'source_key_excess':60-30,'source_window_key_weight':170*(60-30-8),'alpha_equal':False}]}
     assert not (tmp_path/f"candidate-{r['proposal_index']}").exists()
     # The other proposal is independent of it.
     assert outcomes[8]['comparison']['verdict']=='improved'
@@ -365,7 +397,9 @@ def test_partial_copy_formula():
         for x,pixel in enumerate(pixels): im.putpixel((x,0),pixel)
         return im
     def made(origin,reference,key='green'):
-        part=restoration.partial(image(origin),image(reference),key)
+        # A cell at its frame's size is a copy: every excess in it is the source's own, so none is capped.
+        part=restoration.partial(image(origin),image(reference),image(reference),key)
+        assert not part.capped.any()
         return part,[part.frame.getpixel((x,0)) for x in range(len(origin))]
     # A larger drop at one place does not pay for a rise at another.
     part,pixels=made([(100,110,100,255),(100,108,100,255)],[(100,108,100,255),(100,109,100,255)])
@@ -385,6 +419,85 @@ def test_partial_copy_formula():
     accent=(200,60,200,255)
     assert made([FILL],[accent],'magenta')[1]==[FILL]
     assert made([FILL],[accent],'green')[1]==[accent]
+
+
+def seam(left,right):
+    """A 16 px picture whose columns 0-6 are one colour and the rest another: halved, column 3 mixes them evenly."""
+    im=Image.new('RGBA',(16,16),right)
+    im.paste(left,(0,0,7,16))
+    return im
+
+
+def halved(im):
+    return resize_cell(im,(im.width//2,im.height//2))
+
+
+COLUMN=[[x==3 for x in range(8)]]*8
+
+
+@pytest.mark.parametrize('key,left,right,mixed,capped',[
+    ('green',WARM,COOL,(105,114,105,255),(105,113,105,255)),
+    # Magenta's hue is min(R, B) - G: both keyed channels come down one step.
+    ('magenta',ROSE,IRIS,(109,100,109,255),(108,100,108,255)),
+    # A part-covered side: the mix is weighted by coverage, and the capped pixel keeps the source's.
+    ('green',(126,120,103,255),(81,120,126,127),(111,120,111,191),(111,119,111,191))])
+def test_one_step_the_resample_made_is_capped(key,left,right,mixed,capped):
+    drawn=seam(left,right); ref=halved(drawn)
+    origin=Image.new('RGBA',ref.size,FILL)
+    # No source pixel is over the bar; the cell's mixed column is exactly one step over it.
+    assert {ref.getpixel((3,y)) for y in range(8)}=={mixed}
+    assert int(restoration.source_key_weight(drawn,ref.size,key).max())==0
+    assert int(restoration.key_weight(np.asarray(ref),key)[:,3].min())==mixed[3]
+    part=restoration.partial(origin,ref,drawn,key)
+    assert part.capped.tolist()==COLUMN and not part.protected.any() and not part.alpha_conflict
+    assert part.copied.tolist()==[[x!=3 for x in range(8)]]*8
+    for y in range(8):
+        for x in range(8):
+            assert part.frame.getpixel((x,y))==(capped if x==3 else ref.getpixel((x,y)))
+    assert not restoration.key_weight(np.asarray(part.frame),key).any()
+    # The other key does not read that colour as its hue: the whole source cell is copied.
+    other=restoration.partial(origin,ref,drawn,'magenta' if key=='green' else 'green')
+    assert not other.capped.any() and not other.protected.any() and other.frame.tobytes()==ref.tobytes()
+    # The cap answers a rise only. Where the delivered pixel already carries more, the source's is copied as it is.
+    stained=Image.new('RGBA',ref.size,(100,140,100,255) if key=='green' else (140,100,140,255))
+    kept=restoration.partial(stained,ref,drawn,key)
+    assert kept.copied.all() and not kept.capped.any() and kept.frame.tobytes()==ref.tobytes()
+
+
+@pytest.mark.parametrize('key,left,right,dark',[
+    ('green',(120,115,90,255),(90,115,120,255),None),    # two steps
+    ('green',(240,230,40,255),(40,230,240,255),None),    # yellow meets cyan: the mix is a bright green
+    ('magenta',(230,60,60,255),(60,60,230,255),None),    # red meets blue
+    ('green',(240,230,40,255),(40,230,240,255),(5,6))])  # a dark pixel under the mix does not make a deep cap a small one
+def test_a_deeper_made_excess_keeps_the_delivered_pixel(key,left,right,dark):
+    drawn=seam(left,right)
+    if dark: drawn.putpixel(dark,(20,20,20,255))
+    ref=halved(drawn)
+    part=restoration.partial(Image.new('RGBA',ref.size,FILL),ref,drawn,key)
+    # Nothing under those places is over the bar either: it is the depth alone that refuses the cap.
+    assert int(restoration.source_key_weight(drawn,ref.size,key).max())==0
+    assert not part.capped.any() and part.protected.tolist()==COLUMN and not part.alpha_conflict
+    assert all(part.frame.getpixel((3,y))==FILL for y in range(8))
+
+
+def test_an_excess_a_source_pixel_carries_is_not_capped():
+    origin=Image.new('RGBA',(8,8),FILL)
+    # A key-coloured source pixel, barely covered, under two of the mixed places. Those two still read
+    # one step over the bar, but the excess is the source's own there: the delivered pixel stays, and
+    # its coverage is not the source's.
+    drawn=seam(WARM,COOL); drawn.putpixel((5,6),(60,200,60,1))
+    ref=halved(drawn)
+    part=restoration.partial(origin,ref,drawn,'green')
+    assert [ref.getpixel((3,y))[:3] for y in (2,3)]==[(105,114,105)]*2
+    assert part.protected.tolist()==[[x==3 and y in (2,3) for x in range(8)] for y in range(8)]
+    assert part.capped.tolist()==[[x==3 and y not in (2,3) for x in range(8)] for y in range(8)]
+    assert part.alpha_conflict
+    # Under zero coverage the same colour carries nothing: every mixed place is capped, with the source's coverage.
+    drawn.putpixel((5,6),(60,200,60,0))
+    ref=halved(drawn)
+    part=restoration.partial(origin,ref,drawn,'green')
+    assert part.capped.tolist()==COLUMN and not part.protected.any() and not part.alpha_conflict
+    assert ref.getpixel((3,3))[3]<255 and part.frame.getchannel('A').tobytes()==ref.getchannel('A').tobytes()
 
 
 def recolour_outline(colour):
@@ -578,6 +691,8 @@ def test_replaced_origin_or_source_is_error(case,tmp_path,adopted):
 def test_other_policy_receipt_is_not_read_as_this_one(case,tmp_path,adopted):
     origin,first,current=adopted
     for change in (lambda r: r['restoration'].update(policy_version='another-policy'),
+                   # The same cell under the contract before this one, which never capped: its receipt is not this one's.
+                   lambda r: r['restoration'].update(metric_version='source-restoration-v2',policy_version='key-protected-source-copy-v1'),
                    lambda r: r.update(restoration={'operation':'restore_active_cut','metric_version':'source-restoration-v1',
                                                    'target':2,'restored_cells':[2]})):
         rewrite_receipt(current,change)
@@ -596,7 +711,8 @@ def test_old_proposal_cannot_be_compared_on_the_new_baseline(case,tmp_path,adopt
     with pytest.raises(ValueError,match='does not bind'):
         compare_result(case,second,baseline=case[0],origin=origin)
     # Evidence of another schema or metric is not this contract's.
-    for field,value in (('schema_version',1),('metric_version','source-restoration-v1'),('policy_version','another-policy')):
+    for field,value in (('schema_version',2),('metric_version','source-restoration-v2'),
+                        ('policy_version','key-protected-source-copy-v1'),('policy_version','another-policy')):
         with pytest.raises(ValueError,match='does not bind'):
             compare_result(case,{**second,field:value},baseline=current,origin=origin)
     # A candidate whose receipt drops the earlier cell is not the verified one.
@@ -605,6 +721,139 @@ def test_old_proposal_cannot_be_compared_on_the_new_baseline(case,tmp_path,adopt
     c,_=restoration.read_loop(forged)
     outcome=compare_result(case,{**second,'candidate_artifacts':c.artifacts},baseline=current,origin=origin)
     assert (outcome['verdict'],outcome['reasons'])==('unknown',['candidate-report-differs-from-verified-receipt'])
+
+
+@pytest.mark.parametrize('scaled,left,right,mixed,capped',[
+    ('green',WARM,COOL,(105,114,105,255),(105,113,105,255)),
+    ('magenta',ROSE,IRIS,(109,100,109,255),(108,100,108,255))],indirect=['scaled'])
+def test_cli_restores_a_resampled_cell_with_its_made_excess_capped(scaled,tmp_path,left,right,mixed,capped):
+    paths,_,_=scaled
+    painted={k:repaint_source(scaled,k,seam_patch(left,right)) for k in (2,8)}
+    baseline,origin,src=cli_args(scaled)
+    report=tmp_path/'repair.json'
+    assert main(['video-loop-repair',*baseline,*origin,*src,'--out-dir',str(tmp_path/'cli'),'--report',str(report)])==0
+    r=json.loads(report.read_bytes())
+    assert (r['status'],r['schema_version'],r['metric_version'],r['policy_version'])==('candidate',3,METRIC,POLICY)
+    target,part=r['target'],r['partial']
+    assert (part['capped']['count'],part['protected']['count'],part['alpha_equals_source'])==(6,0,True)
+    assert part['capped_pixels']=={'count':6,'listed':6,'pixels':[
+        {'x':27,'y':y,'origin_rgba':list(FILL),'source_rgba':list(mixed),'output_rgba':list(capped),
+         'source_window':[53,2*y-1,56,2*y+2]} for y in range(25,31)]}
+    candidate=[a for k,p in r['outputs'].items() for a in ('--candidate-'+k,p)]
+    comparison=tmp_path/'comparison.json'
+    assert main(['video-loop-compare',*baseline,*origin,*candidate,*src,'--repair-evidence',str(report),'--report',str(comparison)])==0
+    c=json.loads(comparison.read_bytes())
+    assert (c['verdict'],c['schema_version'],c['metric_version'],c['policy_version'])==('improved',4,METRIC,POLICY), c['reasons']
+    key=c['axes']['key_colour']
+    assert (key['introduced_pixels'][target],key['introduced_excess'][target],key['candidate'][target])==(0,0,0)
+    assert c['cleared_faults']==[{'cell':target,'faults':['outline']}]
+    assert c['restoration']['capped']==part['capped'] and c['restoration']['capped_pixels']==part['capped_pixels']
+    # The final strip: the source's cell but for the six capped pixels, their coverage the source's; no other cell touched.
+    made,before=cells(outputs(r)),cells(paths)
+    reference=resize_cell(cleaned(painted[target]),(W,H))
+    assert reference.getpixel((27,25))==mixed
+    for y in range(H):
+        for x in range(W):
+            assert made[target].getpixel((x,y))==(capped if x==27 and 25<=y<=30 else reference.getpixel((x,y)))
+    assert all(a.tobytes()==b.tobytes() for k,(a,b) in enumerate(zip(before,made)) if k!=target)
+    receipt=json.loads(outputs(r)['report'].read_bytes())['restoration']
+    assert (receipt['metric_version'],receipt['policy_version'])==(METRIC,POLICY)
+    assert receipt['applied'][0]['capped']==part['capped']
+
+
+def test_whole_source_cell_with_a_made_excess_is_still_refused(scaled,tmp_path):
+    paths,inputs,_=scaled
+    for k in (2,8): repaint_source(scaled,k,seam_patch(WARM,COOL))
+    r=repair(scaled,tmp_path)
+    target=r['target']
+    # The guard itself is unchanged: the source's own cell there raises it at each of the six places.
+    o,_=restoration.read_loop(paths)
+    state,_=restoration.chain(o,o,source.Source.read(**inputs))
+    whole=[state.projection.frames[k] if k==target else f for k,f in enumerate(o.frames)]
+    judged=restoration.judge(o.frames,whole,state.projection.frames,state.key)
+    assert judged['axes']['key_colour']['introduced_pixels'][target]==6
+    assert judged['verdict']=='regressed' and 'key_colour:regressed' in judged['reasons']
+    # Written out as the candidate, one capped place given the source's pixel back is not the verified cell.
+    forged=outputs(r)
+    fs=cells(forged); fs[target].putpixel((27,25),(105,114,105,255)); write_strip(forged,fs)
+    c,_=restoration.read_loop(forged); r['candidate_artifacts']=c.artifacts
+    outcome=compare_result(scaled,r)
+    assert (outcome['verdict'],outcome['reasons'])==('regressed',['changed-cell-is-not-the-verified-source-copy'])
+
+
+def test_deeper_made_excess_in_a_resampled_cell_keeps_the_delivered_pixels(scaled,tmp_path):
+    for k in (2,8): repaint_source(scaled,k,seam_patch((120,115,90,255),(90,115,120,255)))
+    r=repair(scaled,tmp_path)
+    part=r['partial']
+    assert (part['capped']['count'],part['protected']['count'],part['alpha_equals_source'])==(0,6,True)
+    assert part['protected_pixels']['pixels'][0]=={
+        'x':27,'y':25,'origin_rgba':list(FILL),'source_rgba':[105,115,105,255],'origin_key_weight':0,
+        'source_key_weight':255*2,'source_key_excess':10,'source_window_key_weight':0,'alpha_equal':True}
+    assert r['comparison']['verdict']=='improved', r['comparison']['reasons']
+    made=cells(outputs(r))[r['target']]
+    assert all(made.getpixel((27,y))==FILL for y in range(25,31))
+
+
+def test_normal_cell_with_a_made_excess_is_left_as_delivered(tmp_path):
+    # A delivered normal cell can carry such an excess itself. It is not a target and is never rewritten.
+    case=build(tmp_path,zoom=2,paint={5:seam_patch(WARM,COOL)})
+    paths,_,clean=case
+    assert [clean[5].getpixel((27,y)) for y in range(25,31)]==[(105,114,105,255)]*6
+    r=repair(case,tmp_path)
+    assert r['comparison']['verdict']=='improved', r['comparison']['reasons']
+    assert r['comparison']['axes']['key_colour']['baseline'][5]==r['comparison']['axes']['key_colour']['candidate'][5]==6
+    assert cells(outputs(r))[5].tobytes()==clean[5].tobytes()
+    # With nothing damaged the request copies the five files, that cell included.
+    write_strip(paths,clean)
+    noop=repair(case,tmp_path,out='noop')
+    assert noop['status']=='no_change' and noop['comparison']['verdict']=='non_regressing'
+    assert all(outputs(noop)[k].read_bytes()==paths[k].read_bytes() for k in paths)
+
+
+@pytest.fixture
+def capped_baseline(scaled,tmp_path):
+    """A resampled loop whose first restored cell holds capped pixels, adopted as the next baseline."""
+    for k in (2,8): repaint_source(scaled,k,seam_patch(WARM,COOL))
+    first=repair(scaled,tmp_path)
+    assert first['comparison']['verdict']=='improved' and first['partial']['capped']['count']==6
+    return scaled[0],first,outputs(first)
+
+
+def test_capped_cell_is_rebuilt_from_the_origin_by_later_requests(scaled,tmp_path,capped_baseline):
+    origin,first,current=capped_baseline
+    second=repair(scaled,tmp_path,baseline=current,origin=origin,out='next-request')
+    assert second['comparison']['verdict']=='improved', second['comparison']['reasons']
+    assert second['applied_cells']==[first['target']] and {first['target'],second['target']}=={2,8}
+    assert second['baseline_artifacts']==first['candidate_artifacts'] and second['origin_artifacts']==first['origin_artifacts']
+    receipt=json.loads(outputs(second)['report'].read_bytes())['restoration']
+    assert [e['target'] for e in receipt['applied']]==[first['target'],second['target']]
+    assert [e['capped']['count'] for e in receipt['applied']]==[6,6]
+    # A separate comparison of the final files agrees with the preview.
+    assert compare_result(scaled,second,baseline=current,origin=origin)['verdict']=='improved'
+    final=outputs(second)
+    third=repair(scaled,tmp_path,baseline=final,origin=origin,out='all-restored')
+    assert third['status']=='no_change' and third['comparison']['verdict']=='non_regressing'
+    assert third['applied_cells']==[first['target'],second['target']] and third['target'] is None
+    assert all(outputs(third)[k].read_bytes()==final[k].read_bytes() for k in final)
+
+
+@pytest.mark.parametrize('tamper,refusal',[
+    ('capped_mask',REBUILT),('capped_digest',REBUILT),('capped_field_removed',REBUILT),
+    ('uncapped_pixel',PIXELS),('deeper_cap',PIXELS),('cap_elsewhere',PIXELS)])
+def test_changed_capped_cell_or_its_receipt_is_error(scaled,tmp_path,capped_baseline,tamper,refusal):
+    origin,first,current=capped_baseline
+    target=first['target']
+    entry=lambda report: report['restoration']['applied'][0]
+    if tamper=='capped_mask': rewrite_receipt(current,lambda r: entry(r)['capped']['rle'].__setitem__(0,entry(r)['capped']['rle'][0]+1))
+    elif tamper=='capped_digest': rewrite_receipt(current,lambda r: entry(r)['capped'].update(sha256='0'*64))
+    elif tamper=='capped_field_removed': rewrite_receipt(current,lambda r: entry(r).pop('capped'))
+    # A capped place given the source's own pixel back, capped a step further, or a cap where none was due.
+    elif tamper=='uncapped_pixel': repaint_cell(current,target,(27,25),(105,114,105,255))
+    elif tamper=='deeper_cap': repaint_cell(current,target,(27,25),(105,112,105,255))
+    else: repaint_cell(current,target,(26,25),(120,113,90,255))
+    with pytest.raises(ValueError,match=refusal):
+        repair(scaled,tmp_path,baseline=current,origin=origin,out='next-request')
+    assert not (tmp_path/'next-request').exists()
 
 
 def test_low_scale_legacy_search_is_bounded():

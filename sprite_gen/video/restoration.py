@@ -2,10 +2,12 @@
 """Restore one damaged delivered cell from its verified source time, without RIFE.
 
 A source pixel is copied only where it does not raise the key guard over the
-origin's pixel; the origin's pixel stays everywhere else, and the cell's whole
-coverage must still be the source's. The origin is the five files the first
-restoration started from: every request rebuilds the current baseline from it
-and the source, so a receipt is recomputed, never trusted.
+origin's pixel. Where it would, and the excess is one step that the resample
+made out of source pixels that have none, the source pixel is written with its
+key hue capped to the bar; anywhere else the origin's pixel stays. The cell's
+whole coverage must still be the source's. The origin is the five files the
+first restoration started from: every request rebuilds the current baseline
+from it and the source, so a receipt is recomputed, never trusted.
 
 Source correspondence, proposal generation and final acceptance are separate.
 A failed independent proposal never hides the next one; a missing shared source
@@ -25,26 +27,31 @@ from PIL import Image
 
 from sprite_gen._deps import np
 from sprite_gen.frames.cutout import KEY_TARGETS
+from sprite_gen.frames.decontam import _cap_key_hue
 from sprite_gen.frames.extract import _key_channel_split, _key_excess_field, _SPILL_FULL_MIN_TINT
 from sprite_gen.spec.runio import atomic_write_text
+from sprite_gen.util import resample
 from sprite_gen.video import evidence, playback, rife, source
 from sprite_gen.video.compare import KIND as COMPARISON_KIND, Loop
 from sprite_gen.video.interpolation_quality import SMEAR_WARN, OUTLINE_WARN, faults
 
-METRIC = "source-restoration-v2"
-POLICY = "key-protected-source-copy-v1"
+METRIC = "source-restoration-v3"
+POLICY = "key-protected-source-copy-one-step-cap-v1"
 SCOPE = "processing-defect-restoration"
 OPERATION = "restore_active_cut"
 KIND = "sprite-gen-video-loop-restoration"
-REPAIR_SCHEMA = 2
-COMPARISON_SCHEMA = 3
+REPAIR_SCHEMA = 3
+COMPARISON_SCHEMA = 4
 MAX_PROPOSALS = 3
 ARTIFACTS = ("strip", "meta", "report", "gif", "webp")
-PROTECTED_LISTED = 256  # protected pixels a report spells out; the mask always holds all of them
+LISTED = 256  # capped or protected pixels a report spells out; the masks always hold all of them
 
 # The guard in whole numbers is the same formula only while the bar is a whole number.
 _BAR = int(_SPILL_FULL_MIN_TINT)
 assert _BAR == _SPILL_FULL_MIN_TINT
+# The only excess that is capped: one step over the bar, the least a whole-number channel can
+# change. It bounds the change; it is not a promise about how any deeper cap would look.
+CAP_DEPTH = 1
 
 
 def read_loop(paths: dict[str, Path]) -> tuple[Loop, dict[str, playback.Playback]]:
@@ -58,15 +65,18 @@ def measure(frames: list[Image.Image], neighbours: list[Image.Image]) -> list[di
     return [rife.smear(f, neighbours[k - 1], neighbours[(k + 1) % len(frames)]) for k, f in enumerate(frames)]
 
 
+def _key_hue(rgba: Any, key: str) -> Any:
+    channels, others = _key_channel_split(KEY_TARGETS[key])
+    return _key_excess_field(rgba[..., :3].astype(np.int64), channels, others)
+
+
 def key_weight(rgba: Any, key: str) -> Any:
     """Alpha times the key hue's excess over the full-spill bar, per pixel, in whole numbers.
 
     255 times the alpha-weighted excess the comparison reports. Includes newly
     restored coverage: returning to a source pixel does not excuse its key spill.
     """
-    channels, others = _key_channel_split(KEY_TARGETS[key])
-    hue = _key_excess_field(rgba[..., :3].astype(np.int64), channels, others)
-    return rgba[..., 3].astype(np.int64) * np.maximum(0, hue - _BAR)
+    return rgba[..., 3].astype(np.int64) * np.maximum(0, _key_hue(rgba, key) - _BAR)
 
 
 def _source_key(src: source.Source) -> str | None:
@@ -76,26 +86,59 @@ def _source_key(src: source.Source) -> str | None:
     return key if key in ("green", "magenta") else None
 
 
+def source_key_weight(cropped: Image.Image, size: tuple[int, int], key: str) -> Any:
+    """The most key weight among the source pixels each cell pixel's colour was mixed from.
+
+    Zero where every visible source pixel under it is at or under the bar: an
+    excess there was made by mixing them, not carried by any of them. The windows
+    are the resample's own (`resample.mix_windows`).
+    """
+    weight = key_weight(np.asarray(cropped, dtype=np.uint8), key)
+    return resample.window_extrema(weight, *resample.mix_windows(cropped.size, size))[1]
+
+
+def made_excess(reference: Image.Image, cropped: Image.Image, key: str) -> Any:
+    """Where the source's cell is exactly `CAP_DEPTH` over the bar and no source pixel under it is over."""
+    s = np.asarray(reference, dtype=np.uint8)
+    return ((s[..., 3] > 0) & (_key_hue(s, key) == _BAR + CAP_DEPTH)
+            & (source_key_weight(cropped, reference.size, key) == 0))
+
+
+def _capped(rgba: Any, key: str) -> Any:
+    """The engine's key-hue cap to the bar on whole pixels: the keyed channels come down, nothing else moves."""
+    channels, others = _key_channel_split(KEY_TARGETS[key])
+    out = rgba.copy()
+    out[..., :3] = _cap_key_hue(rgba[..., :3], channels, others, _BAR).astype(np.uint8)
+    return out
+
+
 @dataclass
 class Partial:
-    frame: Image.Image  # the source where it is copied, the origin where it is protected
+    frame: Image.Image  # per place: the source's pixel, the source's with its key hue capped, or the origin's
     copied: Any
+    capped: Any
     protected: Any
     alpha_conflict: bool  # a protected pixel whose coverage is not the source's
 
 
-def partial(origin: Image.Image, reference: Image.Image, key: str) -> Partial:
+def partial(origin: Image.Image, reference: Image.Image, cropped: Image.Image, key: str) -> Partial:
     """Where the two differ, the source's pixel unless it would raise the key guard there.
 
-    Every pixel is the origin's or the source's whole RGBA at the same place: no
-    colour is mixed, moved or made, and a hidden colour never gains coverage.
+    A place where it would is capped only when its excess is a made one of one
+    step (`made_excess`): the source's pixel with the keyed channels one lower,
+    its coverage unchanged. Any other such place keeps the origin's whole RGBA.
+    No colour is moved or taken from another place, and a hidden colour never
+    gains coverage.
     """
     b, s = (np.asarray(f, dtype=np.uint8) for f in (origin, reference))
     differs = (b != s).any(axis=-1)
-    protected = differs & (key_weight(s, key) > key_weight(b, key))
-    copied = differs & ~protected
-    frame = Image.fromarray(np.where(copied[..., None], s, b))
-    return Partial(frame, copied, protected, bool((b[..., 3] != s[..., 3])[protected].any()))
+    raised = differs & (key_weight(s, key) > key_weight(b, key))
+    capped = raised & made_excess(reference, cropped, key)
+    protected = raised & ~capped
+    copied = differs & ~raised
+    out = np.where(copied[..., None], s, b)
+    out[capped] = _capped(s[capped], key)
+    return Partial(Image.fromarray(out), copied, capped, protected, bool((b[..., 3] != s[..., 3])[protected].any()))
 
 
 def _mask(mask: Any) -> dict[str, Any]:
@@ -108,21 +151,28 @@ def _mask(mask: Any) -> dict[str, Any]:
             "sha256": evidence.digest(f"{w}x{h}:".encode() + np.packbits(flat).tobytes())}
 
 
-def _protected_pixels(part: Partial, origin: Image.Image, reference: Image.Image, key: str) -> dict[str, Any]:
-    b, s = (np.asarray(f, dtype=np.uint8) for f in (origin, reference))
-    kb, ks = key_weight(b, key), key_weight(s, key)
-    places = np.argwhere(part.protected)
-    return {"count": len(places), "alpha_conflicts": int((b[..., 3] != s[..., 3])[part.protected].sum()),
-            "listed": min(len(places), PROTECTED_LISTED),
-            "pixels": [{"x": int(x), "y": int(y), "origin_rgba": b[y, x].tolist(), "source_rgba": s[y, x].tolist(),
-                        "origin_key_weight": int(kb[y, x]), "source_key_weight": int(ks[y, x]),
-                        "alpha_equal": bool(b[y, x, 3] == s[y, x, 3])} for y, x in places[:PROTECTED_LISTED]]}
-
-
-def _describe(part: Partial, origin: Image.Image, reference: Image.Image, key: str) -> dict[str, Any]:
-    return {"copied": _mask(part.copied), "protected": _mask(part.protected),
+def _describe(part: Partial, origin: Image.Image, reference: Image.Image, cropped: Image.Image,
+              key: str) -> dict[str, Any]:
+    """The three masks, and the capped and the protected pixels spelled out with what decided each."""
+    b, s, f = (np.asarray(im, dtype=np.uint8) for im in (origin, reference, part.frame))
+    kb, ks, hue = key_weight(b, key), key_weight(s, key), _key_hue(s, key)
+    under = source_key_weight(cropped, reference.size, key)
+    (top, bottom), (left, right) = resample.mix_windows(cropped.size, reference.size)
+    capped, protected = np.argwhere(part.capped), np.argwhere(part.protected)
+    return {"copied": _mask(part.copied), "capped": _mask(part.capped), "protected": _mask(part.protected),
             "alpha_equals_source": not part.alpha_conflict,
-            "protected_pixels": _protected_pixels(part, origin, reference, key)}
+            "capped_pixels": {"count": len(capped), "listed": min(len(capped), LISTED), "pixels": [
+                {"x": int(x), "y": int(y), "origin_rgba": b[y, x].tolist(), "source_rgba": s[y, x].tolist(),
+                 "output_rgba": f[y, x].tolist(),
+                 "source_window": [int(left[x]), int(top[y]), int(right[x]), int(bottom[y])]}
+                for y, x in capped[:LISTED]]},
+            "protected_pixels": {"count": len(protected),
+                                 "alpha_conflicts": int((b[..., 3] != s[..., 3])[part.protected].sum()),
+                                 "listed": min(len(protected), LISTED), "pixels": [
+                {"x": int(x), "y": int(y), "origin_rgba": b[y, x].tolist(), "source_rgba": s[y, x].tolist(),
+                 "origin_key_weight": int(kb[y, x]), "source_key_weight": int(ks[y, x]),
+                 "source_key_excess": int(hue[y, x]), "source_window_key_weight": int(under[y, x]),
+                 "alpha_equal": bool(b[y, x, 3] == s[y, x, 3])} for y, x in protected[:LISTED]]}}
 
 
 def proposals(frames: list[Image.Image], projection: source.Projection, shown: list[int],
@@ -149,7 +199,8 @@ def proposal_id(current: dict[str, Any], origin: dict[str, Any], src: source.Sou
                 "source": {"artifacts": src.artifacts, "sequence": src.record["source"]},
                 "projection": _portable(projection.record), "operation": OPERATION, "metric": METRIC,
                 "policy": POLICY, "target": target,
-                "mask": {k: _mask(m)["sha256"] for k, m in (("copied", part.copied), ("protected", part.protected))}}
+                "mask": {k: _mask(m)["sha256"] for k, m in (("copied", part.copied), ("capped", part.capped),
+                                                            ("protected", part.protected))}}
     return evidence.digest(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode())
 
 
@@ -160,7 +211,7 @@ def _entry(target: int, part: Partial, origin: Loop, current: dict[str, Any], be
             "proposal_id": proposal_id(current, origin.artifacts, src, projection, target, part),
             "baseline_artifacts": current,
             "baseline_pixels_sha256": evidence.digest(b"".join(f.tobytes() for f in before)),
-            "copied": _mask(part.copied), "protected": _mask(part.protected),
+            "copied": _mask(part.copied), "capped": _mask(part.capped), "protected": _mask(part.protected),
             "origin_rgba_sha256": evidence.digest(origin.frames[target].tobytes()),
             "source_rgba_sha256": evidence.digest(projection.frames[target].tobytes()),
             "output_rgba_sha256": evidence.digest(part.frame.tobytes()),
@@ -272,7 +323,7 @@ def chain(origin: Loop, current: Loop, src: source.Source) -> tuple[Chain | None
         previous = entry.get("baseline_artifacts")
         if not isinstance(previous, dict) or (step == 0 and previous != origin.artifacts):
             raise ValueError("an applied restoration names another baseline than its prefix")
-        part = partial(origin.frames[target], projection.frames[target], key)
+        part = partial(origin.frames[target], projection.frames[target], projection.cropped[target], key)
         after = [part.frame if k == target else f for k, f in enumerate(frames)]
         if (part.alpha_conflict or _portable(entry) != _portable(_entry(target, part, origin, previous, frames, src, projection))
                 or judge(frames, after, projection.frames, key)["verdict"] != "improved"):
@@ -294,7 +345,9 @@ def _base(origin: Loop, baseline: Loop, candidate: Loop, src: source.Source) -> 
             "source": {"artifacts": src.artifacts, "sequence": src.record["source"]},
             "axes": {}, "gait": {"absolute": "unverified", "source_order": "unverified"},
             "limits": ["same-time processing damage only; no absolute gait or drawing-quality certification",
-                       "a restored cell is the source's pixel or the origin's at each place, never the whole source drawing",
+                       "a restored cell is, at each place, the source's pixel, the source's pixel with its key hue "
+                       "capped one step to the bar, or the origin's; never the whole source drawing",
+                       "one step is the least a channel can change: a bound on the cap, not a verdict on how it looks",
                        "source and origin receipts bind supplied bytes; they are not signatures of the original producer"]}
 
 
@@ -345,12 +398,12 @@ def compare(origin: Loop, baseline: Loop, candidate: Loop, src: source.Source, *
         if len(changed) != 1 or changed[0] not in state.targets(baseline.frames):
             return finish("unknown", ["changed-cells-outside-verified-proposal"])
         target = changed[0]
-        part = partial(origin.frames[target], ref[target], state.key)
+        part = partial(origin.frames[target], ref[target], projection.cropped[target], state.key)
         entry = _entry(target, part, origin, baseline.artifacts, baseline.frames, src, projection)
         if repair_evidence.get("proposal_id") != entry["proposal_id"] or repair_evidence.get("target") != target:
             raise ValueError("repair proposal identity differs from actual changed cells")
-        result["restoration"] = {"target": target, "proposal_id": entry["proposal_id"],
-                                 **_describe(part, origin.frames[target], ref[target], state.key)}
+        result["restoration"] = {"target": target, "proposal_id": entry["proposal_id"], **_describe(
+            part, origin.frames[target], ref[target], projection.cropped[target], state.key)}
         if part.alpha_conflict:
             return finish("unknown", ["protected-pixel-alpha-conflict"])
         if candidate.frames[target].tobytes() != part.frame.tobytes():
@@ -433,11 +486,11 @@ def restore(paths: dict[str, Path], origin_paths: dict[str, Path], src: source.S
     result.update(target=target, proposal_id=None, common_failure=False, reasons=[], status="no_change")
     frame = receipt = None
     if target is not None:
-        part = partial(origin.frames[target], projection.frames[target], state.key)
+        part = partial(origin.frames[target], projection.frames[target], projection.cropped[target], state.key)
         entry = _entry(target, part, origin, baseline.artifacts, baseline.frames, src, projection)
-        result.update(proposal_id=entry["proposal_id"], status="candidate",
-                      partial=_describe(part, origin.frames[target], projection.frames[target], state.key))
-        if part.alpha_conflict or not part.copied.any():
+        result.update(proposal_id=entry["proposal_id"], status="candidate", partial=_describe(
+            part, origin.frames[target], projection.frames[target], projection.cropped[target], state.key))
+        if part.alpha_conflict or not (part.copied | part.capped).any():
             return {**result, "status": "unknown", "reasons": [
                 "protected-pixel-alpha-conflict" if part.alpha_conflict else "no-unprotected-source-pixel"]}
         frame, receipt = part.frame, _receipt(origin, src, projection, [*state.applied, entry])

@@ -117,46 +117,76 @@ quality bounds, and [video pipeline](video-pipeline.md) for processing stages.
 `video-loop-repair` proposes a separate output for one damaged interior cell.
 It preserves the cut, metadata, normal cells, boundary cells, and actual GIF/WebP
 schedule. No interpolation is called. This operation has its own contract:
-repair report `schema_version: 2`, comparison `schema_version: 3`,
-`metric_version: source-restoration-v2`, `policy_version:
-key-protected-source-copy-v1`, `scope: processing-defect-restoration`,
-`operation: restore_active_cut`. The v1 comparison above is unchanged.
-`source-restoration-v1`, an unreleased draft that copied the whole source cell,
-is not this contract: its evidence and receipts are refused, never read as v2.
+repair report `schema_version: 3`, comparison `schema_version: 4`,
+`metric_version: source-restoration-v3`, `policy_version:
+key-protected-source-copy-one-step-cap-v1`, `scope:
+processing-defect-restoration`, `operation: restore_active_cut`. The v1
+comparison above is unchanged. Two unreleased drafts are not this contract:
+`source-restoration-v1` copied the whole source cell and `source-restoration-v2`
+never capped a pixel. Their evidence and receipts are refused, never read as v3.
 
 ### What a restored cell is
 
 In the target cell, a pixel that differs from the source at the same place and
 the same source time becomes the source's pixel, **unless the source's pixel
-would raise the key-colour guard there**. At those places the delivered pixel
-stays. Every pixel of the output is the whole RGBA of one of the two at that
-place: nothing is blended, moved, borrowed from another frame or recoloured,
-and a colour hidden under zero coverage never gains coverage.
+would raise the key-colour guard there**. Such a place is one of two kinds.
+
+- **A made excess of one step.** A cell is a resample of its source frame, and
+  mixing two colours that are both under the bar can give a colour over it
+  ([video pipeline](video-pipeline.md), "Cells"). Where the source's cell is
+  exactly one step over the bar and no visible source pixel its colour was mixed
+  from is over it, the source's pixel is written with the keyed channels one
+  step lower (green: `G - 1`; magenta: `R - 1` and `B - 1`). Its coverage and
+  its other channel are the source's.
+- **Anything else** keeps the delivered pixel: an excess a source pixel under
+  that place already carries (the subject's own key-coloured material, or spill
+  the keying left), and a made excess deeper than one step.
+
+Every other pixel of the output is the whole RGBA of the origin's or the
+source's at that place: nothing is blended, moved or borrowed from another
+frame, and a colour hidden under zero coverage never gains coverage.
 
 ```text
 K(p)       = alpha(p) x max(0, key hue excess(p) - 8)        whole numbers
+window(p)  = the source pixels the resample mixed the cell's colour at p from
 differing  = places where the origin's cell and the source's differ in RGBA
-protected  = differing places where K(source) > K(origin)
-copied     = differing places that are not protected
-output(p)  = source(p) where copied, origin(p) everywhere else
+raised     = differing places where K(source) > K(origin)
+capped     = raised places where key hue excess(source) = 9
+             and K(q) = 0 for every q in window(p)
+protected  = raised places that are not capped
+copied     = differing places that are not raised
+output(p)  = source(p) where copied,
+             source(p) with the keyed channels one lower where capped,
+             origin(p) everywhere else
 ```
 
 `K` is 255 times the alpha-weighted excess of `axes.key_colour`, with the same
 full-spill bar and the same hue test (green: `G - max(R, B)`; magenta:
-`min(R, B) - G`), so yellow, cyan, red and blue are not the key's hue. The mask
-is made by the engine from the actual files and has no manual input: no
-dilation, blur, key cleanup or tuning. When nothing is protected the output is
-the whole source cell.
+`min(R, B) - G`), so yellow, cyan, red and blue are not the key's hue. The
+window is the resampler's own (`sprite_gen/util/resample.py`, `mix_windows`),
+read on the cleaned, ramped and cropped source frame the cell was resampled
+from. A cell at its frame's size is a copy, so nothing in it is a made excess.
+The masks are made by the engine from the actual files and have no manual
+input: no dilation, blur, key cleanup or tuning. When nothing is raised the
+output is the whole source cell.
 
-**The output's coverage must be the source's at every pixel.** Where a protected
-place has another alpha in the origin than in the source, keeping the delivered
-pixel would keep a silhouette the source does not have, so that proposal ends
-with `status: unknown`, `common_failure: false`, reason
-`protected-pixel-alpha-conflict` and empty `outputs`. Nothing is written. It
-used that proposal's attempt; the next independent proposal may be tried. A
-target whose every differing place is protected ends the same way with
-`no-unprotected-source-pixel`. No protected pixel is given up to make a
-candidate pass, however few they are.
+One step is the least a whole-number channel can change. It bounds what the cap
+does to a pixel; it does not say that a deeper cap would look right, and none is
+applied. A bright seam, such as yellow meeting cyan under a green key or red
+meeting blue under a magenta one, mixes far over the bar and is a real colour
+of the picture: capping it would draw a darker line than either side. The
+general resample is not changed and caps nothing; only this operation, which
+knows the key and both pictures, does.
+
+**The output's coverage must be the source's at every pixel.** A capped pixel
+has the source's alpha. Where a protected place has another alpha in the origin
+than in the source, keeping the delivered pixel would keep a silhouette the
+source does not have, so that proposal ends with `status: unknown`,
+`common_failure: false`, reason `protected-pixel-alpha-conflict` and empty
+`outputs`. Nothing is written. It used that proposal's attempt; the next
+independent proposal may be tried. A target with no copied and no capped place
+ends the same way with `no-unprotected-source-pixel`. No protected pixel is
+given up to make a candidate pass, however few they are.
 
 ### The origin
 
@@ -215,7 +245,7 @@ source-relative damage. `--proposal-index` is one-based, limited to 1–3. A cel
 already restored, a strip or playback boundary cell and a cell that is not
 played are never proposed. The stable `proposal_id` binds the baseline's five
 digests, the origin's five digests, the source inputs and sequence, the
-projection, the policy version, the target and the digests of its two masks.
+projection, the policy version, the target and the digests of its three masks.
 Repeating the same index is the same proposal, not a retry strategy. The
 application owns its deadline, attempted IDs and adoption transaction.
 
@@ -229,9 +259,10 @@ application owns its deadline, attempted IDs and adoption transaction.
 | `applied_cells` | Cells earlier requests restored, in order, as rebuilt from the origin |
 | `origin_artifacts`, `baseline_artifacts`, `candidate_artifacts` | Exact five-file byte receipts (`sha256`, `bytes` per file) |
 | `source_artifacts`, `projection` | Source inputs, fixed transform, sample PTS and exact correspondence |
-| `partial.copied`, `partial.protected` | The two masks of the target: `size`, `count`, row-major run lengths `rle` (the first run is clear) and `sha256` of the packed bits |
+| `partial.copied`, `partial.capped`, `partial.protected` | The three masks of the target: `size`, `count`, row-major run lengths `rle` (the first run is clear) and `sha256` of the packed bits |
 | `partial.alpha_equals_source` | Whether the output's coverage is the source's; `false` only with `protected-pixel-alpha-conflict` |
-| `partial.protected_pixels` | `count`, `alpha_conflicts`, and for the first 256 in row order (`listed`) `x`, `y`, `origin_rgba`, `source_rgba`, `origin_key_weight`, `source_key_weight`, `alpha_equal` |
+| `partial.capped_pixels` | `count`, and for the first 256 in row order (`listed`) `x`, `y`, `origin_rgba`, `source_rgba`, `output_rgba`, and `source_window` (`[left, top, right, bottom]`, inclusive, in the cropped source frame) |
+| `partial.protected_pixels` | `count`, `alpha_conflicts`, and for the first 256 in row order (`listed`) `x`, `y`, `origin_rgba`, `source_rgba`, `origin_key_weight`, `source_key_weight`, `source_key_excess`, `source_window_key_weight` (the most `K` in its window), `alpha_equal`. A place is protected, not capped, when `source_key_excess` is not 9 or `source_window_key_weight` is not 0 |
 | `comparison` | Initial measurement of written files; compare again after finalization |
 | `interpolation_calls` | Always zero in this operation |
 
@@ -268,7 +299,7 @@ comparison reports, not in the loop report, which cannot hold its own digest.
 | `projection` | Recipe, crop, cell, scale, wrap, samples, PTS, reference pixel hashes |
 | `applied` | One entry per restored cell, in the order they were adopted; a cell appears once |
 | `applied[].target`, `source_index` | The cell and its source frame |
-| `applied[].copied`, `protected` | The two masks, as in the repair report |
+| `applied[].copied`, `capped`, `protected` | The three masks, as in the repair report |
 | `applied[].origin_rgba_sha256`, `source_rgba_sha256`, `output_rgba_sha256` | The cell in the origin, in the source projection and as restored |
 | `applied[].alpha_equals_source` | Always `true` for an applied cell |
 | `applied[].proposal_id`, `baseline_artifacts`, `baseline_pixels_sha256` | The proposal, the five files it was proposed on and their decoded cells |
@@ -279,11 +310,12 @@ the baseline, proves the projection on **the origin's** normal cells, then
 makes each applied cell again from the origin and the source in the recorded
 order. Each must have been a proposal of the loop as it stood before it, must
 give the recorded masks and digests, and must pass the protections on that
-loop. The cells read from the baseline must then equal the rebuilt ones: an
-applied cell its partial copy, every other cell the origin's. The rebuilt
-pixels are an expectation to compare with; they never replace the baseline's
-files. A restored cell therefore stays verified although it is no longer the
-source's whole cell.
+loop. Which places are capped is decided again from the source frames and the
+resampler's windows, never read from the receipt. The cells read from the
+baseline must then equal the rebuilt ones: an applied cell its partial copy,
+every other cell the origin's. The rebuilt pixels are an expectation to compare
+with; they never replace the baseline's files. A restored cell therefore stays
+verified although it is no longer the source's whole cell.
 
 These are errors, with nonzero exit: an origin that already carries a receipt;
 a baseline that differs from the origin without a receipt; a receipt naming
@@ -337,8 +369,9 @@ The report carries `origin`, `baseline` and `candidate` (each with its five
 `improved` requires that the one changed cell is byte-exact the partial copy
 made from the origin and the source, its coverage the source's, the candidate's
 receipt the recomputed one, at least one cleared actual fault, unchanged normal
-cells and metadata bytes, and no worsening protected axis. Changed pixels
-outside the copied mask return `regressed` with
+cells and metadata bytes, and no worsening protected axis. A changed cell that
+is not that copy (a pixel outside the masks, a capped place left uncapped or
+capped further) returns `regressed` with
 `changed-cell-is-not-the-verified-source-copy`; a receipt that differs returns
 `unknown` with `candidate-report-differs-from-verified-receipt`; changed
 metadata bytes `candidate-metadata-bytes-changed`; equal pixels with any other
@@ -352,20 +385,25 @@ Boundary pixels and actual playback intervals stay identical. GIF quantization
 and WebP decoding are checked against the strip export mapping, with their
 actual integer delays recorded separately from fractional strip timing.
 
-Key-colour protection is read again from the final strip, whatever the mask
+Key-colour protection is read again from the final strip, whatever the masks
 promised. `axes.key_colour.introduced_excess` sums only the positive per-pixel
 increases of the alpha-weighted excess on the fixed canvas, per cell, and
 `introduced_pixels` counts the pixels that increased. The sum is not a pixel
 count. A reduction elsewhere cannot offset newly introduced spill, even when
-the cell's total tint decreases.
+the cell's total tint decreases. The bar, the per-pixel rule and the coverage
+rule are the same for a capped cell: the cap is what lets the source's pixel
+meet them, not an exception to them. A normal cell that already carries a made
+excess is not a target and is never rewritten; `axes.key_colour.baseline`
+reports it as delivered.
 
 For an outline-specific UI success message, require `verdict == improved` and
 an `outline` entry in `cleared_faults[].faults`. `axes` contains raw baseline,
 reference and candidate values for outline/smear, source-relative partial
 coverage and key colour. `gait.source_order == preserved` proves source motion
-order only; `gait.absolute == unverified` remains explicit. A restored cell is
-the source's pixel or the delivered one at each place; these measurements do
-not claim the source's whole drawing, nor to repair mistakes already in it.
+order only; `gait.absolute == unverified` remains explicit. A restored cell is,
+at each place, the source's pixel, the source's pixel capped one step, or the
+delivered one; these measurements do not claim the source's whole drawing, nor
+to repair mistakes already in it.
 
 A candidate-specific unknown or regression may be followed by the next unused
 proposal within budget. Shared unknown stops the request. Upload and activate

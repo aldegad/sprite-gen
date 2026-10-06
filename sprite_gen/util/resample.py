@@ -15,7 +15,11 @@ from PIL import Image
 from sprite_gen._deps import np
 
 
-def _support_bounds(n_src: int, n_out: int, support: float) -> tuple[np.ndarray, np.ndarray]:
+# How far `resize_cell`'s colour filter (Hamming) reaches, in source pixels at 1:1.
+MIX_SUPPORT = 1.0
+
+
+def support_bounds(n_src: int, n_out: int, support: float) -> tuple[np.ndarray, np.ndarray]:
     """First and last source index Pillow's resample reads for each output index, for a filter
     of `support` source pixels (`precompute_coeffs` in Pillow's Resample.c: the support widens
     by the scale when shrinking)."""
@@ -27,7 +31,15 @@ def _support_bounds(n_src: int, n_out: int, support: float) -> tuple[np.ndarray,
     return lo, np.maximum(lo, hi)
 
 
-def _window_extrema(a: np.ndarray, rows: tuple[np.ndarray, np.ndarray], cols: tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+def mix_windows(src_size: tuple[int, int], size: tuple[int, int]) -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
+    """The source pixels `resize_cell` mixes each output pixel's colour from: the first and last
+    source row for each output row, then the same for the columns. `resize_cell` holds its
+    coverage to these windows; a caller that has to know what a cell's pixel was made of reads
+    the same ones (a cell at its own size is a copy: its window still holds its own pixel)."""
+    return support_bounds(src_size[1], size[1], MIX_SUPPORT), support_bounds(src_size[0], size[0], MIX_SUPPORT)
+
+
+def window_extrema(a: np.ndarray, rows: tuple[np.ndarray, np.ndarray], cols: tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     """Min and max of `a` over each output pixel's source window (separable, rows then columns)."""
     def along(v: np.ndarray, lo: np.ndarray, hi: np.ndarray, axis: int) -> tuple[np.ndarray, np.ndarray]:
         low = high = np.take(v, lo, axis=axis)
@@ -50,7 +62,11 @@ def resize_cell(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     LANCZOS's crisp edge, held to the range of the source coverage the colour mixes from (no
     halo outside the silhouette, no hole inside it). Colour is a Hamming mix of premultiplied
     colour, a filter with no negative lobe: every pixel's colour is a weighted mix of the
-    colours under it and never one they did not have. docs/video-pipeline.md "Cells"."""
+    colours under it and never one they did not have. Each channel therefore stays within the
+    colours under it. The key hue's excess (G - max(R, B) for green) does not: a colour led by
+    red mixed with one led by blue is led by neither as far, so the mix can carry more excess
+    than both. The cell is left as mixed; nothing here knows the key. docs/video-pipeline.md
+    "Cells"."""
     if image.size == tuple(size):
         return image.copy()
     w, h = size
@@ -62,7 +78,7 @@ def resize_cell(image: Image.Image, size: tuple[int, int]) -> Image.Image:
 
     mix_alpha = scaled(alpha, Image.Resampling.HAMMING)
     mix = np.stack([scaled(src[..., c] * alpha, Image.Resampling.HAMMING) for c in range(3)], axis=-1)
-    low, high = _window_extrema(alpha, _support_bounds(image.height, h, 1.0), _support_bounds(image.width, w, 1.0))
+    low, high = window_extrema(alpha, *mix_windows(image.size, size))
     cover = np.clip(scaled(alpha, Image.Resampling.LANCZOS), low, high)
     cover = np.where(mix_alpha > 1e-3, np.round(cover), 0)
     colour = np.where((cover > 0)[..., None], np.round(mix / np.maximum(mix_alpha, 1e-3)[..., None]), 0)
