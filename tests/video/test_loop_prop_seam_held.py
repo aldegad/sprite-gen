@@ -118,10 +118,11 @@ def test_motion_auto_takes_two_steps_where_the_held_staff_closes_only_there(held
 
 
 def test_a_held_part_that_swings_with_the_step_is_cut_one_step_long(tmp_path):
-    """A pennant at the tip sways on a beat of its own (61 frames) and pops at the first choice; the
+    """A pennant at the tip sways on a beat of its own (53 frames) and pops at the first choice; the
     staff stands straight above the hand and swings with the step below it, so a one-step cut whose
-    top closes closes below the hand too and is taken."""
-    report = _cut(tmp_path, _keyed(tmp_path, tip_amp=0, foot_swing=STEP, flag=(61, 3.0)))
+    top closes closes below the hand too and is taken. The first choice's pop is 12.6 and no other
+    candidate's reaches 8.5; the cut taken closes below the hand at 0.0 (over 1.2 does not)."""
+    report = _cut(tmp_path, _keyed(tmp_path, tip_amp=0, foot_swing=STEP, flag=(53, 0.75)))
     cycle = report["cycle"]
     shape = cycle["seam_pop"]
     assert shape["first_choice"]["pop"] > repair.SEAM_POP_REFERENCE and shape["applied"] is True
