@@ -28,6 +28,7 @@ MODULE_DOMAIN = {
     'batch': 'video',
     'align': 'video',
     'follow': 'video',
+    'compare': 'video',
     'rife_install': 'video',
     'clip_prompt': 'video',
     'prepare': 'gen',
