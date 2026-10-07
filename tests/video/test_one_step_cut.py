@@ -105,8 +105,11 @@ def _same_but_the_screen(a: Path, b: Path) -> None:
     assert frames == sorted(p.name for p in (b / "cycle").glob("*.png"))
     assert all((a / "cycle" / f).read_bytes() == (b / "cycle" / f).read_bytes() for f in frames)
     left, right = (json.loads((d / "loop.loop.report.json").read_text().replace(str(d), "@")) for d in (a, b))
-    left["cycle"].pop("step_screen")
-    right["cycle"].pop("step_screen")
+    for report in (left, right):
+        # The gait observation keeps a copy of the screen's record (sprite_gen/video/evidence.py): each
+        # report's copy is its own record, and nothing else of the gait is set aside with it.
+        screens = report["gait"]["screens"]
+        assert "step_screen" in screens and screens.pop("step_screen") == report["cycle"].pop("step_screen")
     assert left == right
 
 
@@ -114,7 +117,8 @@ def _same_but_the_screen(a: Path, b: Path) -> None:
 def test_the_step_screen_changes_nothing_but_its_own_record(tmp_path, monkeypatch, cycle, suspect):
     """A one-step cut, a cycle on a frame count that is not whole (23.5 frames: twice it repeats
     better, being whole there — a suspect that is no step) and a whole cycle of 25: with the screen
-    or without it, every image, the strip metadata and the report are the same but for its record."""
+    or without it, every image, the strip metadata and the report are the same but for its record, and
+    the gait observation's copy of it."""
     keyed = _keyed(tmp_path, cycle)
     report = _cut(tmp_path / "screened", keyed)
     assert report["cycle"]["step_screen"]["suspect"] is suspect

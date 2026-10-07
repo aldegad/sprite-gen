@@ -20,11 +20,12 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen._deps import np
-from sprite_gen.video.rife import Interpolate
+from sprite_gen.video.rife import Interpolate, smear
+from sprite_gen.video.interpolation_quality import faults
 
 # A step this many times the loop's median step (whole body, or the hair behind it) is a jump.
 JUMP_RATIO = 1.4
-# Frames replaced at most per loop. A loop that needs more is jolting everywhere, not jumping
+# Interpolation calls at most per loop, including rejected proposals. A loop that needs more is jolting everywhere, not jumping
 # once, and a few made frames do not fix it (the jolt index, section 3, says so instead).
 MAX_REPAIRS = 3
 # The hair behind a right-facing body, below the head, as fractions of the union box: where a
@@ -78,8 +79,10 @@ def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, 
                  ratio: float = JUMP_RATIO, max_frames: int = MAX_REPAIRS) -> tuple[list[Image.Image], dict[str, Any]]:
     """Replace the frame that breaks each jump with RIFE's frame between its neighbours, worst jump first.
 
-    At most `max_frames`, and never next to a frame already made: two made frames side by side
-    are made from each other and melt the legs. `interpolate` may be None while no jump is
+    At most `max_frames` calls, and never next to a frame already made: two made frames side by side
+    are made from each other and melt the legs. A proposal with a shared interpolation-quality
+    fault keeps the original middle frame. Blocked and rejected targets do not end the search
+    for independent targets. `interpolate` may be None while no jump is
     found; it is asked for only when a frame is to be made (a ValueError says so otherwise).
     Scores are re-read after each replacement, on the union box of the original loop."""
     out = list(frames)
@@ -89,37 +92,62 @@ def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, 
     record: dict[str, Any] = {
         "ratio": ratio, "max_frames": max_frames, "facing": facing, "hair_box": list(hair_box(facing)),
         "score_max_before": round(float(first["score"].max()), 4), "replaced": [], "rounds": [],
+        "blocked": [], "attempts": 0,
     }
     if n < 4:
         record.update(stopped="loop shorter than 4 frames", score_max_after=record["score_max_before"])
         return out, record
     replaced: list[int] = []
-    stopped = f"{max_frames} frames replaced"
+    attempted: set[int] = set()
+    blocked: set[int] = set()
+    stopped = f"{max_frames} interpolation calls used"
     scores = first
     for _ in range(max_frames):
-        k = int(np.argmax(scores["score"]))
-        score = float(scores["score"][k])
-        if score < ratio:
-            stopped = f"no step at or above {ratio}x the median"
+        selected = None
+        for k0 in np.argsort(-scores["score"], kind="stable"):
+            k = int(k0)
+            score = float(scores["score"][k])
+            if score < ratio:
+                break
+            # Two jumps around a stray frame point back to that frame; a single cut points
+            # to the frame after the step. This is the existing target rule, worst first.
+            before, after = float(scores["score"][(k - 1) % n]), float(scores["score"][(k + 1) % n])
+            j = k if before >= ratio and before > after else (k + 1) % n
+            if j in replaced or (j - 1) % n in replaced or (j + 1) % n in replaced:
+                if j not in blocked:
+                    record["blocked"].append({"target": j, "reason": "already-made-or-adjacent"})
+                    blocked.add(j)
+                continue
+            if j in attempted:
+                continue
+            selected = (k, j, score)
             break
-        # A jump is a step; the frame to remake is the one that broke it. A cut (the ponytail
-        # lands somewhere new and stays) breaks only step k, and the frame after it is remade
-        # half way. A single stray frame breaks the step into it and the step out of it: when
-        # the step before k is also a jump and larger than the step after k+1, frame k is the
-        # stray one, and remaking the frame after it would leave it standing.
-        before, after = float(scores["score"][(k - 1) % n]), float(scores["score"][(k + 1) % n])
-        j = k if before >= ratio and before > after else (k + 1) % n
-        if j in replaced or (j - 1) % n in replaced or (j + 1) % n in replaced:
-            stopped = f"the worst jump (frame {j}) sits next to a frame already made"
+        if selected is None:
+            stopped = (f"no step at or above {ratio}x the median" if float(scores["score"].max()) < ratio
+                       else "no independent unattempted target; remaining targets rejected or next to a frame already made")
             break
+        k, j, score = selected
         if interpolate is None:
             raise ValueError(f"frame {j} follows a jump ({score:.2f}x the median step) and no interpolator is available")
-        out[j] = interpolate(out[(j - 1) % n], out[(j + 1) % n], 0.5)
-        replaced.append(j)
-        record["rounds"].append({"step": [k, (k + 1) % n], "score": round(score, 4), "whole": round(float(scores["whole"][k]), 4),
-                                 "hair": round(float(scores["hair"][k]), 4), "replaced": j})
-        scores = jump_scores(out, facing=facing, box=box)
+        a, b = out[(j - 1) % n], out[(j + 1) % n]
+        made = interpolate(a, b, 0.5)
+        if made.mode != "RGBA" or made.size != out[j].size:
+            raise ValueError("repair interpolator must return an RGBA frame of the original size")
+        attempted.add(j)
+        measure = smear(made, a, b)
+        wrong = faults(measure)
+        if not made.getchannel("A").getbbox():
+            wrong.append("empty")
+        record["rounds"].append({"step": [k, (k + 1) % n], "target": j, "score": round(score, 4),
+                                 "whole": round(float(scores["whole"][k]), 4), "hair": round(float(scores["hair"][k]), 4),
+                                 "original": smear(out[j], a, b), "proposal": measure, "faults": wrong,
+                                 "outcome": "rejected" if wrong else "accepted", **({"replaced": j} if not wrong else {})})
+        if not wrong:
+            out[j] = made
+            replaced.append(j)
+            scores = jump_scores(out, facing=facing, box=box)
     record["replaced"] = replaced
+    record["attempts"] = len(attempted)
     record["stopped"] = stopped
     record["score_max_after"] = round(float(scores["score"].max()), 4)
     return out, record

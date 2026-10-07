@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 2.38.0
+version: 2.39.0
 description: "Generates images and game sprites through GPT or Grok with guided provider choices, separate saved defaults, automatic cleanup and optional curation. Handles sprite requests, ordinary image generation/editing, standalone image-to-video clips (i2v, animate this still, 그록 영상, 이매진 비디오, 스틸 움직여줘, first/last frame, reference-to-video, 영상 이어붙이기, 영상 편집, extend/edit a clip), clips from a video MCP on the agent (ZCRE, 지크 MCP), chroma removal, animation atlases, video loops, 큐레이션뷰, image candidates, 팔레트 스왑, palette swap, recolor, rig layers, engine exports, repeating backgrounds, projected shadows, motion/contact inspection and optional scene composition from existing assets."
 license: Apache-2.0
 depends_on:
@@ -102,6 +102,9 @@ hold the arms still, and check the loop with `handed-check --state walk`.
 | Continue or edit an existing clip | `video-extend`, `video-edit` | [video](docs/video.md) |
 | Grok video sprites | `video-set` | [video-pipeline](docs/video-pipeline.md) |
 | A soft part of a walk loop follows the body (a chest, a belly): an ellipse in the first cell, after `video-cycle-align` | `video-follow` | [video-pipeline](docs/video-pipeline.md#6-follow-through--video-follow) |
+| Where that ellipse is carried in every other cell, and what the move changes there (an arm crossing a chest moves with it): a record and boards of every cell, nothing moved | `video-follow-inspect` | [video-pipeline](docs/video-pipeline.md#inspecting-a-follow-through--video-follow-inspect) |
+| Compare the currently displayed loop with a final candidate, including after follow-through | `video-loop-compare` | [loop-comparison](docs/loop-comparison.md) |
+| Restore post-processing damage in the current cut from its exact source times, preserving normal cells and playback | `video-source-manifest` → `video-loop-repair` → `video-loop-compare` | [source restoration](docs/loop-comparison.md#restoring-the-active-cut-from-source) |
 | Video sprites from a clip your agent makes with a connected video MCP (ZCRE, 지크) | `video-canvas`, `video-prompt --no-last-frame`, the agent's own MCP tools (quote, user approval, generate, save the mp4), then `video-frames` and `video-loop` (a walk or run with `--anchor motion-auto`, which holds its size), and for a walk or run cut in two or more directions `video-cycle-align --view …` over their loop directories (a set it stops on a loop that may hold two cycles: look at that loop, count its strides, and pass `--cycles <loop>=<k>`; a loop the report lists under `unnamed_feet` — its view could not tell the feet apart, or only by too small a margin (`low-margin`): look at its first candidate frame, say which own foot lands there, and align again with `--foot <loop>=left|right`). `video-set` is not run on this route, so the set stage it runs by default (`--align-cycles auto`) is yours to run. sprite-gen never calls the MCP. Walk, run and jump only: ZCRE's `grok-imagine-video-1.5` has no end frame, so idle, attack and diagonal walks are refused unless `--unpinned` | [video-pipeline](docs/video-pipeline.md#a-clip-from-a-video-mcp-on-your-agent--zcre) |
 | Ordinary image or edit | `gen --provider codex` or `gen --provider grok` (subscription routes) | [gen](docs/gen.md) |
 | Image generation with no login available (server, container, SaaS) | `gen --provider openai` — server/SaaS route on `OPENAI_API_KEY`, **billed per call**, never a default or a fallback | [gen](docs/gen.md#subscription-first--openai-is-named-or-it-does-not-run) |

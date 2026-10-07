@@ -53,6 +53,7 @@ from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import period as period_mod
 from sprite_gen.video import repair as repair_mod
 from sprite_gen.video import rife as rife_mod
+from sprite_gen.video import evidence as evidence_mod
 from sprite_gen.video.frames import drop_specks
 
 ANALYSIS_SIZE = 96  # thumbnail edge for the distance matrix
@@ -732,6 +733,8 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
         strip.alpha_composite(im, (k * w, 0))
     meta = {
         "frames": len(cells),
+        "sample_indices": idx,
+        "source_rect": [left, top, right, bottom] if not feet else None,
         "w": w,
         "h": h,
         # how the cycle was cut, and whether a runtime should repeat it: a one-shot
@@ -877,7 +880,7 @@ def _repair_jumps(frames: list[Image.Image], interpolate: rife_mod.Interpolate |
     record["applied"] = bool(record["replaced"])
     if made_by:
         record["interpolator"] = {"kind": "rife-ncnn-vulkan", **made_by[0]}
-    elif record["replaced"]:
+    elif record["attempts"]:
         record["interpolator"] = {"kind": "injected"}
     return frames, record
 
@@ -1107,6 +1110,8 @@ def run_loop(
     target = (report_path or (out_dir / f"{name}.loop.report.json")).expanduser().resolve()
     report_base = {
         "kind": "sprite-gen-video-loop-report", "frames_dir": str(frames_dir),
+        "source": evidence_mod.source_identity(files, fps),
+        "producer": evidence_mod.engine_identity(),
         "out_dir": str(out_dir), "state": state, "fps": fps, "frames_total": n,
         "window": [lo, hi], "profile": prof.why, "cycle_mode": cycle_mode,
         "seam_max": seam_max,
@@ -1263,6 +1268,8 @@ def run_loop(
             specks += d
         frames.append(im)
 
+    if prof.gait:
+        report_base["gait"] = evidence_mod.gait_observation(frames, cycle)
     cycle_seconds = L / fps
     wrap_dx = 0
     if anchor == "body":
@@ -1284,6 +1291,12 @@ def run_loop(
             write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle})
             raise SystemExit(error) from exc
         report_base["motion_anchor"] = motion
+    if anchor in ("none", "body"):
+        from sprite_gen.video.source import RECIPE
+        report_base["source_projection"] = {
+            "recipe": RECIPE, "wrap_dx_px": wrap_dx,
+            "before_repair_pixels_sha256": [evidence_mod.digest(f.tobytes()) for f in frames],
+        }
     if repair != "off" and prof.gait:
         report_base["jump_repair"] = None
         try:
@@ -1353,6 +1366,8 @@ def run_loop(
     strip, strip_meta = build_strip(frames, max_height=strip_height, cycle_seconds=cycle_seconds, body_height=body_height, anchor="feet" if anchor == "feet" else "none", kind=str(cycle.get("kind") or "periodic"),
                                     standing_src=standing_height(files[standing_frame], standing_frame) if body_height is not None else None,
                                     standing_frame=standing_frame)
+    strip_meta["source_cut"] = {"source": report_base["source"], "start": i, "length": L,
+                                "samples": [i + k for k in strip_meta["sample_indices"]]}
     # The scaled-back frames are read for the last time above; the cycle cells keep them.
     shutil.rmtree(out_dir / FALLBACK_FRAMES_DIR, ignore_errors=True)
     if state:
@@ -1484,7 +1499,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--body-height", type=int, help="scale so the STANDING height (the subject in the clip's first frame, i.e. the base still's pose) is this many px — the same value across states gives the same character size; --strip-height stays the cap")
     parser.add_argument("--anchor", choices=ANCHOR_MODES, default=None, help="motion-auto: automatic stable regions, local repeat selection and XY ramp (walk/run); motion: fixed cut with explicit regions; body (default for walk/run): measure the last-to-first head-and-torso offset once and spread it as a ramp over the cycle; feet: remove in-canvas drift (a straight-line trend) so every cell stands on the mean foot line; none: leave placement as filmed (default for other states)")
     parser.add_argument("--anchor-region", type=motion_anchor.parse_region, action="append", help="motion anchor only: repeat twice with head then torso x0,y0,x1,y1 in the first selected frame; requires --cycle fixed and at least 6 frames")
-    parser.add_argument("--repair", choices=REPAIR_MODES, default="auto", help="auto (default): in a walk or run loop, a frame that follows a jump (a step 1.4x the median, whole body or the hair behind it) is replaced by RIFE's frame between its neighbours, at most 3 and never two side by side, recorded in the report (docs/loop-repair.md); where no RIFE is installed a loop that needs a frame is cut as filmed with a warning (`sprite-gen rife install` adds RIFE); on: the same repair, but no RIFE fails the loop; off: cut as filmed")
+    parser.add_argument("--repair", choices=REPAIR_MODES, default="auto", help="auto (default): propose RIFE's frame between the neighbours of a jump (a step 1.4x the median, whole body or the hair behind it); adopt only without smear/outline faults, at most 3 calls and never two adopted frames side by side (docs/loop-repair.md). Rejected proposals keep the original. Missing RIFE keeps the filmed loop with a warning (`sprite-gen rife install`); on: the same repair, but no RIFE fails the loop; off: cut as filmed")
     parser.add_argument("--jolt-max", type=float, default=None, help=f"walk/run: fail the repaired loop when its jolt index (how far each step strays from its neighbours' mean, over the median step) exceeds this. Default: no gate — the index is reported and a value over {repair_mod.JOLT_REFERENCE} is a warning line")
     parser.add_argument("--head-step-max", type=float, default=None, help=f"walk/run: fail the repaired loop when the head's largest sideways move in one frame exceeds this %% of the body height. Default: no gate — reported, and over {repair_mod.HEAD_STEP_REFERENCE} is a warning line")
     parser.add_argument("--facing", choices=FACINGS, default="right", help="which way the body faces in the frames (default right): the hair the jump search watches is behind it")

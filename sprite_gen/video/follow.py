@@ -47,6 +47,7 @@ import os
 import shutil
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,11 @@ from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.gif_utils import save_clean_gif
 from sprite_gen.video import loop as loop_mod
 
+VERB = "video-follow"
+# How the motion is read and a region moved, by name. `video-follow-inspect` writes it beside what it read, so
+# what somebody saw under one way of reading is not taken for another's: a change that gives the same strip,
+# regions and settings another carry, offset or picture takes a new name.
+POLICY = "common-lay/damped-mass/cos2-bilinear/1"
 FREQ_DEFAULT = 2.4  # Hz: a slow, soft part
 ZETA_DEFAULT = 0.6  # damping ratio: it lags and settles, with no ringing
 GAIN_DEFAULT = 2.5  # times the physical answer
@@ -280,6 +286,34 @@ def _sample(premultiplied: np.ndarray, sx: np.ndarray, sy: np.ndarray) -> np.nda
     return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
 
 
+def region_weight(xx: np.ndarray, yy: np.ndarray, region: tuple[float, float, float, float],
+                  shift: tuple[float, float]) -> np.ndarray:
+    """Per pixel of a cell, how much of a region's move it takes: 1 at the centre of the ellipse carried by
+    `shift`, 0 at its rim (cos²) and outside it. The pixels a region covers are those where this is over 0."""
+    cx, cy, rx, ry = region
+    r = np.sqrt(((xx - cx - shift[0]) / rx) ** 2 + ((yy - cy - shift[1]) / ry) ** 2)
+    return np.where(r < 1, np.cos(r * math.pi / 2) ** 2, 0)
+
+
+def move_field(xx: np.ndarray, yy: np.ndarray, moves: list[tuple[list[tuple[float, float, float, float]], tuple[float, float]]],
+               shift: tuple[float, float]) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Per pixel of a cell: whether a region of `moves`, carried by `shift`, covers it, and how far it is moved
+    across and down. None when no region covers a pixel of the cell."""
+    weights = []
+    for regions, _ in moves:
+        weight = np.zeros(xx.shape, np.float32)
+        for region in regions:
+            weight = np.maximum(weight, region_weight(xx, yy, region, shift))
+        weights.append(weight)
+    inside = np.logical_or.reduce([weight > 0 for weight in weights])
+    if not inside.any():
+        return None
+    largest = np.argmax(np.stack([math.hypot(*offset) * weight for (_, offset), weight in zip(moves, weights)]), axis=0)[None]
+    move_x = np.take_along_axis(np.stack([offset[0] * weight for (_, offset), weight in zip(moves, weights)]), largest, 0)[0]
+    move_y = np.take_along_axis(np.stack([offset[1] * weight for (_, offset), weight in zip(moves, weights)]), largest, 0)[0]
+    return inside, move_x, move_y
+
+
 def move_regions(cell: Image.Image, moves: list[tuple[list[tuple[float, float, float, float]], tuple[float, float]]],
                  shift: tuple[float, float]) -> Image.Image:
     """`cell` with each group of regions moved by its own offset (dx, dy), their centres carried by `shift`.
@@ -290,19 +324,10 @@ def move_regions(cell: Image.Image, moves: list[tuple[list[tuple[float, float, f
     src = np.asarray(cell.convert("RGBA"), dtype=np.float32)
     h, w = src.shape[:2]
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-    weights = []
-    for regions, _ in moves:
-        weight = np.zeros((h, w), np.float32)
-        for cx, cy, rx, ry in regions:
-            r = np.sqrt(((xx - cx - shift[0]) / rx) ** 2 + ((yy - cy - shift[1]) / ry) ** 2)
-            weight = np.maximum(weight, np.where(r < 1, np.cos(r * math.pi / 2) ** 2, 0))
-        weights.append(weight)
-    inside = np.logical_or.reduce([weight > 0 for weight in weights])
-    if not inside.any():
+    field = move_field(xx, yy, moves, shift)
+    if field is None:
         return cell.copy()
-    largest = np.argmax(np.stack([math.hypot(*offset) * weight for (_, offset), weight in zip(moves, weights)]), axis=0)[None]
-    move_x = np.take_along_axis(np.stack([offset[0] * weight for (_, offset), weight in zip(moves, weights)]), largest, 0)[0]
-    move_y = np.take_along_axis(np.stack([offset[1] * weight for (_, offset), weight in zip(moves, weights)]), largest, 0)[0]
+    inside, move_x, move_y = field
     pm = src.copy()
     pm[..., :3] *= pm[..., 3:4] / 255
     moved = _sample(pm, xx - move_x, yy - move_y)
@@ -315,9 +340,32 @@ def move_regions(cell: Image.Image, moves: list[tuple[list[tuple[float, float, f
     return Image.fromarray(out, "RGBA")
 
 
-def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]], *, gain: float = GAIN_DEFAULT,
-                freq: float = FREQ_DEFAULT, zeta: float = ZETA_DEFAULT, board: Path | None = None,
-                on_fold: str = "refuse") -> dict[str, Any]:
+@dataclass(frozen=True, eq=False)
+class Request:
+    """A follow-through asked of a loop directory, read and checked; nothing is written by reading it."""
+
+    loop_dir: Path
+    name: str
+    meta_path: Path
+    meta_bytes: bytes
+    meta: dict[str, Any]
+    regions: list[tuple[float, float, float, float]]
+    gain: float
+    freq: float
+    zeta: float
+    on_fold: str
+
+    @property
+    def strip_path(self) -> Path:
+        return self.loop_dir / f"{self.name}.strip.png"
+
+    @property
+    def source_path(self) -> Path:
+        return self.loop_dir / SOURCE
+
+
+def read_request(loop_dir: Path, regions: list[tuple[float, float, float, float]], *, gain: float = GAIN_DEFAULT,
+                 freq: float = FREQ_DEFAULT, zeta: float = ZETA_DEFAULT, on_fold: str = "refuse", verb: str = VERB) -> Request:
     loop_dir = loop_dir.expanduser().resolve()
     # The numbers go into the record, which is JSON, and into the cells' arithmetic: a numpy number from a
     # caller (an int64 has no JSON form) is read as the float the command line gives, so every caller of the
@@ -326,36 +374,103 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
     gain, freq, zeta = float(gain), float(freq), float(zeta)
     metas = sorted(loop_dir.glob("*.strip.json"))
     if len(metas) != 1:
-        raise SystemExit(f"video-follow: {loop_dir}: expected one <name>.strip.json from video-loop, found {len(metas)}")
+        raise SystemExit(f"{verb}: {loop_dir}: expected one <name>.strip.json from video-loop, found {len(metas)}")
     meta_path = metas[0]
     name = meta_path.name[: -len(".strip.json")]
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta_bytes = meta_path.read_bytes()
+    meta = json.loads(meta_bytes.decode("utf-8"))
     if meta.get("kind") == "one-shot" or meta.get("loop") is False:
-        raise SystemExit("video-follow: a one-shot plays once; the follow-through is a loop's steady state")
+        raise SystemExit(f"{verb}: a one-shot plays once; the follow-through is a loop's steady state")
     if not regions:
-        raise SystemExit("video-follow: at least one --region cx,cy,rx,ry")
+        raise SystemExit(f"{verb}: at least one --region cx,cy,rx,ry")
     if gain < 0 or freq <= 0 or not 0 < zeta:
-        raise SystemExit("video-follow: --gain must be 0 or more, --freq and --zeta above 0")
+        raise SystemExit(f"{verb}: --gain must be 0 or more, --freq and --zeta above 0")
     if on_fold not in ON_FOLD_MODES:
-        raise SystemExit(f"video-follow: unknown --on-fold {on_fold!r}; expected one of {', '.join(ON_FOLD_MODES)}")
-    strip_path = loop_dir / f"{name}.strip.png"
-    source = loop_dir / SOURCE
-    if not source.exists():
-        shutil.copyfile(strip_path, source)
-    strip = Image.open(source).convert("RGBA")
+        raise SystemExit(f"{verb}: unknown --on-fold {on_fold!r}; expected one of {', '.join(ON_FOLD_MODES)}")
+    return Request(loop_dir, name, meta_path, meta_bytes, meta, regions, gain, freq, zeta, on_fold)
+
+
+@dataclass(frozen=True, eq=False)
+class Answer:
+    """What a request comes to on a strip: the body's motion, each region's gain, and every cell's move.
+
+    `video-follow` writes it over the loop; `video-follow-inspect` writes it down and changes nothing. Both
+    read the carry, the offsets and the moved cells here, and nowhere else."""
+
+    request: Request
+    cells: list[Image.Image]
+    cols: np.ndarray  # per cell, how far its body lies from cell 0's: across
+    rows: np.ndarray  # and down
+    height0: int
+    worn: list[int]
+    requested: float
+    reach_requested: float
+    reach_per_gain: float
+    radii: list[float]
+    gains: list[float]  # per region; 0 where it is held
+    held: list[bool]
+    ratios: list[float]
+    moves: dict[float, tuple[np.ndarray, np.ndarray]]  # per gain a region moves by, the offset per cell: across, down
+    reaches: dict[float, float]
+    gain: float  # the largest any region moves by; dx, dy and reach are that gain's
+    dx: np.ndarray
+    dy: np.ndarray
+    reach: float
+    groups: list[tuple[list[tuple[float, float, float, float]], tuple[np.ndarray, np.ndarray]]]
+
+    def carry(self, k: int) -> tuple[float, float]:
+        """How far cell k's body lies from cell 0's, across and down: every region's ellipse is carried by it."""
+        return self.cols[k] - self.cols[0], self.rows[k] - self.rows[0]
+
+    def moves_in(self, k: int) -> list[tuple[list[tuple[float, float, float, float]], tuple[float, float]]]:
+        """Cell k's groups of regions, each with its offset in that cell."""
+        return [(group, (mx[k], my[k])) for group, (mx, my) in self.groups]
+
+    def moved(self, k: int) -> Image.Image:
+        return move_regions(self.cells[k], self.moves_in(k), self.carry(k))
+
+    def record(self) -> dict[str, Any]:
+        """The follow-through as the strip's meta records it; `video-follow` adds its animations' checks."""
+        request, requested = self.request, self.requested
+        return {
+            "regions": [list(r) for r in request.regions], "gain": self.gain, "freq_hz": request.freq, "zeta": request.zeta,
+            "harmonics": HARMONICS,
+            "source": SOURCE, "body_px": self.height0, "body_worn_px": self.worn,
+            "body_bob_px": [round(float(np.ptp(self.cols)), 2), round(float(np.ptp(self.rows)), 2)],
+            "dx_px": np.round(self.dx, 2).tolist(), "dy_px": np.round(self.dy, 2).tolist(),
+            "reach_px": round(self.reach, 2),
+            "gain_requested": requested, "on_fold": request.on_fold,
+            "fold": {
+                "lowered": any(g != requested for g in self.gains), "ratio": round(max(self.ratios), 3),
+                "reach_requested_px": round(self.reach_requested, 2), "reach_per_gain_px": round(self.reach_per_gain, 3),
+                # Where the regions took gains of their own, each says the gain it moved by and whether it
+                # was held still (gain 0); where they all took one, the strip's `gain` is every region's.
+                "regions": [{"radius_px": radius, "ratio": round(ratio, 3),
+                             "gain_limit": None if (limit := gain_limit(self.reach_per_gain, radius)) is None else round(limit, 3)}
+                            | ({} if len(set(self.gains)) == 1 else {"gain": g, "held": hold})
+                            for radius, ratio, g, hold in zip(self.radii, self.ratios, self.gains, self.held)],
+            },
+        }
+
+
+def solve(request: Request, strip: Image.Image, *, strip_name: str, verb: str = VERB) -> Answer:
+    """The answer to `request` on `strip`, the loop's strip as cut (an RGBA picture; `strip_name` names its file
+    in a refusal). Reads nothing else and writes nothing."""
+    meta, regions = request.meta, request.regions
+    gain, freq, zeta, on_fold = request.gain, request.freq, request.zeta, request.on_fold
     n, w, h = int(meta["frames"]), int(meta["w"]), int(meta["h"])
     if strip.size != (w * n, h):
-        raise SystemExit(f"video-follow: {source.name} is {strip.size[0]}x{strip.size[1]}, the strip meta says {w * n}x{h}; "
+        raise SystemExit(f"{verb}: {strip_name} is {strip.size[0]}x{strip.size[1]}, the strip meta says {w * n}x{h}; "
                          "cut the loop again (video-loop)")
     for cx, cy, rx, ry in regions:
         if not (0 <= cx < w and 0 <= cy < h):
-            raise SystemExit(f"video-follow: --region centre {cx:g},{cy:g} is outside the {w}x{h} cell")
+            raise SystemExit(f"{verb}: --region centre {cx:g},{cy:g} is outside the {w}x{h} cell")
     cells = [strip.crop((k * w, 0, (k + 1) * w, h)) for k in range(n)]
     fps = 1000.0 / float(meta["delay_ms"])
     try:
         rows, cols, height0, worn = body_motion(cells)
     except ValueError as exc:
-        raise SystemExit(f"video-follow: {exc}") from exc
+        raise SystemExit(f"{verb}: {exc}") from exc
     dy = follow_offsets(rows, fps, freq=freq, zeta=zeta, gain=gain)
     dx = follow_offsets(cols, fps, freq=freq, zeta=zeta, gain=gain)
     reach = float(np.max(np.hypot(dx, dy)))
@@ -368,7 +483,7 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
     gains, held = [requested] * len(regions), [False] * len(regions)
     if fold_ratio(reach, smallest) >= 1:
         if on_fold == "refuse":
-            raise SystemExit(f"video-follow: a move of {reach:.1f} px folds a region of radius {smallest:g} px over itself; "
+            raise SystemExit(f"{verb}: a move of {reach:.1f} px folds a region of radius {smallest:g} px over itself; "
                              "lower --gain or give the region larger radii")
         # A gain for each region: every part hangs on the same body and answers the same motion, but
         # how far it moves before it folds is its own size, so a small part (an ear) does not hold a
@@ -381,7 +496,7 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
         if all(held):
             k = radii.index(max(radii))  # the largest folds at the largest gain: if it is held, every region is
             every = f" (the largest of {len(regions)} regions: every one folds)" if len(regions) > 1 else ""
-            raise SystemExit(f"video-follow: a move of {reach:.1f} px folds a region of radius {radii[k]:g} px over itself{every}, and "
+            raise SystemExit(f"{verb}: a move of {reach:.1f} px folds a region of radius {radii[k]:g} px over itself{every}, and "
                              f"--on-fold lower would have to go under --gain {GAIN_MEASURED:g} (the mass as measured moves "
                              f"{reach_per_gain:.1f} px; the largest gain that does not fold is {gains[k]:g}); give the region larger radii")
         gains = [0.0 if hold else g for g, hold in zip(gains, held)]
@@ -395,8 +510,23 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
     reach = reaches[gain]
     ratios = [0.0 if hold else fold_ratio(reaches[g], radius) for radius, g, hold in zip(radii, gains, held)]
     groups = [([r for r, rg, hold in zip(regions, gains, held) if rg == g and not hold], move) for g, move in moves.items()]
-    out = [move_regions(c, [(group, (mx[k], my[k])) for group, (mx, my) in groups], (cols[k] - cols[0], rows[k] - rows[0]))
-           for k, c in enumerate(cells)]
+    return Answer(request, cells, cols, rows, height0, worn, requested, reach_requested, reach_per_gain, radii, gains, held,
+                  ratios, moves, reaches, gain, dx, dy, reach, groups)
+
+
+def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]], *, gain: float = GAIN_DEFAULT,
+                freq: float = FREQ_DEFAULT, zeta: float = ZETA_DEFAULT, board: Path | None = None,
+                on_fold: str = "refuse") -> dict[str, Any]:
+    request = read_request(loop_dir, regions, gain=gain, freq=freq, zeta=zeta, on_fold=on_fold)
+    loop_dir, name, meta_path, meta = request.loop_dir, request.name, request.meta_path, request.meta
+    strip_path = request.strip_path
+    source = request.source_path
+    if not source.exists():
+        shutil.copyfile(strip_path, source)
+    answer = solve(request, Image.open(source).convert("RGBA"), strip_name=source.name)
+    cells = answer.cells
+    n, (w, h) = len(cells), cells[0].size
+    out = [answer.moved(k) for k in range(n)]
     joined = Image.new("RGBA", (w * n, h), (0, 0, 0, 0))
     for k, c in enumerate(out):
         joined.alpha_composite(c, (k * w, 0))
@@ -413,22 +543,7 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
         save_clean_gif(out, staged[gif_path], duration_ms=delay_ms, loop=0, alpha_threshold=128)
         loop_mod.write_webp(out, staged[webp_path], delay_ms=delay_ms, workdir=stage / ".webp-frames")
         record = {
-            "regions": [list(r) for r in regions], "gain": gain, "freq_hz": freq, "zeta": zeta, "harmonics": HARMONICS,
-            "source": SOURCE, "body_px": height0, "body_worn_px": worn,
-            "body_bob_px": [round(float(np.ptp(cols)), 2), round(float(np.ptp(rows)), 2)],
-            "dx_px": np.round(dx, 2).tolist(), "dy_px": np.round(dy, 2).tolist(),
-            "reach_px": round(reach, 2),
-            "gain_requested": requested, "on_fold": on_fold,
-            "fold": {
-                "lowered": any(g != requested for g in gains), "ratio": round(max(ratios), 3),
-                "reach_requested_px": round(reach_requested, 2), "reach_per_gain_px": round(reach_per_gain, 3),
-                # Where the regions took gains of their own, each says the gain it moved by and whether it
-                # was held still (gain 0); where they all took one, the strip's `gain` is every region's.
-                "regions": [{"radius_px": radius, "ratio": round(ratio, 3),
-                             "gain_limit": None if (limit := gain_limit(reach_per_gain, radius)) is None else round(limit, 3)}
-                            | ({} if len(set(gains)) == 1 else {"gain": g, "held": hold})
-                            for radius, ratio, g, hold in zip(radii, ratios, gains, held)],
-            },
+            **answer.record(),
             "gif": loop_mod.verify_animation(staged[gif_path], expect_frames=n, check_stale=False),
             "webp": loop_mod.verify_animation(staged[webp_path], expect_frames=n, check_stale=True),
         }
@@ -438,7 +553,7 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     if board is not None:
-        _board(cells, out, dy, board)
+        _board(cells, out, answer.dy, board)
         record["board"] = str(board)
     return {"strip": str(strip_path), **record}
 
@@ -459,7 +574,8 @@ def _board(before: list[Image.Image], after: list[Image.Image], dy: np.ndarray, 
     board.save(path)
 
 
-def add_arguments(parser: argparse.ArgumentParser) -> None:
+def add_request_arguments(parser: argparse.ArgumentParser) -> None:
+    """What a follow-through is asked with; `video-follow-inspect` takes the same and is asked alike."""
     parser.add_argument("--loop-dir", required=True, type=Path, help="a video-loop output directory (after video-cycle-align, if the set is aligned)")
     parser.add_argument("--region", action="append", type=parse_region, required=True,
                         help="cx,cy,rx,ry: an ellipse over the soft part in the strip's first cell, in cell pixels (repeatable)")
@@ -470,7 +586,29 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                              "named in the record, and the strip is refused only when every region is")
     parser.add_argument("--freq", type=float, default=FREQ_DEFAULT, help=f"the part's own frequency in Hz (default {FREQ_DEFAULT:g})")
     parser.add_argument("--zeta", type=float, default=ZETA_DEFAULT, help=f"damping ratio (default {ZETA_DEFAULT:g}: lags and settles, no ringing)")
+
+
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    add_request_arguments(parser)
     parser.add_argument("--board", type=Path, help="write a before/after picture at the frames where the part sits lowest and highest")
+
+
+def fold_notes(record: dict[str, Any], verb: str = VERB) -> list[str]:
+    """What to say of a record whose gain was lowered or whose regions were held, a line each."""
+    fold, notes = record["fold"], []
+    if "held" in fold["regions"][0]:  # the regions took gains of their own
+        for (cx, cy, rx, ry), entry in zip(record["regions"], fold["regions"]):
+            name = f"--region {cx:g},{cy:g},{rx:g},{ry:g}"
+            if entry["held"]:
+                notes.append(f"{verb}: {name} folds at --gain {entry['gain_limit']:g}, under {GAIN_MEASURED:g} (the mass as measured): "
+                             "it is held, and does not move")
+            elif entry["gain"] != record["gain_requested"]:
+                notes.append(f"{verb}: --gain {record['gain_requested']:g} folds {name} (a move of {fold['reach_requested_px']:g} px); "
+                             f"lowered to --gain {entry['gain']:g} for it")
+    elif fold["lowered"]:
+        notes.append(f"{verb}: --gain {record['gain_requested']:g} folds a region (a move of {fold['reach_requested_px']:g} px); "
+                     f"lowered to --gain {record['gain']:g}")
+    return notes
 
 
 def run(**kwargs: object) -> int:
@@ -480,18 +618,8 @@ def run(**kwargs: object) -> int:
                          on_fold=str(kwargs.get("on_fold") or "refuse"))
     fold = result["fold"]
     own = "held" in fold["regions"][0]  # the regions took gains of their own
-    if own:
-        for (cx, cy, rx, ry), entry in zip(result["regions"], fold["regions"]):
-            name = f"--region {cx:g},{cy:g},{rx:g},{ry:g}"
-            if entry["held"]:
-                print(f"video-follow: {name} folds at --gain {entry['gain_limit']:g}, under {GAIN_MEASURED:g} (the mass as measured): "
-                      "it is held, and does not move", file=sys.stderr)
-            elif entry["gain"] != result["gain_requested"]:
-                print(f"video-follow: --gain {result['gain_requested']:g} folds {name} (a move of {fold['reach_requested_px']:g} px); "
-                      f"lowered to --gain {entry['gain']:g} for it", file=sys.stderr)
-    elif fold["lowered"]:
-        print(f"video-follow: --gain {result['gain_requested']:g} folds a region (a move of {fold['reach_requested_px']:g} px); "
-              f"lowered to --gain {result['gain']:g}", file=sys.stderr)
+    for note in fold_notes(result):
+        print(note, file=sys.stderr)
     print(json.dumps({k: result[k] for k in ("strip", "regions", "gain", "gain_requested", "on_fold", "body_bob_px", "reach_px")}
                      | ({"region_gains": [entry["gain"] for entry in fold["regions"]]} if own else {})
                      | ({"board": result["board"]} if "board" in result else {}), ensure_ascii=False, indent=2))

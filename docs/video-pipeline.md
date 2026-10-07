@@ -25,6 +25,7 @@ still ──video-canvas──▶ canvas.png ──video──▶ clip.mp4 ─�
 | `sprite-gen video-set` | `sprite_gen/video/batch.py` | bases × states → one folder per item, `set.report.json`, `table.md` |
 | `sprite-gen video-cycle-align` | `sprite_gen/video/align.py` | the loop directories of one walk or run, one per direction → one cycle length, each loop turned to start on a foot strike, + report ([loop repair](loop-repair.md) section 4) |
 | `sprite-gen video-follow` | `sprite_gen/video/follow.py` | a loop directory + an ellipse → the strip, GIF and WebP with that region following the body ([section 6](#6-follow-through--video-follow)) |
+| `sprite-gen video-follow-inspect` | `sprite_gen/video/follow_inspect.py` | a loop directory + the ellipses `video-follow` takes → a record of where each is carried in every cell and what the move changes there, and two boards of every cell; the loop directory is only read ([section 6](#inspecting-a-follow-through--video-follow-inspect)) |
 
 Wrappers: `scripts/video_canvas.py`, `scripts/video_frames.py`, `scripts/video_loop.py`,
 `scripts/video_set.py`. Binaries: `ffmpeg`/`ffprobe` (frames), `img2webp` from libwebp
@@ -1014,7 +1015,14 @@ Outputs:
   at its own size is copied as it is). Coverage keeps LANCZOS's edge, held between the least and
   the most coverage of the source pixels the colour mixes from, so nothing spills outside the
   silhouette and nothing opens inside it. Colour is a Hamming mix of premultiplied colour, a
-  filter with no negative lobe, so every pixel's colour is a mix of the colours under it. The
+  filter with no negative lobe, so every pixel's colour is a mix of the colours under it. Each
+  channel therefore stays within the colours under it, but the key hue's excess (green:
+  `G - max(R, B)`) does not: a colour led by red mixed with one led by blue is led by neither as
+  far, so a cell can carry a little more key hue than any source pixel under it. Every filter
+  that mixes colours does this, in a cell and again wherever the cell is scaled later; the
+  resample knows no key and caps nothing (`tests/video/test_strip_resample.py`). The one
+  operation that compares a cell with the key bar, source restoration, handles it itself
+  ([loop-comparison.md](loop-comparison.md#what-a-restored-cell-is)). The
   strip used LANCZOS over premultiplied RGBA before, which weighs the colours across an edge
   against each other and divides by the edge's low coverage: on a keyed frame, whose edge holds
   a light rim and ink with a little of the key's green, it drew a lighter rim and greener ink
@@ -1174,6 +1182,84 @@ sprite-gen video-follow --loop-dir set/front-walk/loop --region 136,164,60,50 [-
   `follow.source.png` and the `follow` record, and says so (`follow_cleared` in its loop row); a
   new cut with `video-loop` removes them too. Run `video-follow` again after either.
 - A one-shot (`kind: one-shot`) is refused: the follow-through is a loop's steady state.
+
+### Inspecting a follow-through — `video-follow-inspect`
+
+The ellipse is given in the first cell, where somebody looked. Into every other cell it is carried
+by the body's motion, and there nobody looked: an arm that swings across a chest is inside the
+chest's ellipse in those cells and moves with it, and so does a sleeve of the chest's own colour,
+which no count of colours finds. The engine does not read what a pixel belongs to.
+`video-follow-inspect` writes what somebody needs in order to look, and moves nothing:
+
+```bash
+sprite-gen video-follow-inspect --loop-dir set/front-run/loop --region 136,164,60,50 [--region …] \
+  [--gain 2.5] [--on-fold refuse|lower] [--freq 2.4] [--zeta 0.6] \
+  --out-dir inspect/front-run [--scale 2] [--columns 8]
+```
+
+- **Asked as `video-follow` is, answered by the same code.** It takes `video-follow`'s arguments
+  (all but `--board`), reads the strip as cut — `follow.source.png` where a follow-through was
+  already written, the strip itself where none was — and solves it where `video-follow` does
+  (`follow.read_request`, `follow.solve`): the carry, each region's gain, the offsets and the
+  moved cells are computed in one place, and both commands read them there. What `video-follow`
+  refuses it refuses in the same words under its own name, and then writes nothing.
+- **The loop directory is read and never written**: not the strip, not its meta, and not the
+  `follow.source.png` that `video-follow` keeps on its first run. An `--out-dir` at or under the
+  loop directory is refused. Run before `video-follow`, it changes nothing `video-follow` writes.
+- **What is inside an ellipse is not read.** Every region is written `ownership: "unknown"` in
+  every cell, the first included, from its centre to its rim; no cell is marked or held on a
+  guess. `solid_px` counts the body's silhouette under the ellipse (alpha ≥ 128), not whose
+  pixels they are. Saying which cells hold the part alone is for a person or a model that looks
+  at the board of the cells as cut, and for a second reader apart from the first.
+  `video-follow` takes no such list: it moves every cell.
+- **`follow-inspect.json`** (`kind: video-follow-inspection`, `schema_version: 1`):
+
+  | key | what it holds |
+  |---|---|
+  | `input_id` | one sha256 over what the answer is read from: the strip's sha256, the meta's `cut_sha256`, the regions, the settings, the policy and the engine's version |
+  | `inputs.strip` | `file`, `sha256`, `bytes`: the strip as cut that was read |
+  | `inputs.meta` | `file`, `sha256`, `bytes`: `<name>.strip.json` as read; `cut_sha256`: its sha256 without the `follow` record `video-follow` adds (keys sorted, no spaces); `follow_recorded` |
+  | `inputs.cut` | `frames`, `w`, `h`, `delay_ms`, as read from the meta |
+  | `inputs.regions`, `inputs.settings` | the ellipses in the order given; `gain`, `on_fold`, `freq_hz`, `zeta` |
+  | `inputs.policy`, `inputs.engine` | the way the motion is read and a region moved, by name (`follow.POLICY`) with the constants it is fixed by; the engine's `name` and `version` |
+  | `follow` | the follow-through as `video-follow` records it in the strip's meta, without `gif` and `webp` |
+  | `regions[i]` | `index`, `ellipse` as given, `radius_px`, `gain` (0 when held), `held`, `gain_limit`; over all cells the largest `reach_px` and `fold_ratio`, the least `jacobian_min`, the sum of `changed_px`; `ring`, its colour on the boards |
+  | `cells[k]` | `index`, `carry_px` (across, down), `changed_px`, `jacobian_min`, `box` (x0, y0, x1, y1: the cell's picture on both boards) and `regions[i]` |
+  | `cells[k].regions[i]` | `ellipse`: the region carried (centre plus `carry_px`, the radii as given); `offset_px` (across, down) and `reach_px`: the region's own move in that cell, 0 when held; `fold_ratio`; `jacobian_min` and `jacobian_min_at` (x, y); `ellipse_px`, `solid_px`; `changed_px`; `ownership` |
+  | `boards` | `scale`, `columns`, `size`, `ground`; `source` and `moved`, each `file`, `sha256` (the PNG file) and `pixels_sha256` (its pixels) |
+
+- **`carry_px`** is how far the cell's body lies from the first cell's, in whole pixels: what
+  every region's ellipse is carried by in that cell, and what `video-follow` carries it by. It
+  was written nowhere before; from the record's rounded offsets it cannot be worked back for a
+  strip of more than thirteen cells (the answer keeps six harmonics of the cycle).
+- **`jacobian_min`** is the least area of the source that one pixel of the moved cell takes, over
+  the pixels of the region's ellipse: 1 where nothing moves, 0 where the picture stops — one line
+  of the source drawn across many — and under 0 where it would run backwards, which is what the
+  fold check refuses. It is read on the pixels, between each pixel's neighbours on either side
+  across and down, so for a region a few pixels across it reads a little over the steepest point
+  of the weight. A region that `--on-fold lower` lowered moves at the largest gain that does not
+  fold it, so in the cell where it moves most it is drawn nearly stopped: not folded, and
+  stretched. `jacobian_min_at` is the pixel.
+  Where regions overlap the move is the larger one's, so a region's numbers there are what is
+  drawn in its ellipse, not its own move alone. `changed_px` counts the pixels whose RGBA the
+  move changes; outside every carried ellipse it changes none.
+- **The record names what it was read from.** It holds no path, no time and nothing of the
+  machine: the same loop asked the same way writes the same record, byte for byte, anywhere.
+  `input_id` is the same before and after `video-follow` is run on the loop, and another after a
+  new cut, an alignment, a changed region or setting, or another engine version — what somebody
+  saw on one cut's boards is not evidence for another cut. `--scale` and `--columns` change the
+  boards and their sha256, not `input_id` and not a number of the record but the `box`es.
+  `pixels_sha256` is over a board's pixels (RGB, row by row), so another PNG writer gives the same
+  one; `sha256` is the file's. The offsets, ratios and areas are rounded to 4 places.
+- **The boards** hold every cell of the strip in order, `--columns` to a row, each under its
+  number (the first cell is 0), over a flat grey, `--scale` board pixels to a cell pixel. Each
+  region's carried ellipse is ringed in its colour, dashed with black. The ring is on the board
+  pixels just outside the ellipse — the first the move does not touch — so inside an ellipse the
+  cell shows whole (but for another region's ring crossing it), and at `--scale 2` or more no
+  cell pixel is covered whole. `follow-inspect.source.png` has the cells as cut;
+  `follow-inspect.moved.png` has them as `video-follow` would write them, laid and ringed alike.
+  They are two files so that whoever says what is inside an ellipse can be given the cells as cut
+  alone, without the answer beside them.
 
 ## What the rules were measured on
 
