@@ -362,12 +362,14 @@ def test_cycle_align_aligns_a_two_step_loop_as_the_one_cycle_it_is(held, tmp_pat
     assert "steps" not in json.loads((root / "out" / "loop.strip.json").read_text())
 
 
-# What v2.35.0 wrote for a loop whose steps nobody counted (no `steps` in its strip metadata):
-# aligning it writes exactly these, so a set without a held part is rewritten as before.
+# What v2.35.0 wrote for a loop whose steps nobody counted (no `steps` in its strip metadata), and the
+# source each cut names since 2.39 (docs/loop-comparison.md): aligning it writes exactly these, so a set
+# without a held part is rewritten as before.
 STRIP_KEYS_2350 = {"body_h", "body_height_target", "body_ref", "body_src_h", "cell_cap", "cell_height_cap", "cycle_align",
                    "cycle_drawings", "cycle_frames", "cycle_seconds", "delay_ms", "drawings", "drift_px", "foot_anchor",
                    "foot_sway_px", "foot_x", "frames", "h", "kind", "loop", "motion_anchor", "scale", "state", "subsampled",
                    "top_margin_px", "w"}
+SOURCE_KEYS_2390 = {"sample_indices", "source_cut", "source_rect"}
 CYCLE_ALIGN_KEYS_2350 = {"between", "cycle_screen", "cycles_given", "drawings", "foot_why", "fps", "from", "made_at",
                          "made_by_rife", "nearest_at", "reach_swing", "retake", "seam_ratio", "source", "start_foot",
                          "start_foot_source", "stride_swing", "strikes", "taken", "to", "turned_by", "turned_on", "view"}
@@ -375,7 +377,16 @@ CYCLE_ALIGN_KEYS_2350 = {"between", "cycle_screen", "cycles_given", "drawings", 
 
 def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path):
     src = tmp_path / "src"
-    _cut(src, _keyed(src, staff=False))
+    report = _cut(src, _keyed(src, staff=False))
+    cut = json.loads((src / "out" / "loop.strip.json").read_text())
+    # The cut names its cells' source: the keyed frames it read, its window in them, and each cell's frame
+    # there — every frame of the window one cell, under one crop.
+    start, length = report["cycle"]["start"], report["cycle"]["length"]
+    assert cut["frames"] == length and cut["sample_indices"] == list(range(length))
+    assert cut["source_cut"] == {"source": report["source"], "start": start, "length": length,
+                                 "samples": list(range(start, start + length))}
+    left, top, right, bottom = cut["source_rect"]
+    assert cut["scale"] == 1.0 and [right - left, bottom - top, top] == [cut["w"], cut["h"], cut["top_margin_px"]]
     dirs = []
     for name in ("a", "b"):
         shutil.copytree(src / "out", tmp_path / name)
@@ -384,4 +395,10 @@ def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path):
     assert all("cycles_kept" not in row and "steps" not in row for row in out["loops"])
     for d in dirs:
         meta = json.loads((d / "loop.strip.json").read_text())
-        assert set(meta) == STRIP_KEYS_2350 and set(meta["cycle_align"]) == CYCLE_ALIGN_KEYS_2350
+        assert set(meta) == STRIP_KEYS_2350 | SOURCE_KEYS_2390
+        assert set(meta["cycle_align"]) == CYCLE_ALIGN_KEYS_2350
+        # The cut's source stays as the cut wrote it: `cycle_align` says the cells were turned after it, so it
+        # no longer names each cell's frame (docs/loop-comparison.md). The rebuilt strip names its own cells —
+        # the same frames, turned, under the same crop.
+        assert meta["source_cut"] == cut["source_cut"]
+        assert meta["sample_indices"] == list(range(length)) and meta["source_rect"] == cut["source_rect"]
