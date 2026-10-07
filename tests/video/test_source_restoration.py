@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from sprite_gen.video import evidence, source, restoration, playback, loop
+from sprite_gen.video import evidence, source, restoration, playback, loop, repair as repair_mod
 from sprite_gen.cli import main
 from sprite_gen.util.gif_utils import save_clean_gif
 from sprite_gen.util.resample import resize_cell
@@ -20,7 +20,7 @@ from sprite_gen.video.compare import Loop
 
 W, H, N = 64, 80, 12
 FILL = (210, 160, 110, 255)
-METRIC, POLICY = 'source-restoration-v3', 'key-protected-source-copy-one-step-cap-v1'
+METRIC, POLICY = 'source-restoration-v4', 'key-protected-source-copy-one-step-cap-jump-guard-v1'
 # Two colours under the green key's bar (hue excess -6 each), one led by red and one by blue:
 # their even mix (105, 114, 105) is one step over it. ROSE and IRIS are the same for magenta.
 WARM, COOL = (120, 114, 90, 255), (90, 114, 120, 255)
@@ -74,11 +74,12 @@ def cells(paths):
     return restoration.read_loop(paths)[0].frames
 
 
-def build(tmp_path, zoom=1, key='green', paint=None):
+def build(tmp_path, zoom=1, key='green', paint=None, facing='right'):
     """A loop with two damaged cells and its keyed source, `zoom` times the cell's size.
 
     At zoom 1 a cell is a copy of its frame; at 2 every cell is a resample, as a delivered loop's are.
-    `paint` draws on chosen source frames before the loop is cut from them.
+    `paint` draws on chosen source frames before the loop is cut from them. `facing` is the one the
+    jump repair records, as `video-loop --facing` writes it.
     """
     if not shutil.which('ffmpeg') or not loop.img2webp_supports_exact():
         pytest.skip('ffmpeg and img2webp >=1.5 required')
@@ -103,7 +104,7 @@ def build(tmp_path, zoom=1, key='green', paint=None):
     m={'frames':12,'w':64,'h':80,'delay_ms':41.67,'cycle_seconds':.5,'cycle_frames':12,'subsampled':False,'loop':True,'scale':1/zoom,'source_rect':[0,0,W*zoom,H*zoom],'sample_indices':list(range(12)),'foot_anchor':'none'}
     src=source.Source.read(**inputs)
     m['source_cut']={'source':src.record['source'],'start':0,'length':12,'samples':list(range(12))}
-    report={'kind':'sprite-gen-video-loop-report','status':'passed','fps':24.,'frames_total':12,'source':src.record['source'],'cycle':{'start':0,'length':12},'anchor':'none','jump_repair':{'replaced':[2,8]},'strip':m,'n_out':12,'delay_ms':42}
+    report={'kind':'sprite-gen-video-loop-report','status':'passed','fps':24.,'frames_total':12,'source':src.record['source'],'cycle':{'start':0,'length':12},'anchor':'none','jump_repair':{'replaced':[2,8],'facing':facing},'strip':m,'n_out':12,'delay_ms':42}
     paths['meta'].write_text(json.dumps(m)); paths['report'].write_text(json.dumps(report))
     write_strip(paths,bad)
     return paths, inputs, clean
@@ -164,7 +165,7 @@ def test_source_restoration_preserves_normal_motion_and_timing(case,tmp_path):
     assert result['origin_artifacts']==result['baseline_artifacts']
     comparison=compare_result(case,result)
     assert comparison['verdict']=='improved', comparison['reasons']
-    assert (comparison['metric_version'],comparison['policy_version'],comparison['schema_version'])==(METRIC,POLICY,4)
+    assert (comparison['metric_version'],comparison['policy_version'],comparison['schema_version'])==(METRIC,POLICY,5)
     target=result['target']
     a,b=cells(case[0]),cells(outputs(result))
     assert all(x.tobytes()==y.tobytes() for k,(x,y) in enumerate(zip(a,b)) if k!=target)
@@ -299,7 +300,7 @@ def test_cli_real_json_needs_the_origin(case,tmp_path,capsys):
     assert not comparison.exists()
     assert main(['video-loop-compare',*baseline,*origin,*candidate,*src,'--repair-evidence',str(report),'--report',str(comparison)])==0
     c=json.loads(comparison.read_bytes())
-    assert c['verdict']=='improved' and c['schema_version']==4 and c['metric_version']==METRIC
+    assert c['verdict']=='improved' and c['schema_version']==5 and c['metric_version']==METRIC
     assert set(c['candidate']['artifacts'])==set(c['origin']['artifacts'])=={'strip','meta','report','gif','webp'}
     assert c['origin']['artifacts']==r['origin_artifacts']
 
@@ -380,7 +381,7 @@ def test_less_total_key_spill_cannot_hide_new_local_key_spill(case,tmp_path):
     src=source.Source.read(**inputs)
     state,_=restoration.chain(o,o,src)
     whole=[state.projection.frames[k] if k==target else f for k,f in enumerate(o.frames)]
-    judged=restoration.judge(o.frames,whole,state.projection.frames,state.key)
+    judged=restoration.judge(o.frames,whole,state.projection.frames,state.key,state.facing)
     assert sum(f for f in judged['axes']['key_colour']['candidate'])<sum(judged['axes']['key_colour']['baseline'])
     assert judged['axes']['key_colour']['introduced_pixels'][target]==4
     assert judged['verdict']=='regressed' and 'key_colour:regressed' in judged['reasons']
@@ -691,6 +692,9 @@ def test_replaced_origin_or_source_is_error(case,tmp_path,adopted):
 def test_other_policy_receipt_is_not_read_as_this_one(case,tmp_path,adopted):
     origin,first,current=adopted
     for change in (lambda r: r['restoration'].update(policy_version='another-policy'),
+                   # The released contract before the jump guard: its cells were accepted without it.
+                   lambda r: r['restoration'].update(metric_version='source-restoration-v3',
+                                                     policy_version='key-protected-source-copy-one-step-cap-v1'),
                    # The same cell under the contract before this one, which never capped: its receipt is not this one's.
                    lambda r: r['restoration'].update(metric_version='source-restoration-v2',policy_version='key-protected-source-copy-v1'),
                    lambda r: r.update(restoration={'operation':'restore_active_cut','metric_version':'source-restoration-v1',
@@ -712,7 +716,8 @@ def test_old_proposal_cannot_be_compared_on_the_new_baseline(case,tmp_path,adopt
         compare_result(case,second,baseline=case[0],origin=origin)
     # Evidence of another schema or metric is not this contract's.
     for field,value in (('schema_version',2),('metric_version','source-restoration-v2'),
-                        ('policy_version','key-protected-source-copy-v1'),('policy_version','another-policy')):
+                        ('policy_version','key-protected-source-copy-v1'),('metric_version','source-restoration-v3'),
+                        ('policy_version','key-protected-source-copy-one-step-cap-v1'),('policy_version','another-policy')):
         with pytest.raises(ValueError,match='does not bind'):
             compare_result(case,{**second,field:value},baseline=current,origin=origin)
     # A candidate whose receipt drops the earlier cell is not the verified one.
@@ -721,6 +726,73 @@ def test_old_proposal_cannot_be_compared_on_the_new_baseline(case,tmp_path,adopt
     c,_=restoration.read_loop(forged)
     outcome=compare_result(case,{**second,'candidate_artifacts':c.artifacts},baseline=current,origin=origin)
     assert (outcome['verdict'],outcome['reasons'])==('unknown',['candidate-report-differs-from-verified-receipt'])
+
+
+def shifted(dx):
+    """The whole drawing moved `dx` pixels sideways: the same lines, fills and coverage, all of it somewhere else."""
+    def paint(f):
+        moved=Image.new('RGBA',f.size); moved.paste(f,(dx,0)); f.paste(moved)
+    return paint
+
+
+@pytest.mark.parametrize('facing',['right','left'])
+def test_the_jump_around_a_restored_cell_is_the_jump_repairs_own_score(tmp_path,facing):
+    # The melted in-between filled the part-covered line, so the steps into and out of it changed more
+    # coverage than the source's do. The restored cell gives those steps back the source's.
+    case=build(tmp_path,facing=facing)
+    paths,_,clean=case
+    r=repair(case,tmp_path)
+    c=r['comparison']
+    assert c['verdict']=='improved', c['reasons']
+    axis,target=c['axes']['jump'],r['target']
+    # Both loops scored on the source cells' box, with the facing the jump repair recorded.
+    box=repair_mod.union_box(clean)
+    a,b=(repair_mod.jump_scores(cells(p),facing=facing,box=box) for p in (paths,outputs(r)))
+    assert (axis['facing'],axis['hair_box'],axis['box'])==(facing,list(repair_mod.hair_box(facing)),list(box))
+    assert (axis['baseline'],axis['candidate'])==(a['score'].tolist(),b['score'].tolist())
+    assert axis['whole']=={'baseline':a['whole'].tolist(),'candidate':b['whole'].tolist()}
+    assert axis['hair']=={'baseline':a['hair'].tolist(),'candidate':b['hair'].tolist()}
+    # A cell reads the larger of its two steps, the step into it and the step out of it.
+    steps=[target-1,target]
+    assert axis['cells']==[{'cell':target,'steps':steps,'baseline':max(a['score'][steps]),'candidate':max(b['score'][steps])}]
+    assert axis['cells'][0]['candidate']<=axis['cells'][0]['baseline'] and axis['status']!='regressed'
+
+
+@pytest.mark.parametrize('facing',['right','left'])
+def test_a_restored_cell_that_brings_its_jump_back_is_not_improved(tmp_path,facing):
+    # The source frame under the melted cell is the jump the repair took out: its whole drawing stands
+    # six pixels to one side of its neighbours'. Its pixels clear the melt and bring the jump back.
+    case=build(tmp_path,facing=facing)
+    repaint_source(case,2,shifted(6))
+    outcomes={r['target']:r for r in (repair(case,tmp_path,k) for k in (1,2))}
+    r=outcomes[2]
+    assert r['status']=='candidate' and r['partial']['alpha_equals_source'] and r['partial']['protected']['count']==0
+    c=r['comparison']
+    assert (c['verdict'],c['reasons'])==('regressed',['jump:regressed'])
+    # The melt is cleared and every other protection holds: the jump alone refuses the cell.
+    assert c['cleared_faults']==[{'cell':2,'faults':['outline']}]
+    assert all(v['status']!='regressed' for k,v in c['axes'].items() if k!='jump')
+    cell=c['axes']['jump']['cells'][0]
+    assert (cell['cell'],cell['steps'])==(2,[1,2]) and cell['candidate']>cell['baseline']
+    assert compare_result(case,r)['verdict']=='regressed'
+    # The other cell is independent of it.
+    assert outcomes[8]['comparison']['verdict']=='improved'
+
+
+@pytest.mark.parametrize('facing',[None,'sideways'])
+def test_a_jump_repair_record_without_its_facing_is_shared_unknown(case,tmp_path,facing):
+    # The jump repair records the facing its hair box was read with. Without it, which steps of a
+    # replaced cell jumped is not known, so none of its cells is proposed.
+    paths,_,clean=case
+    rewrite_receipt(paths,lambda r: r['jump_repair'].pop('facing') if facing is None else r['jump_repair'].update(facing=facing))
+    r=repair(case,tmp_path)
+    assert (r['status'],r['common_failure'],r['reasons'],r['outputs'])==('unknown',True,['jump-repair-facing-unverified'],{})
+    # A loop the repair left alone needs none: a request on it is the byte-exact no-op.
+    write_strip(paths,clean)
+    rewrite_receipt(paths,lambda r: r.update(jump_repair={'applied':False,'why':'--repair off'}))
+    noop=repair(case,tmp_path,out='noop')
+    assert noop['status']=='no_change' and noop['comparison']['verdict']=='non_regressing'
+    assert noop['comparison']['axes']['jump']=={'facing':None,'cells':[],'status':'non_regressing','reason':'no-jump-repaired-cell'}
 
 
 @pytest.mark.parametrize('scaled,left,right,mixed,capped',[
@@ -743,7 +815,7 @@ def test_cli_restores_a_resampled_cell_with_its_made_excess_capped(scaled,tmp_pa
     comparison=tmp_path/'comparison.json'
     assert main(['video-loop-compare',*baseline,*origin,*candidate,*src,'--repair-evidence',str(report),'--report',str(comparison)])==0
     c=json.loads(comparison.read_bytes())
-    assert (c['verdict'],c['schema_version'],c['metric_version'],c['policy_version'])==('improved',4,METRIC,POLICY), c['reasons']
+    assert (c['verdict'],c['schema_version'],c['metric_version'],c['policy_version'])==('improved',5,METRIC,POLICY), c['reasons']
     key=c['axes']['key_colour']
     assert (key['introduced_pixels'][target],key['introduced_excess'][target],key['candidate'][target])==(0,0,0)
     assert c['cleared_faults']==[{'cell':target,'faults':['outline']}]
@@ -770,7 +842,7 @@ def test_whole_source_cell_with_a_made_excess_is_still_refused(scaled,tmp_path):
     o,_=restoration.read_loop(paths)
     state,_=restoration.chain(o,o,source.Source.read(**inputs))
     whole=[state.projection.frames[k] if k==target else f for k,f in enumerate(o.frames)]
-    judged=restoration.judge(o.frames,whole,state.projection.frames,state.key)
+    judged=restoration.judge(o.frames,whole,state.projection.frames,state.key,state.facing)
     assert judged['axes']['key_colour']['introduced_pixels'][target]==6
     assert judged['verdict']=='regressed' and 'key_colour:regressed' in judged['reasons']
     # Written out as the candidate, one capped place given the source's pixel back is not the verified cell.

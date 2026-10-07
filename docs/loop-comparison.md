@@ -117,13 +117,15 @@ quality bounds, and [video pipeline](video-pipeline.md) for processing stages.
 `video-loop-repair` proposes a separate output for one damaged interior cell.
 It preserves the cut, metadata, normal cells, boundary cells, and actual GIF/WebP
 schedule. No interpolation is called. This operation has its own contract:
-repair report `schema_version: 3`, comparison `schema_version: 4`,
-`metric_version: source-restoration-v3`, `policy_version:
-key-protected-source-copy-one-step-cap-v1`, `scope:
+repair report `schema_version: 3`, comparison `schema_version: 5`,
+`metric_version: source-restoration-v4`, `policy_version:
+key-protected-source-copy-one-step-cap-jump-guard-v1`, `scope:
 processing-defect-restoration`, `operation: restore_active_cut`. The v1
-comparison above is unchanged. Two unreleased drafts are not this contract:
-`source-restoration-v1` copied the whole source cell and `source-restoration-v2`
-never capped a pixel. Their evidence and receipts are refused, never read as v3.
+comparison above is unchanged. Earlier versions are not this contract:
+`source-restoration-v3` (2.39.0) made the same cell and accepted it without
+[the jump guard](#the-jump-guard), and two unreleased drafts,
+`source-restoration-v1` and `-v2`, copied the whole source cell and never capped
+a pixel. Their evidence and receipts are refused, never read as v4.
 
 ### What a restored cell is
 
@@ -369,7 +371,8 @@ The report carries `origin`, `baseline` and `candidate` (each with its five
 `improved` requires that the one changed cell is byte-exact the partial copy
 made from the origin and the source, its coverage the source's, the candidate's
 receipt the recomputed one, at least one cleared actual fault, unchanged normal
-cells and metadata bytes, and no worsening protected axis. A changed cell that
+cells and metadata bytes, and no worsening protected axis, the jump around the
+changed cell included. A changed cell that
 is not that copy (a pixel outside the masks, a capped place left uncapped or
 capped further) returns `regressed` with
 `changed-cell-is-not-the-verified-source-copy`; a receipt that differs returns
@@ -395,6 +398,60 @@ rule are the same for a capped cell: the cap is what lets the source's pixel
 meet them, not an exception to them. A normal cell that already carries a made
 excess is not a target and is never rewritten; `axes.key_colour.baseline`
 reports it as delivered.
+
+### The jump guard
+
+A target is a cell the jump repair replaced, and the repair replaced it because
+a step into or out of the source frame at that time jumped ([loop
+repair](loop-repair.md), section 2). The in-between it adopted may have melted,
+and that is what restoration clears; the source frame it replaced is still the
+jump. Its pixels can clear the melt and bring the jump back. `axes.jump` reads
+the jump repair's own step score on the final cells of both loops:
+
+```text
+score[k]   = repair.jump_scores(cells, facing, box)["score"][k]    step k: cell k to cell k+1, the last to the first
+facing     = jump_repair.facing in the origin's loop report
+box        = the union box of the source's own cells (repair.union_box)
+jump(c)    = max(score[c - 1], score[c])                           the step into cell c and the step out of it
+regressed  where jump(candidate) > jump(baseline) at a changed cell
+```
+
+The score is the one the jump repair picks frames by: per step, the change of
+coverage over the whole box and over the hair behind the body, each over its
+own median in the loop, the larger of the two. Both loops are scored on one box,
+the source cells' (the jump repair reads the box of the loop as filmed), with
+the facing the repair recorded. More than the baseline's is worse. No bound is
+read, `JUMP_RATIO` included: the baseline is the measure. A rise is a measured
+worsening, as on every other axis, so the verdict is `regressed` with
+`jump:regressed`, not `unknown`, and the next independent proposal may be
+tried. A fall alone does not make a candidate `improved`: that still needs a
+cleared fault.
+
+| `axes.jump` field | Meaning |
+|---|---|
+| `baseline`, `candidate` | Each step's score on that loop |
+| `whole`, `hair` | The two parts of the scores, each with `baseline` and `candidate` |
+| `facing`, `hair_box`, `box` | The recorded facing, the hair box as fractions of `box`, and `box` in cell pixels (`[left, top, right, bottom]`) |
+| `cells` | Per changed cell: `cell`, `steps` (`[c - 1, c]`, cyclic), and its `baseline` and `candidate` reading |
+| `status` | `regressed` when a changed cell's reading rises, `improved` when one falls and none rises, else `non_regressing` |
+
+The jump repair records the facing it read the hair with (`video-loop
+--facing`). A loop report whose repair names replaced cells but no facing, or a
+facing other than `right` or `left`, cannot say which steps were read: the
+request is shared `unknown` with `jump-repair-facing-unverified`. A loop whose
+repair replaced no cell has no target and reads no facing; its no-op reports
+`axes.jump` as `{"facing": null, "cells": [], "status": "non_regressing",
+"reason": "no-jump-repaired-cell"}`.
+
+In use, a cell the jump repair made is restored only where the in-between
+jumped more than the source frame does, as when it lost coverage (a limb left a
+pale ghost). Where the in-between was the smoother step and only its drawing
+melted, the restored cell is `regressed` and the delivered in-between stays.
+
+The guard reads coverage, not colour. A wrong colour in a source frame is
+seen only through the jump it came with: where the in-between jumped more, the
+source frame is restored with its colour, right or wrong. The comparison reads
+no colour bound beyond the key colour's.
 
 For an outline-specific UI success message, require `verdict == improved` and
 an `outline` entry in `cleared_faults[].faults`. `axes` contains raw baseline,
