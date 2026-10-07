@@ -193,6 +193,9 @@ When a frame was replaced the seam gate measures the rendered cells
 
 To compare an active result with a final candidate after all processing, use
 [`video-loop-compare`](loop-comparison.md); a seam pass alone is not an improvement.
+A replaced cell restored later from its source frame is compared with these
+same scores around it, with the recorded `facing`: a restoration that brings
+the jump back is not an improvement ([the jump guard](loop-comparison.md#the-jump-guard)).
 
 RIFE is located only when a frame is to be made. A loop with a jump and no RIFE is cut as filmed
 with a warning under `--repair auto`, and fails under `--repair on` (section 1, "Without RIFE").
