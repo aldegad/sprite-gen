@@ -12,6 +12,10 @@ from it and the source, so a receipt is recomputed, never trusted.
 Source correspondence, proposal generation and final acceptance are separate.
 A failed independent proposal never hides the next one; a missing shared source
 bridge stops the operation. All quality measurements consume final pixels.
+
+A target is a cell the jump repair replaced because a step into or out of the
+source frame there jumped. Restoring that frame's pixels can restore the jump:
+acceptance also reads the jump repair's own step score around the changed cell.
 """
 from __future__ import annotations
 
@@ -31,17 +35,17 @@ from sprite_gen.frames.decontam import _cap_key_hue
 from sprite_gen.frames.extract import _key_channel_split, _key_excess_field, _SPILL_FULL_MIN_TINT
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util import resample
-from sprite_gen.video import evidence, playback, rife, source
+from sprite_gen.video import evidence, playback, repair, rife, source
 from sprite_gen.video.compare import KIND as COMPARISON_KIND, Loop
 from sprite_gen.video.interpolation_quality import SMEAR_WARN, OUTLINE_WARN, faults
 
-METRIC = "source-restoration-v3"
-POLICY = "key-protected-source-copy-one-step-cap-v1"
+METRIC = "source-restoration-v4"
+POLICY = "key-protected-source-copy-one-step-cap-jump-guard-v1"
 SCOPE = "processing-defect-restoration"
 OPERATION = "restore_active_cut"
 KIND = "sprite-gen-video-loop-restoration"
 REPAIR_SCHEMA = 3
-COMPARISON_SCHEMA = 4
+COMPARISON_SCHEMA = 5
 MAX_PROPOSALS = 3
 ARTIFACTS = ("strip", "meta", "report", "gif", "webp")
 LISTED = 256  # capped or protected pixels a report spells out; the masks always hold all of them
@@ -77,6 +81,13 @@ def key_weight(rgba: Any, key: str) -> Any:
     restored coverage: returning to a source pixel does not excuse its key spill.
     """
     return rgba[..., 3].astype(np.int64) * np.maximum(0, _key_hue(rgba, key) - _BAR)
+
+
+def _jump_facing(origin: Loop) -> str | None:
+    """The facing the jump repair read the origin's frames with, as its record says; None when it names none."""
+    from sprite_gen.video.loop import FACINGS
+    facing = (origin.source_report.get("jump_repair") or {}).get("facing")
+    return facing if facing in FACINGS else None
 
 
 def _source_key(src: source.Source) -> str | None:
@@ -226,7 +237,39 @@ def _receipt(origin: Loop, src: source.Source, projection: source.Projection,
             "upstream_quality": "historical; final pixels require source-restoration comparison"}
 
 
-def judge(before: list[Image.Image], after: list[Image.Image], ref: list[Image.Image], key: str) -> dict[str, Any]:
+def _status(pairs: list[tuple[float, float]]) -> str:
+    """One axis over (baseline, candidate) pairs where more is worse: any rise regresses it."""
+    return ("regressed" if any(y > x + 1e-9 for x, y in pairs) else
+            "improved" if any(y < x - 1e-9 for x, y in pairs) else "non_regressing")
+
+
+def jump(before: list[Image.Image], after: list[Image.Image], ref: list[Image.Image], changed: list[int],
+         facing: str | None) -> dict[str, Any]:
+    """The jump repair's step score (`repair.jump_scores`) on the two steps into and out of each changed cell.
+
+    Both loops are scored on one box, the source cells' union box (the jump repair reads the box of
+    the loop as filmed), with the facing the repair recorded. A cell's reading is the larger of its
+    two steps' scores. More than the baseline's is worse; no bound is read. None for `facing`
+    only where no cell can change (`chain`): nothing is scored.
+    """
+    if facing is None:
+        assert not changed
+        return {"facing": None, "cells": [], "status": "non_regressing", "reason": "no-jump-repaired-cell"}
+    box = repair.union_box(ref)
+    a, b = (repair.jump_scores(row, facing=facing, box=box) for row in (before, after))
+    n = len(before)
+    cells = [{"cell": c, "steps": [(c - 1) % n, c],
+              "baseline": max(float(a["score"][s]) for s in ((c - 1) % n, c)),
+              "candidate": max(float(b["score"][s]) for s in ((c - 1) % n, c))} for c in changed]
+    return {"baseline": a["score"].tolist(), "candidate": b["score"].tolist(),
+            "whole": {"baseline": a["whole"].tolist(), "candidate": b["whole"].tolist()},
+            "hair": {"baseline": a["hair"].tolist(), "candidate": b["hair"].tolist()},
+            "facing": facing, "hair_box": list(repair.hair_box(facing)), "box": list(box), "cells": cells,
+            "status": _status([(c["baseline"], c["candidate"]) for c in cells])}
+
+
+def judge(before: list[Image.Image], after: list[Image.Image], ref: list[Image.Image], key: str,
+          facing: str | None) -> dict[str, Any]:
     """The protections over final pixels, from one loop's cells to the next's."""
     changed = [k for k, (a, b) in enumerate(zip(before, after)) if a.tobytes() != b.tobytes()]
     a_final, b_final, reference = measure(before, before), measure(after, after), measure(ref, ref)
@@ -236,8 +279,7 @@ def judge(before: list[Image.Image], after: list[Image.Image], ref: list[Image.I
         a, b = ([max(0, q[metric] - threshold) for q in row] for row in (a_final, b_final))
         axes[metric] = {"baseline": [q[metric] for q in a_final], "candidate": [q[metric] for q in b_final],
                         "reference": [q[metric] for q in reference], "threshold": threshold,
-                        "status": "regressed" if any(y > x + 1e-9 for x, y in zip(a, b)) else
-                                  "improved" if any(y < x - 1e-9 for x, y in zip(a, b)) else "non_regressing"}
+                        "status": _status(list(zip(a, b)))}
     a_partial, b_partial = ([max(0, q["partial_excess"] - r["partial_excess"]) for q, r in zip(row, reference)]
                             for row in (a_fixed, b_fixed))
     axes["introduced_partial"] = {"baseline": a_partial, "candidate": b_partial,
@@ -252,6 +294,8 @@ def judge(before: list[Image.Image], after: list[Image.Image], ref: list[Image.I
                           "introduced_excess": [int(r.sum()) / 255 for r in raised],
                           "introduced_pixels": [int((r > 0).sum()) for r in raised], "tint_threshold": _BAR,
                           "status": "regressed" if any(r.any() for r in raised) else "non_regressing"}
+    # A rise brings back what the jump repair took out: a measured worsening, so `regressed`, as on every axis.
+    axes["jump"] = jump(before, after, ref, changed, facing)
     cleared = [{"cell": k, "faults": sorted(set(faults(a_final[k])) - set(faults(b_final[k])))} for k in changed]
     regressed = [k + ":regressed" for k, v in axes.items() if v["status"] == "regressed"]
     if regressed:
@@ -269,6 +313,7 @@ def judge(before: list[Image.Image], after: list[Image.Image], ref: list[Image.I
 class Chain:
     projection: source.Projection
     key: str
+    facing: str | None  # the jump repair's; None only when it replaced no cell, so there is no target
     shown: list[int]
     applied: list[dict[str, Any]]
 
@@ -303,10 +348,13 @@ def chain(origin: Loop, current: Loop, src: source.Source) -> tuple[Chain | None
     key = _source_key(src)
     if key is None:
         return None, "source-key-colour-unverified"
+    facing = _jump_facing(origin)
+    if facing is None and projection.record["repair_hints"]:
+        return None, "jump-repair-facing-unverified"
     schedule = playback.mapping(origin)
     if schedule is None:
         return None, "playback-schedule-unverified"
-    state = Chain(projection, key, schedule[0], [])
+    state = Chain(projection, key, facing, schedule[0], [])
     if receipt is None:
         return state, None
     applied = receipt.get("applied")
@@ -326,7 +374,7 @@ def chain(origin: Loop, current: Loop, src: source.Source) -> tuple[Chain | None
         part = partial(origin.frames[target], projection.frames[target], projection.cropped[target], key)
         after = [part.frame if k == target else f for k, f in enumerate(frames)]
         if (part.alpha_conflict or _portable(entry) != _portable(_entry(target, part, origin, previous, frames, src, projection))
-                or judge(frames, after, projection.frames, key)["verdict"] != "improved"):
+                or judge(frames, after, projection.frames, key, facing)["verdict"] != "improved"):
             raise ValueError("an applied restoration is not reproduced by the origin, the source and the protections")
         state.applied.append(entry)
         frames = after
@@ -348,6 +396,8 @@ def _base(origin: Loop, baseline: Loop, candidate: Loop, src: source.Source) -> 
                        "a restored cell is, at each place, the source's pixel, the source's pixel with its key hue "
                        "capped one step to the bar, or the origin's; never the whole source drawing",
                        "one step is the least a channel can change: a bound on the cap, not a verdict on how it looks",
+                       "the jump guard reads coverage, not colour: a wrong colour in a source frame is seen only "
+                       "through the jump it came with",
                        "source and origin receipts bind supplied bytes; they are not signatures of the original producer"]}
 
 
@@ -411,7 +461,7 @@ def compare(origin: Loop, baseline: Loop, candidate: Loop, src: source.Source, *
         receipt = _receipt(origin, src, projection, [*state.applied, entry])
         if _portable(candidate.source_report) != _portable({**baseline.source_report, "restoration": receipt}):
             return finish("unknown", ["candidate-report-differs-from-verified-receipt"])
-    measured = judge(baseline.frames, candidate.frames, ref, state.key)
+    measured = judge(baseline.frames, candidate.frames, ref, state.key, state.facing)
     result["axes"] = {**measured["axes"], "seam": {
         "status": "non_regressing", "reason": "strip-and-playback-boundary-cells-and-durations-exact"}}
     result["gait"]["source_order"] = "preserved"

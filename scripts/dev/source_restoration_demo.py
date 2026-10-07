@@ -207,7 +207,7 @@ def write_delivered(out: Path, source: dict[str, Path]) -> tuple[dict[str, Path]
             "source_cut": {"source": identity, "start": 0, "length": N, "samples": list(range(N))}}
     report = {"kind": "sprite-gen-video-loop-report", "status": "passed", "fps": FPS, "frames_total": N,
               "source": identity, "cycle": {"start": 0, "length": N}, "anchor": "none",
-              "jump_repair": {"replaced": list(DAMAGED)}, "strip": meta, "n_out": N, "delay_ms": DELAY,
+              "jump_repair": {"replaced": list(DAMAGED), "facing": "right"}, "strip": meta, "n_out": N, "delay_ms": DELAY,
               "note": ("synthetic stand-in for a delivered loop: cells cut by the loop recipe from drawn keyed frames; "
                        f"cells {DAMAGED[0]} and {DAMAGED[1]} drawn as melted in-betweens (scripts/dev/source_restoration_demo.py)")}
     files = paths(out / "delivered")
