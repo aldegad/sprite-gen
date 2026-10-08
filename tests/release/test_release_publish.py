@@ -69,6 +69,10 @@ class Harness:
         self.gh = tmp_path / "gh"
         self.gh.write_text(GH_STUB, encoding="utf-8")
         self.gh.chmod(0o755)
+        if os.name == "nt":
+            # Windows runs no shebang (WinError 193): the stub is called through a .cmd that hands it to this Python.
+            script, self.gh = self.gh, tmp_path / "gh.cmd"
+            self.gh.write_text(f'@"{sys.executable}" "{script}" %*\r\n', encoding="utf-8")
 
     def run(self, *args: str, unreachable: bool = False) -> subprocess.CompletedProcess[str]:
         env = {**os.environ, "GH_STUB_STATE": str(self.state), "GH_STUB_LOG": str(self.log)}

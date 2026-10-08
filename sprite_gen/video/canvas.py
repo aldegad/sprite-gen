@@ -7,7 +7,8 @@ canvas is decided HERE, on the still: a jump needs head-room above (tall), an
 attack needs room above and in front, a projectile needs room in front (wide), everything else stays square.
 The state -> canvas table below is the single owner of that rule; `--shape`
 overrides it per call, with the state's own row for that shape where it has one (a walk or run
-forced wide gets no head-room).
+forced wide gets no head-room). `--shape portrait` is the roomy upright frame for a walk or run seen
+at a diagonal: the still cut to its subject, 60 % of a 9:16 canvas's height, 18 % above it.
 
 `--fit tight` is the other way to frame: no room is added for the motion. The
 empty rows above and below the subject are dropped (a little headroom stays),
@@ -48,17 +49,21 @@ from sprite_gen.spec.runio import atomic_write_text
 SHAPE_SQUARE = "square"
 SHAPE_TALL = "tall"
 SHAPE_WIDE = "wide"
-SHAPES = (SHAPE_SQUARE, SHAPE_TALL, SHAPE_WIDE)
+SHAPE_PORTRAIT = "portrait"
+SHAPES = (SHAPE_SQUARE, SHAPE_TALL, SHAPE_WIDE, SHAPE_PORTRAIT)
 
 
 @dataclass(frozen=True)
 class CanvasProfile:
     shape: str
     ratio: float  # width / height
-    headroom: float  # fraction of the canvas height kept empty ABOVE the still (tall/wide)
+    headroom: float  # fraction of the canvas height kept empty ABOVE the still (tall/wide), above the subject (portrait)
     lead: float  # fraction of the canvas width kept empty IN FRONT of the subject (wide)
     trail: float  # fraction of the canvas width kept empty BEHIND the subject (wide)
     why: str
+    # portrait: the fraction of the canvas height the subject's own rows fill. The other shapes place the still whole,
+    # its own margins included, so they cannot say how much of the frame the figure is; 0 for them.
+    subject: float = 0.0
 
 
 # The one table. Keys are state names as the sprite-request uses them; unknown
@@ -99,10 +104,24 @@ STATE_SHAPE_CANVAS: dict[tuple[str, str], CanvasProfile] = {
     ("walk", SHAPE_WIDE): GAIT_WIDE,
     ("run", SHAPE_WIDE): GAIT_WIDE,
 }
+# `--shape portrait`: a roomy upright frame for a walk or run seen at a diagonal (`video-set --diagonal-gait-shape`).
+# The still is cut to its subject (only the flat key around it goes, nothing is scaled) and placed centred on a 9:16
+# canvas whose height the subject fills 60 % of, 18 % of the height above it and the rest below. In the crashbang
+# village production (2026-10-06, `output/modern-village-ortho16-20261006/batch_motion.py`, take
+# `pinned-portrait-roomy`) a stocky back-diagonal run on a 9:16 canvas with the figure 85 % of the height reached the
+# side edges with its arms and strides and `video-frames` refused the frames; at 60 % with 18 % above, pinned at
+# 720p, the run held its rear diagonal facing right and facing left. `--shape tall` did not give that frame: it
+# re-padded the production's 9:16 still to 3:4 with a jump's head-room and the figure came out about 40 % of the
+# height, so the production built the canvas by hand. Judged by eye on one character; the numbers are that take's,
+# not a sweep.
+PORTRAIT = CanvasProfile(SHAPE_PORTRAIT, 9 / 16, 0.18, 0.0, 0.0,
+                         "a diagonal walk or run: the subject 60 % of a 9:16 frame's height with 18 % above it, so "
+                         "swinging arms and strides stay clear of every edge", subject=0.60)
 SHAPE_DEFAULTS: dict[str, CanvasProfile] = {
     SHAPE_SQUARE: STATE_CANVAS["default"],
     SHAPE_TALL: STATE_CANVAS["jump"],
     SHAPE_WIDE: WIDE_OVERRIDE,
+    SHAPE_PORTRAIT: PORTRAIT,
 }
 CORNER_TOLERANCE = 24  # max per-channel spread across the four corners for a "flat" background
 FITS = ("state", "tight")  # state: the table's room for the motion; tight: none
@@ -205,6 +224,46 @@ def subject_rows(image: Image.Image, fill: tuple[int, int, int], tolerance: int)
     return int(rows[0]), int(rows[-1]) + 1
 
 
+def subject_box(image: Image.Image, fill: tuple[int, int, int], tolerance: int) -> tuple[int, int, int, int]:
+    """(left, top, right, bottom), one past the last, around every pixel that is not the background `fill`."""
+    data = np.asarray(image.convert("RGB"), dtype=np.int16)
+    found = np.abs(data - np.array(fill, dtype=np.int16)).max(axis=2) > tolerance
+    rows, cols = np.flatnonzero(found.any(axis=1)), np.flatnonzero(found.any(axis=0))
+    if rows.size == 0:
+        raise SystemExit("video-canvas: --shape portrait found no subject on the still's background")
+    return int(cols[0]), int(rows[0]), int(cols[-1]) + 1, int(rows[-1]) + 1
+
+
+def portrait_canvas(src: Image.Image, fill: tuple[int, int, int], profile: CanvasProfile, head: float, *,
+                    tolerance: int) -> tuple[Image.Image, dict[str, Any]]:
+    """The still cut to its subject and placed centred, `head` of the canvas height above it, on a canvas of
+    `profile.ratio` whose height the subject fills `profile.subject` of (`PORTRAIT`).
+
+    Only flat background is cut away and nothing is scaled. A subject wider than the ratio allows at that height
+    widens the canvas (its height follows) and then fills less of the height; the report says how much."""
+    if not 0 < profile.subject < 1 or not head + profile.subject < 1:
+        raise SystemExit(f"video-canvas: --headroom {head} leaves no room below a subject {profile.subject:.0%} of the "
+                         f"{profile.shape} canvas's height; keep headroom below {1 - profile.subject:.2f}")
+    left, top, right, bottom = subject_box(src, fill, tolerance)
+    subject = src.crop((left, top, right, bottom))
+    sw, sh = subject.size
+    canvas_h = math.ceil(sh / profile.subject)
+    canvas_w = round(canvas_h * profile.ratio)
+    if canvas_w < sw:
+        canvas_w, canvas_h = sw, max(canvas_h, math.ceil(sw / profile.ratio))
+    x, y = (canvas_w - sw) // 2, round(canvas_h * head)
+    canvas_h = max(canvas_h, y + sh)
+    canvas = Image.new("RGB", (canvas_w, canvas_h), fill)
+    canvas.paste(subject, (x, y))
+    report = {
+        "canvas": [canvas_w, canvas_h],
+        "offset": [x, y],
+        "portrait": {"subject_box": [left, top, right, bottom], "subject": [sw, sh],
+                     "subject_height_pct": round(100 * sh / canvas_h, 2)},
+    }
+    return canvas, report
+
+
 def tight_canvas(src: Image.Image, fill: tuple[int, int, int], *, tolerance: int) -> tuple[Image.Image, dict[str, Any]]:
     """Drop the empty rows above and below the subject, keep the width, pad to the nearest framing.
 
@@ -286,25 +345,33 @@ def pad_canvas(
     back = profile.trail if trail is None else trail
     if not 0 <= head < 0.9 or not 0 <= front < 0.9 or not 0 <= back < 0.9 or not front + back < 0.9:
         raise SystemExit("video-canvas: --headroom/--lead/--trail must be in [0, 0.9) and lead + trail below 0.9")
-    if profile.shape == SHAPE_SQUARE:
-        side = max(w, h)
-        canvas_w, canvas_h = side, side
-        x, y = (side - w) // 2, side - h
-    elif profile.shape == SHAPE_TALL:
-        # the still becomes the bottom (1 - headroom) of a canvas at least as tall as the
-        # profile ratio demands for the still's width — never narrower than the still
-        canvas_h = max(h, round(h / (1 - head)), round(w / profile.ratio))
-        canvas_w = max(w, round(canvas_h * profile.ratio))
-        x, y = (canvas_w - w) // 2, canvas_h - h
-    else:  # wide: `trail` of the width stays empty behind the subject, the rest of the extra width goes in front; at least the profile ratio
-        required_h = max(h, round(h / (1 - head)))
-        canvas_w = max(w, round(w / (1 - front - back)), round(required_h * profile.ratio))
-        canvas_h = max(h, round(canvas_w / profile.ratio))
-        y = canvas_h - h
-        behind = min(round(canvas_w * back), canvas_w - w)
-        x = behind if facing == "right" else canvas_w - w - behind
-    canvas = Image.new("RGB", (canvas_w, canvas_h), fill)
-    canvas.paste(src, (x, y))
+    extra: dict[str, Any] = {}
+    if profile.shape == SHAPE_PORTRAIT:
+        # the subject, not the still, is placed: the still's own margins would set how much of the frame it fills
+        canvas, placed = portrait_canvas(src, tuple(fill), profile, head,  # type: ignore[arg-type]
+                                         tolerance=0 if kind is not None else CORNER_TOLERANCE)
+        (canvas_w, canvas_h), (x, y) = placed["canvas"], placed["offset"]
+        extra = {"portrait": placed["portrait"]}
+    else:
+        if profile.shape == SHAPE_SQUARE:
+            side = max(w, h)
+            canvas_w, canvas_h = side, side
+            x, y = (side - w) // 2, side - h
+        elif profile.shape == SHAPE_TALL:
+            # the still becomes the bottom (1 - headroom) of a canvas at least as tall as the
+            # profile ratio demands for the still's width — never narrower than the still
+            canvas_h = max(h, round(h / (1 - head)), round(w / profile.ratio))
+            canvas_w = max(w, round(canvas_h * profile.ratio))
+            x, y = (canvas_w - w) // 2, canvas_h - h
+        else:  # wide: `trail` of the width stays empty behind the subject, the rest of the extra width goes in front; at least the profile ratio
+            required_h = max(h, round(h / (1 - head)))
+            canvas_w = max(w, round(w / (1 - front - back)), round(required_h * profile.ratio))
+            canvas_h = max(h, round(canvas_w / profile.ratio))
+            y = canvas_h - h
+            behind = min(round(canvas_w * back), canvas_w - w)
+            x = behind if facing == "right" else canvas_w - w - behind
+        canvas = Image.new("RGB", (canvas_w, canvas_h), fill)
+        canvas.paste(src, (x, y))
     report = {
         "fit": "state",
         "shape": profile.shape,
@@ -320,6 +387,7 @@ def pad_canvas(
         "corner_rgb": list(corner),
         **key_report,
         "why": profile.why,
+        **extra,
     }
     return canvas, report
 
@@ -360,9 +428,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--still", required=True, type=Path, help="base still on a flat chroma background")
     parser.add_argument("--out", required=True, type=Path, help="padded PNG to feed `sprite-gen video`")
     parser.add_argument("--state", help="motion state name (jump/attack/projectile/... — selects the canvas row)")
-    parser.add_argument("--shape", choices=SHAPES, help="override the state's canvas shape")
+    parser.add_argument("--shape", choices=SHAPES, help="override the state's canvas shape; portrait: 9:16 with the subject (the still cut to it, nothing scaled) 60 %% of the height and 18 %% above it, roomy for a diagonal walk or run")
     parser.add_argument("--facing", choices=("right", "left"), default="right", help="which way the subject faces (wide canvases add room in front)")
-    parser.add_argument("--headroom", type=float, help="tall/wide: empty fraction of canvas height above the still (default from the profile)")
+    parser.add_argument("--headroom", type=float, help="tall/wide: empty fraction of canvas height above the still; portrait: above the subject (default from the profile)")
     parser.add_argument("--lead", type=float, help="wide: empty fraction in front of the subject (default from the profile)")
     parser.add_argument("--trail", type=float, help="wide: empty fraction behind the subject, for a weapon drawn back (default from the profile)")
     parser.add_argument("--key", choices=KEYS, default="auto", help="chroma key of the still (auto reads the corners; green/magenta are normalized to the exact key; white pads with the corner colour)")

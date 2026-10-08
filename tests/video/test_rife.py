@@ -19,7 +19,8 @@ from sprite_gen.video import rife
 
 
 def _fake_binary(tmp_path: Path, with_model: bool = True) -> Path:
-    binary = tmp_path / "bin" / rife.BINARY
+    suffix = ".exe" if rife.platform_release() == "windows" else ""
+    binary = tmp_path / "bin" / f"{rife.BINARY}{suffix}"
     binary.parent.mkdir(parents=True)
     binary.write_text("#!/bin/sh\nexit 0\n")
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
@@ -88,6 +89,26 @@ def test_missing_model_is_refused(monkeypatch, tmp_path):
     monkeypatch.delenv("SPRITE_GEN_RIFE_MODEL", raising=False)
     with pytest.raises(rife.RifeUnavailable, match="flownet.param"):
         rife.locate()
+
+
+def test_model_path_is_relative_to_the_binary_directory(monkeypatch, tmp_path):
+    binary = tmp_path / "install" / "rife-ncnn-vulkan.exe"
+    model = binary.parent / rife.MODEL
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        Image.new("RGB", (2, 2)).save(command[command.index("-o") + 1])
+        return type("Result", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+
+    monkeypatch.setattr(rife.subprocess, "run", fake_run)
+    frame = rife._call(binary, model, Image.new("RGB", (2, 2)), Image.new("RGB", (2, 2)), 0.5, tmp_path)
+
+    command = captured["command"]
+    assert command[command.index("-m") + 1] == rife.MODEL
+    assert captured["kwargs"]["cwd"] == binary.parent
+    assert frame.size == (2, 2)
 
 
 def _disc(cx: int) -> Image.Image:

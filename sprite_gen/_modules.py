@@ -29,6 +29,7 @@ MODULE_DOMAIN = {
     'align': 'video',
     'follow': 'video',
     'follow_inspect': 'video',
+    'set_export': 'video',
     'compare': 'video',
     'restoration': 'video',
     'source': 'video',
@@ -95,8 +96,8 @@ DOMAIN_TITLE = dict(DOMAINS)
 PIPELINES: list[dict[str, object]] = [
     {"key": "A", "name": "atlas rows", "verbs": ["prepare", "gen", "gen-set", "extract", "compose-atlas", "curation"],
      "chain": "prepare → gen (or gen-set) → extract → compose-atlas; optional curation and recompose", "doc": "docs/run-contract.md"},
-    {"key": "B", "name": "video → loop", "verbs": ["video-canvas", "video", "video-prompt", "video-frames", "video-loop", "video-set", "video-cycle-align", "video-follow", "video-follow-inspect", "handed-check"],
-     "chain": "video-canvas → video (or video-prompt + a video MCP) → video-frames → video-loop, or video-set; video-cycle-align across a set; video-follow for a soft part's follow-through (video-follow-inspect shows every cell of it and moves nothing); handed-check for an item on one side", "doc": "docs/video-pipeline.md"},
+    {"key": "B", "name": "video → loop", "verbs": ["video-canvas", "video", "video-prompt", "video-frames", "video-loop", "video-set", "video-cycle-align", "video-follow", "video-follow-inspect", "handed-check", "video-set-export"],
+     "chain": "video-canvas → video (or video-prompt + a video MCP) → video-frames → video-loop, or video-set; video-cycle-align across a set; video-follow for a soft part's follow-through (video-follow-inspect shows every cell of it and moves nothing); handed-check for an item on one side; video-set-export for the set by compass heading", "doc": "docs/video-pipeline.md"},
 ]
 
 TOOL_GROUPS: list[dict[str, object]] = [

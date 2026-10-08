@@ -366,8 +366,13 @@ def generate_image(
     workdir: Path | None = None,
     decontam: str = "off",
     layout_guide: bool = False,
+    camera_elevation: int | None = None,
 ) -> GenResult:
     """Generate one image and return a GenResult. Raises SystemExit on any failure."""
+    if camera_elevation is not None:
+        from sprite_gen.video.batch import check_camera_elevation
+
+        check_camera_elevation(camera_elevation, "gen")
     if decontam not in ("off", "auto", "palette"):
         raise SystemExit(f"gen: unknown --decontam {decontam!r}; expected off|auto|palette")
     if decontam == "palette" and not transparent:
@@ -402,7 +407,8 @@ def generate_image(
     # takes the outline and light fills with it (2026-10-04). A key the prompt already names stays.
     parts = still_prompt(prompt, view=view, facing=facing, handed=handed, body_plan=body_plan, refs=bool(refs),
                          key=chroma_key if strategy_source == STRATEGY_SOURCE_REFS else None,
-                         layout=layout_guide_cell(aspect_ratio) if layout_guide else None)
+                         layout=layout_guide_cell(aspect_ratio) if layout_guide else None,
+                         camera_elevation=camera_elevation)
     prompt = parts.text
     for line in prompt_parts.note_lines(parts):
         print(f"[gen] {line}", file=sys.stderr)
@@ -545,6 +551,7 @@ def generate_image(
                                 "handed": [vars(h) for h in handed or []],
                                 **({"body_plan": [vars(b) for b in body_plan]} if body_plan else {})}} if view else {}),
                    **({"layout_guide": guide_cell} if guide_cell else {}),
+                   **({"camera_elevation": camera_elevation} if camera_elevation is not None else {}),
                    **({"prompt_notes": parts.notes} if parts.notes else {})},
         )
     finally:
@@ -574,14 +581,16 @@ def _check_view(view: str | None, facing: str | None, facing_fix: str, handed: l
 def still_prompt(prompt: str, *, view: str | None = None, facing: str | None = None,
                  handed: list[handed_mod.Handed] | None = None, body_plan: list[Body] | None = None,
                  refs: bool = False, key: str | None = None,
-                 layout: dict[str, Any] | None = None) -> prompt_parts.Prompt:
+                 layout: dict[str, Any] | None = None,
+                 camera_elevation: int | None = None) -> prompt_parts.Prompt:
     """The prompt a still is drawn from: the caller's text, then the engine's pieces (`prompt_parts.Prompt.add`;
-    without `handed` or `body_plan`, 2.22.0's prompt to the byte). In order:
+    without `handed`, `body_plan` or `camera_elevation`, 2.22.0's prompt to the byte). In order:
 
     - `view` (`--direction`): the sentence for drawing the still at that view, turned to `facing` (the side and
       diagonal views; a `body_plan` that is not one biped gets it without the feet, chest, hips, shoulders and
-      shoes and with what it stands on, `still_view_text`), then where each `handed` item is in it
-      (`handedness.text`);
+      shoes and with what it stands on, `still_view_text`), then the camera looking down `camera_elevation`
+      degrees (`batch.camera_still_text`), then where each `handed` item is in it (`handedness.text`);
+    - without a `view`, the camera where the view sentence would be;
     - with `refs` and a `facing`: the turn over the reference (`facing.prompt_suffix`);
     - `key` (green / magenta, a ref run `auto` planned to key): the key background line, unless the prompt
       names a key background already;
@@ -589,14 +598,23 @@ def still_prompt(prompt: str, *, view: str | None = None, facing: str | None = N
     """
     figures = body_mod.figures(body_plan)
     parts = prompt_parts.Prompt(prompt, caller=f"{prompt} {figures}" if figures else None)
+    camera = None
+    if camera_elevation is not None:
+        from sprite_gen.video.batch import camera_still_text
+
+        camera = camera_still_text(camera_elevation, body_plan)
     if view is not None:
         # The view sentences are the video pipeline's (a still is drawn for the clip that starts from it).
         from sprite_gen.video.batch import still_view_text
 
         text = still_view_text(view, facing or "right", body_plan)
         parts.add("view", text[0].upper() + text[1:] + ".", facing=facing or prompt_parts.NO_TURN)
+        if camera is not None:
+            parts.add("camera", camera, sep=" ")
         if handed:
             parts.add("handed", handed_mod.text(handed, view, facing), sep=" ", handed=handed)
+    elif camera is not None:
+        parts.add("camera", camera)
     if refs and facing is not None:
         parts.add("facing", facing_mod.prompt_suffix(facing), facing=facing)
     if key is not None:
@@ -653,6 +671,7 @@ def _run(args: argparse.Namespace) -> int:
         workdir=args.workdir,
         decontam=str(getattr(args, "decontam", None) or "off"),
         layout_guide=bool(getattr(args, "layout_guide", False)),
+        camera_elevation=getattr(args, "camera_elevation", None),
     )
     payload = result.to_dict()
     # `provider` in the payload is always the backend that actually generated the
@@ -770,6 +789,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--direction", choices=handed_mod.VIEWS, help="draw the still at this sprite view: the engine's view sentence is added to the prompt (side and diagonal views also take --facing right|left)")
     parser.add_argument("--handed", action="append", default=[], metavar="ITEM=SIDE [PART]", help="with --direction: an asymmetric item on one of the character's own sides, e.g. 'the black smartwatch=left wrist' (repeatable); the prompt says where it is in this view, and the still is never mirrored")
     parser.add_argument("--body-plan", action="append", default=[], metavar="PLAN | FIGURE=PLAN", help="with --direction: what the character stands on, biped (default), quadruped or legless; a scene of several figures names each, e.g. 'the man=biped' 'the horse=quadruped' (repeatable): the view sentence names no part the body lacks, as video-set --body-plan")
+    parser.add_argument("--camera-elevation", type=int, default=None, metavar="DEG", help="draw the still from a fixed top-down orthographic game camera looking down DEG degrees above the horizon (10..80; 35 was chosen for an RPG village over 16, which read as an eye-level side-scroller, and 50, too steep): the engine's camera sentence is added after the view sentence, or after the prompt without --direction; film it with video-set --camera-elevation DEG")
     parser.add_argument("--trim-alpha", action="store_true", help="with --transparent: crop the published PNG to its opaque bbox so the bottom edge is the foot line (margins reported)")
     parser.add_argument(
         "--layout-guide",

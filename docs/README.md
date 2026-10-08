@@ -17,6 +17,7 @@ flowchart LR
         b1[video-canvas] --> b2[video] --> b3[video-frames] --> b4[video-loop]
         b5[video-set] -.runs all four.-> b1
         b4 --> b6[video-cycle-align] --> b7[video-follow]
+        b7 --> b8[video-set-export]
     end
     subgraph C["C · utilities"]
         direction LR
@@ -38,7 +39,7 @@ flowchart LR
 | Pipeline / tool group / workflow | Entry doc | Verbs |
 |---|---|---|
 | **A · atlas rows** — one still becomes a runtime sprite sheet | [run-contract.md](run-contract.md) | `prepare` → `gen` / `gen-set` → `extract` → `compose-atlas`; optional `curation` and recompose |
-| **B · video → loop** — one still becomes transparent motion loops | [video-pipeline.md](video-pipeline.md) | `video-canvas` → `video` (or `video-prompt` and a video MCP on your agent) → `video-frames` → `video-loop`, `video-set`, `video-cycle-align`, `video-follow` (`video-follow-inspect` shows every cell of it and moves nothing); `handed-check` for an item on one side |
+| **B · video → loop** — one still becomes transparent motion loops | [video-pipeline.md](video-pipeline.md) | `video-canvas` → `video` (or `video-prompt` and a video MCP on your agent) → `video-frames` → `video-loop`, `video-set`, `video-cycle-align`, `video-follow` (`video-follow-inspect` shows every cell of it and moves nothing); `handed-check` for an item on one side; `video-set-export` for the set by compass heading ([direction-set.md](direction-set.md)) |
 | **C · utilities** — imported images in, clean cuts out | [sheet-slicing.md](sheet-slicing.md) | `cutout`, `slice-sheet`, `unpack-atlas` |
 | **D · post-processing** — finished sheets, refined | [recolor.md](recolor.md) | `recolor`, `recolor-palette`, `compose-layers`, breathing (compose), `export-pngs`, `export-aseprite` |
 | **E · asset tools** — independent background, shadow and motion tools | [asset-tools.md](asset-tools.md) | `background-tile`, `shadow`, `inspect-motion` |
@@ -81,6 +82,7 @@ grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
 | [video-pipeline.md](video-pipeline.md) | Pipeline B engine contract: state canvas, keyed frames, true-period and one-shot cycles, strip/GIF/WebP, the batch |
 | [loop-review.md](loop-review.md) | Automatic loop decisions, ambiguous gait review, visual evidence and explicit cut/alignment overrides |
 | [loop-repair.md](loop-repair.md) | RIFE (where it runs, cost, licences, `sprite-gen rife install`, what runs without it), jump-frame repair, the jolt index and its gate, one cycle length per direction set |
+| [direction-set.md](direction-set.md) | `video-set-export`: a finished set as eight compass headings for a top-down game — the heading map, per-cell mirroring with provenance, the `--handed` refusal, one foot pivot, the size check, `directions.json` |
 | [frame-interpolation.md](frame-interpolation.md) | Generative in-betweens for sprite frames, recorded as a take |
 | [seamless-video-loop.md](seamless-video-loop.md) | Making a non-looping ambient clip loop forever (RIFE seam bridge) — a different job from pipeline B |
 
