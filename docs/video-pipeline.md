@@ -1208,7 +1208,9 @@ lowercase hexadecimal digits; anything else is refused before anything is read):
 - **`uncertain`**, refused: the cut is the one, but a cell was made between two of its frames
   (RIFE, or any `between`), or a cell is not the cut's cell pixel for pixel — a crop or a scale
   changed and nothing records how, or a cell was drawn again since. A made cell has no reading of
-  its own, and none is taken from the nearer frame by rounding.
+  its own, and none is taken from the nearer frame by rounding. A cut made before its strip
+  recorded its crop (`source_rect`) says nothing of where it was cropped; there the cells' pixels
+  decide alone, as they do for every cell anyway.
 - **`no-match`**, refused: neither — another clip, another cut, a strip nothing here was cut or
   aligned from. Locate the regions again on this strip.
 

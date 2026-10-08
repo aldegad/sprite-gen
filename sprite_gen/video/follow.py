@@ -364,7 +364,9 @@ def transported_motion(meta: dict[str, Any], cells: list[Image.Image], read_on: 
     (w, h), rect = cells[0].size, meta.get("source_rect")
     now = (w, h, meta.get("scale"), None if rect is None else list(rect[:2]))
     then = (origin["w"], origin["h"], origin["scale"], origin["crop_origin"])
-    if now != then:
+    # A cut made before the strip recorded its crop says nothing of where it was cropped: there the cells' pixels
+    # below are the whole test, as they are for every cell anyway.
+    if now[:3] != then[:3] or (then[3] is not None and now[3] != then[3]):
         raise uncertain(f"the cut's crop or scale changed (cells {then[0]}x{then[1]} at scale {then[2]} from {then[3]}, now "
                         f"{w}x{h} at scale {now[2]} from {now[3]}) and no transform is recorded")
     frames, digests = origin["sample_indices"], origin["cells_sha256"]
