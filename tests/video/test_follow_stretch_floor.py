@@ -57,7 +57,8 @@ def strip_dir(path, frames):
 
 @pytest.fixture
 def probes(tmp_path):
-    return {'X1': strip_dir(tmp_path/'x1', X1[0]), 'X2': strip_dir(tmp_path/'x2', X2[0])}
+    # Named apart from every copy below on a file system that does not tell case apart.
+    return {'X1': strip_dir(tmp_path/'probe-x1', X1[0]), 'X2': strip_dir(tmp_path/'probe-x2', X2[0])}
 
 
 def followed(src, path, regions, **kw):
@@ -75,7 +76,7 @@ def drawn(loop_dir):
 @pytest.mark.parametrize('floor', FLOORS)
 def test_f1_every_cell_of_every_region_keeps_the_floor(probes, tmp_path, floor):
     for name, (_, region) in (('X1', X1), ('X2', X2)):
-        _, rec = followed(probes[name], tmp_path/f'{name}', [region], stretch_floor=floor)
+        _, rec = followed(probes[name], tmp_path/f'{name}-followed', [region], stretch_floor=floor)
         stretch = rec['stretch']
         assert stretch['policy'] == follow.STRETCH_POLICY and stretch['floor'] == floor
         entry = stretch['regions'][0]
@@ -88,7 +89,7 @@ def test_f1_every_cell_of_every_region_keeps_the_floor(probes, tmp_path, floor):
 
 def test_f1_a_floor_no_gain_of_one_or_more_keeps_holds_the_region_and_one_held_alone_is_refused(probes, tmp_path):
     _, region = X1
-    loop_dir = shutil.copytree(probes['X1'], tmp_path/'x1')
+    loop_dir = shutil.copytree(probes['X1'], tmp_path/'one')
     before = drawn(loop_dir)
     with pytest.raises(SystemExit, match=r'--stretch-floor 0\.5.*held'):
         follow.follow_loop(loop_dir, [region], on_fold='lower', stretch_floor=0.5)
@@ -105,7 +106,7 @@ def test_f1_a_floor_no_gain_of_one_or_more_keeps_holds_the_region_and_one_held_a
 def test_f1_under_refuse_a_move_under_the_floor_is_refused(probes, tmp_path):
     _, region = X2
     with pytest.raises(SystemExit, match='--stretch-floor'):
-        follow.follow_loop(shutil.copytree(probes['X2'], tmp_path/'x2'), [region], gain=1.0, stretch_floor=0.9)
+        follow.follow_loop(shutil.copytree(probes['X2'], tmp_path/'refused'), [region], gain=1.0, stretch_floor=0.9)
 
 
 # ---------------------------------------------------------------- F2: never above the fold rule's gain
@@ -162,7 +163,7 @@ def test_the_floor_is_read_between_0_and_1(probes, tmp_path):
     _, region = X1
     for bad in (-0.1, 1.0, 1.5, float('nan')):
         with pytest.raises(SystemExit, match='--stretch-floor'):
-            follow.follow_loop(shutil.copytree(probes['X1'], tmp_path/f'x1-{bad}'), [region], stretch_floor=bad)
+            follow.follow_loop(shutil.copytree(probes['X1'], tmp_path/f'bad-{bad}'), [region], stretch_floor=bad)
 
 
 # ---------------------------------------------------------------- Q1: the bend and the seam are written down
