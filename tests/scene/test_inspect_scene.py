@@ -14,6 +14,8 @@ from sprite_gen.scene.inspect_scene import inspect_scene, output_path, run
 from sprite_gen.scene.model import load_scene
 from sprite_gen.spec import runio
 
+from conftest import symlink_or_skip
+
 
 def frames_asset(tmp_path, name, images, duration=0.1):
     entries = []
@@ -171,7 +173,7 @@ def test_run_refuses_reserved_names_scene_inputs_and_their_aliases(tmp_path, cap
     spec = ramp_scene(tmp_path)
     out = tmp_path / target
     if target == "spec-symlink.json":
-        out.symlink_to(spec)
+        symlink_or_skip(out, spec)
     elif target == "asset-hardlink.png":
         os.link(tmp_path / "ramp-1.png", out)
     elif target == "a-directory":

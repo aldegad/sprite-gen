@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shlex
+import sys
 
 from conftest import run_script
 
@@ -86,7 +88,8 @@ def test_correction_loop_min_attempts_forces_provider_then_converges(fixture_run
         "--out-dir", str(out_dir),
         "--max-passes", "3",
         "--min-attempts", "2",
-        "--provider-command", f"python3 {provider} {fixture_run_dir} {{next_run_dir}}",
+        # The template is POSIX shell syntax: literal paths are quoted so a Windows path keeps its backslashes.
+        "--provider-command", shlex.join([sys.executable, str(provider), str(fixture_run_dir)]) + " {next_run_dir}",
     )
     assert result.returncode == 0, result.stdout + result.stderr
     loop_report = json.loads((out_dir / "correction-loop.report.json").read_text(encoding="utf-8"))

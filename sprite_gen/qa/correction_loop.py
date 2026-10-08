@@ -122,12 +122,13 @@ def run_loop(
             raise SystemExit("correction loop needs --provider-command, or use --dry-run for an inspect/score/hint demo")
         next_run_dir = out_dir / f"candidate-{attempt + 1}"
         prompt_file = attempt_dir / "correction-hints.txt"
-        command = provider_command.format(
-            prompt_file=str(prompt_file),
-            next_run_dir=str(next_run_dir),
-            attempt=attempt + 1,
-        )
-        completed = subprocess.run(shlex.split(command), capture_output=True, text=True)
+        # The template is split first and each argument filled in after, so a substituted
+        # path is never re-read as shell syntax: POSIX splitting would drop the backslashes
+        # of a Windows path and break a path that holds a space or a quote.
+        argv = [arg.format(prompt_file=str(prompt_file), next_run_dir=str(next_run_dir), attempt=attempt + 1)
+                for arg in shlex.split(provider_command)]
+        command = shlex.join(argv)
+        completed = subprocess.run(argv, capture_output=True, text=True)
         atomic_write_text(
             attempt_dir / "provider.log",
             completed.stdout + ("\n--- stderr ---\n" + completed.stderr if completed.stderr else ""),

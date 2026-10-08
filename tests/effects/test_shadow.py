@@ -18,6 +18,8 @@ from sprite_gen.effects import shadow
 from sprite_gen.spec.assets import load_asset
 from sprite_gen.spec import runio
 
+from conftest import symlink_or_skip
+
 
 def _silhouette(size=(32, 48)):
     image = Image.new("RGBA", size)
@@ -361,7 +363,7 @@ def test_invalid_target_is_rejected_without_mutating_destination(tmp_path, targe
     out_dir.mkdir()
     target = out_dir / "shadow.png"
     if target_kind == "symlink":
-        target.symlink_to(tmp_path / "unrelated.png")
+        symlink_or_skip(target, tmp_path / "unrelated.png")
     else:
         target.mkdir()
     with pytest.raises(ValueError, match="regular file"):

@@ -14,6 +14,8 @@ from PIL import Image
 from sprite_gen.background import tile
 from sprite_gen.spec import runio
 
+from conftest import symlink_or_skip
+
 
 def invoke(source, out, *extra):
     return subprocess.run(
@@ -75,7 +77,7 @@ def test_source_overwrite_and_aliases_are_refused(source, tmp_path, alias):
     elif alias in ("symlink", "hardlink"):
         out = tmp_path / "alias.png"
         if alias == "symlink":
-            out.symlink_to(source)
+            symlink_or_skip(out, source)
         else:
             os.link(source, out)
     else:

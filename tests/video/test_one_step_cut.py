@@ -104,7 +104,10 @@ def _same_but_the_screen(a: Path, b: Path) -> None:
     frames = sorted(p.name for p in (a / "cycle").glob("*.png"))
     assert frames == sorted(p.name for p in (b / "cycle").glob("*.png"))
     assert all((a / "cycle" / f).read_bytes() == (b / "cycle" / f).read_bytes() for f in frames)
-    left, right = (json.loads((d / "loop.loop.report.json").read_text().replace(str(d), "@")) for d in (a, b))
+    # The report is JSON text, so the run dir appears in it JSON-escaped: on Windows its
+    # backslashes are doubled, and a raw str(d) would match nothing.
+    left, right = (json.loads((d / "loop.loop.report.json").read_text(encoding="utf-8").replace(json.dumps(str(d))[1:-1], "@"))
+                   for d in (a, b))
     for report in (left, right):
         # The gait observation keeps a copy of the screen's record (sprite_gen/video/evidence.py): each
         # report's copy is its own record, and nothing else of the gait is set aside with it.

@@ -40,7 +40,8 @@ def write_scene(tmp_path, layers, *, width=16, height=12, fps=10, duration=0.5, 
 
 
 def snapshot(directory):
-    return {str(p.relative_to(directory)): p.read_bytes() for p in Path(directory).rglob("*") if p.is_file()}
+    # POSIX keys, like the report's file list, so the comparison holds on Windows too.
+    return {p.relative_to(directory).as_posix(): p.read_bytes() for p in Path(directory).rglob("*") if p.is_file()}
 
 
 def test_anchor_velocity_camera_parallax_and_z_order_place_pixels(tmp_path):
