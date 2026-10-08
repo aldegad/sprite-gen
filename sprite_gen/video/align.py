@@ -25,6 +25,14 @@ The loop directories are `video-loop` output directories. Their first alignment 
 as filmed in `cycle.source/`; every later alignment reads from there, so running it again — or
 with another length — never resamples a resampled loop.
 
+Every alignment records where each cell of the new strip is from (`cycle_align.cells_from`): a frame
+of `cycle.source/` (`{"source": i}`, as many times as it is taken) or a frame made between two of them
+(`{"between": [i, j], "t": t}`). The first also records the strip as cut (`cycle_align.origin`,
+`follow.cut_origin`: its sha256, cell size, scale and crop origin, its cells, and the body's motion as
+`video-follow` reads it there), and every later one keeps it: regions somebody located on the cut's
+first cell are carried to the aligned loop by these two (`video-follow --read-on`), not read again on a
+first cell that is another. Neither changes a pixel of the strip, the GIF or the WebP.
+
 Resampling to one length assumes every loop holds one cycle. A loop that holds two (a cut that
 took two strides as one) would come out walking twice as fast as the rest, and pixels cannot tell
 it from a loop of one stride whose two steps look alike. So each loop is screened first
@@ -73,6 +81,7 @@ from sprite_gen._deps import np
 from sprite_gen.gen import handedness as handed_mod
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.gif_utils import save_clean_gif
+from sprite_gen.video import follow as follow_mod
 from sprite_gen.video import held as held_mod
 from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import loop as loop_mod
@@ -173,8 +182,10 @@ def _retake_line(name: str, r: dict[str, Any]) -> str:
 
 
 def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Interpolate | None,
-             *, between: str = DEFAULT_BETWEEN) -> tuple[list[Image.Image], dict[str, Any]]:
-    """`frames` as one cycle, resampled to `length` frames at times k·L/length (offset 0).
+             *, between: str = DEFAULT_BETWEEN, cells_from: list[dict[str, Any]] | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
+    """`frames` as one cycle, resampled to `length` frames at times k·L/length (offset 0). Where `cells_from` is a
+    list, where each frame came from is appended to it: `{"source": i}` for a frame of `frames` taken as it is, `{"between":
+    [i, j], "t": t}` for one made between two.
 
     A time between two source frames is made by `interpolate`, with what it added and the outline it
     lost measured (`rife.smear`) and judged (`faults`); `between` auto keeps a made frame with no
@@ -195,13 +206,13 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
         t = k * count / length
         i = int(np.floor(t))
         frac = t - i
-        nearer = frames[(i + (frac >= 0.5)) % count]
+        nearer = (i + (frac >= 0.5)) % count
         if frac < SNAP:
-            out.append(frames[i % count])
+            taken: dict[str, Any] = {"source": i % count}
         elif frac > 1 - SNAP:
-            out.append(frames[(i + 1) % count])
+            taken = {"source": (i + 1) % count}
         elif between == "nearest":
-            out.append(nearer)
+            taken = {"source": nearer}
             nearest_at.append(k)
         else:
             if interpolate is None:
@@ -211,9 +222,12 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
             measure = rife_mod.smear(made, a, b)
             wrong = faults(measure)
             keep = between == "rife" or not wrong
-            out.append(made if keep else nearer)
+            taken = {"between": [i % count, (i + 1) % count], "t": round(frac, 4)} if keep else {"source": nearer}
             (made_at if keep else nearest_at).append(k)
             smears.append({"at": k, "method": "rife" if keep else "nearest", **measure, "faults": wrong})
+        out.append(made if "between" in taken else frames[taken["source"]])
+        if cells_from is not None:
+            cells_from.append(taken)
     facts: dict[str, Any] = {"from": count, "to": length, "between": between, "taken": length - len(made_at),
                              "made_by_rife": len(made_at), "made_at": made_at}
     if between != "rife":
@@ -559,9 +573,23 @@ def _source_frames(loop_dir: Path) -> list[Image.Image]:
     return [Image.open(f).convert("RGBA") for f in files]
 
 
+def origin_of(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> dict[str, Any] | None:
+    """The strip as cut that this loop is aligned from (`follow.cut_origin`), read before anything is rewritten: on a
+    loop never aligned its strip now (`follow.source.png` where a follow-through moved it); on a loop aligned before,
+    the origin its first alignment recorded, kept as it is — None where that alignment recorded none (the cut is no
+    longer there to read)."""
+    if "cycle_align" in meta:
+        return meta["cycle_align"].get("origin")
+    source = loop_dir / loop_mod.FOLLOW_SOURCE
+    strip = source if source.exists() else loop_dir / f"{meta_path.name[: -len('.strip.json')]}.strip.png"
+    return follow_mod.cut_origin(strip.read_bytes(), meta)
+
+
 def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list[Image.Image], fps: float,
-             record: dict[str, Any]) -> dict[str, Any]:
-    """Write the aligned cycle, strip, GIF and WebP over the loop's own, at the loop's own cell size rules."""
+             record: dict[str, Any], *, cells_from: list[dict[str, Any]] | None = None,
+             origin: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Write the aligned cycle, strip, GIF and WebP over the loop's own, at the loop's own cell size rules. `cells_from`
+    says where each of `frames` is from; the record keeps it per cell of the strip, with the cut's `origin`."""
     name = meta_path.name[: -len(".strip.json")]
     cycle_dir = loop_dir / "cycle"
     cycle_dir.mkdir(exist_ok=True)
@@ -590,6 +618,10 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     adjacent = float(np.abs(flat[1:] - flat[:-1]).mean())
     seam = float(np.abs(flat[-1] - flat[0]).mean())
     record["seam_ratio"] = round(seam / adjacent, 4) if adjacent > 0 else None
+    if origin is not None:
+        record["origin"] = origin
+    if cells_from is not None:  # per cell of the strip, which may hold fewer of the frames than the cycle (`sample_indices`)
+        record["cells_from"] = [cells_from[i] for i in strip_meta["sample_indices"]]
     merged["cycle_align"] = record
     strip.save(loop_dir / f"{name}.strip.png")
     atomic_write_text(meta_path, json.dumps(merged, indent=2) + "\n")
@@ -748,11 +780,17 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
             interpolate = found
         return interpolate(a, b, t)
 
-    # Every loop is resampled before any is rewritten: a loop that cannot be made leaves the set as it was.
+    # Every loop is resampled before any is rewritten: a loop that cannot be made leaves the set as it was. The cut
+    # each is aligned from is read first, while its strip is still the cut's.
+    origins = [origin_of(d, meta_path, meta) for d, meta_path, meta, _ in loops]
     aligned = []
     for i, ((d, *_), frames, view) in enumerate(zip(loops, sources, views or [None] * len(loops))):
+        # which frame of cycle.source/ each of `frames` is: all of them, or the one cycle `--cycles` took out
+        index = ([(taken[i]["start"] + k) % taken[i]["from"] for k in range(taken[i]["length"])] if i in taken
+                 else list(range(len(frames))))
+        provenance: list[dict[str, Any]] = []
         try:
-            out, facts = resample(frames, target, lazy, between=between)
+            out, facts = resample(frames, target, lazy, between=between, cells_from=provenance)
             strike = foot_strike(out, view=view, foot=start_foot, given=told.get(i))
         except rife_mod.RifeNotInstalled as exc:
             raise rife_mod.RifeNotInstalled(f"{d}: {exc}") from exc
@@ -774,11 +812,15 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
             record["nearest_at"] = sorted((k - start) % target for k in facts["nearest_at"])
         if "smear" in facts:
             record["smear"] = sorted(({**m, "at": (m["at"] - start) % target} for m in facts["smear"]), key=lambda m: m["at"])
-        aligned.append((out[start:] + out[:start], record))
+        provenance = [{"source": index[p["source"]]} if "source" in p else {"between": [index[j] for j in p["between"]], "t": p["t"]}
+                      for p in provenance]
+        aligned.append((out[start:] + out[:start], record, provenance[start:] + provenance[:start]))
     rows = []
-    for (d, meta_path, meta, _), (out, record) in zip(loops, aligned):
-        merged = _rebuild(d, meta_path, meta, out, fps, record)
-        rows.append({"dir": str(d), "name": meta_path.name[: -len(".strip.json")], **{k: v for k, v in record.items() if k not in ("gif", "webp")},
+    for (d, meta_path, meta, _), (out, record, provenance), origin in zip(loops, aligned, origins):
+        merged = _rebuild(d, meta_path, meta, out, fps, record, cells_from=provenance, origin=origin)
+        # The report names where each cell is from; the cut's own record stays in the strip's meta.
+        rows.append({"dir": str(d), "name": meta_path.name[: -len(".strip.json")],
+                     **{k: v for k, v in record.items() if k not in ("gif", "webp", "origin")},
                      "strip": {k: merged[k] for k in ("frames", "w", "h", "body_h", "delay_ms")}})
     warnings = [_fault_line(r["name"], m) for r in rows for m in r.get("smear", []) if m["faults"]]
     retakes = [{"dir": r["dir"], "name": r["name"], **r["retake"]} for r in rows if r["retake"]]

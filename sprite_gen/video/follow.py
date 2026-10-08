@@ -36,14 +36,39 @@ The strip as it was before is kept as `follow.source.png` beside it; running the
 reads from there, so a second follow-through never moves a moved strip. `video-loop` (a new
 cut) and `video-cycle-align` (a new cycle) remove it, and the alignment records that the
 follow-through was cleared. docs/video-pipeline.md section 6.
+
+The regions are where somebody looked: in the first cell of the strip they were read on. An alignment
+turns a loop to start elsewhere, and its first cell is then another; read again there, the motion is
+taken from another cell 0 and the regions land on another place of the body. `--read-on <sha256>` names
+the strip (as cut, before any follow-through) the regions were read on. That strip is this loop's own —
+`same`, read as ever — or the cut this loop was aligned from (`video-cycle-align` records it, with its
+reading and where every new cell is from): then the cut's reading is carried to each cell from the cut's
+cell it is, the regions stay where they were read, and the damped mass is solved on the new order, length
+and frame time (`transported`). A cell the alignment made between two of the cut's, or one that is not
+the cut's cell pixel for pixel (a crop or a scale changed, and nothing records how), has no reading to
+carry: refused `uncertain`, never carried by the nearest whole cell. Any other strip is refused
+`no-match`. Without `--read-on` nothing of this is read or written.
+
+`--stretch-floor D` asks every region's move to leave each pixel at least D of its area. The weight's
+steepest slope is π/2 over each radius, so a move (ox, oy) leaves 1 − (π/2)·hypot(ox/rx, oy/ry) of it —
+by the way the region moves, where the fold rule reads the smaller radius whichever way it moves. Each
+region takes the largest gain, in steps of GAIN_STEP, that keeps the floor in every cell, and never one
+above what the fold rule gave it: the floor only lowers. Under it the fold rule's handling stands (under 1
+held, every region held refused; `--on-fold refuse` refuses). The record names the floor and its policy.
+
+What carries a region is the lay of the body's outline (`carry_basis`): whose pixels are inside the
+carried ellipse is not read, and nothing here moves a region on a guess of it.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -73,6 +98,15 @@ HARMONICS = 6  # of the cycle, for the body's motion: a step's shape, not its no
 ALPHA_SOLID = 128
 WORN_FROM, WORN_TO = 0.25, 0.5  # of the body's depth in the first cell: the levels its silhouette is worn down to
 SOURCE = loop_mod.FOLLOW_SOURCE
+# How a reading made on the cut is carried to a loop aligned from it (`--read-on`): per whole cell of the cut, by the
+# alignment's record of where each cell is from, and only to a cell that is that cell pixel for pixel.
+TRANSPORT_POLICY = "cut-reading/whole-cell/1"
+# How `--stretch-floor` reads a region's least area: the cos² weight's closed form, by direction, never above the
+# fold rule's gain.
+STRETCH_POLICY = "stretch-floor/cos2-direction/1"
+# What carries a region into a cell: the lay of the body's outline. Whose pixels the carried ellipse holds is not read.
+CARRY_BASIS = {"reading": "outline-lay", "region": "unverified"}
+READ_ON = re.compile(r"[0-9a-f]{64}")  # a strip's sha256, as `--read-on` names it
 
 
 def parse_region(text: str) -> tuple[float, float, float, float]:
@@ -83,6 +117,13 @@ def parse_region(text: str) -> tuple[float, float, float, float]:
     if rx <= 0 or ry <= 0:
         raise argparse.ArgumentTypeError(f"--region radii must be positive, got {text!r}")
     return cx, cy, rx, ry
+
+
+def parse_read_on(text: str) -> str:
+    if not READ_ON.fullmatch(text):
+        raise argparse.ArgumentTypeError(f"--read-on wants the sha256 of the strip the regions were read on (64 lowercase "
+                                         f"hexadecimal digits), got {text!r}")
+    return text
 
 
 def _run_depth(solid: np.ndarray, axis: int) -> np.ndarray:
@@ -238,6 +279,111 @@ def body_motion(cells: list[Image.Image]) -> tuple[np.ndarray, np.ndarray, int, 
             height0, [worn[0], worn[-1]])
 
 
+def _cells(strip: Image.Image, n: int, w: int, h: int) -> list[Image.Image]:
+    return [strip.crop((k * w, 0, (k + 1) * w, h)) for k in range(n)]
+
+
+def _cell_sha256(cell: Image.Image) -> str:
+    """One cell's pixels, RGBA row by row: a cell drawn alike is the same one, whatever wrote its file."""
+    return hashlib.sha256(cell.tobytes()).hexdigest()
+
+
+def cut_origin(strip_bytes: bytes, meta: dict[str, Any]) -> dict[str, Any]:
+    """What `video-cycle-align` keeps of a loop's strip as cut when it first aligns it (`cycle_align.origin`), so a
+    follow-through whose regions were read on that cut can be carried to the aligned loop (`--read-on`): the strip's
+    sha256 (the file's bytes, as `--read-on` names it), its cell size, scale and crop origin, which frame of the
+    cycle each of its cells is (`sample_indices`), each cell's pixels by sha256, and the body's motion as read on
+    it (`reading`: per cell how far its body lies from cell 0's, across and down, by `POLICY`). A strip whose body
+    cannot be read keeps `reading` None and says why. Reads the bytes given and nothing else."""
+    strip = Image.open(io.BytesIO(strip_bytes)).convert("RGBA")
+    n, w, h = int(meta["frames"]), int(meta["w"]), int(meta["h"])
+    rect, samples = meta.get("source_rect"), meta.get("sample_indices")
+    origin: dict[str, Any] = {
+        "strip_sha256": hashlib.sha256(strip_bytes).hexdigest(), "frames": n, "w": w, "h": h, "scale": meta.get("scale"),
+        "crop_origin": None if rect is None else list(rect[:2]),
+        # A cut made before its strip recorded the frames it took holds every frame of its cycle, or it was subsampled
+        # and which ones is not known.
+        "sample_indices": list(samples) if samples is not None else (list(range(n)) if n == meta.get("cycle_frames") else None),
+    }
+    if strip.size != (w * n, h):
+        return origin | {"cells_sha256": None, "reading": None,
+                         "reading_why": f"the strip is {strip.size[0]}x{strip.size[1]}, its meta says {w * n}x{h}"}
+    cells = _cells(strip, n, w, h)
+    origin["cells_sha256"] = [_cell_sha256(cell) for cell in cells]
+    try:
+        rows, cols, height0, worn = body_motion(cells)
+    except ValueError as exc:
+        return origin | {"reading": None, "reading_why": str(exc)}
+    origin["reading"] = {"policy": POLICY, "carry_px": [[c, r] for c, r in zip(cols.tolist(), rows.tolist())],
+                         "body_px": height0, "body_worn_px": worn}
+    return origin
+
+
+def read_on_relation(meta: dict[str, Any], strip_sha256: str, read_on: str, *, verb: str = VERB) -> str:
+    """How the strip the regions were read on (`read_on`) stands to this loop: its own strip as cut (`same`), or the
+    cut it was aligned from (`transported`); refused `no-match` otherwise."""
+    if read_on == strip_sha256:
+        return "same"
+    origin = (meta.get("cycle_align") or {}).get("origin")
+    if origin is not None and origin.get("strip_sha256") == read_on:
+        return "transported"
+    aligned_from = f"the cut it was aligned from ({origin['strip_sha256']})" if origin else "a cut it was aligned from (none is recorded)"
+    raise SystemExit(f"{verb}: --read-on {read_on}: no-match — the regions were read on a strip that is neither this loop's "
+                     f"strip as cut ({strip_sha256}) nor {aligned_from}; locate them again on this strip")
+
+
+def transported_motion(meta: dict[str, Any], cells: list[Image.Image], read_on: str, *,
+                       verb: str = VERB) -> tuple[np.ndarray, np.ndarray, int, list[int], list[int]]:
+    """The cut's reading carried to `cells`, the strip of a loop aligned from the cut `read_on` names: per cell how far
+    the body of the cut's cell it is lies from the cut's cell 0 (down, then across, as `body_motion` gives them), the
+    body's height and wear as read on the cut, and which cell of the cut each cell is.
+
+    The alignment records where each cell is from (`cycle_align.cells_from`). A cell made between two of the cut's
+    has no reading, and is not given its nearer one's; a cell the record calls the cut's must be that cell pixel for
+    pixel, so a crop, a scale or a drawing changed since — and not recorded as a transform — is caught here. Either
+    is refused `uncertain`."""
+    record = meta.get("cycle_align") or {}
+    origin, cells_from = record["origin"], record.get("cells_from")
+
+    def uncertain(why: str) -> SystemExit:
+        return SystemExit(f"{verb}: --read-on {read_on} is the cut this loop was aligned from, but uncertain: {why}; the "
+                          "reading is not carried — only a whole cell of the cut carries it, and none is taken by rounding")
+
+    reading = origin.get("reading")
+    if reading is None:
+        raise uncertain(f"the cut's reading was not recorded ({origin.get('reading_why')})")
+    if reading.get("policy") != POLICY:
+        raise uncertain(f"the cut was read as {reading.get('policy')}, and this engine reads as {POLICY}")
+    if not isinstance(cells_from, list) or len(cells_from) != len(cells):
+        raise uncertain(f"the alignment records where {len(cells_from) if isinstance(cells_from, list) else 'no'} cells are "
+                        f"from, and the strip has {len(cells)}")
+    for k, entry in enumerate(cells_from):
+        if "source" not in entry:
+            i, j = entry["between"]
+            raise uncertain(f"cell {k} is made between the cut's frames {i} and {j} (t {entry['t']:g})")
+    (w, h), rect = cells[0].size, meta.get("source_rect")
+    now = (w, h, meta.get("scale"), None if rect is None else list(rect[:2]))
+    then = (origin["w"], origin["h"], origin["scale"], origin["crop_origin"])
+    # A cut made before the strip recorded its crop says nothing of where it was cropped: there the cells' pixels
+    # below are the whole test, as they are for every cell anyway.
+    if now[:3] != then[:3] or (then[3] is not None and now[3] != then[3]):
+        raise uncertain(f"the cut's crop or scale changed (cells {then[0]}x{then[1]} at scale {then[2]} from {then[3]}, now "
+                        f"{w}x{h} at scale {now[2]} from {now[3]}) and no transform is recorded")
+    frames, digests = origin["sample_indices"], origin["cells_sha256"]
+    cut_cells = []
+    for k, (cell, entry) in enumerate(zip(cells, cells_from)):
+        i = entry["source"]
+        if frames is None or i not in frames:
+            raise uncertain(f"cell {k} is frame {i} of the cut's cycle, which the cut's strip does not hold")
+        j = frames.index(i)
+        if _cell_sha256(cell) != digests[j]:
+            raise uncertain(f"cell {k} is not the cut's cell {j} as drawn: its pixels differ")
+        cut_cells.append(j)
+    carry = reading["carry_px"]
+    return (np.asarray([carry[j][1] for j in cut_cells], float), np.asarray([carry[j][0] for j in cut_cells], float),
+            int(reading["body_px"]), list(reading["body_worn_px"]), cut_cells)
+
+
 def follow_offsets(motion: np.ndarray, fps: float, *, freq: float, zeta: float, gain: float) -> np.ndarray:
     """The part's offset from where the body carries it, per cell, in the cycle's steady state."""
     n = len(motion)
@@ -271,6 +417,28 @@ def lowered_gain(gain: float, reach_per_gain: float, radius: float) -> float:
     steps = math.ceil(limit / GAIN_STEP) - 1  # under the limit, never on it
     # The step count is rounded from floats: the one test that decides is `fold_ratio` itself.
     while steps > 0 and fold_ratio(steps * GAIN_STEP * reach_per_gain, radius) >= 1:
+        steps -= 1
+    return min(gain, round(steps * GAIN_STEP, 2))
+
+
+def stretch_per_gain(radii: tuple[float, float], across: np.ndarray, down: np.ndarray) -> tuple[float, int]:
+    """How much of a pixel's area a region's move takes per unit of gain, at its worst cell, and that cell: the cos²
+    weight is steepest at π/2 over each radius, so a move (ox, oy) leaves 1 − (π/2)·hypot(ox/rx, oy/ry) of the area
+    (`across`, `down`: the move at gain 1, per cell)."""
+    rx, ry = radii
+    per_cell = (math.pi / 2) * np.hypot(across / rx, down / ry)
+    k = int(np.argmax(per_cell))
+    return float(per_cell[k]), k
+
+
+def floor_gain(gain: float, per_gain: float, floor: float) -> float:
+    """The largest gain, in steps of GAIN_STEP and no more than `gain`, whose move leaves `floor` of a pixel's area or
+    more (1 − gain · `per_gain` ≥ `floor`)."""
+    if per_gain <= 0 or 1 - gain * per_gain >= floor:
+        return gain
+    steps = math.floor((1 - floor) / per_gain / GAIN_STEP) + 1
+    # The step count is rounded from floats: the one test that decides is the area left at the gain written.
+    while steps > 0 and 1 - round(steps * GAIN_STEP, 2) * per_gain < floor:
         steps -= 1
     return min(gain, round(steps * GAIN_STEP, 2))
 
@@ -354,6 +522,8 @@ class Request:
     freq: float
     zeta: float
     on_fold: str
+    read_on: str | None = None  # the sha256 of the strip as cut the regions were read on; None: this strip's, as ever
+    stretch_floor: float | None = None  # the least area a moved pixel keeps; None: the fold rule alone
 
     @property
     def strip_path(self) -> Path:
@@ -365,7 +535,8 @@ class Request:
 
 
 def read_request(loop_dir: Path, regions: list[tuple[float, float, float, float]], *, gain: float = GAIN_DEFAULT,
-                 freq: float = FREQ_DEFAULT, zeta: float = ZETA_DEFAULT, on_fold: str = "refuse", verb: str = VERB) -> Request:
+                 freq: float = FREQ_DEFAULT, zeta: float = ZETA_DEFAULT, on_fold: str = "refuse", verb: str = VERB,
+                 read_on: str | None = None, stretch_floor: float | None = None) -> Request:
     loop_dir = loop_dir.expanduser().resolve()
     # The numbers go into the record, which is JSON, and into the cells' arithmetic: a numpy number from a
     # caller (an int64 has no JSON form) is read as the float the command line gives, so every caller of the
@@ -387,7 +558,15 @@ def read_request(loop_dir: Path, regions: list[tuple[float, float, float, float]
         raise SystemExit(f"{verb}: --gain must be 0 or more, --freq and --zeta above 0")
     if on_fold not in ON_FOLD_MODES:
         raise SystemExit(f"{verb}: unknown --on-fold {on_fold!r}; expected one of {', '.join(ON_FOLD_MODES)}")
-    return Request(loop_dir, name, meta_path, meta_bytes, meta, regions, gain, freq, zeta, on_fold)
+    if read_on is not None and not READ_ON.fullmatch(str(read_on)):
+        raise SystemExit(f"{verb}: --read-on wants the sha256 of the strip the regions were read on (64 lowercase "
+                         f"hexadecimal digits), got {read_on!r}")
+    if stretch_floor is not None:
+        stretch_floor = float(stretch_floor)
+        if not 0 <= stretch_floor < 1:  # a NaN is neither
+            raise SystemExit(f"{verb}: --stretch-floor is the least area a moved pixel keeps, at least 0 and under 1; got {stretch_floor:g}")
+    return Request(loop_dir, name, meta_path, meta_bytes, meta, regions, gain, freq, zeta, on_fold,
+                   None if read_on is None else str(read_on), stretch_floor)
 
 
 @dataclass(frozen=True, eq=False)
@@ -417,9 +596,14 @@ class Answer:
     dy: np.ndarray
     reach: float
     groups: list[tuple[list[tuple[float, float, float, float]], tuple[np.ndarray, np.ndarray]]]
+    read_on: dict[str, Any] | None = None  # how the strip the regions were read on stands to this one (`--read-on`)
+    stretch: dict[str, Any] | None = None  # the floor asked, and what it did to each region (`--stretch-floor`)
 
     def carry(self, k: int) -> tuple[float, float]:
-        """How far cell k's body lies from cell 0's, across and down: every region's ellipse is carried by it."""
+        """How far cell k's body lies from cell 0's, across and down: every region's ellipse is carried by it. Carried
+        from the cut, the cells' motion is already from the cut's cell 0, where the regions were read."""
+        if self.read_on is not None and self.read_on["relation"] == "transported":
+            return self.cols[k], self.rows[k]
         return self.cols[k] - self.cols[0], self.rows[k] - self.rows[0]
 
     def moves_in(self, k: int) -> list[tuple[list[tuple[float, float, float, float]], tuple[float, float]]]:
@@ -450,27 +634,41 @@ class Answer:
                             | ({} if len(set(self.gains)) == 1 else {"gain": g, "held": hold})
                             for radius, ratio, g, hold in zip(self.radii, self.ratios, self.gains, self.held)],
             },
-        }
+        } | ({} if self.read_on is None else {"read_on": self.read_on}) | ({} if self.stretch is None else {"stretch": self.stretch}) \
+          | ({} if self.read_on is None and self.stretch is None else {"carry_basis": dict(CARRY_BASIS)})
 
 
-def solve(request: Request, strip: Image.Image, *, strip_name: str, verb: str = VERB) -> Answer:
+def solve(request: Request, strip: Image.Image, *, strip_name: str, verb: str = VERB,
+          strip_sha256: str | None = None) -> Answer:
     """The answer to `request` on `strip`, the loop's strip as cut (an RGBA picture; `strip_name` names its file
-    in a refusal). Reads nothing else and writes nothing."""
+    in a refusal, `strip_sha256` is its file's, read where the request names the strip its regions were read on).
+    Reads nothing else and writes nothing."""
     meta, regions = request.meta, request.regions
     gain, freq, zeta, on_fold = request.gain, request.freq, request.zeta, request.on_fold
     n, w, h = int(meta["frames"]), int(meta["w"]), int(meta["h"])
     if strip.size != (w * n, h):
         raise SystemExit(f"{verb}: {strip_name} is {strip.size[0]}x{strip.size[1]}, the strip meta says {w * n}x{h}; "
                          "cut the loop again (video-loop)")
+    cells = _cells(strip, n, w, h)
+    read_on = None
+    if request.read_on is not None:
+        if strip_sha256 is None:
+            raise ValueError("solve: a request with read_on needs the strip's sha256")
+        read_on = {"sha256": request.read_on, "relation": read_on_relation(meta, strip_sha256, request.read_on, verb=verb)}
     for cx, cy, rx, ry in regions:
         if not (0 <= cx < w and 0 <= cy < h):
             raise SystemExit(f"{verb}: --region centre {cx:g},{cy:g} is outside the {w}x{h} cell")
-    cells = [strip.crop((k * w, 0, (k + 1) * w, h)) for k in range(n)]
     fps = 1000.0 / float(meta["delay_ms"])
-    try:
-        rows, cols, height0, worn = body_motion(cells)
-    except ValueError as exc:
-        raise SystemExit(f"{verb}: {exc}") from exc
+    if read_on is not None and read_on["relation"] == "transported":
+        # The cut's own reading, cell for cell: the regions are where they were read, on the cut's cell 0, and the
+        # damped mass answers that motion in this loop's order, length and frame time.
+        rows, cols, height0, worn, cut_cells = transported_motion(meta, cells, request.read_on, verb=verb)
+        read_on |= {"policy": TRANSPORT_POLICY, "cut_cells": cut_cells}
+    else:
+        try:
+            rows, cols, height0, worn = body_motion(cells)
+        except ValueError as exc:
+            raise SystemExit(f"{verb}: {exc}") from exc
     dy = follow_offsets(rows, fps, freq=freq, zeta=zeta, gain=gain)
     dx = follow_offsets(cols, fps, freq=freq, zeta=zeta, gain=gain)
     reach = float(np.max(np.hypot(dx, dy)))
@@ -500,6 +698,10 @@ def solve(request: Request, strip: Image.Image, *, strip_name: str, verb: str = 
                              f"--on-fold lower would have to go under --gain {GAIN_MEASURED:g} (the mass as measured moves "
                              f"{reach_per_gain:.1f} px; the largest gain that does not fold is {gains[k]:g}); give the region larger radii")
         gains = [0.0 if hold else g for g, hold in zip(gains, held)]
+    stretch = None
+    if request.stretch_floor is not None:
+        gains, held, stretch = _keep_floor(request, radii, gains, held, (follow_offsets(cols, fps, freq=freq, zeta=zeta, gain=1.0),
+                                                                          follow_offsets(rows, fps, freq=freq, zeta=zeta, gain=1.0)), verb)
     # One move per gain: a region's offset is its gain times the answer at gain 1. The strip's `gain`
     # is the largest any region moves by, and `dx_px`/`dy_px` and `reach_px` are that gain's.
     moves = {g: (follow_offsets(cols, fps, freq=freq, zeta=zeta, gain=g), follow_offsets(rows, fps, freq=freq, zeta=zeta, gain=g))
@@ -511,19 +713,52 @@ def solve(request: Request, strip: Image.Image, *, strip_name: str, verb: str = 
     ratios = [0.0 if hold else fold_ratio(reaches[g], radius) for radius, g, hold in zip(radii, gains, held)]
     groups = [([r for r, rg, hold in zip(regions, gains, held) if rg == g and not hold], move) for g, move in moves.items()]
     return Answer(request, cells, cols, rows, height0, worn, requested, reach_requested, reach_per_gain, radii, gains, held,
-                  ratios, moves, reaches, gain, dx, dy, reach, groups)
+                  ratios, moves, reaches, gain, dx, dy, reach, groups, read_on, stretch)
+
+
+def _keep_floor(request: Request, radii: list[float], gains: list[float], held: list[bool],
+                move: tuple[np.ndarray, np.ndarray], verb: str) -> tuple[list[float], list[bool], dict[str, Any]]:
+    """The fold rule's gains (`gains`, 0 where `held`) lowered where a region's move would leave a pixel less than
+    `--stretch-floor` of its area (`move`: across and down per cell at gain 1), and the record of it. A region is never
+    raised; one the floor takes under GAIN_MEASURED is held as the fold rule holds one, and the strip is refused when
+    every region is — or, under `--on-fold refuse`, when the floor lowers any."""
+    floor, requested = request.stretch_floor, request.gain
+    per = [stretch_per_gain((rx, ry), *move) for _, _, rx, ry in request.regions]
+    floored = [floor_gain(requested, q, floor) for q, _ in per]
+    lowered = [g if hold else min(g, f) for g, f, hold in zip(gains, floored, held)]
+    by_floor = [not hold and g < rule for g, rule, hold in zip(lowered, gains, held)]
+    if any(by_floor) and request.on_fold == "refuse":
+        least = min(1 - requested * q for (q, _), by in zip(per, by_floor) if by)
+        raise SystemExit(f"{verb}: --gain {requested:g} leaves a moved pixel {least:.3f} of its area, under --stretch-floor {floor:g}; "
+                         "lower --gain, pass --on-fold lower or give the region larger radii")
+    now_held = [hold or (by and g < GAIN_MEASURED) for hold, by, g in zip(held, by_floor, lowered)]
+    if all(now_held):
+        k = radii.index(max(radii))
+        raise SystemExit(f"{verb}: --stretch-floor {floor:g} leaves every region held: to keep it each would move under --gain "
+                         f"{GAIN_MEASURED:g} (the mass as measured; the largest region at {lowered[k]:g}); lower the floor or give "
+                         "the regions larger radii")
+    final = [0.0 if hold else g for g, hold in zip(lowered, now_held)]
+    return final, now_held, {
+        "policy": STRETCH_POLICY, "floor": floor,
+        "regions": [{"per_gain": round(q, 6), "least_cell": cell, "rule_gain": rule, "floor_gain": f, "gain": g, "held": hold,
+                     "least_area": 1.0 if hold else round(1 - g * q, 4), "under_measured": not hold and g < GAIN_MEASURED}
+                    for (q, cell), rule, f, g, hold in zip(per, gains, floored, final, now_held)],
+    }
 
 
 def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]], *, gain: float = GAIN_DEFAULT,
                 freq: float = FREQ_DEFAULT, zeta: float = ZETA_DEFAULT, board: Path | None = None,
-                on_fold: str = "refuse") -> dict[str, Any]:
-    request = read_request(loop_dir, regions, gain=gain, freq=freq, zeta=zeta, on_fold=on_fold)
+                on_fold: str = "refuse", read_on: str | None = None, stretch_floor: float | None = None) -> dict[str, Any]:
+    request = read_request(loop_dir, regions, gain=gain, freq=freq, zeta=zeta, on_fold=on_fold, read_on=read_on,
+                           stretch_floor=stretch_floor)
     loop_dir, name, meta_path, meta = request.loop_dir, request.name, request.meta_path, request.meta
     strip_path = request.strip_path
     source = request.source_path
     if not source.exists():
         shutil.copyfile(strip_path, source)
-    answer = solve(request, Image.open(source).convert("RGBA"), strip_name=source.name)
+    data = source.read_bytes()
+    answer = solve(request, Image.open(io.BytesIO(data)).convert("RGBA"), strip_name=source.name,
+                   strip_sha256=hashlib.sha256(data).hexdigest())
     cells = answer.cells
     n, (w, h) = len(cells), cells[0].size
     out = [answer.moved(k) for k in range(n)]
@@ -586,6 +821,16 @@ def add_request_arguments(parser: argparse.ArgumentParser) -> None:
                              "named in the record, and the strip is refused only when every region is")
     parser.add_argument("--freq", type=float, default=FREQ_DEFAULT, help=f"the part's own frequency in Hz (default {FREQ_DEFAULT:g})")
     parser.add_argument("--zeta", type=float, default=ZETA_DEFAULT, help=f"damping ratio (default {ZETA_DEFAULT:g}: lags and settles, no ringing)")
+    parser.add_argument("--read-on", type=parse_read_on, default=None, metavar="SHA256",
+                        help="the sha256 of the strip as cut (before any follow-through) the regions were read on: this loop's own is "
+                             "read as without it (relation same); the cut this loop was aligned from (video-cycle-align records it) has "
+                             "its reading carried cell for cell (transported); a made cell or a cell geometry nothing records is "
+                             "refused uncertain, any other strip no-match. Without it nothing of this is read or written")
+    parser.add_argument("--stretch-floor", type=float, default=None, metavar="D",
+                        help="the least area, 0 to under 1, a moved pixel keeps, read by the way each region moves: each region takes "
+                             "the largest gain that keeps it, never above the fold rule's; under it the fold rule's handling stands "
+                             f"(held under {GAIN_MEASURED:g}, every region held refused; --on-fold refuse refuses). No default: without "
+                             "it the fold rule alone")
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -596,6 +841,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def fold_notes(record: dict[str, Any], verb: str = VERB) -> list[str]:
     """What to say of a record whose gain was lowered or whose regions were held, a line each."""
     fold, notes = record["fold"], []
+    if "stretch" in record:  # a floor was asked: each region says what lowered it, the fold or the floor
+        floor = record["stretch"]["floor"]
+        for (cx, cy, rx, ry), entry, folded in zip(record["regions"], record["stretch"]["regions"], fold["regions"]):
+            name = f"--region {cx:g},{cy:g},{rx:g},{ry:g}"
+            if entry["held"]:
+                why = (f"folds at --gain {folded['gain_limit']:g}" if entry["rule_gain"] == 0 else
+                       f"keeps --stretch-floor {floor:g} only at --gain {entry['floor_gain']:g}")
+                notes.append(f"{verb}: {name} {why}, under {GAIN_MEASURED:g} (the mass as measured): it is held, and does not move")
+            elif entry["gain"] != record["gain_requested"]:
+                by = f"--stretch-floor {floor:g}" if entry["gain"] < entry["rule_gain"] else "the fold"
+                notes.append(f"{verb}: {name} moves at --gain {entry['gain']:g}, lowered from {record['gain_requested']:g} by {by}")
+        return notes
     if "held" in fold["regions"][0]:  # the regions took gains of their own
         for (cx, cy, rx, ry), entry in zip(record["regions"], fold["regions"]):
             name = f"--region {cx:g},{cy:g},{rx:g},{ry:g}"
@@ -615,13 +872,16 @@ def run(**kwargs: object) -> int:
     result = follow_loop(Path(str(kwargs["loop_dir"])), list(kwargs["region"]),  # type: ignore[arg-type]
                          gain=float(kwargs.get("gain", GAIN_DEFAULT)), freq=float(kwargs.get("freq", FREQ_DEFAULT)),  # type: ignore[arg-type]
                          zeta=float(kwargs.get("zeta", ZETA_DEFAULT)), board=kwargs.get("board"),  # type: ignore[arg-type]
-                         on_fold=str(kwargs.get("on_fold") or "refuse"))
+                         on_fold=str(kwargs.get("on_fold") or "refuse"), read_on=kwargs.get("read_on"),  # type: ignore[arg-type]
+                         stretch_floor=kwargs.get("stretch_floor"))  # type: ignore[arg-type]
     fold = result["fold"]
     own = "held" in fold["regions"][0]  # the regions took gains of their own
     for note in fold_notes(result):
         print(note, file=sys.stderr)
     print(json.dumps({k: result[k] for k in ("strip", "regions", "gain", "gain_requested", "on_fold", "body_bob_px", "reach_px")}
                      | ({"region_gains": [entry["gain"] for entry in fold["regions"]]} if own else {})
+                     | ({"read_on": result["read_on"]["relation"]} if "read_on" in result else {})
+                     | ({"stretch_floor": result["stretch"]["floor"]} if "stretch" in result else {})
                      | ({"board": result["board"]} if "board" in result else {}), ensure_ascii=False, indent=2))
     return 0
 
