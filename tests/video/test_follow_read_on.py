@@ -165,6 +165,31 @@ def test_t1_a_turned_loop_followed_on_the_cuts_reading_is_the_cuts_follow_throug
     assert all(np.array_equal(moved[k], reference[(k+turned) % N]) for k in range(N))
 
 
+def test_t1_a_cut_that_did_not_record_its_crop_is_carried_by_its_cells_pixels(origin, tmp_path):
+    # A cut made before the strip recorded its crop and frames (no `source_rect`, no `sample_indices`): its alignment
+    # records both, and nothing says the crop changed — every cell is still the cut's, pixel for pixel.
+    o, read_on, followed = origin
+    legacy = copy(o, tmp_path/'legacy-cut')
+    meta = meta_of(legacy)
+    for key in ('source_rect', 'sample_indices', 'source_cut'):
+        meta.pop(key, None)
+    (legacy/'run.strip.json').write_text(json.dumps(meta, indent=2)+'\n')
+    loop_dir = aligned(legacy, tmp_path/'legacy-turned')
+    record = meta_of(loop_dir)['cycle_align']
+    assert record['origin']['crop_origin'] is None and meta_of(loop_dir)['source_rect'] is not None
+    follow.follow_loop(loop_dir, [chest(o)], on_fold='lower', read_on=read_on)
+    assert meta_of(loop_dir)['follow']['read_on']['relation'] == 'transported'
+    turned, moved, reference = record['turned_by'], cells_of(loop_dir), cells_of(followed)
+    assert all(np.array_equal(moved[k], reference[(k+turned) % N]) for k in range(N))
+    # And a cell that is not the cut's is still caught by its pixels.
+    touched = aligned(legacy, tmp_path/'legacy-touched')
+    strip = Image.open(touched/'run.strip.png').convert('RGBA')
+    ImageDraw.Draw(strip).point((meta_of(touched)['w']*2+3, 3), fill=MARK)
+    strip.save(touched/'run.strip.png')
+    with pytest.raises(SystemExit, match='uncertain.*cell 2'):
+        follow.follow_loop(touched, [chest(o)], on_fold='lower', read_on=read_on)
+
+
 def test_t1_the_same_turned_loop_followed_as_read_today_moves_another_place(origin, tmp_path):
     # The app gives the regions read on the cut's first cell to the turned loop, whose first cell is another.
     o, _, followed = origin
