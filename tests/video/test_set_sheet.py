@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """One sheet for the directions of a set (docs/video-pipeline.md section 7): rows in the compass order
-S SW W NW N NE E SE whatever order the loops are given in, one cell that holds every body box of every
-cell (its pivot the bottom centre), one ground line under every cell — the lowest body pixel of any
-cell of any direction —, every row at the size it was cut (nothing scaled, nothing lost), and the
-centre picture stood on that line at the rows' standing height. Loops of different lengths are laid
+S SW W NW N NE E SE whatever order the loops are given in, one cell that holds every pixel of every
+cell (its pivot the bottom centre), one ground line under every cell — the lowest body pixel (alpha 8
+and over) of any cell of any direction —, every row at the size it was cut (nothing scaled, nothing
+lost, a fainter pixel kept as no body), and the centre picture stood on that line at the rows' standing
+height. Loops of different lengths are laid
 all the same and said to differ (`same_length` false).
 
 The loops are synthetic strips written the way `video-loop` writes one (`<name>.strip.png` beside
@@ -84,6 +85,10 @@ def _box(im: Image.Image):
     return im.getchannel("A").getbbox()
 
 
+def _body(im: Image.Image):
+    return im.getchannel("A").point(lambda v: 255 if v >= 8 else 0).getbbox()
+
+
 def _make(tmp_path: Path, dirs: list[Path], views: list[str], **kw) -> tuple[dict, Image.Image]:
     out = tmp_path / "out"
     meta = set_sheet.make_sheet(dirs, views, out_dir=out, name="walk", **kw)
@@ -116,7 +121,7 @@ def test_every_row_is_laid_as_cut_on_one_ground_line(tmp_path):
     cells = _cells(sheet, meta)
     base = meta["baseline_y"]
     assert base == meta["cell_h"] and meta["anchor"] == [meta["cell_w"] // 2, base] and meta["cell_w"] % 2 == 0
-    lowest = max(_box(c)[3] for c in cells.values())
+    lowest = max(_body(c)[3] for c in cells.values())
     assert lowest == base  # the lowest body pixel of any cell is row baseline_y - 1
     by_code = {r["code"]: r for r in meta["rows"]}
     assert by_code["S"]["body_bottom_y"] == base and by_code["E"]["body_bottom_y"] == base
@@ -132,6 +137,25 @@ def test_every_row_is_laid_as_cut_on_one_ground_line(tmp_path):
             assert (cb[0] - sb[0], cb[1] - sb[1]) == (meta["cell_w"] // 2 - math.ceil(w / 2), base - h)
     total = sum(int(np.asarray(c, dtype=np.int64)[..., 3].sum()) for c in cells.values())
     assert total == sum(int(np.asarray(s, dtype=np.int64)[..., 3].sum()) for d in dirs for s in _strip_cells(d))
+
+
+def test_a_faint_pixel_is_kept_in_the_cell_and_is_no_body(tmp_path):
+    """A soft shadow under the feet (alpha under 8) is not where the body stands: the ground line is the
+    body's, and the cell reaches below it to keep the shadow, every pixel of the strip on the sheet."""
+    frames = []
+    for k in range(12):
+        f = _walker((60, 100), COLOURS["S"], k, 12, ground=96, height=80)
+        a = np.asarray(f).copy()
+        a[96:100, 10:50] = (0, 0, 0, 4)
+        frames.append(Image.fromarray(a, "RGBA"))
+    d = _loop(tmp_path, "S", frames, body_h=80)
+    meta, sheet = _make(tmp_path, [d], ["front"])
+    cells = _cells(sheet, meta)
+    assert meta["cell_h"] == meta["baseline_y"] + 4 and meta["rows"][0]["body_bottom_y"] == meta["baseline_y"]
+    assert max(_body(c)[3] for c in cells.values()) == meta["baseline_y"]
+    assert max(_box(c)[3] for c in cells.values()) == meta["cell_h"]
+    assert sum(int(np.asarray(c, dtype=np.int64)[..., 3].sum()) for c in cells.values()) == \
+        sum(int(np.asarray(f, dtype=np.int64)[..., 3].sum()) for f in frames)
 
 
 def test_the_cell_is_the_union_of_every_body_box_about_the_pivot(tmp_path):
@@ -218,13 +242,13 @@ def test_lengths_that_differ_are_laid_all_the_same_and_said_to_differ(tmp_path, 
 
 
 def test_the_centre_picture_stands_on_the_ground_line_at_the_rows_height(tmp_path):
-    """A transparent still, drawn twice the rows' size and wider than any of them: scaled to the rows'
-    standing height (the median of their `body_h`), stood on the ground line, centred on the pivot, and the
-    cell made wide enough to hold it."""
+    """A transparent still, drawn twice the rows' size and wider than any of them, with a faint shadow under
+    its feet: scaled to the rows' standing height (the median of their `body_h`), its body stood on the
+    ground line and centred on the pivot, the shadow kept below the line, and the cell made to hold it."""
     dirs = [_direction(tmp_path, "S", height=78), _direction(tmp_path, "E", height=80), _direction(tmp_path, "N", height=84)]
     a = np.zeros((300, 260, 4), dtype=np.uint8)
     a[40:200, 50:210] = (250, 250, 250, 255)  # 160 tall, 160 wide: at half size 80 x 80, wider than any row
-    a[200:204, 50:210] = (250, 250, 250, 4)  # a shadow too faint to count as body (alpha under 8)
+    a[200:220, 50:210] = (0, 0, 0, 4)  # a shadow too faint to count as body (alpha under 8)
     still = tmp_path / "still.png"
     Image.fromarray(a, "RGBA").save(still)
     meta, sheet = _make(tmp_path, dirs, ["front", "side@right", "back"], center=still)
@@ -233,12 +257,13 @@ def test_the_centre_picture_stands_on_the_ground_line_at_the_rows_height(tmp_pat
     assert centre["body_h"] == 80 and centre["standing_h"] == 160 and centre["scale"] == 0.5
     cell = Image.open(tmp_path / "out" / "walk.center.png").convert("RGBA")
     assert cell.size == (meta["cell_w"], meta["cell_h"])
-    solid = cell.getchannel("A").point(lambda v: 255 if v >= 8 else 0).getbbox()
+    solid = _body(cell)
     assert abs((solid[3] - solid[1]) - 80) <= 1  # the rows' standing height
+    assert solid[3] == meta["baseline_y"]  # its body on the ground line
+    assert abs((solid[0] + solid[2]) / 2 - meta["cell_w"] / 2) <= 0.5  # centred on the pivot
     box = _box(cell)
     assert list(box) == centre["box"]
-    assert box[3] == meta["baseline_y"]  # on the ground line
-    assert abs((box[0] + box[2]) / 2 - meta["cell_w"] / 2) <= 0.5  # centred on the pivot
+    assert box[3] > meta["baseline_y"] and box[3] == meta["cell_h"]  # the shadow kept, below the line
     assert box[2] - box[0] >= 80 and meta["cell_w"] >= box[2] - box[0]
     rows_widest = max(_box(c)[2] - _box(c)[0] for c in _cells(sheet, meta).values() if _box(c))
     assert meta["cell_w"] >= max(rows_widest, box[2] - box[0])
