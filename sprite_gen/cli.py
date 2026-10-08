@@ -23,6 +23,7 @@ from sprite_gen.video import clip_prompt as video_prompt
 from sprite_gen.video import align as video_align
 from sprite_gen.video import follow as video_follow
 from sprite_gen.video import follow_inspect as video_follow_inspect
+from sprite_gen.video import set_export as video_set_export
 from sprite_gen.video import compare as video_compare
 from sprite_gen.video import restoration as video_restoration
 from sprite_gen.video import source as video_source
@@ -399,6 +400,12 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Where video-follow carries each region in every cell and what it would change there, with nothing moved: a record and two boards of every cell, for whoever says what is inside an ellipse.",
         video_follow_inspect.add_arguments,
         video_follow_inspect.run,
+    ),
+    # The end of pipeline B for a top-down game (docs/direction-set.md): the set's final strips by compass heading.
+    "video-set-export": (
+        "One eight-heading set a top-down game loads from a finished video-set: filmed views copied, an unfilmed left or right heading mirrored cell by cell with provenance (refused with --handed), one foot pivot each, sizes checked.",
+        video_set_export.add_arguments,
+        video_set_export.run,
     ),
     "rife": (
         "install: download the pinned RIFE (rife-ncnn-vulkan, sha256-checked) into the user data directory, where the loop repair finds it.",
