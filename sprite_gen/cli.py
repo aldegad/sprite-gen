@@ -23,6 +23,7 @@ from sprite_gen.video import clip_prompt as video_prompt
 from sprite_gen.video import align as video_align
 from sprite_gen.video import follow as video_follow
 from sprite_gen.video import follow_inspect as video_follow_inspect
+from sprite_gen.video import set_sheet as video_set_sheet
 from sprite_gen.video import compare as video_compare
 from sprite_gen.video import restoration as video_restoration
 from sprite_gen.video import source as video_source
@@ -399,6 +400,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Where video-follow carries each region in every cell and what it would change there, with nothing moved: a record and two boards of every cell, for whoever says what is inside an ellipse.",
         video_follow_inspect.add_arguments,
         video_follow_inspect.run,
+    ),
+    "video-set-sheet": (
+        "The directions of one set on one sheet: rows in compass order (S SW W NW N NE E SE), one cell holding every body box, one ground line under every cell, no row scaled; an optional centre picture stood on the same line at the rows' standing height.",
+        video_set_sheet.add_arguments,
+        video_set_sheet.run,
     ),
     "rife": (
         "install: download the pinned RIFE (rife-ncnn-vulkan, sha256-checked) into the user data directory, where the loop repair finds it.",
