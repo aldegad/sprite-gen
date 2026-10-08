@@ -736,7 +736,12 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   regions were read on the cut be carried to the aligned loop (`video-follow --read-on`,
   docs/video-pipeline.md section 6). Neither record changes a pixel of the strip, GIF or WebP.
 - Loops at different frame rates are refused (one length in frames would mean different
-  durations), and so is a loop cut before `cell_height_cap` was recorded (cut it again).
+  durations), and so is a loop cut before `cell_height_cap` was recorded (cut it again). So is a
+  loop never aligned whose strip as cut is missing — its `<name>.strip.png`, or `follow.source.png`
+  where a follow-through moved it: the first alignment reads `cycle_align.origin` there, and no
+  later one could. It is named before any loop of the set is touched, `cycle.source/` included; put
+  the strip back or cut the loop again. A loop aligned before keeps the origin it recorded and
+  needs no strip.
 
 `video-set` runs this after its loops are cut, once per walk or run state filmed in two or more
 directions (`--align-cycles auto`, default; `off` keeps each loop's own length). Its report

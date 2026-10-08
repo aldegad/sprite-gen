@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from pathlib import Path
 
 import numpy as np
@@ -276,6 +277,34 @@ def test_a_loop_cut_before_the_cell_cap_was_recorded_is_refused_by_name(tmp_path
     (d / "walk.strip.json").write_text(json.dumps(meta))
     with pytest.raises(SystemExit, match="cell_height_cap"):
         align.align_set([d], interpolate=Recorder())
+
+
+def _files(d: Path) -> dict[str, bytes | None]:
+    """Every path under a loop directory, a file by its bytes and a directory as None."""
+    return {p.relative_to(d).as_posix(): p.read_bytes() if p.is_file() else None for p in sorted(d.rglob("*"))}
+
+
+def test_a_loop_whose_strip_as_cut_is_missing_is_refused_by_name_and_the_set_left_as_it_was(tmp_path):
+    """A first alignment reads the strip as cut (`cycle_align.origin`): a loop directory without it is refused, its strip
+    named, before any loop of the set is touched — no traceback, no `cycle.source/` left behind in it or the loop before it."""
+    dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24))]
+    (dirs[1] / "walk.strip.png").unlink()
+    before = [_files(d) for d in dirs]
+    with pytest.raises(SystemExit, match=rf"^video-cycle-align: {re.escape(str(dirs[1].resolve()))}: no walk\.strip\.png — .*cycle_align\.origin"):
+        align.main([*(a for d in dirs for a in ("--loop-dir", str(d))), "--report", str(tmp_path / "align.json")])
+    assert [_files(d) for d in dirs] == before
+    assert not (tmp_path / "align.json").exists()
+
+
+def test_a_loop_aligned_before_is_aligned_again_without_its_strip(tmp_path):
+    """Only a first alignment reads the strip as cut; a later one keeps the origin the first recorded."""
+    dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24))]
+    align.align_set(dirs, interpolate=Recorder())
+    origin = json.loads((dirs[0] / "walk.strip.json").read_text())["cycle_align"]["origin"]
+    (dirs[0] / "walk.strip.png").unlink()
+    assert align.align_set(dirs, interpolate=Recorder(), length=22)["length"] == 22
+    meta = json.loads((dirs[0] / "walk.strip.json").read_text())
+    assert meta["cycle_align"]["origin"] == origin and (dirs[0] / "walk.strip.png").is_file()
 
 
 def test_video_set_aligns_each_gait_filmed_in_two_or_more_directions(tmp_path):

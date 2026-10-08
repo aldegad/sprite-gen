@@ -31,7 +31,9 @@ of `cycle.source/` (`{"source": i}`, as many times as it is taken) or a frame ma
 `follow.cut_origin`: its sha256, cell size, scale and crop origin, its cells, and the body's motion as
 `video-follow` reads it there), and every later one keeps it: regions somebody located on the cut's
 first cell are carried to the aligned loop by these two (`video-follow --read-on`), not read again on a
-first cell that is another. Neither changes a pixel of the strip, the GIF or the WebP.
+first cell that is another. Neither changes a pixel of the strip, the GIF or the WebP. A loop never aligned whose
+strip as cut is not there (`cut_strip`) is refused by name before any loop of the set is touched: no later
+alignment could record its origin.
 
 Resampling to one length assumes every loop holds one cycle. A loop that holds two (a cut that
 took two strides as one) would come out walking twice as fast as the rest, and pixels cannot tell
@@ -553,6 +555,11 @@ def _loop_files(loop_dir: Path) -> tuple[Path, dict[str, Any]]:
     for key in ("cycle_frames", "cycle_seconds", "cell_height_cap", "kind"):
         if key not in meta:
             raise ValueError(f"{metas[0]}: no `{key}` — cut the loop again with this sprite-gen (video-loop) before aligning it")
+    strip = cut_strip(loop_dir, metas[0], meta)
+    if strip is not None and not strip.is_file():
+        raise ValueError(f"{loop_dir}: no {strip.name} — a first alignment reads the strip as cut to record where its cells are from "
+                         "(cycle_align.origin, which video-follow --read-on carries regions by); put the loop's strip back, or cut "
+                         "the loop again with video-loop, before aligning it")
     return metas[0], meta
 
 
@@ -573,15 +580,22 @@ def _source_frames(loop_dir: Path) -> list[Image.Image]:
     return [Image.open(f).convert("RGBA") for f in files]
 
 
-def origin_of(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> dict[str, Any] | None:
-    """The strip as cut that this loop is aligned from (`follow.cut_origin`), read before anything is rewritten: on a
-    loop never aligned its strip now (`follow.source.png` where a follow-through moved it); on a loop aligned before,
-    the origin its first alignment recorded, kept as it is — None where that alignment recorded none (the cut is no
-    longer there to read)."""
+def cut_strip(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> Path | None:
+    """The file `origin_of` reads the strip as cut from: on a loop never aligned its strip now (`follow.source.png` where a
+    follow-through moved it); None on a loop aligned before, whose origin its first alignment recorded."""
     if "cycle_align" in meta:
-        return meta["cycle_align"].get("origin")
+        return None
     source = loop_dir / loop_mod.FOLLOW_SOURCE
-    strip = source if source.exists() else loop_dir / f"{meta_path.name[: -len('.strip.json')]}.strip.png"
+    return source if source.exists() else loop_dir / f"{meta_path.name[: -len('.strip.json')]}.strip.png"
+
+
+def origin_of(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> dict[str, Any] | None:
+    """The strip as cut that this loop is aligned from (`follow.cut_origin`), read before anything is rewritten from
+    `cut_strip`; on a loop aligned before, the origin its first alignment recorded, kept as it is — None where that
+    alignment recorded none (the cut is no longer there to read)."""
+    strip = cut_strip(loop_dir, meta_path, meta)
+    if strip is None:
+        return meta["cycle_align"].get("origin")
     return follow_mod.cut_origin(strip.read_bytes(), meta)
 
 
