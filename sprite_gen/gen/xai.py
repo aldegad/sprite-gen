@@ -12,6 +12,7 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -58,6 +59,9 @@ def _parse_expiry(raw: str) -> datetime:
     text = raw.strip()
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
+    # grok writes nanosecond fractions with trailing zeros dropped (any length); datetime.fromisoformat
+    # on Python < 3.11 accepts only 3 or 6 digits, so write the fraction as exactly six before parsing.
+    text = re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), text)
     parsed = datetime.fromisoformat(text)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)

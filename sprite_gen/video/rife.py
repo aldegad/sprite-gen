@@ -134,9 +134,17 @@ def _call(binary: Path, model: Path, a: Image.Image, b: Image.Image, t: float, t
     b.save(tmp / "b.png")
     out = tmp / "o.png"
     out.unlink(missing_ok=True)
+    # rife-ncnn-vulkan on Windows prepends its executable directory to `-m`.
+    # Passing an absolute model path therefore duplicates the install path. Give it
+    # a path relative to the executable directory; cwd also makes that path valid
+    # for builds that resolve model paths from the process working directory.
+    try:
+        model_arg = os.path.relpath(model, binary.parent)
+    except ValueError:  # Windows: the model is on another drive than the binary, so no relative path reaches it
+        model_arg = str(model)
     proc = subprocess.run(
-        [str(binary), "-0", str(tmp / "a.png"), "-1", str(tmp / "b.png"), "-o", str(out), "-s", f"{t:.4f}", "-m", str(model)],
-        capture_output=True, text=True, timeout=CALL_TIMEOUT_SECONDS,
+        [str(binary), "-0", str(tmp / "a.png"), "-1", str(tmp / "b.png"), "-o", str(out), "-s", f"{t:.4f}", "-m", model_arg],
+        cwd=binary.parent, capture_output=True, text=True, timeout=CALL_TIMEOUT_SECONDS,
     )
     if proc.returncode != 0 or not out.is_file():
         raise RifeUnavailable(f"{binary.name} failed (exit {proc.returncode}): {(proc.stderr or proc.stdout).strip()[-300:]}")

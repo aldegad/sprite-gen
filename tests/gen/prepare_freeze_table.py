@@ -60,7 +60,7 @@ def draw(**extra: Any) -> dict[str, str]:
                 prepare.run(out_dir=run_dir, character_id="fox", description=CHARACTER,
                             base_image=base if with_base else None, **kwargs, **extra)
             for prompt in sorted((run_dir / "prompts").rglob("*.txt")):
-                name = f"{label}/{'base' if with_base else 'no-base'}/{prompt.relative_to(run_dir / 'prompts')}"
+                name = f"{label}/{'base' if with_base else 'no-base'}/{prompt.relative_to(run_dir / 'prompts').as_posix()}"
                 out[name] = prompt.read_text(encoding="utf-8")
     return out
 
