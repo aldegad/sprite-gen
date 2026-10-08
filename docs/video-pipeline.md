@@ -1,6 +1,6 @@
 # Video → sprite pipeline (engine SSoT)
 
-> Owns: Pipeline B engine contract: state canvas, keyed frames, true-period and one-shot cycles, strip/GIF/WebP, the batch · Index: [docs/README.md](README.md)
+> Owns: Pipeline B engine contract: state canvas, keyed frames, true-period and one-shot cycles, strip/GIF/WebP, the batch, a set's sheet · Index: [docs/README.md](README.md)
 
 One still becomes a whole motion set: the still is padded into the canvas a state
 needs, Grok Imagine animates it in place, the clip is keyed frame by frame, and one
@@ -26,6 +26,7 @@ still ──video-canvas──▶ canvas.png ──video──▶ clip.mp4 ─�
 | `sprite-gen video-cycle-align` | `sprite_gen/video/align.py` | the loop directories of one walk or run, one per direction → one cycle length, each loop turned to start on a foot strike, + report ([loop repair](loop-repair.md) section 4) |
 | `sprite-gen video-follow` | `sprite_gen/video/follow.py` | a loop directory + an ellipse → the strip, GIF and WebP with that region following the body ([section 6](#6-follow-through--video-follow)) |
 | `sprite-gen video-follow-inspect` | `sprite_gen/video/follow_inspect.py` | a loop directory + the ellipses `video-follow` takes → a record of where each is carried in every cell and what the move changes there, and two boards of every cell; the loop directory is only read ([section 6](#inspecting-a-follow-through--video-follow-inspect)) |
+| `sprite-gen video-set-sheet` | `sprite_gen/video/set_sheet.py` | the loop directories of one set, each with its `--view` → one sheet: a row per direction in compass order, one cell size, one ground line, every row as cut, + a record and an optional centre picture; the loop directories are only read ([section 7](#7-one-sheet-for-a-set--video-set-sheet)) |
 
 Wrappers: `scripts/video_canvas.py`, `scripts/video_frames.py`, `scripts/video_loop.py`,
 `scripts/video_set.py`. Binaries: `ffmpeg`/`ffprobe` (frames), `img2webp` from libwebp
@@ -1342,6 +1343,57 @@ sprite-gen video-follow-inspect --loop-dir set/front-run/loop --region 136,164,6
   `follow-inspect.moved.png` has them as `video-follow` would write them, laid and ringed alike.
   They are two files so that whoever says what is inside an ellipse can be given the cells as cut
   alone, without the answer beside them.
+
+## 7. One sheet for a set — `video-set-sheet`
+
+Each direction of a set is cut on its own, and a strip is the union of its own cycle's bodies: a side
+walk's cell is wider than a front one's, a direction with a long ear taller. Laid side by side as they
+are — a 3×3 board, a sheet for a game engine — the directions stand at different heights and the board
+shows it as it plays. `video-set-sheet` lays them on one sheet that a board or an engine can place as it
+is:
+
+```bash
+sprite-gen video-set-sheet --loop-dir S/loop --view front --loop-dir W/loop --view side@left \
+  --loop-dir N/loop --view back --loop-dir E/loop --view side@right --center base.png --out-dir walk-set --name walk
+```
+
+- **Rows.** One per direction given, in the compass order **S, SW, W, NW, N, NE, E, SE** — clockwise from
+  the viewer, the order a character turns in — whatever order the loops are given in. `--view` names the
+  row, as `video-cycle-align` takes it: `front` S, `back` N, `side@right` E, `side@left` W,
+  `front_diagonal@right` SE, `front_diagonal@left` SW, `back_diagonal@right` NE, `back_diagonal@left` NW
+  (`@left` faces the screen's left). A strip turned over to face the other way is a direction like any
+  other. A direction given twice, a front or back view with a side (its picture turned over is not a
+  compass direction) and a count of `--view` other than the loops' are refused before anything is written.
+- **One cell.** Each strip is laid on its pivot — the one its sidecar declares (`anchor`: the foot line
+  under `video-loop --anchor feet`), else its bottom centre, where `video-loop` stands the feet — and the
+  cell is the union of every pixel of every cell of every direction (and of the centre picture), centred
+  on that pivot: every cell's pivot is its bottom centre (`anchor` in the record), and no pixel is dropped.
+- **One ground line.** `baseline_y` is the lowest body pixel of any cell of any direction — body as
+  `video-loop` reads one, alpha 8 and over: that pixel is row `baseline_y − 1` of its cell. A fainter
+  pixel (a soft shadow under the feet) is no body: it is kept, and the cell reaches below the line to hold
+  it, so `cell_h` is `baseline_y` or more. A direction whose strip leaves room under its feet stands that
+  much above the line, as cut: each row's `body_bottom_y` says where its lowest body pixel ends.
+- **No row scaled.** Every cell of the sheet is the strip's own cell, pixel for pixel. One size across
+  the set is `video-loop --body-height`'s; the sheet never sizes a direction on its own. A board that
+  shows the sheet smaller scales it as one, and stands each cell's `baseline_y` on its ground.
+- **The centre picture** (`--center`): a transparent still — the set's base, the picture a board shows in
+  its middle. It is scaled to the rows' standing height (the median of their `body_h`, against the
+  still's own standing height read as `video-loop` reads one: its box at alpha 8 and over), its body
+  stood on the ground line and centred on the pivot, alone in a cell of the sheet's size
+  (`<name>.center.png`); a fainter shadow under it is kept below the line. A
+  still with no transparent background is refused (cut it off first: `sprite-gen cutout`), and so are
+  rows without `body_h` beside one.
+- **Lengths.** Loops of different lengths, in frames or in frame time, are laid all the same, one frame
+  a column and the shorter rows' last cells empty; the record says `same_length: false` and a warning line
+  names each direction's length. `video-cycle-align` gives a set one cycle length.
+
+The record, `<name>.sheet.json` (kind `sprite-gen-video-set-sheet`, schema 1): `sheet`, `order` (the
+rows' codes), `columns`, `cell_w`, `cell_h`, `baseline_y`, `anchor` (`[cell_w / 2, baseline_y]`),
+`same_length`; `rows`, one per row with its `row`, `code`, `view`, `frames`, `delay_ms`, the strip's
+`name`, the loop directory as `input`, the strip's `strip_sha256`, `body_h` and `body_bottom_y`; and
+`center` — null, or the picture's `png`, `input`, `sha256`, its own `standing_h`, the rows' `body_h` it
+was scaled to, the `scale` and its `box` in the cell. The loop directories are only read: no strip,
+frame or frame time is changed.
 
 ## What the rules were measured on
 
