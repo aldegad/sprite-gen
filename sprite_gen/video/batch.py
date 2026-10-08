@@ -29,6 +29,7 @@ from sprite_gen.gen.chroma import KEY_BACKGROUND_TEXT
 from sprite_gen.gen.facing import FACINGS, validate as validate_facing
 from sprite_gen.gen import handedness as handed_mod
 from sprite_gen.gen import prompt_parts
+from sprite_gen.gen import video as video_gen
 from sprite_gen.gen.handedness import Handed
 from sprite_gen.video import facing as facing_mod
 from sprite_gen.video import canvas as canvas_mod
@@ -167,6 +168,76 @@ def still_view_text(direction: str, facing: str = "right", body_plan: list[Body]
     body = "every figure's whole body and head" if body_mod.scene(body_plan) else "the whole body and head"
     view = STILL_VIEW_TEXT_ANY_BODY.get(direction, VIEW_TEXT[direction]).format(facing=facing, body=body)
     return f"{view}, {stands_on}"
+
+
+# A camera that looks down (`--camera-elevation DEG`): a top-down orthographic game (an RPG village) sees its
+# characters from above, and every sentence above draws and films them at eye level. Opt-in, its own piece
+# (topic "camera", `prompt_parts.Prompt.add`), so without it every prompt is the one before it to the byte.
+# The words are the crashbang village production's (2026-10-06/07, `output/modern-village-ortho16-20261006`,
+# `stocky-village-ortho-20261006`, `kuma-village-ortho-20261007`), judged by eye in the live village, not
+# measured over many takes: the ground's own projection, 16 degrees, put in a still prompt drew an eye-level
+# character the user rejected as a side-scroller; 35 and 50 degrees were stood in the live village capture at
+# the same foot spot and height and 35 was chosen, 50 too steep. Saying only the angle was not enough: the
+# still says what looking down shows (the crown and shoulder tops, the face from slightly above, the legs
+# foreshortened, the feet seen from their tops) and that it is a parallel projection.
+CAMERA_ELEVATION_RANGE = (10, 80)
+CAMERA_STILL_TEXT = (
+    "The camera is high above: a fixed orthographic top-down game camera looking down at the character from about "
+    "{deg} degrees above the horizon, not an eye-level side-scroller view. Because we look down from above, the top "
+    "of the head and the tops of the shoulders are visible, the face, where it shows, is seen slightly from above, "
+    "the legs look slightly shorter from foreshortening, and the tops of the feet are seen from above with the soles "
+    "hidden. Parallel orthographic projection, no fisheye, no perspective convergence."
+)
+# The same camera for a body that is not one biped (`body_plan`): what looking down shows, with no shoulders or
+# feet counted, so a horse is not drawn with a person's shoulders. Not judged on a clip or a still.
+CAMERA_STILL_TEXT_ANY_BODY = (
+    "The camera is high above: a fixed orthographic top-down game camera looking down at {who} from about {deg} "
+    "degrees above the horizon, not an eye-level side-scroller view. Because we look down from above, {top} "
+    "visible, {face}, where it shows, is seen slightly from above, any legs look slightly shorter from "
+    "foreshortening, and nothing is seen from below. Parallel orthographic projection, no fisheye, no perspective "
+    "convergence."
+)
+# A clip starts from a still already drawn from above, so its line points at the image, as the clip's view
+# sentence does. The KUMA pack (`kuma-village-ortho-20261007/motion.py`, CAMERA_LINE) ended every walk, run and
+# action prompt with it, and the takes it kept were judged by eye for heading and legs (one slam note: "crown of
+# mask seen from above"), not counted for the angle; no take went without it, so it is not a comparison.
+CAMERA_CLIP_TEXT = "The high top-down camera angle (looking down about {deg} degrees) stays exactly as in the image."
+# A front or back walk's mid-step redraw says "seen at eye level" (`WALK_START_TEXT`), which a camera from above
+# contradicts. The KUMA pack redrew both from its 35-degree stills with those words said this way instead, and
+# both walks passed (judgments.json: "Mid-step redraw start; front heading held" / "back heading held").
+WALK_START_EYE_LEVEL = "seen at eye level"
+WALK_START_CAMERA_TEXT = "seen from the same high top-down camera angle as the image, looking down about {deg} degrees"
+
+
+def check_camera_elevation(deg: Any, prog: str = "video") -> int | None:
+    """`--camera-elevation`: None, or whole degrees above the horizon in `CAMERA_ELEVATION_RANGE`; anything else is
+    refused before a prompt is put together."""
+    if deg is None:
+        return None
+    low, high = CAMERA_ELEVATION_RANGE
+    if isinstance(deg, bool) or not isinstance(deg, int) or not low <= deg <= high:
+        raise SystemExit(f"{prog}: --camera-elevation is whole degrees above the horizon, {low}..{high} (35 was chosen "
+                         f"for a top-down village), got {deg!r}")
+    return deg
+
+
+def camera_still_text(deg: int, body_plan: list[Body] | None = None) -> str:
+    """The camera sentence for drawing a still from `deg` degrees above (`CAMERA_STILL_TEXT`); for a `body_plan` that
+    is not one biped, `CAMERA_STILL_TEXT_ANY_BODY`."""
+    check_camera_elevation(deg)
+    if body_mod.biped(body_plan):
+        return CAMERA_STILL_TEXT.format(deg=deg)
+    if body_mod.scene(body_plan):
+        return CAMERA_STILL_TEXT_ANY_BODY.format(deg=deg, who="every figure", face="each face",
+                                                 top="the top of every head and the upper side of every body are")
+    return CAMERA_STILL_TEXT_ANY_BODY.format(deg=deg, who="the character", face="the face",
+                                             top="the top of the head and the upper side of the body are")
+
+
+def camera_clip_text(deg: int) -> str:
+    """The clip's camera line: the angle the starting still was drawn from stays (`CAMERA_CLIP_TEXT`)."""
+    check_camera_elevation(deg)
+    return CAMERA_CLIP_TEXT.format(deg=deg)
 # What stays put while an attack moves, said once: after the built-in attack sentence and after a
 # caller's own motion paragraph alike. A request interpreter writes its motion before the still
 # exists, so it cannot know where the other hand's shield or lantern is drawn; the engine holds it.
@@ -395,15 +466,16 @@ def _staggered_start(gap: float) -> None:
 
 def build_prompt(direction: str, state: str, character: str | None, facing: str = "right", motion: str | None = None,
                  pinned: bool | None = None, model: str | None = None, handed: list[Handed] | None = None,
-                 body_plan: list[Body] | None = None) -> str:
+                 body_plan: list[Body] | None = None, camera_elevation: int | None = None) -> str:
     """The clip prompt for one (direction, state): `clip_prompt_parts(...).text`."""
     return clip_prompt_parts(direction, state, character, facing=facing, motion=motion, pinned=pinned, model=model,
-                             handed=handed, body_plan=body_plan).text
+                             handed=handed, body_plan=body_plan, camera_elevation=camera_elevation).text
 
 
 def clip_prompt_parts(direction: str, state: str, character: str | None, facing: str = "right", motion: str | None = None,
                       pinned: bool | None = None, model: str | None = None,
-                      handed: list[Handed] | None = None, body_plan: list[Body] | None = None) -> prompt_parts.Prompt:
+                      handed: list[Handed] | None = None, body_plan: list[Body] | None = None,
+                      camera_elevation: int | None = None) -> prompt_parts.Prompt:
     """The clip prompt for one (direction, state), as its pieces (`prompt_parts.Prompt`: `.text` is the
     prompt, `.notes` what the caller's own words say against or again after the engine's).
 
@@ -429,11 +501,16 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
     motion sentence or the caller's paragraph, what it stands on (`body_plan.text`); a walk or run seen from behind
     then says it stays square and does not sway (`BACK_GAIT_TEXT_ANY_BODY`).
 
-    Without `handed` or `body_plan` the prompt is 2.22.0's, to the byte (`tests/gen/test_prompt_freeze.py`). `handed` lists
+    `camera_elevation` (`--camera-elevation`, degrees above the horizon) says the still was drawn by a camera looking
+    down and that the angle stays (`CAMERA_CLIP_TEXT`), after the view and the other rules and before the handed piece.
+
+    Without `handed`, `body_plan` or `camera_elevation` the prompt is 2.22.0's, to the byte
+    (`tests/gen/test_prompt_freeze.py`). `handed` lists
     the character's asymmetric items (`handedness.parse`): the prompt ends with where each one stays, anchored
     to the first frame (`handedness.text(clip=True)`), the one piece `prompt_parts.Prompt.add` checks.
     """
     validate_facing(facing)
+    check_camera_elevation(camera_elevation)
     view = VIEW_TEXT.get(direction, f"seen from the {direction}").format(facing=facing)
     turned = facing if direction in handed_mod.LATERAL_VIEWS else None
     if state in ACTION_TEXT_STATES:
@@ -474,6 +551,8 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
     parts = prompt_parts.Prompt(text, caller=caller, sep=" ")
     # the caller's words against the view the engine's sentence turns the clip to (a note, never an edit)
     parts.note(facing=turned or prompt_parts.NO_TURN)
+    if camera_elevation is not None:
+        parts.add("camera", camera_clip_text(camera_elevation))
     if handed:
         parts.add("handed", handed_mod.text(handed, direction, turned, clip=True, gait=state in GAIT_STATES), handed=handed)
     return parts
@@ -557,14 +636,17 @@ def starts_mid_step(state: str, direction: str, body_plan: list[Body] | None = N
 
 
 def walk_start_prompt(direction: str, key: str | None = None, handed: list[Handed] | None = None,
-                      body_plan: list[Body] | None = None) -> str:
+                      body_plan: list[Body] | None = None, camera_elevation: int | None = None) -> str:
     """The redraw sentence for a walk's mid-step start still; with `key` (green / magenta) the background line,
     then with `handed` where each asymmetric item is in this view (`handedness.text`, the still's sentences).
-    A `body_plan` that is not one biped gets `WALK_START_TEXT_ANY_BODY`; one without legs is refused."""
+    A `body_plan` that is not one biped gets `WALK_START_TEXT_ANY_BODY`; one without legs is refused.
+    `camera_elevation` keeps the base still's camera from above: the redraw's "seen at eye level" is said as
+    `WALK_START_CAMERA_TEXT` instead, the only words that change."""
     if direction not in WALK_START_TEXT:
         raise SystemExit(f"video: no mid-step start still for the {direction} view (only {', '.join(WALK_START_TEXT)})")
     if body_mod.legless(body_plan):
         raise SystemExit("video: a body without legs has no mid-step start still; it films from its base")
+    check_camera_elevation(camera_elevation)
     if body_mod.biped(body_plan):
         text = WALK_START_TEXT[direction]
     else:
@@ -572,6 +654,11 @@ def walk_start_prompt(direction: str, key: str | None = None, handed: list[Hande
         text = WALK_START_TEXT_ANY_BODY[direction].format(
             what="the figures" if scene else "the character", who="every figure" if scene else "the character",
             legs=WALK_START_LEGS_TEXT["scene" if scene else "one"], stands_on=body_mod.text(body_plan))
+    if camera_elevation is not None:
+        # an appended camera sentence would leave "seen at eye level" contradicting it in the same prompt
+        if text.count(WALK_START_EYE_LEVEL) != 1:
+            raise RuntimeError(f"the mid-step redraw no longer says {WALK_START_EYE_LEVEL!r} once; say its camera anew")
+        text = text.replace(WALK_START_EYE_LEVEL, WALK_START_CAMERA_TEXT.format(deg=camera_elevation))
     if key is not None:
         if key not in KEY_BACKGROUND_TEXT:
             raise SystemExit(f"video: a mid-step start still is drawn on a green or magenta key, not {key!r}")
@@ -602,9 +689,11 @@ def run_redraw_cli(base: Path, prompt: str, out: Path, report: Path, *, log: Pat
 def walk_start_still(base: Path, direction: str, item_dir: Path, *, key: str, force: bool,
                      runner: Callable[..., int] = run_redraw_cli, provider: str | None = None,
                      handed: list[Handed] | None = None,
-                     body_plan: list[Body] | None = None) -> tuple[Path, dict[str, Any]]:
+                     body_plan: list[Body] | None = None,
+                     camera_elevation: int | None = None) -> tuple[Path, dict[str, Any]]:
     """The base still redrawn mid-step for a front or back walk (`WALK_START_TEXT`), on the base's own key,
-    told where each `handed` item is (a redraw from a reference alone can move it to the other side).
+    told where each `handed` item is (a redraw from a reference alone can move it to the other side) and, with
+    `camera_elevation`, to keep the base's camera from above.
 
     Reused when the same prompt already drew it from the same base (unless `force`)."""
     with Image.open(base) as im:
@@ -612,7 +701,7 @@ def walk_start_still(base: Path, direction: str, item_dir: Path, *, key: str, fo
     if kind not in KEY_BACKGROUND_TEXT:
         raise SystemExit(f"the {direction} walk starts from a still redrawn mid-step on a green or magenta key, and this "
                          f"base's corners are not one (key {key}); pass --walk-start as-given to film from the base itself")
-    prompt = walk_start_prompt(direction, kind, handed, body_plan)
+    prompt = walk_start_prompt(direction, kind, handed, body_plan, camera_elevation)
     out, report = item_dir / "walk-start.png", item_dir / "walk-start.report.json"
     if out.is_file() and report.is_file() and not force:
         try:
@@ -655,6 +744,7 @@ def run_item(
     still_provider: str | None = None,
     handed: list[Handed] | None = None,
     body_plan: list[Body] | None = None,
+    camera_elevation: int | None = None,
 ) -> dict[str, Any]:
     if walk_start not in WALK_START_MODES:
         raise SystemExit(f"video-set: --walk-start must be one of {', '.join(WALK_START_MODES)}")
@@ -666,14 +756,18 @@ def run_item(
     if facing_fix not in facing_mod.FIXES:
         raise SystemExit("video-set: --facing-fix must be mirror or none")
     _refuse_mirror_with_handed(facing_fix, handed)
+    check_camera_elevation(camera_elevation, "video-set")
     duration = duration_for(state, duration)
     item_dir = root / item
     item_dir.mkdir(parents=True, exist_ok=True)
     result: dict[str, Any] = {"item": item, "direction": direction, "state": state, "dir": str(item_dir)}
     if direction in handed_mod.LATERAL_VIEWS:
         result["turned"] = facing
+    if camera_elevation is not None:
+        result["camera_elevation"] = camera_elevation
     try:
-        parts = clip_prompt_parts(direction, state, character, facing=facing, handed=handed, body_plan=body_plan)
+        parts = clip_prompt_parts(direction, state, character, facing=facing, handed=handed, body_plan=body_plan,
+                                  camera_elevation=camera_elevation)
         prompt = parts.text
         if parts.notes:
             result["prompt_notes"] = parts.notes
@@ -702,6 +796,11 @@ def run_item(
                     raise ValueError("incomplete canvas report")
                 if canvas_report.get("fit", "state") != fit:
                     raise ValueError("cached canvas was framed with another --fit")
+                # the shape this run frames on: the forced one, else the state's own row (a canvas cached under
+                # --diagonal-gait-shape is not the state's own once the flag is dropped); --fit tight picks its own
+                if fit == "state" and canvas_report.get("shape") != canvas_mod.profile_for(state, shape).shape:
+                    # a clip filmed on another canvas would keep that framing (`--shape`, `--diagonal-gait-shape`)
+                    raise ValueError("cached canvas was framed with another shape")
                 if direction == "side":
                     prior = canvas_report.get("facing_check") or {}
                     if not isinstance(prior, dict):
@@ -717,7 +816,7 @@ def run_item(
             if starts_mid_step(state, direction, body_plan) and walk_start == "redraw":
                 still, result["walk_start"] = walk_start_still(base, direction, item_dir, key=key, force=force,
                                                                runner=redraw_runner, provider=still_provider, handed=handed,
-                                                               body_plan=body_plan)
+                                                               body_plan=body_plan, camera_elevation=camera_elevation)
             if direction == "side":
                 if prepare_side is not None:
                     still, facing_report = prepare_side(base)
@@ -785,6 +884,36 @@ def run_item(
         result["ok"] = False
         result["error"] = str(exc)
     return result
+
+
+# `--diagonal-gait-shape`: the canvas for a walk or run in a diagonal view only. In the crashbang village production
+# (2026-10-06, `output/modern-village-ortho16-20261006/batch_motion.py`, review.json) a stocky back-diagonal run kept
+# turning toward a side view: rewritten "fixed heading" prompts turned on square and 9:16 canvases alike, and on a
+# 9:16 canvas with the figure 85 % of the height its arms and strides reached the side edges and `video-frames`
+# refused the frames. The built-in prompt (`build_prompt`), from a still redrawn closer to the back, on a 9:16 canvas
+# with the figure 60 % of the height and 18 % above it, pinned to that canvas at 720p (take `pinned-portrait-roomy`),
+# held the rear diagonal facing right and facing left: what failed was limbs cut at the edges, not the prompt. That
+# canvas is `portrait` (`canvas.PORTRAIT`); `wide` and `square` are there to compare against it. Judged by eye, one
+# character, one take each way.
+DIAGONAL_GAIT_SHAPES = (canvas_mod.SHAPE_PORTRAIT, canvas_mod.SHAPE_WIDE, canvas_mod.SHAPE_SQUARE)
+
+
+def item_shape(direction: str, state: str, shape: str | None, diagonal_gait_shape: str | None) -> str | None:
+    """The canvas shape one item is framed on: `diagonal_gait_shape` for a walk or run in a diagonal view, else the
+    set's `shape` (None: the state's own row)."""
+    if diagonal_gait_shape is not None and state in GAIT_STATES and direction in DIAGONAL_VIEWS:
+        return diagonal_gait_shape
+    return shape
+
+
+def _refuse_pinned_at(resolution: str, pinned: list[str]) -> None:
+    """A set whose `pinned` items (`pins_last_frame`) would ask for a clip pinned at a resolution the clip model
+    refuses with a closing frame (`video.LAST_FRAME_REFUSED_RESOLUTIONS`) stops before any clip is made."""
+    if pinned and resolution in video_gen.LAST_FRAME_REFUSED_RESOLUTIONS:
+        raise SystemExit(
+            f"video-set: {', '.join(pinned)} {'is' if len(pinned) == 1 else 'are'} filmed pinned to end on the canvas "
+            f"(--last-frame), which is refused at {resolution} (HTTP 400, no clip); use --resolution "
+            f"{video_gen.LAST_FRAME_MAX_RESOLUTION}, or leave those states out of this set")
 
 
 def _refuse_mirror_with_handed(facing_fix: str, handed: list[Handed] | None) -> None:
@@ -983,14 +1112,26 @@ def run_set(
     handed: list[Handed] | None = None,
     align_feet: dict[str, str] | None = None,
     body_plan: list[Body] | None = None,
+    camera_elevation: int | None = None,
+    diagonal_gait_shape: str | None = None,
 ) -> dict[str, Any]:
     """`bases` maps a view to its still; `facing` is right, left or `right,left` (`facings_of`), and a view filmed
     both ways is keyed `view@right` and `view@left` (`resolve_bases`). `handed` (`handedness.parse`) puts each
     asymmetric item's side into every clip prompt; it refuses `facing_fix` mirror, which would move it.
     `align_feet` (`--align-foot`) maps an item of a walk or run filmed in two or more directions to the
-    own foot that lands on its loop's first strike (`align_gaits`); any other item is refused up front."""
+    own foot that lands on its loop's first strike (`align_gaits`); any other item is refused up front.
+    `camera_elevation` (`--camera-elevation`) says in every clip prompt, and in a mid-step redraw, that the
+    stills were drawn by a camera looking down that many degrees. `diagonal_gait_shape` (`--diagonal-gait-shape`)
+    frames only the walks and runs of the two diagonal views on that canvas (`item_shape`).
+    A set at 1080p that films any item pinned to its canvas (`pins_last_frame`) is refused before any clip."""
     if align_cycles not in ALIGN_MODES:
         raise SystemExit(f"video-set: --align-cycles must be one of {', '.join(ALIGN_MODES)}")
+    check_camera_elevation(camera_elevation, "video-set")
+    if diagonal_gait_shape is not None and diagonal_gait_shape not in DIAGONAL_GAIT_SHAPES:
+        raise SystemExit(f"video-set: --diagonal-gait-shape must be one of {', '.join(DIAGONAL_GAIT_SHAPES)}, "
+                         f"got {diagonal_gait_shape!r}")
+    if fit == "tight" and diagonal_gait_shape is not None:
+        raise SystemExit("video-set: --fit tight picks each canvas's shape itself; drop --diagonal-gait-shape")
     if anchor == "motion-auto" and any(not loop_mod.profile_for(state).gait for state in states):
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
     if anchor == "motion":
@@ -1011,6 +1152,7 @@ def run_set(
             raise SystemExit(f"video-set: base still for '{direction}' not found: {base}")
     # (item, direction, state, facing, base); a set filmed both ways names a lateral item's facing
     items = [(f"{d}-{f}-{s}" if both and f else f"{d}-{s}", d, s, f or facings[0], b) for d, f, b in views for s in states]
+    _refuse_pinned_at(resolution, [i for i, d, s, _, _ in items if pins_last_frame(s, d)])
     aligned_items = [i for i, _, s, _, _ in items if align_cycles == "auto" and loop_mod.profile_for(s).gait
                      and sum(1 for _, _, s2, _, _ in items if s2 == s) >= 2]
     for item, foot in (align_feet or {}).items():
@@ -1034,7 +1176,7 @@ def run_set(
         return prepare_side
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
-        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=b, root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=f, facing_fix=facing_fix, prepare_side=side_preparer(f), body_height=body_height, fit=fit, decontam=decontam, walk_start=walk_start, redraw_runner=redraw_runner, still_provider=still_provider, handed=handed, body_plan=body_plan): i for i, d, s, f, b in items}
+        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=b, root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=item_shape(d, s, shape, diagonal_gait_shape), anchor=anchor, spill=spill, facing=f, facing_fix=facing_fix, prepare_side=side_preparer(f), body_height=body_height, fit=fit, decontam=decontam, walk_start=walk_start, redraw_runner=redraw_runner, still_provider=still_provider, handed=handed, body_plan=body_plan, camera_elevation=camera_elevation): i for i, d, s, f, b in items}
         for fut in as_completed(futures):
             r = fut.result()
             results.append(r)
@@ -1055,7 +1197,9 @@ def run_set(
     warnings += [f"cycle-align:{st}: {line}" for st, a in aligned.items() for line in a.get("warnings", [])]
     warnings += [f"cycle-align:{st}: --align-foot {item}={foot} not applied ({a.get('why') or a.get('error') or 'the item failed'})"
                  for st, a in aligned.items() for item, foot in a.get("feet_unused", {}).items()]
-    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), **({"handed": [vars(h) for h in handed]} if handed else {}), **({"body_plan": [vars(b) for b in body_plan]} if body_plan else {}), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": failed, "warnings": warnings, "items": results, "cycle_align": aligned}
+    payload = {"kind": "sprite-gen-video-set-report", "root": str(root), "states": states, "facing": facing, "facing_fix": facing_fix, "directions": list(bases), **({"handed": [vars(h) for h in handed]} if handed else {}), **({"body_plan": [vars(b) for b in body_plan]} if body_plan else {}),
+               **({"camera_elevation": camera_elevation} if camera_elevation is not None else {}),
+               **({"diagonal_gait_shape": diagonal_gait_shape} if diagonal_gait_shape is not None else {}), "body_height": body_height, "ok": sum(1 for r in results if r.get("ok")), "failed": failed, "warnings": warnings, "items": results, "cycle_align": aligned}
     atomic_write_text(root / "set.report.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     print(table)
     return payload
@@ -1086,11 +1230,21 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--out-dir", required=True, type=Path, help="batch root; one folder per direction-state")
     parser.add_argument("--character", help="short subject phrase used in the prompts (e.g. 'The armored knight')")
     parser.add_argument("--duration", type=int, default=None, help=f"seconds per clip for every state (default: {DEFAULT_DURATION_SECONDS}, attack {STATE_DURATION_SECONDS['attack']}); a repeating motion holds enough cycles at 3 s and a longer clip only costs more (2026-09-18)")
-    parser.add_argument("--resolution", default="720p")
+    parser.add_argument("--resolution", default="720p", help="clip resolution (default 720p); 1080p is refused up front when any item is filmed pinned to its canvas (idle, attack, a diagonal walk or run): the clip model answers a pinned 1080p request with HTTP 400")
     parser.add_argument("--key", choices=("auto", "green", "magenta", "white"), default="auto")
     parser.add_argument("--concurrency", type=int, default=3, help="parallel clip generations (starts are staggered regardless)")
     parser.add_argument("--start-gap", type=float, default=START_GAP_SECONDS, help="seconds between clip request starts")
     parser.add_argument("--shape", choices=canvas_mod.SHAPES, help="force one canvas shape for every state (e.g. wide for a costume or arms that leave a 1:1 frame)")
+    parser.add_argument("--diagonal-gait-shape", choices=DIAGONAL_GAIT_SHAPES, default=None,
+                        help="the canvas for the walks and runs of the front_diagonal and back_diagonal views only (over --shape): "
+                             "portrait is 9:16 with the figure 60 %% of the height and 18 %% above it, which kept a "
+                             "back-diagonal run's limbs inside the frame and its angle both ways where a square canvas "
+                             "did not; default: the state's own canvas")
+    parser.add_argument("--camera-elevation", type=int, default=None, metavar="DEG",
+                        help=f"the stills were drawn by a top-down orthographic game camera looking down DEG degrees "
+                             f"({CAMERA_ELEVATION_RANGE[0]}..{CAMERA_ELEVATION_RANGE[1]}; 35 for an RPG village, as gen "
+                             "--camera-elevation drew them): every clip prompt says the angle stays, and a front or back "
+                             "walk's mid-step redraw keeps it instead of eye level")
     parser.add_argument("--anchor", choices=tuple(a for a in loop_mod.ANCHOR_MODES if a != "motion"), default="none", help="motion-auto: automatic regions, local period and XY correction (walk/run only); feet: remove in-canvas drift")
     parser.add_argument("--spill", choices=frames_mod.SPILL_MODES, default="auto", help="auto: judge key reflections from each item's canvas still (default); small / full: force")
     parser.add_argument("--fit", choices=canvas_mod.FITS, default="state", help="state: each state's room for the motion (default); tight: no room, the subject fills the frame and a motion that leaves it is clipped (use with --body-height at a low --resolution)")
@@ -1123,6 +1277,8 @@ def run(**kwargs: object) -> int:
         handed=handed_mod.parse_all(list(kwargs.get("handed") or [])) or None,  # type: ignore[arg-type]
         align_feet=align_mod.parse_feet(list(kwargs.get("align_foot") or []), prog="video-set", flag="--align-foot"),
         body_plan=body_mod.parse_all(list(kwargs.get("body_plan") or [])) or None,  # type: ignore[arg-type]
+        camera_elevation=kwargs.get("camera_elevation"),  # type: ignore[arg-type]
+        diagonal_gait_shape=kwargs.get("diagonal_gait_shape"),  # type: ignore[arg-type]
     )
     return 0 if not payload["failed"] else 1
 

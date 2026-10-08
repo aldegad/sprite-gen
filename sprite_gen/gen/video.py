@@ -78,6 +78,14 @@ DURATION_MIN, DURATION_MAX = 1, 15
 # docs' prose says "<IMAGE_0> … when you also pass images"; its samples say <IMAGE_1>.
 REFERENCE_MAX = 7
 REFERENCE_MAX_RESOLUTION = "720p"
+# A pinned closing frame (`--last-frame`, first-last or last-frame mode) is refused at 1080p: the API answers
+# HTTP 400 and returns no clip. Seen in the crashbang village production (2026-10-07, KUMA pack,
+# `output/kuma-village-ortho-20261007/grok-ledger.jsonl`: five combo takes at 1080p pinned, each "HTTP 400: 1080p
+# not allowed with --last-frame; no clip returned"; the 2026-10-06 office-worker pack had met the same). Those
+# takes' video.log were overwritten by the unpinned retakes, so the ledger line is the record, not the reply body.
+# Refused here, before an upload, rather than after a round trip.
+LAST_FRAME_MAX_RESOLUTION = "720p"
+LAST_FRAME_REFUSED_RESOLUTIONS = ("1080p",)
 REFERENCE_TAG = re.compile(r"<IMAGE_(\d+)>")
 # docs.x.ai model-capabilities/video/extension|editing (2026-09-13).
 EXTEND_INPUT_SECONDS = (2.0, 15.0)
@@ -307,6 +315,11 @@ def _validate(request: VideoRequest) -> None:
         _require_still(request.last_frame, "--last-frame")
         if request.model == CLASSIC_MODEL:
             raise SystemExit(f"video: --last-frame needs {DEFAULT_MODEL}; the classic {CLASSIC_MODEL} rejects last_frame")
+        if request.resolution in LAST_FRAME_REFUSED_RESOLUTIONS:
+            raise SystemExit(
+                f"video: --last-frame is refused at {request.resolution} (the API answers HTTP 400 and returns no clip); "
+                f"use --resolution {LAST_FRAME_MAX_RESOLUTION}, or drop --last-frame"
+            )
     references = request.reference_images
     tags = sorted({int(n) for n in REFERENCE_TAG.findall(request.prompt)})
     if references:
@@ -710,7 +723,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--facing", choices=FACINGS, default="right", help="with --direction side: required direction (default right)")
     parser.add_argument("--facing-fix", choices=facing_mod.FIXES, default="none", help="with --direction side: record only (none, default), or opt into mirror")
     parser.add_argument("--image", type=Path, help="the still to animate / the first frame (PNG/JPEG/WebP)")
-    parser.add_argument("--last-frame", type=Path, help=f"pin the closing frame ({DEFAULT_MODEL} only); alone or with --image")
+    parser.add_argument("--last-frame", type=Path, help=f"pin the closing frame ({DEFAULT_MODEL} only, {LAST_FRAME_MAX_RESOLUTION} max: refused at 1080p); alone or with --image")
     parser.add_argument(
         "--reference", dest="reference_images", action="append", type=Path, default=None, metavar="IMAGE",
         help=f"reference image, repeatable up to {REFERENCE_MAX}; refer to them in the prompt as <IMAGE_0>, <IMAGE_1>, … "

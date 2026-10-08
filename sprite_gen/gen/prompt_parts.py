@@ -1,18 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 """Attaching the engine's sentences to a prompt: the one place pieces go on.
 
-A prompt is the caller's own text and then the engine's pieces: the view sentence, the turn over a
-reference, where a handed item is, the key background line, the layout guide; for a clip the side view's
-hold. Every piece goes on through `Prompt.add`, and each goes on only where its condition holds:
+A prompt is the caller's own text and then the engine's pieces: the view sentence, a camera looking down,
+the turn over a reference, where a handed item is, the key background line, the layout guide; for a clip
+the side view's hold. Every piece goes on through `Prompt.add`, and each goes on only where its condition
+holds:
 
-- every piece but the handed one goes on as 2.22.0 attached it. The prompts a character with no handed
-  item is drawn and filmed from are frozen at 2.22.0, to the byte (`tests/gen/test_prompt_freeze.py`); a
-  change to them waits for a before-and-after comparison on the app's default clip model;
+- every piece but the handed and camera ones goes on as 2.22.0 attached it. The prompts a character with no
+  handed item and no `--camera-elevation` is drawn and filmed from are frozen at 2.22.0, to the byte
+  (`tests/gen/test_prompt_freeze.py`); a change to them waits for a before-and-after comparison on the app's
+  default clip model;
 - the key background line is left out when the prompt already names a key background (`ALREADY_SAID`), as
   2.22.0 did;
-- the handed piece (`ONCE_ONLY`) drops a sentence the prompt already carries, word for word: a start still's
-  prompt handed back to `gen --direction --handed` already has it. Its arm sentences (the arms swing, the far
-  arm's item shows when that arm comes forward) are there only for an item on an arm
+- the handed and camera pieces (`ONCE_ONLY`) drop a sentence the prompt already carries, word for word: a start
+  still's prompt handed back to `gen --direction --handed` already has the handed one, and a caller who pasted
+  the camera sentence into a `--motion` paragraph already has that one. The handed piece's arm sentences (the
+  arms swing, the far arm's item shows when that arm comes forward) are there only for an item on an arm
   (`handedness.limb`).
 
 The caller's text is never edited. Where it and a piece disagree (`facing left` in the text, `--facing
@@ -68,9 +71,10 @@ def _key_said(prompt: "Prompt", **_: Any) -> tuple[str, str] | None:
 ALREADY_SAID: dict[str, Callable[..., tuple[str, str] | None]] = {
     "key-background": _key_said,
 }
-# Topics whose sentences the prompt already carries are dropped from the piece. Only the handed piece: every
-# other piece is said as 2.22.0 said it, a repeat included.
-ONCE_ONLY = frozenset({"handed"})
+# Topics whose sentences the prompt already carries are dropped from the piece. Only the pieces 2.22.0 did not have
+# (the handed piece, the camera of `--camera-elevation`): every other piece is said as 2.22.0 said it, a repeat
+# included.
+ONCE_ONLY = frozenset({"handed", "camera"})
 
 
 @dataclass(frozen=True)

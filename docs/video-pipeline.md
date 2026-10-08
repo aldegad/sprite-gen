@@ -72,6 +72,23 @@ height; wide canvases grow both dimensions to preserve their ratio without shrin
 the still. A still whose corners are not one flat colour
 is refused — a non-flat background cannot be extended without guessing.
 
+**`--shape portrait` is a roomy upright frame for a walk or run seen at a diagonal** (`PORTRAIT`). The still
+is cut to its subject (only the flat background around it goes, nothing is scaled) and placed centred on a 9:16
+canvas. The subject fills 60 % of the canvas height, with 18 % above it and the rest below
+(`CanvasProfile.subject`; the other shapes place the still whole, margins and all, so they cannot say how much of
+the frame the figure is). A subject wider than 9:16 allows at that height widens the canvas and then fills less
+of the height. The report's `portrait` block gives the subject's box in the still and its share of the height.
+`--headroom` moves the room above the subject, and one that leaves no room below it is refused. In the crashbang
+village production (2026-10-06, office worker, take `pinned-portrait-roomy`) a stocky back-diagonal run kept
+turning toward a side view. Rewritten "fixed heading" prompts turned on square and 9:16 canvases alike. On a 9:16
+canvas with the figure at 85 % of the height, the arms and strides reached the side edges and `video-frames`
+refused the frames. The built-in prompt, from a still redrawn closer to the back, on this frame pinned at 720p, held the
+rear diagonal facing right and facing left. What failed was limbs cut at the edges, not the prompt. `--shape
+tall` did not give this frame: it re-padded the production's 9:16 still to 3:4 and the figure came out at about
+40 % of the height, so the production built this canvas by hand. Judged by eye on one character; the numbers
+are that take's, not a sweep. `video-set --diagonal-gait-shape portrait` puts only the diagonal walks and runs
+on it (section 5).
+
 **`--fit tight` adds no room.** It is the framing for a fixed body height at a low
 clip resolution: the room above makes the subject a small part of the clip, and a
 `--body-height` target then has to upscale it. Tight drops the empty rows above and
@@ -546,6 +563,37 @@ turned over shows it in too few frames for a near arm; one facing left (the item
 crossing the body) turned over shows it behind the body's centre; a diagonal turned over moves it
 across the picture. `tests/qa/test_handed_check.py` draws each view as it should look, passes it, and
 fails it turned over.
+
+### A camera that looks down (`--camera-elevation`)
+
+Every sentence above draws and films a character at eye level. A top-down orthographic game (an RPG
+village) sees its characters from above, so its stills and clips need a camera that looks down.
+`gen --camera-elevation DEG` (with or without `--direction`), `video-set --camera-elevation DEG` and
+`video-prompt --camera-elevation DEG` (10..80 whole degrees above the horizon; anything else is refused before a
+prompt is made) add one piece, topic `camera` ([prompt assembly](prompt-assembly.md)):
+
+| Prompt | What it gets |
+|---|---|
+| a still (`gen`) | after the view sentence (or after the caller's text without `--direction`), before the handed piece: "The camera is high above: a fixed orthographic top-down game camera looking down at the character from about DEG degrees above the horizon, not an eye-level side-scroller view. Because we look down from above, the top of the head and the tops of the shoulders are visible, the face, where it shows, is seen slightly from above, the legs look slightly shorter from foreshortening, and the tops of the feet are seen from above with the soles hidden. Parallel orthographic projection, no fisheye, no perspective convergence." With a `--body-plan` that is not one biped, the same without shoulders or feet: the top of the head and the upper side of the body visible, any legs foreshortened, nothing seen from below (`CAMERA_STILL_TEXT_ANY_BODY`; a scene says every figure). |
+| a clip (`video-set`, `video-prompt`) | after the view and the other rules, before the handed piece: "The high top-down camera angle (looking down about DEG degrees) stays exactly as in the image." |
+| a front or back walk's mid-step redraw | no sentence added: its "seen at eye level" is said as "seen from the same high top-down camera angle as the image, looking down about DEG degrees", since an added camera sentence would leave the prompt saying both |
+
+The words come from the crashbang village production (2026-10-06 and 07: an office worker, a stocky Lupin
+and the bear-masked KUMA, eight directions each). The ground's own projection, 16 degrees, put in a still
+prompt drew an eye-level character, and the user rejected it as looking like a side-scroller. 35 and 50 degrees
+were stood in the live village capture at the same foot spot and height; 35 was chosen and 50 was too steep.
+Naming the angle alone was not enough, so the still says what looking down shows: the crown and the tops of the
+shoulders, the face from slightly above, the legs foreshortened, the tops of the feet. The KUMA pack ended every walk, run and
+action clip prompt with the clip line and redrew its front and back walks mid-step with the redraw words above.
+Both of those walks passed. This was **judged by eye on three characters, not measured over many takes**:
+no take went without the line, so there is no before-and-after comparison yet. Draw the stills with `gen
+--camera-elevation DEG` and film them with the same DEG. A set's report and each item record
+`camera_elevation`, and a clip or mid-step still cached under another angle is not reused.
+
+A walk or run in a diagonal view still says it heads "like a character walking up and to the right in an
+isometric game" (`VIEW_MOTION_TEXT`). With `--camera-elevation` the camera line comes after that sentence and
+the isometric words stay: they are what held the three-quarter angle in 10 of 10 (2026-10-02), and the
+freeze holds them until a comparison says otherwise.
 
 ## 3. Frames — extract, key, check the edges
 
@@ -1072,6 +1120,19 @@ scaling down rather than up, and lets the subject reach the frame edge. Items
 are idempotent (an existing clip is reused unless `--force`); one failure stops only
 its item and is listed in `table.md` with its stage and error. Exit code is non-zero
 when any item failed.
+
+`--diagonal-gait-shape portrait|wide|square` frames only the walks and runs of the `front_diagonal` and
+`back_diagonal` views on that canvas, over `--shape`. Every other item keeps its own canvas, and without the
+option every item is framed as before. `portrait` is the roomy 9:16 frame of section 1, which kept a
+back-diagonal run's limbs inside the frame and its angle both ways where square canvases did not. The set
+report records `diagonal_gait_shape`, and a clip cached on a canvas of another shape is not reused (the same
+holds for `--shape`). `--fit tight` picks its own shapes and refuses it.
+
+A set at `--resolution 1080p` that would film any item pinned to its canvas (`pins_last_frame`: idle, attack,
+a walk or run in a diagonal) is refused before its first clip, naming those items: the clip model answers a
+pinned 1080p request with HTTP 400 and no clip. In the crashbang KUMA pack (2026-10-07, `grok-ledger.jsonl`) five
+combo takes at 1080p with `--last-frame` were each refused that way. `sprite-gen video --last-frame` refuses 1080p
+itself, before uploading. Film pinned items at 720p, or leave those states out of a 1080p set.
 
 A front or back walk films from its base redrawn mid-step (`--walk-start redraw`, default; one
 image generation each, `--still-provider` picks the provider; see §2). After the loops are cut,

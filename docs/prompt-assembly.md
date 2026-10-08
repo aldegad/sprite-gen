@@ -5,11 +5,13 @@ sentence is a **piece** with a topic, and every piece goes on through one place
 (`sprite_gen/gen/prompt_parts.py`, `Prompt.add`). The caller's text is never edited.
 
 **A piece goes on only where its condition holds.** The arm sentences go on only for a `--handed`
-item on a wrist, a hand, a forearm or an elbow (`handedness.limb`, one table).
+item on a wrist, a hand, a forearm or an elbow (`handedness.limb`, one table). The camera sentence goes on
+only with `--camera-elevation`.
 
-## Without `--handed`, 2.22.0's prompts
+## Without `--handed` or `--camera-elevation`, 2.22.0's prompts
 
-The prompts a character with no handed item is drawn and filmed from are 2.22.0's, byte for byte:
+The prompts a character with no handed item and no `--camera-elevation` is drawn and filmed from are
+2.22.0's, byte for byte:
 clips (built-in or `--motion`, every model and pin), `video-prompt`, stills (view, facing,
 reference, key line, layout guide, the `--facing-fix regen` regeneration), `video --direction side`
 and the mid-step redraw. `tests/gen/test_prompt_freeze.py` compares every prompt string in that table
@@ -24,7 +26,9 @@ change again without a new comparison. So far: the two diagonal stills' view sen
 ([video-pipeline](video-pipeline.md#2-clip--sprite-gen-video)).
 
 `--handed` adds its piece and changes nothing else: the prompt is the one without it, with the handed
-sentences put in (`tests/gen/test_prompt_assembly.py`).
+sentences put in (`tests/gen/test_prompt_assembly.py`). `--camera-elevation` does the same with its camera
+sentence (`tests/gen/test_prompt_camera.py`), but in one place: the mid-step redraw says "seen at eye level",
+and there those words are said from above instead and nothing is added (below).
 
 ## The pieces
 
@@ -34,6 +38,7 @@ sentences put in (`tests/gen/test_prompt_assembly.py`).
 |---|---|---|
 | the caller's text | always | `--prompt` / `--prompt-file` |
 | view | `--direction` (with `--body-plan`, the sentence for that body) | `batch.still_view_text` |
+| camera | `--camera-elevation DEG`: after the view sentence, in its paragraph; without `--direction`, where the view sentence would be (with `--body-plan`, the sentence for that body) | `batch.camera_still_text` (`CAMERA_STILL_TEXT`, `CAMERA_STILL_TEXT_ANY_BODY`) |
 | handed | `--direction --handed` | `handedness.text` |
 | facing | `--ref` with `--facing` | `facing.prompt_suffix` |
 | key background | `--transparent --ref` when `auto` plans a key | `chroma.KEY_BACKGROUND_TEXT` |
@@ -46,9 +51,16 @@ said after the first prompt (`facing.prepare_correction`).
 own, `MOTION_TEXT` / `VIEW_MOTION_TEXT`, or the caller's `--motion` with `HOLD_TEXT`, `GAIT_HOLD_TEXT`
 and `REPEAT_TEXT`), the view, frame, camera, background, design and rhythm rules (`VIEW_TEXT` in
 `COMMON_TEXT` / `PINNED_LOOP_TEXT` / `ACTION_COMMON_TEXT`) and a Lite model's walk sentences
-(`LITE_WALK_TEXT`, `LITE_HEAD_TEXT`), as 2.22.0 put them together; then the handed piece
-(`handedness.text(clip=True)`). `sprite-gen video --direction side` adds the side view's hold after
-the prompt (`video.side_view_prompt`).
+(`LITE_WALK_TEXT`, `LITE_HEAD_TEXT`), as 2.22.0 put them together; then the pieces:
+
+| Piece | When | Sentence from |
+|---|---|---|
+| camera | `--camera-elevation DEG` (`video-set`, `video-prompt`) | `batch.camera_clip_text` (`CAMERA_CLIP_TEXT`): "The high top-down camera angle (looking down about DEG degrees) stays exactly as in the image." |
+| handed | `--handed` | `handedness.text(clip=True)` |
+
+`sprite-gen video --direction side` adds the side view's hold after the prompt (`video.side_view_prompt`).
+`sprite-gen video` takes no `--camera-elevation`: it sends the caller's prompt, and a prompt from
+`video-prompt --camera-elevation` already carries the line.
 
 The handed piece of a clip is one sentence per wrist (or other part), not per item: two items on one
 wrist share it, and with an item on each wrist neither sentence calls the other wrist bare. In a
@@ -69,7 +81,10 @@ a walk or run seen from behind then says the body stays square and does not sway
 ([sheet rows](video-pipeline.md#the-sheet-rows--prepare---body-plan)).
 
 **A front or back walk's start still** (`batch.walk_start_prompt`): the mid-step redraw sentence,
-the key background line, then the still's handed sentences.
+the key background line, then the still's handed sentences. With `--camera-elevation` the redraw sentence's
+"seen at eye level" is said as "seen from the same high top-down camera angle as the image, looking down about
+DEG degrees" (`WALK_START_CAMERA_TEXT`): a camera sentence added after it would leave the prompt saying both. No
+sentence is added; these are the only words that change.
 
 ## What "already said" means
 
@@ -77,9 +92,9 @@ the key background line, then the still's handed sentences.
   line out. It is read from the hex code (`#FF00FF`, `00ff00`) or the key's name right before
   "background", "backdrop", "chroma key", "key" or "screen" (`chroma.named_key_background`), as
   in 2.22.0.
-- **The handed piece** (`prompt_parts.ONCE_ONLY`): a sentence the prompt already carries, word for
-  word, is dropped from it. A start-still prompt handed back to `gen --direction --handed` keeps one
-  copy of the handed sentences.
+- **The handed and camera pieces** (`prompt_parts.ONCE_ONLY`): a sentence the prompt already carries, word
+  for word, is dropped from it. A start-still prompt handed back to `gen --direction --handed` keeps one
+  copy of the handed sentences; a `--motion` paragraph that already ends with the camera line keeps one.
 
 Every other piece is said as 2.22.0 said it, even where the prompt already says it.
 
@@ -122,7 +137,11 @@ them, most urgent first:
 
 ## The checks
 
-`tests/gen/test_prompt_freeze.py` holds every prompt string without `--handed` to 2.22.0's.
+`tests/gen/test_prompt_freeze.py` holds every prompt string without `--handed` or `--camera-elevation` to
+2.22.0's. `tests/gen/test_prompt_camera.py` draws every still (each view and facing, none, with `--handed`, every
+body plan, with and without a reference), every clip (each state, both clip models, a caller's own walk, pinned or
+not, with `--handed`), the mid-step redraw and `video-prompt` with the camera, and checks each is the prompt without
+it and the camera sentence at its place, said once; and that an angle outside 10..80 is refused.
 `tests/gen/test_prompt_assembly.py` draws every prompt in the option table as text, with no
 generation: five views, both facings, no item / one / two on one wrist / one on each wrist / one on an
 ear, a caller's text that names the key, the turn or the item's side or does not, every state, both
