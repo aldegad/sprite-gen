@@ -90,10 +90,11 @@ def test_f1_every_cell_of_every_region_keeps_the_floor(probes, tmp_path, floor):
 def test_f1_a_floor_no_gain_of_one_or_more_keeps_holds_the_region_and_one_held_alone_is_refused(probes, tmp_path):
     _, region = X1
     loop_dir = shutil.copytree(probes['X1'], tmp_path/'one')
-    before = drawn(loop_dir)
+    before = {p.name: p.read_bytes() for p in loop_dir.iterdir()}
     with pytest.raises(SystemExit, match=r'--stretch-floor 0\.5.*held'):
         follow.follow_loop(loop_dir, [region], on_fold='lower', stretch_floor=0.5)
-    assert drawn(loop_dir) == before
+    # Nothing is written but the strip as cut, kept beside the loop as on any refusal.
+    assert {p.name: p.read_bytes() for p in loop_dir.iterdir() if p.name != follow.SOURCE} == before
     # Beside a larger region that keeps it at 1 or more, the small one is held and named, and the large one moves.
     cx, cy, _, _ = region
     _, rec = followed(probes['X1'], tmp_path/'two', [(cx, cy, 30.0, 30.0), region], stretch_floor=0.5)
