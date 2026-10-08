@@ -719,11 +719,22 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   loop's frame rate, so the aligned cycle lasts L*/fps seconds. `strip.json` gains
   `cycle_align` (`from`, `to`, `between`, `taken`, `made_by_rife`, `made_at`, `smear` and/or
   `nearest_at`, `drawings`, `retake`, `turned_by`, `turned_on`, `view`, `start_foot`, `start_foot_source`, `strikes`, the seam ratio of the rebuilt
-  cells, and the re-verified GIF/WebP).
+  cells, `cells_from`, `origin`, and the re-verified GIF/WebP).
+- **Where every cell is from**: `cycle_align.cells_from` holds, per cell of the rebuilt strip,
+  `{"source": i}` — frame i of `cycle.source/`, taken as filmed (a turn, a snap, or the nearer
+  frame), as many times as it is taken — or `{"between": [i, j], "t": t}`, a frame made between
+  two. The report's loop rows carry it too.
 - **The cut as filmed is kept** in `cycle.source/` on the first alignment, and every later
   alignment reads from there: running it again, or at another length, never resamples a
   resampled loop. Every loop of the set is resampled before any is rewritten, so a loop that
-  cannot be made leaves the set as it was.
+  cannot be made leaves the set as it was. The first alignment also records the strip as cut,
+  before anything is rewritten (`cycle_align.origin`: its file's sha256 — `follow.source.png`'s
+  where a follow-through moved it —, cell size, scale, crop origin, `sample_indices`, each cell's
+  pixels by sha256, and the body's motion as `video-follow` reads it there, `reading`), and every
+  later alignment keeps it as it is. A loop aligned before this record existed has none, and gets
+  none: its cut is no longer there to read. With `cells_from` it lets a follow-through whose
+  regions were read on the cut be carried to the aligned loop (`video-follow --read-on`,
+  docs/video-pipeline.md section 6). Neither record changes a pixel of the strip, GIF or WebP.
 - Loops at different frame rates are refused (one length in frames would mean different
   durations), and so is a loop cut before `cell_height_cap` was recorded (cut it again).
 
@@ -742,7 +753,8 @@ or whose state was not aligned, is named in that state's `feet_unused` and a war
 Cutting a loop again with `video-loop` removes its `cycle.source/`, so the next alignment reads
 the new cut. An alignment also clears a follow-through (`video-follow`, which moved the old
 cells): `follow.source.png` and the strip's `follow` record are removed and the loop's row says
-`follow_cleared`; run `video-follow` again after it.
+`follow_cleared`; run `video-follow` again after it, with `--read-on` naming the strip the regions
+were read on.
 
 How much RIFE that is, on the 2026-10-03 sets (the experiment's `finalize.py`): resampling to
 the median made 18 of 21 frames for a Lite side loop of 27, 20 of 21 for a back-diagonal loop of

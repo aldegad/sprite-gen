@@ -306,9 +306,10 @@ def test_what_the_answer_is_asked_with_is_in_the_id_and_how_the_boards_are_drawn
     lower = others[3]
     assert (lower['cells'], lower['regions'], lower['boards']) == (base['cells'], base['regions'], base['boards'])
     assert lower['inputs']['settings'] == base['inputs']['settings'] | {'on_fold': 'lower'}
-    assert base['inputs']['settings'] == {'gain': 2.5, 'on_fold': 'refuse', 'freq_hz': 2.4, 'zeta': 0.6}
+    assert base['inputs']['settings'] == {'gain': 2.5, 'on_fold': 'refuse', 'freq_hz': 2.4, 'zeta': 0.6, 'read_on': None, 'stretch_floor': None}
     assert base['inputs']['policy'] == {'name': follow.POLICY, 'harmonics': 6, 'alpha_solid': 128, 'worn': [0.25, 0.5],
-                                        'gain_measured': 1.0, 'gain_step': 0.01, 'weight': 'cos2'}
+                                        'gain_measured': 1.0, 'gain_step': 0.01, 'weight': 'cos2',
+                                        'transport': follow.TRANSPORT_POLICY, 'stretch_floor': follow.STRETCH_POLICY}
     # Numbers from a caller are read as the command line's.
     for kind in (np.int64, np.float32, int):
         given = follow_inspect.inspect_loop(loop_dir, np.asarray([CHEST], dtype=kind), tmp_path/f'kind-{kind.__name__}', gain=kind(2.5) if kind is np.float32 else 2.5)
@@ -441,7 +442,8 @@ def test_the_command_takes_what_video_follow_takes(tmp_path, capsys):
     assert (out/FILES[0]).samefile(printed['record']) and printed['input_id'] == record['input_id'] and printed['cells'] == N
     assert printed['ownership'] == 'unknown' and printed['held'] == [] and printed['region_gains'] == [region['gain'] for region in record['regions']]
     assert [(out/record['boards'][name]['file']).samefile(printed['boards'][name]['path']) for name in ('source', 'moved')] == [True, True]
-    assert record['boards']['columns'] == 6 and record['inputs']['settings'] == {'gain': 50.0, 'on_fold': 'lower', 'freq_hz': 2.5, 'zeta': 0.5}
+    assert record['boards']['columns'] == 6 and record['inputs']['settings'] == {'gain': 50.0, 'on_fold': 'lower', 'freq_hz': 2.5, 'zeta': 0.5,
+                                                                                'read_on': None, 'stretch_floor': None}
     lines = said.strip().splitlines()
     assert lines and all(line.startswith('video-follow-inspect: --gain 50 folds ') and 'lowered to --gain ' in line for line in lines)
     assert follow_inspect.main([*asked, '--out-dir', str(tmp_path/'direct')]) == 0
