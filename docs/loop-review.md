@@ -230,7 +230,9 @@ Cycle PNGs preserve the supplied keyed pixels (no additional speck removal), wit
 common transparent padding to avoid clipping. Strip scaling, GIF palette conversion
 and output frame-density settings still apply. The sidecar/report records regions,
 measurements, endpoint, every shift and padding. For this mode the unchanged seam
-limit gates the **rendered, resampled cells**, recorded as `seam_measurement=rendered-cells`.
+limit gates the **rendered, resampled cells**, recorded as `seam_measurement=rendered-cells`;
+a cell the jump repair gave a filmed ghost way to the frame beside it is read there as filmed
+(`seam_as_filmed`, [loop repair](loop-repair.md) section 2).
 This tests the corrected output, not the drifting input. It cannot repair missing
 poses, changing colors, limb identity or an incorrectly chosen cycle.
 

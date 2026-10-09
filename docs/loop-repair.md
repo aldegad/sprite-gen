@@ -66,7 +66,7 @@ cut before RIFE existed still cuts — and nothing is left unsaid:
 
 | Where | Default without RIFE | Asked for by name |
 |---|---|---|
-| `video-loop` jump repair (section 2) | `--repair auto`: the loop is cut as filmed; `jump_repair` reads `applied: false`, `why`, `rife` (what was not found), `install`, and the worst jump's score; one `video-loop: warning:` line on stderr | `--repair on`: fails with the install line |
+| `video-loop` jump repair (section 2) | `--repair auto`: a jump is cut as filmed, and each filmed ghost is given way to the clean frame beside it (its own `warning:` line). Where a jump is left, `jump_repair` reads `why`, `rife` (what was not found), `install` and `unmade` (the step, target and score the jump search stopped at), and one `video-loop: warning:` line on stderr says the jump frame was not repaired. `applied` is false only where nothing was replaced | `--repair on`: fails with the install line |
 | `video-set` cycle alignment (section 4) | `--align-cycles auto`: the state is skipped and every loop keeps its own length; `cycle_align.<state>` reads `applied: false` with `why`, `rife`, `install`; the set report lists it under `warnings`; one `video-set: warning:` line | `video-cycle-align`: fails with the install line |
 
 A RIFE that is found and then fails (a binary that cannot reach Vulkan, say) is an error in every
@@ -192,8 +192,8 @@ Ghost rounds are outside the three-call budget, which is the jumps'. A cell give
 it too, and the jumps are then read on the loop as the ghosts left it. A cell given way to the
 frame beside it is that frame shown twice in a row — a step of nothing and a step of two — and the
 jolt index (section 3) measures it as it plays; the GIF and WebP hold it as one frame of twice the
-delay, and are checked for one frame per run of identical cells. A loop the screen does not read
-(drawn part-covered, `reads: false`) has no ghost round.
+delay, and are checked for one frame per run of identical cells. The seam gate reads it as filmed
+(below). A loop the screen does not read (drawn part-covered, `reads: false`) has no ghost round.
 
 The report's `jump_repair` carries `replaced` (cycle frame indices, ghost and jump rounds alike), `attempts` (the jumps' calls),
 `blocked` targets, and each round's `why` (`ghost` or `jump`), target, `original` and `proposal`
@@ -227,8 +227,17 @@ The original middle frame is retained, not a duplicate of either neighbour.
 The jump rounds' record is above; `jump_repair` also records `score_max_before` (the cut as
 filmed) / `score_max_after`, why it stopped, and which interpolator made the proposals. Rejection is not overall quality failure
 or success: original drawing changes and normal gait motion can remain.
-When a frame was replaced the seam gate measures the rendered cells
-(`seam_measurement: rendered-cells`), because the source frames no longer say what plays.
+When a frame was made — RIFE's, for a jump or for a filmed ghost — the seam gate measures the
+rendered cells (`seam_measurement: rendered-cells`), because the source frames no longer say what
+plays. A cell given way to the frame beside it is read as filmed (`seam_as_filmed`, frames of the
+cut). The gate asks whether the cut closes, and that frame shown twice in a row is a step of nothing
+and a step of two wherever the ghost was: at the wrap — a ghost at the cut's first frame given way
+to its second, or at its last given way to its first — the step of two read as a cut that does not
+close (a walk whose wrap is an ordinary step read twice its mean step and was refused), and the
+step of nothing as one that closes whatever the cut. On the source frames the cell is the frame as
+filmed; on the rendered cells, the cell of the strip the cut makes with that frame as filmed. A loop
+that only gave its ghosts way to the frames beside them is gated on its source frames, as filmed.
+`--anchor body` reads its `seam_ratio_after_anchor` the same way.
 
 To compare an active result with a final candidate after all processing, use
 [`video-loop-compare`](loop-comparison.md); a seam pass alone is not an improvement.

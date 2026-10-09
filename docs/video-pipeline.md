@@ -913,7 +913,7 @@ frames beside it, else by the clean frame beside it, else kept and named (`ghost
 take a clean frame there. The report's `jump_repair` names the frames. RIFE
 is installed once with `sprite-gen rife install`; without it a loop that needs a frame is cut as
 filmed with a warning, each filmed ghost given way to the clean frame beside it (`--repair on`
-fails instead). A frame shown twice in a row is one frame of the GIF and WebP, checked so. See [loop repair](loop-repair.md). The repaired loop's jolt index and the head's frame-to-frame
+fails instead). A frame shown twice in a row is one frame of the GIF and WebP, checked so, and the seam gate reads a frame given way as filmed (`seam_as_filmed`). See [loop repair](loop-repair.md). The repaired loop's jolt index and the head's frame-to-frame
 moves are reported (`jolt`); beyond the reference bounds that is a warning line, and a gate
 (`video-loop: loop jolts — …`) only when `--jolt-max` / `--head-step-max` are passed.
 
