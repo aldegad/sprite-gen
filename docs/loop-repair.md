@@ -664,8 +664,9 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   - **The rule**: a loop is named when its cut is held (`hold` 2 or 3), the set's length leaves
     it under **13 drawings a second** (`align.RETAKE_DRAWINGS_MIN`), and **one or more** frames
     between its drawings were not made (`align.RETAKE_UNMADE_MIN`) — taken from the nearer source
-    frame (`auto`'s replacements, every made time under `nearest`) or made with a fault and kept
-    (`rife`). Each loop row carries `drawings` and `retake` (the record, or `null`): `reason`,
+    frame (`auto`'s replacements, a made ghost's among them, every made time under `nearest`) or
+    made with a fault and kept (`rife`); a filmed ghost given way at a whole time is no frame
+    between drawings left unmade, and is named in `ghost_at` instead. Each loop row carries `drawings` and `retake` (the record, or `null`): `reason`,
     `hold`, `source`, `drawings` (in the cycle), `drawings_per_second_filmed`,
     `drawings_per_second` (at the set's length), `frames_per_drawing` (the gap, in frames of the
     aligned loop), `unmade`, and the `limits`. The report's `retake` lists every such loop (`dir`,
