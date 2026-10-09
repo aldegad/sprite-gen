@@ -7,7 +7,9 @@ neighbours where both are clean and the frame has no fault, else the clean frame
 after, else the one before), else, both being filmed ghosts too, kept and named. A cell given way is
 in `jump_repair.replaced`, so the source projection and the restoration read it as a made cell, and
 the GIF and WebP are checked for one frame per run of identical cells (a cell given way to the frame
-beside it is that frame shown twice in a row).
+beside it is that frame shown twice in a row). The seam gate, on in every cut here, reads a cell given
+way to the frame beside it as filmed (`seam_as_filmed`): at the wrap that frame twice in a row is a
+step of two or a step of nothing, which would refuse a cut that closes or pass one that does not.
 
 The fixtures are synthetic: the walk of tests/video/test_cycle_align.py (a body and a foot going round,
 20 frames a cycle) with a band of 0.3 coverage beside the foot (tests/video/test_ghost_screen.py `_band`)
@@ -39,30 +41,39 @@ from tests.video.test_loop_repair import _no_rife
 L = 20
 SMALL = (0.36, 0.80, 0.44, 0.87)  # 8 x 8 px beside the foot: reads 0.011, and the step into it is no jump
 WIDE = (0.25, 0.80, 0.75, 0.95)  # around the feet: reads 0.36, and the steps into and out of it read as jumps
+# The walk two frames into its cycle: cut from there, its wrap is an ordinary step (the seam ratio of the cut reads
+# 1.05), as a cut chosen to close has it. From the cycle's start the wrap is a short step (0.44), and two steps there
+# still read under the gate.
+EVEN = 2
 
 
-def _keyed(root: Path, name: str, ghosts: tuple[int, ...], box=SMALL, length: int = L) -> Path:
-    """Keyed frames of the walk, a little more than a cycle, its frames in `ghosts` filmed with a band."""
+def _keyed(root: Path, name: str, ghosts: tuple[int, ...], box=SMALL, phase: int = 0) -> Path:
+    """Keyed frames of the walk from `phase` frames into its cycle, a little more than a cycle, its frames in `ghosts`
+    (frames of the clip, which the cut starts at) filmed with a band."""
     keyed = root / f"{name}-keyed"
     keyed.mkdir(parents=True)
-    for k in range(length + 6):
-        frame = _block_walker(2 * math.pi * k / length)
-        (tg._band(frame, box=box) if k % length in ghosts else frame).save(keyed / f"{k:04d}.png")
+    for k in range(L + 6):
+        frame = _block_walker(2 * math.pi * (k + phase) / L)
+        (tg._band(frame, box=box) if k % L in ghosts else frame).save(keyed / f"{k:04d}.png")
     return keyed
 
 
 def _cut(keyed: Path, out: Path, length: int = L, **kw) -> dict:
-    """`video-loop --cycle fixed --start 0 --anchor none` with the jump repair (auto unless given)."""
-    return loop_mod.run_loop(keyed, out, fps=24.0, state="walk", min_len=None, max_len=None, n_out=None, seam_max=1000.0,
-                             name="walk", report_path=None, cycle_mode="fixed", start=0, length=length, anchor="none", **kw)
+    """`video-loop --cycle fixed --start 0 --anchor none` with the jump repair (auto unless given) and the seam gate,
+    the default `--seam-max` the application cuts with."""
+    return loop_mod.run_loop(keyed, out, fps=24.0, state="walk", min_len=None, max_len=None, n_out=None,
+                             seam_max=loop_mod.SEAM_RATIO_MAX, name="walk", report_path=None, cycle_mode="fixed", start=0,
+                             length=length, anchor="none", **kw)
 
 
 class _Middle:
     """A stand-in RIFE: the walk's true frame half way between two of its frames, found by their bytes;
-    a frame it does not know gets the later one."""
+    a frame it does not know gets the later one. Between the two phases of the walk in `ghostly` its frame
+    carries a band (tests/video/test_ghost_screen.py `_band`): RIFE's frame for a ghost, a ghost too."""
 
-    def __init__(self, length: int = L):
+    def __init__(self, length: int = L, ghostly: tuple[tuple[int, int], ...] = ()):
         self.length = length
+        self.ghostly = ghostly
         self.phase = {_block_walker(2 * math.pi * k / length).tobytes(): k for k in range(length)}
         self.calls: list[tuple[int | None, int | None, float]] = []
 
@@ -71,7 +82,8 @@ class _Middle:
         self.calls.append((ka, kb, t))
         if ka is None or kb is None:
             return b.copy()
-        return _block_walker(2 * math.pi * (ka + t * ((kb - ka) % self.length)) / self.length)
+        made = _block_walker(2 * math.pi * (ka + t * ((kb - ka) % self.length)) / self.length)
+        return tg._band(made) if (ka, kb) in self.ghostly else made
 
 
 def _frames(path: Path) -> list[Image.Image]:
@@ -262,6 +274,86 @@ def test_the_alignment_reads_the_cut_given_way_and_carries_its_record(tmp_path):
     assert e["ghost_screen"]["ghosts"] == [] and e["ghost_at"] == [] and e["retake"] is None
     meta = json.loads((tmp_path / "E" / "walk.strip.json").read_text())
     assert meta["ghost_given_way"] == cut and "cycle_align" in meta
+
+
+# --- the seam gate: a cell given way is read as filmed ----------------------------------------------
+
+
+def _phase(k: int) -> int:
+    """The phase of the walk at frame k of a clip keyed from EVEN (`_Middle` finds its frames by it)."""
+    return (k + EVEN) % L
+
+
+@pytest.mark.parametrize("rife_frame", ["not installed", "a ghost too"])
+def test_a_ghost_at_the_cuts_first_frame_given_way_leaves_the_seam_the_cut_closes_with(tmp_path, monkeypatch, rife_frame):
+    """The default seam gate on a walk whose wrap is an ordinary step, its filmed ghost at the cut's first frame, given
+    way to frame 1 — no RIFE installed, or RIFE's frame between frames 19 and 1 a ghost too. Frame 1 then shows twice in
+    a row and the step from the last frame into the loop is two: read on the cells as they play, the wrap measured 2.17
+    times the mean step and a walk that closes was refused, "the cycle does not close". The gate reads the cell given
+    way as filmed — on the source frames, the seam `--repair off` reads."""
+    filmed = _cut(_keyed(tmp_path, "filmed", (0,), phase=EVEN), tmp_path / "filmed", repair="off")
+    middle = None
+    if rife_frame == "not installed":
+        _no_rife(monkeypatch, tmp_path)
+    else:
+        middle = _Middle(ghostly=((_phase(L - 1), _phase(1)),))
+    report = _cut(_keyed(tmp_path, "E", (0,), phase=EVEN), tmp_path / "E", interpolate=middle)  # before: refused
+    out = tmp_path / "E"
+    assert [(g["frame"], g["taken"]) for g in report["ghost_given_way"]] == [(0, {"source": 1})]
+    assert _cycle(out, 0).tobytes() == _cycle(out, 1).tobytes()
+    _delivered_clean(out)
+    assert report["seam_as_filmed"] == [0] and report["seam_measurement"] == "source-frames"
+    assert report["resampled_seam_ratio"] == filmed["resampled_seam_ratio"] < loop_mod.SEAM_RATIO_MAX
+    assert report["gif"]["n_frames"] == report["webp"]["n_frames"] == L - 1
+
+
+def test_a_ghost_at_the_cuts_last_frame_given_way_to_its_first_leaves_the_seam_the_cut_closes_with(tmp_path, monkeypatch):
+    """The ghost at the cut's last frame given way to frame 0, the cut's first shown again at the wrap: read on the cells,
+    the wrap was no step at all (0.0), whatever the cut. Read as filmed, it is the seam the cut closes with."""
+    filmed = _cut(_keyed(tmp_path, "filmed", (L - 1,), phase=EVEN), tmp_path / "filmed", repair="off")
+    _no_rife(monkeypatch, tmp_path)
+    report = _cut(_keyed(tmp_path, "E", (L - 1,), phase=EVEN), tmp_path / "E")
+    out = tmp_path / "E"
+    assert report["resampled_seam_ratio"] == filmed["resampled_seam_ratio"] > 1  # before: 0.0
+    assert [(g["frame"], g["taken"]) for g in report["ghost_given_way"]] == [(L - 1, {"source": 0})]
+    assert _cycle(out, L - 1).tobytes() == _cycle(out, 0).tobytes()
+    assert report["seam_as_filmed"] == [L - 1] and report["seam_measurement"] == "source-frames"
+
+
+SHORT = 14  # a cut six frames short of the walk's cycle: its wrap is six steps and does not close
+
+
+def test_a_cut_that_does_not_close_is_refused_though_its_last_frame_gives_way_to_its_first(tmp_path, monkeypatch):
+    """A cut 14 frames long of a walk 20 frames a cycle does not close (`--repair off` refuses it); its last frame a
+    filmed ghost given way to its first, the wrap read on the cells was a step of nothing and the cut was delivered.
+    Read as filmed, it is refused as it is filmed."""
+    with pytest.raises(SystemExit, match="the cycle does not close"):
+        _cut(_keyed(tmp_path, "filmed", (SHORT - 1,), phase=EVEN), tmp_path / "filmed", length=SHORT, repair="off")
+    filmed = json.loads((tmp_path / "filmed" / "walk.loop.report.json").read_text())
+    _no_rife(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit, match="the cycle does not close"):  # before: delivered, the seam read 0.0
+        _cut(_keyed(tmp_path, "E", (SHORT - 1,), phase=EVEN), tmp_path / "E", length=SHORT)
+    report = json.loads((tmp_path / "E" / "walk.loop.report.json").read_text())
+    assert [(g["frame"], g["taken"]) for g in report["ghost_given_way"]] == [(SHORT - 1, {"source": 0})]
+    assert report["seam_as_filmed"] == [SHORT - 1]
+    assert report["resampled_seam_ratio"] == filmed["resampled_seam_ratio"] > loop_mod.SEAM_RATIO_MAX
+
+
+@pytest.mark.parametrize("ghost", [0, L - 1])
+def test_a_cut_with_a_frame_made_reads_its_cell_given_way_as_filmed_on_the_cells(tmp_path, ghost):
+    """Frame 9's filmed ghost is given RIFE's frame, so the gate reads the rendered cells; the ghost at the cut's first
+    (or last) frame, RIFE's frame for it a ghost too, is given way to the frame after it. On the cells as they play the
+    wrap read two steps at the first frame (2.17, refused) and none at the last (0.0). The gate reads the strip the cut
+    makes with that frame as filmed: near the cut with frame 9 alone given way, and under the gate."""
+    reference = _cut(_keyed(tmp_path, "ref", (9,), phase=EVEN), tmp_path / "ref", interpolate=_Middle())
+    middle = _Middle(ghostly=((_phase(ghost - 1), _phase(ghost + 1)),))
+    report = _cut(_keyed(tmp_path, "E", (ghost, 9), phase=EVEN), tmp_path / "E", interpolate=middle)  # before: refused, or 0.0
+    assert 1 < report["resampled_seam_ratio"] < loop_mod.SEAM_RATIO_MAX
+    assert abs(report["resampled_seam_ratio"] - reference["resampled_seam_ratio"]) < 0.5
+    assert {r["target"]: r["taken"] for r in _ghost_rounds(report)} == {9: "rife", ghost: {"source": (ghost + 1) % L}}
+    assert report["seam_measurement"] == reference["seam_measurement"] == "rendered-cells"
+    assert report["seam_as_filmed"] == [ghost] and "seam_as_filmed" not in reference
+    _delivered_clean(tmp_path / "E")
 
 
 # --- the application's walk: motion anchoring, size hold, body height ------------------------------
