@@ -3,9 +3,13 @@
 that need one skip; `--rife-only` runs the tests marked `real_rife` (`pytest -m real_rife`), none
 skipped. A test that skips without RIFE and is not marked is measured by neither run.
 
-The suite is collected twice, with nothing else changed: once with a stand-in RIFE everywhere
-`rife.locate()` looks (SPRITE_GEN_RIFE, PATH, the install root) and once with none. Every test the
-two collections skip, or collect, differently is decided by RIFE, and must carry the mark."""
+Its collection: the suite is collected twice, with nothing else changed, once with a stand-in RIFE
+everywhere `rife.locate()` looks (SPRITE_GEN_RIFE, PATH, the install root) and once with none. Every
+test the two collections skip, or collect, differently is decided by RIFE, and must carry the mark.
+
+Its run: a fixture or the test body can skip it, which no collection reads, so the RIFE-less run itself
+(`pytest --rife-unmeasured`, tests/conftest.py) fails each skip of a test that is not marked, unless it
+is named as skipping for another reason. Each way an unmarked test can skip is run through it here."""
 
 from __future__ import annotations
 
@@ -15,6 +19,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from xml.etree import ElementTree
 
 from sprite_gen.video import rife
 
@@ -61,6 +66,15 @@ def _stand_in(data: Path) -> Path:
     return binary
 
 
+def _rife_less_env(tmp_path: Path) -> dict[str, str]:
+    """This environment with nothing where `rife.locate()` looks — no SPRITE_GEN_RIFE(_MODEL), no RIFE on
+    PATH, an empty data directory — and no PYTEST_ADDOPTS selecting a part of a run."""
+    env = {k: v for k, v in os.environ.items() if k not in ("SPRITE_GEN_RIFE", "SPRITE_GEN_RIFE_MODEL", "PYTEST_ADDOPTS")}
+    env["PATH"] = _without_rife(env.get("PATH", ""), tmp_path / "path")
+    env["SPRITE_GEN_DATA_DIR"] = str(tmp_path / "without")
+    return env
+
+
 def _collect(tmp_path: Path, name: str, env: dict[str, str]) -> dict[str, list[bool]]:
     out = tmp_path / f"{name}.json"
     proc = subprocess.run(
@@ -77,11 +91,10 @@ def _collect(tmp_path: Path, name: str, env: dict[str, str]) -> dict[str, list[b
 def test_every_test_rife_decides_is_marked_real_rife(tmp_path):
     (tmp_path / "rife_probe.py").write_text(PROBE)
     # The whole suite, as the lane collects it: no PYTEST_ADDOPTS selecting a part.
-    base = {k: v for k, v in os.environ.items() if k not in ("SPRITE_GEN_RIFE", "SPRITE_GEN_RIFE_MODEL", "PYTEST_ADDOPTS")}
+    base = _rife_less_env(tmp_path)
     base["PYTHONPATH"] = os.pathsep.join(filter(None, [str(tmp_path), base.get("PYTHONPATH")]))
-    base["PATH"] = _without_rife(base.get("PATH", ""), tmp_path / "path")
     stand_in = _stand_in(tmp_path / "with")
-    absent = _collect(tmp_path, "no RIFE", {**base, "SPRITE_GEN_DATA_DIR": str(tmp_path / "without")})
+    absent = _collect(tmp_path, "no RIFE", base)
     present = _collect(tmp_path, "a stand-in RIFE", {
         **base,
         "SPRITE_GEN_DATA_DIR": str(tmp_path / "with"),
@@ -94,3 +107,94 @@ def test_every_test_rife_decides_is_marked_real_rife(tmp_path):
         "skipped or collected by whether RIFE is reachable, but not marked real_rife — "
         "`scripts/linux_lane.sh --rife-only` would not run them:\n" + "\n".join(unmarked))
     assert decided, "no test is decided by RIFE: the stand-in or the conftest skip no longer reaches the marked tests"
+
+
+# Each way a test can skip where no RIFE is reachable: by its mark, which `--rife-only` runs, and,
+# unmarked, by a skip mark, in a fixture, in its body, and with its whole file.
+GUARDS = '''
+import pytest
+
+from sprite_gen.video import rife
+
+
+def _found():
+    try:
+        rife.locate()
+    except rife.RifeUnavailable:
+        return False
+    return True
+
+
+@pytest.fixture
+def interpolate():
+    try:
+        return rife.Rife()
+    except rife.RifeUnavailable:
+        pytest.skip("rife-ncnn-vulkan not installed")
+
+
+@pytest.mark.real_rife
+def test_marked():
+    rife.Rife()
+
+
+@pytest.mark.skipif(not _found(), reason="rife-ncnn-vulkan not installed")
+def test_skip_mark():
+    pass
+
+
+def test_fixture_skip(interpolate):
+    pass
+
+
+def test_body_skip():
+    try:
+        rife.locate()
+    except rife.RifeUnavailable:
+        pytest.skip("rife-ncnn-vulkan not installed")
+'''
+
+GUARDED_FILE = '''
+import pytest
+
+from sprite_gen.video import rife
+
+try:
+    rife.locate()
+except rife.RifeUnavailable:
+    pytest.skip("rife-ncnn-vulkan not installed", allow_module_level=True)
+
+
+def test_in_a_skipped_file():
+    pass
+'''
+
+
+def test_the_rife_less_run_fails_each_unmarked_skip_by_name(tmp_path):
+    probes = {"test_guards.py": GUARDS, "test_guarded_file.py": GUARDED_FILE}
+    for name, text in probes.items():
+        (tmp_path / name).write_text(text)
+    report = tmp_path / "report.xml"
+    # This repository's configuration, and tests/conftest.py as the one conftest (-p), over files outside
+    # the suite; the skipped file's error does not end the run before the other tests.
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "--rife-unmeasured", "-c", str(ROOT / "pyproject.toml"), "--rootdir", str(tmp_path),
+         "--noconftest", "-p", "conftest", "-p", "no:cacheprovider", "--continue-on-collection-errors",
+         f"--junitxml={report}", *(str(tmp_path / name) for name in probes)],
+        cwd=ROOT,
+        env=_rife_less_env(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    output = f"{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}"
+    assert report.is_file(), output
+    outcomes = {case.get("name"): [e.tag for e in case if e.tag in ("skipped", "failure", "error")]
+                for case in ElementTree.parse(report).iter("testcase")}
+    assert outcomes == {
+        "test_marked": ["skipped"],  # tests/conftest.py's skip, which --rife-only runs
+        "test_skip_mark": ["error"],  # skipped in setup, failed there
+        "test_fixture_skip": ["error"],
+        "test_body_skip": ["failure"],
+        "test_guarded_file": ["error"],  # the file's collection
+    }, output
+    assert proc.returncode == 1, output
