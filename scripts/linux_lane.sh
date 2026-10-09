@@ -24,14 +24,14 @@
 # never passed over in silence:
 #   --rife-unmeasured "<why>"  every gate but RIFE: no `rife install`, and the suite runs with an
 #                              empty data directory and no RIFE on PATH, so the tests that need
-#                              the real binary (marked `real_rife`) skip for that stated reason. The
-#                              run ends by naming what it did not measure and exits 3, not 0.
+#                              the real binary (marked `real_rife`) skip for that stated reason;
+#                              any other skip fails the run (`pytest --rife-unmeasured`) unless
+#                              tests/conftest.py names it as not RIFE's. The run ends by naming
+#                              what it did not measure and exits 3, not 0.
 #   --rife-only                the RIFE gates alone, on a host where Vulkan works: `rife install`
 #                              (its check frame) and every test of the suite marked `real_rife`,
-#                              none of it skipped. The mark is the suite's only RIFE guard
-#                              (tests/conftest.py), so these are the tests `--rife-unmeasured`
-#                              skips for RIFE; tests/release/test_lane_rife_collection.py fails on
-#                              a test RIFE decides that is not marked.
+#                              none of it skipped — the tests `--rife-unmeasured` let skip for RIFE
+#                              (docs/release.md).
 # A commit has passed the lane when one run exits 0, or when a `--rife-unmeasured` run (exit 3)
 # and a `--rife-only` run (exit 0) of the same commit both did.
 set -euo pipefail
@@ -152,7 +152,8 @@ test -f "$smoke/run/sprite-sheet-alpha.png"
 test -f "$smoke/run/manifest.json"
 
 step "tests"
-.venv/bin/python -m pytest -q
+# Without RIFE, a skip of a test not marked real_rife fails unless tests/conftest.py names it.
+.venv/bin/python -m pytest -q ${rife_unmeasured:+--rife-unmeasured}
 
 if [ -n "$rife_unmeasured" ]; then
   echo "linux_lane: every gate but RIFE passed at $sha"
