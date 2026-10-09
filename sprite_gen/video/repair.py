@@ -6,7 +6,10 @@ lands somewhere it was not one frame earlier: one step of the loop changes far m
 loop's usual step. That step is a jump; the frame after it is replaced by the frame RIFE makes
 half-way between its two neighbours, and every other frame stays the video's own
 (docs/loop-repair.md section 2). Re-making every frame instead (an offset of half a frame) also
-softens the frames that were fine, and was judged "not corrected" (2026-10-03).
+softens the frames that were fine, and was judged "not corrected" (2026-10-03). A frame the
+ghost screen names a filmed ghost is replaced in the same stage, before the jumps are read: by
+RIFE's frame between its neighbours where both are clean and it has no fault, else by the clean
+frame beside it (docs/loop-repair.md section 4).
 
 Measured on the loop as it plays — cyclic, the last frame followed by the first — and inside
 the union box of the body over the whole loop, the way the strip cells are cut, so a frame's
@@ -21,7 +24,7 @@ from PIL import Image
 
 from sprite_gen._deps import np
 from sprite_gen.video.rife import Interpolate, crossfade, ghost, smear
-from sprite_gen.video.interpolation_quality import faults, ghost_screen, looks
+from sprite_gen.video.interpolation_quality import clean_beside, faults, ghost_screen, looks
 
 # A step this many times the loop's median step (whole body, or the hair behind it) is a jump.
 JUMP_RATIO = 1.4
@@ -75,22 +78,68 @@ def jump_scores(frames: list[Image.Image], *, facing: str = "right", box: tuple[
     return {"whole": w, "hair": h, "score": np.maximum(w, h)}
 
 
-def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, facing: str = "right",
-                 ratio: float = JUMP_RATIO, max_frames: int = MAX_REPAIRS) -> tuple[list[Image.Image], dict[str, Any]]:
-    """Replace the frame that breaks each jump with RIFE's frame between its neighbours, worst jump first.
+def _give_way(frames: list[Image.Image], j: int, ghosts: dict[int, float], interpolate: Interpolate | None,
+              out: list[Image.Image]) -> dict[str, Any]:
+    """The round of a filmed ghost at `j` (`why` ghost), its cell replaced in `out` where it gives way.
 
-    At most `max_frames` calls, and never next to a frame already made: two made frames side by side
-    are made from each other and melt the legs. A proposal with a shared interpolation-quality
-    fault — a ghost too, on its own coverage, where the loop's ghost screen reads it — keeps the
-    original middle frame; a proposal that cross-fades two drawings inside its silhouette is still
-    taken, its round naming it (`look`). Blocked and rejected targets do not end the search
-    for independent targets. `interpolate` may be None while no jump is
-    found; it is asked for only when a frame is to be made (a ValueError says so otherwise).
-    Scores are re-read after each replacement, on the union box of the original loop."""
+    Where both frames beside it are clean, RIFE's frame half way between them is proposed and taken
+    without a fault (`taken` rife); else, or where there is no interpolator, the clean frame beside it
+    the cycle alignment would take (`interpolation_quality.clean_beside`, `taken` {source}); where
+    both are filmed ghosts too it is kept (`taken` None)."""
+    n = len(frames)
+    a, b = (j - 1) % n, (j + 1) % n
+    measure: dict[str, Any] | None = None
+    wrong: list[str] = []
+    no_proposal = ("a frame beside it is a filmed ghost too" if a in ghosts or b in ghosts
+                   else "no interpolator" if interpolate is None else None)
+    if no_proposal is None:
+        assert interpolate is not None
+        made = interpolate(frames[a], frames[b], 0.5)
+        if made.mode != "RGBA" or made.size != frames[j].size:
+            raise ValueError("repair interpolator must return an RGBA frame of the original size")
+        measure = {**smear(made, frames[a], frames[b]), "ghost": ghost(made), "crossfade": crossfade(made, frames[a], frames[b], 0.5)}
+        wrong = faults(measure)
+        if not made.getchannel("A").getbbox():
+            wrong.append("empty")
+    beside = clean_beside(j, ghosts, n)
+    taken: Any = "rife" if measure is not None and not wrong else {"source": beside} if beside is not None else None
+    if taken == "rife":
+        out[j] = made
+    elif taken is not None:
+        out[j] = frames[beside]
+    return {"why": "ghost", "target": j, "neighbours": [a, b],
+            "original": {**smear(frames[j], frames[a], frames[b]), "ghost": ghosts[j]},
+            "proposal": measure, **({"no_proposal": no_proposal} if no_proposal else {}), "faults": wrong,
+            "look": looks(measure) if measure is not None else [], "taken": taken,
+            "outcome": "accepted" if taken == "rife" else "given-way" if taken is not None else "kept",
+            **({"replaced": j} if taken is not None else {})}
+
+
+def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, facing: str = "right",
+                 ratio: float = JUMP_RATIO, max_frames: int = MAX_REPAIRS,
+                 screen: dict[str, Any] | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
+    """Replace each filmed ghost the screen names, then the frame that breaks each jump with RIFE's
+    frame between its neighbours, worst jump first.
+
+    `screen` is the ghost screen of `frames` as filmed (`interpolation_quality.ghost_screen`, read
+    here when not given). Each ghost it names is a round of its own (`why` ghost, in frame order,
+    outside the call budget): RIFE's frame between its two neighbours where both are clean and the
+    frame has no fault, else the clean frame beside it (the frame after it, else the one before it),
+    else, both being filmed ghosts too, the ghost kept (`_give_way`). The jumps are then read on
+    the loop as the ghosts left it (`why` jump): at most `max_frames` calls, and never next to a
+    frame already made or given way: two made frames side by side are made from each other and
+    melt the legs. A proposal with a shared interpolation-quality fault — a ghost too, on its own
+    coverage, where the screen reads the loop — keeps the original middle frame; a proposal that
+    cross-fades two drawings inside its silhouette is still taken, its round naming it (`look`).
+    Blocked and rejected targets do not end the search for independent targets. `interpolate` may
+    be None: a ghost then gives way to the clean frame beside it, and the jump search stops at the
+    first frame it would make, naming it (`unmade`). Scores are re-read after each replacement, on
+    the union box of the original loop."""
     out = list(frames)
     n = len(out)
     box = union_box(frames)
-    reads: bool | None = None  # whether the ghost screen reads the loop as filmed, once a frame is made
+    screen = screen if screen is not None else ghost_screen(frames)
+    reads = bool(screen["reads"])
     first = jump_scores(out, facing=facing, box=box)
     record: dict[str, Any] = {
         "ratio": ratio, "max_frames": max_frames, "facing": facing, "hair_box": list(hair_box(facing)),
@@ -101,10 +150,16 @@ def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, 
         record.update(stopped="loop shorter than 4 frames", score_max_after=record["score_max_before"])
         return out, record
     replaced: list[int] = []
+    ghosts = {g["frame"]: g["ghost"] for g in screen["ghosts"]}
+    for j in sorted(ghosts):
+        round_ = _give_way(frames, j, ghosts, interpolate, out)
+        record["rounds"].append(round_)
+        if "replaced" in round_:
+            replaced.append(j)
     attempted: set[int] = set()
     blocked: set[int] = set()
     stopped = f"{max_frames} interpolation calls used"
-    scores = first
+    scores = jump_scores(out, facing=facing, box=box) if replaced else first
     for _ in range(max_frames):
         selected = None
         for k0 in np.argsort(-scores["score"], kind="stable"):
@@ -131,19 +186,19 @@ def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, 
             break
         k, j, score = selected
         if interpolate is None:
-            raise ValueError(f"frame {j} follows a jump ({score:.2f}x the median step) and no interpolator is available")
+            record["unmade"] = {"step": [k, (k + 1) % n], "target": j, "score": round(score, 4)}
+            stopped = "a frame to make after a jump and no interpolator"
+            break
         a, b = out[(j - 1) % n], out[(j + 1) % n]
         made = interpolate(a, b, 0.5)
         if made.mode != "RGBA" or made.size != out[j].size:
             raise ValueError("repair interpolator must return an RGBA frame of the original size")
         attempted.add(j)
-        if reads is None:
-            reads = ghost_screen(frames)["reads"]
         measure = {**smear(made, a, b), "ghost": ghost(made) if reads else None, "crossfade": crossfade(made, a, b, 0.5)}
         wrong = faults(measure)
         if not made.getchannel("A").getbbox():
             wrong.append("empty")
-        record["rounds"].append({"step": [k, (k + 1) % n], "target": j, "score": round(score, 4),
+        record["rounds"].append({"why": "jump", "step": [k, (k + 1) % n], "target": j, "score": round(score, 4),
                                  "whole": round(float(scores["whole"][k]), 4), "hair": round(float(scores["hair"][k]), 4),
                                  "original": {**smear(out[j], a, b), "ghost": ghost(out[j]) if reads else None},
                                  "proposal": measure, "faults": wrong, "look": looks(measure),

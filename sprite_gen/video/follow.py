@@ -777,10 +777,12 @@ def follow_loop(loop_dir: Path, regions: list[tuple[float, float, float, float]]
         joined.save(staged[strip_path])
         save_clean_gif(out, staged[gif_path], duration_ms=delay_ms, loop=0, alpha_threshold=128)
         loop_mod.write_webp(out, staged[webp_path], delay_ms=delay_ms, workdir=stage / ".webp-frames")
+        # a cell left as it was beside its twin (a filmed ghost given way to the frame beside it) is one frame of both
+        shown = loop_mod.shown_runs(out)
         record = {
             **answer.record(),
-            "gif": loop_mod.verify_animation(staged[gif_path], expect_frames=n, check_stale=False),
-            "webp": loop_mod.verify_animation(staged[webp_path], expect_frames=n, check_stale=True),
+            "gif": loop_mod.verify_animation(staged[gif_path], expect_frames=shown, check_stale=False),
+            "webp": loop_mod.verify_animation(staged[webp_path], expect_frames=shown, check_stale=True),
         }
         atomic_write_text(staged[meta_path], json.dumps({**meta, "follow": record}, indent=2) + "\n")
         for path, written in staged.items():  # the record last, as it was written last

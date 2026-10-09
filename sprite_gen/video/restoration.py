@@ -16,6 +16,9 @@ bridge stops the operation. All quality measurements consume final pixels.
 A target is a cell the jump repair replaced because a step into or out of the
 source frame there jumped. Restoring that frame's pixels can restore the jump:
 acceptance also reads the jump repair's own step score around the changed cell.
+The jump repair also replaces a filmed ghost, a frame the ghost screen names, and
+restoring it would deliver the ghost again: a cell whose source frame the cut's
+screen names is never a target, and acceptance reads the ghost on final pixels.
 """
 from __future__ import annotations
 
@@ -37,15 +40,15 @@ from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util import resample
 from sprite_gen.video import evidence, playback, repair, rife, source
 from sprite_gen.video.compare import KIND as COMPARISON_KIND, Loop
-from sprite_gen.video.interpolation_quality import SMEAR_WARN, OUTLINE_WARN, faults
+from sprite_gen.video.interpolation_quality import GHOST_WARN, SMEAR_WARN, OUTLINE_WARN, faults, ghost_screen
 
-METRIC = "source-restoration-v4"
-POLICY = "key-protected-source-copy-one-step-cap-jump-guard-v1"
+METRIC = "source-restoration-v5"
+POLICY = "key-protected-source-copy-one-step-cap-jump-ghost-guard-v1"
 SCOPE = "processing-defect-restoration"
 OPERATION = "restore_active_cut"
 KIND = "sprite-gen-video-loop-restoration"
-REPAIR_SCHEMA = 3
-COMPARISON_SCHEMA = 5
+REPAIR_SCHEMA = 4
+COMPARISON_SCHEMA = 6
 MAX_PROPOSALS = 3
 ARTIFACTS = ("strip", "meta", "report", "gif", "webp")
 LISTED = 256  # capped or protected pixels a report spells out; the masks always hold all of them
@@ -65,8 +68,17 @@ def read_loop(paths: dict[str, Path]) -> tuple[Loop, dict[str, playback.Playback
     return loop, animations
 
 
-def measure(frames: list[Image.Image], neighbours: list[Image.Image]) -> list[dict[str, float]]:
-    return [rife.smear(f, neighbours[k - 1], neighbours[(k + 1) % len(frames)]) for k, f in enumerate(frames)]
+def measure(frames: list[Image.Image], neighbours: list[Image.Image], reads: bool) -> list[dict[str, float | None]]:
+    """Each frame against its two neighbours (`rife.smear`) and its own ghost reading (`rife.ghost`), where the
+    cut's ghost screen reads the loop (`reads`; None otherwise), so `faults` judges both."""
+    return [{**rife.smear(f, neighbours[k - 1], neighbours[(k + 1) % len(frames)]), "ghost": rife.ghost(f) if reads else None}
+            for k, f in enumerate(frames)]
+
+
+def filmed_screen(projection: source.Projection) -> dict[str, Any]:
+    """The ghost screen of the cut's source frames as the cut read them (`interpolation_quality.ghost_screen`),
+    at their own size: the frames each cell was resampled from (`projection.cropped`)."""
+    return ghost_screen(projection.cropped)
 
 
 def _key_hue(rgba: Any, key: str) -> Any:
@@ -187,12 +199,17 @@ def _describe(part: Partial, origin: Image.Image, reference: Image.Image, croppe
 
 
 def proposals(frames: list[Image.Image], projection: source.Projection, shown: list[int],
-              applied: list[int]) -> list[int]:
+              applied: list[int], screen: dict[str, Any]) -> list[int]:
+    """The cells to restore, worst first: a cell the jump repair replaced (`repair_hints`) whose final pixels
+    carry an interpolation fault, against its own neighbours and the source's, that the source frame at its
+    time does not — and whose source frame the cut's ghost `screen` does not name: the cut gave that ghost way."""
     ref = projection.frames
-    actual, fixed, original = measure(frames, frames), measure(frames, ref), measure(ref, ref)
+    reads = bool(screen["reads"])
+    actual, fixed, original = measure(frames, frames, reads), measure(frames, ref, reads), measure(ref, ref, reads)
     boundary = {0, len(ref) - 1, shown[0], shown[-1]}
+    filmed = {g["frame"] for g in screen["ghosts"]}
     eligible = [k for k in projection.record["repair_hints"] if k in shown and k not in boundary and k not in applied
-                and frames[k].tobytes() != ref[k].tobytes()
+                and k not in filmed and frames[k].tobytes() != ref[k].tobytes()
                 and faults(actual[k]) and faults(fixed[k]) and not faults(original[k])]
     return sorted(eligible, key=lambda k: (-max(fixed[k]["outline_loss"], fixed[k]["dark_excess"]), k))[:MAX_PROPOSALS]
 
@@ -268,12 +285,26 @@ def jump(before: list[Image.Image], after: list[Image.Image], ref: list[Image.Im
             "status": _status([(c["baseline"], c["candidate"]) for c in cells])}
 
 
+def ghost_axis(a_final: list[dict[str, Any]], b_final: list[dict[str, Any]], reference: list[dict[str, Any]],
+               screen: dict[str, Any]) -> dict[str, Any]:
+    """Each cell's own ghost reading (`rife.ghost`) on final pixels, beyond GHOST_WARN: any rise regresses it.
+    `filmed` is the screen of the cut's source frames; where it does not read the loop (drawn part-covered)
+    no cell is judged, as in the cut."""
+    if not screen["reads"]:
+        return {"filmed": screen, "threshold": GHOST_WARN, "status": "non_regressing", "reason": "loop-drawn-part-covered"}
+    a, b = ([q["ghost"] for q in row] for row in (a_final, b_final))
+    return {"baseline": a, "candidate": b, "reference": [q["ghost"] for q in reference], "threshold": GHOST_WARN,
+            "filmed": screen, "status": _status([(max(0, x - GHOST_WARN), max(0, y - GHOST_WARN)) for x, y in zip(a, b)])}
+
+
 def judge(before: list[Image.Image], after: list[Image.Image], ref: list[Image.Image], key: str,
-          facing: str | None) -> dict[str, Any]:
-    """The protections over final pixels, from one loop's cells to the next's."""
+          facing: str | None, screen: dict[str, Any]) -> dict[str, Any]:
+    """The protections over final pixels, from one loop's cells to the next's. `screen` is the cut's ghost
+    screen of its source frames (`filmed_screen`)."""
     changed = [k for k, (a, b) in enumerate(zip(before, after)) if a.tobytes() != b.tobytes()]
-    a_final, b_final, reference = measure(before, before), measure(after, after), measure(ref, ref)
-    a_fixed, b_fixed = measure(before, ref), measure(after, ref)
+    reads = bool(screen["reads"])
+    a_final, b_final, reference = measure(before, before, reads), measure(after, after, reads), measure(ref, ref, reads)
+    a_fixed, b_fixed = measure(before, ref, reads), measure(after, ref, reads)
     axes: dict[str, Any] = {}
     for metric, threshold in (("outline_loss", OUTLINE_WARN), ("dark_excess", SMEAR_WARN)):
         a, b = ([max(0, q[metric] - threshold) for q in row] for row in (a_final, b_final))
@@ -296,6 +327,8 @@ def judge(before: list[Image.Image], after: list[Image.Image], ref: list[Image.I
                           "status": "regressed" if any(r.any() for r in raised) else "non_regressing"}
     # A rise brings back what the jump repair took out: a measured worsening, so `regressed`, as on every axis.
     axes["jump"] = jump(before, after, ref, changed, facing)
+    # So does a ghost: the jump repair gave a filmed ghost way, and its source frame would bring it back.
+    axes["ghost"] = ghost_axis(a_final, b_final, reference, screen)
     cleared = [{"cell": k, "faults": sorted(set(faults(a_final[k])) - set(faults(b_final[k])))} for k in changed]
     regressed = [k + ":regressed" for k, v in axes.items() if v["status"] == "regressed"]
     if regressed:
@@ -316,9 +349,10 @@ class Chain:
     facing: str | None  # the jump repair's; None only when it replaced no cell, so there is no target
     shown: list[int]
     applied: list[dict[str, Any]]
+    screen: dict[str, Any]  # the ghost screen of the cut's source frames (`filmed_screen`)
 
     def targets(self, frames: list[Image.Image]) -> list[int]:
-        return proposals(frames, self.projection, self.shown, [e["target"] for e in self.applied])
+        return proposals(frames, self.projection, self.shown, [e["target"] for e in self.applied], self.screen)
 
 
 def chain(origin: Loop, current: Loop, src: source.Source) -> tuple[Chain | None, str | None]:
@@ -354,7 +388,7 @@ def chain(origin: Loop, current: Loop, src: source.Source) -> tuple[Chain | None
     schedule = playback.mapping(origin)
     if schedule is None:
         return None, "playback-schedule-unverified"
-    state = Chain(projection, key, facing, schedule[0], [])
+    state = Chain(projection, key, facing, schedule[0], [], filmed_screen(projection))
     if receipt is None:
         return state, None
     applied = receipt.get("applied")
@@ -374,7 +408,7 @@ def chain(origin: Loop, current: Loop, src: source.Source) -> tuple[Chain | None
         part = partial(origin.frames[target], projection.frames[target], projection.cropped[target], key)
         after = [part.frame if k == target else f for k, f in enumerate(frames)]
         if (part.alpha_conflict or _portable(entry) != _portable(_entry(target, part, origin, previous, frames, src, projection))
-                or judge(frames, after, projection.frames, key, facing)["verdict"] != "improved"):
+                or judge(frames, after, projection.frames, key, facing, state.screen)["verdict"] != "improved"):
             raise ValueError("an applied restoration is not reproduced by the origin, the source and the protections")
         state.applied.append(entry)
         frames = after
@@ -398,6 +432,8 @@ def _base(origin: Loop, baseline: Loop, candidate: Loop, src: source.Source) -> 
                        "one step is the least a channel can change: a bound on the cap, not a verdict on how it looks",
                        "the jump guard reads coverage, not colour: a wrong colour in a source frame is seen only "
                        "through the jump it came with",
+                       "the ghost guard reads a band of part coverage at least 5 px thick, on the cut's source frames and "
+                       "on final cells: a thinner one, or one the cell's size thins under it, is not seen",
                        "source and origin receipts bind supplied bytes; they are not signatures of the original producer"]}
 
 
@@ -461,7 +497,7 @@ def compare(origin: Loop, baseline: Loop, candidate: Loop, src: source.Source, *
         receipt = _receipt(origin, src, projection, [*state.applied, entry])
         if _portable(candidate.source_report) != _portable({**baseline.source_report, "restoration": receipt}):
             return finish("unknown", ["candidate-report-differs-from-verified-receipt"])
-    measured = judge(baseline.frames, candidate.frames, ref, state.key, state.facing)
+    measured = judge(baseline.frames, candidate.frames, ref, state.key, state.facing, state.screen)
     result["axes"] = {**measured["axes"], "seam": {
         "status": "non_regressing", "reason": "strip-and-playback-boundary-cells-and-durations-exact"}}
     result["gait"]["source_order"] = "preserved"

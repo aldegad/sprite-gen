@@ -97,7 +97,7 @@ from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import period as period_mod
 from sprite_gen.video import rife as rife_mod
-from sprite_gen.video.interpolation_quality import CROSSFADE_LOOK, SMEAR_WARN, OUTLINE_WARN, faults, ghost_screen, looks
+from sprite_gen.video.interpolation_quality import CROSSFADE_LOOK, SMEAR_WARN, OUTLINE_WARN, clean_beside, faults, ghost_screen, looks
 
 SNAP = 0.03  # a sample time within this of a source frame takes that frame
 SOURCE_DIR = loop_mod.CYCLE_SOURCE_DIR  # removed by video-loop whenever it cuts the loop again
@@ -257,14 +257,15 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
     smears: list[dict[str, Any]] = []
     ghost_at: list[dict[str, Any]] = []
 
-    def clean(k: int, first: int, other: int) -> int:
-        """`first` where the screen passes it, else `other` where it passes that (rife takes `first`
-        as it is); each ghost passed over or taken is listed in `ghost_at`, a ghost taken with why it was kept."""
+    def clean(k: int, first: int, other: int | None) -> int:
+        """`first` where the screen passes it, else `other`, the clean frame beside it, where there is one
+        (rife takes `first` as it is); each ghost passed over or taken is listed in `ghost_at`, a ghost
+        taken with why it was kept."""
         if first not in ghosts:
             return first
-        taken_ = first if between == "rife" or other in ghosts else other
+        taken_ = first if between == "rife" or other is None else other
         ghost_at.append({"at": k, "source": first, "ghost": ghosts[first], "taken": taken_,
-                         **({"kept": KEPT_NO_CLEAN if other in ghosts else KEPT_RIFE} if taken_ == first else {})})
+                         **({"kept": KEPT_NO_CLEAN if other is None else KEPT_RIFE} if taken_ == first else {})})
         return taken_
 
     for k in range(length):
@@ -274,10 +275,9 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
         nearer = (i + (frac >= 0.5)) % count
         beside = (i + (frac < 0.5)) % count  # the other frame beside the time
         if frac < SNAP or frac > 1 - SNAP:  # on a source frame (the nearer); a ghost there gives way to the frame after it, else before
-            after, before = (nearer + 1) % count, (nearer - 1) % count
-            taken: dict[str, Any] = {"source": clean(k, nearer, before if after in ghosts else after)}
+            taken: dict[str, Any] = {"source": clean(k, nearer, clean_beside(nearer, ghosts, count))}
         elif between == "nearest":
-            taken = {"source": clean(k, nearer, beside)}
+            taken = {"source": clean(k, nearer, None if beside in ghosts else beside)}
             nearest_at.append(k)
         else:
             if interpolate is None:
@@ -288,7 +288,8 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
                        "crossfade": rife_mod.crossfade(made, a, b, frac)}
             wrong = faults(measure)
             keep = between == "rife" or not wrong
-            taken = {"between": [i % count, (i + 1) % count], "t": round(frac, 4)} if keep else {"source": clean(k, nearer, beside)}
+            taken = ({"between": [i % count, (i + 1) % count], "t": round(frac, 4)} if keep
+                     else {"source": clean(k, nearer, None if beside in ghosts else beside)})
             (made_at if keep else nearest_at).append(k)
             smears.append({"at": k, "method": "rife" if keep else "nearest", **measure, "faults": wrong, "look": looks(measure)})
         out.append(made if "between" in taken else frames[taken["source"]])
@@ -710,7 +711,7 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     shutil.rmtree(loop_dir / ".webp-frames", ignore_errors=True)
     # a GIF or WebP holds a frame shown twice in a row (`--between nearest` stretching a loop) as one
     # frame of twice the delay, so each is checked for one frame per run of identical cells
-    runs = 1 + sum(1 for a, b in zip(cells, cells[1:]) if a.tobytes() != b.tobytes())
+    runs = loop_mod.shown_runs(cells)
     record["gif"] = loop_mod.verify_animation(gif_path, expect_frames=runs, check_stale=False)
     record["webp"] = loop_mod.verify_animation(webp_path, expect_frames=runs, check_stale=True)
     return merged

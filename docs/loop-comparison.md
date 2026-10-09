@@ -117,15 +117,22 @@ quality bounds, and [video pipeline](video-pipeline.md) for processing stages.
 `video-loop-repair` proposes a separate output for one damaged interior cell.
 It preserves the cut, metadata, normal cells, boundary cells, and actual GIF/WebP
 schedule. No interpolation is called. This operation has its own contract:
-repair report `schema_version: 3`, comparison `schema_version: 5`,
-`metric_version: source-restoration-v4`, `policy_version:
-key-protected-source-copy-one-step-cap-jump-guard-v1`, `scope:
+repair report `schema_version: 4`, comparison `schema_version: 6`,
+`metric_version: source-restoration-v5`, `policy_version:
+key-protected-source-copy-one-step-cap-jump-ghost-guard-v1`, `scope:
 processing-defect-restoration`, `operation: restore_active_cut`. The v1
 comparison above is unchanged. Earlier versions are not this contract:
-`source-restoration-v3` (2.39.0) made the same cell and accepted it without
-[the jump guard](#the-jump-guard), and two unreleased drafts,
-`source-restoration-v1` and `-v2`, copied the whole source cell and never capped
-a pixel. Their evidence and receipts are refused, never read as v4.
+`source-restoration-v4` (2.40.0 – 2.43.0) made the same cell without [the ghost
+guard](#the-ghost-guard), so it could take a filmed ghost back where the cut
+gave it way; `source-restoration-v3` (2.39.0) also accepted it without [the
+jump guard](#the-jump-guard); and two unreleased drafts, `source-restoration-v1`
+and `-v2`, copied the whole source cell and never capped a pixel. Their evidence
+and receipts are refused, never read as v5: a v4 repair report given to
+`video-loop-compare` is an input error, and a request whose baseline carries a
+v4 receipt in its loop report is shared `unknown`,
+`restoration-receipt-policy-unsupported`. The origin itself is still a valid
+first request. A restored cell's pixels are made as in v4; proposal IDs change
+with the versions.
 
 ### What a restored cell is
 
@@ -273,7 +280,8 @@ as `non_regressing`. If the legacy recipe cannot uniquely explain every
 unmodified cell of the origin, the result is shared `unknown` without a
 candidate. Historical repair indices are hints only: a target must have a final
 and source-relative interpolation fault, and its source reference must pass the
-common policy. A request whose proposals exist but are each refused stays
+common policy, its ghost reading included, and not be a frame the cut's ghost
+screen names ([the ghost guard](#the-ghost-guard)). A request whose proposals exist but are each refused stays
 `unknown` or `regressed` per proposal and keeps the active result; it is not
 reported as `no_change`.
 
@@ -372,7 +380,7 @@ The report carries `origin`, `baseline` and `candidate` (each with its five
 made from the origin and the source, its coverage the source's, the candidate's
 receipt the recomputed one, at least one cleared actual fault, unchanged normal
 cells and metadata bytes, and no worsening protected axis, the jump around the
-changed cell included. A changed cell that
+changed cell and each cell's ghost included. A changed cell that
 is not that copy (a pixel outside the masks, a capped place left uncapped or
 capped further) returns `regressed` with
 `changed-cell-is-not-the-verified-source-copy`; a receipt that differs returns
@@ -386,7 +394,11 @@ quantity is excess over the fixed source reference with common source
 neighbours. Restoring natural antialiasing may increase raw partial coverage.
 Boundary pixels and actual playback intervals stay identical. GIF quantization
 and WebP decoding are checked against the strip export mapping, with their
-actual integer delays recorded separately from fractional strip timing.
+actual integer delays recorded separately from fractional strip timing. A cell
+the mapping shows again right after an identical one (a filmed ghost the cut
+gave way to the frame beside it) is one frame of both files, held for the sum
+of its delays — in hundredths of a second in the GIF, which stores the sum so —
+and is checked as one; `strip_indices` still lists every scheduled cell.
 
 Key-colour protection is read again from the final strip, whatever the masks
 promised. `axes.key_colour.introduced_excess` sums only the positive per-pixel
@@ -452,6 +464,46 @@ The guard reads coverage, not colour. A wrong colour in a source frame is
 seen only through the jump it came with: where the in-between jumped more, the
 source frame is restored with its colour, right or wrong. The comparison reads
 no colour bound beyond the key colour's.
+
+### The ghost guard
+
+`video-loop` gives a filmed ghost way in its jump repair stage ([loop
+repair](loop-repair.md), section 2): the cell then shows RIFE's frame between
+the two clean frames beside it, or one of them, and is listed in
+`jump_repair.replaced` like a frame made for a jump. Its source frame at that
+time is the ghost. The source's pixels clear any fault the cell carries, and
+before this guard nothing read the ghost: the smear and outline faults measure
+a frame against its neighbours, and partial coverage was read only beyond the
+source reference's own, which is the ghost. So `source-restoration-v4` could
+propose such a cell and accept the ghost back.
+
+```text
+filmed     = interpolation_quality.ghost_screen(the cut's source frames, cropped, at their own size)
+ghost(f)   = rife.ghost(f)                        part coverage at least 5 px thick, over the solid pixels
+target     never a cell whose source frame `filmed` names
+faults     smear and outline as before, and `ghost` over 0.003 where `filmed` reads the loop
+regressed  where max(0, ghost(candidate) - 0.003) > max(0, ghost(baseline) - 0.003) at any cell
+```
+
+The screen is the one `video-loop` read the cut with, on the frames each cell
+was resampled from, so a cell is no target where the cut named its source
+frame a ghost. The faults every final cell is judged by now carry its own ghost
+reading, and `axes.ghost` reads it on final pixels as `outline_loss` and
+`dark_excess` are read: excess over the limit, any rise `regressed` with
+`ghost:regressed`. A loop the screen does not read (drawn part-covered, a glow,
+a translucent cape) is not judged: no `ghost` in the faults, and `axes.ghost`
+is `non_regressing` with `reason: "loop-drawn-part-covered"`.
+
+| `axes.ghost` field | Meaning |
+|---|---|
+| `filmed` | The screen of the cut's source frames: `limit`, `thick_px`, `level`, `reads`, `ghosts` (each `frame` and its reading), `why` where it does not read |
+| `baseline`, `candidate`, `reference` | Each cell's own reading on that loop's final cells and on the source reference cells |
+| `threshold` | 0.003 (`interpolation_quality.GHOST_WARN`) |
+| `status` | `regressed` when a cell's excess rises, `improved` when one falls and none rises, else `non_regressing` |
+
+The reading thins with the cell: a band a few pixels thick in the source frame
+can read under the limit in a cell scaled down, so the target rule reads the
+source frames, where the cut read them.
 
 For an outline-specific UI success message, require `verdict == improved` and
 an `outline` entry in `cleared_faults[].faults`. `axes` contains raw baseline,
