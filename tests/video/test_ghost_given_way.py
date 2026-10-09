@@ -10,6 +10,7 @@ the GIF and WebP are checked for one frame per run of identical cells (a cell gi
 beside it is that frame shown twice in a row). The seam gate, on in every cut here, reads a cell given
 way to the frame beside it as filmed (`seam_as_filmed`): at the wrap that frame twice in a row is a
 step of two or a step of nothing, which would refuse a cut that closes or pass one that does not.
+`--anchor body`, the walk's default, reads the wrap of its strip (`seam_ratio_after_anchor`) the same way.
 
 The fixtures are synthetic: the walk of tests/video/test_cycle_align.py (a body and a foot going round,
 20 frames a cycle) with a band of 0.3 coverage beside the foot (tests/video/test_ghost_screen.py `_band`)
@@ -58,12 +59,12 @@ def _keyed(root: Path, name: str, ghosts: tuple[int, ...], box=SMALL, phase: int
     return keyed
 
 
-def _cut(keyed: Path, out: Path, length: int = L, **kw) -> dict:
-    """`video-loop --cycle fixed --start 0 --anchor none` with the jump repair (auto unless given) and the seam gate,
-    the default `--seam-max` the application cuts with."""
+def _cut(keyed: Path, out: Path, length: int = L, anchor: str = "none", **kw) -> dict:
+    """`video-loop --cycle fixed --start 0 --anchor none` (or the anchor given) with the jump repair (auto unless given)
+    and the seam gate, the default `--seam-max` the application cuts with."""
     return loop_mod.run_loop(keyed, out, fps=24.0, state="walk", min_len=None, max_len=None, n_out=None,
                              seam_max=loop_mod.SEAM_RATIO_MAX, name="walk", report_path=None, cycle_mode="fixed", start=0,
-                             length=length, anchor="none", **kw)
+                             length=length, anchor=anchor, **kw)
 
 
 class _Middle:
@@ -320,19 +321,38 @@ def test_a_ghost_at_the_cuts_last_frame_given_way_to_its_first_leaves_the_seam_t
     assert report["seam_as_filmed"] == [L - 1] and report["seam_measurement"] == "source-frames"
 
 
+def test_ghosts_at_both_ends_of_the_cut_given_way_inward_leave_the_seam_the_cut_closes_with(tmp_path, monkeypatch):
+    """Filmed ghosts at the cut's first and last frames at once: across the wrap each has the other beside it, so no
+    frame is made between its neighbours — frame 0 gives way to the frame after it, the last frame to the one before
+    it — and the GIF and WebP hold two runs of two. On the cells as they play the wrap was three steps (2.40, refused).
+    Read as filmed, it is the seam `--repair off` reads."""
+    filmed = _cut(_keyed(tmp_path, "filmed", (0, L - 1), phase=EVEN), tmp_path / "filmed", repair="off")
+    _no_rife(monkeypatch, tmp_path)
+    report = _cut(_keyed(tmp_path, "E", (0, L - 1), phase=EVEN), tmp_path / "E")  # before: refused
+    out = tmp_path / "E"
+    assert [(g["frame"], g["taken"]) for g in report["ghost_given_way"]] == [(0, {"source": 1}), (L - 1, {"source": L - 2})]
+    assert _cycle(out, 0).tobytes() == _cycle(out, 1).tobytes() and _cycle(out, L - 1).tobytes() == _cycle(out, L - 2).tobytes()
+    _delivered_clean(out)
+    assert report["seam_as_filmed"] == [0, L - 1] and report["seam_measurement"] == "source-frames"
+    assert report["resampled_seam_ratio"] == filmed["resampled_seam_ratio"] < loop_mod.SEAM_RATIO_MAX
+    assert report["gif"]["n_frames"] == report["webp"]["n_frames"] == L - 2
+
+
 SHORT = 14  # a cut six frames short of the walk's cycle: its wrap is six steps and does not close
 
 
-def test_a_cut_that_does_not_close_is_refused_though_its_last_frame_gives_way_to_its_first(tmp_path, monkeypatch):
+@pytest.mark.parametrize("anchor", ["none", "body"])
+def test_a_cut_that_does_not_close_is_refused_though_its_last_frame_gives_way_to_its_first(tmp_path, monkeypatch, anchor):
     """A cut 14 frames long of a walk 20 frames a cycle does not close (`--repair off` refuses it); its last frame a
-    filmed ghost given way to its first, the wrap read on the cells was a step of nothing and the cut was delivered.
-    Read as filmed, it is refused as it is filmed."""
+    filmed ghost given way to its first, the wrap read on the cells was a step of nothing and the cut was delivered,
+    under `--anchor body` (the walk's default) as under `none`. Read as filmed, it is refused as it is filmed."""
     with pytest.raises(SystemExit, match="the cycle does not close"):
-        _cut(_keyed(tmp_path, "filmed", (SHORT - 1,), phase=EVEN), tmp_path / "filmed", length=SHORT, repair="off")
+        _cut(_keyed(tmp_path, "filmed", (SHORT - 1,), phase=EVEN), tmp_path / "filmed", length=SHORT, anchor=anchor,
+             repair="off")
     filmed = json.loads((tmp_path / "filmed" / "walk.loop.report.json").read_text())
     _no_rife(monkeypatch, tmp_path)
     with pytest.raises(SystemExit, match="the cycle does not close"):  # before: delivered, the seam read 0.0
-        _cut(_keyed(tmp_path, "E", (SHORT - 1,), phase=EVEN), tmp_path / "E", length=SHORT)
+        _cut(_keyed(tmp_path, "E", (SHORT - 1,), phase=EVEN), tmp_path / "E", length=SHORT, anchor=anchor)
     report = json.loads((tmp_path / "E" / "walk.loop.report.json").read_text())
     assert [(g["frame"], g["taken"]) for g in report["ghost_given_way"]] == [(SHORT - 1, {"source": 0})]
     assert report["seam_as_filmed"] == [SHORT - 1]
@@ -353,6 +373,27 @@ def test_a_cut_with_a_frame_made_reads_its_cell_given_way_as_filmed_on_the_cells
     assert {r["target"]: r["taken"] for r in _ghost_rounds(report)} == {9: "rife", ghost: {"source": (ghost + 1) % L}}
     assert report["seam_measurement"] == reference["seam_measurement"] == "rendered-cells"
     assert report["seam_as_filmed"] == [ghost] and "seam_as_filmed" not in reference
+    _delivered_clean(tmp_path / "E")
+
+
+@pytest.mark.parametrize("ghosts", [(0,), (L - 1,), (0, L - 1)], ids=["first", "last", "both"])
+def test_anchor_body_reads_a_cell_given_way_as_filmed_in_the_wrap_after_its_ramp(tmp_path, monkeypatch, ghosts):
+    """`--anchor body`, the walk's default, ramps the cut so its last frame returns to its first and records the wrap
+    as it then plays in the strip metadata (`seam_ratio_after_anchor`: the last frame against the first, over the mean
+    step). Read on `cycle/`, a ghost at the cut's last frame given way to its first was no step at all (0.0, as the
+    gate read it too), and one at the first frame given way to the second two steps (the gate refused it, 2.17; 2.40
+    with both ends). The gate and the wrap after the ramp read a cell given way as filmed: what `--repair off` reads."""
+    filmed = _cut(_keyed(tmp_path, "filmed", ghosts, phase=EVEN), tmp_path / "filmed", anchor="body", repair="off")
+    _no_rife(monkeypatch, tmp_path)
+    report = _cut(_keyed(tmp_path, "E", ghosts, phase=EVEN), tmp_path / "E", anchor="body")  # before: refused, or 0.0
+
+    def seams(r: dict) -> tuple[float, float]:
+        return r["resampled_seam_ratio"], r["strip"]["seam_ratio_after_anchor"]
+
+    assert seams(report) == seams(filmed)
+    assert filmed["resampled_seam_ratio"] < loop_mod.SEAM_RATIO_MAX and filmed["strip"]["seam_ratio_after_anchor"] > 0.5
+    assert [g["frame"] for g in report["ghost_given_way"]] == sorted(ghosts)
+    assert report["seam_as_filmed"] == sorted(ghosts) and report["seam_measurement"] == "source-frames"
     _delivered_clean(tmp_path / "E")
 
 
