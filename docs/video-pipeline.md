@@ -906,9 +906,14 @@ transparent corners, no RGB under alpha 0 in the WebP).
 A walk or run loop then has its jump frames repaired before the strip is built: a frame that
 breaks a step 1.4× the loop's median (whole body, or the hair behind it) is replaced by RIFE's
 frame between its two neighbours, at most three and never two side by side (`--repair auto`,
-the default; `--repair off` cuts as filmed). The report's `jump_repair` names the frames. RIFE
+the default; `--repair off` cuts as filmed). A frame the ghost screen names a filmed ghost, read on
+the cut as filmed, is replaced in the same stage first: by RIFE's frame between the two clean
+frames beside it, else by the clean frame beside it, else kept and named (`ghost_given_way`,
+`ghost_kept`) — a walk of one direction is delivered as cut and never meets the alignment that would
+take a clean frame there. The report's `jump_repair` names the frames. RIFE
 is installed once with `sprite-gen rife install`; without it a loop that needs a frame is cut as
-filmed with a warning (`--repair on` fails instead). See [loop repair](loop-repair.md). The repaired loop's jolt index and the head's frame-to-frame
+filmed with a warning, each filmed ghost given way to the clean frame beside it (`--repair on`
+fails instead). A frame shown twice in a row is one frame of the GIF and WebP, checked so. See [loop repair](loop-repair.md). The repaired loop's jolt index and the head's frame-to-frame
 moves are reported (`jolt`); beyond the reference bounds that is a warning line, and a gate
 (`video-loop: loop jolts — …`) only when `--jolt-max` / `--head-step-max` are passed.
 
