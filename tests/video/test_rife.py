@@ -226,10 +226,13 @@ def test_real_rife_melts_legs_crossing_too_far_and_alignment_takes_the_nearer_fr
     out, facts = align.resample(list(far), 4, interpolate)  # times 0, 0.5, 1, 1.5: both made at t=0.5
     assert facts["between"] == "auto" and facts["made_by_rife"] == 0 and facts["nearest_at"] == [1, 3]
     assert out[1] is far[1] and out[3] is far[0]
-    # the melted legs are left part-covered too: a ghost on its own coverage as well (section 4)
-    assert [(m["method"], m["faults"][0]) for m in facts["smear"]] == [("nearest", "outline")] * 2
+    # the melt made a to b is left part-covered too, a ghost on its own coverage as well; the one made
+    # b to a is not (RIFE is not symmetric); neither is a cross-fade of two drawings (section 4)
+    assert [(m["method"], m["faults"], m["look"]) for m in facts["smear"]] == [("nearest", ["outline", "ghost"], []),
+                                                                               ("nearest", ["outline"], [])]
     kept, facts = align.resample(list(far), 4, interpolate, between="rife")
-    assert facts["made_at"] == [1, 3] and all(m["faults"][0] == "outline" and m["method"] == "rife" for m in facts["smear"])
+    assert facts["made_at"] == [1, 3] and [(m["method"], m["faults"]) for m in facts["smear"]] == [("rife", ["outline", "ghost"]),
+                                                                                                  ("rife", ["outline"])]
     out, facts = align.resample(list(near), 4, interpolate)
     assert facts["made_at"] == [1, 3] and facts["nearest_at"] == [] and all(not m["faults"] for m in facts["smear"])
 
