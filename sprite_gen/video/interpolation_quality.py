@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """The shared acceptance policy for the frames repair and cycle alignment deliver.
 
-Measurements live in ``rife`` (``smear``, ``ghost``); these are the existing alignment bounds,
-also applied before replacing a filmed middle frame during jump repair, and the ghost screen
-every frame a loop path delivers passes, filmed or made (docs/loop-repair.md section 4).
+Measurements live in ``rife`` (``smear``, ``ghost``, ``crossfade``); these are the existing alignment
+bounds, also applied before replacing a filmed middle frame during jump repair, the ghost screen
+every frame a loop path delivers passes, filmed or made, and the cross-fade a made frame is named
+for, kept (docs/loop-repair.md section 4).
 """
 
 from PIL import Image
@@ -18,6 +19,11 @@ OUTLINE_WARN = 0.05
 # model leaves between two held drawings (and the frames made beside them) and the frames seen as clean
 # (docs/loop-repair.md section 4).
 GHOST_WARN = 0.003
+# A made frame whose `rife.crossfade` is over this is named to look at, never given way for: on drawn
+# walks only the frame seen cross-faded read over it, but on synthetic legs a clean drawing between two
+# far-apart drawings outlined in grey reads over it too, and a cross-fade drawn without outlines mostly
+# under it — the reading does not part the two, so it is no fault (docs/loop-repair.md section 4).
+CROSSFADE_LOOK = 0.015
 
 
 def faults(measure: dict[str, float | None]) -> list[str]:
@@ -27,6 +33,13 @@ def faults(measure: dict[str, float | None]) -> list[str]:
     return ([*(["smear"] if measure["dark_excess"] > SMEAR_WARN else []),
              *(["outline"] if measure["outline_loss"] > OUTLINE_WARN else []),
              *(["ghost"] if (measure.get("ghost") or 0.0) > GHOST_WARN else [])])
+
+
+def looks(measure: dict[str, float | None]) -> list[str]:
+    """What a person should look at in a made frame, beyond its faults: two drawings cross-faded
+    inside its silhouette (`crossfade` over CROSSFADE_LOOK, where the measure carries it). Named in a
+    warning, the frame kept — never a reason to give it way."""
+    return ["crossfade"] if (measure.get("crossfade") or 0.0) > CROSSFADE_LOOK else []
 
 
 def ghost_screen(frames: list[Image.Image]) -> dict:

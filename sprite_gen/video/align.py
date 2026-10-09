@@ -8,7 +8,8 @@ resampled to the set's median length L*: frame k of the new loop is the source l
 k·L/L* (cyclic, offset 0), so a time that lands on a source frame takes that frame as filmed
 and only the times between two frames are made by RIFE — each kept unless it smeared, lost its
 outline or carries a ghost, where the nearer source frame is taken instead (`--between auto`, the
-default; `rife` keeps every made frame and warns, `nearest` makes none). Every frame delivered,
+default; `rife` keeps every made frame and warns, `nearest` makes none); a made frame kept that
+cross-fades two drawings inside its silhouette is named to look at. Every frame delivered,
 filmed or made, passes the ghost screen (`interpolation_quality.ghost_screen`): a filmed frame half
 drawn between two drawings gives way to a clean source frame beside it, named in `ghost_at`. Then
 each loop is turned to start as a heel lands — read off the stride, the lowest row or the body's
@@ -93,7 +94,7 @@ from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import period as period_mod
 from sprite_gen.video import rife as rife_mod
-from sprite_gen.video.interpolation_quality import SMEAR_WARN, OUTLINE_WARN, faults, ghost_screen
+from sprite_gen.video.interpolation_quality import CROSSFADE_LOOK, SMEAR_WARN, OUTLINE_WARN, faults, ghost_screen, looks
 
 SNAP = 0.03  # a sample time within this of a source frame takes that frame
 SOURCE_DIR = loop_mod.CYCLE_SOURCE_DIR  # removed by video-loop whenever it cuts the loop again
@@ -198,7 +199,9 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
     auto keeps a made frame with no fault and takes the nearer source frame where it has one, rife
     keeps every made frame, nearest makes none and takes the nearer source frame (the motion keeps the
     filmed frames at up to half a frame off their time). Every made frame is listed in `smear` with
-    its `method`: rife (kept) or nearest (a source frame beside it taken instead).
+    its `method`: rife (kept) or nearest (a source frame beside it taken instead), and its `crossfade`
+    (`rife.crossfade`: two drawings cross-faded inside its silhouette) with what to `look` at — named,
+    never a reason to give it way.
 
     Every frame delivered passes the ghost screen (`ghost_screen`, the source loop's, recorded as it is):
     a source frame it names is not taken under auto or nearest — at a time on it, the frame after it is,
@@ -244,12 +247,13 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
                 raise ValueError(f"frame {k} of {length} falls between source frames and no interpolator is available")
             a, b = frames[i % count], frames[(i + 1) % count]
             made = interpolate(a, b, frac)
-            measure = {**rife_mod.smear(made, a, b), "ghost": rife_mod.ghost(made) if screen["reads"] else None}
+            measure = {**rife_mod.smear(made, a, b), "ghost": rife_mod.ghost(made) if screen["reads"] else None,
+                       "crossfade": rife_mod.crossfade(made, a, b, frac)}
             wrong = faults(measure)
             keep = between == "rife" or not wrong
             taken = {"between": [i % count, (i + 1) % count], "t": round(frac, 4)} if keep else {"source": clean(k, nearer, beside)}
             (made_at if keep else nearest_at).append(k)
-            smears.append({"at": k, "method": "rife" if keep else "nearest", **measure, "faults": wrong})
+            smears.append({"at": k, "method": "rife" if keep else "nearest", **measure, "faults": wrong, "look": looks(measure)})
         out.append(made if "between" in taken else frames[taken["source"]])
         if cells_from is not None:
             cells_from.append(taken)
@@ -705,6 +709,14 @@ def _fault_line(name: str, m: dict[str, Any], *, other_side: bool = False) -> st
             + "; see it in cycle/, or align with --between auto (the nearer source frame there) or --between nearest")
 
 
+def _look_line(name: str, m: dict[str, Any]) -> str:
+    """A made frame kept that cross-fades two drawings inside its silhouette, in words."""
+    return (f"{name}: frame {m['at']} (made by RIFE) may cross-fade two drawings inside its outline — where the source frames "
+            f"beside it differ it shows their blend and lost their strong edges (crossfade {m['crossfade']:.4f}, over {CROSSFADE_LOOK}); "
+            "kept, a reading to look at and not a fault — see it in cycle/, and where the legs show twice, align with "
+            "--between nearest or film the direction again (docs/loop-repair.md section 4)")
+
+
 def _ghost_line(name: str, g: dict[str, Any], between: str) -> str:
     """A cell where a filmed ghost frame would have been delivered, and what was instead."""
     line = f"{name}: frame {g['at']}: source frame {g['source']} is a filmed ghost ({_ghost_words(g['ghost'])})"
@@ -883,10 +895,14 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
                      "strip": {k: merged[k] for k in ("frames", "w", "h", "body_h", "delay_ms")}})
     warnings = [_fault_line(r["name"], m, other_side=any(g["at"] == m["at"] and g["taken"] != g["source"] for g in r["ghost_at"]))
                 for r in rows for m in r.get("smear", []) if m["faults"]]
+    warnings += [_look_line(r["name"], m) for r in rows for m in r.get("smear", []) if m["method"] == "rife" and m["look"]]
     retakes = [{"dir": r["dir"], "name": r["name"], **r["retake"]} for r in rows if r["retake"]]
     # A loop to film again is named by its directory where two loops share a strip name (each `walk`).
     shared = len({r["name"] for r in rows}) < len(rows)
     warnings += [_ghost_line(r["dir"] if shared else r["name"], g, between) for r in rows for g in r["ghost_at"]]
+    warnings += [f"{r['dir'] if shared else r['name']}: the ghost screen does not read it — {r['ghost_screen']['why']}; no frame of it "
+                 "is named a ghost or given way for one, so look at cycle/ (docs/loop-repair.md section 4)"
+                 for r in rows if not r["ghost_screen"]["reads"]]
     warnings = cycle_warnings + [_retake_line(r["dir"] if shared else r["name"], r["retake"]) for r in rows if r["retake"]] + warnings
     unnamed = [_unnamed_foot(r) for r in rows if r["start_foot"] is None]
     if len(rows) > 1 and views is None and unnamed:
@@ -942,7 +958,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                              "taken and named in the warnings; rife keeps every made frame and warns on those; nearest takes the nearer "
                              "source frame — nothing made, no RIFE needed, the motion up to half a frame off its time. Every made frame is "
                              "measured in the report (`smear`); under auto and nearest a filmed ghost frame gives way to a clean source "
-                             "frame beside it (`ghost_at`)")
+                             "frame beside it (`ghost_at`); a made frame kept that cross-fades two drawings inside its outline is kept "
+                             "and named to look at (`look`)")
 
 
 def parse_cycles(values: list[str]) -> dict[str, int]:

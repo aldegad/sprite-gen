@@ -1311,6 +1311,11 @@ def run_loop(
             raise SystemExit(error) from exc
         if report_base["jump_repair"]["replaced"]:
             report_base["seam_measurement"] = "rendered-cells"
+        for r in report_base["jump_repair"].get("rounds", []):
+            if r["outcome"] == "accepted" and r["look"]:
+                print(f"video-loop: warning: frame {r['target']} was repaired with RIFE's frame between its neighbours, which may "
+                      f"cross-fade two drawings inside its outline (crossfade {r['proposal']['crossfade']:.4f}); kept, a reading to "
+                      "look at — see it in the loop, or cut it with --repair off (docs/loop-repair.md section 4)", file=sys.stderr)
         if "rife" in report_base["jump_repair"]:
             print(f"video-loop: warning: a jump frame was not repaired ({report_base['jump_repair']['score_max_before']:.2f}x "
                   f"the median step) — RIFE is not installed, so the loop is cut as filmed; run `{rife_mod.INSTALL_COMMAND}` "
@@ -1354,6 +1359,9 @@ def run_loop(
             print(f"video-loop: warning: frame {g['frame']} of the cut (cycle/frame-{g['frame']:03d}.png) carries a part-covered band "
                   f"over {100 * g['ghost']:.2f} % of its body, at least {rife_mod.GHOST_THICK} px thick — a filmed ghost; delivered as cut "
                   "it shows, and video-cycle-align takes a clean frame beside it (docs/loop-repair.md)", file=sys.stderr)
+        if not report_base["ghost_screen"]["reads"]:
+            print(f"video-loop: warning: the ghost screen does not read this cut — {report_base['ghost_screen']['why']}; no frame "
+                  "of it is named a ghost, here or in video-cycle-align, so look at cycle/ (docs/loop-repair.md)", file=sys.stderr)
     cycle_dir.mkdir(parents=True, exist_ok=True)
     for old in cycle_dir.glob("frame-*.png"):
         old.unlink()
@@ -1557,7 +1565,7 @@ def run(**kwargs: object) -> int:
         summary["cycle"]["coverage"] = payload["cycle"]["coverage"]
     if "step_screen" in payload["cycle"]:
         summary["cycle"]["step_screen"] = payload["cycle"]["step_screen"]
-    if payload.get("ghost_screen", {}).get("ghosts"):
+    if payload.get("ghost_screen", {}).get("ghosts") or payload.get("ghost_screen", {}).get("reads") is False:
         summary["ghost_screen"] = payload["ghost_screen"]
     if payload.get("jump_repair", {}).get("replaced"):
         summary["jump_repair"] = {k: payload["jump_repair"][k] for k in ("replaced", "score_max_before", "score_max_after")}

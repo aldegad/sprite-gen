@@ -20,8 +20,8 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen._deps import np
-from sprite_gen.video.rife import Interpolate, ghost, smear
-from sprite_gen.video.interpolation_quality import faults, ghost_screen
+from sprite_gen.video.rife import Interpolate, crossfade, ghost, smear
+from sprite_gen.video.interpolation_quality import faults, ghost_screen, looks
 
 # A step this many times the loop's median step (whole body, or the hair behind it) is a jump.
 JUMP_RATIO = 1.4
@@ -82,7 +82,8 @@ def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, 
     At most `max_frames` calls, and never next to a frame already made: two made frames side by side
     are made from each other and melt the legs. A proposal with a shared interpolation-quality
     fault — a ghost too, on its own coverage, where the loop's ghost screen reads it — keeps the
-    original middle frame. Blocked and rejected targets do not end the search
+    original middle frame; a proposal that cross-fades two drawings inside its silhouette is still
+    taken, its round naming it (`look`). Blocked and rejected targets do not end the search
     for independent targets. `interpolate` may be None while no jump is
     found; it is asked for only when a frame is to be made (a ValueError says so otherwise).
     Scores are re-read after each replacement, on the union box of the original loop."""
@@ -138,14 +139,14 @@ def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, 
         attempted.add(j)
         if reads is None:
             reads = ghost_screen(frames)["reads"]
-        measure = {**smear(made, a, b), "ghost": ghost(made) if reads else None}
+        measure = {**smear(made, a, b), "ghost": ghost(made) if reads else None, "crossfade": crossfade(made, a, b, 0.5)}
         wrong = faults(measure)
         if not made.getchannel("A").getbbox():
             wrong.append("empty")
         record["rounds"].append({"step": [k, (k + 1) % n], "target": j, "score": round(score, 4),
                                  "whole": round(float(scores["whole"][k]), 4), "hair": round(float(scores["hair"][k]), 4),
                                  "original": {**smear(out[j], a, b), "ghost": ghost(out[j]) if reads else None},
-                                 "proposal": measure, "faults": wrong,
+                                 "proposal": measure, "faults": wrong, "look": looks(measure),
                                  "outcome": "rejected" if wrong else "accepted", **({"replaced": j} if not wrong else {})})
         if not wrong:
             out[j] = made
