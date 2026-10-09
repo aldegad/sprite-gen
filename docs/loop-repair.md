@@ -616,12 +616,16 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
     is a ghost too, under `auto` and `nearest`; a made frame that is a ghost gives way like any
     faulty one, to the nearer source frame, or to the other beside its time where the nearer is a
     filmed ghost. `rife` keeps both, named. Where both frames beside it are ghosts the ghost is
-    kept, named, and the line says to film the direction again. A loop already the set's length
-    is screened the same way.
+    kept, named, and the loop is a take to film again (`retake`, reason `filmed-ghost`, below). A
+    loop already the set's length is screened the same way.
   - Each cell where a filmed ghost would have been delivered is listed in `ghost_at` (`at`, the
     ghost `source` as a frame of `cycle.source/`, its `ghost` reading, and the frame `taken` — the
-    ghost itself where it was kept), with a line in `warnings` ("source frame 5 is a filmed ghost
-    (…), so source frame 6 beside it was taken there"). `cells_from` says the same per cell.
+    ghost itself where it was kept, with why: `kept` is `no-clean-frame` where neither source frame
+    beside its time is clean, under any `--between`, and `between-rife` where `rife` kept it beside
+    a clean one), with a line in `warnings` ("source frame 5 is a filmed ghost (…), so source frame
+    6 beside it was taken there"). `cells_from` says the same per cell. A made frame given way at
+    such a cell says which: the other frame beside its time taken, "the nearer being a filmed
+    ghost", or the nearer kept, "the frames beside it being filmed ghosts too".
   - Where 0.3 % sits: set by eye on drawn walks, between the half-drawn frames (and the frames
     made beside them) that a person sees as ghosts, which read well above it, and the frames seen
     as clean, which read well under it; a sliver of the same kind, too small to see at a strip's
@@ -709,11 +713,28 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
     `name` and the same numbers), a warning line names it ("film this direction again
     (held-drawings) — …", by its directory where two loops share a strip name), and `video-set`
     carries both into its record.
+  - **A filmed ghost with no clean frame beside it** (reason `filmed-ghost`): a ghost the screen
+    names at a time whose source frames on both sides are ghosts too (three in a row at a whole
+    time, two at a time between them) is delivered as filmed — no frame of the take shows the
+    drawing there, and nothing but a new take fixes it. A loop with **one or more** such cells
+    (`ghost_at` `kept: "no-clean-frame"`, `align.RETAKE_GHOST_KEPT_MIN`) is named whatever its
+    hold; a ghost `--between rife` kept beside a clean frame (`between-rife`) is the choice of
+    whoever aligned it and is not counted. Its numbers are under `ghost`: the cells `kept`, their
+    frames of `cycle.source/` (`sources`), the highest reading (`ghost_max`) and the screen's
+    `limit`, with `limits.ghost_kept_min`. Its line: "film this direction again (filmed-ghost) —
+    frame(s) 5 show source frame(s) 10 of cycle.source/, filmed ghosts (…), and the source frames
+    beside each are filmed ghosts too …".
+  - **One record per loop**: `retake` is one object (or `null`). `reason` is the first reason
+    that applies, `held-drawings` before `filmed-ghost`, and `reasons` lists every one; the held
+    numbers (`hold`, `drawings`, …, `unmade`) stand only where `held-drawings` applies, `ghost`
+    only where `filmed-ghost` does, and `limits` carries each one's. A held loop that also keeps a
+    ghost reads `reason: "held-drawings"`, `reasons: ["held-drawings", "filmed-ghost"]`, with a
+    line for each — one new take fixes both.
   - **Not named**: a held loop at its own length (nothing is made — on twos it plays at 12 a
     second, as filmed), a held loop whose made frames all kept their outline, a held loop squeezed
     to 13 drawings a second or more (its drawings come closer than on twos), and a loop drawn every
     frame with a replaced frame (one soft step, not a gap the take cannot fill).
-  - **Exit code and words**: the set is still aligned and written (`applied: true`, exit 0) — the
+  - **Exit code and words** (both reasons): the set is still aligned and written (`applied: true`, exit 0) — the
     loop is the best this take allows, and the caller decides: a pipeline with a retake budget
     films that direction again and aligns the set anew; one without delivers it with the warning.
     Nothing passes quietly: the line is on stderr and in `warnings`, and `retake` is the

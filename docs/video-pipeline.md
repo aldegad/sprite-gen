@@ -1093,7 +1093,9 @@ under `unnamed_feet`, told back with `--align-foot <item>=left|right`), a failed
 and a made frame with a smear, one that melted and was replaced, or a loop whose foot could not be named is a line under
 `warnings`. A held loop stretched past what an interpolator bridges is named for a new take: the
 state's `retake` (reason `held-drawings`, with its numbers; per item under `cycle_align.retake`) and
-a warning line ([loop repair](loop-repair.md) section 4, "Held drawings"). Two cases skip the alignment with a warning instead of failing it (`applied: false`,
+a warning line ([loop repair](loop-repair.md) section 4, "Held drawings"), as is a loop that delivers a filmed
+ghost with no clean frame beside it (reason `filmed-ghost`, its cells under `ghost`; `reasons` lists both
+where both apply). Two cases skip the alignment with a warning instead of failing it (`applied: false`,
 `reason`, and a line under the report's `warnings`): no RIFE (`rife-not-installed`), and a loop
 that may hold more than one cycle (`cycle-suspects`, the loops under `suspects`; count them, then
 `video-cycle-align --cycles <loop>=<k>`). See [loop repair](loop-repair.md) section 4.
