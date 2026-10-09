@@ -65,21 +65,36 @@ def mapping(loop: Any) -> tuple[list[int], int] | None:
     return [min(n - 1, round(k * n / count)) for k in range(count)], delay
 
 
+def runs(loop: Any, indices: list[int]) -> list[tuple[int, int]]:
+    """The strip cells `indices` play as (first index, frames shown): a cell shown again right after an
+    identical one (a filmed ghost given way to the frame beside it) is one frame of a GIF or WebP, held
+    that many delays."""
+    out: list[tuple[int, int]] = []
+    for index in indices:
+        if out and loop.frames[out[-1][0]].tobytes() == loop.frames[index].tobytes():
+            out[-1] = (out[-1][0], out[-1][1] + 1)
+        else:
+            out.append((index, 1))
+    return out
+
+
 def verify(loop: Any, animations: dict[str, Playback]) -> tuple[dict[str, Any], str | None]:
     recipe = mapping(loop)
     if recipe is None:
         return {}, "playback-schedule-unverified"
     indices, delay = recipe
+    shown = runs(loop, indices)
     records = {}
     for key, fmt in (("gif", "GIF"), ("webp", "WEBP")):
         if key not in animations:
             return records, "playback-missing"
         animation = animations[key]
-        expected_delay = delay // 10 * 10 if fmt == "GIF" else delay
-        if (animation.format != fmt or animation.loop != 0 or len(animation.frames) != len(indices)
-                or animation.durations != [expected_delay] * len(indices)):
+        # The GIF writer adds the delays of identical frames and stores the sum in hundredths of a second.
+        durations = [count * delay // 10 * 10 if fmt == "GIF" else count * delay for _, count in shown]
+        if (animation.format != fmt or animation.loop != 0 or len(animation.frames) != len(shown)
+                or animation.durations != durations):
             return records, f"{key}:playback-schedule-mismatch"
-        for frame, index in zip(animation.frames, indices):
+        for frame, index in zip(animation.frames, (index for index, _ in shown)):
             cell = loop.frames[index]
             expected = _prepare_transparent_frame(cell, 128).convert("RGBA") if fmt == "GIF" else cell
             if frame.size != cell.size or visible_bytes(frame) != visible_bytes(expected):

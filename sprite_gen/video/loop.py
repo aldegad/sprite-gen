@@ -850,40 +850,83 @@ def write_loop_report(target: Path, payload: dict[str, Any]) -> None:
     atomic_write_text(target, json.dumps(finite(payload), ensure_ascii=False, indent=2, allow_nan=False) + "\n")
 
 
+def shown_runs(cells: list[Image.Image]) -> int:
+    """The frames a GIF or WebP of `cells` holds: a cell shown twice in a row (a filmed ghost given way
+    to the frame beside it, `--between nearest` stretching a loop) is one frame of twice the delay in
+    both, so one per run of identical cells."""
+    return 1 + sum(1 for a, b in zip(cells, cells[1:]) if a.tobytes() != b.tobytes())
+
+
 def _repair_jumps(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *, facing: str,
-                  required: bool) -> tuple[list[Image.Image], dict[str, Any]]:
-    """`repair_mod.repair_jumps`, with RIFE located only once a frame is to be made: a loop
-    without a jump needs no binary. The report names the interpolator that made the frames.
+                  required: bool, screen: dict[str, Any]) -> tuple[list[Image.Image], dict[str, Any]]:
+    """`repair_mod.repair_jumps` on the cut as filmed and its ghost `screen`, with RIFE located only
+    once a frame is to be made: a loop without a jump or a ghost between two clean frames needs no
+    binary. The report names the interpolator that made the frames.
 
     A frame to make and no RIFE installed: `required` lets `RifeNotInstalled` through; otherwise
-    the loop comes back as filmed and the record says why (`applied: false`, `rife`, `install`)."""
+    each filmed ghost gives way to the clean frame beside it, a jump stays as filmed, and the record
+    says why where a jump was left (`rife`, `install`; `applied` false where nothing was replaced)."""
     made_by: list[dict[str, str]] = []
+    calls = 0
 
     def lazy(a: Image.Image, b: Image.Image, t: float) -> Image.Image:
-        nonlocal interpolate
+        nonlocal interpolate, calls
         if interpolate is None:
             located = rife_mod.Rife()
             made_by.append(located.describe())
             interpolate = located
+        calls += 1
         return interpolate(a, b, t)
 
     try:
-        repaired, record = repair_mod.repair_jumps(frames, lazy, facing=facing)
+        repaired, record = repair_mod.repair_jumps(frames, lazy, facing=facing, screen=screen)
     except rife_mod.RifeNotInstalled as exc:
         if required:
             raise
-        # RIFE is located before the first frame is made, so nothing was replaced yet.
-        worst = round(float(repair_mod.jump_scores(frames, facing=facing)["score"].max()), 4)
-        return frames, {"applied": False, "why": "RIFE not installed — cut as filmed", "rife": str(exc),
-                        "install": rife_mod.INSTALL_COMMAND, "ratio": repair_mod.JUMP_RATIO, "facing": facing,
-                        "score_max_before": worst, "score_max_after": worst, "replaced": []}
+        # RIFE is located before the first frame is made, so nothing was made yet: the stage runs again
+        # with no interpolator, each ghost giving way to the clean frame beside it and a jump left as filmed.
+        repaired, record = repair_mod.repair_jumps(frames, None, facing=facing, screen=screen)
+        record["applied"] = bool(record["replaced"])
+        if "unmade" in record:
+            record.update(why="RIFE not installed — cut as filmed" if not record["replaced"] else
+                          "RIFE not installed — the jump cut as filmed, each filmed ghost given way to the clean frame beside it",
+                          rife=str(exc), install=rife_mod.INSTALL_COMMAND)
+        return repaired, record
     frames = repaired
     record["applied"] = bool(record["replaced"])
     if made_by:
         record["interpolator"] = {"kind": "rife-ncnn-vulkan", **made_by[0]}
-    elif record["attempts"]:
+    elif calls:
         record["interpolator"] = {"kind": "injected"}
     return frames, record
+
+
+def _ghost_lines(jump_repair: dict[str, Any]) -> list[str]:
+    """What became of each filmed ghost the jump repair stage read, in words (`video-loop: warning:` lines)."""
+    lines = []
+    for r in jump_repair.get("rounds", []):
+        if r.get("why") != "ghost":
+            continue
+        j = r["target"]
+        line = (f"frame {j} of the cut carries a part-covered band over {100 * r['original']['ghost']:.2f} % of its body, at least "
+                f"{rife_mod.GHOST_THICK} px thick — a filmed ghost; ")
+        if r["taken"] == "rife":
+            lines.append(line + f"given way to RIFE's frame between frames {r['neighbours'][0]} and {r['neighbours'][1]} "
+                         f"(cycle/frame-{j:03d}.png) (docs/loop-repair.md section 2)")
+            continue
+        if r["taken"] is None:
+            lines.append(line + f"and so are the frames beside it ({r['neighbours'][0]} and {r['neighbours'][1]}); kept, as there "
+                         f"is no clean frame to give way to (cycle/frame-{j:03d}.png) — film this direction again (docs/loop-repair.md section 2)")
+            continue
+        if r["proposal"] is not None:
+            why = f"RIFE's frame between its neighbours has a fault ({', '.join(r['faults'])})"
+        elif r["no_proposal"] == "no interpolator":
+            why = f"RIFE is not installed, so no frame between its neighbours was made (`{rife_mod.INSTALL_COMMAND}`)"
+        else:
+            why = r["no_proposal"]
+        lines.append(line + f"given way to frame {r['taken']['source']} beside it, shown twice in a row (cycle/frame-{j:03d}.png): "
+                     f"{why} (docs/loop-repair.md section 2)")
+    return lines
 
 
 def moved_alpha(frames: list[Image.Image], analysis: dict[str, Any]) -> list[np.ndarray]:
@@ -1298,22 +1341,37 @@ def run_loop(
             "recipe": RECIPE, "wrap_dx_px": wrap_dx,
             "before_repair_pixels_sha256": [evidence_mod.digest(f.tobytes()) for f in frames],
         }
+    if prof.gait:
+        # The ghost screen of the cut as filmed (docs/loop-repair.md section 4), read before the jump repair: each
+        # filmed ghost it names is a target of that repair, which gives it way to a clean frame where there is one.
+        # A loop delivered as cut, never aligned, would show it otherwise.
+        report_base["ghost_screen"] = ghost_screen(frames)
     if repair != "off" and prof.gait:
         report_base["jump_repair"] = None
         try:
-            frames, report_base["jump_repair"] = _repair_jumps(frames, interpolate, facing=facing, required=repair == "on")
+            frames, report_base["jump_repair"] = _repair_jumps(frames, interpolate, facing=facing, required=repair == "on",
+                                                               screen=report_base["ghost_screen"])
         except (ValueError, rife_mod.RifeUnavailable) as exc:
             fix = (f"install RIFE (`{rife_mod.INSTALL_COMMAND}`), or pass --repair auto to cut it as filmed with a warning"
                    if isinstance(exc, rife_mod.RifeNotInstalled) else "fix RIFE, or pass --repair off to cut it as filmed")
-            error = f"video-loop: {exc}; the loop has a jump frame to repair — {fix} (docs/loop-repair.md)"
+            error = (f"video-loop: {exc}; the loop has a frame to make (after a jump, or for a filmed ghost between two clean "
+                     f"frames) — {fix} (docs/loop-repair.md)")
             shutil.rmtree(out_dir / FALLBACK_FRAMES_DIR, ignore_errors=True)
             write_loop_report(target, {**report_base, "status": "failed", "error": error, "cycle": cycle})
             raise SystemExit(error) from exc
         if report_base["jump_repair"]["replaced"]:
             report_base["seam_measurement"] = "rendered-cells"
+        # What became of each filmed ghost: given way (the cell and what it shows now) or kept, no clean frame beside it.
+        ghost_rounds = [r for r in report_base["jump_repair"]["rounds"] if r.get("why") == "ghost"]
+        report_base["ghost_given_way"] = [{"frame": r["target"], "ghost": r["original"]["ghost"], "taken": r["taken"]}
+                                          for r in ghost_rounds if r["taken"] is not None]
+        report_base["ghost_kept"] = [{"frame": r["target"], "ghost": r["original"]["ghost"]} for r in ghost_rounds if r["taken"] is None]
+        for line in _ghost_lines(report_base["jump_repair"]):
+            print(f"video-loop: warning: {line}", file=sys.stderr)
         for r in report_base["jump_repair"].get("rounds", []):
             if r["outcome"] == "accepted" and r["look"]:
-                print(f"video-loop: warning: frame {r['target']} was repaired with RIFE's frame between its neighbours, which may "
+                print(f"video-loop: warning: frame {r['target']} was {'given way for a filmed ghost' if r['why'] == 'ghost' else 'repaired'} "
+                      "with RIFE's frame between its neighbours, which may "
                       f"cross-fade two drawings inside its outline (crossfade {r['proposal']['crossfade']:.4f}); kept, a reading to "
                       "look at — see it in the loop, or cut it with --repair off (docs/loop-repair.md section 4)", file=sys.stderr)
         if "rife" in report_base["jump_repair"]:
@@ -1351,14 +1409,13 @@ def run_loop(
             raise SystemExit(error)
         for line in warnings:
             print(f"video-loop: warning: {line} (reference bound; the loop is kept — docs/loop-repair.md)", file=sys.stderr)
-        # The ghost screen of the cut as delivered (docs/loop-repair.md section 4): a loop delivered as cut,
-        # never aligned, carries a filmed ghost as it is, so each is named here; `video-cycle-align` screens
-        # its source again and takes a clean frame beside it.
-        report_base["ghost_screen"] = ghost_screen(frames)
-        for g in report_base["ghost_screen"]["ghosts"]:
-            print(f"video-loop: warning: frame {g['frame']} of the cut (cycle/frame-{g['frame']:03d}.png) carries a part-covered band "
-                  f"over {100 * g['ghost']:.2f} % of its body, at least {rife_mod.GHOST_THICK} px thick — a filmed ghost; delivered as cut "
-                  "it shows, and video-cycle-align takes a clean frame beside it (docs/loop-repair.md)", file=sys.stderr)
+        if "ghost_given_way" not in report_base:
+            # The jump repair did not run (--repair off): a filmed ghost is delivered as cut, named here;
+            # `video-cycle-align` screens its source again and takes a clean frame beside it.
+            for g in report_base["ghost_screen"]["ghosts"]:
+                print(f"video-loop: warning: frame {g['frame']} of the cut (cycle/frame-{g['frame']:03d}.png) carries a part-covered band "
+                      f"over {100 * g['ghost']:.2f} % of its body, at least {rife_mod.GHOST_THICK} px thick — a filmed ghost; delivered as cut "
+                      "it shows (--repair off), and video-cycle-align takes a clean frame beside it (docs/loop-repair.md)", file=sys.stderr)
         if not report_base["ghost_screen"]["reads"]:
             print(f"video-loop: warning: the ghost screen does not read this cut — {report_base['ghost_screen']['why']}; no frame "
                   "of it is named a ghost, here or in video-cycle-align, so look at cycle/ (docs/loop-repair.md)", file=sys.stderr)
@@ -1400,6 +1457,12 @@ def run_loop(
     strip_meta["drawings"] = {k: report_base["drawings"][k] for k in ("hold", "drawings_per_second", "contrast", "frames")}
     strip_meta["cycle_drawings"] = {k: report_base["cycle_drawings"][k] for k in ("start", "length", "steps", "hold", "drawings_per_second", "contrast")
                                     } | ({"why": report_base["cycle_drawings"]["why"]} if "why" in report_base["cycle_drawings"] else {})
+    # A cut frame that is no longer the frame as filmed for a filmed ghost, and one kept with no clean frame beside
+    # it: `cycle/` is the alignment's material (`cycle.source/`), whose screen no longer sees a ghost given way, so the
+    # strip says it, and an alignment carries it over (frames of the cut).
+    for key in ("ghost_given_way", "ghost_kept"):
+        if report_base.get(key):
+            strip_meta[key] = report_base[key]
     if motion is not None:
         strip_meta["foot_anchor"] = anchor
         strip_meta["motion_anchor"] = motion
@@ -1463,8 +1526,10 @@ def run_loop(
     save_clean_gif(pick, gif_path, duration_ms=delay_ms, loop=0, alpha_threshold=128)
     write_webp(pick, webp_path, delay_ms=delay_ms, workdir=out_dir / ".webp-frames")
     shutil.rmtree(out_dir / ".webp-frames", ignore_errors=True)
-    gif_report = verify_animation(gif_path, expect_frames=n_out, check_stale=False)
-    webp_report = verify_animation(webp_path, expect_frames=n_out, check_stale=True)
+    # A filmed ghost given way to the frame beside it is that frame shown twice in a row: one frame of the GIF or WebP
+    shown = shown_runs(pick)
+    gif_report = verify_animation(gif_path, expect_frames=shown, check_stale=False)
+    webp_report = verify_animation(webp_path, expect_frames=shown, check_stale=True)
 
     payload = {
         **report_base,
@@ -1567,6 +1632,9 @@ def run(**kwargs: object) -> int:
         summary["cycle"]["step_screen"] = payload["cycle"]["step_screen"]
     if payload.get("ghost_screen", {}).get("ghosts") or payload.get("ghost_screen", {}).get("reads") is False:
         summary["ghost_screen"] = payload["ghost_screen"]
+    for key in ("ghost_given_way", "ghost_kept"):
+        if payload.get(key):
+            summary[key] = payload[key]
     if payload.get("jump_repair", {}).get("replaced"):
         summary["jump_repair"] = {k: payload["jump_repair"][k] for k in ("replaced", "score_max_before", "score_max_after")}
     summary["strip"] = {k: payload["strip"][k] for k in ("path", "frames", "w", "h", "body_h", "delay_ms")}
