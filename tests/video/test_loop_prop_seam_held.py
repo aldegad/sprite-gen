@@ -375,6 +375,8 @@ CYCLE_ALIGN_KEYS_2350 = {"between", "cycle_screen", "cycles_given", "drawings", 
                          "start_foot_source", "stride_swing", "strikes", "taken", "to", "turned_by", "turned_on", "view"}
 # 2.41.0: where every cell is from, and the cut the first alignment was made from (video-follow --read-on)
 CORRESPONDENCE_KEYS_2410 = {"cells_from", "origin"}
+# 2.43.0: the ghost screen of the loop as filmed, and each cell where a filmed ghost gave way or was kept
+GHOST_KEYS_2430 = {"ghost_screen", "ghost_at"}
 
 
 def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path):
@@ -398,7 +400,7 @@ def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path):
     for d in dirs:
         meta = json.loads((d / "loop.strip.json").read_text())
         assert set(meta) == STRIP_KEYS_2350 | SOURCE_KEYS_2390
-        assert set(meta["cycle_align"]) == CYCLE_ALIGN_KEYS_2350 | CORRESPONDENCE_KEYS_2410
+        assert set(meta["cycle_align"]) == CYCLE_ALIGN_KEYS_2350 | CORRESPONDENCE_KEYS_2410 | GHOST_KEYS_2430
         # The cut's source stays as the cut wrote it: `cycle_align` says the cells were turned after it, so it
         # no longer names each cell's frame (docs/loop-comparison.md). The rebuilt strip names its own cells —
         # the same frames, turned, under the same crop.
