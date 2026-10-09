@@ -21,7 +21,8 @@ def engine_identity() -> dict[str, str]:
     root = Path(__file__).parent
     files = [*sorted(root.glob("*.py")), *sorted((root.parent / "frames").glob("*.py")),
              root.parent / "cli.py", root.parent / "util/resample.py", root.parent / "util/gif_utils.py"]
-    return {"implementation_sha256": digest(b"".join(str(p.relative_to(root.parent)).encode() + b"\0" + p.read_bytes() for p in files))}
+    # Names hashed as POSIX paths, so one checkout has one fingerprint on every OS.
+    return {"implementation_sha256": digest(b"".join(p.relative_to(root.parent).as_posix().encode() + b"\0" + p.read_bytes() for p in files))}
 
 
 def source_identity(files: list[Path], fps: float) -> dict[str, Any]:

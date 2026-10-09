@@ -22,7 +22,7 @@ from PIL import Image
 
 from sprite_gen.scene.model import Scene, load_scene
 from sprite_gen.spec.assets import finite
-from sprite_gen.spec.runio import LOCK_FILENAME, acquire_run_dir_lock, atomic_write_set, release_run_dir_lock
+from sprite_gen.spec.runio import LOCK_FILENAME, acquire_run_dir_lock, atomic_write_set, relative_posix, release_run_dir_lock
 from sprite_gen.util.resample import resize_cell
 
 
@@ -274,7 +274,8 @@ def _render_locked(scene, renderer, output, formats, settings, export_layers):
                      "note": "Placement metadata references source files; copy referenced assets when moving this output."}
         report = {"kind": "sprite-gen-scene-render", "version": 1, "source_spec": str(scene.path),
                   "source_fingerprints": scene.source_fingerprints, "frames": scene.frame_count,
-                  "files": [str(p.relative_to(output)) for p in payloads] + ["placement.json", "scene.report.json"],
+                  # Report paths are manifest entries, so they use "/" on every OS.
+                  "files": [relative_posix(p, output) for p in payloads] + ["placement.json", "scene.report.json"],
                   "encoding": encoding, "inspection": check}
         payloads[output / "placement.json"] = json.dumps(placement, indent=2)+"\n"
         payloads[output / "scene.report.json"] = json.dumps(report, indent=2)+"\n"

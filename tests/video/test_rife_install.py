@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import stat
+import sys
 import zipfile
 from pathlib import Path
 
@@ -108,11 +109,23 @@ def test_another_dir_names_the_variable_that_points_the_engine_at_it(pinned, tmp
         rife.locate()
 
 
+# Windows runs the .exe it installs, never a shebang script, so a binary that starts and
+# reports its own failure cannot be stood in for there; the next test covers Windows.
+@pytest.mark.skipif(sys.platform == "win32", reason="a shebang script cannot stand in for rife-ncnn-vulkan.exe")
 def test_the_check_frame_fails_on_a_binary_that_does_not_run(pinned, tmp_path):
     rife_install.install(zip_path=pinned, platform=PLATFORM, run_check=False)
     target = tmp_path / "data" / "rife" / TOP
     (target / BINARY).write_text("#!/bin/sh\necho no vulkan >&2\nexit 1\n")
     with pytest.raises(SystemExit, match="check frame failed.*no vulkan"):
+        rife_install.install(platform=PLATFORM)
+
+
+def test_the_check_frame_fails_on_a_binary_that_cannot_be_started(pinned, tmp_path):
+    """A damaged or wrong-platform build: the OS refuses to start it (ENOEXEC, WinError 193)."""
+    rife_install.install(zip_path=pinned, platform=PLATFORM, run_check=False)
+    target = tmp_path / "data" / "rife" / TOP
+    (target / BINARY).write_bytes(b"\x00 not a program\n")
+    with pytest.raises(SystemExit, match="check frame failed.*could not be started"):
         rife_install.install(platform=PLATFORM)
 
 

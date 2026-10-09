@@ -147,10 +147,15 @@ def _call(binary: Path, model: Path, a: Image.Image, b: Image.Image, t: float, t
     b.save(tmp / "b.png")
     out = tmp / "o.png"
     out.unlink(missing_ok=True)
-    proc = subprocess.run(
-        [str(binary), "-0", str(tmp / "a.png"), "-1", str(tmp / "b.png"), "-o", str(out), "-s", f"{t:.4f}", "-m", str(model)],
-        capture_output=True, text=True, timeout=CALL_TIMEOUT_SECONDS,
-    )
+    try:
+        proc = subprocess.run(
+            [str(binary), "-0", str(tmp / "a.png"), "-1", str(tmp / "b.png"), "-o", str(out), "-s", f"{t:.4f}", "-m", str(model)],
+            capture_output=True, text=True, timeout=CALL_TIMEOUT_SECONDS,
+        )
+    except OSError as exc:
+        # A binary that is found but cannot be started (a damaged or wrong-platform build:
+        # WinError 193 on Windows, ENOEXEC elsewhere) is a RIFE that fails, not a crash.
+        raise RifeUnavailable(f"{binary.name} could not be started: {exc}") from exc
     if proc.returncode != 0 or not out.is_file():
         raise RifeUnavailable(f"{binary.name} failed (exit {proc.returncode}): {(proc.stderr or proc.stdout).strip()[-300:]}")
     with Image.open(out) as im:

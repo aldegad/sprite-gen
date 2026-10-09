@@ -19,7 +19,9 @@ from sprite_gen.video import rife
 
 
 def _fake_binary(tmp_path: Path, with_model: bool = True) -> Path:
-    binary = tmp_path / "bin" / rife.BINARY
+    # The platform's own file name (rife-ncnn-vulkan.exe on Windows): PATH lookup and the
+    # install root only find the binary under that name.
+    binary = tmp_path / "bin" / rife.installed_binary(Path(".")).name
     binary.parent.mkdir(parents=True)
     binary.write_text("#!/bin/sh\nexit 0\n")
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)

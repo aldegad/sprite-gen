@@ -16,6 +16,8 @@ from PIL import Image, ImageDraw
 from sprite_gen.qa.motion import analyze_motion
 from sprite_gen.qa import motion
 
+from conftest import symlink_or_skip
+
 
 def sequence(xs=(24, 22, 20, 18, 16), *, durations=None, ys=None, two_feet=False):
     frames = []
@@ -260,7 +262,7 @@ def test_output_cannot_overwrite_any_source_or_alias(tmp_path, capsys, target):
     source = descriptor(tmp_path)
     output = tmp_path / target
     if target == "symlink.json":
-        output.symlink_to(source)
+        symlink_or_skip(output, source)
     if target == "hardlink.json":
         os.link(source, output)
     before = file_bytes(tmp_path)
