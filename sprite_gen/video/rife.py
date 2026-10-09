@@ -10,7 +10,8 @@ pushed out from inside its outline (`bleed`): a disagreement there reads as the 
 black a frame premultiplied over black put under it (2.24 and before: a black smear between
 crossing legs). Inside the coverage the colour is the frame's own, outline included.
 `smear` measures what a made frame has that neither neighbour has, and the outline it lost where
-the flow failed and melted a limb into the fill (docs/loop-repair.md section 4).
+the flow failed and melted a limb into the fill; `ghost` reads a band of part coverage on a frame
+alone, filmed or made (docs/loop-repair.md section 4).
 
 The binary's own CPU path (`-g -1`) returns a wrong frame with rife-v4.6 on both macOS and
 Linux (measured 2026-10-03: mean error 39 against 3.3 through Vulkan), so it is never passed;
@@ -55,6 +56,10 @@ PARTIAL_ALPHA = (0.1, 0.9)
 # when a dark solid pixel lies within this many pixels of it. A drawn outline sits on the edge, under
 # an antialiased pixel or two, whatever the frame's size.
 OUTLINE_REACH = 2
+# `ghost`: part-covered pixels count where they make a region at least this many pixels thick. An
+# antialiased edge or a keyed strand of hair is a pixel or two wide and erodes away; the band a video
+# model leaves between two drawings, or a flow carries from it, does not.
+GHOST_THICK = 5
 CALL_TIMEOUT_SECONDS = 120
 
 Interpolate = Callable[[Image.Image, Image.Image, float], Image.Image]
@@ -221,6 +226,17 @@ def smear(made: Image.Image, a: Image.Image, b: Image.Image) -> dict[str, float]
     solid = max(1, sm)
     return {"dark_excess": round((dm - max(da, db)) / solid, 5), "partial_excess": round((pm - max(pa, pb)) / solid, 5),
             "outline_loss": round((um - max(ua, ub)) / max(1, em), 5)}
+
+
+def ghost(frame: Image.Image) -> float:
+    """Part-covered pixels (PARTIAL_ALPHA) inside regions at least GHOST_THICK pixels thick, as a
+    fraction of the frame's solid pixels: a ghost band, read on the frame's own coverage and not
+    against its neighbours, so a band a filmed frame carries reads the same in a frame made beside
+    it (docs/loop-repair.md section 4)."""
+    alpha = np.asarray(frame.convert("RGBA").getchannel("A"), dtype=np.float32) / 255.0
+    lo, hi = PARTIAL_ALPHA
+    thick = _mask((alpha > lo) & (alpha < hi), GHOST_THICK, ImageFilter.MinFilter)
+    return round(float(thick.sum()) / max(1, int((alpha >= 0.5).sum())), 5)
 
 
 class Rife:

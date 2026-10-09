@@ -5,8 +5,8 @@ frame RIFE made beside one — is read on its own coverage, not against the fram
 loop path delivers one unmeasured.
 
 The fixtures are synthetic: two outlined legs (tests/video/test_rife.py `_walker`) and, for a
-filmed ghost, a band of 0.3 coverage between the feet, where a video model's transition frame
-carried one in a walk filmed on threes. The interpolators are stand-ins that follow the motion
+filmed ghost, a band of 0.3 coverage between the feet, where a video model's half-drawn frame
+between two held drawings carries one. The interpolators are stand-ins that follow the motion
 (a whole, outlined frame); the one real-RIFE case runs where RIFE is installed."""
 
 from __future__ import annotations

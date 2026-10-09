@@ -20,8 +20,8 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen._deps import np
-from sprite_gen.video.rife import Interpolate, smear
-from sprite_gen.video.interpolation_quality import faults
+from sprite_gen.video.rife import Interpolate, ghost, smear
+from sprite_gen.video.interpolation_quality import faults, ghost_screen
 
 # A step this many times the loop's median step (whole body, or the hair behind it) is a jump.
 JUMP_RATIO = 1.4
@@ -81,13 +81,15 @@ def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, 
 
     At most `max_frames` calls, and never next to a frame already made: two made frames side by side
     are made from each other and melt the legs. A proposal with a shared interpolation-quality
-    fault keeps the original middle frame. Blocked and rejected targets do not end the search
+    fault — a ghost too, on its own coverage, where the loop's ghost screen reads it — keeps the
+    original middle frame. Blocked and rejected targets do not end the search
     for independent targets. `interpolate` may be None while no jump is
     found; it is asked for only when a frame is to be made (a ValueError says so otherwise).
     Scores are re-read after each replacement, on the union box of the original loop."""
     out = list(frames)
     n = len(out)
     box = union_box(frames)
+    reads: bool | None = None  # whether the ghost screen reads the loop as filmed, once a frame is made
     first = jump_scores(out, facing=facing, box=box)
     record: dict[str, Any] = {
         "ratio": ratio, "max_frames": max_frames, "facing": facing, "hair_box": list(hair_box(facing)),
@@ -134,13 +136,16 @@ def repair_jumps(frames: list[Image.Image], interpolate: Interpolate | None, *, 
         if made.mode != "RGBA" or made.size != out[j].size:
             raise ValueError("repair interpolator must return an RGBA frame of the original size")
         attempted.add(j)
-        measure = smear(made, a, b)
+        if reads is None:
+            reads = ghost_screen(frames)["reads"]
+        measure = {**smear(made, a, b), "ghost": ghost(made) if reads else None}
         wrong = faults(measure)
         if not made.getchannel("A").getbbox():
             wrong.append("empty")
         record["rounds"].append({"step": [k, (k + 1) % n], "target": j, "score": round(score, 4),
                                  "whole": round(float(scores["whole"][k]), 4), "hair": round(float(scores["hair"][k]), 4),
-                                 "original": smear(out[j], a, b), "proposal": measure, "faults": wrong,
+                                 "original": {**smear(out[j], a, b), "ghost": ghost(out[j]) if reads else None},
+                                 "proposal": measure, "faults": wrong,
                                  "outcome": "rejected" if wrong else "accepted", **({"replaced": j} if not wrong else {})})
         if not wrong:
             out[j] = made
