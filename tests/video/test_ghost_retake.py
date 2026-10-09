@@ -128,8 +128,17 @@ def test_a_ghost_kept_at_a_made_time_is_a_take_to_film_again_and_its_fault_line_
 
 @pytest.mark.real_rife
 def test_real_rife_a_ghost_kept_at_a_made_time_is_a_take_to_film_again(tmp_path):
-    """A2 through the real RIFE: its frame between the two ghosts carries them, and the cell keeps the ghost."""
-    _check_made_time(_made_time(tmp_path, rife.Rife()))
+    """A2 through the real RIFE: its frame between the two ghosts carries them, and the cell keeps the ghost.
+    The real RIFE makes each frame beside a filmed ghost, the frames this case reads; the stand-in makes the
+    rest, some forty between two clean frames that no assertion here reads, each of which would cost two runs
+    of rife-ncnn-vulkan, slow where RIFE runs on the CPU."""
+    real = rife.Rife()
+
+    def beside_a_ghost(a: Image.Image, b: Image.Image, t: float) -> Image.Image:
+        return real(a, b, t) if max(rife.ghost(a), rife.ghost(b)) > GHOST_WARN else tg._follow(a, b, t)
+
+    _check_made_time(_made_time(tmp_path, beside_a_ghost))
+    assert real.made == 3  # E's frames made between source frames 4 and 5, 5 and 6, 6 and 7
 
 
 def test_a_held_loop_that_keeps_a_ghost_carries_both_reasons_held_drawings_first(tmp_path):
