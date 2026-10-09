@@ -24,7 +24,10 @@ A loop whose cut holds each drawing for two or three frames (`held_drawings`, sp
 held.py), that the length leaves at under RETAKE_DRAWINGS_MIN drawings a second, with frames
 between them that could not be made, is aligned all the same — and named in the report's `retake`
 (reason `held-drawings`, with its numbers) and in a warning: the gap is wider than any interpolator
-bridges, and only a new take fixes it.
+bridges, and only a new take fixes it. So is a loop that delivers a filmed ghost where neither source
+frame beside it is clean (reason `filmed-ghost`, its cells and source frames under `ghost`): no frame of
+the take shows the drawing there. A loop named for both carries one record, `reason` the first of them
+and `reasons` both.
 
 The loop directories are `video-loop` output directories. Their first alignment keeps the cut
 as filmed in `cycle.source/`; every later alignment reads from there, so running it again — or
@@ -94,7 +97,7 @@ from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import period as period_mod
 from sprite_gen.video import rife as rife_mod
-from sprite_gen.video.interpolation_quality import CROSSFADE_LOOK, SMEAR_WARN, OUTLINE_WARN, faults, ghost_screen, looks
+from sprite_gen.video.interpolation_quality import CROSSFADE_LOOK, SMEAR_WARN, OUTLINE_WARN, clean_beside, faults, ghost_screen, looks
 
 SNAP = 0.03  # a sample time within this of a source frame takes that frame
 SOURCE_DIR = loop_mod.CYCLE_SOURCE_DIR  # removed by video-loop whenever it cuts the loop again
@@ -133,6 +136,14 @@ CYCLES = (1, 2, 3)  # what --cycles <loop>=k may say a loop holds
 RETAKE_DRAWINGS_MIN = 13.0
 RETAKE_UNMADE_MIN = 1
 RETAKE_REASON = "held-drawings"
+# A filmed ghost the screen names is kept where it is the ghost itself that is delivered (`ghost_at`
+# `kept`): `no-clean-frame` where neither source frame beside its time is clean, `between-rife` where
+# `--between rife` kept it beside a clean one. A loop with RETAKE_GHOST_KEPT_MIN or more cells kept with no
+# clean frame is a take to film again, the reason `filmed-ghost`: no frame of the take shows the drawing
+# there. One kept under rife is the choice of whoever aligned it, and no reason.
+RETAKE_GHOST_KEPT_MIN = 1
+RETAKE_GHOST_REASON = "filmed-ghost"
+KEPT_NO_CLEAN, KEPT_RIFE = "no-clean-frame", "between-rife"
 
 
 def held_drawings(frames: list[Image.Image], *, fps: float, clip: dict[str, Any] | None = None,
@@ -161,27 +172,51 @@ def held_drawings(frames: list[Image.Image], *, fps: float, clip: dict[str, Any]
     return {"source": "cycle", **held_mod.measure([float(D[k, (k + 1) % n]) for k in range(n)], fps=fps, cyclic=True)}
 
 
-def retake(drawings: dict[str, Any], facts: dict[str, Any], *, fps: float) -> dict[str, Any] | None:
-    """The reason to film a loop again, with its numbers, or None. `drawings` is the source's
-    `held_drawings`, `facts` its `resample` facts: a held source stretched to under
-    RETAKE_DRAWINGS_MIN drawings a second, with RETAKE_UNMADE_MIN or more frames between them not made
-    — taken from the nearer source frame (`nearest_at`), or made with a fault and kept (`--between rife`)."""
-    if not drawings.get("hold") or drawings["hold"] < 2:
+def retake(drawings: dict[str, Any], facts: dict[str, Any], ghost_at: list[dict[str, Any]], *, fps: float) -> dict[str, Any] | None:
+    """The reasons to film a loop again, with their numbers, in one record, or None. `drawings` is the
+    source's `held_drawings`, `facts` its `resample` facts, `ghost_at` its cells where a filmed ghost
+    gave way or was kept, as the loop's row records them (each cell where it now stands).
+
+    `held-drawings`: a held source stretched to under RETAKE_DRAWINGS_MIN drawings a second, with
+    RETAKE_UNMADE_MIN or more frames between them not made — taken from the nearer source frame
+    (`nearest_at`), or made with a fault and kept (`--between rife`); its numbers stand in the record
+    only where it applies. `filmed-ghost`: RETAKE_GHOST_KEPT_MIN or more cells where the ghost itself
+    was kept, neither frame beside its time clean (`kept` no-clean-frame) — `ghost` names them (`kept`),
+    their frames of the source (`sources`), the highest reading (`ghost_max`) and the screen's `limit`.
+    `reason` is the first that applies, in that order, `reasons` all of them, `limits` each one's."""
+    reasons: list[str] = []
+    record: dict[str, Any] = {}
+    limits: dict[str, Any] = {}
+    if drawings.get("hold") and drawings["hold"] >= 2:
+        per_second = drawings["drawings"] / (facts["to"] / fps)
+        unmade = len(facts.get("nearest_at", [])) + sum(1 for m in facts.get("smear", []) if m["method"] == "rife" and m["faults"])
+        if per_second < RETAKE_DRAWINGS_MIN and unmade >= RETAKE_UNMADE_MIN:
+            reasons.append(RETAKE_REASON)
+            record |= {"hold": drawings["hold"], "source": drawings["source"], "drawings": drawings["drawings"],
+                       "drawings_per_second_filmed": drawings["drawings_per_second"], "drawings_per_second": round(per_second, 3),
+                       "frames_per_drawing": round(facts["to"] / drawings["drawings"], 3), "unmade": unmade}
+            limits |= {"drawings_per_second_min": RETAKE_DRAWINGS_MIN, "unmade_min": RETAKE_UNMADE_MIN}
+    kept = [g for g in ghost_at if g.get("kept") == KEPT_NO_CLEAN]
+    if len(kept) >= RETAKE_GHOST_KEPT_MIN:
+        reasons.append(RETAKE_GHOST_REASON)
+        record["ghost"] = {"kept": [g["at"] for g in kept], "sources": sorted({g["source"] for g in kept}),
+                           "ghost_max": max(g["ghost"] for g in kept), "limit": facts["ghost_screen"]["limit"]}
+        limits["ghost_kept_min"] = RETAKE_GHOST_KEPT_MIN
+    if not reasons:
         return None
-    seconds = facts["to"] / fps
-    per_second = drawings["drawings"] / seconds
-    unmade = len(facts.get("nearest_at", [])) + sum(1 for m in facts.get("smear", []) if m["method"] == "rife" and m["faults"])
-    if per_second >= RETAKE_DRAWINGS_MIN or unmade < RETAKE_UNMADE_MIN:
-        return None
-    return {"reason": RETAKE_REASON, "hold": drawings["hold"], "source": drawings["source"], "drawings": drawings["drawings"],
-            "drawings_per_second_filmed": drawings["drawings_per_second"], "drawings_per_second": round(per_second, 3),
-            "frames_per_drawing": round(facts["to"] / drawings["drawings"], 3), "unmade": unmade,
-            "limits": {"drawings_per_second_min": RETAKE_DRAWINGS_MIN, "unmade_min": RETAKE_UNMADE_MIN}}
+    return {"reason": reasons[0], "reasons": reasons, **record, "limits": limits}
 
 
-def _retake_line(name: str, r: dict[str, Any]) -> str:
-    """A loop to film again, in words."""
-    return (f"{name}: film this direction again ({r['reason']}) — its {'clip' if r['source'] == 'clip' else 'cut'} shows each drawing for {r['hold']} frames "
+def _retake_line(name: str, r: dict[str, Any], reason: str) -> str:
+    """A loop to film again for `reason` (one of its `reasons`), in words."""
+    if reason == RETAKE_GHOST_REASON:
+        g = r["ghost"]
+        cells, sources = ", ".join(map(str, g["kept"])), ", ".join(map(str, g["sources"]))
+        return (f"{name}: film this direction again ({reason}) — frame(s) {cells} show source frame(s) {sources} of {SOURCE_DIR}/, "
+                f"filmed ghosts (up to {_ghost_words(g['ghost_max'])}), and the source frames beside each are filmed ghosts too: "
+                "no clean frame stands there, so the loop shows the ghost. A new take fixes it; no frame of this one shows the "
+                "drawing there (docs/loop-repair.md section 4)")
+    return (f"{name}: film this direction again ({reason}) — its {'clip' if r['source'] == 'clip' else 'cut'} shows each drawing for {r['hold']} frames "
             f"({r['drawings']:g} drawings in the cycle, {r['drawings_per_second_filmed']:g} a second as filmed); at the set's length "
             f"that is {r['drawings_per_second']:g} drawings a second, {r['frames_per_drawing']:g} frames apart, and {r['unmade']} "
             "frame(s) between them could not be made, so the loop halts there. A new take that draws every frame "
@@ -207,7 +242,8 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
     a source frame it names is not taken under auto or nearest — at a time on it, the frame after it is,
     or the one before it; where it is the nearer frame, the other beside the time is — and rife keeps it.
     Each such cell is listed in `ghost_at`: `at`, the ghost `source` and its reading, and the frame
-    `taken` (the ghost itself where rife kept it, or where neither frame beside it is clean)."""
+    `taken` — the ghost itself where rife kept it beside a clean frame (`kept` between-rife), or where
+    neither frame beside it is clean (`kept` no-clean-frame, under any `between`)."""
     count = len(frames)
     if length < 2:
         raise ValueError(f"cycle length {length} is too short")
@@ -221,13 +257,15 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
     smears: list[dict[str, Any]] = []
     ghost_at: list[dict[str, Any]] = []
 
-    def clean(k: int, first: int, other: int) -> int:
-        """`first` where the screen passes it, else `other` where it passes that (rife takes `first`
-        as it is); each ghost passed over or taken is listed in `ghost_at`."""
+    def clean(k: int, first: int, other: int | None) -> int:
+        """`first` where the screen passes it, else `other`, the clean frame beside it, where there is one
+        (rife takes `first` as it is); each ghost passed over or taken is listed in `ghost_at`, a ghost
+        taken with why it was kept."""
         if first not in ghosts:
             return first
-        taken_ = first if between == "rife" or other in ghosts else other
-        ghost_at.append({"at": k, "source": first, "ghost": ghosts[first], "taken": taken_})
+        taken_ = first if between == "rife" or other is None else other
+        ghost_at.append({"at": k, "source": first, "ghost": ghosts[first], "taken": taken_,
+                         **({"kept": KEPT_NO_CLEAN if other is None else KEPT_RIFE} if taken_ == first else {})})
         return taken_
 
     for k in range(length):
@@ -237,10 +275,9 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
         nearer = (i + (frac >= 0.5)) % count
         beside = (i + (frac < 0.5)) % count  # the other frame beside the time
         if frac < SNAP or frac > 1 - SNAP:  # on a source frame (the nearer); a ghost there gives way to the frame after it, else before
-            after, before = (nearer + 1) % count, (nearer - 1) % count
-            taken: dict[str, Any] = {"source": clean(k, nearer, before if after in ghosts else after)}
+            taken: dict[str, Any] = {"source": clean(k, nearer, clean_beside(nearer, ghosts, count))}
         elif between == "nearest":
-            taken = {"source": clean(k, nearer, beside)}
+            taken = {"source": clean(k, nearer, None if beside in ghosts else beside)}
             nearest_at.append(k)
         else:
             if interpolate is None:
@@ -251,7 +288,8 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
                        "crossfade": rife_mod.crossfade(made, a, b, frac)}
             wrong = faults(measure)
             keep = between == "rife" or not wrong
-            taken = {"between": [i % count, (i + 1) % count], "t": round(frac, 4)} if keep else {"source": clean(k, nearer, beside)}
+            taken = ({"between": [i % count, (i + 1) % count], "t": round(frac, 4)} if keep
+                     else {"source": clean(k, nearer, None if beside in ghosts else beside)})
             (made_at if keep else nearest_at).append(k)
             smears.append({"at": k, "method": "rife" if keep else "nearest", **measure, "faults": wrong, "look": looks(measure)})
         out.append(made if "between" in taken else frames[taken["source"]])
@@ -673,7 +711,7 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     shutil.rmtree(loop_dir / ".webp-frames", ignore_errors=True)
     # a GIF or WebP holds a frame shown twice in a row (`--between nearest` stretching a loop) as one
     # frame of twice the delay, so each is checked for one frame per run of identical cells
-    runs = 1 + sum(1 for a, b in zip(cells, cells[1:]) if a.tobytes() != b.tobytes())
+    runs = loop_mod.shown_runs(cells)
     record["gif"] = loop_mod.verify_animation(gif_path, expect_frames=runs, check_stale=False)
     record["webp"] = loop_mod.verify_animation(webp_path, expect_frames=runs, check_stale=True)
     return merged
@@ -693,9 +731,10 @@ def _ghost_words(reading: float) -> str:
     return f"a part-covered band over {100 * reading:.2f} % of its body, at least {rife_mod.GHOST_THICK} px thick"
 
 
-def _fault_line(name: str, m: dict[str, Any], *, other_side: bool = False) -> str:
-    """A made frame's faults, in words, and what became of it; `other_side` where the nearer source
-    frame is a filmed ghost and the other beside it was taken (`_ghost_line` names both)."""
+def _fault_line(name: str, m: dict[str, Any], ghost: dict[str, Any] | None = None) -> str:
+    """A made frame's faults, in words, and what became of it; `ghost` is its cell's `ghost_at` entry
+    where the nearer source frame is a filmed ghost — the other beside it taken, or the ghost kept, the
+    other a filmed ghost too (`_ghost_line` names both)."""
     what = [*([f"has {100 * m['dark_excess']:.2f} % more dark pixels inside the body than either source frame beside it — a smear"]
               if "smear" in m["faults"] else []),
             *([f"lost its outline on {100 * m['outline_loss']:.2f} % of its edge beyond either source frame beside it — "
@@ -703,8 +742,11 @@ def _fault_line(name: str, m: dict[str, Any], *, other_side: bool = False) -> st
             *([f"carries {_ghost_words(m['ghost'])} — a ghost"] if "ghost" in m["faults"] else [])]
     if m["method"] == "nearest":
         return (f"{name}: frame {m['at']}: RIFE's frame " + "; ".join(what)
-                + (", so the source frame on its other side was taken there, the nearer being a filmed ghost (--between auto)"
-                   if other_side else ", so the nearer source frame was taken there (--between auto)"))
+                + (", so the nearer source frame was taken there (--between auto)" if ghost is None else
+                   ", so the source frame on its other side was taken there, the nearer being a filmed ghost (--between auto)"
+                   if ghost["taken"] != ghost["source"] else
+                   ", so the nearer source frame, a filmed ghost, was kept there, the frames beside it being filmed ghosts too "
+                   "(--between auto)"))
     return (f"{name}: frame {m['at']} (made by RIFE) " + "; ".join(what)
             + "; see it in cycle/, or align with --between auto (the nearer source frame there) or --between nearest")
 
@@ -717,12 +759,12 @@ def _look_line(name: str, m: dict[str, Any]) -> str:
             "--between nearest or film the direction again (docs/loop-repair.md section 4)")
 
 
-def _ghost_line(name: str, g: dict[str, Any], between: str) -> str:
+def _ghost_line(name: str, g: dict[str, Any]) -> str:
     """A cell where a filmed ghost frame would have been delivered, and what was instead."""
     line = f"{name}: frame {g['at']}: source frame {g['source']} is a filmed ghost ({_ghost_words(g['ghost'])})"
     if g["taken"] != g["source"]:
         return line + f", so source frame {g['taken']} beside it was taken there"
-    if between == "rife":
+    if g["kept"] == KEPT_RIFE:
         return line + "; kept (--between rife) — see it in cycle/, or align with --between auto or nearest (a clean frame beside it there)"
     return line + ", and so are the frames beside it; kept — film this direction again"
 
@@ -865,7 +907,10 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
             raise SystemExit(f"video-cycle-align: {d}: {exc}; frames between source frames are made by RIFE (docs/loop-repair.md)") from exc
         start = strike["start"]
         drawings = held_drawings(frames, fps=fps, clip=loops[i][2].get("drawings"), cut=loops[i][2].get("cycle_drawings"))
-        again = retake(drawings, facts, fps=fps)
+        # the ghosts passed over or kept as frames of cycle.source/, each cell where it now stands
+        ghost_at = sorted(({**g, "at": (g["at"] - start) % target, "source": index[g["source"]], "taken": index[g["taken"]]}
+                           for g in facts["ghost_at"]), key=lambda g: g["at"])
+        again = retake(drawings, facts, ghost_at, fps=fps)
         record = {**facts, "drawings": drawings, "retake": again, "turned_by": start, "turned_on": strike["by"], "view": view, "start_foot": strike["start_foot"],
                   "start_foot_source": strike["start_foot_source"],
                   # the two strikes as they stand in the rebuilt cycle/: the larger first
@@ -879,10 +924,9 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
             record["nearest_at"] = sorted((k - start) % target for k in facts["nearest_at"])
         if "smear" in facts:
             record["smear"] = sorted(({**m, "at": (m["at"] - start) % target} for m in facts["smear"]), key=lambda m: m["at"])
-        # the screen's frames and the ghosts passed over as frames of cycle.source/, each cell where it now stands
+        # the screen's frames as frames of cycle.source/
         record["ghost_screen"] = {**facts["ghost_screen"], "ghosts": [{**g, "frame": index[g["frame"]]} for g in facts["ghost_screen"]["ghosts"]]}
-        record["ghost_at"] = sorted(({**g, "at": (g["at"] - start) % target, "source": index[g["source"]], "taken": index[g["taken"]]}
-                                     for g in facts["ghost_at"]), key=lambda g: g["at"])
+        record["ghost_at"] = ghost_at
         provenance = [{"source": index[p["source"]]} if "source" in p else {"between": [index[j] for j in p["between"]], "t": p["t"]}
                       for p in provenance]
         aligned.append((out[start:] + out[:start], record, provenance[start:] + provenance[:start]))
@@ -893,17 +937,18 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         rows.append({"dir": str(d), "name": meta_path.name[: -len(".strip.json")],
                      **{k: v for k, v in record.items() if k not in ("gif", "webp", "origin")},
                      "strip": {k: merged[k] for k in ("frames", "w", "h", "body_h", "delay_ms")}})
-    warnings = [_fault_line(r["name"], m, other_side=any(g["at"] == m["at"] and g["taken"] != g["source"] for g in r["ghost_at"]))
+    warnings = [_fault_line(r["name"], m, next((g for g in r["ghost_at"] if g["at"] == m["at"]), None))
                 for r in rows for m in r.get("smear", []) if m["faults"]]
     warnings += [_look_line(r["name"], m) for r in rows for m in r.get("smear", []) if m["method"] == "rife" and m["look"]]
     retakes = [{"dir": r["dir"], "name": r["name"], **r["retake"]} for r in rows if r["retake"]]
     # A loop to film again is named by its directory where two loops share a strip name (each `walk`).
     shared = len({r["name"] for r in rows}) < len(rows)
-    warnings += [_ghost_line(r["dir"] if shared else r["name"], g, between) for r in rows for g in r["ghost_at"]]
+    warnings += [_ghost_line(r["dir"] if shared else r["name"], g) for r in rows for g in r["ghost_at"]]
     warnings += [f"{r['dir'] if shared else r['name']}: the ghost screen does not read it — {r['ghost_screen']['why']}; no frame of it "
                  "is named a ghost or given way for one, so look at cycle/ (docs/loop-repair.md section 4)"
                  for r in rows if not r["ghost_screen"]["reads"]]
-    warnings = cycle_warnings + [_retake_line(r["dir"] if shared else r["name"], r["retake"]) for r in rows if r["retake"]] + warnings
+    warnings = cycle_warnings + [_retake_line(r["dir"] if shared else r["name"], r["retake"], reason)
+                                 for r in rows if r["retake"] for reason in r["retake"]["reasons"]] + warnings
     unnamed = [_unnamed_foot(r) for r in rows if r["start_foot"] is None]
     if len(rows) > 1 and views is None and unnamed:
         warnings.append("no view given (--view): each loop " + ("not named by --foot " if told else "")

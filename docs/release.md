@@ -17,6 +17,22 @@ GitHub-hosted CI(GitHub Actions)는 쓰지 않는다. 테스트 게이트와 whe
 lavapipe 에서는 첫 업로드에서 죽는다 — 그래서 그런 호스트에서는 RIFE 를 떼어 내되 조용히 건너뛰지는
 않는다.
 
+실제 rife-ncnn-vulkan 을 돌리는 시험은 `real_rife` 표시를 단다(`pyproject.toml` 이 등록하고,
+`tests/conftest.py` 가 RIFE 를 못 찾으면 그 표시가 붙은 시험을 건너뛴다). `--rife-unmeasured` 는
+RIFE 가 닿는 곳이 하나도 없는 상태로 스위트 전체를 돌려 그 시험들이 이 이유로 건너뛰어지고,
+`--rife-only` 는 `sprite-gen rife install`(그 확인 프레임)과 스위트 전체에서 `real_rife` 가 붙은
+시험(`pytest -m real_rife`)을 돌린다 — 하나라도 건너뛰거나, 표시된 시험이 없으면 실패다. 그래서 새
+실제-RIFE 시험은 표시만 붙이면 `--rife-only` 가 저절로 걷는다.
+
+표시 없이 RIFE 가 없을 때 건너뛰거나 모이지 않는 시험은 두 실행 어느 쪽도 재지 않는다. 그래서
+`--rife-unmeasured` 는 시험을 `pytest --rife-unmeasured` 로 돌리고, 그 실행에서 건너뛴 것마다 — skip
+표시로든, fixture 나 시험 본문에서든, 파일째 import 에서든 — `tests/conftest.py` 가 `real_rife` 표시를
+본다. 표시가 없고, 같은 파일의 `NOT_RIFE_SKIPS` 가 RIFE 가 아닌 이유(레인이 주지 않는 입력)로
+건너뛴다고 이름 대지도 않았으면, 그 결과를 실패로 바꿔 시험의 이름을 댄다. RIFE 가 없으면 아예 모이지
+않는 시험은 그 실행에 보이지 않으므로, `tests/release/test_lane_rife_collection.py` 가 스위트를 RIFE 가
+있는 척하는 대역을 둔 채 한 번, 없는 채 한 번 모아, 모이는지나 skip 표시의 판정이 갈리는 시험마다
+표시를 요구하고 없으면 그 이름을 대고 실패한다.
+
 통과는 커밋 하나의 것이다. 어떤 커밋에서 잰 레인 — 한 번의 exit 0 이든, `--rife-only` 의 exit 0 이든 —
 은 다른 커밋의 통과가 아니다. 이전 릴리즈나 부모 커밋의 통과를 다음 커밋으로 옮겨 적지 않고, 머지할
 커밋과 태그 커밋을 각각 그 SHA 의 깨끗한 클론에서 잰다. `--rife-unmeasured` 로 잰 커밋은 같은 SHA 의

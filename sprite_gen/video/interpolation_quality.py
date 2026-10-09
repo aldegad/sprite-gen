@@ -3,9 +3,11 @@
 
 Measurements live in ``rife`` (``smear``, ``ghost``, ``crossfade``); these are the existing alignment
 bounds, also applied before replacing a filmed middle frame during jump repair, the ghost screen
-every frame a loop path delivers passes, filmed or made, and the cross-fade a made frame is named
-for, kept (docs/loop-repair.md section 4).
+every frame a loop path delivers passes, filmed or made, the clean frame a filmed ghost gives way
+to, and the cross-fade a made frame is named for, kept (docs/loop-repair.md section 4).
 """
+
+from collections.abc import Container
 
 from PIL import Image
 
@@ -54,3 +56,12 @@ def ghost_screen(frames: list[Image.Image]) -> dict:
         return {**record, "ghosts": [], "why": f"the loop is drawn part-covered: its median frame reads {level:.5f}, over the "
                                                f"{GHOST_WARN} that names a ghost"}
     return {**record, "ghosts": [{"frame": i, "ghost": v} for i, v in enumerate(readings) if v > GHOST_WARN]}
+
+
+def clean_beside(frame: int, ghosts: Container[int], count: int) -> int | None:
+    """The frame of a loop of `count` frames a filmed ghost at `frame` gives way to: the frame after
+    it where the screen passes it (`ghosts` are the frames it names), else the one before it; None
+    where both are ghosts too, and the ghost is kept. The cycle alignment takes it at a time on a
+    ghost, and the jump repair of `video-loop` where its frame between the two is not taken."""
+    after, before = (frame + 1) % count, (frame - 1) % count
+    return after if after not in ghosts else before if before not in ghosts else None

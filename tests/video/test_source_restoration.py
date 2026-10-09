@@ -17,10 +17,12 @@ from sprite_gen.cli import main
 from sprite_gen.util.gif_utils import save_clean_gif
 from sprite_gen.util.resample import resize_cell
 from sprite_gen.video.compare import Loop
+from sprite_gen.video.interpolation_quality import GHOST_WARN
 
 W, H, N = 64, 80, 12
 FILL = (210, 160, 110, 255)
-METRIC, POLICY = 'source-restoration-v4', 'key-protected-source-copy-one-step-cap-jump-guard-v1'
+METRIC, POLICY = 'source-restoration-v5', 'key-protected-source-copy-one-step-cap-jump-ghost-guard-v1'
+REPAIR_SCHEMA, COMPARISON_SCHEMA = 4, 6
 # Two colours under the green key's bar (hue excess -6 each), one led by red and one by blue:
 # their even mix (105, 114, 105) is one step over it. ROSE and IRIS are the same for magenta.
 WARM, COOL = (120, 114, 90, 255), (90, 114, 120, 255)
@@ -74,16 +76,18 @@ def cells(paths):
     return restoration.read_loop(paths)[0].frames
 
 
-def build(tmp_path, zoom=1, key='green', paint=None, facing='right'):
+def build(tmp_path, zoom=1, key='green', paint=None, facing='right', unpainted=()):
     """A loop with two damaged cells and its keyed source, `zoom` times the cell's size.
 
     At zoom 1 a cell is a copy of its frame; at 2 every cell is a resample, as a delivered loop's are.
     `paint` draws on chosen source frames before the loop is cut from them. `facing` is the one the
-    jump repair records, as `video-loop --facing` writes it.
+    jump repair records, as `video-loop --facing` writes it. A damaged cell in `unpainted` is made from
+    its frame as it was before `paint`: what the cut gave way for what was painted.
     """
     if not shutil.which('ffmpeg') or not loop.img2webp_supports_exact():
         pytest.skip('ffmpeg and img2webp >=1.5 required')
     fs = [f.resize((W*zoom,H*zoom),Image.Resampling.NEAREST) for f in frames()]
+    drawn = [f.copy() for f in fs]
     for k,draw in (paint or {}).items(): draw(fs[k])
     src_dir=tmp_path/'keyed'
     src_dir.mkdir()
@@ -99,7 +103,7 @@ def build(tmp_path, zoom=1, key='green', paint=None, facing='right'):
     manifest.write_text(json.dumps(source.manifest(clip=mp4,canvas=canvas,frames_report=freport,files=sorted(src_dir.glob('*.png')),timestamps=source.timestamps(mp4,0))))
     clean=[resize_cell(cleaned(f),(W,H)) for f in fs]
     bad=list(clean)
-    for k in (2,8): bad[k]=resize_cell(damage(cleaned(fs[k]),zoom),(W,H))
+    for k in (2,8): bad[k]=resize_cell(damage(cleaned((drawn if k in unpainted else fs)[k]),zoom),(W,H))
     paths={k:tmp_path/('b'+ext) for k,ext in [('strip','.png'),('meta','.json'),('report','.loop.json'),('gif','.gif'),('webp','.webp')]}
     m={'frames':12,'w':64,'h':80,'delay_ms':41.67,'cycle_seconds':.5,'cycle_frames':12,'subsampled':False,'loop':True,'scale':1/zoom,'source_rect':[0,0,W*zoom,H*zoom],'sample_indices':list(range(12)),'foot_anchor':'none'}
     src=source.Source.read(**inputs)
@@ -161,11 +165,11 @@ def repaint_source(case, index, paint):
 
 def test_source_restoration_preserves_normal_motion_and_timing(case,tmp_path):
     result=repair(case,tmp_path)
-    assert result['status']=='candidate' and result['schema_version']==3
+    assert result['status']=='candidate' and result['schema_version']==REPAIR_SCHEMA
     assert result['origin_artifacts']==result['baseline_artifacts']
     comparison=compare_result(case,result)
     assert comparison['verdict']=='improved', comparison['reasons']
-    assert (comparison['metric_version'],comparison['policy_version'],comparison['schema_version'])==(METRIC,POLICY,5)
+    assert (comparison['metric_version'],comparison['policy_version'],comparison['schema_version'])==(METRIC,POLICY,COMPARISON_SCHEMA)
     target=result['target']
     a,b=cells(case[0]),cells(outputs(result))
     assert all(x.tobytes()==y.tobytes() for k,(x,y) in enumerate(zip(a,b)) if k!=target)
@@ -292,7 +296,7 @@ def test_cli_real_json_needs_the_origin(case,tmp_path,capsys):
     assert not (tmp_path/'guessed').exists() and not report.exists()
     assert main(['video-loop-repair',*baseline,*origin,*src,'--out-dir',str(tmp_path/'cli'),'--report',str(report)])==0
     r=json.loads(report.read_bytes())
-    assert (r['schema_version'],r['metric_version'],r['policy_version'])==(3,METRIC,POLICY)
+    assert (r['schema_version'],r['metric_version'],r['policy_version'])==(REPAIR_SCHEMA,METRIC,POLICY)
     candidate=[a for k,p in r['outputs'].items() for a in ('--candidate-'+k,p)]
     comparison=tmp_path/'comparison.json'
     with pytest.raises(SystemExit,match='origin'):
@@ -300,7 +304,7 @@ def test_cli_real_json_needs_the_origin(case,tmp_path,capsys):
     assert not comparison.exists()
     assert main(['video-loop-compare',*baseline,*origin,*candidate,*src,'--repair-evidence',str(report),'--report',str(comparison)])==0
     c=json.loads(comparison.read_bytes())
-    assert c['verdict']=='improved' and c['schema_version']==5 and c['metric_version']==METRIC
+    assert c['verdict']=='improved' and c['schema_version']==COMPARISON_SCHEMA and c['metric_version']==METRIC
     assert set(c['candidate']['artifacts'])==set(c['origin']['artifacts'])=={'strip','meta','report','gif','webp'}
     assert c['origin']['artifacts']==r['origin_artifacts']
 
@@ -381,7 +385,7 @@ def test_less_total_key_spill_cannot_hide_new_local_key_spill(case,tmp_path):
     src=source.Source.read(**inputs)
     state,_=restoration.chain(o,o,src)
     whole=[state.projection.frames[k] if k==target else f for k,f in enumerate(o.frames)]
-    judged=restoration.judge(o.frames,whole,state.projection.frames,state.key,state.facing)
+    judged=restoration.judge(o.frames,whole,state.projection.frames,state.key,state.facing,state.screen)
     assert sum(f for f in judged['axes']['key_colour']['candidate'])<sum(judged['axes']['key_colour']['baseline'])
     assert judged['axes']['key_colour']['introduced_pixels'][target]==4
     assert judged['verdict']=='regressed' and 'key_colour:regressed' in judged['reasons']
@@ -390,6 +394,36 @@ def test_less_total_key_spill_cannot_hide_new_local_key_spill(case,tmp_path):
     write_strip(forged,whole)
     c,_=restoration.read_loop(forged); r['candidate_artifacts']=c.artifacts
     assert compare_result(case,r)['reasons']==['changed-cell-is-not-the-verified-source-copy']
+
+
+def ghost_band(f):
+    """A filmed ghost under the body of frame 2, between its feet: a band of part coverage whose sides the dark
+    feet outline, so it carries no smear and no outline fault against the frames beside it."""
+    for y in range(60,72):
+        for x in range(29,37):
+            if f.getpixel((x,y))[3]==0: f.putpixel((x,y),(240,225,220,77))
+
+
+def test_a_cell_whose_source_frame_is_a_filmed_ghost_is_never_restored(tmp_path):
+    # Cell 2 is the frame the jump repair gave a filmed ghost way for, and it lost its outline at the cell's size.
+    # The ghost passes the smear and outline faults, so source-restoration-v4 proposed the cell and took the ghost
+    # back. The ghost screen of the cut's source frames names it: no target, and a ghost there regresses.
+    case=build(tmp_path,paint={2:ghost_band},unpainted=(2,))
+    paths,inputs,_=case
+    first=repair(case,tmp_path)
+    assert (first['target'],first['proposals_available'])==(8,1)  # before: cell 2 proposed too, the ghost restored
+    assert first['comparison']['verdict']=='improved', first['comparison']['reasons']
+    axis=first['comparison']['axes']['ghost']
+    assert [g['frame'] for g in axis['filmed']['ghosts']]==[2] and axis['status']=='non_regressing'
+    assert axis['baseline'][2]<=GHOST_WARN<axis['reference'][2]
+    assert repair(case,tmp_path,2)['status']=='exhausted'
+    # The source frame written into the cell is the ghost again: the ghost axis regresses.
+    o,_=restoration.read_loop(paths)
+    state,_=restoration.chain(o,o,source.Source.read(**inputs))
+    whole=[state.projection.frames[k] if k==2 else f for k,f in enumerate(o.frames)]
+    judged=restoration.judge(o.frames,whole,state.projection.frames,state.key,state.facing,state.screen)
+    assert judged['axes']['ghost']['status']=='regressed' and judged['verdict']=='regressed'
+    assert 'ghost:regressed' in judged['reasons']
 
 
 def test_partial_copy_formula():
@@ -692,6 +726,9 @@ def test_replaced_origin_or_source_is_error(case,tmp_path,adopted):
 def test_other_policy_receipt_is_not_read_as_this_one(case,tmp_path,adopted):
     origin,first,current=adopted
     for change in (lambda r: r['restoration'].update(policy_version='another-policy'),
+                   # The released contract before the ghost guard: it could restore a filmed ghost the cut gave way.
+                   lambda r: r['restoration'].update(metric_version='source-restoration-v4',
+                                                     policy_version='key-protected-source-copy-one-step-cap-jump-guard-v1'),
                    # The released contract before the jump guard: its cells were accepted without it.
                    lambda r: r['restoration'].update(metric_version='source-restoration-v3',
                                                      policy_version='key-protected-source-copy-one-step-cap-v1'),
@@ -715,8 +752,9 @@ def test_old_proposal_cannot_be_compared_on_the_new_baseline(case,tmp_path,adopt
     with pytest.raises(ValueError,match='does not bind'):
         compare_result(case,second,baseline=case[0],origin=origin)
     # Evidence of another schema or metric is not this contract's.
-    for field,value in (('schema_version',2),('metric_version','source-restoration-v2'),
+    for field,value in (('schema_version',2),('schema_version',3),('metric_version','source-restoration-v2'),
                         ('policy_version','key-protected-source-copy-v1'),('metric_version','source-restoration-v3'),
+                        ('metric_version','source-restoration-v4'),('policy_version','key-protected-source-copy-one-step-cap-jump-guard-v1'),
                         ('policy_version','key-protected-source-copy-one-step-cap-v1'),('policy_version','another-policy')):
         with pytest.raises(ValueError,match='does not bind'):
             compare_result(case,{**second,field:value},baseline=current,origin=origin)
@@ -805,7 +843,7 @@ def test_cli_restores_a_resampled_cell_with_its_made_excess_capped(scaled,tmp_pa
     report=tmp_path/'repair.json'
     assert main(['video-loop-repair',*baseline,*origin,*src,'--out-dir',str(tmp_path/'cli'),'--report',str(report)])==0
     r=json.loads(report.read_bytes())
-    assert (r['status'],r['schema_version'],r['metric_version'],r['policy_version'])==('candidate',3,METRIC,POLICY)
+    assert (r['status'],r['schema_version'],r['metric_version'],r['policy_version'])==('candidate',REPAIR_SCHEMA,METRIC,POLICY)
     target,part=r['target'],r['partial']
     assert (part['capped']['count'],part['protected']['count'],part['alpha_equals_source'])==(6,0,True)
     assert part['capped_pixels']=={'count':6,'listed':6,'pixels':[
@@ -815,7 +853,7 @@ def test_cli_restores_a_resampled_cell_with_its_made_excess_capped(scaled,tmp_pa
     comparison=tmp_path/'comparison.json'
     assert main(['video-loop-compare',*baseline,*origin,*candidate,*src,'--repair-evidence',str(report),'--report',str(comparison)])==0
     c=json.loads(comparison.read_bytes())
-    assert (c['verdict'],c['schema_version'],c['metric_version'],c['policy_version'])==('improved',5,METRIC,POLICY), c['reasons']
+    assert (c['verdict'],c['schema_version'],c['metric_version'],c['policy_version'])==('improved',COMPARISON_SCHEMA,METRIC,POLICY), c['reasons']
     key=c['axes']['key_colour']
     assert (key['introduced_pixels'][target],key['introduced_excess'][target],key['candidate'][target])==(0,0,0)
     assert c['cleared_faults']==[{'cell':target,'faults':['outline']}]
@@ -842,7 +880,7 @@ def test_whole_source_cell_with_a_made_excess_is_still_refused(scaled,tmp_path):
     o,_=restoration.read_loop(paths)
     state,_=restoration.chain(o,o,source.Source.read(**inputs))
     whole=[state.projection.frames[k] if k==target else f for k,f in enumerate(o.frames)]
-    judged=restoration.judge(o.frames,whole,state.projection.frames,state.key,state.facing)
+    judged=restoration.judge(o.frames,whole,state.projection.frames,state.key,state.facing,state.screen)
     assert judged['axes']['key_colour']['introduced_pixels'][target]==6
     assert judged['verdict']=='regressed' and 'key_colour:regressed' in judged['reasons']
     # Written out as the candidate, one capped place given the source's pixel back is not the verified cell.

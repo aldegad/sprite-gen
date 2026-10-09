@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 name = "sprite-gen"
 # Release discipline: keep this package metadata version synchronized with
 # SKILL.md's `version:` field in the same release commit.
-version = "2.43.0"
+version = "2.44.0"
 description = "Component-row pipeline for clean 2D game sprites and animation atlases"
 readme = "README.md"
 license = "Apache-2.0"
@@ -69,6 +69,11 @@ pythonpath = ["tests"]
 # subprocess.wait(). 120s is generous for the extract/compose subprocess tests.
 timeout = 120
 timeout_method = "signal"
+# One mark names a test of the real rife-ncnn-vulkan: tests/conftest.py skips it where no RIFE is
+# reachable, and `scripts/linux_lane.sh --rife-only` runs exactly the marked tests (`-m real_rife`).
+markers = [
+    "real_rife: runs the real rife-ncnn-vulkan; skipped where none is reachable, run by `scripts/linux_lane.sh --rife-only`",
+]
 
 # The pipeline ships an importable sprite_gen package. The canonical invocation is the
 # console script declared above (`sprite-gen <tool>`); `scripts/<tool>.py` survives as a

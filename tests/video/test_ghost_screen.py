@@ -23,7 +23,7 @@ from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import repair
 from sprite_gen.video.interpolation_quality import GHOST_WARN, faults, ghost_screen
 from tests.video.test_cycle_align import _walker as _block_walker
-from tests.video.test_rife import _real_rife_available, _walker
+from tests.video.test_rife import _walker
 
 
 def _band(im: Image.Image, *, alpha: float = 0.3, box=(0.36, 0.78, 0.64, 0.99)) -> Image.Image:
@@ -185,19 +185,20 @@ def test_alignment_delivers_no_filmed_ghost_and_names_each_cell_it_passed_over(t
 
 
 def test_jump_repair_rejects_a_proposal_that_carries_a_ghost(monkeypatch):
-    """The proposal between frames 0 and 2 carries what the filmed ghost 2 carries: nothing beyond
-    its neighbours, so it passed; on its own coverage it is a ghost, and the original stays."""
-    frames = [_walker(20, -20), _walker(8, -8), _band(_walker(-5, 5)), _walker(10, -10)]
+    """The proposal for the frame after a jump carries a band of part coverage: on its own coverage it
+    is a ghost, and the original stays. (A filmed ghost beside it is no longer what the proposal is made
+    from: the jump repair gives it way first, tests/video/test_ghost_given_way.py.)"""
+    frames = [_walker(20, -20), _walker(8, -8), _walker(-5, 5), _walker(10, -10)]
     before = [f.tobytes() for f in frames]
     scores = np.array([3., 2., 1., 1.])
     monkeypatch.setattr(repair, "jump_scores", lambda *a, **kw: {k: scores for k in ("whole", "hair", "score")})
     out, record = repair.repair_jumps(frames, lambda a, b, t: _band(_walker(8, -8)))
-    assert record["replaced"] == [] and record["rounds"][0]["faults"] == ["ghost"]
+    assert record["replaced"] == [] and record["rounds"][0]["why"] == "jump" and "ghost" in record["rounds"][0]["faults"]
     assert record["rounds"][0]["proposal"]["ghost"] > GHOST_WARN and record["rounds"][0]["original"]["ghost"] == 0
     assert [f.tobytes() for f in out] == before
 
 
-@pytest.mark.skipif(not _real_rife_available(), reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH / sprite-gen rife install)")
+@pytest.mark.real_rife
 def test_real_rife_delivers_no_cell_carrying_a_filmed_ghost():
     """A filmed ghost resampled 4 to 8 through the real RIFE: before the screen the ghost itself was
     taken at its own time, unmeasured, and the frames made beside it carried it, judged only beyond it."""
