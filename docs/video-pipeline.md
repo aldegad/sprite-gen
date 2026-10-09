@@ -379,8 +379,12 @@ default): one `--loop-dir` per direction of the same walk or run, one `--view` e
 order, so that every loop starts as the same own foot lands wherever its view can tell the feet
 apart. A frame that falls between two source frames is made by RIFE, and the command fails where one
 is needed and RIFE is not installed; `--between nearest` makes none. A frame RIFE made that melted
-(lost its outline where legs crossed too far) is replaced by the nearer source frame and named
-(`--between auto`, the default; [loop repair](loop-repair.md) section 4). A loop whose view cannot
+(lost its outline where legs crossed too far) or carries a ghost (a band of part coverage) is
+replaced by the nearer source frame and named, and a filmed frame left half drawn between two
+drawings gives way to a clean source frame beside it (`--between auto`, the default; [loop
+repair](loop-repair.md) section 4, "The ghost screen"); a made frame that may cross-fade two
+drawings inside its outline is kept and named to look at (section 4, "A cross-fade inside the
+silhouette"). A loop whose view cannot
 tell its feet apart — or tells them apart by too small a margin (`foot_why` `low-margin`) — starts
 on its larger strike and is listed under the report's `unnamed_feet` with its two strike frames in
 `cycle/`: look at the first, say which own foot lands there, and run the same alignment again with

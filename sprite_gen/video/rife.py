@@ -10,7 +10,9 @@ pushed out from inside its outline (`bleed`): a disagreement there reads as the 
 black a frame premultiplied over black put under it (2.24 and before: a black smear between
 crossing legs). Inside the coverage the colour is the frame's own, outline included.
 `smear` measures what a made frame has that neither neighbour has, and the outline it lost where
-the flow failed and melted a limb into the fill (docs/loop-repair.md section 4).
+the flow failed and melted a limb into the fill; `ghost` reads a band of part coverage on a frame
+alone, filmed or made; `crossfade` reads two drawings cross-faded inside a whole silhouette, a
+reading to look at, not a fault (docs/loop-repair.md section 4).
 
 The binary's own CPU path (`-g -1`) returns a wrong frame with rife-v4.6 on both macOS and
 Linux (measured 2026-10-03: mean error 39 against 3.3 through Vulkan), so it is never passed;
@@ -55,6 +57,17 @@ PARTIAL_ALPHA = (0.1, 0.9)
 # when a dark solid pixel lies within this many pixels of it. A drawn outline sits on the edge, under
 # an antialiased pixel or two, whatever the frame's size.
 OUTLINE_REACH = 2
+# `ghost`: part-covered pixels count where they make a region at least this many pixels thick. An
+# antialiased edge or a keyed strand of hair is a pixel or two wide and erodes away; the band a video
+# model leaves between two drawings, or a flow carries from it, does not.
+GHOST_THICK = 5
+# `crossfade`: an edge's local range is read over this many pixels, wider than RIFE's blur, so a
+# softened edge keeps its height and a cross-faded one does not; strong edges are counted in windows
+# this share of the body's height; a window that kept under CROSSFADE_KEEP of its source frames'
+# strong edges lost them.
+CROSSFADE_RANGE = 7
+CROSSFADE_WINDOW = 0.08
+CROSSFADE_KEEP = 0.6
 CALL_TIMEOUT_SECONDS = 120
 
 Interpolate = Callable[[Image.Image, Image.Image, float], Image.Image]
@@ -221,6 +234,76 @@ def smear(made: Image.Image, a: Image.Image, b: Image.Image) -> dict[str, float]
     solid = max(1, sm)
     return {"dark_excess": round((dm - max(da, db)) / solid, 5), "partial_excess": round((pm - max(pa, pb)) / solid, 5),
             "outline_loss": round((um - max(ua, ub)) / max(1, em), 5)}
+
+
+def ghost(frame: Image.Image) -> float:
+    """Part-covered pixels (PARTIAL_ALPHA) inside regions at least GHOST_THICK pixels thick, as a
+    fraction of the frame's solid pixels: a ghost band, read on the frame's own coverage and not
+    against its neighbours, so a band a filmed frame carries reads the same in a frame made beside
+    it (docs/loop-repair.md section 4)."""
+    alpha = np.asarray(frame.convert("RGBA").getchannel("A"), dtype=np.float32) / 255.0
+    lo, hi = PARTIAL_ALPHA
+    thick = _mask((alpha > lo) & (alpha < hi), GHOST_THICK, ImageFilter.MinFilter)
+    return round(float(thick.sum()) / max(1, int((alpha >= 0.5).sum())), 5)
+
+
+def _local_range(x: np.ndarray) -> np.ndarray:
+    """Per pixel, the largest over the channels of max - min within CROSSFADE_RANGE pixels."""
+    out = np.zeros(x.shape[:2], dtype=np.float32)
+    for c in range(x.shape[2]):
+        channel = Image.fromarray(np.uint8(np.clip(x[..., c], 0, 1) * 255 + 0.5), "L")
+        hi = np.asarray(channel.filter(ImageFilter.MaxFilter(CROSSFADE_RANGE)), dtype=np.float32)
+        lo = np.asarray(channel.filter(ImageFilter.MinFilter(CROSSFADE_RANGE)), dtype=np.float32)
+        out = np.maximum(out, (hi - lo) / 255.0)
+    return out
+
+
+def crossfade(made: Image.Image, a: Image.Image, b: Image.Image, t: float) -> float:
+    """A cross-fade of two drawings inside the silhouette, the coverage whole: the near and far boots
+    of `a` and `b` both shown at part strength where a flow found nothing to follow. Read where two
+    things meet in one window of the frame where `a` and `b` differ: pixels of the made frame's solid
+    body at the plain blend of `a` and `b` at its own fraction `t` and well away from each (in patches
+    GHOST_THICK pixels thick, past an edge's soft rim), and the made frame keeping under CROSSFADE_KEEP
+    of the source frames' strong edges there — a blend shows each edge at part height, a flow that
+    moved the part shows it whole, only softer. The strong-edge pixels lost in such windows, as a
+    fraction of the made frame's solid pixels; 0 where it shows no blend. Relative to the source
+    frames' own edges, so a palette's lightness does not decide it (docs/loop-repair.md section 4)."""
+    m, fa, fb = (np.asarray(f.convert("RGBA"), dtype=np.float32) / 255.0 for f in (made, a, b))
+    pm, pa, pb = (np.dstack([x[..., :3] * x[..., 3:], x[..., 3:]]) for x in (m, fa, fb))
+
+    def dist(x: np.ndarray, y: np.ndarray) -> np.ndarray:  # premultiplied RGBA, 0..1
+        return np.sqrt(((x - y) ** 2).sum(-1) / 4.0)
+
+    d = dist(pa, pb)
+    solid = m[..., 3] >= 0.5
+    blend = (solid & (d > 0.15) & (dist(pm, (1 - t) * pa + t * pb) < 0.35 * d)
+             & (dist(pm, pa) > 0.25 * d) & (dist(pm, pb) > 0.25 * d))
+    blend &= _mask(_mask(blend, GHOST_THICK, ImageFilter.MinFilter), GHOST_THICK, ImageFilter.MaxFilter)
+    if not blend.any():
+        return 0.0
+    rows = np.nonzero((np.maximum.reduce([fa[..., 3], fb[..., 3], m[..., 3]]) >= 0.5).any(axis=1))[0]
+    w = max(16, round(CROSSFADE_WINDOW * (rows[-1] - rows[0] + 1)))
+    changed = _mask(d > 0.08, CROSSFADE_RANGE, ImageFilter.MaxFilter)
+    ys, xs = np.nonzero(blend)
+    y0, y1, x0, x1 = max(0, ys.min() - w), ys.max() + w, max(0, xs.min() - w), xs.max() + w
+    rm, ra, rb = (np.zeros(d.shape, np.float32) for _ in range(3))
+    for into, x in ((rm, pm), (ra, pa), (rb, pb)):
+        into[y0:y1, x0:x1] = _local_range(x[y0:y1, x0:x1])
+    lost, step = 0.0, w // 2
+    for y in range((y0 // step) * step, y1, step):
+        for x in range((x0 // step) * step, x1, step):
+            win = (slice(y, y + w), slice(x, x + w))
+            near = changed[win]
+            if blend[win].sum() < 0.01 * w * w or near.sum() < 0.1 * w * w:
+                continue
+            strong = max(np.percentile(ra[win][near], 95), np.percentile(rb[win][near], 95))
+            if strong < 0.15:  # no edge to keep here
+                continue
+            ka, kb, km = (int((r[win][near] > 0.5 * strong).sum()) for r in (ra, rb, rm))
+            kept = (ka + kb) / 2
+            if kept >= 0.02 * w * w and km < CROSSFADE_KEEP * kept:
+                lost += kept - km
+    return round(lost / max(1, int(solid.sum())), 5)
 
 
 class Rife:

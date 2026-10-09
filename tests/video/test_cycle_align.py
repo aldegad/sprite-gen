@@ -49,8 +49,8 @@ def test_resample_keeps_every_frame_that_lands_on_a_source_frame():
     frames = [_walker(2 * math.pi * k / 6) for k in range(6)]
     rec = Recorder()
     out, facts = align.resample(frames, 12, rec, between="rife")
-    assert {k: v for k, v in facts.items() if k != "smear"} == {"from": 6, "to": 12, "between": "rife", "taken": 6, "made_by_rife": 6,
-                                                                "made_at": [1, 3, 5, 7, 9, 11]}
+    assert {k: v for k, v in facts.items() if k not in ("smear", "ghost_screen")} == {
+        "from": 6, "to": 12, "between": "rife", "taken": 6, "made_by_rife": 6, "made_at": [1, 3, 5, 7, 9, 11], "ghost_at": []}
     assert [m["at"] for m in facts["smear"]] == [1, 3, 5, 7, 9, 11]
     assert all(out[2 * k] is frames[k] for k in range(6)) and rec.calls == [0.5] * 6
     same, facts = align.resample(frames, 6, None)  # already that long: untouched, nothing made

@@ -179,12 +179,16 @@ Blocked targets are skipped while independent candidates remain. Scores are re-r
 after adoption; a rejected target is never retried in that run. The circular last/first
 adjacency rule and call budget still apply. The shared `interpolation_quality` policy
 is the same one used by cycle alignment: `dark_excess > 0.001` or
-`outline_loss > 0.05` rejects a proposal. An empty proposal is also rejected.
+`outline_loss > 0.05` rejects a proposal, and so does a proposal that is a ghost on its own
+coverage (`ghost` over 0.003, read where the loop's ghost screen reads it, section 4). An empty
+proposal is also rejected. A proposal that cross-fades two drawings inside its silhouette
+(`crossfade` over 0.015, section 4) is taken all the same and named: its round's `look` says so, and
+a `warning:` line names the frame.
 The original middle frame is retained, not a duplicate of either neighbour.
 
 The report's `jump_repair` carries `replaced` (cycle frame indices), `attempts`,
 `blocked` targets, and each round's step, target, score, whole/hair parts,
-`original` and `proposal` measurements, `faults`, and `outcome` (`accepted` or
+`original` and `proposal` measurements (with each one's `ghost`, and the proposal's `crossfade`), `faults`, `look`, and `outcome` (`accepted` or
 `rejected`). It also records `score_max_before` / `score_max_after`, why it stopped,
 and which interpolator made the proposals. Rejection is not overall quality failure
 or success: original drawing changes and normal gait motion can remain.
@@ -543,22 +547,25 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
 
 - **Length**: the median of the set's own lengths (`--length` overrides). The median is the
   length that needs the fewest made frames across the set; a loop already that long is not
-  touched.
+  resampled — every frame is its own, and only the ghost screen (below) may give one way.
 - **Resample, offset 0**: frame k of a loop of L frames resampled to L* is the source at time
   k·L/L*, cyclic. A time within 0.03 of a source frame takes that frame as filmed; only a time
   between two frames is made, by RIFE at that fraction (section 1). An offset of half a frame,
   which would remake every frame, is not offered (section 2).
 - **Between two source frames** (`--between`): `auto` (default) makes the frame with RIFE,
   measures it (below) and keeps it unless it has a fault, where the nearer source frame is taken
-  instead and named; `rife` keeps every made frame and names the faulty ones; `nearest` takes the
-  nearer source frame every time, so nothing is made and no RIFE is needed, and the motion keeps
+  instead and named — the other one beside it where the nearer is a filmed ghost (below); `rife`
+  keeps every made frame and names the faulty ones; `nearest` takes the nearer source frame every
+  time (the other where the nearer is a filmed ghost), so nothing is made and no RIFE is needed, and the motion keeps
   the filmed frames at up to half a frame off their time (a loop stretched longer shows a frame
   twice, which the GIF and WebP hold as one frame of twice the delay). `video-set` passes
   `--align-between`. `auto` runs RIFE for every frame between two source frames, as `rife` does,
   and needs it installed the same way.
 - **Smear and melt, per made frame**: `cycle_align.smear` lists every frame RIFE made, with its
-  `method` — `rife` (kept) or `nearest` (the nearer source frame taken instead) — its `faults`,
-  and what it has that neither source frame beside it has (`rife.smear`):
+  `method` — `rife` (kept) or `nearest` (a source frame beside it taken instead) — its `faults`,
+  its own ghost reading (`ghost`, below; `null` where the screen does not read the loop), its
+  cross-fade reading and what to `look` at (`crossfade`, below — named, never judged), and what
+  it has that neither source frame beside it has (`rife.smear`):
   - `dark_excess`: dark pixels (luma under 70/255) inside the body beyond the darker neighbour's
     count, as a fraction of its solid pixels — a black smear raises it, a dark part that only
     moved (a hat, a watch) does not. Over 0.1 % it is the fault `smear`.
@@ -569,11 +576,14 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
     Over 5 % it is the fault `outline`. A step the flow follows keeps its outline; a figure drawn
     without outlines loses none against neighbours that have none, and is not judged by it.
   - `partial_excess`: part-covered pixels beyond the more ragged neighbour's, as a fraction of
-    its solid pixels. Reported, not judged: a melted frame and a clean one read alike on it.
+    its solid pixels. Reported, not judged: a melted frame and a clean one read alike on it, and a
+    frame made beside a filmed ghost carries the ghost without adding to it — the ghost screen
+    reads part coverage on the frame alone.
 
   Every fault is a line in the report's `warnings` (and on stderr, and in `video-set`'s
   `warnings`), whichever `--between`: under `auto` it says the nearer source frame was taken
-  there; under `rife` that the frame is kept, to look at in `cycle/`. The report counts the
+  there (or the other, the nearer being a filmed ghost); under `rife` that the frame is kept, to
+  look at in `cycle/`. The report counts the
   frames kept from RIFE (`made_by_rife`) and those replaced (`replaced`); a loop row lists both
   (`made_at`, `nearest_at`).
 
@@ -585,6 +595,77 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   short step at every fraction and 32 % for the melted frame. The 5 % line is where a frame stops
   reading as a little soft at a foot and starts reading as melted; it is a reference, not a
   measured optimum, and frames near it are worth a look either way.
+- **The ghost screen, every frame delivered** (`interpolation_quality.ghost_screen`, `rife.ghost`):
+  a video model filming a walk held on twos or threes sometimes leaves a frame half way between two
+  drawings — a band of part coverage where a leg was and is going.
+  Taken at its own time it was delivered as filmed, never measured; a frame RIFE made beside it
+  carried the band, and measured against that neighbour it added nothing. So every frame the
+  alignment delivers is read on its own coverage, not against its neighbours:
+  - `ghost`: part-covered pixels (alpha 0.1–0.9) inside regions at least **5 px** thick
+    (`rife.GHOST_THICK`; an antialiased edge or a keyed strand of hair is a pixel or two wide and
+    erodes away), as a fraction of the frame's solid pixels. Over **0.3 %**
+    (`interpolation_quality.GHOST_WARN`) the frame is a ghost: on a made frame the fault `ghost`.
+  - The screen reads the loop as filmed (`cycle.source/`): `ghost_screen` per loop row and in
+    `cycle_align` — `limit`, `thick_px`, the loop's own `level` (its median frame's reading), `reads`,
+    and `ghosts` (each `frame` of `cycle.source/` over the limit, with its reading). A loop whose
+    level is itself over the limit is drawn part-covered — a glow, a translucent cape — and is not
+    judged (`reads: false`, with `why`): every made frame's `ghost` is `null`, nothing gives way, and
+    a line in `warnings` (on stderr, and in `video-loop`'s own output for the cut) says the screen
+    does not read it, so whoever delivers it looks at `cycle/` instead.
+  - A time on a filmed ghost takes the source frame after it, or the one before it where that one
+    is a ghost too, under `auto` and `nearest`; a made frame that is a ghost gives way like any
+    faulty one, to the nearer source frame, or to the other beside its time where the nearer is a
+    filmed ghost. `rife` keeps both, named. Where both frames beside it are ghosts the ghost is
+    kept, named, and the line says to film the direction again. A loop already the set's length
+    is screened the same way.
+  - Each cell where a filmed ghost would have been delivered is listed in `ghost_at` (`at`, the
+    ghost `source` as a frame of `cycle.source/`, its `ghost` reading, and the frame `taken` — the
+    ghost itself where it was kept), with a line in `warnings` ("source frame 5 is a filmed ghost
+    (…), so source frame 6 beside it was taken there"). `cells_from` says the same per cell.
+  - Where 0.3 % sits: set by eye on drawn walks, between the half-drawn frames (and the frames
+    made beside them) that a person sees as ghosts, which read well above it, and the frames seen
+    as clean, which read well under it; a sliver of the same kind, too small to see at a strip's
+    size, reads under it too. On the synthetic legs of `tests/video/test_ghost_screen.py` a keyed
+    edge softened over two or three pixels reads 0.04 % and a band of 0.3 coverage between the
+    feet 2 %. It is a reference, not a measured optimum, and a frame near it is worth a look either way.
+  - What it does not see: a frame RIFE made that blends two drawings inside one silhouette — the
+    near and far boots cross-faded while the outline stays whole — has no part coverage to read
+    and is not a ghost here; the cross-fade reading below names it.
+  - `video-loop` records the same screen of the cut it delivers, for a walk or run
+    (`ghost_screen` in its report, and a `warning:` line per ghost naming `cycle/frame-NNN.png`):
+    a loop delivered as cut — one direction, never aligned — shows its ghost, and the alignment
+    screens `cycle.source/` again and takes a clean frame beside it. The jump repair (section 2)
+    rejects a proposal that is a ghost. `video-loop-compare` and `video-loop-repair` keep their own
+    versioned measures (`rife.smear`, [loop comparison](loop-comparison.md)) and do not read it.
+- **A cross-fade inside the silhouette — named, not judged** (`rife.crossfade`,
+  `interpolation_quality.looks`): where two drawings differ more than the flow can follow — the legs
+  trading places across a gap two or three frames wide — RIFE can move the coverage and cross-fade
+  the colour: both drawings' boots at part strength inside one whole outline. No band of part
+  coverage, nothing darker inside the body, and an outline the outline rule reads only where the art
+  outlines in near-black (it counts pixels under 70/255 as outline): drawn in grey or brown, the same
+  frame passes every fault.
+  - `crossfade`: in windows 8 % of the body's height over the frame where the two source frames
+    differ, two things in one window — pixels of the made frame's solid body at the plain blend of
+    the two at its own fraction and well away from each (in patches 5 px thick, past an edge's soft
+    rim), and the made frame keeping under 60 % of the source frames' strong edges there (local range
+    over 7 px, wider than RIFE's blur, above half the sources' 95th percentile there): a blend shows
+    each edge at part height, a flow that moved the part shows it whole, only softer. The strong-edge
+    pixels lost in such windows, over the frame's solid pixels; 0 where it shows no blend. Relative
+    to the source frames' own edges, so the palette's lightness does not decide it.
+  - Over **0.015** (`interpolation_quality.CROSSFADE_LOOK`) the frame is named to look at: its
+    `smear` row's `look` is `["crossfade"]`, and a kept frame (`method: rife`) gets a line in
+    `warnings` ("frame 14 (made by RIFE) may cross-fade two drawings inside its outline …; kept").
+    It is no fault: `auto` keeps it, it gives nothing way, and the retake rule does not count it.
+  - Why a reading and not a fault: checked against frames labelled by eye, it does not part them.
+    On drawn walks the frame seen cross-faded read well over the line and the frames seen clean
+    under it; on synthetic legs (the walker of `tests/video/test_crossfade.py`, its palette varied
+    32 ways — the outline black, brown, grey or none, the boots dark, mid, light or none, two leg
+    fills — four steps, three fractions, 1,536 frames) the colour-blended, coverage-whole frame reads over it in
+    209 of 384 — 74 of 96 outlined in grey, where the fault rules catch 2, but 11 of 96 drawn
+    without outlines — and the clean drawing between, drawn, reads over it in 29 of 384, every one
+    a step of 13 degrees or more between far-apart drawings, most outlined in grey. A fault would
+    give way for clean frames and still pass blends; a line to look at costs neither. 0.015 is set
+    by eye between the cross-faded frames and the clean ones, a reference, not a measured optimum.
 - **What `auto` costs**: a frame replaced shows the nearer source frame, so the motion there
   steps as filmed, up to half a frame off its time, and the loop shows fewer distinct drawings a
   second than `rife` — but no melted one. A clip drawn on twos has a long step between drawings
@@ -617,8 +698,9 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   - **The rule**: a loop is named when its cut is held (`hold` 2 or 3), the set's length leaves
     it under **13 drawings a second** (`align.RETAKE_DRAWINGS_MIN`), and **one or more** frames
     between its drawings were not made (`align.RETAKE_UNMADE_MIN`) — taken from the nearer source
-    frame (`auto`'s replacements, every made time under `nearest`) or made with a fault and kept
-    (`rife`). Each loop row carries `drawings` and `retake` (the record, or `null`): `reason`,
+    frame (`auto`'s replacements, a made ghost's among them, every made time under `nearest`) or
+    made with a fault and kept (`rife`); a filmed ghost given way at a whole time is no frame
+    between drawings left unmade, and is named in `ghost_at` instead. Each loop row carries `drawings` and `retake` (the record, or `null`): `reason`,
     `hold`, `source`, `drawings` (in the cycle), `drawings_per_second_filmed`,
     `drawings_per_second` (at the set's length), `frames_per_drawing` (the gap, in frames of the
     aligned loop), `unmade`, and the `limits`. The report's `retake` lists every such loop (`dir`,
@@ -718,7 +800,7 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   rewritten at the loop's own cell rules (`cell_height_cap`, body-height target, anchor), at the
   loop's frame rate, so the aligned cycle lasts L*/fps seconds. `strip.json` gains
   `cycle_align` (`from`, `to`, `between`, `taken`, `made_by_rife`, `made_at`, `smear` and/or
-  `nearest_at`, `drawings`, `retake`, `turned_by`, `turned_on`, `view`, `start_foot`, `start_foot_source`, `strikes`, the seam ratio of the rebuilt
+  `nearest_at`, `ghost_screen`, `ghost_at`, `drawings`, `retake`, `turned_by`, `turned_on`, `view`, `start_foot`, `start_foot_source`, `strikes`, the seam ratio of the rebuilt
   cells, `cells_from`, `origin`, and the re-verified GIF/WebP).
 - **Where every cell is from**: `cycle_align.cells_from` holds, per cell of the rebuilt strip,
   `{"source": i}` — frame i of `cycle.source/`, taken as filmed (a turn, a snap, or the nearer
