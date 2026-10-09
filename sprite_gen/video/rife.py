@@ -267,8 +267,9 @@ def crossfade(made: Image.Image, a: Image.Image, b: Image.Image, t: float) -> fl
     of the source frames' strong edges there — a blend shows each edge at part height, a flow that
     moved the part shows it whole, only softer. The strong-edge pixels lost in such windows, as a
     fraction of the made frame's solid pixels — the windows step by half their size, so one lost pixel
-    is counted in up to four of them; 0 where it shows no blend. Relative to the source frames' own
-    edges, so a palette's lightness does not decide it (docs/loop-repair.md section 4)."""
+    is counted in up to four of them (nine where the window is an odd number of pixels wide); 0 where
+    it shows no blend. Relative to the source frames' own edges, so a palette's lightness does not
+    decide it (docs/loop-repair.md section 4)."""
     m, fa, fb = (np.asarray(f.convert("RGBA"), dtype=np.float32) / 255.0 for f in (made, a, b))
     pm, pa, pb = (np.dstack([x[..., :3] * x[..., 3:], x[..., 3:]]) for x in (m, fa, fb))
 
