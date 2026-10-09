@@ -642,16 +642,17 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   trading places across a gap two or three frames wide — RIFE can move the coverage and cross-fade
   the colour: both drawings' boots at part strength inside one whole outline. No band of part
   coverage, nothing darker inside the body, and an outline the outline rule reads only where the art
-  outlines in near-black (it counts pixels under 70/255 as outline): drawn in grey or brown, the same
-  frame passes every fault.
+  outlines in near-black (it counts pixels under 70/255 as outline): outlined lighter than 70/255
+  (grey, a light brown), the same frame passes every fault.
   - `crossfade`: in windows 8 % of the body's height over the frame where the two source frames
     differ, two things in one window — pixels of the made frame's solid body at the plain blend of
     the two at its own fraction and well away from each (in patches 5 px thick, past an edge's soft
     rim), and the made frame keeping under 60 % of the source frames' strong edges there (local range
     over 7 px, wider than RIFE's blur, above half the sources' 95th percentile there): a blend shows
     each edge at part height, a flow that moved the part shows it whole, only softer. The strong-edge
-    pixels lost in such windows, over the frame's solid pixels; 0 where it shows no blend. Relative
-    to the source frames' own edges, so the palette's lightness does not decide it.
+    pixels lost in such windows, over the frame's solid pixels — the windows step by half their size,
+    so one lost pixel is counted in up to four of them; 0 where it shows no blend. Relative to the
+    source frames' own edges, so the palette's lightness does not decide it.
   - Over **0.015** (`interpolation_quality.CROSSFADE_LOOK`) the frame is named to look at: its
     `smear` row's `look` is `["crossfade"]`, and a kept frame (`method: rife`) gets a line in
     `warnings` ("frame 14 (made by RIFE) may cross-fade two drawings inside its outline …; kept").
