@@ -23,7 +23,7 @@ from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import repair
 from sprite_gen.video.interpolation_quality import GHOST_WARN, faults, ghost_screen
 from tests.video.test_cycle_align import _walker as _block_walker
-from tests.video.test_rife import _real_rife_available, _walker
+from tests.video.test_rife import _walker
 
 
 def _band(im: Image.Image, *, alpha: float = 0.3, box=(0.36, 0.78, 0.64, 0.99)) -> Image.Image:
@@ -197,7 +197,7 @@ def test_jump_repair_rejects_a_proposal_that_carries_a_ghost(monkeypatch):
     assert [f.tobytes() for f in out] == before
 
 
-@pytest.mark.skipif(not _real_rife_available(), reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH / sprite-gen rife install)")
+@pytest.mark.real_rife
 def test_real_rife_delivers_no_cell_carrying_a_filmed_ghost():
     """A filmed ghost resampled 4 to 8 through the real RIFE: before the screen the ghost itself was
     taken at its own time, unmeasured, and the frames made beside it carried it, judged only beyond it."""

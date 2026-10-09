@@ -651,8 +651,9 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
     over 7 px, wider than RIFE's blur, above half the sources' 95th percentile there): a blend shows
     each edge at part height, a flow that moved the part shows it whole, only softer. The strong-edge
     pixels lost in such windows, over the frame's solid pixels — the windows step by half their size,
-    so one lost pixel is counted in up to four of them; 0 where it shows no blend. Relative to the
-    source frames' own edges, so the palette's lightness does not decide it.
+    so one lost pixel is counted in up to four of them (nine where the window is an odd number of
+    pixels wide); 0 where it shows no blend. Relative to the source frames' own edges, so the
+    palette's lightness does not decide it.
   - Over **0.015** (`interpolation_quality.CROSSFADE_LOOK`) the frame is named to look at: its
     `smear` row's `look` is `["crossfade"]`, and a kept frame (`method: rife`) gets a line in
     `warnings` ("frame 14 (made by RIFE) may cross-fade two drawings inside its outline …; kept").

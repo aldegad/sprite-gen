@@ -25,7 +25,6 @@ from PIL import Image, ImageDraw
 from sprite_gen.video import align, repair, rife
 from sprite_gen.video.interpolation_quality import CROSSFADE_LOOK, faults, looks
 from tests.video.test_ghost_screen import _band, _block_walker, _cut
-from tests.video.test_rife import _real_rife_available
 
 GREY, BLACK = (125, 118, 112), (20, 20, 20)
 LIGHT_BOOTS = (225, 210, 180)
@@ -180,7 +179,7 @@ def test_jump_repair_takes_a_crossfaded_proposal_and_names_it(monkeypatch):
     assert first["proposal"]["crossfade"] > CROSSFADE_LOOK and out[1] is made
 
 
-@pytest.mark.skipif(not _real_rife_available(), reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH / sprite-gen rife install)")
+@pytest.mark.real_rife
 def test_real_rife_through_a_short_step_reads_no_crossfade():
     """A short step the flow follows: RIFE's frames are softer than their sources, never a cross-fade."""
     interpolate = rife.Rife()

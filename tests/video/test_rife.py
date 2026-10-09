@@ -2,8 +2,8 @@
 """RIFE runner: it is found or refused by name, and a real binary (when one is installed)
 interpolates an RGBA frame that sits between its two neighbours, alpha included.
 
-The real-binary test runs only where `rife-ncnn-vulkan` is reachable (SPRITE_GEN_RIFE, PATH or the install root);
-the locating rules need no binary at all."""
+The real-binary tests are marked `real_rife` and run only where `rife-ncnn-vulkan` is reachable (SPRITE_GEN_RIFE,
+PATH or the install root; tests/conftest.py); the locating rules need no binary at all."""
 
 from __future__ import annotations
 
@@ -98,15 +98,7 @@ def _disc(cx: int) -> Image.Image:
     return Image.fromarray(im, "RGBA")
 
 
-def _real_rife_available() -> bool:
-    try:
-        rife.locate()
-    except rife.RifeUnavailable:
-        return False
-    return True
-
-
-@pytest.mark.skipif(not _real_rife_available(), reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH / sprite-gen rife install)")
+@pytest.mark.real_rife
 def test_real_rife_makes_the_frame_between_in_colour_and_alpha():
     interpolate = rife.Rife()
     mid = interpolate(_disc(40), _disc(72), 0.5)
@@ -119,7 +111,7 @@ def test_real_rife_makes_the_frame_between_in_colour_and_alpha():
     assert interpolate.made == 1
 
 
-@pytest.mark.skipif(not _real_rife_available(), reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH / sprite-gen rife install)")
+@pytest.mark.real_rife
 def test_real_rife_between_crossing_legs_adds_no_black():
     """Two outlined legs walk through each other (the near one forward, the far one back): the frame
     between must not be darker inside the body than either neighbour. 2.24 premultiplied the colour
@@ -210,7 +202,7 @@ def test_outline_loss_reads_a_melted_limb_and_not_a_moved_one():
     assert rife.smear(flat[2], flat[0], flat[1])["outline_loss"] <= 0.01
 
 
-@pytest.mark.skipif(not _real_rife_available(), reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH / sprite-gen rife install)")
+@pytest.mark.real_rife
 def test_real_rife_melts_legs_crossing_too_far_and_alignment_takes_the_nearer_frame_there():
     """Outlined legs that cross a long way between two drawings (a clip drawn on twos) come out of
     RIFE as one shape with no outline where they meet the air (measured 32 % of the edge at t=0.5);
@@ -237,7 +229,7 @@ def test_real_rife_melts_legs_crossing_too_far_and_alignment_takes_the_nearer_fr
     assert facts["made_at"] == [1, 3] and facts["nearest_at"] == [] and all(not m["faults"] for m in facts["smear"])
 
 
-@pytest.mark.skipif(not _real_rife_available(), reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH / sprite-gen rife install)")
+@pytest.mark.real_rife
 def test_real_rife_repair_rejects_outline_loss_and_keeps_the_original_middle(monkeypatch):
     from sprite_gen.video import repair
 
