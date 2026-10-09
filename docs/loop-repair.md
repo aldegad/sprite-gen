@@ -181,12 +181,14 @@ adjacency rule and call budget still apply. The shared `interpolation_quality` p
 is the same one used by cycle alignment: `dark_excess > 0.001` or
 `outline_loss > 0.05` rejects a proposal, and so does a proposal that is a ghost on its own
 coverage (`ghost` over 0.003, read where the loop's ghost screen reads it, section 4). An empty
-proposal is also rejected.
+proposal is also rejected. A proposal that cross-fades two drawings inside its silhouette
+(`crossfade` over 0.015, section 4) is taken all the same and named: its round's `look` says so, and
+a `warning:` line names the frame.
 The original middle frame is retained, not a duplicate of either neighbour.
 
 The report's `jump_repair` carries `replaced` (cycle frame indices), `attempts`,
 `blocked` targets, and each round's step, target, score, whole/hair parts,
-`original` and `proposal` measurements (with each one's `ghost`), `faults`, and `outcome` (`accepted` or
+`original` and `proposal` measurements (with each one's `ghost`, and the proposal's `crossfade`), `faults`, `look`, and `outcome` (`accepted` or
 `rejected`). It also records `score_max_before` / `score_max_after`, why it stopped,
 and which interpolator made the proposals. Rejection is not overall quality failure
 or success: original drawing changes and normal gait motion can remain.
@@ -561,7 +563,8 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   and needs it installed the same way.
 - **Smear and melt, per made frame**: `cycle_align.smear` lists every frame RIFE made, with its
   `method` — `rife` (kept) or `nearest` (a source frame beside it taken instead) — its `faults`,
-  its own ghost reading (`ghost`, below; `null` where the screen does not read the loop), and what
+  its own ghost reading (`ghost`, below; `null` where the screen does not read the loop), its
+  cross-fade reading and what to `look` at (`crossfade`, below — named, never judged), and what
   it has that neither source frame beside it has (`rife.smear`):
   - `dark_excess`: dark pixels (luma under 70/255) inside the body beyond the darker neighbour's
     count, as a fraction of its solid pixels — a black smear raises it, a dark part that only
@@ -606,7 +609,9 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
     `cycle_align` — `limit`, `thick_px`, the loop's own `level` (its median frame's reading), `reads`,
     and `ghosts` (each `frame` of `cycle.source/` over the limit, with its reading). A loop whose
     level is itself over the limit is drawn part-covered — a glow, a translucent cape — and is not
-    judged (`reads: false`, with `why`): every made frame's `ghost` is `null`, nothing gives way.
+    judged (`reads: false`, with `why`): every made frame's `ghost` is `null`, nothing gives way, and
+    a line in `warnings` (on stderr, and in `video-loop`'s own output for the cut) says the screen
+    does not read it, so whoever delivers it looks at `cycle/` instead.
   - A time on a filmed ghost takes the source frame after it, or the one before it where that one
     is a ghost too, under `auto` and `nearest`; a made frame that is a ghost gives way like any
     faulty one, to the nearer source frame, or to the other beside its time where the nearer is a
@@ -625,13 +630,42 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
     feet 2 %. It is a reference, not a measured optimum, and a frame near it is worth a look either way.
   - What it does not see: a frame RIFE made that blends two drawings inside one silhouette — the
     near and far boots cross-faded while the outline stays whole — has no part coverage to read
-    and is not a ghost here.
+    and is not a ghost here; the cross-fade reading below names it.
   - `video-loop` records the same screen of the cut it delivers, for a walk or run
     (`ghost_screen` in its report, and a `warning:` line per ghost naming `cycle/frame-NNN.png`):
     a loop delivered as cut — one direction, never aligned — shows its ghost, and the alignment
     screens `cycle.source/` again and takes a clean frame beside it. The jump repair (section 2)
     rejects a proposal that is a ghost. `video-loop-compare` and `video-loop-repair` keep their own
     versioned measures (`rife.smear`, [loop comparison](loop-comparison.md)) and do not read it.
+- **A cross-fade inside the silhouette — named, not judged** (`rife.crossfade`,
+  `interpolation_quality.looks`): where two drawings differ more than the flow can follow — the legs
+  trading places across a gap two or three frames wide — RIFE can move the coverage and cross-fade
+  the colour: both drawings' boots at part strength inside one whole outline. No band of part
+  coverage, nothing darker inside the body, and an outline the outline rule reads only where the art
+  outlines in near-black (it counts pixels under 70/255 as outline): drawn in grey or brown, the same
+  frame passes every fault.
+  - `crossfade`: in windows 8 % of the body's height over the frame where the two source frames
+    differ, two things in one window — pixels of the made frame's solid body at the plain blend of
+    the two at its own fraction and well away from each (in patches 5 px thick, past an edge's soft
+    rim), and the made frame keeping under 60 % of the source frames' strong edges there (local range
+    over 7 px, wider than RIFE's blur, above half the sources' 95th percentile there): a blend shows
+    each edge at part height, a flow that moved the part shows it whole, only softer. The strong-edge
+    pixels lost in such windows, over the frame's solid pixels; 0 where it shows no blend. Relative
+    to the source frames' own edges, so the palette's lightness does not decide it.
+  - Over **0.015** (`interpolation_quality.CROSSFADE_LOOK`) the frame is named to look at: its
+    `smear` row's `look` is `["crossfade"]`, and a kept frame (`method: rife`) gets a line in
+    `warnings` ("frame 14 (made by RIFE) may cross-fade two drawings inside its outline …; kept").
+    It is no fault: `auto` keeps it, it gives nothing way, and the retake rule does not count it.
+  - Why a reading and not a fault: checked against frames labelled by eye, it does not part them.
+    On drawn walks the frame seen cross-faded read well over the line and the frames seen clean
+    under it; on synthetic legs (the walker of `tests/video/test_crossfade.py`, its palette varied
+    32 ways — the outline black, brown, grey or none, the boots dark, mid, light or none, two leg
+    fills — four steps, three fractions, 1,536 frames) the colour-blended, coverage-whole frame reads over it in
+    209 of 384 — 74 of 96 outlined in grey, where the fault rules catch 2, but 11 of 96 drawn
+    without outlines — and the clean drawing between, drawn, reads over it in 29 of 384, every one
+    a step of 13 degrees or more between far-apart drawings, most outlined in grey. A fault would
+    give way for clean frames and still pass blends; a line to look at costs neither. 0.015 is set
+    by eye between the cross-faded frames and the clean ones, a reference, not a measured optimum.
 - **What `auto` costs**: a frame replaced shows the nearer source frame, so the motion there
   steps as filmed, up to half a frame off its time, and the loop shows fewer distinct drawings a
   second than `rife` — but no melted one. A clip drawn on twos has a long step between drawings
