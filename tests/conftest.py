@@ -41,6 +41,22 @@ def run_script(name: str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """A test marked `real_rife` runs the real binary: skipped where `rife.locate()` finds none. The
+    mark is the only RIFE guard, so the tests it skips are the tests `scripts/linux_lane.sh
+    --rife-only` runs (`-m real_rife`); tests/release/test_lane_rife_collection.py holds the suite to it."""
+    marked = [item for item in items if item.get_closest_marker("real_rife")]
+    if not marked:
+        return
+    from sprite_gen.video import rife
+
+    try:
+        rife.locate()
+    except rife.RifeUnavailable:
+        for item in marked:
+            item.add_marker(pytest.mark.skip(reason="rife-ncnn-vulkan not installed (SPRITE_GEN_RIFE / PATH / sprite-gen rife install)"))
+
+
 @pytest.fixture
 def fixture_run_dir(tmp_path: Path) -> Path:
     """A throwaway copy of the golden fixture run dir."""

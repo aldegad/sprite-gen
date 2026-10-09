@@ -17,6 +17,16 @@ GitHub-hosted CI(GitHub Actions)는 쓰지 않는다. 테스트 게이트와 whe
 lavapipe 에서는 첫 업로드에서 죽는다 — 그래서 그런 호스트에서는 RIFE 를 떼어 내되 조용히 건너뛰지는
 않는다.
 
+실제 rife-ncnn-vulkan 을 돌리는 시험은 `real_rife` 표시 하나로 가려진다(`pyproject.toml` 이 등록하고
+`tests/conftest.py` 가 RIFE 를 못 찾으면 그 표시가 붙은 시험을 건너뛴다). `--rife-unmeasured` 는
+RIFE 가 닿는 곳이 하나도 없는 상태로 스위트 전체를 돌려 그 시험들이 이 이유로 건너뛰어지고,
+`--rife-only` 는 `sprite-gen rife install`(그 확인 프레임)과 스위트 전체에서 `real_rife` 가 붙은
+시험(`pytest -m real_rife`)을 돌린다 — 하나라도 건너뛰거나, 표시된 시험이 없으면 실패다. 그래서 새
+실제-RIFE 시험은 표시만 붙이면 `--rife-only` 가 저절로 걷는다. 표시 없이 RIFE 유무에 따라 건너뛰거나
+모이는 시험이 생기면 두 실행 어느 쪽도 재지 않게 되므로, `tests/release/test_lane_rife_collection.py` 가
+스위트를 RIFE 가 있는 척하는 대역을 둔 채 한 번, 없는 채 한 번 모아 두 결과가 갈리는 시험마다 표시를
+요구하고, 없으면 그 시험의 이름을 대고 실패한다.
+
 통과는 커밋 하나의 것이다. 어떤 커밋에서 잰 레인 — 한 번의 exit 0 이든, `--rife-only` 의 exit 0 이든 —
 은 다른 커밋의 통과가 아니다. 이전 릴리즈나 부모 커밋의 통과를 다음 커밋으로 옮겨 적지 않고, 머지할
 커밋과 태그 커밋을 각각 그 SHA 의 깨끗한 클론에서 잰다. `--rife-unmeasured` 로 잰 커밋은 같은 SHA 의
