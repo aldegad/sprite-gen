@@ -26,6 +26,14 @@ Optional `fit` object (opt-in; absent means legacy behavior). For pixel-art targ
 
 `prepare_sprite_run.py` exposes these as `--fit-resample`, `--fit-align-x`, `--fit-align-y`, and `--fit-ground-frames` / `--no-fit-ground-frames`, plus the `pixel_unfake` family below as `--fit-pixel-unfake`, `--fit-logical-height`, `--fit-palette-size`, `--fit-detail-bias`, `--fit-outline {on,off,STRENGTH}`, `--fit-pitch-hint`. CLI flags override the same keys in `--request` JSON; either way the merged result is recorded in the run's `sprite-request.json` `fit` object (SSoT).
 
+With `fit.pixel_unfake: false`, extracted poses in each state row share one shrink
+ratio, chosen to fit the widest and tallest poses inside the cell's safe area.
+A raised or extended weapon therefore does not shrink only that pose's body.
+This preserves scale already present in the generated row; it does not repair
+size drift drawn by the image model. Alignment still follows `align_x`/`align_y`,
+and separate state rows can have different shrink ratios. The pixel-unfake path
+and standalone `fit_to_cell` calls keep their existing behavior.
+
 ## `pixel_unfake` mode
 
 For true pixel-unfake output (game-ready chunky pixel art with intact 1px outlines), use the `pixel_unfake` mode instead of `resample` — it removes ALL non-integer resampling:

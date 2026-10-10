@@ -1267,6 +1267,8 @@ def fit_to_cell(
     safe_margin_x: int,
     safe_margin_y: int,
     fit: dict[str, Any] | None = None,
+    *,
+    scale: float | None = None,
 ) -> Image.Image:
     # `fit` comes from sprite-request.json ("fit" object):
     #   resample: "lanczos" (default) | "nearest" | "kcentroid" — kcentroid is the
@@ -1293,7 +1295,8 @@ def fit_to_cell(
     sprite = image.crop(bbox)
     max_width = max(1, cell_width - safe_margin_x * 2)
     max_height = max(1, cell_height - safe_margin_y * 2)
-    scale = min(max_width / sprite.width, max_height / sprite.height, 1.0)
+    if scale is None:
+        scale = min(max_width / sprite.width, max_height / sprite.height, 1.0)
     if scale != 1.0:
         new_size = (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale)))
         if resample_name == "kcentroid":
@@ -2566,21 +2569,37 @@ def extract_component_images(strip: Image.Image, frame_count: int) -> list[Image
     return [component_group_image(strip, group) for group in groups]
 
 
+def fit_row_to_cells(images: list[Image.Image], cell_width: int, cell_height: int,
+                     safe_margin_x: int, safe_margin_y: int,
+                     fit: dict[str, Any] | None = None) -> list[Image.Image]:
+    # The prop's reach changes a pose's bounds, not the character's physical size.
+    # One scale for the complete row fits even its widest/tallest pose.
+    bounds = [bbox for image in images if (bbox := image.getbbox()) is not None]
+    scale = 1.0
+    if bounds:
+        max_width = max(bbox[2] - bbox[0] for bbox in bounds)
+        max_height = max(bbox[3] - bbox[1] for bbox in bounds)
+        scale = min(max(1, cell_width - 2 * safe_margin_x) / max_width,
+                    max(1, cell_height - 2 * safe_margin_y) / max_height, 1.0)
+    return [fit_to_cell(image, cell_width, cell_height, safe_margin_x, safe_margin_y,
+                        fit, scale=scale) for image in images]
+
+
 def extract_component_frames(strip: Image.Image, frame_count: int, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, fit: dict[str, Any] | None = None) -> list[Image.Image] | None:
     images = extract_component_images(strip, frame_count)
     if images is None:
         return None
-    return [fit_to_cell(image, cell_width, cell_height, safe_margin_x, safe_margin_y, fit) for image in images]
+    return fit_row_to_cells(images, cell_width, cell_height, safe_margin_x, safe_margin_y, fit)
 
 
 def extract_slot_frames(strip: Image.Image, frame_count: int, cell_width: int, cell_height: int, safe_margin_x: int, safe_margin_y: int, fit: dict[str, Any] | None = None) -> list[Image.Image]:
     slot_width = strip.width / frame_count
-    frames = []
+    images = []
     for index in range(frame_count):
         left = round(index * slot_width)
         right = round((index + 1) * slot_width)
-        frames.append(fit_to_cell(strip.crop((left, 0, right, strip.height)), cell_width, cell_height, safe_margin_x, safe_margin_y, fit))
-    return frames
+        images.append(strip.crop((left, 0, right, strip.height)))
+    return fit_row_to_cells(images, cell_width, cell_height, safe_margin_x, safe_margin_y, fit)
 
 
 def chroma_adjacent_count(image: Image.Image, chroma_key: tuple[int, int, int], threshold: float) -> int:
