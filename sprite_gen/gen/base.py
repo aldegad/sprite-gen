@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Modified: optional configuration preflight for provider-specific vision deployments.
 """Shared contract for sprite-gen image generation providers.
 
 One generation call = prompt (+ optional reference images) -> one verified raw
@@ -191,6 +192,13 @@ def announce_api_billing(provider: str, env_name: str, detail: str = "") -> None
     on the invoice (수홍 2026-09-20, 구독 우선 불변식 5).
     """
     print(f"[gen] {provider}: running on {env_name} — {API_CHARGE_WORDS}{detail}", file=sys.stderr, flush=True)
+
+
+def validate_inspection(backend: Provider) -> None:
+    """Preflight optional inspection configuration before a workflow buys images."""
+    validate = getattr(backend, "validate_inspection", None)
+    if validate is not None:
+        validate()
 
 
 def run_logged(cmd: list[str], log: Path) -> int:

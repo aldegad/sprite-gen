@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Modified: label the explicit-only Azure provider without adding a guided billing route.
 """The two user journeys and their selectable fields, declared once."""
 from sprite_gen.gen import CODEX_UNAVAILABLE_CHOICES, CODEX_UNAVAILABLE_SETTING, PROVIDERS
 
@@ -12,6 +13,7 @@ MOTION_METHODS = {
 # a row to drop quietly: the mapping is checked rather than zipped positionally,
 # so registering a backend in `gen.PROVIDERS` without naming it fails at import.
 PROVIDER_LABELS = {
+    "azure": "Azure OpenAI / Foundry (per-call API billing)",
     "codex": "지피티",
     "grok": "그록",
     "openai": "지피티 API (서버·SaaS 용, 호출당 과금)",

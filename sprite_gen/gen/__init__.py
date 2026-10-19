@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Modified: explicitly selected Azure provider and preflight for its vision configuration.
 """Unified image generation layer for sprite-gen.
 
 Single source of truth for provider-backed image generation: codex (`image_gen`,
@@ -8,6 +9,10 @@ Grok login; XAI_API_KEY only without one, billed per call and said) and openai
 One call = prompt (+ optional refs) -> one verified raw PNG, with an optional
 deterministic transparent chroma post-process. The general `image-gen` skill is a
 thin shuttle over `sprite-gen gen`.
+
+Azure OpenAI / Foundry is an explicit-only, per-call route configured through
+AZURE_OPENAI_ENDPOINT and a deployment name, using Azure CLI / Entra or an
+explicit API key. Its authentication never falls back (docs/azure.md).
 
 codex and openai reach the same family of GPT image models by different routes:
 codex needs an interactive ChatGPT login and the `codex` CLI on PATH, openai needs
@@ -27,7 +32,7 @@ out of a chroma background (`chroma`). `--transparent` follows the provider's
 strategy unless `--alpha-mode` overrides it.
 
 CLI:
-    sprite-gen gen --provider codex|grok|openai --prompt "..." --out DEST.png
+    sprite-gen gen --provider codex|grok|openai|azure --prompt "..." --out DEST.png
         [--ref REF.png ...] [--transparent [--alpha-mode auto|native|chroma]
         [--chroma-key magenta|green]] [--white-check CHECK.png] [--model ID]
         [--aspect-ratio 1:1] [--quality low|medium|high|xhigh|max|auto]
@@ -71,12 +76,14 @@ from .base import (
     codex_unavailable_question,
     print_json,
     verify_png,
+    validate_inspection,
 )
 from .codex_provider import CodexProvider
 from .grok_provider import GrokProvider
 from .openai_provider import OpenAIProvider
+from .azure_provider import AzureProvider
 
-PROVIDERS = ("codex", "grok", "openai")
+PROVIDERS = ("codex", "grok", "openai", "azure")
 # `--alpha-mode`: `auto` reads the provider's declared strategy (the SSoT);
 # `native` / `chroma` force one. Forcing `native` on a chroma-only provider fails
 # loud — a strategy the backend cannot execute is not a fallback candidate.
@@ -92,7 +99,7 @@ HARD_DEFAULT_PROVIDER = "codex"
 # A per-call API-billed backend is never a default: only a choice the user made
 # reaches it, so nothing routes a subscription user onto metered credit unasked
 # (구독 우선 불변식 1-2).
-EXPLICIT_ONLY_PROVIDERS = ("openai",)
+EXPLICIT_ONLY_PROVIDERS = ("openai", "azure")
 # What a default codex that cannot run here turns into (수홍 2026-10-16, docs/gen.md "When codex cannot run"):
 # codex is not signed in (`codex_provider.codex_login`), or `codex exec` said its usage is used up
 # (`codex_provider.CodexUsageLimit`). `ask` (the default) ends the call with one question and nothing generated
@@ -231,6 +238,8 @@ def _make_provider(name: str, *, keep_session: bool):
         return GrokProvider()
     if name == "openai":
         return OpenAIProvider()
+    if name == "azure":
+        return AzureProvider()
     raise SystemExit(f"gen: unknown provider {name!r}; expected one of {', '.join(PROVIDERS)}")
 
 
@@ -474,6 +483,8 @@ def generate_image(
             raise SystemExit(f"gen: reference image not found: {ref}")
 
     backend = _make_provider(provider, keep_session=keep_session)
+    if refs and facing is not None:
+        validate_inspection(backend)
     # Decided before the model runs: the strategy shapes the transport prompt
     # (native asks for alpha) and the post-process (chroma keys it out).
     strategy: str | None = None
@@ -769,21 +780,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             f"asks (exit {CODEX_UNAVAILABLE_EXIT}) or runs what was chosen for that "
             f"(`sprite-gen defaults save --codex-unavailable`, {CODEX_UNAVAILABLE_ENV}). "
             "codex and grok run on a subscription login; openai is for servers and SaaS "
-            "and is billed per call on OPENAI_API_KEY, so it runs only when chosen"
+            "and is billed per call on OPENAI_API_KEY, so it runs only when chosen. "
+            "azure is explicit-only and bills the configured Azure deployment"
         ),
     )
     parser.add_argument("--prompt")
     parser.add_argument("--prompt-file", type=Path)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--ref", action="append", type=Path, default=[], help="reference image (repeatable)")
-    parser.add_argument("--model")
-    parser.add_argument("--aspect-ratio", help="grok and openai, e.g. 1:1 16:9 9:16 (openai maps it to a gpt-image size; codex ignores it)")
+    parser.add_argument("--model", help="provider model ID; for azure, a deployment name overriding AZURE_OPENAI_DEPLOYMENT")
+    parser.add_argument("--aspect-ratio", help="grok, openai and azure, e.g. 1:1 16:9 9:16 (openai/azure map it to a gpt-image size; codex ignores it)")
     parser.add_argument(
         "--quality",
         choices=QUALITIES,
         default=None,
         help=(
-            "rendering effort billed for this image; openai carries the whole range "
+            "rendering effort billed for this image; openai and azure carry the whole range "
             "(low..max, auto = the model decides) and grok takes low / medium / auto. "
             "Omitted = the provider's own default. A provider that cannot honour the "
             "level fails instead of downgrading it"
@@ -796,8 +808,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "output size tier, priced together with --quality: grok Imagine's "
             "1k / 1.5k / 2k (tier names, not pixel counts — 1.5k renders 1408px at 1:1). "
-            "Omitted = the provider's own default (grok: 1k). openai sizes from "
-            "--aspect-ratio and codex from neither, so both refuse this flag "
+            "Omitted = the provider's own default (grok: 1k). openai/azure size from "
+            "--aspect-ratio and codex from neither, so those providers refuse this flag "
             "instead of ignoring it"
         ),
     )
@@ -806,7 +818,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "publish a transparent RGBA PNG using the provider's transparency strategy: "
-            "codex asks image_gen for real alpha and openai asks for background=transparent (native), "
+            "codex asks image_gen for real alpha and openai/azure ask for background=transparent (native), "
             "grok is keyed out of a chroma background"
         ),
     )
@@ -816,7 +828,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=ALPHA_MODE_AUTO,
         help=(
             "transparency strategy for --transparent: auto = the provider's declared strategy "
-            "(native on codex and openai, but chroma whenever --ref is attached — native alpha with refs is unstable — "
+            "(native on codex, openai and azure, but chroma whenever --ref is attached — native alpha with refs is unstable — "
             "with the --chroma-key background line added to a prompt that names no key); "
             "chroma forces chroma keying (e.g. a codex prompt that already carries a key background); "
             "native forces native alpha and is refused on a provider that cannot return alpha"

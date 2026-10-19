@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Modified: document per-call billing for the Azure row-generation route.
 """`sprite-gen gen-set` — generate every state row of a prepared run, N at a time.
 
 The atlas pipeline's one AI step, as a command instead of prose. `prepare` already
@@ -268,7 +269,7 @@ def run_set(
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run-dir", required=True, type=Path, help="a prepared run (sprite-request.json, prompts/, references/layout-guides/)")
     parser.add_argument("--states", help="comma list; default = every non-mirrored state in the request")
-    parser.add_argument("--provider", choices=gen_mod.PROVIDERS, help="honoured verbatim (openai bills per call); default "
+    parser.add_argument("--provider", choices=gen_mod.PROVIDERS, help="honoured verbatim (openai and azure bill per call); default "
                         "resolves like `gen`: env > codex, and a codex that cannot run asks or runs what was chosen for that")
     parser.add_argument("--model")
     parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY, help=f"rows generated at once (default {DEFAULT_CONCURRENCY})")

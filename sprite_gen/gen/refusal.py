@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Modified: preserve Azure error codes without assuming the public OpenAI moderation taxonomy.
 """What a provider refusal line says about why the provider refused.
 
 The line shape is a contract other programs read:
@@ -53,6 +54,7 @@ REDACTED = "[redacted]"
 # content. An xAI clip blocked by moderation is recognised by
 # `video.respect_moderation: false` instead (sprite_gen.gen.video).
 POLICY_CODES: dict[str, frozenset[str]] = {
+    "azure": frozenset(),
     "openai": frozenset({"moderation_blocked"}),
     "grok": frozenset(),
 }

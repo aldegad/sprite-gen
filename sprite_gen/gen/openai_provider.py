@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Modified: share the Images API codec with Azure without sharing credentials or transport.
 """Direct OpenAI Images generation/editing with an API key and no ChatGPT login.
 
 The `codex` provider reaches the same family of models through the ChatGPT
@@ -121,7 +122,7 @@ def resolve_credential(env: dict[str, str] | None = None) -> str:
     )
 
 
-def _reference(path: Path, index: int) -> tuple[str, str, bytes]:
+def _reference(path: Path, index: int, *, who: str = "openai-gen") -> tuple[str, str, bytes]:
     """Read one reference image as a (filename, mime, bytes) multipart part.
 
     The part is named by position, not by the local file: a user's filename is
@@ -136,32 +137,32 @@ def _reference(path: Path, index: int) -> tuple[str, str, bytes]:
         if mime not in _REFERENCE_MIMES:
             raise ValueError("reference must be PNG, JPEG or WebP")
     except (OSError, ValueError, UnidentifiedImageError) as exc:
-        raise SystemExit(f"openai-gen: invalid reference image {path}") from exc
+        raise SystemExit(f"{who}: invalid reference image {path}") from exc
     return f"image-{index}.{_REFERENCE_MIMES[mime]}", mime, data
 
 
-def _fields(request: GenRequest) -> dict[str, str]:
+def _fields(request: GenRequest, *, who: str = "openai-gen") -> dict[str, str]:
     """The request fields shared by generations and edits, validated offline.
 
     Everything that can be refused without spending money is refused here, before
     a credential is read or a socket is opened.
     """
     if not request.prompt.strip():
-        raise SystemExit("openai-gen: empty prompt")
+        raise SystemExit(f"{who}: empty prompt")
     if len(request.refs) > MAX_REFS:
-        raise SystemExit(f"openai-gen: at most {MAX_REFS} reference images are supported")
+        raise SystemExit(f"{who}: at most {MAX_REFS} reference images are supported")
     # `size` here comes from --aspect-ratio (SIZES); gpt-image has no long-edge
     # preset, so an asked-for resolution is refused instead of being dropped from
     # a body the caller is about to pay for (No Silent Fallback).
     if request.resolution is not None:
         raise SystemExit(
-            f"openai-gen: resolution {request.resolution!r} is grok Imagine's vocabulary; "
+            f"{who}: resolution {request.resolution!r} is grok Imagine's vocabulary; "
             "a gpt-image size comes from --aspect-ratio"
         )
     quality = request.quality or DEFAULT_QUALITY
     if quality not in SUPPORTED_QUALITIES:
         raise SystemExit(
-            f"openai-gen: unsupported quality {quality!r}; expected one of {', '.join(SUPPORTED_QUALITIES)}"
+            f"{who}: unsupported quality {quality!r}; expected one of {', '.join(SUPPORTED_QUALITIES)}"
         )
     if request.aspect_ratio is None:
         size = DEFAULT_SIZE
@@ -169,7 +170,7 @@ def _fields(request: GenRequest) -> dict[str, str]:
         size = SIZES[request.aspect_ratio]
     else:
         raise SystemExit(
-            f"openai-gen: aspect ratio {request.aspect_ratio!r} has no gpt-image size; "
+            f"{who}: aspect ratio {request.aspect_ratio!r} has no gpt-image size; "
             f"expected one of {', '.join(SIZES)}"
         )
     return {
@@ -189,7 +190,7 @@ def _json_request(fields: dict[str, str]) -> tuple[bytes, str]:
     return json.dumps(body).encode("utf-8"), "application/json"
 
 
-def _multipart_request(fields: dict[str, str], refs: list[Path]) -> tuple[bytes, str]:
+def _multipart_request(fields: dict[str, str], refs: list[Path], *, who: str = "openai-gen") -> tuple[bytes, str]:
     """Encode the edits request; `/v1/images/edits` takes multipart, not JSON.
 
     Reference images go in as repeated `image[]` parts, in the order they were
@@ -203,7 +204,7 @@ def _multipart_request(fields: dict[str, str], refs: list[Path]) -> tuple[bytes,
         chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
         chunks.append(value.encode("utf-8") + b"\r\n")
     for index, ref in enumerate(refs):
-        filename, mime, data = _reference(ref, index)
+        filename, mime, data = _reference(ref, index, who=who)
         chunks.append(marker)
         chunks.append(
             f'Content-Disposition: form-data; name="image[]"; filename="{filename}"\r\n'
@@ -268,17 +269,17 @@ def _refusal(reply: Any) -> refusal.Refusal:
     return refusal.read("openai", reply, details)
 
 
-def _publish_image(item: dict, path: Path) -> None:
+def _publish_image(item: dict, path: Path, *, who: str = "openai-gen") -> None:
     # gpt-image models always answer with inline base64 — no signed URL to follow
     # and no bearer token to forward.
     encoded = item.get("b64_json")
     if not isinstance(encoded, str) or not encoded:
-        raise SystemExit("openai-gen: response has no b64_json image; nothing published")
+        raise SystemExit(f"{who}: response has no b64_json image; nothing published")
     try:
         data = base64.b64decode(encoded, validate=True)
     except (ValueError, binascii.Error) as exc:
-        raise SystemExit("openai-gen: response image is invalid; nothing published") from exc
-    publish_png(data, path, label="openai-gen")
+        raise SystemExit(f"{who}: response image is invalid; nothing published") from exc
+    publish_png(data, path, label=who)
 
 
 class OpenAIProvider:
