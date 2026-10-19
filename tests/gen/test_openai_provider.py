@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Modified: retain the OpenAI opt-in invariant while allowing other explicit-only providers.
 """OpenAI Images API contract, offline: no key, no network, no codex subprocess.
 
 The paid seam is the request body, so that is what is pinned here: which endpoint
@@ -351,7 +352,7 @@ def test_provider_is_registered_everywhere_a_provider_must_be(api):
 def test_openai_is_never_a_default_and_runs_only_when_chosen(monkeypatch, api):
     """불변식 1: no default, no guided-flow image provider; only a choice the user made reaches it."""
     assert gen.HARD_DEFAULT_PROVIDER == "codex"
-    assert gen.EXPLICIT_ONLY_PROVIDERS == ("openai",)
+    assert "openai" in gen.EXPLICIT_ONLY_PROVIDERS
     monkeypatch.delenv("SPRITE_GEN_DEFAULT_PROVIDER", raising=False)
     monkeypatch.setattr(gen, "_codex_available", lambda: (True, ""))
     assert gen.resolve_default_provider() == ("codex", None)

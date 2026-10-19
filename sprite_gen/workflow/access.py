@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Modified: Azure credential readiness does not imply deployment access or quota.
 """Credential readiness is not proof of a paid subscription or remaining quota."""
 from __future__ import annotations
 
@@ -12,6 +13,15 @@ def probe_access(provider: str) -> dict:
     """One probe per provider: images and videos of a provider share its credential precedence."""
     result = {"provider": provider, "login": "unknown", "subscription": "unknown", "quota": "unknown",
               "billing": "subscription", "reason": "Subscription and media access need user confirmation when not independently known."}
+    if provider == "azure":
+        from sprite_gen.gen.azure_provider import Config, resolve_credential as resolve_azure
+        try:
+            credential = resolve_azure(Config.from_env())
+        except (SystemExit, OSError, ValueError):
+            return {**result, "login": "unavailable", "billing": "api-credit",
+                    "reason": "Check Azure endpoint/auth configuration and az login, or the explicitly selected API key."}
+        return {**result, "login": "ready", "billing": "api-credit",
+                "reason": f"Azure uses {credential.source} and bills per API call; deployment access and remaining quota are unverified."}
     if provider == "codex":
         # The one reading of how codex is signed in; it never repeats what the CLI said.
         login = codex_provider.codex_login()

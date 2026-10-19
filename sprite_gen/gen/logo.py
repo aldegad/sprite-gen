@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Modified: fail before buying images when a provider's required vision configuration is absent.
 """`sprite-gen logo` — typography drawn by the model in a scene, then lifted out of it (docs/logo.md).
 
 Lettering asked for on its own comes out as a font with an effect on it. Asked for inside the
@@ -42,7 +43,7 @@ from sprite_gen.spec.runio import atomic_save_image, atomic_write_text
 from sprite_gen.util.cli_kwargs import namespace_from_kwargs
 
 from . import chroma as chroma_mod
-from . import codex_provider, openai_provider, xai
+from . import azure_provider, codex_provider, openai_provider, xai
 from .base import QUALITIES, RESOLUTIONS, print_json
 
 REPORT_KIND = "sprite-gen-logo-report"
@@ -52,7 +53,8 @@ COMPOSITIONS: dict[str, dict[str, str]] = {
 }
 KEY_CHOICES = ("auto", *logo_matte.KEYS)
 SUBSCRIPTION_AUTH = (codex_provider.AUTH_SOURCE_LOGIN, xai.AUTH_SOURCE_GROK_LOGIN)
-PER_CALL_AUTH = (codex_provider.AUTH_SOURCE_API_KEY, xai.AUTH_SOURCE_API_KEY, openai_provider.AUTH_SOURCE_API_KEY)
+PER_CALL_AUTH = (codex_provider.AUTH_SOURCE_API_KEY, xai.AUTH_SOURCE_API_KEY, openai_provider.AUTH_SOURCE_API_KEY,
+                 azure_provider.AUTH_CLI, azure_provider.KEY_ENV)
 READ_LABEL = "logo text check"
 READ_PROMPT = (
     "Read the lettering in the attached image exactly as it is spelled, letter by letter. Return only JSON "
@@ -294,6 +296,7 @@ def make_logo(provider: str, *, text: str, out_dir: Path, subtitle: str | None =
 
     backend = gen_pkg._make_provider(provider, keep_session=False)
     try:
+        gen_pkg.validate_inspection(backend)
         if lettering is not None:
             key = _given_lettering(Path(lettering).expanduser(), mood, files, report, chroma_key)
         else:

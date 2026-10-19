@@ -178,12 +178,19 @@ python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-githu
 
 Image generation is part of this engine (`sprite_gen.gen`, providers `codex` and `grok` on a subscription you already pay for, plus an `openai` provider for servers and SaaS that bills per call and runs only when you chose it; the general `image-gen` skill is a thin shuttle over it). Every call uses **your own** credential, the subscription login first and an API key only without one, and nothing is shipped with the repo:
 
+Azure OpenAI / Foundry users can explicitly select `--provider azure`. It uses
+your Azure resource and deployment, with Azure CLI / Microsoft Entra authentication
+by default or an explicitly selected API key. Azure is always billed per API call,
+including when authenticated through `az login`; it is not a subscription-provider
+fallback. See [Azure setup](docs/azure.md).
+
 | Calls | First | Without it | Docs |
 |---|---|---|---|
 | `gen --provider codex` | the `codex` ChatGPT login | (a codex signed in with an API key bills that key) | [gen](docs/gen.md) |
 | `gen --provider grok`, `video*` | the `grok` CLI login | `XAI_API_KEY` | [gen](docs/gen.md#direct-grok-calls-and-authentication), [video](docs/video.md) |
 | `pixel-draw` | the `claude` (Claude Code) subscription login | `ANTHROPIC_API_KEY` | [pixel-draw](docs/pixel-draw.md#which-credential-a-call-runs-on) |
 | `gen --provider openai` | — | `OPENAI_API_KEY`, only when you chose it | [gen](docs/gen.md#subscription-first--openai-runs-only-when-you-chose-it) |
+| `gen --provider azure` | Azure CLI / Entra | Explicit `AZURE_OPENAI_AUTH=api-key`; **no automatic auth fallback** | [Azure](docs/azure.md) |
 | `sound` | — | `ELEVENLABS_API_KEY` | [sound](docs/sound.md) |
 
 A call on an API key is billed per call and says so on stderr before the request leaves, also inside `gen-set` and `video-set`. A call that names no provider runs on codex; when codex cannot run (not signed in, or its usage used up) it stops and asks (exit 75) — or runs what you chose for that with `sprite-gen defaults save --codex-unavailable grok|openai` ([gen](docs/gen.md#when-codex-cannot-run--ask-or-what-you-chose)). `logo` makes its images and its text checks through `gen`'s providers, on the same credentials.

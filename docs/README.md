@@ -79,6 +79,7 @@ grouping is derived from `sprite_gen/_modules.py`, the one taxonomy table.
 | Doc | Owns |
 |---|---|
 | [gen.md](gen.md) | `sprite-gen gen` / `gen-set`: providers, default resolution and what a default codex that cannot run turns into, transparency strategy per provider, when a refused provider request is sent again, row usage |
+| [azure.md](azure.md) | Explicit Azure OpenAI / Foundry image generation and editing: endpoint/deployment configuration, Entra/API-key authentication, optional vision, usage reporting and limits |
 | [`sprite-gen sound`](sound.md) | Generate normalized SFX and BGM audio assets with Opus and AAC encoding, SQLite raw request caching, and Web Audio loop metadata. |
 | [pixel-draw.md](pixel-draw.md) | `sprite-gen pixel-draw` (experimental): Claude Opus draws 8–48 px pixel art as a pixel grid — the inputs, the safe area, the style (`--style`), a set of up to 64 frames drawn four at a time and one motion (`--motion`), the run folder and its report, gates G1–G8, the row repair and the one redraw, the pick between candidates, Message Batches and `--resume`, re-rendering an edited `grid.txt` |
 | [logo.md](logo.md) | `sprite-gen logo`: a title logo or wordmark lettered by the model into a title screen or poster, only its lettering redrawn on a chroma key, cut out with its glow kept — the steps, files, report, text check and refusals, the key choice, the logo matte and its known limit |

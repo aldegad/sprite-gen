@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Modified: advertise the explicitly selected Azure image provider.
 """Single sprite-gen CLI entrypoint."""
 
 from __future__ import annotations
@@ -284,7 +285,7 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         ui_kit.run,
     ),
     "gen": (
-        "Generate one image via a provider (codex image_gen / grok Imagine on a subscription login first (an API key only without one, billed per call and said), or openai Images API for servers/SaaS, billed per call) into a verified PNG.",
+        "Generate one image via a provider (codex/grok subscription routes, or explicitly selected openai/azure APIs billed per call) into a verified PNG.",
         _add_gen,
         gen.run,
     ),

@@ -21,6 +21,11 @@ added, however it is invoked
 | `codex` | codex `image_gen` | ChatGPT OAuth | your ChatGPT subscription | inline base64 in the session rollout jsonl, decoded deterministically | **`native`** — image_gen returns a real alpha channel when asked (measured, then published) |
 | `grok` | direct Imagine `/images/generations` or `/images/edits` | Grok login (preferred) or `XAI_API_KEY` | your SuperGrok Imagine quota; console credit only on the key route | inline bytes decoded and re-encoded as a verified PNG | `chroma` — Imagine returns JPEG only; generate on a key and matte it out |
 | `openai` | direct Images `/v1/images/generations` or `/v1/images/edits` | `OPENAI_API_KEY` | **billed per call** — for servers and SaaS | inline base64 decoded and published as a verified PNG | **`native`** — `background: transparent` returns a real alpha channel |
+| `azure` | Azure OpenAI / Foundry v1 Images API | Azure CLI / Entra, or explicitly selected API key | **billed per call**, explicit-only | inline base64 decoded and published as a verified PNG | **`native`**, subject to the configured deployment's capabilities |
+
+Azure setup, deployment-name overrides, optional vision, and its no-retry/no-auth-fallback
+contract are documented in [Azure images](azure.md). It is not a default,
+guided subscription provider, or codex-unavailable fallback.
 
 The strategy is declared **once**, on the adapter (`Provider.transparency`), and is
 the only place that says what a backend can do. See
@@ -54,7 +59,7 @@ If you are one person generating sprites, use `codex` or `grok`.
 precedence (maintainer 확정 2026-07-17):
 
 1. **`SPRITE_GEN_DEFAULT_PROVIDER`** env var (`codex` or `grok`) — the user override.
-   An unknown value fails loud, and so does `openai`: a per-call API backend is
+   An unknown value fails loud, and so do `openai` and `azure`: a per-call API backend is
    never a default ([subscription first](#subscription-first--openai-runs-only-when-you-chose-it)).
 2. **`codex`** — the hard default (GPT `image_gen`).
 
@@ -189,8 +194,11 @@ with the status, the provider's code and the error body the provider sent.
 A refusal line is `<verb>: <reason> (HTTP <n>)[ code=<code>][ key=value ...]; …: <body>`:
 `code=` is the provider's `error.code` when it matches `^[A-Za-z0-9_.:-]{1,64}$`,
 and `<reason>` is `refused by the provider's content policy` when that code is a
-documented policy block (`sprite_gen/gen/refusal.py` `POLICY_CODES`: openai
-`moderation_blocked`, followed by `moderation_stage=input|output|unknown`). The
+documented policy block (`sprite_gen/gen/refusal.py` `POLICY_CODES`: OpenAI
+`moderation_blocked`, followed by `moderation_stage=input|output|unknown`; Azure
+[`contentFilter` or `content_policy_violation`](https://learn.microsoft.com/azure/foundry/openai/how-to/dall-e#quickstart)).
+Unknown Azure codes, authentication failures and quota errors are not labelled
+as policy blocks. The
 `(HTTP <n>)` part never changes shape. The video verbs use the same `code=` and
 reason, and a clip xAI reports with `respect_moderation: false` is that refusal
 with `respect_moderation=false` in place of a code (docs/video.md). A clip xAI
@@ -291,14 +299,14 @@ second run on top would make every one of its POSTs a second retry loop.
 
 ```bash
 sprite-gen gen \
-  [--provider codex|grok|openai] # optional; default = SPRITE_GEN_DEFAULT_PROVIDER env → codex; a codex that cannot run asks (exit 75) or runs what you chose for that. openai bills per call
+  [--provider codex|grok|openai|azure] # optional; default = SPRITE_GEN_DEFAULT_PROVIDER env → codex; a codex that cannot run asks (exit 75) or runs what you chose for that. azure must be explicitly named; openai/azure bill per call
   --prompt "…"            # or --prompt-file PROMPT.txt
   --out DEST.png \
-  [--ref REF.png ...]     # repeatable; Grok accepts up to five references, openai up to sixteen
+  [--ref REF.png ...]     # repeatable; Grok accepts up to five references, the shared OpenAI/Azure codec up to sixteen
   [--transparent [--alpha-mode auto|native|chroma] [--chroma-key magenta|green]] \
   [--white-check CHECK.png] \
-  [--aspect-ratio 1:1]    # grok and openai, e.g. 1:1 or 16:9; grok single-ref edits inherit the source ratio; openai maps it to a gpt-image size
-  [--quality low|medium|high|xhigh|max|auto] # billed effort; openai takes the range, grok takes auto/low/medium
+  [--aspect-ratio 1:1]    # grok/openai/azure; OpenAI/Azure map it to a gpt-image size
+  [--quality low|medium|high|xhigh|max|auto] # billed effort; openai/azure send the range, grok takes auto/low/medium
   [--resolution 1k|1.5k|2k]  # grok output-size tier, priced with --quality
   [--model ID] \
   [--layout-guide [figure|ui-kit]]  # attach a layout guide: the one-slot figure guide (bare flag) or the UI kit layout; see below
@@ -351,6 +359,7 @@ capability, declared in its adapter:
 | `codex` | refused — `image_gen` exposes no effort dial | refused |
 | `grok` | `auto` `low` `medium` | `1k` `1.5k` `2k` |
 | `openai` | `auto` `low` `medium` `high` `xhigh` `max` | refused — a gpt-image `size` comes from `--aspect-ratio` |
+| `azure` | same vocabulary, subject to the deployed model | refused — a gpt-image `size` comes from `--aspect-ratio` |
 
 - **Omitted = the provider's own default.** The request body is then byte-identical
   to what the same call already sent, so nothing about existing runs changes.
@@ -600,4 +609,3 @@ edge *is* the ground-contact line. The subject is never cut — only fully trans
 margin goes — and the report records `extra.trim_alpha` with the `bbox`, `before` /
 `after` sizes and the `margin_px` removed on each side. The `.raw.png` beside the output
 is untouched.
-
