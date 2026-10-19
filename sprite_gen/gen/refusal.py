@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Modified: preserve Azure error codes without assuming the public OpenAI moderation taxonomy.
+# Modified: classify the documented Azure image-policy codes independently of OpenAI's taxonomy.
 """What a provider refusal line says about why the provider refused.
 
 The line shape is a contract other programs read:
@@ -51,10 +51,13 @@ REDACTED = "[redacted]"
 # guide, "Handling blocked requests", 2026-09-30). xAI has none: its documented
 # video failure code `invalid_argument` covers moderation and parameter errors
 # alike, so listing it would tell a caller with a bad parameter to change the
-# content. An xAI clip blocked by moderation is recognised by
+# content. Azure images document contentFilter and content_policy_violation:
+# https://learn.microsoft.com/azure/foundry/openai/how-to/dall-e#quickstart
+# (common errors and content-filter examples, read 2026-10-19).
+# An xAI clip blocked by moderation is recognised by
 # `video.respect_moderation: false` instead (sprite_gen.gen.video).
 POLICY_CODES: dict[str, frozenset[str]] = {
-    "azure": frozenset(),
+    "azure": frozenset({"contentFilter", "content_policy_violation"}),
     "openai": frozenset({"moderation_blocked"}),
     "grok": frozenset(),
 }

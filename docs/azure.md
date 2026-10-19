@@ -3,8 +3,10 @@
 > Owns: the explicit Azure provider, its authentication and deployment configuration · Index: [docs/README.md](README.md)
 
 `sprite-gen gen --provider azure` uses an image deployment on your Azure resource.
-It shares sprite-gen's image encoding, verified PNG publishing, alpha handling,
-row extraction and atlas composition. It does not require a Codex/ChatGPT or Grok
+It shares the public `sprite_gen.gen.images_codec` wire codec with OpenAI while
+each provider owns its model/deployment and quality defaults, authentication, and
+transport. PNG publishing, alpha handling, row extraction and atlas composition
+remain shared. It does not require a Codex/ChatGPT or Grok
 login, and adds no Python runtime dependency.
 
 **Every image or vision call is billed to Azure**, even when the credential comes
@@ -31,11 +33,18 @@ sprite-gen gen --provider azure --prompt "an original blue pixel-art robot" \
 not change that choice. Missing/expired CLI credentials fail rather than
 switching to a key, another account, or another image provider.
 
-On shared machines, pin the subscription with `AZURE_SUBSCRIPTION_ID`. Optionally
-set `AZURE_TENANT_ID` as a directory UUID too: the provider verifies the selected
+On shared machines, pin the subscription with `SPRITE_GEN_AZURE_SUBSCRIPTION_ID`.
+Optionally set `SPRITE_GEN_AZURE_TENANT_ID` as a directory UUID too: the provider verifies the selected
 subscription's tenant, then requests its token. It never runs `az account set`
 or changes the CLI's global default. A tenant alone is also supported.
 `AZURE_CONFIG_DIR` is honored if you maintain separate Azure CLI profiles.
+
+The scope variables above deliberately use sprite-gen's namespace and accept
+UUIDs, not subscription names or tenant domains. Generic `AZURE_TENANT_ID` and
+`AZURE_SUBSCRIPTION_ID` variables used by other Azure tools are ignored by this
+provider, whether they contain UUIDs, names, or domains. For example,
+`AZURE_TENANT_ID=contoso.onmicrosoft.com` does not scope sprite-gen's token request:
+without the namespaced settings it uses the Azure CLI's current profile.
 
 Authentication uses the resolved `az` executable (including Windows `.cmd`
 shims), UTF-8 subprocess I/O, a bounded 30-second wait, and the standard
@@ -120,8 +129,9 @@ endpoint or assumes that the image deployment can inspect images.
   fallback. A timeout or broken response may already have been billed.
 - HTTP failures retain the normal `(HTTP NNN)` and `code=` fields. Credential
   echoes and signed URL query strings are redacted with the shared refusal
-  formatter; Azure error codes are not presumed to use OpenAI's moderation
-  taxonomy.
+  formatter. Azure's documented `contentFilter` and `content_policy_violation`
+  codes produce the shared `refused by the provider's content policy` reason;
+  other codes are retained without being misclassified as policy blocks.
 - Generation respects `SPRITE_GEN_GEN_TIMEOUT_SECONDS` from the first API send,
   including reading the answer. CLI authentication has its separate bounded wait.
 - The existing output is not replaced unless a valid image is returned.

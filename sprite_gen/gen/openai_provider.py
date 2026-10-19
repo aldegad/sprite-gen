@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Modified: share the Images API codec with Azure without sharing credentials or transport.
+# Modified: consume the public shared Images codec; retain OpenAI-owned defaults and transport.
 """Direct OpenAI Images generation/editing with an API key and no ChatGPT login.
 
 The `codex` provider reaches the same family of models through the ChatGPT
@@ -29,30 +29,27 @@ most and each time said on stderr — `retry`, the rule every direct provider ca
 """
 from __future__ import annotations
 
-import base64
-import binascii
-import io
 import json
 import time
 import urllib.error
 import urllib.request
-import uuid
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, UnidentifiedImageError
-
-from . import refusal, retry
+from . import images_codec as images, refusal, retry
+# Preserve existing public constants/metadata helper while the codec owns their implementation.
+from .images_codec import (
+    BACKGROUND_OPAQUE, BACKGROUND_TRANSPARENT, DEFAULT_SIZE, MAX_REFS, PNG_OUTPUT_FORMAT,
+    RATE_LIMIT_HEADER_PREFIX, SIZES, SUPPORTED_QUALITIES, rate_limit_headers,
+)
 from .xai import NO_ANSWER, error_body, read_whole, time_left
 from .base import (
     GEN_TIMEOUT_SECONDS,
-    QUALITIES,
     TRANSPARENCY_NATIVE,
     GenRequest,
     ProviderRun,
     announce_api_billing,
     env_api_key,
-    publish_png,
 )
 
 API_BASE = "https://api.openai.com/v1"
@@ -63,48 +60,10 @@ DEFAULT_MODEL = "gpt-image-2.5-flare"
 # The documented default is `auto` (the model picks the effort). It is sent
 # explicitly so the billed level is always visible in the request and the report.
 DEFAULT_QUALITY = "auto"
-# gpt-image-2.5 accepts the whole shared vocabulary.
-SUPPORTED_QUALITIES = QUALITIES
-# "For GPT image models, you can provide up to 16 images." (images/edits `images`)
-MAX_REFS = 16
-PNG_OUTPUT_FORMAT = "png"
-BACKGROUND_TRANSPARENT = "transparent"
-BACKGROUND_OPAQUE = "opaque"
-
-# `--aspect-ratio` -> a concrete gpt-image `size`. Every entry satisfies the
-# documented constraints (both sides divisible by 16, ratio inside 1:3..3:1,
-# 655,360 <= pixels <= 8,294,400) and is checked by the test suite, so the ratio
-# a caller asks for is the ratio that is billed and returned. A ratio that has no
-# exact gpt-image size is refused rather than quietly rounded to a nearby one.
-SIZES = {
-    "auto": "auto",
-    "1:1": "1024x1024",
-    "3:2": "1536x1024",
-    "2:3": "1024x1536",
-    "4:3": "1024x768",
-    "3:4": "768x1024",
-    "16:9": "1536x864",
-    "9:16": "864x1536",
-    "2:1": "1440x720",
-    "1:2": "720x1440",
-    "3:1": "1536x512",
-    "1:3": "512x1536",
-}
-DEFAULT_SIZE = SIZES["1:1"]
-
-_REFERENCE_MIMES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
-
 # `error.moderation_details.moderation_stage` on a `moderation_blocked` answer
 # (image-generation guide, 2026-09-30): whether the prompt/input images or the
 # drawn image was blocked. Only these documented values reach the line.
 MODERATION_STAGES = ("input", "output", "unknown")
-
-# The account's limits and what is left of them ride on the response as `x-ratelimit-*`
-# headers (rate-limits guide, 2026-10-10: requests, tokens and project tokens — limit,
-# remaining, reset). It lists images per minute among the limits but names no header for it
-# and no endpoint that sends them, so the report keeps every `x-ratelimit-*` that came.
-RATE_LIMIT_HEADER_PREFIX = "x-ratelimit-"
-
 
 def resolve_credential(env: dict[str, str] | None = None) -> str:
     """Return the OpenAI API key (`base.env_api_key`), or fail loud naming the variable that is missing.
@@ -120,99 +79,6 @@ def resolve_credential(env: dict[str, str] | None = None) -> str:
         "This provider never falls back to the codex ChatGPT login, which needs an "
         "interactive browser sign-in that a container does not have."
     )
-
-
-def _reference(path: Path, index: int, *, who: str = "openai-gen") -> tuple[str, str, bytes]:
-    """Read one reference image as a (filename, mime, bytes) multipart part.
-
-    The part is named by position, not by the local file: a user's filename is
-    their data, and a name carrying a quote or a newline would forge the part
-    header it is written into.
-    """
-    try:
-        data = path.read_bytes()
-        with Image.open(io.BytesIO(data)) as source:
-            source.load()
-            mime = Image.MIME.get(source.format)
-        if mime not in _REFERENCE_MIMES:
-            raise ValueError("reference must be PNG, JPEG or WebP")
-    except (OSError, ValueError, UnidentifiedImageError) as exc:
-        raise SystemExit(f"{who}: invalid reference image {path}") from exc
-    return f"image-{index}.{_REFERENCE_MIMES[mime]}", mime, data
-
-
-def _fields(request: GenRequest, *, who: str = "openai-gen") -> dict[str, str]:
-    """The request fields shared by generations and edits, validated offline.
-
-    Everything that can be refused without spending money is refused here, before
-    a credential is read or a socket is opened.
-    """
-    if not request.prompt.strip():
-        raise SystemExit(f"{who}: empty prompt")
-    if len(request.refs) > MAX_REFS:
-        raise SystemExit(f"{who}: at most {MAX_REFS} reference images are supported")
-    # `size` here comes from --aspect-ratio (SIZES); gpt-image has no long-edge
-    # preset, so an asked-for resolution is refused instead of being dropped from
-    # a body the caller is about to pay for (No Silent Fallback).
-    if request.resolution is not None:
-        raise SystemExit(
-            f"{who}: resolution {request.resolution!r} is grok Imagine's vocabulary; "
-            "a gpt-image size comes from --aspect-ratio"
-        )
-    quality = request.quality or DEFAULT_QUALITY
-    if quality not in SUPPORTED_QUALITIES:
-        raise SystemExit(
-            f"{who}: unsupported quality {quality!r}; expected one of {', '.join(SUPPORTED_QUALITIES)}"
-        )
-    if request.aspect_ratio is None:
-        size = DEFAULT_SIZE
-    elif request.aspect_ratio in SIZES:
-        size = SIZES[request.aspect_ratio]
-    else:
-        raise SystemExit(
-            f"{who}: aspect ratio {request.aspect_ratio!r} has no gpt-image size; "
-            f"expected one of {', '.join(SIZES)}"
-        )
-    return {
-        "model": request.model or DEFAULT_MODEL,
-        "prompt": request.prompt,
-        "n": "1",
-        "size": size,
-        "quality": quality,
-        # png keeps the alpha channel that `background: transparent` produces.
-        "output_format": PNG_OUTPUT_FORMAT,
-        "background": BACKGROUND_TRANSPARENT if request.native_alpha else BACKGROUND_OPAQUE,
-    }
-
-
-def _json_request(fields: dict[str, str]) -> tuple[bytes, str]:
-    body = {**fields, "n": int(fields["n"])}
-    return json.dumps(body).encode("utf-8"), "application/json"
-
-
-def _multipart_request(fields: dict[str, str], refs: list[Path], *, who: str = "openai-gen") -> tuple[bytes, str]:
-    """Encode the edits request; `/v1/images/edits` takes multipart, not JSON.
-
-    Reference images go in as repeated `image[]` parts, in the order they were
-    given, because the model reads them positionally.
-    """
-    boundary = "----sprite-gen-" + uuid.uuid4().hex
-    marker = f"--{boundary}\r\n".encode("utf-8")
-    chunks: list[bytes] = []
-    for name, value in fields.items():
-        chunks.append(marker)
-        chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
-        chunks.append(value.encode("utf-8") + b"\r\n")
-    for index, ref in enumerate(refs):
-        filename, mime, data = _reference(ref, index, who=who)
-        chunks.append(marker)
-        chunks.append(
-            f'Content-Disposition: form-data; name="image[]"; filename="{filename}"\r\n'
-            f"Content-Type: {mime}\r\n\r\n".encode("utf-8")
-        )
-        chunks.append(data + b"\r\n")
-    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
-    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
 
 TRANSPORT_FAILED = "openai-gen: request failed or timed out; no automatic retry (the server may have accepted it)"
@@ -255,31 +121,12 @@ def _ask(url: str, token: str, data: bytes, content_type: str) -> tuple[int, Any
                      provider="openai", who="openai", label="gen", kind=refusal.provider_code, deadline=deadline)
 
 
-def rate_limit_headers(headers: Any) -> dict[str, str]:
-    """The response's `x-ratelimit-*` headers, names lower-cased and values as sent; {} when none came."""
-    return {name.lower(): value for name, value in headers.items()
-            if name.lower().startswith(RATE_LIMIT_HEADER_PREFIX)}
-
-
 def _refusal(reply: Any) -> refusal.Refusal:
     error = reply.get("error") if isinstance(reply, dict) else None
     moderation = error.get("moderation_details") if isinstance(error, dict) else None
     stage = moderation.get("moderation_stage") if isinstance(moderation, dict) else None
     details = (("moderation_stage", stage),) if stage in MODERATION_STAGES else ()
     return refusal.read("openai", reply, details)
-
-
-def _publish_image(item: dict, path: Path, *, who: str = "openai-gen") -> None:
-    # gpt-image models always answer with inline base64 — no signed URL to follow
-    # and no bearer token to forward.
-    encoded = item.get("b64_json")
-    if not isinstance(encoded, str) or not encoded:
-        raise SystemExit(f"{who}: response has no b64_json image; nothing published")
-    try:
-        data = base64.b64decode(encoded, validate=True)
-    except (ValueError, binascii.Error) as exc:
-        raise SystemExit(f"{who}: response image is invalid; nothing published") from exc
-    publish_png(data, path, label=who)
 
 
 class OpenAIProvider:
@@ -305,14 +152,15 @@ class OpenAIProvider:
         return text, {**metadata, "auth_source": AUTH_SOURCE_API_KEY, "transport": "openai-api"}
 
     def generate(self, request: GenRequest, workdir: Path) -> ProviderRun:
-        fields = _fields(request)
+        fields = images.request_fields(request, model=request.model or DEFAULT_MODEL,
+                                       quality=request.quality or DEFAULT_QUALITY, who="openai-gen")
         refs = [Path(ref) for ref in request.refs]
         if refs:
             endpoint = "/images/edits"
-            data, content_type = _multipart_request(fields, refs)
+            data, content_type = images.multipart_request(fields, refs, who="openai-gen")
         else:
             endpoint = "/images/generations"
-            data, content_type = _json_request(fields)
+            data, content_type = images.json_request(fields)
         token = resolve_credential()
         announce_api_billing(
             self.name,
@@ -338,7 +186,7 @@ class OpenAIProvider:
         items = reply.get("data") if isinstance(reply, dict) else None
         if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
             raise SystemExit("openai-gen: expected exactly one image in the response; nothing published")
-        _publish_image(items[0], request.raw)
+        images.publish_image(items[0], request.raw, who="openai-gen")
         usage = reply.get("usage") if isinstance(reply, dict) else None
         return ProviderRun(
             provider=self.name,

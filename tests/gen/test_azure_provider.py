@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Azure transport/auth/configuration contracts. Synthetic credentials; no cloud calls."""
 import base64
+import ast
 import io
 import json
 import subprocess
 import urllib.error
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +14,7 @@ from PIL import Image
 
 from http_answer import Answer
 from sprite_gen import gen
-from sprite_gen.gen import azure_provider as azure, logo
+from sprite_gen.gen import azure_provider as azure, logo, openai_provider, refusal
 from sprite_gen.gen.base import GenRequest
 from sprite_gen.workflow import access
 from sprite_gen.workflow.catalog import GUIDED_PROVIDERS, validate_choices
@@ -90,6 +92,65 @@ def test_api_key_generation_uses_azure_and_reports_usage(tmp_path, api, capsys):
     assert "this is a per-call API charge, not a subscription" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("code", ["contentFilter", "content_policy_violation"])
+def test_azure_content_blocks_are_policy_refusals(tmp_path, api, code):
+    api.update(status=400, body={"error": {"code": code, "message": KEY + " blocked"}})
+    out = tmp_path / "out.png"
+    out.write_bytes(b"prior image")
+    with pytest.raises(SystemExit) as error:
+        gen.generate_image("azure", "synthetic blocked request", out)
+    assert refusal.CONTENT_POLICY in str(error.value)
+    assert f"(HTTP 400) code={code}" in str(error.value)
+    assert KEY not in str(error.value)
+    assert len(api["calls"]) == 1 and out.read_bytes() == b"prior image"
+
+
+def test_azure_defaults_do_not_follow_openai_policy_changes(tmp_path, api, monkeypatch):
+    monkeypatch.setattr(openai_provider, "DEFAULT_QUALITY", "high")
+    monkeypatch.setattr(openai_provider, "DEFAULT_MODEL", "different-openai-model")
+    gen.generate_image("azure", "x", tmp_path / "out.png")
+    fields = json.loads(api["calls"][0][0].data)
+    assert fields["quality"] == "auto" and fields["model"] == "image-deployment"
+
+
+@pytest.mark.parametrize("provider,other", [(azure, "openai_provider"), (openai_provider, "azure_provider")])
+def test_image_providers_use_public_codec_without_sibling_imports(provider, other):
+    source = ast.parse(Path(provider.__file__).read_text())
+    codec_aliases = set()
+    for node in ast.walk(source):
+        if isinstance(node, ast.ImportFrom):
+            assert not node.module or node.module.split(".")[-1] != other
+            for alias in node.names:
+                assert alias.name != other
+                if alias.name == "images_codec":
+                    codec_aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            assert all(alias.name.split(".")[-1] != other for alias in node.names)
+    assert codec_aliases
+    for node in ast.walk(source):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in codec_aliases:
+            assert not node.attr.startswith("_"), "Providers must consume the shared codec's public interface."
+
+
+@pytest.mark.parametrize("tenant,subscription", [
+    ("contoso.onmicrosoft.com", "Unrelated subscription"),
+    (TENANT, SUBSCRIPTION),
+])
+def test_generic_azure_scope_variables_do_not_select_a_cli_account(monkeypatch, tenant, subscription):
+    monkeypatch.setenv("AZURE_TENANT_ID", tenant)
+    monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", subscription)
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"accessToken": TOKEN}), stderr="")
+    monkeypatch.setattr(azure.subprocess, "run", run)
+    config = azure.Config.from_env()
+    assert config.tenant is None and config.subscription is None
+    azure.resolve_credential(config)
+    assert len(calls) == 1
+    assert "--tenant" not in calls[0] and "--subscription" not in calls[0]
+
+
 def test_reference_edit_preserves_reference_order_and_deployment_override(tmp_path, api):
     refs = [tmp_path / "one.png", tmp_path / "two.png"]
     for index, path in enumerate(refs):
@@ -146,7 +207,7 @@ def test_missing_deployment_or_invalid_fields_never_spend(tmp_path, api, monkeyp
     assert not api["calls"]
 
 
-@pytest.mark.parametrize("status", [302, 401, 403, 429, 500, 503])
+@pytest.mark.parametrize("status", [302, 400, 401, 403, 429, 500, 503])
 def test_http_errors_never_retry_fallback_publish_or_leak(tmp_path, api, status):
     api.update(status=status, body={"error": {"code": "synthetic_error", "message": KEY + " https://signed.invalid/x?sig=secret"}})
     out = tmp_path / "out.png"
@@ -156,6 +217,7 @@ def test_http_errors_never_retry_fallback_publish_or_leak(tmp_path, api, status)
     assert "no retry or provider fallback" in str(error.value)
     assert KEY not in str(error.value) and "sig=secret" not in str(error.value)
     assert "code=synthetic_error" in str(error.value)
+    assert refusal.CONTENT_POLICY not in str(error.value)
     assert out.read_bytes() == b"prior output"
     assert len(api["calls"]) == 1
     redirect = next(handler for handler in api["handlers"] if isinstance(handler, azure._NoRedirect))

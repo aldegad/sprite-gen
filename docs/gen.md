@@ -194,8 +194,11 @@ with the status, the provider's code and the error body the provider sent.
 A refusal line is `<verb>: <reason> (HTTP <n>)[ code=<code>][ key=value ...]; …: <body>`:
 `code=` is the provider's `error.code` when it matches `^[A-Za-z0-9_.:-]{1,64}$`,
 and `<reason>` is `refused by the provider's content policy` when that code is a
-documented policy block (`sprite_gen/gen/refusal.py` `POLICY_CODES`: openai
-`moderation_blocked`, followed by `moderation_stage=input|output|unknown`). The
+documented policy block (`sprite_gen/gen/refusal.py` `POLICY_CODES`: OpenAI
+`moderation_blocked`, followed by `moderation_stage=input|output|unknown`; Azure
+[`contentFilter` or `content_policy_violation`](https://learn.microsoft.com/azure/foundry/openai/how-to/dall-e#quickstart)).
+Unknown Azure codes, authentication failures and quota errors are not labelled
+as policy blocks. The
 `(HTTP <n>)` part never changes shape. The video verbs use the same `code=` and
 reason, and a clip xAI reports with `respect_moderation: false` is that refusal
 with `respect_moderation=false` in place of a code (docs/video.md). A clip xAI
@@ -296,7 +299,7 @@ second run on top would make every one of its POSTs a second retry loop.
 
 ```bash
 sprite-gen gen \
-  [--provider codex|grok|openai|azure] # azure must be explicitly named; openai/azure bill per call
+  [--provider codex|grok|openai|azure] # optional; default = SPRITE_GEN_DEFAULT_PROVIDER env → codex; a codex that cannot run asks (exit 75) or runs what you chose for that. azure must be explicitly named; openai/azure bill per call
   --prompt "…"            # or --prompt-file PROMPT.txt
   --out DEST.png \
   [--ref REF.png ...]     # repeatable; Grok accepts up to five references, the shared OpenAI/Azure codec up to sixteen

@@ -15,11 +15,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-from . import facing_vision, openai_provider as images, refusal
+from . import facing_vision, images_codec as images, refusal
 from .base import (
     GEN_TIMEOUT_SECONDS, GenRequest, ProviderRun, TRANSPARENCY_NATIVE,
     announce_api_billing, env_api_key, provider_binary, provider_subprocess_env,
@@ -31,8 +31,9 @@ DEPLOYMENT_ENV = "AZURE_OPENAI_DEPLOYMENT"
 AUTH_ENV = "AZURE_OPENAI_AUTH"
 KEY_ENV = "AZURE_OPENAI_API_KEY"
 VISION_ENV = "AZURE_OPENAI_VISION_DEPLOYMENT"
-SUBSCRIPTION_ENV = "AZURE_SUBSCRIPTION_ID"
-TENANT_ENV = "AZURE_TENANT_ID"
+SUBSCRIPTION_ENV = "SPRITE_GEN_AZURE_SUBSCRIPTION_ID"
+TENANT_ENV = "SPRITE_GEN_AZURE_TENANT_ID"
+DEFAULT_QUALITY = "auto"
 AUTH_CLI = "azure-cli"
 AUTH_KEY = "api-key"
 API_VERSION = "preview"
@@ -154,7 +155,7 @@ def resolve_credential(config: Config, env: Mapping[str, str] | None = None) -> 
             if config.tenant:
                 account = _cli_json(["account", "show", *scope])
                 if not isinstance(account, dict) or str(account.get("tenantId", "")).casefold() != config.tenant:
-                    raise SystemExit("azure-gen: selected subscription does not belong to AZURE_TENANT_ID; no auth fallback")
+                    raise SystemExit(f"azure-gen: selected subscription does not belong to {TENANT_ENV}; no auth fallback")
         elif config.tenant:
             scope = ["--tenant", config.tenant]
         reply = _cli_json(["account", "get-access-token", "--resource", TOKEN_RESOURCE, *scope])
@@ -212,14 +213,15 @@ class AzureProvider:
 
     def generate(self, request: GenRequest, workdir: Path) -> ProviderRun:
         config = Config.from_env()
-        fields = images._fields(replace(request, model=config.image_deployment(request.model)), who="azure-gen")
+        fields = images.request_fields(request, model=config.image_deployment(request.model),
+                                       quality=request.quality or DEFAULT_QUALITY, who="azure-gen")
         refs = [Path(ref) for ref in request.refs]
         if refs:
             operation = "images/edits"
-            data, content_type = images._multipart_request(fields, refs, who="azure-gen")
+            data, content_type = images.multipart_request(fields, refs, who="azure-gen")
         else:
             operation = "images/generations"
-            data, content_type = images._json_request(fields)
+            data, content_type = images.json_request(fields)
         credential = resolve_credential(config)
         announce_api_billing(self.name, credential.source,
                              f" (deployment={fields['model']}, quality={fields['quality']}, size={fields['size']}).")
@@ -228,7 +230,7 @@ class AzureProvider:
         items = reply.get("data") if isinstance(reply, dict) else None
         if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
             raise SystemExit("azure-gen: expected exactly one image in the response; nothing published")
-        images._publish_image(items[0], request.raw, who="azure-gen")
+        images.publish_image(items[0], request.raw, who="azure-gen")
         return ProviderRun(self.name, time.monotonic() - started, fields["model"], extra={
             "auth_source": credential.source, "transport": "azure-openai-api",
             "endpoint": "/" + operation, "api_version": API_VERSION,
