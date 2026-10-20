@@ -884,6 +884,9 @@ def request_bodies(request: dict[str, Any]) -> list[Body] | None:
 
 
 def row_prompt(request: dict[str, Any], state: str, entry: dict[str, Any]) -> str:
+    if request.get("prompt_profile") == "compact" and not request.get("directions") \
+            and body_mod.biped(request_bodies(request)):
+        return row_prompt_compact(request, state, entry)
     cell = request["cell"]
     chroma = request["chroma_key"]
     character = request["character"]
@@ -961,6 +964,38 @@ Layout requirements:
 - Keep every frame self-contained with at least {safe_margin_x} px horizontal and {safe_margin_y} px vertical safe padding. No character body part should be clipped by the frame slot.
 - Avoid motion blur. Use clear pose changes readable at {runtime_size}.
 - Preserve the same silhouette, face, proportions, palette, material, and props across every frame.
+
+Output only the sprite strip image."""
+
+
+# 짧은 행 프롬프트(`prompt_profile: "compact"`). 두 발로 선 캐릭터 한 명의 행에만 쓴다.
+# 기본(full) 프롬프트의 규칙을 한 번씩만 말하고, 앵커 고정 목록과 사전 참조 문장은 뺀다.
+# 기본값(full)의 바이트는 그대로다(freeze 표가 검사한다).
+PROMPT_PROFILES = ("full", "compact")
+
+
+def row_prompt_compact(request: dict[str, Any], state: str, entry: dict[str, Any]) -> str:
+    cell = request["cell"]
+    chroma = request["chroma_key"]
+    character = request["character"]
+    frames = int(entry["frames"])
+    runtime_size = f"{int(cell['width'])}x{int(cell['height'])}"
+    margin_x = int(cell["safe_margin_x"])
+    margin_y = int(cell["safe_margin_y"])
+    action = str(entry.get("action", ""))
+    # The action may already say how the loop closes; say it once.
+    loop_text = " The last frame loops back to the first." if entry.get("loop") and "loops back" not in action else ""
+    return f"""Create one horizontal sprite strip: exactly {frames} full-body frames of the game character `{character["id"]}`, state `{state}`, left to right in one row.
+
+Action: {action}.{loop_text}
+
+Identity: match the attached reference exactly: same face, hair, costume, props, palette, outline weight, body proportions and pixel density. Do not restyle or redesign. Animate the motion only.
+
+Layout: {frames} equal-width invisible {runtime_size} slots. Center one complete pose in each slot, spread evenly, no pose crossing into a neighbouring slot, feet on one ground line, at least {margin_x}px horizontal and {margin_y}px vertical padding, nothing cropped. The attached layout guide gives the slot positions only; do not draw it.
+
+Background: flat pure {chroma["name"]} {chroma["hex"]} across the whole image; no {chroma["hex"]} or chroma-adjacent colours in the character.
+
+Forbidden: effects, shadows, speed lines, motion blur, text, labels, grids, frames, scenery, detached pieces or stray pixels.
 
 Output only the sprite strip image."""
 
@@ -1097,6 +1132,12 @@ def _run(args: argparse.Namespace):
     # default so the request has one canonical representation. Downstream
     # validation derives its floor from this plus cell geometry via
     # sprite_gen.spec.subject.
+    # Prompt profile: absent or "full" = the default row prompt. "compact" is opt-in and recorded only when named.
+    profile = raw_request.get("prompt_profile", "full")
+    if profile not in PROMPT_PROFILES:
+        raise SystemExit(f"unknown prompt_profile: {profile!r} (expected one of {', '.join(PROMPT_PROFILES)})")
+    if profile != "full":
+        request["prompt_profile"] = profile
     subject = raw_request.get("subject")
     if subject is not None:
         if subject not in SUBJECTS:
