@@ -32,7 +32,8 @@ needs_node = pytest.mark.skipif(NODE is None, reason="node is not on PATH: the f
 def case(tmp_path_factory):
     root = tmp_path_factory.mktemp("face")
     request = tf.write_case(root / "case")
-    face_pack.build(request, root / "pack")
+    # Two workers: the default (one per core) multiplied by parallel test workers exhausts memory.
+    face_pack.build(request, root / "pack", jobs=2)
     pack = json.loads((root / "pack" / "face-pack.json").read_text(encoding="utf-8"))
     return root, pack
 
