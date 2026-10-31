@@ -302,18 +302,25 @@ def _planted(times: list[float]) -> list[Image.Image]:
     return [_reach(t) for t in times]
 
 
-def test_a_part_standing_still_on_both_sides_stays_where_it_stood():
+# At the smaller sizes a game shows the cells at (`--judge-scale`, tests/video/test_judge_scale.py) a foot dragged and
+# two poses laid over each other stay refused: the size takes back outline refusals only.
+JUDGED = (1.0, 0.6, 0.5, 0.35)
+
+
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_part_standing_still_on_both_sides_stays_where_it_stood(judge_scale):
     frames = _planted([0, 1, 2, 3, 3, 4, 5, 6])
-    out, record = held_fill.fill(frames, Between(_reach, range(7)), ring=False)
+    out, record = held_fill.fill(frames, Between(_reach, range(7)), ring=False, judge_scale=judge_scale)
     assert record["made"] == [4]
     assert out[4].tobytes() == _reach(3.5).tobytes()
     assert record["before"]["held_runs"][0]["filled"] is True
     assert record["contact"][0]["kept"] == 1.0
 
 
-def test_a_frame_between_that_drags_a_planted_foot_is_not_taken():
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_frame_between_that_drags_a_planted_foot_is_not_taken(judge_scale):
     frames = _planted([0, 1, 2, 3, 3, 4, 5, 6])
-    out, record = held_fill.fill(frames, Between(_reach, range(7), after=slid), ring=False)
+    out, record = held_fill.fill(frames, Between(_reach, range(7), after=slid), ring=False, judge_scale=judge_scale)
     assert record["made"] == []
     assert out[4].tobytes() == frames[4].tobytes()  # the held cell, as filmed
     run = record["before"]["held_runs"][0]
@@ -321,10 +328,77 @@ def test_a_frame_between_that_drags_a_planted_foot_is_not_taken():
     assert record["held_runs"] == [{"start": 3, "length": 2}]
 
 
-def test_a_frame_between_that_cross_fades_two_poses_is_not_taken():
+def _landing(time: float) -> Image.Image:
+    """The planter `time` frames in with its foot on the floor only from frame 3 to frame 4, lifted off it before and
+    after (higher the further from them): the foot is planted in the two frames a run between them is made from and in
+    no frame beside them."""
+    a = np.asarray(planter(4 * time)).copy()
+    lift = 0 if 3 <= time <= 4 else round(4 + 6 * min(abs(time - 3), abs(time - 4)))
+    foot = a[110:H_PLANTER - 8].copy()
+    a[110:H_PLANTER - 8] = 0
+    a[110 - lift:H_PLANTER - 8 - lift] = foot
+    return Image.fromarray(a, "RGBA")
+
+
+H_PLANTER = planter(0).height
+
+
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_frame_between_that_drags_a_foot_planted_only_in_its_two_frames_is_not_taken(judge_scale):
+    # The foot lands at frame 3 and lifts after frame 4: a part read as standing still only where the frames beside the
+    # two also hold it would read nothing here, and the drag would pass (`still_kept` reads the two frames alone).
+    frames = [_landing(t) for t in (0, 1, 2, 3, 3, 4, 5, 6)]
+    out, record = held_fill.fill(frames, Between(_landing, range(7), after=slid), ring=False, judge_scale=judge_scale)
+    assert record["made"] == []
+    assert out[4].tobytes() == frames[4].tobytes()
+    run = record["before"]["held_runs"][0]
+    assert run["filled"] is False and "contact" in run["faults"]
+    # Drawn where it belongs, the frame between is taken: the foot stays where it stood.
+    out, record = held_fill.fill(frames, Between(_landing, range(7)), ring=False, judge_scale=judge_scale)
+    assert record["made"] == [4] and out[4].tobytes() == _landing(3.5).tobytes()
+
+
+def _keyed(reach: float, seed: int, *, rim: range = range(0), shade: float = 0, grain: int = 0,
+           dx: int = 0) -> Image.Image:
+    """The planter with its foot keyed the way a cut from video is: its rim a pixel wider on both sides on the rows
+    `rim`, its colour falling off by `shade` levels toward the toe, `grain` levels of noise (seeded); moved `dx` px along
+    the floor."""
+    a = np.asarray(planter(reach)).astype(np.int16)
+    foot = a[110:H_PLANTER - 8].copy()
+    solid = foot[..., 3:] > 0
+    falloff = np.linspace(0, shade, foot.shape[1])[None, :, None]
+    noise = np.random.default_rng(seed).integers(-grain, grain + 1, size=foot[..., :3].shape)
+    foot[..., :3] = np.where(solid, np.clip(foot[..., :3] - falloff + noise, 0, 255), 0)
+    for y in rim:
+        foot[y - 110, 51], foot[y - 110, 68] = foot[y - 110, 52], foot[y - 110, 67]
+    a[110:H_PLANTER - 8] = 0
+    a[110:H_PLANTER - 8, dx:] = foot[:, :foot.shape[1] - dx]
+    return Image.fromarray(np.uint8(a), "RGBA")
+
+
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_frame_between_that_drags_a_keyed_foot_2_px_is_not_taken(judge_scale):
+    # A foot keyed from video: its rim a pixel wider on some rows in one frame and on others in the next, its shading
+    # and grain not the same twice. Each outline pixel both frames draw in one place in one colour is a part standing
+    # still. A reading that also asks the square round each pixel to be the same in both frames (3 px a side or more)
+    # leaves out the rows where the rim moved and the pixels under the grain, keeps little but the sole, and takes this
+    # drag (docs/loop-repair.md section 7).
+    a = _keyed(12, 1, rim=range(111, 132, 3), shade=20, grain=8)
+    b = _keyed(20, 2, rim=range(112, 132, 3), shade=12, grain=8)
+    dragged = _keyed(16, 3, shade=16, grain=8, dx=2)
+    kept = held_fill.still_kept(dragged, a, b)
+    assert kept["reads"] and kept["kept"] < held_fill.STILL_KEPT_MIN
+    assert "contact" in held_fill.judge(dragged, a, b, 0.5, reads=True, scale=judge_scale)[1]
+    in_place = _keyed(16, 3, shade=16, grain=8)
+    assert held_fill.still_kept(in_place, a, b)["kept"] == 1.0
+    assert "contact" not in held_fill.judge(in_place, a, b, 0.5, reads=True, scale=judge_scale)[1]
+
+
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_frame_between_that_cross_fades_two_poses_is_not_taken(judge_scale):
     # Two poses laid over each other at half strength: the double exposure an interpolator gives where it cannot follow.
     frames = shown_again(walk(), STALLED)[: N + 3]
-    out, record = held_fill.fill(frames, lambda a, b, t: Image.blend(a, b, t), ring=True)
+    out, record = held_fill.fill(frames, lambda a, b, t: Image.blend(a, b, t), ring=True, judge_scale=judge_scale)
     assert record["made"] == [] and [o.tobytes() for o in out] == [f.tobytes() for f in frames]
     assert all(not r["filled"] and "ghost" in r["faults"] for r in record["before"]["held_runs"])
 

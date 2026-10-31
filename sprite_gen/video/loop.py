@@ -61,7 +61,7 @@ from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import period as period_mod
 from sprite_gen.video import repair as repair_mod
 from sprite_gen.video import rife as rife_mod
-from sprite_gen.video.interpolation_quality import ghost_screen
+from sprite_gen.video.interpolation_quality import ghost_screen, judge_scale as quality_judge_scale
 from sprite_gen.video import evidence as evidence_mod
 from sprite_gen.video.frames import drop_specks
 from sprite_gen.util.console import utf8_streams
@@ -1414,13 +1414,13 @@ def _located(interpolate: rife_mod.Interpolate | None, made_by: list[dict[str, s
 
 
 def _fill_held(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *, ring: bool, same: list[bool],
-               mode: str, hold: int | None) -> tuple[list[Image.Image], dict[str, Any]]:
+               mode: str, hold: int | None, judge_scale: float) -> tuple[list[Image.Image], dict[str, Any]]:
     """`held_fill.fill` on the cut, with RIFE located only once a frame is to be made: a cut with no held cell, or only
     runs kept as filmed, needs no binary. The record names the interpolator that made the frames. A frame to make and no
     RIFE installed: the held cells are delivered as filmed, and the record says which and how to install it (`unmade`)."""
     made_by: list[dict[str, str]] = []
     lazy = _located(interpolate, made_by)
-    asked = partial(held_fill_mod.fill, ring=ring, same=same, mode=mode, hold=hold)
+    asked = partial(held_fill_mod.fill, ring=ring, same=same, mode=mode, hold=hold, judge_scale=judge_scale)
     try:
         frames, record = asked(frames, lazy)
     except rife_mod.RifeNotInstalled as exc:
@@ -1434,13 +1434,13 @@ def _fill_held(frames: list[Image.Image], interpolate: rife_mod.Interpolate | No
 
 
 def _upsample(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *, ring: bool, fps: float,
-              out_fps: float) -> tuple[list[Image.Image], dict[str, Any]]:
+              out_fps: float, judge_scale: float) -> tuple[list[Image.Image], dict[str, Any]]:
     """`held_fill.upsample` on the cut, with RIFE located only once a frame is to be made. No RIFE installed: the cut is
     delivered at its own rate, never with a frame shown again for each cell between, and the record says so."""
     made_by: list[dict[str, str]] = []
     lazy = _located(interpolate, made_by)
     try:
-        out, record = held_fill_mod.upsample(frames, lazy, ring=ring, fps=fps, out_fps=out_fps)
+        out, record = held_fill_mod.upsample(frames, lazy, ring=ring, fps=fps, out_fps=out_fps, judge_scale=judge_scale)
     except rife_mod.RifeNotInstalled as exc:
         return frames, {"asked": out_fps, "fps": fps, "applied": False, "cells": len(frames),
                         "why": "RIFE is not installed", "rife": str(exc), "install": rife_mod.install_command()}
@@ -2424,6 +2424,7 @@ def _cut_loop(
     air_retime: str | None = None,
     meters_per_px: float | None = None,
     contacts: list[str] | None = None,
+    judge_scale: float = held_fill_mod.JUDGE_SCALE,
 ) -> dict[str, Any]:
     state = state.strip().lower() if state else state
     if state == effect.STATE:
@@ -2469,6 +2470,10 @@ def _cut_loop(
         raise SystemExit(f"video-loop: unknown --body-turn {body_turn!r}; expected one of {', '.join(body_turn_mod.MODES)}")
     if fill_held not in held_fill_mod.MODES:
         raise SystemExit(f"video-loop: unknown --fill-held {fill_held!r}; expected one of {', '.join(held_fill_mod.MODES)}")
+    try:
+        judge_scale = quality_judge_scale(str(judge_scale))
+    except argparse.ArgumentTypeError as exc:
+        raise SystemExit(f"video-loop: {exc}") from exc
     if out_fps is not None:
         if not (math.isfinite(out_fps) and out_fps > fps):
             raise SystemExit(f"video-loop: --out-fps {out_fps:g} is not above the clip's {fps:g} fps: a cut is given at a higher "
@@ -2841,7 +2846,8 @@ def _cut_loop(
         cut_drawings = report_base["cycle_drawings"]
         hold = cut_drawings["hold"] if cut_drawings["hold"] is not None else report_base["drawings"]["hold"]
         try:
-            frames, report_base["held_fill"] = _fill_held(frames, interpolate, ring=ring, same=same, mode=fill_held, hold=hold)
+            frames, report_base["held_fill"] = _fill_held(frames, interpolate, ring=ring, same=same, mode=fill_held, hold=hold,
+                                                          judge_scale=judge_scale)
         except (ValueError, rife_mod.RifeUnavailable) as exc:
             error = (f"video-loop: {exc}; the cut shows a picture again and the frames between are to be made — fix RIFE, "
                      "or pass --fill-held off to cut it as filmed (docs/loop-repair.md section 7)")
@@ -3045,7 +3051,7 @@ def _cut_loop(
             try:
                 frames, report_base["air_retime"], retimed = _air_retime(
                     frames, interpolate, fps=fps, rate=out_fps or fps, floor=floor, times=[i + k for k in range(L)],
-                    declared=declared, asked=asked_air, meters_per_px=meters_per_px, facing=facing)
+                    declared=declared, asked=asked_air, meters_per_px=meters_per_px, facing=facing, judge_scale=judge_scale)
             except (ValueError, rife_mod.RifeUnavailable) as exc:
                 error = (f"video-loop: {exc}; --air-retime makes the frames between the clip's — fix RIFE, or cut it "
                          "without --air-retime (docs/video-pipeline.md, \"Root motion\")")
@@ -3067,7 +3073,8 @@ def _cut_loop(
     if out_fps is not None and retimed is None:
         # A rate above the clip's: every cell at its own time, made between the frames beside it (held_fill.upsample).
         try:
-            frames, held_record["out_fps"] = _upsample(frames, interpolate, ring=ring, fps=fps, out_fps=out_fps)
+            frames, held_record["out_fps"] = _upsample(frames, interpolate, ring=ring, fps=fps, out_fps=out_fps,
+                                                       judge_scale=judge_scale)
         except (ValueError, rife_mod.RifeUnavailable) as exc:
             error = (f"video-loop: {exc}; --out-fps {out_fps:g} makes the frames between the clip's — fix RIFE, or cut it "
                      "without --out-fps (docs/loop-repair.md section 7)")
@@ -3467,6 +3474,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                              "between the frames beside it — never a frame shown again. A loop keeps its cycle's seconds, a "
                              "cut played once runs from its first frame to its last; the strip metadata says `out_fps`. With no "
                              "RIFE installed the cut is delivered at its own rate, with a warning (docs/loop-repair.md section 7)")
+    parser.add_argument("--judge-scale", type=quality_judge_scale, default=held_fill_mod.JUDGE_SCALE, metavar="S",
+                        help="the size the game shows the cells at, S of the cut's size, over 0 and at most 1 (0.6 for cells "
+                             "drawn at 60 %%): a frame made between two frames (the held fill, --out-fps, --air-retime) and "
+                             "refused for its outline as cut is taken where its line keeps its ink as seen at that size; every "
+                             "other reading (smear, ghost, hole, doubled, contact) and every other refusal as at 1, the cells "
+                             "delivered at their own size, the strip metadata saying `judge_scale`. "
+                             "Default 1, the frames as cut (docs/loop-repair.md section 7)")
     parser.add_argument("--air-retime", default=None, metavar="gravity=G,air=T,speed=V",
                         help="a cut played once: give each air with its take-off and landing in the cut (the frames between the "
                              "last contact and the next) a length of T seconds, a gravity of G m/s² and a speed along of V m/s, "
@@ -3510,6 +3524,7 @@ def run(**kwargs: object) -> int:
         fill_held=str(kwargs.get("fill_held") or "auto"), out_fps=kwargs.get("out_fps"),  # type: ignore[arg-type]
         air_retime=kwargs.get("air_retime"), meters_per_px=kwargs.get("meters_per_px"),  # type: ignore[arg-type]
         contacts=kwargs.get("contact"),  # type: ignore[arg-type]
+        judge_scale=float(kwargs.get("judge_scale") or held_fill_mod.JUDGE_SCALE),  # type: ignore[arg-type]
     )
     summary = {k: payload[k] for k in ("state", "frames_total", "window", "cycle_seconds", "n_out", "delay_ms", "resampled_seam_ratio", "specks_dropped", "report")}
     summary["cycle"] = {k: payload["cycle"].get(k) for k in ("kind", "start", "length", "period_global", "ratio", "review_recommended", "half_period_guard", "fundamental")}

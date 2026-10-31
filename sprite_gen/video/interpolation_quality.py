@@ -9,12 +9,24 @@ is refused for; and the hole through a limb and the double outline a frame the a
 (docs/loop-repair.md section 4).
 """
 
+import argparse
+import math
 from collections.abc import Container
 
 from PIL import Image
 
 from sprite_gen._deps import np
 from sprite_gen.video import rife
+
+# The size a game shows the cells at, a share of the frames' own (`--judge-scale`): 1 reads a frame made between two
+# frames as cut and nothing else. Below 1, a frame refused for its outline as cut is taken where its line keeps its ink
+# as seen at that size (`rife.outline_faded`: the line's ink beside each edge pixel summed across rife.OUTLINE_REACH
+# pixels of that size, against the two it is made between, on the frames as cut): a thin line an interpolator softened
+# reads lost at the frames' own size and as kept where a game shows it smaller, while a line gone to the fill or legs
+# melted into one shape stay lost at any scale. The size takes back outline refusals only: every reading that names a
+# broken frame (smear, ghost, hole, doubled, and the held fill's contact) is read as at 1, its limits set in pixels of
+# the frames as cut, and the frames delivered are the size they were cut at (docs/loop-repair.md section 7).
+JUDGE_SCALE = 1.0
 
 SMEAR_WARN = 0.001
 OUTLINE_WARN = 0.05
@@ -54,6 +66,18 @@ HOLE_WARN = 0.0
 DOUBLED_WARN = 0.03
 
 
+def judge_scale(text: str) -> float:
+    """`--judge-scale`: a share over 0 and at most 1 of the frames' own size (`JUDGE_SCALE`)."""
+    try:
+        value = float(text)
+    except ValueError:
+        value = math.nan
+    if not (math.isfinite(value) and 0 < value <= 1):
+        raise argparse.ArgumentTypeError(f"--judge-scale {text}: a share of the frames' size over 0 and at most 1 "
+                                         "(the size the game shows them at; 1, as cut)")
+    return value
+
+
 def faults(measure: dict[str, float | None]) -> list[str]:
     """Smear inside the body or outline loss beyond both neighbours, and a ghost on the frame's
     own coverage where the measure carries its reading (`ghost`; None where the screen does not
@@ -64,7 +88,9 @@ def faults(measure: dict[str, float | None]) -> list[str]:
     lighter than the neighbours' by more than `rife.OUTLINE_SHIFT` (docs/loop-repair.md section 4).
     Where it is None (art painted without a line) and in the versioned measures of
     `video-loop-compare` and `video-loop-repair`, which carry `rife.smear` alone, the dark line
-    judges alone. A part torn where the measure carries how far the frame's passes disagree
+    judges alone. Where it also carries an `outline_faded` (how much of the edge's line faded as a game shows the
+    frames smaller, `--judge-scale`), an outline lost as cut is lost only where the line faded there too
+    (docs/loop-repair.md section 7). A part torn where the measure carries how far the frame's passes disagree
     (`torn`, the overlapped wrap's frames: `rife.passes`, `rife.torn`). A hole through a limb where
     it carries the holes the frame opened that neither neighbour has (`hole`, the cycle alignment's
     frames: `rife.hole`). A double outline where it carries how far a line one neighbour draws runs at
@@ -73,6 +99,9 @@ def faults(measure: dict[str, float | None]) -> list[str]:
     `rife.ghost_window`) and that is over GHOST_WINDOW_WARN."""
     shift = measure.get("outline_shift")
     outline = measure["outline_loss"] if shift is None else min(measure["outline_loss"], shift)
+    faded = measure.get("outline_faded")
+    if faded is not None:
+        outline = min(outline, faded)
     return ([*(["smear"] if measure["dark_excess"] > SMEAR_WARN else []),
              *(["outline"] if outline > OUTLINE_WARN else []),
              *(["ghost"] if ((measure.get("ghost") or 0.0) > GHOST_WARN
