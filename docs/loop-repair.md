@@ -1770,7 +1770,8 @@ and the cut's word is the first it rises and falls twice on, the same line in bo
 L (the cut is a cycle); `"four steps"` on L/2 (two cycles); `"one step"` on 2L (once in the cut); null where
 none. It returns `{says, by, lines, on, why, mark}`: `by`, `["screen", "feet"]` where the body said the
 word and `["order"]` where the order did, never one place, only where it says one; `lines`, each place's
-record, `{screen: {...}, feet: {...}}`, each `{says, bob, on, why}` (`says` in both places the cut's word,
+record, `{screen: {...}, feet: {...}}`, each `{says, bob, on, why}` (`says` in both places the body's word,
+the same in both, the cut's word where the body said it, the body's reading as it stood where the order did,
 `bob` that place's reading on the cut, `on` its reading at L/2 or 2L that said four steps or one step, with
 its `interval`, only for four steps or one step, `why` only where `says` is null; the record over the feet's
 `bob` and `on` record `over`, the row it was read over, `reach` or `sole`); `on`, for four steps or one step,
@@ -1832,9 +1833,11 @@ written. The loop report's `cycle.cut_witness` records `{cut, says, by, lines, o
 only where it says a word, `on` only for four steps or one step, `why` only where `says` is null, `held`
 only where held, `mark` only where marked); the printed summary's `cycle.cut_witness` records
 `{cut, says, by, held, mark}` (each where present). `by` is `["screen", "feet"]` or `["order"]`, never one
-place; `lines.screen.says` and `lines.feet.says` are the cut's word; `lines.*.bob`, `lines.*.on` and `on`
-carry `top_line`, the line that stood. The record over the feet's `bob` and `on` record `over`, the row it
-was read over (`reach` or `sole`). No key in the record tells a right hold from a false one.
+place; `lines.screen.says` and `lines.feet.says` are the body's word, the same in both, the cut's word where
+`by` is `["screen", "feet"]`, the body's reading as it stood where it is `["order"]`; `lines.*.bob`,
+`lines.*.on` and `on` carry `top_line`, the line that stood. The record over the feet's `bob` and `on`
+record `over`, the row it was read over (`reach` or `sole`). No key in the record tells a right hold from a
+false one.
 
 **What crossings cannot see**: a hold the step range absorbs (a 13-frame step held to 17), a still run of
 the feet together inside the clip as long as a pass, and a wobble that reaches the reading's sides at a
