@@ -443,6 +443,9 @@ the cells (`held_fill`); tell the person that one line: `poses/cells`, e.g. `24/
 RIFE the cells are delivered as filmed and a warning names the motion and the install line; `--fill-held off` cuts as
 before. A cut asked for above its clip's rate (`--out-fps 60` on a 24 fps clip) is made of frames between, never
 frames shown again ([loop repair](loop-repair.md) section 7).
+A cut a game shows smaller than it was cut is given `--judge-scale` at that share (`--judge-scale 0.6` for cells
+drawn at 60 %), so a frame between refused only for its outline as cut is taken back where its line keeps its ink at
+the size it is seen; every other reading and the frames delivered stay as cut ([loop repair](loop-repair.md) section 7).
 
 **The fundamental period: recorded, never cut on the pixels' word.** A motion that repeats every
 P frames repeats every 2P as well, and 2P can be the better repeat: a clip drawn on twos (a new
