@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased - A frame between whose line the interpolator softened but kept is taken back at the size the game shows the cells, its outline read for the ink it keeps there, a frame refused for anything else refused still, the contact reading's limit on parts that cross themselves named
+## v3.15.0 - A frame between whose line the interpolator softened but kept is taken back at the size the game shows the cells, its outline read for the ink it keeps there, a frame refused for anything else refused still, the contact reading's limit on parts that cross themselves named
 
 **Upgrading from 3.14.0: nothing changes unless `--judge-scale` is given; at its default of 1 every frame between is judged as cut, nothing is added, and outputs, reports and strip metadata keep their bytes. Given under 1, the share the game shows the cells at, it takes back a frame between refused for `outline` alone where its line keeps its ink at that size, and changes nothing else.**
 
