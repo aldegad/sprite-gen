@@ -237,15 +237,16 @@ def test_a_fixed_cut_of_one_cycle_whose_crossings_mark_cycles_is_counted_two_ste
     picture, the body rises and falls twice an interval, its arms swinging within its sides, the crossings mark cycles,
     and the cut of one cycle is two steps — not failed, as `--anchor motion-auto` counts its own cut (the parent engine
     counted it one step and stood the count aside). Its arms swinging past its sides, the bands they swing across move
-    on the beat and nothing witnesses the crossings cycles: left on steps, they count the cut one step, and it fails."""
-    for arm, cycles in ((ARMS_IN, True), (16, False)):
+    on the beat, but the rows down the middle of the body read a body rising whole, and it is counted the same (the
+    engine before read the bands alone, left the crossings on steps, counted the cut one step and failed it)."""
+    for arm in (ARMS_IN, 16):
         frames = [_behind(k, cycle=20, hold=2, arm=arm) for k in range(73)]
         D = loop_mod._distances(np.stack([loop_mod._small_features(f) for f in frames]))
         counted = loop_mod.fixed_count(frames, D, 20, 20)
-        assert counted["chosen_by"] == "caller" and counted["cycles"]["cycles"] is cycles, arm
-        assert counted["cycles"].get("unwitnessed", False) is not cycles, arm
-        assert counted["cut"]["verdict"] == ("two" if cycles else "refuted") and counted["cut"]["k"] == [2 if cycles else 1], arm
-        assert loop_mod.odd_count({"kind": "fixed", "step_count": counted}) is not cycles, arm
+        assert counted["chosen_by"] == "caller" and counted["cycles"]["cycles"] is True, arm
+        assert counted["cycles"].get("unwitnessed", False) is False, arm
+        assert counted["cut"]["verdict"] == "two" and counted["cut"]["k"] == [2], arm
+        assert loop_mod.odd_count({"kind": "fixed", "step_count": counted}) is False, arm
 
 
 def test_a_wrap_a_part_on_its_own_beat_leaves_open_says_so_in_its_failure_line(tmp_path: Path):

@@ -1956,7 +1956,7 @@ def _counted(cycle: dict[str, Any], steps: int, *, window: CutWindow, D: np.ndar
 def _witnessed(cycle: dict[str, Any], *, frames: list[Image.Image], view: str | None = None) -> dict[str, Any]:
     """The cut a walk's search and step count chose (`_by_steps`), held to one word before it is cut whichever way it
     was chosen — the search's, two steps by the clip's crossings, crossings read or not: the body's
-    (`local_cycle.cut_word`: its top line on the screen and over its feet, the first word either says), or where it says
+    (`local_cycle.cut_word`: one of its lines saying so both on the screen and over its feet), or where it says
     no cycle the order the feet are drawn in (`legs.feet_order`, as the step count reads it; not from the side `view`),
     recorded `cut_witness` — not the order where the cut is the search's, kept because none of the clip's two-step cuts
     closes (`declined`). Legs drawn alike loop as well on one step as on two, and crossings read off feet that slide,

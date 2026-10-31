@@ -20,8 +20,9 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from sprite_gen.video import align, local_cycle
+from sprite_gen.video import align, legs, local_cycle
 from sprite_gen.video import loop as loop_mod
+from tests.video import test_walk_steps as walks
 
 W, H = 100, 120
 
@@ -400,16 +401,29 @@ def test_video_set_leaves_a_loop_its_body_rises_and_falls_four_times_in_out_of_t
     assert f"four times in its cut ({local_cycle.FOUR_STEPS})" in capsys.readouterr().err
 
 
+def _drawn_four_steps() -> dict:
+    """The body's word on a cut of two cycles of a walker whose arms swing past its sides, off its frames (`cut_word`):
+    the loop `video-loop` writes where the cut it was asked for, or the one it was handed, runs two cycles long."""
+    frames = [walks._behind(k, cycle=20, hold=2) for k in range(walks.FRAMES)]
+    word = local_cycle.cut_word({**legs.strike_signals(frames), **legs.body_signals(frames)}, 40)
+    return {k: word.get(k) for k in ("says", "by")}
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("witness, reason", [({"held": "unwitnessed"}, local_cycle.UNWITNESSED),
-                                             ({"says": "four steps", "by": ["order"]}, local_cycle.FOUR_STEPS)])
+                                             ({"says": "four steps", "by": ["order"]}, local_cycle.FOUR_STEPS),
+                                             (_drawn_four_steps, local_cycle.FOUR_STEPS)],
+                         ids=["held", "four-steps-by-its-order", "four-steps-by-its-body"])
 def test_video_cycle_align_alone_stops_on_a_loop_whose_cut_its_report_holds_and_names_why(tmp_path, witness, reason):
     """`video-cycle-align` run on a set's loops alone, without the rows `video-set` marks, reads the report beside each
     loop (`align.held_cut`): a loop whose cut nothing witnessed whole cycles (`cycle-unwitnessed`) may hold half a
     cycle or two, and one cut two cycles long where its strip counts two steps (`cycle-four-steps`) returns half way at
     its second step, which alone reads as one cycle. Either stops the set before anything is rewritten, named under
     `suspects` with its reason and its report, never aligned as one cycle without a word (the parent engine aligned
-    both: the first at its own length, the second at twice the speed of the rest); a count settles it."""
+    both: the first at its own length, the second at twice the speed of the rest); a count settles it. A body read as
+    four steps stops it as the order does, witnessed on the screen and over its feet; the parent engine held such a
+    cut's arms against it, and the loop that reads two cycles now stops the set as one held does."""
+    witness = witness() if callable(witness) else witness
     four = reason == local_cycle.FOUR_STEPS
     dirs = [_cut(tmp_path, n, L, cycles=c, report=n == "N")
             for n, L, c in (("S", 20, 1), ("E", 24, 1), ("N", 40 if four else 28, 2 if four else 1))]
