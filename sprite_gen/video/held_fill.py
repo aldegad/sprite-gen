@@ -32,7 +32,9 @@ a clip that stalls now and then reads none. A frame made
 is judged as the frames the alignment makes are (`align.measure_made`, `faults`), for a part standing still on both
 sides of it (`still_kept`: a foot planted, a hand on a ledge), which must stand where it stood, and for a picture of its
 own (`same_picture`, `held`): one that shows the picture of either frame it is made between, or of the cell before it,
-is no frame between but a held cell again. A frame refused is made again at another fraction of RETIME_T within half a
+is no frame between but a held cell again. Where the size the game shows the cells at is given
+(`judge_scale`, `interpolation_quality.JUDGE_SCALE`), one refused for its outline as cut is taken where its line keeps
+its ink at that size; nothing else changes. A frame refused is made again at another fraction of RETIME_T within half a
 cell of its own time, else the run is kept as filmed and says why. One refused as `held` is made again only on the side
 away from the picture it showed, and not again where it showed both: the frames between run from one pose to the next,
 so one nearer that picture shows it too. A run is made whole or kept whole: half made it would step back.
@@ -55,7 +57,7 @@ from sprite_gen._deps import np
 from sprite_gen.video import held as held_mod
 from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import rife as rife_mod
-from sprite_gen.video.interpolation_quality import faults, ghost_screen, looks
+from sprite_gen.video.interpolation_quality import JUDGE_SCALE, faults, ghost_screen, looks
 
 MODES = ("auto", "off")
 PIXEL_SAME = 0.1  # a thumbnail pixel (premultiplied, 0..1) that changes by more than this has changed
@@ -162,14 +164,14 @@ def still_kept(frame: Image.Image, a: Image.Image, b: Image.Image) -> dict[str, 
 
 
 def judge(frame: Image.Image, a: Image.Image, b: Image.Image, t: float, *, reads: bool,
-          before: Image.Image | None = None) -> tuple[dict[str, Any], list[str]]:
-    """A frame made between `a` and `b` at `t`: the alignment's measure and faults (`align.measure_made`, `faults`),
-    `contact` where a part standing still on both sides does not stand where it stood (`still_kept`), and `held` where
-    it shows the same picture as `a`, `b` or the cell delivered `before` it (`same_picture`; which of them, `shows`): no
-    frame between, but a held cell again."""
+          before: Image.Image | None = None, scale: float = JUDGE_SCALE) -> tuple[dict[str, Any], list[str]]:
+    """A frame made between `a` and `b` at `t`: the alignment's measure and faults (`align.measure_made`, `faults`; an
+    outline lost as cut taken back where its line keeps its ink at `scale` of the frames' size), `contact` where a part standing still on both sides does not stand
+    where it stood (`still_kept`), and `held` where it shows the same picture as `a`, `b` or the cell delivered `before`
+    it (`same_picture`; which of them, `shows`): no frame between, but a held cell again."""
     from sprite_gen.video.align import measure_made  # align imports loop, which imports this module
 
-    measure = measure_made(frame, a, b, t, reads=reads)
+    measure = measure_made(frame, a, b, t, reads=reads, scale=scale)
     contact = still_kept(frame, a, b)
     shows = [name for name, other in (("a", a), ("b", b), ("before", before))
              if other is not None and same_picture(frame, (other,))]
@@ -179,9 +181,10 @@ def judge(frame: Image.Image, a: Image.Image, b: Image.Image, t: float, *, reads
 
 
 def _made(interpolate: rife_mod.Interpolate, a: Image.Image, b: Image.Image, t: float, window: tuple[float, float], *,
-          reads: bool, before: Image.Image | None = None) -> tuple[Image.Image | None, dict[str, Any]]:
+          reads: bool, before: Image.Image | None = None, scale: float = JUDGE_SCALE
+          ) -> tuple[Image.Image | None, dict[str, Any]]:
     """The frame between `a` and `b` at `t`, or at the fraction of RETIME_T nearest it inside `window` that is made
-    with no fault (`judge`, `before` the cell delivered before it, None where that is `a`) and, made only off its time,
+    with no fault (`judge` at `scale`, `before` the cell delivered before it, None where that is `a`) and, made only off its time,
     with its ghost band under RETIME_WINDOW_MAX in every window (align's bar for a frame made again at another
     fraction); None and what each try was refused for, where none is. The frames between run from `a` to `b`, so one
     that shows `a` or the cell before it again (`held`, `shows`) is made again only later, one that shows `b` only
@@ -194,7 +197,7 @@ def _made(interpolate: rife_mod.Interpolate, a: Image.Image, b: Image.Image, t: 
         if not lo < at < hi:
             continue
         frame = interpolate(a, b, at)
-        measure, wrong = judge(frame, a, b, at, reads=reads, before=before)
+        measure, wrong = judge(frame, a, b, at, reads=reads, before=before, scale=scale)
         seen = at != t and (measure.get("ghost_window") or 0.0) >= RETIME_WINDOW_MAX
         tries.append({"t": round(at, 4), "faults": wrong, **({"shows": measure["shows"]} if measure["shows"] else {}),
                       **({"window_over": RETIME_WINDOW_MAX} if seen and not wrong else {})})
@@ -236,13 +239,15 @@ def _fillable(run: dict[str, int], n: int, *, ring: bool, on: int | None = None)
 
 def fill(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *, ring: bool,
          same: Sequence[bool] | None = None, mode: str = "auto", reads: bool | None = None,
-         hold: int | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
+         hold: int | None = None, judge_scale: float = JUDGE_SCALE) -> tuple[list[Image.Image], dict[str, Any]]:
     """`frames` with each held run's cells made again between the run's first cell and the next pose (see the module),
     and the record: the reading before (`before`, each run `filled` or why not), the cells made (`made`, and how each
     was, `frames`), the cells left for want of an interpolator (`unmade`, `interpolate` None), the hold of a cut drawn
-    on twos or threes (`drawn`), and the reading of the frames returned (`cells`, `poses`, `held_runs`). `same` is the
-    steps' reading as filmed (`same_steps` of `frames` where None); `reads` whether the ghost screen reads the cut (read
-    on `frames` where None); `hold` the cut's held-drawings reading (`held.measure_cycle`)."""
+    on twos or threes (`drawn`), the size the game shows the cells at where not the frames' own
+    (`judge_scale`), and the reading of the frames returned (`cells`, `poses`, `held_runs`). `same` is the steps' reading as filmed
+    (`same_steps` of `frames` where None); `reads` whether the ghost screen reads the cut (read on `frames` where None);
+    `hold` the cut's held-drawings reading (`held.measure_cycle`); `judge_scale` the share of the frames' size the game
+    shows the cells at (`judge`)."""
     if mode not in MODES:
         raise ValueError(f"fill mode {mode!r}: one of {', '.join(MODES)}")
     same = list(same_steps(frames) if same is None else same)
@@ -271,7 +276,7 @@ def fill(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *,
             t = (c - a) / (b - a)
             half = 0.5 / (b - a)
             frame, how = _made(interpolate, frames[a], frames[b % n], t, (t - half, t + half), reads=reads,
-                               before=taken[-1][1] if taken else None)
+                               before=taken[-1][1] if taken else None, scale=judge_scale)
             tried.append({"cell": c, "between": [a, b % n], **how})
             if frame is None:
                 break
@@ -294,6 +299,8 @@ def fill(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *,
     }
     if on is not None:
         record["drawn"] = on
+    if judge_scale != JUDGE_SCALE:
+        record["judge_scale"] = judge_scale
     if unmade:
         record["unmade"] = {"cells": unmade}
     record.update(reading(same_steps(out)) if made else reading(same))
@@ -311,12 +318,14 @@ def times(n: int, fps: float, out_fps: float, *, ring: bool) -> list[float]:
 
 
 def at_times(frames: list[Image.Image], interpolate: rife_mod.Interpolate, at: Sequence[float], *, ring: bool,
-             spacing: float | Sequence[float], reads: bool | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
+             spacing: float | Sequence[float], reads: bool | None = None, judge_scale: float = JUDGE_SCALE
+             ) -> tuple[list[Image.Image], dict[str, Any]]:
     """`frames` at the times `at`, in frames of the cut: a cell on a frame's time is that frame, one between two frames
     showing one picture is that picture, any other is made between the two at its own time (`_made`, within half its
-    `spacing` of it: frames a cell, one for all or one each), and one no frame made is taken for is the nearer frame and
-    named (`shown_again`). The record: how many were made, the cells shown again, how each was (`frames`), and the
-    frame each cell is, None where it was made (`source_frames`)."""
+    `spacing` of it: frames a cell, one for all or one each; judged at `judge_scale`, the share of the frames' size the game shows them at), and one no
+    frame made is taken for is the nearer frame and named (`shown_again`). The record: how many were made, the cells
+    shown again, how each was (`frames`), the frame each cell is, None where it was made (`source_frames`), and the size
+    the game shows the cells at where not the frames' own (`judge_scale`)."""
     n = len(frames)
     same = same_steps(frames + ([frames[0]] if ring else []))
     if reads is None:
@@ -339,7 +348,7 @@ def at_times(frames: list[Image.Image], interpolate: rife_mod.Interpolate, at: S
         t = tau - a
         half = (spacing if isinstance(spacing, (int, float)) else spacing[k]) / 2
         frame, how = _made(interpolate, frames[a], frames[(a + 1) % n], t, (t - half, t + half), reads=reads,
-                           before=out[-1] if out else None)
+                           before=out[-1] if out else None, scale=judge_scale)
         if frame is None:
             out.append(frames[near % n])
             source_frames.append(near % n)
@@ -350,27 +359,29 @@ def at_times(frames: list[Image.Image], interpolate: rife_mod.Interpolate, at: S
         source_frames.append(None)
         made.append({"cell": k, "between": [a, (a + 1) % n], **how})
     return out, {"made": sum(1 for m in made if "taken" not in m), "shown_again": shown_again, "frames": made,
-                 "source_frames": source_frames}
+                 "source_frames": source_frames, **({"judge_scale": judge_scale} if judge_scale != JUDGE_SCALE else {})}
 
 
 def upsample(frames: list[Image.Image], interpolate: rife_mod.Interpolate, *, ring: bool, fps: float, out_fps: float,
-             reads: bool | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
-    """`frames` given at `out_fps` (`times`), each cell at its own time (`at_times`, within half a cell of it)."""
+             reads: bool | None = None, judge_scale: float = JUDGE_SCALE) -> tuple[list[Image.Image], dict[str, Any]]:
+    """`frames` given at `out_fps` (`times`), each cell at its own time (`at_times`, within half a cell of it,
+    judged at `judge_scale` of the frames' size)."""
     at = times(len(frames), fps, out_fps, ring=ring)
-    out, made = at_times(frames, interpolate, at, ring=ring, spacing=fps / out_fps, reads=reads)
+    out, made = at_times(frames, interpolate, at, ring=ring, spacing=fps / out_fps, reads=reads, judge_scale=judge_scale)
     return out, {"asked": out_fps, "fps": fps, "applied": True, "cells": len(out), "times": [round(x, 4) for x in at], **made}
 
 
 def public(record: dict[str, Any]) -> dict[str, Any]:
     """The record as the strip metadata carries it: the reading as delivered (`cells`, `poses`, `held_runs`), before
     (each run `filled` or why not, with its faults), the cells made and left, and the rate asked — not each try."""
-    out: dict[str, Any] = {k: record[k] for k in ("mode", "why", "drawn", "cells", "poses", "held_runs", "made") if k in record}
+    out: dict[str, Any] = {k: record[k] for k in ("mode", "why", "drawn", "judge_scale", "cells", "poses", "held_runs", "made")
+                           if k in record}
     before = record["before"]
     out["before"] = {"cells": before["cells"], "poses": before["poses"],
                      "held_runs": [{k: v for k, v in r.items() if k != "tries"} for r in before["held_runs"]]}
     if "unmade" in record:
         out["unmade"] = {k: record["unmade"][k] for k in ("cells", "why", "install") if k in record["unmade"]}
     if "out_fps" in record:
-        out["out_fps"] = {k: record["out_fps"][k] for k in ("asked", "fps", "applied", "cells", "made", "shown_again", "why", "install")
-                          if k in record["out_fps"]}
+        out["out_fps"] = {k: record["out_fps"][k] for k in ("asked", "fps", "applied", "judge_scale", "cells", "made",
+                                                             "shown_again", "why", "install") if k in record["out_fps"]}
     return out

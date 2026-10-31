@@ -67,6 +67,7 @@ import hashlib
 import importlib
 import io
 import json
+import math
 import os
 import platform
 import shutil
@@ -133,6 +134,18 @@ LINE_DEPTH = 2 * BLEED_DEPTH
 # is lighter by less than OUTLINE_SHIFT, or there is no line to lose, and the dark line judges alone: a frame
 # refused there is replaced by a filmed one, a melted frame kept would be delivered (docs/loop-repair.md section 4).
 OUTLINED = 0.75
+# `outline_faded`, read where a game shows the cells at a share of the frames' size (`--judge-scale`): a pixel of a made
+# frame's edge has its line where the line's ink beside it, summed across OUTLINE_REACH pixels of the size seen, is at
+# least this share of the weaker neighbour's at the same rank. A thin line the flow softened spreads its ink over a few
+# pixels and keeps it; a line gone to the fill, or legs melted into one shape of fill, has little or none.
+LINE_SEEN = 0.6
+# `outline_faded` reads a pair only where its ink sees both neighbours' lines: a neighbour whose edge `smear` reads as
+# outlined (a solid pixel under DARK_LUMA within OUTLINE_REACH) has, on more than this share of it, no solid pixel
+# darker than its fill in the square, where the fill read from LINE_DEPTH inside is the line itself (a line as wide as
+# that depth or wider, or a part drawn in its line's colour). There a line kept and a line lost both read no ink, and
+# legs melted out of a thick line would be taken: nothing is taken back, and the dark line judges alone, as
+# `outline_shift` leaves it under OUTLINED (docs/loop-repair.md section 7).
+LINE_UNSEEN = 0.02
 # `ghost`: part-covered pixels count where they make a region at least this many pixels thick. An
 # antialiased edge or a keyed strand of hair is a pixel or two wide and erodes away; the band a video
 # model leaves between two drawings, or a flow carries from it, does not.
@@ -652,6 +665,50 @@ def outlined(frame: Image.Image) -> float:
     if fill is None or not edge.any():
         return 0.0
     return round(float(np.mean((_luma(fill) - line)[edge] > OUTLINE_SHIFT)), 5)
+
+
+def _line_ink(frame: Image.Image, reach: int) -> tuple[np.ndarray, float]:
+    """Per pixel of a frame's coverage edge (alpha from PARTIAL_ALPHA's floor, as `smear` reads it), the ink of its line:
+    how far its solid pixels in the square `reach` pixels round it are darker than the colour from LINE_DEPTH inside,
+    pushed out over the edge (luma, 0..1, nothing where lighter), summed and divided by the square's side. A line
+    crossing the square gives its darkness times its width, however far the flow spread it inside the square. And the
+    share of the edge `smear` reads as outlined (a solid pixel under DARK_LUMA within OUTLINE_REACH) whose square has no
+    solid pixel darker than that fill: a line the ink does not see (LINE_UNSEEN). Empty and 0 where the frame has no
+    edge or nothing solid."""
+    x = np.asarray(frame.convert("RGBA"), dtype=np.float32) / 255.0
+    covered = x[..., 3] >= PARTIAL_ALPHA[0]
+    edge = covered & ~_mask(covered, 3, ImageFilter.MinFilter)
+    fill = _core_fill(x, LINE_DEPTH)
+    if fill is None or not edge.any():
+        return np.zeros(0, dtype=np.float32), 0.0
+    solid = x[..., 3] >= 0.5
+    dark = np.where(solid, np.clip(_luma(fill) - _luma(x), 0.0, None), 0.0)
+    side = 2 * reach + 1
+    summed = np.pad(np.pad(dark, reach).cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    h, w = dark.shape
+    box = summed[side:side + h, side:side + w] - summed[:h, side:side + w] - summed[side:side + h, :w] + summed[:h, :w]
+    outlined = _mask(solid & (_luma(x) < DARK_LUMA), 2 * OUTLINE_REACH + 1, ImageFilter.MaxFilter)[edge]
+    darker = (_square_min(-dark, reach, constant_values=0.0) < 0)[edge]
+    unseen = float((outlined & ~darker).sum()) / outlined.sum() if outlined.any() else 0.0
+    return (box / side)[edge], unseen
+
+
+def outline_faded(made: Image.Image, a: Image.Image, b: Image.Image, scale: float) -> float | None:
+    """The edge of a made frame whose line faded as a game shows the frames at `scale` of their size (`--judge-scale`),
+    read on the frames as given against the two neighbours rank by rank: each pixel of its coverage edge by its line's
+    ink (`_line_ink`) across OUTLINE_REACH pixels of the size seen (OUTLINE_REACH / `scale` here, rounded up), in order,
+    against the weaker of the two neighbours' at the same rank (their quantiles), counted where it is under LINE_SEEN of
+    that, as a fraction of its edge. A thin line the flow softened keeps its ink and is not counted; a line gone to the
+    fill, or legs melted into one shape of fill, is. None, nothing taken back, where one of the three has no edge or
+    nothing solid to read the line against, or where the ink does not see a neighbour's line on more than LINE_UNSEEN of
+    its outlined edge (a line as wide as LINE_DEPTH or wider) (docs/loop-repair.md section 7)."""
+    reach = math.ceil(OUTLINE_REACH / scale - 1e-9)
+    (im, _), (ia, unseen_a), (ib, unseen_b) = (_line_ink(f, reach) for f in (made, a, b))
+    if not (im.size and ia.size and ib.size) or max(unseen_a, unseen_b) > LINE_UNSEEN:
+        return None
+    rank = (np.arange(im.size) + 0.5) / im.size
+    weaker = np.minimum(np.quantile(ia, rank), np.quantile(ib, rank))
+    return round(float(np.mean(np.sort(im) < LINE_SEEN * weaker)), 5)
 
 
 def outline_shift(made: Image.Image, a: Image.Image, b: Image.Image) -> float | None:
