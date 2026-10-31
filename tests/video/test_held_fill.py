@@ -328,6 +328,111 @@ def test_a_frame_between_that_drags_a_planted_foot_is_not_taken(judge_scale):
     assert record["held_runs"] == [{"start": 3, "length": 2}]
 
 
+def _landing(time: float) -> Image.Image:
+    """The planter `time` frames in with its foot on the floor only from frame 3 to frame 4, lifted off it before and
+    after (higher the further from them): the foot is planted in the two frames a run between them is made from and in
+    no frame beside them."""
+    a = np.asarray(planter(4 * time)).copy()
+    lift = 0 if 3 <= time <= 4 else round(4 + 6 * min(abs(time - 3), abs(time - 4)))
+    foot = a[110:H_PLANTER - 8].copy()
+    a[110:H_PLANTER - 8] = 0
+    a[110 - lift:H_PLANTER - 8 - lift] = foot
+    return Image.fromarray(a, "RGBA")
+
+
+H_PLANTER = planter(0).height
+
+
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_frame_between_that_drags_a_foot_planted_only_in_its_two_frames_is_not_taken(judge_scale):
+    # The foot lands at frame 3 and lifts after frame 4: a part read as standing still only where the frames beside the
+    # two also hold it would read nothing here, and the drag would pass (`still_kept` reads the two frames alone).
+    frames = [_landing(t) for t in (0, 1, 2, 3, 3, 4, 5, 6)]
+    out, record = held_fill.fill(frames, Between(_landing, range(7), after=slid), ring=False, judge_scale=judge_scale)
+    assert record["made"] == []
+    assert out[4].tobytes() == frames[4].tobytes()
+    run = record["before"]["held_runs"][0]
+    assert run["filled"] is False and "contact" in run["faults"]
+    # Drawn where it belongs, the frame between is taken: the foot stays where it stood.
+    out, record = held_fill.fill(frames, Between(_landing, range(7)), ring=False, judge_scale=judge_scale)
+    assert record["made"] == [4] and out[4].tobytes() == _landing(3.5).tobytes()
+
+
+def _keyed(reach: float, seed: int, *, rim: range = range(0), shade: float = 0, grain: int = 0, contact: int = 0,
+           shadow: int | None = None, dx: int = 0, dy: int = 0) -> Image.Image:
+    """The planter with its foot keyed the way a cut from video is: its rim a pixel wider on both sides on the rows
+    `rim`, its colour falling off by `shade` levels toward the toe, `grain` levels of noise (seeded), its two rows above
+    the sole `contact` levels darker, and its shadow on the floor keyed with it 2 px under the sole on the columns whose
+    parity is `shadow`; the foot moved `dx` px along the floor and `dy` px down (up where negative)."""
+    a = np.asarray(planter(reach)).astype(np.int16)
+    foot = a[110:H_PLANTER - 8].copy()
+    solid = foot[..., 3:] > 0
+    falloff = np.linspace(0, shade, foot.shape[1])[None, :, None]
+    noise = np.random.default_rng(seed).integers(-grain, grain + 1, size=foot[..., :3].shape)
+    foot[..., :3] = np.where(solid, np.clip(foot[..., :3] - falloff + noise, 0, 255), 0)
+    foot[-3:-1, :, :3] = np.where(solid[-3:-1], np.clip(foot[-3:-1, :, :3] - contact, 0, 255), 0)
+    for y in rim:
+        foot[y - 110, 51], foot[y - 110, 68] = foot[y - 110, 52], foot[y - 110, 67]
+    a[110:H_PLANTER - 8] = 0
+    moved = np.zeros_like(a)
+    moved[110 + dy:H_PLANTER - 8 + dy, dx:] = foot[:, :foot.shape[1] - dx]
+    a = np.where(moved[..., 3:] > 0, moved, a)
+    if shadow is not None:
+        cols = [x for x in range(52, 68) if x % 2 == shadow]
+        a[H_PLANTER - 8:H_PLANTER - 6, cols] = (40, 30, 20, 255)
+    return Image.fromarray(np.uint8(a), "RGBA")
+
+
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_frame_between_that_drags_a_keyed_foot_2_px_is_not_taken(judge_scale):
+    # A foot keyed from video: its rim a pixel wider on some rows in one frame and on others in the next, its shading
+    # and grain not the same twice. Each outline pixel both frames draw in one place in one colour is a part standing
+    # still. A reading that also asks the square round each pixel to be the same in both frames (3 px a side or more)
+    # leaves out the rows where the rim moved and the pixels under the grain, keeps little but the sole, and takes this
+    # drag (docs/loop-repair.md section 7).
+    a = _keyed(12, 1, rim=range(111, 132, 3), shade=20, grain=8)
+    b = _keyed(20, 2, rim=range(112, 132, 3), shade=12, grain=8)
+    dragged = _keyed(16, 3, shade=16, grain=8, dx=2)
+    kept = held_fill.still_kept(dragged, a, b)
+    assert kept["reads"] and kept["kept"] < held_fill.STILL_KEPT_MIN
+    assert "contact" in held_fill.judge(dragged, a, b, 0.5, reads=True, scale=judge_scale)[1]
+    in_place = _keyed(16, 3, shade=16, grain=8)
+    assert held_fill.still_kept(in_place, a, b)["kept"] == 1.0
+    assert "contact" not in held_fill.judge(in_place, a, b, 0.5, reads=True, scale=judge_scale)[1]
+
+
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_frame_between_that_lifts_a_keyed_foot_2_px_is_not_taken(judge_scale):
+    # The keyed foot lifted 2 px off the floor: its sides move along themselves and stay within a pixel of where they
+    # stood, its sole does not.
+    a = _keyed(12, 1, rim=range(111, 132, 3), shade=20, grain=8)
+    b = _keyed(20, 2, rim=range(112, 132, 3), shade=12, grain=8)
+    lifted = _keyed(16, 3, shade=16, grain=8, dy=-2)
+    kept = held_fill.still_kept(lifted, a, b)
+    assert kept["reads"] and kept["kept"] < held_fill.STILL_KEPT_MIN
+    assert "contact" in held_fill.judge(lifted, a, b, 0.5, reads=True, scale=judge_scale)[1]
+    in_place = _keyed(16, 3, shade=16, grain=8)
+    assert "contact" not in held_fill.judge(in_place, a, b, 0.5, reads=True, scale=judge_scale)[1]
+
+
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_frame_between_that_lifts_a_keyed_foot_off_its_keyed_shadow_is_not_taken(judge_scale):
+    # Its shadow keyed with it under the sole, on the even columns in one frame and the odd in the next, and its two
+    # rows above the sole 40 levels darker in one: round the sole each frame draws what the other does not. A reading
+    # that keeps a still pixel only where most of the square round it is the same in both frames (80 or 60 % of a 5 px
+    # square, two thirds of a 3 px one, 80 % of its shape alone) or all of it leaves the sole out, keeps the sides, which
+    # a lift moves along themselves, and takes the lift (docs/loop-repair.md section 7).
+    a = _keyed(12, 1, rim=range(111, 132, 3), shade=20, grain=8, contact=40, shadow=0)
+    b = _keyed(20, 2, rim=range(112, 132, 3), shade=12, grain=8, shadow=1)
+    lifted = _keyed(16, 3, shade=16, grain=8, contact=20, dy=-2)
+    kept = held_fill.still_kept(lifted, a, b)
+    assert kept["reads"] and kept["kept"] < held_fill.STILL_KEPT_MIN
+    assert "contact" in held_fill.judge(lifted, a, b, 0.5, reads=True, scale=judge_scale)[1]
+    in_place = _keyed(16, 3, shade=16, grain=8, contact=20)
+    assert held_fill.still_kept(in_place, a, b)["kept"] == 1.0
+    assert "contact" not in held_fill.judge(in_place, a, b, 0.5, reads=True, scale=judge_scale)[1]
+
+
 @pytest.mark.parametrize("judge_scale", JUDGED)
 def test_a_frame_between_that_cross_fades_two_poses_is_not_taken(judge_scale):
     # Two poses laid over each other at half strength: the double exposure an interpolator gives where it cannot follow.
