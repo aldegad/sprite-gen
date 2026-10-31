@@ -302,18 +302,25 @@ def _planted(times: list[float]) -> list[Image.Image]:
     return [_reach(t) for t in times]
 
 
-def test_a_part_standing_still_on_both_sides_stays_where_it_stood():
+# At the smaller sizes a game shows the cells at (`--judge-scale`, tests/video/test_judge_scale.py) a foot dragged and
+# two poses laid over each other stay refused: the size takes back outline refusals only.
+JUDGED = (1.0, 0.6, 0.5, 0.35)
+
+
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_part_standing_still_on_both_sides_stays_where_it_stood(judge_scale):
     frames = _planted([0, 1, 2, 3, 3, 4, 5, 6])
-    out, record = held_fill.fill(frames, Between(_reach, range(7)), ring=False)
+    out, record = held_fill.fill(frames, Between(_reach, range(7)), ring=False, judge_scale=judge_scale)
     assert record["made"] == [4]
     assert out[4].tobytes() == _reach(3.5).tobytes()
     assert record["before"]["held_runs"][0]["filled"] is True
     assert record["contact"][0]["kept"] == 1.0
 
 
-def test_a_frame_between_that_drags_a_planted_foot_is_not_taken():
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_frame_between_that_drags_a_planted_foot_is_not_taken(judge_scale):
     frames = _planted([0, 1, 2, 3, 3, 4, 5, 6])
-    out, record = held_fill.fill(frames, Between(_reach, range(7), after=slid), ring=False)
+    out, record = held_fill.fill(frames, Between(_reach, range(7), after=slid), ring=False, judge_scale=judge_scale)
     assert record["made"] == []
     assert out[4].tobytes() == frames[4].tobytes()  # the held cell, as filmed
     run = record["before"]["held_runs"][0]
@@ -321,10 +328,11 @@ def test_a_frame_between_that_drags_a_planted_foot_is_not_taken():
     assert record["held_runs"] == [{"start": 3, "length": 2}]
 
 
-def test_a_frame_between_that_cross_fades_two_poses_is_not_taken():
+@pytest.mark.parametrize("judge_scale", JUDGED)
+def test_a_frame_between_that_cross_fades_two_poses_is_not_taken(judge_scale):
     # Two poses laid over each other at half strength: the double exposure an interpolator gives where it cannot follow.
     frames = shown_again(walk(), STALLED)[: N + 3]
-    out, record = held_fill.fill(frames, lambda a, b, t: Image.blend(a, b, t), ring=True)
+    out, record = held_fill.fill(frames, lambda a, b, t: Image.blend(a, b, t), ring=True, judge_scale=judge_scale)
     assert record["made"] == [] and [o.tobytes() for o in out] == [f.tobytes() for f in frames]
     assert all(not r["filled"] and "ghost" in r["faults"] for r in record["before"]["held_runs"])
 

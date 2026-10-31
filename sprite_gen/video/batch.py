@@ -38,6 +38,7 @@ from sprite_gen.video import canvas as canvas_mod
 from sprite_gen.video import frames as frames_mod
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import held_fill as held_fill_mod
+from sprite_gen.video.interpolation_quality import judge_scale as judge_scale_type
 from sprite_gen.video import local_cycle
 from sprite_gen.video import root_motion as root_motion_mod
 from sprite_gen.video import align as align_mod
@@ -736,6 +737,7 @@ def run_item(
     out_fps: float | None = None,
     air_retime: str | None = None,
     meters_per_px: float | None = None,
+    judge_scale: float = held_fill_mod.JUDGE_SCALE,
 ) -> dict[str, Any]:
     """One (direction, state) item, canvas to loop. `play` is the request's play mode for it (`play.MODES`; None, the
     state's preset) and `motion` the caller's own motion text in place of the state's sentence. `anchor` is the
@@ -878,7 +880,8 @@ def run_item(
         lp = loop_mod.run_loop(Path(fr["keyed_dir"]), item_dir / "loop", fps=float(fr["fps"]), state=state, min_len=None, max_len=None, n_out=None, seam_max=loop_mod.SEAM_RATIO_MAX, name=item, report_path=item_dir / "loop.report.json", anchor=anchor_for(state, cut, anchor), body_height=body_height,
                                cycle_mode=cut,
                                facing=facing if direction in handed_mod.LATERAL_VIEWS else "right", view=direction,
-                               fill_held=fill_held, out_fps=out_fps, air_retime=air_retime, meters_per_px=meters_per_px)
+                               fill_held=fill_held, out_fps=out_fps, air_retime=air_retime, meters_per_px=meters_per_px,
+                               judge_scale=judge_scale)
         result["loop"] = {"kind": lp["cycle"].get("kind", "periodic"), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "drift_px": lp["strip"].get("drift_px", 0), "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
         result["loop"]["review_recommended"] = lp["cycle"].get("review_recommended", False)
         result["loop"]["half_period_guard"] = lp["cycle"].get("half_period_guard")
@@ -911,6 +914,7 @@ def run_item(
         result["loop"]["poses"] = held_fill_mod.said(held)
         result["loop"]["held_fill"] = {"before": held_fill_mod.said(held["before"]), "held_runs": held["held_runs"],
                                        "made": held["made"], **({"unmade": held["unmade"]} if "unmade" in held else {}),
+                                       **({"judge_scale": held["judge_scale"]} if "judge_scale" in held else {}),
                                        **({"out_fps": held["out_fps"]} if "out_fps" in held else {})}
         if "root_motion" in lp:
             # A cut played once: each air's seconds and apex (docs/video-pipeline.md, "Root motion").
@@ -1012,7 +1016,7 @@ def left_out_why(reasons: list[str], *, stands: bool = False, one_step: bool = F
 
 
 def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpolate: Any = None, between: str = align_mod.DEFAULT_BETWEEN,
-                feet: dict[str, str] | None = None) -> dict[str, Any]:
+                feet: dict[str, str] | None = None, judge_scale: float = align_mod.JUDGE_SCALE) -> dict[str, Any]:
     """One cycle length per gait state across the set's directions (`video-cycle-align`,
     docs/loop-repair.md section 4). A state filmed in fewer than two directions has nothing to
     match. A failure is recorded under its state and the batch reports it; the loops stay as cut.
@@ -1062,7 +1066,8 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
         try:
             report = align_mod.align_set([Path(r["dir"]) / "loop" for r in rows], interpolate=interpolate,
                                          report_path=root / f"{state}.cycle-align.json", between=between,
-                                         views=[_align_view(r) for r in rows], state=state, feet=told)
+                                         views=[_align_view(r) for r in rows], state=state, feet=told,
+                                         judge_scale=judge_scale)
         except rife_mod.RifeNotInstalled as exc:
             out[state] = {"ok": True, "applied": False, "reason": "rife-not-installed", "why": "RIFE not installed — each loop keeps its own length",
                           "rife": str(exc), "install": rife_mod.install_command()}
@@ -1186,6 +1191,7 @@ def run_set(
     out_fps: float | None = None,
     air_retime: str | None = None,
     meters_per_px: float | None = None,
+    judge_scale: float = held_fill_mod.JUDGE_SCALE,
 ) -> dict[str, Any]:
     """`bases` maps a view to its still; `facing` is right, left or `right,left` (`facings_of`), and a view filmed
     both ways is keyed `view@right` and `view@left` (`resolve_bases`). `handed` (`handedness.parse`) puts each
@@ -1258,13 +1264,14 @@ def run_set(
         return prepare_side
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
-        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=b, root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=f, facing_fix=facing_fix, prepare_side=side_preparer(f), body_height=body_height, fit=fit, decontam=decontam, walk_start=walk_start, redraw_runner=redraw_runner, still_provider=still_provider, handed=handed, body_plan=body_plan, **({"end_frame": end_frames[i]} if end_frames and i in end_frames else {}), **({"play": plays[i]} if i in plays else {}), **({"motion": motions[i]} if i in motions else {}), fill_held=fill_held, out_fps=out_fps, air_retime=air_retime, meters_per_px=meters_per_px): i for i, d, s, f, b in items}
+        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=b, root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=f, facing_fix=facing_fix, prepare_side=side_preparer(f), body_height=body_height, fit=fit, decontam=decontam, walk_start=walk_start, redraw_runner=redraw_runner, still_provider=still_provider, handed=handed, body_plan=body_plan, **({"end_frame": end_frames[i]} if end_frames and i in end_frames else {}), **({"play": plays[i]} if i in plays else {}), **({"motion": motions[i]} if i in motions else {}), fill_held=fill_held, out_fps=out_fps, air_retime=air_retime, meters_per_px=meters_per_px, judge_scale=judge_scale): i for i, d, s, f, b in items}
         for fut in as_completed(futures):
             r = fut.result()
             results.append(r)
             print(json.dumps({k: r[k] for k in ("item", "ok") if k in r} | ({"error": r["error"]} if not r.get("ok") else {"seam": r["loop"]["seam_ratio"]}), ensure_ascii=False), flush=True)
     results.sort(key=lambda r: [i for i, *_ in items].index(r["item"]))
-    aligned = align_gaits(results, root, align_cycles, interpolate=interpolate, between=align_between, feet=align_feet)
+    aligned = align_gaits(results, root, align_cycles, interpolate=interpolate, between=align_between, feet=align_feet,
+                          judge_scale=judge_scale)
     table = write_table(results, root / "table.md", both=both)
     failed = [r["item"] for r in results if not r.get("ok")] + [f"cycle-align:{st}" for st, a in aligned.items() if not a.get("ok")]
     # What the set left undone for want of RIFE — never a failure, never silent.
@@ -1404,6 +1411,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--out-fps", type=float, default=None,
                         help="give each cut at this rate, above its clip's, made of frames between (video-loop --out-fps); with "
                              "a walk or run filmed in two or more directions, pass --align-cycles off")
+    parser.add_argument("--judge-scale", type=judge_scale_type, default=held_fill_mod.JUDGE_SCALE, metavar="S",
+                        help="the size the game shows the cells at, S of the cut's size, over 0 and at most 1: a frame made "
+                             "between two frames and refused for its outline as cut is taken where its line keeps its ink at "
+                             "that size, in each cut (video-loop --judge-scale) and in the alignment (video-cycle-align "
+                             "--judge-scale). Default 1, the frames as cut")
     parser.add_argument("--air-retime", default=None, metavar="gravity=G,air=T,speed=V",
                         help="each cut played once with an air in it: that air given a length, a gravity and a speed of its own "
                              "(video-loop --air-retime); each item's `loop.air` says each air's seconds and apex")
@@ -1434,6 +1446,7 @@ def run(**kwargs: object) -> int:
         motion=_parse_keyed(list(kwargs.get("motion") or []), "--motion") or None,  # type: ignore[arg-type]
         fill_held=str(kwargs.get("fill_held") or "auto"), out_fps=kwargs.get("out_fps"),  # type: ignore[arg-type]
         air_retime=kwargs.get("air_retime"), meters_per_px=kwargs.get("meters_per_px"),  # type: ignore[arg-type]
+        judge_scale=float(kwargs.get("judge_scale") or held_fill_mod.JUDGE_SCALE),  # type: ignore[arg-type]
     )
     return 0 if not payload["failed"] else 1
 

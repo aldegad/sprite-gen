@@ -224,9 +224,12 @@ def _pieces(L: int, spans: Sequence[dict[str, Any]], *, fps: float, rate: float,
 
 def retime(frames: list[Image.Image], interpolate: rife_mod.Interpolate, *, fps: float, rate: float, floor: int | None,
            times: Sequence[float], declared: Sequence[tuple[str, list[list[int]]]], asked: dict[str, float],
-           meters_per_px: float | None, facing: str = "right") -> tuple[list[Image.Image], dict[str, Any], dict[str, Any] | None]:
+           meters_per_px: float | None, facing: str = "right", judge_scale: float = held_fill_mod.JUDGE_SCALE
+           ) -> tuple[list[Image.Image], dict[str, Any], dict[str, Any] | None]:
     """The cut with each air that has a take-off and a landing retimed (see the module), at `rate` cells a second.
-    `times` are the frames' times in frames of the clip (for the declared contacts). Returns the frames, the record, and
+    `times` are the frames' times in frames of the clip (for the declared contacts); `judge_scale` the share of the
+    frames' size the game shows the cells at, where a frame made and refused for its outline as cut is taken if its
+    line keeps its ink (held_fill.at_times). Returns the frames, the record, and
     what the cut's reading needs where it was retimed (None where not): each cell's time in frames of the cut (`times`),
     the frame each cell is, None where it was made (`source_frames`, held_fill.at_times'), what each cell touches (`touch`), and
     the canvas the cells were moved on (`offset`, where the frames' (0, 0) is)."""
@@ -267,7 +270,7 @@ def retime(frames: list[Image.Image], interpolate: rife_mod.Interpolate, *, fps:
             at.append(start + (end - start) * j / cells)
             spacing.append((end - start) / cells)
             piece_of.append((which, j, cells))
-    made_frames, made = held_fill_mod.at_times(frames, interpolate, at, ring=False, spacing=spacing)
+    made_frames, made = held_fill_mod.at_times(frames, interpolate, at, ring=False, spacing=spacing, judge_scale=judge_scale)
     # Each cell moved: none up to the first take-off; an air cell onto its parabola; from a landing on, along.
     moves: list[tuple[int, int]] = []
     along_px = 0
@@ -330,7 +333,8 @@ def retime(frames: list[Image.Image], interpolate: rife_mod.Interpolate, *, fps:
         airs.append(row)
     same = held_fill_mod.same_steps(out)
     record.update(applied=True, rate=rate, air=airs, made=made["made"], shown_again=made["shown_again"],
-                  canvas_offset=list(offset), **held_fill_mod.reading(same))
+                  canvas_offset=list(offset), **{k: made[k] for k in ("judge_scale",) if k in made},
+                  **held_fill_mod.reading(same))
     record["frames"] = made["frames"]
     return out, record, {"times": at, "source_frames": made["source_frames"], "touch": cell_touch, "offset": offset}
 

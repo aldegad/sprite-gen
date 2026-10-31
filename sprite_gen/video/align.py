@@ -117,7 +117,9 @@ from sprite_gen.video import local_cycle
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import period as period_mod
 from sprite_gen.video import rife as rife_mod
-from sprite_gen.video.interpolation_quality import CROSSFADE_LOOK, GHOST_WARN, SMEAR_WARN, OUTLINE_WARN, clean_beside, faults, ghost_screen, looks
+from sprite_gen.video import interpolation_quality as quality_mod
+from sprite_gen.video.interpolation_quality import (CROSSFADE_LOOK, GHOST_WARN, JUDGE_SCALE, SMEAR_WARN, OUTLINE_WARN,
+                                                     clean_beside, faults, ghost_screen, looks)
 from sprite_gen.util.console import utf8_streams
 
 REPORT_KIND = "sprite-gen-video-cycle-align-report"
@@ -326,20 +328,27 @@ def _retake_line(name: str, r: dict[str, Any], reason: str, row: dict[str, Any] 
             "fixes it; no interpolator draws legs that swap places across a gap this wide (docs/loop-repair.md section 4)")
 
 
-def measure_made(frame: Image.Image, a: Image.Image, b: Image.Image, t: float, *, reads: bool) -> dict[str, Any]:
+def measure_made(frame: Image.Image, a: Image.Image, b: Image.Image, t: float, *, reads: bool,
+                 scale: float = JUDGE_SCALE) -> dict[str, Any]:
     """Everything a frame made between `a` and `b` at `t` is judged by (`faults`): what it added and the outline it lost
     (`rife.smear`, `rife.outline_shift`), its ghost band over the whole body and in windows of it (`rife.ghost`,
     `rife.ghost_window` with where that window lies, `ghost_window_at`; None where the ghost screen does not read the loop,
     `reads`), its cross-fade (`rife.crossfade`, named, not judged), its holes (`rife.hole`) and double outline
-    (`rife.doubled`)."""
+    (`rife.doubled`), all on the frames as given. Where `scale` is under 1 (the share of their size a game shows them at),
+    also how much of its edge's line faded as seen there (`outline_faded`, `rife.outline_faded`), which takes back an
+    outline lost as cut where the line keeps its ink at that size (`faults`)."""
     window, at = rife_mod.ghost_window(frame) if reads else (None, None)
-    return {**rife_mod.smear(frame, a, b), "outline_shift": rife_mod.outline_shift(frame, a, b),
-            "ghost": rife_mod.ghost(frame) if reads else None, "ghost_window": window, "ghost_window_at": list(at) if at else None,
-            "crossfade": rife_mod.crossfade(frame, a, b, t), "hole": rife_mod.hole(frame, a, b, t), "doubled": rife_mod.doubled(frame, a, b)}
+    measure = {**rife_mod.smear(frame, a, b), "outline_shift": rife_mod.outline_shift(frame, a, b),
+               "ghost": rife_mod.ghost(frame) if reads else None, "ghost_window": window, "ghost_window_at": list(at) if at else None,
+               "crossfade": rife_mod.crossfade(frame, a, b, t), "hole": rife_mod.hole(frame, a, b, t), "doubled": rife_mod.doubled(frame, a, b)}
+    if scale != JUDGE_SCALE:
+        measure["outline_faded"] = rife_mod.outline_faded(frame, a, b, scale)
+    return measure
 
 
 def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Interpolate | None,
-             *, between: str = DEFAULT_BETWEEN, cells_from: list[dict[str, Any]] | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
+             *, between: str = DEFAULT_BETWEEN, cells_from: list[dict[str, Any]] | None = None,
+             judge_scale: float = JUDGE_SCALE) -> tuple[list[Image.Image], dict[str, Any]]:
     """`frames` as one cycle, resampled to `length` frames at times k·L/length (offset 0). Where `cells_from` is a
     list, where each frame came from is appended to it: `{"source": i}` for a frame of `frames` taken as it is, `{"between":
     [i, j], "t": t}` for one made between two.
@@ -348,7 +357,9 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
     lost measured (`rife.smear`), its own ghost read (`rife.ghost`), the holes it opened inside its
     silhouette that neither source frame has there, in place, carried by the whole figure's motion, or
     one hole of each source frame, alike and on its way (`rife.hole`), how far a line one source frame
-    draws runs at part strength in its own place (`rife.doubled`), and judged (`faults`); `between`
+    draws runs at part strength in its own place (`rife.doubled`), and judged (`faults`) — an outline lost as cut
+    taken back where its line keeps its ink at `judge_scale` of the frames' size (`measure_made`; `judge_scale` in the
+    facts where not 1); `between`
     auto keeps a made frame with no fault and takes the nearer source frame where it has one, rife
     keeps every made frame, nearest makes none and takes the nearer source frame (the motion keeps the
     filmed frames at up to half a frame off their time). Every made frame is listed in `smear` with
@@ -383,7 +394,7 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
 
     def made(a: Image.Image, b: Image.Image, t: float) -> tuple[Image.Image, dict[str, Any], list[str]]:
         frame = interpolate(a, b, t)  # type: ignore[misc]
-        measure = measure_made(frame, a, b, t, reads=screen["reads"])
+        measure = measure_made(frame, a, b, t, reads=screen["reads"], scale=judge_scale)
         return frame, measure, faults(measure)
 
     def clean(k: int, first: int, other: int | None) -> int:
@@ -447,6 +458,8 @@ def resample(frames: list[Image.Image], length: int, interpolate: rife_mod.Inter
     facts: dict[str, Any] = {"from": count, "to": length, "between": between, "taken": length - len(made_at),
                              "made_by_rife": len(made_at), "made_at": made_at, "ghost_screen": screen, "ghost_at": ghost_at,
                              "beat": beat}
+    if judge_scale != JUDGE_SCALE:
+        facts["judge_scale"] = judge_scale
     if between != "rife":
         facts["nearest_at"] = nearest_at
     if between != "nearest":
@@ -1111,6 +1124,7 @@ def _fault_line(name: str, m: dict[str, Any], ghost: dict[str, Any] | None = Non
               if "smear" in m["faults"] else []),
             *([f"lost its outline on {100 * m['outline_loss']:.2f} % of its edge beyond either source frame beside it"
                + ("" if m["outline_shift"] is None else f", {100 * m['outline_shift']:.2f} % lighter than theirs at the same rank")
+               + ("" if m.get("outline_faded") is None else f", {100 * m['outline_faded']:.2f} % faded at the size the game shows it")
                + " — a melted or ghost limb"] if "outline" in m["faults"] else []),
             *([f"carries {_ghost_words(m['ghost'])} — a ghost" if (m.get("ghost") or 0.0) > GHOST_WARN else
                f"carries a part-covered band over {100 * m['ghost_window']:.2f} % of the solid pixels in a band {100 * rife_mod.GHOST_BAND:g} % "
@@ -1196,7 +1210,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
               report_path: Path | None = None, between: str = DEFAULT_BETWEEN, views: list[str | None] | None = None,
               start_foot: str = START_FOOT, multi_cycle: str = "fail", cycles: dict[str, int] | None = None,
               state: str | None = None, feet: dict[str, str] | None = None, between_cache: Path | None = None,
-              same_foot: str = "warn") -> dict[str, Any]:
+              same_foot: str = "warn", judge_scale: float = JUDGE_SCALE) -> dict[str, Any]:
     """Resample every loop of a set to one length (default: the median), turned to a foot strike —
     where `views` (one per loop: `front`, `back`, `side@right`, `front_diagonal@left`, …) lets it,
     the strike of the same own foot (`start_foot`) in every loop.
@@ -1238,6 +1252,10 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         raise SystemExit(f"video-cycle-align: --multi-cycle must be one of {', '.join(MULTI_CYCLE)}, not {multi_cycle!r}")
     if same_foot not in SAME_FOOT:
         raise SystemExit(f"video-cycle-align: --same-foot must be one of {', '.join(SAME_FOOT)}, not {same_foot!r}")
+    try:
+        judge_scale = quality_mod.judge_scale(str(judge_scale))
+    except argparse.ArgumentTypeError as exc:
+        raise SystemExit(f"video-cycle-align: {exc}") from exc
     for v in views or []:
         if v is not None:
             name, _, facing = v.partition("@")
@@ -1302,7 +1320,9 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         # holds one cycle, or the number it holds (each loop's `settle` lists the choices).
         rerun = ["sprite-gen video-cycle-align", *(f"--loop-dir {d}" for d, *_ in loops),
                  *(f"--view {v}" for v in (views or []) if v is not None), *([f"--length {length}"] if length is not None else []),
-                 *([f"--between {between}"] if between != DEFAULT_BETWEEN else []), *([f"--start-foot {start_foot}"] if start_foot != START_FOOT else []),
+                 *([f"--between {between}"] if between != DEFAULT_BETWEEN else []),
+                 *([f"--judge-scale {judge_scale:g}"] if judge_scale != JUDGE_SCALE else []),
+                 *([f"--start-foot {start_foot}"] if start_foot != START_FOOT else []),
                  *([f"--state {state}"] if state else []), *([f"--report {report_path}"] if report_path is not None else []),
                  *([f"--between-cache {cache.directory}"] if cache is not None else []),
                  *(f"--cycles {loops[i][0]}={k}" for i, k in sorted(given.items())),
@@ -1349,7 +1369,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
                  else list(range(len(frames))))
         provenance: list[dict[str, Any]] = []
         try:
-            out, facts = resample(frames, target, lazy, between=between, cells_from=provenance)
+            out, facts = resample(frames, target, lazy, between=between, cells_from=provenance, judge_scale=judge_scale)
             strike = foot_strike(out, view=view, foot=start_foot, given=told.get(i))
         except rife_mod.RifeNotInstalled as exc:
             raise rife_mod.RifeNotInstalled(f"{d}: {exc}") from exc
@@ -1446,7 +1466,8 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
                  f"{r['foot']['cue']} said {r['foot_disagrees'][0]}; started as given" for r in rows if r.get("foot_disagrees")]
     report = {"kind": REPORT_KIND, "applied": True, "length": target,
               "length_rule": "requested" if length is not None else "median",
-              "between": between, "start_foot": start_foot, "retake": retakes, "warnings": warnings,
+              "between": between, **({"judge_scale": judge_scale} if judge_scale != JUDGE_SCALE else {}),
+              "start_foot": start_foot, "retake": retakes, "warnings": warnings,
               "lengths": lengths, "multi_cycle": multi_cycle, "suspects": suspects, "unnamed_feet": unnamed,
               "cycles_given": {str(loops[i][0]): k for i, k in given.items()},
               "feet_given": {str(loops[i][0]): f for i, f in told.items()},
@@ -1496,6 +1517,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                              "measured in the report (`smear`); under auto and nearest a filmed ghost frame gives way to a clean source "
                              "frame beside it (`ghost_at`); a made frame kept that cross-fades two drawings inside its outline is kept "
                              "and named to look at (`look`)")
+    parser.add_argument("--judge-scale", type=quality_mod.judge_scale, default=JUDGE_SCALE, metavar="S",
+                        help="the size the game shows the cells at, S of the loops' size, over 0 and at most 1 (0.6 for cells "
+                             "drawn at 60 %%): a frame made between two source frames (--between auto) and refused for its "
+                             "outline as cut is kept where its line keeps its ink as seen at that size; every other reading "
+                             "(smear, ghost, hole, doubled) and every other refusal as at 1, the cells delivered at their own "
+                             "size. Default 1, the frames as cut (docs/loop-repair.md "
+                             "section 7)")
     parser.add_argument("--same-foot", choices=SAME_FOOT, default="warn",
                         help="a loop seen from the back or a back diagonal that steps the same foot twice in a row (the picture's "
                              "halves of its feet lifting, read round the loop): warn (default) names it in the report (`same_foot`, "
@@ -1543,15 +1571,16 @@ def run(**kwargs: object) -> int:
                            multi_cycle=str(kwargs.get("multi_cycle") or "fail"), cycles=parse_cycles(list(kwargs.get("cycles") or [])),  # type: ignore[arg-type]
                            state=kwargs.get("state"), feet=parse_feet(list(kwargs.get("foot") or [])),  # type: ignore[arg-type]
                            between_cache=kwargs.get("between_cache"),  # type: ignore[arg-type]
-                           same_foot=str(kwargs.get("same_foot") or "warn"))
+                           same_foot=str(kwargs.get("same_foot") or "warn"),
+                           judge_scale=float(kwargs.get("judge_scale") or JUDGE_SCALE))  # type: ignore[arg-type]
     except rife_mod.RifeNotInstalled as exc:
         # Asked for by name, so no RIFE is a failure, never a quiet skip (video-set skips with a warning).
         raise SystemExit(f"video-cycle-align: {exc}; frames between source frames are made by RIFE — "
                          f"`{rife_mod.install_command()}` (docs/loop-repair.md)") from exc
     for line in report["warnings"]:
         print(f"video-cycle-align: warning: {line}", file=sys.stderr)
-    print(json.dumps({k: report[k] for k in ("length", "lengths", "cycles_given", "feet_given", "between", "made_by_rife", "replaced", "retake",
-                                             "unnamed_feet", "cycle_seconds", "between_cache")}
+    print(json.dumps({k: report[k] for k in ("length", "lengths", "cycles_given", "feet_given", "between", "judge_scale", "made_by_rife",
+                                             "replaced", "retake", "unnamed_feet", "cycle_seconds", "between_cache") if k in report}
                      | {"loops": [{k: r[k] for k in ("name", "from", "to", "made_by_rife", "turned_by", "turned_on", "start_foot", "start_foot_source",
                                                      "seam_ratio")} for r in report["loops"]]},
                      ensure_ascii=False, indent=2))
