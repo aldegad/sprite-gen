@@ -13,9 +13,9 @@ Both read the same per-frame signals (`strike_signals`) and choose between them 
   lower, once a step.
 - `top`: the body's top line, for a body with no legs to read. It rises and falls once a step
   whichever leg leads, so the step count reads it as the witness that a crossing interval, or a
-  cut, holds two steps (`local_cycle.bob_word`, `local_cycle.cut_word`) — against the lowest row,
-  the lowest opaque row and the widths of the upper body, since the picture moving or zoomed with
-  the body moves the line as well.
+  cut, holds two steps (`local_cycle.body_word`, `local_cycle.cut_word`) — against the lowest row,
+  the lowest opaque row, the rows down the middle of the body and the widths of the upper body,
+  since the picture moving or zoomed with the body moves the line as well.
 - `gap`: the widest empty run between the foot band's two ends, of the frame's height — two feet
   seen apart.
 
@@ -37,6 +37,14 @@ The step count's witness reads more (`body_signals`), recorded nowhere else:
   lowest solid row is then its, not the feet's. The feet are drawn opaque.
 - `edge`: 1 where the lowest solid row is the frame's last row — the feet may run off the
   frame, and the lowest row is the frame's, not theirs — else 0.
+- `first_row`: the first solid row. `top` passes over what is narrower than half the frame's
+  widest row, and it is taken off the head by a part as wide as that, a tail or a cape lifted over
+  it, where the first solid row stays on the body's top. The first solid row takes an ear's or a
+  hat's tip in. Neither is the better line, so the witness reads both (`local_cycle.TOP_LINES`).
+- `strips`: per frame, the rows down the middle of the body (`_strip`), DEEP of its median height
+  from the first solid row, in colour and cover. A body rising on its legs carries its rows whole,
+  where a picture zoomed in and out draws them longer and shorter. Arms swinging across the bands
+  hardly touch them, so the witness reads them where the bands cannot tell (`local_cycle.body_depth`).
 
 Which of the two feet is which is read on cues the view draws (`depth_cue`, `shade_cue`): from the front or back the
 foot nearer the viewer is drawn lower, from the side or a diagonal the far leg is drawn in shade. `video-cycle-align`
@@ -67,6 +75,10 @@ BODY_RUN = 0.5  # the body's top line: the first row at least half as wide as th
 # The upper body's bands, each from and to these fractions of the body's median height below its first solid row: the
 # head's top band first, then down to the middle of the body, where the legs part.
 BANDS = ((0.02, 0.10), (0.10, 0.18), (0.18, 0.26), (0.26, 0.34), (0.34, 0.42), (0.42, 0.50))
+# The strip down the body's middle (`_strip`): STRIP of the body's median height either side of its middle column, DEEP
+# of it down from the first solid row: past the waist, where a body's rows are still the body's and not its legs'.
+STRIP = 0.12
+DEEP = 0.7
 # A walk seen from the side or a diagonal opens its feet by a good part of its height each step;
 # from the front or back its foot band hardly changes width, but the foot nearer the viewer is
 # drawn lower by a few hundredths of it.
@@ -173,11 +185,25 @@ def zoomed(alpha: np.ndarray, scale: float) -> np.ndarray:
                                    resample=Image.Resampling.BILINEAR))
 
 
+def _strip(frame: Image.Image, alpha: np.ndarray, first: int, rows: int, half: float) -> np.ndarray:
+    """The strip down the middle of the body of `frame` (`alpha` its alpha, `first` its first solid row): its `rows` from
+    the first solid row, `half` px either side of the mean column of the solid pixels among them, each row's mean
+    premultiplied colour and its mean cover, (rows, 4) in 0..1, nothing past the frame's last row."""
+    middle = float(np.nonzero(alpha[first:first + rows] >= LOW_ALPHA)[1].mean())
+    left, right = max(0, round(middle - half)), min(alpha.shape[1], round(middle + half) + 1)
+    cover = alpha[first:first + rows, left:right].astype(np.float32) / 255.0
+    colour = np.asarray(frame.crop((left, first, right, first + cover.shape[0])).convert("RGB")).astype(np.float32) / 255.0
+    out = np.zeros((rows, 4), dtype=np.float32)
+    out[:cover.shape[0], :3] = (colour * cover[..., None]).mean(axis=1)
+    out[:cover.shape[0], 3] = cover.mean(axis=1)
+    return out
+
+
 def body_signals(frames: list[Image.Image]) -> dict[str, Any]:
     """From the solid pixels, what the step count's witness reads besides `strike_signals` (see the module): per
-    frame `bands`, `sole` and `edge`; and `band_rows` and `median_frame`. `bands` reads the same rows of every frame,
-    of the clip's median body height."""
-    edge, sole, heights, read = [], [], [], []
+    frame `bands`, `sole`, `edge`, `first_row` and `strips`; and `band_rows` and `median_frame`. `bands` and `strips`
+    read the same rows of every frame, of the clip's median body height."""
+    edge, sole, heights, read, firsts = [], [], [], [], []
     for f in frames:
         alpha = np.asarray(f.getchannel("A"))
         rows = np.nonzero((alpha >= LOW_ALPHA).any(axis=1))[0]
@@ -189,12 +215,16 @@ def body_signals(frames: list[Image.Image]) -> dict[str, Any]:
         edge.append(float(y1 == alpha.shape[0] - 1))
         heights.append(y1 - y0 + 1)
         read.append(_row_widths(alpha))
+        firsts.append(y0)
     median = float(np.median(heights)) if frames else 0.0
     rows = band_rows(median)
     middle = (np.asarray(frames[int(np.argmin([abs(h - median) for h in heights]))].getchannel("A")) if frames
               else np.zeros((1, 1), np.uint8))
+    deep = math.ceil(DEEP * median)
+    strips = [_strip(f, np.asarray(f.getchannel("A")), y0, deep, STRIP * median) for f, y0 in zip(frames, firsts)]
     return {"bands": [_bands_of(y0, width, rows) for y0, width in read], "band_rows": rows, "median_frame": middle,
-            "sole": sole, "edge": edge}
+            "sole": sole, "edge": edge, "first_row": [float(y0) for y0 in firsts],
+            "strips": np.stack(strips) if strips else np.zeros((0, 0, 4), dtype=np.float32)}
 
 
 def swings(sig: dict[str, list[float]]) -> dict[str, float]:
