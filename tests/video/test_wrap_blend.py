@@ -436,7 +436,7 @@ def test_the_checkpoints_part_on_a_flat_figure_is_cut_as_filmed_with_a_warning(t
     assert "the wrap blend was not used" in capsys.readouterr().err
     cut(tmp_path, keyed(tmp_path, frames, "keyed-off"), "off", wrap_blend="off", repair="off")
     assert outputs(tmp_path / "auto") == outputs(tmp_path / "off")
-    assert as_pinned(rife_runs(), {"rife-v4.25": 24, "rife-v4.6": 16}), rife_runs()
+    assert as_pinned(rife_runs(), {"rife-v4.25": (8, 24), "rife-v4.6": 16}), rife_runs()
 
 
 # --- 4. a 1 px line on a flat figure ---------------------------------------------------------------------------------------

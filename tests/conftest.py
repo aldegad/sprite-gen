@@ -249,24 +249,34 @@ def rife_runs(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
     return lambda: sum(r.calls for r in located)
 
 
-# The models whose count of the binary's calls a test holds as a most, not exactly: rife-v4.25 runs with no augmentation,
-# in float16, so its frames differ with the GPU's arithmetic (an Apple GPU and llvmpipe made different ones), and with them
-# the frames refused and made again at another time. rife-v4.6's counts were the same on every machine measured.
-RUNS_AT_MOST = frozenset({"rife-v4.25"})
+# The models whose count of the binary's calls a test may hold between two ends, not exactly: rife-v4.25 runs with no
+# augmentation, in float16, so its frames differ with the GPU's arithmetic (an Apple GPU and llvmpipe made different ones),
+# and with them the frames refused and made again at another fraction. rife-v4.6's counts were the same on every machine
+# measured, and are held exactly.
+RUNS_BETWEEN = frozenset({"rife-v4.25"})
+
+Pin = int | tuple[int, int]
 
 
-def as_pinned(called: int, pin: int | dict[str, int]) -> bool:
+def as_pinned(called: int, pin: Pin | dict[str, Pin]) -> bool:
     """Whether `called`, the binary's calls a test made (`rife_runs()`, `Rife.calls`), keeps the test's pin for the model
-    it ran (`rife.model_name()`; an int pins every model alike): none where the binary is not found here; else the pin
-    exactly, or at most the pin for a model in `RUNS_AT_MOST`, where it is the most measured on an Apple GPU and on
-    llvmpipe."""
+    it ran (`rife.model_name()`; a pin not by model pins every model alike): none where the binary is not found here;
+    else an int exactly, and `(floor, top)` from floor to top, both kept. Only a model in `RUNS_BETWEEN` is held between
+    two ends, any other is refused one (ValueError). The floor is the calls the cut makes where no frame is refused: two
+    for each frame it asks for, each asked once at its own time, the frames a refused run never asked for counted in.
+    The top is the most measured on an Apple GPU and on llvmpipe."""
     from sprite_gen.video import rife
 
     if not rife_located():
         return called == 0
     model = rife.model_name()
-    most = pin if isinstance(pin, int) else pin[model]
-    return called <= most if model in RUNS_AT_MOST else called == most
+    want = pin[model] if isinstance(pin, dict) else pin
+    if isinstance(want, int):
+        return called == want
+    if model not in RUNS_BETWEEN:
+        raise ValueError(f"{model}'s calls are pinned exactly, not between {want[0]} and {want[1]}")
+    floor, top = want
+    return floor <= called <= top
 
 
 def pin_id(value: object) -> str | None:

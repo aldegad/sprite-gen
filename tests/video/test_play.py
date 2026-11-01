@@ -260,7 +260,7 @@ def test_a_once_return_that_does_not_come_back_is_refused(tmp_path) -> None:
 
 # The binary's calls the held fill makes on this cut, by model (`rife.model_name()`): rife-v4.25's frame between held cells
 # 31 to 33 shows a neighbour's picture again, so it is refused (`held`), tried at the group's other times and kept as filmed.
-ONCE_RETURN_RUNS = {"rife-v4.25": 44, "rife-v4.6": 36}
+ONCE_RETURN_RUNS = {"rife-v4.25": (30, 44), "rife-v4.6": 36}
 
 
 @pytest.mark.timeout(900)  # 36 to 44 calls of the binary at 96 x 96 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver

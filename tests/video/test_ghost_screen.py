@@ -186,7 +186,7 @@ def test_jump_repair_rejects_a_proposal_that_carries_a_ghost(monkeypatch):
 
 # The binary's calls of this resample, by model (`rife.model_name()`): rife-v4.25's frame made beside the filmed ghost
 # carries a ghost of its own, so it is made again at other times and the nearer source frame taken.
-SCREEN_CALLS = {"rife-v4.25": 28, "rife-v4.6": 20}
+SCREEN_CALLS = {"rife-v4.25": (8, 28), "rife-v4.6": 20}
 
 
 @pytest.mark.slow
