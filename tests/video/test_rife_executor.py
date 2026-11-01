@@ -11,8 +11,11 @@ answer from another is not handed on. So a frame kept is the RIFE's own, taken o
 executor changed keys its frames anew.
 
 The executor here is stood in: a pool of devices behind the send, each answering as the executor does (`rife.answer`)
-from a device whose runs follow from the images and from what it is, so another device makes other bytes. One test,
-marked `torch_rife`, serves the torch backend itself (`rife_torch.serve`) and finds the frames this process makes."""
+from a device whose runs follow from the images and from what it is, so another device makes other bytes. It runs
+rife-v4.6, named on this host too (SPRITE_GEN_RIFE_MODEL_NAME alone: the model directory a lane names is unset), so the
+augmentation each request names is the host's `-x -z` or another; an executor of another model than the host's is
+refused as the RIFE is made. One test, marked `torch_rife`, serves the torch backend itself (`rife_torch.serve`) on the
+model the lane names (SPRITE_GEN_RIFE_MODEL, else the default installed) and finds the frames this process makes."""
 
 from __future__ import annotations
 
@@ -35,7 +38,8 @@ from tests.video.test_rife_torch import _binary_beside_a_model, _no_torch
 NAME = f"{__name__}:send"
 DETERMINISM = {"cudnn_deterministic": True, "cudnn_benchmark": False, "cudnn_conv_fp32_precision": "ieee"}
 # What a device of the executor is, as the torch backend names it on CUDA: no CPU, no host name.
-T4 = {"backend": "torch", "device": "cuda", "weights": dict(rife.MODEL_SHA256), "net": "n" * 64, "torch": "2.13.0+cu130",
+T4 = {"backend": "torch", "device": "cuda", "model": "rife-v4.6", "net": "n" * 64, "torch": "2.13.0+cu130",
+      "weights": {name: pins["ubuntu"] for name, pins in rife.MODEL_SHA256["rife-v4.6"].items()},
       "cuda": "13.0", "cudnn": 92000, "gpu": "Tesla T4", "capability": [7, 5], "driver": "610.57.04",
       "determinism": DETERMINISM}
 L4 = {**T4, "gpu": "NVIDIA L4", "capability": [8, 9]}
@@ -58,7 +62,7 @@ class Device:
         if self.fails is not None:
             raise self.fails
         self.runs += 1
-        modes = rife.tta() if modes is None else modes
+        modes = rife.tta(self.ident["model"]) if modes is None else modes
         out = np.rint(x.astype(np.float64) * (1 - t) + y.astype(np.float64) * t).astype(np.uint8)
         out[0, 0] = list(hashlib.sha256(json.dumps([self.ident, list(modes)], sort_keys=True).encode()).digest()[:3])
         return out
@@ -71,7 +75,7 @@ class Device:
         return (*rife.frame_runs(self.run, colour, cover, t), rife.pass_runs(self.run, colour, cover, t))
 
     def describe(self) -> dict:
-        return {"kind": "rife-torch", "device": self.ident["device"], "model": rife.MODEL}
+        return {"kind": "rife-torch", "device": self.ident["device"], "model": self.ident["model"]}
 
 
 class Executor:
@@ -118,9 +122,23 @@ def send(request: bytes) -> bytes:
     return reached(request)
 
 
+@pytest.fixture(autouse=True)
+def _host_model(request, monkeypatch) -> None:
+    """This host runs rife-v4.6, the model of the devices stood in (T4), and names it one way:
+    SPRITE_GEN_RIFE_MODEL_NAME, with no SPRITE_GEN_RIFE_MODEL left from a lane. A lane's names its own model's directory
+    (rife-v4.25, scripts/t4_lane.py), which no device stood in runs and no test stood in reads; beside the name, the
+    engine refuses the two as two models (`rife.model_name`). The test marked torch_rife serves the torch backend itself
+    on the lane's model, and keeps the lane's environment."""
+    if request.node.get_closest_marker("torch_rife"):
+        return
+    monkeypatch.delenv("SPRITE_GEN_RIFE_MODEL", raising=False)
+    monkeypatch.setenv("SPRITE_GEN_RIFE_MODEL_NAME", "rife-v4.6")
+
+
 @pytest.fixture
 def executor(monkeypatch) -> Executor:
-    """The torch backend chosen and its frames sent (NAME) to an executor of one T4; no device named on this host."""
+    """The torch backend chosen and its frames sent (NAME) to an executor of one T4 running rife-v4.6, the model this host
+    names; no device named on this host."""
     stood = Executor(Device())
     monkeypatch.setattr(sys.modules[__name__], "reached", stood)
     monkeypatch.setenv("SPRITE_GEN_RIFE_BACKEND", "torch")
@@ -153,7 +171,8 @@ def test_a_frame_is_one_call_a_read_one_call_and_the_rife_asks_the_executor_once
     assert frame.tobytes() == there.tobytes() and apart.dtype == np.float32 and np.array_equal(apart, apart_here)
     assert executor.kinds() == ["probe", "frame", "read"] and device.runs == 2 + 2 + rife.PASS_CALLS
     assert made.counts() == {"runs": 2 + 2 + rife.PASS_CALLS, "executor_calls": 3}
-    assert made.describe() == {"kind": "rife-torch", "executor": NAME, "device": "cuda", "gpu": "Tesla T4", "tta": "-x -z"}
+    assert made.describe() == {"kind": "rife-torch", "executor": NAME, "device": "cuda", "gpu": "Tesla T4",
+                               "model": "rife-v4.6", "tta": "-x -z"}
     monkeypatch.setenv("SPRITE_GEN_RIFE_TTA", "-z")  # the host's augmentation, read as each frame is asked for
     other = made(a, b, 0.25)
     assert other.tobytes() == here(a, b, 0.25).tobytes() and executor.headers[-1]["modes"] == ["-z"]
@@ -181,6 +200,28 @@ def test_each_request_carries_the_engine_code_and_the_identity_the_rife_holds(ex
     assert set(captured) == {"colour_a", "colour_b", "cover_a", "cover_b"}
     for name, want in (("colour_a", colour[0]), ("colour_b", colour[1]), ("cover_a", cover[0]), ("cover_b", cover[1])):
         assert captured[name].dtype == np.uint8 and np.array_equal(captured[name], want)
+
+
+@pytest.mark.parametrize("host, held", [(None, "rife-v4.6"), ("rife-v4.6", "rife-v4.25"), ("rife-v4.6", None)])
+def test_an_executor_of_another_model_than_this_host_runs_is_refused_as_the_rife_is_made(executor, monkeypatch, host, held):
+    """The model is the executor's, named in its identity, and this host runs one (SPRITE_GEN_RIFE_MODEL_NAME, else
+    rife-v4.25): an executor running another — or naming none, an older sprite-gen — is refused by the probe, both named,
+    before a frame is asked for; one running the host's model makes its frames with the host's augmentation for it."""
+    if host is None:
+        monkeypatch.delenv("SPRITE_GEN_RIFE_MODEL_NAME", raising=False)
+    else:
+        monkeypatch.setenv("SPRITE_GEN_RIFE_MODEL_NAME", host)
+    executor.devices[0].ident = {k: v for k, v in {**T4, "model": held}.items() if v is not None}
+    with pytest.raises(rife.RifeUnavailable, match=rf"the executor runs the model {held!r}, and this host runs "
+                                                   rf"{host or rife.MODEL} .*run one model on both sides") as refused:
+        rife.Rife()
+    assert not isinstance(refused.value, rife.RifeNotInstalled)
+    assert executor.kinds() == ["probe"] and executor.devices[0].runs == 0
+    monkeypatch.delenv("SPRITE_GEN_RIFE_MODEL_NAME", raising=False)
+    executor.devices[0].ident = {**T4, "model": rife.MODEL}
+    made = rife.Rife()
+    made(_disc(40), _disc(72), 0.5)
+    assert made.describe()["model"] == rife.MODEL and executor.headers[-1]["modes"] == []
 
 
 def test_the_host_runs_with_no_pytorch_installed(executor, monkeypatch):
@@ -639,7 +680,7 @@ def test_a_loop_names_the_executor_that_made_its_frames(executor, tmp_path):
     filmed, _ = _loop({10: 12})
     rep = _run(tmp_path, _keyed(tmp_path, filmed))
     assert rep["jump_repair"]["interpolator"] == {"kind": "rife-torch", "executor": NAME, "device": "cuda",
-                                                  "gpu": "Tesla T4", "tta": "-x -z"}
+                                                  "gpu": "Tesla T4", "model": "rife-v4.6", "tta": "-x -z"}
     assert executor.kinds()[0] == "probe" and executor.kinds().count("probe") == 1
 
 
@@ -647,7 +688,8 @@ def test_a_loop_names_the_executor_that_made_its_frames(executor, tmp_path):
 
 @pytest.mark.torch_rife
 def test_the_torch_backend_served_makes_the_frame_and_the_read_this_process_makes(monkeypatch):
-    """`rife_torch.serve` as the executor, called in this process: the frame and the read are the torch backend's of this
+    """`rife_torch.serve` as the executor, called in this process, on the model the lane names (SPRITE_GEN_RIFE_MODEL,
+    else the default installed), the one this host runs too: the frame and the read are the torch backend's of this
     process, byte for byte, its identity is that backend's with the protocol, and the backend is loaded once for every
     request it serves."""
     from sprite_gen.video import rife_torch
@@ -655,6 +697,7 @@ def test_the_torch_backend_served_makes_the_frame_and_the_read_this_process_make
     monkeypatch.setattr(rife_torch, "_served", None)
     here = rife_torch.TorchRunner(rife.locate_model(), rife.device())
     served = rife.Rife(runner=rife.RemoteRunner(rife_torch.serve, "sprite_gen.video.rife_torch:serve"))
+    assert served.model_name == here.model_name == rife.model_name()
     loaded = rife_torch._served
     a, b = _legs(40, 64), _legs(64, 52)
     assert served(a, b, 0.5).tobytes() == rife.Rife(runner=here)(a, b, 0.5).tobytes()

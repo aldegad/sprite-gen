@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from conftest import as_pinned
 from sprite_gen.video import align, rife, restoration, source
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import repair
@@ -390,15 +391,20 @@ def test_the_applications_walk_gives_a_small_filmed_ghost_way(tmp_path):
     _app_ghost_given_way(report, tmp_path / "E")
 
 
+# The binary's calls on the application's walk, by model (`rife.model_name()`): rife-v4.25's frame between held cells 32
+# to 34 shows a neighbour's picture again, so it is refused (`held`), tried at another time and kept as filmed.
+APP_RUNS = {"rife-v4.25": (8, 10), "rife-v4.6": 8}
+
+
 @pytest.mark.slow
 @pytest.mark.real_rife
-@pytest.mark.timeout(900)  # 8 calls of the binary at 280 x 221 (the held fill's frames between and the jump repair's): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.timeout(900)  # 8 to 10 calls of the binary at 280 x 221 (the held fill's frames between and the jump repair's): seconds on a GPU, minutes on a CPU's Vulkan driver
 def test_real_rife_the_applications_walk_gives_a_small_filmed_ghost_way(tmp_path, rife_runs):
     """B1b through the real RIFE, located as `video-loop` locates it."""
     report = _app_cut(tmp_path, None)
     assert report["jump_repair"]["interpolator"]["kind"] == "rife-ncnn-vulkan"
     _app_ghost_given_way(report, tmp_path / "E")
-    assert rife_runs() == 8
+    assert as_pinned(rife_runs(), APP_RUNS), rife_runs()
 
 
 # --- the source projection and the restoration ------------------------------------------------------

@@ -80,7 +80,7 @@ def _made(a: Image.Image, b: Image.Image, t: float, coverage) -> Image.Image:
     rife._call = call
     try:
         with tempfile.TemporaryDirectory() as td:
-            return rife.between(a, b, t, binary=Path("x"), model=Path("x"), tmp=Path(td))
+            return rife.between(a, b, t, binary=Path("x"), model=Path("x") / "rife-v4.6", tmp=Path(td))
     finally:
         rife._call = real
 

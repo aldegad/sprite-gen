@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from conftest import rife_located
+from conftest import as_pinned
 from sprite_gen.video import batch, clip_prompt, effect, loop, nonloop, play
 from test_clip_prompt import PUNCH, punch_frames
 
@@ -258,10 +258,15 @@ def test_a_once_return_that_does_not_come_back_is_refused(tmp_path) -> None:
     assert json.loads((tmp_path / "out" / "punch.loop.report.json").read_text())["status"] == "failed"
 
 
-@pytest.mark.timeout(900)  # 36 calls of the binary at 96 x 96 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+# The binary's calls the held fill makes on this cut, by model (`rife.model_name()`): rife-v4.25's frame between held cells
+# 31 to 33 shows a neighbour's picture again, so it is refused (`held`), tried at the group's other times and kept as filmed.
+ONCE_RETURN_RUNS = {"rife-v4.25": (30, 44), "rife-v4.6": 36}
+
+
+@pytest.mark.timeout(900)  # 36 to 44 calls of the binary at 96 x 96 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
 def test_a_once_return_cut_keeps_both_ends_and_plays_once(tmp_path, rife_runs) -> None:
     report = cut(tmp_path, punch_frames(tmp_path / "frames", (96, 96), count=90))
-    assert rife_runs() == (36 if rife_located() else 0)
+    assert as_pinned(rife_runs(), ONCE_RETURN_RUNS), rife_runs()
     meta = report["strip"]
     assert report["cycle"]["kind"] == "once-return" and report["cycle"]["length"] == 90
     assert meta["loop"] is False and meta["hold_last"] is False and meta["returns"] is True

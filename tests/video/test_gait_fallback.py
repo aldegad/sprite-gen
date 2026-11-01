@@ -6,7 +6,7 @@ import math
 import numpy as np
 import pytest
 from PIL import Image, ImageDraw
-from conftest import rife_located
+from conftest import as_pinned
 from sprite_gen.video import gait_fallback, loop
 from tests.video import test_ghost_given_way as ghost_clips
 from tests.video import test_stop as stop_clips
@@ -161,12 +161,12 @@ def test_a_clip_the_first_search_cuts_is_cut_without_the_fallback(tmp_path):
 
 
 @pytest.mark.slow
-@pytest.mark.timeout(900)  # 22 calls of the binary at 280 x 180 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.timeout(900)  # 16 to 22 calls of the binary at 280 x 180 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
 def test_a_cycle_longer_than_half_the_clip_is_found_by_the_fallback(tmp_path, rife_runs):
     frames = [walker(k, period=40) for k in range(73)]
     code, report, output = run(tmp_path, frames)
     assert code == 0
-    assert rife_runs() == (22 if rife_located() else 0)
+    assert as_pinned(rife_runs(), {"rife-v4.25": (4, 16), "rife-v4.6": 22}), rife_runs()
     assert abs(report['cycle']['length']-40) <= 1
     fallback = report['gait_fallback']
     assert 'no periodic cycle found' in fallback['reason']
@@ -371,7 +371,7 @@ def wrap_and_inner(output):
 
 
 @pytest.mark.slow
-@pytest.mark.timeout(900)  # 14 calls of the binary at 280 x 180 for the 2 % walk (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.timeout(900)  # 14 to 16 calls of the binary at 280 x 180 for the 2 % walk (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize('clip', ['walking away', 'shrinking 2 %'])
 def test_a_walk_cut_again_by_hand_is_held_at_its_size_and_its_feet(tmp_path, clip, rife_runs):
     """A cut the caller names (`--cycle fixed`, the recut path) of a walk that changes size: held over the whole clip
@@ -381,7 +381,7 @@ def test_a_walk_cut_again_by_hand_is_held_at_its_size_and_its_feet(tmp_path, cli
     (1 inside) and was refused at 6.83, the 2 % walk 1 px (1) at 3.80."""
     frames = [walking_away(k) for k in range(73)] if clip == 'walking away' else [walker(k, grow=-0.02) for k in range(73)]
     code, report, output = run(tmp_path, frames, cut=FIXED)
-    assert rife_runs() == (14 if clip == 'shrinking 2 %' and rife_located() else 0)
+    assert as_pinned(rife_runs(), {"rife-v4.25": (4, 16), "rife-v4.6": 14} if clip == 'shrinking 2 %' else 0), rife_runs()
     edges = wrap_and_inner(output)
     # The feet first, whatever the gate said: held at its size alone, the walk away's last frame stands 6 px above its
     # first (1 px a frame inside) and the seam reads 10.03 — its size moved into its place.

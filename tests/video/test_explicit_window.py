@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import rife_located
+from conftest import as_pinned
 from sprite_gen.video import loop
 from tests.video import test_gait_fallback as fallback_clips
 from tests.video import test_loop_prop_seam_held as held_clips
@@ -64,10 +64,12 @@ ROWS = [
      and r["cycle"]["seam_pop"]["held_edge"]["two_step_capped"] == {"max_len": 47, "lengths_over": [48, 49]}, True, 0),
     ("two-step", _held, ("--state", "walk", *MOTION, "--min-len", "20"), lambda r: r["cycle"]["seam_pop"]["applied"], True, 0),
     ("counted", _short, ("--state", "walk", *MOTION, "--max-len", "42", "--steps", "1"),
-     lambda r: r["cycle"]["steps"]["window"] == [41, 42] and r["cycle"]["steps"]["counted_window"] == [41, 43], True, 6),
+     lambda r: r["cycle"]["steps"]["window"] == [41, 42] and r["cycle"]["steps"]["counted_window"] == [41, 43], True,
+     {"rife-v4.25": (6, 20), "rife-v4.6": 6}),
     ("counted", _slow, ("--state", "walk", *MOTION, "--min-len", "18", "--steps", "1"), lambda r: r["cycle"]["steps"]["by"] == "given", True, 6),
     ("fallback", _slow_front, ("--state", "walk", *MOTION, "--max-len", "36"), lambda r: r["gait_fallback"]["window"] == [12, 36], False, 0),
-    ("fallback", _slow_front, ("--state", "walk", *MOTION, "--min-len", "30"), lambda r: r["gait_fallback"]["window"][0] == 30, True, 22),
+    ("fallback", _slow_front, ("--state", "walk", *MOTION, "--min-len", "30"), lambda r: r["gait_fallback"]["window"][0] == 30, True,
+     {"rife-v4.25": (4, 16), "rife-v4.6": 22}),
     ("one-shot", _hop, ("--state", "jump", "--max-len", "30"), lambda r: r["periodic_attempt"] is not None and r["cycle"]["kind"] == "one-shot", True, 0),
     ("one-shot", _hop, ("--state", "jump", "--min-len", "30"), lambda r: r["periodic_attempt"] is not None and r["cycle"]["kind"] == "one-shot", True, 0),
     ("fixed", _hop, ("--state", "jump", "--cycle", "fixed", "--start", "50", "--length", "40", "--max-len", "30"),
@@ -91,7 +93,7 @@ def test_an_explicit_window_holds_on_every_path(tmp_path, path, clip, args, ran,
         code = exc.code
     report = json.loads(report_path.read_text())
     assert ran(report), report.get("cycle")
-    assert rife_runs() == (runs if rife_located() else 0)
+    assert as_pinned(rife_runs(), runs), rife_runs()
     lo, hi = _bound(args, "--min-len"), _bound(args, "--max-len")
     if not cut:
         assert code != 0 and report["status"] == "failed", report.get("cycle")

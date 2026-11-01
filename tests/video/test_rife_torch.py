@@ -1,18 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""RIFE's torch backend (docs/loop-repair.md section 1): rife-v4.6 in PyTorch, from the binary's own model, run as one
-call of the binary runs it — the pair turned eight ways and run both ways in time, their flows averaged at every level.
+"""RIFE's torch backend (docs/loop-repair.md section 1): the binary's model in PyTorch, from the binary's own files, run
+as one call of the binary runs it — rife-v4.25, the default, padded to 128 with no augmentation
+(tests/video/test_rife_torch_v425.py), and rife-v4.6, the pair turned eight ways and run both ways in time, their flows
+averaged at every level.
 
 Chosen by SPRITE_GEN_RIFE_BACKEND=torch, on the device SPRITE_GEN_RIFE_DEVICE names. Nothing falls back: with torch chosen
 the binary is never run, a device that cannot be had is not traded for another, and PyTorch missing is RIFE not
 installed, its reason named.
 
-The tests marked `torch_rife` run the network: they need PyTorch and the rife-v4.6 model (`rife.locate_model()`), are
+The tests marked `torch_rife` run the network: they need PyTorch and the models (`rife.locate_model()`, rife-v4.6 beside it), are
 skipped where either is missing (tests/conftest.py) and run with none skipped by the lanes (`-m torch_rife`,
 docs/release.md), on the device SPRITE_GEN_RIFE_DEVICE names. The rest need neither and stand a runner in where one runs.
 
 The fixtures are synthetic: discs, legs and walkers drawn here or in tests/video/test_rife.py and test_crossfade.py,
 and tests/fixtures/rife-walkers — walker pairs, clean and faulty, with the binary's own -x -z frame of each made on
-an Apple GPU, the engine's verdict on it, and how far the same binary's frame on Mesa llvmpipe lay from it."""
+an Apple GPU, the engine's verdict on it, and how far the same binary's frame on Mesa llvmpipe lay from it; and, for
+each model, the pairs it is judged alike on by the binary and the torch backend (`alike`)."""
 
 from __future__ import annotations
 
@@ -34,10 +37,19 @@ WALKERS = Path(__file__).resolve().parents[1] / "fixtures" / "rife-walkers"
 
 @pytest.fixture(scope="module")
 def runner():
-    """The torch backend on SPRITE_GEN_RIFE_DEVICE, from the installed model."""
+    """The torch backend on SPRITE_GEN_RIFE_DEVICE, from the installed model the engine runs (rife-v4.25 by default)."""
     from sprite_gen.video import rife_torch
 
     return rife_torch.TorchRunner(rife.locate_model(), rife.device())
+
+
+@pytest.fixture(scope="module")
+def runner46():
+    """The torch backend on SPRITE_GEN_RIFE_DEVICE, from the installed rife-v4.6, which `sprite-gen rife install` puts beside
+    rife-v4.25: the model whose augmentation the binary runs inside one call, and the one the walker fixtures recorded."""
+    from sprite_gen.video import rife_torch
+
+    return rife_torch.TorchRunner(rife.locate_model().parent / "rife-v4.6", rife.device())
 
 
 def _key(x: np.ndarray) -> tuple[tuple[int, ...], bytes]:
@@ -72,7 +84,7 @@ def _patch(cx: int) -> Image.Image:
 
 
 @pytest.mark.torch_rife
-def test_flows_turned_back_from_every_way_point_alike(runner):
+def test_flows_turned_back_from_every_way_point_alike(runner46):
     """Five fields of different values turned to each of the sixteen ways (eight turns, each both ways in time, the backward
     swapped) and turned back are themselves. And a patch moving right, run alone each of the sixteen ways with its flows
     turned back to the pair's own frame: at t = 0.25 it stands 8 px past where it was in a and 24 px short of where it is in
@@ -89,9 +101,9 @@ def test_flows_turned_back_from_every_way_point_alike(runner):
             turn = rt._swap if d else (lambda c: c)
             assert torch.equal(turn(rt._to_canon(rt._from_canon(turn(field), g), g)), field)
     colour, _ = rife.inputs(_patch(40), _patch(72))  # 96 x 128, a multiple of 32: no padding
-    pads = [runner._pad(c) for c in colour]
+    pads = [runner46._pad(c) for c in colour]
     with torch.inference_mode():
-        flows = [runner._infer(pads, 0.25, [(g, d)], flows=True)[1][0][0].cpu().numpy() for g in range(8) for d in (0, 1)]
+        flows = [runner46._infer(pads, 0.25, [(g, d)], flows=True)[1][0][0].cpu().numpy() for g in range(8) for d in (0, 1)]
     yy, xx = np.mgrid[:96, :128]
     on = (np.abs(yy - 48) <= 12) & (np.abs(xx - 48) <= 12)  # inside the patch where it stands at t
     x0, y0, x1, y1, mask = np.array([[f[c][on].mean() for c in range(5)] for f in flows]).T
@@ -101,23 +113,26 @@ def test_flows_turned_back_from_every_way_point_alike(runner):
 
 
 @pytest.mark.torch_rife
-def test_a_frame_is_the_same_made_the_other_way_in_time_or_turned(runner):
-    """`-z`: the frame from a to b at t is the frame from b to a at 1 - t. `-x`: the frame of the pair flipped left-right
-    is the frame flipped. Each to within a level of a channel (the order of a mean's terms)."""
+def test_a_frame_is_the_same_made_the_other_way_in_time_or_turned(runner46):
+    """rife-v4.6's `-z`: the frame from a to b at t is the frame from b to a at 1 - t. `-x`: the frame of the pair flipped
+    left-right is the frame flipped. Each to within a level of a channel (the order of a mean's terms)."""
     colour, _ = rife.inputs(_marked(40), _marked(72))
-    there, back = runner.run(colour[0], colour[1], 0.25, ("-z",)), runner.run(colour[1], colour[0], 0.75, ("-z",))
+    there, back = runner46.run(colour[0], colour[1], 0.25, ("-z",)), runner46.run(colour[1], colour[0], 0.75, ("-z",))
     assert np.abs(there.astype(int) - back.astype(int)).max() <= 1
-    flipped = runner.run(colour[0][:, ::-1].copy(), colour[1][:, ::-1].copy(), 0.25, ("-x",))
-    assert np.abs(flipped[:, ::-1].astype(int) - runner.run(colour[0], colour[1], 0.25, ("-x",)).astype(int)).max() <= 1
+    flipped = runner46.run(colour[0][:, ::-1].copy(), colour[1][:, ::-1].copy(), 0.25, ("-x",))
+    assert np.abs(flipped[:, ::-1].astype(int) - runner46.run(colour[0], colour[1], 0.25, ("-x",)).astype(int)).max() <= 1
 
 
 @pytest.mark.torch_rife
-@pytest.mark.parametrize("named", [None, ""])
-def test_the_frame_between_two_discs_lands_half_way(runner, monkeypatch, named):
-    """`sprite-gen rife install`'s check frame through the torch backend, with the augmentation every call asks for and
-    with none: the disc lands half way (x 48), not cross-faded at both ends."""
+@pytest.mark.parametrize("model, named", [("rife-v4.25", None), ("rife-v4.6", None), ("rife-v4.6", "")])
+def test_the_frame_between_two_discs_lands_half_way(request, monkeypatch, model, named):
+    """`sprite-gen rife install`'s check frame through the torch backend, each model with the augmentation every call asks
+    for (rife-v4.25 none, rife-v4.6 -x -z) and rife-v4.6 with none: the disc lands half way (x 48), not cross-faded at both
+    ends."""
     if named is not None:
         monkeypatch.setenv("SPRITE_GEN_RIFE_TTA", named)
+    runner = request.getfixturevalue("runner46" if model == "rife-v4.6" else "runner")
+    assert runner.model_name == model
     mid = rife.Rife(runner=runner)(rife_install._disc(30), rife_install._disc(66), 0.5)
     xs = np.nonzero(np.asarray(mid)[..., 3] > 127)[1]
     assert abs(xs.mean() - 48) <= 4
@@ -131,15 +146,18 @@ def test_the_model_loads_whole_and_any_other_bytes_are_refused_by_sha256(tmp_pat
 
     from sprite_gen.video import rife_torch
 
-    model = rife.locate_model()
-    assert set(rife_torch.state_from_ncnn(rife.model_bytes(model))) == set(rife_torch.IFNet().state_dict())
-    for k, (name, change) in enumerate((("flownet.bin", lambda b: b[:100] + bytes([b[100] ^ 1]) + b[101:]),
-                                        ("flownet.bin", lambda b: b[: len(b) // 2]),
-                                        ("flownet.param", lambda b: b.replace(b"Convolution", b"Convolutiom", 1)))):
-        copy = shutil.copytree(model, tmp_path / str(k) / rife.MODEL)
-        (copy / name).write_bytes(change((copy / name).read_bytes()))
-        with pytest.raises(rife.RifeUnavailable, match=rf"{name} has sha256 [0-9a-f]{{64}}, expected {rife.MODEL_SHA256[name]}"):
-            rife_torch.TorchRunner(copy, "cpu")
+    for held in rife.MODELS:
+        model = rife.locate_model().parent / held
+        state = rife_torch.state_from_ncnn(rife.model_bytes(model), held)
+        assert set(state) == set(rife_torch.IFNet(held).state_dict())
+        for k, (name, change) in enumerate((("flownet.bin", lambda b: b[:100] + bytes([b[100] ^ 1]) + b[101:]),
+                                            ("flownet.bin", lambda b: b[: len(b) // 2]),
+                                            ("flownet.param", lambda b: b.replace(b"Convolution", b"Convolutiom", 1)))):
+            copy = shutil.copytree(model, tmp_path / held / str(k) / held)
+            (copy / name).write_bytes(change((copy / name).read_bytes()))
+            pins = " or ".join(sorted(set(rife.MODEL_SHA256[held][name].values())))
+            with pytest.raises(rife.RifeUnavailable, match=rf"{name} has sha256 [0-9a-f]{{64}}, expected one of {pins}"):
+                rife_torch.TorchRunner(copy, "cpu")
 
 
 @pytest.mark.torch_rife
@@ -156,7 +174,8 @@ def test_the_same_frame_twice_is_the_same_bytes_and_the_identity_names_what_make
     a, b = _legs(40, 64), _legs(64, 52)
     assert made(a, b, 0.5).tobytes() == made(a, b, 0.5).tobytes()
     ident = runner.identity()
-    assert (ident["backend"], ident["device"], ident["weights"]) == ("torch", rife.device(), rife.MODEL_SHA256)
+    assert (ident["backend"], ident["device"], ident["model"]) == ("torch", rife.device(), rife.MODEL)
+    assert all(ident["weights"][name] in pins.values() for name, pins in rife.MODEL_SHA256[rife.MODEL].items())
     assert (ident["net"], ident["torch"]) == (rife_torch.CODE_SHA256, torch.__version__)
     if runner.device == "cuda":
         assert ident["determinism"] == {"cudnn_deterministic": True, "cudnn_benchmark": False, "cudnn_conv_fp32_precision": "ieee"}
@@ -195,31 +214,45 @@ def _apart(m: Image.Image, n: Image.Image) -> tuple[float, float]:
 @pytest.mark.torch_rife
 @pytest.mark.timeout(900)  # a frame and its sixteen passes, seven pairs: seconds on a GPU, a minute or two on two CPU cores
 @pytest.mark.parametrize("key", sorted(_walkers()))
-def test_walkers_are_judged_as_the_binary_judged_them(runner, key):
-    """Each recorded walker pair, its frame and passes made by the torch backend, has the verdict the binary's frame had,
+def test_walkers_are_judged_as_the_binary_judged_them(runner46, key):
+    """Each recorded walker pair, its rife-v4.6 frame and passes made by the torch backend, has the verdict the binary's
+    frame had,
     on a machine with no binary: the same faults (smear, outline, ghost, torn) and looks (crossfade). The pairs were
     picked where the binary on an Apple GPU, the binary on Mesa llvmpipe and the torch backend on a CPU all gave that
     verdict, every reading at least a tenth of its bound away from it. The frame lies from the binary's no further than
     twice as far as the binary's own frames on those two GPUs lay apart."""
     rec = _walkers()[key]
     a, b, ncnn = (_walker(key, name) for name in ("a", "b", "ncnn"))
-    made, apart = rife.Rife(runner=runner).read(a, b, rec["t"])
+    made, apart = rife.Rife(runner=runner46).read(a, b, rec["t"])
     assert _verdict(made, a, b, rec["t"], apart) == (rec["faults"], rec["looks"])
     mean, most = _apart(made, ncnn)
     assert mean <= 2 * rec["gpu_gap"]["mean_abs"] and most <= 2 * rec["gpu_gap"]["max_abs"], (mean, most, rec["gpu_gap"])
 
 
+def _alike() -> dict:
+    """The walker pairs each model is judged alike on (walkers.json `alike`): those its own frames met the pick's rule on,
+    the binary on an Apple GPU and on llvmpipe and the torch backend on a CPU giving the same verdict, every reading at
+    least a tenth of its bound away from it (`picked` says what was left out, and why)."""
+    return json.loads((WALKERS / "walkers.json").read_text())["alike"]
+
+
 @pytest.mark.real_rife
 @pytest.mark.torch_rife
 @pytest.mark.timeout(1800)  # the binary on a CPU's Vulkan driver: a minute or more a pair
-@pytest.mark.parametrize("key", sorted(_walkers()))
-def test_the_binary_and_the_torch_backend_judge_the_walkers_alike_on_one_machine(runner, key):
-    """The recorded walker pairs through this machine's binary (llvmpipe on the Linux lane) and the torch backend: the same
-    verdict for each."""
+@pytest.mark.parametrize("model, key", [(model, key) for model, picked in sorted(_alike().items()) for key in picked["pairs"]])
+def test_the_binary_and_the_torch_backend_judge_the_walkers_alike_on_one_machine(model, key):
+    """The walker pairs picked for each model through this machine's binary (llvmpipe on the Linux lane) and the torch
+    backend, both running that model by its name: the same verdict for each. rife-v4.6 on the seven recorded for it,
+    rife-v4.25, the default, on the six its own frames met the rule on."""
+    from sprite_gen.video import rife_torch
+
     t = _walkers()[key]["t"]
     a, b = _walker(key, "a"), _walker(key, "b")
+    binary, held = rife.locate()
     verdicts = []
-    for made in (rife.Rife(*rife.locate()), rife.Rife(runner=runner)):
+    for made in (rife.Rife(binary, held.parent / model),
+                 rife.Rife(runner=rife_torch.TorchRunner(rife.locate_model().parent / model, rife.device()))):
+        assert made.model_name == model
         frame, apart = made.read(a, b, t)
         verdicts.append(_verdict(frame, a, b, t, apart))
     assert verdicts[0] == verdicts[1]
@@ -440,7 +473,8 @@ def test_a_model_other_than_the_pinned_one_is_refused_and_one_not_there_is_not_i
     (model / "flownet.bin").write_text("another model")
     monkeypatch.setenv("SPRITE_GEN_RIFE_MODEL", str(model))
     assert rife.locate_model() == model.resolve()
-    with pytest.raises(rife.RifeUnavailable, match=rf"flownet.param has sha256 [0-9a-f]{{64}}, expected {rife.MODEL_SHA256['flownet.param']}"):
+    pins = " or ".join(sorted(set(rife.MODEL_SHA256[rife.MODEL]["flownet.param"].values())))
+    with pytest.raises(rife.RifeUnavailable, match=rf"flownet.param has sha256 [0-9a-f]{{64}}, expected one of {pins}"):
         rife.model_bytes(model)
 
 
@@ -450,7 +484,8 @@ class FakeRunner:
     """A runner that makes each frame `a` itself (its colour as RIFE is given it, its coverage), and names itself."""
 
     def __init__(self, **identity):
-        self.ident = {"backend": "torch", "device": "cpu", "weights": dict(rife.MODEL_SHA256), "net": "n" * 64,
+        self.ident = {"backend": "torch", "device": "cpu", "model": rife.MODEL, "net": "n" * 64,
+                      "weights": {name: pins["ubuntu"] for name, pins in rife.MODEL_SHA256[rife.MODEL].items()},
                       "torch": "2.13.0", "cpu": "AVX2", "arch": "x86_64", **identity}
         self.model = Path("/models") / rife.MODEL
         self.frames = self.reads = 0
@@ -476,14 +511,14 @@ def test_a_report_names_the_torch_backend_and_counts_its_runs(monkeypatch, tmp_p
     torch backend's runs (`runs`), 2 a frame and 2 + PASS_CALLS a read."""
     binary, _ = _recording_binary(tmp_path)
     ncnn = rife.Rife(binary, tmp_path / rife.MODEL)
-    assert ncnn.describe() == {"kind": "rife-ncnn-vulkan", "binary": str(binary), "model": rife.MODEL, "tta": "-x -z"}
+    assert ncnn.describe() == {"kind": "rife-ncnn-vulkan", "binary": str(binary), "model": rife.MODEL, "tta": ""}
     a, b = _disc(40), _disc(72)
     ncnn(a, b, 0.5)
     ncnn.read(a, b, 0.5)
     assert ncnn.counts() == {"binary_calls": 2 + 2 + rife.PASS_CALLS}
     fake = FakeRunner()
     torch = rife.Rife(runner=fake)
-    assert torch.describe() == {"kind": "rife-torch", "device": "cpu", "model": rife.MODEL, "tta": "-x -z"}
+    assert torch.describe() == {"kind": "rife-torch", "device": "cpu", "model": rife.MODEL, "tta": ""}
     assert torch(a, b, 0.5).tobytes() == a.tobytes()
     frame, apart = torch.read(a, b, 0.5)
     assert frame.tobytes() == a.tobytes() and apart.shape == (96, 128) and (fake.frames, fake.reads) == (1, 1)
@@ -502,11 +537,11 @@ def test_the_loop_and_the_alignment_name_the_torch_backend_that_made_their_frame
     filmed, _ = _loop({10: 12})
     (tmp_path / "loop").mkdir()
     rep = _run(tmp_path / "loop", _keyed(tmp_path / "loop", filmed))
-    assert rep["jump_repair"]["interpolator"] == {"kind": "rife-torch", "device": "cpu", "model": rife.MODEL, "tta": "-x -z"}
+    assert rep["jump_repair"]["interpolator"] == {"kind": "rife-torch", "device": "cpu", "model": rife.MODEL, "tta": ""}
     dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24))]
     report = align.align_set(dirs, report_path=tmp_path / "align.json", between="rife")
     assert report["made_by_rife"] > 0
-    assert report["interpolator"] == {"kind": "rife-torch", "device": "cpu", "model": rife.MODEL, "tta": "-x -z"}
+    assert report["interpolator"] == {"kind": "rife-torch", "device": "cpu", "model": rife.MODEL, "tta": ""}
 
 
 @pytest.mark.parametrize("field, value", [("backend", "ncnn"), ("weights", {"flownet.param": "0" * 64, "flownet.bin": "1" * 64}),

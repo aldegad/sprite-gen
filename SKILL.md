@@ -1,6 +1,6 @@
 ---
 name: sprite-gen
-version: 3.14.0
+version: 3.15.0
 description: "Generates images and game sprites through GPT or Grok with guided provider choices, separate saved defaults, automatic cleanup and optional curation. Handles sprite requests, ordinary image generation/editing, typography logos (로고, 타이포그래피, 타이틀 글자, 타이틀 로고, wordmark, logo, title lettering: a title screen drawn with the title in it, its lettering lifted out transparent), standalone image-to-video clips (i2v, animate this still, 그록 영상, 이매진 비디오, 스틸 움직여줘, first/last frame, reference-to-video, 영상 이어붙이기, 영상 편집, extend/edit a clip), clips from a video MCP on the agent (ZCRE, 지크 MCP), chroma removal, animation atlases, video loops, 큐레이션뷰, image candidates, 팔레트 스왑, palette swap, recolor, engine exports, repeating backgrounds, projected shadows, talking face layers over body motions (말하는 얼굴, 입 맞추기, 얼굴 층, lip sync, face pack), motion/contact inspection and optional scene composition from existing assets."
 license: Apache-2.0
 depends_on:
@@ -14,7 +14,7 @@ depends_on:
     - name: node
       why: "face-bake: the face pack's player (sprite-gen-face-v1.mjs) picks the frames"
     - name: rife-ncnn-vulkan
-      why: "video-loop jump repair and video-cycle-align (RIFE v4.6 in-betweens with the -x -z test-time augmentation, release 20221029). Install once with `sprite-gen rife install` (sha256-checked, into the user data directory); SPRITE_GEN_RIFE or PATH override it; Linux without a GPU also needs libvulkan1 mesa-vulkan-drivers. Without it, walk and run loops are cut as filmed with a warning. SPRITE_GEN_RIFE_BACKEND=torch runs the same model in PyTorch instead, for a GPU with no Vulkan (`pip install \"sprite-gen[torch]\"`, then `sprite-gen rife install --backend torch`; SPRITE_GEN_RIFE_DEVICE=cuda or cpu; SPRITE_GEN_RIFE_EXECUTOR=module:attr sends its frames to a GPU elsewhere, rife_torch.serve there)"
+      why: "video-loop jump repair, held-cell fill and video-cycle-align (RIFE v4.25 in-betweens, no test-time augmentation, each image padded to 128; TNTwise's rife-ncnn-vulkan release 20250112). Install once with `sprite-gen rife install` (an 830 MB zip, 45 MB kept, sha256-checked, into the user data directory); SPRITE_GEN_RIFE or PATH override it (nihui's 20221029 on PATH has no rife-v4.25: install, or set SPRITE_GEN_RIFE); SPRITE_GEN_RIFE_MODEL_NAME=rife-v4.6 runs the old model with -x -z, its frames 3.14.0's; Linux without a GPU also needs libvulkan1 mesa-vulkan-drivers. Without it, walk and run loops are cut as filmed with a warning. SPRITE_GEN_RIFE_BACKEND=torch runs the same model in PyTorch instead, for a GPU with no Vulkan (`pip install \"sprite-gen[torch]\"`, then `sprite-gen rife install --backend torch`; SPRITE_GEN_RIFE_DEVICE=cuda or cpu; SPRITE_GEN_RIFE_EXECUTOR=module:attr sends its frames to a GPU elsewhere, rife_torch.serve there)"
   required_scripts:
     - scripts/prepare_sprite_run.py
     - scripts/generate_sprite_image.py
@@ -146,6 +146,8 @@ Scene creation consumes finished assets and remains optional. Asset metadata own
 `SPRITE_GEN_ROOT` is the absolute installed repository path. Use `$SPRITE_GEN_ROOT/.venv/bin/sprite-gen` or `$SPRITE_GEN_ROOT/.venv/bin/python`; do not assume an activated shell. **폴백 금지**: create a missing venv or report the failure, never use an arbitrary global Python. **NumPy 가 없는 인터프리터** fails at package import. Setup and diagnosis: [interpreter](docs/interpreter.md).
 
 ## RIFE for walk and run loops
+
+RIFE is rife-v4.25 with no augmentation by default. `SPRITE_GEN_RIFE_MODEL_NAME=rife-v4.6` runs the model of 3.14.0 and before, with `-x -z`, to make a cut again as it was made then; a `--between-cache` never hands one model's frames to the other.
 
 Without RIFE, tell the user which loops went unrepaired, which motions' held cells were not filled (`held_fill.unmade`, or `--out-fps` not met) and which airs were not retimed (`air_retime.why`), and offer the install; after it, cut those loops again and run `video-cycle-align`. [loop-repair](docs/loop-repair.md).
 

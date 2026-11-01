@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from conftest import rife_located
+from conftest import as_pinned
 from sprite_gen.video import loop, batch, canvas, clip_prompt
 
 
@@ -35,7 +35,7 @@ def cut(tmp_path, **kwargs):
 def test_cut_keeps_final_pose_in_strip_and_once_previews(tmp_path, rife_runs):
     keyed(tmp_path / "keyed")
     report = cut(tmp_path)
-    assert rife_runs() == (20 if rife_located() else 0)
+    assert as_pinned(rife_runs(), 20), rife_runs()
     meta = report["strip"]
     assert report["cycle"]["kind"] == "once"
     assert meta["loop"] is False and meta["hold_last"] is True

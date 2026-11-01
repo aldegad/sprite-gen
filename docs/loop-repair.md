@@ -17,23 +17,41 @@ where the appearance does not change and only the motion does — the case optic
 
 ### What
 
-[rife-ncnn-vulkan](https://github.com/nihui/rife-ncnn-vulkan) release **20221029**, model
-**`rife-v4.6`** (shipped inside the release zip). The engine calls the binary as an external
-tool, like `ffmpeg` and `img2webp`; nothing is vendored into the package. Every call asks for
-the binary's test-time augmentation, spatial and temporal (`-x -z`, `rife.TTA`;
-[Which setting](#which-setting--measured-2026-10-15) below); `SPRITE_GEN_RIFE_TTA` names another —
-`-x`, `-z`, both, or empty for none — and anything else is refused.
+[rife-ncnn-vulkan](https://github.com/TNTwise/rife-ncnn-vulkan), TNTwise's fork of nihui's, release
+**20250112**, model **`rife-v4.25`** (Practical-RIFE 4.25, shipped inside the release zip) with no
+test-time augmentation. The engine calls the binary as an external tool, like `ffmpeg` and `img2webp`;
+nothing is vendored into the package. Each image goes to the binary padded with zeros, at its top left, to
+a multiple of 128 each way, and the frame that comes back is cut to the pair's size (`rife.MODELS`):
+Practical-RIFE pads 4.25 to 128 at scale 1, and the binary pads it only to 64 itself, which took fewer
+frames on one of the cuts measured ([Which model](#which-model--measured-2026-11-01) below).
 
-| Release zip | SHA-256 (measured 2026-10-03) |
-|---|---|
-| `rife-ncnn-vulkan-20221029-ubuntu.zip` | `1e2c7ee7fa7daa326542d50622f0afedc80cf6f1858bda411d16385ffa5cdf68` |
-| `rife-ncnn-vulkan-20221029-macos.zip` | `4a63a1f3c9c715773c57d2ee51df1b315ed20cd6c63103e45c483ecc4400b595` |
-| `rife-ncnn-vulkan-20221029-windows.zip` | `d8e4d772d26cd8006ef0ad0bc82eb191b53c68677d1ae2f42506d74cbbbea606` |
+`rife-v4.6`, the model of 3.14.0 and before, ships in the same zip and runs where it is named:
+`SPRITE_GEN_RIFE_MODEL_NAME=rife-v4.6`, or `SPRITE_GEN_RIFE_MODEL` naming a `rife-v4.6` directory. It
+runs as it ran: every call asks for the binary's augmentation, spatial and temporal (`-x -z`; [Which
+setting](#which-setting--measured-2026-10-15) below), each image handed as it is, and its frames are
+3.14.0's to the byte (this release's binary with `-x -z` made 20221029's frames on the three public cuts of
+`tests/fixtures/rife-cuts`, every frame). `SPRITE_GEN_RIFE_TTA` names another augmentation for it — `-x`,
+`-z`, both, or empty for none — and anything else is refused. `rife-v4.25` runs with none: TNTwise's README
+marks `-x` and `-z` deprecated with rife-v4.25, and none is what was measured, so naming either is
+refused, not run. A model name the engine does not run, a model directory not named as the model it holds
+(the binary reads the model's version from the directory's name) and a name and a directory that disagree
+are refused too.
 
-| Model file (the macOS and Ubuntu zips hold the same, measured 2026-10-21) | SHA-256 |
-|---|---|
-| `rife-v4.6/flownet.param` | `724569596bcd1e7b9fa50455c604777ebed99746d2ef40aa86e31b5725f1053c` |
-| `rife-v4.6/flownet.bin` | `f334ed2260149ce0188a6dcf049844e8b0cdd912e01cbcfb63553157d2508958` |
+| Release zip, [TNTwise 20250112](https://github.com/TNTwise/rife-ncnn-vulkan/releases/tag/20250112) | Size | SHA-256 (measured 2026-11-01) |
+|---|---|---|
+| `macos.zip` | 830.6 MB | `543bf845a6160d8ad29a10c2b7a0713e78781dc2505c62185f7d14c3265bb4c0` |
+| `ubuntu.zip` | 825.9 MB | `a4166da15a9839350a3695c35d9e19288c5c48c0fc9afc5aacb766d3d7f8ab62` |
+| `windows.zip` | 826.9 MB | `42ed35e115b026f222386648920218cb8a9c7ae1e23698a7363bdd2e1455aba3` |
+
+| Model file (measured 2026-11-01) | macOS, Ubuntu | Windows (its `flownet.param` has CRLF line ends) |
+|---|---|---|
+| `rife-v4.25/flownet.param` | `6ba231fb00e4ae82b120f938d9b2df91db32fbf322bd110f29450efaf61848d6` | `99d0f49866ff06f170c08e570e3e1b67b89019e3d11a87c8f0e7908fa50ab4c1` |
+| `rife-v4.25/flownet.bin` | `10de487a095e61cb2971c39e3b5e17005a70fba6201c77fb96e063f4423b583f` | the same |
+| `rife-v4.6/flownet.param` | `724569596bcd1e7b9fa50455c604777ebed99746d2ef40aa86e31b5725f1053c` | `28df14d57a225725ee5386f52eba422488450d37c9f40800ed4f62e8ba846692` |
+| `rife-v4.6/flownet.bin` | `f334ed2260149ce0188a6dcf049844e8b0cdd912e01cbcfb63553157d2508958` | the same |
+
+`rife-v4.6`'s two files on macOS and Ubuntu are 20221029's, the same bytes. The release's forty-odd other
+models (`rife` to `rife-v4.26-large`) are not kept.
 
 #### The torch backend: `SPRITE_GEN_RIFE_BACKEND=torch`
 
@@ -41,22 +59,34 @@ The binary is the default. `SPRITE_GEN_RIFE_BACKEND=torch` runs the same model i
 (`sprite_gen/video/rife_torch.py`), for a GPU the binary cannot run on: rife-ncnn-vulkan needs Vulkan,
 and a GPU offered for compute alone (CUDA with no Vulkan driver) has none. It is the same RIFE:
 
-- the network is rife-v4.6's IFNet (Practical-RIFE `IFNet_HDv3`), written again with its parameter
-  names;
+- the network is the model's IFNet (Practical-RIFE `IFNet_HDv3`), written again with its parameter
+  names: for `rife-v4.25` an encoder run on each image and five blocks at scales 16 to 1, each image
+  padded with zeros to a multiple of 128 as the engine hands the binary it; for `rife-v4.6` four blocks,
+  padded to 32 as the binary pads it;
 - its weights are read out of the binary's own model files above, checked against those SHA-256 first
-  (the binary's float16 weights widened as the binary widens them, no other download);
-- one run does what one call of the binary does with `-x -z`: the pair turned its eight ways and run
-  both ways in time, every way's flows turned back and averaged at each of the network's four levels,
-  the frames averaged and rounded as the binary rounds them; `SPRITE_GEN_RIFE_TTA` means the same;
+  (the binary's float16 weights widened as the binary widens them, no other download). For `rife-v4.25`
+  they are Practical-RIFE's published `flownet.pkl` (SHA-256
+  `6615790efd627772917205db291f51cd392528a157ecbb2ecaeec3bff8eb6de2`, in its 4.25 zip of 2024-09-19)
+  cut to float16; on the CPU the network makes Practical-RIFE's own frame from those weights, byte for
+  byte (measured against its `train_log/IFNet_HDv3.py`, which is not vendored);
+- `rife-v4.25` runs once a frame, with no augmentation, and an augmentation named is refused; for
+  `rife-v4.6` one run does what one call of the binary does with `-x -z`: the pair turned its eight ways
+  and run both ways in time, every way's flows turned back and averaged at each of the network's four
+  levels, the frames averaged and rounded as the binary rounds them; `SPRITE_GEN_RIFE_TTA` means the same;
 - a frame is the same two runs (colour, coverage) and a read the same sixteen passes (section 4), the
   engine's part of them done by the same code for either backend (`rife.frame_runs`, `rife.pass_runs`).
+
+No mirror of the pkl is kept: the backend reads the release zip's model, from GitHub like the binary, so
+it needs no file from Practical-RIFE's Google Drive, and the pkl's SHA-256 above (and in `NOTICE`) says
+which published weights those are.
 
 | Variable | Values | Default |
 |---|---|---|
 | `SPRITE_GEN_RIFE_BACKEND` | `ncnn` (the binary), `torch` | `ncnn` |
 | `SPRITE_GEN_RIFE_DEVICE` | `cuda`, `cpu` (the torch backend's device) | `cuda` |
-| `SPRITE_GEN_RIFE_MODEL` | a `rife-v4.6` directory | beside the binary (`ncnn`); the install root's (`torch`) |
-| `SPRITE_GEN_RIFE_TTA` | `-x`, `-z`, both, or empty | `-x -z`, for both backends |
+| `SPRITE_GEN_RIFE_MODEL_NAME` | `rife-v4.25`, `rife-v4.6` | `rife-v4.25` |
+| `SPRITE_GEN_RIFE_MODEL` | a model directory, named as its model | the model named, beside the binary (`ncnn`); the install root's (`torch`) |
+| `SPRITE_GEN_RIFE_TTA` | `-x`, `-z`, both, or empty (`rife-v4.6`; `rife-v4.25` takes empty only) | none for `rife-v4.25`, `-x -z` for `rife-v4.6`, for both backends |
 | `SPRITE_GEN_RIFE_EXECUTOR` | `module:attr`, the host's send to a GPU elsewhere (torch backend; below) | unset: in this process |
 
 Nothing falls back. With torch chosen the engine neither looks for the binary nor runs it. A device is
@@ -72,11 +102,11 @@ On CUDA every frame runs with cuDNN deterministic, its benchmark off and its con
 float32 (`torch.backends.cudnn.conv.fp32_precision = "ieee"`: PyTorch turns TF32 on by default), so the
 same frame twice is the same bytes on one GPU, driver and PyTorch. On the CPU it is the same bytes
 whatever the thread count. PyTorch does not promise the same bytes across GPUs or releases, so what
-made a frame (the backend, the model bytes it loaded, its network code, PyTorch, on CUDA the GPU,
+made a frame (the backend, the model it runs and the bytes it loaded, its network code, PyTorch, on CUDA the GPU,
 driver, CUDA, cuDNN and those settings as they read back, on the CPU its instruction set) is the RIFE's
 identity, and a frame kept for one is never taken for another (section 4, `--between-cache`). The
 engine's reports name what made their frames: `interpolator.kind` is `rife-ncnn-vulkan` or
-`rife-torch`, and the overlapped wrap counts the binary's calls (`binary_calls`) or the torch backend's
+`rife-torch`, `interpolator.model` the model, and the overlapped wrap counts the binary's calls (`binary_calls`) or the torch backend's
 runs (`runs`).
 
 #### A GPU elsewhere: `SPRITE_GEN_RIFE_EXECUTOR`
@@ -112,12 +142,15 @@ it would make. The next loop or alignment makes a new RIFE, which asks again and
 anew. Containers of one image, GPU and driver are one executor: their hosts' CPU and name are no
 part of the identity, so a cache directory serves every one of them.
 
-The host keeps to three things:
+The host keeps to four things:
 
 - Name one GPU type for the executor, with no list to fall back on. A request a GPU of another type
   takes fails the RIFE.
 - Run the same sprite-gen on both sides. A request names this host's `rife.py` by SHA-256, and an
   executor of other code is refused as the RIFE is made.
+- Run one model on both sides. The executor runs the model its own environment names
+  (`SPRITE_GEN_RIFE_MODEL_NAME`, else `rife-v4.25`), and one that answers with another than this host's is
+  refused as the RIFE is made.
 - Do not deploy the executor anew while a loop or an alignment runs: that run fails, by why.
 
 A send that raises, an answer that does not read (not the format, damaged or cut short on the
@@ -144,8 +177,8 @@ sprite-gen rife install            # once per machine
 
 It downloads the zip for this platform (macOS, universal; Linux and Windows, x86-64), checks
 the SHA-256 above before anything is unpacked, and keeps only what the engine runs — the
-binary, `rife-v4.6/`, `LICENSE` and `README.md` (and `vcomp140.dll` on Windows), about 35 MB of
-the 430 MB zip. It lands in the user data directory:
+binary, `rife-v4.25/`, `rife-v4.6/`, `LICENSE` and `README.md` (and the DLLs on Windows), about 45 MB of
+the 830 MB zip (the zip carries every model the fork converted; 20221029's was 430 MB). It lands in the user data directory:
 
 | | Install root |
 |---|---|
@@ -161,12 +194,16 @@ finds out at install time (`--no-check` skips it). `--zip FILE` installs from a 
 downloaded (behind a proxy, in an image build), checked the same way; `--dir DIR` installs
 elsewhere and prints the `SPRITE_GEN_RIFE=…` line the engine then needs. Other platforms (Linux
 on ARM, for one) have no release build: build it from the repository and set `SPRITE_GEN_RIFE`.
-Either backend's install checks the model's two files against their SHA-256 above once the zip is
-unpacked, and installs nothing where they differ.
+Either backend's install checks both models' files against their SHA-256 above once the zip is
+unpacked, and installs nothing where they differ. The check frame runs the model the engine runs
+(`SPRITE_GEN_RIFE_MODEL_NAME`, else `rife-v4.25`), and the report names it (`model`). An install of
+20221029 is left where it is; the engine looks for 20250112's directory.
 
 The engine finds the binary by, in order: `SPRITE_GEN_RIFE` (the binary's path), then
-`rife-ncnn-vulkan` on `PATH`, then the install root above. The model is `SPRITE_GEN_RIFE_MODEL` or
-`rife-v4.6/` next to the binary. When an earlier place holds another RIFE, the install says which one
+`rife-ncnn-vulkan` on `PATH`, then the install root above. The model is `SPRITE_GEN_RIFE_MODEL` or the
+named model's directory (`rife-v4.25/` by default) next to the binary. nihui's 20221029 binary on `PATH`
+holds no `rife-v4.25/`, so it is RIFE not installed until the install above is run, or `SPRITE_GEN_RIFE`
+names this one, or `SPRITE_GEN_RIFE_MODEL_NAME=rife-v4.6` names the model it has. When an earlier place holds another RIFE, the install says which one
 the engine runs.
 
 For the torch backend:
@@ -179,7 +216,8 @@ sprite-gen rife install --backend torch    # the model, and a check frame throug
 `--backend torch` (the default where `SPRITE_GEN_RIFE_BACKEND=torch`) installs the same zip and makes
 the check frame through PyTorch on `SPRITE_GEN_RIFE_DEVICE` (name `cpu` for an image built without a
 GPU). It reads the model only, so a Linux machine the binary does not run on (ARM) is not refused. The
-backend reads the model from `SPRITE_GEN_RIFE_MODEL`, else the install root's `rife-v4.6/`, never from
+backend reads the model from `SPRITE_GEN_RIFE_MODEL`, else the install root's directory of the named
+model (`rife-v4.25/` by default), never from
 beside a binary on `PATH`. PyPI's Linux wheel of PyTorch is its CUDA build (527 MB, and its CUDA
 libraries); a host that runs the backend on the CPU only installs PyTorch's CPU build first (192 MB):
 `pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu`.
@@ -255,13 +293,14 @@ What there is to choose (read 2026-10-15):
 
 | Source | Newest | What it offers |
 |---|---|---|
-| [nihui/rife-ncnn-vulkan](https://github.com/nihui/rife-ncnn-vulkan/releases) | release 20221029, the one above | models up to `rife-v4.6`; `-x`, spatial test-time augmentation (the pair run as its eight flips and transposes, the results averaged); `-z`, temporal (the pair run both ways in time as well); `-u`, a mode for 4K frames |
-| [TNTwise/rife-ncnn-vulkan](https://github.com/TNTwise/rife-ncnn-vulkan/releases) (a fork) | release 20250112 (an 830 MB zip) | adds `rife-v4.25`, `rife-v4.25-lite` and `rife-v4.26` (and `-v4.25-heavy`, `-v4.26-large`, which Practical-RIFE does not list); its README marks `-x` and `-z` "deprecated with rife-v4.25" |
+| [nihui/rife-ncnn-vulkan](https://github.com/nihui/rife-ncnn-vulkan/releases) | release 20221029, 3.14.0's and before | models up to `rife-v4.6`; `-x`, spatial test-time augmentation (the pair run as its eight flips and transposes, the results averaged); `-z`, temporal (the pair run both ways in time as well); `-u`, a mode for 4K frames |
+| [TNTwise/rife-ncnn-vulkan](https://github.com/TNTwise/rife-ncnn-vulkan/releases) (a fork) | release 20250112 (an 830 MB zip), the one above since 2026-11-01 | adds `rife-v4.25`, `rife-v4.25-lite` and `rife-v4.26` (and `-v4.25-heavy`, `-v4.26-large`, which Practical-RIFE does not list); its README marks `-x` and `-z` "deprecated with rife-v4.25" |
 | [hzwer/Practical-RIFE](https://github.com/hzwer/Practical-RIFE) (the weights) | 4.26 (2024-09-21) and 4.25.lite (2024-10-20); no model since | "recommended to choose 4.25 by default for most scenes" |
 
-Chosen: **`rife-v4.6`, the model above, with `-x -z`**: the pair is run as its eight flips and
-transposes and both ways in time, and the results are averaged, so a frame made from a to b is the
-one made from b to a. The fork's models are not used.
+Chosen then, and still how `rife-v4.6` runs: **`rife-v4.6` with `-x -z`**: the pair is run as its eight
+flips and transposes and both ways in time, and the results are averaged, so a frame made from a to b is
+the one made from b to a. The fork's models were not used until `rife-v4.25` was measured on real cuts
+([Which model](#which-model--measured-2026-11-01) below).
 
 What each setting makes of the synthetic pairs of `tests/video/test_rife.py`: every setting through
 the engine's own `rife.between`, named by `SPRITE_GEN_RIFE_TTA`, read with its own measures
@@ -301,6 +340,65 @@ CPU. Each Modal range is two runs, and hosts differ: the same 280 × 520 frame t
 frame in a container takes longer (llvmpipe compiles its shaders). One call is stopped at 600 s
 (`rife.CALL_TIMEOUT_SECONDS`) and reported as a RIFE that failed.
 
+### Which model — measured 2026-11-01
+
+Chosen: **`rife-v4.25`, padded to 128, with no augmentation**, through TNTwise's 20250112 binary, the
+model Practical-RIFE recommends "by default for most scenes". It was chosen on five loop cuts filled
+24 → 60 fps by `held_fill.upsample` (section 7), each read for the poses that come out
+(`held_fill.reading`): three public cuts drawn with thick lines, kept as `tests/fixtures/rife-cuts`
+(`tests/video/test_rife_cuts.py`), and two drawn with thin lines, which are private and measured outside
+this repository. On the public three, through the binary on an Apple M4 Max GPU and through
+Practical-RIFE 4.25's own code in PyTorch (its published float32 weights, on the same GPU), each padded
+to 128:
+
+| Cut (frames filled, 24 → 60 fps) | `rife-v4.6`, `-x -z`: poses, frames taken | `rife-v4.25`, binary: poses, taken | `rife-v4.25`, PyTorch: poses, taken |
+|---|---|---|---|
+| knight's walk (26 frames, 65 cells) | 42, 17 | **40**, 15 | 41, 16 |
+| Pip's run (26 frames, 65 cells) | 40, 20 | **39**, 19 | 39, 19 |
+| Pip's jump (29 frames, 72 cells) | 67, 52 | **67**, 53 | 67, 53 |
+
+- **The binary and PyTorch take the same frames** on Pip's run and Pip's jump. On the knight's walk
+  PyTorch takes one more, cell 6 at t 0.2, a frame on the bar (below, "Known limits"). The tests hold the
+  binary's numbers: the knight's walk at least 40, Pip's run and jump within one of 39 and 67, and Pip's
+  jump the very frames PyTorch took.
+- **Padded to 128, not 64.** The binary pads `rife-v4.25` only to 64 itself; handed Pip's jump so, it took
+  64 poses from 48 frames. Padded to 128 by the engine, as Practical-RIFE pads it at scale 1, it takes 67
+  from 53, PyTorch's. `rife-v4.6` is handed each image as before, and its frames do not change.
+- **The feet hold.** Where a planted pair's feet stand still, the frame made between them was dragged
+  2 px sideways and 2 px up over the feet band, and read by `held_fill.still_kept`'s windows: on the
+  knight's walk (88 such frames) and Pip's jump (91) every one the windows caught for `rife-v4.6` they
+  catch for `rife-v4.25` (knight's walk 43 sideways and 77 up, Pip's jump 86 and 42, both models alike);
+  Pip's run has no still feet to drag.
+- **`rife-v4.6` is 3.14.0's to the byte.** This binary with `-x -z` made 20221029's frames on all three
+  cuts, every cell; a cut with no held cell runs no RIFE and is the same bytes whichever model is named
+  (`test_a_cut_with_no_held_cell_runs_no_rife_and_is_the_same_bytes_whichever_model`).
+
+Time: a cut took 5 to 7 minutes of the binary on the Apple GPU with `rife-v4.25` (300 to 400 s of RIFE,
+225 to 275 frames tried). On the synthetic pairs of `tests/video/test_rife.py`, where legs walk through
+each other (`_legs`), `rife-v4.25` adds dark of +0.4, +0.4 and +1.8 % at t 0.25, 0.5 and 0.75, against
+`rife-v4.6`'s +1.3, −2.2 and +2.1 %: under the 3 % bound either way, though where the legs cross (t 0.5)
+it adds a little where `rife-v4.6` adds none.
+
+#### Known limits
+
+- **The knight's walk takes two poses fewer than with `rife-v4.6`** (40 against 42). Cells 2, 34 and 36,
+  which `rife-v4.6` filled, are refused for `rife-v4.25` by the binary and by Practical-RIFE's PyTorch
+  alike. Cell 6, asked at t 0.4, is refused by the binary: its frames at t 0.25 to 0.55 by the outline and
+  ghost readings (with contact or a doubled limb), and its frame at t 0.2, which no fault refuses, because
+  made off its time its ghost band reads 0.00602 in its worst window, over `align.RETIME_WINDOW_MAX`
+  (0.006). Practical-RIFE's own PyTorch read it under the bar and took it; the torch backend, on the
+  binary's float16 weights, reads 0.00602 too. A thick line that sits on a bar tips one way or the other
+  with the weights and arithmetic that make the frame: a threshold that wobbles, left to the plan that next
+  tunes the judge.
+- On small synthetic sprites `rife-v4.25` sometimes makes the frame between held cells show a neighbour's
+  picture again; it is refused (`held`), tried at another time and the cells kept as filmed, with a
+  warning (the once-return punch of `tests/video/test_play.py`, the application's walk of
+  `tests/video/test_ghost_given_way.py`).
+- Where a tail swings across a hand (`tests/video/test_loop_overlap.py`'s third walker), `rife-v4.25`'s
+  frame at weight 0.7 keeps the hand whole but fades the tail over the legs, and no reading refuses that
+  (section 2, "A part torn").
+- `rife-v4.25` takes no augmentation, so a frame from a to b is not the frame from b to a.
+
 ### Decision
 
 **RIFE runs where the engine runs.** On a Mac that is the Apple GPU. In the app it is the
@@ -308,16 +406,23 @@ Modal job container itself, on CPU through llvmpipe — no GPU function and no s
 
 ```
 apt_install("libvulkan1", "mesa-vulkan-drivers")    # the Vulkan loader + llvmpipe
-curl -fsSL -o /tmp/rife.zip https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-ubuntu.zip
-echo '1e2c7ee7fa7daa326542d50622f0afedc80cf6f1858bda411d16385ffa5cdf68  /tmp/rife.zip' | sha256sum -c -
-unzip -q /tmp/rife.zip -d /opt && ln -s /opt/rife-ncnn-vulkan-20221029-ubuntu/rife-ncnn-vulkan /usr/local/bin/
+curl -fsSL -o /tmp/rife.zip https://github.com/TNTwise/rife-ncnn-vulkan/releases/download/20250112/ubuntu.zip
+echo 'a4166da15a9839350a3695c35d9e19288c5c48c0fc9afc5aacb766d3d7f8ab62  /tmp/rife.zip' | sha256sum -c -
+unzip -q /tmp/rife.zip 'ubuntu/rife-ncnn-vulkan' 'ubuntu/rife-v4.25/*' 'ubuntu/rife-v4.6/*' 'ubuntu/LICENSE' -d /opt/rife
+chmod +x /opt/rife/ubuntu/rife-ncnn-vulkan && ln -s /opt/rife/ubuntu/rife-ncnn-vulkan /usr/local/bin/
 ```
 
 `sprite-gen rife install` (after the package, as the image's own user) does the same download,
-hash and unpack, and adds the check frame; CI installs RIFE that way.
+hash and unpack, checks the models' files, and adds the check frame; CI installs RIFE that way. The zip is
+830 MB to download, 45 MB kept.
+
+The costs below are `rife-v4.6`'s, measured 2026-10-03 and 2026-10-15. `rife-v4.25` runs with no
+augmentation, on each image padded to 128; it was not timed on Modal when it became the default (the
+change made no paid run). On the Apple M4 Max GPU it took about 1.4 s a frame tried on the public cuts
+(two runs at 640 × 896, process starts included).
 
 Cost on Modal (prices read from modal.com/pricing on 2026-10-03: CPU $0.0000131 per core per
-second, memory $0.00000222 per GiB per second), with the augmentation ("Which setting" above): one
+second, memory $0.00000222 per GiB per second), `rife-v4.6` with the augmentation ("Which setting" above): one
 repaired frame of 280 × 520 is 12 to 30 s and 120 to 370 CPU seconds, a fifth of a cent to half a
 cent; a loop makes at most three, so at most about a minute and a half of one container — under two
 cents. Aligning a set's cycles (section 4) makes more frames, and larger: 44 to 61 s and 600 to 870
@@ -327,18 +432,30 @@ minutes. A deployment that aligns on a CPU names a lighter augmentation for that
 two seconds either way. That is the reason section 4 keeps every frame that lands on a source frame.
 
 **The torch backend is for a GPU the binary cannot use; the binary stays the default.** A GPU offered
-for compute only cannot run the binary at all, and there the torch backend runs the same model and
-augmentation. Elsewhere it adds PyTorch, hundreds of megabytes, for the same model: on a Mac the binary
+for compute only cannot run the binary at all, and there the torch backend runs the same model (and for
+`rife-v4.6` the same augmentation). Elsewhere it adds PyTorch, hundreds of megabytes, for the same model: on a Mac the binary
 already runs on the GPU. On a CPU host the torch backend is faster than the binary on llvmpipe (the
 table below), but its frames are not the binary's bytes; a deployment that wants it there names it, and
-the default does not move. Measured on synthetic walkers, 2026-10-21:
+the default does not move. Measured on synthetic walkers with `rife-v4.6`, 2026-10-21, and with `rife-v4.25`, 2026-11-01, the pick
+run again on the same ten candidates by the same rule:
 
-- **The same verdicts.** The seven pairs of `tests/fixtures/rife-walkers` (clean steps, an outline lost
-  where legs cross far, a ghost band, parts torn, a cross-fade to look at) get the same faults and
-  looks from the binary on an Apple GPU, the binary on llvmpipe and the torch backend on a CPU, each
-  reading at least a tenth of its bound away from it (and three more pairs besides, one left out for a
-  torn reading 8 % from its bound on llvmpipe). The tests keep it: the torch backend judges the seven
-  as the binary did on a machine with no binary, and as this machine's binary does where both run.
+- **The same verdicts.** The seven pairs of `tests/fixtures/rife-walkers` picked for `rife-v4.6` (clean
+  steps, an outline lost where legs cross far, a ghost band, parts torn, a cross-fade to look at) get the
+  same faults and looks from the binary on an Apple GPU, the binary on llvmpipe and the torch backend on
+  a CPU, each reading at least a tenth of its bound away from it (of ten candidate pairs, two more met
+  the rule and were not added, and near50 was left out for a torn reading 8 % from its bound on
+  llvmpipe); run again for `rife-v4.6`, the pick gave the same seven. With `rife-v4.25` nine of the ten
+  meet the rule, and six are recorded for it: near25, far50, mid50, cross50, bnear50 and bfar33 (near50,
+  far25 and swap50 met the rule and were not added; near50 and far25 are near25's and far50's pairs at
+  another t with the same verdict). bfar50 does not meet it: its verdicts differ on llvmpipe, where the
+  binary reads a cross-fade look over its bound (0.01645 against 0.015) and the torch backend on that
+  CPU does not (0.01198), the faults the same, and its least margin there is 0.097 of the bound; on the
+  Apple GPU the binary reads it under (0.0113). With `rife-v4.25` no candidate reads a cross-fade look
+  clear of its bound, so no `rife-v4.25` pair checks the look; `rife-v4.6`'s bfar50 still does. The tests
+  keep it: the torch backend judges `rife-v4.6`'s seven as the binary did, from the binary's recorded
+  `rife-v4.6` frames, on a machine with no binary, and where both run the binary and the torch backend
+  judge each model's pairs alike, listed in `tests/fixtures/rife-walkers/walkers.json` under `alike`
+  (`rife-v4.6`, run by name, on its seven; `rife-v4.25` on its six).
 - **Frames as close as two GPUs'.** Against the binary's frame on the Apple GPU, the torch backend's
   lies 0.005 to 0.052 of 255 apart on average and 11 at most (premultiplied RGBA in the box either
   covers), and the binary's own frame on llvmpipe 0.007 to 0.25 apart and 76 at most: closer on six of
@@ -368,18 +485,19 @@ took 8.4 s. The T4 lane runs the torch tests on CUDA for a release (docs/release
 
 ### Licences
 
-| Part | Licence | Source (read 2026-10-03) |
+| Part | Licence | Source (read 2026-10-03; TNTwise and 4.25 read 2026-11-01) |
 |---|---|---|
-| rife-ncnn-vulkan (code, release binaries) | MIT, © 2020 nihui | `LICENSE` in the repository and in the release zip |
+| rife-ncnn-vulkan, TNTwise's fork (code, release 20250112 binaries, the models it converted) | MIT, © 2020 nihui (the fork keeps nihui's licence) | `LICENSE` in github.com/TNTwise/rife-ncnn-vulkan and in each release zip |
+| rife-ncnn-vulkan (code, release binaries), up to 3.14.0 | MIT, © 2020 nihui | `LICENSE` in the repository and in the release zip |
 | RIFE (the network) | MIT | github.com/hzwer/ECCV2022-RIFE; the authors add that they "respect the commercial behavior of other developers" |
-| RIFE v4.x weights (Practical-RIFE) | MIT — "The content of these links is under the same MIT license as this project." | github.com/hzwer/Practical-RIFE |
+| RIFE v4.x weights (Practical-RIFE), 4.25 and 4.6 among them | MIT — "The content of these links is under the same MIT license as this project." | github.com/hzwer/Practical-RIFE (README, read at bbfd2ea) |
 | ncnn | BSD 3-Clause | github.com/Tencent/ncnn |
 
-| sprite-gen's torch backend (`sprite_gen/video/rife_torch.py`) | MIT notices in `NOTICE`: the IFNet written again from Practical-RIFE `IFNet_HDv3.py` and `warplayer.py`, © 2021 hzwer; the augmentation from rife-ncnn-vulkan's `RIFE::process_v4`, © 2020 nihui | Practical-RIFE f6b5132 (2022-09-26); rife-ncnn-vulkan 20221029 |
+| sprite-gen's torch backend (`sprite_gen/video/rife_torch.py`) | MIT notices in `NOTICE`: the IFNets written again from Practical-RIFE `IFNet_HDv3.py` and `warplayer.py`, © 2021 hzwer; the augmentation from rife-ncnn-vulkan's `RIFE::process_v4`, © 2020 nihui | Practical-RIFE f6b5132 (2022-09-26) for 4.6, its 4.25 model zip (2024-09-19, `train_log/IFNet_HDv3.py`) for 4.25; rife-ncnn-vulkan 20221029 |
 | PyTorch (the `torch` extra) | BSD 3-Clause | github.com/pytorch/pytorch |
 
 sprite-gen ships none of the binaries, weights or PyTorch: its torch backend is code written again from
-the two MIT sources above, their notices in `NOTICE`, and reads the weights from the release zip's
+the MIT sources above, their notices in `NOTICE`, and reads the weights from the release zip's
 model. A deployment that bakes the release zip into an image ships the zip's `LICENSE` with it.
 
 ## 2. Jump frames — `video-loop --repair auto`
@@ -755,7 +873,7 @@ were still refused.
 Every stretch of the stand-in is refused: the loop keeps the flow repair, `surge_after` names the
 rush, and the calls the stretch made are spent. Up to 2.45.0 the first five were taken, and their
 legs stopped where the tail was given its time. On a Mac's GPU a call is a
-second or so; on Modal's CPU with `-x -z` twelve to thirty seconds a
+second or so; on Modal's CPU, `rife-v4.6` with `-x -z`, twelve to thirty seconds a
 280 × 520 frame (section 1), so a loop that rushes costs two to four and a half minutes more, and a
 loop that does not, nothing.
 
@@ -832,9 +950,12 @@ a part is refused (`torn`). The frame nearest a half is made first, where the pa
 furthest; the first frame refused ends the run. A clip whose part crosses another on every run is
 refused the overlapped wrap and kept as filmed, for the gate to refuse: a torn hand is not delivered.
 On the file's third walker — painted without a line, seen from behind, 480 × 640, its big tail swung
-from 48 to −8 degrees across its hand between two frames a cycle apart — the real RIFE's frames at
+from 48 to −8 degrees across its hand between two frames a cycle apart — `rife-v4.6`'s frames at
 weights 0.5 and 0.7 read 0.44 and 0.26, over the 0.21 that names a part torn, with no other fault;
-swung 10 degrees past no hand, its frames at 0.3, 0.5 and 0.7 read 0.04 at most.
+swung 10 degrees past no hand, its frames at 0.3, 0.5 and 0.7 read 0.04 at most. `rife-v4.25`'s frame
+at 0.5 drags the hand apart too and reads 1.0; at 0.7 it keeps the hand whole, its fingers their own
+colour, and reads 0.12 (measured 2026-11-01). Its tail there fades over the legs, which no reading
+refuses.
 
 On the walker of `tests/video/test_loop_overlap.py` — seen from the front, 26 frames a cycle, its
 tail swinging round on a beat of 41 frames, 73 frames, with the stand-in in-between (measured
@@ -880,7 +1001,7 @@ run is made whole and refused for something else at most forty frames, outside t
 first walker above takes ten frames, the second four where it is taken and fifteen where its torso slides.
 
 **Turned off.** Where RIFE runs on a CPU, those calls take minutes a frame: on two CPU cores with the
-augmentation off (`SPRITE_GEN_RIFE_TTA=`), a frame of a 960 × 960 synthetic walker took 160 to 174 s, its
+augmentation off (`rife-v4.6`, `SPRITE_GEN_RIFE_TTA=`), a frame of a 960 × 960 synthetic walker took 160 to 174 s, its
 sixteen passes nearly all of it — so a wrap refused for a part torn at its first frame costs minutes a run,
 and one made whole up to forty frames. A caller that stops the loop at a deadline would stop it there, and
 the loop would not fail on its own seam. `video-loop --overlap-wrap off` turns the overlapped wrap off
@@ -1021,7 +1142,7 @@ The seam bridge (`repair.seam_bridge`, driven from `loop.run_loop`) runs under `
 | Drawn on twos (J = 2.6) | 4.47 against steps beside it | Skipped: drawn on twos or threes | Refused at 3.00 as filmed |
 | Real RIFE (rife-v4.6 with augmentation, J = 2.6) | 2.65 against steps beside it | Closed by one frame without faults | Passes gate |
 
-Cost: at most seven plain RIFE calls per loop, one per frame. From the RIFE table in section 1 (a 960 x 960 frame on Modal `cpu=2`), a frame takes 4.3 to 6.2 s with no augmentation, and 44.0 to 60.5 s with `-x -z`. Seven frames take 30 to 43 s with augmentation off, and five to seven minutes with `-x -z`. A CPU host sets `SPRITE_GEN_RIFE_TTA=` (empty: no augmentation). The readings take little time, evaluating a few thumbnails and running the ghost screen on the stretch and the three frames either side rather than the whole loop.
+Cost: at most seven plain RIFE calls per loop, one per frame. From the RIFE table in section 1 (`rife-v4.6`, a 960 x 960 frame on Modal `cpu=2`), a frame takes 4.3 to 6.2 s with no augmentation, and 44.0 to 60.5 s with `-x -z`. Seven frames take 30 to 43 s with augmentation off, and five to seven minutes with `-x -z`. `rife-v4.25`, the default, runs with none; with `rife-v4.6` named, a CPU host sets `SPRITE_GEN_RIFE_TTA=` (empty: no augmentation). The readings take little time, evaluating a few thumbnails and running the ghost screen on the stretch and the three frames either side rather than the whole loop.
 
 Limits:
 - Anchors up to five frames apart can tear a small part that a large part swings across, and no fault check above detects it (on the third walker of `tests/video/test_loop_overlap.py`, a big tail across a hand, the reading `rife.torn` names it; it costs 34 calls of the binary a frame and the bridge does not run it). The walk flow repair, over two or three frames, takes the same risk; that is why the bridge stops at four frames.
@@ -3118,8 +3239,10 @@ sprite-gen video-cycle-align --loop-dir set/front-walk/loop --loop-dir set/side-
   interpolator identity. The identity is read again for every frame asked for, and nothing of it is
   remembered: the RIFE binary file and each file in the model directory, by sha256; the model directory's
   path as given to the binary (the binary reads the model's version from the directory name); the
-  augmentation every call asks for at that moment (`rife.tta()`: `SPRITE_GEN_RIFE_TTA`, or the default
-  `-x -z` when it is not set — section 1, "Which setting"), as another augmentation makes another frame;
+  augmentation every call asks for at that moment (`rife.tta()`: `SPRITE_GEN_RIFE_TTA`, or the model's own
+  when it is not set — none for `rife-v4.25`, `-x -z` for `rife-v4.6`; section 1, "Which setting"), as
+  another augmentation makes another frame; so `rife-v4.25` and `rife-v4.6` key their frames apart by their
+  files and their directory's name, and a frame made by one is never taken for the other;
   the engine code as loaded, which is the sha256 of `sprite_gen/video/rife.py` read once at import
   (`rife.py` written over on disk during a run changes no code that is running, so a frame made by the
   loaded code is kept under that code, and a later process that loads other code gets another key and
@@ -3320,7 +3443,7 @@ plays the clip's filmed frames, none made between two others, and names a run it
 | A frame made, judged | `align.measure_made` and `interpolation_quality.faults` (smear, outline, ghost, hole, doubled), the alignment's own | One acceptance policy for every frame RIFE makes (section 4). |
 | A part standing still, kept still (`still_kept`) | The outline pixels both frames draw in one place in one colour (solid at alpha 128, within 24 levels) must be drawn there in the frame made, within a pixel, for at least `STILL_KEPT_MIN` 0.8 of them in every window a tenth of the body high that holds 12 or more; else the fault `contact` | A foot planted or a hand on a ledge stays where it stood. A synthetic in-between that drags a planted foot 3 px along the floor keeps 0.50 of its window; one off by a pixel, 1.00. |
 | A picture of its own (`same_picture`) | The frame made must not read as the same picture (the reading above) as either frame it is made between or as the cell delivered before it (in a run of three, at `--out-fps` or in an air retimed with `--air-retime`, that can be a frame made too); else the fault `held` | An interpolator that gives back a frame it was handed, or one picture at two times, makes no frame between. Taken, the cell would be counted as made and still show the picture beside it. On a synthetic stalled walk (runs of two and three cells) whose interpolator gives back the frame before, both runs are kept as filmed (24/27 poses/cells). Each first cell is tried at its own time and then only later within half a cell (0.5 to 0.7, and 0.3333 to 0.45). `warning:` lines name cells 5-6 and 14-16. A synthetic fall that sinks less than a pixel in half a frame shows the frame before it again at 0.5 and 0.55, and is made at 0.6. |
-| A frame refused | Made again at the fraction of `RETIME_T` nearest its own within half a cell of it, its ghost band under `RETIME_WINDOW_MAX` (section 4's bar for a frame made off its time). One refused as `held` is made again only on the side away from the picture it showed (later where it showed the frame before or the cell before it, earlier where it showed the frame after), and not again where it showed both. Else the run is kept as filmed, with a warning naming the cells and the faults | A frame half way that RIFE cannot draw is often clean nearer one side. The frames between run from one pose to the next, so a fraction nearer a picture a frame showed again shows it too. On the cuts of eight tests that reach the binary through the default fill, trying every fraction within half a cell ran the binary 214 times. The side rule runs it 124 times and makes the same cells (3.10.0, which took such frames, ran it 90 times). |
+| A frame refused | Made again at the fraction of `RETIME_T` nearest its own within half a cell of it, its ghost band under `RETIME_WINDOW_MAX` (section 4's bar for a frame made off its time). One refused as `held` is made again only on the side away from the picture it showed (later where it showed the frame before or the cell before it, earlier where it showed the frame after), and not again where it showed both. Else the run is kept as filmed, with a warning naming the cells and the faults | A frame half way that RIFE cannot draw is often clean nearer one side. The frames between run from one pose to the next, so a fraction nearer a picture a frame showed again shows it too. On the cuts of eight tests that reach the binary through the default fill (`rife-v4.6`), trying every fraction within half a cell ran the binary 214 times. The side rule runs it 124 times and makes the same cells (3.10.0, which took such frames, ran it 90 times). |
 | Whole or not at all | A run is made whole or kept whole | Half made, it would step back to the held picture and on again. |
 | Order | After the anchor and `source_projection`, before the ghost screen, the wrap blend, the part pop and the jump repair | Everything that reads the flow and the wrap reads the cut as it will play. |
 | No RIFE | The held cells are delivered as filmed, the cut passes, and a `warning:` line names the motion, the cells and `sprite-gen rife install`; `held_fill.unmade` records them | Never a failure, never silent. |

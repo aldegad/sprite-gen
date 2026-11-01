@@ -127,6 +127,33 @@ def test_a_cut_with_no_held_cell_is_delivered_byte_for_byte_as_before(case, tmp_
         assert record["held_runs"] == [] and record["poses"] == cells
 
 
+
+@pytest.mark.skipif(os.name == "nt", reason="a shebang script cannot stand in for rife-ncnn-vulkan.exe")
+@pytest.mark.parametrize("model", ["rife-v4.25", "rife-v4.6"])
+@pytest.mark.parametrize("case", sorted(UNHELD))
+def test_a_cut_with_no_held_cell_runs_no_rife_and_is_the_same_bytes_whichever_model(case, model, tmp_path, monkeypatch):
+    """The six cuts with no held cell, with a RIFE there to be found — either model named (SPRITE_GEN_RIFE_MODEL_NAME) —
+    are the bytes pinned before the fill: the binary is never run, so changing the default model changes none of
+    them."""
+    from sprite_gen.video import rife
+
+    log = tmp_path / "rife" / "argv.txt"
+    binary = tmp_path / "rife" / rife.BINARY
+    binary.parent.mkdir()
+    binary.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexit 1\n')
+    binary.chmod(0o700)
+    for name in rife.MODELS:
+        (binary.parent / name).mkdir()
+        for f in ("flownet.param", "flownet.bin"):
+            (binary.parent / name / f).write_bytes(b"x")
+    monkeypatch.setenv("SPRITE_GEN_RIFE", str(binary))
+    monkeypatch.setenv("SPRITE_GEN_RIFE_MODEL_NAME", model)
+    monkeypatch.delenv("SPRITE_GEN_RIFE_MODEL", raising=False)
+    frames, kw, pinned = UNHELD[case]
+    rep = _run(tmp_path, frames(), case, **kw)
+    assert _pictures(Path(rep["out_dir"]), case) == pinned
+    assert not log.exists()
+
 STALLED = {5: 2, 13: 3}  # the walk's frame 5 shown twice, frame 13 three times
 STALLED_OFF = {  # the stalled walk cut on the engine before the fill (886936e)
     "strip": "32f2c1b7f4f3aedfa3eba4d49b849fd8efea9e011aaf2e035407a97ac6e9430d",

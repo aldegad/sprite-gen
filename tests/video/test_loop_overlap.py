@@ -466,19 +466,28 @@ def _painted(tail: float) -> Image.Image:
     return Image.fromarray(np.uint8(np.clip(f, 0, 1) * 255 + 0.5), "RGBA")
 
 
+# The weights at which the real RIFE drags the third walker's hand apart, by model (`rife.model_name()`): rife-v4.6 at 0.5
+# and 0.7; rife-v4.25 at 0.5, and at 0.7 it keeps the hand whole, its fingers their own colour.
+TORN_AT = {"rife-v4.6": (0.5, 0.7), "rife-v4.25": (0.5,)}
+
+
 @pytest.mark.slow
 @pytest.mark.real_rife
 @pytest.mark.timeout(900)  # 102 calls of the binary at 480 x 640: over a minute on a GPU, minutes on a CPU's Vulkan driver
 def test_real_rife_a_frame_made_across_a_hand_is_torn_and_refused_and_a_short_swing_is_kept():
     """The third walker: between its frame with the tail swung over the hand (48 degrees) and its frame a cycle on with
-    the tail hanging (-8 degrees), the real RIFE drags the hand apart at weights 0.5 and 0.7, and only the passes say so —
-    the frame is refused as torn, and without that reading nothing refuses it (painted without a line, the outline readings
-    pass it, and its coverage keeps no ghost band). Swung 10 degrees, past no hand, its frame half way reads nothing."""
+    the tail hanging (-8 degrees), the real RIFE drags the hand apart where the model does (TORN_AT), and only the passes
+    say so — the frame is refused as torn, and without that reading nothing refuses it (painted without a line, the
+    outline readings pass it, and its coverage keeps no ghost band); where it keeps the hand whole the passes read it
+    under the bar. Swung 10 degrees, past no hand, its frame half way reads nothing."""
     interpolate = rife.Rife()
     early = _painted(-8)
     for u in (0.5, 0.7):
         _, said = repair.overlap_frame(interpolate.read, _painted(48), early, u, reads=True)
-        assert said["faults"] == ["torn"] and said["proposal"]["torn"] > TORN_WARN
+        if u in TORN_AT[interpolate.model_name]:
+            assert said["faults"] == ["torn"] and said["proposal"]["torn"] > TORN_WARN
+        else:
+            assert said["faults"] == [] and said["proposal"]["torn"] < TORN_WARN
         assert faults({**said["proposal"], "torn": None}) == []
     _, said = repair.overlap_frame(interpolate.read, _painted(2), early, 0.5, reads=True)
     assert said["faults"] == [] and said["proposal"]["torn"] < TORN_WARN / 2

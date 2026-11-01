@@ -107,8 +107,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def _torch_rife_missing() -> str | None:
-    """Why the torch backend cannot run here, None where it can: PyTorch, the rife-v4.6 model it reads
-    (`rife.locate_model()`) and the device SPRITE_GEN_RIFE_DEVICE names."""
+    """Why the torch backend cannot run here, None where it can: PyTorch, the model it reads (`rife.locate_model()`,
+    rife-v4.25 unless another is named) and the device SPRITE_GEN_RIFE_DEVICE names."""
     from sprite_gen.video import rife
 
     try:
@@ -181,9 +181,12 @@ def _fail_unmeasured_skip(report: pytest.TestReport | pytest.CollectReport, node
 
 @pytest.fixture(autouse=True)
 def _engine_tta(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every test runs the augmentation the engine ships (`rife.TTA`) and its backend, the binary, in this process: a
-    SPRITE_GEN_RIFE_TTA, SPRITE_GEN_RIFE_BACKEND or SPRITE_GEN_RIFE_EXECUTOR left in the calling shell would change what
-    the real-RIFE tests measure. SPRITE_GEN_RIFE_DEVICE stays: it names where the torch backend's tests run."""
+    """Every test runs the model and augmentation the engine ships (`rife.MODEL`, its `rife.MODELS` augmentation) and its
+    backend, the binary, in this process: a SPRITE_GEN_RIFE_MODEL_NAME, SPRITE_GEN_RIFE_TTA, SPRITE_GEN_RIFE_BACKEND or
+    SPRITE_GEN_RIFE_EXECUTOR left in the calling shell would change what the real-RIFE tests measure.
+    SPRITE_GEN_RIFE_DEVICE stays: it names where the torch backend's tests run, and SPRITE_GEN_RIFE_MODEL where the model
+    is (a lane names the default model's directory)."""
+    monkeypatch.delenv("SPRITE_GEN_RIFE_MODEL_NAME", raising=False)
     monkeypatch.delenv("SPRITE_GEN_RIFE_TTA", raising=False)
     monkeypatch.delenv("SPRITE_GEN_RIFE_BACKEND", raising=False)
     monkeypatch.delenv("SPRITE_GEN_RIFE_EXECUTOR", raising=False)
@@ -244,6 +247,42 @@ def rife_runs(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
 
     monkeypatch.setattr(rife.Rife, "__init__", counted)
     return lambda: sum(r.calls for r in located)
+
+
+# The models whose count of the binary's calls a test may hold between two ends, not exactly: rife-v4.25 runs with no
+# augmentation, in float16, so its frames differ with the GPU's arithmetic (an Apple GPU and llvmpipe made different ones),
+# and with them the frames refused and made again at another fraction. rife-v4.6's counts were the same on every machine
+# measured, and are held exactly.
+RUNS_BETWEEN = frozenset({"rife-v4.25"})
+
+Pin = int | tuple[int, int]
+
+
+def as_pinned(called: int, pin: Pin | dict[str, Pin]) -> bool:
+    """Whether `called`, the binary's calls a test made (`rife_runs()`, `Rife.calls`), keeps the test's pin for the model
+    it ran (`rife.model_name()`; a pin not by model pins every model alike): none where the binary is not found here;
+    else an int exactly, and `(floor, top)` from floor to top, both kept. Only a model in `RUNS_BETWEEN` is held between
+    two ends, any other is refused one (ValueError). The floor is the calls the cut makes where no frame is refused: two
+    for each frame it asks for, each asked once at its own time, the frames a refused run never asked for counted in.
+    The top is the most measured on an Apple GPU and on llvmpipe."""
+    from sprite_gen.video import rife
+
+    if not rife_located():
+        return called == 0
+    model = rife.model_name()
+    want = pin[model] if isinstance(pin, dict) else pin
+    if isinstance(want, int):
+        return called == want
+    if model not in RUNS_BETWEEN:
+        raise ValueError(f"{model}'s calls are pinned exactly, not between {want[0]} and {want[1]}")
+    floor, top = want
+    return floor <= called <= top
+
+
+def pin_id(value: object) -> str | None:
+    """A parametrized pin by model named by its rife-v4.6 count, the count it pinned before there were two models, so a
+    case keeps its id; anything else named as pytest names it."""
+    return str(value["rife-v4.6"]) if isinstance(value, dict) else None
 
 
 @pytest.fixture(autouse=True)

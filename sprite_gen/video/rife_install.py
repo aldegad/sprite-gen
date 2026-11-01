@@ -1,18 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """`sprite-gen rife install` — put the pinned RIFE where the engine finds it.
 
-Downloads the rife-ncnn-vulkan release zip for this platform (pinned release and SHA-256,
+Downloads TNTwise's rife-ncnn-vulkan release zip for this platform (pinned release and SHA-256,
 docs/loop-repair.md section 1), checks the hash before anything is unpacked, and keeps only what
-the engine runs: the binary, the model `rife-v4.6/`, the licence and readme (and on Windows the
-OpenMP runtime the binary loads). The install lands in `rife.install_root()` — the user data
+the engine runs: the binary, the models `rife-v4.25/` (the default) and `rife-v4.6/`, the licence and
+readme (and on Windows the OpenMP runtime the binary loads). The install lands in `rife.install_root()` — the user data
 directory — which `rife.locate()` searches after SPRITE_GEN_RIFE and PATH. `--dir` installs
 somewhere else and prints the SPRITE_GEN_RIFE line that points the engine at it.
 
 Unpacked into a staging directory and renamed into place, so an interrupted install never leaves
-a half-written RIFE where the engine looks; the model's two files are checked against their pinned
+a half-written RIFE where the engine looks; each model's two files are checked against their pinned
 SHA-256 (`rife.MODEL_SHA256`) before it is. Running it again over a finished install of the same
 zip does nothing but the check. The check makes one frame between two discs through the
-installed binary, so a machine that has the files but no working Vulkan finds out here.
+installed binary and the model the engine runs (`rife.model_name()`), so a machine that has the files
+but no working Vulkan finds out here.
 
 `--backend torch` (the default where SPRITE_GEN_RIFE_BACKEND names torch) installs the same zip for the
 torch backend, which reads the model only (`rife.locate_model()`): a Linux machine the binary does not run
@@ -43,33 +44,37 @@ from sprite_gen.util.console import utf8_streams
 
 # SHA-256 of each release zip, measured on the downloaded files (docs/loop-repair.md section 1).
 ZIP_SHA256 = {
-    "macos": "4a63a1f3c9c715773c57d2ee51df1b315ed20cd6c63103e45c483ecc4400b595",
-    "ubuntu": "1e2c7ee7fa7daa326542d50622f0afedc80cf6f1858bda411d16385ffa5cdf68",
-    "windows": "d8e4d772d26cd8006ef0ad0bc82eb191b53c68677d1ae2f42506d74cbbbea606",
+    "macos": "543bf845a6160d8ad29a10c2b7a0713e78781dc2505c62185f7d14c3265bb4c0",
+    "ubuntu": "a4166da15a9839350a3695c35d9e19288c5c48c0fc9afc5aacb766d3d7f8ab62",
+    "windows": "42ed35e115b026f222386648920218cb8a9c7ae1e23698a7363bdd2e1455aba3",
 }
+# The folder each zip holds the release in (the Windows zip's is named after the branch it was built from).
+ZIP_TOP = {"macos": "macos", "ubuntu": "ubuntu", "windows": "rife-ncnn-vulkan-refs/heads/master-windows"}
 # The machines each zip's binary runs on (`platform.machine()`, lower case). The macOS binary is
 # universal; the Linux and Windows ones are x86-64 only.
 ZIP_MACHINES = {"macos": None, "ubuntu": {"x86_64", "amd64"}, "windows": {"amd64", "x86_64"}}
-URL = "https://github.com/nihui/rife-ncnn-vulkan/releases/download/{release}/{name}"
+SOURCE = "github.com/TNTwise/rife-ncnn-vulkan"
+URL = "https://github.com/TNTwise/rife-ncnn-vulkan/releases/download/{release}/{name}"
 MARKER = ".sprite-gen-install.json"
 CHUNK = 1 << 20
 TIMEOUT_SECONDS = 60
 
 
 def zip_name(platform: str) -> str:
-    return f"{rife.BINARY}-{rife.RELEASE}-{platform}.zip"
+    """The release zip's name for a platform, as the release names it."""
+    return f"{platform}.zip"
 
 
 def _platform(platform: str | None, backend: str = "ncnn") -> str:
     name = platform or rife.platform_release()
     if name not in ZIP_SHA256:
         raise SystemExit(f"rife install: rife-ncnn-vulkan {rife.RELEASE} ships no build for {sys.platform}; build it from "
-                         f"github.com/nihui/rife-ncnn-vulkan and set SPRITE_GEN_RIFE to the binary (docs/loop-repair.md)")
+                         f"{SOURCE} and set SPRITE_GEN_RIFE to the binary (docs/loop-repair.md)")
     machines = ZIP_MACHINES[name]
     machine = platform_mod.machine().lower()
     if backend == "ncnn" and platform is None and machines is not None and machine not in machines:
         raise SystemExit(f"rife install: the {name} build of rife-ncnn-vulkan {rife.RELEASE} is x86-64 only and this machine "
-                         f"is {machine}; build it from github.com/nihui/rife-ncnn-vulkan and set SPRITE_GEN_RIFE to the binary")
+                         f"is {machine}; build it from {SOURCE} and set SPRITE_GEN_RIFE to the binary")
     return name
 
 
@@ -102,15 +107,18 @@ def _kept(member: str, top: str, platform: str) -> bool:
     rel = member[len(top) + 1:]
     if any(part in ("", ".", "..") for part in rel.split("/")):
         return False
-    if rel.startswith(rife.MODEL + "/"):
-        return "/" not in rel[len(rife.MODEL) + 1:]
-    if "/" in rel:
-        return False
+    folder, _, rest = rel.partition("/")
+    if rest:
+        return folder in rife.MODELS and "/" not in rest
     return rel in (rife.BINARY, rife.BINARY + ".exe", "LICENSE", "README.md") or (platform == "windows" and rel.lower().endswith(".dll"))
 
 
+def _models_whole(where: Path) -> bool:
+    return all((where / m / f).is_file() for m in rife.MODELS for f in ("flownet.param", "flownet.bin"))
+
+
 def _unpack(zip_path: Path, staging: Path, platform: str) -> list[str]:
-    top = f"{rife.BINARY}-{rife.RELEASE}-{platform}"
+    top = ZIP_TOP[platform]
     kept: list[str] = []
     with zipfile.ZipFile(zip_path) as zf:
         for info in zf.infolist():
@@ -123,9 +131,9 @@ def _unpack(zip_path: Path, staging: Path, platform: str) -> list[str]:
                 shutil.copyfileobj(src, out, CHUNK)
             kept.append(rel)
     binary = staging / rife.installed_binary(Path("."), platform).name
-    model = staging / rife.MODEL
-    if not binary.is_file() or not (model / "flownet.param").is_file() or not (model / "flownet.bin").is_file():
-        raise SystemExit(f"rife install: {zip_path.name} has no {top}/{binary.name} with {rife.MODEL}/flownet.param and flownet.bin")
+    if not binary.is_file() or not _models_whole(staging):
+        models = " and ".join(f"{m}/flownet.param and flownet.bin" for m in rife.MODELS)
+        raise SystemExit(f"rife install: {zip_path.name} has no {top}/{binary.name} with {models}")
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return sorted(kept)
 
@@ -136,8 +144,7 @@ def _complete(target: Path, platform: str, sha: str) -> bool:
     except (OSError, ValueError):
         return False
     binary = target / rife.installed_binary(Path("."), platform).name
-    return (marker.get("sha256") == sha and binary.is_file()
-            and all((target / rife.MODEL / f).is_file() for f in ("flownet.param", "flownet.bin")))
+    return marker.get("sha256") == sha and binary.is_file() and _models_whole(target)
 
 
 def _disc(cx: int) -> Image.Image:
@@ -148,8 +155,8 @@ def _disc(cx: int) -> Image.Image:
 
 
 def check(binary: Path, model: Path, *, backend: str = "ncnn") -> dict[str, Any]:
-    """One frame half way between two discs through `binary`, or through the torch backend from `model`: the disc must
-    land in the middle."""
+    """One frame half way between two discs through `binary` running `model`, or through the torch backend from `model`:
+    the disc must land in the middle."""
     try:
         made = rife.Rife(binary, model) if backend == "ncnn" else rife.Rife(runner=rife.torch_runner(model))
         mid = made(_disc(30), _disc(66), 0.5)
@@ -172,12 +179,16 @@ def install(*, dest: Path | None = None, zip_path: Path | None = None, platform:
         raise SystemExit(f"rife install: {exc}") from exc
     if backend not in rife.BACKENDS:
         raise SystemExit(f"rife install: backend {backend!r}: name ncnn or torch")
+    try:
+        model_name = rife.model_name()
+    except rife.RifeUnavailable as exc:
+        raise SystemExit(f"rife install: {exc}") from exc
     name = _platform(platform, backend)
     sha = ZIP_SHA256[name]
     root = (dest or rife.install_root()).expanduser().resolve()
     binary = rife.installed_binary(root, name)
     target = binary.parent
-    report: dict[str, Any] = {"backend": backend, "release": rife.RELEASE, "model": rife.MODEL, "platform": name,
+    report: dict[str, Any] = {"backend": backend, "release": rife.RELEASE, "model": model_name, "platform": name,
                               "zip": zip_name(name), "sha256": sha, "dir": str(target), "binary": str(binary)}
     if not force and _complete(target, name, sha):
         report["installed"] = "already"
@@ -199,7 +210,8 @@ def install(*, dest: Path | None = None, zip_path: Path | None = None, platform:
             staging = work / target.name
             report["files"] = _unpack(zip_path, staging, name)
             try:
-                rife.model_bytes(staging / rife.MODEL)
+                for model in rife.MODELS:
+                    rife.model_bytes(staging / model)
             except rife.RifeUnavailable as exc:
                 raise SystemExit(f"rife install: {exc}; nothing was installed") from exc
             (staging / MARKER).write_text(json.dumps({"release": rife.RELEASE, "zip": zip_name(name), "sha256": sha}) + "\n",
@@ -209,7 +221,7 @@ def install(*, dest: Path | None = None, zip_path: Path | None = None, platform:
             staging.rename(target)
         report["installed"] = "now"
     if run_check:
-        report["check"] = check(binary, target / rife.MODEL, backend=backend)
+        report["check"] = check(binary, target / model_name, backend=backend)
     if backend == "torch":
         # What the torch backend will read: SPRITE_GEN_RIFE_MODEL before the install root.
         try:
@@ -217,9 +229,9 @@ def install(*, dest: Path | None = None, zip_path: Path | None = None, platform:
         except rife.RifeUnavailable:
             found = None
         report["engine_finds"] = found
-        if found != str((target / rife.MODEL).resolve()):
+        if found != str((target / model_name).resolve()):
             report["note"] = (f"the torch backend reads SPRITE_GEN_RIFE_MODEL before {rife.install_root()}; to read this "
-                              f"install set SPRITE_GEN_RIFE_MODEL={target / rife.MODEL}" + (f" (it now reads {found})" if found else ""))
+                              f"install set SPRITE_GEN_RIFE_MODEL={target / model_name}" + (f" (it now reads {found})" if found else ""))
         return report
     # What the engine will run: SPRITE_GEN_RIFE and PATH are searched before the install root.
     try:
@@ -238,7 +250,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     p = sub.add_parser("install", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dir", type=Path, help=f"install root (default: the user data directory, {rife.install_root()}; "
                                             "another directory needs SPRITE_GEN_RIFE, which the command prints)")
-    p.add_argument("--zip", type=Path, help=f"use this already-downloaded release zip ({zip_name('<platform>')}) instead of downloading it; "
+    p.add_argument("--zip", type=Path, help=f"use this already-downloaded release zip ({SOURCE} {rife.RELEASE}, "
+                                            f"{zip_name('<platform>')}) instead of downloading it; "
                                             "its SHA-256 is checked all the same")
     p.add_argument("--force", action="store_true", help="unpack again over a finished install")
     p.add_argument("--no-check", action="store_true", help="skip the check frame made through the installed binary")

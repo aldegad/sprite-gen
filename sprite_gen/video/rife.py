@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """RIFE in-betweens for RGBA sprite frames, through the external `rife-ncnn-vulkan` binary or, where SPRITE_GEN_RIFE_BACKEND
-names it, the same rife-v4.6 in PyTorch (`rife_torch`).
+names it, the same model in PyTorch (`rife_torch`). The model is rife-v4.25, or rife-v4.6 where it is named (`MODELS`,
+`model_name()`).
 
 Where it runs, what it costs and why this build: docs/loop-repair.md section 1. RIFE reads
 three colour channels and no alpha, so a frame is interpolated as two images — its colour and
@@ -26,8 +27,10 @@ the sixteen single passes the binary's augmentation combines inside one call, on
 The binary's own CPU path (`-g -1`) returns a wrong frame with rife-v4.6 on both macOS and
 Linux (measured 2026-10-03: mean error 39 against 3.3 through Vulkan), so it is never passed;
 a machine without a GPU runs the Vulkan path on Mesa's llvmpipe, which gives the GPU's frame.
-Every call asks for the binary's test-time augmentation, spatial and temporal (`-x -z`, `TTA`;
-docs/loop-repair.md section 1, "Which setting"); SPRITE_GEN_RIFE_TTA names another (`tta()`).
+Each model's calls ask for its own augmentation (`MODELS`): rife-v4.25 none, each image padded with zeros to a multiple
+of 128 first and the frame cut back after (`_binary_run`); rife-v4.6 the binary's test-time augmentation, spatial and
+temporal (`-x -z`), each image handed as it is (docs/loop-repair.md section 1, "Which setting"). SPRITE_GEN_RIFE_TTA names
+another for rife-v4.6 (`tta()`).
 
 The binary is found by SPRITE_GEN_RIFE, then on PATH, then where `sprite-gen rife install`
 puts it (`install_root()`, docs/loop-repair.md section 1). A RIFE that cannot be found is
@@ -75,7 +78,7 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NamedTuple
 
 import PIL
 from PIL import Image, ImageFilter, PngImagePlugin
@@ -84,28 +87,60 @@ from sprite_gen._deps import np
 from sprite_gen.video.frames import _components, _near
 
 BINARY = "rife-ncnn-vulkan"
-MODEL = "rife-v4.6"
-RELEASE = "20221029"
-# What runs RIFE (`backend()`): the binary, the default, or rife-v4.6 in PyTorch (`rife_torch`); and the torch devices
-# it runs on (`device()`), the first the default.
+# TNTwise's rife-ncnn-vulkan, the build `sprite-gen rife install` puts in place (docs/loop-repair.md section 1): nihui's
+# 20221029 with the models since, rife-v4.25 among them, which the 20221029 binary does not run.
+RELEASE = "20250112"
+
+
+class Model(NamedTuple):
+    """A model the engine runs (`MODELS`): the augmentation every call asks for by default (`tta()`), and the multiple each
+    image is padded to with zeros before RIFE is handed it, the frame cut back after (0: handed as it is)."""
+
+    tta: tuple[str, ...]
+    pad: int
+
+
+# The models the engine runs, each by the name of the directory its two files ship in (the binary reads the model's
+# version from it). rife-v4.25, the default, runs with no augmentation (TNTwise's README marks -x and -z deprecated with
+# it) and each image padded to 128, as Practical-RIFE pads it at scale 1: the binary pads it to 64 itself, and pip-jump,
+# a public cut, takes 48 frames padded to 64 and 53 padded to 128, the 53 PyTorch takes from the published weights
+# (docs/loop-repair.md section 1, "Which setting"). rife-v4.6, chosen by name (`model_name()`), runs as 3.14.0 ran it:
+# -x -z, each image handed as it is, so its frames are the old ones.
+MODELS = {
+    "rife-v4.25": Model(tta=(), pad=128),
+    "rife-v4.6": Model(tta=("-x", "-z"), pad=0),
+}
+MODEL = "rife-v4.25"
+PLATFORMS = ("macos", "ubuntu", "windows")
+# What runs RIFE (`backend()`): the binary, the default, or the same model in PyTorch (`rife_torch`); and the torch
+# devices it runs on (`device()`), the first the default.
 BACKENDS = ("ncnn", "torch")
 DEVICES = ("cuda", "cpu")
-# The model files of rife-v4.6 as the release zips ship them, the macOS and the Ubuntu zip alike: `sprite-gen rife install`
-# checks them, and the torch backend reads its weights out of exactly these (`model_bytes`), as it reads them by their
-# layout (docs/loop-repair.md section 1).
+# Each model's two files as each release zip ships them: the Windows zip's flownet.param has CRLF line ends, the macOS and
+# Ubuntu zips' LF, and flownet.bin is the same in all three. `sprite-gen rife install` checks them, and the torch backend
+# reads its weights out of exactly these (`model_bytes`), as it reads them by their layout (docs/loop-repair.md section 1).
 MODEL_SHA256 = {
-    "flownet.param": "724569596bcd1e7b9fa50455c604777ebed99746d2ef40aa86e31b5725f1053c",
-    "flownet.bin": "f334ed2260149ce0188a6dcf049844e8b0cdd912e01cbcfb63553157d2508958",
+    "rife-v4.25": {
+        "flownet.param": {"macos": "6ba231fb00e4ae82b120f938d9b2df91db32fbf322bd110f29450efaf61848d6",
+                          "ubuntu": "6ba231fb00e4ae82b120f938d9b2df91db32fbf322bd110f29450efaf61848d6",
+                          "windows": "99d0f49866ff06f170c08e570e3e1b67b89019e3d11a87c8f0e7908fa50ab4c1"},
+        "flownet.bin": {p: "10de487a095e61cb2971c39e3b5e17005a70fba6201c77fb96e063f4423b583f" for p in PLATFORMS},
+    },
+    "rife-v4.6": {
+        "flownet.param": {"macos": "724569596bcd1e7b9fa50455c604777ebed99746d2ef40aa86e31b5725f1053c",
+                          "ubuntu": "724569596bcd1e7b9fa50455c604777ebed99746d2ef40aa86e31b5725f1053c",
+                          "windows": "28df14d57a225725ee5386f52eba422488450d37c9f40800ed4f62e8ba846692"},
+        "flownet.bin": {p: "f334ed2260149ce0188a6dcf049844e8b0cdd912e01cbcfb63553157d2508958" for p in PLATFORMS},
+    },
 }
 TORCH_EXTRA = 'pip install "sprite-gen[torch]"'
 # `RemoteRunner`: the version of the requests and answers a host and its executor exchange (`pack`); another is refused.
 PROTOCOL = 1
-# The binary's test-time augmentation, passed on every call: `-x` runs the pair as its eight flips and
-# transposes, `-z` runs it both ways in time as well, and what comes back is averaged — so a frame made
-# from a to b is the one made from b to a (docs/loop-repair.md section 1, "Which setting"). On a machine
-# without a GPU it costs 15 to 19 times the CPU of a plain call. SPRITE_GEN_RIFE_TTA names another
-# (`tta()`): either mode, or none.
-TTA = ("-x", "-z")
+# The binary's test-time augmentation a call can ask for: `-x` runs the pair as its eight flips and transposes, `-z`
+# runs it both ways in time as well, and what comes back is averaged — so a frame made from a to b is the one made from
+# b to a. rife-v4.6 asks for both (`MODELS`), rife-v4.25 for neither (docs/loop-repair.md section 1, "Which setting").
+# On a machine without a GPU both cost 15 to 19 times the CPU of a plain call. SPRITE_GEN_RIFE_TTA names another for
+# rife-v4.6 (`tta()`): either mode, or none.
 TTA_MODES = ("-x", "-z")
 # Coverage RIFE leaves under this is its own blur, not body: dropped so no halo is invented.
 ALPHA_FLOOR = 2 / 255
@@ -230,10 +265,10 @@ Read = Callable[[Image.Image, Image.Image, float], tuple[Image.Image, np.ndarray
 # The one line that installs it, quoted wherever a missing RIFE is reported.
 INSTALL_COMMAND = "sprite-gen rife install"
 INSTALL_HINT = (
-    f"run `{INSTALL_COMMAND}` (rife-ncnn-vulkan {RELEASE} with the model {MODEL}, sha256-checked, into the "
-    f"user data directory), or put {BINARY} on PATH or set SPRITE_GEN_RIFE to the binary — the model {MODEL}/ "
-    f"ships beside it (SPRITE_GEN_RIFE_MODEL overrides); on Linux without a GPU also `libvulkan1 mesa-vulkan-drivers`; "
-    f"see docs/loop-repair.md"
+    f"run `{INSTALL_COMMAND}` (TNTwise's rife-ncnn-vulkan {RELEASE} with the models {' and '.join(MODELS)}, "
+    f"sha256-checked, into the user data directory), or put {BINARY} {RELEASE} on PATH or set SPRITE_GEN_RIFE to the "
+    f"binary — the model's directory ships beside it (SPRITE_GEN_RIFE_MODEL overrides); on Linux without a GPU also "
+    f"`libvulkan1 mesa-vulkan-drivers`; see docs/loop-repair.md"
 )
 
 
@@ -278,9 +313,39 @@ def installed_binary(root: Path | None = None, platform: str | None = None) -> P
     return (root or install_root()) / f"{BINARY}-{RELEASE}-{platform}" / (BINARY + (".exe" if platform == "windows" else ""))
 
 
+def model_name() -> str:
+    """The model the engine runs (`MODELS`): SPRITE_GEN_RIFE_MODEL_NAME where it is set and not empty, else the name of the
+    directory SPRITE_GEN_RIFE_MODEL names, else MODEL. A name the engine does not run, a directory not named as the model
+    it holds (the binary reads the model's version from its name) and a directory and a name that disagree are each
+    refused (`RifeUnavailable`, not RIFE not installed: a loop does not cut around it)."""
+    named = os.environ.get("SPRITE_GEN_RIFE_MODEL_NAME") or None
+    if named is not None and named not in MODELS:
+        raise RifeUnavailable(f"SPRITE_GEN_RIFE_MODEL_NAME={named!r}: name {' or '.join(MODELS)} ({MODEL}, the default), "
+                              "or leave it unset")
+    path = os.environ.get("SPRITE_GEN_RIFE_MODEL") or None
+    held = Path(path).expanduser().name if path else None
+    if held is not None:
+        if held not in MODELS:
+            raise RifeUnavailable(f"SPRITE_GEN_RIFE_MODEL={path!r}: its directory is named {held!r}, not as the model it "
+                                  f"holds ({' or '.join(MODELS)}): the binary reads the model's version from that name")
+        if named is not None and named != held:
+            raise RifeUnavailable(f"SPRITE_GEN_RIFE_MODEL={path!r} holds {held}, and SPRITE_GEN_RIFE_MODEL_NAME={named!r}: "
+                                  "name one model, or unset one of them")
+    return named or held or MODEL
+
+
+def held_model(model: Path) -> str:
+    """The model in the directory `model`, by its name (`MODELS`); a directory not named as one is refused."""
+    if model.name not in MODELS:
+        raise RifeUnavailable(f"RIFE model {model}: the directory is named {model.name!r}, not as the model it holds "
+                              f"({' or '.join(MODELS)}): the binary reads the model's version from that name")
+    return model.name
+
+
 def locate() -> tuple[Path, Path]:
     """(binary, model directory): the binary from SPRITE_GEN_RIFE, else PATH, else `install_root()`;
-    the model from SPRITE_GEN_RIFE_MODEL, else beside the binary."""
+    the model from SPRITE_GEN_RIFE_MODEL, else `model_name()`'s directory beside the binary."""
+    name = model_name()  # refused here, before anything is looked for
     named = os.environ.get("SPRITE_GEN_RIFE")
     installed = installed_binary() if platform_release() else None
     found = named or shutil.which(BINARY) or (str(installed) if installed and installed.is_file() else None)
@@ -291,32 +356,37 @@ def locate() -> tuple[Path, Path]:
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise RifeNotInstalled(f"{binary} is not an executable file; {INSTALL_HINT}")
     binary = binary.resolve()
-    model = Path(os.environ.get("SPRITE_GEN_RIFE_MODEL") or binary.parent / MODEL).expanduser()
+    model = Path(os.environ.get("SPRITE_GEN_RIFE_MODEL") or binary.parent / name).expanduser()
     if not (model / "flownet.param").is_file() or not (model / "flownet.bin").is_file():
         raise RifeNotInstalled(f"RIFE model {model} has no flownet.param / flownet.bin; {INSTALL_HINT}")
     return binary, model
 
 
-def tta() -> tuple[str, ...]:
-    """The test-time augmentation every call asks for: SPRITE_GEN_RIFE_TTA when it is set (`-x`, `-z`
-    or both, space-separated; empty for none), else TTA. Anything else is refused: a flag passed
-    through unread could be the binary's CPU path, which is wrong with this model."""
+def tta(model: str | None = None) -> tuple[str, ...]:
+    """The test-time augmentation every call of `model` (else `model_name()`'s) asks for: SPRITE_GEN_RIFE_TTA when it is set
+    (`-x`, `-z` or both, space-separated; empty for none), else the model's own (`MODELS`). Anything else is refused: a
+    flag passed through unread could be the binary's CPU path, which is wrong with rife-v4.6; and rife-v4.25 runs with
+    none — TNTwise's README marks -x and -z deprecated with it, and none is what was measured."""
+    model = model or model_name()
     named = os.environ.get("SPRITE_GEN_RIFE_TTA")
     if named is None:
-        return TTA
+        return MODELS[model].tta
     modes = tuple(named.split())
     if any(m not in TTA_MODES for m in modes) or len(set(modes)) < len(modes):
         raise RifeUnavailable(f"SPRITE_GEN_RIFE_TTA={named!r}: name -x, -z or both, space-separated, or leave it empty for none")
+    if modes and not MODELS[model].tta:
+        raise RifeUnavailable(f"SPRITE_GEN_RIFE_TTA={named!r}: {model} runs with no augmentation (TNTwise's README marks -x "
+                              "and -z deprecated with it); leave it empty or unset, or name SPRITE_GEN_RIFE_MODEL_NAME=rife-v4.6")
     return modes
 
 
 def backend() -> str:
-    """What runs RIFE: SPRITE_GEN_RIFE_BACKEND, `ncnn` (the binary) where it is unset or empty, or `torch` (rife-v4.6 in
-    PyTorch, `rife_torch`). Anything else is refused, not read as the default."""
+    """What runs RIFE: SPRITE_GEN_RIFE_BACKEND, `ncnn` (the binary) where it is unset or empty, or `torch` (the same model
+    in PyTorch, `rife_torch`). Anything else is refused, not read as the default."""
     named = os.environ.get("SPRITE_GEN_RIFE_BACKEND") or "ncnn"
     if named not in BACKENDS:
-        raise RifeUnavailable(f"SPRITE_GEN_RIFE_BACKEND={named!r}: name ncnn ({BINARY}, the default) or torch (rife-v4.6 in "
-                              f"PyTorch), or leave it unset")
+        raise RifeUnavailable(f"SPRITE_GEN_RIFE_BACKEND={named!r}: name ncnn ({BINARY}, the default) or torch (the same "
+                              f"model in PyTorch), or leave it unset")
     return named
 
 
@@ -381,40 +451,44 @@ def install_command() -> str:
 
 def locate_model() -> Path:
     """The model directory the torch backend reads, with no binary looked for: SPRITE_GEN_RIFE_MODEL, else where
-    `sprite-gen rife install` puts the model (`<install_root()>/rife-ncnn-vulkan-<release>-<platform>/rife-v4.6`)."""
+    `sprite-gen rife install` puts `model_name()`'s (`<install_root()>/rife-ncnn-vulkan-<release>-<platform>/<model>`)."""
+    name = model_name()
     named = os.environ.get("SPRITE_GEN_RIFE_MODEL")
-    model = Path(named).expanduser() if named else installed_binary().parent / MODEL
+    model = Path(named).expanduser() if named else installed_binary().parent / name
     if not (model / "flownet.param").is_file() or not (model / "flownet.bin").is_file():
         where = "SPRITE_GEN_RIFE_MODEL" if named else "SPRITE_GEN_RIFE_MODEL is not set, and the install root"
         raise RifeNotInstalled(f"RIFE model {model} has no flownet.param / flownet.bin ({where}); run `{install_command()}` "
-                               f"(the model {MODEL}, sha256-checked, into the user data directory), or set "
-                               f"SPRITE_GEN_RIFE_MODEL to a {MODEL} directory; see docs/loop-repair.md")
+                               f"(the model {name}, sha256-checked, into the user data directory), or set "
+                               f"SPRITE_GEN_RIFE_MODEL to a {name} directory; see docs/loop-repair.md")
     return model.resolve()
 
 
 def model_bytes(model: Path) -> dict[str, bytes]:
-    """The two files of the model in `model`, each read once and checked against MODEL_SHA256, so the bytes handed on are
-    the bytes checked: another model, or one cut short or written over, is refused by name, never read
-    (`RifeUnavailable`)."""
+    """The two files of the model in `model` (`held_model`), each read once and checked against its pins in MODEL_SHA256,
+    any release zip's, so the bytes handed on are the bytes checked: another model, or one cut short or written over, is
+    refused by name, never read (`RifeUnavailable`)."""
+    held = held_model(model)
     files = {}
-    for name, pinned in MODEL_SHA256.items():
+    for name, pins in MODEL_SHA256[held].items():
         try:
             data = (model / name).read_bytes()
         except OSError as exc:
             raise RifeUnavailable(f"RIFE model {model}: {name} could not be read: {exc}") from exc
         got = hashlib.sha256(data).hexdigest()
-        if got != pinned:
-            raise RifeUnavailable(f"RIFE model {model}: {name} has sha256 {got}, expected {pinned} ({MODEL} of "
+        if got not in pins.values():
+            expected = " or ".join(sorted(set(pins.values())))
+            raise RifeUnavailable(f"RIFE model {model}: {name} has sha256 {got}, expected one of {expected} ({held} of "
                                   f"{BINARY} {RELEASE}); install it again (`{INSTALL_COMMAND} --force`), or point "
-                                  f"SPRITE_GEN_RIFE_MODEL at that {MODEL}")
+                                  f"SPRITE_GEN_RIFE_MODEL at that {held}")
         files[name] = data
     return files
 
 
 def _call(binary: Path, model: Path, a: Image.Image, b: Image.Image, t: float, tmp: Path,
           modes: tuple[str, ...] | None = None) -> Image.Image:
-    """One run of the binary from `a` to `b` at `t`, with the augmentation `tta()` names, or `modes` (`passes`: none)."""
-    modes = tta() if modes is None else modes
+    """One run of the binary from `a` to `b` at `t`, with the augmentation `tta()` names for the model, or `modes`
+    (`passes`: none)."""
+    modes = tta(held_model(model)) if modes is None else modes
     a.save(tmp / "a.png")
     b.save(tmp / "b.png")
     out = tmp / "o.png"
@@ -473,7 +547,7 @@ def bleed(frame: np.ndarray) -> np.ndarray:
 
 
 # One run of RIFE, wherever it runs: from the first image to the second (H x W x 3, uint8) at a fraction, with the
-# augmentation named (None: `tta()`'s, read for the run), to the image it makes (H x W x 3, uint8).
+# augmentation named (None: `tta()`'s for the model, read for the run), to the image it makes (H x W x 3, uint8).
 Run = Callable[[np.ndarray, np.ndarray, float, tuple[str, ...] | None], np.ndarray]
 
 
@@ -518,11 +592,27 @@ def pass_runs(run: Run, colour: list[np.ndarray], cover: list[np.ndarray], t: fl
     return apart.astype(np.float32)
 
 
+def padded(x: np.ndarray, multiple: int) -> np.ndarray:
+    """An image (H x W x C) at the top left of a canvas a multiple of `multiple` each way, zeros round it."""
+    h, w = x.shape[:2]
+    out = np.zeros((-(-h // multiple) * multiple, -(-w // multiple) * multiple, *x.shape[2:]), dtype=x.dtype)
+    out[:h, :w] = x
+    return out
+
+
 def _binary_run(binary: Path, model: Path, tmp: Path) -> Run:
-    """A run of the binary (`_call`, its images written in `tmp`)."""
+    """A run of the binary (`_call`, its images written in `tmp`): each image handed to it as the model is handed one
+    (`MODELS`) — rife-v4.25's padded with zeros to a multiple of 128 and the image it makes cut back to the pair's size,
+    rife-v4.6's as it is."""
+    pad = MODELS[held_model(model)].pad
+
     def run(x: np.ndarray, y: np.ndarray, t: float, modes: tuple[str, ...] | None) -> np.ndarray:
+        h, w = x.shape[:2]
+        if pad:
+            x, y = padded(x, pad), padded(y, pad)
         a, b = Image.fromarray(x, "RGB"), Image.fromarray(y, "RGB")
-        return np.asarray(_call(binary, model, a, b, t, tmp) if modes is None else _call(binary, model, a, b, t, tmp, modes))
+        made = np.asarray(_call(binary, model, a, b, t, tmp) if modes is None else _call(binary, model, a, b, t, tmp, modes))
+        return np.ascontiguousarray(made[:h, :w]) if pad else made
     return run
 
 
@@ -1189,6 +1279,7 @@ class Binary:
 
     def __init__(self, binary: Path, model: Path):
         self.binary, self.model = binary, model
+        self.model_name = held_model(model)  # refused here, before a frame is asked for
 
     def frame(self, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> tuple[np.ndarray, np.ndarray]:
         with tempfile.TemporaryDirectory(prefix="sprite-gen-rife-") as td:
@@ -1367,6 +1458,11 @@ class RemoteRunner:
         self.calls = 0
         self.remote: dict = {}
         self.remote = self._sent({"probe": True}, {}, {})[0]
+        held, wanted = self.remote.get("model"), model_name()
+        if held != wanted:
+            raise RifeUnavailable(f"{self.name}: the executor runs the model {held!r}, and this host runs {wanted} "
+                                  "(SPRITE_GEN_RIFE_MODEL_NAME, else the default): run one model on both sides")
+        self.model_name = wanted
 
     def frame(self, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> tuple[np.ndarray, np.ndarray]:
         made = self._made(colour, cover, t, read=False)
@@ -1385,11 +1481,11 @@ class RemoteRunner:
 
     def _made(self, colour: list[np.ndarray], cover: list[np.ndarray], t: float, *, read: bool) -> dict[str, np.ndarray]:
         """A frame, or a read, made by the executor in one call: the request names the identity held, the fraction, the
-        augmentation this host asks for now (`tta()`) and whether the passes are read; the answer is that identity's, at
+        augmentation this host asks for its model now (`tta()`) and whether the passes are read; the answer is that identity's, at
         the frame's size, or it is not handed on."""
         h, w = cover[0].shape
         want = {"rgb": ((h, w, 3), np.uint8), "alpha": ((h, w), np.uint8), **({"apart": ((h, w), np.float32)} if read else {})}
-        return self._sent({"expect": self.remote, "t": t, "modes": list(tta()), "read": read},
+        return self._sent({"expect": self.remote, "t": t, "modes": list(tta(self.model_name)), "read": read},
                           {"colour_a": colour[0], "colour_b": colour[1], "cover_a": cover[0], "cover_b": cover[1]}, want)[1]
 
     def _sent(self, header: dict, arrays: dict[str, np.ndarray],
@@ -1451,7 +1547,7 @@ def torch_runner(model: Path | None = None) -> object:
         rife_torch = importlib.import_module("sprite_gen.video.rife_torch")
     except ImportError as exc:
         raise RifeNotInstalled(f"SPRITE_GEN_RIFE_BACKEND=torch, and PyTorch cannot be imported ({exc}); install it and the "
-                               f"model {MODEL} with `{install_command()}`; see docs/loop-repair.md") from exc
+                               f"model {model_name()} with `{install_command()}`; see docs/loop-repair.md") from exc
     except OSError as exc:  # installed, and its libraries do not load: a RIFE found that fails
         raise RifeUnavailable(f"SPRITE_GEN_RIFE_BACKEND=torch, and PyTorch failed to load: {exc}") from exc
     return rife_torch.TorchRunner(model or locate_model(), named)
@@ -1478,7 +1574,10 @@ class Rife:
                 runner = torch_runner()
         self.runner = runner
         self.binary, self.model = getattr(runner, "binary", None), getattr(runner, "model", None)
-        self.tta = tta()  # refused here, before a frame is asked for
+        # the model its runner runs (a runner stood in names none: the one `model_name()` names), and its augmentation,
+        # refused here, before a frame is asked for
+        self.model_name = getattr(runner, "model_name", None) or model_name()
+        self.tta = tta(self.model_name)
         self.made = 0
         self.calls = 0
 
@@ -1497,9 +1596,9 @@ class Rife:
         return _joined(rgb, alpha), apart
 
     def describe(self) -> dict[str, str]:
-        """What made the frames, for a report: its `kind` (`rife-ncnn-vulkan`, `rife-torch`), where it runs from, and the
-        augmentation."""
-        return {**self.runner.describe(), "tta": " ".join(self.tta)}  # type: ignore[attr-defined]
+        """What made the frames, for a report: its `kind` (`rife-ncnn-vulkan`, `rife-torch`), where it runs from, the model
+        and the augmentation."""
+        return {**self.runner.describe(), "model": self.model_name, "tta": " ".join(self.tta)}  # type: ignore[attr-defined]
 
     def counts(self) -> dict[str, int]:
         """The runs it made, as a report names them: the binary's calls (`binary_calls`), or the torch backend's runs
@@ -1515,14 +1614,14 @@ class Rife:
         binary or model changed under this very RIFE is another identity; for the torch backend what it loaded and runs
         on, the same for its life; on an executor what the executor answered as this RIFE was made, held for its life and
         enforced on every frame it makes, and the executor's name) and this host's, read as it is now on every call: the augmentation every call asks
-        for now (`tta()`: SPRITE_GEN_RIFE_TTA is read on every call, and another is another frame); the engine code this
+        for now (`tta()` for its model: SPRITE_GEN_RIFE_TTA is read on every call, and another is another frame); the engine code this
         process loaded (`CODE_SHA256`: it turns a frame into RIFE's two runs and back) and NumPy's and
         Pillow's versions; and the machine — the OS, and `uname`'s host name, OS release and build and
         architecture (platform.uname() keeps its first answer) — as the Apple GPU and llvmpipe are only measured
         to agree to the third decimal of an error (docs/loop-repair.md section 1), so a frame made on one is not
         taken on another."""
         return json.dumps({
-            **self.runner.identity(), "tta": list(tta()), "code": CODE_SHA256, "numpy": np.__version__,  # type: ignore[attr-defined]
+            **self.runner.identity(), "tta": list(tta(self.model_name)), "code": CODE_SHA256, "numpy": np.__version__,  # type: ignore[attr-defined]
             "pillow": PIL.__version__, "machine": [sys.platform, *(os.uname() if hasattr(os, "uname") else platform.uname()[:5])]},
             sort_keys=True)
 

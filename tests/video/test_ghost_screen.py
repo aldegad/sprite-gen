@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageFilter
 
+from conftest import as_pinned
 from sprite_gen.video import align, rife
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import repair
@@ -183,9 +184,14 @@ def test_jump_repair_rejects_a_proposal_that_carries_a_ghost(monkeypatch):
     assert [f.tobytes() for f in out] == before
 
 
+# The binary's calls of this resample, by model (`rife.model_name()`): rife-v4.25's frame made beside the filmed ghost
+# carries a ghost of its own, so it is made again at other times and the nearer source frame taken.
+SCREEN_CALLS = {"rife-v4.25": (8, 28), "rife-v4.6": 20}
+
+
 @pytest.mark.slow
 @pytest.mark.real_rife
-@pytest.mark.timeout(900)  # 20 calls of the binary at 128 x 192: seconds on a GPU, a minute or two on a CPU's Vulkan driver
+@pytest.mark.timeout(900)  # 20 to 28 calls of the binary at 128 x 192: seconds on a GPU, a minute or two on a CPU's Vulkan driver
 def test_real_rife_delivers_no_cell_carrying_a_filmed_ghost():
     """A filmed ghost resampled 4 to 8 through the real RIFE: before the screen the ghost itself was
     taken at its own time, unmeasured, and the frames made beside it carried it, judged only beyond it."""
@@ -195,4 +201,4 @@ def test_real_rife_delivers_no_cell_carrying_a_filmed_ghost():
     assert all(f is not frames[1] for f in out)
     assert max(rife.ghost(f) for f in out) <= GHOST_WARN
     assert [g["frame"] for g in facts["ghost_screen"]["ghosts"]] == [1]
-    assert interpolate.calls == 20
+    assert interpolate.model_name == rife.model_name() and as_pinned(interpolate.calls, SCREEN_CALLS), interpolate.calls

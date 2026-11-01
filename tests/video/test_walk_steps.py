@@ -57,7 +57,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from conftest import feet_unseen, rife_located
+from conftest import as_pinned, feet_unseen, pin_id
 from sprite_gen.video import crossings, legs, local_cycle, loop
 
 FRAMES = 73
@@ -493,8 +493,9 @@ def _unwitnessed(report: dict, interval: float) -> dict:
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # up to 12 calls of the binary at 300 x 220 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
-@pytest.mark.parametrize("walker, view, interval, runs", [("behind", None, 17.5, 12), ("behind", "back_diagonal", 17.5, 12),
-                                                          ("outward", "front_diagonal", 16, 0)])
+@pytest.mark.parametrize("walker, view, interval, runs", [("behind", None, 17.5, {"rife-v4.25": (8, 10), "rife-v4.6": 12}),
+                                                          ("behind", "back_diagonal", 17.5, {"rife-v4.25": (8, 10), "rife-v4.6": 12}),
+                                                          ("outward", "front_diagonal", 16, 0)], ids=pin_id)
 def test_a_walk_whose_feet_meet_once_a_cycle_but_whose_body_does_not_bob_is_cut_two_intervals_with_a_warning(tmp_path, walker, view,
                                                                                                          interval, runs, rife_runs):
     """The two walkers whose feet meet once a cycle, their body held still: its top line does not rise and fall, and
@@ -503,7 +504,7 @@ def test_a_walk_whose_feet_meet_once_a_cycle_but_whose_body_does_not_bob_is_cut_
     one cycle on the picture where a pass hid, and on the foot cue's turn half an interval on from the view)."""
     draw = (lambda k: _behind(k, cycle=interval, hold=1, bob=0)) if walker == "behind" else (lambda k: _outward(k, cycle=interval, bob=0))
     report = _cut(tmp_path / "out", _keyed(tmp_path, draw), *(("--view", view) if view else ()))
-    assert rife_runs() == (runs if rife_located() else 0)
+    assert as_pinned(rife_runs(), runs), rife_runs()
     said = _unwitnessed(report, interval)
     assert said["bob"]["swing"] < local_cycle.BOB_FLOOR and "does not rise and fall" in said["bob"]["why"]
 
@@ -554,12 +555,13 @@ def test_a_diagonal_walk_whose_near_foot_steps_out_is_cut_one_cycle_from_its_vie
     assert "cycles" not in plain["cycle"]["step_count"] and abs(plain["cycle"]["length"] - 2 * cycle) <= 1
     said = plain["cycle"]["cut_witness"]
     assert said["says"] == "four steps" and local_cycle.four_steps(plain["cycle"]) and plain["cycle"]["steps"]["count"] == 2
-    assert rife_runs() == (runs if rife_located() else 0)
+    assert as_pinned(rife_runs(), runs), rife_runs()
 
 
 @pytest.mark.slow
-@pytest.mark.timeout(900)  # up to 12 calls of the binary at 300 x 220 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
-@pytest.mark.parametrize("cycle, runs", [(20, 10), (24, 12)])
+@pytest.mark.timeout(900)  # up to 30 calls of the binary at 300 x 220 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.parametrize("cycle, runs", [(20, {"rife-v4.25": (10, 22), "rife-v4.6": 10}), (24, {"rife-v4.25": (12, 30), "rife-v4.6": 12})],
+                         ids=pin_id)
 def test_a_walk_whose_feet_stay_apart_and_meet_once_a_cycle_is_cut_one_cycle_on_the_order_its_feet_are_drawn_in(tmp_path, cycle, runs, rife_runs):
     """Seen from the front, the feet apart, the foot stepping toward the camera drawn lower: the feet meet on the screen
     once a cycle, and the body does not rise and fall. The clip shows its two sides of feet are its two legs — seen apart
@@ -579,7 +581,7 @@ def test_a_walk_whose_feet_stay_apart_and_meet_once_a_cycle_is_cut_one_cycle_on_
     side = _cut(tmp_path / "side", keyed, "--view", "side")
     assert abs(side["cycle"]["length"] - 2 * cycle) <= 1.5 and local_cycle.unwitnessed(side["cycle"])
     assert "order" not in (side["cycle"]["step_count"].get("cycles") or {}) and "order" not in side["cycle"]["cut_witness"]
-    assert rife_runs() == (runs if rife_located() else 0)
+    assert as_pinned(rife_runs(), runs), rife_runs()
 
 
 @pytest.mark.slow
@@ -731,7 +733,10 @@ def test_a_wide_walk_whose_far_leg_is_drawn_a_few_tones_off_is_cut_two_steps(tmp
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # up to 22 calls of the binary at about 300 x 340 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
-@pytest.mark.parametrize("motion, bob, room, runs", [("arc", 3, 0, 8), ("arc", 0, 60, 22), ("sway", 0, 60, 6), ("ramp", 0, 60, 16)])
+@pytest.mark.parametrize("motion, bob, room, runs", [("arc", 3, 0, {"rife-v4.25": (6, 10), "rife-v4.6": 8}),
+                                                     ("arc", 0, 60, {"rife-v4.25": (14, 22), "rife-v4.6": 22}),
+                                                     ("sway", 0, 60, {"rife-v4.25": 2, "rife-v4.6": 6}),
+                                                     ("ramp", 0, 60, {"rife-v4.25": 8, "rife-v4.6": 16})], ids=pin_id)
 def test_a_walk_whose_crossings_are_its_steps_carried_up_and_down_is_cut_two_steps(tmp_path, motion, bob, room, runs, rife_runs):
     """The wide walker with its legs drawn alike, carried up and down the screen with the whole picture (`_carried`;
     its legs, their steps and their crossings every 23 frames as they were): bobbing, along a smooth arc 24 px deep;
@@ -743,7 +748,7 @@ def test_a_walk_whose_crossings_are_its_steps_carried_up_and_down_is_cut_two_ste
     and falling twice an interval and cut each one step, counted two, and no warning said so)."""
     walker = lambda k: _alike(k, cycle=46, phase=13, tone=4, lean=1, leg_tone=0, leg_half=10, bob=bob)  # noqa: E731
     report = _cut(tmp_path / "out", _keyed(tmp_path, _carried(walker, motion, room)))
-    assert rife_runs() == (runs if rife_located() else 0)
+    assert as_pinned(rife_runs(), runs), rife_runs()
     _two_steps(report, 46)
     said = _unwitnessed(report, 23)
     assert said["asked"].startswith("the feet together")
@@ -782,7 +787,7 @@ def test_a_walk_carried_up_and_down_whole_feet_and_all_is_cut_two_intervals_with
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # up to 8 calls of the binary at 300 x 340 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
-@pytest.mark.parametrize("bob, runs", [(0, 8), (3, 4)])
+@pytest.mark.parametrize("bob, runs", [(0, {"rife-v4.25": 4, "rife-v4.6": 8}), (3, {"rife-v4.25": (4, 6), "rife-v4.6": 4})], ids=pin_id)
 def test_a_walk_on_a_picture_shaken_twice_an_interval_is_cut_two_steps_with_a_warning(tmp_path, bob, runs, rife_runs):
     """The wide walker with its legs drawn alike, its crossings its steps every 23 frames, held still (or rising and
     falling on its legs once a step), on a picture shaken 3 px up and down twice an interval — dy = round(3 sin(4 pi k /
@@ -792,7 +797,7 @@ def test_a_walk_on_a_picture_shaken_twice_an_interval_is_cut_two_steps_with_a_wa
     warning."""
     walker = lambda k: _alike(k, cycle=46, phase=13, tone=4, lean=1, leg_tone=0, leg_half=10, bob=bob)  # noqa: E731
     report = _cut(tmp_path / "out", _keyed(tmp_path, _carried(walker, lambda k: round(3 * math.sin(4 * math.pi * k / 23)))))
-    assert rife_runs() == (runs if rife_located() else 0)
+    assert as_pinned(rife_runs(), runs), rife_runs()
     said = _unwitnessed(report, 23)
     assert said["asked"].startswith("the feet together")
     if not bob:
