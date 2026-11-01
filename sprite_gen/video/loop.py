@@ -1436,12 +1436,21 @@ def fill_cut(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None
     return frames, record
 
 
+def _playing_hold(cells: list[Image.Image]) -> int | None:
+    """The hold of a loop's cells as they play (`drawing_firsts`), None for cells with no body to read."""
+    try:
+        return drawing_firsts(cells)[1]
+    except ValueError:
+        return None
+
+
 def _fill_again(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, record: dict[str, Any], *, ring: bool,
                 mode: str, skip: list[int]) -> tuple[list[Image.Image], dict[str, Any] | None]:
-    """`held_fill.again` on the cut, with RIFE located only once a frame is to be made, as `fill_cut` does."""
+    """`held_fill.again` on the cut, with RIFE located only once a frame is to be made, as `fill_cut` does, the hold of
+    the cut as it now plays read between its drawings as the seam and the step gate read it (`drawing_firsts`)."""
     made_by: list[dict[str, str]] = []
     lazy = _located(interpolate, made_by)
-    asked = partial(held_fill_mod.again, record=record, ring=ring, mode=mode, skip=skip)
+    asked = partial(held_fill_mod.again, record=record, ring=ring, mode=mode, skip=skip, hold=_playing_hold)
     try:
         frames, again = asked(frames, lazy)
     except rife_mod.RifeNotInstalled as exc:

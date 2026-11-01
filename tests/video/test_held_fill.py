@@ -466,6 +466,26 @@ def test_a_hold_across_a_loop_s_wrap_longer_than_three_cells_is_kept_whole():
     assert record["before"]["wrap"]["joined"] == 4 and record["wrap_held"] is True
 
 
+def test_a_cut_read_again_that_plays_on_twos_keeps_its_held_pair():
+    # The read after the repairs keeps a run where the cells as they now play read drawn on twos or threes (`hold`, the
+    # reading the seam and the step gate take): a walk on twos redrawn a pixel aside each repeat reads a drawing a frame as
+    # filmed, so the fill keeps nothing, and the anchor brings a pair back to one picture. Read as a drawing a frame, the
+    # pair is made again. The hold is asked only where a run is read.
+    _, record = held_fill.fill([walk_at(t) for t in range(N)], None, ring=True)
+    assert record["before"]["held_runs"] == []
+    unread = [walk_at(t) for t in range(N)]
+    assert held_fill.again(unread, None, record, ring=True, hold=lambda cells: pytest.fail("asked")) == (unread, None)
+    frames = [walk_at(9 if t == 10 else t) for t in range(N)]  # cell 10 shows cell 9's picture
+    calls: list = []
+    out, again = held_fill.again(frames, lambda a, b, t: calls.append(t) or a, record, ring=True, hold=lambda cells: 2)
+    assert calls == [] and again["made"] == [] and again["drawn"] == 2
+    assert [f.tobytes() for f in out] == [f.tobytes() for f in frames]
+    assert [(h["from"], h["to"], h["kind"]) for h in held_fill.intended(again)] == [(9, 10, "drawn")]
+    between = Between(walk_at, range(N), period=N)
+    out, again = held_fill.again(frames, between, record, ring=True, hold=lambda cells: 1)
+    assert again["made"] == [10] and "drawn" not in again and out[10].tobytes() == walk_at(10).tobytes()
+
+
 def test_a_cut_played_once_does_not_read_a_wrap():
     frames = [walk_at(t) for t in [*range(N - 1), 0]]
     out, record = held_fill.fill(frames, lambda a, b, t: a, ring=False)

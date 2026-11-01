@@ -50,7 +50,7 @@ docs/video-pipeline.md "Root motion")."""
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from PIL import Image, ImageFilter
@@ -384,12 +384,15 @@ def intended(record: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def again(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, record: dict[str, Any], *, ring: bool,
-          mode: str = "auto", skip: Sequence[int] = ()) -> tuple[list[Image.Image], dict[str, Any] | None]:
+          mode: str = "auto", skip: Sequence[int] = (),
+          hold: Callable[[list[Image.Image]], int | None] | None = None) -> tuple[list[Image.Image], dict[str, Any] | None]:
     """The cut read again once everything after the fill has run, each run of cells showing one picture that the fill
     did not leave (no kept run of `record` holds a cell of it, and no cell of it is in `skip`: cells a repair already gave
     way to the frame beside it, its frame between refused) made again as the fill makes a run (`fill`, with the same
     rules): the frames, and the record of it, None where no such run was read. A cut drawn on twos or threes, or cut
-    with the fill off, is not read again."""
+    with the fill off, is not read again. `hold` reads the held-drawings hold of the cut as it now plays, asked only
+    where a run is read: a cut whose redrawn repeats read as drawings as filmed (a pixel aside each) and as held once
+    the anchor moved them back is drawn on twos or threes all the same, and keeps them (`drawn`)."""
     if mode == "off" or "drawn" in record:
         return frames, None
     before = record["before"]
@@ -410,7 +413,8 @@ def again(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, r
     for r in new:
         for k in range(r["start"], r["start"] + r["length"] - 1):
             masked[k] = True
-    out, made = fill(frames, interpolate, ring=ring, same=masked, mode=mode, wrap=wrap)
+    out, made = fill(frames, interpolate, ring=ring, same=masked, mode=mode, wrap=wrap,
+                     hold=hold(frames) if hold is not None else None)
     return out, made
 
 
