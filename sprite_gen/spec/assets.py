@@ -226,26 +226,6 @@ def load_asset(source: Path, *, state=None, fps=None, anchor=None) -> FrameSeque
     return _load_asset(source, _Snapshot(), state=state, fps=fps, anchor=anchor)
 
 
-def load_asset_states(source: Path, *, state=None, fps=None, anchor=None) -> dict[str | None, FrameSequence]:
-    """Read every declared state from one snapshot; never discover frames by filename sort."""
-    source = Path(source).expanduser().resolve()
-    snapshot = _Snapshot()
-    states = [state]
-    if state is None and source.suffix.lower() == ".json":
-        data = snapshot.json(source)
-        if not isinstance(data, dict):
-            raise ValueError("asset descriptor must be an object")
-        if "frame_layout" in data:
-            states = list(data["frame_layout"]["rows"])
-        elif data.get("kind") == SET_SHEET_KIND:
-            states = [row["code"] for row in data["rows"]]
-        elif isinstance(data.get("rows"), list) and "cell" in data:
-            states = data["rows"]
-        if not states or len(set(states)) != len(states):
-            raise ValueError("asset states must be nonempty and unique")
-    return {key: _load_asset(source, snapshot, state=key, fps=fps, anchor=anchor) for key in states}
-
-
 PLAYBACK_FIELDS = ("loop", "hold_last", "end_frame", "events", "blend", "direction", "body_h", "frame_variant")
 
 

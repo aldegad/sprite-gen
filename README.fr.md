@@ -50,7 +50,7 @@ flowchart LR
     end
     subgraph C["C · utilitaires"]
         direction LR
-        c1[cutout] ~~~ c2[slice-sheet] ~~~ c4[ui-kit] ~~~ c3[unpack-atlas]
+        c1[cutout] ~~~ c2[slice-sheet] ~~~ c3[unpack-atlas]
     end
     subgraph D["D · post-traitement"]
         direction LR

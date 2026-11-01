@@ -119,59 +119,8 @@ def test_refuses_a_ratio_it_cannot_read(tmp_path, monkeypatch):
         _run(tmp_path, monkeypatch, layout_guide=True, aspect_ratio="tall")
 
 
-def test_ui_kit_guide_attaches_the_kit_layout_and_names_every_element(tmp_path, monkeypatch):
-    from sprite_gen.frames import ui_kit
-
-    fake, report = _run(tmp_path, monkeypatch, layout_guide="ui-kit", aspect_ratio="1:1")
-
-    guide = fake.attached[0].convert("RGB")
-    assert guide.size == (1024, 1024)
-    for x, y, w, h in ui_kit.boxes((1024, 1024)).values():
-        assert guide.getpixel((x + w // 2, y)) == ui_kit.GUIDE_BOX
-        assert guide.getpixel((x + w // 2, y + h // 2)) == ui_kit.GUIDE_BACKGROUND
-    request = fake.requests[0]
-    assert request.prompt.startswith("a tall knight, full body\n\n")
-    assert request.prompt.endswith(ui_kit.guide_text())
-    assert "crown" not in request.prompt
-    cell = report["extra"]["layout_guide"]
-    assert cell["kind"] == "ui-kit"
-    assert cell["boxes"]["panel"] == {"x": 48, "y": 48, "w": 576, "h": 400}
-    assert report["refs"] == []
-
-
-def test_ui_kit_guide_is_square_or_2_3(tmp_path, monkeypatch):
-    for ratio in ("16:9", "3:4", "9:16"):
-        with pytest.raises(SystemExit, match=r"square \(1:1.*2:3"):
-            _run(tmp_path, monkeypatch, layout_guide="ui-kit", aspect_ratio=ratio)
-    fake, _ = _run(tmp_path, monkeypatch, layout_guide="ui-kit")
-    assert fake.attached[0].size == (1024, 1024)
-
-
-def test_ui_kit_guide_at_2_3_is_the_whole_kit(tmp_path, monkeypatch):
-    from sprite_gen.frames import ui_kit
-
-    fake, report = _run(tmp_path, monkeypatch, layout_guide="ui-kit", aspect_ratio="2:3")
-
-    guide = fake.attached[0].convert("RGB")
-    assert guide.size == (683, 1024)
-    boxes = ui_kit.boxes((683, 1024))
-    assert list(boxes) == [slot.name for slot in ui_kit.LAYOUT]
-    for name, (x, y, w, h) in boxes.items():
-        # a box's top edge, or a round part's circle, passes the top centre of its place
-        assert ui_kit.GUIDE_BOX in [guide.getpixel((x + w // 2, y + i)) for i in range(3)], name
-        assert guide.getpixel((x + w // 2, y + h // 2)) == ui_kit.GUIDE_BACKGROUND
-    request = fake.requests[0]
-    assert request.aspect_ratio == "2:3"
-    assert request.prompt.endswith(ui_kit.guide_text((683, 1024)))
-    assert ui_kit.guide_text((683, 1024)) != ui_kit.guide_text()
-    cell = report["extra"]["layout_guide"]
-    assert cell["kind"] == "ui-kit" and (cell["width"], cell["height"]) == (683, 1024)
-    assert cell["boxes"]["joystick_knob"] == dict(zip("xywh", boxes["joystick_knob"]))
-    assert cell["boxes"]["panel"] == {"x": 32, "y": 32, "w": 384, "h": 267}
-
-
 def test_the_flag_alone_is_still_the_figure_guide():
     parser = gen._build_parser()
     assert parser.parse_args(["--out", "x.png", "--layout-guide"]).layout_guide == "figure"
-    assert parser.parse_args(["--out", "x.png", "--layout-guide", "ui-kit"]).layout_guide == "ui-kit"
+    assert parser.parse_args(["--out", "x.png", "--layout-guide", "figure"]).layout_guide == "figure"
     assert parser.parse_args(["--out", "x.png"]).layout_guide is None

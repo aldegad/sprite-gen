@@ -7,11 +7,6 @@ overlap B replaces part of the leading overlap A along a connected seam.
 Every output pixel is copied intact from A or B, including its original alpha.
 There is no resampling, blur, compositing, or colour interpolation.
 
-``axis="xy"`` quilts along x, then along y with a cyclic seam: the second seam's
-two ends, which meet across the x wrap, may differ by one step at most, so the
-second pass cannot break the join the first one made. Its report measures both
-joins of the finished tile.
-
 Reports describe local pixel differences, not semantic continuity of a painting.
 Inspect repeated tiles visually even when the numerical checks pass.
 """
@@ -126,22 +121,16 @@ def inspect_tile(image: Image.Image, axis: str = "x") -> dict[str, Any]:
     }
 
 
-def _minimum_seam(error: Any, cyclic: bool = False) -> tuple[Any, float]:
+def _minimum_seam(error: Any) -> tuple[Any, float]:
     """Minimum accumulated error, with neighbouring rows moving at most one px.
 
     ``cut`` is the LAST B pixel, not the first A pixel. In particular cut=0
     must copy B at x=0: the wrap then joins adjacent source pixels P-1 and P.
     Reserve the overlap's final column for A when overlap > 1. A one-column
     overlap necessarily copies B there and switches to A at the next column.
-
-    ``cyclic``: the first and last rows are neighbours too (they meet across the
-    other axis's wrap), so the seam's two ends may differ by one step at most.
-    One search per starting column, all at once.
     """
     height, overlap = error.shape
     width = max(1, overlap - 1)
-    if cyclic and height > 1:
-        return _cyclic_seam(error[:, :width].astype(np.float64))
     costs = error[0, :width].astype(np.float64)
     steps = np.zeros((height, width), dtype=np.int8)
     for row in range(1, height):
@@ -158,34 +147,27 @@ def _minimum_seam(error: Any, cyclic: bool = False) -> tuple[Any, float]:
     return seam, score
 
 
-def _cyclic_seam(error: Any) -> tuple[Any, float]:
-    height, width = error.shape
-    costs = np.full((width, width), np.inf)
-    costs[np.arange(width), np.arange(width)] = error[0]
-    steps = np.zeros((height, width, width), dtype=np.int8)
-    blocked = np.full((width, 1), np.inf)
-    for row in range(1, height):
-        left = np.concatenate((blocked, costs[:, :-1]), axis=1)
-        right = np.concatenate((costs[:, 1:], blocked), axis=1)
-        steps[row][(left < costs) & (left <= right)] = -1
-        steps[row][(right < costs) & (right < left)] = 1
-        costs = np.minimum(costs, np.minimum(left, right)) + error[row]
-    start_column, end_column = np.indices((width, width))
-    final = np.where(np.abs(start_column - end_column) <= 1, costs, np.inf)
-    start, end = divmod(int(np.argmin(final)), width)
-    seam = np.empty(height, dtype=np.int32)
-    seam[-1] = end
-    for row in range(height - 1, 0, -1):
-        seam[row - 1] = seam[row] + steps[row, start, seam[row]]
-    return seam, float(final[start, end] / height)
-
-
 def _crop_box(start: int, length: int, cross: int, axis: str) -> list[int]:
     return [start, 0, start + length, cross] if axis == "x" else [0, start, cross, start + length]
 
 
-def _quilt(pixels: Any, period: int, overlap: int, axis: str, *, cyclic: bool = False) -> tuple[Any, dict[str, Any]]:
-    """Quilt one axis of axis-oriented pixels (the tiling axis is dimension 1)."""
+def make_tile(
+    image: Image.Image, period: int, *, axis: str = "x", overlap: int = 32,
+) -> tuple[Image.Image, dict[str, Any]]:
+    """Return an RGBA tile and JSON-safe report, leaving ``image`` untouched.
+
+    The tile is ``period`` pixels along ``axis`` with the other dimension
+    unchanged. At most MAX_CANDIDATES evenly spaced crop starts are evaluated,
+    including both endpoints. The seam search is exact within each candidate,
+    but the bounded crop search does not claim a global optimum.
+    """
+    for name, value in (("period", period), ("overlap", overlap)):
+        if isinstance(value, bool) or not isinstance(value, Integral):
+            raise TypeError(f"{name} must be an integer")
+    period, overlap = int(period), int(overlap)
+    if period < 2 or not 1 <= overlap < period:
+        raise ValueError("geometry requires period >= 2 and 1 <= overlap < period")
+    pixels = _pixels(image, axis)
     height, length, _ = pixels.shape
     slack = length - period - overlap
     if slack < 0:
@@ -203,7 +185,7 @@ def _quilt(pixels: Any, period: int, overlap: int, axis: str, *, cyclic: bool = 
         # independent equally weighted channel. Selection still copies raw RGBA.
         a[..., :3] *= a[..., 3:] / 255
         b[..., :3] *= b[..., 3:] / 255
-        seam, score = _minimum_seam(np.square(a - b).mean(axis=-1), cyclic)
+        seam, score = _minimum_seam(np.square(a - b).mean(axis=-1))
         if score < best_score:
             best_score, best_start, best_seam = score, int(start), seam
     assert best_seam is not None
@@ -211,21 +193,19 @@ def _quilt(pixels: Any, period: int, overlap: int, axis: str, *, cyclic: bool = 
     result = crop[:, :period].copy()
     use_b = np.arange(overlap)[None, :] <= best_seam[:, None]
     result[:, :overlap] = np.where(use_b[..., None], crop[:, period:], crop[:, :overlap])
+    tile = Image.fromarray(result if axis == "x" else result.transpose(1, 0, 2))
+    report = inspect_tile(tile, axis)
 
     # The wrap is now a natural source adjacency. It can pass while the new
     # internal cut is bad, so inspect that cut separately against SOURCE detail.
-    # Include vertical mask transitions as well as each row's horizontal cut;
-    # a cyclic seam also turns between its last and first rows.
+    # Include vertical mask transitions as well as each row's horizontal cut.
     rows = np.arange(height)
     seam_color, seam_alpha = _differences(result[rows, best_seam], result[rows, best_seam + 1])
     reference_color, reference_alpha = _differences(crop[:, :-1], crop[:, 1:])
     turn_rows = np.flatnonzero(np.diff(best_seam))
-    turn_next = turn_rows + 1
-    if cyclic and height > 1 and best_seam[-1] != best_seam[0]:
-        turn_rows, turn_next = np.append(turn_rows, height - 1), np.append(turn_next, 0)
     if turn_rows.size:
-        turn_cols = np.maximum(best_seam[turn_rows], best_seam[turn_next])
-        turn_color, turn_alpha = _differences(result[turn_rows, turn_cols], result[turn_next, turn_cols])
+        turn_cols = np.maximum(best_seam[turn_rows], best_seam[turn_rows + 1])
+        turn_color, turn_alpha = _differences(result[turn_rows, turn_cols], result[turn_rows + 1, turn_cols])
         seam_color = np.concatenate((seam_color, turn_color))
         seam_alpha = np.concatenate((seam_alpha, turn_alpha))
         vertical_color, vertical_alpha = _differences(crop[:-1], crop[1:])
@@ -234,14 +214,17 @@ def _quilt(pixels: Any, period: int, overlap: int, axis: str, *, cyclic: bool = 
     quilt_color, quilt_alpha = _stats(seam_color), _alpha_stats(seam_alpha)
     reference_color_stats, reference_alpha_stats = _stats(reference_color), _alpha_stats(reference_alpha)
     quilt_color_limits, quilt_alpha_limits = _limits(reference_color_stats), _limits(reference_alpha_stats)
-    reasons = []
     if _exceeds(quilt_color, quilt_color_limits):
-        reasons.append("Internal quilt color difference exceeds source interior variation.")
+        report["review_reasons"].append("Internal quilt color difference exceeds source interior variation.")
     if _exceeds(quilt_alpha, quilt_alpha_limits):
-        reasons.append("Internal quilt alpha mismatch exceeds source interior variation.")
-    return result, {
-        "start": best_start,
-        "reasons": reasons,
+        report["review_reasons"].append("Internal quilt alpha mismatch exceeds source interior variation.")
+    report.update({
+        "status": "needs-review" if report["review_reasons"] else "pass",
+        "method": "crop-overlap-minimum-error-quilt",
+        "source_size": list(image.size),
+        "source_crop": _crop_box(best_start, period + overlap, height, axis),
+        "core_crop": _crop_box(best_start, period, height, axis),
+        "overlap": overlap,
         "search": {"evaluated_candidates": int(starts.size), "candidate_limit": MAX_CANDIDATES,
                    "available_crops": slack + 1, "strategy": "evenly-spaced including endpoints"},
         "quilt_seam": {
@@ -252,99 +235,8 @@ def _quilt(pixels: Any, period: int, overlap: int, axis: str, *, cyclic: bool = 
             "source_interior_alpha_difference": reference_alpha_stats,
             "thresholds": {"color": quilt_color_limits, "alpha": quilt_alpha_limits},
         },
-    }
-
-
-def _geometry(period: Any, overlap: Any) -> tuple[int, int]:
-    for name, value in (("period", period), ("overlap", overlap)):
-        if isinstance(value, bool) or not isinstance(value, Integral):
-            raise TypeError(f"{name} must be an integer")
-    period, overlap = int(period), int(overlap)
-    if period < 2 or not 1 <= overlap < period:
-        raise ValueError("geometry requires period >= 2 and 1 <= overlap < period")
-    return period, overlap
-
-
-def make_tile(
-    image: Image.Image, period: int, *, axis: str = "x", overlap: int = 32,
-) -> tuple[Image.Image, dict[str, Any]]:
-    """Return an RGBA tile and JSON-safe report, leaving ``image`` untouched.
-
-    The tile is ``period`` pixels along ``axis`` with the other dimension
-    unchanged; with ``axis="xy"`` it is ``period`` pixels square. At most
-    MAX_CANDIDATES evenly spaced crop starts are evaluated per axis, including
-    both endpoints. The seam search is exact within each candidate, but the
-    bounded crop search does not claim a global optimum.
-    """
-    period, overlap = _geometry(period, overlap)
-    if axis == "xy":
-        return _make_tile_xy(image, period, overlap)
-    pixels = _pixels(image, axis)
-    height = pixels.shape[0]
-    result, quilt = _quilt(pixels, period, overlap, axis)
-    tile = Image.fromarray(result if axis == "x" else result.transpose(1, 0, 2))
-    report = inspect_tile(tile, axis)
-    report["review_reasons"].extend(quilt["reasons"])
-    start = quilt["start"]
-    report.update({
-        "status": "needs-review" if report["review_reasons"] else "pass",
-        "method": "crop-overlap-minimum-error-quilt",
-        "source_size": list(image.size),
-        "source_crop": _crop_box(start, period + overlap, height, axis),
-        "core_crop": _crop_box(start, period, height, axis),
-        "overlap": overlap,
-        "search": quilt["search"],
-        "quilt_seam": quilt["quilt_seam"],
     })
     return tile, report
-
-
-def _make_tile_xy(image: Image.Image, period: int, overlap: int) -> tuple[Image.Image, dict[str, Any]]:
-    source = _pixels(image, "x")
-    height, width, _ = source.shape
-    for axis, length in (("x", width), ("y", height)):
-        if length < period + overlap:
-            raise ValueError(
-                f"source has {length} pixels along {axis}; period + overlap requires {period + overlap}"
-            )
-    across, x_quilt = _quilt(source, period, overlap, "x")
-    down, y_quilt = _quilt(across.transpose(1, 0, 2), period, overlap, "y", cyclic=True)
-    tile = Image.fromarray(np.ascontiguousarray(down.transpose(1, 0, 2)))
-    x0, y0 = x_quilt["start"], y_quilt["start"]
-    report = inspect_tile_xy(tile)
-    for axis, quilt in (("x", x_quilt), ("y", y_quilt)):
-        measured = report["axes"][axis]
-        measured["review_reasons"].extend(quilt["reasons"])
-        measured["status"] = "needs-review" if measured["review_reasons"] else "pass"
-        measured.update(search=quilt["search"], quilt_seam=quilt["quilt_seam"])
-    report["review_reasons"] = [f"{axis}: {reason}" for axis in ("x", "y")
-                                for reason in report["axes"][axis]["review_reasons"]]
-    report.update({
-        "status": "needs-review" if report["review_reasons"] else "pass",
-        "method": "crop-overlap-minimum-error-quilt along x, then along y with a cyclic seam",
-        "source_size": list(image.size),
-        "source_crop": [x0, y0, x0 + period + overlap, y0 + period + overlap],
-        "core_crop": [x0, y0, x0 + period, y0 + period],
-        "overlap": overlap,
-    })
-    return tile, report
-
-
-def inspect_tile_xy(image: Image.Image) -> dict[str, Any]:
-    """Measure both wrap edges of a tile meant to repeat in both directions.
-
-    ``axes`` holds the ``inspect_tile`` report of each axis; ``status`` is
-    ``needs-review`` when either axis needs review, and every reason is
-    prefixed with its axis.
-    """
-    axes = {axis: inspect_tile(image, axis) for axis in ("x", "y")}
-    reasons = [f"{axis}: {reason}" for axis in ("x", "y") for reason in axes[axis]["review_reasons"]]
-    return {
-        "schema_version": 1, "axis": "xy", "size": list(image.size),
-        "status": "needs-review" if reasons else "pass",
-        "requires_visual_review": True, "assessment": _ASSESSMENT,
-        "review_reasons": reasons, "axes": axes,
-    }
 
 
 def _same_file(a: Path, b: Path) -> bool:
@@ -411,10 +303,8 @@ def _publish(
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--source", required=True, type=Path, help="independent single-frame PNG")
     parser.add_argument("--out", required=True, type=Path, help="output PNG; cannot overwrite the source")
-    parser.add_argument("--period", required=True, type=int,
-                        help="tile length in pixels along --axis (with xy: the side of the square tile)")
-    parser.add_argument("--axis", choices=("x", "y", "xy"), default="x",
-                        help="repeat direction; xy makes one tile seamless both ways and measures both joins")
+    parser.add_argument("--period", required=True, type=int, help="tile length in pixels along --axis")
+    parser.add_argument("--axis", choices=("x", "y"), default="x")
     parser.add_argument("--overlap", type=int, default=32,
                         help="1 <= overlap < period; source must contain period + overlap pixels")
     parser.add_argument("--report", type=Path, help="JSON report (default: <out-stem>.report.json)")

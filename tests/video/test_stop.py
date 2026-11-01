@@ -16,7 +16,6 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from sprite_gen.compose import game_pack
 from sprite_gen.util.resample import resize_cell
 from sprite_gen.video import evidence, loop, stop
 
@@ -315,25 +314,6 @@ def test_stop_refuses_a_loop_it_cannot_leave(tmp_path):
         (few / f.name).write_bytes(f.read_bytes())
     with pytest.raises(SystemExit, match="holds"):
         make(tmp_path, few, meta_path, name="few")
-
-
-def test_game_pack_packs_the_stop_to_play_once(tmp_path):
-    keyed, run_from = clip(tmp_path, cycles=2)
-    meta = cut(tmp_path, keyed, run_from + PERIOD)
-    out = make(tmp_path, keyed, meta)
-    request = tmp_path / "game.json"
-    request.write_text(json.dumps({"version": 1, "assets": [
-        {"id": "hero_run_side", "source": str(meta), "display": {"body_height": 56}},
-        {"id": "hero_stop_side", "source": str(tmp_path / "stop" / "stop.strip.json"), "display": {"body_height": 56}}]}))
-    packed = game_pack.pack(request, tmp_path / "pack")
-    run_anim, stop_anim = packed["animations"]["hero_run_side"], packed["animations"]["hero_stop_side"]
-    assert run_anim["loop"] is True
-    assert (stop_anim["loop"], stop_anim["hold_last"]) == (False, True) and len(stop_anim["frames"]) == len(out["shown"])
-    # Drawn at their pivots, the loop's cell lies where the stop's sidecar says it does: the stop stands where the run did.
-    f = stop_anim["size"]["w"] / out["strip"]["w"]
-    origin = out["strip"]["loop_cell_origin"]
-    for axis in (0, 1):
-        assert abs(stop_anim["anchor"][axis] - origin[axis] * f - run_anim["anchor"][axis]) <= 1.0
 
 
 def test_stop_source_identity_is_the_loop_cut_from(tmp_path):

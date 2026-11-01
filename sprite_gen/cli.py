@@ -8,14 +8,12 @@ from pathlib import Path
 from typing import Callable
 
 from sprite_gen import _modules, gen
-from sprite_gen.audio import sound
 from sprite_gen.background import tile
 from sprite_gen.curate import anchor
 from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, export_aseprite, export_pngs
-from sprite_gen.compose import game_pack
 from sprite_gen.qa import correction_loop, inspect, preview, score, motion
 from sprite_gen.qa import handed as handed_check
-from sprite_gen.frames import cutout, extract, slice_sheet, ui_kit, unpack_atlas
+from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
 from sprite_gen.gen import gen_set, logo, pixel_draw, prepare, video
 from sprite_gen.video import batch as video_batch
 from sprite_gen.video import canvas as video_canvas
@@ -218,8 +216,6 @@ def _add_correction_loop(p: argparse.ArgumentParser) -> None:
 
 
 COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[..., int]]] = {
-    "game-pack": ("Resize finished assets into game atlases with playback policies.", game_pack.add_arguments, game_pack.run),
-    "sound": ("Generate a named game sound or instrumental music with browser audio exports.", sound.add_arguments, sound.run),
     "background-tile": ("Quilt a repeating RGBA background and measure its join.", tile.add_arguments, tile.run),
     "shadow": ("Project silhouette shadows from any supported asset.", shadow.add_arguments, shadow.run),
     "inspect-motion": ("Measure asset timing and contact evidence without changing animation.", motion.add_arguments, motion.run),
@@ -280,11 +276,6 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "Slice a multi-figure grid sheet into per-cell standing cuts (tachi-e).",
         _add_slice_sheet,
         slice_sheet.run,
-    ),
-    "ui-kit": (
-        "Split a UI kit sheet drawn on the fixed layout into nine-slice elements with measured insets.",
-        ui_kit.add_arguments,
-        ui_kit.run,
     ),
     "gen": (
         "Generate one image via a provider (codex image_gen / grok Imagine on a subscription login first (an API key only without one, billed per call and said), or openai Images API for servers/SaaS, billed per call) into a verified PNG.",

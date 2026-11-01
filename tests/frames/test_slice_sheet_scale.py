@@ -13,7 +13,6 @@ import pytest
 from PIL import Image
 
 from sprite_gen import cli
-from sprite_gen.compose import game_pack
 from sprite_gen.frames import slice_sheet as slice_module
 from sprite_gen.frames.slice_sheet import slice_sheet
 
@@ -130,36 +129,6 @@ def test_sheet_scale_with_contain_takes_the_one_factor_every_cut_fits(tmp_path):
         assert x0 >= 0 and x1 <= 128 and abs(y1 - 124) <= 1, path.name
         anchor_x, anchor_y = cell["anchor"]
         assert abs(anchor_y - y1) <= 1 and abs(anchor_x - (x0 + x1) / 2) <= 1, path.name
-
-
-def test_game_pack_images_keep_the_sliced_sizes_and_stand_on_the_reported_anchor(tmp_path):
-    boxes = [(30, 60), (30, 30), (80, 20)]
-    sheet = transparent_sheet(tmp_path / "props.png", boxes)
-    written = slice_sheet(sheet, tmp_path / "cells", None, grid=(3, 1), names=["post", "crate", "bench"],
-                          prefix="prop_", canvas=(128, 96), baseline_y=92.0, target_height=84.0,
-                          scale="sheet", fit="contain")
-    data = report(tmp_path / "cells", "prop_")
-    request = {"version": 2, "images": [
-        {"id": cell["name"], "source": f"cells/{cell['file']}", "display": {"height": 48},
-         "anchor": cell["anchor"], "footprint": "base"} for cell in data["cells"]]}
-    (tmp_path / "game.json").write_text(json.dumps(request), encoding="utf-8")
-    result = game_pack.pack(tmp_path / "game.json", tmp_path / "pack")
-    frames = {name: (page, record) for page in result["textures"] for name, record in page["frames"].items()}
-    for cell, (_w, h), path in zip(data["cells"], boxes, written):
-        entry = result["images"][cell["name"]]
-        # one canvas for every cell, so one display height scales them all by the same amount
-        assert entry["size"] == {"w": 64, "h": 48}
-        assert entry["anchor"] == pytest.approx([v * 0.5 for v in cell["anchor"]])
-        page, record = frames[entry["frame"]]
-        rect = record["frame"]
-        with Image.open(tmp_path / "pack" / page["image"]) as atlas:
-            frame = atlas.crop((rect["x"], rect["y"], rect["x"] + rect["w"], rect["y"] + rect["h"])).convert("RGBA")
-        x0, y0, x1, y1 = opaque_box(frame)
-        assert abs((y1 - y0) - h * data["factor"] * 0.5) <= 1, cell["name"]
-        anchor_x, anchor_y = entry["anchor"]
-        assert abs(anchor_y - y1) <= 1 and abs(anchor_x - (x0 + x1) / 2) <= 1, cell["name"]
-        footprint = entry["footprint"]
-        assert abs(footprint["y"] + footprint["h"] - anchor_y) <= 1, cell["name"]
 
 
 def test_cli_and_the_script_take_scale_and_fit(tmp_path):

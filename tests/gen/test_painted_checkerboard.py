@@ -125,12 +125,12 @@ class _CheckerboardProvider:
         return gen_base.ProviderRun(provider=self.name, elapsed_seconds=0.1, model=request.model)
 
 
-def test_a_ui_kit_generation_that_comes_back_on_a_checkerboard_is_refused(tmp_path, monkeypatch):
+def test_a_generation_with_a_layout_guide_that_comes_back_on_a_checkerboard_is_refused(tmp_path, monkeypatch):
     # the layout guide is an attached image, so `auto` keys the result (`refs-attached`): the checkerboard is
     # refused with its own reason instead of being keyed into an empty sheet, and nothing is published
     monkeypatch.setattr(gen, "_make_provider", lambda name, *, keep_session: _CheckerboardProvider())
-    out, report = tmp_path / "uikit.png", tmp_path / "report.json"
+    out, report = tmp_path / "props.png", tmp_path / "report.json"
     with pytest.raises(SystemExit, match=r"^chroma: the background is a painted transparency checkerboard"):
-        gen.run(provider="fake", prompt="A game UI kit in brass and walnut.", out=out, report=report,
-                transparent=True, layout_guide="ui-kit", aspect_ratio="2:3")
+        gen.run(provider="fake", prompt="A sheet of six wooden props.", out=out, report=report,
+                transparent=True, layout_guide=True, aspect_ratio="2:3")
     assert not out.exists() and not report.exists()

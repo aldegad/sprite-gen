@@ -145,7 +145,7 @@ API contract: [OpenAI Images](https://developers.openai.com/api/images/).
 
 ## Provider addresses
 
-sprite-gen calls four providers over HTTP itself, with no SDK. Each provider's calls go
+sprite-gen calls three providers over HTTP itself, with no SDK. Each provider's calls go
 to one base address, and one environment variable replaces it. The variable is read
 when each request is made, not at import, so a process that sets or changes it after
 importing the engine is followed. Unset, empty or blank is the documented address, as
@@ -157,7 +157,6 @@ fragment, or the call stops naming the variable.
 | OpenAI | `SPRITE_GEN_OPENAI_BASE_URL` | `https://api.openai.com/v1` | `gen --provider openai` images and edits, its vision checks (facing, the logo's text) |
 | xAI | `SPRITE_GEN_XAI_BASE_URL` | `https://api.x.ai/v1` | `gen --provider grok` images and edits, its vision checks, the video facing check, `video` / `video-extend` / `video-edit` requests and polls, `video-resume` polls, the clip's download |
 | Anthropic | `SPRITE_GEN_ANTHROPIC_BASE_URL` | `https://api.anthropic.com/v1` | `pixel-draw` messages, Message Batches, a batch's results file |
-| ElevenLabs | `SPRITE_GEN_ELEVENLABS_BASE_URL` | `https://api.elevenlabs.io/v1` | `sound` effects and music |
 
 The value is the API root with its version path, as the default is: a request for
 `/images/generations` goes to `<value>/images/generations` with the same method,
@@ -194,7 +193,7 @@ the order as before; any other value stops the call naming the variable.
 | xAI (`gen --provider grok`, the video verbs, Grok vision) | the grok login file first (`~/.grok/auth.json`, `GROK_HOME`); `XAI_API_KEY` only without one | `XAI_API_KEY`; the login file and `GROK_HOME` are not looked at |
 | Anthropic (`pixel-draw`) | `claude auth status` first; `ANTHROPIC_API_KEY` only without a subscription login, and for `--batch` | `ANTHROPIC_API_KEY`; `claude` is not run |
 | codex (`gen --provider codex`, its vision checks) | `codex login status`, then `codex exec` | not usable: `codex login status` is not run; a default codex [asks, or runs what you chose](#when-codex-cannot-run--ask-or-what-you-chose), naming `SPRITE_GEN_LOGINS=off`; `--provider codex` stops |
-| OpenAI (`gen --provider openai`), ElevenLabs (`sound`) | the key; neither has a login | the same |
+| OpenAI (`gen --provider openai`) | the key; it has no login | the same |
 
 Each key keeps its own rule either way: set but empty is refused naming it, and a
 missing key stops the call naming the key (and, with `off`, the variable). A login
@@ -223,7 +222,7 @@ sprite-gen gen \
   [--quality low|medium|high|xhigh|max|auto] # billed effort; openai takes the range, grok takes auto/low/medium
   [--resolution 1k|1.5k|2k]  # grok output-size tier, priced with --quality
   [--model ID] \
-  [--layout-guide [figure|ui-kit]]  # attach a layout guide: the one-slot figure guide (bare flag) or the UI kit layout
+  [--layout-guide [figure]]  # attach the one-slot figure layout guide (bare flag)
   [--direction side|front|back|front_diagonal|back_diagonal [--facing right|left]] # add the engine's view sentence
   [--handed "the black smartwatch=left wrist" ...]  # with --direction: where an item on one side is in that view
   [--body-plan quadruped | --body-plan "the horse=quadruped" ...]  # with --direction: the view for that body
@@ -322,7 +321,7 @@ strategy it can execute, and `--alpha-mode auto` (the default) follows it:
 - **A painted transparency checkerboard is refused before keying.** Asked for a key
   background, a model sometimes paints the grey and white checkerboard that editors show
   behind transparent pixels instead. The matte reads the key off the borders, so it reads
-  the checkerboard and keys nearly the whole image away: a UI kit sheet keyed that way has
+  the checkerboard and keys nearly the whole image away: a sheet keyed that way has
   nothing left to cut. A caller generates again.
 - `--alpha-mode chroma` on codex is for prompts that already carry a key background: the native request is **not** added to the prompt
   and the raw is keyed like a grok run.

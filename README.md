@@ -63,7 +63,7 @@ flowchart LR
     end
     subgraph C["C · utilities"]
         direction LR
-        c1[cutout] ~~~ c2[slice-sheet] ~~~ c4[ui-kit] ~~~ c3[unpack-atlas]
+        c1[cutout] ~~~ c2[slice-sheet] ~~~ c3[unpack-atlas]
     end
     subgraph D["D · post-processing"]
         direction LR
@@ -138,7 +138,6 @@ A title logo whose letters the model draws freely? `sprite-gen logo --provider c
 ```bash
 sprite-gen cutout icon.png --white-check              # white/ivory → matte, magenta/green → chroma engine
 sprite-gen slice-sheet --sheet sheet.png --chroma-key magenta --grid 3x2   # multi-figure sheet → per-cell cuts
-sprite-gen ui-kit --sheet uikit.png --out-dir ui/     # UI kit sheet (gen --layout-guide ui-kit) → nine-slice elements
 sprite-gen unpack-atlas --atlas sheet.png             # finished atlas → curator-ready run (or --pngs-dir folder/)
 ```
 
@@ -154,7 +153,6 @@ sprite-gen export-aseprite --run-dir <run>                       # Aseprite JSON
 
 ```bash
 sprite-gen background-tile --source background.png --period 512 --overlap 32 --out tile.png
-sprite-gen background-tile --source ground.png --axis xy --period 960 --overlap 64 --out ground-tile.png  # both ways
 sprite-gen shadow --source walk.strip.json --out-dir shadows/
 sprite-gen inspect-motion --source walk.strip.json --out motion.json
 # Only with known same-foot contact and an isolated foot ROI:
@@ -185,7 +183,6 @@ Image generation is part of this engine (`sprite_gen.gen`, providers `codex` and
 | `gen --provider grok`, `video*` | the `grok` CLI login | `XAI_API_KEY` | [gen](docs/gen.md#direct-grok-calls-and-authentication), [video](docs/video.md) |
 | `pixel-draw` | the `claude` (Claude Code) subscription login | `ANTHROPIC_API_KEY` | [pixel-draw](docs/pixel-draw.md#which-credential-a-call-runs-on) |
 | `gen --provider openai` | — | `OPENAI_API_KEY`, only when you chose it | [gen](docs/gen.md#subscription-first--openai-runs-only-when-you-chose-it) |
-| `sound` | — | `ELEVENLABS_API_KEY` | [sound](docs/sound.md) |
 
 A call on an API key is billed per call and says so on stderr before the request leaves, also inside `gen-set` and `video-set`. A call that names no provider runs on codex; when codex cannot run (not signed in, or its usage used up) it stops and asks (exit 75) — or runs what you chose for that with `sprite-gen defaults save --codex-unavailable grok|openai` ([gen](docs/gen.md#when-codex-cannot-run--ask-or-what-you-chose)). `logo` makes its images and its text checks through `gen`'s providers, on the same credentials.
 

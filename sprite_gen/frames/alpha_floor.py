@@ -6,8 +6,8 @@ pixel within ``edge`` pixels of a solid pixel (8-connected: diagonals count) bel
 object's anti-aliased edge and is kept as it is. Every other faint pixel is haze and becomes
 ``(0, 0, 0, 0)``. Nothing is blended or resampled: a pixel is kept byte for byte or cleared.
 
-Shared by `slice-sheet --alpha-floor` and `ui-kit` (docs/ui-kit.md "Alpha cleanup"). The report
-measures what changed instead of asserting it.
+Used by `slice-sheet --alpha-floor` (docs/sheet-slicing.md "Alpha cleanup"). The report measures
+what changed instead of asserting it.
 """
 
 from __future__ import annotations

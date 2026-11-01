@@ -172,5 +172,6 @@ def test_the_package_never_reaches_into_the_scripts_wrappers() -> None:
         "instead:\n" + "\n".join(offenders))
 
 
-def test_built_wheel_carries_browser_audio_player(wheel_names: set[str]) -> None:
-    assert 'sprite_gen/audio/sprite-gen-audio-v2.mjs' in wheel_names
+def test_built_wheel_carries_the_face_player(wheel_names: set[str]) -> None:
+    # `face-bake` runs the face pack's player with node from the installed package (`video/*.mjs` package data)
+    assert 'sprite_gen/video/sprite-gen-face-v1.mjs' in wheel_names

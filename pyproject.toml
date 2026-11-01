@@ -112,4 +112,4 @@ include = ["sprite_gen*"]
 # not feared: adding curator/src/deep/new.js under the old patterns built a wheel without it.
 # `curator/**/*` derives the answer from the filesystem, the same fix as packages.find above.
 [tool.setuptools.package-data]
-sprite_gen = ["serve/curator/**/*", "serve/composer/**/*", "audio/*.mjs", "video/*.mjs"]
+sprite_gen = ["serve/curator/**/*", "serve/composer/**/*", "video/*.mjs"]

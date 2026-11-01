@@ -11,7 +11,6 @@ from sprite_gen import _deps as _deps  # noqa: F401
 __all__ = [
     "spec",     # run dir IO, request/layout, migrations
     "gen",      # provider-backed image generation
-    "audio",    # provider-backed sound generation and browser exports
     "frames",   # sheet -> frames extraction (+ inverse unpack)
     "curate",   # curation decisions / sidecar / anchors
     "compose",  # bake atlas / cycle / gif / export
