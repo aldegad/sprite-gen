@@ -44,6 +44,12 @@ and a report.
 - **Ghosts**: the frames shown pass the ghost screen every loop path delivers (`interpolation_quality`),
   read on them as filmed, as `video-loop` reads its cut; a ghost is named in the report and a warning, by
   its cell and clip frame, and kept as filmed.
+- **Held cells**: the frames shown are read for a picture shown again (`held_fill.same_steps`, on them as filmed)
+  and, by default (`--fill-held auto`), each held run's cells are made again between the run's first cell and the
+  next pose, as `video-loop` makes a cut played once (docs/loop-repair.md section 7): its opening and closing pose
+  (the still), a run longer than `held_fill.HOLD_MAX` and a clip drawn on twos or threes kept as filmed. A frame
+  between that is refused, and every held cell where no RIFE is installed, is kept as filmed with a warning line;
+  `--fill-held off` plays the frames as filmed.
 
 The cells are the loop's cells' scale and placement: the loop's cell sits inside the stop's cell
 (`loop_cell_origin`), centred on it with the same bottom unless a frame reaches lower, and the sidecar's
@@ -71,6 +77,7 @@ from sprite_gen.video import gait_fallback
 from sprite_gen.video import held_fill as held_fill_mod
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import nonloop
+from sprite_gen.video import rife as rife_mod
 from sprite_gen.video.interpolation_quality import ghost_screen
 from sprite_gen.video.repair import ALPHA_SOLID
 from sprite_gen.util.console import utf8_streams
@@ -148,7 +155,10 @@ def read_loop(meta_path: Path) -> tuple[dict[str, Any], list[Image.Image], str]:
 
 
 def _scaled(path: Path, scale: float) -> Image.Image:
-    im = Image.open(path).convert("RGBA")
+    return _scale(Image.open(path).convert("RGBA"), scale)
+
+
+def _scale(im: Image.Image, scale: float) -> Image.Image:
     return resize_cell(im, (max(1, round(im.width * scale)), max(1, round(im.height * scale))))
 
 
@@ -362,9 +372,14 @@ def pick(played: list[int], *, speed: int, max_frames: int | None) -> list[int]:
 
 def make_stop(frames_dir: Path, loop_meta: Path, out_dir: Path, *, name: str = "stop", speed: int = 1,
               max_frames: int | None = None, fps: float | None = None, report_path: Path | None = None,
-              seam_max: float = SEAM_MAX, run_up_max: float = RUN_UP_MAX_CYCLES) -> dict[str, Any]:
+              seam_max: float = SEAM_MAX, run_up_max: float = RUN_UP_MAX_CYCLES, fill_held: str = "auto",
+              interpolate: rife_mod.Interpolate | None = None) -> dict[str, Any]:
     """Cut the stop and write `<name>.strip.png`, `<name>.strip.json`, `<name>.gif`, `<name>.webp` and the report
-    (`<name>.stop.report.json`, or `report_path`) into `out_dir`. A refusal writes the report and exits."""
+    (`<name>.stop.report.json`, or `report_path`) into `out_dir`. A refusal writes the report and exits. `fill_held`
+    auto makes the held cells again between the poses beside them (the module's "Held cells"), with `interpolate`, or
+    RIFE located once a frame is to be made; off plays them as filmed."""
+    if fill_held not in held_fill_mod.MODES:
+        raise SystemExit(f"{PROG}: --fill-held {fill_held!r}: one of {', '.join(held_fill_mod.MODES)}")
     if speed not in SPEEDS:
         raise SystemExit(f"{PROG}: --speed {speed}: 1 or 2")
     if not (math.isfinite(seam_max) and seam_max > 0 and math.isfinite(run_up_max) and run_up_max >= 0):
@@ -413,8 +428,26 @@ def make_stop(frames_dir: Path, loop_meta: Path, out_dir: Path, *, name: str = "
         loop_mod.write_loop_report(target, {**base, **exc.record, "status": "failed", "error": str(exc)})
         raise SystemExit(str(exc)) from exc
     shown = pick(found["played"], speed=speed, max_frames=max_frames)
+    # Read as filmed, at the keyed frames' own size, as video-loop reads its cut: a part-covered band is a
+    # number of pixels thick, and scaled down a ghost's band falls under it.
+    filmed = [Image.open(files[j]).convert("RGBA") for j in shown]
+    screen = ghost_screen(filmed)
+    # The stop's frames shown again (docs/loop-repair.md section 7), made again between the poses beside them as a cut
+    # played once is, on the frames as filmed at their own size; a cell made stands where the held cell stood (its
+    # frame's move), scaled and laid as the clip's frames are.
+    try:
+        filled, held = loop_mod.fill_cut(filmed, interpolate, ring=False, same=held_fill_mod.same_steps(filmed),
+                                           mode=fill_held, hold=(meta.get("drawings") or {}).get("hold"))
+    except (ValueError, rife_mod.RifeUnavailable) as exc:
+        error = (f"{PROG}: {exc}; the stop shows a picture again and the frames between are to be made — fix RIFE, or "
+                 "pass --fill-held off to cut it as filmed (docs/loop-repair.md section 7)")
+        loop_mod.write_loop_report(target, {**base, **found, "drift": drift, "status": "failed", "error": error})
+        raise SystemExit(error) from exc
+    shown_frames = [laid[j] for j in shown]
+    for k in held["made"]:
+        shown_frames[k] = space.lay(_scale(filled[k], scale), guess)
     loop_rect = (-space.origin[0], -space.origin[1], w - space.origin[0], h - space.origin[1])
-    stop_cells, rect = _cells([laid[j] for j in shown], [moves[j] for j in shown], loop_rect)
+    stop_cells, rect = _cells(shown_frames, [moves[j] for j in shown], loop_rect)
     cw, ch = stop_cells[0].size
     if cw * len(stop_cells) > loop_mod.STRIP_MAX_WIDTH:
         error = (f"{PROG}: {len(stop_cells)} cells of {cw} px make a strip {cw * len(stop_cells)} px wide, over "
@@ -424,15 +457,6 @@ def make_stop(frames_dir: Path, loop_meta: Path, out_dir: Path, *, name: str = "
     origin = [loop_rect[0] - rect[0], loop_rect[1] - rect[1]]
     pivot = meta.get("anchor") or [w / 2, h]
     last = _box(stop_cells[-1])
-    # Read as filmed, at the keyed frames' own size, as video-loop reads its cut: a part-covered band is a
-    # number of pixels thick, and scaled down a ghost's band falls under it.
-    filmed = [Image.open(files[j]).convert("RGBA") for j in shown]
-    screen = ghost_screen(filmed)
-    # The stop's frames shown again (docs/loop-repair.md section 7): named, never made between — a stop plays the clip's
-    # filmed frames, none made between two others.
-    reading = held_fill_mod.reading(held_fill_mod.same_steps(filmed))
-    held = {"mode": "off", "why": "a stop plays the clip's filmed frames, none made between two others", "made": [],
-            "before": reading, **reading}
     for g in screen.get("ghosts", []):
         g["clip_frame"] = shown[g["frame"]]
     delay = round(1000 / fps, 2)
@@ -445,7 +469,10 @@ def make_stop(frames_dir: Path, loop_meta: Path, out_dir: Path, *, name: str = "
         "from_loop": {"strip_sha256": strip_sha, "state": meta.get("state"), "frames": len(cells), "w": w, "h": h,
                       "from_cell": found["entry"]["from_cell"]},
         "source_cut": {"source": identity, "frames": shown, "entry": found["entry"]["frame"], "rest_end": found["rest"]["end"]},
-        "speed": speed, "seam_steps": found["seam"]["steps"], "held_fill": held,
+        "speed": speed, "seam_steps": found["seam"]["steps"], "held_fill": held_fill_mod.public(held),
+        # The holds the motion means, as cells of the strip (one cell a frame shown): what a reader of it —
+        # `inspect-holds`, a scene — does not take for a picture shown again by mistake.
+        "holds": held_fill_mod.intended(held),
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     strip = Image.new("RGBA", (cw * len(stop_cells), ch), (0, 0, 0, 0))
@@ -466,7 +493,7 @@ def make_stop(frames_dir: Path, loop_meta: Path, out_dir: Path, *, name: str = "
         "drift": {**drift, "ground_in_cell": drift["ground"] - rect[1],
                   "ends_on_ground": last is not None and last[3] - 1 == drift["ground"] - rect[1]},
         "shown": shown, "frames_shown": len(shown), "seconds": round(len(shown) / fps, 4),
-        "ghost_screen": screen,
+        "ghost_screen": screen, "held_fill": held,
         "strip": {"path": str(strip_path), **strip_meta}, "gif": gif, "webp": webp,
     }
     loop_mod.write_loop_report(target, payload)
@@ -479,9 +506,15 @@ def make_stop(frames_dir: Path, loop_meta: Path, out_dir: Path, *, name: str = "
               f"{100 * g['ghost']:.2f} % of its body — a filmed ghost, kept as filmed", file=sys.stderr)
     if not screen["reads"]:
         print(f"{PROG}: warning: the ghost screen does not read this stop — {screen['why']}", file=sys.stderr)
-    for run in held["held_runs"]:
-        print(f"{PROG}: warning: cells {run['start']}-{run['start'] + run['length'] - 1} show one picture "
-              f"({held_fill_mod.said(held)} poses/cells): the clip stalls there, played as filmed", file=sys.stderr)
+    # What became of the held cells: those left for want of RIFE, the runs a frame between was refused for, and, with
+    # --fill-held off, every run (each played as filmed); a run kept as the motion's own says nothing.
+    for line in loop_mod.fill_lines(held):
+        print(f"{PROG}: warning: {line}", file=sys.stderr)
+    for run in held["before"]["held_runs"]:
+        if run.get("why") == "--fill-held off":
+            print(f"{PROG}: warning: cells {run['start']}-{run['start'] + run['length'] - 1} show one picture "
+                  f"({held_fill_mod.said(held)} poses/cells): the clip stalls there, played as filmed (--fill-held off)",
+                  file=sys.stderr)
     payload["report"] = str(target)
     return payload
 
@@ -499,6 +532,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                         help=f"refuse a seam (the last loop cell into the stop's first frame) over this many of the clip's steps (default {SEAM_MAX}, the jump line)")
     parser.add_argument("--run-up-max", type=float, default=RUN_UP_MAX_CYCLES,
                         help=f"refuse a stop whose frames between the rest and the loop's frames are longer than this many of the clip's cycles (default {RUN_UP_MAX_CYCLES})")
+    parser.add_argument("--fill-held", choices=held_fill_mod.MODES, default="auto",
+                        help="auto (default): cells of the stop that show the picture before them again (the clip stalls) are "
+                             "made again with RIFE between the poses beside them, as video-loop makes a cut played once; the "
+                             f"opening pose, the closing still, a run longer than {held_fill_mod.HOLD_MAX} cells and a clip drawn on "
+                             "twos or threes are kept, and a frame between that is refused, or no RIFE installed, keeps the cells "
+                             "as filmed with a warning line (`held_fill`, docs/loop-repair.md section 7); off: as filmed")
     parser.add_argument("--fps", type=float, help="the frames' rate (default: the loop's source_cut, else 24)")
     parser.add_argument("--report", type=Path, help="report path (default <out-dir>/<name>.stop.report.json)")
 
@@ -508,11 +547,16 @@ def run(**kwargs: object) -> int:
                         name=str(kwargs.get("name") or "stop"), speed=int(kwargs.get("speed") or 1),  # type: ignore[arg-type]
                         max_frames=kwargs.get("max_frames"), fps=kwargs.get("fps"), report_path=kwargs.get("report"),  # type: ignore[arg-type]
                         seam_max=float(SEAM_MAX if kwargs.get("seam_max") is None else kwargs["seam_max"]),  # type: ignore[arg-type]
-                        run_up_max=float(RUN_UP_MAX_CYCLES if kwargs.get("run_up_max") is None else kwargs["run_up_max"]))  # type: ignore[arg-type]
+                        run_up_max=float(RUN_UP_MAX_CYCLES if kwargs.get("run_up_max") is None else kwargs["run_up_max"]),  # type: ignore[arg-type]
+                        fill_held=str(kwargs.get("fill_held") or "auto"))
     print(json.dumps({"strip": payload["strip"]["path"], "frames": payload["strip"]["frames"], "seconds": payload["seconds"],
                       "from_cell": payload["entry"]["from_cell"], "entry": payload["entry"]["frame"], "rest_end": payload["rest"]["end"],
                       "seam_steps": payload["seam"]["steps"], "run_up": payload["run_up"], "drift": payload["drift"],
-                      "ghosts": [g["clip_frame"] for g in payload["ghost_screen"].get("ghosts", [])], "report": payload["report"]},
+                      "ghosts": [g["clip_frame"] for g in payload["ghost_screen"].get("ghosts", [])],
+                      "held_fill": {"poses_cells": held_fill_mod.said(payload["held_fill"]),
+                                    "before": held_fill_mod.said(payload["held_fill"]["before"]),
+                                    "made": payload["held_fill"]["made"]},
+                      "report": payload["report"]},
                      ensure_ascii=False, indent=2))
     return 0
 

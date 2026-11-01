@@ -371,6 +371,7 @@ class VideoResult:
     output_duration: float | None = None  # extend / edit: ffprobe seconds of the published clip
     extra: dict[str, Any] = field(default_factory=dict)
     facing: dict[str, Any] | None = None
+    held: dict[str, Any] | None = None  # the published clip read for a picture shown again (`read_held`), by the CLI
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -400,7 +401,103 @@ class VideoResult:
             "downloads": self.downloads,
             **({"extra": self.extra} if self.extra else {}),
             **({"facing": self.facing} if self.facing is not None else {}),
+            **({"held": self.held} if self.held is not None else {}),
         }
+
+
+# A clip's frames read for a picture shown again (`read_held`). The canvas `video-canvas` films on is one flat colour: the
+# commonest colour of the first frame's border (BORDER_PX wide, read in eighths of each channel), where BACKGROUND_SHARE
+# or more of the border lies within BACKGROUND_TOL of it (each channel, 0..1), is the background, and a frame's pixels
+# within BACKGROUND_TOL of it are not the subject. A clip with no such border (a scene filmed whole) is read on every pixel.
+BORDER_PX = 4
+BACKGROUND_TOL = 0.12
+BACKGROUND_SHARE = 0.5
+
+
+def _background(rgba: Any) -> list[float] | None:
+    """The flat colour the clip is filmed on, read on its first frame's border (see above), or None."""
+    from sprite_gen._deps import np
+
+    b = BORDER_PX
+    ring = np.concatenate([rgba[:b].reshape(-1, 4), rgba[-b:].reshape(-1, 4), rgba[:, :b].reshape(-1, 4),
+                           rgba[:, -b:].reshape(-1, 4)])[:, :3].astype(np.float32) / 255
+    bins = np.minimum(np.floor(ring * 8).astype(int), 7)
+    codes = bins[:, 0] * 64 + bins[:, 1] * 8 + bins[:, 2]
+    colour = np.median(ring[codes == int(np.bincount(codes).argmax())], axis=0)
+    share = float((np.abs(ring - colour).max(axis=1) <= BACKGROUND_TOL).mean())
+    return [round(float(c), 4) for c in colour] if share >= BACKGROUND_SHARE else None
+
+
+def read_held(clip: Path) -> dict[str, Any]:
+    """The published clip's frames read for a picture shown again, as `video-loop` reads a cut (`held_fill.same_steps`,
+    docs/loop-repair.md section 7): each step of two frames on the subject (the frame less the canvas it is filmed on,
+    `_background`), decoded by ffmpeg two frames at a time. The record: `read`, the frames, the background colour (None:
+    every pixel), the poses over the frames, and each run of frames showing one picture (`start`, `length`), with `why`
+    where the engine keeps such a run as the motion's own — longer than `held_fill.HOLD_MAX`, or the clip's opening or
+    closing pose — and none where `video-loop` would make its frames again between the poses beside them. Nothing is
+    changed: the provider's frames are the clip, and the material its loops are cut from. A clip ffmpeg cannot read is
+    `read` false, with `why`."""
+    from PIL import Image
+
+    from sprite_gen._deps import np
+    from sprite_gen.video import held_fill
+
+    ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        return {"read": False, "why": "ffmpeg and ffprobe are needed to read its frames (install ffmpeg)"}
+    probe = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                            "-of", "json", str(clip)], capture_output=True, text=True)
+    try:
+        stream = json.loads(probe.stdout)["streams"][0]
+        width, height = int(stream["width"]), int(stream["height"])
+    except (ValueError, KeyError, IndexError, TypeError):
+        return {"read": False, "why": f"ffprobe found no video stream ({probe.stderr.strip()[:200] or 'no answer'})"}
+    size = width * height * 4
+    proc = subprocess.Popen([ffmpeg, "-v", "error", "-nostdin", "-i", str(clip), "-map", "0:v:0", "-f", "rawvideo",
+                             "-pix_fmt", "rgba", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    same: list[bool] = []
+    background = None
+    previous = None
+    assert proc.stdout is not None
+    while len(data := proc.stdout.read(size)) == size:
+        rgba = np.frombuffer(data, np.uint8).reshape(height, width, 4).copy()
+        if previous is None:
+            background = _background(rgba)
+        if background is not None:
+            off = np.abs(rgba[..., :3].astype(np.float32) / 255 - np.asarray(background, np.float32)).max(axis=-1)
+            rgba[off <= BACKGROUND_TOL, 3] = 0
+        frame = Image.fromarray(rgba, "RGBA")
+        if previous is not None:
+            same.append(held_fill.same_steps([previous, frame])[0])
+        previous = frame
+    error = proc.stderr.read().decode("utf-8", "replace").strip() if proc.stderr else ""
+    if proc.wait() != 0 or previous is None:
+        return {"read": False, "why": f"ffmpeg could not read its frames ({error[:200] or 'no frame'})"}
+    n = len(same) + 1
+    rows = []
+    for run in held_fill.runs(same):
+        why = (f"held {run['length']} frames, longer than a drawing on threes ({held_fill.HOLD_MAX}): a hold the motion means"
+               if run["length"] > held_fill.HOLD_MAX else
+               "the clip's opening pose" if run["start"] == 0 else
+               "the clip's closing pose" if run["start"] + run["length"] == n else None)
+        rows.append({**run, **({"why": why} if why else {})})
+    reading = held_fill.reading(same)
+    return {"read": True, "frames": n, "background": background, "pixel_same": held_fill.PIXEL_SAME,
+            "changed_max": held_fill.CHANGED_MAX, "hold_max": held_fill.HOLD_MAX, "cells": reading["cells"],
+            "poses": reading["poses"], "held_runs": rows}
+
+
+def held_lines(clip: Path, record: dict[str, Any]) -> list[str]:
+    """What the reading found, in words: each run of frames showing one picture that the engine does not keep as the
+    motion's own, or why the frames were not read. A run kept as the motion's own says nothing."""
+    from sprite_gen.video import held_fill
+
+    if not record["read"]:
+        return [f"{clip.name}: its frames were not read for a picture shown again — {record['why']}"]
+    return [f"{clip.name} shows one picture on frames {r['start']}-{r['start'] + r['length'] - 1} "
+            f"({held_fill.said(record)} poses/frames): the clip repeats a frame there, kept as the provider made it; "
+            "video-loop makes such cells again between the poses beside them (docs/loop-repair.md section 7)"
+            for r in record["held_runs"] if "why" not in r]
 
 
 def _validate(request: VideoRequest) -> None:
@@ -1067,6 +1164,10 @@ def _publish_report(args: argparse.Namespace, make: Callable[[], VideoResult], *
         if report_path is not None:
             atomic_write_text(report_path, json.dumps(unfinished.to_dict(), ensure_ascii=False, indent=2) + "\n")
         raise
+    # The clip as published, read for a picture shown again (docs/loop-repair.md section 7): named, never changed.
+    result.held = read_held(result.out)
+    for line in held_lines(result.out, result.held):
+        print(f"{verb or 'video'}: warning: {line}", file=sys.stderr)
     payload = result.to_dict()
     if report_path is not None:
         atomic_write_text(report_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
@@ -1089,7 +1190,7 @@ def _run(args: argparse.Namespace) -> int:
         reference_images=list(args.reference_images or []),
         direction=args.direction, facing=args.facing, facing_fix=args.facing_fix,
     )
-    return _publish_report(args, lambda: generate_video(request))
+    return _publish_report(args, lambda: generate_video(request), verb="video")
 
 
 def _run_extend(args: argparse.Namespace) -> int:
@@ -1104,7 +1205,7 @@ def _run_edit(args: argparse.Namespace) -> int:
 
 def _run_resume(args: argparse.Namespace) -> int:
     request = ResumeRequest(request_id=args.request_id, out=args.out)
-    return _publish_report(args, lambda: resume_video(request))
+    return _publish_report(args, lambda: resume_video(request), verb="video-resume")
 
 
 def _build_parser() -> argparse.ArgumentParser:

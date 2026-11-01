@@ -651,6 +651,8 @@ def test_a_baked_line_on_the_loop_puts_in_no_jump_and_changes_nothing_outside(ca
     assert report["outside_changed_px_max"] == 0 and report["over_sum"] == []
     assert report["talk_frames"] > 0 and report["set"] == "neutral"
     assert abs(_seconds(tmp_path / "out" / "voice-baked.wav") - frames / 24) < 1 / 48000 * 2
+    # the idle loop shows a new picture on every frame, so the bake reads no held run
+    assert report["held"]["held_runs"] == [] and report["held"]["poses"] == report["held"]["frames"] == frames
 
 
 @needs_node
@@ -675,3 +677,48 @@ def test_a_pack_that_changed_after_it_was_made_is_refused(case, tmp_path):
         fh.write(b"\0")
     with pytest.raises(SystemExit, match="not the file the pack was made with"):
         face_bake.load_pack(tmp_path / "pack")
+
+
+def _greet_held(root, tmp_path, dup, holds=None):
+    """The pack with greet's cell `dup[1]` its cell `dup[0]` again, byte for byte (a clip that stalls), its digest
+    written anew, and `holds` listed on greet's row."""
+    shutil.copytree(root / "pack", tmp_path / "pack")
+    manifest = json.loads((tmp_path / "pack" / "face-pack.json").read_text(encoding="utf-8"))
+    greet = body(manifest, "greet")
+    src, dst = (tmp_path / "pack" / greet["cells"][k] for k in dup)
+    dst.write_bytes(src.read_bytes())
+    manifest["files"][greet["cells"][dup[1]]] = hashlib.sha256(dst.read_bytes()).hexdigest()
+    if holds is not None:
+        greet["holds"] = holds
+    (tmp_path / "pack" / "face-pack.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return tmp_path / "pack"
+
+
+@needs_node
+@pytest.mark.slow
+def test_a_bake_names_a_body_picture_shown_again_mid_clip_and_bakes_it_as_the_pack_has_it(case, tmp_path, capsys):
+    root, _ = case
+    _wav(tmp_path / "line.wav", tf.voice())
+    pack = _greet_held(root, tmp_path, (4, 5))
+    report = face_bake.bake(pack, tmp_path / "line.wav", tmp_path / "out", play="greet", lead=0.2)
+    assert report["held"]["held_runs"] == [{"start": 4, "length": 2, "body": [["greet", 4], ["greet", 5]]}]
+    assert report["held"]["poses"] == report["frames"] - 1
+    assert json.loads((tmp_path / "out" / "bake.json").read_text(encoding="utf-8"))["held"] == report["held"]
+    held = [np.asarray(Image.open(tmp_path / "out" / "frames" / f"frame-{t:05d}.png")) for t in (4, 5)]
+    assert np.array_equal(*held)  # baked as the pack has it: no frame made
+    assert (f"face-bake: warning: frames 4-5 show one body picture (greet:4, greet:5; {report['frames'] - 1}/"
+            f"{report['frames']} poses/frames): the body stands still there mid-motion") in capsys.readouterr().err
+
+
+@needs_node
+@pytest.mark.slow
+@pytest.mark.parametrize("dup, holds, kind", [((0, 1), None, "opening"),
+                                              ((4, 5), [{"from": 4, "to": 5, "kind": "drawn", "reason": "drawn on twos"}], "drawn")])
+def test_a_bake_says_nothing_of_a_hold_the_clip_means(case, tmp_path, capsys, dup, holds, kind):
+    root, _ = case
+    _wav(tmp_path / "line.wav", tf.voice())
+    pack = _greet_held(root, tmp_path, dup, holds)
+    report = face_bake.bake(pack, tmp_path / "line.wav", tmp_path / "out", play="greet", lead=0.2)
+    [run] = report["held"]["held_runs"]
+    assert (run["start"], run["length"], run["kind"]) == (dup[0], 2, kind)
+    assert "face-bake: warning" not in capsys.readouterr().err

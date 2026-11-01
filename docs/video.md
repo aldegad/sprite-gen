@@ -125,6 +125,28 @@ the request — the unfinished report's `auth_source`; refresh an expired login 
   again. Each resume polls afresh, so a clip whose download failed is fetched from the
   URL the new poll names.
 
+### A picture shown again
+
+A provider sometimes repeats a frame: two frames in a row show one picture, and the
+motion stalls there. `video`, `video-extend`, `video-edit` and `video-resume` read the
+clip they publish for that, frame by frame with ffmpeg, as video-loop reads its cells
+(docs/loop-repair.md section 7): a flat canvas filmed round the subject (the commonest
+colour of a 4 px border, if it is half the border or more) is not read, so the subject's
+pixels decide; a scene filmed whole is read on every pixel. The clip is published as
+the provider made it; nothing is filled. A repeated frame is named on stderr,
+
+```
+video: warning: clip.mp4 shows one picture on frames 40-41 (143/144 poses/frames): the clip repeats a frame there, kept as the provider made it; video-loop makes such cells again between the poses beside them (docs/loop-repair.md section 7)
+```
+
+and the report records the reading as `held`: `read`, `frames`, `poses`, `cells`,
+`background` (the canvas colour, or `null`), the thresholds read with (`pixel_same`,
+`changed_max`, `hold_max`) and `held_runs` (`start`, `length`). The clip's opening and
+closing pose and a run longer than a drawing on threes (`hold_max`, 3) are recorded with
+a `why` and not warned of — a still at either end, or a hold the motion means. With no
+ffmpeg, or a file ffmpeg cannot read, `held` is `{"read": false, "why": …}` and the run
+says its frames were not read; the clip is still published.
+
 ### An unfinished generation
 
 xAI accepted the request and the run ended before it did — the poll timeout came with
@@ -165,8 +187,8 @@ it)`), or `xai: response was not valid JSON` for a whole answer that is not JSON
   `video.respect_moderation: false` is:
   `<verb>: generation <id> refused by the provider's content policy (HTTP 200) respect_moderation=false; nothing was written`.
 - Output is whatever the model returns (typically H.264 mp4 with audio unless
-  `--no-audio`). Downstream frame extraction is a separate step and not part of
-  this command.
+  `--no-audio`). It is read for a picture shown again (above) and published as it
+  came; downstream frame extraction is a separate step and not part of this command.
 
 ## Related
 
