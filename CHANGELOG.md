@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased
+## v3.15.0 - RIFE is `rife-v4.25` from TNTwise's 20250112 release by default, padded to 128 with no augmentation, the old `rife-v4.6` kept by name (`SPRITE_GEN_RIFE_MODEL_NAME`), and `sprite-gen rife install` run again
 
 **Upgrading from 3.14.0: RIFE is rife-v4.25 by default, so every frame RIFE makes changes, `sprite-gen rife install` must run again, and the old model is one variable away.** The engine runs TNTwise's rife-ncnn-vulkan 20250112 and its `rife-v4.25` with no augmentation, each image padded to 128; 3.14.0 ran nihui's 20221029 and `rife-v4.6` with `-x -z`. A cut with no held cell and no repair runs no RIFE and keeps its bytes (`tests/video/test_held_fill.py::test_a_cut_with_no_held_cell_runs_no_rife_and_is_the_same_bytes_whichever_model`); a cut whose held cells are filled, a repaired walk and a set's alignment get rife-v4.25's frames, and can take more or fewer poses. Run `sprite-gen rife install` once (an 830 MB zip, 45 MB kept, into a new directory beside the old install). A 20221029 binary on `PATH` holds no `rife-v4.25/` and now reads as RIFE not installed: install, or set `SPRITE_GEN_RIFE`. `SPRITE_GEN_RIFE_MODEL_NAME=rife-v4.6` runs the old model as it ran, its frames 3.14.0's to the byte. A `--between-cache` keys frames by model, so frames kept by 3.14.0 are not taken. With the torch backend, `sprite-gen rife install --backend torch` again; an executor and its host must name the same model.
 
