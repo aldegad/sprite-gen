@@ -12,9 +12,10 @@ executor changed keys its frames anew.
 
 The executor here is stood in: a pool of devices behind the send, each answering as the executor does (`rife.answer`)
 from a device whose runs follow from the images and from what it is, so another device makes other bytes. It runs
-rife-v4.6, named on this host too (SPRITE_GEN_RIFE_MODEL_NAME), so the augmentation each request names is the host's
-`-x -z` or another; an executor of another model than the host's is refused as the RIFE is made. One test, marked
-`torch_rife`, serves the torch backend itself (`rife_torch.serve`) and finds the frames this process makes."""
+rife-v4.6, named on this host too (SPRITE_GEN_RIFE_MODEL_NAME alone: the model directory a lane names is unset), so the
+augmentation each request names is the host's `-x -z` or another; an executor of another model than the host's is
+refused as the RIFE is made. One test, marked `torch_rife`, serves the torch backend itself (`rife_torch.serve`) on the
+model the lane names (SPRITE_GEN_RIFE_MODEL, else the default installed) and finds the frames this process makes."""
 
 from __future__ import annotations
 
@@ -122,8 +123,15 @@ def send(request: bytes) -> bytes:
 
 
 @pytest.fixture(autouse=True)
-def _host_model(monkeypatch) -> None:
-    """This host runs rife-v4.6, the model of the devices stood in (T4)."""
+def _host_model(request, monkeypatch) -> None:
+    """This host runs rife-v4.6, the model of the devices stood in (T4), and names it one way:
+    SPRITE_GEN_RIFE_MODEL_NAME, with no SPRITE_GEN_RIFE_MODEL left from a lane. A lane's names its own model's directory
+    (rife-v4.25, scripts/t4_lane.py), which no device stood in runs and no test stood in reads; beside the name, the
+    engine refuses the two as two models (`rife.model_name`). The test marked torch_rife serves the torch backend itself
+    on the lane's model, and keeps the lane's environment."""
+    if request.node.get_closest_marker("torch_rife"):
+        return
+    monkeypatch.delenv("SPRITE_GEN_RIFE_MODEL", raising=False)
     monkeypatch.setenv("SPRITE_GEN_RIFE_MODEL_NAME", "rife-v4.6")
 
 
@@ -680,7 +688,8 @@ def test_a_loop_names_the_executor_that_made_its_frames(executor, tmp_path):
 
 @pytest.mark.torch_rife
 def test_the_torch_backend_served_makes_the_frame_and_the_read_this_process_makes(monkeypatch):
-    """`rife_torch.serve` as the executor, called in this process: the frame and the read are the torch backend's of this
+    """`rife_torch.serve` as the executor, called in this process, on the model the lane names (SPRITE_GEN_RIFE_MODEL,
+    else the default installed), the one this host runs too: the frame and the read are the torch backend's of this
     process, byte for byte, its identity is that backend's with the protocol, and the backend is loaded once for every
     request it serves."""
     from sprite_gen.video import rife_torch
@@ -688,6 +697,7 @@ def test_the_torch_backend_served_makes_the_frame_and_the_read_this_process_make
     monkeypatch.setattr(rife_torch, "_served", None)
     here = rife_torch.TorchRunner(rife.locate_model(), rife.device())
     served = rife.Rife(runner=rife.RemoteRunner(rife_torch.serve, "sprite_gen.video.rife_torch:serve"))
+    assert served.model_name == here.model_name == rife.model_name()
     loaded = rife_torch._served
     a, b = _legs(40, 64), _legs(64, 52)
     assert served(a, b, 0.5).tobytes() == rife.Rife(runner=here)(a, b, 0.5).tobytes()
