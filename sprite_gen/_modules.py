@@ -15,6 +15,7 @@ MODULE_DOMAIN = {
     'shadow': 'effects',
     'motion': 'qa',
     'handed': 'qa',
+    'holds': 'qa',
     'render': 'scene',
     'inspect_scene': 'scene',
     'model': 'scene',
@@ -113,8 +114,8 @@ TOOL_GROUPS: list[dict[str, object]] = [
      "chain": "cutout · slice-sheet · unpack-atlas (each stands alone)", "doc": "docs/sheet-slicing.md"},
     {"key": "D", "name": "post-processing", "verbs": ["recolor", "recolor-palette", "breathe", "export-pngs", "export-aseprite"],
      "chain": "recolor · breathe · export-pngs · export-aseprite", "doc": "docs/recolor.md"},
-    {"key": "E", "name": "asset tools", "verbs": ["background-tile", "shadow", "inspect-motion"],
-     "chain": "background-tile · shadow · inspect-motion (independent; no generation required)", "doc": "docs/asset-tools.md"},
+    {"key": "E", "name": "asset tools", "verbs": ["background-tile", "shadow", "inspect-motion", "inspect-holds"],
+     "chain": "background-tile · shadow · inspect-motion · inspect-holds (independent; no generation required)", "doc": "docs/asset-tools.md"},
 ]
 
 WORKFLOWS: list[dict[str, object]] = [

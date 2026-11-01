@@ -12,6 +12,7 @@ from sprite_gen.background import tile
 from sprite_gen.curate import anchor
 from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, export_aseprite, export_pngs
 from sprite_gen.qa import correction_loop, inspect, preview, score, motion
+from sprite_gen.qa import holds as inspect_holds
 from sprite_gen.qa import handed as handed_check
 from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
 from sprite_gen.gen import gen_set, logo, pixel_draw, prepare, video
@@ -219,6 +220,7 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
     "background-tile": ("Quilt a repeating RGBA background and measure its join.", tile.add_arguments, tile.run),
     "shadow": ("Project silhouette shadows from any supported asset.", shadow.add_arguments, shadow.run),
     "inspect-motion": ("Measure asset timing and contact evidence without changing animation.", motion.add_arguments, motion.run),
+    "inspect-holds": ("Count the frames on which a figure shows the picture of the frame before, by its alpha, a key, a box or a log of its cells; --gate fails on one no list of holds meant names.", inspect_holds.add_arguments, inspect_holds.run),
     "scene-render": ("Render referenced assets using scene placement, camera and lighting.", render.add_arguments, render.run),
     "scene-inspect": ("Measure scene loops, viewport clipping and repeated joins.", inspect_scene.add_arguments, inspect_scene.run),
     "workflow": ("Resolve image/sprite choices, check access and guide the next conversation step.", guide.add_arguments, guide.run),

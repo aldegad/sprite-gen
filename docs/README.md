@@ -29,7 +29,7 @@ flowchart LR
         d1[recolor] ~~~ d2["breathe (compose)"] ~~~ d3[export-*]
     end
     subgraph E["E · asset tools (independent)"]
-        e1[background-tile] ~~~ e2[shadow] ~~~ e3[inspect-motion]
+        e1[background-tile] ~~~ e2[shadow] ~~~ e3[inspect-motion] ~~~ e4[inspect-holds]
     end
     subgraph S["S · scene (optional)"]
         s1["existing assets + scene.json"] --> s2[scene-render]
@@ -43,7 +43,7 @@ flowchart LR
 | **B · video → loop** — one still becomes transparent motion loops | [video-pipeline.md](video-pipeline.md) | `video-canvas` → `video` (or `video-prompt` and a video MCP on your agent) → `video-frames` → `video-loop`, `video-set`, `video-cycle-align`, `video-sway`, the Sway layer (`video-sway-inspect` shows every cell of it and moves nothing; old names `video-follow`, `video-follow-inspect`), `video-set-sheet` (a set's directions on one sheet, on one ground line), `video-stop` (a walk or run that stops, from the clip's own start played backwards); `handed-check` for an item on one side; obstacle plate painted and erased (`--prop-plate`) |
 | **C · utilities** — imported images in, clean cuts out | [sheet-slicing.md](sheet-slicing.md) | `cutout`, `slice-sheet`, `unpack-atlas` |
 | **D · post-processing** — finished sheets, refined | [recolor.md](recolor.md) | `recolor`, `recolor-palette`, breathing (compose, or `breathe` on a folder of frames), `export-pngs`, `export-aseprite` |
-| **E · asset tools** — independent background, shadow and motion tools | [asset-tools.md](asset-tools.md) | `background-tile`, `shadow`, `inspect-motion` |
+| **E · asset tools** — independent background, shadow and motion tools | [asset-tools.md](asset-tools.md) | `background-tile`, `shadow`, `inspect-motion`, `inspect-holds` |
 | **S · scene** — optional composition of existing assets | [scene.md](scene.md) | `scene-render`, `scene-inspect` |
 
 `sprite-gen --help` prints these separate catalogs and every verb grouped by domain; the

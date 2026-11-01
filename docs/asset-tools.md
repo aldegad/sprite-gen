@@ -1,6 +1,6 @@
 # Independent asset tools
 
-> Owns: Background recipes, repeating RGBA tiles, projected shadows, shared asset formats and motion/contact measurements · Index: [docs/README.md](README.md)
+> Owns: Background recipes, repeating RGBA tiles, projected shadows, shared asset formats, motion/contact measurements and frames shown again · Index: [docs/README.md](README.md)
 
 These commands accept finished artwork without a sprite-generation run or scene spec. `background` owns repeating tiles, `effects` owns shadow projection, and `qa` owns motion measurements. [Scene creation](scene.md) optionally consumes their outputs. Atlas and character-part assembly remain in `compose`.
 
@@ -107,3 +107,41 @@ Python API: `analyze_motion(sequence, *, contacts=None, foot_box=None, facing=No
 Repeated tracked poses retain their complete elapsed duration. Velocity uses distinct pose onset times; duplicate holds add time but do not add independent votes. The last hold remains part of the clip duration without inventing a later displacement endpoint. Confidence is a conditional heuristic, not a calibrated probability of contact.
 
 Scene consumes only verified measurements for the matching selected asset and requires an explicit direction relative to a declared plane or the world. Measurement does not automatically apply stride to any scene or sprite.
+
+## Frames shown again
+
+```bash
+# A figure layer or keyed frames (RGBA): read by alpha.
+sprite-gen inspect-holds --source figures/ --holds web/assets --scene roof --gate
+
+# A clip filmed on a key colour, a still background, or a renderer's log of the cells.
+sprite-gen inspect-holds --source clip.mp4 --key green
+sprite-gen inspect-holds --source frames/ --box 400,120,300,520
+sprite-gen inspect-holds --log cells.jsonl --log-figure hero --log-figure figures
+
+# A cut, its own intended holds listed.
+sprite-gen inspect-holds --source loop/walk.strip.json --gate
+```
+
+`inspect-holds` counts, figure by figure, the frames on which a figure shows the picture it showed on the frame before: on screen it stands still for a frame and then goes on. It reads a delivery whatever made it: a cut, clips joined into one move, a scene rendered frame by frame. Frames are numbered from 0 in the order they are read (a folder's PNGs in name order, a video's frames, a strip's cells); `--frames FROM-TO` reads those frames and the one before `FROM`, to compare with. Nothing is changed.
+
+The figure is read one of four ways:
+
+| Way | Reads | For |
+|---|---|---|
+| alpha (the default) | the frames' alpha; several figures are told apart by where they stand, followed from frame to frame | a figure layer rendered on a clear background, keyed frames, a strip |
+| `--key auto\|green\|magenta\|white` | each frame keyed as `video-frames` keys a clip, then its alpha | a clip filmed on a key colour (mp4 or frames) |
+| `--box x,y,w,h` | that box of each frame, in place | a figure over a background that does not move |
+| `--log FILE` with `--log-figure KEY` | the cell each figure shows: one JSON object a line, one line a frame from 0; `KEY` holds a cell (a string or a number, an object as its values joined by spaces, null where not shown) or a list of them (`figures` gives `figure0`, `figure1`, ...) | a renderer that logs its cells; exact, no pixel read |
+
+An opaque frame whose background moves is not read: its background changes more pixels from one frame to the next than a figure's step does, so a held picture and a moving one cannot be told apart. Opaque frames given with none of `--key`, `--box` or `--log` are refused (exit 2). Read such a delivery by its figure layer, a key, or a log.
+
+A renderer that draws a figure at a new scale, turn or sub-pixel place on every frame draws a held picture afresh each time: the frame changes more of the figure's pixels than the rule below allows and is not read as a hold. Read such a render by its log.
+
+Two pictures are one picture by the rule a cut's held cells are read by ([loop-repair.md section 7](loop-repair.md)): at most `CHANGED_MAX` of the figure's pixels change by more than `PIXEL_SAME`, on its thumbnail and as drawn. The figure is read alone, each pair placed first where its alpha's boxes meet, then within `SEARCH_PX` (3) pixels of it where the fewest pixels change: a camera that follows a figure moves its held picture across the screen, and it is still the picture shown again. Figures that touch read as one.
+
+`--holds FILE` names the holds a delivery means, in the format a holds list is written in: `{"holds": [{"scene", "figure", "from", "to", "reason"}]}`, frames `from` to `to` inclusive. A folder reads every `*.holds.json` under it, and `--holds` repeats. `scene` and `figure` may be left out, for a list of one video or of every figure; a list that names scenes is read for the one `--scene` names (without `--scene` it is refused). A hold without a reason, or whose `from` is after its `to`, refuses the list. A strip's own `holds` (the holds its cut means, `motion-hold`, `drawn`, `opening`, `closing`) are listed with it, and a strip that loops is read across its wrap too (its first cell against its last: a hold at frame 0).
+
+The report (stdout, and `--report PATH`) gives each figure's `frames`, `holds`, `listed`, `unlisted`, `unlistedRuns` and `listedRuns`, each run `from`, `to` and `drawings` (the cell a log names, or the frame the picture was first shown on), a listed run its `reason`, and `unlisted` over every figure; `read_by`, `first_frame`, `wrap`, the lists read and the rule's numbers. `--gate` exits 1 where any hold is on no list, else 0; without it the command exits 0 whatever it finds, and an unlisted hold is a line on stderr. Errors exit 2.
+
+Python API: `inspect(figures, *, first=0, start=None, listed=(), wrap=False, same=None)`, `alpha_figures(frames)`, `log_figures(path, keys)`, `same_figure(a, b)` and `read(...)` in `sprite_gen.qa.holds`.
