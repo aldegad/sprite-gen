@@ -106,7 +106,8 @@ def gates(sha: str, whole_suite: bool) -> dict:
     if built != sha:
         rec["why"] = f"the image holds {built}, not {sha}"
         return rec
-    model = Path(json.loads(Path("/lane/rife-install.json").read_text())["dir"]) / "rife-v4.6"
+    installed = json.loads(Path("/lane/rife-install.json").read_text())
+    model = Path(installed["dir"]) / installed["model"]  # the model the engine runs by default (rife-v4.25)
     # Nowhere the engine looks for the binary holds one: an empty data directory, nothing on PATH, no SPRITE_GEN_RIFE.
     env = {k: v for k, v in os.environ.items() if not k.startswith("SPRITE_GEN_")}
     env.update(PATH=f"{VENV}/bin:{env.get('PATH', '/usr/local/bin:/usr/bin:/bin')}", XDG_DATA_HOME=tempfile.mkdtemp(),

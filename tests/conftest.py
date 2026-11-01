@@ -107,8 +107,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def _torch_rife_missing() -> str | None:
-    """Why the torch backend cannot run here, None where it can: PyTorch, the rife-v4.6 model it reads
-    (`rife.locate_model()`) and the device SPRITE_GEN_RIFE_DEVICE names."""
+    """Why the torch backend cannot run here, None where it can: PyTorch, the model it reads (`rife.locate_model()`,
+    rife-v4.25 unless another is named) and the device SPRITE_GEN_RIFE_DEVICE names."""
     from sprite_gen.video import rife
 
     try:
@@ -181,9 +181,12 @@ def _fail_unmeasured_skip(report: pytest.TestReport | pytest.CollectReport, node
 
 @pytest.fixture(autouse=True)
 def _engine_tta(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every test runs the augmentation the engine ships (`rife.TTA`) and its backend, the binary, in this process: a
-    SPRITE_GEN_RIFE_TTA, SPRITE_GEN_RIFE_BACKEND or SPRITE_GEN_RIFE_EXECUTOR left in the calling shell would change what
-    the real-RIFE tests measure. SPRITE_GEN_RIFE_DEVICE stays: it names where the torch backend's tests run."""
+    """Every test runs the model and augmentation the engine ships (`rife.MODEL`, its `rife.MODELS` augmentation) and its
+    backend, the binary, in this process: a SPRITE_GEN_RIFE_MODEL_NAME, SPRITE_GEN_RIFE_TTA, SPRITE_GEN_RIFE_BACKEND or
+    SPRITE_GEN_RIFE_EXECUTOR left in the calling shell would change what the real-RIFE tests measure.
+    SPRITE_GEN_RIFE_DEVICE stays: it names where the torch backend's tests run, and SPRITE_GEN_RIFE_MODEL where the model
+    is (a lane names the default model's directory)."""
+    monkeypatch.delenv("SPRITE_GEN_RIFE_MODEL_NAME", raising=False)
     monkeypatch.delenv("SPRITE_GEN_RIFE_TTA", raising=False)
     monkeypatch.delenv("SPRITE_GEN_RIFE_BACKEND", raising=False)
     monkeypatch.delenv("SPRITE_GEN_RIFE_EXECUTOR", raising=False)

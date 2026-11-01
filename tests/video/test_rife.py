@@ -36,7 +36,8 @@ def test_missing_binary_is_refused_with_the_install_line(monkeypatch, tmp_path):
     monkeypatch.delenv("SPRITE_GEN_RIFE", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setenv("SPRITE_GEN_DATA_DIR", str(tmp_path / "data"))
-    with pytest.raises(rife.RifeNotInstalled, match=r"run `sprite-gen rife install` \(rife-ncnn-vulkan 20221029"):
+    with pytest.raises(rife.RifeNotInstalled, match=r"run `sprite-gen rife install` \(TNTwise's rife-ncnn-vulkan 20250112 with "
+                                                    r"the models rife-v4.25 and rife-v4.6"):
         rife.locate()
 
 
@@ -65,7 +66,7 @@ def test_the_data_directory_follows_the_platform_rules(monkeypatch, tmp_path):
     monkeypatch.setattr(rife.sys, "platform", "linux")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     assert rife.data_dir() == tmp_path / "xdg" / "sprite-gen"
-    assert rife.installed_binary().parent.name == "rife-ncnn-vulkan-20221029-ubuntu"
+    assert rife.installed_binary().parent.name == "rife-ncnn-vulkan-20250112-ubuntu"
     monkeypatch.delenv("XDG_DATA_HOME")
     assert rife.data_dir() == Path.home() / ".local" / "share" / "sprite-gen"
     monkeypatch.setattr(rife.sys, "platform", "win32")
@@ -104,21 +105,22 @@ def _recording_binary(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _modes_asked(monkeypatch, tmp_path: Path, named: str | None) -> tuple[list[list[str]], dict[str, str]]:
-    """The augmentation flags of each call one made frame sends, and the interpolator's record."""
+    """The augmentation flags of each call one made frame of rife-v4.6 sends, and the interpolator's record."""
     if named is None:
         monkeypatch.delenv("SPRITE_GEN_RIFE_TTA", raising=False)
     else:
         monkeypatch.setenv("SPRITE_GEN_RIFE_TTA", named)
     binary, log = _recording_binary(tmp_path)
-    interpolate = rife.Rife(binary, tmp_path / rife.MODEL)
+    interpolate = rife.Rife(binary, tmp_path / "rife-v4.6")
     interpolate(_disc(40), _disc(72), 0.5)
     calls = [line.split() for line in log.read_text().splitlines()]
     return [[a for a in argv if a in ("-x", "-z", "-u", "-g")] for argv in calls], interpolate.describe()
 
 
-def test_every_call_asks_for_both_augmentations_and_never_the_cpu_path(monkeypatch, tmp_path):
-    """The colour run and the coverage run both go out with `-x -z` (docs/loop-repair.md section 1,
-    "Which setting"), and with no `-g`: the binary's own CPU path is wrong with this model."""
+def test_every_call_of_rife_v4_6_asks_for_both_augmentations_and_never_the_cpu_path(monkeypatch, tmp_path):
+    """rife-v4.6's colour run and coverage run both go out with `-x -z` (docs/loop-repair.md section 1,
+    "Which setting"), and with no `-g`: the binary's own CPU path is wrong with this model. (rife-v4.25's go out with
+    neither: tests/video/test_rife_models.py.)"""
     modes, record = _modes_asked(monkeypatch, tmp_path, None)
     assert modes == [["-x", "-z"], ["-x", "-z"]] and record["tta"] == "-x -z"
 
@@ -134,7 +136,7 @@ def test_a_call_past_its_time_is_a_rife_that_failed(monkeypatch, tmp_path):
     binary.write_text("#!/bin/sh\nexec sleep 5\n")  # exec: the stopped process is the one holding the pipes
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setattr(rife, "CALL_TIMEOUT_SECONDS", 0.2)
-    with pytest.raises(rife.RifeUnavailable, match=r"made no frame in 0.2 s .*augmentation -x -z"):
+    with pytest.raises(rife.RifeUnavailable, match=r"made no frame in 0.2 s .*augmentation none"):
         rife.Rife(binary, tmp_path / rife.MODEL)(_disc(40), _disc(72), 0.5)
 
 
@@ -172,20 +174,22 @@ def _premultiplied(frame: Image.Image) -> np.ndarray:
 
 
 @pytest.mark.slow
-def test_read_makes_the_frame_as_every_call_and_reads_sixteen_single_passes_turned_back(monkeypatch, tmp_path):
-    """`Rife.read`: the frame as `between` makes it, with the augmentation every call asks for, then the sixteen single
-    passes with none — the pair flipped and transposed eight ways, each from a to b at t and from b to a at 1 - t. A binary
-    that hands back its first frame makes every forward pass a and every backward pass b, once each pass is turned back:
-    the passes disagree by exactly how far a and b differ, and only where they differ."""
+@pytest.mark.parametrize("model", list(rife.MODELS))
+def test_read_makes_the_frame_as_every_call_and_reads_sixteen_single_passes_turned_back(monkeypatch, tmp_path, model):
+    """`Rife.read`: the frame as `between` makes it, with the augmentation every call of the model asks for, then the
+    sixteen single passes with none — the pair flipped and transposed eight ways, each from a to b at t and from b to a at
+    1 - t. A binary that hands back its first frame makes every forward pass a and every backward pass b, once each pass is
+    turned back (and, for rife-v4.25, cut back from the padding): the passes disagree by exactly how far a and b differ,
+    and only where they differ."""
     monkeypatch.delenv("SPRITE_GEN_RIFE_TTA", raising=False)
     binary, log = _recording_binary(tmp_path)
-    interpolate = rife.Rife(binary, tmp_path / rife.MODEL)
+    interpolate = rife.Rife(binary, tmp_path / model)
     a, b = _marked(40), _marked(72)
     frame, apart = interpolate.read(a, b, 0.25)
     calls = [line.split() for line in log.read_text().splitlines()]
     assert len(calls) == 2 + rife.PASS_CALLS == interpolate.calls and interpolate.made == 1
     flags = [[x for x in argv if x in ("-x", "-z", "-u", "-g")] for argv in calls]
-    assert flags[:2] == [["-x", "-z"], ["-x", "-z"]] and all(f == [] for f in flags[2:])
+    assert flags[:2] == [list(rife.MODELS[model].tta)] * 2 and all(f == [] for f in flags[2:])
     times = [argv[argv.index("-s") + 1] for argv in calls[2:]]
     assert times.count("0.2500") == times.count("0.7500") == rife.PASS_CALLS // 2
     assert np.array_equal(np.asarray(frame), np.asarray(a))  # the frame between, from the copying binary: a itself
@@ -232,17 +236,21 @@ def test_real_rife_makes_the_frame_between_in_colour_and_alpha():
 
 @pytest.mark.slow
 @pytest.mark.real_rife
-def test_real_rife_between_crossing_legs_adds_no_black():
-    """Two outlined legs walk through each other (the near one forward, the far one back): where they
-    cross (t=0.5) the frame between is no darker inside the body than either neighbour. 2.24
-    premultiplied the colour over black and left 6 % of the body dark there. Either side of the crossing
-    the flips of `-x` keep the near leg's outline whole over the far one, a line each neighbour draws in
-    another place: 1.3 % and 2.1 % of the body at t=0.25 and 0.75, the same on two GPUs — a line, not
-    the black fill."""
-    interpolate = rife.Rife()
+@pytest.mark.parametrize("model", list(rife.MODELS))
+def test_real_rife_between_crossing_legs_adds_no_black(model):
+    """Two outlined legs walk through each other (the near one forward, the far one back): the frames between are not
+    the black fill 2.24 left where they cross, premultiplying the colour over black — 6 % of the body dark at t=0.5 —
+    only a line each neighbour draws in another place, under 3 % of the body at t=0.25, 0.5 and 0.75. rife-v4.6's flips
+    of `-x` keep the near leg's outline whole over the far one: 1.3 % and 2.1 % either side of the crossing, the same on
+    two GPUs, and at the crossing no darker inside the body than either neighbour. rife-v4.25, with no augmentation,
+    leaves 0.4 %, 0.4 % and 1.8 % (an Apple GPU)."""
+    root = rife.locate()[0].parent
+    interpolate = rife.Rife(rife.locate()[0], root / model)
     a, b = _legs(36, 70), _legs(60, 46)
     dark = [rife.smear(interpolate(a, b, t), a, b)["dark_excess"] for t in (0.25, 0.5, 0.75)]
-    assert dark[1] <= 0 and max(dark) < 0.03
+    assert max(dark) < 0.03, dark
+    if model == "rife-v4.6":
+        assert dark[1] <= 0, dark
 
 
 def _legs(x_near: int, x_far: int) -> Image.Image:
@@ -269,7 +277,7 @@ def test_where_the_colour_and_coverage_runs_disagree_the_body_shows_not_black(mo
         return x if len(calls) % 2 else y
 
     monkeypatch.setattr(rife, "_call", stand_in)
-    made = rife.between(a, b, 0.5, binary=tmp_path, model=tmp_path, tmp=tmp_path)
+    made = rife.between(a, b, 0.5, binary=tmp_path, model=tmp_path / rife.MODEL, tmp=tmp_path)
     m = np.asarray(made).astype(int)
     bare_in_a = np.asarray(a)[..., 3] == 0
     covered = (m[..., 3] >= 128) & bare_in_a

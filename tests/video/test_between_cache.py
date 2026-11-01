@@ -210,7 +210,7 @@ def test_the_same_rife_is_another_identity_once_its_machine_libraries_or_code_ch
     assert (cache.hits, cache.misses) == (1, 6)
 
 
-def _picking_rife(root: Path) -> tuple[Path, Path]:
+def _picking_rife(root: Path, name: str = rife.MODEL) -> tuple[Path, Path]:
     """(binary, its model's flownet.bin): a stand-in RIFE that runs. It hands back the first or the second of its two
     images (`-0`, `-1`) — the one its model's flownet.bin names, the other where its own FLIP is 1 — so a frame taken
     for another model or binary shows in its pixels. Where a file `race` stands beside it, it first writes the other
@@ -231,7 +231,7 @@ def _picking_rife(root: Path) -> tuple[Path, Path]:
         shutil.copyfile(args["-" + str(pick ^ FLIP)], args["-o"])
         """))
     binary.chmod(0o700)
-    model = binary.parent / rife.MODEL
+    model = binary.parent / name
     model.mkdir()
     (model / "flownet.param").write_text("synthetic")
     (model / "flownet.bin").write_text("0")
@@ -250,7 +250,7 @@ def _dot(cx: int, colour: tuple[int, int, int]) -> Image.Image:
 def test_the_same_rife_makes_its_frame_again_once_a_file_it_runs_from_changed(tmp_path):
     """One Rife makes and keeps a frame, then its model's bytes are written over: the next pass makes the frame
     again, as this very RIFE now makes another. So for its binary written over, a file added to its model, and its
-    model's files under another name (the binary reads the model's version from the name). Every frame taken or made
+    model's files under another path (the binary reads the model's version from its name). Every frame taken or made
     is the frame the same RIFE makes with no directory, byte for byte. A RIFE whose model is gone fails as a RIFE that
     fails."""
     binary, weights = _picking_rife(tmp_path)
@@ -272,7 +272,7 @@ def test_the_same_rife_makes_its_frame_again_once_a_file_it_runs_from_changed(tm
     assert again(made) == (a.tobytes(), 0, 1)
     (weights.parent / "contextnet.bin").write_text("a file added")
     assert again(made) == (a.tobytes(), 0, 1)
-    assert again(rife.Rife(binary, shutil.copytree(weights.parent, tmp_path / "rife-v4"))) == (a.tobytes(), 0, 1)
+    assert again(rife.Rife(binary, shutil.copytree(weights.parent, tmp_path / "elsewhere" / rife.MODEL))) == (a.tobytes(), 0, 1)
     shutil.rmtree(weights.parent)
     with pytest.raises(rife.RifeUnavailable, match="could not be read"):
         rife.Cache(tmp_path / "kept").frame(made, a, b, 0.5)
@@ -302,11 +302,11 @@ def test_a_frame_made_while_its_rife_changed_is_handed_on_and_not_kept(tmp_path)
 
 @pytest.mark.skipif(sys.platform == "win32", reason="a shebang script cannot stand in for rife-ncnn-vulkan.exe")
 def test_a_frame_kept_under_one_augmentation_is_made_again_under_another(monkeypatch, tmp_path):
-    """SPRITE_GEN_RIFE_TTA is read on every call (`rife.tta()`), so one Rife makes another frame once it names another
-    augmentation: a frame kept by a pass without augmentation is made again by a pass with the default `-x -z`, and by
-    one with `-z` alone, and taken again by the next pass without. Every frame taken or made is the frame the same RIFE
-    makes with no directory, byte for byte."""
-    binary, weights = _picking_rife(tmp_path)
+    """SPRITE_GEN_RIFE_TTA is read on every call (`rife.tta()`), so one Rife of rife-v4.6 makes another frame once it names
+    another augmentation: a frame kept by a pass without augmentation is made again by a pass with rife-v4.6's `-x -z`,
+    and by one with `-z` alone, and taken again by the next pass without. Every frame taken or made is the frame the same
+    RIFE makes with no directory, byte for byte."""
+    binary, weights = _picking_rife(tmp_path, "rife-v4.6")
     binary.write_text(binary.read_text().replace("FLIP = 0", 'FLIP = int("-x" in sys.argv)'))
     made = rife.Rife(binary, weights.parent)
     a, b = _dot(40, (255, 0, 0)), _dot(72, (0, 0, 255))
@@ -321,7 +321,7 @@ def test_a_frame_kept_under_one_augmentation_is_made_again_under_another(monkeyp
     assert again() == (a.tobytes(), 0, 1)
     assert again() == (a.tobytes(), 1, 0)
     monkeypatch.delenv("SPRITE_GEN_RIFE_TTA")
-    assert rife.tta() == rife.TTA == ("-x", "-z")
+    assert rife.tta("rife-v4.6") == rife.MODELS["rife-v4.6"].tta == ("-x", "-z")
     assert again() == (b.tobytes(), 0, 1)
     monkeypatch.setenv("SPRITE_GEN_RIFE_TTA", "-z")
     assert again() == (a.tobytes(), 0, 1)
