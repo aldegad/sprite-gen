@@ -96,6 +96,7 @@ the frames taken and made (`between_cache`). Nothing is kept without it.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import shutil
@@ -1492,20 +1493,30 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
     lengths = [len(f) for f in sources]
     target = length if length is not None else round(statistics.median(lengths))
     located: list[dict[str, str]] = []
+    # The frames between made for the loop being aligned, by their two frames and time: the fill at the end asks again
+    # for a frame its resampling made and gave way (`--between auto`), and takes it here rather than run RIFE again.
+    made_here: dict[tuple[str, str, str, str, str], Image.Image] = {}
 
     def lazy(a: Image.Image, b: Image.Image, t: float) -> Image.Image:
         nonlocal interpolate
+        key = (a.mode, f"{a.size}", hashlib.sha256(a.tobytes()).hexdigest(), hashlib.sha256(b.tobytes()).hexdigest() + b.mode
+               + f"{b.size}", float(t).hex())
+        if key in made_here:
+            return made_here[key].copy()
         if interpolate is None:
             found = rife_mod.Rife()
             located.append(found.describe())
             interpolate = found
-        return cache.frame(interpolate, a, b, t) if cache is not None else interpolate(a, b, t)
+        frame = cache.frame(interpolate, a, b, t) if cache is not None else interpolate(a, b, t)
+        made_here[key] = frame.copy()
+        return frame
 
     # Every loop is resampled before any is rewritten: a loop that cannot be made leaves the set as it was. The cut
     # each is aligned from is read first, while its strip is still the cut's.
     origins = [origin_of(d, meta_path, meta) for d, meta_path, meta, _ in loops]
     aligned = []
     for i, ((d, *_), frames, view) in enumerate(zip(loops, sources, views or [None] * len(loops))):
+        made_here.clear()
         # which frame of cycle.source/ each of `frames` is: all of them, or the one cycle `--cycles` took out
         index = ([(taken[i]["start"] + k) % taken[i]["from"] for k in range(taken[i]["length"])] if i in taken
                  else list(range(len(frames))))
