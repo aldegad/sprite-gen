@@ -32,7 +32,7 @@ RIFE 가 닿는 곳이 하나도 없는 상태로 스위트 전체를 돌려 그
 시험(`pytest --full -m "real_rife and not torch_rife"`, 아래 torch 단계가 나머지)을 돌린다 — 하나라도 건너뛰거나, 표시된 시험이 없으면 실패다. 그래서 새
 실제-RIFE 시험은 표시만 붙이면 `--rife-only` 가 저절로 걷는다.
 
-컷의 기본 채움(`--fill-held auto`)으로 바이너리에 닿고 CPU 의 Vulkan 드라이버에서 기본 120 s 제한을 넘길 만큼 자주 실행하는 시험은 `real_rife` 표시 여부와 관계없이 긴 바이너리 시험처럼 `@pytest.mark.timeout(900)` 과 바이너리 호출 수 주석을 달고 `tests/conftest.py` 의 `rife_runs` 로 요청하는 RIFE 실행 수를 고정한다(`rife_located()` 가 바이너리를 못 찾으면 0). 바이너리를 몇 번만 실행하고 기본 제한 안에서 여유 있게 끝나는 시험은 둘 다 두지 않는다. CPU 의 Vulkan 드라이버에서는 실행 하나에 몇 초씩 걸리므로, 실행을 더 요구하는 변경이 시간 초과가 아니라 호출 수에서 걸린다.
+컷의 기본 채움(`--fill-held auto`)으로 바이너리에 닿고 CPU 의 Vulkan 드라이버에서 기본 120 s 제한을 넘길 만큼 자주 실행하는 시험은 `real_rife` 표시 여부와 관계없이 긴 바이너리 시험처럼 `@pytest.mark.timeout(900)` 과 바이너리 호출 수 주석을 달고 `tests/conftest.py` 의 `as_pinned` 로 요청하는 RIFE 실행 수를 모델별로 고정한다(바이너리를 못 찾으면 호출 수를 0 으로, 즉 호출이 없는 것으로 고정하며, 이는 이전에 `rife_located()` 가 거짓일 때와 같다). rife-v4.6 은 전처럼 정확한 수로 고정하고, rife-v4.25 는 고정값 이하로 고정하며, 그 고정값은 Apple GPU 와 llvmpipe(Linux 레인의 CPU Vulkan 드라이버)에서 잰 수 가운데 큰 쪽이다. rife-v4.25 를 이하로 두는 까닭은 증강 없이 float16 으로 실행하여 프레임이 GPU 의 연산에 따라 달라지고, 그에 따라 거부되어 다른 때에 다시 만드는 프레임도 달라지기 때문이다. 고정된 35 건을 두 기계에서 실행하여, 합성 걷기 하나에서 바이너리가 Apple GPU 에서는 8 번, llvmpipe 에서는 10 번 호출되었고, 나머지 34 건은 수가 같았으며, rife-v4.6 은 잰 모든 기계에서 수가 같았다. 바이너리를 몇 번만 실행하고 기본 제한 안에서 여유 있게 끝나는 시험은 둘 다 두지 않는다. 고정의 목적은 그대로다. CPU 의 Vulkan 드라이버에서는 실행 하나에 몇 초씩 걸리므로, 실행을 더 요구하는 변경이 시간 초과가 아니라 호출 수에서 걸린다.
 
 RIFE 의 torch 백엔드(`SPRITE_GEN_RIFE_BACKEND=torch`, docs/loop-repair.md 1절)를 돌리는 시험은
 `torch_rife` 표시를 단다(`pyproject.toml` 이 등록한다). `tests/conftest.py` 는 PyTorch 가 import 되지

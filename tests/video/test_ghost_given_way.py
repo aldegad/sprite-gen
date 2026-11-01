@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from conftest import as_pinned
 from sprite_gen.video import align, rife, restoration, source
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import repair
@@ -403,7 +404,7 @@ def test_real_rife_the_applications_walk_gives_a_small_filmed_ghost_way(tmp_path
     report = _app_cut(tmp_path, None)
     assert report["jump_repair"]["interpolator"]["kind"] == "rife-ncnn-vulkan"
     _app_ghost_given_way(report, tmp_path / "E")
-    assert rife_runs() == APP_RUNS[rife.model_name()]
+    assert as_pinned(rife_runs(), APP_RUNS), rife_runs()
 
 
 # --- the source projection and the restoration ------------------------------------------------------

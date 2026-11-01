@@ -249,6 +249,32 @@ def rife_runs(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
     return lambda: sum(r.calls for r in located)
 
 
+# The models whose count of the binary's calls a test holds as a most, not exactly: rife-v4.25 runs with no augmentation,
+# in float16, so its frames differ with the GPU's arithmetic (an Apple GPU and llvmpipe made different ones), and with them
+# the frames refused and made again at another time. rife-v4.6's counts were the same on every machine measured.
+RUNS_AT_MOST = frozenset({"rife-v4.25"})
+
+
+def as_pinned(called: int, pin: int | dict[str, int]) -> bool:
+    """Whether `called`, the binary's calls a test made (`rife_runs()`, `Rife.calls`), keeps the test's pin for the model
+    it ran (`rife.model_name()`; an int pins every model alike): none where the binary is not found here; else the pin
+    exactly, or at most the pin for a model in `RUNS_AT_MOST`, where it is the most measured on an Apple GPU and on
+    llvmpipe."""
+    from sprite_gen.video import rife
+
+    if not rife_located():
+        return called == 0
+    model = rife.model_name()
+    most = pin if isinstance(pin, int) else pin[model]
+    return called <= most if model in RUNS_AT_MOST else called == most
+
+
+def pin_id(value: object) -> str | None:
+    """A parametrized pin by model named by its rife-v4.6 count, the count it pinned before there were two models, so a
+    case keeps its id; anything else named as pytest names it."""
+    return str(value["rife-v4.6"]) if isinstance(value, dict) else None
+
+
 @pytest.fixture(autouse=True)
 def own_settings(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     """No test reads the saved preferences or the provider choices of the machine it runs on: what a call that

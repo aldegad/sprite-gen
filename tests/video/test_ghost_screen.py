@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageFilter
 
+from conftest import as_pinned
 from sprite_gen.video import align, rife
 from sprite_gen.video import loop as loop_mod
 from sprite_gen.video import repair
@@ -200,4 +201,4 @@ def test_real_rife_delivers_no_cell_carrying_a_filmed_ghost():
     assert all(f is not frames[1] for f in out)
     assert max(rife.ghost(f) for f in out) <= GHOST_WARN
     assert [g["frame"] for g in facts["ghost_screen"]["ghosts"]] == [1]
-    assert interpolate.calls == SCREEN_CALLS[interpolate.model_name]
+    assert interpolate.model_name == rife.model_name() and as_pinned(interpolate.calls, SCREEN_CALLS), interpolate.calls

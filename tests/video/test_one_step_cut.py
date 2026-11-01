@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from conftest import feet_unseen, rife_located
+from conftest import as_pinned, feet_unseen
 from sprite_gen.video import align, batch, local_cycle, loop, period
 from tests.video.test_video_pipeline import HAS_IMG2WEBP
 
@@ -151,7 +151,7 @@ def test_the_step_screen_changes_nothing_but_its_own_record(tmp_path, monkeypatc
     monkeypatch.setattr(period, "step_screen", lambda *a, **k: {"stubbed": True})
     _cut(tmp_path / "unscreened", keyed)
     _same_but_the_screen(tmp_path / "screened", tmp_path / "unscreened")
-    assert rife_runs() == (8 if rife_located() else 0)
+    assert as_pinned(rife_runs(), 8), rife_runs()
 
 
 @pytest.mark.slow
@@ -167,7 +167,7 @@ def test_the_step_screen_reads_a_cycle_on_a_frame_count_that_is_not_whole(tmp_pa
 def test_steps_1_cuts_the_walk_again_two_steps_long_where_its_arms_close(slow, tmp_path, rife_runs):
     root, keyed, first = slow
     report = _cut(tmp_path / "out", keyed, "--steps", "1")
-    assert rife_runs() == (6 if rife_located() else 0)
+    assert as_pinned(rife_runs(), 6), rife_runs()
     cycle = report["cycle"]
     assert cycle["length"] in (CYCLE - 1, CYCLE, CYCLE + 1)
     L = first["cycle"]["length"]
