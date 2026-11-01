@@ -425,15 +425,51 @@ def test_the_opening_and_the_closing_pose_of_a_cut_played_once_are_kept():
     assert "opening" in whys[0] and "closing" in whys[1]
 
 
-def test_a_loop_s_held_cells_at_its_wrap_are_kept_and_at_its_start_made():
-    frames = _planted([0, 0, 1, 2, 3, 4, 5, 5])
-    between = Between(_reach, range(7), period=None)
-    # The wrap closes on cell 0 again: a frame between the last pose and the first is the wrap's, not the hold's.
+def test_a_loop_s_held_cells_at_its_wrap_are_made_between_its_last_pose_and_its_first_cell():
+    # A loop has no closing pose: its last cells' next pose is its first cell, across the wrap. Before, the run at the
+    # end was kept as filmed and said nothing (`the loop's last cells`), a picture shown twice on every pass.
+    frames = [walk_at(t) for t in [0, 0, *range(1, N - 2), N - 3]]
+    between = Between(walk_at, range(N), period=N)
     out, record = held_fill.fill(frames, between, ring=True)
     runs = record["before"]["held_runs"]
-    assert (runs[0]["start"], runs[0]["filled"]) == (0, True)
-    assert (runs[1]["start"], runs[1]["filled"]) == (6, False) and "wrap" in runs[1]["why"]
-    assert record["made"] == [1] and out[0].tobytes() == frames[0].tobytes() and out[7].tobytes() == frames[7].tobytes()
+    assert [(r["start"], r["filled"]) for r in runs] == [(0, True), (N - 2, True)]
+    assert record["made"] == [1, N - 1] and "wrap" not in record["before"]
+    # cell 1 half way from cell 0 to the pose after it; the last cell half way from the last pose to cell 0 a cycle on
+    assert out[1].tobytes() == walk_at(0.5).tobytes() and out[N - 1].tobytes() == walk_at(N - 1.5).tobytes()
+    assert out[0].tobytes() == frames[0].tobytes() and record["held_runs"] == [] and "wrap_held" not in record
+
+
+def test_a_loop_whose_last_cell_shows_its_first_again_keeps_its_first_cell_and_makes_the_last():
+    # The step across the wrap is read too: a last cell that shows the first cell's picture again (a cut one cell too
+    # long) is made between the pose before it and the first cell; the first cell stays the first cell.
+    frames = [walk_at(t) for t in [*range(N - 1), 0]]
+    between = Between(walk_at, range(N), period=N)
+    out, record = held_fill.fill(frames, between, ring=True)
+    assert record["before"]["held_runs"] == [] and record["before"]["wrap_held"] is True
+    assert record["before"]["poses"] == N - 1
+    wrap = record["before"]["wrap"]
+    assert (wrap["start"], wrap["length"], wrap["joined"], wrap["filled"]) == (N - 1, 1, 2, True)
+    assert record["made"] == [N - 1] and out[N - 1].tobytes() == walk_at(N - 1).tobytes()
+    assert out[0].tobytes() == frames[0].tobytes() and record["poses"] == N and "wrap_held" not in record
+    assert held_fill.public(record)["before"]["wrap"]["made"] == [N - 1]
+
+
+def test_a_hold_across_a_loop_s_wrap_longer_than_three_cells_is_kept_whole():
+    # Two cells before the wrap and two after it show one picture: one hold of four, the motion's own, kept whole.
+    frames = [walk_at(t) for t in [0, 0, *range(1, N - 3), 0, 0]]
+    calls: list = []
+    out, record = held_fill.fill(frames, lambda a, b, t: calls.append(t) or a, ring=True)
+    runs = record["before"]["held_runs"]
+    assert calls == [] and record["made"] == []
+    assert [(r["start"], r["filled"]) for r in runs] == [(0, False), (N - 2, False)]
+    assert all("across the loop's wrap" in r["why"] for r in runs) and runs[1]["wrap"] is True
+    assert record["before"]["wrap"]["joined"] == 4 and record["wrap_held"] is True
+
+
+def test_a_cut_played_once_does_not_read_a_wrap():
+    frames = [walk_at(t) for t in [*range(N - 1), 0]]
+    out, record = held_fill.fill(frames, lambda a, b, t: a, ring=False)
+    assert "wrap" not in record["before"] and "wrap_held" not in record and record["made"] == []
 
 
 def test_codec_copies_read_as_the_same_picture_and_the_slowest_motion_does_not():

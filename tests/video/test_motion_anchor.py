@@ -100,7 +100,9 @@ def test_cli_writes_corrected_cycle_and_gates_rendered_cells(tmp_path, corrected
     out = tmp_path / "output"
     args = ["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk", "--repair", "off",
             "--cycle", "fixed", "--start", "0", "--length", "24", "--anchor", "motion",
-            "--anchor-region", "55,27,86,60", "--anchor-region", "48,61,94,110"]
+            "--anchor-region", "55,27,86,60", "--anchor-region", "48,61,94,110", "--fill-held", "off"]
+    # Anchored, cells 5 to 7 differ by one pixel: the default would make 6 and 7 again after the anchor
+    # (docs/loop-repair.md section 7). Off, the cells are the anchor's own.
     assert loop.main(args) == 0
     result = json.loads((out / "loop.loop.report.json").read_text())
     assert result["status"] == "passed"
