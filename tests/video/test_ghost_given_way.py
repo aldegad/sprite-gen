@@ -393,7 +393,7 @@ def test_the_applications_walk_gives_a_small_filmed_ghost_way(tmp_path):
 
 # The binary's calls on the application's walk, by model (`rife.model_name()`): rife-v4.25's frame between held cells 32
 # to 34 shows a neighbour's picture again, so it is refused (`held`), tried at another time and kept as filmed.
-APP_RUNS = {"rife-v4.25": (8, 10), "rife-v4.6": 8}
+APP_RUNS = {"rife-v4.25": (10, 12), "rife-v4.6": 12}
 
 
 @pytest.mark.slow

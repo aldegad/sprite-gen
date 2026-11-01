@@ -370,7 +370,7 @@ def test_a_loop_aligned_to_more_cells_says_where_each_is_from_and_read_on_cut_re
         sway.sway_loop(made, [region], **kw)
     assert files(made) == before
     # Stretched by the cut's own cells, shown again, every cell is one of the cut's, and the pair is carried through.
-    shown = aligned(b, tmp_path/'shown', length=17)
+    shown = aligned(b, tmp_path/'shown', length=17, fill_held='off')  # the cells shown again stay so (--fill-held off)
     entries = meta_of(shown)['cycle_align']['cells_from']
     assert len(entries) == 17 and all('source' in entry for entry in entries) and CR not in meta_of(shown)
     read_on = sway.sway_loop(shown, [region], **kw)['read_on']

@@ -176,7 +176,14 @@ def test_actual_cli_auto_selects_corrects_and_verifies_animation(tmp_path):
     assert abs(motion['endpoint_xy'][0]+23) <= 1
     assert abs(motion['endpoint_xy'][1]+5) <= 1
     left, top, _, _ = motion['padding_ltrb']
+    # Anchored, the walker's legs hold their rounded swing for two or three cells: the fill read after the anchor makes
+    # those cells again between the poses beside them (RIFE's frames, where it is installed). Every other cell is its
+    # source frame moved back.
+    held = report['held_fill']
+    made = set(held['made']) | set((held.get('again') or {}).get('made', []))
     for k, path in enumerate(sorted((output/'cycle').glob('*.png'))):
+        if k in made:
+            continue
         image = Image.open(path)
         dx, dy = motion['shifts_xy'][k]
         restored = image.crop((left+dx, top+dy, left+dx+280, top+dy+180))

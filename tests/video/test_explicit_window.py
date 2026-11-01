@@ -56,7 +56,7 @@ ROWS = [
     # A window that holds one step of a walk whose steps are seen: no cut of two steps there, and none of one.
     ("first", _slow, ("--state", "walk", *MOTION, "--max-len", "25"),
      lambda r: "gait_fallback" not in r and r["error"].startswith("no cut of two steps in --max-len 25"), False, 0),
-    ("first", _slow, ("--state", "walk", *MOTION, "--min-len", "18"), lambda r: "gait_fallback" not in r, True, 6),
+    ("first", _slow, ("--state", "walk", *MOTION, "--min-len", "18"), lambda r: "gait_fallback" not in r, True, 8),
     ("two-step", _held, ("--state", "walk", *MOTION, "--max-len", "25"),
      lambda r: r["cycle"]["seam_pop"]["held_edge"]["two_step_capped"]["max_len"] == 25, True, 0),
     ("two-step", _held, ("--state", "walk", *MOTION, "--max-len", "47"),  # 47 of 47-49 read
@@ -65,8 +65,8 @@ ROWS = [
     ("two-step", _held, ("--state", "walk", *MOTION, "--min-len", "20"), lambda r: r["cycle"]["seam_pop"]["applied"], True, 0),
     ("counted", _short, ("--state", "walk", *MOTION, "--max-len", "42", "--steps", "1"),
      lambda r: r["cycle"]["steps"]["window"] == [41, 42] and r["cycle"]["steps"]["counted_window"] == [41, 43], True,
-     {"rife-v4.25": (6, 20), "rife-v4.6": 6}),
-    ("counted", _slow, ("--state", "walk", *MOTION, "--min-len", "18", "--steps", "1"), lambda r: r["cycle"]["steps"]["by"] == "given", True, 6),
+     {"rife-v4.25": (8, 22), "rife-v4.6": 8}),
+    ("counted", _slow, ("--state", "walk", *MOTION, "--min-len", "18", "--steps", "1"), lambda r: r["cycle"]["steps"]["by"] == "given", True, 8),
     ("fallback", _slow_front, ("--state", "walk", *MOTION, "--max-len", "36"), lambda r: r["gait_fallback"]["window"] == [12, 36], False, 0),
     ("fallback", _slow_front, ("--state", "walk", *MOTION, "--min-len", "30"), lambda r: r["gait_fallback"]["window"][0] == 30, True,
      {"rife-v4.25": (4, 16), "rife-v4.6": 22}),

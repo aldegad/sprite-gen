@@ -163,11 +163,11 @@ def test_the_step_screen_reads_a_cycle_on_a_frame_count_that_is_not_whole(tmp_pa
 
 
 @pytest.mark.slow
-@pytest.mark.timeout(900)  # 6 calls of the binary at 280 x 220 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.timeout(900)  # 8 calls of the binary at 280 x 220 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
 def test_steps_1_cuts_the_walk_again_two_steps_long_where_its_arms_close(slow, tmp_path, rife_runs):
     root, keyed, first = slow
     report = _cut(tmp_path / "out", keyed, "--steps", "1")
-    assert as_pinned(rife_runs(), 6), rife_runs()
+    assert as_pinned(rife_runs(), 8), rife_runs()
     cycle = report["cycle"]
     assert cycle["length"] in (CYCLE - 1, CYCLE, CYCLE + 1)
     L = first["cycle"]["length"]

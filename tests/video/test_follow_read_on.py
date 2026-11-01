@@ -216,7 +216,7 @@ def test_t1_the_same_turned_loop_followed_as_read_today_moves_another_place(orig
 
 def test_t2_a_loop_stretched_by_the_nearer_cell_is_carried_cell_for_cell_duplicates_and_all(origin, tmp_path):
     o, read_on, _ = origin
-    loop_dir = aligned(o, tmp_path/'stretched', length=17)
+    loop_dir = aligned(o, tmp_path/'stretched', length=17, fill_held='off')  # the nearer cells shown again, as resampled
     record = meta_of(loop_dir)['cycle_align']
     sources = [entry['source'] for entry in record['cells_from']]
     assert len(sources) == 17 and len(set(sources)) < len(sources)
