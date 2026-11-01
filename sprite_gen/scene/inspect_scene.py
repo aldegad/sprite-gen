@@ -25,10 +25,10 @@ def _mae(a, b) -> float:
     return float(np.abs(a - b).mean())
 
 
-def inspect_scene(scene: Scene, *, renderer=None, frame_dir=None):
+def inspect_scene(scene: Scene, *, renderer=None, frame_dir=None, fill_held="auto", interpolate=None):
     from sprite_gen.frames.cutout import GREEN, MAGENTA
     from sprite_gen.scene.render import Renderer
-    renderer = renderer or Renderer(scene)
+    renderer = renderer or Renderer(scene, fill_held=fill_held, interpolate=interpolate)
     first = previous = None
     green, magenta = 0, 0
     clipped = {layer.id: {"top_frames": 0, "bottom_frames": 0, "side_frames": 0, "offscreen_frames": 0,
@@ -100,10 +100,14 @@ def inspect_scene(scene: Scene, *, renderer=None, frame_dir=None):
     offscreen = [name for name, s in clipped.items() if s["offscreen_frames"]]
     if offscreen:
         warnings.append(f"layers entirely outside the viewport in some frames: {', '.join(offscreen)}")
+    # Each layer's scene frames that show the cell the frame before shows, by which cell each shows (`Renderer.repeats`):
+    # what was not made, or not held on purpose, is a line to look at.
+    warnings += renderer.warnings
     return {"kind": "sprite-gen-scene-inspection", "version": 1, "frames": scene.frame_count,
             "source_fingerprints": scene.source_fingerprints, "status": "needs-review" if warnings else "measured",
             "loop": loop, "key_like_pixels": {GREEN: green, MAGENTA: magenta}, "clipping": clipped,
-            "sources": sources, "tile_joins": tiles, "warnings": warnings, "visual_review_required": True}
+            "sources": sources, "tile_joins": tiles, "repeats": renderer.repeats, "warnings": warnings,
+            "visual_review_required": True}
 
 
 def output_path(out, scene: Scene) -> Path:
@@ -126,14 +130,17 @@ def add_arguments(parser):
     parser.add_argument("--spec", type=Path, required=True)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--require-loop", action="store_true")
+    parser.add_argument("--fill-held", choices=("auto", "off"), default="auto",
+                        help="as scene-render reads it: auto (default) measures a layer cut from a filmed clip at the scene's "
+                             "times where it would show a cell again; off measures its cells as cut")
 
 
-def run(spec, out=None, require_loop=False):
+def run(spec, out=None, require_loop=False, fill_held="auto"):
     try:
         scene = load_scene(spec)
         if out is not None:
             output_path(out, scene)
-        report = inspect_scene(scene)
+        report = inspect_scene(scene, fill_held=fill_held)
         payload = json.dumps(report, indent=2) + "\n"
         if out is not None:
             target = output_path(out, scene)
