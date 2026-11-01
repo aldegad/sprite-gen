@@ -436,16 +436,26 @@ for compute only cannot run the binary at all, and there the torch backend runs 
 `rife-v4.6` the same augmentation). Elsewhere it adds PyTorch, hundreds of megabytes, for the same model: on a Mac the binary
 already runs on the GPU. On a CPU host the torch backend is faster than the binary on llvmpipe (the
 table below), but its frames are not the binary's bytes; a deployment that wants it there names it, and
-the default does not move. Measured on synthetic walkers with `rife-v4.6`, 2026-10-21 (with `rife-v4.25`,
-2026-11-01, the binary on the Apple GPU and the torch backend on its CPU give the seven pairs the same
-verdicts again):
+the default does not move. Measured on synthetic walkers with `rife-v4.6`, 2026-10-21, and with `rife-v4.25`, 2026-11-01, the pick
+run again on the same ten candidates by the same rule:
 
-- **The same verdicts.** The seven pairs of `tests/fixtures/rife-walkers` (clean steps, an outline lost
-  where legs cross far, a ghost band, parts torn, a cross-fade to look at) get the same faults and
-  looks from the binary on an Apple GPU, the binary on llvmpipe and the torch backend on a CPU, each
-  reading at least a tenth of its bound away from it (and three more pairs besides, one left out for a
-  torn reading 8 % from its bound on llvmpipe). The tests keep it: the torch backend judges the seven
-  as the binary did on a machine with no binary, and as this machine's binary does where both run.
+- **The same verdicts.** The seven pairs of `tests/fixtures/rife-walkers` picked for `rife-v4.6` (clean
+  steps, an outline lost where legs cross far, a ghost band, parts torn, a cross-fade to look at) get the
+  same faults and looks from the binary on an Apple GPU, the binary on llvmpipe and the torch backend on
+  a CPU, each reading at least a tenth of its bound away from it (of ten candidate pairs, two more met
+  the rule and were not added, and near50 was left out for a torn reading 8 % from its bound on
+  llvmpipe); run again for `rife-v4.6`, the pick gave the same seven. With `rife-v4.25` nine of the ten
+  meet the rule, and six are recorded for it: near25, far50, mid50, cross50, bnear50 and bfar33 (near50,
+  far25 and swap50 met the rule and were not added; near50 and far25 are near25's and far50's pairs at
+  another t with the same verdict). bfar50 does not meet it: its verdicts differ on llvmpipe, where the
+  binary reads a cross-fade look over its bound (0.01645 against 0.015) and the torch backend on that
+  CPU does not (0.01198), the faults the same, and its least margin there is 0.097 of the bound; on the
+  Apple GPU the binary reads it under (0.0113). With `rife-v4.25` no candidate reads a cross-fade look
+  clear of its bound, so no `rife-v4.25` pair checks the look; `rife-v4.6`'s bfar50 still does. The tests
+  keep it: the torch backend judges `rife-v4.6`'s seven as the binary did, from the binary's recorded
+  `rife-v4.6` frames, on a machine with no binary, and where both run the binary and the torch backend
+  judge each model's pairs alike, listed in `tests/fixtures/rife-walkers/walkers.json` under `alike`
+  (`rife-v4.6`, run by name, on its seven; `rife-v4.25` on its six).
 - **Frames as close as two GPUs'.** Against the binary's frame on the Apple GPU, the torch backend's
   lies 0.005 to 0.052 of 255 apart on average and 11 at most (premultiplied RGBA in the box either
   covers), and the binary's own frame on llvmpipe 0.007 to 0.25 apart and 76 at most: closer on six of

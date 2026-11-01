@@ -254,5 +254,30 @@
     "max_abs": 76.0
    }
   }
+ },
+ "alike": {
+  "rife-v4.6": {
+   "pairs": [
+    "bfar33",
+    "bfar50",
+    "bnear50",
+    "cross50",
+    "far50",
+    "mid50",
+    "near25"
+   ],
+   "picked": "2026-10-21, of ten candidate pairs: the binary's rife-v4.6 frame with -x -z on an Apple M4 Max GPU (MoltenVK) and on Mesa llvmpipe, and the torch backend's on a CPU, the same faults and looks, every reading at least a tenth of its bound away from it. near50 is left out (a torn reading 8 % from its bound on llvmpipe); far25 and swap50 met the rule and were not added. Run by name (SPRITE_GEN_RIFE_MODEL_NAME=rife-v4.6)."
+  },
+  "rife-v4.25": {
+   "pairs": [
+    "bfar33",
+    "bnear50",
+    "cross50",
+    "far50",
+    "mid50",
+    "near25"
+   ],
+   "picked": "2026-11-01, of the same ten candidates by the same rule: the binary's rife-v4.25 frame with no augmentation (TNTwise rife-ncnn-vulkan 20250112) on an Apple M4 Max GPU (MoltenVK) and on Mesa llvmpipe, and the torch backend's on the CPU of each. bfar50 is left out: on llvmpipe the binary's frame reads a cross-fade of 0.01645, over the look's bound (0.015) by less than a tenth of it, and the torch backend's 0.01198, under it. near50, far25 and swap50 met the rule and were not added: near50 and far25 are near25's and far50's pairs at another t, with the same verdict."
+  }
  }
 }

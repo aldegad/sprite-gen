@@ -14,7 +14,8 @@ docs/release.md), on the device SPRITE_GEN_RIFE_DEVICE names. The rest need neit
 
 The fixtures are synthetic: discs, legs and walkers drawn here or in tests/video/test_rife.py and test_crossfade.py,
 and tests/fixtures/rife-walkers — walker pairs, clean and faulty, with the binary's own -x -z frame of each made on
-an Apple GPU, the engine's verdict on it, and how far the same binary's frame on Mesa llvmpipe lay from it."""
+an Apple GPU, the engine's verdict on it, and how far the same binary's frame on Mesa llvmpipe lay from it; and, for
+each model, the pairs it is judged alike on by the binary and the torch backend (`alike`)."""
 
 from __future__ import annotations
 
@@ -228,17 +229,30 @@ def test_walkers_are_judged_as_the_binary_judged_them(runner46, key):
     assert mean <= 2 * rec["gpu_gap"]["mean_abs"] and most <= 2 * rec["gpu_gap"]["max_abs"], (mean, most, rec["gpu_gap"])
 
 
+def _alike() -> dict:
+    """The walker pairs each model is judged alike on (walkers.json `alike`): those its own frames met the pick's rule on,
+    the binary on an Apple GPU and on llvmpipe and the torch backend on a CPU giving the same verdict, every reading at
+    least a tenth of its bound away from it (`picked` says what was left out, and why)."""
+    return json.loads((WALKERS / "walkers.json").read_text())["alike"]
+
+
 @pytest.mark.real_rife
 @pytest.mark.torch_rife
 @pytest.mark.timeout(1800)  # the binary on a CPU's Vulkan driver: a minute or more a pair
-@pytest.mark.parametrize("key", sorted(_walkers()))
-def test_the_binary_and_the_torch_backend_judge_the_walkers_alike_on_one_machine(runner, key):
-    """The recorded walker pairs through this machine's binary (llvmpipe on the Linux lane) and the torch backend, each
-    running the model the engine runs: the same verdict for each."""
+@pytest.mark.parametrize("model, key", [(model, key) for model, picked in sorted(_alike().items()) for key in picked["pairs"]])
+def test_the_binary_and_the_torch_backend_judge_the_walkers_alike_on_one_machine(model, key):
+    """The walker pairs picked for each model through this machine's binary (llvmpipe on the Linux lane) and the torch
+    backend, both running that model by its name: the same verdict for each. rife-v4.6 on the seven recorded for it,
+    rife-v4.25, the default, on the six its own frames met the rule on."""
+    from sprite_gen.video import rife_torch
+
     t = _walkers()[key]["t"]
     a, b = _walker(key, "a"), _walker(key, "b")
+    binary, held = rife.locate()
     verdicts = []
-    for made in (rife.Rife(*rife.locate()), rife.Rife(runner=runner)):
+    for made in (rife.Rife(binary, held.parent / model),
+                 rife.Rife(runner=rife_torch.TorchRunner(rife.locate_model().parent / model, rife.device()))):
+        assert made.model_name == model
         frame, apart = made.read(a, b, t)
         verdicts.append(_verdict(frame, a, b, t, apart))
     assert verdicts[0] == verdicts[1]
