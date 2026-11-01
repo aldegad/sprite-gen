@@ -97,9 +97,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import statistics
 import sys
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +114,7 @@ from sprite_gen.util.gif_utils import save_clean_gif
 from sprite_gen.video import sway as sway_mod
 from sprite_gen.video import cadence as cadence_mod
 from sprite_gen.video import held as held_mod
+from sprite_gen.video import held_fill as held_fill_mod
 from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import local_cycle
 from sprite_gen.video import loop as loop_mod
@@ -984,16 +987,136 @@ def _loop_files(loop_dir: Path) -> tuple[Path, dict[str, Any]]:
     for key in ("cycle_frames", "cycle_seconds", "cell_height_cap", "kind"):
         if key not in meta:
             raise ValueError(f"{metas[0]}: no `{key}` — cut the loop again with this sprite-gen (video-loop) before aligning it")
-    if "out_fps" in meta:
+    if "out_fps" in meta and "cycle_align" not in meta:
         raise ValueError(f"{metas[0]}: cut at --out-fps {meta['out_fps']:g}, its cells each made at a time of their own — the "
                          "alignment makes its own frames between: align the loop cut at its clip's rate (video-loop without "
-                         "--out-fps)")
+                         "--out-fps), and ask the alignment for the rate (video-cycle-align --out-fps)")
     strip = cut_strip(loop_dir, metas[0], meta)
     if strip is not None and not strip.is_file():
         raise ValueError(f"{loop_dir}: no {strip.name} — a first alignment reads the strip as cut to record where its cells are from "
                          "(cycle_align.origin, which video-follow --read-on carries regions by); put the loop's strip back, or cut "
                          "the loop again with video-loop, before aligning it")
     return metas[0], meta
+
+
+CUT_AGAIN_DIR = ".cycle.source.cut"  # where a filled loop is cut again with the fill off, removed once staged
+
+
+def filled(meta: dict[str, Any]) -> bool:
+    """Whether a cut's held cells were made again (`held_fill.made`, or `made` of the read after its repair)."""
+    held = meta.get("held_fill") or {}
+    return bool(held.get("made") or (held.get("again") or {}).get("made"))
+
+
+def unfilled_source(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> dict[str, Any] | None:
+    """The frames an alignment reads are the cut as filmed: a loop never aligned whose held cells `video-loop` made again
+    (`filled`) is cut again from its frames as its report records it was asked (`loop.cut_again`), with the fill off, and
+    that cut is kept as `cycle.source/` (its strip and strip record beside its frames) — the alignment makes its frames
+    between from filmed frames, never from frames made between, and fills what it delivers at the end. What was done
+    (`cut_again`), or None where nothing was to do: a loop aligned before, one not filled, one whose `cycle.source/`
+    already holds its cut with the fill off. ValueError naming why it cannot be cut again (a report from before cuts
+    recorded what they were asked, frames moved away, another cut taken): cut it again with `--fill-held off`."""
+    if "cycle_align" in meta or not filled(meta):
+        return None
+    source = loop_dir / SOURCE_DIR
+    staged = source / meta_path.name
+    if staged.is_file():
+        try:
+            if not filled(json.loads(staged.read_text(encoding="utf-8"))):
+                return None
+        except (OSError, ValueError):
+            pass
+    found = cut_report(loop_dir, meta_path, meta)
+    if found is None:
+        raise ValueError("its held cells were made again (held_fill), and no report of its cut is beside it to cut it again "
+                         "with the fill off")
+    report_path, report = found
+    work = loop_dir / CUT_AGAIN_DIR
+    shutil.rmtree(work, ignore_errors=True)
+    try:
+        try:
+            cut = loop_mod.cut_again(report, work, report_path=work / "cut.loop.report.json", fill_held="off")
+        except SystemExit as exc:
+            raise ValueError(f"cutting it again with the fill off failed: {exc}") from None
+        cut_meta = json.loads((work / meta_path.name).read_text(encoding="utf-8"))
+        was = meta.get("cycle_drawings") or {}
+        now = cut_meta.get("cycle_drawings") or {}
+        if (now.get("start"), now.get("length")) != (was.get("start"), was.get("length")):
+            raise ValueError(f"cut again with the fill off it took frames {now.get('start')}+{now.get('length')}, not "
+                             f"{was.get('start')}+{was.get('length')}")
+        shutil.rmtree(source, ignore_errors=True)
+        (work / "cycle").rename(source)
+        shutil.copyfile(work / meta_path.name, staged)
+        strip = meta_path.name[: -len(".strip.json")] + ".strip.png"
+        shutil.copyfile(work / strip, source / strip)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return {"report": str(report_path), "fill_held": "off", "cells": cut["strip"]["cycle_frames"],
+            "made_before": (meta.get("held_fill") or {}).get("made", [])}
+
+
+def _material_filled(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> bool:
+    """Whether the frames an alignment of this loop reads (`cycle.source/`, or its cut) hold cells made between: their
+    own record says so where it is kept beside them, else the cut's (a loop never aligned)."""
+    staged = loop_dir / SOURCE_DIR / meta_path.name
+    if staged.is_file():
+        try:
+            return filled(json.loads(staged.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            return False
+    return "cycle_align" not in meta and filled(meta)
+
+
+def _indexed(cell: dict[str, Any], index: list[int]) -> dict[str, Any]:
+    """Where a cell is from (`resample`'s `cells_from`, or a cell the fill made) as frames of `cycle.source/`."""
+    if "source" in cell:
+        return {"source": index[cell["source"]]}
+    return {"between": [index[j] for j in cell["between"]], "t": cell["t"],
+            **({"held_fill": cell["held_fill"]} if "held_fill" in cell else {})}
+
+
+def _place_between(cells: list[dict[str, Any]], between: list[int], t: float, count: int, cell: int) -> dict[str, Any]:
+    """Where a cell made between two cells of the aligned loop (`between`, at `t`) stands on its `count` source frames,
+    as `cells_from` records a frame made between two: the place `t` of the way from the one's to the other's, round the
+    cycle; `held_fill` names the cells it was made between."""
+    def place(c: dict[str, Any]) -> float:
+        return float(c["source"]) if "source" in c else c["between"][0] + c["t"]
+
+    pa, pb = place(cells[between[0]]), place(cells[between[1]])
+    x = pa + t * ((pb - pa) % count)
+    i = math.floor(x)
+    return {"between": [i % count, (i + 1) % count], "t": round(x - i, 4),
+            "held_fill": {"between": list(between), "t": round(t, 4), "cell": cell}}
+
+
+def _fill_aligned(frames: list[Image.Image], interpolate: Any, *, mode: str, hold: int | None
+                  ) -> tuple[list[Image.Image], dict[str, Any]]:
+    """`held_fill.fill` on an aligned loop (a ring: its first cell kept; `hold` the hold of frames drawn on twos or
+    threes, every run kept). No RIFE installed: its held cells are delivered as resampled, the record says which and how
+    to install it (`unmade`), never a failure."""
+    asked = partial(held_fill_mod.fill, ring=True, mode=mode, drawn_on=hold)
+    try:
+        return asked(frames, interpolate)
+    except rife_mod.RifeNotInstalled as exc:
+        out, record = asked(frames, None)
+        if "unmade" in record:
+            record["unmade"].update(why="RIFE is not installed", rife=str(exc), install=rife_mod.install_command())
+        return out, record
+
+
+def _rate_aligned(frames: list[Image.Image], interpolate: Any, cells: list[dict[str, Any]], *, fps: float, out_fps: float,
+                  count: int) -> tuple[list[Image.Image], dict[str, Any], list[dict[str, Any]]]:
+    """An aligned loop given at `out_fps` (`held_fill.upsample`), and where each of its cells is from. No RIFE
+    installed: the loop at its own rate, the record saying so."""
+    try:
+        out, record = held_fill_mod.upsample(frames, interpolate, ring=True, fps=fps, out_fps=out_fps)
+    except rife_mod.RifeNotInstalled as exc:
+        return frames, {"asked": out_fps, "fps": fps, "applied": False, "cells": len(frames), "why": "RIFE is not installed",
+                        "rife": str(exc), "install": rife_mod.install_command()}, cells
+    made = {row["cell"]: row for row in record["frames"]}
+    placed = [cells[k] if k is not None else _place_between(cells, made[j]["between"], made[j]["t"], count, j)
+              for j, k in enumerate(record["source_frames"])]
+    return out, record, placed
 
 
 def _source_frames(loop_dir: Path) -> list[Image.Image]:
@@ -1018,6 +1141,9 @@ def cut_strip(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> Path | N
     follow-through moved it); None on a loop aligned before, whose origin its first alignment recorded."""
     if "cycle_align" in meta:
         return None
+    staged = loop_dir / SOURCE_DIR / f"{meta_path.name[: -len('.strip.json')]}.strip.png"
+    if staged.is_file():
+        return staged  # the cut again with the fill off (`unfilled_source`): what is aligned
     source = loop_dir / loop_mod.FOLLOW_SOURCE
     return source if source.exists() else loop_dir / f"{meta_path.name[: -len('.strip.json')]}.strip.png"
 
@@ -1029,17 +1155,25 @@ def origin_of(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> dict[str
     strip = cut_strip(loop_dir, meta_path, meta)
     if strip is None:
         return meta["cycle_align"].get("origin")
+    if strip.parent.name == SOURCE_DIR:
+        meta = json.loads((strip.parent / meta_path.name).read_text(encoding="utf-8"))
     return sway_mod.cut_origin(strip.read_bytes(), meta)
 
 
 def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list[Image.Image], fps: float,
              record: dict[str, Any], *, cells_from: list[dict[str, Any]] | None = None,
-             origin: dict[str, Any] | None = None) -> dict[str, Any]:
+             origin: dict[str, Any] | None = None, held: dict[str, Any] | None = None,
+             holds: list[dict[str, Any]] | None = None, times: list[float] | None = None,
+             source_fps: float | None = None) -> dict[str, Any]:
     """Write the aligned cycle, strip, GIF and WebP over the loop's own, at the loop's own cell size rules. `cells_from`
     says where each of `frames` is from; the record keeps it per cell of the strip, with the cut's `origin`. On a loop
-    never aligned, the cut's own strip record is kept beside its frames as filmed first (`cycle.source/`), as it was."""
+    never aligned, the cut's own strip record is kept beside its frames as filmed first (`cycle.source/`), as it was
+    (unless it is there already: a filled loop cut again with the fill off, `unfilled_source`). `held` is what the
+    alignment's fill made of the loop's held cells (`held_fill.public`) and `holds` the holds it kept as the motion's own,
+    as cells of `frames` (both replace the cut's, whose cells these are not); `fps` the rate of `frames`, and
+    `source_fps` the clip's where they are given at a rate of their own (`--out-fps`), each cell at `times`."""
     name = meta_path.name[: -len(".strip.json")]
-    if "cycle_align" not in meta:
+    if "cycle_align" not in meta and not (loop_dir / SOURCE_DIR / meta_path.name).is_file():
         shutil.copyfile(meta_path, loop_dir / SOURCE_DIR / meta_path.name)
     cycle_dir = loop_dir / "cycle"
     cycle_dir.mkdir(exist_ok=True)
@@ -1065,6 +1199,13 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
                  and not (k == "steps" and "cycle_taken" in record)}, **strip_meta}
     if meta.get("foot_anchor") and meta.get("foot_anchor") != "feet":
         merged["foot_anchor"] = meta["foot_anchor"]
+    for key in ("out_fps", "source_fps"):
+        merged.pop(key, None)
+    if source_fps is not None:
+        merged.update(out_fps=fps, source_fps=source_fps)
+    if held is not None:
+        merged["held_fill"] = held
+    merged["holds"] = held_fill_mod.strip_holds(holds or [], strip_meta["sample_indices"], times)
     cells = [strip.crop((k * strip_meta["w"], 0, (k + 1) * strip_meta["w"], strip_meta["h"])) for k in range(strip_meta["frames"])]
     flat = np.stack([loop_mod._small_features(c) for c in cells])
     adjacent = float(np.abs(flat[1:] - flat[:-1]).mean())
@@ -1196,7 +1337,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
               report_path: Path | None = None, between: str = DEFAULT_BETWEEN, views: list[str | None] | None = None,
               start_foot: str = START_FOOT, multi_cycle: str = "fail", cycles: dict[str, int] | None = None,
               state: str | None = None, feet: dict[str, str] | None = None, between_cache: Path | None = None,
-              same_foot: str = "warn") -> dict[str, Any]:
+              same_foot: str = "warn", fill_held: str = "auto", out_fps: float | None = None) -> dict[str, Any]:
     """Resample every loop of a set to one length (default: the median), turned to a foot strike —
     where `views` (one per loop: `front`, `back`, `side@right`, `front_diagonal@left`, …) lets it,
     the strike of the same own foot (`start_foot`) in every loop.
@@ -1224,7 +1365,13 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
     Every loop's beat is recorded (`beat`, `cadence.beat_record`, as frames of the turned loop), and a loop seen from the
     back or a back diagonal is read for the same foot stepping twice in a row (`same_foot`, `cadence.same_foot`, with the
     clip's every cut as `video-loop` read them, `clip`): `same_foot` warn names such a loop in the warnings, refuse stops
-    the set before anything is rewritten (the report written with `applied` false, `refused` same-foot)."""
+    the set before anything is rewritten (the report written with `applied` false, `refused` same-foot).
+
+    The frames aligned are the cut as filmed: a loop whose held cells video-loop made again is cut again with the fill
+    off first (`unfilled_source`), or the set stops naming it. Each loop delivered is read at the end, its held cells made
+    between the poses beside them as video-loop fills a loop (`held_fill.fill`, `fill_held` auto; off delivers them as
+    resampled), its record (`held_fill`) and kept holds (`holds`) replacing the cut's; and given at `out_fps` where one
+    is asked (`held_fill.upsample`, every loop the same number of cells)."""
     if len(loop_dirs) < 1:
         raise SystemExit("video-cycle-align: at least one --loop-dir")
     if between_cache is not None and interpolate is not None and not callable(getattr(interpolate, "identity", None)):
@@ -1238,6 +1385,8 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         raise SystemExit(f"video-cycle-align: --multi-cycle must be one of {', '.join(MULTI_CYCLE)}, not {multi_cycle!r}")
     if same_foot not in SAME_FOOT:
         raise SystemExit(f"video-cycle-align: --same-foot must be one of {', '.join(SAME_FOOT)}, not {same_foot!r}")
+    if fill_held not in held_fill_mod.MODES:
+        raise SystemExit(f"video-cycle-align: --fill-held must be one of {', '.join(held_fill_mod.MODES)}, not {fill_held!r}")
     for v in views or []:
         if v is not None:
             name, _, facing = v.partition("@")
@@ -1253,13 +1402,26 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
             meta_path, meta = _loop_files(d)
         except ValueError as exc:
             raise SystemExit(f"video-cycle-align: {exc}") from exc
-        loops.append((d, meta_path, meta, meta["cycle_frames"] / meta["cycle_seconds"]))
+        # an aligned loop given at a rate of its own is aligned again from its frames at the clip's rate
+        loops.append((d, meta_path, meta, float(meta["source_fps"]) if "out_fps" in meta else meta["cycle_frames"] / meta["cycle_seconds"]))
     # cycle_seconds is written to four decimals, so a rate read back from it carries that rounding
     rates = [fps for *_, fps in loops]
     if max(rates) / min(rates) - 1 > RATE_TOLERANCE:
         raise SystemExit(f"video-cycle-align: the loops play at different frame rates ({sorted(round(r, 3) for r in rates)}); "
                          "one length in frames means nothing across them")
     fps = round(statistics.median(rates), 3)
+    if out_fps is not None and not (math.isfinite(out_fps) and out_fps > fps):
+        raise SystemExit(f"video-cycle-align: --out-fps {out_fps:g} is not above the loops' {fps:g} fps: a set is given at a "
+                         "higher rate than it was filmed (its frames between made)")
+    cut_again: dict[int, dict[str, Any]] = {}
+    for i, (d, meta_path, meta, _) in enumerate(loops):
+        try:
+            done = unfilled_source(d, meta_path, meta)
+        except ValueError as exc:
+            raise SystemExit(f"video-cycle-align: {d}: {exc} — cut it again with `video-loop --fill-held off` and align that: "
+                             "the alignment makes its frames between from frames as filmed (docs/loop-repair.md section 7)") from None
+        if done is not None:
+            cut_again[i] = done
     sources = []
     for d, *_ in loops:
         try:
@@ -1357,10 +1519,11 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
             raise SystemExit(f"video-cycle-align: {d}: {exc}; frames between source frames are made by RIFE (docs/loop-repair.md)") from exc
         start = strike["start"]
         # A loop whose held cells video-loop made again (`held_fill`) shows a picture a cell where its clip held them: the
-        # clip's readings say how it was filmed, not how it plays, and its own cells are read.
-        filled = bool((loops[i][2].get("held_fill") or {}).get("made"))
-        drawings = held_drawings(frames, fps=fps, clip=None if filled else loops[i][2].get("drawings"),
-                                 cut=None if filled else loops[i][2].get("cycle_drawings"))
+        # clip's readings say how it was filmed, not how it plays, and its own cells are read. The frames aligned are the
+        # cut's as filmed wherever they can be (`unfilled_source`); only an aligned loop's frames from before may be filled.
+        made = _material_filled(d, loops[i][1], loops[i][2])
+        drawings = held_drawings(frames, fps=fps, clip=None if made else loops[i][2].get("drawings"),
+                                 cut=None if made else loops[i][2].get("cycle_drawings"))
         # the ghosts passed over or kept as frames of cycle.source/, each cell where it now stands
         ghost_at = sorted(({**g, "at": (g["at"] - start) % target, "source": index[g["source"]], "taken": index[g["taken"]]}
                            for g in facts["ghost_at"]), key=lambda g: g["at"])
@@ -1393,14 +1556,31 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
                                                  "at": [[(k - start) % target, (k + 1 - start) % target]
                                                         for k in _showing(j["step"][0], provenance, len(frames))]}
                                                 for j in screen["jumps"]]}
-        provenance = [{"source": index[p["source"]]} if "source" in p else {"between": [index[j] for j in p["between"]], "t": p["t"]}
-                      for p in provenance]
+        raw = provenance
+        provenance = [_indexed(p, index) for p in provenance]
         out = out[start:] + out[:start]
         if cadence_mod.view_reads_feet(view):
             record["same_foot"] = {**cadence_mod.same_foot(out, view), "clip": loops[i][2].get("clip_feet")}
         record["retake"] = retake(drawings, facts, ghost_at, fps=fps, beat=record["beat"], feet=record.get("same_foot"),
                                   screen=record["screen"])
-        aligned.append((out, record, provenance[start:] + provenance[:start]))
+        if i in cut_again:
+            record["cut_again"] = cut_again[i]
+        # The loop as delivered, read at the end (docs/loop-repair.md section 7): its held cells made between the poses
+        # beside them, its first cell kept (a loop drawn on twos or threes keeps every run), then given at `out_fps`.
+        hold = held_fill_mod.drawn(held_fill_mod.runs(held_fill_mod.same_steps(frames)), len(frames), drawings.get("hold"))
+        out, held = _fill_aligned(out, lazy, mode=fill_held, hold=hold)
+        turned = raw[start:] + raw[:start]
+        base = list(turned)
+        for row in held.get("frames", []):
+            turned[row["cell"]] = _place_between(base, row["between"], row["t"], len(frames), row["cell"])
+        times = None
+        if out_fps is not None:
+            out, held["out_fps"], turned = _rate_aligned(out, lazy, turned, fps=fps, out_fps=out_fps, count=len(frames))
+            times = held["out_fps"]["times"] if held["out_fps"]["applied"] else None
+        record["held_fill"] = held
+        record["holds"] = held_fill_mod.intended(held)
+        record["times"] = times
+        aligned.append((out, record, [_indexed(p, index) for p in turned]))
     twice = [(loops[i][0], loops[i][1], record) for i, (_, record, _) in enumerate(aligned)
              if (record.get("same_foot") or {}).get("twice")]
     if twice and same_foot == "refuse":
@@ -1416,10 +1596,14 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         raise SystemExit(message)
     rows = []
     for (d, meta_path, meta, _), (out, record, provenance), origin in zip(loops, aligned, origins):
-        merged = _rebuild(d, meta_path, meta, out, fps, record, cells_from=provenance, origin=origin)
+        held, holds, times = record.pop("held_fill"), record.pop("holds"), record.pop("times")
+        public = held_fill_mod.public(held)
+        rate = held["out_fps"]["asked"] if (held.get("out_fps") or {}).get("applied") else None
+        merged = _rebuild(d, meta_path, meta, out, rate or fps, record, cells_from=provenance, origin=origin, held=public,
+                          holds=holds, times=times, source_fps=fps if rate else None)
         # The report names where each cell is from; the cut's own record stays in the strip's meta.
         rows.append({"dir": str(d), "name": meta_path.name[: -len(".strip.json")],
-                     **{k: v for k, v in record.items() if k not in ("gif", "webp", "origin")},
+                     **{k: v for k, v in record.items() if k not in ("gif", "webp", "origin")}, "held_fill": public,
                      "strip": {k: merged[k] for k in ("frames", "w", "h", "body_h", "delay_ms")}})
     warnings = [_fault_line(r["name"], m, next((g for g in r["ghost_at"] if g["at"] == m["at"]), None))
                 for r in rows for m in r.get("smear", []) if m["faults"]]
@@ -1430,6 +1614,9 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
     # A loop to film again is named by its directory where two loops share a strip name (each `walk`).
     shared = len({r["name"] for r in rows}) < len(rows)
     warnings += [_ghost_line(r["dir"] if shared else r["name"], g) for r in rows for g in r["ghost_at"]]
+    warnings += [f"{r['dir'] if shared else r['name']}: {line}" for r in rows for line in loop_mod.fill_lines(r["held_fill"])]
+    warnings += [f"{r['dir'] if shared else r['name']}: {line}" for r in rows if "out_fps" in r["held_fill"]
+                 for line in loop_mod.out_fps_lines(r["held_fill"]["out_fps"])]
     warnings += [f"{r['dir'] if shared else r['name']}: the ghost screen does not read it — {r['ghost_screen']['why']}; no frame of it "
                  "is named a ghost or given way for one, so look at cycle/ (docs/loop-repair.md section 4)"
                  for r in rows if not r["ghost_screen"]["reads"]]
@@ -1450,7 +1637,8 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
               "lengths": lengths, "multi_cycle": multi_cycle, "suspects": suspects, "unnamed_feet": unnamed,
               "cycles_given": {str(loops[i][0]): k for i, k in given.items()},
               "feet_given": {str(loops[i][0]): f for i, f in told.items()},
-              "fps": round(fps, 4), "cycle_seconds": round(target / fps, 4),
+              "fps": round(fps, 4), "cycle_seconds": round(target / fps, 4), "fill_held": fill_held,
+              **({"out_fps": out_fps} if out_fps is not None else {}),
               "interpolator": (dict(located[0]) if located else
                                {"kind": "injected"} if any(r.get("smear") for r in rows) else None),
               "between_cache": cache.record() if cache is not None else None,
@@ -1501,6 +1689,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                              "halves of its feet lifting, read round the loop): warn (default) names it in the report (`same_foot`, "
                              "with its clip's every cut as video-loop read them) and the warnings; refuse stops the set before "
                              "anything is rewritten, the report naming it")
+    parser.add_argument("--fill-held", choices=held_fill_mod.MODES, default="auto",
+                        help="auto (default): each loop as aligned is read for neighbour cells that show the same picture, and "
+                             "they are made again as the frames between the poses beside them, as video-loop fills a loop "
+                             "(docs/loop-repair.md section 7), its first cell kept; a loop drawn on twos or threes, and a hold "
+                             "longer than three cells, are kept; with no RIFE the cells are delivered as resampled with a "
+                             "warning. off: delivered as resampled. A loop whose held cells video-loop made again is cut again "
+                             "with the fill off from its report before it is aligned (or the set stops naming it)")
+    parser.add_argument("--out-fps", type=float, metavar="F",
+                        help="give every loop of the set at F frames a second, above the loops' own rate, once aligned: each "
+                             "cell at its own time, made between the cells beside it (never a cell shown again), every loop "
+                             "the same number of cells; the strip metadata says `out_fps` and `source_fps`")
     parser.add_argument("--between-cache", type=Path, metavar="DIR",
                         help="a directory every frame RIFE makes between two source frames is kept in, for aligning the same set "
                              "again: a later alignment given the same DIR (the feet told, a retake in place of one loop) takes a "
@@ -1543,7 +1742,8 @@ def run(**kwargs: object) -> int:
                            multi_cycle=str(kwargs.get("multi_cycle") or "fail"), cycles=parse_cycles(list(kwargs.get("cycles") or [])),  # type: ignore[arg-type]
                            state=kwargs.get("state"), feet=parse_feet(list(kwargs.get("foot") or [])),  # type: ignore[arg-type]
                            between_cache=kwargs.get("between_cache"),  # type: ignore[arg-type]
-                           same_foot=str(kwargs.get("same_foot") or "warn"))
+                           same_foot=str(kwargs.get("same_foot") or "warn"),
+                           fill_held=str(kwargs.get("fill_held") or "auto"), out_fps=kwargs.get("out_fps"))  # type: ignore[arg-type]
     except rife_mod.RifeNotInstalled as exc:
         # Asked for by name, so no RIFE is a failure, never a quiet skip (video-set skips with a warning).
         raise SystemExit(f"video-cycle-align: {exc}; frames between source frames are made by RIFE — "

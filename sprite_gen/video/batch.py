@@ -879,50 +879,7 @@ def run_item(
                                cycle_mode=cut,
                                facing=facing if direction in handed_mod.LATERAL_VIEWS else "right", view=direction,
                                fill_held=fill_held, out_fps=out_fps, air_retime=air_retime, meters_per_px=meters_per_px)
-        result["loop"] = {"kind": lp["cycle"].get("kind", "periodic"), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "drift_px": lp["strip"].get("drift_px", 0), "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
-        result["loop"]["review_recommended"] = lp["cycle"].get("review_recommended", False)
-        result["loop"]["half_period_guard"] = lp["cycle"].get("half_period_guard")
-        if (lp["cycle"].get("fundamental") or {}).get("suspects"):
-            # a half or a third of the cut repeats: it may hold that many cycles (recorded, not cut)
-            result["loop"]["fundamental"] = {"period": lp["cycle"]["fundamental"]["period"],
-                                             "suspects": [{k: row.get(k) for k in ("period", "cycles", "pose", "steps")}
-                                                          for row in lp["cycle"]["fundamental"]["suspects"]]}
-        if "steps" in lp["cycle"]:
-            # the cut's steps are known: its frame count is two steps — one cycle — not twice its siblings' one
-            result["loop"]["steps"] = lp["cycle"]["steps"]["count"]
-        if local_cycle.unwitnessed(lp["cycle"]):
-            # its crossings may mark cycles, or its cut be one step, and nothing witnesses whether: it may hold half a
-            # cycle or two
-            result["loop"][local_cycle.UNWITNESSED] = True
-        if local_cycle.four_steps(lp["cycle"]):
-            # its cut holds four steps (its body or its feet say so): two cycles where its strip counts two steps — aligned as one
-            # cycle, it would play twice as fast
-            result["loop"][local_cycle.FOUR_STEPS] = True
-        if (lp["cycle"].get("step_screen") or {}).get("suspect"):
-            # the cut may be one step of a cycle twice as long (recorded, not cut again)
-            result["loop"]["step_screen"] = {k: lp["cycle"]["step_screen"][k] for k in ("lag", "ratio", "depth", "coverage")}
-        if lp.get("motion_anchor", {}).get("applied") is False:
-            result["loop"]["motion_anchor"] = lp["motion_anchor"]
-        if lp.get("retake"):
-            # a take to film again (a part that pops at the wrap, a walk that starts or stops in the take), named
-            result["loop"]["retake"] = {k: lp["retake"][k] for k in ("reason", "reasons", "remedy")}
-        # The cut's poses over its cells, its held runs as delivered, and what became of them (docs/loop-repair.md section 7).
-        held = lp["held_fill"]
-        result["loop"]["poses"] = held_fill_mod.said(held)
-        result["loop"]["held_fill"] = {"before": held_fill_mod.said(held["before"]), "held_runs": held["held_runs"],
-                                       "made": held["made"], **({"unmade": held["unmade"]} if "unmade" in held else {}),
-                                       **({"out_fps": held["out_fps"]} if "out_fps" in held else {})}
-        if "root_motion" in lp:
-            # A cut played once: each air's seconds and apex (docs/video-pipeline.md, "Root motion").
-            result["loop"]["air"] = root_motion_mod.said(lp["root_motion"])
-        if "air_retime" in lp:
-            result["loop"]["air_retime"] = {k: lp["air_retime"][k] for k in ("applied", "why", "made", "shown_again", "poses", "cells")
-                                            if k in lp["air_retime"]}
-        if "rife" in (lp.get("jump_repair") or {}):
-            # cut as filmed for want of RIFE: the set report lists it under `warnings` (a wrap the seam bridge read carries
-            # its `seam`, not the flow's `off_max_before`)
-            result["loop"]["jump_repair"] = {k: lp["jump_repair"][k] for k in ("applied", "why", "off_max_before", "seam", "install")
-                                             if k in lp["jump_repair"]}
+        result["loop"] = loop_summary(lp)
         result["ok"] = True
     except CodexUnavailableAsk as exc:
         result["ok"] = False
@@ -932,6 +889,60 @@ def run_item(
         result["ok"] = False
         result["error"] = str(exc)
     return result
+
+
+def held_summary(held: dict[str, Any]) -> dict[str, Any]:
+    """What the set report says of a loop's held cells (its `held_fill` record, the cut's or its alignment's)."""
+    return {"before": held_fill_mod.said(held["before"]), "held_runs": held["held_runs"], "made": held["made"],
+            **({"unmade": held["unmade"]} if "unmade" in held else {}),
+            **({"out_fps": held["out_fps"]} if "out_fps" in held else {})}
+
+
+def loop_summary(lp: dict[str, Any]) -> dict[str, Any]:
+    """What the set report says of an item's loop, from `video-loop`'s report of its cut."""
+    loop: dict[str, Any] = {"kind": lp["cycle"].get("kind", "periodic"), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "drift_px": lp["strip"].get("drift_px", 0), "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
+    loop["review_recommended"] = lp["cycle"].get("review_recommended", False)
+    loop["half_period_guard"] = lp["cycle"].get("half_period_guard")
+    if (lp["cycle"].get("fundamental") or {}).get("suspects"):
+        # a half or a third of the cut repeats: it may hold that many cycles (recorded, not cut)
+        loop["fundamental"] = {"period": lp["cycle"]["fundamental"]["period"],
+                               "suspects": [{k: row.get(k) for k in ("period", "cycles", "pose", "steps")}
+                                            for row in lp["cycle"]["fundamental"]["suspects"]]}
+    if "steps" in lp["cycle"]:
+        # the cut's steps are known: its frame count is two steps — one cycle — not twice its siblings' one
+        loop["steps"] = lp["cycle"]["steps"]["count"]
+    if local_cycle.unwitnessed(lp["cycle"]):
+        # its crossings may mark cycles, or its cut be one step, and nothing witnesses whether: it may hold half a
+        # cycle or two
+        loop[local_cycle.UNWITNESSED] = True
+    if local_cycle.four_steps(lp["cycle"]):
+        # its cut holds four steps (its body or its feet say so): two cycles where its strip counts two steps — aligned as one
+        # cycle, it would play twice as fast
+        loop[local_cycle.FOUR_STEPS] = True
+    if (lp["cycle"].get("step_screen") or {}).get("suspect"):
+        # the cut may be one step of a cycle twice as long (recorded, not cut again)
+        loop["step_screen"] = {k: lp["cycle"]["step_screen"][k] for k in ("lag", "ratio", "depth", "coverage")}
+    if lp.get("motion_anchor", {}).get("applied") is False:
+        loop["motion_anchor"] = lp["motion_anchor"]
+    if lp.get("retake"):
+        # a take to film again (a part that pops at the wrap, a walk that starts or stops in the take), named
+        loop["retake"] = {k: lp["retake"][k] for k in ("reason", "reasons", "remedy")}
+    # The cut's poses over its cells, its held runs as delivered, and what became of them (docs/loop-repair.md section 7).
+    held = lp["held_fill"]
+    loop["poses"] = held_fill_mod.said(held)
+    loop["held_fill"] = held_summary(held)
+    if "root_motion" in lp:
+        # A cut played once: each air's seconds and apex (docs/video-pipeline.md, "Root motion").
+        loop["air"] = root_motion_mod.said(lp["root_motion"])
+    if "air_retime" in lp:
+        loop["air_retime"] = {k: lp["air_retime"][k] for k in ("applied", "why", "made", "shown_again", "poses", "cells")
+                              if k in lp["air_retime"]}
+    if "rife" in (lp.get("jump_repair") or {}):
+        # cut as filmed for want of RIFE: the set report lists it under `warnings` (a wrap the seam bridge read carries
+        # its `seam`, not the flow's `off_max_before`)
+        loop["jump_repair"] = {k: lp["jump_repair"][k] for k in ("applied", "why", "off_max_before", "seam", "install")
+                               if k in lp["jump_repair"]}
+    return loop
 
 
 def _refuse_mirror_with_handed(facing_fix: str, handed: list[Handed] | None) -> None:
@@ -1011,8 +1022,27 @@ def left_out_why(reasons: list[str], *, stands: bool = False, one_step: bool = F
     return why + ("; its step screen says it may be one step (cut it again with video-loop --steps 1 if it is)" if one_step else "")
 
 
+def cut_again_unaligned(r: dict[str, Any], *, fill_held: str, out_fps: float | None) -> None:
+    """An item's loop cut for an alignment that did not take it, cut again from its report as a loop delivered as it
+    is (`loop.cut_again`): `fill_held` and `out_fps` as the set was asked. Its result says so (`cut_again`); a cut again
+    that fails is the item's failure."""
+    item_dir = Path(r["dir"])
+    report_path = item_dir / "loop.report.json"
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        lp = loop_mod.cut_again(report, item_dir / "loop", report_path=report_path, fill_held=fill_held, out_fps=out_fps)
+    except (OSError, ValueError) as exc:
+        r["ok"], r["error"] = False, f"the loop cut for the alignment, not aligned, could not be cut again with its held cells filled: {exc}"
+        return
+    except SystemExit as exc:
+        r["ok"], r["error"] = False, str(exc)
+        return
+    r["loop"] = {**loop_summary(lp), "cut_again": {"why": "not aligned", "fill_held": fill_held,
+                                                   **({"out_fps": out_fps} if out_fps is not None else {})}}
+
+
 def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpolate: Any = None, between: str = align_mod.DEFAULT_BETWEEN,
-                feet: dict[str, str] | None = None) -> dict[str, Any]:
+                feet: dict[str, str] | None = None, fill_held: str = "auto", out_fps: float | None = None) -> dict[str, Any]:
     """One cycle length per gait state across the set's directions (`video-cycle-align`,
     docs/loop-repair.md section 4). A state filmed in fewer than two directions has nothing to
     match. A failure is recorded under its state and the batch reports it; the loops stay as cut.
@@ -1062,7 +1092,8 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
         try:
             report = align_mod.align_set([Path(r["dir"]) / "loop" for r in rows], interpolate=interpolate,
                                          report_path=root / f"{state}.cycle-align.json", between=between,
-                                         views=[_align_view(r) for r in rows], state=state, feet=told)
+                                         views=[_align_view(r) for r in rows], state=state, feet=told,
+                                         fill_held=fill_held, out_fps=out_fps)
         except rife_mod.RifeNotInstalled as exc:
             out[state] = {"ok": True, "applied": False, "reason": "rife-not-installed", "why": "RIFE not installed — each loop keeps its own length",
                           "rife": str(exc), "install": rife_mod.install_command()}
@@ -1097,6 +1128,9 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
             r["loop"]["cycle_align"] = {k: row[k] for k in ("from", "to", "made_by_rife", "turned_by", "turned_on", "start_foot", "start_foot_source",
                                                             "seam_ratio", "retake")}
             r["loop"]["n_out"] = row["strip"]["frames"]
+            # the loop as delivered is the alignment's: its held cells and its poses over its cells are the alignment's
+            r["loop"]["held_fill"] = held_summary(row["held_fill"])
+            r["loop"]["poses"] = held_fill_mod.said(row["held_fill"])
     for state, items in left_out.items():
         out.setdefault(state, {"ok": True, "applied": False, "why": "fewer than two directions left to align"})["left_out"] = items
         for item, reasons in items.items():
@@ -1234,9 +1268,6 @@ def run_set(
             raise SystemExit(f"video-set: {exc}") from None
         if meters_per_px is None and {"gravity", "speed"} & set(asked_air):
             raise SystemExit("video-set: --air-retime gravity= and speed= are metres: give --meters-per-px")
-    if out_fps is not None and aligned_items:
-        raise SystemExit(f"video-set: --out-fps gives each cut at a higher rate, and the cycle alignment of {', '.join(aligned_items)} "
-                         "makes its own frames between to one length — pass --align-cycles off with it")
     for item, foot in (align_feet or {}).items():
         if item not in aligned_items:
             raise SystemExit(f"video-set: --align-foot {item}={foot}: {item} is not an item the set aligns (a walk or run filmed in two or "
@@ -1258,13 +1289,20 @@ def run_set(
         return prepare_side
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
-        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=b, root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=f, facing_fix=facing_fix, prepare_side=side_preparer(f), body_height=body_height, fit=fit, decontam=decontam, walk_start=walk_start, redraw_runner=redraw_runner, still_provider=still_provider, handed=handed, body_plan=body_plan, **({"end_frame": end_frames[i]} if end_frames and i in end_frames else {}), **({"play": plays[i]} if i in plays else {}), **({"motion": motions[i]} if i in motions else {}), fill_held=fill_held, out_fps=out_fps, air_retime=air_retime, meters_per_px=meters_per_px): i for i, d, s, f, b in items}
+        futures = {ex.submit(run_item, item=i, direction=d, state=s, base=b, root=root, character=character, duration=duration, resolution=resolution, key=key, force=force, gap=gap, video_runner=video_runner, shape=shape, anchor=anchor, spill=spill, facing=f, facing_fix=facing_fix, prepare_side=side_preparer(f), body_height=body_height, fit=fit, decontam=decontam, walk_start=walk_start, redraw_runner=redraw_runner, still_provider=still_provider, handed=handed, body_plan=body_plan, **({"end_frame": end_frames[i]} if end_frames and i in end_frames else {}), **({"play": plays[i]} if i in plays else {}), **({"motion": motions[i]} if i in motions else {}), fill_held="off" if i in aligned_items else fill_held, out_fps=None if i in aligned_items else out_fps, air_retime=air_retime, meters_per_px=meters_per_px): i for i, d, s, f, b in items}
         for fut in as_completed(futures):
             r = fut.result()
             results.append(r)
             print(json.dumps({k: r[k] for k in ("item", "ok") if k in r} | ({"error": r["error"]} if not r.get("ok") else {"seam": r["loop"]["seam_ratio"]}), ensure_ascii=False), flush=True)
     results.sort(key=lambda r: [i for i, *_ in items].index(r["item"]))
-    aligned = align_gaits(results, root, align_cycles, interpolate=interpolate, between=align_between, feet=align_feet)
+    aligned = align_gaits(results, root, align_cycles, interpolate=interpolate, between=align_between, feet=align_feet,
+                          fill_held=fill_held, out_fps=out_fps)
+    # An item cut for the alignment (its held cells as filmed, at its clip's rate) that no alignment took — left out, or
+    # its state not aligned — is a loop delivered as it is: cut again as asked, its held cells filled (docs/loop-repair.md
+    # section 7).
+    for r in results:
+        if r.get("ok") and r["item"] in aligned_items and "cycle_align" not in r["loop"] and (fill_held != "off" or out_fps is not None):
+            cut_again_unaligned(r, fill_held=fill_held, out_fps=out_fps)
     table = write_table(results, root / "table.md", both=both)
     failed = [r["item"] for r in results if not r.get("ok")] + [f"cycle-align:{st}" for st, a in aligned.items() if not a.get("ok")]
     # What the set left undone for want of RIFE — never a failure, never silent.
@@ -1399,11 +1437,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                              "the set's start foot lands, recorded start_foot_source given")
     parser.add_argument("--fill-held", choices=held_fill_mod.MODES, default="auto",
                         help="each cut's neighbour cells showing the same picture (video-loop --fill-held): auto (default) makes "
-                             "them again with RIFE's frames between, off cuts them as filmed; each item's `loop.poses` says its poses "
-                             "over its cells")
+                             "them again with RIFE's frames between (a walk or run the set aligns is cut as filmed and filled once "
+                             "aligned, video-cycle-align --fill-held), off cuts them as filmed; each item's `loop.poses` says its "
+                             "poses over its cells")
     parser.add_argument("--out-fps", type=float, default=None,
-                        help="give each cut at this rate, above its clip's, made of frames between (video-loop --out-fps); with "
-                             "a walk or run filmed in two or more directions, pass --align-cycles off")
+                        help="give each cut at this rate, above its clip's, made of frames between (video-loop --out-fps); a "
+                             "walk or run filmed in two or more directions is given it once aligned (video-cycle-align --out-fps)")
     parser.add_argument("--air-retime", default=None, metavar="gravity=G,air=T,speed=V",
                         help="each cut played once with an air in it: that air given a length, a gravity and a speed of its own "
                              "(video-loop --air-retime); each item's `loop.air` says each air's seconds and apex")

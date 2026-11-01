@@ -426,6 +426,8 @@ GHOST_KEYS_2430 = {"ghost_screen", "ghost_at"}
 CLIP_FEET_KEYS, BEAT_KEYS = {"clip_feet"}, {"beat", "screen"}
 # 3.8.0: the cut's held cells, read and made again (docs/loop-repair.md section 7)
 HELD_FILL_KEYS_3800 = {"held_fill"}
+# 4.0.0: the strip's exact rate, and the cells it shows again on purpose (docs/loop-repair.md section 7)
+NO_REPEAT_KEYS_400 = {"fps", "holds"}
 
 
 def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path, staffless):
@@ -448,8 +450,11 @@ def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path, staff
     assert all("cycles_kept" not in row and "steps" not in row for row in out["loops"])
     for d in dirs:
         meta = json.loads((d / "loop.strip.json").read_text())
-        assert set(meta) == STRIP_KEYS_2350 | SOURCE_KEYS_2390 | CLIP_FEET_KEYS | HELD_FILL_KEYS_3800
-        assert set(meta["cycle_align"]) == CYCLE_ALIGN_KEYS_2350 | CORRESPONDENCE_KEYS_2410 | GHOST_KEYS_2430 | BEAT_KEYS
+        assert set(meta) == STRIP_KEYS_2350 | SOURCE_KEYS_2390 | CLIP_FEET_KEYS | HELD_FILL_KEYS_3800 | NO_REPEAT_KEYS_400
+        # 4.0.0: a cut whose cells were made again after its repair (its read again) is cut again with the fill off
+        # before it is aligned, and the alignment says so (docs/loop-repair.md section 7).
+        again = {"cut_again"} if align.filled(cut) else set()
+        assert set(meta["cycle_align"]) == CYCLE_ALIGN_KEYS_2350 | CORRESPONDENCE_KEYS_2410 | GHOST_KEYS_2430 | BEAT_KEYS | again
         # The cut's source stays as the cut wrote it: `cycle_align` says the cells were turned after it, so it
         # no longer names each cell's frame (docs/loop-comparison.md). The rebuilt strip names its own cells —
         # the same frames, turned, under the same crop.
