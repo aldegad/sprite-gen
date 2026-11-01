@@ -25,7 +25,7 @@ against every verb's printed options.
 |---|---|
 | `kind` | `sprite-gen-capabilities` |
 | `version` | the installed package's version (`unknown` from a bare checkout) |
-| `providers` | per provider (`openai`, `xai`, `anthropic`, `elevenlabs`): `base_url_env` (the variable that moves its calls), `base_url` (the documented address used when it is unset), `key_env` (its API key); docs/gen.md, [provider addresses](gen.md#provider-addresses) |
+| `providers` | per provider (`openai`, `xai`, `anthropic`): `base_url_env` (the variable that moves its calls), `base_url` (the documented address used when it is unset), `key_env` (its API key); docs/gen.md, [provider addresses](gen.md#provider-addresses) |
 | `logins_env` | `SPRITE_GEN_LOGINS`, where `off` turns subscription logins off ([subscription logins off](gen.md#subscription-logins-off)) |
 | `verbs` | every verb, in the order of `sprite-gen --help`'s table |
 
@@ -68,7 +68,6 @@ its `--help` and its doc ([docs/README.md](README.md)).
 |---|---|---|
 | `gen`, `gen-set`, `logo` | `openai` (`--provider openai`), `xai` (`--provider grok`); codex runs on its own login | yes |
 | `pixel-draw` | `anthropic` | yes |
-| `sound` | `elevenlabs` | yes |
 | `curation` | `xai` (the reroll and in-between buttons on grok; codex on its own login) | yes |
 | `video`, `video-extend`, `video-edit`, `video-set` | `xai` | yes |
 | `video-resume` | `xai` | no |

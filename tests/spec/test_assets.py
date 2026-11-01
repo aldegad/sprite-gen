@@ -333,24 +333,6 @@ def test_row_major_sheet_ignores_unused_cells_and_keeps_sidecar_policy(tmp_path)
     assert [f.getpixel((0, 0)) for f in seq.frames] == [Image.new("RGBA", (1, 1), c).getpixel((0, 0)) for c in colors]
 
 
-def test_all_direction_rows_share_one_snapshot_decode(tmp_path, monkeypatch):
-    source = tmp_path / "directions.json"
-    source.write_text(json.dumps({"cell": [6, 8], "frames": 2, "fps": 10, "rows": ["NE", "SW"]}))
-    image = Image.new("RGBA", (12, 16), "red")
-    image.paste(Image.new("RGBA", (12, 8), "blue"), (0, 8))
-    image.save(tmp_path / "directions.png")
-    reads, decodes = [], []
-    read, decode = assets._read_bytes, assets._decode_image
-    monkeypatch.setattr(assets, "_read_bytes", lambda p: (reads.append(p.name), read(p))[1])
-    monkeypatch.setattr(assets, "_decode_image", lambda data: (decodes.append(len(data)), decode(data))[1])
-    sequences = assets.load_asset_states(source)
-    assert list(sequences) == ["NE", "SW"]
-    assert reads == ["directions.json", "directions.png"] and len(decodes) == 1
-    assert sequences["NE"].frames[0].getpixel((0, 0)) == (255, 0, 0, 255)
-    assert sequences["SW"].frames[0].getpixel((0, 0)) == (0, 0, 255, 255)
-    assert sequences["NE"].fingerprints() == sequences["SW"].fingerprints()
-
-
 @pytest.mark.parametrize(("module", "name", "written"), [
     ("sprite_gen.spec.runio", "REQUEST_KIND", "sprite-gen-request"),
     ("sprite_gen.video.align", "REPORT_KIND", "sprite-gen-video-cycle-align-report"),

@@ -63,7 +63,7 @@ has no key to remove: pass `--chroma-key none` and the sheet keeps its own alpha
 Transparent sheets often carry a faint alpha haze around and between the drawn objects. It
 joins neighbouring parts and enlarges a figure's measured height. `--alpha-floor N` (1..255;
 `64` suits most generated sheets) clears it before parts are measured, with the shared
-[alpha cleanup](ui-kit.md#alpha-cleanup): pixels at or above the floor and the faint pixels
+[alpha cleanup](#alpha-cleanup): pixels at or above the floor and the faint pixels
 within `--alpha-edge` pixels (default 2) of them are kept as they are, every other faint pixel
 becomes fully transparent. The run writes the cleanup's report to
 `<out-dir>/<prefix>alpha-cleanup.json` (haze share before and after, pixels cleared, and the
@@ -74,6 +74,25 @@ the default `0` leaves the alpha exactly as extraction made it.
 sprite-gen slice-sheet --sheet props.png --out-dir props/ --chroma-key none --alpha-floor 64 \
   --grid 3x2 --names pillar,statue,shrub,lantern,gravestone,fountain --prefix prop_
 ```
+
+### Alpha cleanup
+
+Transparent sheets from image models often carry a faint alpha haze: barely visible pixels around and between the drawn objects. `--alpha-floor` clears it with `sprite_gen.frames.alpha_floor.clear_haze`.
+
+* A pixel at or above the floor (`--alpha-floor`) is solid. A pixel above zero and below the floor is faint.
+* A faint pixel within `--alpha-edge` pixels (8-connected, so diagonals count) of a solid pixel is part of an object's anti-aliased edge and is kept unchanged.
+* Every other faint pixel is haze and becomes fully transparent (`0, 0, 0, 0`). A pixel that was already fully transparent is left as it was.
+
+Solid pixels and edge pixels are never changed, so a stroke stays whole as long as some of its pixels reach the floor. A stroke drawn entirely below the floor is indistinguishable from haze and is removed: lower the floor for very faint art. The report measures instead of asserting: it counts what actually changed.
+
+| Field | Meaning |
+|---|---|
+| `floor`, `edge_px` | the settings |
+| `pixels` | pixels in the image |
+| `faint_fraction_before`, `faint_fraction_after` | share of all pixels with alpha from 1 to `floor - 1`, before and after |
+| `haze_fraction_before`, `haze_fraction_after` | share of all pixels that are faint and farther than `edge_px` from a solid pixel |
+| `cleared_pixels` | pixels made transparent |
+| `changed_solid_pixels`, `changed_edge_pixels` | solid and kept-edge pixels whose value changed; `0` unless the cleanup is wrong |
 
 ## Props and icons: sheet scale and contain fit
 
@@ -101,8 +120,8 @@ sprite-gen slice-sheet --sheet icons.png --out-dir icons/ --chroma-key none --al
   --grid 4x3 --cell-width 256 --cell-height 256 --baseline-y 236 --target-height 216 --fit contain
 ```
 
-Every cell of a sheet is cut on the same canvas, so a [game pack](game-pack.md#version-2-request) that gives each
-cell the same `display` height scales them all by the same amount and the sizes stay relative there too. The alpha
+Every cell of a sheet is cut on the same canvas, so a consumer that draws each cell at the same height scales them
+all by the same amount and the sizes stay relative there too. The alpha
 cleanup (`--alpha-floor`) runs before anything is measured, so the factor is taken on the cleaned sheet and applies to
 every cell alike.
 
@@ -142,8 +161,7 @@ Every run writes `<out-dir>/<prefix>slice-sheet.json`:
   main subject's base, the point it stands on; `clipped_px` counts the cut's pixels with any alpha that fell past
   the canvas edge (always `0` with `contain`; the run also prints a line for each cell the canvas cut); `parts` is
   how many parts the cell kept.
-- `anchor` goes into a game pack's `images[].anchor` as it is: it is in the PNG's own pixels. When `--baseline-y`
-  equals `--cell-height`, the pack's default bottom-centre anchor is the same point.
+- `anchor` is in the PNG's own pixels, so an engine can take it as the image's origin as it is.
 
 The PNGs of a default run (`--scale cell --fit none`) are byte for byte those of the version before these flags.
 

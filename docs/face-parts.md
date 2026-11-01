@@ -242,7 +242,7 @@ If the planner finds no suitable frame within the body clip and one round of the
 | Frame steps | `video.loop._small_features` | Loop analysis features. |
 | Jump line | `video.stop.SEAM_MAX` | Stop and loop jump line, 1.4. |
 | Mask growth and pieces | `video.parts._dilate`, `_erode`, and `_pieces` | Tail mask morphology. |
-| Packaged JS player and digests | Sound pack's `sprite-gen-audio-v2.mjs` and `audio/manifest.py` | One rule in JS, copied into the pack. |
+| Packaged JS player and digests | New code here | One rule in JS, copied into the pack. |
 | JS run from Python | node, as in the breathe JS mirror test | Runs the pack's player for a bake. |
 | Similarity anchor with size and tilt | New code here | The engine has no size and tilt reading. |
 | Mouth reading and expression sets | New code here | The engine has no mouth reading. |

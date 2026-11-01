@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Where each provider sprite-gen calls is: its address, read from the environment at every call.
 
-sprite-gen calls four providers over HTTP itself, with no SDK: OpenAI, xAI, Anthropic and ElevenLabs. Each has one
+sprite-gen calls three providers over HTTP itself, with no SDK: OpenAI, xAI and Anthropic. Each has one
 base address, the documented API root with its version path, and one environment variable that replaces it,
 `SPRITE_GEN_<PROVIDER>_BASE_URL`. Unset, empty or blank is the documented address, so nothing changes for anyone who
 sets none. The variable is read when a request is made, never at import, so a process that sets it after importing
@@ -15,9 +15,9 @@ that forwards the provider's API forwards it too. Without the variable it is fet
 
 Every direct provider call builds its URL here (docs/gen.md "Provider addresses" lists them):
 `openai_provider` (images, vision), `xai` callers `grok_provider` (images), `facing_vision.grok_inspect` (vision)
-and `video` (generations, extensions, edits, polls, the clip's download), `anthropic_api` (messages, batches, the
-results file) and `sprite_gen.audio.provider` (sound). The subscription logins (`codex`, `claude`) are the binaries'
-own network and do not read these variables; `SPRITE_GEN_LOGINS=off` turns them off (`base.logins_on`).
+and `video` (generations, extensions, edits, polls, the clip's download), and `anthropic_api` (messages, batches, the
+results file). The subscription logins (`codex`, `claude`) are the binaries' own network and do not read these
+variables; `SPRITE_GEN_LOGINS=off` turns them off (`base.logins_on`).
 """
 from __future__ import annotations
 
@@ -34,16 +34,15 @@ class Provider:
     default: str  # the documented API root, version path included
 
 
-# The four providers' names, each written once: the keys every caller and every table of them (`retry`,
+# The three providers' names, each written once: the keys every caller and every table of them (`retry`,
 # `workflow.capabilities`) names a provider by. A host, not an image provider: `OPENAI` is the API sprite-gen calls,
 # `base.PROVIDER_OPENAI` the image provider that calls it, two names that happen to be spelled alike.
-OPENAI, XAI, ANTHROPIC, ELEVENLABS = "openai", "xai", "anthropic", "elevenlabs"
+OPENAI, XAI, ANTHROPIC = "openai", "xai", "anthropic"
 
 PROVIDERS = {provider.name: provider for provider in (
     Provider(OPENAI, "SPRITE_GEN_OPENAI_BASE_URL", "https://api.openai.com/v1"),
     Provider(XAI, "SPRITE_GEN_XAI_BASE_URL", "https://api.x.ai/v1"),
     Provider(ANTHROPIC, "SPRITE_GEN_ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"),
-    Provider(ELEVENLABS, "SPRITE_GEN_ELEVENLABS_BASE_URL", "https://api.elevenlabs.io/v1"),
 )}
 FETCH_PATH = "/sprite-gen/fetch"
 

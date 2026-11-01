@@ -302,8 +302,7 @@ removed.
 
 The verbs that check a single output against their inputs call the same two functions,
 `runio.same_folder` and `runio.inside_folder`, and have no comparison of their own:
-`background-tile`, `inspect-motion`, `scene-inspect`, `scene-render`, `game-pack`, `ui-kit` and
-`video-sway-inspect`. `video-sway-inspect` now refuses an `--out-dir` that is the loop directory
+`background-tile`, `inspect-motion`, `scene-inspect`, `scene-render` and `video-sway-inspect`. `video-sway-inspect` now refuses an `--out-dir` that is the loop directory
 spelt in capitals on a volume that ignores case; before, it wrote its boards into the loop
 directory. `video-loop-compare`, `video-loop-repair`, `video-source-manifest` and `shadow`
 compared their report or outputs with their inputs by resolved spelling; they now call

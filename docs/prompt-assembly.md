@@ -37,7 +37,7 @@ sentences put in (`tests/gen/test_prompt_assembly.py`).
 | handed | `--direction --handed` | `handedness.text` |
 | facing | `--ref` with `--facing` | `facing.prompt_suffix` |
 | key background | `--transparent --ref` when `auto` plans a key | `chroma.KEY_BACKGROUND_TEXT` |
-| layout guide | `--layout-guide` (`ui-kit`: the UI kit layout) | `gen.layout_guide_text`; `frames.ui_kit.guide_text` |
+| layout guide | `--layout-guide` | `gen.layout_guide_text` |
 
 A facing correction (`--facing-fix regen`) regenerates with the correction ("CORRECTION REQUIRED: …")
 said after the first prompt (`facing.prepare_correction`).

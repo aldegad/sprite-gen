@@ -31,7 +31,7 @@ CLI:
         [--ref REF.png ...] [--transparent [--alpha-mode auto|native|chroma]
         [--chroma-key magenta|green]] [--white-check CHECK.png] [--model ID]
         [--aspect-ratio 1:1] [--quality low|medium|high|xhigh|max|auto]
-        [--resolution 1k|1.5k|2k] [--layout-guide [figure|ui-kit]]
+        [--resolution 1k|1.5k|2k] [--layout-guide [figure]]
         [--report REPORT.json] [--keep-session]
 """
 
@@ -122,10 +122,8 @@ CODEX_UNAVAILABLE_DEFAULT = CODEX_UNAVAILABLE_ASK
 # in-place motion to bob into; a box alone is read loosely, the lines set the scale.
 LAYOUT_GUIDE_LONG_EDGE = 1024
 LAYOUT_GUIDE_NAME = "layout-guide.png"
-# `--layout-guide ui-kit` attaches the UI kit layout instead (`sprite_gen.frames.ui_kit`, docs/ui-kit.md):
-# one box per element, the boxes `ui-kit` later cuts along; square for the frames, 2:3 for the whole kit.
-# The bare flag is the figure guide.
-LAYOUT_GUIDE_KINDS = ("figure", "ui-kit")
+# The bare flag is the figure guide, the one kind there is.
+LAYOUT_GUIDE_KINDS = ("figure",)
 CROWN_LINE = "#ff7a00"
 CROWN_MARK = "#ffb15c"
 FLOOR_LINE = "#00a7a7"
@@ -216,19 +214,6 @@ def layout_guide_kind(value: bool | str | None) -> str | None:
     if value not in LAYOUT_GUIDE_KINDS:
         raise SystemExit(f"gen: unknown --layout-guide {value!r}; expected one of {', '.join(LAYOUT_GUIDE_KINDS)}")
     return str(value)
-
-
-def ui_kit_guide_size(aspect_ratio: str | None) -> tuple[int, int]:
-    """The UI kit guide is square (the frames) or 2:3 (the whole kit): the sheet shapes `ui-kit` cuts along."""
-    from sprite_gen.frames import ui_kit
-
-    width, height = layout_guide_size(aspect_ratio)
-    try:
-        ui_kit.sheet_layout((width, height))
-    except ValueError:
-        raise SystemExit("gen: the ui-kit layout guide is square (1:1, the frames) or 2:3 (the whole kit); "
-                         f"use --aspect-ratio 1:1 or 2:3 (got {aspect_ratio})") from None
-    return width, height
 
 
 def _make_provider(name: str, *, keep_session: bool):
@@ -460,10 +445,8 @@ def generate_image(
 ) -> GenResult:
     """Generate one image and return a GenResult. Raises SystemExit on any failure.
 
-    `layout_guide`: "figure" (or True) attaches the one-slot figure guide, "ui-kit" the UI kit layout."""
+    `layout_guide`: "figure" (or True) attaches the one-slot figure guide."""
     guide_kind = layout_guide_kind(layout_guide)
-    if guide_kind == "ui-kit":
-        ui_kit_guide_size(aspect_ratio)
     if decontam not in extract_mod.DECONTAM_MODES:
         raise SystemExit(f"gen: unknown --decontam {decontam!r}; expected off|auto|palette")
     if decontam == extract_mod.PALETTE and not transparent:
@@ -498,8 +481,7 @@ def generate_image(
     # takes the outline and light fills with it (2026-10-04). A key the prompt already names stays.
     parts = still_prompt(prompt, view=view, facing=facing, handed=handed, body_plan=body_plan, refs=bool(refs),
                          key=chroma_key if strategy_source == STRATEGY_SOURCE_REFS else None,
-                         layout=layout_guide_cell(aspect_ratio) if guide_kind == "figure" else None,
-                         ui_kit_guide=ui_kit_guide_size(aspect_ratio) if guide_kind == "ui-kit" else None)
+                         layout=layout_guide_cell(aspect_ratio) if guide_kind == "figure" else None)
     prompt = parts.text
     for line in prompt_parts.note_lines(parts):
         print(f"[gen] {line}", file=sys.stderr)
@@ -525,12 +507,7 @@ def generate_image(
         attached = list(refs)
         if guide_kind:
             guide = workdir / LAYOUT_GUIDE_NAME
-            if guide_kind == "ui-kit":
-                from sprite_gen.frames import ui_kit
-
-                guide_cell = ui_kit.draw_guide(guide, ui_kit_guide_size(aspect_ratio))
-            else:
-                guide_cell = draw_layout_guide(guide, aspect_ratio)
+            guide_cell = draw_layout_guide(guide, aspect_ratio)
             # Last, so "the last attached image" in the prompt is the guide whatever the caller attached.
             attached.append(guide)
         request = GenRequest(
@@ -676,8 +653,7 @@ def _check_view(view: str | None, facing: str | None, facing_fix: str, handed: l
 def still_prompt(prompt: str, *, view: str | None = None, facing: str | None = None,
                  handed: list[handed_mod.Handed] | None = None, body_plan: list[Body] | None = None,
                  refs: bool = False, key: str | None = None,
-                 layout: dict[str, Any] | None = None,
-                 ui_kit_guide: tuple[int, int] | None = None) -> prompt_parts.Prompt:
+                 layout: dict[str, Any] | None = None) -> prompt_parts.Prompt:
     """The prompt a still is drawn from: the caller's text, then the engine's pieces (`prompt_parts.Prompt.add`;
     without `handed` or `body_plan`, 2.22.0's prompt to the byte). In order:
 
@@ -688,8 +664,7 @@ def still_prompt(prompt: str, *, view: str | None = None, facing: str | None = N
     - with `refs` and a `facing`: the turn over the reference (`facing.prompt_suffix`);
     - `key` (green / magenta, a ref run `auto` planned to key): the key background line, unless the prompt
       names a key background already;
-    - `layout` (the `--layout-guide` cell): where the guide's lines are; `ui_kit_guide`
-      (`--layout-guide ui-kit`, the guide's size): what to draw in each box of the UI kit layout.
+    - `layout` (the `--layout-guide` cell): where the guide's lines are.
     """
     figures = body_mod.figures(body_plan)
     parts = prompt_parts.Prompt(prompt, caller=f"{prompt} {figures}" if figures else None)
@@ -707,10 +682,6 @@ def still_prompt(prompt: str, *, view: str | None = None, facing: str | None = N
         parts.add("key-background", chroma_mod.KEY_BACKGROUND_TEXT[key], key=key)
     if layout is not None:
         parts.add("layout", layout_guide_text(layout))
-    if ui_kit_guide is not None:
-        from sprite_gen.frames import ui_kit
-
-        parts.add("layout", ui_kit.guide_text(ui_kit_guide))
     return parts
 
 
@@ -854,9 +825,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             "attach a layout guide after any --ref. Bare or `figure`: a one-slot guide (frame, inner safe "
             "area at the row guide's 9.4 %% margin, center line) asking for the whole subject inside the "
             "safe area, with room above the head and below the feet; drawn for --aspect-ratio, square "
-            "without one. `ui-kit`: the UI kit layout, one box per element, for `sprite-gen ui-kit`: square "
-            "(--aspect-ratio 1:1 or none) for the frames, 2:3 for the whole kit with bar fills, slot, badge, "
-            "pips and joystick"
+            "without one"
         ),
     )
     parser.add_argument("--white-check", type=Path, help="write a white-composite check image")

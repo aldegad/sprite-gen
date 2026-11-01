@@ -25,21 +25,11 @@ Generate and remove the key with the existing tools, then run the tile command o
 sprite-gen background-tile --source frontage.png --axis x --period 512 --overlap 32 --out tile.png
 ```
 
-`--axis x|y|xy` chooses the repeat direction. `--period` is the output length in source pixels; `--overlap` is the input overlap used to find a low-error quilting seam. Input must contain enough pixels for the requested period and overlap. The tool preserves RGBA, writes a new PNG and `<out-stem>.report.json`, and never overwrites its source. `--report` changes the JSON destination.
+`--axis x|y` chooses the repeat direction. `--period` is the output length in source pixels; `--overlap` is the input overlap used to find a low-error quilting seam. Input must contain enough pixels for the requested period and overlap. The tool preserves RGBA, writes a new PNG and `<out-stem>.report.json`, and never overwrites its source. `--report` changes the JSON destination.
 
 The report measures the join against ordinary interior differences, including alpha and colour over light/dark backgrounds. It records the selected seam and source crop. A numerical join score does not prove that architecture or silhouettes repeat convincingly: inspect at least two adjacent copies. The tool does not invent missing roofs, perspective or scenery.
 
-### Both axes: a ground tile
-
-```bash
-sprite-gen background-tile --source ground.png --axis xy --period 960 --overlap 64 --out ground-tile.png
-```
-
-`--axis xy` makes one square tile, `--period` on each side, that repeats in both directions; the source needs `period + overlap` pixels on both axes. It quilts along x, then along y. The second quilt cannot break the first one's join: its seam's two ends meet across the x wrap, so they may differ by one step at most, like any two neighbouring rows of a seam. Two separate `--axis x` and `--axis y` runs have no such rule, and the second run's report measures only its own axis.
-
-The report measures the finished tile on both axes. `axes.x` and `axes.y` each hold that axis's join measurement (`edge_color_difference`, `seam_alpha_mismatch`, their interior baselines and thresholds), its quilt seam and search, and its own `status` and `review_reasons`. The top-level `status` is `needs-review` when either axis is, and every top-level reason is prefixed with its axis (`y: Internal quilt color difference exceeds source interior variation.`). `size` is the tile's `[width, height]` and each axis report keeps its own `period`; `source_crop` and `core_crop` are `[x0, y0, x1, y1]` boxes in the source. Look at a 2 × 2 repeat of the tile before using it.
-
-Python APIs: `make_tile(image, period, *, axis="x", overlap=32)`, `inspect_tile(image, axis="x")` and `inspect_tile_xy(image)` in `sprite_gen.background.tile`. The first returns the image and report (`axis="xy"` included); the others only measure, `inspect_tile_xy` both joins of a tile in the report shape above without the quilt fields. `inspect_tile` is the one measure of a tile's join: [`pixel-draw`](pixel-draw.md#gates)'s G4 tile seam asks it of a drawn tile along x and along y and warns where it says `needs-review`.
+Python APIs: `make_tile(image, period, *, axis="x", overlap=32)` and `inspect_tile(image, axis="x")` in `sprite_gen.background.tile`. The former returns the image and report; the latter only measures. `inspect_tile` is the one measure of a tile's join: [`pixel-draw`](pixel-draw.md#gates)'s G4 tile seam asks it of a drawn tile along x and along y and warns where it says `needs-review`.
 
 ## Shared asset input
 

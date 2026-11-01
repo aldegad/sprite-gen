@@ -95,11 +95,12 @@ def test_types_defaults_and_flags_are_written_as_json() -> None:
     assert slicing["--cell-width"] == {"name": "--cell-width", "type": "int", "default": 512}
     inputs = {arg["name"]: arg for arg in _document()["verbs"]["compose-gif"]["args"]}["inputs"]
     assert inputs == {"name": "inputs", "positional": True, "type": "path", "nargs": "*"}
-    sound = {arg["name"]: arg for arg in _document()["verbs"]["sound"]["args"]}
-    assert sound["--loop"] == {"name": "--loop", "aliases": ["--no-loop"], "type": "flag"}
+    prepare = {arg["name"]: arg for arg in _document()["verbs"]["prepare"]["args"]}
+    assert prepare["--fit-ground-frames"] == {"name": "--fit-ground-frames", "aliases": ["--no-fit-ground-frames"],
+                                              "type": "flag"}
     video, video_prompt = ({arg["name"]: arg for arg in _document()["verbs"][verb]["args"]} for verb in ("video", "video-prompt"))
     assert video["--model"]["default"] == video_prompt["--model"]["default"] == "grok-imagine-video-1.5"
-    assert _document()["verbs"]["sound"]["exclusive"] == [{"one_of": ["--prompt", "--prompt-file"], "required": True}]
+    assert _document()["verbs"]["video-sway"]["exclusive"] == [{"one_of": ["--loop-dir", "--frames"], "required": True}]
     rife = _document()["verbs"]["rife"]
     assert rife["args"] == [] and list(rife["commands"]) == ["install"]
     assert {arg["name"] for arg in rife["commands"]["install"]["args"]} == {"--dir", "--zip", "--force", "--no-check",
@@ -133,7 +134,7 @@ def test_what_each_paid_verb_calls() -> None:
     paid = {name: entry["providers"] for name, entry in verbs.items() if entry["paid"]}
     assert paid == {
         "gen": ["openai", "xai"], "gen-set": ["openai", "xai"], "logo": ["openai", "xai"],
-        "pixel-draw": ["anthropic"], "sound": ["elevenlabs"], "curation": ["xai"],
+        "pixel-draw": ["anthropic"], "curation": ["xai"],
         "video": ["xai"], "video-extend": ["xai"], "video-edit": ["xai"], "video-set": ["xai"],
     }
     assert verbs["video-resume"]["providers"] == ["xai"] and verbs["video-resume"]["paid"] is False
@@ -150,8 +151,6 @@ def test_the_provider_section_is_the_address_registry_and_the_key_names() -> Non
         "xai": {"base_url_env": "SPRITE_GEN_XAI_BASE_URL", "base_url": "https://api.x.ai/v1", "key_env": "XAI_API_KEY"},
         "anthropic": {"base_url_env": "SPRITE_GEN_ANTHROPIC_BASE_URL", "base_url": "https://api.anthropic.com/v1",
                       "key_env": "ANTHROPIC_API_KEY"},
-        "elevenlabs": {"base_url_env": "SPRITE_GEN_ELEVENLABS_BASE_URL", "base_url": "https://api.elevenlabs.io/v1",
-                       "key_env": "ELEVENLABS_API_KEY"},
     }
 
 

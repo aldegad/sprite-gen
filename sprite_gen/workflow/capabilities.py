@@ -15,7 +15,6 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import PurePath
 from typing import Any
 
-from sprite_gen.audio import provider as sound_provider
 from sprite_gen.gen import address, anthropic_api, openai_provider, xai
 from sprite_gen.gen.base import LOGINS_ENV
 from sprite_gen.util.console import utf8_streams
@@ -31,7 +30,6 @@ PROVIDER_CALLS: dict[str, tuple[str, ...]] = {
     "gen-set": (address.OPENAI, address.XAI),
     "logo": (address.OPENAI, address.XAI),
     "pixel-draw": (address.ANTHROPIC,),
-    "sound": (address.ELEVENLABS,),
     "curation": (address.XAI,),
     "video": (address.XAI,),
     "video-extend": (address.XAI,),
@@ -42,7 +40,7 @@ PROVIDER_CALLS: dict[str, tuple[str, ...]] = {
 # Verbs that call a provider and buy nothing: `video-resume` polls and downloads a clip an earlier run bought.
 NO_PURCHASE = frozenset({"video-resume"})
 KEY_ENVS = {address.OPENAI: openai_provider.AUTH_ENV, address.XAI: xai.AUTH_ENV,
-            address.ANTHROPIC: anthropic_api.AUTH_ENV, address.ELEVENLABS: sound_provider.AUTH_ENV}
+            address.ANTHROPIC: anthropic_api.AUTH_ENV}
 # Argument types by name; any other is its parsing function's name without `_` and `parse_` (`_parse_grid`: grid).
 TYPES = {str: None, int: "int", float: "float"}
 

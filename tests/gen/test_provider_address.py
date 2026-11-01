@@ -24,7 +24,6 @@ from PIL import Image
 
 from http_answer import Answer
 from sprite_gen import gen
-from sprite_gen.audio import provider as sound_provider
 from sprite_gen.gen import anthropic_api, facing_vision, openai_provider, retry, video, xai
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,7 +37,6 @@ DEFAULTS = {
     "openai": ("SPRITE_GEN_OPENAI_BASE_URL", "https://api.openai.com/v1"),
     "xai": ("SPRITE_GEN_XAI_BASE_URL", "https://api.x.ai/v1"),
     "anthropic": ("SPRITE_GEN_ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"),
-    "elevenlabs": ("SPRITE_GEN_ELEVENLABS_BASE_URL", "https://api.elevenlabs.io/v1"),
 }
 
 
@@ -96,8 +94,6 @@ def _answer(method: str, path: str, headers: dict[str, str] | None = None) -> tu
     }
     if (method, route.path) == ("POST", "/anthropic/messages"):
         return 200, {"Content-Type": "text/event-stream"}, SSE
-    if (method, route.path) == ("POST", "/elevenlabs/sound-generation"):
-        return 200, {}, b"audio"
     return 200, {"Content-Type": "application/json"}, json.dumps(answers[(method, route.path)]).encode()
 
 
@@ -135,7 +131,7 @@ def loopback_only(monkeypatch):
 
 @pytest.fixture
 def relay(monkeypatch, tmp_path):
-    """A relay on 127.0.0.1 standing in for all four providers, one path prefix each — its address is not set yet."""
+    """A relay on 127.0.0.1 standing in for all three providers, one path prefix each — its address is not set yet."""
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Relay)
     server.seen = []
     server.root = f"http://127.0.0.1:{server.server_address[1]}"
@@ -189,10 +185,6 @@ def _claude_batch(tmp_path):
     assert set(anthropic_api.batch_results(KEY, ended)) == {"c1"}
 
 
-def _sound(tmp_path):
-    assert sound_provider.generate(sound_provider.request("sfx", "Impact", 3, False))[0] == b"audio"
-
-
 SITES = {
     "openai-image": (_openai_image, "openai", [("POST", "/openai/images/generations")]),
     "openai-vision": (_openai_vision, "openai", [("POST", "/openai/responses")]),
@@ -204,7 +196,6 @@ SITES = {
     "claude-batch": (_claude_batch, "anthropic", [
         ("POST", "/anthropic/messages/batches"), ("GET", "/anthropic/messages/batches/msgbatch_01"),
         ("GET", "/anthropic/sprite-gen/fetch?url=" + urllib.parse.quote(RESULTS, safe=""))]),
-    "elevenlabs-sound": (_sound, "elevenlabs", [("POST", "/elevenlabs/sound-generation?output_format=mp3_44100_128")]),
 }
 
 
@@ -244,7 +235,6 @@ def _capture(monkeypatch, sent: list[str]) -> None:
         return _Lines(answer) if headers.get("Content-Type") == "text/event-stream" else answer
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(sound_provider, "urlopen", urlopen)
 
 
 class _Lines(Answer):
