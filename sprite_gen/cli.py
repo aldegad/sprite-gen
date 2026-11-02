@@ -28,6 +28,7 @@ from sprite_gen.video import sway as video_sway
 from sprite_gen.video import sway_inspect as video_sway_inspect
 from sprite_gen.video import set_sheet as video_set_sheet
 from sprite_gen.video import stop as video_stop
+from sprite_gen.video import chain as video_chain
 from sprite_gen.video import compare as video_compare
 from sprite_gen.video import restoration as video_restoration
 from sprite_gen.video import source as video_source
@@ -401,6 +402,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "A walk or run that stops: the clip's own start played backwards from where it reaches the loop to the still it was filmed from, cut as a one-shot strip beside the loop (seam, drift, speed and refusals reported).",
         video_stop.add_arguments,
         video_stop.run,
+    ),
+    "video-chain": (
+        "Pieces of keyed clips on one canvas played as one move: where they join and when each frame shows is yours, the frames between, no picture shown again and the record are the engine's.",
+        video_chain.add_arguments,
+        video_chain.run,
     ),
     # The face layer (docs/face-parts.md): a talking clip's lower face cut to be laid on body motions, and a line baked
     # with the pack's own player.

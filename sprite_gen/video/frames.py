@@ -89,6 +89,7 @@ EDGE_ROWS = 4  # rows/cols inspected at each edge
 # from is the evidence: if the still carries (almost) no key-coloured material, every
 # key tint in the clip was painted by the model and is spill.
 SPILL_MODES = ("auto", "small", "full")
+KEYS_READ = ("green", "magenta", "white", "brightness")  # what a clip's frames are keyed on, where `video-chain` compares them (brightness: no key, `--alpha-mode brightness`)
 SPILL_FULL_FRACTION = 1.0  # every tinted cluster is spill, whatever its size
 SPILL_FULL_MIN_TINT = _SPILL_FULL_MIN_TINT  # ... and whatever its strength (see extract.py)
 SPILL_REFERENCE_MAX = 0.005  # the still's own key material ≤ the engine's small-cluster share → full
@@ -375,12 +376,12 @@ def _reference_window(reference: Path, key: str) -> tuple[str, Image.Image | Non
     still is kept in the mode it was decoded in and read a band of rows at a time; only the
     window is converted to RGBA, and the full-size image is released before it is keyed.
     """
-    from sprite_gen.frames.cutout import KEY_TARGETS, _EXTRACT_KEY_THRESHOLD, _corner_average, _detect_key_kind
+    from sprite_gen.frames.cutout import KEY_TARGETS, _EXTRACT_KEY_THRESHOLD
     from sprite_gen.frames.extract import detect_background_key_rgb, subject_window
 
     image = Image.open(reference)
     image.load()
-    kind = _detect_key_kind(_corner_average(image)) if key == "auto" else key
+    kind = key_kind(image, key)
     if kind not in ("green", "magenta"):
         return kind, None, None, {}
     target = KEY_TARGETS[kind]
@@ -396,6 +397,13 @@ def _reference_window(reference: Path, key: str) -> tuple[str, Image.Image | Non
         window = Image.fromarray(np.ascontiguousarray(np.asarray(window)[::stride, ::stride]))
         facts["reference_stride"] = stride
     return kind, window, painted, facts
+
+
+def key_kind(image: Image.Image, key: str) -> str:
+    """The key a frame of a clip is keyed on: `key`, or what its corners read as where that is `auto`."""
+    from sprite_gen.frames.cutout import _corner_average, _detect_key_kind
+
+    return _detect_key_kind(_corner_average(image)) if key == "auto" else key
 
 
 def decide_spill(reference: Path, key: str) -> dict[str, Any]:
@@ -745,6 +753,9 @@ def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool,
         atomic_write_text(target, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
         raise
     payload = {**head, "status": "passed", "keyed_dir": str(keyed_dir), "key": key, "spill": decision, **meta, **report}
+    if alpha_mode != "brightness":
+        with Image.open(files[0]) as first:
+            payload["key_read"] = key_kind(first, key)  # what it was keyed on, where `key` says only auto (`video-chain`)
     if source_manifest is not None:
         from sprite_gen.video.evidence import engine_identity
         payload["producer"] = engine_identity()

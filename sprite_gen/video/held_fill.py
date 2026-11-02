@@ -50,7 +50,7 @@ docs/video-pipeline.md "Root motion")."""
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from typing import Any
 
 from PIL import Image, ImageFilter
@@ -174,6 +174,10 @@ def still_kept(frame: Image.Image, a: Image.Image, b: Image.Image) -> dict[str, 
     return {"reads": True, "still_px": int(still.sum()), "kept": round(least, 4), "at_row": at, "window_px": win}
 
 
+# What `judge` can find in a frame made: `faults`' and its own. `video-chain --refuse` names among these.
+FAULTS = ("smear", "outline", "ghost", "torn", "hole", "doubled", "contact", "held")
+
+
 def judge(frame: Image.Image, a: Image.Image, b: Image.Image, t: float, *, reads: bool,
           before: Image.Image | None = None) -> tuple[dict[str, Any], list[str]]:
     """A frame made between `a` and `b` at `t`: the alignment's measure and faults (`align.measure_made`, `faults`),
@@ -192,13 +196,17 @@ def judge(frame: Image.Image, a: Image.Image, b: Image.Image, t: float, *, reads
 
 
 def _made(interpolate: rife_mod.Interpolate, a: Image.Image, b: Image.Image, t: float, window: tuple[float, float], *,
-          reads: bool, before: Image.Image | None = None) -> tuple[Image.Image | None, dict[str, Any]]:
+          reads: bool, before: Image.Image | None = None, refuse: Collection[str] | None = None) -> tuple[Image.Image | None, dict[str, Any]]:
     """The frame between `a` and `b` at `t`, or at the fraction of RETIME_T nearest it inside `window` that is made
     with no fault (`judge`, `before` the cell delivered before it, None where that is `a`) and, made only off its time,
     with its ghost band under RETIME_WINDOW_MAX in every window (align's bar for a frame made again at another
     fraction); None and what each try was refused for, where none is. The frames between run from `a` to `b`, so one
     that shows `a` or the cell before it again (`held`, `shows`) is made again only later, one that shows `b` only
-    earlier, and one that shows both not again: a fraction on the side of a picture it showed would show it too."""
+    earlier, and one that shows both not again: a fraction on the side of a picture it showed would show it too.
+
+    `refuse` (None: every fault) names the faults a frame is refused for, a caller's word for its material
+    (`video-chain --refuse`). `held` refuses it whatever `refuse` says: no frame between is a held cell again. The bar
+    of a frame made off its time stands too. A try's `faults` are those it is refused for, `kept_faults` the rest."""
     from sprite_gen.video.align import RETIME_T, RETIME_WINDOW_MAX
 
     lo, hi = window
@@ -207,10 +215,14 @@ def _made(interpolate: rife_mod.Interpolate, a: Image.Image, b: Image.Image, t: 
         if not lo < at < hi:
             continue
         frame = interpolate(a, b, at)
-        measure, wrong = judge(frame, a, b, at, reads=reads, before=before)
+        measure, found = judge(frame, a, b, at, reads=reads, before=before)
+        wrong = found if refuse is None else [f for f in found if f in refuse or f == "held"]
+        kept = [f for f in found if f not in wrong]
         seen = at != t and (measure.get("ghost_window") or 0.0) >= RETIME_WINDOW_MAX
-        tries.append({"t": round(at, 4), "faults": wrong, **({"shows": measure["shows"]} if measure["shows"] else {}),
-                      **({"window_over": RETIME_WINDOW_MAX} if seen and not wrong else {})})
+        tries.append({"t": round(at, 4), "faults": wrong, **({"kept_faults": kept} if kept else {}),
+                      **({"shows": measure["shows"]} if measure["shows"] else {}),
+                      **({"window_over": RETIME_WINDOW_MAX} if seen and not wrong else {}),
+                      "judged": {k: v for k, v in measure.items() if k != "shows"}})
         if not wrong and not seen:
             return frame, {"t": round(at, 4), **({"from_t": round(t, 4)} if at != t else {}),
                            "contact": measure["contact"], "look": looks(measure), "tries": tries}
@@ -259,7 +271,7 @@ def _fillable(run: dict[str, int], n: int, *, ring: bool, on: int | None = None,
 
 
 def _make_run(frames: Sequence[Image.Image], interpolate: rife_mod.Interpolate, a: int, b: int, cells: Sequence[int], *,
-              reads: bool) -> tuple[list[tuple[int, Image.Image]], list[dict[str, Any]]]:
+              reads: bool, refuse: Collection[str] | None = None) -> tuple[list[tuple[int, Image.Image]], list[dict[str, Any]]]:
     """Each of `cells` made between frame `a` and frame `b` (a loop's `b` n is its first cell across the wrap) at its own
     time, within half a cell of it (`_made`), the cell delivered before each the one made before it: the frames taken,
     up to the first refused, and how each was tried."""
@@ -270,7 +282,7 @@ def _make_run(frames: Sequence[Image.Image], interpolate: rife_mod.Interpolate, 
         t = (c - a) / (b - a)
         half = 0.5 / (b - a)
         frame, how = _made(interpolate, frames[a], frames[b % n], t, (t - half, t + half), reads=reads,
-                           before=taken[-1][1] if taken else None)
+                           before=taken[-1][1] if taken else None, refuse=refuse)
         tried.append({"cell": c, "between": [a, b % n], **how})
         if frame is None:
             break
@@ -280,7 +292,8 @@ def _make_run(frames: Sequence[Image.Image], interpolate: rife_mod.Interpolate, 
 
 def fill(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *, ring: bool,
          same: Sequence[bool] | None = None, mode: str = "auto", reads: bool | None = None,
-         hold: int | None = None, wrap: bool | None = None, drawn_on: int | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
+         hold: int | None = None, wrap: bool | None = None, drawn_on: int | None = None,
+         refuse: Collection[str] | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
     """`frames` with each held run's cells made again between the run's first cell and the next pose (see the module),
     and the record: the reading before (`before`, each run `filled` or why not, and a loop's wrap, `wrap`), the cells
     made (`made`, and how each was, `frames`), the cells left for want of an interpolator (`unmade`, `interpolate`
@@ -289,7 +302,8 @@ def fill(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *,
     `wrap`, for a loop, whether its last cell shows its first cell's picture as filmed (`wrap_same` of `frames` where
     None); `reads` whether the ghost screen reads the cut (read on `frames` where None); `hold` the cut's held-drawings
     reading (`held.measure_cycle`); `drawn_on` the hold of a cut known drawn on twos or threes where its own runs do
-    not read so (a loop resampled to another length from one drawn so, every run of it kept).
+    not read so (a loop resampled to another length from one drawn so, every run of it kept); `refuse` the faults a
+    frame made is refused for (`_made`).
 
     A loop whose last cells show its first cell's picture again (`wrap`) keeps its first cell: the cells before the wrap
     that show it are made again between the pose before them and the first cell, as one run with the cells after it that
@@ -328,7 +342,7 @@ def fill(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *,
             return {**row, "filled": False, "why": "no interpolator"}
         if reads is None:
             reads = bool(ghost_screen(frames)["reads"])
-        taken, tried = _make_run(frames, interpolate, a, b, cells, reads=reads)
+        taken, tried = _make_run(frames, interpolate, a, b, cells, reads=reads, refuse=refuse)
         if len(taken) < len(cells):
             refused = sorted({f for row_ in tried for t_ in row_["tries"] for f in t_["faults"]})
             return {**row, "filled": False, "faults": refused, "tries": tried,
@@ -429,11 +443,12 @@ def times(n: int, fps: float, out_fps: float, *, ring: bool) -> list[float]:
 
 
 def at_times(frames: list[Image.Image], interpolate: rife_mod.Interpolate, at: Sequence[float], *, ring: bool,
-             spacing: float | Sequence[float], reads: bool | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
+             spacing: float | Sequence[float], reads: bool | None = None,
+             refuse: Collection[str] | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
     """`frames` at the times `at`, in frames of the cut: a cell on a frame's time is that frame, one between two frames
     showing one picture is that picture, any other is made between the two at its own time (`_made`, within half its
-    `spacing` of it: frames a cell, one for all or one each), and one no frame made is taken for is the nearer frame and
-    named (`shown_again`). The record: how many were made, the cells shown again, how each was (`frames`), and the
+    `spacing` of it: frames a cell, one for all or one each; `refuse` the faults one is refused for), and one no frame
+    made is taken for is the nearer frame and named (`shown_again`). The record: how many were made, the cells shown again, how each was (`frames`), and the
     frame each cell is, None where it was made (`source_frames`)."""
     n = len(frames)
     same = same_steps(frames + ([frames[0]] if ring else []))
@@ -457,7 +472,7 @@ def at_times(frames: list[Image.Image], interpolate: rife_mod.Interpolate, at: S
         t = tau - a
         half = (spacing if isinstance(spacing, (int, float)) else spacing[k]) / 2
         frame, how = _made(interpolate, frames[a], frames[(a + 1) % n], t, (t - half, t + half), reads=reads,
-                           before=out[-1] if out else None)
+                           before=out[-1] if out else None, refuse=refuse)
         if frame is None:
             out.append(frames[near % n])
             source_frames.append(near % n)

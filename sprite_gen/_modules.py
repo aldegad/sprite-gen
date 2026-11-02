@@ -37,6 +37,7 @@ MODULE_DOMAIN = {
     'sway_inspect': 'video',
     'set_sheet': 'video',
     'stop': 'video',
+    'chain': 'video',
     'compare': 'video',
     'restoration': 'video',
     'source': 'video',

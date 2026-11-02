@@ -396,7 +396,7 @@ def test_a_frame_between_that_shows_both_poses_beside_it_is_not_made_again():
     run = record["before"]["held_runs"][0]
     assert (run["start"], run["length"], run["filled"], run["faults"]) == (1, 2, False, ["held"])
     assert calls == [0.5]
-    assert run["tries"][0]["tries"] == [{"t": 0.5, "faults": ["held"], "shows": ["a", "b"]}]
+    assert [{k: v for k, v in tried.items() if k != "judged"} for tried in run["tries"][0]["tries"]] == [{"t": 0.5, "faults": ["held"], "shows": ["a", "b"]}]
     assert record["made"] == [] and [o.tobytes() for o in out] == [f.tobytes() for f in frames]
 
 

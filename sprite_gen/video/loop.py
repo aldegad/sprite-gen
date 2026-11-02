@@ -40,6 +40,7 @@ import sys
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from collections.abc import Collection
 from typing import Any
 
 from PIL import Image
@@ -1417,13 +1418,14 @@ def _located(interpolate: rife_mod.Interpolate | None, made_by: list[dict[str, s
 
 
 def fill_cut(frames: list[Image.Image], interpolate: rife_mod.Interpolate | None, *, ring: bool, same: list[bool] | None,
-               mode: str, hold: int | None, wrap: bool | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
-    """`held_fill.fill` on the cut, with RIFE located only once a frame is to be made: a cut with no held cell, or only
-    runs kept as filmed, needs no binary. The record names the interpolator that made the frames. A frame to make and no
-    RIFE installed: the held cells are delivered as filmed, and the record says which and how to install it (`unmade`)."""
+               mode: str, hold: int | None, wrap: bool | None = None, refuse: Collection[str] | None = None) -> tuple[list[Image.Image], dict[str, Any]]:
+    """`held_fill.fill` on the cut (`refuse` the faults a frame made is refused for, every one where None), with RIFE
+    located only once a frame is to be made: a cut with no held cell, or only runs kept as filmed, needs no binary. The
+    record names the interpolator that made the frames. A frame to make and no RIFE installed: the held cells are
+    delivered as filmed, and the record says which and how to install it (`unmade`)."""
     made_by: list[dict[str, str]] = []
     lazy = _located(interpolate, made_by)
-    asked = partial(held_fill_mod.fill, ring=ring, same=same, mode=mode, hold=hold, wrap=wrap)
+    asked = partial(held_fill_mod.fill, ring=ring, same=same, mode=mode, hold=hold, wrap=wrap, refuse=refuse)
     try:
         frames, record = asked(frames, lazy)
     except rife_mod.RifeNotInstalled as exc:
