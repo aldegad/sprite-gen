@@ -146,6 +146,11 @@ closing pose and a run longer than a drawing on threes (`hold_max`, 3) are recor
 a `why` and not warned of — a still at either end, or a hold the motion means. With no
 ffmpeg, or a file ffmpeg cannot read, `held` is `{"read": false, "why": …}` and the run
 says its frames were not read; the clip is still published.
+A clip whose every frame is the canvas alone (no pixel left once the canvas colour is
+taken out) is not read either: `held` is `read` false, with `frames`, `background` and a
+`why` (for an 8-frame clip: `no frame of the 8 shows a subject: every pixel is within 0.12
+of the colour it is filmed on (...)`), and the warning line says its frames were not read
+for a picture shown again; the clip is still published.
 
 ### An unfinished generation
 
