@@ -363,6 +363,7 @@ def test_shape_rank_reads_no_held_side_when_the_first_choice_does_not_pop():
 # --- the set ----------------------------------------------------------------------------------
 
 @pytest.mark.slow
+@pytest.mark.timeout(900)  # 80 calls of the binary at 384 x 256 (the held fill's frames between): a minute on a GPU, minutes on a CPU's Vulkan driver
 def test_cycle_align_aligns_a_two_step_loop_as_the_one_cycle_it_is(held, staffless, tmp_path):
     """The loop cut two steps long is one cycle: where its report witnesses its cut whole cycles, it returns half way
     at its second step, which is no suspect (status `steps`), and it is resampled to the set's length like the rest —
