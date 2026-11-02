@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v4.0.0)
+## v4.0.0 - Game features removed leaving only sprites, no picture shown again by default (`--fill-held off`) save meant holds, `inspect-holds` compares deliveries with hold lists, and `video-chain` plays keyed clip pieces as one timed move
 
 **Upgrading from 3.15.0: `sprite-gen sound`, `sprite-gen game-pack` and `sprite-gen ui-kit` are removed, with `gen --layout-guide ui-kit` and `background-tile --axis xy`.** These game-making features were added for building games. Making games is outside the scope of this engine, which makes sprites; features that belong to sprites stay. Files an earlier version wrote (sound folders, game packs, UI kit folders) stay on disk; nothing reads them.
 
