@@ -2,7 +2,9 @@
 """`inspect-holds`: the frames on which a figure shows the picture it showed on the frame before, read on drawn
 figures. Each case draws a figure whose arms and legs swing a few pixels a frame, with frames shown again put in by
 hand; the cases read it by its alpha, by a key, inside a still box, by a log of the cells, from an mp4, and from a
-strip, and hold the list of holds meant (listed or not) and the gate."""
+strip, and hold the list of holds meant (listed or not) and the gate. A figure drawn in a few pixels is read, specks
+beside a figure are not, and a reading that reads no frame against the frame before is an error, whatever left it
+nothing to read."""
 import json
 import shutil
 import subprocess
@@ -250,3 +252,173 @@ def test_a_report_is_written_where_asked(tmp_path: Path) -> None:
     code, report, err = read("--source", str(save(scene(POSES), tmp_path / "frames")), "--report", str(out))
     assert code == 0, err
     assert json.loads(out.read_text()) == report and report["kind"] == holds.REPORT_KIND
+
+
+# --- a figure in a few pixels, specks, and a reading of nothing -------------------------------------------------------
+
+BLUE = (70, 130, 220, 255)
+
+
+def block(w: int, h: int, *, size: tuple[int, int] = (24, 24), at: tuple[int, int] = (8, 6)) -> Image.Image:
+    """A canvas of `size`, clear but for a solid block w x h at `at`."""
+    im = Image.new("RGBA", size)
+    im.paste(BLUE, (at[0], at[1], at[0] + w, at[1] + h))
+    return im
+
+
+def dotted(im: Image.Image, dots: list[tuple[int, int, int]]) -> Image.Image:
+    """`im` with a dot of 1, 2 or 3 px (a speck) at each (x, y, px), the same on every frame it is put on."""
+    im = im.copy()
+    for x, y, px in dots:
+        im.paste((200, 50, 50, 255), (x, y, x + px, y + 1))
+    return im
+
+
+@pytest.mark.parametrize("w, h", [(7, 9), (8, 8)], ids=["63px", "64px"])
+def test_a_figure_drawn_in_a_few_pixels_is_read(tmp_path: Path, w: int, h: int) -> None:
+    """One block, 7 x 9 (63 px) or 8 x 8 (64 px), shown three times. Before, a figure under 64 px was a speck: 63 px read
+    no figure, an empty table, and the gate passed (exit 0) on two frames shown again; the only figure of a frame is
+    read now, however small, and 64 px reads as it did."""
+    code, report, err = read("--source", str(save([block(w, h)] * 3, tmp_path / "frames")), "--gate")
+    assert code == 1, err
+    assert report["unlisted"] == 2 and report["inspected"] == 1 and runs(report) == [(1, 2)]
+    assert (report["table"]["figure"]["frames"], report["table"]["figure"]["steps"]) == (3, 2)
+    assert "2 frames show the picture of the frame before" in err and "figure 1-2" in err
+
+
+def test_specks_beside_a_figure_are_still_left_out(tmp_path: Path) -> None:
+    """Dots of 1, 2 and 3 px, far from the figure and the same on every frame (each would show its picture again on
+    every frame, were it a figure), beside the striped figure and beside a figure of 63 px: neither reads a dot."""
+    dots = [(250, 20, 1), (270, 100, 2), (300, 180, 3)]
+    code, report, err = read("--source", str(save([dotted(im, dots) for im in scene(POSES)], tmp_path / "big")))
+    assert code == 0, err
+    assert sorted(report["table"]) == ["figure"] and runs(report) == [(3, 3), (7, 8)]
+    small = dotted(block(7, 9, size=(48, 32)), [(30, 4, 1), (40, 20, 2), (24, 28, 3)])
+    code, report, err = read("--source", str(save([small] * 3, tmp_path / "small")), "--gate")
+    assert code == 1, err
+    assert sorted(report["table"]) == ["figure"] and runs(report) == [(1, 2)]
+
+
+def test_two_figures_drawn_in_a_few_pixels_are_both_read(tmp_path: Path) -> None:
+    """Two blocks of about 40 px apart: the left one shown four times, the right one a row taller each frame. A part
+    half the frame's largest or more is a figure, so both are read: the left holds on 1-3, the right on none."""
+    frames = []
+    for k in range(4):
+        im = block(6, 7, size=(48, 24), at=(4, 6))
+        im.paste((220, 130, 70, 255), (30, 6, 36, 11 + k))
+        frames.append(im)
+    code, report, err = read("--source", str(save(frames, tmp_path / "frames")))
+    assert code == 0, err
+    assert sorted(report["table"]) == ["figure0", "figure1"] and report["inspected"] == 2
+    assert runs(report, "figure0") == [(1, 3)] and runs(report, "figure1") == []
+
+
+def test_each_figure_s_steps_and_the_figures_inspected_are_counted(tmp_path: Path) -> None:
+    source = str(save(scene(POSES), tmp_path / "frames"))
+    _code, report, _err = read("--source", source)
+    assert report["inspected"] == 1 and report["table"]["figure"]["steps"] == len(POSES) - 1
+    _code, report, _err = read("--source", source, "--frames", "7-11")
+    assert report["table"]["figure"]["steps"] == 5  # 7..11, each against the frame before
+    cells = [figure(p) for p in [0, 1, 2, 3, 4, 5, 0]]
+    _code, report, _err = read("--source", str(strip(tmp_path, cells, {"loop": True})))
+    assert report["table"]["figure"]["steps"] == 7  # six steps and the wrap
+
+
+def test_frames_that_show_no_figure_are_no_reading(tmp_path: Path) -> None:
+    """Three clear frames: no figure, so no frame read against the frame before. Before, an empty table and unlisted 0
+    passed the gate (exit 0, nothing on stderr); it is an error now, with or without --gate, its report printed and
+    written with `inspected` 0 and one line on stderr."""
+    source = str(save([Image.new("RGBA", (24, 24))] * 3, tmp_path / "frames"))
+    out = tmp_path / "holds.json"
+    for gate in (["--gate"], []):
+        code, report, err = read("--source", source, "--report", str(out), *gate)
+        assert code == 2
+        assert (report["inspected"], report["unlisted"], report["table"]) == (0, 0, {})
+        assert json.loads(out.read_text()) == report
+        assert err.splitlines() == ["inspect-holds: no frame was read against the frame before: no figure on frames 0-2 "
+                                    "(no pixel with alpha over 8)"]
+
+
+def test_a_box_that_holds_nothing_on_a_frame_shows_no_picture_there(tmp_path: Path) -> None:
+    """A figure in the box on frames 0-2, then gone: before, two clear crops were one picture shown again (holds at 4
+    and 5); a frame whose box holds nothing now shows no figure there."""
+    frames = scene([0, 1, 2]) + [Image.new("RGBA", (W, H))] * 3
+    code, report, err = read("--source", str(save(frames, tmp_path / "frames")), "--box", "30,40,110,140", "--gate")
+    assert code == 0, err
+    row = report["table"]["figure"]
+    assert (row["frames"], row["steps"], row["holds"]) == (3, 2, 0) and report["inspected"] == 1
+
+
+def _nothing(tmp_path: Path, case: str) -> list[str]:
+    """The arguments of a reading that is left nothing to read, one way or another."""
+    if case == "no frame":
+        (tmp_path / "empty").mkdir()
+        return ["--source", str(tmp_path / "empty")]
+    if case == "one frame":
+        return ["--source", str(save([block(8, 8)], tmp_path / "one"))]
+    if case == "frames past --frames":
+        return ["--source", str(save([block(8, 8)] * 3, tmp_path / "three")), "--frames", "3-5"]
+    if case == "alpha under ALPHA_MIN":
+        faint = Image.new("RGBA", (24, 24))
+        faint.paste((70, 130, 220, holds.ALPHA_MIN), (4, 4, 20, 20))
+        return ["--source", str(save([faint] * 3, tmp_path / "faint"))]
+    if case == "keyed to nothing":
+        return ["--source", str(save([Image.new("RGBA", (64, 64), (*GREEN, 255))] * 3, tmp_path / "green")), "--key", "green"]
+    if case == "box over clear frames":
+        return ["--source", str(save([Image.new("RGBA", (24, 24))] * 3, tmp_path / "clear")), "--box", "2,2,10,10"]
+    if case == "box past the edge":
+        return ["--source", str(save([Image.new("RGBA", (24, 24), (128, 128, 128, 255))] * 3, tmp_path / "grey")),
+                "--box", "40,40,10,10"]
+    log = tmp_path / "cells.jsonl"
+    if case == "log of no cell":
+        log.write_text("".join(json.dumps({"t": k, "hero": None}) + "\n" for k in range(5)))
+        return ["--log", str(log), "--log-figure", "hero"]
+    if case == "log past --frames":
+        log.write_text("".join(json.dumps({"t": k, "hero": "run 0"}) + "\n" for k in range(5)))
+        return ["--log", str(log), "--log-figure", "hero", "--frames", "50-60"]
+    path = strip(tmp_path, [figure(p) for p in range(4)], {"loop": False})
+    if case == "strip past --frames":
+        return ["--source", str(path), "--frames", "10-12"]
+    assert case == "strip past --frames, in a box"
+    return ["--source", str(path), "--frames", "10-12", "--box", "0,0,10,10"]
+
+
+NOTHING_CASES = {
+    "no frame": "no *.png frames",
+    "one frame": "one frame read (frame 0), and no frame before it to read it against",
+    "frames past --frames": "no frame in --frames 3-5: it has 3 frames (0-2)",
+    "alpha under ALPHA_MIN": "no figure on frames 0-2 (no pixel with alpha over 8)",
+    "keyed to nothing": "no figure on frames 0-2 once keyed with --key green (no pixel with alpha over 8)",
+    "box over clear frames": "the box 2,2,10,10 holds no pixel with alpha over 8 on frames 0-2 (the frames are 24x24)",
+    "box past the edge": "the box 40,40,10,10 holds no pixel with alpha over 8 on frames 0-2 (the frames are 24x24)",
+    "log of no cell": "the log names no cell for hero on frames 0-4",
+    "log past --frames": "no frame in --frames 50-60: it has 5 lines (0-4)",
+    "strip past --frames": "no frame in --frames 10-12: it has 4 cells (0-3)",
+    "strip past --frames, in a box": "no frame in --frames 10-12: it has 4 cells (0-3)",
+}
+
+
+@pytest.mark.parametrize("case", list(NOTHING_CASES))
+def test_a_reading_left_nothing_to_read_is_an_error_whatever_left_it_so(tmp_path: Path, case: str, capsys) -> None:
+    """Every way a reading is left no frame to read against the frame before (the input, the alpha floor, the key, the
+    box, the log, the frames asked) ends the same way: exit 2 under --gate, the report with `inspected` 0, and one line
+    on stderr saying why. Before, all but the first and the `strip past --frames` (refused as opaque) passed the gate
+    with an empty reading (`frames past --frames` read only the frame before 3), and the boxes failed it on frames shown
+    again that showed nothing."""
+    code = holds.main([*_nothing(tmp_path, case), "--gate"])
+    out, err = capsys.readouterr()
+    assert code == 2
+    report = json.loads(out)
+    assert (report["inspected"], report["unlisted"]) == (0, 0)
+    assert len(err.splitlines()) == 1 and err.startswith(f"inspect-holds: {holds.NOTHING}: ")
+    assert err.rstrip().endswith(NOTHING_CASES[case])
+
+
+def test_the_python_reading_raises_where_it_reads_nothing(tmp_path: Path) -> None:
+    with pytest.raises(holds.NothingRead) as caught:
+        holds.inspect(holds.alpha_figures([Image.new("RGBA", (24, 24))] * 3))
+    assert caught.value.report == {"unlisted": 0, "inspected": 0, "table": {}}
+    with pytest.raises(holds.NothingRead) as caught:
+        holds.read(source=save([Image.new("RGBA", (24, 24))] * 3, tmp_path / "clear"))
+    assert caught.value.report["inspected"] == 0 and caught.value.report["read_by"] == "alpha"
+    assert str(caught.value).startswith(holds.NOTHING)
