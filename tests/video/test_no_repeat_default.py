@@ -247,9 +247,11 @@ def _set(monkeypatch, tmp_path, *, align_result, out_fps=None):
         still = Image.new("RGBA", (64, 64), (0, 255, 0, 255))
         still.paste((200, 80, 30, 255), (24, 16, 40, 56))
         still.save(stills[view])
+    # The front and back walks film from their base as given: the mid-step start still is `gen`'s (a provider call),
+    # and what this set is asked here is where the fill and the rate go.
     result = batch.run_set(bases=stills, states=["walk", "idle"], root=tmp_path / "set", character=None, duration=3,
                            resolution="720p", key="green", concurrency=1, force=False, gap=0, video_runner=video,
-                           out_fps=out_fps)
+                           out_fps=out_fps, walk_start="as-given")
     return result, seen, again
 
 
