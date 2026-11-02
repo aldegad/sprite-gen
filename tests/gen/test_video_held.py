@@ -87,6 +87,22 @@ def test_a_file_ffmpeg_cannot_read_is_named_not_read(tmp_path):
     assert video.held_lines(clip, record)[0].startswith("fake.mp4: its frames were not read for a picture shown again — ")
 
 
+def test_a_clip_of_the_canvas_alone_is_named_not_read(tmp_path):
+    """Every frame the green canvas, no subject: two frames of the canvas alone are one picture to the rule, so read on,
+    the clip was one hold of eight frames the motion means, and nothing was said. No subject is no reading."""
+    folder = tmp_path / "blank"
+    folder.mkdir()
+    for i in range(8):
+        Image.new("RGB", (W, H), GREEN).save(folder / f"{i:04d}.png")
+    clip = tmp_path / "blank.mp4"
+    subprocess.run([shutil.which("ffmpeg"), "-v", "error", "-y", "-framerate", "24", "-i", str(folder / "%04d.png"),
+                    "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", str(clip)], check=True)
+    record = video.read_held(clip)
+    assert record["read"] is False and record["frames"] == 8 and record["background"] is not None
+    assert record["why"].startswith("no frame of the 8 shows a subject: every pixel is within 0.12 of the colour")
+    assert video.held_lines(clip, record) == [f"blank.mp4: its frames were not read for a picture shown again — {record['why']}"]
+
+
 def _run(tmp_path: Path, monkeypatch, payload: bytes) -> tuple[dict, Path]:
     api = _FakeApi()
     api.payload = payload

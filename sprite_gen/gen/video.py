@@ -436,7 +436,7 @@ def read_held(clip: Path) -> dict[str, Any]:
     where the engine keeps such a run as the motion's own — longer than `held_fill.HOLD_MAX`, or the clip's opening or
     closing pose — and none where `video-loop` would make its frames again between the poses beside them. Nothing is
     changed: the provider's frames are the clip, and the material its loops are cut from. A clip ffmpeg cannot read is
-    `read` false, with `why`."""
+    `read` false, with `why`, and so is one whose every frame is the canvas alone (no subject: nothing was read)."""
     from PIL import Image
 
     from sprite_gen._deps import np
@@ -458,6 +458,7 @@ def read_held(clip: Path) -> dict[str, Any]:
     same: list[bool] = []
     background = None
     previous = None
+    subject = False
     assert proc.stdout is not None
     while len(data := proc.stdout.read(size)) == size:
         rgba = np.frombuffer(data, np.uint8).reshape(height, width, 4).copy()
@@ -466,6 +467,7 @@ def read_held(clip: Path) -> dict[str, Any]:
         if background is not None:
             off = np.abs(rgba[..., :3].astype(np.float32) / 255 - np.asarray(background, np.float32)).max(axis=-1)
             rgba[off <= BACKGROUND_TOL, 3] = 0
+        subject = subject or bool(rgba[..., 3].any())
         frame = Image.fromarray(rgba, "RGBA")
         if previous is not None:
             same.append(held_fill.same_steps([previous, frame])[0])
@@ -474,6 +476,12 @@ def read_held(clip: Path) -> dict[str, Any]:
     if proc.wait() != 0 or previous is None:
         return {"read": False, "why": f"ffmpeg could not read its frames ({error[:200] or 'no frame'})"}
     n = len(same) + 1
+    if not subject:
+        # Two frames of the canvas alone are one picture to the rule: read so, a clip of nothing would be one long hold
+        # the motion means, and say nothing. No subject is no reading.
+        return {"read": False, "frames": n, "background": background,
+                "why": f"no frame of the {n} shows a subject: every pixel is within {BACKGROUND_TOL} of the colour it is "
+                       f"filmed on ({', '.join(map(str, background or []))})"}
     rows = []
     for run in held_fill.runs(same):
         why = (f"held {run['length']} frames, longer than a drawing on threes ({held_fill.HOLD_MAX}): a hold the motion means"
