@@ -271,6 +271,7 @@ path that only passes through an output and comes out of it again with `..` (for
 | `unpack-atlas` | see section 4 | the run dir, whose prior content `--force` replaces; an `--out-dir` inside an input is refused as well |
 | `video-loop` | `--frames-dir` and every PNG found in it | `cycle/`, `cycle.source/`, `cycle.refused/`, `follow.source.png`, `<name>.strip.png`, `<name>.strip.json`, `<name>.gif`, `<name>.webp`, the report |
 | `video-stop` | `--frames-dir` and every PNG found in it; `--loop` and the strip PNG beside it | `<name>.strip.png`, `<name>.strip.json`, `<name>.gif`, `<name>.webp`, the report |
+| `video-chain` | Each `--piece`'s folder; `--places`; `--holds` | `keyed/`, `keyed.refused/`, the report |
 | `video-frames` | `--clip`, `--reference` | `raw/` (its frames are replaced), `keyed/`, `keyed.refused/`, the report, `--source-manifest` |
 | `correction-loop` | `--run-dir`, and every file, folder and link the best candidate's copy reads in it | `--out-dir` and everything the loop writes in it: each attempt's folder and the files in it, each candidate a provider makes, `best-candidate/`, the report |
 | `logo` | `--mood`, `--lettering` | `lettering.png`, `logo.png`, `logo.rejected.png`, `logo.preview.png`, `mood.png` (when the run writes one), the report |

@@ -3499,6 +3499,7 @@ Where sprite-gen gives frames at a higher rate than it was given them:
 | `video-stop --fps` | The rate of the frames given, not an output rate | Unchanged; a stalled stop's held cells are made again by default (`video-stop --fill-held auto`) |
 | `video-cycle-align --out-fps F` | None (new) | Every loop of the set at F, above the loops' own rate, once aligned: each cell at its own time, made between the cells beside it, never a cell shown again, every loop the same number of cells; `out_fps` and `source_fps` in the strip metadata; a rate not above the loops' own is refused; a loop already aligned at a higher rate is aligned again from its `cycle.source/` at its source rate |
 | `video-set --out-fps` with an aligned set | Refused | The aligned walks and runs are given it once aligned (`video-cycle-align --out-fps`), the rest by `video-loop --out-fps` |
+| `video-chain` (new) | None | RIFE's frames between, never a frame shown again on no list, under [video-pipeline.md section 9](video-pipeline.md#9-pieces-of-clips-played-as-one-move-video-chain) |
 
 ### What it takes from sprite-gen
 

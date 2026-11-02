@@ -99,6 +99,7 @@ front-facing observations also remain unchanged. Mirroring does not preserve lef
 | Where an ellipse is carried in every other cell, and what the move changes there (an arm crossing a chest moves with it; the stretch, the bend and the seam): a record and boards of every cell, nothing moved; a seam under a third moving region is not counted | `video-sway-inspect` (old name `video-follow-inspect`) | [video-pipeline](docs/video-pipeline.md#inspecting-a-sway--video-sway-inspect) |
 | A set's directions on one sheet, standing on one ground line (a 3×3 board, an engine import) | `video-set-sheet` | [video-pipeline](docs/video-pipeline.md#7-one-sheet-for-a-set--video-set-sheet) |
 | A walk or run that stops, from the clip's own start played backwards | `video-stop` | [video-pipeline](docs/video-pipeline.md#8-a-walk-or-run-that-stops--video-stop) |
+| Pieces of keyed clips on one canvas played as one move, at the time the caller gives | `video-chain` | [video-pipeline](docs/video-pipeline.md#9-pieces-of-clips-played-as-one-move-video-chain) |
 | Build a talking lower-face pack anchored to every frame of body motions from a reference and keyed clips. | `video-face` | [face-parts](docs/face-parts.md) |
 | Bake a voice and the pack's face layer onto body frames, optionally after a clip's own mouth and sound. | `face-bake` | [face-parts](docs/face-parts.md#face-bake) |
 | Compare the currently displayed loop with a final candidate, including after follow-through | `video-loop-compare` | [loop-comparison](docs/loop-comparison.md) |
@@ -118,6 +119,7 @@ front-facing observations also remain unchanged. Mirroring does not preserve lef
 | Props or icons on a transparent sheet | `slice-sheet --chroma-key none --alpha-floor 64`, props with `--scale sheet --fit contain`, icons with `--fit contain` | [sheet-slicing](docs/sheet-slicing.md#props-and-icons-sheet-scale-and-contain-fit) |
 | Standalone projected shadow | `shadow` | [asset-tools](docs/asset-tools.md#projected-shadows) |
 | Duplicate poses, foot contact and stride measurement | `inspect-motion` | [asset-tools](docs/asset-tools.md#motion-and-contact-evidence) |
+| Read a delivery for frames that show a figure's picture again and name them against hold lists | `inspect-holds` | [asset-tools](docs/asset-tools.md#frames-shown-again) |
 | Optional scene placement, lighting, camera and render | `scene-render`, `scene-inspect` | [scene](docs/scene.md) |
 | What the engine can do, for an agent or a tool to read once: every verb and argument, the providers each may call and be billed by (one JSON line, a quarter of every `--help`); a sandbox that reaches the providers through a relay: `SPRITE_GEN_<PROVIDER>_BASE_URL` (`OPENAI`, `XAI`, `ANTHROPIC`) moves a provider's calls and the files it hands back, `SPRITE_GEN_LOGINS=off` runs every call on its API key | `capabilities` | [capabilities](docs/capabilities.md), [provider addresses](docs/gen.md#provider-addresses) |
 | Defaults | `defaults show`, `defaults save` (`--codex-unavailable ask\|grok\|openai`: what to do when codex cannot run), `defaults clear` | [user-workflow](docs/user-workflow.md#one-settings-owner) |
