@@ -177,11 +177,25 @@ def _around(start, length):
 
 def _profile(distances, js, radius, lo, hi):
     n = len(distances)
+    start, stop = max(2, lo//2), hi+2
     profile = {}
-    for lag in range(max(2, lo//2), hi+2):
-        observed = js[js+lag < n]
-        if len(observed) >= radius+1:
-            profile[lag] = float(distances[observed, observed+lag].mean())
+    if len(js) == 0 or radius < 0 or not (np.diff(js) == 1).all():
+        for lag in range(start, stop):
+            observed = js[js+lag < n]
+            if len(observed) >= radius+1:
+                profile[lag] = float(distances[observed, observed+lag].mean())
+        return profile
+    # Lags below `split` observe every j: gather them as one block, a row per lag.
+    split = min(max(start, n - int(js[-1])), stop)
+    if split > start and len(js) >= radius+1:
+        lags = np.arange(start, split)[:, None]
+        profile = dict(zip(range(start, split), distances[js, js+lags].mean(axis=1).tolist()))
+    # Longer lags run off the end: only the first `count` js stay observed.
+    for lag in range(split, stop):
+        count = n - lag - int(js[0])
+        if count < radius+1:
+            break
+        profile[lag] = float(distances[js[:count], js[:count]+lag].mean())
     return profile
 
 
