@@ -176,15 +176,11 @@ def _around(start, length):
 
 
 def _profile(distances, js, radius, lo, hi):
+    """The mean distance at each lag over the frames `js` still observed at it. `js` must be the consecutive,
+    non-empty frames `_around` gives, with radius >= 2."""
     n = len(distances)
     start, stop = max(2, lo//2), hi+2
     profile = {}
-    if len(js) == 0 or radius < 0 or not (np.diff(js) == 1).all():
-        for lag in range(start, stop):
-            observed = js[js+lag < n]
-            if len(observed) >= radius+1:
-                profile[lag] = float(distances[observed, observed+lag].mean())
-        return profile
     # Lags below `split` observe every j: gather them as one block, a row per lag.
     split = min(max(start, n - int(js[-1])), stop)
     if split > start and len(js) >= radius+1:
