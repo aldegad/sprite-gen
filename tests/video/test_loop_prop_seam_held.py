@@ -22,7 +22,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from conftest import feet_unseen
+from conftest import as_pinned, feet_unseen
 from sprite_gen.video import align, local_cycle, loop, repair
 
 
@@ -363,7 +363,8 @@ def test_shape_rank_reads_no_held_side_when_the_first_choice_does_not_pop():
 # --- the set ----------------------------------------------------------------------------------
 
 @pytest.mark.slow
-def test_cycle_align_aligns_a_two_step_loop_as_the_one_cycle_it_is(held, staffless, tmp_path):
+@pytest.mark.timeout(900)  # 74 calls of the binary at 384 x 256 with rife-v4.25, 66 with rife-v4.6, on an Apple GPU and on llvmpipe (the held fill's frames between; the module's two cuts make 6 more): a minute on a GPU, minutes on a CPU's Vulkan driver
+def test_cycle_align_aligns_a_two_step_loop_as_the_one_cycle_it_is(held, staffless, tmp_path, rife_runs):
     """The loop cut two steps long is one cycle: where its report witnesses its cut whole cycles, it returns half way
     at its second step, which is no suspect (status `steps`), and it is resampled to the set's length like the rest —
     the set's length the median of the loops as cut, nothing kept twice as long. As cut here nothing witnesses either
@@ -404,6 +405,7 @@ def test_cycle_align_aligns_a_two_step_loop_as_the_one_cycle_it_is(held, staffle
     out = align.align_set(dirs, between="nearest", cycles={str(root / "out"): 2, str(other / "out"): 1})
     assert "cycle_taken" in out["loops"][0]
     assert "steps" not in json.loads((root / "out" / "loop.strip.json").read_text())
+    assert as_pinned(rife_runs(), {"rife-v4.25": (54, 74), "rife-v4.6": 66}), rife_runs()
 
 
 # What v2.35.0 wrote for a loop whose steps nobody counted (no `steps` in its strip metadata), and the
@@ -426,6 +428,8 @@ GHOST_KEYS_2430 = {"ghost_screen", "ghost_at"}
 CLIP_FEET_KEYS, BEAT_KEYS = {"clip_feet"}, {"beat", "screen"}
 # 3.8.0: the cut's held cells, read and made again (docs/loop-repair.md section 7)
 HELD_FILL_KEYS_3800 = {"held_fill"}
+# 4.0.0: the strip's exact rate, and the cells it shows again on purpose (docs/loop-repair.md section 7)
+NO_REPEAT_KEYS_400 = {"fps", "holds"}
 
 
 def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path, staffless):
@@ -448,8 +452,11 @@ def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path, staff
     assert all("cycles_kept" not in row and "steps" not in row for row in out["loops"])
     for d in dirs:
         meta = json.loads((d / "loop.strip.json").read_text())
-        assert set(meta) == STRIP_KEYS_2350 | SOURCE_KEYS_2390 | CLIP_FEET_KEYS | HELD_FILL_KEYS_3800
-        assert set(meta["cycle_align"]) == CYCLE_ALIGN_KEYS_2350 | CORRESPONDENCE_KEYS_2410 | GHOST_KEYS_2430 | BEAT_KEYS
+        assert set(meta) == STRIP_KEYS_2350 | SOURCE_KEYS_2390 | CLIP_FEET_KEYS | HELD_FILL_KEYS_3800 | NO_REPEAT_KEYS_400
+        # 4.0.0: a cut whose cells were made again after its repair (its read again) is cut again with the fill off
+        # before it is aligned, and the alignment says so (docs/loop-repair.md section 7).
+        again = {"cut_again"} if align.filled(cut) else set()
+        assert set(meta["cycle_align"]) == CYCLE_ALIGN_KEYS_2350 | CORRESPONDENCE_KEYS_2410 | GHOST_KEYS_2430 | BEAT_KEYS | again
         # The cut's source stays as the cut wrote it: `cycle_align` says the cells were turned after it, so it
         # no longer names each cell's frame (docs/loop-comparison.md). The rebuilt strip names its own cells —
         # the same frames, turned, under the same crop.

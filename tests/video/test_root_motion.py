@@ -319,6 +319,12 @@ def test_without_the_handle_the_cut_is_the_same_pictures_as_before_and_its_sidec
     assert len(cells["cells"]) == meta["frames"]
     source = meta["source_cut"]["source"]
     assert source.pop("sha256") == evidence.source_identity(sorted(keyed.glob("*.png")), 24.0)["sha256"]
+    # 4.0.0 adds the strip's exact rate and the cells it shows again on purpose; the rest is as the base wrote it.
+    assert meta.pop("fps") == pytest.approx(meta["frames"] / meta["cycle_seconds"], rel=1e-4)
+    holds = meta.pop("holds")
+    rows = ((meta.get("held_fill") or {}).get("before") or {}).get("held_runs", [])
+    kept = [row.pop("keep") for row in rows if "keep" in row]
+    assert [h["kind"] for h in holds] == kept and set(kept) <= set(held_fill.KEEPS)
     assert hashlib.sha256(json.dumps(meta, sort_keys=True).encode()).hexdigest() == SIDECARS[case]
     assert (grown is not None) == (meta["kind"] in rm.KINDS)
     if grown is not None:

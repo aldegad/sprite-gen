@@ -12,6 +12,7 @@ from sprite_gen.background import tile
 from sprite_gen.curate import anchor
 from sprite_gen.compose import compose_atlas, compose_cycle, compose_gif, export_aseprite, export_pngs
 from sprite_gen.qa import correction_loop, inspect, preview, score, motion
+from sprite_gen.qa import holds as inspect_holds
 from sprite_gen.qa import handed as handed_check
 from sprite_gen.frames import cutout, extract, slice_sheet, unpack_atlas
 from sprite_gen.gen import gen_set, logo, pixel_draw, prepare, video
@@ -27,6 +28,7 @@ from sprite_gen.video import sway as video_sway
 from sprite_gen.video import sway_inspect as video_sway_inspect
 from sprite_gen.video import set_sheet as video_set_sheet
 from sprite_gen.video import stop as video_stop
+from sprite_gen.video import chain as video_chain
 from sprite_gen.video import compare as video_compare
 from sprite_gen.video import restoration as video_restoration
 from sprite_gen.video import source as video_source
@@ -219,6 +221,7 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
     "background-tile": ("Quilt a repeating RGBA background and measure its join.", tile.add_arguments, tile.run),
     "shadow": ("Project silhouette shadows from any supported asset.", shadow.add_arguments, shadow.run),
     "inspect-motion": ("Measure asset timing and contact evidence without changing animation.", motion.add_arguments, motion.run),
+    "inspect-holds": ("Count the frames on which a figure shows the picture of the frame before, by its alpha, a key, a box or a log of its cells; --gate fails on one no list of holds meant names.", inspect_holds.add_arguments, inspect_holds.run),
     "scene-render": ("Render referenced assets using scene placement, camera and lighting.", render.add_arguments, render.run),
     "scene-inspect": ("Measure scene loops, viewport clipping and repeated joins.", inspect_scene.add_arguments, inspect_scene.run),
     "workflow": ("Resolve image/sprite choices, check access and guide the next conversation step.", guide.add_arguments, guide.run),
@@ -399,6 +402,11 @@ COMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callab
         "A walk or run that stops: the clip's own start played backwards from where it reaches the loop to the still it was filmed from, cut as a one-shot strip beside the loop (seam, drift, speed and refusals reported).",
         video_stop.add_arguments,
         video_stop.run,
+    ),
+    "video-chain": (
+        "Pieces of keyed clips on one canvas played as one move: where they join and when each frame shows is yours, the frames between, no picture shown again and the record are the engine's.",
+        video_chain.add_arguments,
+        video_chain.run,
     ),
     # The face layer (docs/face-parts.md): a talking clip's lower face cut to be laid on body motions, and a line baked
     # with the pack's own player.

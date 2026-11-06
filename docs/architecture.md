@@ -42,7 +42,7 @@ flowchart TB
         compose["compose<br/>atlas · cycle · gif · layers · export-pngs · export-aseprite"]
         background["background<br/>repeating RGBA tiles · join inspection"]
         effects["effects<br/>breathe · anatomy · recolor · interpolate · projected shadows"]
-        qa["qa<br/>inspect-motion · inspect · score · preview · correction-loop"]
+        qa["qa<br/>inspect-motion · inspect-holds · inspect · score · preview · correction-loop"]
         scene["scene<br/>placement · planes · camera · light · render · inspect"]
         serve["serve<br/>curation webview · composition canvas"]
     end
@@ -90,7 +90,7 @@ flowchart TD
     ATLAS --> D
     UNPACK --> CURATE
     subgraph E["E · independent asset tools"]
-        TILE[background-tile] ~~~ SHADOW[shadow] ~~~ MOTION[inspect-motion]
+        TILE[background-tile] ~~~ SHADOW[shadow] ~~~ MOTION[inspect-motion] ~~~ HOLDS[inspect-holds]
     end
     subgraph S["S · optional scene workflow"]
         INPUT["existing assets + scene.json"] --> RENDER[scene-render]

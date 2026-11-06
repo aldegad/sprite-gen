@@ -16,6 +16,12 @@ cell's anchor, what of the body stays on top over that) and read where the face 
   the layer's own step and the body's median step is over the line (`over_line`). The body and the layer moving in
   the same frame can each be within the line and still add up past it; a frame over the line and over the sum of the
   two steps as well is one the laying put in (`over_sum`), and a bake with one is refused.
+- **held**: frames whose body cell shows the picture of the frame before (`held_fill.same_steps`, on the cells as the pack
+  has them), the body standing still for a frame mid-motion (docs/loop-repair.md section 7). A run a clip means is
+  recorded and not warned of: longer than `held_fill.HOLD_MAX` frames, the opening or closing pose of a clip played
+  once (cells of one clip that is not the loop, from its first cell or to its last), or cells a pack's body row lists
+  as `holds` (`from`, `to`, both in, a strip's `holds`). Any other is named in a warning and baked as the pack has it:
+  the bake makes no frame.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import wave
 from pathlib import Path
@@ -36,6 +43,7 @@ from sprite_gen._deps import np
 from sprite_gen.util.console import utf8_streams
 from sprite_gen.video import face_layer as fl
 from sprite_gen.video import face_pack
+from sprite_gen.video import held_fill as held_fill_mod
 
 PROG = "face-bake"
 RATE = 48000
@@ -101,6 +109,66 @@ def _matrix(six: list[float]) -> np.ndarray:
     return np.array([six[:3], six[3:], [0.0, 0.0, 1.0]])
 
 
+def _meant(cells: list[tuple[str, int]], bodies: dict[str, dict[str, Any]]) -> tuple[str, str] | None:
+    """Why a run of baked frames showing one body picture is a hold a clip means, and its kind, or None: the body
+    cells it shows (`cells`, one a frame) read as the clips they are cells of."""
+    if len(cells) > held_fill_mod.HOLD_MAX:
+        return (f"held {len(cells)} frames, longer than a drawing on threes ({held_fill_mod.HOLD_MAX}): a hold the motion "
+                "means"), "motion-hold"
+    names = {name for name, _ in cells}
+    if len(names) != 1:
+        return None
+    name = names.pop()
+    b, ks = bodies[name], [k for _, k in cells]
+    if ks != list(range(ks[0], ks[0] + len(ks))):
+        return None  # across the loop's wrap
+    for h in b.get("holds") or []:
+        if h["from"] <= ks[0] and ks[-1] <= h["to"]:
+            return str(h.get("reason") or f"a hold the clip {name} lists"), str(h.get("kind") or "listed")
+    if b.get("loop"):
+        return None
+    if ks[0] == 0:
+        return f"the clip {name}'s opening pose", "opening"
+    if ks[-1] == len(b["cells"]) - 1:
+        return f"the clip {name}'s closing pose", "closing"
+    return None
+
+
+def held_reading(shown: list[tuple[str, int]], same: list[bool], bodies: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """The bake's body read for a picture shown again: its frames, poses and held runs (`held_fill.reading`), each run
+    with the body cells it shows and, where a clip means it, why (`_meant`)."""
+    record = {**held_fill_mod.reading(same), "pixel_same": held_fill_mod.PIXEL_SAME,
+              "changed_max": held_fill_mod.CHANGED_MAX, "hold_max": held_fill_mod.HOLD_MAX}
+    for run in record["held_runs"]:
+        cells = shown[run["start"]:run["start"] + run["length"]]
+        run["body"] = [[name, k] for name, k in cells]
+        meant = _meant(cells, bodies)
+        if meant is not None:
+            run["why"], run["kind"] = meant
+    record.pop("cells")
+    record["frames"] = len(shown)
+    return record
+
+
+def said(record: dict[str, Any]) -> str:
+    """The body's poses over the bake's frames, as a person is told them: `poses/frames`."""
+    return f"{record['poses']}/{record['frames']}"
+
+
+def held_lines(record: dict[str, Any]) -> list[str]:
+    """A warning for each held run of the bake no clip means."""
+    lines = []
+    for run in record["held_runs"]:
+        if "why" in run:
+            continue
+        end = run["start"] + run["length"] - 1
+        cells = ", ".join(f"{name}:{k}" for name, k in run["body"])
+        lines.append(f"frames {run['start']}-{end} show one body picture ({cells}; {said(record)} poses/frames): "
+                     "the body stands still there mid-motion, baked as the pack has it — make the pack from frames whose "
+                     "held cells are made again (video-loop --fill-held auto, docs/loop-repair.md section 7)")
+    return lines
+
+
 def bake(pack_dir: Path, voice_path: Path, out: Path, *, play: str | None = None, start: int = 0, tags: list[str] | None = None,
          lead: float = 0.5, tail: float = 0.6) -> dict[str, Any]:
     pack = load_pack(pack_dir)
@@ -139,9 +207,22 @@ def bake(pack_dir: Path, voice_path: Path, out: Path, *, play: str | None = None
         return keeps[name, k]
 
     rows, prev = [], None
+    # the body's steps, read on the cells as the pack has them: a pair of cells once, however often it is shown
+    steps: dict[tuple[tuple[str, int], tuple[str, int]], bool] = {}
+    shown: list[tuple[str, int]] = []
+    same: list[bool] = []
+    last_cell = None
     for t, f in enumerate(plan["frames"]):
         b = bodies[f["body"]]
         cell = Image.open(pack_dir / b["cells"][f["cell"]]).convert("RGBA")
+        here = (f["body"], f["cell"])
+        if shown:
+            pair = (shown[-1], here)
+            if pair not in steps:
+                steps[pair] = pair[0] == pair[1] or held_fill_mod.same_steps([last_cell, cell])[0]
+            same.append(steps[pair])
+        shown.append(here)
+        last_cell = cell
         to_body = _matrix(b["to_body"][f["cell"]])
         sp = None if f["face"] is None else sprite(f["face"])
         laid = fl.lay(cell, sp, to_body, keep(f["body"], f["cell"]))
@@ -188,8 +269,11 @@ def bake(pack_dir: Path, voice_path: Path, out: Path, *, play: str | None = None
               "off_frames": sum(1 for r in rows if r["layer"] == "off"),
               "outside_changed_px_max": max((r["outside_changed_px"] for r in rows), default=0),
               "jump_line": fl.JUMP_LINE, "body_median_step": med, "over_line": over_line, "over_sum": over_sum,
-              "verdict": "refused" if refused else "pass", "refused": refused, "rows": rows}
+              "verdict": "refused" if refused else "pass", "refused": refused,
+              "held": held_reading(shown, same, bodies), "rows": rows}
     (out / "bake.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    for line in held_lines(report["held"]):
+        print(f"{PROG}: warning: {line}", file=sys.stderr)
     return report
 
 
@@ -258,6 +342,8 @@ def run(**kwargs: object) -> int:
     print(json.dumps({"out": str(out), "frames": report["frames"], "set": report["set"], "rest": report["rest"],
                       "line_start": report["line_start"], "wait_frames": report["wait_frames"], "talk_frames": report["talk_frames"],
                       "over_line": report["over_line"], "over_sum": report["over_sum"], "outside_changed_px_max": report["outside_changed_px_max"],
+                      "held": {"poses_frames": said(report["held"]),
+                               "warned": sum(1 for r in report["held"]["held_runs"] if "why" not in r)},
                       "verdict": report["verdict"], "videos": made}, ensure_ascii=False, indent=2))
     if report["verdict"] != "pass":
         print(f"{PROG}: refused: " + "; ".join(report["refused"]))

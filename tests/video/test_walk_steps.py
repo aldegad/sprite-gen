@@ -530,8 +530,8 @@ def test_a_walk_whose_feet_meet_once_a_cycle_its_arms_swinging_past_its_sides_is
 
 
 @pytest.mark.slow
-@pytest.mark.timeout(900)  # up to 10 calls of the binary at 300 x 220 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
-@pytest.mark.parametrize("cycle, runs", [(16, 0), (18, 10)])
+@pytest.mark.timeout(900)  # up to 12 calls of the binary at 300 x 220 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.parametrize("cycle, runs", [(16, 0), (18, 12)])
 def test_a_diagonal_walk_whose_near_foot_steps_out_is_cut_one_cycle_from_its_view(tmp_path, cycle, runs, rife_runs):
     """On a front diagonal the near foot steps out toward the camera and passes the far one apart: the feet meet on the
     screen once a cycle, and briefly — no pass hides. Given the view, the count asks the picture: the clip one interval
@@ -560,7 +560,7 @@ def test_a_diagonal_walk_whose_near_foot_steps_out_is_cut_one_cycle_from_its_vie
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # up to 30 calls of the binary at 300 x 220 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
-@pytest.mark.parametrize("cycle, runs", [(20, {"rife-v4.25": (10, 22), "rife-v4.6": 10}), (24, {"rife-v4.25": (12, 30), "rife-v4.6": 12})],
+@pytest.mark.parametrize("cycle, runs", [(20, {"rife-v4.25": (12, 24), "rife-v4.6": 12}), (24, {"rife-v4.25": (12, 30), "rife-v4.6": 12})],
                          ids=pin_id)
 def test_a_walk_whose_feet_stay_apart_and_meet_once_a_cycle_is_cut_one_cycle_on_the_order_its_feet_are_drawn_in(tmp_path, cycle, runs, rife_runs):
     """Seen from the front, the feet apart, the foot stepping toward the camera drawn lower: the feet meet on the screen
@@ -735,7 +735,7 @@ def test_a_wide_walk_whose_far_leg_is_drawn_a_few_tones_off_is_cut_two_steps(tmp
 @pytest.mark.timeout(900)  # up to 22 calls of the binary at about 300 x 340 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize("motion, bob, room, runs", [("arc", 3, 0, {"rife-v4.25": (6, 10), "rife-v4.6": 8}),
                                                      ("arc", 0, 60, {"rife-v4.25": (14, 22), "rife-v4.6": 22}),
-                                                     ("sway", 0, 60, {"rife-v4.25": 2, "rife-v4.6": 6}),
+                                                     ("sway", 0, 60, {"rife-v4.25": 6, "rife-v4.6": 12}),
                                                      ("ramp", 0, 60, {"rife-v4.25": 8, "rife-v4.6": 16})], ids=pin_id)
 def test_a_walk_whose_crossings_are_its_steps_carried_up_and_down_is_cut_two_steps(tmp_path, motion, bob, room, runs, rife_runs):
     """The wide walker with its legs drawn alike, carried up and down the screen with the whole picture (`_carried`;

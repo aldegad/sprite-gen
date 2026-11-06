@@ -223,11 +223,13 @@ With `--play`, the sound track contains the clip's own sound for its `own_mouth`
 | `frames/frame-NNNNN.png` | RGBA frames at the pack's size. |
 | `voice-baked.wav` | Whole sound track, mono 48 kHz, as long as the frames. |
 | `voice-padded.wav` | Voice with lead and tail silence. |
-| `bake.json` | Per frame body, cell, face frame, layer state, level, pixels changed outside the weight, and composite, body, and layer steps. It also records set, rest, `own_mouth_frames`, `line_start`, `wait_frames`, levels, `over_line`, `over_sum`, and verdict. |
+| `bake.json` | Per frame body, cell, face frame, layer state, level, pixels changed outside the weight, and composite, body, and layer steps. It also records set, rest, `own_mouth_frames`, `line_start`, `wait_frames`, levels, `over_line`, `over_sum`, `held`, and verdict. |
 | `baked.mp4` | Frames over the matte with sound, when `--video` is set. |
 | `beside.mp4` | Supplied frames on the left and bake on the right, with bake sound, when `--beside` is set. |
 
 Steps are read on the face around the mouth in reference coordinates. A composite step over 1.4 times the largest of the body's own step, the layer's own step, and the body's median step is `over_line`. Body and layer motion in one frame can add up even when each is within the line. A frame that is `over_line` and also exceeds the sum of the body and layer steps is `over_sum`.
+
+The body is also read for a picture shown again: a frame whose body cell shows the picture of the frame before, so the body stands still for a frame mid-motion. Two cells are one picture by `held_fill`'s rule ([loop repair](loop-repair.md) section 7), read on the cells as the pack has them. `bake.json` records it as `held`: `frames`, `poses`, the thresholds, and `held_runs` (`start`, `length`, and `body`, the clip and cell of each frame). A run a clip means is recorded with a `why` and a `kind` and not warned of: one longer than three frames (`motion-hold`), the opening or closing pose of a clip played once (cells of one clip that is not the loop, from its first cell or to its last), or cells a body row of the pack lists as `holds` (`from`, `to`, both in, `kind`, `reason`, as a strip's `holds`). Any other run, within a clip, across the loop's wrap, or where a clip comes back to the loop, prints `face-bake: warning: frames A-B show one body picture (…)` with the cells and the poses over the frames. The bake makes no frame: the pack's cells are baked as they are, and the verdict does not change. Make the pack from frames whose held cells are made again (`video-loop --fill-held auto`).
 
 If the planner finds no suitable frame within the body clip and one round of the loop, `face-bake` stops and names the reason. The bake is refused with exit code 1 and verdict `refused` if any frame is `over_sum` or if any pixel outside the layer's weight changes. The frames are still written for inspection.
 
