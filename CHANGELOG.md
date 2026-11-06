@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v4.1.0) - Prop plate tracked and erased per frame across camera pans, with palette exclusion and contact warnings (video-frames --prop-plate)
+## v4.1.0 - Prop plate tracked and erased per frame across camera pans, with palette exclusion and contact warnings (video-frames --prop-plate)
 
 **Upgrading from 4.0.0: runs without `--prop-plate` take the same code path as 4.0.0 (every new argument is `None`) and give the same keyed frames, frames report, stdout, and stderr byte for byte as 4.0.0, with `--decontam palette` and `--spill auto` as well as by default. Runs with `--prop-plate`: keyed frames and every cut from them change (the plate is erased in each frame where it is found, and the 3.12.0 median rule no longer erases anything), the frames report's `prop_plate` records per-frame tracking instead of a fixed box, and the edge pass learns the subject palette without the plate. The canvas side (`video-canvas --prop-plate`) is unchanged. No new dependency, no model call.**
 
