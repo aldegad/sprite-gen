@@ -8,6 +8,7 @@ import shutil
 import numpy as np
 import pytest
 from PIL import Image, ImageDraw
+from conftest import as_pinned
 from sprite_gen import cli
 from sprite_gen.video import align, follow, follow_inspect
 from sprite_gen.video import loop as loop_mod
@@ -122,8 +123,9 @@ def aligned(o, path, **kw):
 
 # ---------------------------------------------------------------- C3: the alignment records where every cell is from
 
-@pytest.mark.timeout(900)  # 46 calls of the binary at 256 x 256 (the held fill's frames between): seconds on a GPU, a minute or more on a CPU's Vulkan driver
-def test_the_first_alignment_records_the_cut_it_was_made_from_and_later_ones_keep_it(origin, tmp_path):
+@pytest.mark.slow
+@pytest.mark.timeout(900)  # 46 calls of the binary at 256 x 256 with rife-v4.25, 8 with rife-v4.6, on an Apple GPU and on llvmpipe (the held fill's frames between): seconds on a GPU, a minute or more on a CPU's Vulkan driver
+def test_the_first_alignment_records_the_cut_it_was_made_from_and_later_ones_keep_it(origin, tmp_path, rife_runs):
     o, read_on, _ = origin
     as_cut = meta_of(o)
     loop_dir = copy(o, tmp_path/'turned')
@@ -148,6 +150,7 @@ def test_the_first_alignment_records_the_cut_it_was_made_from_and_later_ones_kee
     align.align_set([loop_dir], length=17, between='nearest', multi_cycle='warn')
     again = meta_of(loop_dir)['cycle_align']
     assert again['origin'] == source and len(again['cells_from']) == 17
+    assert as_pinned(rife_runs(), {'rife-v4.25': (8, 46), 'rife-v4.6': 8}), rife_runs()
 
 
 def test_a_follow_through_on_the_cut_is_not_the_origin_the_cut_as_cut_is(origin, tmp_path):
