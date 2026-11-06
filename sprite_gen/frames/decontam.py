@@ -461,21 +461,30 @@ def _blend_calls(last: dict[str, Any] | None, rows: np.ndarray, cols: np.ndarray
     return np.concatenate([rgb, 255.0 * a[:, None]], axis=1), state
 
 
-def not_applicable(keyed: np.ndarray, keyed_mask: np.ndarray, chroma_key: tuple[int, int, int]) -> str | None:
+def _interior(keyed_mask: np.ndarray, not_subject: np.ndarray | None) -> np.ndarray:
+    """The subject's interior: deeper than `BAND_PX` inside the keyed silhouette, `not_subject` left out."""
+    interior = ~keyed_mask & (_ring_depth(keyed_mask, BAND_PX) > BAND_PX)
+    return interior if not_subject is None else interior & ~not_subject
+
+
+def not_applicable(keyed: np.ndarray, keyed_mask: np.ndarray, chroma_key: tuple[int, int, int],
+                   not_subject: np.ndarray | None = None) -> str | None:
     """Why the pass cannot run on this image, or None when it can."""
     keyed_channels, _ = _key_channel_split(chroma_key)
     if not keyed_channels:
         return (f"key {tuple(chroma_key)} has no key hue (needs saturated and dark channels); "
                 "edge decontamination only applies to chroma keys such as green or magenta")
-    interior = ~keyed_mask & (_ring_depth(keyed_mask, BAND_PX) > BAND_PX)
+    interior = _interior(keyed_mask, not_subject)
     if not np.count_nonzero(interior & (keyed[..., 3] == 255)):
         return (f"no subject pixel lies deeper than {BAND_PX} px inside the keyed silhouette, "
                 "so there is no interior to learn the subject's colours from")
     return None
 
 
-def subject_palette(keyed: np.ndarray, keyed_mask: np.ndarray, chroma_key: tuple[int, int, int]) -> dict[str, Any]:
-    """The subject's colours, learned from its confident interior (opaque, deeper than `BAND_PX`).
+def subject_palette(keyed: np.ndarray, keyed_mask: np.ndarray, chroma_key: tuple[int, int, int],
+                    not_subject: np.ndarray | None = None) -> dict[str, Any]:
+    """The subject's colours, learned from its confident interior (opaque, deeper than `BAND_PX`), the pixels
+    `not_subject` marks left out (a prop plate standing as opaque as the subject: `video-frames --prop-plate`).
 
     Returns {"palette": (k, 3) float64, "keyfree": bool, "key_material_share": float,
     "material_spread": float}, the last being how far the interior itself sits from the
@@ -483,13 +492,11 @@ def subject_palette(keyed: np.ndarray, keyed_mask: np.ndarray, chroma_key: tuple
     and hand it to every frame, so the colours an edge may take do not change from frame to
     frame. Raises SystemExit when `not_applicable` says why it cannot.
     """
-    reason = not_applicable(keyed, keyed_mask, chroma_key)
+    reason = not_applicable(keyed, keyed_mask, chroma_key, not_subject)
     if reason is not None:
         raise SystemExit(f"decontam: {reason}; run without decontam")
     keyed_channels, unkeyed_channels = _key_channel_split(chroma_key)
-    subject = ~keyed_mask
-    interior = subject & (_ring_depth(keyed_mask, BAND_PX) > BAND_PX)
-    confident = interior & (keyed[..., 3] == 255)
+    confident = _interior(keyed_mask, not_subject) & (keyed[..., 3] == 255)
     confident_count = int(np.count_nonzero(confident))
     excess = _key_excess_field(keyed[..., :3].astype(np.int32), keyed_channels, unkeyed_channels)
     key_material = float(np.count_nonzero(confident & (excess > KEY_HUE_TINT))) / confident_count
@@ -516,14 +523,16 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
                   chroma_key: tuple[int, int, int], *, fit: str = "still", alpha_depth: int = 4,
                   palette: dict[str, Any] | None = None, mode: str = PALETTE,
                   source_alpha: np.ndarray | None = None, edge_band: int = 0,
-                  history: dict[str, Any] | None = None) -> tuple[np.ndarray, dict[str, Any]]:
+                  history: dict[str, Any] | None = None,
+                  not_subject: np.ndarray | None = None) -> tuple[np.ndarray, dict[str, Any]]:
     """Re-explain the edge of an already keyed image. Returns (RGBA uint8, stats).
 
     `source_rgb` (H, W, 3) is the frame as generated and `source_alpha` (H, W) its own
     coverage (None: opaque), `keyed` (H, W, 4) the engine's output for it and `keyed_mask`
     the engine's hard-cut background (transparent input included). Interior pixels
     (deeper than `BAND_PX`) are returned byte-identical.
-    `palette` is a `subject_palette` result to reuse (a clip's); None learns this frame's.
+    `palette` is a `subject_palette` result to reuse (a clip's); None learns this frame's, without the
+    pixels `not_subject` marks (None: every pixel the matte kept is the subject's).
     `edge_band` (px) keeps what the matte left transparent along the top, left and right
     edges transparent (*Frame edge*); 0 leaves the frame edge to the pass like anywhere else.
     `history` (video fit) is a dict a clip hands to every frame in order: the pass reads the
@@ -536,7 +545,7 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
     if mode == OFF:
         raise SystemExit("decontam: decontaminate() called with mode 'off'")
     if palette is None:
-        reason = not_applicable(keyed, keyed_mask, chroma_key)
+        reason = not_applicable(keyed, keyed_mask, chroma_key, not_subject)
         if reason is not None:
             if mode == PALETTE:
                 raise SystemExit(f"decontam: {reason}; run without decontam")
@@ -550,7 +559,7 @@ def decontaminate(source_rgb: np.ndarray, keyed: np.ndarray, keyed_mask: np.ndar
     depth = _ring_depth(keyed_mask, BAND_PX)
     band = subject & (depth <= BAND_PX)
     flank = keyed_mask & (_ring_depth(subject, FLANK_PX) <= FLANK_PX)
-    learned = subject_palette(out, keyed_mask, chroma_key) if palette is None else palette
+    learned = subject_palette(out, keyed_mask, chroma_key, not_subject) if palette is None else palette
     palette_rgb = np.asarray(learned["palette"], dtype=np.float64)
     keyfree = bool(learned["keyfree"])
     key_material = float(learned["key_material_share"])
