@@ -2,7 +2,7 @@
 
 All notable public changes to `sprite-gen` are recorded here. Versions track the `version:` field in `SKILL.md` and `pyproject.toml`.
 
-## Unreleased (v4.3.0)
+## v4.3.0 - Shaded sides and tops on the prop plate found as shades of prop_plate.rgb and erased with their edge lines, palette exclusion, and side contact warning (video-frames --prop-plate)
 
 **Upgrading from 4.2.0: runs without `--prop-plate` give the same files, frames reports, stdout, and stderr byte for byte as 4.2.0, except the engine fingerprint `implementation_sha256` (in `producer` of the loop report and other reports that carry one, and in `measurement_engine` and `receipt_engine` fields), which hashes every file in `sprite_gen/video` (only `sprite_gen/video/prop_plate.py` changed, and `video-frames` reaches it only with `--prop-plate`). Runs with `--prop-plate` now also find and erase shaded sides and tops a video model draws on the plate, erase pale green codec ringing and dark reddened box-edge lines within 4 px of what the plate's pixels and the colour rules took, exclude the side and top and their 4 px rim from `--decontam` palette learning, add `side_px` and `side_touch_px` to each frame row and `side_touching` to the frames report's `prop_plate`, print a third warning line when the plate's shaded side or top meets the subject, and refuse a canvas report without `prop_plate.rgb` before keying (`video-canvas --prop-plate` has always written it). `video-canvas --prop-plate` is unchanged. No new dependency, no model call.**
 
