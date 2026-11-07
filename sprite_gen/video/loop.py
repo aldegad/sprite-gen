@@ -154,6 +154,10 @@ SIZE_HOLD_MODES = ("auto", "off")
 # the kept one stale, so writing the cycle removes it: an alignment after a re-cut (say, once RIFE
 # is installed and the jumps are repaired) reads the new cut, not the old one.
 CYCLE_SOURCE_DIR = "cycle.source"
+# A loop whose held cells the cut made again is cut again with the fill off, so an alignment aligns the cut as filmed, and
+# that cut is kept as `cycle.source/` (`keep_unfilled`): by `video-loop` while the clip's frames are there, or else by
+# `video-cycle-align`. The folder beside the loop it is cut in, removed once it is kept.
+CUT_AGAIN_DIR = ".cycle.source.cut"
 # The strip as it was before `video-sway` (the Sway layer; old name `video-follow`) moved a region of it;
 # a later sway reads from it, and a new cut or alignment removes it (docs/video-pipeline.md section 6).
 # Its name, and the key the sway's record is written under, stay `follow` in this release: a consumer reads
@@ -999,19 +1003,21 @@ def refuse(target: Path, out_dir: Path, name: str, report: dict[str, Any], *, cu
     write_loop_report(target, report)
 
 
+def _finite(value: Any) -> Any:
+    """`value` as the report holds it: a ratio that is not finite (a zero-motion one) as None."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _finite(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(item) for item in value]
+    return value
+
+
 def write_loop_report(target: Path, payload: dict[str, Any]) -> None:
     """Strict JSON, including refusals with undefined (zero-motion) ratios."""
-    def finite(value: Any) -> Any:
-        if isinstance(value, float) and not math.isfinite(value):
-            return None
-        if isinstance(value, dict):
-            return {key: finite(item) for key, item in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [finite(item) for item in value]
-        return value
-
     target.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(target, json.dumps(finite(payload), ensure_ascii=False, indent=2, allow_nan=False) + "\n")
+    atomic_write_text(target, json.dumps(_finite(payload), ensure_ascii=False, indent=2, allow_nan=False) + "\n")
 
 
 def resampled_cells(strip: Image.Image, meta: dict[str, Any], idx: list[int], length: int) -> list[Image.Image]:
@@ -2434,6 +2440,65 @@ def cut_again(report: dict[str, Any], out_dir: Path, *, report_path: Path, **ask
                     contacts=list(contacts) if contacts else None, **kw)
 
 
+def filled(meta: dict[str, Any]) -> bool:
+    """Whether a cut's held cells were made again (`held_fill.made`, or `made` of the read after its repair), as its strip
+    record (`<name>.strip.json`) says."""
+    held = meta.get("held_fill") or {}
+    return bool(held.get("made") or (held.get("again") or {}).get("made"))
+
+
+def keep_unfilled(report: dict[str, Any], out_dir: Path, name: str, cut: dict[str, Any], **asked: Any) -> dict[str, Any]:
+    """The cut `report` records made again from its frames with the fill off (`cut_again`, `asked` passed on), kept beside
+    the loop in `out_dir` as `cycle.source/` — its frames, its strip and its strip record (`<name>.strip.json`), the cut
+    as filmed that `video-cycle-align` aligns. `cut` is the loop's cut (its strip record's `cycle_drawings`), whose frames
+    of the clip the cut again must take too. What the cut again returned; ValueError naming why it could not be
+    (`cut_again`'s, a cut again that failed or took other frames), `cycle.source/` then left as it was."""
+    work = out_dir / CUT_AGAIN_DIR
+    shutil.rmtree(work, ignore_errors=True)
+    try:
+        try:
+            again = cut_again(report, work, report_path=work / "cut.loop.report.json", fill_held="off", **asked)
+        except SystemExit as exc:
+            raise ValueError(f"cutting it again with the fill off failed: {exc}") from None
+        record = f"{name}.strip.json"
+        now = json.loads((work / record).read_text(encoding="utf-8")).get("cycle_drawings") or {}
+        if (now.get("start"), now.get("length")) != (cut.get("start"), cut.get("length")):
+            raise ValueError(f"cut again with the fill off it took frames {now.get('start')}+{now.get('length')}, not "
+                             f"{cut.get('start')}+{cut.get('length')}")
+        # The strip and its record go beside its frames first, so `cycle.source/` appears whole or not at all.
+        kept = work / "cycle"
+        shutil.copyfile(work / record, kept / record)
+        shutil.copyfile(work / f"{name}.strip.png", kept / f"{name}.strip.png")
+        source = out_dir / CYCLE_SOURCE_DIR
+        shutil.rmtree(source, ignore_errors=True)
+        kept.rename(source)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return again
+
+
+def _keep_unfilled_here(report_base: dict[str, Any], frames_dir: Path, out_dir: Path, name: str,
+                        strip_meta: dict[str, Any], interpolate: rife_mod.Interpolate | None) -> dict[str, Any]:
+    """A loop whose held cells this cut made again, cut again with the fill off while the clip's frames are here and kept
+    as `cycle.source/` (`keep_unfilled`, from what this cut was asked as its report records it): an alignment of it then
+    aligns the cut as filmed without the clip's frames. Its record (the report's `cycle_source`): kept, with the cells of
+    the cut with the fill off and the cells made before; or not kept and why, said in a warning."""
+    print(f"video-loop: {name}: its held cells were made again, so it is cut again with the fill off and that cut is kept "
+          f"as {CYCLE_SOURCE_DIR}/ for video-cycle-align; the lines below until it is kept are that cut's", file=sys.stderr)
+    # What the cut was asked, as its report holds it (`write_loop_report`): what an alignment reads to cut it again.
+    asked = json.loads(json.dumps(_finite({"cut_args": report_base["cut_args"], "frames_dir": str(frames_dir)})))
+    try:
+        again = keep_unfilled(asked, out_dir, name, strip_meta["cycle_drawings"], interpolate=interpolate)
+    except ValueError as exc:
+        print(f"video-loop: warning: {name}: its held cells were made again and no cut with the fill off is kept beside it "
+              f"({exc}): video-cycle-align cuts it again from the clip's frames, or stops on it without them "
+              "(docs/loop-repair.md section 7)", file=sys.stderr)
+        return {"kept": False, "why": str(exc)}
+    print(f"video-loop: {name}: the cut with the fill off is kept as {CYCLE_SOURCE_DIR}/", file=sys.stderr)
+    return {"kept": True, "dir": CYCLE_SOURCE_DIR, "fill_held": "off", "cells": again["strip"]["cycle_frames"],
+            "made_before": strip_meta["held_fill"]["made"]}
+
+
 def run_loop(frames_dir: Path, out_dir: Path, **options: Any) -> dict[str, Any]:
     """Cut the loop (`_cut_loop`, which takes the options). The frames a size hold or the gait fallback scales back
     are written in folders of the run's own (`_Scratch`), removed however the run ends."""
@@ -3445,6 +3510,10 @@ def _cut_loop(
         # The GIF or WebP could not be written (no img2webp) or failed its verification: nothing of the cut is handed over.
         refuse(target, out_dir, name, {**report_base, "status": "failed", "error": str(exc), "cycle": cycle}, cut_written=True)
         raise
+    # A loop whose held cells were made again: the cut as filmed an alignment aligns, kept beside it while the clip's
+    # frames are here (docs/loop-repair.md section 7). A cut at --out-fps is not aligned, nor one played once.
+    if ring and out_fps is None and filled(strip_meta):
+        report_base["cycle_source"] = _keep_unfilled_here(report_base, frames_dir, out_dir, name, strip_meta, interpolate)
 
     payload = {
         **report_base,
@@ -3558,7 +3627,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                              f"{held_fill_mod.HOLD_MAX} cells, the opening or closing pose of a cut played once, a loop's last "
                              "cells and a cut drawn on twos or threes kept as filmed; off cuts them as filmed. Either way the report and the strip metadata record "
                              "the held runs and the poses over the cells (`held_fill`, docs/loop-repair.md section 7); with no "
-                             "RIFE installed the cells are shown as filmed, with a warning")
+                             "RIFE installed the cells are shown as filmed, with a warning. A loop at the clip's rate whose "
+                             f"cells auto made again is cut again with the fill off and that cut is kept as {CYCLE_SOURCE_DIR}/ "
+                             "for video-cycle-align, which then needs no clip's frames (the report's `cycle_source`)")
     parser.add_argument("--out-fps", type=float, default=None,
                         help="give the cut at this rate, above the clip's (--fps): every cell at its own time, made by RIFE "
                              "between the frames beside it — never a frame shown again. A loop keeps its cycle's seconds, a "
@@ -3682,6 +3753,8 @@ def run(**kwargs: object) -> int:
                             "held_runs": held["held_runs"], "made": held["made"],
                             **({"unmade": held["unmade"]["cells"]} if "unmade" in held else {}),
                             **({"out_fps": {k: held["out_fps"][k] for k in ("asked", "applied", "cells")}} if "out_fps" in held else {})}
+    if "cycle_source" in payload:
+        summary["cycle_source"] = payload["cycle_source"]
     if "root_motion" in payload:
         # Each air of a cut played once, as a person is told it: its seconds and its apex.
         summary["air"] = root_motion_mod.said(payload["root_motion"])

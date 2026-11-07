@@ -11,6 +11,7 @@ The interpolator is `Between`, a stand-in that draws the synthetic clip again at
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -148,9 +149,15 @@ def test_an_aligned_set_whose_cuts_hold_a_picture_twice_delivers_none_shown_agai
         assert any("held_fill" in c for c in meta["cycle_align"]["cells_from"])
 
 
+def _cut_before_it_kept_its_source(d: Path) -> Path:
+    """A filled loop as a video-loop from before it kept the cut with the fill off left it: no `cycle.source/`."""
+    shutil.rmtree(d / align.SOURCE_DIR)
+    return d
+
+
 def test_the_alignment_cuts_a_filled_loop_again_with_the_fill_off_and_aligns_the_frames_as_filmed(tmp_path):
     clip = _held_clip()
-    dirs = [_cut(tmp_path, n, c, length=N + 1, interpolate=_between()) for n, c in (("A", clip), ("B", clip))]
+    dirs = [_cut_before_it_kept_its_source(_cut(tmp_path, n, c, length=N + 1, interpolate=_between())) for n, c in (("A", clip), ("B", clip))]
     assert all(_meta(d)["held_fill"]["made"] == [6] for d in dirs)  # video-loop on its own fills, a loop delivered
     report = align.align_set(dirs, interpolate=_between())
     for d, row in zip(dirs, report["loops"]):
@@ -166,14 +173,89 @@ def test_the_alignment_cuts_a_filled_loop_again_with_the_fill_off_and_aligns_the
 
 def test_a_filled_loop_whose_cut_cannot_be_made_again_stops_the_set_naming_it(tmp_path):
     clip = _held_clip()
-    dirs = [_cut(tmp_path, n, c, length=N + 1, interpolate=_between()) for n, c in (("A", clip), ("B", clip))]
+    dirs = [_cut_before_it_kept_its_source(_cut(tmp_path, n, c, length=N + 1, interpolate=_between())) for n, c in (("A", clip), ("B", clip))]
     report_path = dirs[1] / "walk.loop.report.json"
     report = json.loads(report_path.read_text())
     report.pop("cut_args")  # a report from before cuts recorded what they were asked
     report_path.write_text(json.dumps(report))
-    with pytest.raises(SystemExit, match=r"no cut_args.*video-loop --fill-held off"):
+    with pytest.raises(SystemExit, match=r"no cut_args.*carry the cycle.source/ video-loop kept.*video-loop --fill-held off"):
         align.align_set(dirs, interpolate=_between())
     assert not (dirs[1] / align.SOURCE_DIR / "walk.strip.json").exists()
+
+
+def _aligned_files(d: Path) -> dict[str, bytes]:
+    """What an alignment rewrote in a loop directory, and the cut it aligned (`cycle.source/`), byte for byte."""
+    return {str(p.relative_to(d)): p.read_bytes() for p in sorted(d.rglob("*"))
+            if p.is_file() and (p.parent.name in ("cycle", align.SOURCE_DIR) or p.suffix in (".png", ".gif", ".webp"))}
+
+
+def _aligned_meta(d: Path) -> dict:
+    """The aligned strip's record, but for what the alignment itself cut again (`cut_again`, which names its report)."""
+    meta = _meta(d)
+    meta["cycle_align"].pop("cut_again", None)
+    return meta
+
+
+def test_a_set_with_a_filled_direction_is_aligned_without_the_clip_s_frames_as_it_is_with_them(tmp_path):
+    # An app that aligns a set elsewhere than it cut it holds each loop as video-loop left it, and none of its clip's
+    # frames. Before, a set with a direction whose held cells video-loop made stopped there ("cut it again with
+    # `video-loop --fill-held off`"): only the clip's frames could give the cut with the fill off.
+    clip = _held_clip()
+    cut = [_cut(tmp_path, "A", clip, length=N + 1, interpolate=_between()),
+           _cut(tmp_path, "B", clip, length=N + 1, fill_held="off")]
+    assert _meta(cut[0])["held_fill"]["made"] == [6] and _meta(cut[1])["held_fill"]["made"] == []
+    # With the clip's frames and nothing kept beside the filled loop, the alignment cuts it again with the fill off.
+    framed = [Path(shutil.copytree(d, tmp_path / "framed" / d.name)) for d in cut]
+    shutil.rmtree(framed[0] / align.SOURCE_DIR, ignore_errors=True)
+    by_cut = align.align_set(framed, interpolate=_between())
+    assert by_cut["loops"][0]["cut_again"]["made_before"] == [6]
+    # Without them: the loops as video-loop left them.
+    held = [Path(shutil.copytree(d, tmp_path / "app" / d.name)) for d in cut]
+    for name in ("A", "B"):
+        shutil.rmtree(tmp_path / f"{name}-keyed")
+    kept = align.align_set(held, interpolate=_between())
+    assert all("cut_again" not in row for row in kept["loops"])
+    for a, b in zip(framed, held):
+        assert _aligned_files(a) == _aligned_files(b) and _aligned_meta(a) == _aligned_meta(b)
+    assert (kept["length"], kept["lengths"]) == (by_cut["length"], by_cut["lengths"])
+    assert all(_shown_again(_cells(d)) == [] for d in held)
+
+
+def test_video_loop_keeps_a_filled_loop_s_cut_with_the_fill_off_beside_it_and_an_unfilled_one_s_as_it_was(tmp_path):
+    clip = _held_clip()
+    filled = _cut(tmp_path, "A", clip, length=N + 1, interpolate=_between())
+    unfilled = _cut(tmp_path, "B", walk(N + 6), length=N, interpolate=_between())  # no picture shown again: nothing made
+    # The filled loop's cut with the fill off, as the alignment cut it from the clip's frames: frame 5 shown twice.
+    report = json.loads((filled / "walk.loop.report.json").read_text())
+    again = loop_mod.cut_again(report, tmp_path / "again", report_path=tmp_path / "again.json", fill_held="off")
+    source = filled / align.SOURCE_DIR
+    assert report["cycle_source"] == {"kept": True, "dir": align.SOURCE_DIR, "fill_held": "off",
+                                      "cells": again["strip"]["cycle_frames"], "made_before": [6]}
+    assert sorted(p.name for p in source.iterdir()) == [*(f"frame-{k:03d}.png" for k in range(N + 1)), "walk.strip.json", "walk.strip.png"]
+    for name in [*(f"frame-{k:03d}.png" for k in range(N + 1))]:
+        assert (source / name).read_bytes() == (tmp_path / "again" / "cycle" / name).read_bytes()
+    for name in ("walk.strip.json", "walk.strip.png"):
+        assert (source / name).read_bytes() == (tmp_path / "again" / name).read_bytes()
+    assert not align.filled(json.loads((source / "walk.strip.json").read_text()))
+    assert not (filled / loop_mod.CUT_AGAIN_DIR).exists()
+    # The delivered loop is the filled one; a loop with nothing made, and one cut with the fill off, keep nothing.
+    assert _shown_again(_cells(filled)) == []
+    off = _cut(tmp_path, "C", clip, length=N + 1, fill_held="off")
+    for d in (unfilled, off):
+        assert not (d / align.SOURCE_DIR).exists() and "cycle_source" not in json.loads((d / "walk.loop.report.json").read_text())
+
+
+def test_a_filled_loop_whose_cut_with_the_fill_off_fails_is_delivered_and_says_why_nothing_is_kept(monkeypatch, tmp_path, capsys):
+    def refused(report, out_dir, **asked):
+        raise SystemExit("video-loop: refused for the test")
+
+    monkeypatch.setattr(loop_mod, "cut_again", refused)
+    d = _cut(tmp_path, "A", _held_clip(), length=N + 1, interpolate=_between())
+    report = json.loads((d / "walk.loop.report.json").read_text())
+    assert report["status"] == loop_mod.REPORT_PASSED and _meta(d)["held_fill"]["made"] == [6]
+    assert report["cycle_source"] == {"kept": False, "why": "cutting it again with the fill off failed: video-loop: refused for the test"}
+    assert not (d / align.SOURCE_DIR).exists() and not (d / loop_mod.CUT_AGAIN_DIR).exists()
+    assert "no cut with the fill off is kept beside it" in capsys.readouterr().err
 
 
 def test_an_aligned_set_asked_for_at_a_rate_of_its_own_is_given_frames_between_every_loop_alike(tmp_path):
