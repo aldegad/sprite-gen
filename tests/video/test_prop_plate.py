@@ -410,7 +410,10 @@ def test_each_frame_reports_the_side_and_top_found_joined_to_its_plate(boxed: Fi
     for k, (row, drawn, faces) in enumerate(zip(rows, boxed.plates, boxed.faces)):
         figure_k = body(boxed, k, size, least=1)
         assert row["found"] is True
-        ys, xs = np.nonzero(drawn & ~figure_k)
+        seen = drawn & ~figure_k
+        if faces is not None and (faces & seen).sum() < least:
+            seen &= ~faces  # the sliver read as no side: the box is the front's, whatever of the sliver the codec blends
+        ys, xs = np.nonzero(seen)
         assert all(abs(a - b) <= 2 for a, b in zip(row["box"], (xs.min(), ys.min(), xs.max() + 1, ys.max() + 1))), (k, row["box"])
         if faces is not None and (grown(figure_k, prop_plate.RIM + 1) & faces).any() and (faces & ~figure_k).sum() >= least:
             meets.append(names[k])
@@ -420,8 +423,8 @@ def test_each_frame_reports_the_side_and_top_found_joined_to_its_plate(boxed: Fi
         front, want = int((drawn & ~faces).sum()), int(faces.sum())
         sides.append((k, row["side_px"], want))
         assert abs(row["plate_px"] - front) <= 0.05 * front, (k, row["plate_px"], front)
-        least, most = int(shrunk(faces, 1).sum()), int((grown(faces, 1) & ~(drawn & ~faces)).sum())
-        assert least <= row["side_px"] <= most, (k, row["side_px"], least, most)
+        fewest, most = int(shrunk(faces, 1).sum()), int((grown(faces, 1) & ~(drawn & ~faces)).sum())
+        assert fewest <= row["side_px"] <= most, (k, row["side_px"], fewest, most)
     tall = (boxed.report["prop_plate"]["box"][3] - boxed.report["prop_plate"]["box"][1]) * SCALE
     assert any(want >= 4 * tall for _, _, want in sides), f"no clear frame with a side 4 px wide: {sides}"
     assert any(want == 0 for _, _, want in sides), f"no clear frame before the side: {sides}"
