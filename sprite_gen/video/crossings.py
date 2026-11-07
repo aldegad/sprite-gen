@@ -52,8 +52,10 @@ together as long as a pass, a wobble that reaches the reading's sides at a step'
 
 from __future__ import annotations
 
+import bisect
 import itertools
 import math
+import statistics
 from typing import Any
 
 from PIL import Image
@@ -190,7 +192,7 @@ def _moves_like(sig: dict[str, list[float]], part: tuple[int, int], twin: tuple[
 
 
 def _phi(c: list[float], t: float) -> float:
-    i = int(np.searchsorted(c, t, side="right")) - 1
+    i = bisect.bisect_right(c, t) - 1
     i = min(max(i, 0), len(c) - 2)
     return i + (t - c[i]) / (c[i + 1] - c[i])
 
@@ -304,7 +306,7 @@ class Reading:
         e, last = s + L, s + L - 1
         if len(c) < 3:
             return "uncertain", "no-range", "under two steps in the clip: no step range", [], [], None
-        m = float(np.median(np.diff(c)))
+        m = float(statistics.median(b - a for a, b in zip(c, c[1:])))
         lo, hi = m / ROOT2, m * ROOT2
         step = m / self.per
 
@@ -339,11 +341,24 @@ class Reading:
             tails = np.linspace(*after, OPEN_SAMPLES)
         else:  # frame e alone lies past the last crossing, unplayed: any step the clip allows
             tails = np.linspace(c[-1] + max(lo, self.tail_limit - c[-1]), c[-1] + 10 * hi, OPEN_SAMPLES)
+        base = list(c)
+
+        def ring(x: Any, y: Any) -> list[float]:
+            return ([x] if x is not None else []) + base + ([y] if y is not None else [])
+
+        def phases(t: int) -> list[list[float]]:
+            # phi at t for every (head, tail): before the first crossing it reads the head alone, from the last on the
+            # tail alone, else neither — so each value is computed once, not once a pair
+            if heads[0] is not None and t < c[0]:
+                return [[_phi(ring(x, tails[0]), t)] * len(tails) for x in heads]
+            if tails[0] is not None and t >= c[-1]:
+                return [[_phi(ring(heads[0], y), t) for y in tails]] * len(heads)
+            return [[_phi(ring(heads[0], tails[0]), t)] * len(tails)] * len(heads)
+
         ks, deltas = set(), []
-        for x in heads:
-            for y in tails:
-                cc = ([x] if x is not None else []) + list(c) + ([y] if y is not None else [])
-                advance = self.per * (_phi(cc, e) - _phi(cc, s))
+        for row_e, row_s in zip(phases(e), phases(s)):
+            for phi_e, phi_s in zip(row_e, row_s):
+                advance = self.per * (phi_e - phi_s)
                 k = int(math.floor(advance + 0.5))
                 ks.add(k)
                 deltas.append(advance - k)
