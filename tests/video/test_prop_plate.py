@@ -6,7 +6,10 @@ it and erased from the keyed frames (`video-frames --prop-plate`), so the frames
 The pictures are synthetic: an outlined figure on the green key, filmed by a "model" that returns the canvas at twice
 its size and runs the figure across in front of the plate. One clip keeps the plate where the canvas has it (a pixel
 off in two frames); another pans the camera so the plate moves left frame by frame, turns it in one frame and leaves it
-out of another, as a video model does with a plate it is told to keep still.
+out of another, as a video model does with a plate it is told to keep still. A third pans it so and draws the plate as a
+box, as a video model does with the camera following the body: from its fifth frame a shaded side and a top, a pixel
+wider each frame, a dark line along the side's far edge, and in one frame the figure's hand resting on the plate's top
+by its side.
 """
 
 from __future__ import annotations
@@ -44,6 +47,13 @@ PAN = 4  # frame px the panned clip's camera moves right each frame: its ground,
 TILT = (4, 12.0)  # the panned clip's frame the plate is turned in, and by how many degrees (clockwise, about its foot)
 HIDDEN = (14,)  # the panned clip's frames the model leaves the plate out of
 OUTLINE_MAX = 60  # an outline pixel: no channel above it
+SIDE = (178, 0, 166)  # the shaded side a video model can draw the plate's thickness with: about 0.7 of its light
+TOP = (200, 0, 196)  # the box's top: a shade of the plate between it and its side, not within PLATE_TOLERANCE of it
+BOX_EDGE = (70, 60, 66)  # the dark line the model can draw along the side's far edge
+SIDE_FROM = 4  # the boxed clip's first frame with a side and a top: the side 1 px wide there, a px wider each frame
+SIDE_MAX = 10
+HAND = 7  # the boxed clip's frame whose hand rests on the plate's top by its side
+ARM = 10  # the arm's thickness, frame px
 
 
 def figure(scale: int, *, patch: tuple[int, int, int] | None = None) -> Image.Image:
@@ -99,21 +109,58 @@ def plate_mask(size: tuple[int, int], box: list[int], dx: int, tilt: float) -> n
     return np.asarray(im) > 0
 
 
-class Filmed:
-    """A clip a model made of the canvas, keyed with the plate erased (`erased`) and without (`kept`)."""
+def side_width(k: int) -> int:
+    """The boxed clip's side in frame `k`, px wide (0: none)."""
+    return min(SIDE_MAX, max(0, k - SIDE_FROM + 1))
 
-    def __init__(self, tmp: Path, report: dict, clip: Path, places: list[tuple[int, int]], plates: list[np.ndarray | None],
-                 erased: dict, kept: dict):
-        self.tmp, self.report, self.clip, self.places, self.plates, self.erased, self.kept = (
-            tmp, report, clip, places, plates, erased, kept)
+
+def box_faces(size: tuple[int, int], box: list[int], dx: int, w: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The top and the side a model draws the plate's thickness with on a frame of `size`, beside the canvas's `box` at
+    the frame's scale moved `dx` px right: the side `w` px wide on the plate's right, rising half a px each px back, the
+    top above the plate as deep as the side rises; and the dark line along the side's far edge."""
+    x0, y0, x1, y1 = box[0] + dx, box[1], box[2] + dx, box[3]
+    depth = w // 2
+    top, side, edge = (np.zeros((size[1], size[0]), dtype=bool) for _ in range(3))
+    for i in range(w):
+        rise = (i + 1) * depth // w
+        side[y0 - rise:y1 - rise, x1 + i] = True
+    for j in range(1, depth + 1):
+        shift = j * w // depth
+        top[y0 - j, x0 + shift:x1 + shift] = True
+    edge[y0 - depth:y1 - depth, x1 + w] = True
+    return top & ~side, side, edge
+
+
+def arm(size: tuple[int, int], shoulder: tuple[int, int], hand: tuple[int, int]) -> Image.Image:
+    """An arm from `shoulder` to a hand at `hand` on a frame of `size`, RGBA: skin in a dark outline, antialiased."""
+    k = SS
+    im = Image.new("RGBA", (size[0] * k, size[1] * k))
+    d = ImageDraw.Draw(im)
+    (sx, sy), (hx, hy) = ((x * k, y * k) for x, y in (shoulder, hand))
+    for colour, grow in ((OUTLINE, 2), (SKIN, 0)):
+        d.line([(sx, sy), (hx, hy)], fill=colour, width=(ARM + 2 * grow) * k)
+        d.ellipse((hx - (9 + grow) * k, hy - (5 + grow) * k, hx + (9 + grow) * k, hy + (5 + grow) * k), fill=colour)
+    return im.resize(size, Image.BOX)
+
+
+class Filmed:
+    """A clip a model made of the canvas, keyed with the plate erased (`erased`) and without (`kept`): in each frame the
+    figure's place, the plate as drawn (`plates`, its top and side too), its top and side alone (`faces`) and an arm the
+    figure reaches with (`arms`, RGBA), None where there is none."""
+
+    def __init__(self, tmp: Path, report: dict, shot: tuple, erased: dict, kept: dict):
+        self.tmp, self.report, self.erased, self.kept = tmp, report, erased, kept
+        self.clip, self.places, self.plates, self.faces, self.arms = shot
 
 
 def film(tmp: Path, report: dict, *, pan: int = 0, off: dict[int, int] | None = None, tilt: tuple[int, float] | None = None,
-         hidden: tuple[int, ...] = (), runner: Image.Image | None = None) -> tuple[Path, list[tuple[int, int]], list[np.ndarray | None]]:
+         hidden: tuple[int, ...] = (), runner: Image.Image | None = None, boxed: bool = False, hand: int | None = None) -> tuple:
     """The clip a model makes of the canvas: the canvas at SCALE, its camera moving `pan` px right a frame (the plate
     with the ground), the plate a pixel right in the frames `off` names, turned in the frame `tilt` names and left out of
-    the `hidden` ones, the figure running right across in front of it. Returns the clip, the figure's place and the plate
-    as drawn (None where left out) in each frame."""
+    the `hidden` ones, drawn `boxed` with a top and a side (`box_faces`, `side_width`), the figure running right across
+    in front of it, and in the frame `hand` names reaching with an arm to the plate's top by its side. Returns the clip
+    and, in each frame, the figure's place, the plate as drawn, its top and side, and the arm (None where there is
+    none)."""
     if not shutil.which("ffmpeg"):
         pytest.skip("ffmpeg required")
     w, h = report["canvas"]
@@ -123,23 +170,35 @@ def film(tmp: Path, report: dict, *, pan: int = 0, off: dict[int, int] | None = 
     made = tmp / "made"
     made.mkdir()
     runner = runner if runner is not None else figure(SCALE)
-    places, plates = [], []
+    places, plates, faces, arms = [], [], [], []
     for k in range(FRAMES):
         frame = np.zeros((size[1], size[0], 3), dtype=np.uint8)
         frame[...] = GREEN
-        drawn = None if k in hidden else plate_mask(size, box, (off or {}).get(k, 0) - pan * k,
-                                                    tilt[1] if tilt is not None and tilt[0] == k else 0.0)
+        dx, w = (off or {}).get(k, 0) - pan * k, side_width(k) if boxed else 0
+        drawn = None if k in hidden else plate_mask(size, box, dx, tilt[1] if tilt is not None and tilt[0] == k else 0.0)
+        sides = None
         if drawn is not None:
             frame[drawn] = prop_plate.RGB
+            if w:
+                top, side, edge = box_faces(size, box, dx, w)
+                frame[top], frame[side], frame[edge] = TOP, SIDE, BOX_EDGE
+                sides = top | side
+                drawn = drawn | sides
         im = Image.fromarray(frame, "RGB")
         at = ((ox + AT[0]) * SCALE + (STEP - pan) * k, (oy + AT[1]) * SCALE)
+        reach = None
+        if k == hand:
+            reach = arm(size, (at[0] + 30 * SCALE, at[1] + 32 * SCALE), (box[2] + dx - 3, box[1] - w // 2 - 3))
+            im.paste(reach, (0, 0), reach)
         im.paste(runner, at, runner)
         places.append(at)
         plates.append(drawn)
+        faces.append(sides)
+        arms.append(reach)
         im.save(made / f"frame-{k:04d}.png")
     subprocess.run(["ffmpeg", "-v", "error", "-framerate", "24", "-i", str(made / "frame-%04d.png"), "-c:v", "libx264",
                     "-pix_fmt", "yuv420p", "-crf", "12", str(tmp / "clip.mp4")], check=True)
-    return tmp / "clip.mp4", places, plates
+    return tmp / "clip.mp4", places, plates, faces, arms
 
 
 def key(tmp: Path, clip: Path, out: str, plate: Path | None, *, decontam: str = "off") -> dict:
@@ -173,10 +232,19 @@ def shrunk(mask: np.ndarray, px: int) -> np.ndarray:
     return ~grown(~mask, px)
 
 
+def body(shot: Filmed, k: int, size: tuple[int, int], *, least: int = 128) -> np.ndarray:
+    """Where the figure covers at least `least` of 255 in frame `k` of `shot`, its arm too."""
+    out = placed(body_mask(SCALE, least=least), shot.places[k], size)
+    if shot.arms[k] is not None:
+        out |= np.asarray(shot.arms[k])[..., 3] >= least
+    return out
+
+
 def shoot(tmp: Path, **kwargs) -> Filmed:
     report = make_canvas(tmp)
-    clip, places, plates = film(tmp, report, **kwargs)
-    return Filmed(tmp, report, clip, places, plates, key(tmp, clip, "erased", tmp / "canvas.json"), key(tmp, clip, "kept", None))
+    shot = film(tmp, report, **kwargs)
+    clip = shot[0]
+    return Filmed(tmp, report, shot, key(tmp, clip, "erased", tmp / "canvas.json"), key(tmp, clip, "kept", None))
 
 
 @pytest.fixture(scope="module")
@@ -189,6 +257,13 @@ def filmed(tmp_path_factory) -> Filmed:
 def panned(tmp_path_factory) -> Filmed:
     """The camera panning right: the plate moves left PAN px a frame, is turned in one frame and left out of one."""
     return shoot(tmp_path_factory.mktemp("panned"), pan=PAN, tilt=TILT, hidden=HIDDEN)
+
+
+@pytest.fixture(scope="module")
+def boxed(tmp_path_factory) -> Filmed:
+    """The camera panning right after the figure, the plate drawn as a box: from frame SIDE_FROM a shaded side and a top
+    a px wider each frame and a dark line along the side's far edge, the figure's hand on the plate's top in frame HAND."""
+    return shoot(tmp_path_factory.mktemp("boxed"), pan=PAN, boxed=True, hand=HAND)
 
 
 # --- video-canvas ------------------------------------------------------------------------------------------------
@@ -255,17 +330,18 @@ def left_of_the_plate(shot: Filmed) -> list[tuple[int, int]]:
     frames = keyed(shot.tmp, "erased")
     size = (frames[0].shape[1], frames[0].shape[0])
     out = []
-    for a, at, drawn in zip(frames, shot.places, shot.plates):
-        free = (a[..., 3] > 0) & ~grown(placed(body_mask(SCALE), at, size), 3)
+    for k, (a, drawn) in enumerate(zip(frames, shot.plates)):
+        free = (a[..., 3] > 0) & ~grown(body(shot, k, size), 3)
         near = grown(drawn, 3) if drawn is not None else np.zeros(free.shape, dtype=bool)
         out.append((int((free & near).sum()), int((free & magenta(a)).sum())))
     return out
 
 
-@pytest.mark.parametrize("clip", ["filmed", "panned"])
+@pytest.mark.parametrize("clip", ["filmed", "panned", "boxed"])
 def test_the_plate_is_gone_from_every_keyed_frame(clip: str, request) -> None:
-    """Gone where the model kept the plate where the canvas has it, drew it a pixel off, carried it off with the camera
-    or turned it: no pixel of it or of the line its edge blends into the key is left, and no magenta anywhere."""
+    """Gone where the model kept the plate where the canvas has it, drew it a pixel off, carried it off with the camera,
+    turned it or drew it as a box with a shaded side and top: no pixel of it, of its side or top, or of the line their
+    edges blend into the key is left, and no magenta anywhere."""
     shot: Filmed = request.getfixturevalue(clip)
     left = left_of_the_plate(shot)
     assert all(n == 0 and m == 0 for n, m in left), f"(plate px, magenta px) left, frame by frame: {left}"
@@ -316,16 +392,140 @@ def test_the_warnings_name_the_frames_with_no_plate_and_those_where_it_meets_the
     assert prop_plate.warnings({**plate, "not_found": [], "touching": []}) == []
 
 
-@pytest.mark.parametrize("clip", ["filmed", "panned"])
+def test_each_frame_reports_the_side_and_top_found_joined_to_its_plate(boxed: Filmed, request) -> None:
+    """A row a frame says how many pixels of the plate's front were found (`plate_px`) and how many of the shaded side
+    and top joined to it (`side_px`): where the figure is clear of the plate, the side and top as drawn but for the
+    pixel the codec blends at their edges (a side a pixel wide it may blend whole, and the rim takes it), and none
+    before the model draws them; nor in the clips whose plate has no side, where the codec mixes a dark magenta where the
+    figure's outline crosses the plate. The box spans them; the frames the figure meets the side or top in
+    are named, the hand on the plate's top among them, but for one where the figure hides all of them but a sliver
+    smaller than the least piece of the plate (PIECE_SHARE), which is read as no side and goes within the rim."""
+    plate = boxed.erased["prop_plate"]
+    rows = plate["rows"]
+    names = [f"frame-{k + 1:04d}.png" for k in range(FRAMES)]
+    size = (boxed.plates[0].shape[1], boxed.plates[0].shape[0])
+    x0, y0, x1, y1 = boxed.report["prop_plate"]["box"]
+    least = round(prop_plate.PIECE_SHARE * (x1 - x0) * (y1 - y0) * SCALE ** 2)
+    meets, sides = [], []
+    for k, (row, drawn, faces) in enumerate(zip(rows, boxed.plates, boxed.faces)):
+        figure_k = body(boxed, k, size, least=1)
+        assert row["found"] is True
+        ys, xs = np.nonzero(drawn & ~figure_k)
+        assert all(abs(a - b) <= 2 for a, b in zip(row["box"], (xs.min(), ys.min(), xs.max() + 1, ys.max() + 1))), (k, row["box"])
+        if faces is not None and (grown(figure_k, prop_plate.RIM + 1) & faces).any() and (faces & ~figure_k).sum() >= least:
+            meets.append(names[k])
+        if (grown(figure_k, prop_plate.RIM + 1) & drawn).any():
+            continue
+        faces = faces if faces is not None else np.zeros_like(drawn)
+        front, want = int((drawn & ~faces).sum()), int(faces.sum())
+        sides.append((k, row["side_px"], want))
+        assert abs(row["plate_px"] - front) <= 0.05 * front, (k, row["plate_px"], front)
+        least, most = int(shrunk(faces, 1).sum()), int((grown(faces, 1) & ~(drawn & ~faces)).sum())
+        assert least <= row["side_px"] <= most, (k, row["side_px"], least, most)
+    tall = (boxed.report["prop_plate"]["box"][3] - boxed.report["prop_plate"]["box"][1]) * SCALE
+    assert any(want >= 4 * tall for _, _, want in sides), f"no clear frame with a side 4 px wide: {sides}"
+    assert any(want == 0 for _, _, want in sides), f"no clear frame before the side: {sides}"
+    assert names[HAND] in meets and plate["side_touching"] == meets, (plate["side_touching"], meets)
+    assert [r["frame"] for r in rows if r.get("side_touch_px")] == meets
+    for shot in (request.getfixturevalue("filmed"), request.getfixturevalue("panned")):
+        flat = shot.erased["prop_plate"]
+        assert [r.get("side_px", 0) for r in flat["rows"]] == [0] * FRAMES and flat["side_touching"] == []
+
+
+def test_the_warnings_name_the_frames_where_the_plate_s_side_meets_the_subject(boxed: Filmed) -> None:
+    plate = boxed.erased["prop_plate"]
+    lines = prop_plate.warnings(plate)
+    side = [line for line in lines if "side" in line]
+    assert len(side) == 1 and f"{len(plate['side_touching'])} frame(s)" in side[0], lines
+    assert all(name in side[0] for name in plate["side_touching"][:prop_plate.NAMED])
+    assert prop_plate.warnings({**plate, "not_found": [], "touching": [], "side_touching": []}) == []
+
+
+SKINS = ((255, 224, 196), (241, 194, 167), (238, 206, 178), (233, 150, 160), (224, 172, 105), (198, 134, 66), (141, 85, 36),
+         (92, 51, 23))  # pale to dark, and a flushed one
+
+
+def test_skin_is_no_shade_of_the_plate_until_most_of_it_is_the_plate_s_colour() -> None:
+    """The plate's side and top are read as shades of its colour: its colour darkened, down to SHADE_LEAST of its light.
+    No skin is one; mixed with the plate's colour (as a codec blends a hand resting on it), a skin is read as one only
+    once nearly half of it is the plate's (the darkest skin here; the hand's own skin from 0.78), the edge pixels the
+    magenta rule takes within the rim already. The side and
+    top as a model draws them are shades; the dark outline, the figure's hair and cloth, black, and the plate darker
+    than SHADE_LEAST (0.4 of its light) are not."""
+    rgb = prop_plate.RGB
+    shade = lambda colours: prop_plate.shade(np.asarray(colours, dtype=np.int32).reshape(-1, 1, 3), rgb).ravel().tolist()
+    assert shade(SKINS) == [False] * len(SKINS)
+    shares = []
+    for skin in SKINS:
+        mixes = [tuple(round((1 - t) * s + t * p) for s, p in zip(skin, rgb)) for t in np.arange(0, 1.001, 0.01)]
+        shares.append(round(float(np.arange(0, 1.001, 0.01)[shade(mixes).index(True)]), 2))
+    assert min(shares) >= 0.45 and shares[SKINS.index(SKIN)] >= 0.75, dict(zip(SKINS, shares))
+    assert shade([SIDE, TOP, (192, 6, 166), (150, 4, 136), (120, 0, 118)]) == [True] * 5
+    assert shade([(102, 0, 102), (89, 0, 89), (0, 0, 0)]) == [True, False, False], "0.4 of its light is a shade, 0.35 and black not"
+    assert shade([OUTLINE, HAIR, NAVY, SHIRT, PINK, DENIM, RING, GREEN]) == [False] * 8
+
+
+def test_a_side_and_top_joined_to_the_plate_go_with_their_edge_and_a_shade_apart_from_it_stays(tmp_path: Path) -> None:
+    """A plate drawn as a box, as decoded: a shaded side 10 px wide on its right rising 5 px, a top, and along the
+    side's far edge the dark line and the grey it blends into the key with. They go. A patch of the side's very colour
+    the subject holds 12 px past the side, inside the search but joined to no plate, stays: only what is joined to the
+    plate's front is read as its side or top."""
+    w, h, (x0, y0, x1, y1) = 140, 90, (60, 25, 76, 75)
+    (tmp_path / "canvas.json").write_text(json.dumps({"kind": prop_plate.CANVAS_REPORT, "canvas": [w, h],
+                                                      "prop_plate": {"box": [x0, y0, x1, y1], "rgb": list(prop_plate.RGB)}}))
+    decoded = np.zeros((h, w, 3), dtype=np.uint8)
+    decoded[...] = GREEN
+    decoded[y0:y1, x0:x1] = prop_plate.RGB
+    top, side, edge = box_faces((w, h), [x0, y0, x1, y1], 0, 10)
+    decoded[top], decoded[side], decoded[edge] = TOP, SIDE, BOX_EDGE
+    decoded[np.roll(edge, 1, axis=1)] = (134, 128, 132)
+    patch = np.zeros((h, w), dtype=bool)
+    patch[45:55, 98:106] = True
+    decoded[patch] = SIDE
+    Image.fromarray(decoded, "RGB").save(tmp_path / "frame-0001.png")
+    keyed_frame = np.zeros((h, w, 4), dtype=np.uint8)
+    solid = (decoded != GREEN).any(axis=2)
+    keyed_frame[solid, :3], keyed_frame[solid, 3] = decoded[solid], 255
+    (tmp_path / "keyed").mkdir()
+    Image.fromarray(keyed_frame, "RGBA").save(tmp_path / "keyed" / "frame-0001.png")
+    plate = prop_plate.read(tmp_path / "canvas.json")
+    raw = [tmp_path / "frame-0001.png"]
+    done = prop_plate.erase([tmp_path / "keyed" / "frame-0001.png"], raw, prop_plate.find(raw, plate), plate)
+    out = np.asarray(Image.open(tmp_path / "keyed" / "frame-0001.png"))
+    assert (out[..., 3][patch] == 255).all(), "the patch apart from the plate keeps every pixel"
+    assert not (out[..., 3] > 0)[~patch].any(), f"left of the box: {np.argwhere((out[..., 3] > 0) & ~patch)[:5].tolist()}"
+    row = done["rows"][0]
+    assert row["plate_px"] == (x1 - x0) * (y1 - y0) and row["side_px"] == int((top | side).sum()), row
+    assert row["box"] == [x0, y0 - 5, x1 + 10, y1], row
+    assert done["side_touching"] == [] and done["touching"] == []
+
+
+def test_a_canvas_report_s_plate_colour_is_the_one_the_plate_and_its_shades_are_found_by(filmed: Filmed, tmp_path: Path) -> None:
+    """The plate is found by the colour the canvas report holds (`prop_plate.rgb`): told another, no frame finds it; and
+    a report without one is refused."""
+    report = json.loads((filmed.tmp / "canvas.json").read_text())
+    assert prop_plate.read(filmed.tmp / "canvas.json")["rgb"] == report["prop_plate"]["rgb"] == list(prop_plate.RGB)
+    report["prop_plate"]["rgb"] = [0, 0, 255]
+    (tmp_path / "blue.json").write_text(json.dumps(report))
+    raw = sorted((filmed.tmp / "erased" / "raw").glob("*.png"))
+    assert not any(row["found"] for row in prop_plate.find(raw, prop_plate.read(tmp_path / "blue.json")))
+    del report["prop_plate"]["rgb"]
+    (tmp_path / "bare.json").write_text(json.dumps(report))
+    with pytest.raises(SystemExit, match="holds no plate colour"):
+        prop_plate.read(tmp_path / "bare.json")
+
+
+@pytest.mark.parametrize("clip", ["filmed", "panned", "boxed"])
 def test_the_figure_crossing_in_front_of_the_plate_keeps_its_pixels(clip: str, request) -> None:
-    """The figure crosses the plate and the line round it, its dark outline over that line. None of it goes but the few
-    edge pixels the codec tinted with the plate's magenta."""
+    """The figure crosses the plate and the line round it, its dark outline over that line, and in the boxed clip its
+    side and top, and rests a hand on the plate's top by its side. None of it goes but the few edge pixels the codec
+    tinted with the plate's magenta."""
     shot: Filmed = request.getfixturevalue(clip)
     erased, kept = keyed(shot.tmp, "erased"), keyed(shot.tmp, "kept")
     size = (erased[0].shape[1], erased[0].shape[0])
     lost, tinted, over_rim = [], [], []
-    for a, b, at, drawn in zip(erased, kept, shot.places, shot.plates):
-        core = shrunk(placed(body_mask(SCALE), at, size), 2)
+    for k, (a, b, drawn) in enumerate(zip(erased, kept, shot.plates)):
+        core = shrunk(body(shot, k, size), 2)
         gone = core & (a != b).any(axis=2)
         lost.append(int(gone.sum()))
         tinted.append(int((gone & magenta(b)).sum()))
@@ -336,7 +536,7 @@ def test_the_figure_crossing_in_front_of_the_plate_keeps_its_pixels(clip: str, r
     assert max(lost) <= 2, f"figure pixels erased, frame by frame: {lost}"
 
 
-@pytest.mark.parametrize("clip", ["filmed", "panned"])
+@pytest.mark.parametrize("clip", ["filmed", "panned", "boxed"])
 def test_away_from_each_frame_s_plate_the_frames_are_the_frames_keyed_without_it(clip: str, request) -> None:
     shot: Filmed = request.getfixturevalue(clip)
     for a, b, drawn in zip(keyed(shot.tmp, "erased"), keyed(shot.tmp, "kept"), shot.plates):
@@ -376,7 +576,7 @@ def test_the_plate_s_edge_and_a_blue_grey_line_beside_it_go_and_the_denim_crossi
     denim bar crossing the rim from outside it stays, the part in front of the plate too."""
     w, h, box = 120, 80, (60, 20, 76, 70)
     (tmp_path / "canvas.json").write_text(json.dumps({"kind": prop_plate.CANVAS_REPORT, "canvas": [w, h],
-                                                      "prop_plate": {"box": list(box)}}))
+                                                      "prop_plate": {"box": list(box), "rgb": list(prop_plate.RGB)}}))
     decoded = np.zeros((h, w, 3), dtype=np.uint8)
     decoded[...] = GREEN
     decoded[box[1]:box[3], box[0]:box[2]] = prop_plate.RGB
@@ -399,6 +599,50 @@ def test_the_plate_s_edge_and_a_blue_grey_line_beside_it_go_and_the_denim_crossi
     assert not (out[..., 3] > 0)[~bar].any(), f"left beside the bar: {np.argwhere((out[..., 3] > 0) & ~bar)[:5].tolist()}"
     assert done["touching"] == ["frame-0001.png"] and done["rows"][0]["touch_px"] == int(
         (bar & prop_plate.not_subject(prop_plate.find(raw, plate)[0], (w, h))).sum())
+
+
+# A thin side a model draws reddening toward the key, outward from the plate's colour: a shade, a magenta past the
+# shades, a dark red past the magenta rule, the grey its far edge blends into the key with, and a green a codec rings
+# just off the key's colour, which the keying takes
+RED_SIDE = ((214, 12, 150), (226, 0, 148), (184, 14, 60), (184, 14, 60), (74, 144, 76), (118, 190, 120), (2, 242, 52), (2, 242, 52))
+PALE = ((95, 210, 94), (72, 208, 74))  # a pale green a codec can ring past the line a plate's edge blends into the key with
+
+
+def test_what_is_left_against_what_went_with_the_plate_goes_and_the_denim_reaching_past_it_stays(tmp_path: Path) -> None:
+    """Left, past the line the plate's edge blends into the key with (4 px), the codec rings a pale green 2 px wide;
+    right, a side 1 px of shade wide, then a magenta, a dark red no shade or magenta reads, and the grey into the key.
+    Neither lies wholly within the rim of the plate's pixels, both lie wholly within RIM px of what the plate and the
+    colour rules took, and both go. A denim bar under the plate, crossing that reach from outside it, keeps every
+    pixel."""
+    w, h, (x0, y0, x1, y1) = 120, 80, (40, 20, 56, 70)
+    (tmp_path / "canvas.json").write_text(json.dumps({"kind": prop_plate.CANVAS_REPORT, "canvas": [w, h],
+                                                      "prop_plate": {"box": [x0, y0, x1, y1], "rgb": list(prop_plate.RGB)}}))
+    decoded = np.zeros((h, w, 3), dtype=np.uint8)
+    decoded[...] = GREEN
+    decoded[y0:y1, x0:x1] = prop_plate.RGB
+    for k, colour in enumerate(EDGE + PALE):
+        decoded[y0:y1, x0 - 1 - k] = colour
+    for k, colour in enumerate(RED_SIDE):
+        decoded[y0:y1, x1 + k] = colour
+    bar = np.zeros((h, w), dtype=bool)
+    bar[y1 + 1:y1 + 7, x0 - 10:x0 + 10] = True
+    decoded[bar] = DENIM
+    Image.fromarray(decoded, "RGB").save(tmp_path / "frame-0001.png")
+    keyed_frame = np.zeros((h, w, 4), dtype=np.uint8)
+    solid = (decoded != GREEN).any(axis=2)
+    solid[y0:y1, x1 + 6:x1 + 8] = bar[y0:y1, x1 + 6:x1 + 8]  # the keying takes the green just off the key's
+    keyed_frame[solid, :3], keyed_frame[solid, 3] = decoded[solid], 255
+    (tmp_path / "keyed").mkdir()
+    Image.fromarray(keyed_frame, "RGBA").save(tmp_path / "keyed" / "frame-0001.png")
+    plate = prop_plate.read(tmp_path / "canvas.json")
+    raw = [tmp_path / "frame-0001.png"]
+    found = prop_plate.find(raw, plate)
+    assert found[0]["box"] == [x0, y0, x1 + 1, y1] and found[0]["side_px"] == y1 - y0, found[0]
+    prop_plate.erase([tmp_path / "keyed" / "frame-0001.png"], raw, found, plate)
+    out = np.asarray(Image.open(tmp_path / "keyed" / "frame-0001.png"))
+    assert (out[..., 3][bar] == 255).all(), "the denim bar keeps every pixel"
+    left = (out[..., 3] > 0) & ~bar
+    assert not left.any(), f"left: columns {sorted(set(np.nonzero(left)[1].tolist()))}"
 
 
 def test_a_canvas_report_without_a_plate_is_refused_before_anything_is_keyed(filmed: Filmed, tmp_path: Path) -> None:
@@ -428,8 +672,9 @@ def palette_clip(tmp_path_factory) -> Filmed:
     """The still clip keyed with the edge pass on, its figure wearing a pink patch: a magenta of its own."""
     tmp = tmp_path_factory.mktemp("palette")
     report = make_canvas(tmp)
-    clip, places, plates = film(tmp, report, runner=figure(SCALE, patch=PINK))
-    return Filmed(tmp, report, clip, places, plates, key(tmp, clip, "erased", tmp / "canvas.json", decontam="palette"),
+    shot = film(tmp, report, runner=figure(SCALE, patch=PINK))
+    clip = shot[0]
+    return Filmed(tmp, report, shot, key(tmp, clip, "erased", tmp / "canvas.json", decontam="palette"),
                   key(tmp, clip, "kept", None, decontam="palette"))
 
 
