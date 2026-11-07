@@ -1000,27 +1000,23 @@ def _loop_files(loop_dir: Path) -> tuple[Path, dict[str, Any]]:
     return metas[0], meta
 
 
-CUT_AGAIN_DIR = ".cycle.source.cut"  # where a filled loop is cut again with the fill off, removed once staged
-
-
-def filled(meta: dict[str, Any]) -> bool:
-    """Whether a cut's held cells were made again (`held_fill.made`, or `made` of the read after its repair)."""
-    held = meta.get("held_fill") or {}
-    return bool(held.get("made") or (held.get("again") or {}).get("made"))
+CUT_AGAIN_DIR = loop_mod.CUT_AGAIN_DIR  # where a filled loop is cut again with the fill off, removed once kept
+filled = loop_mod.filled  # whether a cut's held cells were made again, as its strip record says
 
 
 def unfilled_source(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> dict[str, Any] | None:
     """The frames an alignment reads are the cut as filmed: a loop never aligned whose held cells `video-loop` made again
-    (`filled`) is cut again from its frames as its report records it was asked (`loop.cut_again`), with the fill off, and
-    that cut is kept as `cycle.source/` (its strip and strip record beside its frames) — the alignment makes its frames
-    between from filmed frames, never from frames made between, and fills what it delivers at the end. What was done
-    (`cut_again`), or None where nothing was to do: a loop aligned before, one not filled, one whose `cycle.source/`
-    already holds its cut with the fill off. ValueError naming why it cannot be cut again (a report from before cuts
-    recorded what they were asked, frames moved away, another cut taken): cut it again with `--fill-held off`."""
+    (`filled`) is aligned from its cut with the fill off, kept as `cycle.source/` (its strip and strip record beside its
+    frames) — the alignment makes its frames between from filmed frames, never from frames made between, and fills what
+    it delivers at the end. `video-loop` keeps that cut there as it cuts the loop (`loop.keep_unfilled`); where it is not
+    there, the loop is cut again from its frames as its report records it was asked (`loop.cut_again`), with the fill off,
+    and kept so. What was done (`cut_again`), or None where nothing was to do: a loop aligned before, one not filled, one
+    whose `cycle.source/` already holds its cut with the fill off. ValueError naming why it cannot be cut again (a report
+    from before cuts recorded what they were asked, frames moved away, another cut taken): carry the `cycle.source/`
+    video-loop kept beside it, or cut it again with `--fill-held off`."""
     if "cycle_align" in meta or not filled(meta):
         return None
-    source = loop_dir / SOURCE_DIR
-    staged = source / meta_path.name
+    staged = loop_dir / SOURCE_DIR / meta_path.name
     if staged.is_file():
         try:
             if not filled(json.loads(staged.read_text(encoding="utf-8"))):
@@ -1032,26 +1028,7 @@ def unfilled_source(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> di
         raise ValueError("its held cells were made again (held_fill), and no report of its cut is beside it to cut it again "
                          "with the fill off")
     report_path, report = found
-    work = loop_dir / CUT_AGAIN_DIR
-    shutil.rmtree(work, ignore_errors=True)
-    try:
-        try:
-            cut = loop_mod.cut_again(report, work, report_path=work / "cut.loop.report.json", fill_held="off")
-        except SystemExit as exc:
-            raise ValueError(f"cutting it again with the fill off failed: {exc}") from None
-        cut_meta = json.loads((work / meta_path.name).read_text(encoding="utf-8"))
-        was = meta.get("cycle_drawings") or {}
-        now = cut_meta.get("cycle_drawings") or {}
-        if (now.get("start"), now.get("length")) != (was.get("start"), was.get("length")):
-            raise ValueError(f"cut again with the fill off it took frames {now.get('start')}+{now.get('length')}, not "
-                             f"{was.get('start')}+{was.get('length')}")
-        shutil.rmtree(source, ignore_errors=True)
-        (work / "cycle").rename(source)
-        shutil.copyfile(work / meta_path.name, staged)
-        strip = meta_path.name[: -len(".strip.json")] + ".strip.png"
-        shutil.copyfile(work / strip, source / strip)
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+    cut = loop_mod.keep_unfilled(report, loop_dir, meta_path.name[: -len(".strip.json")], meta.get("cycle_drawings") or {})
     return {"report": str(report_path), "fill_held": "off", "cells": cut["strip"]["cycle_frames"],
             "made_before": (meta.get("held_fill") or {}).get("made", [])}
 
@@ -1368,8 +1345,9 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
     clip's every cut as `video-loop` read them, `clip`): `same_foot` warn names such a loop in the warnings, refuse stops
     the set before anything is rewritten (the report written with `applied` false, `refused` same-foot).
 
-    The frames aligned are the cut as filmed: a loop whose held cells video-loop made again is cut again with the fill
-    off first (`unfilled_source`), or the set stops naming it. Each loop delivered is read at the end, its held cells made
+    The frames aligned are the cut as filmed: a loop whose held cells video-loop made again is aligned from its cut with
+    the fill off, as video-loop kept it in `cycle.source/` or else cut again first (`unfilled_source`), or the set stops
+    naming it. Each loop delivered is read at the end, its held cells made
     between the poses beside them as video-loop fills a loop (`held_fill.fill`, `fill_held` auto; off delivers them as
     resampled), its record (`held_fill`) and kept holds (`holds`) replacing the cut's; and given at `out_fps` where one
     is asked (`held_fill.upsample`, every loop the same number of cells)."""
@@ -1419,8 +1397,9 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         try:
             done = unfilled_source(d, meta_path, meta)
         except ValueError as exc:
-            raise SystemExit(f"video-cycle-align: {d}: {exc} — cut it again with `video-loop --fill-held off` and align that: "
-                             "the alignment makes its frames between from frames as filmed (docs/loop-repair.md section 7)") from None
+            raise SystemExit(f"video-cycle-align: {d}: {exc} — carry the {SOURCE_DIR}/ video-loop kept beside it (its cut with "
+                             "the fill off), or cut it again with `video-loop --fill-held off` and align that: the alignment "
+                             "makes its frames between from frames as filmed (docs/loop-repair.md section 7)") from None
         if done is not None:
             cut_again[i] = done
     sources = []
@@ -1705,7 +1684,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                              "they are made again as the frames between the poses beside them, as video-loop fills a loop "
                              "(docs/loop-repair.md section 7), its first cell kept; a loop drawn on twos or threes, and a hold "
                              "longer than three cells, are kept; with no RIFE the cells are delivered as resampled with a "
-                             "warning. off: delivered as resampled. A loop whose held cells video-loop made again is cut again "
+                             "warning. off: delivered as resampled. A loop whose held cells video-loop made again is aligned "
+                             f"from its cut with the fill off, which video-loop keeps as {SOURCE_DIR}/, or else is cut again "
                              "with the fill off from its report before it is aligned (or the set stops naming it)")
     parser.add_argument("--out-fps", type=float, metavar="F",
                         help="give every loop of the set at F frames a second, above the loops' own rate, once aligned: each "

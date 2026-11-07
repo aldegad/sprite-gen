@@ -453,10 +453,11 @@ def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path, staff
     for d in dirs:
         meta = json.loads((d / "loop.strip.json").read_text())
         assert set(meta) == STRIP_KEYS_2350 | SOURCE_KEYS_2390 | CLIP_FEET_KEYS | HELD_FILL_KEYS_3800 | NO_REPEAT_KEYS_400
-        # 4.0.0: a cut whose cells were made again after its repair (its read again) is cut again with the fill off
-        # before it is aligned, and the alignment says so (docs/loop-repair.md section 7).
-        again = {"cut_again"} if align.filled(cut) else set()
-        assert set(meta["cycle_align"]) == CYCLE_ALIGN_KEYS_2350 | CORRESPONDENCE_KEYS_2410 | GHOST_KEYS_2430 | BEAT_KEYS | again
+        # 4.0.0: a cut whose cells were made again after its repair (its read again) is aligned from its cut with the fill
+        # off; 4.2.0: video-loop keeps that cut beside it (`cycle_source`), so the alignment cuts nothing again and writes
+        # no `cut_again` (docs/loop-repair.md section 7).
+        assert not align.filled(cut) or report["cycle_source"]["kept"]
+        assert set(meta["cycle_align"]) == CYCLE_ALIGN_KEYS_2350 | CORRESPONDENCE_KEYS_2410 | GHOST_KEYS_2430 | BEAT_KEYS
         # The cut's source stays as the cut wrote it: `cycle_align` says the cells were turned after it, so it
         # no longer names each cell's frame (docs/loop-comparison.md). The rebuilt strip names its own cells —
         # the same frames, turned, under the same crop.
