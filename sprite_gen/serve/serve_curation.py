@@ -59,7 +59,7 @@ from sprite_gen.effects import interpolate as interpolate_mod
 from sprite_gen import gen as gen_mod
 from sprite_gen.gen.base import PROVIDER_CODEX, PROVIDER_GROK
 from sprite_gen.curate.curation import (CURATION_FILENAME, SCHEMA_VERSION, effective_logical_height,
-                                 REF_ANCHOR, REF_BASIS, REF_GUIDE,
+                                 REF_ANCHOR, REF_BASIS, REF_GUIDE, Sidecar,
                                  empty_curation, frame_variant, imported_ref_role,
                                  load_curation, load_curation_report, pixel_snap_scale,
                                  recolor_pick, run_revision, write_curation_atomic)
@@ -241,6 +241,73 @@ class Wire:
     BACKUP = "backup"
     # downloads — the file name the browser saves under
     FILENAME_HEADER = "X-Filename"
+
+
+class Route:
+    """Every path the curator SPA calls on this server, declared once. The server routes on
+    these names and builds the anchor chip URL it hands out from one of them;
+    tests/serve/test_curator_requests.py holds each script's fetch to them."""
+
+    RUN = "/api/run"
+    OP_PROGRESS = "/api/op-progress"
+    ANCHOR = "/api/anchor"
+    BREATHE_ANATOMY = "/api/breathe-anatomy"
+    BASE_GRID = "/api/base-grid"
+    PROGRESS = "/api/progress"
+    CURATION = "/api/curation"
+    COMPARE_GIF = "/api/compare-gif"
+    COMPOSE = "/api/compose"
+    BASE_EDIT = "/api/base-edit"
+    STATE_FPS = "/api/state-fps"
+    INTERPOLATE = "/api/interpolate"
+    REROLL = "/api/reroll"
+    EXPORT = "/api/export"
+    EXPORT_GIF = "/api/export-gif"
+    DOWNLOAD = "/download/"  # followed by one of DOWNLOADS
+
+
+class Ask:
+    """What the curator SPA sends: the key of every query parameter and POST body field it
+    puts on a request to this server, declared once. Kept apart from `Wire`, which runs the
+    other way: a key spelt the same both ways is two contracts (`state` asked of /api/state-fps
+    and echoed in its reply). tests/serve/test_curator_requests.py holds each script that sends
+    one to these names. The curation save's body is the sidecar itself
+    (`curate.curation.Sidecar`), and the run generation it echoes back is `Wire.RUN_REVISION`."""
+
+    # GET /api/anchor ?direction&scale — the chip URL carrying direction is this server's own
+    DIRECTION = "direction"
+    SCALE = "scale"  # and GET /download/gif ?scale
+    # GET /api/breathe-anatomy ?state&rigid_row&axis_x&torso_half — the three are passed on as
+    # the anatomy overrides of a breathe config (`effects.breathe.freeze_anatomy`)
+    STATE = "state"  # and /download/gif, POST /api/state-fps, /api/interpolate, /api/reroll
+    RIGID_ROW = "rigid_row"
+    AXIS_X = "axis_x"
+    TORSO_HALF = "torso_half"
+    ANATOMY_OVERRIDES = (RIGID_ROW, AXIS_X, TORSO_HALF)
+    # POST /api/compare-gif
+    FRAMES = "frames"
+    DURATION_MS = "duration_ms"
+    FORMAT = "format"  # one of COMPARE_FORMATS
+    # POST /api/base-edit
+    OPS = "ops"
+    TRANSFORM = "transform"
+    SPACE = "space"  # one of OPS_SPACES
+    # POST /api/state-fps
+    FPS = "fps"
+    # POST /api/interpolate (and /api/reroll's provider)
+    FROM = "from"
+    TO = "to"
+    T = "t"
+    PROVIDER = "provider"
+    LABEL = "label"
+
+
+# The values the SPA sends that the server branches on: /api/compare-gif's format, the space
+# /api/base-edit's ops are in (raw pixels, or the detected grid's logical cells), and the
+# downloads (/download/<kind>; the one row's GIF is `gif?state=`, carried on as `gif:<state>:<scale>`).
+FORMAT_GIF, FORMAT_WEBM, FORMAT_MP4 = COMPARE_FORMATS = ("gif", "webm", "mp4")
+SPACE_RAW, SPACE_LOGICAL = OPS_SPACES = ("raw", "logical")
+DOWNLOAD_ATLAS, DOWNLOAD_PNGS, DOWNLOAD_GIFS, DOWNLOAD_GIF = DOWNLOADS = ("atlas", "pngs", "gifs", "gif")
 
 
 
@@ -426,7 +493,7 @@ def _anchor_views(run_dir: Path, request: dict, curation: dict | None, version: 
         status = anchor_mod.anchor_status(run_dir, request, curation, direction)
         url = None
         if not status.get("error"):
-            url = f"/api/anchor?direction={quote(direction, safe='')}&v={quote(version, safe='')}"
+            url = f"{Route.ANCHOR}?{Ask.DIRECTION}={quote(direction, safe='')}&v={quote(version, safe='')}"
         views[direction] = {**status, "url": url}
     return views
 
@@ -995,30 +1062,30 @@ def build_download(run_dir: Path, kind: str) -> tuple[bytes, str] | dict:
     남는다 (런 폴더 = 작업장, 다운로드 = 핸드오프). 실패 시 dict(에러)."""
     request = load_request(run_dir)
     character = str(request.get("character", {}).get("id") or run_dir.name)
-    if kind == "atlas":
+    if kind == DOWNLOAD_ATLAS:
         result = run_compose(run_dir)
         if not result[Wire.OK]:
             return result
         files = [run_dir / "sprite-sheet-alpha.png", run_dir / "manifest.json"]
         files = [f for f in files if f.is_file()]
         return _zip_paths(run_dir, files), f"{character}-atlas.zip"
-    if kind == "pngs":
+    if kind == DOWNLOAD_PNGS:
         result = run_export(run_dir)
         if not result[Wire.OK]:
             return result
         out = run_dir / "curated"
         return _zip_paths(run_dir, sorted(out.rglob("*.png"))), f"{character}-pngs.zip"
-    if kind == "gifs":
+    if kind == DOWNLOAD_GIFS:
         result = run_export_gif(run_dir)
         if not result[Wire.OK]:
             return result
         out = run_dir / "exports"
         return _zip_paths(run_dir, sorted(out.glob("*.gif"))), f"{character}-gifs.zip"
-    if kind.startswith("gif:"):
+    if kind.startswith(f"{DOWNLOAD_GIF}:"):
         # 한 줄(state) 단건 — 현재 큐레이션 합성 그대로, zip 없이 GIF 원파일로.
         # 검수/공유용이라 4x 니어리스트를 기본으로 굽는다 (뷰어 확대 보간 뭉갬 방지;
         # 픽셀 데이터는 그대로). ?scale=1 로 원배율. 게임은 아틀라스를 쓰므로 무관.
-        state, _, scale_part = kind[len("gif:"):].partition(":")
+        state, _, scale_part = kind[len(f"{DOWNLOAD_GIF}:"):].partition(":")
         scale = max(1, min(8, int(scale_part or 4)))
         result = run_export_gif(run_dir, state=state, scale=scale)
         if not result[Wire.OK]:
@@ -1169,7 +1236,7 @@ class CurationHandler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self._send_file(CURATOR_DIR / "index.html")
             return
-        if path == "/api/run":
+        if path == Route.RUN:
             try:
                 busy = maybe_heal(self.run_dir)  # 실시간 계약: 스냅샷 전에 캐시 자가치유
                 if busy:
@@ -1198,7 +1265,7 @@ class CurationHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_json({Wire.ERROR: str(exc)}, 500)
             return
-        if path == "/api/op-progress":
+        if path == Route.OP_PROGRESS:
             # 오래 걸리는 파이프라인(추출 등)의 잘게 쪼갠 진행도 — 큐레이터가 폴링해
             # 퍼센트 표시 (maintainer 요청 2026-07-18). busy=락 보유 여부, progress=엔진 기록.
             self._send_json({
@@ -1206,14 +1273,14 @@ class CurationHandler(BaseHTTPRequestHandler):
                 Wire.PROGRESS: _read_op_progress(self.run_dir),
             })
             return
-        if path == "/api/anchor":
+        if path == Route.ANCHOR:
             # 방향 앵커 ref 를 **지금** 큐레이션 진실에서 굽어 그대로 응답한다 (파일 아님).
             # 생성이 붙이는 `references/anchors/<dir>-anchor-x8.png` 와 같은 함수·같은
             # 수학이라, 칩에 보이는 것이 다음 생성에 붙는 것이다 (표시/생성 드리프트 0).
             query = parse_qs(urlparse(self.path).query)
-            direction = (query.get("direction") or [""])[0]
+            direction = (query.get(Ask.DIRECTION) or [""])[0]
             try:
-                scale = max(1, min(16, int((query.get("scale") or ["8"])[0])))
+                scale = max(1, min(16, int((query.get(Ask.SCALE) or ["8"])[0])))
             except ValueError:
                 self._send_json({Wire.ERROR: "scale must be an integer"}, 400)
                 return
@@ -1239,14 +1306,14 @@ class CurationHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
-        if path == "/api/breathe-anatomy":
+        if path == Route.BREATHE_ANATOMY:
             # 실루엣 해부는 **서버에서만** 돈다 (maintainer 결정 2026-07-25 b안). 웹뷰는 이
             # 숫자를 받아 워프만 미러링한다 — 눈쌍 대칭 매칭·연결요소·병목 검출을 JS 가
             # 재구현하면 굽기와 미리보기의 진실이 갈라진다.
             query = parse_qs(urlparse(self.path).query)
-            state = (query.get("state") or [""])[0]
+            state = (query.get(Ask.STATE) or [""])[0]
             overrides = {}
-            for name in ("rigid_row", "axis_x", "torso_half"):
+            for name in Ask.ANATOMY_OVERRIDES:
                 value = (query.get(name) or [""])[0]
                 if value:
                     overrides[name] = int(value)
@@ -1261,7 +1328,7 @@ class CurationHandler(BaseHTTPRequestHandler):
             except (Exception, SystemExit) as exc:
                 self._send_json({Wire.ERROR: str(exc)}, 500)
             return
-        if path == "/api/base-grid":
+        if path == Route.BASE_GRID:
             # 베이스의 검출 픽셀 격자 — 편집기(줌 모달)의 논리 해상도와 base-edit 의
             # 논리→raw 확장이 같은 절단선을 쓴다 (_base_grid_response, mtime 캐시).
             try:
@@ -1273,13 +1340,13 @@ class CurationHandler(BaseHTTPRequestHandler):
             except (Exception, SystemExit) as exc:
                 self._send_json({Wire.ERROR: str(exc)}, 500)
             return
-        if path.startswith("/download/"):
-            kind = path[len("/download/"):]
-            if kind == "gif":
+        if path.startswith(Route.DOWNLOAD):
+            kind = path[len(Route.DOWNLOAD):]
+            if kind == DOWNLOAD_GIF:
                 query = parse_qs(urlparse(self.path).query)
-                state = (query.get("state") or [""])[0]
-                scale = (query.get("scale") or ["4"])[0]
-                kind = f"gif:{state}:{scale}"
+                state = (query.get(Ask.STATE) or [""])[0]
+                scale = (query.get(Ask.SCALE) or ["4"])[0]
+                kind = f"{DOWNLOAD_GIF}:{state}:{scale}"
             try:
                 busy = maybe_heal(self.run_dir)  # 리포트 미소비 — 소비자는 /api/run 만
                 if busy:
@@ -1306,7 +1373,7 @@ class CurationHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
-        if path == "/api/progress":
+        if path == Route.PROGRESS:
             # 가벼운 생성 진행 스냅샷 (트리 실시간 갱신용 폴링 대상): 상태별 raw 유무 +
             # 추출 프레임 수 + 런 세대. /api/run 전체 스냅샷(프레임 이미지 오픈)보다 훨씬 싸다.
             try:
@@ -1373,7 +1440,7 @@ class CurationHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         try:
-            if path == "/api/curation":
+            if path == Route.CURATION:
                 payload = self._read_body()
                 # Serialize the curation write with a concurrent --force publish (same
                 # publish_guard the swap holds), and reject a payload whose states are no
@@ -1397,7 +1464,7 @@ class CurationHandler(BaseHTTPRequestHandler):
                         # 2026-07-19: hero frozen 마커 소실, validator 무결성 감사 발견).
                         # 계약: 기존 파일에 있고 payload 의 그 행에 없는 화이트리스트
                         # 필드는 이월한다.
-                        engine_owned = ("frozen",)
+                        engine_owned = (Sidecar.FROZEN,)
                         # 뷰가 **조건부로만 authoring** 하는 행 필드: 트윈 없는 줄의
                         # `pixel_unfake` 는 buildPayload 가 아예 안 싣는다(그 줄의 퍼펙은
                         # 표시 렌즈라 사이드카에 새로 적으면 안 된다). 생략을 삭제로 받으면
@@ -1405,7 +1472,7 @@ class CurationHandler(BaseHTTPRequestHandler):
                         # 선언된 트윈 없는 줄이 큐레이터를 한 번 여는 것만으로 `plain` 으로
                         # 뒤집히고, `.plain.png` 가 없으니 굽기가 죽는다. 사용자는 아무것도
                         # 안 눌렀고 알림도 없다 (validator 실측 2026-07-26).
-                        view_conditional = ("pixel_unfake",)
+                        view_conditional = (Sidecar.PIXEL_UNFAKE,)
                         try:
                             existing = json.loads((self.run_dir / CURATION_FILENAME).read_text(encoding="utf-8"))
                         except (OSError, json.JSONDecodeError):
@@ -1414,25 +1481,25 @@ class CurationHandler(BaseHTTPRequestHandler):
                         # (해제 시 빈 객체로) 실어 보내므로 키가 **없을 때만** 이월한다 —
                         # `sprite-gen anchor --pick` 으로 심어둔 지정이 뷰를 모르는 저장
                         # (구 클라이언트/수동 POST)에 조용히 사라지지 않게.
-                        if "anchors" in existing and "anchors" not in payload:
-                            payload["anchors"] = existing["anchors"]
+                        if Sidecar.ANCHORS in existing and Sidecar.ANCHORS not in payload:
+                            payload[Sidecar.ANCHORS] = existing[Sidecar.ANCHORS]
                         # 채택 컬러웨이도 같은 계약이다. 뷰는 variant 섹션이 있는 런에서만
                         # 이 필드를 authoring 한다 (variants 를 안 구운 런에서는 아예 안 싣는다)
                         # — 생략을 삭제로 받으면 다른 런에서 고른 채택이, 또는 손으로/CLI 로
                         # 심어둔 채택이 무관한 편집 한 번에 조용히 사라진다.
-                        if "recolor" in existing and "recolor" not in payload:
-                            payload["recolor"] = existing["recolor"]
+                        if Sidecar.RECOLOR in existing and Sidecar.RECOLOR not in payload:
+                            payload[Sidecar.RECOLOR] = existing[Sidecar.RECOLOR]
                         # 런 전역 `pixel_unfake` 도 같은 계약이다 — 뷰는 **트윈 줄이 전부
                         # 같을 때만** 이 필드를 싣는다(혼합/트윈 없음이면 생략). 생략을
                         # 삭제로 받으면 굽기가 읽는 **변종이 바뀐다**(plain→pixel): 사용자는
                         # 아무것도 안 눌렀는데 다른 파일로 구워지고, 뷰의 호흡 기준 프레임
                         # 키도 같이 갈린다. 뷰가 authoring 하지 않은 값은 이월한다.
-                        if "pixel_unfake" in existing and "pixel_unfake" not in payload:
-                            payload["pixel_unfake"] = existing["pixel_unfake"]
-                        for state_name, prev_entry in (existing.get("states") or {}).items():
+                        if Sidecar.PIXEL_UNFAKE in existing and Sidecar.PIXEL_UNFAKE not in payload:
+                            payload[Sidecar.PIXEL_UNFAKE] = existing[Sidecar.PIXEL_UNFAKE]
+                        for state_name, prev_entry in (existing.get(Sidecar.STATES) or {}).items():
                             if not isinstance(prev_entry, dict):
                                 continue
-                            slot = (payload.get("states") or {}).get(state_name)
+                            slot = (payload.get(Sidecar.STATES) or {}).get(state_name)
                             if not isinstance(slot, dict):
                                 continue
                             for field in engine_owned + view_conditional:
@@ -1445,14 +1512,14 @@ class CurationHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_json({Wire.OK: True})
                 return
-            if path == "/api/compare-gif":
+            if path == Route.COMPARE_GIF:
                 # 비교 캔버스 캡처 프레임들(PNG dataURL) → 투명 GIF 조립.
                 # 프레임 합성은 클라이언트(큐레이션 상태 합성 경로)가 이미 끝냈다 —
                 # 여기선 조립만 한다 (결정론: 가상 시간 샘플).
                 payload = self._read_body()
-                raw_frames = payload.get("frames")
+                raw_frames = payload.get(Ask.FRAMES)
                 try:
-                    duration_ms = max(20, int(payload.get("duration_ms", 100)))
+                    duration_ms = max(20, int(payload.get(Ask.DURATION_MS, 100)))
                 except (TypeError, ValueError):
                     duration_ms = 100
                 if not isinstance(raw_frames, list) or not raw_frames or len(raw_frames) > 200:
@@ -1472,21 +1539,21 @@ class CurationHandler(BaseHTTPRequestHandler):
                     return
                 # 포맷 선택 (maintainer 2026-07-19 "webm/mp4 로도"): gif=save_clean_gif,
                 # webm=VP9 알파 보존, mp4=x264 (알파 불가 — 화이트 배경 합성).
-                fmt = str(payload.get("format", "gif")).lower()
-                if fmt not in ("gif", "webm", "mp4"):
+                fmt = str(payload.get(Ask.FORMAT, FORMAT_GIF)).lower()
+                if fmt not in COMPARE_FORMATS:
                     self._send_json({Wire.ERROR: "format: gif|webm|mp4"}, 400)
                     return
-                if fmt != "gif" and shutil.which("ffmpeg") is None:
+                if fmt != FORMAT_GIF and shutil.which("ffmpeg") is None:
                     self._send_json({Wire.ERROR: "ffmpeg not found on server machine (webm/mp4 assembly requires it)"}, 500)
                     return
                 with tempfile.TemporaryDirectory() as td:
                     out = Path(td) / f"compare.{fmt}"
-                    if fmt == "gif":
+                    if fmt == FORMAT_GIF:
                         save_clean_gif(images, out, duration_ms=duration_ms)
                     else:
                         even = lambda v: (v + 1) // 2 * 2  # noqa: E731 — 코덱 짝수 치수 요구
                         for index, im in enumerate(images):
-                            if fmt == "mp4":
+                            if fmt == FORMAT_MP4:
                                 frame = Image.new("RGB", (even(im.width), even(im.height)), (255, 255, 255))
                                 frame.paste(im, (0, 0), im)
                             elif im.width % 2 or im.height % 2:
@@ -1497,7 +1564,7 @@ class CurationHandler(BaseHTTPRequestHandler):
                             frame.save(Path(td) / f"f{index:04d}.png")
                         fps = max(1, round(1000 / duration_ms))
                         args = ["ffmpeg", "-y", "-framerate", str(fps), "-i", str(Path(td) / "f%04d.png")]
-                        if fmt == "webm":
+                        if fmt == FORMAT_WEBM:
                             args += ["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0", "-crf", "28", "-auto-alt-ref", "0"]
                         else:
                             args += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18"]
@@ -1507,7 +1574,7 @@ class CurationHandler(BaseHTTPRequestHandler):
                             self._send_json({Wire.ERROR: f"ffmpeg failed: {proc.stderr[-300:]}"}, 500)
                             return
                     data = out.read_bytes()
-                content_type = {"gif": "image/gif", "webm": "video/webm", "mp4": "video/mp4"}[fmt]
+                content_type = {FORMAT_GIF: "image/gif", FORMAT_WEBM: "video/webm", FORMAT_MP4: "video/mp4"}[fmt]
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header(Wire.FILENAME_HEADER, f"compare.{fmt}")
@@ -1516,19 +1583,19 @@ class CurationHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
                 return
-            if path == "/api/compose":
+            if path == Route.COMPOSE:
                 result = run_compose(self.run_dir)
                 self._send_json(result, 200 if result[Wire.OK] else 500)
                 return
-            if path == "/api/base-edit":
+            if path == Route.BASE_EDIT:
                 # 베이스(base-source) 픽셀 편집 — 프레임과 달리 사이드카가 아니라
                 # 파일 자체에 굽는다: 베이스는 생성 identity truth 입력이라, 편집이
                 # 이후 생성(앵커 재파생·행 리롤)에 반영되려면 파일이 바뀌어야 한다
                 # (maintainer 지시 2026-07-17 '베이스를 다르게 해서 뽑고 싶다').
                 # 원본은 최초 1회 <base>.orig 로 백업 (관측 가능, 덮어쓰지 않음).
                 payload = self._read_body()
-                ops = payload.get("ops")
-                transform_req = payload.get("transform")
+                ops = payload.get(Ask.OPS)
+                transform_req = payload.get(Ask.TRANSFORM)
                 if not isinstance(ops, dict):
                     ops = {}
                 if not ops and not transform_req:
@@ -1538,16 +1605,16 @@ class CurationHandler(BaseHTTPRequestHandler):
                 if base_path is None:
                     self._send_json({Wire.ERROR: "no base-source image in this run"}, 404)
                     return
-                space = str(payload.get("space") or "raw")
+                space = str(payload.get(Ask.SPACE) or SPACE_RAW)
                 grid = None
-                if space == "logical":
+                if space == SPACE_LOGICAL:
                     # 논리 셀 좌표 (줌 모달 편집 공간) — 검출 격자로 raw 블록에 확장.
                     # 격자 SSoT = _base_grid_response (클라 표시와 동일 절단선).
                     grid = _base_grid_response(self.run_dir, base_path).get(Wire.GRID)
                     if not grid:
                         self._send_json({Wire.ERROR: "logical ops need a detected base grid"}, 422)
                         return
-                elif space != "raw":
+                elif space != SPACE_RAW:
                     self._send_json({Wire.ERROR: f"unknown ops space: {space}"}, 400)
                     return
                 request = load_request(self.run_dir)
@@ -1595,8 +1662,8 @@ class CurationHandler(BaseHTTPRequestHandler):
                     from sprite_gen.curate.curation import normalize_transform as _normalize_transform
                     tnorm = dict(_normalize_transform(transform_req))
                     if grid is not None:
-                        tnorm["dx"] = tnorm.get("dx", 0.0) * grid[Wire.PITCH][0]
-                        tnorm["dy"] = tnorm.get("dy", 0.0) * grid[Wire.PITCH][1]
+                        tnorm[Sidecar.DX] = tnorm.get(Sidecar.DX, 0.0) * grid[Wire.PITCH][0]
+                        tnorm[Sidecar.DY] = tnorm.get(Sidecar.DY, 0.0) * grid[Wire.PITCH][1]
                     moved = _apply_transform(image, tnorm, (image.width, image.height))
                     canvas = Image.new("RGBA", (image.width, image.height), chroma + (255,))
                     canvas.alpha_composite(moved)
@@ -1606,15 +1673,15 @@ class CurationHandler(BaseHTTPRequestHandler):
                 self._send_json({Wire.OK: True, Wire.APPLIED: applied, Wire.SPACE: space,
                                  Wire.BACKUP: backup.name})
                 return
-            if path == "/api/state-fps":
+            if path == Route.STATE_FPS:
                 # 줄 전체 재생 속도 = state fps (SSoT = sprite-request.json).
                 # 프레임별 지속시간은 프레임 복제가 담당 (maintainer 확정 2026-07-18 —
                 # per-frame duration 이중 진실 금지). fps 는 재생 메타데이터라
                 # 추출/프레임 캐시와 무관하다.
                 payload = self._read_body()
-                state = str(payload.get("state") or "")
+                state = str(payload.get(Ask.STATE) or "")
                 try:
-                    fps = int(payload.get("fps"))
+                    fps = int(payload.get(Ask.FPS))
                 except (TypeError, ValueError):
                     self._send_json({Wire.ERROR: "fps:int required"}, 400)
                     return
@@ -1632,17 +1699,17 @@ class CurationHandler(BaseHTTPRequestHandler):
                     write_request(self.run_dir, request)
                 self._send_json({Wire.OK: True, Wire.STATE: state, Wire.FPS: fps})
                 return
-            if path == "/api/interpolate":
+            if path == Route.INTERPOLATE:
                 payload = self._read_body()
-                state = str(payload.get("state") or "")
+                state = str(payload.get(Ask.STATE) or "")
                 request = load_request(self.run_dir)
                 if state not in request.get("states", {}):
                     self._send_json({Wire.ERROR: f"unknown state: {state}"}, 400)
                     return
                 try:
-                    index_a = int(payload["from"])
-                    index_b = int(payload["to"])
-                    t_value = float(payload.get("t", 0.5))
+                    index_a = int(payload[Ask.FROM])
+                    index_b = int(payload[Ask.TO])
+                    t_value = float(payload.get(Ask.T, 0.5))
                 except (KeyError, TypeError, ValueError):
                     self._send_json(
                         {Wire.ERROR: "body needs integer 'from'/'to' (+ optional float 't')"}, 400)
@@ -1650,33 +1717,33 @@ class CurationHandler(BaseHTTPRequestHandler):
                 if not 0.0 < t_value < 1.0:
                     self._send_json({Wire.ERROR: f"t must be inside (0, 1): {t_value}"}, 400)
                     return
-                provider = str(payload.get("provider") or interpolate_mod.DEFAULT_PROVIDER)
+                provider = str(payload.get(Ask.PROVIDER) or interpolate_mod.DEFAULT_PROVIDER)
                 if provider not in CURATOR_PROVIDERS:
                     self._send_json({Wire.ERROR: f"unknown provider: {provider}"}, 400)
                     return
                 result = run_interpolate(self.run_dir, state, index_a, index_b,
-                                         t_value, payload.get("label") or None, provider)
+                                         t_value, payload.get(Ask.LABEL) or None, provider)
                 self._send_json(result, 200 if result[Wire.OK] else 500)
                 return
-            if path == "/api/reroll":
+            if path == Route.REROLL:
                 payload = self._read_body()
-                state = str(payload.get("state") or "")
+                state = str(payload.get(Ask.STATE) or "")
                 request = load_request(self.run_dir)
                 if state not in request.get("states", {}):
                     self._send_json({Wire.ERROR: f"unknown state: {state}"}, 400)
                     return
-                provider = str(payload.get("provider") or gen_mod.HARD_DEFAULT_PROVIDER)
+                provider = str(payload.get(Ask.PROVIDER) or gen_mod.HARD_DEFAULT_PROVIDER)
                 if provider not in CURATOR_PROVIDERS:
                     self._send_json({Wire.ERROR: f"unknown provider: {provider}"}, 400)
                     return
                 result = run_reroll(self.run_dir, state, provider)
                 self._send_json(result, 200 if result[Wire.OK] else 500)
                 return
-            if path == "/api/export":
+            if path == Route.EXPORT:
                 result = run_export(self.run_dir)
                 self._send_json(result, 200 if result[Wire.OK] else 500)
                 return
-            if path == "/api/export-gif":
+            if path == Route.EXPORT_GIF:
                 result = run_export_gif(self.run_dir)
                 self._send_json(result, 200 if result[Wire.OK] else 500)
                 return

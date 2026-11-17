@@ -165,7 +165,54 @@ from sprite_gen.util.resample import transform_cell
 CURATION_FILENAME = "curation.json"
 CURATION_KIND = "sprite-gen-curation"  # 큐레이터 persistence.js 의 저장 payload 도 이 값이다
 SCHEMA_VERSION = 1
-IDENTITY = {"rotate": 0.0, "scale": 1.0, "dx": 0, "dy": 0, "shx": 0.0, "shy": 0.0, "flipX": 0}
+
+
+class Sidecar:
+    """The keys of `curation.json` (schema above), declared once. The curator SPA writes the
+    sidecar (`curator/src/persistence.js` `buildPayload`) and reads it back (`store.js`
+    `seedEntries`, `boot.js`); this module, the curation server and the bake read it through
+    these names. tests/curate/test_curation_sidecar_keys.py holds the SPA to them."""
+
+    # the document
+    VERSION = "version"
+    KIND = "kind"
+    RUN_REVISION = "run_revision"
+    PIXEL_UNFAKE = "pixel_unfake"  # the run-wide default, and a state's own
+    ANCHORS = "anchors"
+    RECOLOR = "recolor"
+    STATES = "states"
+    # states.<state>
+    SELECTED = "selected"
+    ORDER = "order"
+    DELETED = "deleted"
+    CLONES = "clones"
+    UNLINKED = "unlinked"
+    NAMES = "names"
+    TRANSFORMS = "transforms"
+    PIXELS = "pixels"
+    BREATHE = "breathe"
+    FROZEN = "frozen"
+    REVISION = "revision"  # a state's, and an anchor pick's
+    # states.<state>.transforms.<index>
+    ROTATE = "rotate"
+    SCALE = "scale"
+    DX = "dx"
+    DY = "dy"
+    SHX = "shx"
+    SHY = "shy"
+    FLIP_X = "flipX"
+    # anchors.<direction>
+    STATE = "state"
+    INDEX = "index"
+    STALE = "stale"
+    STALE_REASON = "stale_reason"
+    REPIN = "repin"
+    # recolor
+    PICKED = "picked"
+
+
+IDENTITY = {Sidecar.ROTATE: 0.0, Sidecar.SCALE: 1.0, Sidecar.DX: 0, Sidecar.DY: 0,
+            Sidecar.SHX: 0.0, Sidecar.SHY: 0.0, Sidecar.FLIP_X: 0}
 
 # Generation-material chip roles for imported `_refs/<role>-<name>.png` files
 # (run-contract.md §4). Single source shared by the importer (fail-loud on an
@@ -175,7 +222,7 @@ REF_ANCHOR, REF_BASIS, REF_GUIDE = IMPORTED_REF_ROLES = ("anchor", "basis", "gui
 # 은퇴한 사이드카 키 -> 현행 키. `fit` 쪽과 같은 어휘 교체다 (runio.LEGACY_FIT_KEYS 참조):
 # "pixel perfect" 는 광의 통용어의 오용이고, 이 파이프라인이 하는 일의 정확한 명칭은
 # "unfake"(격자 스냅/재양자화로 가짜 픽셀아트를 되돌린다) 다 — maintainer 2026-07-25.
-LEGACY_CURATION_KEYS = {"pixel_perfect": "pixel_unfake"}
+LEGACY_CURATION_KEYS = {"pixel_perfect": Sidecar.PIXEL_UNFAKE}
 
 
 def _migrate_curation_keys(doc: dict[str, Any], where: str) -> bool:
@@ -184,7 +231,7 @@ def _migrate_curation_keys(doc: dict[str, Any], where: str) -> bool:
     두 키가 동시에 있으면 hard fail — 어느 쪽이 진실인지 코드가 고를 수 없다."""
     moved = False
     scopes = [("", doc)] + [(f"states.{name}.", entry)
-                            for name, entry in (doc.get("states") or {}).items()
+                            for name, entry in (doc.get(Sidecar.STATES) or {}).items()
                             if isinstance(entry, dict)]
     for prefix, scope in scopes:
         for legacy, current in LEGACY_CURATION_KEYS.items():
@@ -321,8 +368,8 @@ def state_breathe(curation: dict[str, Any] | None, state: str) -> dict[str, Any]
     (적지 않은 경계는 0). 세기만 적은 줄은 반환이 이전과 같다."""
     if not curation:
         return None
-    entry = curation.get("states", {}).get(state)
-    raw = entry.get("breathe") if isinstance(entry, dict) else None
+    entry = curation.get(Sidecar.STATES, {}).get(state)
+    raw = entry.get(Sidecar.BREATHE) if isinstance(entry, dict) else None
     if not isinstance(raw, dict):
         return None
     retired = sorted(k for k in RETIRED_BREATHE_KEYS if k in raw)
@@ -532,22 +579,22 @@ def edit_index(curation: dict[str, Any] | None, state: str, index: int) -> int:
     베이크(compose/GIF/export)와 웹뷰가 같은 규칙을 쓴다 (드리프트 금지)."""
     if not curation:
         return index
-    entry = curation.get("states", {}).get(state)
+    entry = curation.get(Sidecar.STATES, {}).get(state)
     if not isinstance(entry, dict):
         return index
-    clones = entry.get("clones")
+    clones = entry.get(Sidecar.CLONES)
     if not isinstance(clones, dict):
         return index
     src = clones.get(str(index), clones.get(index))
     if src is None:
         return index
-    unlinked = entry.get("unlinked")
+    unlinked = entry.get(Sidecar.UNLINKED)
     if isinstance(unlinked, list) and index in {int(u) for u in unlinked if str(u).lstrip("-").isdigit()}:
         return index
     # 레거시 자가판정 (웹뷰와 동일 규칙): 링크 개념(2026-07-18) 이전 사이드카가 복제
     # 인덱스에 직접 넣어둔 변형/픽셀 편집은 독립 의도다 — 조용한 편집 소실 금지.
-    own_transform = (entry.get("transforms") or {}).get(str(index))
-    own_pixels = (entry.get("pixels") or {}).get(str(index))
+    own_transform = (entry.get(Sidecar.TRANSFORMS) or {}).get(str(index))
+    own_pixels = (entry.get(Sidecar.PIXELS) or {}).get(str(index))
     if own_transform or (own_pixels and len(own_pixels)):
         return index
     try:
@@ -569,10 +616,10 @@ def frame_variant(curation: dict[str, Any] | None, state: str | None = None) -> 
     if not curation:
         return "pixel"
     if state is not None:
-        entry = curation.get("states", {}).get(state)
-        if isinstance(entry, dict) and isinstance(entry.get("pixel_unfake"), bool):
-            return "pixel" if entry["pixel_unfake"] else "plain"
-    if curation.get("pixel_unfake") is False:
+        entry = curation.get(Sidecar.STATES, {}).get(state)
+        if isinstance(entry, dict) and isinstance(entry.get(Sidecar.PIXEL_UNFAKE), bool):
+            return "pixel" if entry[Sidecar.PIXEL_UNFAKE] else "plain"
+    if curation.get(Sidecar.PIXEL_UNFAKE) is False:
         return "plain"
     return "pixel"
 
@@ -771,18 +818,18 @@ def _validated_anchor_pins(run_dir: Path, data: dict[str, Any], request: dict[st
     핀한 행을 리롤하면 사용자가 본 적 없는 프레임이 '당신이 핀한 앵커'로 표시됐다)."""
     anchors_out: dict[str, Any] = {}
     for direction, pick in anchor_choices(data).items():
-        stored = pick.get("revision")
-        current = state_revision(run_dir, pick["state"], request=request) if request else None
+        stored = pick.get(Sidecar.REVISION)
+        current = state_revision(run_dir, pick[Sidecar.STATE], request=request) if request else None
         fresh = (isinstance(stored, list) and stored and current
                  and stored == current[:len(stored)])
-        entry = {"state": pick["state"], "index": pick["index"]}
+        entry = {Sidecar.STATE: pick[Sidecar.STATE], Sidecar.INDEX: pick[Sidecar.INDEX]}
         if stored is not None:
-            entry["revision"] = stored
+            entry[Sidecar.REVISION] = stored
         if not fresh:
-            entry["stale"] = True
+            entry[Sidecar.STALE] = True
             # 왜 낡았나를 구분한다: 재생성됐다(지문 불일치) vs 애초에 증명이 없다(지문 없음).
             # 후자에 "재생성됐다" 라고 말하면 사실과 다른 오류가 된다 (validator 5차 기각 2).
-            entry["stale_reason"] = "regenerated" if stored is not None else "unverifiable"
+            entry[Sidecar.STALE_REASON] = "regenerated" if stored is not None else "unverifiable"
             report["anchors_stale"].append(direction)
         anchors_out[direction] = entry
     return anchors_out
@@ -819,7 +866,7 @@ def load_curation_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str
         return None, report
     raw_text = path.read_text(encoding="utf-8")
     data = json.loads(raw_text)
-    if data.get("kind") != CURATION_KIND:
+    if data.get(Sidecar.KIND) != CURATION_KIND:
         raise SystemExit(f"{path} is not a sprite-gen-curation file")
     # 은퇴 키 이관 (메모리) — 다음 저장이 현행 키로 파일을 갱신한다. 두 키 동시 = hard fail.
     _migrate_curation_keys(data, str(path))
@@ -833,15 +880,15 @@ def load_curation_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str
     # 그 문서를 통째로 유효하다고 통과시켜 낡은 핀이 살아난다 (validator 5차 실측 — provenance
     # 이월만으로는 못 막았다. 게이트가 건너뛰면 이월된 증거를 아무도 안 본다).
     anchors_out = _validated_anchor_pins(run_dir, data, request, report)
-    if data.get("run_revision") == run_revision(run_dir) and not report["anchors_stale"]:
-        return ({**data, **({"anchors": anchors_out} if anchors_out else {})}, report)
-    if data.get("run_revision") == run_revision(run_dir):
+    if data.get(Sidecar.RUN_REVISION) == run_revision(run_dir) and not report["anchors_stale"]:
+        return ({**data, **({Sidecar.ANCHORS: anchors_out} if anchors_out else {})}, report)
+    if data.get(Sidecar.RUN_REVISION) == run_revision(run_dir):
         # 프레임 세대는 현재지만 지정 하나가 낡았다 — states 는 전부 유효하다.
         _report_stale_anchors(run_dir, report)
-        return ({**data, "anchors": anchors_out}, report)
+        return ({**data, Sidecar.ANCHORS: anchors_out}, report)
     kept: dict[str, Any] = {}
-    for name, entry in (data.get("states") or {}).items():
-        entry_rev = entry.get("revision") if isinstance(entry, dict) else None
+    for name, entry in (data.get(Sidecar.STATES) or {}).items():
+        entry_rev = entry.get(Sidecar.REVISION) if isinstance(entry, dict) else None
         current = state_revision(run_dir, name, request=request) if request else None
         if (isinstance(entry_rev, list) and entry_rev and current
                 and entry_rev == current[:len(entry_rev)]):
@@ -850,7 +897,7 @@ def load_curation_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str
             report["dropped"].append(name)
     if not report["dropped"] and not report["anchors_stale"]:
         # 런 세대 지문은 바뀌었지만 (예: request 메타 편집) 전 행이 개별 검증을 통과.
-        return {**data, "states": kept, **({"anchors": anchors_out} if anchors_out else {})}, report
+        return {**data, Sidecar.STATES: kept, **({Sidecar.ANCHORS: anchors_out} if anchors_out else {})}, report
     if report["dropped"]:
         print(f"[curation] frames regenerated under {CURATION_FILENAME}: dropped "
               f"{', '.join(report['dropped'])} (kept {len(kept)}); the file itself is unchanged "
@@ -860,7 +907,7 @@ def load_curation_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str
     if not kept and not anchors_out:
         return None, report
     # 전 행이 드롭돼도 지정은 남긴다 — 남아 있어야 오류를 낼 수 있다.
-    return {**data, "states": kept, **({"anchors": anchors_out} if anchors_out else {})}, report
+    return {**data, Sidecar.STATES: kept, **({Sidecar.ANCHORS: anchors_out} if anchors_out else {})}, report
 
 
 def load_curation(run_dir: Path) -> dict[str, Any] | None:
@@ -876,38 +923,38 @@ def stamp_curation(run_dir: Path, payload: dict[str, Any]) -> dict[str, Any]:
     (transport echo) 은 제거. 행 스탬프가 계산 불가(행 미생성)면 스탬프를 지운다 —
     거짓 증명을 남기지 않는다."""
     payload = {k: v for k, v in payload.items() if k != "runRevision"}
-    payload["run_revision"] = run_revision(run_dir)
+    payload[Sidecar.RUN_REVISION] = run_revision(run_dir)
     try:
         request = load_request(run_dir)
     except (OSError, json.JSONDecodeError):
         request = None
-    anchors = payload.get("anchors")
+    anchors = payload.get(Sidecar.ANCHORS)
     if isinstance(anchors, dict):
         for direction, pick in list(anchors.items()):
-            if not isinstance(pick, dict) or not isinstance(pick.get("state"), str):
+            if not isinstance(pick, dict) or not isinstance(pick.get(Sidecar.STATE), str):
                 continue
-            for derived in ("stale", "stale_reason", "repin"):
+            for derived in (Sidecar.STALE, Sidecar.STALE_REASON, Sidecar.REPIN):
                 pick.pop(derived, None)  # 파생/의도 표식은 저장하지 않는다 (게이트가 재판정)
             # **없을 때만** 찍는다: 이월되는 기존 지정에 현재 지문을 다시 찍으면 낡은 지정이
             # 새 세대에서 유효해져 버린다 (states 부활과 같은 병). 새 지정(revision 없음)만
             # 지금 세대로 도장받는다. 계산 불가(그 행 미추출)면 스탬프를 남기지 않는다 —
             # states 와 같은 규칙(거짓 증명 금지)이고, 게이트가 그걸 unverifiable 로 읽는다.
-            if pick.get("revision") is None:
-                rev = state_revision(run_dir, pick["state"], request=request) if request else None
+            if pick.get(Sidecar.REVISION) is None:
+                rev = state_revision(run_dir, pick[Sidecar.STATE], request=request) if request else None
                 if rev:
-                    pick["revision"] = rev
+                    pick[Sidecar.REVISION] = rev
                 else:
-                    pick.pop("revision", None)
-    states = payload.get("states")
+                    pick.pop(Sidecar.REVISION, None)
+    states = payload.get(Sidecar.STATES)
     if isinstance(states, dict):
         for name, entry in states.items():
             if not isinstance(entry, dict):
                 continue
             rev = state_revision(run_dir, name, request=request) if request else None
             if rev:
-                entry["revision"] = rev
+                entry[Sidecar.REVISION] = rev
             else:
-                entry.pop("revision", None)
+                entry.pop(Sidecar.REVISION, None)
     return payload
 
 
@@ -916,27 +963,27 @@ def normalize_transform(raw: Any) -> dict[str, float]:
     if not isinstance(raw, dict):
         return dict(IDENTITY)
     return {
-        "rotate": float(raw.get("rotate", 0.0)),
-        "scale": float(raw.get("scale", 1.0)),
-        "dx": float(raw.get("dx", 0)),
-        "dy": float(raw.get("dy", 0)),
-        "shx": float(raw.get("shx", 0.0)),
-        "shy": float(raw.get("shy", 0.0)),
+        Sidecar.ROTATE: float(raw.get(Sidecar.ROTATE, 0.0)),
+        Sidecar.SCALE: float(raw.get(Sidecar.SCALE, 1.0)),
+        Sidecar.DX: float(raw.get(Sidecar.DX, 0)),
+        Sidecar.DY: float(raw.get(Sidecar.DY, 0)),
+        Sidecar.SHX: float(raw.get(Sidecar.SHX, 0.0)),
+        Sidecar.SHY: float(raw.get(Sidecar.SHY, 0.0)),
         # (maintainer 2026-05-28) flipX: 0 | 1 — horizontal mirror. Image-gen 결과가 좌우
         # 반대로 나올 때 frame 별로 거울 반전. matrix 마지막에 diag(-1, 1) 곱.
-        "flipX": 1 if raw.get("flipX") else 0,
+        Sidecar.FLIP_X: 1 if raw.get(Sidecar.FLIP_X) else 0,
     }
 
 
 def is_identity(transform: dict[str, float]) -> bool:
     return (
-        abs(transform["rotate"]) < 1e-6
-        and abs(transform["scale"] - 1.0) < 1e-6
-        and abs(transform["dx"]) < 1e-6
-        and abs(transform["dy"]) < 1e-6
-        and abs(transform.get("shx", 0.0)) < 1e-6
-        and abs(transform.get("shy", 0.0)) < 1e-6
-        and not transform.get("flipX", 0)
+        abs(transform[Sidecar.ROTATE]) < 1e-6
+        and abs(transform[Sidecar.SCALE] - 1.0) < 1e-6
+        and abs(transform[Sidecar.DX]) < 1e-6
+        and abs(transform[Sidecar.DY]) < 1e-6
+        and abs(transform.get(Sidecar.SHX, 0.0)) < 1e-6
+        and abs(transform.get(Sidecar.SHY, 0.0)) < 1e-6
+        and not transform.get(Sidecar.FLIP_X, 0)
     )
 
 
@@ -967,8 +1014,8 @@ def state_clones(curation: dict[str, Any] | None, state: str, default_count: int
     한다. 복제는 자기만의 order 슬롯/변형/픽셀편집을 갖는 정식 인스턴스이고, 굽기 때
     원본 프레임 파일을 읽는다 (frames/ 는 파생 캐시라 복제 파일을 만들지 않는다 —
     복제 의도는 사이드카가 소유). 손상 항목은 스킵."""
-    entry = ((curation or {}).get("states") or {}).get(state)
-    raw = entry.get("clones") if isinstance(entry, dict) else None
+    entry = ((curation or {}).get(Sidecar.STATES) or {}).get(state)
+    raw = entry.get(Sidecar.CLONES) if isinstance(entry, dict) else None
     clones: dict[int, int] = {}
     if isinstance(raw, dict):
         for key, value in raw.items():
@@ -996,10 +1043,10 @@ def state_instances(curation: dict[str, Any] | None, state: str, default_count: 
     "선택되진 않았지만 존재하는 인스턴스" 를 물어야 하는 소비자 — 앵커 프레임 지정
     검증(sprite_gen.curate.anchor) — 의 SSoT."""
     clones = state_clones(curation, state, default_count)
-    entry = ((curation or {}).get("states") or {}).get(state)
+    entry = ((curation or {}).get(Sidecar.STATES) or {}).get(state)
     deleted: set[int] = set()
     if isinstance(entry, dict):
-        deleted = set(normalize_frame_indices(entry.get("deleted"), default_count, set(clones)))
+        deleted = set(normalize_frame_indices(entry.get(Sidecar.DELETED), default_count, set(clones)))
     return [index for index in [*range(default_count), *sorted(clones)] if index not in deleted]
 
 
@@ -1010,28 +1057,28 @@ def anchor_choices(curation: dict[str, Any] | None) -> dict[str, dict[str, Any]]
     지정이 없는 방향은 여기 없다 = 앵커 행의 시퀀스 첫 인스턴스가 앵커라는 뜻.
     손상 항목은 스킵 (손으로 편집된 사이드카가 크래시를 내지 않는다) — 지정이 가리키는
     인스턴스의 **실재 검증은 해석 시점**(sprite_gen.curate.anchor.resolve_anchor)에 fail-loud."""
-    raw = (curation or {}).get("anchors")
+    raw = (curation or {}).get(Sidecar.ANCHORS)
     picks: dict[str, dict[str, Any]] = {}
     if isinstance(raw, dict):
         for direction, value in raw.items():
             if not isinstance(value, dict):
                 continue
-            state = value.get("state")
+            state = value.get(Sidecar.STATE)
             try:
-                index = int(value.get("index"))
+                index = int(value.get(Sidecar.INDEX))
             except (TypeError, ValueError):
                 continue
             if isinstance(state, str) and state:
-                pick = {"state": state, "index": index}
+                pick = {Sidecar.STATE: state, Sidecar.INDEX: index}
                 # 세대 지문 (쓰기 시 stamp_curation 이 찍는다) + 로드 게이트가 붙인 stale 표식.
                 # stale 은 파생값이라 파일에 쓰지 않는다 — 게이트가 매번 다시 판정한다.
-                if value.get("revision") is not None:
-                    pick["revision"] = value["revision"]
-                if value.get("stale"):
-                    pick["stale"] = True
-                    pick["stale_reason"] = str(value.get("stale_reason") or "regenerated")
-                if value.get("repin"):
-                    pick["repin"] = True  # 명시 재지정 의도 (쓰기 경로에서 소비·제거)
+                if value.get(Sidecar.REVISION) is not None:
+                    pick[Sidecar.REVISION] = value[Sidecar.REVISION]
+                if value.get(Sidecar.STALE):
+                    pick[Sidecar.STALE] = True
+                    pick[Sidecar.STALE_REASON] = str(value.get(Sidecar.STALE_REASON) or "regenerated")
+                if value.get(Sidecar.REPIN):
+                    pick[Sidecar.REPIN] = True  # 명시 재지정 의도 (쓰기 경로에서 소비·제거)
                 picks[str(direction)] = pick
     return picks
 
@@ -1049,10 +1096,10 @@ def recolor_pick(curation: dict[str, Any] | None) -> str | None:
     here: the pick is returned as stored, and the reader (the curation view via
     `serve_curation`) reports it as unknown against the current bake report instead
     of silently clearing it (No Silent Fallback)."""
-    raw = (curation or {}).get("recolor")
+    raw = (curation or {}).get(Sidecar.RECOLOR)
     if not isinstance(raw, dict):
         return None
-    picked = raw.get("picked")
+    picked = raw.get(Sidecar.PICKED)
     return picked if isinstance(picked, str) and picked else None
 
 
@@ -1070,7 +1117,7 @@ def _carry_anchor_provenance(run_dir: Path, payload: dict[str, Any]) -> dict[str
     실려 있어야 새 지문을 받는다 (뷰의 핀 버튼이 stale 상태에서 그걸 싣는다). 잊은 writer 는
     지정을 낡은 상태로 남기므로 오류가 유지된다 — 조용히 유효해지는 쪽으로 실패하지 않는다.
     """
-    anchors = payload.get("anchors")
+    anchors = payload.get(Sidecar.ANCHORS)
     if not isinstance(anchors, dict) or not anchors:
         return payload
     try:
@@ -1078,18 +1125,18 @@ def _carry_anchor_provenance(run_dir: Path, payload: dict[str, Any]) -> dict[str
     except (OSError, json.JSONDecodeError):
         return payload
     stored = anchor_choices(old)
-    payload = {**payload, "anchors": {k: dict(v) if isinstance(v, dict) else v
+    payload = {**payload, Sidecar.ANCHORS: {k: dict(v) if isinstance(v, dict) else v
                                       for k, v in anchors.items()}}
-    for direction, pick in payload["anchors"].items():
+    for direction, pick in payload[Sidecar.ANCHORS].items():
         if not isinstance(pick, dict):
             continue
         prior = stored.get(direction)
-        if pick.pop("repin", None):
-            pick.pop("revision", None)  # 명시 재지정 = 지금 세대로 새로 도장받는다
+        if pick.pop(Sidecar.REPIN, None):
+            pick.pop(Sidecar.REVISION, None)  # 명시 재지정 = 지금 세대로 새로 도장받는다
             continue
-        if (prior and prior["state"] == pick.get("state")
-                and prior["index"] == pick.get("index") and prior.get("revision") is not None):
-            pick["revision"] = prior["revision"]
+        if (prior and prior[Sidecar.STATE] == pick.get(Sidecar.STATE)
+                and prior[Sidecar.INDEX] == pick.get(Sidecar.INDEX) and prior.get(Sidecar.REVISION) is not None):
+            pick[Sidecar.REVISION] = prior[Sidecar.REVISION]
     return payload
 
 
@@ -1118,13 +1165,13 @@ def write_curation_atomic(run_dir: Path, payload: dict[str, Any]) -> str | None:
 
     backup: str | None = None
 
-    if payload.get("kind") != CURATION_KIND:
+    if payload.get(Sidecar.KIND) != CURATION_KIND:
         raise ValueError("payload is not a sprite-gen-curation document")
     _migrate_curation_keys(payload, str(run_dir / CURATION_FILENAME))
     payload = _carry_anchor_provenance(run_dir, payload)
     payload = stamp_curation(run_dir, payload)
-    if isinstance(payload.get("anchors"), dict) and not payload["anchors"]:
-        payload.pop("anchors")  # 빈 지정은 기록하지 않는다 (없음 = 기본값, 같은 뜻)
+    if isinstance(payload.get(Sidecar.ANCHORS), dict) and not payload[Sidecar.ANCHORS]:
+        payload.pop(Sidecar.ANCHORS)  # 빈 지정은 기록하지 않는다 (없음 = 기본값, 같은 뜻)
     target = run_dir / CURATION_FILENAME
     if target.is_file():
         old_text = target.read_text(encoding="utf-8")
@@ -1142,16 +1189,16 @@ def write_curation_atomic(run_dir: Path, payload: dict[str, Any]) -> str | None:
             new_anchors = anchor_choices(payload)
             if any(d not in new_anchors for d in anchor_choices(old)):
                 backup = backup_stale_curation(run_dir, old_text)
-            new_states = payload.get("states") or {}
-            same_generation = old.get("run_revision") == payload.get("run_revision")
-            for name, old_entry in (old.get("states") or {}).items():
+            new_states = payload.get(Sidecar.STATES) or {}
+            same_generation = old.get(Sidecar.RUN_REVISION) == payload.get(Sidecar.RUN_REVISION)
+            for name, old_entry in (old.get(Sidecar.STATES) or {}).items():
                 new_entry = new_states.get(name)
                 if not isinstance(old_entry, dict):
                     continue
                 if not isinstance(new_entry, dict):
                     lost = True
                 else:
-                    old_rev, new_rev = old_entry.get("revision"), new_entry.get("revision")
+                    old_rev, new_rev = old_entry.get(Sidecar.REVISION), new_entry.get(Sidecar.REVISION)
                     if isinstance(old_rev, list) and isinstance(new_rev, list):
                         lost = old_rev != new_rev[:len(old_rev)]
                     else:
@@ -1185,22 +1232,22 @@ def transform_matrix(t: dict[str, float]) -> tuple[float, float, float, float]:
     the ground grid is what bakes — no preview/bake drift. flipX (when set)
     multiplies the right-most diag(-1, 1) so column-0 의 부호가 반전된다.
     """
-    rr = math.radians(t["rotate"])
+    rr = math.radians(t[Sidecar.ROTATE])
     c, sn = math.cos(rr), math.sin(rr)
-    s, shx, shy = t["scale"], t.get("shx", 0.0), t.get("shy", 0.0)
+    s, shx, shy = t[Sidecar.SCALE], t.get(Sidecar.SHX, 0.0), t.get(Sidecar.SHY, 0.0)
     m00 = s * (c + sn * shy)
     m01 = s * (c * shx + sn)
     m10 = s * (-sn + c * shy)
     m11 = s * (c - sn * shx)
-    if t.get("flipX"):
+    if t.get(Sidecar.FLIP_X):
         m00, m10 = -m00, -m10
     return m00, m01, m10, m11
 
 
 def state_pixel_ops(curation: dict[str, Any] | None, state: str) -> dict[int, dict[str, Any]]:
     """프레임별 픽셀 편집 ops — {frame_index: {"x,y": "#rrggbb"|None}}. 손상 항목은 스킵."""
-    entry = ((curation or {}).get("states") or {}).get(state)
-    raw = entry.get("pixels") if isinstance(entry, dict) else None
+    entry = ((curation or {}).get(Sidecar.STATES) or {}).get(state)
+    raw = entry.get(Sidecar.PIXELS) if isinstance(entry, dict) else None
     ops: dict[int, dict[str, Any]] = {}
     if isinstance(raw, dict):
         for key, value in raw.items():
@@ -1249,16 +1296,16 @@ def state_plan(
     default_order = list(range(default_count))
     if not curation:
         return default_order, {}
-    entry = curation.get("states", {}).get(state)
+    entry = curation.get(Sidecar.STATES, {}).get(state)
     if not isinstance(entry, dict):
         return default_order, {}
 
     # 복제 인스턴스 인덱스도 selected/deleted 의 유효 인덱스다 (파일은 원본을 읽음
     # — source_frame_index). 기본값(선택 없음)은 물리 프레임만: 복제는 명시 선택으로만 굽는다.
     clone_ids = set(state_clones(curation, state, default_count))
-    deleted = set(normalize_frame_indices(entry.get("deleted"), default_count, clone_ids))
+    deleted = set(normalize_frame_indices(entry.get(Sidecar.DELETED), default_count, clone_ids))
     default_visible = [index for index in default_order if index not in deleted]
-    selected = entry.get("selected")
+    selected = entry.get(Sidecar.SELECTED)
     if isinstance(selected, list) and selected:
         # tolerate a hand-edited / corrupt sidecar: skip non-integer,
         # out-of-range, duplicate, or deleted entries instead of crashing.
@@ -1272,7 +1319,7 @@ def state_plan(
     else:
         ordered = default_visible
 
-    transforms_raw = entry.get("transforms", {})
+    transforms_raw = entry.get(Sidecar.TRANSFORMS, {})
     transforms: dict[int, dict[str, float]] = {}
     if isinstance(transforms_raw, dict):
         for key, value in transforms_raw.items():
@@ -1321,7 +1368,7 @@ def apply_transform(
     ia, ib = m11 / det, -m01 / det
     id_, ie = -m10 / det, m00 / det
     cin_x, cin_y = src.width / 2, src.height / 2
-    cout_x, cout_y = cw / 2 + transform["dx"], ch / 2 + transform["dy"]
+    cout_x, cout_y = cw / 2 + transform[Sidecar.DX], ch / 2 + transform[Sidecar.DY]
     c = -(ia * cout_x + ib * cout_y) + cin_x
     f = -(id_ * cout_x + ie * cout_y) + cin_y
     if not snap_scale:
@@ -1341,4 +1388,4 @@ def apply_transform(
 
 
 def empty_curation() -> dict[str, Any]:
-    return {"version": SCHEMA_VERSION, "kind": CURATION_KIND, "states": {}}
+    return {Sidecar.VERSION: SCHEMA_VERSION, Sidecar.KIND: CURATION_KIND, Sidecar.STATES: {}}

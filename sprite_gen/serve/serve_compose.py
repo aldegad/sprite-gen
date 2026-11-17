@@ -98,6 +98,42 @@ class Wire:
 TYPE_DIR, TYPE_IMAGE = "dir", "image"
 
 
+class Route:
+    """Every path the composer SPA calls on this server (`composer/src/api.js`), declared once;
+    tests/serve/test_curator_requests.py holds each fetch to them."""
+
+    STATE = "/api/state"
+    BROWSE = "/api/browse"
+    BROWSE_IMG = "/api/browse-img"
+    MOUNT = "/api/mount"
+    PICK = "/api/pick"
+    BUILD = "/api/build"
+    OPEN_CURATION = "/api/open-curation"
+
+
+class Ask:
+    """What the composer SPA sends: the key of every query parameter and POST body field it puts
+    on a request, declared once and kept apart from `Wire` (the other direction), as the
+    curation server's `Ask` is. The run dir /api/open-curation is asked for is the one
+    /api/build answered with, sent back under its own key (`Wire.RUN_DIR`)."""
+
+    # GET /api/browse ?dir, POST /api/mount {dir}
+    DIR = "dir"
+    # GET /api/browse-img ?path, and each row's cells[].path in /api/build
+    PATH = "path"
+    # POST /api/pick ?kind — one of PICK_KINDS
+    KIND = "kind"
+    # POST /api/build {outDir, rows: [{name, cells: [{path}]}]}
+    OUT_DIR = "outDir"
+    ROWS = "rows"
+    NAME = "name"
+    CELLS = "cells"
+
+
+# /api/pick's kinds: a folder to mount, or image(s) whose folder is mounted
+PICK_FOLDER, PICK_IMAGE = PICK_KINDS = ("folder", "image")
+
+
 def _is_under(path: Path, root: Path) -> bool:
     """True iff `path` resolves inside `root`. The traversal guard for browse/img:
     the client names paths, so every filesystem read is confined to the mounted
@@ -150,18 +186,18 @@ def _build_groups(rows: list[dict], mount_root: Path) -> list[dict]:
     groups: list[dict] = []
     used: set[str] = set()
     for row in rows:
-        cells = row.get("cells") or []
+        cells = row.get(Ask.CELLS) or []
         if not cells:
             continue
         paths = []
         for cell in cells:
-            p = Path(str(cell.get("path", ""))).resolve()
+            p = Path(str(cell.get(Ask.PATH, ""))).resolve()
             if not _is_under(p, mount_root):
                 raise PermissionError(f"outside mounted root: {p}")
             if p.suffix.lower() not in IMAGE_SUFFIXES or not p.is_file():
                 raise FileNotFoundError(f"not an image file: {p}")
             paths.append(p)
-        name = _sanitize_state(str(row.get("name", "")))
+        name = _sanitize_state(str(row.get(Ask.NAME, "")))
         base, n = name, 2
         while name in used:
             name, n = f"{base}-{n}", n + 1
@@ -175,8 +211,8 @@ def _build_groups(rows: list[dict], mount_root: Path) -> list[dict]:
 # not available, so the two entry points map one-to-one instead. `choose file` for
 # images returns a newline-joined list of POSIX paths (multiple selections allowed).
 _PICK_SCRIPTS = {
-    "folder": 'POSIX path of (choose folder with prompt "Open a folder of images")',
-    "image": (
+    PICK_FOLDER: 'POSIX path of (choose folder with prompt "Open a folder of images")',
+    PICK_IMAGE: (
         'set picks to (choose file of type {"public.image"} '
         'with prompt "Open image(s)" with multiple selections allowed)\n'
         'set out to ""\n'
@@ -188,7 +224,7 @@ _PICK_SCRIPTS = {
 }
 
 
-def native_pick(kind: str = "folder") -> dict:
+def native_pick(kind: str = PICK_FOLDER) -> dict:
     """Pop the OS chooser and return a folder to mount.
 
     kind="folder" -> {"dir": <abs path>}; kind="image" -> the picked image(s)'
@@ -207,7 +243,7 @@ def native_pick(kind: str = "folder") -> dict:
         if "-128" in (proc.stderr or ""):  # user canceled
             return {Wire.CANCELLED: True}
         raise RuntimeError(proc.stderr.strip() or "osascript failed")
-    if kind == "folder":
+    if kind == PICK_FOLDER:
         picked = proc.stdout.strip()
         return {Wire.DIR: picked} if picked else {Wire.CANCELLED: True}
     files = [line for line in proc.stdout.splitlines() if line.strip()]
@@ -282,18 +318,18 @@ class ComposeHandler(BaseHTTPRequestHandler):
                 return
             self._send_file(index)
             return
-        if path == "/api/state":
+        if path == Route.STATE:
             self._send_json({
                 Wire.LANG: self.lang,
                 Wire.MOUNT: str(self.mount_root) if self.mount_root else None,
             })
             return
-        if path == "/api/browse":
+        if path == Route.BROWSE:
             query = parse_qs(urlparse(self.path).query)
             if self.mount_root is None:
                 self._send_json({Wire.ERROR: "no folder mounted"}, 409)
                 return
-            requested = query.get("dir", [str(self.mount_root)])[0]
+            requested = query.get(Ask.DIR, [str(self.mount_root)])[0]
             try:
                 self._send_json(_list_dir(Path(unquote(requested)), self.mount_root))
             except PermissionError as exc:
@@ -301,12 +337,12 @@ class ComposeHandler(BaseHTTPRequestHandler):
             except FileNotFoundError as exc:
                 self._send_json({Wire.ERROR: str(exc)}, 404)
             return
-        if path == "/api/browse-img":
+        if path == Route.BROWSE_IMG:
             query = parse_qs(urlparse(self.path).query)
             if self.mount_root is None:
                 self._send_json({Wire.ERROR: "no folder mounted"}, 409)
                 return
-            requested = query.get("path", [""])[0]
+            requested = query.get(Ask.PATH, [""])[0]
             target = Path(unquote(requested)).resolve()
             if not _is_under(target, self.mount_root):
                 self._send_json({Wire.ERROR: "outside mounted root"}, 403)
@@ -328,14 +364,14 @@ class ComposeHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path == "/api/mount":
+        if path == Route.MOUNT:
             length = int(self.headers.get("Content-Length", 0))
             try:
                 payload = json.loads(self.rfile.read(length) or b"{}")
             except json.JSONDecodeError:
                 self._send_json({Wire.ERROR: "invalid JSON body"}, 400)
                 return
-            raw = (payload.get("dir") or "").strip()
+            raw = (payload.get(Ask.DIR) or "").strip()
             if not raw:
                 self._send_json({Wire.ERROR: "dir required"}, 400)
                 return
@@ -346,8 +382,8 @@ class ComposeHandler(BaseHTTPRequestHandler):
             ComposeHandler.mount_root = candidate
             self._send_json({Wire.MOUNT: str(candidate), **_list_dir(candidate, candidate)})
             return
-        if path == "/api/pick":
-            kind = parse_qs(urlparse(self.path).query).get("kind", ["folder"])[0]
+        if path == Route.PICK:
+            kind = parse_qs(urlparse(self.path).query).get(Ask.KIND, [PICK_FOLDER])[0]
             try:
                 self._send_json(native_pick(kind))
             except NotImplementedError as exc:
@@ -357,7 +393,7 @@ class ComposeHandler(BaseHTTPRequestHandler):
             except RuntimeError as exc:
                 self._send_json({Wire.ERROR: str(exc)}, 500)
             return
-        if path == "/api/build":
+        if path == Route.BUILD:
             # Materialize the virtual session into a real run dir via the SSoT
             # importer (import_png_groups). The session is the unsaved buffer; this
             # is the one place references become bytes on disk.
@@ -370,7 +406,7 @@ class ComposeHandler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 self._send_json({Wire.ERROR: "invalid JSON body"}, 400)
                 return
-            raw_out = (payload.get("outDir") or "").strip()
+            raw_out = (payload.get(Ask.OUT_DIR) or "").strip()
             if not raw_out:
                 self._send_json({Wire.ERROR: "outDir required"}, 400)
                 return
@@ -380,7 +416,7 @@ class ComposeHandler(BaseHTTPRequestHandler):
                                  Wire.CODE: "out-dir-not-empty"}, 409)
                 return
             try:
-                groups = _build_groups(payload.get("rows") or [], self.mount_root)
+                groups = _build_groups(payload.get(Ask.ROWS) or [], self.mount_root)
             except PermissionError as exc:
                 self._send_json({Wire.ERROR: str(exc)}, 403)
                 return
@@ -399,7 +435,7 @@ class ComposeHandler(BaseHTTPRequestHandler):
             self._send_json({Wire.RUN_DIR: str(out_dir), Wire.STATES: summary.get("states", []),
                              Wire.FRAMES: summary.get("frames", 0), Wire.CELL: summary.get("cell")})
             return
-        if path == "/api/open-curation":
+        if path == Route.OPEN_CURATION:
             # Hand off to the curation view: launch a serve_curation process on the
             # built run dir and return its URL. A curation server is a legitimate
             # long-lived per-run-dir surface, not a workaround.
@@ -409,7 +445,7 @@ class ComposeHandler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 self._send_json({Wire.ERROR: "invalid JSON body"}, 400)
                 return
-            run_dir = Path(str(payload.get("runDir", ""))).expanduser().resolve()
+            run_dir = Path(str(payload.get(Wire.RUN_DIR, ""))).expanduser().resolve()
             if not (run_dir / REQUEST_FILENAME).is_file():
                 self._send_json({Wire.ERROR: f"not a run dir (no sprite-request.json): {run_dir}"}, 404)
                 return
