@@ -22,6 +22,7 @@ from PIL import Image, ImageDraw
 
 from sprite_gen._deps import np
 from sprite_gen.video import loop
+from sprite_gen.video.loop_vocab import CYCLE_ONE_SHOT, CYCLE_PERIODIC
 
 
 def attempt(fn, **kwargs):
@@ -45,14 +46,14 @@ def measure(files: list[Path], fps: float, state: str) -> dict:
     one_shot = attempt(loop.detect_one_shot, D=D, min_len=lo,
                        max_len=max(hi, round(n * .9)), frame_mass=mass)
     auto = periodic
-    route = "periodic"
+    route = CYCLE_PERIODIC
     floor = loop.PERIODICITY_MIN
     if periodic["ok"]:
         floor = loop.periodicity_floor(n, periodic["cycle"]["period_global"], partial_repeat=profile.action_seconds is not None)
         periodic["cycle"]["periodicity_min"] = floor
     if periodic["ok"] and profile.periodic and periodic["cycle"]["periodicity"] < floor:
         if profile.one_shot_ok:
-            auto, route = one_shot, "one-shot"
+            auto, route = one_shot, CYCLE_ONE_SHOT
         else:
             auto, route = {"ok": False, "error": "periodicity gate"}, "periodicity-rejected"
     auto = {**auto, "route": route}

@@ -119,6 +119,7 @@ from sprite_gen.video import held_fill as held_fill_mod
 from sprite_gen.video import legs as legs_mod
 from sprite_gen.video import local_cycle
 from sprite_gen.video import loop as loop_mod
+from sprite_gen.video.loop_vocab import ANCHOR_FEET, ANCHOR_NONE
 from sprite_gen.video import period as period_mod
 from sprite_gen.video import rife as rife_mod
 from sprite_gen.video.interpolation_quality import CROSSFADE_LOOK, GHOST_WARN, SMEAR_WARN, OUTLINE_WARN, clean_beside, faults, ghost_screen, looks
@@ -167,6 +168,11 @@ SAME_FOOT = ("warn", "refuse")
 # A set with a loop the two-cycle screen suspects and no --cycles for it: fail (default) stops the
 # set before anything is rewritten, warn aligns it as it is and names the loop in the warnings.
 MULTI_CYCLE = ("fail", "warn")
+# What became of a loop the two-cycle screen suspects (its `status` under `suspects`): counted by --cycles, settled by
+# the steps its cut was counted with, stopped the set (--multi-cycle fail) or aligned as it is and warned of (warn).
+# A set stopped on one is refused for SUSPECTS_REFUSED (the report's `refused`, video-set's `reason`).
+SUSPECT_COUNTED, SUSPECT_STEPS, SUSPECT_STOPPED, SUSPECT_WARNED = "counted", "steps", "stopped", "warned"
+SUSPECTS_REFUSED = "cycle-suspects"
 CYCLES = (1, 2, 3)  # what --cycles <loop>=k may say a loop holds
 # A loop whose source holds its drawings (two or three frames each, sprite_gen/video/held.py) and that
 # the set's length leaves at fewer than this many drawings a second, with at least UNMADE_MIN of the
@@ -199,7 +205,7 @@ RETAKE_BEAT_REASON, RETAKE_FEET_REASON = "broken-beat", "same-foot"
 # it films without the jump does; at the cut's seam, its last frame to its first, the reason `seam-jump` — another cut
 # of the clip may close on a pose it holds. Both `recut-or-retake`.
 RETAKE_JUMP_REASON, RETAKE_SEAM_REASON = "filmed-jump", "seam-jump"
-REMEDIES = ("retake", "recut", "recut-or-retake")
+REMEDIES = loop_mod.REMEDIES  # the words a retake's `remedy` is said in, loop's: a loop's own retake says them too
 
 
 def held_drawings(frames: list[Image.Image], *, fps: float, clip: dict[str, Any] | None = None,
@@ -267,8 +273,8 @@ def retake(drawings: dict[str, Any], facts: dict[str, Any], ghost_at: list[dict[
         record["ghost"] = {"kept": [g["at"] for g in kept], "sources": sorted({g["source"] for g in kept}),
                            "ghost_max": max(g["ghost"] for g in kept), "limit": facts["ghost_screen"]["limit"]}
         limits["ghost_kept_min"] = RETAKE_GHOST_KEPT_MIN
-    for reason, key, seam, remedy in ((RETAKE_JUMP_REASON, "filmed_jump", False, "recut-or-retake"),
-                                      (RETAKE_SEAM_REASON, "seam_jump", True, "recut-or-retake")):
+    for reason, key, seam, remedy in ((RETAKE_JUMP_REASON, "filmed_jump", False, loop_mod.REMEDY_RECUT_OR_RETAKE),
+                                      (RETAKE_SEAM_REASON, "seam_jump", True, loop_mod.REMEDY_RECUT_OR_RETAKE)):
         jumps = [j for j in (screen or {}).get("jumps", []) if j["seam"] is seam]
         if jumps:
             reasons.append(reason)
@@ -278,12 +284,12 @@ def retake(drawings: dict[str, Any], facts: dict[str, Any], ghost_at: list[dict[
     if beat and facts.get("between") == "auto" and beat.get("path") == "read" and beat.get("over"):
         reasons.append(RETAKE_BEAT_REASON)
         record["broken_beat"] = {"jolt": beat["jolt"], "gap": beat["gap"], "over": beat["over"],
-                                 "named": sorted(k for run in beat.get("named", []) for k in run), "remedy": "recut-or-retake"}
+                                 "named": sorted(k for run in beat.get("named", []) for k in run), "remedy": loop_mod.REMEDY_RECUT_OR_RETAKE}
         limits["beat_jolt"] = cadence_mod.BEAT_JOLT
     if feet and feet.get("read") and feet.get("twice"):
         clip = feet.get("clip") or {}
-        remedy = ("retake" if clip.get("cuts") and clip.get("same_foot") and not clip.get("alternate")
-                  else "recut" if clip.get("alternate") else "recut-or-retake")
+        remedy = (loop_mod.REMEDY_RETAKE if clip.get("cuts") and clip.get("same_foot") and not clip.get("alternate")
+                  else loop_mod.REMEDY_RECUT if clip.get("alternate") else loop_mod.REMEDY_RECUT_OR_RETAKE)
         reasons.append(RETAKE_FEET_REASON)
         record["same_foot"] = {"order": feet["order"], "twice": feet["twice"],
                                "clip": ({k: clip[k] for k in ("length", "cuts", "same_foot", "alternate", "unread", "seam_in_step") if k in clip}
@@ -313,8 +319,8 @@ def _retake_line(name: str, r: dict[str, Any], reason: str, row: dict[str, Any] 
     if reason == RETAKE_BEAT_REASON:
         return f"{name}: cut it again or film this direction again ({reason}): " + _beat_line(name, row)[len(name) + 2:]  # type: ignore[arg-type]
     if reason == RETAKE_FEET_REASON:
-        say = {"retake": "film this direction again", "recut": "cut it again",
-               "recut-or-retake": "cut it again or film this direction again"}[r["same_foot"]["remedy"]]
+        say = {loop_mod.REMEDY_RETAKE: "film this direction again", loop_mod.REMEDY_RECUT: "cut it again",
+               loop_mod.REMEDY_RECUT_OR_RETAKE: "cut it again or film this direction again"}[r["same_foot"]["remedy"]]
         return f"{name}: {say} ({reason}): " + _same_foot_line(name, row)[len(name) + 2:]  # type: ignore[arg-type]
     if reason == RETAKE_GHOST_REASON:
         g = r["ghost"]
@@ -722,7 +728,7 @@ def strike_foot(frames: list[Image.Image], strikes: tuple[int, int], view: str, 
         hi_foot = next(s for s in handed_mod.SIDES if at[s]["depth"] == "near")
     else:  # at the higher cue the picture's right foot is the lower one
         lower = next(s for s in handed_mod.SIDES if at[s]["picture"] == "right")
-        hi_foot = lower if view == "front" else next(s for s in handed_mod.SIDES if s != lower)
+        hi_foot = lower if view == handed_mod.VIEW_FRONT else next(s for s in handed_mod.SIDES if s != lower)
     other = next(s for s in handed_mod.SIDES if s != hi_foot)
     return {**record, "feet": [hi_foot, other] if hi == 0 else [other, hi_foot]}
 
@@ -868,7 +874,7 @@ def cut_report(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> tuple[P
     sprite-gen-video-loop-report, passed, in the loop's directory or the one above it (a video-set
     item keeps it there), whose strip is this loop's and whose cut (start, length) is the one the strip
     metadata records (`cycle_drawings`) — a report of another cut of the same clip is not it."""
-    cut = meta.get("cycle_drawings") or {}
+    cut = meta.get(loop_mod.Strip.CYCLE_DRAWINGS) or {}
     if "start" not in cut or "length" not in cut:
         return None
     strip_name = meta_path.name[: -len(".strip.json")] + ".strip.png"
@@ -880,10 +886,11 @@ def cut_report(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> tuple[P
                 data = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            if not isinstance(data, dict) or data.get("kind") != loop_mod.REPORT_KIND or data.get("status") != loop_mod.REPORT_PASSED:
+            if (not isinstance(data, dict) or data.get(loop_mod.Report.KIND) != loop_mod.REPORT_KIND
+                    or data.get(loop_mod.Report.STATUS) != loop_mod.REPORT_PASSED):
                 continue
-            cycle = data.get("cycle") or {}
-            if (Path(str((data.get("strip") or {}).get("path", ""))).name == strip_name
+            cycle = data.get(loop_mod.Report.CYCLE) or {}
+            if (Path(str((data.get(loop_mod.Report.STRIP) or {}).get(loop_mod.Report.STRIP_PATH, ""))).name == strip_name
                     and (cycle.get("start"), cycle.get("length")) == (cut["start"], cut["length"])):
                 return path, data
     return None
@@ -893,17 +900,17 @@ def one_step(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> dict[str,
     """A loop the cut's step screen suspects of being one step (`cut_report`, `cycle.step_screen`), and
     whose steps nobody counted (no `steps` in its strip metadata): the screen's evidence and the report
     it is in. None otherwise — and where no report is found."""
-    if meta.get("steps") is not None:
+    if meta.get(loop_mod.Strip.STEPS) is not None:
         return None
     found = cut_report(loop_dir, meta_path, meta)
     if found is None:
         return None
     path, data = found
-    screen = (data.get("cycle") or {}).get("step_screen") or {}
+    screen = (data.get(loop_mod.Report.CYCLE) or {}).get("step_screen") or {}
     if not screen.get("suspect"):
         return None
     return {**{k: screen[k] for k in ("length", "lag", "ratio", "depth", "pairs", "coverage", "leg_peaks", "why") if k in screen},
-            "seconds": round(screen["lag"] / float(data["fps"]), 3), "report": str(path)}
+            "seconds": round(screen["lag"] / float(data[loop_mod.Report.FPS]), 3), "report": str(path)}
 
 
 def held_cut(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> dict[str, Any] | None:
@@ -915,7 +922,7 @@ def held_cut(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> dict[str,
     if found is None:
         return None
     path, data = found
-    cycle = data.get("cycle") or {}
+    cycle = data.get(loop_mod.Report.CYCLE) or {}
     reason = (local_cycle.UNWITNESSED if local_cycle.unwitnessed(cycle) else
               local_cycle.FOUR_STEPS if local_cycle.four_steps(cycle) else None)
     return {"reason": reason, "report": str(path)} if reason else None
@@ -985,11 +992,11 @@ def _loop_files(loop_dir: Path) -> tuple[Path, dict[str, Any]]:
     if len(metas) != 1:
         raise ValueError(f"{loop_dir}: expected one <name>.strip.json from video-loop, found {len(metas)}")
     meta = json.loads(metas[0].read_text(encoding="utf-8"))
-    for key in ("cycle_frames", "cycle_seconds", "cell_height_cap", "kind"):
+    for key in (loop_mod.Strip.CYCLE_FRAMES, loop_mod.Strip.CYCLE_SECONDS, loop_mod.Strip.CELL_HEIGHT_CAP, loop_mod.Strip.KIND):
         if key not in meta:
             raise ValueError(f"{metas[0]}: no `{key}` — cut the loop again with this sprite-gen (video-loop) before aligning it")
-    if "out_fps" in meta and "cycle_align" not in meta:
-        raise ValueError(f"{metas[0]}: cut at --out-fps {meta['out_fps']:g}, its cells each made at a time of their own — the "
+    if loop_mod.Strip.OUT_FPS in meta and loop_mod.Strip.CYCLE_ALIGN not in meta:
+        raise ValueError(f"{metas[0]}: cut at --out-fps {meta[loop_mod.Strip.OUT_FPS]:g}, its cells each made at a time of their own — the "
                          "alignment makes its own frames between: align the loop cut at its clip's rate (video-loop without "
                          "--out-fps), and ask the alignment for the rate (video-cycle-align --out-fps)")
     strip = cut_strip(loop_dir, metas[0], meta)
@@ -1014,7 +1021,7 @@ def unfilled_source(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> di
     whose `cycle.source/` already holds its cut with the fill off. ValueError naming why it cannot be cut again (a report
     from before cuts recorded what they were asked, frames moved away, another cut taken): carry the `cycle.source/`
     video-loop kept beside it, or cut it again with `--fill-held off`."""
-    if "cycle_align" in meta or not filled(meta):
+    if loop_mod.Strip.CYCLE_ALIGN in meta or not filled(meta):
         return None
     staged = loop_dir / SOURCE_DIR / meta_path.name
     if staged.is_file():
@@ -1028,9 +1035,10 @@ def unfilled_source(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> di
         raise ValueError("its held cells were made again (held_fill), and no report of its cut is beside it to cut it again "
                          "with the fill off")
     report_path, report = found
-    cut = loop_mod.keep_unfilled(report, loop_dir, meta_path.name[: -len(".strip.json")], meta.get("cycle_drawings") or {})
-    return {"report": str(report_path), "fill_held": "off", "cells": cut["strip"]["cycle_frames"],
-            "made_before": (meta.get("held_fill") or {}).get("made", [])}
+    cut = loop_mod.keep_unfilled(report, loop_dir, meta_path.name[: -len(".strip.json")], meta.get(loop_mod.Strip.CYCLE_DRAWINGS) or {})
+    return {"report": str(report_path), "fill_held": "off",
+            "cells": cut[loop_mod.Report.STRIP][loop_mod.Strip.CYCLE_FRAMES],
+            "made_before": (meta.get(loop_mod.Strip.HELD_FILL) or {}).get("made", [])}
 
 
 def _material_filled(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> bool:
@@ -1042,7 +1050,7 @@ def _material_filled(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> b
             return filled(json.loads(staged.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             return False
-    return "cycle_align" not in meta and filled(meta)
+    return loop_mod.Strip.CYCLE_ALIGN not in meta and filled(meta)
 
 
 def _indexed(cell: dict[str, Any], index: list[int]) -> dict[str, Any]:
@@ -1117,7 +1125,7 @@ def _source_frames(loop_dir: Path) -> list[Image.Image]:
 def cut_strip(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> Path | None:
     """The file `origin_of` reads the strip as cut from: on a loop never aligned its strip now (`follow.source.png` where a
     follow-through moved it); None on a loop aligned before, whose origin its first alignment recorded."""
-    if "cycle_align" in meta:
+    if loop_mod.Strip.CYCLE_ALIGN in meta:
         return None
     staged = loop_dir / SOURCE_DIR / f"{meta_path.name[: -len('.strip.json')]}.strip.png"
     if staged.is_file():
@@ -1132,7 +1140,7 @@ def origin_of(loop_dir: Path, meta_path: Path, meta: dict[str, Any]) -> dict[str
     alignment recorded none (the cut is no longer there to read)."""
     strip = cut_strip(loop_dir, meta_path, meta)
     if strip is None:
-        return meta["cycle_align"].get("origin")
+        return meta[loop_mod.Strip.CYCLE_ALIGN].get("origin")
     if strip.parent.name == SOURCE_DIR:
         meta = json.loads((strip.parent / meta_path.name).read_text(encoding="utf-8"))
     return sway_mod.cut_origin(strip.read_bytes(), meta)
@@ -1151,7 +1159,7 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     as cells of `frames` (both replace the cut's, whose cells these are not); `fps` the rate of `frames`, and
     `source_fps` the clip's where they are given at a rate of their own (`--out-fps`), each cell at `times`."""
     name = meta_path.name[: -len(".strip.json")]
-    if "cycle_align" not in meta and not (loop_dir / SOURCE_DIR / meta_path.name).is_file():
+    if loop_mod.Strip.CYCLE_ALIGN not in meta and not (loop_dir / SOURCE_DIR / meta_path.name).is_file():
         shutil.copyfile(meta_path, loop_dir / SOURCE_DIR / meta_path.name)
     cycle_dir = loop_dir / "cycle"
     cycle_dir.mkdir(exist_ok=True)
@@ -1160,11 +1168,13 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     for k, im in enumerate(frames):
         im.save(cycle_dir / f"frame-{k:03d}.png")
     cycle_seconds = len(frames) / fps
-    standing = meta.get("body_src_h") if meta.get("body_ref") in ("first-frame", "cut-first-frame") else None
+    standing = meta.get(loop_mod.Strip.BODY_SRC_H) if meta.get(loop_mod.Strip.BODY_REF) in ("first-frame", "cut-first-frame") else None
     strip, strip_meta = loop_mod.build_strip(
-        frames, max_height=int(meta["cell_height_cap"]), cycle_seconds=cycle_seconds, body_height=meta.get("body_height_target"),
-        anchor="feet" if meta.get("foot_anchor") == "feet" else "none", kind=str(meta["kind"]), standing_src=standing,
-        standing_frame=int(meta.get("body_ref_frame") or 0))
+        frames, max_height=int(meta[loop_mod.Strip.CELL_HEIGHT_CAP]), cycle_seconds=cycle_seconds,
+        body_height=meta.get(loop_mod.Strip.BODY_HEIGHT_TARGET),
+        anchor=ANCHOR_FEET if meta.get(loop_mod.Strip.FOOT_ANCHOR) == ANCHOR_FEET else ANCHOR_NONE, kind=str(meta[loop_mod.Strip.KIND]),
+        standing_src=standing,
+        standing_frame=int(meta.get(loop_mod.Strip.BODY_REF_FRAME) or 0))
     # what build_strip does not own (how the cut was anchored) is carried over as it was; a
     # follow-through moved the old cycle's cells, so it is cleared and the record says so
     if loop_mod.sway_recorded(meta) or (loop_dir / loop_mod.FOLLOW_SOURCE).exists():
@@ -1173,18 +1183,19 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     # a loop one cycle of which was taken out (`--cycles` k > 1) no longer holds the steps it was counted with
     # and the record of the cut's cells is the cut's strip's, not this one's
     merged = {**{k: v for k, v in meta.items() if k not in strip_meta
-                 and k not in ("cycle_align", loop_mod.CELL_RECORD, *loop_mod.SWAY_RECORD_KEYS)
-                 and not (k == "steps" and "cycle_taken" in record)}, **strip_meta}
-    if meta.get("foot_anchor") and meta.get("foot_anchor") != "feet":
-        merged["foot_anchor"] = meta["foot_anchor"]
-    for key in ("out_fps", "source_fps"):
+                 and k not in (loop_mod.Strip.CYCLE_ALIGN, loop_mod.CELL_RECORD, *loop_mod.SWAY_RECORD_KEYS)
+                 and not (k == loop_mod.Strip.STEPS and "cycle_taken" in record)}, **strip_meta}
+    if meta.get(loop_mod.Strip.FOOT_ANCHOR) and meta.get(loop_mod.Strip.FOOT_ANCHOR) != ANCHOR_FEET:
+        merged[loop_mod.Strip.FOOT_ANCHOR] = meta[loop_mod.Strip.FOOT_ANCHOR]
+    for key in (loop_mod.Strip.OUT_FPS, loop_mod.Strip.SOURCE_FPS):
         merged.pop(key, None)
     if source_fps is not None:
-        merged.update(out_fps=fps, source_fps=source_fps)
+        merged.update({loop_mod.Strip.OUT_FPS: fps, loop_mod.Strip.SOURCE_FPS: source_fps})
     if held is not None:
-        merged["held_fill"] = held
-    merged["holds"] = held_fill_mod.strip_holds(holds or [], strip_meta["sample_indices"], times)
-    cells = [strip.crop((k * strip_meta["w"], 0, (k + 1) * strip_meta["w"], strip_meta["h"])) for k in range(strip_meta["frames"])]
+        merged[loop_mod.Strip.HELD_FILL] = held
+    merged[loop_mod.Strip.HOLDS] = held_fill_mod.strip_holds(holds or [], strip_meta[loop_mod.Strip.SAMPLE_INDICES], times)
+    cells = [strip.crop((k * strip_meta[loop_mod.Strip.W], 0, (k + 1) * strip_meta[loop_mod.Strip.W],
+                         strip_meta[loop_mod.Strip.H])) for k in range(strip_meta[loop_mod.Strip.FRAMES])]
     flat = np.stack([loop_mod._small_features(c) for c in cells])
     adjacent = float(np.abs(flat[1:] - flat[:-1]).mean())
     seam = float(np.abs(flat[-1] - flat[0]).mean())
@@ -1192,8 +1203,8 @@ def _rebuild(loop_dir: Path, meta_path: Path, meta: dict[str, Any], frames: list
     if origin is not None:
         record["origin"] = origin
     if cells_from is not None:  # per cell of the strip, which may hold fewer of the frames than the cycle (`sample_indices`)
-        record["cells_from"] = [cells_from[i] for i in strip_meta["sample_indices"]]
-    merged["cycle_align"] = record
+        record["cells_from"] = [cells_from[i] for i in strip_meta[loop_mod.Strip.SAMPLE_INDICES]]
+    merged[loop_mod.Strip.CYCLE_ALIGN] = record
     strip.save(loop_dir / f"{name}.strip.png")
     atomic_write_text(meta_path, json.dumps(merged, indent=2) + "\n")
     delay_ms = max(20, round(1000 * cycle_seconds / len(cells)))
@@ -1382,7 +1393,8 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         except ValueError as exc:
             raise SystemExit(f"video-cycle-align: {exc}") from exc
         # an aligned loop given at a rate of its own is aligned again from its frames at the clip's rate
-        loops.append((d, meta_path, meta, float(meta["source_fps"]) if "out_fps" in meta else meta["cycle_frames"] / meta["cycle_seconds"]))
+        loops.append((d, meta_path, meta, float(meta[loop_mod.Strip.SOURCE_FPS]) if loop_mod.Strip.OUT_FPS in meta
+                      else meta[loop_mod.Strip.CYCLE_FRAMES] / meta[loop_mod.Strip.CYCLE_SECONDS]))
     # cycle_seconds is written to four decimals, so a rate read back from it carries that rounding
     rates = [fps for *_, fps in loops]
     if max(rates) / min(rates) - 1 > RATE_TOLERANCE:
@@ -1410,7 +1422,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
             raise SystemExit(f"video-cycle-align: {exc}") from exc
     given = _resolve_cycles(cycles, loops)
     told = _resolve_loops("--foot", feet, loops, handed_mod.SIDES)
-    screens = [cycle_screen(frames, fps=fps, state=state or meta.get("state")) for (_, _, meta, _), frames in zip(loops, sources)]
+    screens = [cycle_screen(frames, fps=fps, state=state or meta.get(loop_mod.Strip.STATE)) for (_, _, meta, _), frames in zip(loops, sources)]
     suspects: list[dict[str, Any]] = []
     taken: dict[int, dict[str, Any]] = {}
     cycle_warnings: list[str] = []
@@ -1419,26 +1431,26 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         # A loop counted two steps long (`steps`) returns half way at its second step: not a second cycle — unless nothing
         # witnessed its cut whole cycles, or it was cut two cycles long (`held`).
         held = held_cut(d, meta_path, meta)
-        stepped = [row for row in screen["suspects"] if meta.get("steps") == 2 and row["cycles"] == 2 and held is None]
+        stepped = [row for row in screen["suspects"] if meta.get(loop_mod.Strip.STEPS) == 2 and row["cycles"] == 2 and held is None]
         rows = [row for row in screen["suspects"] if row not in stepped]
         step = one_step(d, meta_path, meta)
         if rows or step or stepped or held:
-            status = ("counted" if k is not None else "steps" if not rows and not step and not held
-                      else "stopped" if multi_cycle == "fail" else "warned")
+            status = (SUSPECT_COUNTED if k is not None else SUSPECT_STEPS if not rows and not step and not held
+                      else SUSPECT_STOPPED if multi_cycle == "fail" else SUSPECT_WARNED)
             suspects.append({"dir": str(d), "name": meta_path.name[: -len(".strip.json")], "length": len(sources[i]),
                              "status": status, "cycles_given": k,
                              "candidates": [{key: row[key] for key in ("period", "seconds", "divisor", "cycles", "periodicity", "pose",
                                                                        "off_path", "distance", "steps", "follow", "why") if key in row}
                                             for row in (rows or stepped)],
                              **({"one_step": step} if step else {}), **({"held": held} if held else {}),
-                             **({"steps": meta["steps"]} if stepped else {}),
+                             **({"steps": meta[loop_mod.Strip.STEPS]} if stepped else {}),
                              "settle": [f"--cycles {d}={c}" for c in sorted({1, *(row["cycles"] for row in rows), *([2] if held else [])})]})
         if k is not None and k > 1:
             if not any(row["cycles"] == k for row in screen["suspects"]):
                 cycle_warnings.append(f"{d}: --cycles {k} given, but the screen found no return at 1/{k} of it; "
                                       f"one cycle is taken out of it as asked")
             sources[i], taken[i] = take_cycle(sources[i], k)
-    stopped = [e for e in suspects if e["status"] == "stopped"]
+    stopped = [e for e in suspects if e["status"] == SUSPECT_STOPPED]
     if stopped:
         # The command that settles it, as given plus a count for each stopped loop: K is 1 where it
         # holds one cycle, or the number it holds (each loop's `settle` lists the choices).
@@ -1460,7 +1472,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
                    " — or add --multi-cycle warn to align the set as it is (docs/loop-repair.md section 4)")
         if report_path is not None:
             loop_mod.write_loop_report(report_path.expanduser().resolve(), {
-                "kind": REPORT_KIND, "applied": False, "refused": "cycle-suspects", "why": message, "command": command,
+                "kind": REPORT_KIND, "applied": False, "refused": SUSPECTS_REFUSED, "why": message, "command": command,
                 "multi_cycle": multi_cycle, "lengths": [len(f) for f in sources], "fps": round(fps, 4), "suspects": suspects,
                 "cycles_given": {str(loops[i][0]): k for i, k in given.items()}, "feet_given": {str(loops[i][0]): f for i, f in told.items()}})
         raise CycleSuspects(message, suspects, command)
@@ -1468,7 +1480,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
                        + ("one step where the rest play two, if it is one" if "one_step" in e else
                           "half or twice as fast as the rest, if it is not one cycle" if "held" in e and not e["candidates"] else
                           f"{max(row['cycles'] for row in e['candidates'])} times as fast as the rest if it does")
-                       for e in suspects if e["status"] == "warned"]
+                       for e in suspects if e["status"] == SUSPECT_WARNED]
     lengths = [len(f) for f in sources]
     target = length if length is not None else round(statistics.median(lengths))
     located: list[dict[str, str]] = []
@@ -1512,8 +1524,8 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         # clip's readings say how it was filmed, not how it plays, and its own cells are read. The frames aligned are the
         # cut's as filmed wherever they can be (`unfilled_source`); only an aligned loop's frames from before may be filled.
         made = _material_filled(d, loops[i][1], loops[i][2])
-        drawings = held_drawings(frames, fps=fps, clip=None if made else loops[i][2].get("drawings"),
-                                 cut=None if made else loops[i][2].get("cycle_drawings"))
+        drawings = held_drawings(frames, fps=fps, clip=None if made else loops[i][2].get(loop_mod.Strip.DRAWINGS),
+                                 cut=None if made else loops[i][2].get(loop_mod.Strip.CYCLE_DRAWINGS))
         # the ghosts passed over or kept as frames of cycle.source/, each cell where it now stands
         ghost_at = sorted(({**g, "at": (g["at"] - start) % target, "source": index[g["source"]], "taken": index[g["taken"]]}
                            for g in facts["ghost_at"]), key=lambda g: g["at"])
@@ -1550,7 +1562,7 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         provenance = [_indexed(p, index) for p in provenance]
         out = out[start:] + out[:start]
         if cadence_mod.view_reads_feet(view):
-            record["same_foot"] = {**cadence_mod.same_foot(out, view), "clip": loops[i][2].get("clip_feet")}
+            record["same_foot"] = {**cadence_mod.same_foot(out, view), "clip": loops[i][2].get(loop_mod.Strip.CLIP_FEET)}
         record["retake"] = retake(drawings, facts, ghost_at, fps=fps, beat=record["beat"], feet=record.get("same_foot"),
                                   screen=record["screen"])
         if i in cut_again:
@@ -1594,7 +1606,8 @@ def align_set(loop_dirs: list[Path], *, length: int | None = None, interpolate: 
         # The report names where each cell is from; the cut's own record stays in the strip's meta.
         rows.append({"dir": str(d), "name": meta_path.name[: -len(".strip.json")],
                      **{k: v for k, v in record.items() if k not in ("gif", "webp", "origin")}, "held_fill": public,
-                     "strip": {k: merged[k] for k in ("frames", "w", "h", "body_h", "delay_ms")}})
+                     "strip": {k: merged[k] for k in (loop_mod.Strip.FRAMES, loop_mod.Strip.W, loop_mod.Strip.H,
+                                                      loop_mod.Strip.BODY_H, loop_mod.Strip.DELAY_MS)}})
     warnings = [_fault_line(r["name"], m, next((g for g in r["ghost_at"] if g["at"] == m["at"]), None))
                 for r in rows for m in r.get("smear", []) if m["faults"]]
     warnings += [_look_line(r["name"], m) for r in rows for m in r.get("smear", []) if m["method"] == "rife" and m["look"]]

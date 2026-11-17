@@ -59,7 +59,7 @@ class Loop:
         # Read each artifact once. Hash and measure the same snapshot, including JSON whitespace.
         data = {k: p.read_bytes() for k, p in (("strip", strip), ("meta", meta), ("report", report))}
         m, r = _json(data["meta"], "meta"), _json(data["report"], "report")
-        n, w, h = (_positive_int(m.get(k), k) for k in ("frames", "w", "h"))
+        n, w, h = (_positive_int(m.get(k), k) for k in (loop_mod.Strip.FRAMES, loop_mod.Strip.W, loop_mod.Strip.H))
         with Image.open(io.BytesIO(data["strip"])) as im:
             if im.format != "PNG" or im.size != (n * w, h) or getattr(im, "n_frames", 1) != 1:
                 raise ValueError("strip must be a single PNG whose size agrees with meta frames/w/h")
@@ -67,7 +67,7 @@ class Loop:
         frames = [sheet.crop((k * w, 0, (k + 1) * w, h)) for k in range(n)]
         if any(not f.getchannel("A").getbbox() for f in frames):
             raise ValueError("strip contains a fully transparent frame")
-        delay = m.get("delay_ms")
+        delay = m.get(loop_mod.Strip.DELAY_MS)
         if delay is not None and (not _number(delay) or delay <= 0):
             raise ValueError("delay_ms must be finite and positive")
         artifacts = {k: {"sha256": evidence.digest(b), "bytes": len(b)} for k, b in data.items()}
@@ -78,7 +78,7 @@ class Loop:
             return "timing-missing"
         if "durations_ms" in self.meta:
             return "nonuniform-timing-unsupported"
-        seconds = self.meta.get("cycle_seconds")
+        seconds = self.meta.get(loop_mod.Strip.CYCLE_SECONDS)
         if not _number(seconds):
             return "cycle-duration-missing"
         # The writer rounds delay_ms to .01 ms and cycle_seconds to .0001 s.
@@ -87,12 +87,13 @@ class Loop:
         return None
 
     def provenance_issue(self) -> str | None:
-        cut = self.meta.get("source_cut")
-        src = self.source_report.get("source")
-        cycle = self.source_report.get("cycle")
+        cut = self.meta.get(loop_mod.Strip.SOURCE_CUT)
+        src = self.source_report.get(loop_mod.Report.SOURCE)
+        cycle = self.source_report.get(loop_mod.Report.CYCLE)
         if not all(isinstance(v, dict) for v in (cut, src, cycle)):
             return "source-provenance-missing"
-        if self.source_report.get("kind") != loop_mod.REPORT_KIND or self.source_report.get("status") != loop_mod.REPORT_PASSED:
+        if (self.source_report.get(loop_mod.Report.KIND) != loop_mod.REPORT_KIND
+                or self.source_report.get(loop_mod.Report.STATUS) != loop_mod.REPORT_PASSED):
             return "source-report-unverified"
         sha = src.get("sha256")
         if (src.get("kind") != evidence.SOURCE_KIND or not isinstance(sha, str) or len(sha) != 64
@@ -100,42 +101,46 @@ class Loop:
                 or not isinstance(src.get("frames"), int) or isinstance(src["frames"], bool) or src["frames"] < 1
                 or not _number(src.get("fps")) or src["fps"] <= 0):
             return "source-provenance-invalid"
-        start, length, samples = cut.get("start"), cut.get("length"), cut.get("samples")
+        start, length, samples = cut.get(loop_mod.SourceCut.START), cut.get(loop_mod.SourceCut.LENGTH), cut.get(loop_mod.SourceCut.SAMPLES)
         if (not isinstance(start, int) or isinstance(start, bool) or start < 0
                 or not isinstance(length, int) or isinstance(length, bool) or length < 2
                 or start + length > src["frames"] or not isinstance(samples, list)
                 or len(samples) != len(self.frames) or any(not isinstance(k, int) or isinstance(k, bool) for k in samples)
                 or samples != sorted(set(samples)) or any(k < start or k >= start + length for k in samples)):
             return "source-samples-unverified"
-        if (cut.get("source") != src or cycle.get("start") != start or cycle.get("length") != length
-                or self.source_report.get("fps") != src["fps"] or self.source_report.get("frames_total") != src["frames"]):
+        if (cut.get(loop_mod.SourceCut.SOURCE) != src or cycle.get("start") != start or cycle.get("length") != length
+                or self.source_report.get(loop_mod.Report.FPS) != src["fps"]
+                or self.source_report.get(loop_mod.Report.FRAMES_TOTAL) != src["frames"]):
             return "source-provenance-inconsistent"
-        if self.meta.get("cycle_frames") != length:
+        if self.meta.get(loop_mod.Strip.CYCLE_FRAMES) != length:
             return "source-samples-unverified"
         expected = [start + round(k * length / len(samples)) for k in range(len(samples))]
         if samples != expected:
             return "source-samples-unverified"
-        if not _number(self.meta.get("cycle_seconds")) or abs(self.meta["cycle_seconds"] - length / src["fps"]) > .00005 + 1e-9:
+        if (not _number(self.meta.get(loop_mod.Strip.CYCLE_SECONDS))
+                or abs(self.meta[loop_mod.Strip.CYCLE_SECONDS] - length / src["fps"]) > .00005 + 1e-9):
             return "source-timing-inconsistent"
-        if "cycle_align" in self.meta:
+        if loop_mod.Strip.CYCLE_ALIGN in self.meta:
             return "aligned-source-phase-unverified"
-        if self.meta.get("loop") is not True:
+        if self.meta.get(loop_mod.Strip.LOOP) is not True:
             return "loop-playback-unverified"
-        rect = self.meta.get("source_rect")
+        rect = self.meta.get(loop_mod.Strip.SOURCE_RECT)
         if rect is not None and (not isinstance(rect, list) or len(rect) != 4 or not all(_number(v) for v in rect)
                                  or rect[2] <= rect[0] or rect[3] <= rect[1]):
             return "source-geometry-invalid"
-        reported_strip = self.source_report.get("strip")
+        reported_strip = self.source_report.get(loop_mod.Report.STRIP)
         if not isinstance(reported_strip, dict) or any(self.meta.get(k) != reported_strip.get(k)
-                                                      for k in ("w", "h", "frames", "scale", "source_rect", "foot_anchor")):
+                                                      for k in (loop_mod.Strip.W, loop_mod.Strip.H, loop_mod.Strip.FRAMES,
+                                                                loop_mod.Strip.SCALE, loop_mod.Strip.SOURCE_RECT,
+                                                                loop_mod.Strip.FOOT_ANCHOR)):
             return "source-geometry-inconsistent"
         return None
 
     def describe(self) -> dict[str, Any]:
         return {"artifacts": self.artifacts, "frames": len(self.frames), "cell": list(self.frames[0].size),
                 "timing": {"delay_ms": self.delay, "duration_ms": self.delay * len(self.frames) if self.delay else None},
-                "source_cut": self.meta.get("source_cut"), "producer": self.source_report.get("producer"),
-                "gait": self.source_report.get("gait"), "follow": loop_mod.sway_recorded(self.meta),
+                "source_cut": self.meta.get(loop_mod.Strip.SOURCE_CUT), "producer": self.source_report.get(loop_mod.Report.PRODUCER),
+                "gait": self.source_report.get(loop_mod.Report.GAIT), "follow": loop_mod.sway_recorded(self.meta),
                 "pixels_sha256": evidence.digest(b"".join(f.tobytes() for f in self.frames))}
 
 
@@ -182,7 +187,7 @@ def compare(baseline: Loop, candidate: Loop) -> dict[str, Any]:
         for issue in (loop.timing_issue(), loop.provenance_issue()):
             if issue:
                 reasons.append(f"{side}:{issue}")
-    same_samples = (not reasons and a.meta["source_cut"] == b.meta["source_cut"])
+    same_samples = (not reasons and a.meta[loop_mod.Strip.SOURCE_CUT] == b.meta[loop_mod.Strip.SOURCE_CUT])
     if not reasons and not same_samples:
         reasons.append("different-source-samples-phase-unverified")
     same_timing = a.delay == b.delay and len(a.frames) == len(b.frames)
@@ -190,10 +195,10 @@ def compare(baseline: Loop, candidate: Loop) -> dict[str, Any]:
         reasons.append("different-timing")
     # A fixed crop and scale put both arrays in the same coordinate system. Per-frame
     # foot anchoring or an unrecorded/legacy crop cannot establish this.
-    geometry_keys = ("w", "h", "source_rect", "scale", "foot_anchor")
+    geometry_keys = (loop_mod.Strip.W, loop_mod.Strip.H, loop_mod.Strip.SOURCE_RECT, loop_mod.Strip.SCALE, loop_mod.Strip.FOOT_ANCHOR)
     same_geometry = (all(k in a.meta and k in b.meta and a.meta[k] == b.meta[k] for k in geometry_keys)
-                     and isinstance(a.meta.get("source_rect"), list) and len(a.meta["source_rect"]) == 4
-                     and _number(a.meta.get("scale")) and a.meta["scale"] > 0)
+                     and isinstance(a.meta.get(loop_mod.Strip.SOURCE_RECT), list) and len(a.meta[loop_mod.Strip.SOURCE_RECT]) == 4
+                     and _number(a.meta.get(loop_mod.Strip.SCALE)) and a.meta[loop_mod.Strip.SCALE] > 0)
     if not same_geometry:
         reasons.append("spatial-basis-unverified")
     comparable = bool(same_samples and same_timing and same_geometry and not reasons)
@@ -206,7 +211,7 @@ def compare(baseline: Loop, candidate: Loop) -> dict[str, Any]:
     confined = comparable and all(ma["interpolation"]["faults"][k] for k in changed)
     cleared = comparable and all(not mb["interpolation"]["faults"][k] for k in changed)
     axes = {
-        "phase": _axis(a.meta.get("source_cut"), b.meta.get("source_cut"), bool(same_samples),
+        "phase": _axis(a.meta.get(loop_mod.Strip.SOURCE_CUT), b.meta.get(loop_mod.Strip.SOURCE_CUT), bool(same_samples),
                        "same-source-samples" if same_samples else "source-phase-unverified",
                        "non_regressing" if same_samples else "unknown"),
         "silhouette_motion": _axis("coverage-as-delivered", "coverage-as-delivered", comparable,
@@ -216,7 +221,7 @@ def compare(baseline: Loop, candidate: Loop) -> dict[str, Any]:
                              "observation-only-less-motion-is-not-better"),
         "top_band_motion": _axis(ma["top_band_motion"], mb["top_band_motion"], comparable and all("unknown" not in m["top_band_motion"] for m in (ma, mb)),
                                  "silhouette-top-not-an-identified-head"),
-        "scale": _axis(a.meta.get("scale"), b.meta.get("scale"), comparable,
+        "scale": _axis(a.meta.get(loop_mod.Strip.SCALE), b.meta.get(loop_mod.Strip.SCALE), comparable,
                        "identical-coverage-preserves-size" if same_coverage else "rigid-scale-not-inferred-from-bbox",
                        "non_regressing" if same_coverage else "unknown"),
         "drawing_preservation": _axis([], changed, comparable,

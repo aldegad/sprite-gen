@@ -32,7 +32,8 @@ from sprite_gen.gen.chroma import KEY_BACKGROUND_TEXT
 from sprite_gen.gen.facing import FACINGS, validate as validate_facing
 from sprite_gen.gen import handedness as handed_mod
 from sprite_gen.gen import prompt_parts
-from sprite_gen.gen.handedness import Handed
+from sprite_gen.gen.handedness import (VIEW_BACK, VIEW_BACK_DIAGONAL, VIEW_FRONT, VIEW_FRONT_DIAGONAL, VIEW_SIDE,
+                                      Handed)
 from sprite_gen.video import facing as facing_mod
 from sprite_gen.video import canvas as canvas_mod
 from sprite_gen.video import frames as frames_mod
@@ -46,6 +47,8 @@ from sprite_gen.video.body_plan import Body
 from sprite_gen.video import rife as rife_mod
 from sprite_gen.video import effect, nonloop
 from sprite_gen.video import play as play_mod
+from sprite_gen.video.loop_vocab import (ANCHOR_MOTION, ANCHOR_MOTION_AUTO, ANCHOR_NONE, CYCLE_AUTO, CYCLE_LIFETIME,
+                                         CYCLE_ONCE, CYCLE_ONCE_RETURN, CYCLE_ONE_SHOT, CYCLE_PERIODIC, CYCLE_PINNED)
 from sprite_gen.util.console import utf8_streams
 
 START_GAP_SECONDS = 2.0
@@ -75,13 +78,13 @@ def duration_for(state: str, requested: int | None) -> int:
     """Seconds to ask for: an explicit request wins, otherwise the state's own default."""
     return requested if requested is not None else STATE_DURATION_SECONDS.get(state, DEFAULT_DURATION_SECONDS)
 VIEW_TEXT = {
-    "side": "seen from the exact side, facing {facing}",
-    "front": "seen from the front, facing the viewer directly",
-    "back": "seen from directly behind, facing away from the viewer",
+    VIEW_SIDE: "seen from the exact side, facing {facing}",
+    VIEW_FRONT: "seen from the front, facing the viewer directly",
+    VIEW_BACK: "seen from directly behind, facing away from the viewer",
     # Three-quarter views, as an isometric game's character walks down and up to the right. The clip
     # starts from a still already drawn at that angle, so the clip's view sentence points at the image.
-    "front_diagonal": "seen from a three-quarter front angle, turned exactly as in the image",
-    "back_diagonal": "seen from a three-quarter back angle, turned exactly as in the image",
+    VIEW_FRONT_DIAGONAL: "seen from a three-quarter front angle, turned exactly as in the image",
+    VIEW_BACK_DIAGONAL: "seen from a three-quarter back angle, turned exactly as in the image",
 }
 # The view sentence for drawing a still at a view, where it differs from the clip's: a diagonal still is
 # often redrawn from a front or side picture, so "turned exactly as in the image" would keep the picture's
@@ -96,18 +99,18 @@ VIEW_TEXT = {
 # follow a reference's angle (docs/video-pipeline.md). `{other}` is the side opposite `{facing}`: the near side
 # of a front diagonal, the far side of a back one.
 STILL_VIEW_TEXT = {
-    "front": (
+    VIEW_FRONT: (
         "seen from the front: the whole body and head turned to face the viewer squarely, the chest, hips and the toes "
         "of both feet pointing straight at the viewer and the face centred between both ears, looking straight out of "
         "the image, not turned toward either side even when a reference picture shows the character from another angle"
     ),
-    "back": (
+    VIEW_BACK: (
         "seen from directly behind: the whole body and head turned fully away from the viewer, the back of the head, "
         "the shoulders, the hips and the heels of both feet facing straight at the viewer, the face completely hidden "
         "and not turned toward either side or looking back over the shoulder, even when a reference picture shows the "
         "character from another angle"
     ),
-    "front_diagonal": (
+    VIEW_FRONT_DIAGONAL: (
         "seen from a three-quarter front angle: the whole body turned about 45 degrees to the {facing}, halfway between "
         "facing the viewer and facing {facing}, not a front view with only the head turned: the chest and hips turn as far "
         "as the head, so the middle of the chest and of the waist sits about three quarters of the way across the body "
@@ -117,7 +120,7 @@ STILL_VIEW_TEXT = {
         "of the picture set a little higher and partly behind the near leg, both toes pointing toward the lower {facing}, "
         "the face looking the same way as the chest, even when a reference picture shows the character from another angle"
     ),
-    "back_diagonal": (
+    VIEW_BACK_DIAGONAL: (
         "seen from a three-quarter back angle: the whole body turned about 45 degrees away from the viewer toward the upper "
         "{facing}, halfway between facing away and facing {facing}, not a back view with only the head turned: the back and "
         "hips turn as far as the head, so the middle of the back and of the waist sits about three quarters of the way "
@@ -138,29 +141,29 @@ STILL_VIEW_TEXT = {
 # The diagonals here keep their few words and take none of the person's middle-line and leg clauses, which count
 # a chest, shoulders and two feet.
 STILL_VIEW_TEXT_ANY_BODY = {
-    "front": (
+    VIEW_FRONT: (
         "seen from the front: {body} turned to face the viewer squarely, the face centred and looking straight out of "
         "the image, not turned toward either side even when a reference picture shows it from another angle"
     ),
-    "back": (
+    VIEW_BACK: (
         "seen from directly behind: {body} turned fully away from the viewer, the back of the body and of the head "
         "facing straight at the viewer, square to the viewer and symmetric left to right, with the back of the head "
         "centred above the body, neither side of the body showing more than the other and any tail rising from the "
         "middle, the face completely hidden and not turned toward either side or looking back, even when a reference "
         "picture shows it from another angle"
     ),
-    "front_diagonal": (
+    VIEW_FRONT_DIAGONAL: (
         "seen from a three-quarter front angle: {body} turned about 45 degrees to the {facing}, halfway between facing "
         "the viewer and facing {facing}, the face looking the same way as the body and the front of the body pointing "
         "toward the lower {facing}"
     ),
-    "back_diagonal": (
+    VIEW_BACK_DIAGONAL: (
         "seen from a three-quarter back angle: {body} turned about 45 degrees away from the viewer toward the upper "
         "{facing}, halfway between facing away and facing {facing}, the face hidden and not looking back, and the "
         "body pointing diagonally up and to the {facing} so its back faces the viewer at an angle"
     ),
 }
-DIAGONAL_VIEWS = frozenset({"front_diagonal", "back_diagonal"})
+DIAGONAL_VIEWS = frozenset({VIEW_FRONT_DIAGONAL, VIEW_BACK_DIAGONAL})
 
 
 def still_view_text(direction: str, facing: str = "right", body_plan: list[Body] | None = None) -> str:
@@ -190,17 +193,17 @@ HOLD_TEXT = {
 # spot and turned the right way, as the built-in gait sentences do. `{facing}` is the side view's.
 GAIT_STATES = nonloop.GAIT_STATES
 GAIT_HOLD_TEXT = {
-    "front": "It stays in place as if on a treadmill, without coming any closer, and keeps facing the viewer the whole time.",
-    "back": (
+    VIEW_FRONT: "It stays in place as if on a treadmill, without coming any closer, and keeps facing the viewer the whole time.",
+    VIEW_BACK: (
         "It stays in place as if on a treadmill, without moving any farther away, and keeps facing away from the viewer "
         "the whole time."
     ),
-    "side": "It stays in place as if on a treadmill, without moving across the screen, and keeps facing {facing} the whole time.",
-    "front_diagonal": (
+    VIEW_SIDE: "It stays in place as if on a treadmill, without moving across the screen, and keeps facing {facing} the whole time.",
+    VIEW_FRONT_DIAGONAL: (
         "It stays in place as if on a treadmill, without moving across the screen, and keeps the exact three-quarter front "
         "angle of the image the whole time, never turning into a side view."
     ),
-    "back_diagonal": (
+    VIEW_BACK_DIAGONAL: (
         "It stays in place as if on a treadmill, without moving across the screen, and keeps the exact three-quarter back "
         "angle of the image the whole time, its face hidden, never turning into a side view."
     ),
@@ -278,12 +281,12 @@ IDLE_TEXT_ANY_BODY = (
 # `GAIT_HOLD_TEXT`); the engine's default stays generic. "as if on a treadmill" keeps the treadmill a
 # comparison: said as a place, it was sometimes drawn under the feet.
 VIEW_MOTION_TEXT = {
-    ("walk", "front"): "walks naturally in place, facing the viewer, as if on a treadmill, without coming any closer.",
-    ("walk", "back"): (
+    ("walk", VIEW_FRONT): "walks naturally in place, facing the viewer, as if on a treadmill, without coming any closer.",
+    ("walk", VIEW_BACK): (
         "walks naturally in place, facing away from the viewer, as if on a treadmill, without moving any farther away."
     ),
-    ("run", "front"): "runs naturally in place, facing the viewer, as if on a treadmill, without coming any closer.",
-    ("run", "back"): (
+    ("run", VIEW_FRONT): "runs naturally in place, facing the viewer, as if on a treadmill, without coming any closer.",
+    ("run", VIEW_BACK): (
         "runs naturally in place, facing away from the viewer, as if on a treadmill, without moving any farther away."
     ),
     # A diagonal says where the character is heading on the screen, the way an isometric game reads, and that it
@@ -291,23 +294,23 @@ VIEW_MOTION_TEXT = {
     # back walk turned to a side view in 2 of 2 clips; named as a heading up and to the right, in 10 of 10 it
     # kept the angle (2026-10-02, five people twice each, pinned). `{facing}` is the way the view is turned: a
     # view drawn facing left heads down or up and to the left (it said "to the right" whatever the facing).
-    ("walk", "front_diagonal"): (
+    ("walk", VIEW_FRONT_DIAGONAL): (
         "walks naturally in place, as if on a treadmill, heading diagonally toward the viewer and to the {facing}, like a "
         "character walking down and to the {facing} in an isometric game, without moving across the screen. It keeps the "
         "exact three-quarter front angle of the image the whole time and never turns into a side view."
     ),
-    ("walk", "back_diagonal"): (
+    ("walk", VIEW_BACK_DIAGONAL): (
         "walks naturally in place, as if on a treadmill, heading diagonally away from the viewer toward the upper {facing}, "
         "like a character walking up and to the {facing} in an isometric game, without moving across the screen. It keeps "
         "the exact three-quarter back angle of the image the whole time: its back stays turned toward the viewer at that "
         "angle and its face stays hidden. It never turns into a side view."
     ),
-    ("run", "front_diagonal"): (
+    ("run", VIEW_FRONT_DIAGONAL): (
         "runs naturally in place, as if on a treadmill, heading diagonally toward the viewer and to the {facing}, like a "
         "character running down and to the {facing} in an isometric game, without moving across the screen. It keeps the "
         "exact three-quarter front angle of the image the whole time and never turns into a side view."
     ),
-    ("run", "back_diagonal"): (
+    ("run", VIEW_BACK_DIAGONAL): (
         "runs naturally in place, as if on a treadmill, heading diagonally away from the viewer toward the upper {facing}, "
         "like a character running up and to the {facing} in an isometric game, without moving across the screen. It keeps "
         "the exact three-quarter back angle of the image the whole time: its back stays turned toward the viewer at that "
@@ -337,7 +340,7 @@ LITE_WALK_TEXT_LEGLESS = "A slow, relaxed, unhurried pace: small, even movements
 # Lite's back-diagonal walk swayed its head 2.7-3.8 % of the body height side to side against Pro's
 # 0.88 %; with this sentence four takes swayed 1.7-3.1 % (2026-10-03). Measured on that view only.
 LITE_HEAD_TEXT = {
-    "back_diagonal": (
+    VIEW_BACK_DIAGONAL: (
         "The head stays level and steady over the body the whole time: it does not bob, nod, tilt or sway from side to "
         "side; only the legs, arms and the ends of the hair move."
     ),
@@ -346,7 +349,7 @@ LITE_HEAD_TEXT = {
 
 # The head hold for a body that is not one biped: what moves is what it moves on and its loose ends, no arms.
 LITE_HEAD_TEXT_ANY_BODY = {
-    "back_diagonal": (
+    VIEW_BACK_DIAGONAL: (
         "The head stays level and steady over the body the whole time: it does not bob, nod, tilt or sway from side to "
         "side; only what it moves on and its loose ends, such as a tail, a mane or hair, move."
     ),
@@ -375,7 +378,7 @@ def anchor_for(state: str, cut: str, anchor: str | None = None) -> str:
     counts its steps before the cut (docs/video-pipeline.md, loop-repair.md section 4) — and `none` for any other item."""
     if anchor is not None:
         return anchor
-    return "motion-auto" if loop_mod.profile_for(state).gait and cut in ("auto", "periodic") else "none"
+    return ANCHOR_MOTION_AUTO if loop_mod.profile_for(state).gait and cut in loop_mod.SEARCHED else ANCHOR_NONE
 
 
 def cycle_for(state: str, direction: str, play: str | None = None, *, pinned: bool | None = None) -> str:
@@ -390,14 +393,14 @@ def cycle_for(state: str, direction: str, play: str | None = None, *, pinned: bo
     mode = play_mod.resolve(state, play)
     pins = pins_last_frame(state, direction, play) if pinned is None else pinned
     if mode == play_mod.LIFETIME:
-        return "lifetime"
+        return CYCLE_LIFETIME
     if mode == play_mod.ONCE_HOLD:
-        return "once"
+        return CYCLE_ONCE
     if mode == play_mod.ONCE_RETURN:
-        return "once-return" if pins else "one-shot"
+        return CYCLE_ONCE_RETURN if pins else CYCLE_ONE_SHOT
     if pins and state in PINNED_LOOP_STATES:
-        return "pinned"
-    return "auto" if play is None else "periodic"
+        return CYCLE_PINNED
+    return CYCLE_AUTO if play is None else CYCLE_PERIODIC
 COMMON_TEXT = (
     "2D game sprite animation. The character {motion} The character is {view}. Stays centered in the frame and does "
     "not move across the screen; the body and hair always stay fully inside the frame with margin. Camera completely "
@@ -514,7 +517,7 @@ def clip_prompt_parts(direction: str, state: str, character: str | None, facing:
     if mode == play_mod.ONCE_HOLD and body_plan:
         stands_on = " ".join((b.figure + ": " if b.figure else "") + nonloop.ANATOMY_TEXT.get(b.plan, "") for b in body_plan).strip()
     stands_on = f" {stands_on}" if stands_on else ""
-    if direction == "back" and state in GAIT_STATES and not body_mod.biped(body_plan):
+    if direction == VIEW_BACK and state in GAIT_STATES and not body_mod.biped(body_plan):
         stands_on += f" {BACK_GAIT_TEXT_ANY_BODY['scene' if body_mod.scene(body_plan) else 'one']}"
     if motion is not None:
         motion = " ".join(motion.split())
@@ -576,7 +579,7 @@ def _lite_text(state: str, direction: str, model: str | None, *, built_in: bool,
 # (2026-10-02, four characters, blind judged). The sentence redraws the base still with a reference;
 # the design is the reference's to keep, the background the caller's to say (`walk_start_prompt`).
 WALK_START_TEXT = {
-    "front": (
+    VIEW_FRONT: (
         "Redraw the character in the attached image as the same 2D game sprite, keeping the design, outfit, colors, body "
         "proportions and art style exactly as they are. Only the pose changes: the character is caught mid-step while "
         "walking straight toward the viewer, facing the viewer directly with the hips and shoulders square. One foot is "
@@ -585,7 +588,7 @@ WALK_START_TEXT = {
         "opposite to the legs, hands as in the image. Full body, centered, seen at eye level, with generous empty margin "
         "above the head and below the feet."
     ),
-    "back": (
+    VIEW_BACK: (
         "Redraw the character in the attached image as the same 2D game sprite, keeping the design, outfit, colors, hair, "
         "body proportions and art style exactly as they are, and keeping the same view: seen directly from behind, the back "
         "of the character toward the viewer. Only the pose changes: the character is caught mid-step while walking straight "
@@ -600,13 +603,13 @@ WALK_START_TEXT = {
 # no hips, knees or arms, then what each figure stands on (`body_plan.text`), so a horse is not drawn
 # standing on two legs. `{who}` is "the character" or "every figure"; not measured on a clip.
 WALK_START_TEXT_ANY_BODY = {
-    "front": (
+    VIEW_FRONT: (
         "Redraw {what} in the attached image as the same 2D game sprite, keeping the design, outfit, colors, body "
         "proportions and art style exactly as they are. Only the pose changes: {who} is caught mid-step while walking "
         "straight toward the viewer, facing the viewer directly with the body square. {legs} {stands_on} Full body, "
         "centered, seen at eye level, with generous empty margin all around."
     ),
-    "back": (
+    VIEW_BACK: (
         "Redraw {what} in the attached image as the same 2D game sprite, keeping the design, outfit, colors, hair, body "
         "proportions and art style exactly as they are, and keeping the same view: seen directly from behind, the back "
         "of {who} toward the viewer. Only the pose changes: {who} is caught mid-step while walking straight away from "
@@ -743,13 +746,13 @@ def run_item(
     mode = play_mod.resolve(state, play, prog="video-set")
     if end_frame is not None and mode != play_mod.ONCE_HOLD:
         raise SystemExit("video-set: --end-frame requires a once-hold item (a non-loop state, or --play once-hold)")
-    if mode == play_mod.ONCE_HOLD and (fit == "tight" or anchor not in (None, "none")):
+    if mode == play_mod.ONCE_HOLD and (fit == "tight" or anchor not in (None, ANCHOR_NONE)):
         raise SystemExit("video-set: non-loop states need --fit state and --anchor none to preserve the terminal pose")
     if walk_start not in WALK_START_MODES:
         raise SystemExit(f"video-set: --walk-start must be one of {', '.join(WALK_START_MODES)}")
-    if anchor == "motion-auto" and not loop_mod.profile_for(state).gait:
+    if anchor == ANCHOR_MOTION_AUTO and not loop_mod.profile_for(state).gait:
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
-    if anchor == "motion":
+    if anchor == ANCHOR_MOTION:
         raise SystemExit("video-set: motion anchor requires reviewed regions; use video-loop --cycle fixed")
     validate_facing(facing, facing_fix)
     if facing_fix not in facing_mod.FIXES:
@@ -799,7 +802,7 @@ def run_item(
                     raise ValueError("incomplete canvas report")
                 if canvas_report.get("fit", "state") != fit:
                     raise ValueError("cached canvas was framed with another --fit")
-                if direction == "side" and not lifetime:
+                if direction == VIEW_SIDE and not lifetime:
                     prior = canvas_report.get("facing_check") or {}
                     if not isinstance(prior, dict):
                         raise ValueError("invalid cached facing")
@@ -815,7 +818,7 @@ def run_item(
                 still, result["walk_start"] = walk_start_still(base, direction, item_dir, key=key, force=force,
                                                                runner=redraw_runner, provider=still_provider, handed=handed,
                                                                body_plan=body_plan)
-            if direction == "side" and not lifetime:
+            if direction == VIEW_SIDE and not lifetime:
                 if prepare_side is not None:
                     still, facing_report = prepare_side(base)
                 else:
@@ -823,7 +826,7 @@ def run_item(
                     facing_report = facing_mod.prepare_still(base, still, facing=facing, fix=facing_fix)
             # a lifetime is framed as an effect, whatever its name: on black, its centre kept. The view tells the
             # canvas whether a walk or run crosses the picture, whose still's room it reads (`canvas.gait_room`)
-            canvas_report = canvas_mod.run_canvas(still, canvas_png, state=effect.STATE if lifetime else state, shape=shape, facing=facing if direction not in ("front", "back") else "right", headroom=None, lead=None, report_path=canvas_report_path, fit=fit, view=direction)
+            canvas_report = canvas_mod.run_canvas(still, canvas_png, state=effect.STATE if lifetime else state, shape=shape, facing=facing if direction not in (VIEW_FRONT, VIEW_BACK) else "right", headroom=None, lead=None, report_path=canvas_report_path, fit=fit, view=direction)
             if facing_report is not None:
                 canvas_report["facing_check"] = facing_report
                 atomic_write_text(canvas_report_path, json.dumps(canvas_report, ensure_ascii=False, indent=2) + "\n")
@@ -900,7 +903,7 @@ def held_summary(held: dict[str, Any]) -> dict[str, Any]:
 
 def loop_summary(lp: dict[str, Any]) -> dict[str, Any]:
     """What the set report says of an item's loop, from `video-loop`'s report of its cut."""
-    loop: dict[str, Any] = {"kind": lp["cycle"].get("kind", "periodic"), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "drift_px": lp["strip"].get("drift_px", 0), "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
+    loop: dict[str, Any] = {"kind": lp["cycle"].get("kind", CYCLE_PERIODIC), "cycle": lp["cycle"]["length"], "period": lp["cycle"]["period_global"], "cycle_ratio": round(lp["cycle"]["ratio"], 3), "seam_ratio": lp["resampled_seam_ratio"], "n_out": lp["n_out"], "drift_px": lp["strip"].get("drift_px", 0), "gif": lp["gif"]["file"], "webp": lp["webp"]["file"], "strip": lp["strip"]["path"]}
     loop["review_recommended"] = lp["cycle"].get("review_recommended", False)
     loop["half_period_guard"] = lp["cycle"].get("half_period_guard")
     if (lp["cycle"].get("fundamental") or {}).get("suspects"):
@@ -993,6 +996,7 @@ def resolve_bases(bases: dict[str, Path], facings: tuple[str, ...]) -> list[tupl
 
 
 ALIGN_MODES = ("auto", "off")
+ALIGN_NO_RIFE = "rife-not-installed"  # a set's `cycle_align` reason where no RIFE made the frames between, read for its warning
 
 
 def _align_view(r: dict[str, Any]) -> str | None:
@@ -1095,7 +1099,7 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
                                          views=[_align_view(r) for r in rows], state=state, feet=told,
                                          fill_held=fill_held, out_fps=out_fps)
         except rife_mod.RifeNotInstalled as exc:
-            out[state] = {"ok": True, "applied": False, "reason": "rife-not-installed", "why": "RIFE not installed — each loop keeps its own length",
+            out[state] = {"ok": True, "applied": False, "reason": ALIGN_NO_RIFE, "why": "RIFE not installed — each loop keeps its own length",
                           "rife": str(exc), "install": rife_mod.install_command()}
             print(f"video-set: warning: {state}: cycles not aligned — RIFE is not installed, so each loop keeps its own "
                   f"length; run `{rife_mod.install_command()}`, then `sprite-gen video-cycle-align` (docs/loop-repair.md)",
@@ -1104,10 +1108,10 @@ def align_gaits(results: list[dict[str, Any]], root: Path, mode: str, *, interpo
         except align_mod.CycleSuspects as exc:
             def said(entries: list[dict[str, Any]]) -> str:
                 return ", ".join(Path(e["dir"]).parent.name if Path(e["dir"]).name == "loop" else e["name"] for e in entries)
-            stopped = [e for e in exc.suspects if e["status"] == "stopped"]
+            stopped = [e for e in exc.suspects if e["status"] == align_mod.SUSPECT_STOPPED]
             held = [e for e in stopped if e["candidates"]]
             step = [e for e in stopped if "one_step" in e]
-            out[state] = {"ok": True, "applied": False, "reason": "cycle-suspects",
+            out[state] = {"ok": True, "applied": False, "reason": align_mod.SUSPECTS_REFUSED,
                           "why": " and ".join([*([f"{said(held)} may hold more than one cycle"] if held else []),
                                                *([f"{said(step)} may be one step (cut it again with video-loop --steps 1 if it is)"] if step else [])])
                                  + " — each loop keeps its own length until its cycles are counted",
@@ -1175,7 +1179,7 @@ def write_table(results: list[dict[str, Any]], path: Path, *, both: bool = False
                 status += f" (film again: {', '.join(lp['retake']['reasons'])})"
             # a cut whose steps are known is two of them; one the step screen suspects may be one
             cycle = f"{lp['cycle']}" + (f" ({lp['steps']} steps)" if lp.get("steps") else " (one step?)" if lp.get("step_screen") else "")
-            lines.append(f"| {_view_label(r, both)} | {r['state']} | {lp.get('kind', 'periodic')} | {cycle} | {lp['period'] if lp['period'] is not None else '-'} | {format(lp['seam_ratio'], '.2f') if lp['seam_ratio'] is not None else '-'} | {lp['n_out']} | {status} |")
+            lines.append(f"| {_view_label(r, both)} | {r['state']} | {lp.get('kind', CYCLE_PERIODIC)} | {cycle} | {lp['period'] if lp['period'] is not None else '-'} | {format(lp['seam_ratio'], '.2f') if lp['seam_ratio'] is not None else '-'} | {lp['n_out']} | {status} |")
         else:
             lines.append(f"| {_view_label(r, both)} | {r['state']} | - | - | - | - | - | FAIL: {r.get('error', '')[:80]} |")
     text = "\n".join(lines) + "\n"
@@ -1231,9 +1235,9 @@ def run_set(
     filmed under its name in that mode, a named state without one plays as its preset."""
     if align_cycles not in ALIGN_MODES:
         raise SystemExit(f"video-set: --align-cycles must be one of {', '.join(ALIGN_MODES)}")
-    if anchor == "motion-auto" and any(not loop_mod.profile_for(state).gait for state in states):
+    if anchor == ANCHOR_MOTION_AUTO and any(not loop_mod.profile_for(state).gait for state in states):
         raise SystemExit("video-set: --anchor motion-auto requires walk/run states")
-    if anchor == "motion":
+    if anchor == ANCHOR_MOTION:
         raise SystemExit("video-set: motion anchor requires reviewed regions; use video-loop --cycle fixed")
     facings = facings_of(facing)
     validate_facing(facings[0], facing_fix)
@@ -1257,7 +1261,7 @@ def run_set(
     for item, path in (end_frames or {}).items():
         if item not in modes or modes[item] != play_mod.ONCE_HOLD or not path.is_file():
             raise SystemExit(f"video-set: --end-frame {item} needs a non-loop item (a once-hold) and an existing image")
-    if play_mod.ONCE_HOLD in modes.values() and (fit == "tight" or anchor not in (None, "none")):
+    if play_mod.ONCE_HOLD in modes.values() and (fit == "tight" or anchor not in (None, ANCHOR_NONE)):
         raise SystemExit("video-set: non-loop states need --fit state and --anchor none")
     aligned_items = [i for i, _, s, _, _ in items if align_cycles == "auto" and loop_mod.profile_for(s).gait
                      and sum(1 for _, _, s2, _, _ in items if s2 == s) >= 2]
@@ -1313,13 +1317,13 @@ def run_set(
                    for r in results if r.get("ok") and not r["loop"]["held_fill"].get("out_fps", {"applied": True})["applied"]]
                 + [f"{r['item']}: air not retimed — RIFE is not installed" for r in results
                    if r.get("ok") and r["loop"].get("air_retime", {}).get("why") == "RIFE is not installed"]
-                + [f"cycle-align:{st}: not aligned — {a['why']}" for st, a in aligned.items() if a.get("reason") == "rife-not-installed"])
+                + [f"cycle-align:{st}: not aligned — {a['why']}" for st, a in aligned.items() if a.get("reason") == ALIGN_NO_RIFE])
     if warnings:
         warnings.append(f"install RIFE with `{rife_mod.install_command()}` (docs/loop-repair.md)")
     # What the set left for someone to count — never a failure, never silent.
     warnings += [f"cycle-align:{st}: not aligned — {a['why']}; count them, then `sprite-gen video-cycle-align --cycles <loop>=<k>` "
                  f"(the loops under `suspects` in {a['report']}, docs/loop-repair.md section 4)"
-                 for st, a in aligned.items() if a.get("reason") == "cycle-suspects"]
+                 for st, a in aligned.items() if a.get("reason") == align_mod.SUSPECTS_REFUSED]
     warnings += [f"cycle-align:{st}: {line}" for st, a in aligned.items() for line in a.get("warnings", [])]
     warnings += [f"{r['item']}: {r['frames']['decontam_warning']}" for r in results
                  if r.get("ok") and "decontam_warning" in r.get("frames", {})]
@@ -1421,7 +1425,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--concurrency", type=int, default=3, help="parallel clip generations (starts are staggered regardless)")
     parser.add_argument("--start-gap", type=float, default=START_GAP_SECONDS, help="seconds between clip request starts")
     parser.add_argument("--shape", choices=canvas_mod.SHAPES, help="force one canvas shape for every state (e.g. wide for a costume or arms that leave a 1:1 frame; square keeps a side walk or run square whatever room its still leaves)")
-    parser.add_argument("--anchor", choices=tuple(a for a in loop_mod.ANCHOR_MODES if a != "motion"), default=None, help="default: motion-auto for a walk or run whose loop is searched, none for every other state; motion-auto: automatic regions, local period and XY correction (walk/run only); feet: remove in-canvas drift")
+    parser.add_argument("--anchor", choices=tuple(a for a in loop_mod.ANCHOR_MODES if a != ANCHOR_MOTION), default=None, help="default: motion-auto for a walk or run whose loop is searched, none for every other state; motion-auto: automatic regions, local period and XY correction (walk/run only); feet: remove in-canvas drift")
     parser.add_argument("--spill", choices=frames_mod.SPILL_MODES, default="auto", help="auto: judge key reflections from each item's canvas still (default); small / full: force")
     parser.add_argument("--fit", choices=canvas_mod.FITS, default="state", help="state: each state's room for the motion (default); tight: no room, the subject fills the frame and a motion that leaves it is clipped (use with --body-height at a low --resolution)")
     parser.add_argument("--body-height", type=int, default=None, help="scale every state's loop so the standing height is this many px (video-loop --body-height): one value for the whole set keeps the character the same size across states")

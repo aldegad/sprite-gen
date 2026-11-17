@@ -35,10 +35,11 @@ from PIL import Image
 from sprite_gen._deps import np
 from sprite_gen.qa import motion as qa_motion
 from sprite_gen.video import held_fill as held_fill_mod
+from sprite_gen.video.loop_vocab import CYCLE_ONCE, CYCLE_ONCE_RETURN, CYCLE_ONE_SHOT
 from sprite_gen.video import nonloop
 from sprite_gen.video import rife as rife_mod
 
-KINDS = ("once", "once-return", "one-shot")  # the cuts played once that carry a body (not an effect's lifetime)
+KINDS = (CYCLE_ONCE, CYCLE_ONCE_RETURN, CYCLE_ONE_SHOT)  # the cuts played once that carry a body (not an effect's lifetime)
 RETIME_KEYS = ("gravity", "air", "speed")
 GROUND = "ground"
 SNAP = held_fill_mod.SNAP  # a time within this of a frame is that frame

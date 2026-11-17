@@ -21,6 +21,7 @@ from PIL import Image, __version__ as pillow_version
 
 from sprite_gen._deps import np
 from sprite_gen.video import evidence
+from sprite_gen.video.loop_vocab import ANCHOR_BODY, ANCHOR_NONE
 from sprite_gen.util.resample import resize_cell
 
 KIND = "sprite-gen-video-source-manifest"
@@ -144,7 +145,9 @@ class Projection:
 def _cut_moves(hold: dict[str, Any], n: int) -> tuple[list[dict[str, Any]], tuple[int, int, int, int]]:
     """The move each frame of a held fixed cut was held by (`size_hold.cut_frames`, `gait_fallback.frame_hold`) and the
     room every frame was widened by (`padding_ltrb`): one move per frame of the cut, in order."""
-    moves, pad = hold.get("cut_frames"), hold.get("padding_ltrb")
+    from sprite_gen.video import loop
+
+    moves, pad = hold.get(loop.SizeHold.CUT_FRAMES), hold.get(loop.SizeHold.PADDING_LTRB)
 
     def number(v: Any) -> bool:
         return type(v) in (int, float) and math.isfinite(v)
@@ -167,54 +170,56 @@ def project(baseline: Any, source: Source) -> tuple[Projection | None, str | Non
     from sprite_gen.video.frames import drop_specks
 
     m, report = baseline.meta, baseline.source_report
-    if report.get("kind") != loop.REPORT_KIND or report.get("status") != loop.REPORT_PASSED:
+    if report.get(loop.Report.KIND) != loop.REPORT_KIND or report.get(loop.Report.STATUS) != loop.REPORT_PASSED:
         return None, "source-report-unverified"
     if loop.sway_recorded(m):
         return None, "follow-source-warp-unverified"
     n = len(baseline.frames)
-    cycle = report.get("cycle", {})
+    cycle = report.get(loop.Report.CYCLE, {})
     start, length = cycle.get("start"), cycle.get("length")
     if (type(start) is not int or type(length) is not int or start < 0 or length != n
-            or n < 3 or start + n > len(source.frames) or m.get("subsampled") is not False
-            or m.get("cycle_frames") != n or m.get("loop") is not True):
+            or n < 3 or start + n > len(source.frames) or m.get(loop.Strip.SUBSAMPLED) is not False
+            or m.get(loop.Strip.CYCLE_FRAMES) != n or m.get(loop.Strip.LOOP) is not True):
         return None, "source-schedule-unsupported"
-    if m.get("sample_indices", list(range(n))) != list(range(n)):
+    if m.get(loop.Strip.SAMPLE_INDICES, list(range(n))) != list(range(n)):
         return None, "source-samples-mismatch"
-    for drawings in (m.get("cycle_drawings"), report.get("cycle_drawings")):
+    for drawings in (m.get(loop.Strip.CYCLE_DRAWINGS), report.get(loop.Report.CYCLE_DRAWINGS)):
         if drawings is not None and (drawings.get("start") != start or drawings.get("length") != n):
             return None, "source-drawings-mismatch"
-    reported = report.get("strip")
+    reported = report.get(loop.Report.STRIP)
     if not isinstance(reported, dict) or any(m.get(k) != reported.get(k) for k in
-            ("frames", "w", "h", "delay_ms", "cycle_seconds", "scale", "source_rect", "foot_anchor", "wrap_dx_px")):
+            (loop.Strip.FRAMES, loop.Strip.W, loop.Strip.H, loop.Strip.DELAY_MS, loop.Strip.CYCLE_SECONDS, loop.Strip.SCALE,
+             loop.Strip.SOURCE_RECT, loop.Strip.FOOT_ANCHOR, loop.Strip.WRAP_DX_PX)):
         return None, "source-geometry-inconsistent"
     fps = source.record["fps"]
-    if (report.get("fps") != fps or report.get("frames_total") != len(source.frames)
-            or baseline.timing_issue() or abs(m["cycle_seconds"] - n / fps) > .00005 + 1e-9):
+    if (report.get(loop.Report.FPS) != fps or report.get(loop.Report.FRAMES_TOTAL) != len(source.frames)
+            or baseline.timing_issue() or abs(m[loop.Strip.CYCLE_SECONDS] - n / fps) > .00005 + 1e-9):
         return None, "source-timing-unverified"
     pts = [row["pts_seconds"] for row in source.record["frames"]]
     if any(abs((b - a) - 1 / fps) > 1e-5 for a, b in zip(pts, pts[1:])):
         return None, "nonuniform-source-timing-unsupported"
-    if report.get("source") is not None and report["source"] != source.record["source"]:
+    if report.get(loop.Report.SOURCE) is not None and report[loop.Report.SOURCE] != source.record["source"]:
         return None, "source-sequence-mismatch"
-    if "source_cut" in m and m["source_cut"] != {
-            "source": source.record["source"], "start": start, "length": n,
-            "samples": list(range(start, start + n))}:
+    if loop.Strip.SOURCE_CUT in m and m[loop.Strip.SOURCE_CUT] != {
+            loop.SourceCut.SOURCE: source.record["source"], loop.SourceCut.START: start, loop.SourceCut.LENGTH: n,
+            loop.SourceCut.SAMPLES: list(range(start, start + n))}:
         return None, "source-samples-mismatch"
-    anchor = m.get("foot_anchor")
-    if anchor not in ("none", "body") or report.get("anchor") != anchor:
+    anchor = m.get(loop.Strip.FOOT_ANCHOR)
+    if anchor not in (ANCHOR_NONE, ANCHOR_BODY) or report.get(loop.Report.ANCHOR) != anchor:
         return None, "source-anchor-unsupported"
-    hold = report.get("size_hold", {})
+    hold = report.get(loop.Report.SIZE_HOLD, {})
     # A held cut is read again only where its report records each frame's move, and the cut's frames before repair to
     # prove every one of them on (`source_projection`, the moves of the cells the repair replaced included).
-    held = bool(hold.get("applied"))
+    held = bool(hold.get(loop.SizeHold.APPLIED))
     # A cut whose held cells were made again (`held_fill`), or whose cells are times of their own (`out_fps`, an air
     # retimed: `air_retime`), shows frames the source does not hold.
-    if (any(k in m for k in ("cycle_align", "motion_anchor", "wrap_blend", "out_fps")) or (m.get("held_fill") or {}).get("made")
-            or (m.get("air_retime") or {}).get("applied")
-            or held and ("cut_frames" not in hold or report.get("source_projection") is None)):
+    if (any(k in m for k in (loop.Strip.CYCLE_ALIGN, loop.Strip.MOTION_ANCHOR, loop.Strip.WRAP_BLEND, loop.Strip.OUT_FPS))
+            or (m.get(loop.Strip.HELD_FILL) or {}).get("made")
+            or (m.get(loop.Strip.AIR_RETIME) or {}).get("applied")
+            or held and (loop.SizeHold.CUT_FRAMES not in hold or report.get(loop.Report.SOURCE_PROJECTION) is None)):
         return None, "source-processing-unsupported"
     moves, pad = _cut_moves(hold, n) if held else (None, None)
-    hints = (report.get("jump_repair") or {}).get("replaced", [])
+    hints = (report.get(loop.Report.JUMP_REPAIR) or {}).get("replaced", [])
     if (not isinstance(hints, list) or any(type(k) is not int or not 0 <= k < n for k in hints)
             or len(set(hints)) != len(hints) or len(hints) > n // 2):
         return None, "repair-locations-unverified"
@@ -224,19 +229,19 @@ def project(baseline: Any, source: Source) -> tuple[Projection | None, str | Non
         frame = gait_fallback.hold_frame(frame, moves[j], pad) if moves else frame.copy()
         loop._scrub(frame)
         frames.append(drop_specks(frame, alpha_over=16, diagonal=False, apart=0)[0])
-    dx = loop.body_wrap_offset(frames) if anchor == "body" else 0
-    if anchor == "body" and m.get("wrap_dx_px") != dx:
+    dx = loop.body_wrap_offset(frames) if anchor == ANCHOR_BODY else 0
+    if anchor == ANCHOR_BODY and m.get(loop.Strip.WRAP_DX_PX) != dx:
         return None, "source-anchor-mismatch"
     frames = loop.ramp_frames(frames, dx)
-    native = report.get("source_projection")
-    if native is not None and (native.get("recipe") != RECIPE or native.get("wrap_dx_px") != dx
-            or native.get("before_repair_pixels_sha256") != [evidence.digest(f.tobytes()) for f in frames]):
+    native = report.get(loop.Report.SOURCE_PROJECTION)
+    if native is not None and (native.get(loop.SourceProjection.RECIPE) != RECIPE or native.get(loop.SourceProjection.WRAP_DX_PX) != dx
+            or native.get(loop.SourceProjection.BEFORE_REPAIR_PIXELS_SHA256) != [evidence.digest(f.tobytes()) for f in frames]):
         return None, "source-processing-receipt-mismatch"
     boxes = [frames[k].getchannel("A").point(lambda v: 255 if v >= 8 else 0).getbbox() for k in keep]
     if any(b is None for b in boxes):
         return None, "empty-source-subject"
-    w, h = m["w"], m["h"]
-    rect = m.get("source_rect")
+    w, h = m[loop.Strip.W], m[loop.Strip.H]
+    rect = m.get(loop.Strip.SOURCE_RECT)
     if rect is not None:
         if (not isinstance(rect, list) or len(rect) != 4 or any(type(v) is not int for v in rect)
                 or rect[2] <= rect[0] or rect[3] <= rect[1]):
@@ -246,7 +251,8 @@ def project(baseline: Any, source: Source) -> tuple[Projection | None, str | Non
         # A legacy strip omits the crop. Bounds come only from its recorded scale
         # recipe, frame canvas and the union of the known unmodified subjects.
         target, standing, cap, top = (m.get(k) for k in
-                                     ("body_height_target", "body_src_h", "cell_height_cap", "top_margin_px"))
+                                     (loop.Strip.BODY_HEIGHT_TARGET, loop.Strip.BODY_SRC_H, loop.Strip.CELL_HEIGHT_CAP,
+                                      loop.Strip.TOP_MARGIN_PX))
         if any(type(v) is not int or v <= 0 for v in (target, standing, cap)) or type(top) is not int or top < 0:
             return None, "legacy-projection-recipe-missing"
         left_max, right_min = min(b[0] for b in boxes) - 8, max(b[2] for b in boxes) + 8
@@ -255,7 +261,7 @@ def project(baseline: Any, source: Source) -> tuple[Projection | None, str | Non
             if bottom <= top:
                 continue
             scale = min(cap / (bottom - top), target / standing)
-            if round(scale, 4) != m.get("scale") or round((bottom - top) * scale) != h:
+            if round(scale, 4) != m.get(loop.Strip.SCALE) or round((bottom - top) * scale) != h:
                 continue
             for width in range(max(1, math.floor((w - .5) / scale)), math.ceil((w + .5) / scale) + 1):
                 if round(width * scale) != w:
