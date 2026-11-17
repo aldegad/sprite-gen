@@ -514,7 +514,7 @@ def _validate(request: VideoRequest) -> None:
         raise SystemExit("video: --direction must be side, front, back, front_diagonal or back_diagonal")
     if request.facing_fix not in facing_mod.FIXES:
         raise SystemExit("video: --facing-fix must be mirror or none")
-    if request.direction == "side" and request.mode != MODE_IMAGE_TO_VIDEO:
+    if request.direction == handed_mod.VIEW_SIDE and request.mode != MODE_IMAGE_TO_VIDEO:
         raise SystemExit("video: --direction side requires a single --image, without --last-frame or --reference")
     if not request.prompt.strip():
         raise SystemExit("video: empty prompt; pass --prompt or --prompt-file")
@@ -872,7 +872,7 @@ def generate_video(
     references = [path.expanduser().resolve() for path in request.reference_images]
 
     facing_report = None
-    if request.direction == "side":
+    if request.direction == handed_mod.VIEW_SIDE:
         parts = side_view_prompt(request.prompt, request.facing)
         for line in prompt_parts.note_lines(parts):
             print(f"[video] {line}", file=sys.stderr)

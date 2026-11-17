@@ -38,9 +38,11 @@ from dataclasses import dataclass
 
 from .facing import FACINGS
 
-VIEWS = ("side", "front", "back", "front_diagonal", "back_diagonal")
+# The sprite views, each named once. `VIEW_` keeps them apart from `SIDES`, the character's own left and right.
+VIEW_SIDE, VIEW_FRONT, VIEW_BACK, VIEW_FRONT_DIAGONAL, VIEW_BACK_DIAGONAL = VIEWS = (
+    "side", "front", "back", "front_diagonal", "back_diagonal")
 # Views turned toward a side of the picture: each is drawn facing right or left.
-LATERAL_VIEWS = frozenset({"side", "front_diagonal", "back_diagonal"})
+LATERAL_VIEWS = frozenset({VIEW_SIDE, VIEW_FRONT_DIAGONAL, VIEW_BACK_DIAGONAL})
 SIDES = ("left", "right")
 # The one table of which parts get the arm sentences: the wrist and the parts around it, which a walking
 # side view's far arm carries out in front of the body (the case filmed: a watch on the far wrist). A
@@ -108,7 +110,7 @@ def placement(side: str, view: str, facing: str | None = None) -> dict[str, str 
     validate_view(view, facing)
     flip = {"left": "right", "right": "left"}
     # the own left side; the own right side is its mirror
-    picture = {"front": "right", "front_diagonal": "right", "back": "left", "back_diagonal": "left"}.get(view)
+    picture = {VIEW_FRONT: "right", VIEW_FRONT_DIAGONAL: "right", VIEW_BACK: "left", VIEW_BACK_DIAGONAL: "left"}.get(view)
     depth = None if view not in LATERAL_VIEWS else ("near" if facing == "left" else "far")
     if side == "right":
         picture = flip[picture] if picture else None
@@ -125,7 +127,7 @@ def _none(h: Handed, items: list[Handed]) -> str:
 def _view_clause(h: Handed, view: str, facing: str | None, items: list[Handed]) -> str:
     at = placement(h.side, view, facing)
     none = _none(h, items)
-    if view == "side":
+    if view == VIEW_SIDE:
         if at["depth"] == "near":
             return (f"Facing {facing}, the character's own {h.side} side is toward the viewer: its {h.where()} is the near "
                     f"one, nearer the viewer, and {h.item} on it shows clearly.")
@@ -137,7 +139,7 @@ def _view_clause(h: Handed, view: str, facing: str | None, items: list[Handed]) 
             return (f"{lead}{swings}. Wherever the far {swings} reaches out in front of the body, clear of its outline, "
                     f"{h.item} shows whole on it; where the body covers that {swings}, it is hidden.")
         return f"{lead}side, behind the body, so {h.item} is hidden or at most a sliver of it shows."
-    lead = {"front": "Seen from the front", "back": "Seen from behind"}.get(view, "In this view")
+    lead = {VIEW_FRONT: "Seen from the front", VIEW_BACK: "Seen from behind"}.get(view, "In this view")
     if at["depth"] is None:
         return (f"{lead}, the character's own {h.where()} is the one at the {at['picture']} of the picture, so {h.item} is "
                 f"drawn at the {at['picture']} of the picture.")
@@ -167,7 +169,7 @@ def _clip_clause(group: list[Handed], view: str, facing: str | None, *, gait: bo
     at = placement(h.side, view, facing)
     part = h.part or "side"
     stay, they = ("stays", "it") if len(group) == 1 else ("stay", "them")
-    swings = limb(h.part) if view == "side" else None
+    swings = limb(h.part) if view == VIEW_SIDE else None
     if swings and gait:
         if at["depth"] == "far":
             bare = f"; the {swings} nearer the viewer stays bare, exactly as in the image" if other_bare else ""
@@ -177,10 +179,10 @@ def _clip_clause(group: list[Handed], view: str, facing: str | None, *, gait: bo
                 f"where it swings out in front of it") if other_bare else ""
         return (f"{_names(group)} {stay} on the {part} that wears {they} in the image, on the {swings} nearer the "
                 f"viewer{bare}.")
-    if view == "side" and at["depth"] == "far":
+    if view == VIEW_SIDE and at["depth"] == "far":
         # "nearer the viewer", not "in front of the body": mid-stride, the far arm is the one in front of the body
         return f"The {part} nearer the viewer stays bare, exactly as in the image, for the whole clip." if other_bare else ""
-    if view == "side":
+    if view == VIEW_SIDE:
         where = f"the {part} nearer the viewer"
     elif at["depth"] is None:
         where = f"the {part} at the {at['picture']} of the picture"
@@ -195,7 +197,7 @@ def first_frame_needs(items: list[Handed], view: str, facing: str | None = None,
     frame shows and makes up what it hides, so a walk or run whose far limb wears an item starts from a still
     with that limb out in front of the body and the item in view."""
     validate_view(view, facing)
-    if view != "side" or not gait:
+    if view != VIEW_SIDE or not gait:
         return []
     return [f"{h.item} is on the far {limb(h.part)} in this view, and the clip shows it only if its first frame does: start "
             f"from a still drawn mid-stride, the far {limb(h.part)} out in front of the body with {h.item} in view and the "
@@ -215,7 +217,7 @@ def text(items: list[Handed], view: str, facing: str | None = None, *, clip: boo
             groups.setdefault((h.side, h.part), []).append(h)
         clauses = [_clip_clause(group, view, facing, gait=gait, other_bare=(group[0].other, part) not in groups)
                    for (_, part), group in groups.items()]
-        if gait and view == "side" and any(limb(h.part) for h in items):
+        if gait and view == VIEW_SIDE and any(limb(h.part) for h in items):
             # the far arm's item shows only if the arms swing: said outright, once, before where the items are
             clauses.insert(0, ARMS_SWING_TEXT)
         return " ".join(clause for clause in clauses if clause)

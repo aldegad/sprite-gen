@@ -58,8 +58,9 @@ KIND = SET_SHEET_KIND
 SCHEMA = 1
 # The compass code of each view, and the order of a sheet's rows: clockwise from the viewer.
 ORDER = ("S", "SW", "W", "NW", "N", "NE", "E", "SE")
-CODES = {"front": "S", "front_diagonal@left": "SW", "side@left": "W", "back_diagonal@left": "NW", "back": "N",
-         "back_diagonal@right": "NE", "side@right": "E", "front_diagonal@right": "SE"}
+CODES = {handed_mod.VIEW_FRONT: "S", f"{handed_mod.VIEW_FRONT_DIAGONAL}@left": "SW", f"{handed_mod.VIEW_SIDE}@left": "W",
+         f"{handed_mod.VIEW_BACK_DIAGONAL}@left": "NW", handed_mod.VIEW_BACK: "N", f"{handed_mod.VIEW_BACK_DIAGONAL}@right": "NE",
+         f"{handed_mod.VIEW_SIDE}@right": "E", f"{handed_mod.VIEW_FRONT_DIAGONAL}@right": "SE"}
 
 
 @dataclass(frozen=True)

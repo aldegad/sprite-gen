@@ -34,7 +34,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen._deps import np
-from sprite_gen.frames.cutout import KEY_TARGETS
+from sprite_gen.frames.cutout import KEY_AUTO, KEY_TARGETS
 from sprite_gen.frames.decontam import _cap_key_hue
 from sprite_gen.frames.extract import _key_channel_split, _key_excess_field, _SPILL_FULL_MIN_TINT
 from sprite_gen.spec.runio import atomic_write_text, refuse_overlap
@@ -106,7 +106,7 @@ def _jump_facing(origin: Loop) -> str | None:
 
 def _source_key(src: source.Source) -> str | None:
     key = src.record["recipe"].get("key")
-    if key == "auto":
+    if key == KEY_AUTO:
         key = (src.record["recipe"].get("spill") or {}).get("key")
     return key if isinstance(key, str) and key in KEY_TARGETS else None
 
