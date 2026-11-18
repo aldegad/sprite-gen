@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw
 
 from conftest import run_script
 from sprite_gen.spec.subject import cell_area, default_min_used_pixels, subject_kind
+from sprite_gen.spec import subject as subject_mod
 
 FRAMES = 3
 
@@ -70,6 +71,14 @@ def _request_for_cell(width: int, height: int, margin_x: int, margin_y: int) -> 
             "safe_margin_y": margin_y,
         }
     }
+
+
+def test_the_subjects_are_named_once_and_each_has_a_floor() -> None:
+    """Spelt out here, as the request writes them; the floor table is keyed by the declared names, one row each."""
+    assert subject_mod.SUBJECTS == ("character", "effect")
+    assert (subject_mod.SUBJECT_CHARACTER, subject_mod.SUBJECT_EFFECT) == subject_mod.SUBJECTS
+    assert subject_mod.SUBJECT_DEFAULT == "character"
+    assert list(subject_mod.SUBJECT_FLOOR_RATIOS) == list(subject_mod.SUBJECTS)
 
 
 def test_profile_resolves_floor_and_rejects_unknown_kinds() -> None:

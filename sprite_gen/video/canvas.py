@@ -47,12 +47,13 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen._deps import np
-from sprite_gen.frames.cutout import KEY_TARGETS, extract_route
+from sprite_gen.frames.cutout import GREEN, KEY_AUTO, KEY_TARGETS, KEY_WHITE, MAGENTA, extract_route
 from sprite_gen.frames.extract import is_border_key_candidate
 from sprite_gen.gen.facing import FACINGS
-from sprite_gen.gen.handedness import VIEWS
+from sprite_gen.gen.handedness import VIEW_SIDE, VIEWS
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.console import utf8_streams
+from sprite_gen.video import effect
 from sprite_gen.video import prop_plate as plate_mod
 
 SHAPE_SQUARE = "square"
@@ -84,7 +85,7 @@ class CanvasProfile:
 # into it, so their room is not read (ROOM_VIEWS). A run is read at the walk's bounds. The rule:
 # docs/video-pipeline.md section 1.
 GAIT_ROOM = {"front": 0.15, "behind": 0.25}
-ROOM_VIEWS = frozenset({"side"})
+ROOM_VIEWS = frozenset({VIEW_SIDE})
 GAIT_ROOM_WHY = "the still leaves its silhouette too little room for a walk or run from the side: the square is widened by the room it lacks"
 # The one table. Keys are state names as the sprite-request uses them; unknown
 # states fall through to `default`.
@@ -144,7 +145,7 @@ FITS = ("state", "tight")  # state: the table's room for the motion; tight: none
 # the nearest one so the clip keeps the proportions the subject was cut to.
 TIGHT_RATIOS = {SHAPE_TALL: 9 / 16, SHAPE_SQUARE: 1.0, SHAPE_WIDE: 16 / 9}
 TIGHT_HEADROOM = 0.04  # of the subject's own height, kept above it so the head is not flush with the edge
-KEYS = ("auto", "green", "magenta", "white")  # auto: the corners decide; white: no chroma key, pad with the corner colour
+KEYS = (KEY_AUTO, GREEN, MAGENTA, KEY_WHITE)  # auto: the corners decide; white: no chroma key, pad with the corner colour
 
 
 def profile_for(state: str | None, shape: str | None = None) -> CanvasProfile:
@@ -183,9 +184,9 @@ def resolve_key(corner: tuple[int, int, int], key: str) -> str | None:
     """
     if key not in KEYS:
         raise SystemExit(f"video-canvas: unknown --key {key!r}; expected one of {', '.join(KEYS)}")
-    if key == "white":
+    if key == KEY_WHITE:
         return None
-    if key == "auto":
+    if key == KEY_AUTO:
         for kind, target in KEY_TARGETS.items():
             if is_border_key_candidate(corner, target):
                 return kind
@@ -318,7 +319,7 @@ def pad_canvas(
     headroom: float | None = None,
     lead: float | None = None,
     trail: float | None = None,
-    key: str = "auto",
+    key: str = KEY_AUTO,
     fit: str = "state",
     view: str | None = None,
 ) -> tuple[Image.Image, dict[str, Any]]:
@@ -422,7 +423,7 @@ def run_canvas(
     headroom: float | None,
     lead: float | None,
     report_path: Path | None,
-    key: str = "auto",
+    key: str = KEY_AUTO,
     trail: float | None = None,
     fit: str = "state",
     view: str | None = None,
@@ -435,8 +436,7 @@ def run_canvas(
         raise SystemExit("video-canvas: --fit tight picks its own shape and adds no room; drop --shape/--headroom/--lead/--trail")
     if prop_plate and report_path is None:
         raise SystemExit("video-canvas: --prop-plate needs --report: the plate's box is written there for video-frames --prop-plate")
-    if state == "effect":
-        from . import effect
+    if state == effect.STATE:
         if prop_plate:
             raise SystemExit("video-canvas: an effect keeps its source canvas; drop --prop-plate")
         if fit != "state" or any(v is not None for v in (shape, headroom, lead, trail)):
@@ -447,7 +447,7 @@ def run_canvas(
         profile = profile_for(state, shape)
         canvas, report = pad_canvas(Image.open(still), profile, facing=facing, headroom=headroom, lead=lead, trail=trail, key=key, fit=fit, view=view)
         if prop_plate:
-            if report["key"] != "green":
+            if report["key"] != GREEN:
                 raise SystemExit(f"video-canvas: --prop-plate paints a magenta plate on a green key; the still's key is {report['key'] or 'not a chroma key'}")
             report["prop_plate"] = plate_mod.paint(canvas, subject_box(canvas, tuple(report["key_rgb"]), 0), facing=facing)  # type: ignore[arg-type]
     out = out.expanduser().resolve()
@@ -455,7 +455,7 @@ def run_canvas(
     tmp = out.with_name(out.name + ".part")
     canvas.save(tmp, format="PNG")
     tmp.replace(out)
-    if state == "effect":
+    if state == effect.STATE:
         report["end_frame"] = str(effect.empty_end(out, out.with_name(out.stem + ".end.png")))
     payload = {"kind": plate_mod.CANVAS_REPORT, "still": str(still), "out": str(out), "state": state, **report}
     if report_path is not None:
@@ -472,7 +472,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--headroom", type=float, help="tall/wide: empty fraction of canvas height above the still (default from the profile)")
     parser.add_argument("--lead", type=float, help="wide: empty fraction in front of the subject (default from the profile)")
     parser.add_argument("--trail", type=float, help="wide: empty fraction behind the subject, for a weapon drawn back (default from the profile)")
-    parser.add_argument("--key", choices=KEYS, default="auto", help="chroma key of the still (auto reads the corners; green/magenta are normalized to the exact key; white pads with the corner colour)")
+    parser.add_argument("--key", choices=KEYS, default=KEY_AUTO, help="chroma key of the still (auto reads the corners; green/magenta are normalized to the exact key; white pads with the corner colour)")
     parser.add_argument("--fit", choices=FITS, default="state", help="state: the state's room for the motion (default); tight: drop the empty rows around the subject and add no room, so it fills the frame and a motion that leaves it is clipped")
     parser.add_argument("--view", choices=VIEWS, help="the still's view; a walk or run from the side has the still's room around its silhouette read, and its square widened by the room it lacks (`room` in the report). Left out, the room is not read")
     parser.add_argument("--prop-plate", action="store_true", help="paint a flat magenta plate, a low wall for the subject to clear, on the ground in front of it (the side it faces), sized by its height; green key only, needs --report, where its box is written for `video-frames --prop-plate` to erase")
@@ -484,7 +484,7 @@ def run(**kwargs: object) -> int:
         Path(str(kwargs["still"])), Path(str(kwargs["out"])),
         state=kwargs.get("state"), shape=kwargs.get("shape"), facing=str(kwargs.get("facing") or "right"),  # type: ignore[arg-type]
         headroom=kwargs.get("headroom"), lead=kwargs.get("lead"), trail=kwargs.get("trail"), report_path=kwargs.get("report"),  # type: ignore[arg-type]
-        key=str(kwargs.get("key") or "auto"), fit=str(kwargs.get("fit") or "state"), view=kwargs.get("view"),  # type: ignore[arg-type]
+        key=str(kwargs.get("key") or KEY_AUTO), fit=str(kwargs.get("fit") or "state"), view=kwargs.get("view"),  # type: ignore[arg-type]
         prop_plate=bool(kwargs.get("prop_plate")),
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))

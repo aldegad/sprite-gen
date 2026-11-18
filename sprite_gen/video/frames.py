@@ -74,7 +74,7 @@ from typing import Any, Callable
 from PIL import Image
 
 from sprite_gen._deps import np
-from sprite_gen.frames.cutout import cutout
+from sprite_gen.frames.cutout import GREEN, KEY_AUTO, KEY_WHITE, MAGENTA, cutout
 from sprite_gen.frames.decontam import palette_from_stats
 from sprite_gen.frames.extract import _border_key_candidate_field, _key_channel_split, _painted_key_leans
 from sprite_gen.frames.extract import _SPILL_FULL_MIN_TINT, DEFAULT_UNMIX_REACH
@@ -91,7 +91,7 @@ EDGE_ROWS = 4  # rows/cols inspected at each edge
 # from is the evidence: if the still carries (almost) no key-coloured material, every
 # key tint in the clip was painted by the model and is spill.
 SPILL_MODES = ("auto", "small", "full")
-KEYS_READ = ("green", "magenta", "white", "brightness")  # what a clip's frames are keyed on, where `video-chain` compares them (brightness: no key, `--alpha-mode brightness`)
+KEYS_READ = (GREEN, MAGENTA, KEY_WHITE, "brightness")  # what a clip's frames are keyed on, where `video-chain` compares them (brightness: no key, `--alpha-mode brightness`)
 SPILL_FULL_FRACTION = 1.0  # every tinted cluster is spill, whatever its size
 SPILL_FULL_MIN_TINT = _SPILL_FULL_MIN_TINT  # ... and whatever its strength (see extract.py)
 SPILL_REFERENCE_MAX = 0.005  # the still's own key material ≤ the engine's small-cluster share → full
@@ -384,7 +384,7 @@ def _reference_window(reference: Path, key: str) -> tuple[str, Image.Image | Non
     image = Image.open(reference)
     image.load()
     kind = key_kind(image, key)
-    if kind not in ("green", "magenta"):
+    if kind not in KEY_TARGETS:
         return kind, None, None, {}
     target = KEY_TARGETS[kind]
     painted = detect_background_key_rgb(image, target, _EXTRACT_KEY_THRESHOLD)
@@ -405,7 +405,7 @@ def key_kind(image: Image.Image, key: str) -> str:
     """The key a frame of a clip is keyed on: `key`, or what its corners read as where that is `auto`."""
     from sprite_gen.frames.cutout import _corner_average, _detect_key_kind
 
-    return _detect_key_kind(_corner_average(image)) if key == "auto" else key
+    return _detect_key_kind(_corner_average(image)) if key == KEY_AUTO else key
 
 
 def decide_spill(reference: Path, key: str) -> dict[str, Any]:
@@ -418,7 +418,7 @@ def decide_spill(reference: Path, key: str) -> dict[str, Any]:
     from sprite_gen.frames.extract import key_material_pixels
 
     kind, window, painted, facts = _reference_window(reference, key)
-    if kind not in ("green", "magenta"):
+    if kind not in KEY_TARGETS:
         return {"mode": "small", "reference": str(reference), "reason": f"key {kind!r} has no spill pass"}
     material = subject = 0
     if window is not None:
@@ -475,7 +475,7 @@ def key_frames(
     raw_files: list[Path],
     keyed_dir: Path,
     *,
-    key: str = "auto",
+    key: str = KEY_AUTO,
     check_edges: bool = True,
     spill: str = "small",
     allow_subject: bool = False,
@@ -787,11 +787,11 @@ def run_frames(clip: Path, out_dir: Path, *, key: str, allow_edge_contact: bool,
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    from . import effect
+    from . import canvas, effect
     parser.add_argument("--alpha-mode", choices=effect.ALPHA_MODES, default="chroma", help="chroma key (default), or emitted light on black: brightness alpha, unpremultiplied RGB, no speck/edge cleanup; dark smoke becomes faint")
     parser.add_argument("--clip", required=True, type=Path, help="mp4 from `sprite-gen video`, or one made elsewhere from a `video-canvas` still (a video MCP such as ZCRE); an audio track and a cover image are left out")
     parser.add_argument("--out-dir", required=True, type=Path, help="writes raw/ and keyed/ here; a refused run leaves keyed.refused/ and no keyed/")
-    parser.add_argument("--key", choices=("auto", "green", "magenta", "white"), default="auto", help="background key (auto reads the corners)")
+    parser.add_argument("--key", choices=canvas.KEYS, default=KEY_AUTO, help="background key (auto reads the corners)")
     parser.add_argument("--allow-edge-contact", action="store_true", help="accept any opaque pixel at the top/left/right edge (subject and leftover key background alike)")
     parser.add_argument("--allow-subject-edge-contact", action="store_true", help="accept the subject touching the top/left/right edge (a `video-canvas --fit tight` clip) but still refuse leftover key background there")
     parser.add_argument("--report", type=Path, help="report JSON (default <out-dir>/frames.report.json)")
@@ -803,7 +803,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run(**kwargs: object) -> int:
-    payload = run_frames(Path(str(kwargs["clip"])), Path(str(kwargs["out_dir"])), key=str(kwargs.get("key") or "auto"),
+    payload = run_frames(Path(str(kwargs["clip"])), Path(str(kwargs["out_dir"])), key=str(kwargs.get("key") or KEY_AUTO),
                          allow_edge_contact=bool(kwargs.get("allow_edge_contact")), report_path=kwargs.get("report"),  # type: ignore[arg-type]
                          spill=str(kwargs.get("spill") or "small"), reference=kwargs.get("reference"),  # type: ignore[arg-type]
                          allow_subject_edge_contact=bool(kwargs.get("allow_subject_edge_contact")),

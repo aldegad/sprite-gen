@@ -38,6 +38,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen._deps import np
+from sprite_gen.gen.handedness import VIEW_BACK, VIEW_BACK_DIAGONAL
 
 LEG_PATH_BAND = 0.10  # the leg path is read on the lowest tenth of the loop's box: the feet and the shins
 READ_HEIGHT = 410  # px the first frame's figure ends at, at most, where the path is read
@@ -53,7 +54,7 @@ SCREEN_ROWS = 0.30  # the screen's leg rows: the lowest 30 % of the box (a strip
 # are all large has no one step that jumps).
 SCREEN_JUMP = 2.0
 SCREEN_ALONE = 1.3
-STEP_VIEWS = ("back", "back_diagonal")  # the views whose feet stand side by side, the stepping foot drawn higher
+STEP_VIEWS = (VIEW_BACK, VIEW_BACK_DIAGONAL)  # the views whose feet stand side by side, the stepping foot drawn higher
 FOOT_ROWS = 0.03  # the feet split at the middle of the solid columns of the box's lowest 3 % over the loop
 LIFT_MIN = 0.010  # a half lifted by 1 % of the box's height or more is in a step ...
 LIFT_CELLS = 2  # ... held for two frames or more

@@ -196,6 +196,7 @@ from sprite_gen.frames import folder as folder_mod
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.gif_utils import save_clean_gif
 from sprite_gen.video import loop as loop_mod
+from sprite_gen.video.loop_vocab import CYCLE_ONE_SHOT
 from sprite_gen.util.console import utf8_streams
 
 VERB = "video-sway"
@@ -1524,7 +1525,7 @@ def read_request(loop_dir: Path, regions: list[tuple[float, ...]], *, gain: floa
     name = meta_path.name[: -len(".strip.json")]
     meta_bytes = meta_path.read_bytes()
     meta = json.loads(meta_bytes.decode("utf-8"))
-    if meta.get("kind") == "one-shot" or meta.get("loop") is False:
+    if meta.get("kind") == CYCLE_ONE_SHOT or meta.get("loop") is False:
         raise SystemExit(f"{verb}: a one-shot plays once; the follow-through is a loop's steady state")
     ask = read_ask(regions, gain=gain, freq=freq, zeta=zeta, on_fold=on_fold, read_on=read_on, stretch_floor=stretch_floor,
                    breathe=breathe, lag=lag, gain_across=gain_across, band=band, band_margin=band_margin, band_up=band_up,

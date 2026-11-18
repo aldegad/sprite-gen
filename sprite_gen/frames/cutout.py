@@ -59,13 +59,16 @@ CORNER_MIN_BRIGHT = 225  # a corner pixel must be at least this bright (min chan
 # The key colours, the one table: gen's `chroma.KEYS` is built from it, and the logo matte and
 # slice-sheet key by it. The extract engine keys these out; cutout only detects them and routes.
 MAGENTA, GREEN = "magenta", "green"
+# The keys that are not a key colour: auto reads the corners, white is the position matte (and what a corner
+# that is neither key colour reads as), measured the measured matte.
+KEY_AUTO, KEY_WHITE, KEY_MEASURED = "auto", "white", "measured"
 KEY_TARGETS: dict[str, tuple[int, int, int]] = {
     MAGENTA: (255, 0, 255),
     GREEN: (0, 255, 0),
 }
 # `--key`: auto reads the corners; white is the position matte; a key colour is the chroma engine;
 # measured is the measured matte.
-KEYS = ("auto", "white", *KEY_TARGETS, "measured")
+KEYS = (KEY_AUTO, KEY_WHITE, *KEY_TARGETS, KEY_MEASURED)
 # extract.remove_chroma_background params — the extract CLI defaults (SSoT: extract.py argparse).
 _EXTRACT_KEY_THRESHOLD = 96.0
 _EXTRACT_FRINGE_THRESHOLD = 180.0
@@ -148,7 +151,7 @@ def _detect_key_kind(color: tuple[int, int, int]) -> str:
     for kind, target in KEY_TARGETS.items():
         if is_border_key_candidate(color, target):
             return kind
-    return "white"
+    return KEY_WHITE
 
 
 def _background_mask(px: Any, width: int, height: int, bg: tuple[int, int, int], tol: int) -> bytearray:
@@ -406,7 +409,7 @@ def cutout(
     input_path: Path,
     out_path: Path,
     *,
-    key: str = "auto",
+    key: str = KEY_AUTO,
     strength: int = STRENGTH_DEFAULT,
     band: int = BAND_DEFAULT,
     erode: float = ERODE_DEFAULT,
@@ -455,10 +458,10 @@ def cutout(
     image = Image.open(input_path).convert("RGBA")
     width, height = image.size
 
-    route = _detect_key_kind(_corner_average(image)) if key == "auto" else key
-    if key == "auto" and route == "white" and not _bright_corners(image):
-        route = "measured"
-    if route == "measured":
+    route = _detect_key_kind(_corner_average(image)) if key == KEY_AUTO else key
+    if key == KEY_AUTO and route == KEY_WHITE and not _bright_corners(image):
+        route = KEY_MEASURED
+    if route == KEY_MEASURED:
         result, route_stats = _measured_route(image, decontam, key)
     elif route in KEY_TARGETS:
         result, route_stats = extract_route(image, route, spill_max_fraction=spill_max_fraction,
@@ -530,7 +533,7 @@ def add_arguments(p: Any) -> None:
     p.add_argument(
         "--key",
         choices=KEYS,
-        default="auto",
+        default=KEY_AUTO,
         help="background type; auto detects from corners (white→matte, magenta/green→extract engine, any other "
         "colour→measured matte); a magenta/green background the engine does not recognise is measured too",
     )
@@ -572,7 +575,7 @@ def run(**kwargs: object) -> int:
     stats = cutout(
         input_path,
         out_path,
-        key=str(kwargs.get("key", "auto")),  # type: ignore[arg-type]
+        key=str(kwargs.get("key", KEY_AUTO)),  # type: ignore[arg-type]
         strength=int(kwargs.get("strength", STRENGTH_DEFAULT)),  # type: ignore[arg-type]
         band=int(kwargs.get("band", BAND_DEFAULT)),  # type: ignore[arg-type]
         erode=float(kwargs.get("erode", ERODE_DEFAULT)),  # type: ignore[arg-type]

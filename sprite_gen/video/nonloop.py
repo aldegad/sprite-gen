@@ -9,10 +9,11 @@ from PIL import Image
 
 from sprite_gen._deps import np
 from sprite_gen.video.body_plan import LEGLESS, QUADRUPED
+from sprite_gen.video.loop_vocab import CYCLE_LIFETIME, CYCLE_ONCE, CYCLE_ONCE_RETURN
 
 # Cuts played once: `once` ends held on its terminal pose, `lifetime` on an empty frame, `once-return` back on its
 # first pose (a clip pinned to end on its first frame, kept whole, `loop.once_return_cycle`).
-KINDS = ("once", "lifetime", "once-return")
+KINDS = (CYCLE_ONCE, CYCLE_LIFETIME, CYCLE_ONCE_RETURN)
 MOTION_TEXT = {'death': 'collapses directly onto the ground, settles into a completely prone position, and remains '
           'lying entirely motionless for the final 0.4 seconds without shifting, rising, or returning '
           'to the starting posture.',
@@ -174,7 +175,7 @@ def terminal_pose(boxes: list[Box | None], *, count: int, state: str | None) -> 
 Ending = Callable[[np.ndarray, np.ndarray, float], tuple[int, int, dict[str, Any]]]
 
 
-def select_cut(D: np.ndarray, masses: np.ndarray, *, fps: float, ending: Ending, kind: str = "once") -> dict[str, Any]:
+def select_cut(D: np.ndarray, masses: np.ndarray, *, fps: float, ending: Ending, kind: str = CYCLE_ONCE) -> dict[str, Any]:
     """One cut body; an ending (`hold_ending` with its `end_pose`, `effect.lifetime_ending`) returns inclusive bounds
     and its measured evidence."""
     start, end, terminal = ending(D, masses, fps)
@@ -198,7 +199,7 @@ def metadata(cycle: dict[str, Any], indices: list[int]) -> dict[str, Any]:
     """A single play's strip metadata: it plays once (`loop: false`); a `once` cut holds its last cell (`hold_last`),
     and a `once-return` cut starts and ends on its first pose (`returns`)."""
     event = cycle["event_frame"] - cycle["start"]
-    return {"loop": False, "hold_last": cycle["kind"] == "once", **({"returns": True} if cycle["kind"] == "once-return" else {}),
+    return {"loop": False, "hold_last": cycle["kind"] == CYCLE_ONCE, **({"returns": True} if cycle["kind"] == CYCLE_ONCE_RETURN else {}),
             "end_frame": len(indices) - 1,
             "events": [{"frame": min(range(len(indices)), key=lambda k: abs(indices[k] - event)),
                         "name": "motion_peak"}]}

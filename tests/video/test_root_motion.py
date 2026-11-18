@@ -150,6 +150,12 @@ def test_the_air_given_only_a_length_keeps_the_clip_s_own_gravity_and_speed():
     assert record["made"] == 0  # every cell a frame: nothing to make, no RIFE asked for
 
 
+def test_the_cuts_that_carry_a_body_are_the_ones_played_once_with_a_body():
+    # Written as a strip's `kind` says it: a set built from the names agrees with itself whatever they say, and no
+    # other test reads a cut of each of these kinds (an effect's lifetime carries no body).
+    assert rm.KINDS == ("once", "once-return", "one-shot")
+
+
 def test_a_cut_with_no_air_is_not_retimed_and_says_why():
     frames = [J.draw(0)] * 2 + J.jump()[:J.TAKEOFF + 1]
     floor = max(nonloop.body_box(f)[3] for f in frames)
