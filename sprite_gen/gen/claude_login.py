@@ -174,15 +174,24 @@ def send_message(body: dict[str, Any], *, label: str, env: Mapping[str, str] | N
     child = {**child_env(env), "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(body["max_tokens"])}
     with tempfile.TemporaryDirectory(prefix="sprite-gen-claude-") as cwd:
         try:
-            # The binary writes UTF-8, and its reply is the drawing: a byte that is not UTF-8 stops the call
-            # rather than change what was drawn.
+            # The binary writes UTF-8 and its reply is the drawing, so a byte that is not UTF-8 is never read as
+            # another character. Where the streams are decoded decides what that stops: on Windows each on a reader
+            # thread of its own, which leaves one it cannot decode None, so a stdout that does not decode fails the
+            # call below and a stderr alone that does not is lost while the reply comes back; elsewhere both here,
+            # where either fails the call.
             done = run(_args(body), input=_message(body), env=child, cwd=cwd, capture_output=True, text=True,
                        encoding="utf-8", errors="strict", timeout=CALL_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired as exc:
             raise api.ApiError(f"{label}: `claude -p` gave no answer in {CALL_TIMEOUT_SECONDS:g}s and was stopped "
                                "(SPRITE_GEN_CLAUDE_CALL_TIMEOUT_SECONDS)", billed=True) from exc
+        except UnicodeDecodeError as exc:
+            raise api.ApiError(f"{label}: `claude -p` answered with a byte that is not UTF-8 ({exc}); the answer is "
+                               "not read", billed=True) from exc
         except OSError as exc:
             raise api.ApiError(f"{label}: `claude -p` did not start ({exc})", billed=False) from exc
+    if done.stdout is None:
+        raise api.ApiError(f"{label}: `claude -p` answered with a byte that is not UTF-8 on stdout; the answer is not "
+                           "read", billed=True)
     seconds = round(time.monotonic() - started, 3)
     result: dict[str, Any] | None = None
     message_id, texts, thinking = None, [], []
