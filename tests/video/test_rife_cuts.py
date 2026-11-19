@@ -44,7 +44,7 @@ BOUNDS = {"knight-walk": (40, None), "pip-run": (38, 40), "pip-jump": (66, 68)}
 
 @lru_cache(maxsize=None)
 def _record() -> dict:
-    return json.loads((CUTS / "cuts.json").read_text())["cuts"]
+    return json.loads((CUTS / "cuts.json").read_text(encoding="utf-8"))["cuts"]
 
 
 def _frames(cut: str) -> list[Image.Image]:
