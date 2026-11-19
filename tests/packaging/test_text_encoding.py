@@ -262,6 +262,101 @@ LOCALE = {
     "write-text": "p.write_text(text)",
     "write-text-errors-only": "p.write_text(text, errors='strict')",
     "zip-name-rebound": "import zipfile\nwith zipfile.ZipFile(z) as f:\n    pass\nf = p\nf.open()",
+    # A name bound in two scopes names both, whichever binding the walk reaches last: one scope's import of os.open
+    # does not hide another scope's io.open (a review's probe is the first row). The two rows whose os.open the walk
+    # reaches first guard the other way round: the first binding does not win either.
+    "alias-scope-later-function": (
+        "from io import open as reader\n"
+        "def unrelated():\n"
+        "    from os import open as reader\n"
+        "    return reader\n"
+        "def read_report(path):\n"
+        "    with reader(path, 'r') as handle:\n"
+        "        return handle.read()\n"),
+    "alias-scope-earlier-function": (
+        "def unrelated():\n"
+        "    from os import open as reader\n"
+        "    return reader\n"
+        "from io import open as reader\n"
+        "def read_report(path):\n"
+        "    with reader(path, 'r') as handle:\n"
+        "        return handle.read()\n"),
+    "alias-scope-sibling-functions": (
+        "def read_report(path):\n"
+        "    from io import open as reader\n"
+        "    with reader(path, 'r') as handle:\n"
+        "        return handle.read()\n"
+        "def unrelated():\n"
+        "    from os import open as reader\n"
+        "    return reader\n"),
+    "alias-scope-nested-function": (
+        "from io import open as reader\n"
+        "def read_report(path):\n"
+        "    def unrelated():\n"
+        "        from os import open as reader\n"
+        "        return reader\n"
+        "    with reader(path, 'r') as handle:\n"
+        "        return handle.read()\n"),
+    "alias-scope-os-first": (
+        "from os import open as reader\n"
+        "def read_report(path):\n"
+        "    from io import open as reader\n"
+        "    with reader(path, 'r') as handle:\n"
+        "        return handle.read()\n"),
+    "alias-scope-os-first-nested": (
+        "from os import open as reader\n"
+        "def outer(path):\n"
+        "    def read_report():\n"
+        "        from io import open as reader\n"
+        "        with reader(path, 'r') as handle:\n"
+        "            return handle.read()\n"
+        "    return read_report\n"),
+    "open-hidden-in-another-scope": (
+        "def raw(path):\n"
+        "    from os import open\n"
+        "    return open(path, 0)\n"
+        "def read_report(path):\n"
+        "    return open(path).read()\n"),
+    "module-alias-other-scope": (
+        "import io as x\n"
+        "def unrelated():\n"
+        "    import os as x\n"
+        "    return x\n"
+        "x.open(p)\n"),
+    # A star import of an opener's module binds its openers; an assignment of a name binds what that name names: a
+    # module, a path class, getattr.
+    "star-io": "from io import *\nTextIOWrapper(buffer)",
+    "star-tempfile": "from tempfile import *\nNamedTemporaryFile('w')",
+    "star-os": "from os import *\nfdopen(fd, 'w')",
+    "star-pathlib": "from pathlib import *\nPath.read_text(p)",
+    "module-assigned": "import io\nx = io\nx.TextIOWrapper(buffer)",
+    "class-assigned": "from pathlib import Path\nP = Path\nP.read_text(p)",
+    "getattr-assigned": "g = getattr\ng(p, 'read_text')()",
+    "getattr-other-opener": "import tempfile\ngetattr(tempfile, 'NamedTemporaryFile')('w')",
+    # A name the module imports, or binds to a zip archive, bound again some other way: its `.open` may be a path's.
+    "imported-name-rebound": (
+        "import logging as log\n"
+        "def write(run):\n"
+        "    log = run / 'log.txt'\n"
+        "    with log.open('w') as handle:\n"
+        "        handle.write('done')\n"),
+    "zip-name-loop": "import zipfile\nwith zipfile.ZipFile(z) as f:\n    pass\nfor f in paths:\n    f.open('w')",
+    "zip-name-branch": "import zipfile\nif fresh:\n    f = p\nelse:\n    f = zipfile.ZipFile(z)\nf.open('w')",
+    "zip-name-comprehension": "import zipfile\nf = zipfile.ZipFile(z)\n[f.open('w') for f in paths]",
+    "zip-name-class-body": (
+        "import zipfile\n"
+        "archive = p\n"
+        "def read(z):\n"
+        "    class Kept:\n"
+        "        archive = zipfile.ZipFile(z)\n"
+        "    return archive.open('w')\n"),
+    "zip-name-global": (
+        "import zipfile\n"
+        "f = zipfile.ZipFile(z)\n"
+        "def swap():\n"
+        "    global f\n"
+        "    f = p\n"
+        "f.open('w')\n"),
 }
 NAMED = {
     "open-encoding": "open(p, 'r', encoding='utf-8')",
@@ -285,6 +380,21 @@ NAMED = {
     "zip-member": "import zipfile\nwith zipfile.ZipFile(z) as zf:\n    zf.open(info)",
     "zip-assigned": "import zipfile\nzf = zipfile.ZipFile(z)\nzf.open('a')",
     "a-function-named-read-text": "def read_text(backend):\n    return backend\nread_text(b)",
+    # The way out of an alias-scope finding: os.open under a name of its own.
+    "alias-scope-renamed": (
+        "from io import open as reader\n"
+        "def unrelated():\n"
+        "    from os import open as raw\n"
+        "    return raw\n"
+        "def read_report(path):\n"
+        "    with reader(path, 'r', encoding='utf-8') as handle:\n"
+        "        return handle.read()\n"),
+    "imported-name-literal": "try:\n    from PIL import Image\nexcept ImportError:\n    Image = None\nImage.open(p)",
+    "zip-member-loop": (
+        "import zipfile\n"
+        "with zipfile.ZipFile(z) as zf:\n"
+        "    for info in zf.infolist():\n"
+        "        zf.open(info)\n"),
 }
 
 
