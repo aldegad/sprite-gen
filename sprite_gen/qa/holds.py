@@ -589,7 +589,7 @@ def run(**kwargs: object) -> int:
         print(f"inspect-holds: {nothing}", file=sys.stderr)
         return 2
     if report["unlisted"]:
-        runs = "; ".join(f"{name} {', '.join(str(r['from']) if r['from'] == r['to'] else f'{r['from']}-{r['to']}' for r in row['unlistedRuns'])}"
+        runs = "; ".join(f"{name} {', '.join(str(r['from']) if r['from'] == r['to'] else str(r['from']) + '-' + str(r['to']) for r in row['unlistedRuns'])}"
                          for name, row in report["table"].items() if row["unlisted"])
         many = report["unlisted"] > 1
         print(f"inspect-holds: {report['unlisted']} frame{'s' if many else ''} show{'' if many else 's'} the picture of the "
