@@ -27,11 +27,14 @@ the module only imports, a module's own `open` such as `Image.open` or `os.open`
 `Image = None` after a failed import, does not count: a literal has no `open`), or a name a scope binds to a
 `zipfile.ZipFile` and to nothing else, whose `open` reads bytes.
 
-A spawner reads text only when its call says so, so its call's keywords are what is checked, wherever the spawner
-goes: a call of any name bound to it; a call it is handed to as an argument (`functools.partial(run, text=True)`,
-`probe(cmd, run=run)`), read by that call's keywords; and a call of something the scan cannot name (a parameter, an
-attribute of an object, a call's result) that passes `text` or `universal_newlines`. A spawner passed on any other way
-uncalled (into a container, as a return value, to an attribute) is found, its call not seen.
+A spawner reads text when its call says so (`getoutput` and `getstatusoutput` always do), so its call's keywords are
+what is checked, wherever the spawner goes: a call of any name bound to it; a call it is handed to as an argument
+(`functools.partial(run, text=True)`, `probe(cmd, run=run)`), read by that call's keywords as the spawner it is handed
+(`partial(getoutput)` reads text, `partial(getoutput, encoding="utf-8")` names its encoding), and a call handed that
+call's result (`partial(partial(run), text=True)`), read by its own keywords alone; and a call of something the scan
+cannot name (a parameter, an attribute of an object, a call's result) that passes `text` or `universal_newlines`. A
+spawner passed on any other way uncalled (into a container, as a return value, to an attribute) is found, its call
+not seen.
 
 What it does not see:
 - a name another module of the package binds (`from .x import reader`, `from .x import *`, a module's `__getattr__`):
@@ -141,7 +144,7 @@ SPAWNERS = {
     "subprocess.getoutput": (True, None),
     "subprocess.getstatusoutput": (True, None),
 }
-SPAWNER_BY_KEYWORDS = (False, None)  # a spawner read from its call's keywords alone: handed on, or not named
+SPAWNER_BY_KEYWORDS = (False, None)  # a spawner read from its call's keywords alone: not named
 TEXT_MODE = ("text", "universal_newlines")  # the keywords that ask a spawner for text, and mark a call as one
 LOCALE_ONLY = {"os.popen"}  # reads a child's output as text in the locale's encoding, and takes no encoding
 BUILTINS = {"open": {"builtins.open"}, "getattr": {"builtins.getattr"}}  # names a built-in, whatever else binds them
@@ -266,6 +269,11 @@ def _shifted(spec: tuple) -> tuple:
 def _none(node: ast.AST | None) -> bool:
     """Whether `node` is absent or the literal None: an argument not given."""
     return node is None or isinstance(node, ast.Constant) and node.value is None
+
+
+def _handed(call: ast.Call) -> list[ast.AST]:
+    """What `call` is handed: each argument but an unpacked one, by position or by keyword."""
+    return [a for a in call.args if not isinstance(a, ast.Starred)] + [k.value for k in call.keywords if k.arg]
 
 
 def _encoding(encoding: ast.AST | None, what: str) -> str | None:
@@ -401,11 +409,10 @@ class _Scan(ast.NodeVisitor):
             if bound:
                 specs.append((spec, what))
         whys = [why for why in (self.locale(node, spec, what) for spec, what in specs) if why]
-        arguments = [a for a in node.args if not isinstance(a, ast.Starred)] + [k.value for k in node.keywords if k.arg]
+        arguments = _handed(node)
         self.handed.update(id(argument) for argument in arguments)
-        handed = sorted({name for argument in arguments for name in self.qualify(argument).intersection(SPAWNERS)})
         children = [(SPAWNERS[name], name) for name in sorted(found.intersection(SPAWNERS))]
-        children += [(SPAWNER_BY_KEYWORDS, f"a call handed {name}") for name in handed]
+        children += [((always, None), f"a call handed {name}") for name, always in sorted(self.given(arguments))]
         if not children and self.nameless(func) and any(k.arg in TEXT_MODE for k in node.keywords):
             children.append((SPAWNER_BY_KEYWORDS, "a call the scan cannot name, asking for text"))
         whys += [why for why in (self.child(node, spec, what) for spec, what in children) if why]
@@ -418,6 +425,19 @@ class _Scan(ast.NodeVisitor):
             if isinstance(name, ast.Constant) and name.value in BY_NAME:
                 self.flag(node, f"getattr(..., {name.value!r}): an opener taken by name, its call not seen")
         self.generic_visit(node)
+
+    def given(self, arguments: list[ast.AST]) -> set[tuple[str, bool]]:
+        """Each spawner `arguments` hand to a call, and whether it reads text whatever that call says: one an argument
+        names is read as that spawner (getoutput and getstatusoutput always read text); one handed to a call an
+        argument is the result of (`partial(partial(run), text=True)`) is read by the call's keywords alone, the inner
+        call being read by its own where it stands."""
+        given: set[tuple[str, bool]] = set()
+        for argument in arguments:
+            if isinstance(argument, ast.Call):
+                given.update((name, False) for name, _ in self.given(_handed(argument)))
+            else:
+                given.update((name, SPAWNERS[name][0]) for name in self.qualify(argument).intersection(SPAWNERS))
+        return given
 
     def child(self, call: ast.Call, spec: tuple, what: str) -> str | None:
         """Why `call`, read as starting a child (`spec`: whether it always reads text, and where `universal_newlines`
@@ -468,8 +488,8 @@ class _Scan(ast.NodeVisitor):
 
     def uncalled_child(self, node: ast.AST) -> str | None:
         """Why `node`, a name or a dotted name not called, passes on what reads a child's output where its call is not
-        seen: a spawner anywhere but bound to a name (followed) or handed to a call (read by its keywords), or a call
-        that reads text in the locale's encoding whatever it is given."""
+        seen: a spawner anywhere but bound to a name (followed) or handed to a call (read by its keywords as that
+        spawner, `given`), or a call that reads text in the locale's encoding whatever it is given."""
         found = self.qualify(node)
         if found & LOCALE_ONLY:
             return "a call that reads a child's output in the locale's encoding, passed on uncalled"
