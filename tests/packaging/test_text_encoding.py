@@ -705,6 +705,47 @@ LOCALE = {
     "nameless-parameter": "def probe(runner, cmd):\n    return runner(cmd, capture_output=True, text=True)",
     "nameless-attribute": "self.run(cmd, universal_newlines=True)",
     "nameless-result": "import subprocess\ngetattr(subprocess, 'run')(cmd, text=True)",
+    # getoutput and getstatusoutput read text whatever they are told, so a call either is handed to reads text unless
+    # it names an encoding: under every name the module binds them to, handed by position or by keyword, in a partial
+    # of a partial, in a container. A review's probe is the first row. os.popen is found handed on as passed on.
+    "subprocess-getoutput-handed-on": (
+        "import functools, subprocess\n"
+        "read_output = functools.partial(subprocess.getoutput)\n"
+        "read_output(cmd)\n"),
+    "subprocess-getstatusoutput-handed-on": (
+        "import functools, subprocess\nfunctools.partial(subprocess.getstatusoutput, cmd)"),
+    "subprocess-getoutput-handed-on-by-alias": (
+        "from functools import partial\nfrom subprocess import getoutput as g\npartial(g, cmd)"),
+    "subprocess-getoutput-handed-on-from-star": (
+        "from functools import partial\nfrom subprocess import *\npartial(getoutput)"),
+    "subprocess-getoutput-handed-on-assigned": (
+        "import functools, subprocess\ng = subprocess.getoutput\nfunctools.partial(g)"),
+    "subprocess-getstatusoutput-handed-on-module-assigned": (
+        "import functools, subprocess\nsp = subprocess\nfunctools.partial(sp.getstatusoutput)"),
+    "subprocess-getoutput-handed-on-default": (
+        "import functools, subprocess\n"
+        "def reader(get=subprocess.getoutput):\n"
+        "    return functools.partial(get)\n"),
+    "subprocess-getoutput-partial-of-partial": (
+        "import functools, subprocess\nfunctools.partial(functools.partial(subprocess.getoutput), cmd)"),
+    "subprocess-getoutput-handed-by-keyword": (
+        "import functools, subprocess\nfunctools.partial(func=subprocess.getoutput)"),
+    "subprocess-getstatusoutput-handed-by-keyword": (
+        "import subprocess\n"
+        "def probe(cmd, run):\n"
+        "    return run(cmd)\n"
+        "probe(cmd, run=subprocess.getstatusoutput)\n"),
+    "subprocess-getoutput-mapped": "import subprocess\nlist(map(subprocess.getoutput, cmds))",
+    "subprocess-getoutput-handed-on-in-a-container": (
+        "import functools, subprocess\nRUNNERS = [functools.partial(subprocess.getoutput)]\nRUNNERS[0](cmd)"),
+    "subprocess-getoutput-out-of-a-container": (
+        "import functools, subprocess\nRUNNERS = {'probe': subprocess.getoutput}\nfunctools.partial(RUNNERS['probe'])"),
+    "os-popen-handed-on": "import functools, os\nfunctools.partial(os.popen, cmd)",
+    "os-popen-handed-on-by-alias": "import functools\nfrom os import popen as p\nfunctools.partial(p)",
+    "os-popen-handed-on-from-star": "import functools\nfrom os import *\nfunctools.partial(func=popen)",
+    # run handed to a call, and that call's result handed to one that asks for text.
+    "subprocess-run-partial-of-partial": (
+        "import functools, subprocess\nfunctools.partial(functools.partial(subprocess.run), text=True)"),
     # The closed reading on a spawner's name: subprocess.run under a name another scope binds os.system to is checked
     # wherever that name is called, whichever binding the walk reaches last.
     "subprocess-alias-scope-later-function": (
@@ -789,6 +830,15 @@ NAMED = {
         "    return probe(cmd, run=run)\n"),
     "subprocess-handed-on-encoding": (
         "import functools, subprocess\nfunctools.partial(subprocess.run, text=True, encoding='utf-8')"),
+    # getoutput handed to a call that names an encoding; run handed on with nothing that asks for text.
+    "subprocess-getoutput-handed-on-encoding": (
+        "import functools, subprocess\nfunctools.partial(subprocess.getoutput, encoding='utf-8')"),
+    "subprocess-getoutput-partial-of-partial-encoding": (
+        "import functools, subprocess\n"
+        "functools.partial(functools.partial(subprocess.getoutput, encoding='utf-8'), cmd)"),
+    "subprocess-run-handed-on-bytes": "import functools, subprocess\nfunctools.partial(subprocess.run, cmd)",
+    "subprocess-run-partial-of-partial-bytes": (
+        "import functools, subprocess\nfunctools.partial(functools.partial(subprocess.run, cmd), check=True)"),
     "os-system": "import os\nos.system(cmd)",
     # `text` on a call the scan names, and that is no spawner: a function or a class of the module, or an import.
     "a-function-with-a-text-keyword": "def piece(text):\n    return text\npiece(text='walk')",
