@@ -858,12 +858,20 @@ def run_item(
             result["clip"] = {"attempts": attempts, "duration": duration, "last_frame": str(end_frame) if end_frame is not None else pins}
             if attempts[-1] != 0 or not clip.exists():
                 raise SystemExit(f"clip generation failed after {len(attempts)} attempt(s); see {item_dir / 'clip.log'}")
-            try:  # what the clip ran on, as its report says: the Grok login or XAI_API_KEY
-                result["clip"]["auth_source"] = json.loads(clip_report.read_text()).get("auth_source")
-            except (OSError, ValueError):
-                result["clip"]["auth_source"] = None
+            # what the clip ran on, as its report says: the Grok login or XAI_API_KEY. The report is UTF-8
+            # (`sprite-gen video` writes it so), whatever the locale's encoding. One that is not there says nothing;
+            # one that is there and cannot be read stops the item, as a cached report that cannot be read does
+            try:
+                ran_on = json.loads(clip_report.read_text(encoding="utf-8"))
+            except OSError:
+                ran_on = {}
+            except ValueError as exc:
+                raise SystemExit(f"cannot read the clip report {clip_report}: {exc}") from exc
+            if not isinstance(ran_on, dict):
+                raise SystemExit(f"cannot read the clip report {clip_report}: it holds no JSON object")
+            result["clip"]["auth_source"] = ran_on.get("auth_source")
             if end_digest is not None:
-                generated = json.loads(clip_report.read_text())
+                generated = json.loads(clip_report.read_text(encoding="utf-8"))
                 generated["end_frame_sha256"] = end_digest
                 atomic_write_text(clip_report, json.dumps(generated, ensure_ascii=False, indent=2) + "\n")
 
