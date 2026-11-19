@@ -82,6 +82,17 @@ NOT_RIFE_SKIPS = {
     "tests/video/test_source_restoration.py::test_a_report_spelt_in_capitals_of_an_input_is_refused",
     "tests/video/test_source_restoration.py::test_a_manifest_spelt_in_capitals_of_an_input_is_refused",
     "tests/effects/test_shadow.py::test_an_output_spelt_in_capitals_of_the_source_is_refused",
+    "tests/frames/test_unpack_atlas_publish.py::test_overlapping_inputs_are_refused_before_anything_is_made"
+    "[out_inside_pngs_spelt_in_capitals]",
+    "tests/frames/test_unpack_atlas_publish.py::test_force_preserves_input_reached_through_a_link[frame-capitals]",
+    "tests/frames/test_unpack_atlas_publish.py::test_force_preserves_input_reached_through_a_link[group-capitals]",
+    "tests/frames/test_unpack_atlas_publish.py::test_force_preserves_input_reached_through_a_link[base-capitals]",
+    "tests/frames/test_unpack_atlas_publish.py::test_force_preserves_input_reached_through_a_link[ref-capitals]",
+    "tests/frames/test_unpack_atlas_publish.py::test_force_preserves_input_reached_through_a_link[group-frame-capitals]",
+    "tests/frames/test_unpack_atlas_publish.py::test_force_preserves_input_reached_through_a_link[group-ref-capitals]",
+    "tests/frames/test_unpack_atlas_publish.py::test_force_preserves_input_reached_through_a_link[meta-capitals]",
+    "tests/frames/test_unpack_atlas_publish.py::test_force_never_breaks_an_input_path_or_touches_what_lies_outside_the_run_dir"
+    "[M3-frame_through_a_link_in_out_spelt_in_capitals]",
     # os.kill(pid, 0) is a Ctrl+C to the console only on Windows, so only a Windows console holds what the case
     # measures; the lane's Linux host has none (its POSIX twin, the signal-0 case, runs there).
     "tests/spec/test_run_dir_lock.py::test_a_lock_holders_pid_is_judged_on_windows_without_a_ctrl_c_to_its_console",
