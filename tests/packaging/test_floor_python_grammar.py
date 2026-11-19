@@ -6,19 +6,20 @@ which only Python 3.12 and later read (PEP 701), and `sprite_gen.cli` imports th
 every `sprite-gen` command stopped with a SyntaxError. The lane runs a newer Python, which read it.
 
 Two checks, and both are needed. `ast.parse(source, feature_version=floor)` refuses the newer grammar its parser gates
-(a `type` statement, type parameters, `except A, B:`), but it reads every f-string the running Python reads, the five
+(a `type` statement, type parameters, `except A, B:`), but it reads every f-string the running Python reads, the six
 forms below among them. So while the floor is under 3.12, every f-string is also walked with the running tokenizer
-(which gives an f-string's parts as tokens from 3.12 on) and held to the four rules Python 3.11 holds a replacement
+(which gives an f-string's parts as tokens from 3.12 on) and held to the five rules Python 3.11 holds a replacement
 field to, measured on 3.11:
   - no quote that closes an f-string around it (3.11 reads an f-string as a plain string first, so that quote ends it);
   - no backslash, in a nested string or not;
   - no comment (a `#` inside a nested string, or in a format spec such as `{n:#x}`, 3.11 reads);
-  - no line break inside a single-quoted f-string.
+  - no line break inside a single-quoted f-string;
+  - no replacement field in the format spec of a field that is itself in a format spec (`{a:{b:{c}}}`, "expressions
+    nested too deeply"; `{a:{b:x}}` is read, and the count starts again inside an f-string nested in a field).
 On a Python older than 3.12 the parser is itself the old one, and `ast.parse` alone asks all of it.
 
 Not caught here: names the standard library added after the floor (`itertools.batched`, `typing.override`), code both
-read that runs differently, a format spec nested three deep (`{a:{b:{c}}}`, "expressions nested too deeply" on 3.11),
-and new grammar `feature_version` does not gate. A new form needs its own sample below."""
+read that runs differently, and new grammar `feature_version` does not gate. A new form needs its own sample below."""
 
 import ast
 import io
@@ -38,17 +39,25 @@ QUOTE = "a quote that closes the f-string around it"
 BACKSLASH = "a backslash"
 COMMENT = "a comment"
 LINE_BREAK = "a line break inside a single-quoted f-string"
+NESTED_SPEC = "a format spec nested three deep"
 
 
 class _Field:
-    """An f-string being walked: the quote that closes it, and where its replacement field stands."""
+    """A replacement field open in an f-string."""
+
+    def __init__(self) -> None:
+        self.spec = False  # past the field's ':', in its format spec
+        self.brackets = 0  # brackets opened inside the field and not yet closed
+
+
+class _FString:
+    """An f-string being walked: the quote that closes it, and its replacement fields open, outermost first (a field in
+    a format spec is one more)."""
 
     def __init__(self, start: tokenize.TokenInfo) -> None:
         prefix_free = start.string.lstrip("rRfFbBuU")
         self.quote = prefix_free[:3] if prefix_free[:3] in ('"""', "'''") else prefix_free[:1]
-        self.open = False  # inside a replacement field
-        self.spec = False  # past the field's ':', in its format spec
-        self.brackets = 0  # brackets opened inside the field and not yet closed
+        self.fields: list[_Field] = []
 
 
 def fstring_rules_broken(source: str) -> list[tuple[int, str]]:
@@ -63,42 +72,47 @@ def fstring_rules_broken(source: str) -> list[tuple[int, str]]:
         return lines[end[0] - 1][end[1]:] + "".join(lines[end[0]:start[0] - 1]) + lines[start[0] - 1][:start[1]]
 
     found: list[tuple[int, str]] = []
-    stack: list[_Field] = []
+    stack: list[_FString] = []
     before = (1, 0)
     for tok in tokenize.generate_tokens(io.StringIO(source).readline):
         text = tok.string
         gap = between(before, tok.start) if stack else ""
         before = tok.end
-        for depth, field in enumerate(stack):
-            innermost = depth == len(stack) - 1
+        for depth, fstring in enumerate(stack):
             # A token inside an f-string nested in this one's field is inside this one's field; the innermost
-            # f-string's own literal text, and its format spec text, are not.
-            if innermost and (not field.open or (tok.type == tokenize.FSTRING_MIDDLE and field.spec
-                                                 and field.brackets == 0)):
+            # f-string's own text (FSTRING_MIDDLE: its literal text and its format spec text) is not.
+            if depth == len(stack) - 1 and (not fstring.fields or tok.type == tokenize.FSTRING_MIDDLE):
                 continue
-            if field.quote in text:
+            if fstring.quote in text:
                 found.append((tok.start[0], QUOTE))
             if "\\" in text or "\\" in gap:
                 found.append((tok.start[0], BACKSLASH))
             if tok.type == tokenize.COMMENT:
                 found.append((tok.start[0], COMMENT))
-            if len(field.quote) == 1 and ("\n" in text or "\n" in gap):
+            if len(fstring.quote) == 1 and ("\n" in text or "\n" in gap):
                 found.append((tok.start[0], LINE_BREAK))
         if tok.type == tokenize.FSTRING_START:
-            stack.append(_Field(tok))
+            stack.append(_FString(tok))
         elif tok.type == tokenize.FSTRING_END:
             stack.pop()
         elif stack and tok.type == tokenize.OP:
-            field = stack[-1]
-            if not field.open:
-                field.open = tok.string == "{"
+            fields = stack[-1].fields
+            if not fields:
+                if tok.string == "{":
+                    fields.append(_Field())
+                continue
+            field = fields[-1]
+            if tok.string == "{" and field.spec and field.brackets == 0:
+                fields.append(_Field())
+                if len(fields) > 2:
+                    found.append((tok.start[0], NESTED_SPEC))
             elif tok.string == ":" and field.brackets == 0:
                 field.spec = True
-            elif tok.string in "([{":
+            elif tok.string in ("(", "[", "{"):
                 field.brackets += 1
-            elif tok.string in ")]}":
+            elif tok.string in (")", "]", "}"):
                 if field.brackets == 0 and tok.string == "}":
-                    field.open = field.spec = False
+                    fields.pop()
                 else:
                     field.brackets -= 1
     return sorted(set(found))
@@ -138,6 +152,7 @@ PEP_701 = {
     "a comment in a field": ('s = f"""{x  # a comment\n}"""\n', COMMENT),
     "a line break in a single-quoted field": ('s = f"{x\n}"\n', LINE_BREAK),
     "same quotes three deep": ("s = f\"{f'{f\"{x}\"}'}\"\n", QUOTE),
+    "a format spec nested three deep": ('s = f"{x:>{width:{fill}}}"\n', NESTED_SPEC),
 }
 
 # Grammar after 3.11 that `feature_version` refuses.
@@ -157,6 +172,9 @@ READ_BY_3_11 = {
     "a backslash in a format spec": 's = f"{n:\\x41>5}"\n',
     "a backslash in the literal text": 's = f"a\\n{x}\\tb"\n',
     "a line break inside a triple-quoted field": 's = f"""{x +\n y}"""\n',
+    "a format spec nested two deep": 's = f"{x:{width}} {y:>{width:d}} {z:{a}{b}} {n:{w:\\x41}}"\n',
+    "two deep inside an f-string in a spec field": "s = f\"{x:{f'{y:{width}}'}}\"\n",
+    "braces of a dict inside a spec field": "s = f\"{x:{ {'w': 3}['w']}}\"\n",
     "the line holds.py holds now": (
         "runs = \"; \".join(f\"{name} {', '.join(str(r['from']) if r['from'] == r['to'] else str(r['from']) + '-' + "
         "str(r['to']) for r in row['unlistedRuns'])}\"\n"
@@ -184,7 +202,7 @@ def test_what_3_11_reads_is_read_at_a_floor_of_3_11(form: str) -> None:
 
 
 def test_a_floor_raised_to_3_12_lets_the_f_string_forms_through() -> None:
-    """requires-python raised to 3.12, the f-string rules lift: the five forms are read wherever the running Python reads
+    """requires-python raised to 3.12, the f-string rules lift: the six forms are read wherever the running Python reads
     them (3.12 and later), and refused only by a Python that cannot read them itself."""
     readable_here = sys.version_info >= (3, 12)
     assert {form: unread(source, (3, 12)) == [] for form, (source, _rule) in PEP_701.items()} == dict.fromkeys(
