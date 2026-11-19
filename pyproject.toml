@@ -18,7 +18,7 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
-    "pillow>=12.3.0,<13",
+    "pillow>=13.0.0,<14",
     # NumPy is a direct dependency, never a transitive ride-along: the chroma
     # extraction path imports it directly and must not depend on some other
     # package happening to pull it in.

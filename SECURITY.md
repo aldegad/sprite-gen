@@ -38,8 +38,8 @@ a package that arrives only because some other dependency pulls it in can leave
 on the next clean environment, and this package's own code must not be at the
 mercy of another package's dependency list.
 
-Pillow requires `>=12.3.0,<13`, which excludes versions affected by the
-security issues fixed in the [Pillow 12.3.0 release](https://pillow.readthedocs.io/en/stable/releasenotes/12.3.0.html).
+Pillow requires `>=13.0.0,<14`, which excludes versions affected by the
+security issues fixed in the [Pillow 13.0.0 release](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html).
 NumPy requires `>=2.2.6,<3` to retain CPython 3.10 compatibility. A version floor
 does not guarantee future advisory coverage: audit the exact versions resolved
 for each supported interpreter when releasing, and audit existing environments
