@@ -26,12 +26,12 @@ from __future__ import annotations
 from math import isqrt
 from typing import Any
 
-SUBJECT_DEFAULT = "character"
-SUBJECTS = ("character", "effect")
+SUBJECT_CHARACTER, SUBJECT_EFFECT = SUBJECTS = ("character", "effect")
+SUBJECT_DEFAULT = SUBJECT_CHARACTER
 
 # Multipliers over the cell's equivalent side. Effect is half the character
 # floor at the formula level; integer ceilings can differ by 1.
-SUBJECT_FLOOR_RATIOS = {"character": (1, 1), "effect": (1, 2)}
+SUBJECT_FLOOR_RATIOS = {SUBJECT_CHARACTER: (1, 1), SUBJECT_EFFECT: (1, 2)}
 
 
 def subject_kind(request: dict[str, Any]) -> str:

@@ -12,6 +12,7 @@ from numbers import Integral
 from PIL import Image
 
 from sprite_gen._deps import np
+from sprite_gen.video.loop_vocab import ANCHOR_MOTION, CYCLE_FIXED
 
 REGION_WEIGHTS = (0.7, 0.3)
 SEARCH_RADIUS = (14, 28)
@@ -39,11 +40,11 @@ def parse_region(value: str) -> Box:
 
 
 def validate_request(anchor: str, cycle_mode: str, length: int | None, regions: list[Box] | None) -> None:
-    if anchor != "motion":
+    if anchor != ANCHOR_MOTION:
         if regions is not None:
             raise ValueError("--anchor-region requires --anchor motion")
         return
-    if cycle_mode != "fixed" or length is None or length < 6:
+    if cycle_mode != CYCLE_FIXED or length is None or length < 6:
         raise ValueError("--anchor motion requires --cycle fixed and --length >= 6")
     if regions is None or len(regions) != 2:
         raise ValueError("--anchor motion needs two --anchor-region values: head, then torso")

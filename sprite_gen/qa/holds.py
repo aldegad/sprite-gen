@@ -45,6 +45,7 @@ from sprite_gen._deps import np
 from sprite_gen.spec.runio import atomic_write_text
 from sprite_gen.util.cli_kwargs import namespace_from_kwargs
 from sprite_gen.util.console import utf8_streams
+from sprite_gen.video import canvas as canvas_mod
 from sprite_gen.video import held_fill as held_fill_mod
 
 REPORT_KIND = "sprite-gen-holds-report"
@@ -54,7 +55,7 @@ MERGE_PX = 6  # solid pixels this near each other are one figure (a hand drawn a
 FIGURE_MIN_PX = 64  # a figure holds at least this many solid pixels, or FIGURE_MIN_PX_CAP of the frame's largest part ...
 FIGURE_MIN_PX_CAP = 0.5  # ... where that is fewer: the largest part of a frame is a figure however small ...
 FIGURE_MIN_SHARE = 0.02  # ... and this share of the largest part in its frame: less is a speck
-KEYS = ("auto", "green", "magenta", "white")  # video-frames' --key
+KEYS = canvas_mod.KEYS  # video-frames' --key
 VIDEO_SUFFIXES = (".mp4", ".mov", ".webm", ".mkv", ".m4v")
 LIST_SUFFIX = ".holds.json"
 NOTHING = "no frame was read against the frame before"  # the error of a reading that read nothing (NothingRead)

@@ -56,6 +56,21 @@ def test_a_turned_view_needs_its_facing() -> None:
     assert set(h.VIEWS) == set(batch_mod.VIEW_TEXT)
 
 
+
+def test_the_views_are_named_once_and_every_view_table_holds_them() -> None:
+    """The views are spelt out here once, as the module declares them; every other table of views is held to the
+    declaration, so a view spelt one letter off in one of them (a picture side, a room read, a stepping-foot read,
+    a sheet's compass code) fails here instead of quietly never matching."""
+    from sprite_gen.gen.facing import FACINGS
+    from sprite_gen.video import cadence, canvas, set_sheet
+
+    assert h.VIEWS == ("side", "front", "back", "front_diagonal", "back_diagonal")
+    assert (h.VIEW_SIDE, h.VIEW_FRONT, h.VIEW_BACK, h.VIEW_FRONT_DIAGONAL, h.VIEW_BACK_DIAGONAL) == h.VIEWS
+    assert h.LATERAL_VIEWS == {h.VIEW_SIDE, h.VIEW_FRONT_DIAGONAL, h.VIEW_BACK_DIAGONAL}
+    assert set(cadence.STEP_VIEWS) <= set(h.VIEWS) and set(canvas.ROOM_VIEWS) <= set(h.VIEWS)
+    assert set(set_sheet.CODES) == ({v for v in h.VIEWS if v not in h.LATERAL_VIEWS}
+                                    | {f"{v}@{f}" for v in h.LATERAL_VIEWS for f in FACINGS})
+
 @pytest.mark.parametrize("view,facing", list(OWN_LEFT))
 def test_the_sentence_says_the_side_and_where_it_is_in_the_view(view, facing) -> None:
     text = h.text([h.parse(WATCH)], view, facing)

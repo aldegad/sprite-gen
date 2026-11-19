@@ -163,11 +163,22 @@ def test_no_table_keys_a_key_colour_by_its_spelling() -> None:
 
 
 def test_every_video_key_flag_reads_its_declaration() -> None:
-    """video-canvas and video-set take `canvas.KEYS`, video-prompt the keys its redraw sentence is written for."""
+    """video-canvas, video-set and video-frames (which keys a clip filmed from a video-canvas still) take
+    `canvas.KEYS`, video-prompt the keys its redraw sentence is written for."""
     from sprite_gen.video import canvas, clip_prompt
 
-    declared = {"video-canvas": canvas.KEYS, "video-set": canvas.KEYS, "video-prompt": clip_prompt.START_STILL_KEYS}
+    declared = {"video-canvas": canvas.KEYS, "video-set": canvas.KEYS, "video-frames": canvas.KEYS,
+                "video-prompt": clip_prompt.START_STILL_KEYS}
     assert [verb for verb, keys in declared.items() if _key_choices(verb) is not keys] == []
+
+
+def test_the_video_key_sets_are_the_cutout_key_names() -> None:
+    """Spelt out, so a key name changed in `cutout` shows here: what a still is padded on (`canvas.KEYS`) and
+    what a clip's frames are read as keyed on (`frames.KEYS_READ`; brightness is the alpha mode with no key)."""
+    from sprite_gen.video import canvas, frames
+
+    assert canvas.KEYS == ("auto", "green", "magenta", "white")
+    assert frames.KEYS_READ == ("green", "magenta", "white", "brightness")
 
 
 def test_the_cutout_key_flag_reads_cutout_keys() -> None:

@@ -232,7 +232,7 @@ def check(frames: list[Image.Image], *, item: handed_mod.Handed, view: str, faci
     expect = handed_mod.placement(item.side, view, facing)
     full = full_ratio(references or [], marker, zone)
     # a far limb in a side view swings out in front of the body; any other far part stays behind it
-    swings = handed_mod.limb(item.part) if view == "side" and expect["depth"] == "far" else None
+    swings = handed_mod.limb(item.part) if view == handed_mod.VIEW_SIDE and expect["depth"] == "far" else None
     rows, fails = [], []
     for i, frame in enumerate(frames):
         m = measure(frame, marker, strap=strap, zone=zone)
@@ -257,7 +257,7 @@ def check(frames: list[Image.Image], *, item: handed_mod.Handed, view: str, faci
                 if ahead < FAR_FRONT_MIN:
                     bad.append(f"at or behind the body's centre ({ahead:+.2f} of the body's height in front of it, at "
                                f"least {FAR_FRONT_MIN} for a far {swings} swung forward): the item is on the near {swings}")
-            elif view == "side" and expect["depth"] == "far" and not swings and full is not None and whole:
+            elif view == handed_mod.VIEW_SIDE and expect["depth"] == "far" and not swings and full is not None and whole:
                 bad.append(f"in full view ({b['ratio'] / full:.0%} of the whole item) on the far side")
         rows.append({**m, "bad": bad})
         if bad:
@@ -265,15 +265,15 @@ def check(frames: list[Image.Image], *, item: handed_mod.Handed, view: str, faci
     # A side view has no picture side, so near and far differ only in size: on the near side a frame shows the
     # item when its largest blob is more than a sliver (the far side's own limit), or a far sliver turned over
     # would count as the near item shown.
-    sized = view == "side" and (expect["depth"] == "near" or swings) and full is not None
+    sized = view == handed_mod.VIEW_SIDE and (expect["depth"] == "near" or swings) and full is not None
     shown = sum(1 for r in rows if r["blobs"] and (not sized or r["blobs"][0]["ratio"] > FAR_MAX * full))
     rules: dict[str, Any] = {}
     if expect["picture"]:
         rules["picture_side"] = expect["picture"]
     if expect["depth"] == "near":
-        near_min = SIDE_NEAR_SHOWN_MIN if view == "side" else NEAR_SHOWN_MIN
+        near_min = SIDE_NEAR_SHOWN_MIN if view == handed_mod.VIEW_SIDE else NEAR_SHOWN_MIN
         rules["near_shown"] = {"min": near_min, "shown": shown, "frames": len(rows), "ok": shown >= near_min * len(rows)}
-    if view == "side":
+    if view == handed_mod.VIEW_SIDE:
         size = ({"checked": False, "why": "no --reference: the item seen whole is unknown"} if full is None
                 else {"checked": True, "full_ratio": round(full, 6)})
         if swings:

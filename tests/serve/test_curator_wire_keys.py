@@ -153,7 +153,7 @@ CURATOR_READS: dict[str, tuple[str, ...]] = {
     W.LAG: (_member("defaults", W.LAG),),
     W.BREATHS: (_member("defaults", W.BREATHS),),
     # /api/base-grid
-    W.GRID: (rf'fetch\("/api/base-grid"\)\)\.json\(\)\)\.{W.GRID}\b',),
+    W.GRID: (rf'fetch\("{re.escape(serve_curation.Route.BASE_GRID)}"\)\)\.json\(\)\)\.{W.GRID}\b',),
     W.X_EDGES: (_member("grid", W.X_EDGES),),
     W.Y_EDGES: (_member("grid", W.Y_EDGES),),
     # POST results
@@ -198,17 +198,9 @@ CURATOR_OTHER_DICTS = {
     ("_breathe_source_frame", "rows"),     # frames-manifest default
     ("_build_run_state_impl", "rows"),     # frames-manifest default
     ("_anchor_views", "url"),              # the inner anchor view, read back by _state_refs
-    ("CurationHandler.do_POST", "gif"),    # compare format -> MIME
-    ("CurationHandler.do_POST", "webm"),
-    ("CurationHandler.do_POST", "mp4"),
 }
 CURATOR_OTHER_STORES = {
     ("_heal_state", "*"),
-    ("payload", "anchors"),                # curation.json keys a save does not author, carried over
-    ("payload", "recolor"),
-    ("payload", "pixel_unfake"),
-    ("tnorm", "dx"),                       # curation transform keys
-    ("tnorm", "dy"),
     ("request", "fps"),                    # sprite-request.json
 }
 

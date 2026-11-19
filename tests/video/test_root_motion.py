@@ -150,6 +150,12 @@ def test_the_air_given_only_a_length_keeps_the_clip_s_own_gravity_and_speed():
     assert record["made"] == 0  # every cell a frame: nothing to make, no RIFE asked for
 
 
+def test_the_cuts_that_carry_a_body_are_the_ones_played_once_with_a_body():
+    # Written as a strip's `kind` says it: a set built from the names agrees with itself whatever they say, and no
+    # other test reads a cut of each of these kinds (an effect's lifetime carries no body).
+    assert rm.KINDS == ("once", "once-return", "one-shot")
+
+
 def test_a_cut_with_no_air_is_not_retimed_and_says_why():
     frames = [J.draw(0)] * 2 + J.jump()[:J.TAKEOFF + 1]
     floor = max(nonloop.body_box(f)[3] for f in frames)
@@ -363,6 +369,15 @@ def test_video_set_hands_the_switches_to_each_cut_and_says_each_air(monkeypatch,
 
     monkeypatch.setattr(batch.loop_mod, "run_loop", run_loop)
     monkeypatch.setattr(batch, "_staggered_start", lambda gap: None)
+    # The side still is inspected for its facing (`facing.prepare_still`), a vision call on the provider: it answers
+    # here, fixed, as every other video-set test has it answer, and once, for the one side still.
+    inspected: list[Path] = []
+
+    def inspect(path, **kw):
+        inspected.append(path)
+        return "right", {}
+
+    monkeypatch.setattr(batch.facing_mod.vision, "grok_inspect", inspect)
     still = tmp_path / "side.png"
     Image.new("RGBA", (64, 64), (200, 80, 30, 255)).save(still)
     result = batch.run_set(bases={"side": still}, states=["jump"], root=tmp_path / "set", character=None, duration=3,
@@ -371,6 +386,7 @@ def test_video_set_hands_the_switches_to_each_cut_and_says_each_air(monkeypatch,
     assert [(kw["air_retime"], kw["meters_per_px"]) for kw in seen] == [("gravity=9.81,air=0.6,speed=4", 0.005)]
     assert result["items"][0]["loop"]["air"] == ["air 0.21 s, apex 0.42 m (cells 3-6)"]
     assert any("air not retimed" in w for w in result["warnings"])
+    assert len(inspected) == 1
     with pytest.raises(SystemExit, match="--meters-per-px"):
         batch.run_set(bases={"side": still}, states=["jump"], root=tmp_path / "set2", character=None, duration=3,
                       resolution="720p", key="green", concurrency=1, force=False, gap=0, video_runner=video,
