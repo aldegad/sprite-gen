@@ -238,7 +238,10 @@ def native_pick(kind: str = PICK_FOLDER) -> dict:
     script = _PICK_SCRIPTS.get(kind)
     if script is None:
         raise ValueError(f"unknown pick kind: {kind}")
-    proc = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    # osascript writes UTF-8 whatever the locale. The path is mounted, so one that is not UTF-8 is refused (a
+    # ValueError: the route answers 400), not changed into another path.
+    proc = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, encoding="utf-8",
+                          errors="strict")
     if proc.returncode != 0:
         if "-128" in (proc.stderr or ""):  # user canceled
             return {Wire.CANCELLED: True}

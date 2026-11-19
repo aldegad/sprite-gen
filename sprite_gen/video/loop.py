@@ -1007,7 +1007,9 @@ def img2webp_supports_exact(binary: str | None = None) -> bool:
     if not binary:
         return False
     try:
-        proc = subprocess.run([binary, "-h"], capture_output=True, text=True, timeout=10)
+        # The help is ASCII and only "-exact" is looked for in it: a byte that is not UTF-8 is replaced
+        proc = subprocess.run([binary, "-h"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return False
     return "-exact" in (proc.stdout + proc.stderr)
@@ -1033,7 +1035,11 @@ def write_webp(frames: list[Image.Image], out: Path, *, delay_ms: int, loop: int
             p = workdir / f"webp-{k:03d}.png"
             im.save(p)
             paths.append(str(p))
-        proc = subprocess.run([img2webp, "-loop", str(loop), "-lossless", "-exact", "-d", str(delay_ms), *paths, "-o", str(out)], capture_output=True, text=True)
+        # img2webp prints its paths in UTF-8 when built for Unicode on Windows (libwebp examples/unicode.h), else in
+        # the code page, and prints the output path even when it succeeds. The text is only quoted when it fails, so
+        # a byte that is not UTF-8 is replaced.
+        proc = subprocess.run([img2webp, "-loop", str(loop), "-lossless", "-exact", "-d", str(delay_ms), *paths,
+                               "-o", str(out)], capture_output=True, text=True, encoding="utf-8", errors="replace")
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
     if proc.returncode != 0 or not out.is_file():

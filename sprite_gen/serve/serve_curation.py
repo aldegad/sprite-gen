@@ -1112,6 +1112,10 @@ def _run_module(name: str, run_dir: Path, *extra: str) -> dict:
         [sys.executable, "-m", qualified(name), "--run-dir", str(run_dir), *extra],
         capture_output=True,
         text=True,
+        # The step writes UTF-8 from its main on (util.console.utf8_streams). What it writes before that, a traceback
+        # from an import, is in the code page and is only shown, so a byte that is not UTF-8 is replaced.
+        encoding="utf-8",
+        errors="replace",
     )
     return {
         Wire.OK: proc.returncode == 0,
@@ -1569,7 +1573,8 @@ class CurationHandler(BaseHTTPRequestHandler):
                         else:
                             args += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18"]
                         args.append(str(out))
-                        proc = subprocess.run(args, capture_output=True, text=True)
+                        # ffmpeg writes UTF-8; its error is only quoted, so a byte that is not UTF-8 is replaced
+                        proc = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
                         if proc.returncode != 0 or not out.exists():
                             self._send_json({Wire.ERROR: f"ffmpeg failed: {proc.stderr[-300:]}"}, 500)
                             return

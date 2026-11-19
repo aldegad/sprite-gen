@@ -326,7 +326,9 @@ def _ffmpeg_binary():
 
 
 def _ffmpeg(args):
-    process = subprocess.run([_ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-y", *args], capture_output=True, text=True)
+    # ffmpeg writes UTF-8; its error is only quoted, so a byte that is not UTF-8 is replaced
+    process = subprocess.run([_ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-y", *args], capture_output=True,
+                             text=True, encoding="utf-8", errors="replace")
     if process.returncode:
         raise ValueError(f"ffmpeg failed: {process.stderr[-3000:]}")
 

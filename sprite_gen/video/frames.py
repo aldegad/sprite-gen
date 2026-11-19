@@ -155,7 +155,9 @@ def probe(clip: Path) -> dict[str, Any]:
     proc = subprocess.run(
         [ffprobe, "-v", "error", "-show_entries", "stream=index,codec_type,codec_name,pix_fmt,width,height,r_frame_rate,nb_frames",
          "-show_entries", "stream_disposition=attached_pic", "-show_entries", "format=duration", "-of", "json", str(clip)],
-        capture_output=True, text=True,
+        # ffprobe writes UTF-8 (paths too, on Windows); the fields read are numbers and ASCII names and the error is
+        # only quoted, so a byte that is not UTF-8 is replaced
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
         raise SystemExit(f"video-frames: ffprobe failed on {clip}: {proc.stderr.strip()[:300]}")
@@ -182,7 +184,9 @@ def extract(clip: Path, raw_dir: Path, stream_index: int | None = None) -> list[
     for old in raw_dir.glob("frame-*.png"):
         old.unlink()
     pick = ["-map", f"0:{stream_index}"] if stream_index is not None else []
-    proc = subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(clip), *pick, str(raw_dir / "frame-%04d.png")], capture_output=True, text=True)
+    # ffmpeg writes UTF-8; its error is only quoted, so a byte that is not UTF-8 is replaced
+    proc = subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(clip), *pick, str(raw_dir / "frame-%04d.png")],
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         raise SystemExit(f"video-frames: ffmpeg failed on {clip}: {proc.stderr.strip()[:300]}")
     files = sorted(raw_dir.glob("frame-*.png"))
