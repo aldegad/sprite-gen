@@ -106,3 +106,18 @@ def test_a_missing_clip_report_leaves_auth_source_empty(tmp_path, monkeypatch):
     item = run_death(tmp_path, base, video_stub)["items"][0]
     assert item["ok"], item.get("error")
     assert item["clip"]["auth_source"] is None
+
+
+def test_a_missing_clip_report_stops_an_end_frame_item_saying_so(tmp_path, monkeypatch):
+    """An item filmed to an end frame writes the frame's digest into the report; with no report it stops, naming it,
+    and the set goes on to write its own report."""
+    base, final = stand_ins(tmp_path, monkeypatch)
+
+    def video_stub(image, prompt, out, report, **kw):
+        out.write_bytes(b"clip")
+        return 0
+
+    result = run_death(tmp_path, base, video_stub, end_frames={"front-death": final})
+    item = result["items"][0]
+    assert not item["ok"] and "clip report" in item["error"] and "clip.report.json" in item["error"]
+    assert result["failed"] == ["front-death"] and (tmp_path / "set" / "set.report.json").is_file()

@@ -870,8 +870,11 @@ def run_item(
             if not isinstance(ran_on, dict):
                 raise SystemExit(f"cannot read the clip report {clip_report}: it holds no JSON object")
             result["clip"]["auth_source"] = ran_on.get("auth_source")
-            if end_digest is not None:
-                generated = json.loads(clip_report.read_text(encoding="utf-8"))
+            if end_digest is not None:  # the end frame's digest goes into the report: without one the item stops
+                try:
+                    generated = json.loads(clip_report.read_text(encoding="utf-8"))
+                except (OSError, ValueError) as exc:
+                    raise SystemExit(f"cannot read the clip report {clip_report}: {exc}") from exc
                 generated["end_frame_sha256"] = end_digest
                 atomic_write_text(clip_report, json.dumps(generated, ensure_ascii=False, indent=2) + "\n")
 
