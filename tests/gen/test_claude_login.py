@@ -203,3 +203,23 @@ def test_no_result_a_timeout_and_a_missing_binary_are_errors():
     with pytest.raises(ApiError, match="did not start") as caught:
         claude_login.send_message(body, label="c1-gen1", run=Run(FileNotFoundError("claude")))
     assert caught.value.billed is False
+
+
+def test_a_reply_that_is_not_utf8_is_an_error_not_an_answer():
+    """The reply is the drawing, read as the UTF-8 the binary writes and never as other characters. A byte that is not
+    UTF-8 on stdout fails the call with its error, as Windows leaves it (each stream is decoded on a thread of its own,
+    and one that does not decode comes back None) and as elsewhere (the decode raises from `run`). On Windows a stderr
+    alone that does not decode is lost and the reply on stdout comes back."""
+    body = api.message_body(system="s", content="Draw", effort="high", max_tokens=64000)
+    unread = r"c1-gen1: `claude -p` answered with a byte that is not UTF-8"
+    windows = subprocess.CompletedProcess(["claude"], 0, stdout=None, stderr="")
+    with pytest.raises(ApiError, match=unread) as caught:
+        claude_login.send_message(body, label="c1-gen1", run=Run(windows))
+    assert caught.value.billed is True
+    elsewhere = UnicodeDecodeError("utf-8", b"\xea\xb1", 0, 2, "unexpected end of data")
+    with pytest.raises(ApiError, match=unread) as caught:
+        claude_login.send_message(body, label="c1-gen1", run=Run(elsewhere))
+    assert caught.value.billed is True and caught.value.__cause__ is elsewhere
+    stderr_lost = stream(INIT, assistant({"type": "text", "text": "PALETTE"}), result(result="PALETTE"))
+    stderr_lost.stderr = None
+    assert claude_login.send_message(body, label="c1-gen1", run=Run(stderr_lost)).text == "PALETTE"
