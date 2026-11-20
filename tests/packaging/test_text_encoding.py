@@ -72,6 +72,7 @@ found unless it names an encoding.
 from __future__ import annotations
 
 import ast
+import itertools
 from pathlib import Path
 
 import pytest
@@ -691,6 +692,9 @@ def test_every_allowed_locale_read_is_still_there():
     assert [key for key in LOCALE_READS if key not in found] == []
 
 
+# A partial of a spawner bound to a name, which rows below bind again by each form of target.
+BOUND = "import functools, subprocess\nrun_it = functools.partial(subprocess.run, cmd, capture_output=True)\n"
+
 # Each way of writing a text read or write that names no encoding, which the scan finds, and ways that name one or
 # read bytes, which it leaves. The forms a review names: an alias, the mode given by position, io.open, codecs.open.
 LOCALE = {
@@ -1031,6 +1035,63 @@ LOCALE = {
         "def probe(cmd):\n"
         "    from subprocess import Popen as r\n"
         "    return r(cmd, text=True)\n"),
+    # A name bound to a partial is followed when a tuple or a list target binds it again, as when `=` does: by its
+    # place, in nested ones, before and after a star, under each target of a chained assignment that unpacks it, and so
+    # is a partial written there (a review's probe is the first row). An annotated `=` and a walrus bind as `=` does.
+    "subprocess-run-partial-unpacked-from-a-tuple": BOUND + "alias, = (run_it,)\nalias(errors='replace')\n",
+    "subprocess-run-partial-unpacked-from-a-list": BOUND + "[alias] = [run_it]\nalias(errors='replace')\n",
+    "subprocess-run-partial-unpacked-list-from-a-tuple": (
+        BOUND + "[first, alias] = cmd, run_it\nalias(errors='replace')\n"),
+    "subprocess-run-partial-unpacked-nested": (
+        BOUND + "first, (second, [alias]) = cmd, [cmd, (run_it,)]\nalias(errors='replace')\n"),
+    "subprocess-run-partial-unpacked-chained": BOUND + "(alias,) = [again] = (run_it,)\nagain(errors='replace')\n",
+    "subprocess-run-partial-unpacked-before-a-star": (
+        BOUND + "alias, *rest = run_it, cmd, cmd\nalias(errors='replace')\n"),
+    "subprocess-run-partial-unpacked-after-a-star": (
+        BOUND + "*rest, alias = cmd, cmd, run_it\nalias(errors='replace')\n"),
+    "subprocess-run-partial-unpacked-around-an-empty-star": (
+        BOUND + "first, *rest, alias = cmd, run_it\nalias(errors='replace')\n"),
+    "subprocess-run-partial-written-where-it-is-unpacked": (
+        "import functools, subprocess\n"
+        "alias, first = functools.partial(subprocess.run, cmd), cmd\n"
+        "alias(errors='replace')\n"),
+    "subprocess-run-partial-annotated": BOUND + "alias: object = run_it\nalias(errors='replace')\n",
+    "subprocess-run-partial-walrus": BOUND + "(alias := run_it)\nalias(errors='replace')\n",
+    # A walrus gives back its value: called, handed to a call or bound to a name, it is read as that value; passed on
+    # anywhere else, its call is not seen.
+    "subprocess-run-partial-walrus-assigned": BOUND + "alias = (again := run_it)\nalias(errors='replace')\n",
+    "subprocess-run-partial-walrus-unpacked": (
+        BOUND + "first, alias = cmd, (again := run_it)\nalias(errors='replace')\n"),
+    "subprocess-run-partial-walrus-called": BOUND + "(alias := run_it)(errors='replace')\n",
+    "subprocess-run-partial-walrus-handed-to-a-def": (
+        BOUND + "def probe(cmd, run):\n    return run(cmd, errors='replace')\nprobe(cmd, run=(alias := run_it))\n"),
+    "subprocess-run-partial-walrus-handed-to-an-import": (
+        BOUND + "import helpers\nhelpers.probe(cmd, run=(alias := run_it))\n"),
+    "subprocess-run-partial-walrus-in-a-container": BOUND + "RUNNERS = [(alias := run_it)]\n",
+    "subprocess-run-walrus-returned": "import subprocess\ndef runner():\n    return (run := subprocess.run)\n",
+    # What the scan does not follow is found where it is written: a starred name (a list of what it takes); a name that
+    # takes a tuple or a list another target of the same assignment unpacks; an attribute or a subscript; a value the
+    # scan cannot unpack (not a tuple or a list written there, a `*` in it, another length); an augmented assignment's
+    # value; a `with` item's context; a loop's iterable.
+    "subprocess-run-partial-into-a-star": BOUND + "*rest, = (run_it,)\nrest[0](errors='replace')\n",
+    "subprocess-run-partial-into-a-star-among-others": (
+        BOUND + "first, *rest = cmd, cmd, run_it\nrest[-1](errors='replace')\n"),
+    "subprocess-run-partial-chained-with-a-name": BOUND + "whole = (alias,) = (run_it,)\nwhole[0](errors='replace')\n",
+    "subprocess-run-partial-chained-with-a-name-called": (
+        BOUND + "whole = (alias,) = (run_it,)\nalias(errors='replace')\n"),
+    "subprocess-run-partial-unpacked-to-an-attribute": (
+        BOUND + "self.run, first = run_it, cmd\nself.run(errors='replace')\n"),
+    "subprocess-run-partial-to-a-subscript": BOUND + "RUNNERS['probe'] = run_it\nRUNNERS['probe'](errors='replace')\n",
+    "subprocess-run-partial-unpacked-from-a-name": (
+        BOUND + "pair = run_it, cmd\nalias, first = pair\nalias(errors='replace')\n"),
+    "subprocess-run-partial-unpacked-with-a-star-in-the-value": (
+        BOUND + "alias, first = run_it, *rest\nalias(errors='replace')\n"),
+    "subprocess-run-partial-unpacked-to-another-length": (
+        BOUND + "alias, first = run_it, cmd, cmd\nalias(errors='replace')\n"),
+    "subprocess-run-partial-augmented": BOUND + "alias = cmd\nalias += run_it\nalias(errors='replace')\n",
+    "subprocess-run-partial-with-as": BOUND + "with run_it as alias:\n    alias(errors='replace')\n",
+    "subprocess-run-partial-for": BOUND + "for alias in (run_it,):\n    alias(errors='replace')\n",
+    "subprocess-run-partial-comprehension": BOUND + "[alias(errors='replace') for alias in [run_it]]\n",
 }
 NAMED = {
     "open-encoding": "open(p, 'r', encoding='utf-8')",
@@ -1146,6 +1207,14 @@ NAMED = {
         "    shell('true')\n"
         "def probe(cmd):\n"
         "    return r(cmd, capture_output=True, text=True, encoding='utf-8')\n"),
+    # A partial bound again by a tuple target, or by a walrus, and called with arguments that read bytes; a partial
+    # written where a tuple target unpacks it, which names its encoding.
+    "subprocess-run-partial-unpacked-called-bytes": BOUND + "alias, = (run_it,)\nalias(check=True)\n",
+    "subprocess-run-partial-walrus-called-bytes": BOUND + "(alias := run_it)(check=True)\n",
+    "subprocess-getoutput-partial-written-where-it-is-unpacked-encoding": (
+        "import functools, subprocess\n"
+        "read, = (functools.partial(subprocess.getoutput, encoding='utf-8'),)\n"
+        "read(cmd)\n"),
 }
 
 
@@ -1172,3 +1241,113 @@ OUTERMOST = {
 @pytest.mark.parametrize("row", list(OUTERMOST))
 def test_a_partial_of_partials_is_found_where_its_layers_end(row):
     assert [call for _, call, _ in locale_calls(LOCALE[row])] == [OUTERMOST[row]]
+
+
+# Where each target form's row is found: at the call, for a target the scan follows; where the value is written, for one
+# it does not follow; at both, for a value that one target of an assignment follows and another does not.
+AT_CALL = "alias(errors='replace')"
+WRITTEN = "run_it"
+FOUND_AT = {
+    "subprocess-run-partial-unpacked-from-a-tuple": [AT_CALL],
+    "subprocess-run-partial-unpacked-from-a-list": [AT_CALL],
+    "subprocess-run-partial-unpacked-list-from-a-tuple": [AT_CALL],
+    "subprocess-run-partial-unpacked-nested": [AT_CALL],
+    "subprocess-run-partial-unpacked-chained": ["again(errors='replace')"],
+    "subprocess-run-partial-unpacked-before-a-star": [AT_CALL],
+    "subprocess-run-partial-unpacked-after-a-star": [AT_CALL],
+    "subprocess-run-partial-unpacked-around-an-empty-star": [AT_CALL],
+    "subprocess-run-partial-written-where-it-is-unpacked": [AT_CALL],
+    "subprocess-run-partial-annotated": [AT_CALL],
+    "subprocess-run-partial-walrus": [AT_CALL],
+    "subprocess-run-partial-walrus-assigned": [AT_CALL],
+    "subprocess-run-partial-walrus-unpacked": [AT_CALL],
+    "subprocess-run-partial-walrus-called": ["(alias := run_it)(errors='replace')"],
+    "subprocess-run-partial-walrus-handed-to-a-def": ["run(cmd, errors='replace')"],
+    "subprocess-run-partial-walrus-handed-to-an-import": ["helpers.probe(cmd, run=(alias := run_it))"],
+    "subprocess-run-partial-walrus-in-a-container": ["alias := run_it"],
+    "subprocess-run-walrus-returned": ["run := subprocess.run"],
+    "subprocess-run-partial-into-a-star": [WRITTEN],
+    "subprocess-run-partial-into-a-star-among-others": [WRITTEN],
+    "subprocess-run-partial-chained-with-a-name": [WRITTEN],
+    "subprocess-run-partial-chained-with-a-name-called": [WRITTEN, AT_CALL],
+    "subprocess-run-partial-unpacked-to-an-attribute": [WRITTEN],
+    "subprocess-run-partial-to-a-subscript": [WRITTEN],
+    "subprocess-run-partial-unpacked-from-a-name": [WRITTEN],
+    "subprocess-run-partial-unpacked-with-a-star-in-the-value": [WRITTEN],
+    "subprocess-run-partial-unpacked-to-another-length": [WRITTEN],
+    "subprocess-run-partial-augmented": [WRITTEN],
+    "subprocess-run-partial-with-as": [WRITTEN],
+    "subprocess-run-partial-for": [WRITTEN],
+    "subprocess-run-partial-comprehension": [WRITTEN],
+}
+
+
+@pytest.mark.parametrize("row", list(FOUND_AT))
+def test_each_target_form_is_found_where_the_scan_follows_it_to(row):
+    assert [call for _, call, _ in locale_calls(LOCALE[row])] == FOUND_AT[row]
+
+
+def _sequences(layers: int) -> list[tuple[type, tuple]]:
+    """Each tuple and list target of the small grammar: of one to three (in an inner layer) or one or two (in the outer)
+    of a name, a starred name (at most one in each) and, with a layer to spare, an inner one."""
+    elements = ["name", "star", *(_sequences(layers - 1) if layers > 1 else [])]
+    shapes = []
+    for length in range(1, (3 if layers == 1 else 2) + 1):
+        shapes += [(kind, parts) for parts in itertools.product(elements, repeat=length) if parts.count("star") <= 1
+                   for kind in (ast.Tuple, ast.List)]
+    return shapes
+
+
+def _leaves(shape, path: tuple = ()) -> list[tuple[tuple, str]]:
+    """Each name of a target shape, by its place: the path to it and whether it is starred."""
+    if isinstance(shape, str):
+        return [(path, shape)]
+    return [leaf for at, part in enumerate(shape[1]) for leaf in _leaves(part, (*path, at))]
+
+
+def _unfolded() -> list[tuple[str, int]]:
+    """Each case of the grammar, with the one line it is found on. For each name of each target (a name, or a tuple or
+    a list of `_sequences(2)`), a value written to match it, with a partial of a spawner at that name's place, as a
+    name bound to it or written there, and a call of the name that reads text in the locale's encoding: found at the
+    call when the name is followed, and where it is assigned when the name is starred (it takes a list). Each case is
+    written twice: every other starred name taking none, a tuple or a list written as the target's, and the partial
+    by its name; then every other starred name taking two, the other of tuple and list, and the partial written
+    there."""
+    other = ast.Name("cmd", ast.Load())
+    flip = {ast.Tuple: ast.List, ast.List: ast.Tuple}
+    cases = []
+    for shape in ["name", *_sequences(2)]:
+        for chosen, kind in _leaves(shape):
+            for written, spare, flipped in ((False, 0, False), (True, 2, True)):
+                carrier = ast.parse("functools.partial(subprocess.run, cmd, capture_output=True)" if written
+                                    else "run_it", mode="eval").body
+                names = iter(f"n{at}" for at in range(64))
+                called = {}
+
+                def target(part, path=()):
+                    if isinstance(part, str):
+                        called[path] = next(names)
+                        name = ast.Name(called[path], ast.Store())
+                        return ast.Starred(name, ast.Store()) if part == "star" else name
+                    return part[0]([target(inner, (*path, at)) for at, inner in enumerate(part[1])], ast.Store())
+
+                def value(part, path=()):
+                    """What `part` takes, written: a name one element, a starred name `spare` of them (the partial
+                    after half of them, for the chosen one); an inner tuple or list, one."""
+                    if isinstance(part, str):
+                        if path != chosen:
+                            return [other] if part == "name" else [other] * spare
+                        return [carrier] if part == "name" else [*[other] * (spare // 2), carrier]
+                    elements = [element for at, inner in enumerate(part[1]) for element in value(inner, (*path, at))]
+                    return [(flip[part[0]] if flipped else part[0])(elements, ast.Load())]
+
+                assigned = ast.unparse(ast.Assign([target(shape)], value(shape)[0], lineno=1))
+                cases.append((f"{BOUND}{assigned}\n{called[chosen]}(errors='replace')\n", 3 if kind == "star" else 4))
+    return cases
+
+
+def test_a_partial_bound_by_any_target_of_the_grammar_is_found_once():
+    cases = _unfolded()
+    wrong = [(source, found) for source, line in cases
+             if (found := [at for at, _, _ in locale_calls(source)]) != [line]]
+    assert not wrong, f"{len(wrong)} of {len(cases)} cases not found once where they should be, as: {wrong[:3]}"
