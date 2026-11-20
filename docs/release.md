@@ -70,7 +70,7 @@ RIFE 의 torch 백엔드(`SPRITE_GEN_RIFE_BACKEND=torch`, docs/loop-repair.md 1�
 
 ```bash
 # safedeps 가 있는 기계에서, 잴 커밋을 체크아웃한 트리(커밋되지 않은 변경이 없는)로
-python3 scripts/cuda_lane.py pack --requirements <목록> --out <빈 디렉터리> [--host-spec <생태계>:<이름>@<버전> ...]
+.venv/bin/python scripts/cuda_lane.py pack --requirements <목록> --out <빈 디렉터리> [--host-spec <생태계>:<이름>@<버전> ...]
 # 그 디렉터리를 호스트로 옮긴 뒤, 호스트에서 Python 3.14 로
 python -I <디렉터리>/cuda_lane.py run --pack <디렉터리> [--wheels <PyPI 에 없는 휠의 디렉터리>] [--rife-zip <zip>]
 ```

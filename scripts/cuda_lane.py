@@ -4,7 +4,7 @@ lane (docs/release.md). Nothing runs on push or pull request. Standard library o
 
 Two steps, on two machines:
 
-    python3 scripts/cuda_lane.py pack --requirements <list> --out <empty dir> [--host-spec <eco>:<name>@<version> ...]
+    .venv/bin/python scripts/cuda_lane.py pack --requirements <list> --out <empty dir> [--host-spec <eco>:<name>@<version> ...]
     <python> -I <pack>/cuda_lane.py run --pack <pack> [--wheels <dir>] [--rife-zip <zip>]
 
 `pack` runs where a checkout of the commit being measured is (no uncommitted changes) and where safedeps is. The list
