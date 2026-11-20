@@ -822,6 +822,33 @@ LOCALE = {
         "def probe(cmd, run):\n"
         "    return run(cmd, errors='replace')\n"
         "probe(cmd, subprocess.run)\n"),
+    # A partial bound to a name is followed: a call of the name, or of a name bound to it, is read through the partial
+    # with its own arguments as the outer layer (errors alone, keywords unpacked), and the name passed on is found.
+    "subprocess-run-partial-bound-called-with-errors": (
+        "import functools, subprocess\n"
+        "run_it = functools.partial(subprocess.run, cmd)\n"
+        "run_it(errors='replace')\n"),
+    "subprocess-getoutput-partial-bound-called-unpacked": (
+        "import functools, subprocess\n"
+        "read_output = functools.partial(subprocess.getoutput, encoding='utf-8')\n"
+        "read_output(cmd, **options)\n"),
+    "subprocess-run-partial-bound-and-bound-again": (
+        "import functools, subprocess\n"
+        "run_it = functools.partial(subprocess.run, cmd)\n"
+        "again = run_it\n"
+        "again(errors='replace')\n"),
+    "subprocess-run-partial-bound-passed-on": (
+        "import functools, subprocess\nrun_it = functools.partial(subprocess.run, cmd)\nRUNNERS = [run_it]"),
+    # A partial of a spawner passed on where its call is not seen is found as the spawner is, whatever it reads where
+    # it is written: into a container, as a return value, to an attribute.
+    "subprocess-run-partial-in-a-container": (
+        "import functools, subprocess\nRUNNERS = [functools.partial(subprocess.run, cmd)]"),
+    "subprocess-run-partial-returned": (
+        "import functools, subprocess\n"
+        "def runner(cmd):\n"
+        "    return functools.partial(subprocess.run, cmd, check=True)\n"),
+    "subprocess-getoutput-partial-to-an-attribute": (
+        "import functools, subprocess\nself.read = functools.partial(subprocess.getoutput, encoding='utf-8')"),
     # The closed reading on a spawner's name: subprocess.run under a name another scope binds os.system to is checked
     # wherever that name is called, whichever binding the walk reaches last.
     "subprocess-alias-scope-later-function": (
@@ -942,6 +969,13 @@ NAMED = {
         "def probe(cmd, run):\n"
         "    return run(cmd, text=True, encoding='utf-8')\n"
         "probe(cmd, subprocess.run)\n"),
+    # A partial bound to a name and called with arguments that read bytes, or name the encoding's errors only.
+    "subprocess-run-partial-bound-called-bytes": (
+        "import functools, subprocess\nrun_it = functools.partial(subprocess.run, cmd)\nrun_it(check=True)"),
+    "subprocess-getoutput-partial-bound-called-with-errors": (
+        "import functools, subprocess\n"
+        "read_output = functools.partial(subprocess.getoutput, encoding='utf-8')\n"
+        "read_output(cmd, errors='replace')\n"),
     "os-system": "import os\nos.system(cmd)",
     # `text` on a call the scan names, and that is no spawner: a function or a class of the module, or an import.
     "a-function-with-a-text-keyword": "def piece(text):\n    return text\npiece(text='walk')",
