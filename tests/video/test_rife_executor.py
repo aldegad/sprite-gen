@@ -665,7 +665,7 @@ def test_a_loop_whose_executor_answer_is_damaged_on_the_way_fails_with_its_recor
         _run(tmp_path, keyed)
     words = "the executor's answer does not read: zlib.error: Error -3 while decompressing data: invalid block type"
     assert words in str(failed.value) and isinstance(failed.value.__cause__.__cause__, zlib.error)
-    report = json.loads((tmp_path / "w.json").read_text())
+    report = json.loads((tmp_path / "w.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and words in report["error"]
     assert not list((tmp_path / "out").glob(f".{loop.FALLBACK_FRAMES}*")) and executor.kinds() == ["probe", "frame"]
 
