@@ -725,6 +725,10 @@ LOCALE = {
     "nameless-parameter": "def probe(runner, cmd):\n    return runner(cmd, capture_output=True, text=True)",
     "nameless-attribute": "self.run(cmd, universal_newlines=True)",
     "nameless-result": "import subprocess\ngetattr(subprocess, 'run')(cmd, text=True)",
+    # An encoding on a call the scan cannot name marks it as well, and is read as on a spawner's: None or a name names
+    # none, as through a getoutput or a partial handed in.
+    "nameless-encoding-none": "def probe(read, cmd):\n    return read(cmd, encoding=None)",
+    "nameless-encoding-a-name": "self.read(cmd, encoding=codec)",
     # getoutput and getstatusoutput read text whatever they are told, so a call either is handed to reads text unless
     # it names an encoding: under every name the module binds them to, handed by position or by keyword, in a partial
     # of a partial, in a container. A review's probe is the first row. os.popen is found handed on as passed on.
@@ -981,6 +985,8 @@ NAMED = {
     "a-function-with-a-text-keyword": "def piece(text):\n    return text\npiece(text='walk')",
     "an-imported-class-with-a-text-keyword": "from .api import Reply\nReply(text='walk')",
     "a-module-function-with-a-text-keyword": "import textwrap\ntextwrap.shorten(text='walk', width=4)",
+    # A call the scan cannot name that names its encoding.
+    "nameless-encoding-named": "def probe(read, cmd):\n    return read(cmd, encoding='utf-8')",
     # The way out of a spawner's alias-scope finding: os.system under a name of its own.
     "subprocess-alias-scope-renamed": (
         "from subprocess import run as r\n"
