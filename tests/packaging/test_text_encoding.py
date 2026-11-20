@@ -49,6 +49,20 @@ the module only imports, a module's own `open` such as `Image.open` or `os.open`
 `Image = None` after a failed import, does not count: a literal has no `open`), or a name a scope binds to a
 `zipfile.ZipFile` and to nothing else, whose `open` reads bytes.
 
+Which name is bound to which value is one list, which every part of the scan reads: a name is followed through what
+the list binds it to, and a value is exempt from being found as passed on only where that following takes it. Each form
+of assignment target is followed or found. Followed: a name, by `=`, an annotated `=` or a walrus; each name of a tuple
+or a list target that unpacks a tuple or a list written there with no `*` in it, nested to any depth, by its place, the
+names before a starred name read from the front and those after it from the back; and each such target of a chained
+assignment. Found where the value is written, when it may start a child (a spawner, a partial of one, a name bound to
+one): what a starred name takes (a list of what is left); a tuple or a list a name takes, as when one target of a
+chained assignment unpacks what another holds (its elements are in a container); what an attribute or a subscript
+takes; a value a tuple or a list target cannot be matched with where it is written (not a tuple or a list there, a `*`
+in it, another length); an augmented assignment's value (its target is not bound to it); a `with` item's context (its
+`as` target takes what entering gives); a `for` loop's or a comprehension's iterable (its target takes the items). A
+walrus gives back its value: called, handed to a call or bound to a name it is read as that value, and anywhere else
+but a statement of its own it is found.
+
 A spawner is read by the arguments it ends up called with, and whether it always reads text is its own: `getoutput`
 and `getstatusoutput` do under any number of partials. A call of it is read where it stands. A `functools.partial` of
 it, however many deep, is read once, where the partials end (at the one no other partial wraps and nothing calls at
@@ -57,16 +71,16 @@ the outer, the outer winning (`partial(partial(getoutput, encoding="utf-8"), cmd
 locale's; `partial(partial(getoutput, encoding=None), cmd, encoding="utf-8")` reads UTF-8). `text`,
 `universal_newlines` and `encoding` are read from what the arguments end with; one a `**` may set after it was last
 written, or a position after a `*` at or before `universal_newlines`', cannot be read and is found. A partial bound to
-a name (by an assignment, a parameter's default, or a call of a def or a class of the module) is read where it is
-written, and each call of that name, or of a name bound to it, is read through it with the call's own arguments as one
-more layer: found there when the call makes it read in the locale's encoding, and found once, where it is written, when
-it already does. A spawner handed to a def or a class of the module binds the parameter it is handed to, and each call
-of that parameter is read as the spawner's. A spawner, a partial of one or a name bound to one is found, its call not
-seen, when it is handed to any other call (an import's, a method's, a built-in's, or a def of the module with no
-parameter of that name) or passed on any other way (into a container, as a return value, to an attribute), whatever it
-reads where it is written. A call of what the scan cannot name (a parameter, an attribute of an object, a call's
-result, or a partial of one) is read as a spawner's when it names `text`, `universal_newlines` or `encoding`, and is
-found unless it names an encoding.
+a name (by a target the scan follows, a parameter's default, or a call of a def or a class of the module) is read where
+it is written, and each call of that name, or of a name bound to it, is read through it with the call's own arguments
+as one more layer: found there when the call makes it read in the locale's encoding, and found once, where it is
+written, when it already does. A spawner handed to a def or a class of the module binds the parameter it is handed to,
+and each call of that parameter is read as the spawner's. A spawner, a partial of one or a name bound to one is found,
+its call not seen, when it is handed to any other call (an import's, a method's, a built-in's, or a def of the module
+with no parameter of that name) or passed on any other way (into a container, as a return value, to an attribute),
+whatever it reads where it is written. A call of what the scan cannot name (a parameter, an attribute of an object, a
+call's result, or a partial of one) is read as a spawner's when it names `text`, `universal_newlines` or `encoding`, and
+is found unless it names an encoding.
 """
 
 from __future__ import annotations
@@ -180,7 +194,10 @@ SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
 
 def _qualify(node: ast.AST, names: dict[str, set[str]]) -> set[str]:
-    """Everything a name or a dotted name may name, as the module's bindings say; nothing for anything else."""
+    """Everything a name or a dotted name may name, as the module's bindings say, and a walrus what its value names;
+    nothing for anything else."""
+    if isinstance(node, ast.NamedExpr):
+        return _qualify(node.value, names)
     if isinstance(node, ast.Name):
         return names.get(node.id, set()) | BUILTINS.get(node.id, set())
     if isinstance(node, ast.Attribute):
@@ -188,14 +205,82 @@ def _qualify(node: ast.AST, names: dict[str, set[str]]) -> set[str]:
     return set()
 
 
-def _aliases(target: ast.AST, value: ast.AST) -> list[tuple[str, ast.AST]]:
-    """Each name an assignment binds to a name or a dotted name (`x = io`, `a, b = io, os`), with that name."""
-    if isinstance(target, ast.Name) and isinstance(value, (ast.Name, ast.Attribute)):
-        return [(target.id, value)]
+def _escape(value: ast.AST, escaped: set[int]) -> None:
+    """Mark `value`, and each element of a tuple or a list written there, as taken by what the scan does not follow."""
+    escaped.add(id(value))
+    if isinstance(value, (ast.Tuple, ast.List)):
+        for element in value.elts:
+            _escape(element, escaped)
+    elif isinstance(value, ast.Starred):
+        _escape(value.value, escaped)
+
+
+def _unpack(target: ast.AST, value: ast.AST, links: list[tuple[str, ast.AST]], escaped: set[int]) -> None:
+    """Bind `target` to `value` as an assignment does: each name the scan follows to the value it takes, into `links`;
+    each value taken by a target it does not follow, into `escaped` (see the module's docstring).
+
+    A name takes the value; what a tuple or a list written there holds is then in a container. A tuple or a list
+    target unpacks a tuple or a list written there, with no `*` in it: of its length, each part by its place; with a
+    starred part, the parts before it from the front, those after it from the back, and the starred one a list of what
+    is left. Anything else takes what the scan does not follow: an attribute, a subscript, and a value a tuple or a list
+    target cannot be matched with where it is written."""
+    if isinstance(target, ast.Name):
+        links.append((target.id, value))
+        if isinstance(value, (ast.Tuple, ast.List)):
+            for element in value.elts:
+                _escape(element, escaped)
+        return
     if isinstance(target, (ast.Tuple, ast.List)) and isinstance(value, (ast.Tuple, ast.List)) \
-            and len(target.elts) == len(value.elts):
-        return [pair for t, v in zip(target.elts, value.elts) for pair in _aliases(t, v)]
-    return []
+            and not any(isinstance(element, ast.Starred) for element in value.elts):
+        star = next((at for at, part in enumerate(target.elts) if isinstance(part, ast.Starred)), None)
+        if star is None and len(value.elts) == len(target.elts):
+            for part, element in zip(target.elts, value.elts):
+                _unpack(part, element, links, escaped)
+            return
+        if star is not None and len(value.elts) >= len(target.elts) - 1:
+            end = len(value.elts) - (len(target.elts) - star - 1)
+            for part, element in (*zip(target.elts[:star], value.elts[:star]),
+                                  *zip(target.elts[star + 1:], value.elts[end:])):
+                _unpack(part, element, links, escaped)
+            for element in value.elts[star:end]:  # the starred part takes a list of them
+                _escape(element, escaped)
+            return
+    _escape(value, escaped)
+
+
+def _links(tree: ast.AST) -> tuple[list[tuple[str, ast.AST, set[str]]], set[int]]:
+    """Which name the module binds to which value, where it writes the value: the one list every reading of a name
+    through what it is bound to is read from (_bindings' names, _Scan's bound), and what is exempt as followed is only
+    what those readings take from it (_Scan).
+
+    links: each name with the value it takes and what it is followed to through it: an assignment's target (`=`, an
+    annotated `=`, a walrus), unpacked (_unpack), and a parameter's default, to the openers, spawners and the rest of
+    FOLLOWED; a parameter of a def or a class of the module, to the argument a call of it hands it, to the spawners.
+    escaped: each value taken by a target the scan does not follow (_unpack)."""
+    assigned: list[tuple[str, ast.AST]] = []
+    escaped: set[int] = set()
+    signatures: dict[str, list[tuple[list[str], set[str]]]] = {}  # each def's or class's, by its name
+    calls: list[ast.Call] = []  # each call of a name
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+            for target in node.targets if isinstance(node, ast.Assign) else [node.target]:
+                _unpack(target, node.value, assigned, escaped)
+        elif isinstance(node, ast.arguments):  # a parameter's default binds its name as an assignment of it would
+            positional = [*node.posonlyargs, *node.args]
+            assigned += [(arg.arg, default) for arg, default in
+                         (*zip(positional[len(positional) - len(node.defaults):], node.defaults),
+                          *zip(node.kwonlyargs, node.kw_defaults)) if default is not None]
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            signatures.setdefault(node.name, []).extend(_signatures(node))
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            calls.append(node)
+    handed: list[tuple[str, ast.AST]] = []
+    for call in calls:  # what a call of a def or a class of the module hands a parameter binds that parameter
+        for positional, named in signatures.get(call.func.id, []):
+            given = itertools.takewhile(lambda argument: not isinstance(argument, ast.Starred), call.args)
+            handed += [*zip(positional, given), *((k.arg, k.value) for k in call.keywords if k.arg in named)]
+    return [*((name, value, FOLLOWED) for name, value in assigned),
+            *((name, value, set(SPAWNERS)) for name, value in handed)], escaped
 
 
 def _signature(arguments: ast.arguments) -> tuple[list[str], set[str]]:
@@ -214,18 +299,16 @@ def _signatures(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> 
     return [(positional[1:], named - set(positional[:1])) for positional, named in inits]
 
 
-def _bindings(tree: ast.AST) -> tuple[dict[str, set[str]], set[str], set[str], set[str], set[str], set[str], set[int],
-                                      list[tuple[str, ast.AST]]]:
+def _bindings(tree: ast.AST, links: list[tuple[str, ast.AST, set[str]]]) -> tuple[
+        dict[str, set[str]], set[str], set[str], set[str], set[str], set[str], set[int]]:
     """What the module binds, read closed: every scope at once, so a name bound in two places names both.
 
-    names: each name an import, an assignment of a name or a parameter's default binds, to everything it names, and
-    each parameter of a def or a class of the module, to the spawners a call of it hands that parameter by name.
-    imported: every module or object imported. rebound: every name also bound another way (an assignment of anything
-    but a literal, a parameter, a loop, a def, `except ... as`). anywhere: every name a walrus, `global` or `nonlocal`
-    binds, which may bind it in a scope other than the one it stands in. defined: every name a def or a class binds.
-    valued: every name bound to a value the scan does not follow, as rebound is without the defs and classes.
-    followed: each node an assignment of a name or a parameter's default binds a name to, and each argument a call of
-    a def or a class of the module hands a parameter. parameters: each such parameter, with the argument handed it.
+    names: each name an import binds, to what it imports, and each name `links` binds, to everything its value names
+    of what the link is followed to. imported: every module or object imported. rebound: every name also bound another
+    way (an assignment of anything but a literal, a parameter, a loop, a def, `except ... as`). anywhere: every name a
+    walrus, `global` or `nonlocal` binds, which may bind it in a scope other than the one it stands in. defined: every
+    name a def or a class binds. valued: every name bound to a value the scan does not follow, as rebound is without
+    the defs and classes. taken: each value of `links` that names gives its name something through.
     """
     names: dict[str, set[str]] = {}
     imported: set[str] = set()
@@ -233,10 +316,7 @@ def _bindings(tree: ast.AST) -> tuple[dict[str, set[str]], set[str], set[str], s
     anywhere: set[str] = set()
     defined: set[str] = set()
     valued: set[str] = set()
-    aliases: list[tuple[str, ast.AST]] = []
     literal: set[int] = set()  # names assigned a literal, which has no `open`
-    signatures: dict[str, list[tuple[list[str], set[str]]]] = {}  # each def's or class's, by its name
-    calls: list[ast.Call] = []  # each call of a name
 
     def bind(name: str, qualified: str) -> None:
         names.setdefault(name, set()).add(qualified)
@@ -263,16 +343,8 @@ def _bindings(tree: ast.AST) -> tuple[dict[str, set[str]], set[str], set[str], s
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             if isinstance(node.value, ast.Constant):
                 literal.update(id(target) for target in targets if isinstance(target, ast.Name))
-            elif node.value is not None:
-                aliases.extend(pair for target in targets for pair in _aliases(target, node.value))
             if isinstance(node, ast.NamedExpr):
                 anywhere.add(node.target.id)
-        elif isinstance(node, ast.arguments):  # a parameter's default binds its name as an assignment of a name would
-            positional = [*node.posonlyargs, *node.args]
-            pairs = [*zip(positional[len(positional) - len(node.defaults):], node.defaults),
-                     *zip(node.kwonlyargs, node.kw_defaults)]
-            aliases.extend((arg.arg, default) for arg, default in pairs
-                           if isinstance(default, (ast.Name, ast.Attribute)))
         elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load) and id(node) not in literal:
             rebound.add(node.id)
             valued.add(node.id)
@@ -282,9 +354,6 @@ def _bindings(tree: ast.AST) -> tuple[dict[str, set[str]], set[str], set[str], s
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             rebound.add(node.name)
             defined.add(node.name)
-            signatures.setdefault(node.name, []).extend(_signatures(node))
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            calls.append(node)
         elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
             rebound.add(node.name)
             valued.add(node.name)
@@ -293,28 +362,16 @@ def _bindings(tree: ast.AST) -> tuple[dict[str, set[str]], set[str], set[str], s
             valued.add(node.rest)
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             anywhere.update(node.names)
-    parameters: list[tuple[str, ast.AST]] = []
-    for call in calls:  # what a call of a def or a class of the module hands a parameter binds that parameter
-        for positional, named in signatures.get(call.func.id, []):
-            given = []
-            for argument in call.args:
-                if isinstance(argument, ast.Starred):
-                    break  # the positions after it are not known
-                given.append(argument)
-            parameters += [*zip(positional, given), *((k.arg, k.value) for k in call.keywords if k.arg in named)]
-    pairs = [*((name, value, FOLLOWED) for name, value in aliases),
-             *((name, value, set(SPAWNERS)) for name, value in parameters
-               if isinstance(value, (ast.Name, ast.Attribute)))]  # a spawner handed on; a partial: _Scan.bound
     grown = True
     while grown:  # an alias of an alias, until nothing more is found: FOLLOWED is finite
         grown = False
-        for name, value, kinds in pairs:
+        for name, value, kinds in links:
             more = (_qualify(value, names) & kinds) - names.get(name, set())
             if more:
                 names.setdefault(name, set()).update(more)
                 grown = True
-    followed = {id(value) for _, value in (*aliases, *parameters)}
-    return names, imported, rebound, anywhere, defined, valued, followed, parameters
+    taken = {id(value) for _, value, kinds in links if _qualify(value, names) & kinds}
+    return names, imported, rebound, anywhere, defined, valued, taken
 
 
 def _shifted(spec: tuple) -> tuple:
@@ -365,39 +422,27 @@ def _merge(layers: list[tuple[list[ast.expr], list[ast.keyword]]]) -> tuple[list
 
 class _Scan(ast.NodeVisitor):
     def __init__(self, tree: ast.AST, source: str) -> None:
+        links, escaped = _links(tree)
         (self.names, self.imported, self.rebound, self.anywhere, self.defined, self.valued,
-         self.followed, parameters) = _bindings(tree)
+         taken) = _bindings(tree, links)
         self.source = source
         self.found: list[tuple[int, str, str]] = []
         self.called: set[int] = set()
         self.handed: set[int] = set()  # each argument of a call: a spawner there is read at that call
         self.wrapped: set[int] = set()  # each call's callee and each partial's first argument: read with that call
         self.byte_openers: list[set[str]] = [self._byte_openers(tree)]
-        # Each name a functools.partial or another name is bound to, by an assignment, a parameter's default or a call
-        # of a def or a class of the module: a call of the name is read through what it is bound to. kept: each value
-        # the scan follows where it goes, bound to names only or to a parameter, or dropped (an expression statement).
+        # bound: each name `links` binds to a name, a walrus or a functools.partial, with it: a call of the name is
+        # read through what it is bound to (carriers). followed: each value of `links` this reading or names takes,
+        # and no target of its assignment takes as what the scan does not follow (escaped): its call is read there.
+        # dropped: each expression statement's value, which goes nowhere.
         self.bound: dict[str, list[ast.AST]] = {}
-        self.kept: set[int] = set()
-        pairs = list(parameters)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Expr):
-                self.kept.add(id(node.value))
-            elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                pairs += [(target.id, node.value) for target in targets if isinstance(target, ast.Name)]
-                if all(isinstance(target, ast.Name) for target in targets):
-                    self.kept.add(id(node.value))
-            elif isinstance(node, ast.arguments):
-                positional = [*node.posonlyargs, *node.args]
-                defaults = [(arg.arg, default) for arg, default in
-                            (*zip(positional[len(positional) - len(node.defaults):], node.defaults),
-                             *zip(node.kwonlyargs, node.kw_defaults)) if default is not None]
-                pairs += defaults
-                self.kept.update(id(default) for _, default in defaults)
-        self.kept.update(id(value) for _, value in parameters)
-        for name, value in pairs:
-            if isinstance(value, ast.Name) or self.is_partial(value):
+        stored: set[int] = set()
+        for name, value, _ in links:
+            if isinstance(value, (ast.Name, ast.NamedExpr)) or self.is_partial(value):
                 self.bound.setdefault(name, []).append(value)
+                stored.add(id(value))
+        self.followed = (taken | stored) - escaped
+        self.dropped = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Expr)}
 
     def qualify(self, node: ast.AST) -> set[str]:
         return _qualify(node, self.names)
@@ -522,7 +567,7 @@ class _Scan(ast.NodeVisitor):
                  for spec, what, layers, bound in self.carriers(func)]
         if self.is_partial(node) and id(node) not in self.wrapped:  # where partials end: none wraps or calls this one
             reads += [(spec, f"functools.partial of {what}", *rest) for spec, what, *rest in self.carriers(node)]
-            if id(node) not in self.kept and id(node) not in self.handed:  # handed: read where it is handed
+            if self.passed_on(node):
                 whys += [f"functools.partial of {what} passed on uncalled: its call cannot be checked"
                          for _, what, _, _ in self.carriers(node, spawners_only=True)]
         for spec, what, layers, bound in reads:
@@ -546,6 +591,11 @@ class _Scan(ast.NodeVisitor):
                 self.flag(node, f"getattr(..., {name.value!r}): an opener taken by name, its call not seen")
         self.generic_visit(node)
 
+    def passed_on(self, node: ast.AST) -> bool:
+        """Whether `node`, not called, goes where its call is not seen: not followed to a name it is bound to, not
+        handed to a call (read at that call) and not dropped (a statement of its own)."""
+        return id(node) not in self.followed and id(node) not in self.handed and id(node) not in self.dropped
+
     def is_partial(self, node: ast.AST) -> bool:
         return isinstance(node, ast.Call) and PARTIAL in self.qualify(node.func)
 
@@ -556,7 +606,9 @@ class _Scan(ast.NodeVisitor):
         around it give, the innermost first, and how many of them a partial bound to a name gave (None: none was).
         Through a functools.partial, what it wraps with its arguments as one more layer; a spawner `node` names; for a
         name, the partials it is bound to (`bound`), directly or through other names; and, unless `spawners_only`, what
-        the scan cannot name, read by its keywords."""
+        the scan cannot name, read by its keywords. A walrus is read as its value, which it gives back."""
+        if isinstance(node, ast.NamedExpr):
+            return self.carriers(node.value, spawners_only, seen)
         if self.is_partial(node):
             if node.args and not isinstance(node.args[0], ast.Starred):
                 inner, layer = self.carriers(node.args[0], spawners_only, seen), (node.args[1:], node.keywords)
@@ -653,6 +705,13 @@ class _Scan(ast.NodeVisitor):
                 self.flag(node, "a text opener passed on uncalled: its call cannot be checked")
             elif why := self.uncalled_child(node):
                 self.flag(node, why)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        """A walrus gives back its value, which goes on where the walrus stands: read there when it is called, handed to
+        a call or bound to a name; found when it may start a child anywhere else but a statement of its own."""
+        if id(node) not in self.called and self.passed_on(node) and self.carriers(node, spawners_only=True):
+            self.flag(node, "a child spawner passed on uncalled by a walrus: its call cannot be checked")
+        self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if isinstance(node.ctx, ast.Load) and id(node) not in self.called:
