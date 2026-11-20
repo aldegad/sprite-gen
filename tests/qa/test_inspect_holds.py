@@ -166,6 +166,35 @@ def test_a_listed_hold_is_listed_and_an_unlisted_one_fails_the_gate(tmp_path: Pa
     assert report["unlisted"] == 0 and report["table"]["figure"]["listed"] == 3
 
 
+# The runs of frames on no list, by figure, the count of those frames, and the line inspect-holds prints for them.
+UNLISTED_LINES = {
+    "a run of one frame and a longer one": (
+        {"walk": [(3, 3), (5, 8)]}, 5,
+        "inspect-holds: 5 frames show the picture of the frame before and are on no list: walk 3, 5-8"),
+    "one frame": (
+        {"walk": [(4, 4)]}, 1,
+        "inspect-holds: 1 frame shows the picture of the frame before and is on no list: walk 4"),
+    "several runs and figures, one with none": (
+        {"hero": [(1, 2), (6, 6), (9, 12)], "figure0": [], "figure1": [(3, 4)]}, 9,
+        "inspect-holds: 9 frames show the picture of the frame before and are on no list: hero 1-2, 6, 9-12; figure1 3-4"),
+}
+
+
+@pytest.mark.parametrize("case", list(UNLISTED_LINES))
+def test_the_frames_on_no_list_are_printed_as_runs(monkeypatch: pytest.MonkeyPatch, capsys, case: str) -> None:
+    """From the report the reading hands back: a run of one frame is its number, a longer run FROM-TO, a figure's runs
+    joined by ", ", figures by "; ", and a figure with no frame on no list left out."""
+    table, unlisted, line = UNLISTED_LINES[case]
+    report = {"unlisted": unlisted, "table": {
+        name: {"unlisted": sum(to - first + 1 for first, to in spans),
+               "unlistedRuns": [{"from": first, "to": to} for first, to in spans]} for name, spans in table.items()}}
+    monkeypatch.setattr(holds, "read", lambda **_asked: report)
+    assert holds.run() == 0
+    out, err = capsys.readouterr()
+    assert json.loads(out) == report
+    assert err == line + "\n"
+
+
 def test_a_list_is_read_as_its_writer_wrote_it(tmp_path: Path) -> None:
     """A list that names scenes is read for the scene named; a hold without a reason, or with its frames the wrong way
     round, refuses the list (as holds lists are read elsewhere)."""
