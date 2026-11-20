@@ -66,7 +66,11 @@ Run the local release gate before a release:
 safedeps gates run --root . --strict
 ```
 
-GitHub-hosted CI is not used for this repository: the test gates and the release
-build run on the maintainer's own Linux runner through `scripts/linux_lane.sh`, and
-the RIFE torch backend's CUDA gates on a T4 rented from Modal through
-`scripts/t4_lane.py` (see [docs/release.md](docs/release.md)).
+No CI runs on push or pull request, and this repository holds no workflow. The
+test gates and the release build run through `scripts/linux_lane.sh` in
+GitHub-hosted runner jobs the maintainer starts by hand for one commit at a time
+([aldegad/sprite-gen-lane](https://github.com/aldegad/sprite-gen-lane): no
+secrets, no token scope). The RIFE torch backend's CUDA gates run on the
+maintainer's NVIDIA host through `scripts/cuda_lane.py`, which installs only
+hash-pinned packages that `safedeps check` passed at that very version (see
+[docs/release.md](docs/release.md)).
