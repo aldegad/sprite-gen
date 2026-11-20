@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The test gates, run on the maintainer's own Linux runner. GitHub-hosted CI is not used.
+# The test gates, run per commit in GitHub-hosted runner jobs the maintainer starts by hand
+# (aldegad/sprite-gen-lane's workflow, docs/release.md). Nothing runs on push or pull request.
 #
 # What the CI job ran, in the same order: a clean virtual environment installed the way the
 # quickstart does (`pip install -e ".[dev]"`), RIFE installed through the user's own path
@@ -8,7 +9,7 @@
 # (prepare -> extract -> compose) and the whole test suite. Then RIFE's torch backend on the CPU:
 # PyTorch (TORCH_VERSION, from PyTorch's CPU index) into the same environment, its install check
 # frame (`sprite-gen rife install --backend torch`) and every test marked torch_rife, none skipped
-# (SPRITE_GEN_RIFE_DEVICE=cpu). Its CUDA run is the T4 lane's (`scripts/t4_lane.py`, docs/release.md).
+# (SPRITE_GEN_RIFE_DEVICE=cpu). Its CUDA run is the CUDA lane's (`scripts/cuda_lane.py`, docs/release.md).
 #
 # Run it from a clean clone of the commit being measured, on x86-64 Linux with:
 #   - Python 3.14 (`python3.14` on PATH, or named by SPRITE_GEN_LANE_PYTHON),

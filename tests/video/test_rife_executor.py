@@ -126,7 +126,7 @@ def send(request: bytes) -> bytes:
 def _host_model(request, monkeypatch) -> None:
     """This host runs rife-v4.6, the model of the devices stood in (T4), and names it one way:
     SPRITE_GEN_RIFE_MODEL_NAME, with no SPRITE_GEN_RIFE_MODEL left from a lane. A lane's names its own model's directory
-    (rife-v4.25, scripts/t4_lane.py), which no device stood in runs and no test stood in reads; beside the name, the
+    (rife-v4.25, scripts/cuda_lane.py), which no device stood in runs and no test stood in reads; beside the name, the
     engine refuses the two as two models (`rife.model_name`). The test marked torch_rife serves the torch backend itself
     on the lane's model, and keeps the lane's environment."""
     if request.node.get_closest_marker("torch_rife"):

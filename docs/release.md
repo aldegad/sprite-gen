@@ -1,16 +1,18 @@
 # 릴리즈 — 태그를 push 하고, 레인이 빌드한 것으로 릴리즈 페이지를 낸다
 
-> Owns: How a vX.Y.Z tag becomes a release page, the lanes a commit passes (Linux, and a T4 for the torch backend on CUDA), what the lane builds and the publisher attaches, and what stays manual · Index: [docs/README.md](README.md)
+> Owns: How a vX.Y.Z tag becomes a release page, the lanes a commit passes (Linux on GitHub-hosted runners, and an NVIDIA CUDA host for the torch backend), what the lane builds and the publisher attaches, and what stays manual · Index: [docs/README.md](README.md)
 
 릴리즈 페이지는 손으로 만들지 않는다. `vX.Y.Z` 태그를 push 한 뒤 `scripts/release_publish.py` 가
 그 태그의 `CHANGELOG.md` 절을 본문으로 페이지를 만든다. 사람이 `gh release create` 의 인자를
 기억할 필요가 없게 하는 것이 목적이다 — v2.5.3 이 태그·CHANGELOG·README 까지 올라간 채 릴리즈
 페이지만 빠져서, 릴리즈 목록에는 v2.5.2 가 Latest 로 남아 있었던 적이 있다.
 
-GitHub-hosted CI(GitHub Actions)는 쓰지 않는다. 테스트 게이트와 wheel·sdist 빌드는 메인테이너의
-리눅스 러너에서 `scripts/linux_lane.sh` 가 돌리고, RIFE torch 판의 CUDA 게이트는 Modal 에서 빌린 T4 에서
-`scripts/t4_lane.py` 가 돌린다(아래 "T4 레인"). 페이지를 내는 기계는 아무것도 빌드하지 않고 레인이 만든
-것을 붙인다.
+push 나 PR 마다 도는 CI 는 없고, 이 레포에는 워크플로가 없다. 테스트 게이트와 wheel·sdist 빌드는
+`scripts/linux_lane.sh` 가 하고, 그것을 메인테이너가 잴 커밋의 SHA 를 넣어 손으로 시작하는 워크플로가 GitHub
+호스트 표준 러너(ubuntu x86-64)에서 돌린다 — [aldegad/sprite-gen-lane](https://github.com/aldegad/sprite-gen-lane)
+의 `linux-lane.yml` 이다. 그 레포는 공개 클론으로 커밋을 받을 뿐 비밀값도, 잡 토큰의 권한도 없다. RIFE torch 판의
+CUDA 게이트는 메인테이너의 NVIDIA GPU 호스트에서 `scripts/cuda_lane.py` 가 돌린다(아래 "CUDA 레인"). 페이지를
+내는 기계는 아무것도 빌드하지 않고 레인이 만든 것을 붙인다.
 
 리눅스 레인이 통과했다는 것은 한 번의 실행이 exit 0 으로 끝났거나, 같은 커밋에서 `--rife-unmeasured "<이유>"`
 실행(exit 3, RIFE 를 재지 못했다고 끝에 적는다)과 `--rife-only` 실행(exit 0)이 둘 다 끝났다는
@@ -18,7 +20,12 @@ GitHub-hosted CI(GitHub Actions)는 쓰지 않는다. 테스트 게이트와 whe
 lavapipe 에서는 첫 업로드에서 죽는다 — 그래서 그런 호스트에서는 RIFE 를 떼어 내되 조용히 건너뛰지는
 않는다.
 
-`scripts/linux_lane.sh` 레인은 `pytest` 호출마다 `--full` 을 전달해 모든 시험을 실행한다(T4 레인도 같다).
+GitHub 호스트 러너의 잡 하나는 6시간에 끊기므로 워크플로는 같은 SHA 를 두 잡으로 나눠 나란히 돌린다: `suite`
+잡이 `--rife-unmeasured "<이유>"` 로, `rife` 잡이 `--rife-only` 로 돈다. 같은 실행에서 `suite` 가 exit 3 으로,
+`rife` 가 exit 0 으로 끝나 둘 다 초록이면(뒤따르는 `verdict` 잡도 초록이다) 그 커밋은 리눅스 레인을 통과한
+것이다. 러너에는 GPU 가 없어 RIFE 는 컨테이너의 Mesa llvmpipe(Vulkan 의 CPU 드라이버)에서 돈다.
+
+`scripts/linux_lane.sh` 레인은 `pytest` 호출마다 `--full` 을 전달해 모든 시험을 실행한다(CUDA 레인도 같다).
 일반 `pytest` 실행은 `pyproject.toml` 에 등록된 `slow` 표시 시험을 `tests/conftest.py` 가 실행 대상에서
 제외하는 빠른 묶음이다. `tests/release/test_fast_bundle.py` 는 레인의 각 `pytest` 호출에 `--full` 이 있는지
 확인한다.
@@ -45,7 +52,7 @@ RIFE 의 torch 백엔드(`SPRITE_GEN_RIFE_BACKEND=torch`, docs/loop-repair.md 1�
 판정 비교)은 `real_rife` 단계에서 빼고 이 단계에서 돈다. `--rife-unmeasured` 는 이 단계를 돌지 않고, 그
 실행에서는 `torch_rife` 가 붙은 시험도 RIFE 때문에 건너뛸 수 있는 것으로 친다.
 `tests/release/test_lane_rife_collection.py` 의 표시 검사도 두 표시를 같이 받는다. CUDA 위의 torch 판은
-이 레인이 재지 않고 T4 레인이 잰다.
+이 레인이 재지 않고 CUDA 레인이 잰다.
 
 표시 없이 RIFE 가 없을 때 건너뛰거나 모이지 않는 시험은 두 실행 어느 쪽도 재지 않는다. 그래서
 `--rife-unmeasured` 는 시험을 `pytest --full --rife-unmeasured` 로 돌리고, 그 실행에서 건너뛴 것마다 — skip
@@ -56,37 +63,58 @@ RIFE 의 torch 백엔드(`SPRITE_GEN_RIFE_BACKEND=torch`, docs/loop-repair.md 1�
 있는 척하는 대역을 둔 채 한 번, 없는 채 한 번 모아, 모이는지나 skip 표시의 판정이 갈리는 시험마다
 표시를 요구하고 없으면 그 이름을 대고 실패한다.
 
-## T4 레인 — torch 판을 CUDA 에서
+## CUDA 레인 — torch 판을 CUDA 에서
 
-`scripts/t4_lane.py` 는 Modal 에서 빌린 NVIDIA T4 하나에서 torch 판을 CUDA 로 잰다. 메인테이너의 Modal
-작업 공간에서, 잴 커밋을 체크아웃한 트리(커밋되지 않은 변경이 없는)로 돌린다:
+`scripts/cuda_lane.py` 는 메인테이너의 NVIDIA GPU 호스트에서 torch 판을 CUDA 로 잰다. 표준 라이브러리만 쓰고,
+두 기계에서 두 단계로 돈다:
 
 ```bash
-modal run --env <환경> scripts/t4_lane.py                 # 게이트
-modal run --env <환경> scripts/t4_lane.py --whole-suite   # 그 앞에 스위트 전체도
+# safedeps 가 있는 기계에서, 잴 커밋을 체크아웃한 트리(커밋되지 않은 변경이 없는)로
+.venv/bin/python scripts/cuda_lane.py pack --requirements <목록> --out <빈 디렉터리> [--host-spec <생태계>:<이름>@<버전> ...]
+# 그 디렉터리를 호스트로 옮긴 뒤, 호스트에서 Python 3.14 로
+python -I <디렉터리>/cuda_lane.py run --pack <디렉터리> [--wheels <PyPI 에 없는 휠의 디렉터리>] [--rife-zip <zip>]
 ```
 
-HEAD 의 트리(`git archive`)를 이미지로 짓는다. 리눅스 레인이 깨끗한 클론에 까는 것처럼, Python 3.14 의 새
-가상 환경에 PyPI 의 PyTorch 2.13.0 과 트리(`pip install -e ".[dev]"`)를 깐다. PyPI 의 리눅스 휠은 CUDA 13
-판이다(`pip install "sprite-gen[torch]"` 이 받는 것). 의존성도 PyPI 에서 받으므로 PyTorch 인덱스의 오래된
-사본이 끼지 않는다. 모델은 `sprite-gen rife install --backend torch` 로 엔진이 바이너리를 찾지 않는 디렉터리에
-둔다. 스위트가 부르는 도구(ffmpeg, libwebp 1.5 의 img2webp, node, git)도 이미지에 있다. 그리고 T4 에서:
+목록은 호스트가 깔 패키지 전부를 한 줄에 하나씩 `이름==버전 --hash=sha256:<값>` 으로 적은 것이다(백슬래시로 줄을
+이어도 된다). 트리의 `[dev]` 와 PyTorch 2.13.0 CUDA 판의 의존성 닫힘을 호스트의 플랫폼과 Python 3.14 에 맞춰
+적는다. 리눅스 호스트라면 PyPI 의 `torch==2.13.0`(리눅스 휠이 CUDA 13 판이다)을, 윈도우 호스트라면 PyTorch cu130
+인덱스의 `torch==2.13.0+cu130` 을 적는다(PyPI 의 윈도우 휠은 CPU 판이다). PyPI 에 없는 휠은 `--wheels`
+디렉터리에 둔다.
 
+`pack` 은 목록의 패키지마다(PyTorch 는 로컬 꼬리표를 뗀 버전으로), 그리고 `--host-spec` 마다(호스트가 레인을 위해
+목록 밖에서 까는 것, 예를 들어 윈도우에서 python.org 의 NuGet 패키지를 풀어 쓰는 Python 이면
+`nuget:python@3.14.10`) `safedeps check` 를 돌린다. 그 버전 그대로 `clean` 이나 `already_approved` 가 아닌 답,
+끝나지 못한 검사(`error`, `check_did_not_finish`), 돌지 못한 safedeps 는 그 자리에서 `pack` 을 멈추고, `pack` 은
+아무것도 쓰지 않는다 — 그러면 호스트가 깔 것이 없다. 모든 검사가 통과해야 HEAD 의 트리(`git archive`),
+`SOURCE_SHA`, 검사한 목록(`requirements.txt`), 검사마다의 답(`checks.json`), 그 커밋의 `cuda_lane.py` 를 쓴다.
+`run` 은 `checks.json` 에 목록의 줄마다 통과한 검사가 없거나 목록이 검사한 것과 다르면 아무것도 만들지 않고
+멈춘다. 두 멈춤은 `tests/release/test_cuda_lane.py` 가 본다.
+
+`run` 은 리눅스 레인이 깨끗한 클론에 까는 것처럼 Python 3.14 의 새 가상 환경을 짓는다. 목록의 휠을 해시를
+확인하며 받고, 받은 파일만으로 깔고, 트리를 `pip install -e "src[dev]"` 로(더 받는 것 없이) 깔고, `pip check` 를
+돌리고, 모델을 `sprite-gen rife install --backend torch --no-check` 로 엔진이 바이너리를 찾지 않는 디렉터리에
+둔다. 윈도우는 긴 경로를 켜지 않은 곳에서 260자 이상인 경로를 쓰지 못하고, PyTorch 2.13.0+cu130 휠에는 173자인
+이름이 있다. 그래서 `run` 은 휠이 쓰는 가장 긴 경로가 가상 환경 아래에 들어가지 않으면 깔기 전에 멈추고 몇 자를
+줄여야 하는지 말한다. 호스트의 설정은 바꾸지 않고 디렉터리의 경로를 짧게 잡는다(예를 들어
+`<드라이브>:\<짧은 이름>\<SHA 앞 7자>`). 그리고 호스트의 GPU 에서:
+
+- `nvidia-smi` 로 GPU 와 드라이버를, PyTorch 로 CUDA 를 확인한다(PyTorch 가 GPU 를 찾지 못하면 실패다).
 - 설치의 확인 프레임을 CUDA 로 만든다(`sprite-gen rife install --backend torch`, `SPRITE_GEN_RIFE_DEVICE=cuda`).
-- `--whole-suite` 면 그 환경(PyTorch 가 든)에서 스위트 전체를 CUDA 로 돈다. `pytest --full --rife-unmeasured` 로
-  돌리므로 바이너리가 닿지 않아 건너뛰는 `real_rife` 말고 다른 건너뜀은 실패다(리눅스 레인의 RIFE 없는
-  실행과 같다).
 - `torch_rife` 가 붙고 `real_rife` 는 붙지 않은 시험 전부를 CUDA 로 돈다. 하나라도 건너뛰거나 표시된 시험이
-  없으면 실패다. 둘이 함께 붙은 시험(같은 기계의 바이너리와 torch 판의 판정 비교)은 리눅스 레인 몫이다. T4 의
-  GPU 는 계산만 내주므로 바이너리가 쓰지 못한다.
+  없으면 실패다. 둘이 함께 붙은 시험(같은 기계의 바이너리와 torch 판의 판정 비교)은 리눅스 레인 몫이다.
 
-실행은 함수 호출 id, GPU 와 드라이버, 단계마다의 출력을 찍는다. 모든 단계가 통과해야 exit 0 이다. T4 레인이
-통과했다는 것은 그 커밋에서 돈 실행 하나가 exit 0 으로 끝났다는 뜻이다. 두 레인이 같은 PyTorch 와 Python 을
-까는지는 `tests/release/test_t4_lane.py` 가 본다.
+엔진이 바이너리를 찾는 곳은 모두 비워 둔다: 밖에서 온 `SPRITE_GEN_*` 가 없고, 사용자 데이터 디렉터리(윈도우는
+`LOCALAPPDATA`, 그 밖은 `XDG_DATA_HOME`)가 비어 있고, PATH 에 rife-ncnn-vulkan 이 없다. NVIDIA 호스트에서는
+Vulkan 바이너리도 돌 수 있으므로 일부러 닿지 않게 두는 것이다. 임시 디렉터리, pip 캐시, CUDA 캐시도 그 디렉터리
+안을 가리키므로 실행은 디렉터리 밖에 아무것도 쓰지 않고, 디렉터리를 통째로 지우면 실행이 쓴 것이 모두 지워진다.
+
+실행은 커밋, GPU 와 드라이버, `pip freeze`, 단계마다의 출력을 찍고 `run.json` 과 `logs/` 에 남긴다. 모든 단계가
+통과해야 exit 0 이다. CUDA 레인이 통과했다는 것은 그 커밋에서 돈 실행 하나가 exit 0 으로 끝났다는 뜻이다. 두
+레인이 같은 PyTorch 와 Python 을 까는지도 `tests/release/test_cuda_lane.py` 가 본다.
 
 ## 통과는 커밋 하나의 것이다
 
-커밋이 레인을 통과했다는 것은 그 커밋에서 리눅스 레인이 통과하고(위 정의) T4 레인이 통과했다는 뜻이다.
+커밋이 레인을 통과했다는 것은 그 커밋에서 리눅스 레인이 통과하고(위 정의) CUDA 레인이 통과했다는 뜻이다.
 통과는 커밋 하나의 것이다. 어떤 커밋에서 잰 레인 — 한 번의 exit 0 이든, `--rife-only` 의 exit 0 이든 —
 은 다른 커밋의 통과가 아니다. 이전 릴리즈나 부모 커밋의 통과를 다음 커밋으로 옮겨 적지 않고, 머지할
 커밋과 태그 커밋을 각각 그 SHA 의 깨끗한 클론에서 잰다. `--rife-unmeasured` 로 잰 커밋은 같은 SHA 의
@@ -99,24 +127,29 @@ HEAD 의 트리(`git archive`)를 이미지로 짓는다. 리눅스 레인이 �
    바꾸고, `pyproject.toml` 의 `version` 과 `SKILL.md` 의 `version:` 을 그 버전으로 맞춘다
    (둘의 일치는 `tests/packaging/test_version_ssot.py` 가 강제한다).
 2. **PR 로 `main` 머지** — `main` 은 보호 브랜치라 직접 push 가 거부된다. 머지할 커밋에서 두 레인이
-   통과해야 한다(위 정의) — 러너에서 그 커밋의 깨끗한 클론으로 `scripts/linux_lane.sh`, 그 커밋을
-   체크아웃한 트리에서 `modal run scripts/t4_lane.py`.
+   통과해야 한다(위 정의) — 그 커밋을 PR head 로 올린 뒤 리눅스 레인 워크플로의 한 실행(두 잡)과, CUDA
+   호스트에서 그 SHA 로 `pack` 한 `scripts/cuda_lane.py` 의 실행.
+
+   ```bash
+   gh workflow run linux-lane.yml --repo aldegad/sprite-gen-lane -f sha=<SHA> [-f ref=<브랜치나 PR>]
+   ```
 3. **태그 push** — 코드네임 접두사 없는 `vX.Y.Z` 로.
 
    ```bash
    git tag vX.Y.Z && git push origin vX.Y.Z
    ```
 
-4. **러너에서 태그 커밋을 패키징한다** — 태그가 가리키는 커밋의 깨끗한 클론에서, 체크아웃 밖의 빈
-   디렉터리로.
+4. **레인이 태그 커밋을 패키징한다** — 태그가 가리키는 SHA 로 워크플로를 `-f artifact=true` 와 함께 돌리고,
+   산출물을 빈 디렉터리로 받는다.
 
    ```bash
-   scripts/linux_lane.sh --artifact <빈 디렉터리>
+   gh workflow run linux-lane.yml --repo aldegad/sprite-gen-lane -f sha=<태그 SHA> -f artifact=true
+   gh run download <실행 id> --repo aldegad/sprite-gen-lane -n package-<태그 SHA> -D <빈 디렉터리>
    ```
 
-   게이트를 통과한 뒤에만 wheel·sdist·`SHA256SUMS`·`SOURCE_SHA`(그 커밋) 네 파일을 쓴다
-   (`--rife-unmeasured` 와 함께 쓰면 같은 커밋의 `--rife-only` 도 통과해야 레인이 통과한 것이다).
-   그 디렉터리를 페이지를 낼 기계로 가져온다.
+   `suite` 잡의 `scripts/linux_lane.sh --artifact` 가 게이트를 통과한 뒤에만 wheel·sdist·`SHA256SUMS`·
+   `SOURCE_SHA`(그 커밋) 네 파일을 쓰고, 워크플로는 그 넷만 `package-<SHA>` 산출물로 14일 동안 남긴다. 같은
+   실행의 `rife` 잡도 초록이어야 레인이 통과한 것이다. 받은 디렉터리를 페이지를 낼 기계에서 쓴다.
 5. **페이지를 낸다** — 태그가 있는 체크아웃에서.
 
    ```bash
@@ -190,5 +223,6 @@ gh release upload vX.Y.Z <clip>.gif --repo aldegad/sprite-gen
 ## Related
 
 - [docs/README.md](README.md) — documentation index
-- `scripts/linux_lane.sh` — the test gates and the release build, on the maintainer's Linux runner
-- `scripts/t4_lane.py` — the torch backend's CUDA gates, on a T4 rented from Modal
+- `scripts/linux_lane.sh` — the test gates and the release build, run per commit by
+  [aldegad/sprite-gen-lane](https://github.com/aldegad/sprite-gen-lane)'s workflow on GitHub-hosted runners
+- `scripts/cuda_lane.py` — the torch backend's CUDA gates, on the maintainer's NVIDIA host

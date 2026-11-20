@@ -4,9 +4,9 @@
 The gate this closes: a `vX.Y.Z` tag can be pushed, changelogged and announced while the
 release page is never created, leaving an older version as Latest. The release chain runs this
 right after the tag is pushed (docs/release.md), and `--dry-run` rehearses the same decision on
-a branch. GitHub-hosted CI is not used: the wheel and sdist come from the Linux lane
-(`scripts/linux_lane.sh --artifact <dir>`, on the maintainer's runner) and are attached with
-`--prebuilt <dir>`, so the machine that publishes builds nothing.
+a branch. No CI runs on push or pull request: the wheel and sdist come from the Linux lane
+(`scripts/linux_lane.sh --artifact <dir>`, in the suite job of the lane workflow) and are attached
+with `--prebuilt <dir>`, so the machine that publishes builds nothing.
 
 Three outcomes, and no fourth:
 
