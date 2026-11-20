@@ -4,54 +4,69 @@
 A text read or write that names no encoding takes the locale's (`locale.getencoding()`). On a Windows whose code page
 is not UTF-8 (cp949 on a Korean one) that is not the UTF-8 the package writes: the read stops at the first character
 the code page cannot decode, or reads other characters, which the package may then write back. This scans the
-package's code (`sprite_gen/`) for every call that would: a `read_text` or `write_text` without an encoding; a
-text-mode open without one (the built-in `open`, `io.open`, `codecs.open`, `os.fdopen`, a path's `open`, the
-compressed and temporary files' openers, `io.TextIOWrapper`), its mode given by keyword or by position; and any of
-them passed on uncalled (`opener = open`, `partial(io.open, ...)`, `getattr(path, "read_text")`), where no call can
-be checked.
+package's code (`sprite_gen/`) for every call that would.
+
+What it guards, and what it does not claim. It guards against a locale read or write written by mistake: a call in
+the package's own code, written with names the module binds, that reads or writes text, or reads a child's output, in
+the locale's encoding. Each such call it can follow is read by the values its arguments end with, and each form on the
+way that it cannot follow is found, not passed: keywords unpacked with `**`, or positions with `*`, where the encoding
+or the text mode may be; a partial of what it cannot name; a call of what it cannot name that names `text`,
+`universal_newlines` or `encoding`; an opener or a child spawner passed on where its call is not seen. It claims
+nothing about a name made at run time (`getattr` with a name not written as a string, a name built from strings,
+`operator.attrgetter`, `vars`, `eval`, `importlib.import_module`); a name another module of the package binds (`from
+.x import reader`, a star import of any module but the openers' and spawners' own, a module's `__getattr__`), which it
+does not follow into that module; a call of what it cannot name that names none of those keywords, only positions,
+`errors` (every codec's: `data.decode("utf-8", errors="replace")`) or `**`; an object's type beyond the names it
+follows (a path class reached another way, as `type(path).read_text(path)` or a loop over classes, is taken for a
+path, its first argument for the encoding); the calls that decode in the locale's encoding when given none and are not
+listed here (`logging.FileHandler`, `fileinput`, a `ConfigParser`'s `read`); or comments, which an AST does not hold.
+Where `getattr` names an opener or a spawner in a string it is found, but that is not part of the claim.
+
+The text calls: a `read_text` or `write_text`; a text-mode open (the built-in `open`, `io.open`, `codecs.open`,
+`os.fdopen`, a path's `open`, the compressed and temporary files' openers, `io.TextIOWrapper`), its mode given by
+keyword or by position; and any of them passed on uncalled (`opener = open`, `partial(io.open, ...)`,
+`getattr(path, "read_text")`), where no call can be checked.
 
 A child's output is text read the same way. A `subprocess` call told to read it as text (`text` or
 `universal_newlines`, by keyword or, for `universal_newlines`, by position; or `errors` alone) decodes what the child
 writes in the locale's encoding unless it names one; `getoutput` and `getstatusoutput` always read text; `os.popen`
-reads text and takes no encoding at all. An encoding named `"locale"` is the locale's by name, and is found on both
-kinds of call: a call that means it is listed below with why.
+reads text and takes no encoding at all, so each mention of it is found.
+
+Only a string literal names an encoding, on an opener as on a spawner: None, a name, an expression and "" name none.
+An encoding named `"locale"` is the locale's by name, and is found on both kinds of call: a call that means it is
+listed below with why.
 
 It reads a name closed: as everything the module binds it to, in every scope at once. A name is followed through an
 import (`from io import open as o`, `import builtins as b; b.open`, `from io import *`), through an assignment of a
-name (`x = io; x.TextIOWrapper(...)`, `P = Path; P.read_text(path)`, `g = getattr`) and through a parameter's default
-(`def probe(run=subprocess.run)`); `open` and `getattr` are always the built-ins as well. A name bound anywhere in the
-module to a text opener or a child spawner is checked as one wherever it is called, whatever another scope binds it
-to: a module that binds `os.open` to a name it binds `io.open` to elsewhere, or `os.system` to one it binds
-`subprocess.run` to, is told so, and renames one. A `.open(...)` is taken for a path's unless its receiver is a name
+name (`x = io; x.TextIOWrapper(...)`, `P = Path; P.read_text(path)`, `g = getattr`), through a parameter's default
+(`def probe(run=subprocess.run)`) and, for a spawner, through the parameter of a def or a class of the module it is
+handed to, by keyword or by position (`probe(cmd, run=subprocess.run)`); `open` and `getattr` are always the built-ins
+as well. A name bound anywhere in the module to a text opener or a child spawner is checked as one wherever it is
+called, whatever another scope binds it to: a module that binds `os.open` to a name it binds `io.open` to elsewhere,
+or `os.system` to one it binds `subprocess.run` to, is told so, and renames one. A `.open(...)` is taken for a path's
+unless its receiver is a name
 the module only imports, a module's own `open` such as `Image.open` or `os.open` (a binding to a literal, as
 `Image = None` after a failed import, does not count: a literal has no `open`), or a name a scope binds to a
 `zipfile.ZipFile` and to nothing else, whose `open` reads bytes.
 
-A spawner reads text when its call says so (`getoutput` and `getstatusoutput` always do), so its call's keywords are
-what is checked, wherever the spawner goes: a call of any name bound to it; a call it is handed to as an argument
-(`functools.partial(run, text=True)`, `probe(cmd, run=run)`), read by that call's keywords as the spawner it is handed
-(`partial(getoutput)` reads text, `partial(getoutput, encoding="utf-8")` names its encoding), and a call handed that
-call's result (`partial(partial(run), text=True)`), read by its own keywords alone; and a call of something the scan
-cannot name (a parameter, an attribute of an object, a call's result) that passes `text` or `universal_newlines`. A
-spawner passed on any other way uncalled (into a container, as a return value, to an attribute) is found, its call
-not seen.
-
-What it does not see:
-- a name another module of the package binds (`from .x import reader`, `from .x import *`, a module's `__getattr__`):
-  it is not followed into that module;
-- a star import from any module but the openers' and spawners' own (`io`, `codecs`, `os`, `gzip`, `bz2`, `lzma`,
-  `tempfile`, `pathlib`, `builtins`, `subprocess`);
-- a name found at run time: `getattr` with a name not written in the call as a string, `operator.attrgetter`, `vars`,
-  `eval`, `importlib.import_module`;
-- an object's type beyond those names: a path class reached any other way (`type(path).read_text(path)`, a loop over
-  classes) is taken for a path, its first argument for the encoding; an encoding given as a name is taken as named,
-  whatever it holds;
-- a spawner called through something the scan cannot name with its text mode in `errors`, a position or `**` alone
-  (`runner(cmd, errors="replace")`): only `text` and `universal_newlines` mark such a call, since `errors` is every
-  codec's (`data.decode("utf-8", errors="replace")`);
-- the calls that decode in the locale's encoding when given none and are not on the lists above (`logging.FileHandler`,
-  `fileinput`, a `ConfigParser`'s `read`);
-- comments: an AST holds none.
+A spawner is read by the arguments it ends up called with, and whether it always reads text is its own: `getoutput`
+and `getstatusoutput` do under any number of partials. A call of it is read where it stands. A `functools.partial` of
+it, however many deep, is read once, where the partials end (at the one no other partial wraps and nothing calls at
+once), with their arguments merged as `functools.partial` merges them: positions in order, keywords from the inner to
+the outer, the outer winning (`partial(partial(getoutput, encoding="utf-8"), cmd, encoding=None)` reads None, so the
+locale's; `partial(partial(getoutput, encoding=None), cmd, encoding="utf-8")` reads UTF-8). `text`,
+`universal_newlines` and `encoding` are read from what the arguments end with; one a `**` may set after it was last
+written, or a position after a `*` at or before `universal_newlines`', cannot be read and is found. A partial bound to
+a name (by an assignment, a parameter's default, or a call of a def or a class of the module) is read where it is
+written, and each call of that name, or of a name bound to it, is read through it with the call's own arguments as one
+more layer: found there when the call makes it read in the locale's encoding, and found once, where it is written, when
+it already does. A spawner handed to a def or a class of the module binds the parameter it is handed to, and each call
+of that parameter is read as the spawner's. A spawner, a partial of one or a name bound to one is found, its call not
+seen, when it is handed to any other call (an import's, a method's, a built-in's, or a def of the module with no
+parameter of that name) or passed on any other way (into a container, as a return value, to an attribute), whatever it
+reads where it is written. A call of what the scan cannot name (a parameter, an attribute of an object, a call's
+result, or a partial of one) is read as a spawner's when it names `text`, `universal_newlines` or `encoding`, and is
+found unless it names an encoding.
 """
 
 from __future__ import annotations
@@ -144,8 +159,12 @@ SPAWNERS = {
     "subprocess.getoutput": (True, None),
     "subprocess.getstatusoutput": (True, None),
 }
-SPAWNER_BY_KEYWORDS = (False, None)  # a spawner read from its call's keywords alone: not named
-TEXT_MODE = ("text", "universal_newlines")  # the keywords that ask a spawner for text, and mark a call as one
+SPAWNER_BY_KEYWORDS = (False, None)  # what the scan cannot name, read as a spawner by its keywords alone
+TEXT_MODE = ("text", "universal_newlines")  # the keywords that ask a spawner for text
+TEXT_MARKS = (*TEXT_MODE, "encoding")  # the keywords that mark a call of what the scan cannot name as a spawner's
+NAMELESS = (SPAWNER_BY_KEYWORDS, "what the scan cannot name")
+PARTIAL = "functools.partial"  # wraps what it is given first, its arguments merged with the wrapped one's
+UNREAD = object()  # a keyword a `**` may have set after it was last written: its value is not known
 LOCALE_ONLY = {"os.popen"}  # reads a child's output as text in the locale's encoding, and takes no encoding
 BUILTINS = {"open": {"builtins.open"}, "getattr": {"builtins.getattr"}}  # names a built-in, whatever else binds them
 # getattr(x, name) taking an opener, or a spawner that reads text whatever it is given.
@@ -153,8 +172,8 @@ BY_NAME = {"open", *PATH_METHODS, *(name.rpartition(".")[2] for name in OPENERS)
            *(name.rpartition(".")[2] for name, (always, _) in SPAWNERS.items() if always),
            *(name.rpartition(".")[2] for name in LOCALE_ONLY)}
 # What an assignment of a name or a parameter's default is followed to: the openers, the path classes, zipfile.ZipFile,
-# getattr, the spawners, their modules.
-FOLLOWED = {*OPENERS, *PATH_CLASSES, *BYTES_OPEN, "builtins.getattr", *SPAWNERS, *LOCALE_ONLY}
+# getattr, the spawners, functools.partial, their modules. A parameter a call hands an argument to: the spawners.
+FOLLOWED = {*OPENERS, *PATH_CLASSES, *BYTES_OPEN, "builtins.getattr", *SPAWNERS, *LOCALE_ONLY, PARTIAL}
 FOLLOWED |= {name.rpartition(".")[0] for name in FOLLOWED}
 SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
@@ -178,15 +197,34 @@ def _aliases(target: ast.AST, value: ast.AST) -> list[tuple[str, ast.AST]]:
     return []
 
 
-def _bindings(tree: ast.AST) -> tuple[dict[str, set[str]], set[str], set[str], set[str], set[str], set[str], set[int]]:
+def _signature(arguments: ast.arguments) -> tuple[list[str], set[str]]:
+    """The parameters an argument is handed to: by position, in order, and by keyword."""
+    return ([a.arg for a in (*arguments.posonlyargs, *arguments.args)],
+            {a.arg for a in (*arguments.args, *arguments.kwonlyargs)})
+
+
+def _signatures(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> list[tuple[list[str], set[str]]]:
+    """Each signature a call of a def's or a class's name hands its arguments to: the def's, or each `__init__` of
+    the class without its first parameter."""
+    if not isinstance(node, ast.ClassDef):
+        return [_signature(node.args)]
+    inits = [_signature(part.args) for part in node.body
+             if isinstance(part, (ast.FunctionDef, ast.AsyncFunctionDef)) and part.name == "__init__"]
+    return [(positional[1:], named - set(positional[:1])) for positional, named in inits]
+
+
+def _bindings(tree: ast.AST) -> tuple[dict[str, set[str]], set[str], set[str], set[str], set[str], set[str], set[int],
+                                      list[tuple[str, ast.AST]]]:
     """What the module binds, read closed: every scope at once, so a name bound in two places names both.
 
-    names: each name an import, an assignment of a name or a parameter's default binds, to everything it names.
+    names: each name an import, an assignment of a name or a parameter's default binds, to everything it names, and
+    each parameter of a def or a class of the module, to the spawners a call of it hands that parameter by name.
     imported: every module or object imported. rebound: every name also bound another way (an assignment of anything
     but a literal, a parameter, a loop, a def, `except ... as`). anywhere: every name a walrus, `global` or `nonlocal`
     binds, which may bind it in a scope other than the one it stands in. defined: every name a def or a class binds.
     valued: every name bound to a value the scan does not follow, as rebound is without the defs and classes.
-    followed: each node an assignment of a name or a parameter's default binds a name to.
+    followed: each node an assignment of a name or a parameter's default binds a name to, and each argument a call of
+    a def or a class of the module hands a parameter. parameters: each such parameter, with the argument handed it.
     """
     names: dict[str, set[str]] = {}
     imported: set[str] = set()
@@ -196,6 +234,8 @@ def _bindings(tree: ast.AST) -> tuple[dict[str, set[str]], set[str], set[str], s
     valued: set[str] = set()
     aliases: list[tuple[str, ast.AST]] = []
     literal: set[int] = set()  # names assigned a literal, which has no `open`
+    signatures: dict[str, list[tuple[list[str], set[str]]]] = {}  # each def's or class's, by its name
+    calls: list[ast.Call] = []  # each call of a name
 
     def bind(name: str, qualified: str) -> None:
         names.setdefault(name, set()).add(qualified)
@@ -241,6 +281,9 @@ def _bindings(tree: ast.AST) -> tuple[dict[str, set[str]], set[str], set[str], s
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             rebound.add(node.name)
             defined.add(node.name)
+            signatures.setdefault(node.name, []).extend(_signatures(node))
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            calls.append(node)
         elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
             rebound.add(node.name)
             valued.add(node.name)
@@ -249,15 +292,28 @@ def _bindings(tree: ast.AST) -> tuple[dict[str, set[str]], set[str], set[str], s
             valued.add(node.rest)
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             anywhere.update(node.names)
+    parameters: list[tuple[str, ast.AST]] = []
+    for call in calls:  # what a call of a def or a class of the module hands a parameter binds that parameter
+        for positional, named in signatures.get(call.func.id, []):
+            given = []
+            for argument in call.args:
+                if isinstance(argument, ast.Starred):
+                    break  # the positions after it are not known
+                given.append(argument)
+            parameters += [*zip(positional, given), *((k.arg, k.value) for k in call.keywords if k.arg in named)]
+    pairs = [*((name, value, FOLLOWED) for name, value in aliases),
+             *((name, value, set(SPAWNERS)) for name, value in parameters
+               if isinstance(value, (ast.Name, ast.Attribute)))]  # a spawner handed on; a partial: _Scan.bound
     grown = True
     while grown:  # an alias of an alias, until nothing more is found: FOLLOWED is finite
         grown = False
-        for name, value in aliases:
-            more = (_qualify(value, names) & FOLLOWED) - names.get(name, set())
+        for name, value, kinds in pairs:
+            more = (_qualify(value, names) & kinds) - names.get(name, set())
             if more:
                 names.setdefault(name, set()).update(more)
                 grown = True
-    return names, imported, rebound, anywhere, defined, valued, {id(value) for _, value in aliases}
+    followed = {id(value) for _, value in (*aliases, *parameters)}
+    return names, imported, rebound, anywhere, defined, valued, followed, parameters
 
 
 def _shifted(spec: tuple) -> tuple:
@@ -277,24 +333,70 @@ def _handed(call: ast.Call) -> list[ast.AST]:
 
 
 def _encoding(encoding: ast.AST | None, what: str) -> str | None:
-    """Why `encoding`, as `what` is given it, is the locale's: not given, None, or "locale" by name; None if it names
-    another. "" when it is not given, for the caller to say why."""
-    if _none(encoding):
-        return ""
-    if isinstance(encoding, ast.Constant) and encoding.value == "locale":
-        return f"{what} with encoding 'locale': the locale's, by name"
-    return None
+    """Why `encoding`, as `what` is given it, is the locale's; None if it names another. Only a string literal that is
+    not empty names one: "" when it names none (not given, None, a name, an expression, ""), for the caller to say
+    why, and "locale" is the locale's by name."""
+    if isinstance(encoding, ast.Constant) and isinstance(encoding.value, str) and encoding.value:
+        return f"{what} with encoding 'locale': the locale's, by name" if encoding.value == "locale" else None
+    return ""
+
+
+def _no_encoding(encoding: ast.AST | None) -> str:
+    """How a call that names no encoding was given `encoding`, for its finding."""
+    return "no encoding" if _none(encoding) else "an encoding it does not name"
+
+
+def _merge(layers: list[tuple[list[ast.expr], list[ast.keyword]]]) -> tuple[list[ast.expr], dict, bool]:
+    """The arguments a spawner ends up called with, from `layers`: the positions and keywords of each partial around it
+    and of its call, the innermost first, merged as functools.partial merges them (positions in order, keywords from
+    the inner to the outer, the outer winning). A keyword a `**` may set after it was last written is UNREAD; the flag
+    says whether one never written may be set."""
+    positions: list[ast.expr] = []
+    keywords: dict = {}
+    unpacked = False
+    for args, given in layers:
+        positions.extend(args)
+        if any(keyword.arg is None for keyword in given):
+            keywords, unpacked = dict.fromkeys(keywords, UNREAD), True
+        keywords.update((keyword.arg, keyword.value) for keyword in given if keyword.arg is not None)
+    return positions, keywords, unpacked
 
 
 class _Scan(ast.NodeVisitor):
     def __init__(self, tree: ast.AST, source: str) -> None:
         (self.names, self.imported, self.rebound, self.anywhere, self.defined, self.valued,
-         self.followed) = _bindings(tree)
+         self.followed, parameters) = _bindings(tree)
         self.source = source
         self.found: list[tuple[int, str, str]] = []
         self.called: set[int] = set()
-        self.handed: set[int] = set()  # each argument of a call: a spawner there is read by that call's keywords
+        self.handed: set[int] = set()  # each argument of a call: a spawner there is read at that call
+        self.wrapped: set[int] = set()  # each call's callee and each partial's first argument: read with that call
         self.byte_openers: list[set[str]] = [self._byte_openers(tree)]
+        # Each name a functools.partial or another name is bound to, by an assignment, a parameter's default or a call
+        # of a def or a class of the module: a call of the name is read through what it is bound to. kept: each value
+        # the scan follows where it goes, bound to names only or to a parameter, or dropped (an expression statement).
+        self.bound: dict[str, list[ast.AST]] = {}
+        self.kept: set[int] = set()
+        pairs = list(parameters)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Expr):
+                self.kept.add(id(node.value))
+            elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                pairs += [(target.id, node.value) for target in targets if isinstance(target, ast.Name)]
+                if all(isinstance(target, ast.Name) for target in targets):
+                    self.kept.add(id(node.value))
+            elif isinstance(node, ast.arguments):
+                positional = [*node.posonlyargs, *node.args]
+                defaults = [(arg.arg, default) for arg, default in
+                            (*zip(positional[len(positional) - len(node.defaults):], node.defaults),
+                             *zip(node.kwonlyargs, node.kw_defaults)) if default is not None]
+                pairs += defaults
+                self.kept.update(id(default) for _, default in defaults)
+        self.kept.update(id(value) for _, value in parameters)
+        for name, value in pairs:
+            if isinstance(value, ast.Name) or self.is_partial(value):
+                self.bound.setdefault(name, []).append(value)
 
     def qualify(self, node: ast.AST) -> set[str]:
         return _qualify(node, self.names)
@@ -411,11 +513,28 @@ class _Scan(ast.NodeVisitor):
         whys = [why for why in (self.locale(node, spec, what) for spec, what in specs) if why]
         arguments = _handed(node)
         self.handed.update(id(argument) for argument in arguments)
-        children = [(SPAWNERS[name], name) for name in sorted(found.intersection(SPAWNERS))]
-        children += [((always, None), f"a call handed {name}") for name, always in sorted(self.given(arguments))]
-        if not children and self.nameless(func) and any(k.arg in TEXT_MODE for k in node.keywords):
-            children.append((SPAWNER_BY_KEYWORDS, "a call the scan cannot name, asking for text"))
-        whys += [why for why in (self.child(node, spec, what) for spec, what in children) if why]
+        inner = node.args[0] if self.is_partial(node) and node.args else None
+        inner = None if isinstance(inner, ast.Starred) else inner
+        self.wrapped.update(id(part) for part in (func, inner) if part is not None)
+        # a call of a spawner, or of partials of one, read with the arguments they end with
+        reads = [(spec, f"a call of {what}", [*layers, (node.args, node.keywords)], bound)
+                 for spec, what, layers, bound in self.carriers(func)]
+        if self.is_partial(node) and id(node) not in self.wrapped:  # where partials end: none wraps or calls this one
+            reads += [(spec, f"functools.partial of {what}", *rest) for spec, what, *rest in self.carriers(node)]
+            if id(node) not in self.kept and id(node) not in self.handed:  # handed: read where it is handed
+                whys += [f"functools.partial of {what} passed on uncalled: its call cannot be checked"
+                         for _, what, _, _ in self.carriers(node, spawners_only=True)]
+        for spec, what, layers, bound in reads:
+            # through a partial bound to a name, what that partial already reads in the locale's encoding is found
+            # where it is written, once
+            if bound is not None and self.child(layers[:bound], spec, what):
+                continue
+            why = self.child(layers, spec, what)
+            if why:
+                whys.append(why)
+        whys += [f"{what} handed to a call the scan does not follow: its call cannot be checked"
+                 for argument in arguments if argument is not inner and id(argument) not in self.followed
+                 for _, what, _, _ in self.carriers(argument, spawners_only=True)]
         whys += [f"{name}: a child's output as text in the locale's encoding, and no encoding to name"
                  for name in sorted(found.intersection(LOCALE_ONLY))]
         if whys:
@@ -426,42 +545,71 @@ class _Scan(ast.NodeVisitor):
                 self.flag(node, f"getattr(..., {name.value!r}): an opener taken by name, its call not seen")
         self.generic_visit(node)
 
-    def given(self, arguments: list[ast.AST]) -> set[tuple[str, bool]]:
-        """Each spawner `arguments` hand to a call, and whether it reads text whatever that call says: one an argument
-        names is read as that spawner (getoutput and getstatusoutput always read text); one handed to a call an
-        argument is the result of (`partial(partial(run), text=True)`) is read by the call's keywords alone, the inner
-        call being read by its own where it stands."""
-        given: set[tuple[str, bool]] = set()
-        for argument in arguments:
-            if isinstance(argument, ast.Call):
-                given.update((name, False) for name, _ in self.given(_handed(argument)))
-            else:
-                given.update((name, SPAWNERS[name][0]) for name in self.qualify(argument).intersection(SPAWNERS))
-        return given
+    def is_partial(self, node: ast.AST) -> bool:
+        return isinstance(node, ast.Call) and PARTIAL in self.qualify(node.func)
 
-    def child(self, call: ast.Call, spec: tuple, what: str) -> str | None:
-        """Why `call`, read as starting a child (`spec`: whether it always reads text, and where `universal_newlines`
-        stands among its positional arguments), reads what the child writes in the locale's encoding; None if it names
-        an encoding or reads bytes."""
+    def carriers(self, node: ast.AST, spawners_only: bool = False,
+                 seen: frozenset[str] = frozenset()) -> list[tuple[tuple, str, list, int | None]]:
+        """What a call of `node` may start, read as a spawner: each spec (whether it always reads text, and where
+        `universal_newlines` stands among its positional arguments) and name, with the layers of arguments the partials
+        around it give, the innermost first, and how many of them a partial bound to a name gave (None: none was).
+        Through a functools.partial, what it wraps with its arguments as one more layer; a spawner `node` names; for a
+        name, the partials it is bound to (`bound`), directly or through other names; and, unless `spawners_only`, what
+        the scan cannot name, read by its keywords."""
+        if self.is_partial(node):
+            if node.args and not isinstance(node.args[0], ast.Starred):
+                inner, layer = self.carriers(node.args[0], spawners_only, seen), (node.args[1:], node.keywords)
+            else:  # what it wraps is not written by position: not named
+                inner, layer = ([] if spawners_only else [(*NAMELESS, [], None)]), (node.args, node.keywords)
+            return [(spec, what, [*layers, layer], bound) for spec, what, layers, bound in inner]
+        found = [(SPAWNERS[name], name, [], None) for name in sorted(self.qualify(node).intersection(SPAWNERS))]
+        if isinstance(node, ast.Name) and node.id not in seen:
+            found += [(spec, what, layers, len(layers)) for value in self.bound.get(node.id, [])
+                      for spec, what, layers, _ in self.carriers(value, True, seen | {node.id}) if layers]
+        if not spawners_only and self.nameless(node):
+            found.append((*NAMELESS, [], None))
+        return found
+
+    def child(self, layers: list, spec: tuple, what: str) -> str | None:
+        """Why a child started with the arguments `layers` end with (_merge), read as `spec` (`carriers`), reads what it
+        writes in the locale's encoding; None if they name an encoding or read bytes. What the scan cannot name is read
+        as a spawner only when they name a keyword of TEXT_MARKS, and then an encoding they name none with is found."""
         always, newlines_at = spec
-        keywords = {k.arg: k.value for k in call.keywords if k.arg is not None}
-        why = _encoding(keywords.get("encoding"), what)
+        positions, keywords, unpacked = _merge(layers)
+        nameless = spec is SPAWNER_BY_KEYWORDS
+        if nameless and not keywords.keys() & set(TEXT_MARKS):
+            return None  # nothing says it starts a child or reads text
+
+        def value(name: str) -> object:
+            return keywords.get(name, UNREAD if unpacked else None)
+
+        unread = f"{what} with keywords it cannot read: a child's output, maybe text, in the locale's encoding"
+        encoding = value("encoding")
+        if encoding is UNREAD:
+            return unread
+        why = _encoding(encoding, what)
         if why != "":
             return why
-        if any(k.arg is None for k in call.keywords):
-            return f"{what} with keywords it cannot read: a child's output, maybe text, in the locale's encoding"
-        if newlines_at is not None and any(isinstance(a, ast.Starred) for a in call.args[:newlines_at + 1]):
-            return f"{what} with arguments it cannot read: a child's output, maybe text, in the locale's encoding"
-        asks = [keywords[k] for k in TEXT_MODE if k in keywords]
-        if newlines_at is not None and len(call.args) > newlines_at:
-            asks.append(call.args[newlines_at])
-        if always or not _none(keywords.get("errors")):  # errors alone asks for text too
+        if nameless and "encoding" in keywords:
+            return f"{what} with {_no_encoding(encoding)}: a child's output, maybe text, in the locale's encoding"
+        asks = [value(name) for name in TEXT_MODE]
+        errors = value("errors")
+        if any(ask is UNREAD for ask in (*asks, errors)):
+            return unread
+        asks = [ask for ask in asks if ask is not None]
+        if newlines_at is not None:
+            starred = next((at for at, a in enumerate(positions) if isinstance(a, ast.Starred)), None)
+            if starred is not None and starred <= newlines_at:
+                return f"{what} with arguments it cannot read: a child's output, maybe text, in the locale's encoding"
+            if len(positions) > newlines_at:
+                asks.append(positions[newlines_at])
+        if always or not _none(errors):  # errors alone asks for text too
             asks.append(ast.Constant(True))
         asks = [ask for ask in asks if not (isinstance(ask, ast.Constant) and not ask.value)]
         if not asks:
             return None  # bytes
         how = "as text" if all(isinstance(ask, ast.Constant) for ask in asks) else "in a text mode it cannot read"
-        return f"{what}: a child's output {how} with no encoding: the locale's"
+        return f"{what}: a child's output {how} with {_no_encoding(encoding)}: the locale's"
 
     def locale(self, call: ast.Call, spec: tuple, what: str) -> str | None:
         """Why `call`, read as `spec`, reads or writes text in the locale's encoding; None if it names one or reads
@@ -484,16 +632,17 @@ class _Scan(ast.NodeVisitor):
         if isinstance(mode, ast.Constant) and isinstance(mode.value, str) and not text(mode.value):
             return None  # bytes
         how = "text mode" if isinstance(mode, ast.Constant) else "a mode it cannot read"
-        return f"{what} in {how} with no encoding: the locale's"
+        return f"{what} in {how} with {_no_encoding(encoding)}: the locale's"
 
     def uncalled_child(self, node: ast.AST) -> str | None:
         """Why `node`, a name or a dotted name not called, passes on what reads a child's output where its call is not
-        seen: a spawner anywhere but bound to a name (followed) or handed to a call (read by its keywords as that
-        spawner, `given`), or a call that reads text in the locale's encoding whatever it is given."""
+        seen: a spawner, or a name bound to a partial of one, anywhere but bound to a name or a parameter (followed) or
+        handed to a call (read at that call: wrapped by a partial, or found as handed to a call the scan does not
+        follow), or a call that reads text in the locale's encoding whatever it is given."""
         found = self.qualify(node)
         if found & LOCALE_ONLY:
             return "a call that reads a child's output in the locale's encoding, passed on uncalled"
-        if found.intersection(SPAWNERS) and id(node) not in self.followed and id(node) not in self.handed:
+        if self.carriers(node, spawners_only=True) and id(node) not in self.followed and id(node) not in self.handed:
             return "a child spawner passed on uncalled: its call cannot be checked"
         return None
 
@@ -791,7 +940,8 @@ LOCALE = {
         "import functools, subprocess\n"
         "functools.partial(functools.partial(subprocess.getoutput, encoding='utf-8'), cmd, encoding=codec)"),
     # Only a string literal names an encoding: a name or "" names none, on a spawner as on an opener.
-    "subprocess-encoding-a-name": "import subprocess\nsubprocess.run(cmd, capture_output=True, text=True, encoding=codec)",
+    "subprocess-encoding-a-name": (
+        "import subprocess\nsubprocess.run(cmd, capture_output=True, text=True, encoding=codec)"),
     "subprocess-encoding-empty": "import subprocess\nsubprocess.check_output(cmd, text=True, encoding='')",
     "open-encoding-a-name": "open(p, 'r', encoding=codec)",
     "write-text-encoding-empty": "p.write_text(text, encoding='')",
@@ -964,7 +1114,8 @@ NAMED = {
         "import functools, subprocess\n"
         "functools.partial(functools.partial(subprocess.getoutput, **options), encoding='utf-8')"),
     "subprocess-run-partial-text-taken-back": (
-        "import functools, subprocess\nfunctools.partial(functools.partial(subprocess.run, cmd, text=True), text=False)"),
+        "import functools, subprocess\n"
+        "functools.partial(functools.partial(subprocess.run, cmd, text=True), text=False)"),
     "subprocess-getoutput-partial-called-at-once": (
         "import functools, subprocess\nfunctools.partial(subprocess.getoutput, encoding=None)(cmd, encoding='utf-8')"),
     # A spawner handed by position to a function of the module, whose call of it names its encoding.
