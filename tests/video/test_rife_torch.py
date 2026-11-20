@@ -185,7 +185,7 @@ def test_the_same_frame_twice_is_the_same_bytes_and_the_identity_names_what_make
 
 
 def _walkers() -> dict:
-    return json.loads((WALKERS / "walkers.json").read_text())["pairs"]
+    return json.loads((WALKERS / "walkers.json").read_text(encoding="utf-8"))["pairs"]
 
 
 def _walker(key: str, name: str) -> Image.Image:
@@ -233,7 +233,7 @@ def _alike() -> dict:
     """The walker pairs each model is judged alike on (walkers.json `alike`): those its own frames met the pick's rule on,
     the binary on an Apple GPU and on llvmpipe and the torch backend on a CPU giving the same verdict, every reading at
     least a tenth of its bound away from it (`picked` says what was left out, and why)."""
-    return json.loads((WALKERS / "walkers.json").read_text())["alike"]
+    return json.loads((WALKERS / "walkers.json").read_text(encoding="utf-8"))["alike"]
 
 
 @pytest.mark.real_rife
@@ -345,7 +345,7 @@ def test_a_loop_whose_device_fails_as_the_network_is_put_on_it_fails_with_its_re
     with pytest.raises(SystemExit, match=r"fix RIFE, or pass --repair off") as failed:
         _run(tmp_path, keyed)
     assert FAILURE_TEXT["OutOfMemoryError"] in str(failed.value) and failed.value.__cause__.__cause__ is error
-    report = json.loads((tmp_path / "w.json").read_text())
+    report = json.loads((tmp_path / "w.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and FAILURE_TEXT["OutOfMemoryError"] in report["error"]
     assert not list((tmp_path / "out").glob(f".{loop.FALLBACK_FRAMES}*"))
 

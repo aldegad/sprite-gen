@@ -90,7 +90,7 @@ def _collect(tmp_path: Path, name: str, env: dict[str, str]) -> dict[str, list[b
         encoding="utf-8",
     )
     assert proc.returncode == 0, f"collection with {name} failed:\n{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}"
-    return json.loads(out.read_text())
+    return json.loads(out.read_text(encoding="utf-8"))
 
 
 @pytest.mark.slow
