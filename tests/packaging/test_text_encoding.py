@@ -766,6 +766,62 @@ LOCALE = {
     # run handed to a call, and that call's result handed to one that asks for text.
     "subprocess-run-partial-of-partial": (
         "import functools, subprocess\nfunctools.partial(functools.partial(subprocess.run), text=True)"),
+    # Partials merge their keywords as functools.partial does, inner to outer, the outer winning, and what is read is
+    # what they end with; a spawner that always reads text does so under any number of them. A review's probe is the
+    # first row: getoutput's encoding named inside and taken back outside.
+    "subprocess-getoutput-partial-encoding-taken-back": (
+        "import functools, subprocess\n"
+        "read_output = functools.partial(functools.partial(subprocess.getoutput, encoding='utf-8'), cmd, "
+        "encoding=None)\n"
+        "read_output()\n"),
+    "subprocess-getstatusoutput-partial-encoding-taken-back": (
+        "import functools, subprocess\n"
+        "functools.partial(functools.partial(subprocess.getstatusoutput, encoding='utf-8'), cmd, encoding=None)"),
+    "os-popen-partial-encoding-taken-back": (
+        "import functools, os\nfunctools.partial(functools.partial(os.popen, encoding='utf-8'), cmd, encoding=None)"),
+    "subprocess-getoutput-three-partials-outer-none": (
+        "import functools, subprocess\n"
+        "functools.partial(functools.partial(functools.partial(subprocess.getoutput, encoding='utf-8'), "
+        "encoding='utf-8'), encoding=None)"),
+    "subprocess-getoutput-partial-encoding-a-name": (
+        "import functools, subprocess\n"
+        "functools.partial(functools.partial(subprocess.getoutput, encoding='utf-8'), cmd, encoding=codec)"),
+    # Only a string literal names an encoding: a name or "" names none, on a spawner as on an opener.
+    "subprocess-encoding-a-name": "import subprocess\nsubprocess.run(cmd, capture_output=True, text=True, encoding=codec)",
+    "subprocess-encoding-empty": "import subprocess\nsubprocess.check_output(cmd, text=True, encoding='')",
+    "open-encoding-a-name": "open(p, 'r', encoding=codec)",
+    "write-text-encoding-empty": "p.write_text(text, encoding='')",
+    # What the scan cannot follow is found: keywords or positions unpacked where they may decide, a partial of what it
+    # cannot name, a partial called later with an encoding it does not name, a spawner handed to a call it does not
+    # follow (an import's, or a function of the module without a parameter of that name).
+    "subprocess-getoutput-partial-kwargs": (
+        "import functools, subprocess\n"
+        "functools.partial(functools.partial(subprocess.getoutput, encoding='utf-8'), **options)"),
+    "subprocess-popen-partial-arguments-unpacked": (
+        "import functools, subprocess\nfunctools.partial(functools.partial(subprocess.Popen, cmd), *arguments)"),
+    "partial-of-what-it-cannot-name": "import functools\nfunctools.partial(runners[name], text=True)",
+    "subprocess-getoutput-partial-called-with-encoding-none": (
+        "import functools, subprocess\n"
+        "read_output = functools.partial(subprocess.getoutput, encoding='utf-8')\n"
+        "read_output(cmd, encoding=None)\n"),
+    "subprocess-run-handed-to-an-import": "import subprocess, helpers\nhelpers.probe(cmd, run=subprocess.run)",
+    "subprocess-run-handed-to-kwargs": (
+        "import subprocess\n"
+        "def probe(cmd, **options):\n"
+        "    return options['run'](cmd, errors='replace')\n"
+        "probe(cmd, run=subprocess.run)\n"),
+    # A spawner handed to a function of the module binds its parameter, by keyword or by position, and each call of
+    # that parameter is read as the spawner's.
+    "subprocess-run-handed-on-unpacked": (
+        "import subprocess\n"
+        "def probe(cmd, run):\n"
+        "    return run(cmd, **TEXT)\n"
+        "probe(cmd, run=subprocess.run)\n"),
+    "subprocess-run-handed-by-position": (
+        "import subprocess\n"
+        "def probe(cmd, run):\n"
+        "    return run(cmd, errors='replace')\n"
+        "probe(cmd, subprocess.run)\n"),
     # The closed reading on a spawner's name: subprocess.run under a name another scope binds os.system to is checked
     # wherever that name is called, whichever binding the walk reaches last.
     "subprocess-alias-scope-later-function": (
@@ -859,6 +915,33 @@ NAMED = {
     "subprocess-run-handed-on-bytes": "import functools, subprocess\nfunctools.partial(subprocess.run, cmd)",
     "subprocess-run-partial-of-partial-bytes": (
         "import functools, subprocess\nfunctools.partial(functools.partial(subprocess.run, cmd), check=True)"),
+    # What partials end with is read, not what each one says on its way: an encoding taken back and given again, the
+    # validator's probe kept and called, a middle partial's None under an outer one's encoding, an encoding written
+    # after an unpacking, text asked for and taken back, a partial given its encoding when it is called at once.
+    "subprocess-getoutput-partial-encoding-given-back": (
+        "import functools, subprocess\n"
+        "functools.partial(functools.partial(subprocess.getoutput, encoding=None), cmd, encoding='utf-8')"),
+    "subprocess-getoutput-partial-encoding-kept-and-called": (
+        "import functools, subprocess\n"
+        "read_output = functools.partial(functools.partial(subprocess.getoutput, encoding='utf-8'), cmd)\n"
+        "read_output()\n"),
+    "subprocess-getoutput-three-partials-middle-none": (
+        "import functools, subprocess\n"
+        "functools.partial(functools.partial(functools.partial(subprocess.getoutput, cmd), encoding=None), "
+        "encoding='utf-8')"),
+    "subprocess-getoutput-partial-kwargs-then-encoding": (
+        "import functools, subprocess\n"
+        "functools.partial(functools.partial(subprocess.getoutput, **options), encoding='utf-8')"),
+    "subprocess-run-partial-text-taken-back": (
+        "import functools, subprocess\nfunctools.partial(functools.partial(subprocess.run, cmd, text=True), text=False)"),
+    "subprocess-getoutput-partial-called-at-once": (
+        "import functools, subprocess\nfunctools.partial(subprocess.getoutput, encoding=None)(cmd, encoding='utf-8')"),
+    # A spawner handed by position to a function of the module, whose call of it names its encoding.
+    "subprocess-run-handed-by-position-encoding": (
+        "import subprocess\n"
+        "def probe(cmd, run):\n"
+        "    return run(cmd, text=True, encoding='utf-8')\n"
+        "probe(cmd, subprocess.run)\n"),
     "os-system": "import os\nos.system(cmd)",
     # `text` on a call the scan names, and that is no spawner: a function or a class of the module, or an import.
     "a-function-with-a-text-keyword": "def piece(text):\n    return text\npiece(text='walk')",
@@ -883,3 +966,18 @@ def test_the_scan_finds_a_text_read_or_write_that_names_no_encoding(source):
 @pytest.mark.parametrize("source", list(NAMED.values()), ids=list(NAMED))
 def test_the_scan_leaves_one_that_names_its_encoding_or_reads_bytes(source):
     assert locale_calls(source) == []
+
+
+# A partial of partials is found once, at the partial its layers end with, not at the ones it wraps.
+OUTERMOST = {
+    "subprocess-getoutput-partial-encoding-taken-back": (
+        "functools.partial(functools.partial(subprocess.getoutput, encoding='utf-8'), cmd, encoding=None)"),
+    "subprocess-getoutput-three-partials-outer-none": (
+        "functools.partial(functools.partial(functools.partial(subprocess.getoutput, encoding='utf-8'), "
+        "encoding='utf-8'), encoding=None)"),
+}
+
+
+@pytest.mark.parametrize("row", list(OUTERMOST))
+def test_a_partial_of_partials_is_found_where_its_layers_end(row):
+    assert [call for _, call, _ in locale_calls(LOCALE[row])] == [OUTERMOST[row]]
