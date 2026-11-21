@@ -20,7 +20,7 @@ def _version_tuple(version: str) -> tuple[int, int]:
 
 
 def _ci_python_versions() -> list[str]:
-    """The Python the gates run on: the Linux lane's pin (GitHub-hosted CI is not used)."""
+    """The Python the gates run on: the Linux lane's pin (no CI runs on push or pull request)."""
     lane = (ROOT / "scripts" / "linux_lane.sh").read_text(encoding="utf-8")
 
     pinned = re.findall(r"^PINNED_PYTHON=(\d+\.\d+)$", lane, re.MULTILINE)

@@ -481,7 +481,8 @@ On the T4 (driver 610.57.04, PyTorch 2.13.0 for CUDA 13.0, cuDNN 9.20, 2026-10-2
 through the executor, from another container of the same image, are the bytes made in the T4's own
 process: both walkers' frames, plain frames, and reads with their disagreement. The executor adds 0.1 to
 0.2 s to a frame, a read takes as long as in the process, and the probe, a T4 container's cold start,
-took 8.4 s. The T4 lane runs the torch tests on CUDA for a release (docs/release.md).
+took 8.4 s. For a release the torch tests now run on CUDA in the CUDA lane, on the maintainer's NVIDIA host
+(docs/release.md).
 
 ### Licences
 
