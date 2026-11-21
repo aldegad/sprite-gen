@@ -191,7 +191,9 @@ def run_loop(
         argv = [arg.format(prompt_file=str(prompt_file), next_run_dir=str(next_run_dir), attempt=attempt + 1)
                 for arg in shlex.split(provider_command)]
         command = shlex.join(argv)
-        completed = subprocess.run(argv, capture_output=True, text=True)
+        # The provider meant is a sprite-gen command (docs/gen.md), which writes UTF-8. Its output only goes to the
+        # log, so another command's byte that is not UTF-8 is replaced there rather than end the loop.
+        completed = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
         atomic_write_text(
             files["log"],
             completed.stdout + ("\n--- stderr ---\n" + completed.stderr if completed.stderr else ""),

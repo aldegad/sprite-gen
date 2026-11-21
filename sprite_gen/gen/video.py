@@ -265,7 +265,9 @@ def probe_duration_seconds(clip: Path, *, verb: str) -> float:
         raise SystemExit(f"{verb}: ffprobe is required to check the input clip's length before uploading (install ffmpeg)")
     proc = subprocess.run(
         [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(clip)],
-        capture_output=True, text=True,
+        # ffprobe writes UTF-8 (paths too, on Windows); the duration read is ASCII and the error is only quoted, so a
+        # byte that is not UTF-8 is replaced
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     text = proc.stdout.strip()
     if proc.returncode != 0 or not text:
@@ -445,8 +447,11 @@ def read_held(clip: Path) -> dict[str, Any]:
     ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
     if not ffmpeg or not ffprobe:
         return {"read": False, "why": "ffmpeg and ffprobe are needed to read its frames (install ffmpeg)"}
+    # ffprobe writes UTF-8; the sizes read are ASCII and the error is only quoted, so a byte that is not UTF-8 is
+    # replaced
     probe = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
-                            "-of", "json", str(clip)], capture_output=True, text=True)
+                            "-of", "json", str(clip)], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace")
     try:
         stream = json.loads(probe.stdout)["streams"][0]
         width, height = int(stream["width"]), int(stream["height"])
