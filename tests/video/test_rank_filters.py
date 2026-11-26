@@ -27,7 +27,7 @@ def _pil_local_range(x: np.ndarray, size: int) -> np.ndarray:
 
 
 @pytest.mark.parametrize("op", [ImageFilter.MinFilter, ImageFilter.MaxFilter])
-@pytest.mark.parametrize("size", [3, 5, 7])
+@pytest.mark.parametrize("size", [3, 5, 7, 15, 31])
 def test_a_mask_filtered_square_by_square_is_pils(op, size):
     rng = np.random.default_rng(size)
     for h, w, share in ((1, 1, 0.5), (2, 9, 0.5), (11, 4, 0.2), (40, 33, 0.05), (40, 33, 0.5), (40, 33, 0.95)):
@@ -47,3 +47,17 @@ def test_the_local_range_is_pils():
         x = rng.random((h, w, 4)).astype(np.float32)
         x[: h // 2, : w // 2] = 0  # flat ground beside the noise
         assert np.array_equal(rife._local_range(x), _pil_local_range(x, rife.CROSSFADE_RANGE)), (h, w)
+
+
+@pytest.mark.parametrize("square, least", [(rife._square_min, True), (rife._square_max, False)])
+def test_a_square_read_through_runs_is_every_pixel_of_it_read_at_once(square, least):
+    """The square minimum and maximum of grey values (a frame's luma, the line beyond its edge), padded either way, wide or
+    narrow, are those of every pixel of each square read at once."""
+    rng = np.random.default_rng(11)
+    for h, w, r in ((1, 1, 0), (1, 7, 3), (9, 2, 1), (23, 31, 2), (23, 31, 9), (40, 12, 20)):
+        x = rng.random((h, w)).astype(np.float32)
+        for pad in ({"mode": "edge"}, {"constant_values": 1.0}):
+            padded = np.pad(x, r, **pad)
+            squares = np.lib.stride_tricks.sliding_window_view(padded, (2 * r + 1, 2 * r + 1))
+            whole = squares.min(axis=(-2, -1)) if least else squares.max(axis=(-2, -1))
+            assert np.array_equal(square(x, r, **pad), whole), (h, w, r, pad)

@@ -727,18 +727,33 @@ def _mask(mask: np.ndarray, size: int, op: type) -> np.ndarray:
 def _square_min(a: np.ndarray, r: int, **pad) -> np.ndarray:
     """Per pixel, the minimum over the square 2r+1 wide around it, one axis at a time, outside the frame as
     `np.pad` fills it with `pad`."""
-    out = np.pad(a, r, **pad)
-    for axis in (0, 1):
-        out = np.lib.stride_tricks.sliding_window_view(out, 2 * r + 1, axis=axis).min(axis=-1)
-    return out
+    return _square(a, r, np.minimum, pad)
 
 
 def _square_max(a: np.ndarray, r: int, **pad) -> np.ndarray:
     """Per pixel, the maximum over the square 2r+1 wide around it, as `_square_min` takes the minimum."""
+    return _square(a, r, np.maximum, pad)
+
+
+def _square(a: np.ndarray, r: int, pick: Callable[..., np.ndarray], pad: dict) -> np.ndarray:
     out = np.pad(a, r, **pad)
     for axis in (0, 1):
-        out = np.lib.stride_tricks.sliding_window_view(out, 2 * r + 1, axis=axis).max(axis=-1)
+        out = _runs(out, 2 * r + 1, axis, pick)
     return out
+
+
+def _runs(a: np.ndarray, k: int, axis: int, pick: Callable[..., np.ndarray]) -> np.ndarray:
+    """`pick` (np.minimum or np.maximum) over every k in a row along `axis`: runs of 2, 4, 8, ... made from the runs half
+    as long, then the two longest that cover k, overlapping. The least or most of a run is read from its values alone,
+    so it is the same whichever runs it is read through."""
+    a = np.moveaxis(a, axis, 0)
+    span, out = 1, a
+    while 2 * span <= k:
+        out = pick(out[:-span], out[span:])
+        span *= 2
+    if span < k:
+        out = pick(out[:len(out) - (k - span)], out[k - span:])
+    return np.moveaxis(out, 0, axis)
 
 
 def _luma(x: np.ndarray) -> np.ndarray:
