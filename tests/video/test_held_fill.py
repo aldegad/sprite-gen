@@ -63,7 +63,7 @@ def _pictures(out: Path, name: str) -> dict[str, str]:
 
 
 def _meta(rep: dict) -> dict:
-    return json.loads(Path(rep["strip"]["path"]).with_suffix("").with_suffix(".strip.json").read_text())
+    return json.loads(Path(rep["strip"]["path"]).with_suffix("").with_suffix(".strip.json").read_text(encoding="utf-8"))
 
 
 def _cycle(rep: dict) -> list[Image.Image]:
@@ -140,7 +140,7 @@ def test_a_cut_with_no_held_cell_runs_no_rife_and_is_the_same_bytes_whichever_mo
     log = tmp_path / "rife" / "argv.txt"
     binary = tmp_path / "rife" / rife.BINARY
     binary.parent.mkdir()
-    binary.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexit 1\n')
+    binary.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexit 1\n', encoding="utf-8")
     binary.chmod(0o700)
     for name in rife.MODELS:
         (binary.parent / name).mkdir()
@@ -687,7 +687,7 @@ def test_video_set_hands_the_switches_to_each_cut(monkeypatch, tmp_path):
 
     def video(image, prompt, out, report, **kw):
         out.write_bytes(b"test-video")
-        report.write_text(json.dumps({"prompt": prompt}))
+        report.write_text(json.dumps({"prompt": prompt}), encoding="utf-8")
         return 0
 
     monkeypatch.setattr(batch.loop_mod, "run_loop", run_loop)
@@ -721,13 +721,13 @@ def test_a_cut_with_cells_made_is_not_restored_from_its_source_frames(tmp_path, 
     frames_report = tmp_path / "frames.json"
     frames_report.write_text(json.dumps({"kind": "sprite-gen-video-frames-report", "fps": 24.0, "frames": len(files),
                                          "width": filmed[0].width, "height": filmed[0].height, "stream_index": 0,
-                                         "key": "green"}))
+                                         "key": "green"}), encoding="utf-8")
     clip = tmp_path / "clip.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-framerate", "24", "-i", str(keyed / "%04d.png"), "-c:v", "libx264",
                     "-pix_fmt", "yuv420p", str(clip)], check=True)
     manifest = tmp_path / "source.json"
     manifest.write_text(json.dumps(source.manifest(clip=clip, canvas=files[0], frames_report=frames_report, files=files,
-                                                   timestamps=source.timestamps(clip, 0))))
+                                                   timestamps=source.timestamps(clip, 0))), encoding="utf-8")
     loop = Loop.read(out / "walk.strip.png", out / "walk.strip.json", out / "walk.loop.report.json")
     projection, issue = source.project(loop, source.Source.read(
         source_manifest=manifest, source_frames_dir=keyed, source_clip=clip, source_canvas=files[0],
@@ -758,7 +758,7 @@ def test_the_curation_view_marks_the_cells_made_and_the_cells_still_held(tmp_pat
                **{**STALLED_CUT, "length": N + 7})
     assert rep["held_fill"]["made"] == [6, 15, 16]
     assert cli.main(["unpack-atlas", "--pngs-dir", str(Path(rep["out_dir"]) / "cycle"), "--out-dir", str(tmp_path / "run")]) == 0
-    rows = json.loads((tmp_path / "run" / "frames" / "frames-manifest.json").read_text())["rows"]
+    rows = json.loads((tmp_path / "run" / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))["rows"]
     labels = rows[0]["labels"]
     assert [k for k, label in enumerate(labels) if label.endswith(" (made)")] == [6, 15, 16]
     assert [k for k, label in enumerate(labels) if label.endswith(" (held)")] == [24, 25, 26, 27]

@@ -82,7 +82,7 @@ def run(tmp_path, frames, *extra, cut=('--anchor', 'motion-auto'), state='walk')
         code = loop.main(args)
     except SystemExit as exc:
         code = exc
-    return code, json.loads((tmp_path/'loop.json').read_text()), output
+    return code, json.loads((tmp_path/'loop.json').read_text(encoding="utf-8")), output
 
 
 def test_drift_is_measured_on_the_fitted_height_and_undone_about_the_feet():
@@ -453,7 +453,7 @@ def test_a_walk_that_keeps_its_size_is_cut_as_filmed_either_way(tmp_path, cut):
         assert code == 0
         outputs.append(output)
     assert report['size_hold'] == {'applied': False, 'why': '--size-hold off'}
-    held = json.loads((tmp_path/'auto'/'loop.json').read_text())['size_hold']
+    held = json.loads((tmp_path/'auto'/'loop.json').read_text(encoding="utf-8"))['size_hold']
     assert held['applied'] is False and 'feet' not in held and 'padding_ltrb' not in held
     for path in ('loop.strip.png', 'loop.gif', 'cycle/frame-000.png', 'cycle/frame-023.png'):
         assert (outputs[0]/path).read_bytes() == (outputs[1]/path).read_bytes(), path
@@ -480,7 +480,7 @@ def test_a_cut_by_hand_that_keeps_its_size_is_not_held_for_what_the_clip_reads(t
         (tmp_path/mode).mkdir()
         code, _, outputs[mode] = run(tmp_path/mode, frames, '--size-hold', mode, cut=how, state=state)
         assert code == 0, code
-    hold = json.loads((tmp_path/'auto'/'loop.json').read_text())['size_hold']
+    hold = json.loads((tmp_path/'auto'/'loop.json').read_text(encoding="utf-8"))['size_hold']
     assert hold['applied'] is False and abs(hold['drift']) >= gait_fallback.SIZE_HOLD_MIN
     seen = hold['at_cut']
     assert seen['pairs'] == pairs and seen['change'] == 0 and seen['size'] is False and 'why' in hold

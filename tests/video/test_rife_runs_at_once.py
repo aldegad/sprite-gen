@@ -57,7 +57,7 @@ def _meeting_binary(root: Path, together: int) -> Path:
         "  n=$((n + 1)); [ $n -gt 60 ] && exit 1; sleep 0.05\n"
         "done\n"
         'while [ $# -gt 0 ]; do case "$1" in -0) a="$2"; shift;; -o) o="$2"; shift;; esac; shift; done\n'
-        'cp "$a" "$o"\n')
+        'cp "$a" "$o"\n', encoding="utf-8")
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
     return binary
 

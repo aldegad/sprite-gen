@@ -469,8 +469,8 @@ def test_a_model_other_than_the_pinned_one_is_refused_and_one_not_there_is_not_i
         rife.locate_model()
     model = tmp_path / "other" / rife.MODEL
     model.mkdir(parents=True)
-    (model / "flownet.param").write_text("another model")
-    (model / "flownet.bin").write_text("another model")
+    (model / "flownet.param").write_text("another model", encoding="utf-8")
+    (model / "flownet.bin").write_text("another model", encoding="utf-8")
     monkeypatch.setenv("SPRITE_GEN_RIFE_MODEL", str(model))
     assert rife.locate_model() == model.resolve()
     pins = " or ".join(sorted(set(rife.MODEL_SHA256[rife.MODEL]["flownet.param"].values())))

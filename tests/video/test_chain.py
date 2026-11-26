@@ -47,7 +47,8 @@ def clip(tmp_path: Path, name: str, frames: list[Image.Image] | None = None, *, 
     out = tmp_path / name
     save(frames if frames is not None else walk(N + 6), out / "keyed")
     if key is not None or fps is not None:
-        (out / "frames.report.json").write_text(json.dumps({"key": "auto", "key_read": key, "fps": fps}))
+        (out / "frames.report.json").write_text(json.dumps({"key": "auto", "key_read": key, "fps": fps}),
+                                                encoding="utf-8")
     return out
 
 
@@ -82,13 +83,14 @@ def gate(folder: str | Path, *lists: Path) -> int:
 
 def places_file(tmp_path: Path, places: list[float]) -> Path:
     path = tmp_path / "places.json"
-    path.write_text(json.dumps({"places": places}))
+    path.write_text(json.dumps({"places": places}), encoding="utf-8")
     return path
 
 
 def holds_file(tmp_path: Path, *holds: tuple[int, int]) -> Path:
     path = tmp_path / "meant.holds.json"
-    path.write_text(json.dumps({"holds": [{"from": a, "to": b, "reason": "the figure stops on the ledge"} for a, b in holds]}))
+    path.write_text(json.dumps({"holds": [{"from": a, "to": b, "reason": "the figure stops on the ledge"} for a, b in holds]}),
+                    encoding="utf-8")
     return path
 
 
@@ -275,7 +277,7 @@ def test_the_record_opens_with_the_faults_this_run_refused_for(tmp_path):
     d = clip(tmp_path, "a")
     make(tmp_path / "every", [f"one={d}:0:4"])
     make(tmp_path / "given", [f"one={d}:0:4"], refuse="held,hole,ghost")
-    head = lambda name: json.loads((tmp_path / name / "out" / "chain.report.json").read_text())
+    head = lambda name: json.loads((tmp_path / name / "out" / "chain.report.json").read_text(encoding="utf-8"))
     assert head("every")["refuse"] == list(held_fill.FAULTS)
     assert head("given")["refuse"] == ["ghost", "hole", "held"]
     assert list(head("given"))[:3] == ["kind", "producer", "refuse"]
@@ -376,7 +378,7 @@ def test_no_rife_takes_the_nearer_frame_warns_and_records_it_and_gate_fails_it(t
     plain = _cli(*args, "--out-dir", str(tmp_path / "plain"))
     assert plain.returncode == 0, plain.stderr
     assert "video-chain: warning: 3 frames (1, 3, 5) took the nearer frame" in plain.stderr and "rife install" in plain.stderr
-    report = json.loads((tmp_path / "plain" / "chain.report.json").read_text())
+    report = json.loads((tmp_path / "plain" / "chain.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "passed" and report["rife"]["why"] == "RIFE is not installed"
     assert all(c["source"].get("piece") == "one" and c["nearer_frame"] for c in report["frames"] if c["frame"] in (1, 3, 5))
     assert (tmp_path / "plain" / "keyed").is_dir()
@@ -385,7 +387,7 @@ def test_no_rife_takes_the_nearer_frame_warns_and_records_it_and_gate_fails_it(t
     assert gated.returncode == chain.EXIT_SHOWN_AGAIN
     assert "--gate: RIFE is not installed" in gated.stderr
     assert not (tmp_path / "gated" / "keyed").exists() and (tmp_path / "gated" / "keyed.refused").is_dir()
-    assert json.loads((tmp_path / "gated" / "chain.report.json").read_text())["status"] == "failed"
+    assert json.loads((tmp_path / "gated" / "chain.report.json").read_text(encoding="utf-8"))["status"] == "failed"
 
 
 def test_no_rife_a_held_cell_and_a_bridge_warn_and_a_chain_with_nothing_to_make_says_nothing(tmp_path, monkeypatch):
@@ -412,7 +414,7 @@ def test_a_rife_that_fails_is_an_error_never_a_chain_as_filmed(tmp_path):
     d = clip(tmp_path, "a")
     with pytest.raises(ValueError, match="rife-ncnn-vulkan failed"):
         make(tmp_path, [f"one={d}:0:3", f"two={d}:5:7"], bridge=[1], interpolate=broken)
-    assert json.loads((tmp_path / "out" / "chain.report.json").read_text())["status"] == "failed"
+    assert json.loads((tmp_path / "out" / "chain.report.json").read_text(encoding="utf-8"))["status"] == "failed"
     assert not (tmp_path / "out" / "keyed").exists()
 
 
@@ -443,10 +445,10 @@ def test_pieces_on_two_keys_are_refused_as_is_a_key_no_report_or_flag_says(tmp_p
 
 def test_a_report_that_says_only_auto_says_no_key_and_a_brightness_cut_is_its_own(tmp_path):
     d = clip(tmp_path, "a")
-    (d / "frames.report.json").write_text(json.dumps({"key": "auto"}))
+    (d / "frames.report.json").write_text(json.dumps({"key": "auto"}), encoding="utf-8")
     with pytest.raises(chain.ChainRefused, match="no report says"):
         make(tmp_path, [f"one={d}:0:3"], key=None)
-    (d / "frames.report.json").write_text(json.dumps({"key": "auto", "alpha_mode": "brightness"}))
+    (d / "frames.report.json").write_text(json.dumps({"key": "auto", "alpha_mode": "brightness"}), encoding="utf-8")
     assert make(tmp_path, [f"one={d}:0:3"], key=None)["key"] == "brightness"
 
 
@@ -486,7 +488,7 @@ def test_places_off_the_chain_or_no_list_are_refused(tmp_path):
         make(tmp_path, [f"one={d}:0:3"], places=places_file(tmp_path, [1, 3.5]))
     bad = tmp_path / "bad.json"
     for body in ('{"places": []}', '{"places": [1, "x"]}', "{", '{"places": [true]}'):
-        bad.write_text(body)
+        bad.write_text(body, encoding="utf-8")
         with pytest.raises(chain.ChainRefused, match="--places"):
             make(tmp_path, [f"one={d}:0:3"], places=bad)
     with pytest.raises(chain.ChainRefused, match="give one time"):
@@ -506,7 +508,7 @@ def test_a_chain_that_draws_nothing_is_an_error_at_the_command_line_and_in_the_r
     proc = _cli("--piece", f"one={empty}:0:3", "--key", "green", "--gate", "--out-dir", str(tmp_path / "out"))
     assert proc.returncode == chain.EXIT_ERROR
     assert holds_mod.NOTHING in proc.stderr and proc.stdout == ""
-    report = json.loads((tmp_path / "out" / "chain.report.json").read_text())
+    report = json.loads((tmp_path / "out" / "chain.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["read"]["inspected"] == 0
     assert not (tmp_path / "out" / "keyed").exists()
 
@@ -515,7 +517,7 @@ def test_a_chain_of_one_frame_reads_no_frame_against_another_and_is_an_error(tmp
     d = clip(tmp_path, "a")
     proc = _cli("--piece", f"one={d}:3:3", "--key", "green", "--out-dir", str(tmp_path / "out"))
     assert proc.returncode == chain.EXIT_ERROR and holds_mod.NOTHING in proc.stderr
-    assert json.loads((tmp_path / "out" / "chain.report.json").read_text())["read"]["inspected"] == 0
+    assert json.loads((tmp_path / "out" / "chain.report.json").read_text(encoding="utf-8"))["read"]["inspected"] == 0
 
 
 def test_a_chain_none_of_whose_joins_can_be_read_is_an_error(tmp_path):
@@ -523,7 +525,7 @@ def test_a_chain_none_of_whose_joins_can_be_read_is_an_error(tmp_path):
     still = clip(tmp_path, "s", [walk_at(0)] * 6)
     with pytest.raises(chain.ChainRefused, match="no join was read: one into two: the pieces do not move"):
         make(tmp_path, [f"one={still}:0:2", f"two={still}:3:5"], holds=[holds_file(tmp_path, (0, 5))], interpolate=lambda a, b, t: a)
-    assert json.loads((tmp_path / "out" / "chain.report.json").read_text())["status"] == "failed"
+    assert json.loads((tmp_path / "out" / "chain.report.json").read_text(encoding="utf-8"))["status"] == "failed"
 
 
 def test_a_join_that_cannot_be_read_beside_one_that_can_warns(tmp_path):
@@ -548,7 +550,7 @@ def test_the_record_gives_each_frame_its_source_judged_values_and_refused_tries(
 
     good = between()
     out = chain.make_chain([f"one={d}:0:4"], tmp_path / "out", key="green", interpolate=fussy, places=places_file(tmp_path, [1, 1.5, 2, 3]))
-    report = json.loads((tmp_path / "out" / "chain.report.json").read_text())
+    report = json.loads((tmp_path / "out" / "chain.report.json").read_text(encoding="utf-8"))
     assert report["kind"] == chain.REPORT_KIND and report["status"] == "passed" and out["exit"] == chain.EXIT_OK
     made = report["frames"][1]
     assert made["source"]["between"] == [{"piece": "one", "frame": 1}, {"piece": "one", "frame": 2}]
@@ -646,7 +648,7 @@ def test_clips_from_video_frames_say_their_own_key_and_rate_and_two_keys_refuse_
 def test_rife_makes_a_chain_s_bridge_and_places_with_none_shown_again(tmp_path):
     d = clip(tmp_path, "a", fps=24.0)
     proc = _cli("--piece", f"one={d}:0:6", "--piece", f"two={d}:7:12", "--bridge", "0", "--out-fps", "48", "--out-dir", str(tmp_path / "out"), "--key", "green")
-    report = json.loads((tmp_path / "out" / "chain.report.json").read_text())
+    report = json.loads((tmp_path / "out" / "chain.report.json").read_text(encoding="utf-8"))
     assert report["interpolator"]["kind"] != "injected" and report["time"]["out_fps"] == 48
     assert proc.returncode == 0, proc.stderr
     assert report["read"]["unlisted"] == 0 and gate(tmp_path / "out" / "keyed") == 0

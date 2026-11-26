@@ -179,7 +179,7 @@ def _cut(root: Path, keyed: Path, *, repair_mode: str = "auto", interpolate=None
                       repair=repair_mode, interpolate=interpolate)
     except SystemExit:
         pass
-    return json.loads((root / "loop.json").read_text())
+    return json.loads((root / "loop.json").read_text(encoding="utf-8"))
 
 
 @pytest.mark.slow
@@ -300,7 +300,7 @@ def test_with_the_overlapped_wrap_off_nothing_is_read_for_the_wrap_and_the_gate_
     with pytest.raises(SystemExit, match="^video-loop: loop seam ratio"):
         loop.main(["--frames-dir", str(keyed), "--out-dir", str(tmp_path / "out"), "--fps", "24.0", "--state", "walk",
                    "--anchor", "motion-auto", "--report", str(tmp_path / "loop.json"), "--overlap-wrap", "off"])
-    report = json.loads((tmp_path / "loop.json").read_text())
+    report = json.loads((tmp_path / "loop.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["error"].startswith("video-loop: loop seam ratio")
     assert report["cycle"]["steps"] == {"count": 2, "by": "crossings"}
     overlap = report["wrap_overlap"]

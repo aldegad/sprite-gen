@@ -23,7 +23,7 @@ def _fake_binary(tmp_path: Path, with_model: bool = True) -> Path:
     # install root only find the binary under that name.
     binary = tmp_path / "bin" / rife.installed_binary(Path(".")).name
     binary.parent.mkdir(parents=True)
-    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
     if with_model:
         (binary.parent / rife.MODEL).mkdir()
@@ -99,7 +99,7 @@ def _recording_binary(tmp_path: Path) -> tuple[Path, Path]:
     binary = tmp_path / rife.BINARY
     binary.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\n'
                       'while [ $# -gt 0 ]; do case "$1" in -0) a="$2"; shift;; -o) o="$2"; shift;; esac; shift; done\n'
-                      'cp "$a" "$o"\n')
+                      'cp "$a" "$o"\n', encoding="utf-8")
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
     return binary, log
 
@@ -113,7 +113,7 @@ def _modes_asked(monkeypatch, tmp_path: Path, named: str | None) -> tuple[list[l
     binary, log = _recording_binary(tmp_path)
     interpolate = rife.Rife(binary, tmp_path / "rife-v4.6")
     interpolate(_disc(40), _disc(72), 0.5)
-    calls = [line.split() for line in log.read_text().splitlines()]
+    calls = [line.split() for line in log.read_text(encoding="utf-8").splitlines()]
     return [[a for a in argv if a in ("-x", "-z", "-u", "-g")] for argv in calls], interpolate.describe()
 
 
@@ -133,7 +133,8 @@ def test_sprite_gen_rife_tta_names_another_augmentation_or_none(monkeypatch, tmp
 
 def test_a_call_past_its_time_is_a_rife_that_failed(monkeypatch, tmp_path):
     binary = tmp_path / rife.BINARY
-    binary.write_text("#!/bin/sh\nexec sleep 5\n")  # exec: the stopped process is the one holding the pipes
+    # exec: the stopped process is the one holding the pipes
+    binary.write_text("#!/bin/sh\nexec sleep 5\n", encoding="utf-8")
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setattr(rife, "CALL_TIMEOUT_SECONDS", 0.2)
     with pytest.raises(rife.RifeUnavailable, match=r"made no frame in 0.2 s .*augmentation none"):
@@ -186,7 +187,7 @@ def test_read_makes_the_frame_as_every_call_and_reads_sixteen_single_passes_turn
     interpolate = rife.Rife(binary, tmp_path / model)
     a, b = _marked(40), _marked(72)
     frame, apart = interpolate.read(a, b, 0.25)
-    calls = [line.split() for line in log.read_text().splitlines()]
+    calls = [line.split() for line in log.read_text(encoding="utf-8").splitlines()]
     assert len(calls) == 2 + rife.PASS_CALLS == interpolate.calls and interpolate.made == 1
     flags = [[x for x in argv if x in ("-x", "-z", "-u", "-g")] for argv in calls]
     assert flags[:2] == [list(rife.MODELS[model].tta)] * 2 and all(f == [] for f in flags[2:])

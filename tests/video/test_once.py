@@ -59,7 +59,7 @@ def test_refuses_unfinished_or_clipped_body(tmp_path, kwargs, reason):
     keyed(tmp_path / "keyed", **kwargs)
     with pytest.raises(SystemExit, match=reason):
         cut(tmp_path)
-    report = json.loads((tmp_path / "out/death.loop.report.json").read_text())
+    report = json.loads((tmp_path / "out/death.loop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed"
 
 
@@ -166,13 +166,13 @@ def test_batch_sends_terminal_pin_and_does_not_reuse_a_changed_pin(tmp_path, mon
     def canvas_stub(still, out, **kw):
         Image.open(base).save(out)
         report = {"fit": "state", "shape": "wide", "canvas": [32, 32], "offset": [0, 0]}
-        kw["report_path"].write_text(json.dumps(report))
+        kw["report_path"].write_text(json.dumps(report), encoding="utf-8")
         return report
 
     def video_stub(image, prompt, out, report, **kw):
         seen.append(kw["last_frame"])
         out.write_bytes(b"clip")
-        report.write_text(json.dumps({"prompt": prompt}))
+        report.write_text(json.dumps({"prompt": prompt}), encoding="utf-8")
         return 0
 
     def frames_stub(clip, out, **kw):

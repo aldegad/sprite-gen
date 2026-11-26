@@ -52,7 +52,7 @@ def test_a_clip_that_does_not_come_back_to_its_first_frame_is_refused(tmp_path: 
     keyed = _still_frames(tmp_path, end_offset=10)
     with pytest.raises(SystemExit, match="the pinned clip does not end on its first frame"):
         _loop(tmp_path, keyed)
-    report = json.loads((tmp_path / "out" / "idle.loop.report.json").read_text())
+    report = json.loads((tmp_path / "out" / "idle.loop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["cycle"]["kind"] == "pinned"
 
 
@@ -85,8 +85,8 @@ def test_video_set_pins_idle_and_cuts_it_whole(tmp_path: Path, monkeypatch) -> N
         seen["last_frame"] = kw.get("last_frame")
         seen["prompt"] = prompt
         Path(out).write_bytes(b"x")
-        Path(report).write_text("{}")
-        Path(kw["log"]).write_text("")
+        Path(report).write_text("{}", encoding="utf-8")
+        Path(kw["log"]).write_text("", encoding="utf-8")
         return 0
 
     monkeypatch.setattr(batch_mod.facing_mod.vision, "grok_inspect", lambda *a, **kw: ("right", {}))

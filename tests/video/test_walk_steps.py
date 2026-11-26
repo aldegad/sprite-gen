@@ -342,7 +342,7 @@ def _keyed(root: Path, draw, frames: int = FRAMES, hold: tuple[int, int] | None 
 def _cut(out: Path, keyed: Path, *extra: str) -> dict:
     assert loop.main(["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk",
                       "--anchor", "motion-auto", "--repair", "off", *extra]) == 0
-    return json.loads((out / "loop.loop.report.json").read_text())
+    return json.loads((out / "loop.loop.report.json").read_text(encoding="utf-8"))
 
 
 def _two_steps(report: dict, cycle: float) -> dict:
@@ -369,7 +369,7 @@ def test_a_half_step_diagonal_walk_is_cut_two_steps(tmp_path):
     assert counted["search"]["verdict"] == "refuted" and counted["search"]["k"] == [1] and counted["search"]["cut"][1] in (14, 15)
     # Its feet pass briefly and no view is given: whether its crossings mark cycles is not asked.
     assert "cycles" not in counted
-    strip = json.loads((tmp_path / "out" / "loop.strip.json").read_text())
+    strip = json.loads((tmp_path / "out" / "loop.strip.json").read_text(encoding="utf-8"))
     assert strip["steps"] == 2 and strip["cycle_frames"] == report["cycle"]["length"]
     # The step screen's pixel suspicion of a cycle twice as long is settled by the count.
     screen = report["cycle"]["step_screen"]
@@ -425,7 +425,7 @@ def test_a_walk_that_stalls_is_not_cut_across_the_stalled_step(tmp_path):
 def _one_cycle(out: Path, cycle: float) -> dict:
     """The cut in `out` is one cycle of the walker, `cycle` frames, two steps by its crossings read as cycles, and says
     so — in its strip too."""
-    report = json.loads((out / "loop.loop.report.json").read_text())
+    report = json.loads((out / "loop.loop.report.json").read_text(encoding="utf-8"))
     c = report["cycle"]
     counted = c["step_count"]
     assert abs(c["length"] - cycle) <= 1
@@ -434,7 +434,7 @@ def _one_cycle(out: Path, cycle: float) -> dict:
     assert abs(counted["step_range"][1] - cycle / 2) <= 1
     assert counted["cut"]["verdict"] == "two" and counted["cut"]["k"] == [2] and counted["cut"]["ring"] == 2
     assert abs(counted["cut"]["phase"]) <= crossings.PHASE_TOLERANCE
-    assert json.loads((out / "loop.strip.json").read_text())["steps"] == 2
+    assert json.loads((out / "loop.strip.json").read_text(encoding="utf-8"))["steps"] == 2
     assert report["status"] == "passed"
     return counted
 
@@ -579,7 +579,8 @@ def test_a_walk_whose_feet_stay_apart_and_meet_once_a_cycle_is_cut_one_cycle_on_
     assert said["bob"]["says"] is None and said["order"]["says"] == "two steps" and "unwitnessed" not in said
     assert said["order"]["slides"] == [] and said["order"]["travel"] < local_cycle.ORDER_TRAVEL * said["order"]["spacing"]
     assert "the foot drawn nearer changes sides" in said["why"]
-    witness = json.loads((tmp_path / "front" / "loop.loop.report.json").read_text())["cycle"]["cut_witness"]
+    report = json.loads((tmp_path / "front" / "loop.loop.report.json").read_text(encoding="utf-8"))
+    witness = report["cycle"]["cut_witness"]
     assert witness["says"] == "two steps" and witness["by"] == ["order"] and "held" not in witness
     side = _cut(tmp_path / "side", keyed, "--view", "side")
     assert abs(side["cycle"]["length"] - 2 * cycle) <= 1.5 and local_cycle.unwitnessed(side["cycle"])
@@ -861,7 +862,7 @@ def test_a_walk_the_search_cuts_two_steps_in_phase_is_cut_as_before(tmp_path):
         plain = _cut(tmp_path / "unread", keyed)
     assert (plain["cycle"]["start"], plain["cycle"]["length"]) == (report["cycle"]["start"], report["cycle"]["length"])
     _same_cut(tmp_path / "read", tmp_path / "unread")
-    strips = [json.loads((tmp_path / d / "loop.strip.json").read_text()) for d in ("read", "unread")]
+    strips = [json.loads((tmp_path / d / "loop.strip.json").read_text(encoding="utf-8")) for d in ("read", "unread")]
     assert strips[0].pop("steps") == 2 and "steps" not in strips[1] and strips[0] == strips[1]
 
 
@@ -880,7 +881,8 @@ def test_a_body_with_no_feet_to_read_is_cut_as_the_search_cuts_it(tmp_path):
     counted = c["step_count"]
     assert counted["readable"] is False and counted["chosen_by"] == "search" and counted["why"]
     assert counted["search"]["cut"] == [c["start"], c["length"]]
-    assert "steps" not in report["cycle"] and "steps" not in json.loads((tmp_path / "out" / "loop.strip.json").read_text())
+    assert "steps" not in report["cycle"]
+    assert "steps" not in json.loads((tmp_path / "out" / "loop.strip.json").read_text(encoding="utf-8"))
     said = _held(report)
     assert said["cut"] == [c["start"], c["length"]] and said["says"] is None and abs(c["length"] - 16) <= 1
     frames = [_blob(k) for k in range(64)]

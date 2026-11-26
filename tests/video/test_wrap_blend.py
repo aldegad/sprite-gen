@@ -352,7 +352,7 @@ def test_a_pin_that_redraws_the_first_frame_has_its_wrap_blended_to_under_a_step
     assert blend["cells"] == list(range(N - 1 - K, N - 1))
     assert blend["equalize"] == {"sigma": 0.5, "blurred": "still"}
     assert {"pose_share", "presence_share", "never_settled", "ramp_step_max_ratio", "bound_ratio", "seconds"} <= set(blend)
-    strip = json.loads((tmp_path / "auto" / "idle.strip.json").read_text())
+    strip = json.loads((tmp_path / "auto" / "idle.strip.json").read_text(encoding="utf-8"))
     assert strip["wrap_blend"] == {"cells": blend["cells"], "K": K}
     off = cut(tmp_path, keyed(tmp_path, frames, "keyed-off"), "off", wrap_blend="off", repair="off")
     assert off["wrap_blend"] == {"applied": False, "why": "--wrap-blend off"} and "wrap_blend" not in off["strip"]
@@ -550,7 +550,7 @@ def test_a_pin_the_gate_refuses_fails_as_before_with_its_cut_as_filmed(tmp_path:
     for out, kw in (("auto", {}), ("off", {"wrap_blend": "off"})):
         with pytest.raises(SystemExit, match="the pinned clip does not end on its first frame"):
             cut(tmp_path, keyed(tmp_path, frames, f"keyed-{out}"), out, **kw)
-    report = json.loads((tmp_path / "auto" / "idle.loop.report.json").read_text())
+    report = json.loads((tmp_path / "auto" / "idle.loop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["wrap_blend"]["why"] == "the pin does not close: the clip is refused on it"
     written = outputs(tmp_path / "auto", "cycle.refused")
     assert len([name for name in written if name.startswith("frame-")]) == N - 1

@@ -98,7 +98,7 @@ def _frames(path: Path) -> list[Image.Image]:
 
 
 def _cells(out: Path) -> list[Image.Image]:
-    meta = json.loads((out / "walk.strip.json").read_text())
+    meta = json.loads((out / "walk.strip.json").read_text(encoding="utf-8"))
     strip = Image.open(out / "walk.strip.png").convert("RGBA")
     return [strip.crop((k * meta["w"], 0, (k + 1) * meta["w"], meta["h"])) for k in range(meta["frames"])]
 
@@ -182,7 +182,7 @@ def test_a_walk_filmed_in_one_direction_gives_its_small_filmed_ghost_way_at_the_
     assert report["seam_measurement"] == "rendered-cells"
     given = [{"frame": 10, "ghost": round_["original"]["ghost"], "taken": "rife"}]
     assert report["ghost_given_way"] == given and report["ghost_kept"] == []
-    meta = json.loads((out / "walk.strip.json").read_text())
+    meta = json.loads((out / "walk.strip.json").read_text(encoding="utf-8"))
     assert meta["ghost_given_way"] == given and "ghost_kept" not in meta
     assert _cycle(out, 10).tobytes() == _block_walker(2 * math.pi * 10 / L).tobytes()
     err = capsys.readouterr().err
@@ -220,7 +220,7 @@ def test_a_ghost_with_no_clean_frame_beside_it_is_kept_and_named(tmp_path, capsy
     (kept,) = report["ghost_kept"]
     assert kept["frame"] == 10 and kept["ghost"] > GHOST_WARN
     assert 10 not in report["jump_repair"]["replaced"] and {9, 11} <= set(report["jump_repair"]["replaced"])
-    meta = json.loads((out / "walk.strip.json").read_text())
+    meta = json.loads((out / "walk.strip.json").read_text(encoding="utf-8"))
     assert meta["ghost_kept"] == report["ghost_kept"] and meta["ghost_given_way"] == report["ghost_given_way"]
     assert report["gif"]["n_frames"] == report["webp"]["n_frames"] == L - 2
     err = capsys.readouterr().err
@@ -260,11 +260,11 @@ def test_the_alignment_reads_the_cut_given_way_and_carries_its_record(tmp_path):
     for name, ghosts in (("S", ()), ("E", (10,))):
         _cut(_keyed(tmp_path, name, ghosts), tmp_path / name, interpolate=_Middle())
         dirs.append(tmp_path / name)
-    cut = json.loads((tmp_path / "E" / "walk.strip.json").read_text())["ghost_given_way"]
+    cut = json.loads((tmp_path / "E" / "walk.strip.json").read_text(encoding="utf-8"))["ghost_given_way"]
     report = align.align_set(dirs, interpolate=_Middle(), report_path=tmp_path / "align.json")
     e = next(r for r in report["loops"] if Path(r["dir"]).name == "E")
     assert e["ghost_screen"]["ghosts"] == [] and e["ghost_at"] == [] and e["retake"] is None
-    meta = json.loads((tmp_path / "E" / "walk.strip.json").read_text())
+    meta = json.loads((tmp_path / "E" / "walk.strip.json").read_text(encoding="utf-8"))
     assert meta["ghost_given_way"] == cut and "cycle_align" in meta
 
 
@@ -304,11 +304,11 @@ def test_a_cut_that_does_not_close_is_refused_though_its_last_frame_gives_way_to
     with pytest.raises(SystemExit, match="the cycle does not close"):
         _cut(_keyed(tmp_path, "filmed", (SHORT - 1,), phase=EVEN), tmp_path / "filmed", length=SHORT, anchor=anchor,
              repair="off")
-    filmed = json.loads((tmp_path / "filmed" / "walk.loop.report.json").read_text())
+    filmed = json.loads((tmp_path / "filmed" / "walk.loop.report.json").read_text(encoding="utf-8"))
     _no_rife(monkeypatch, tmp_path)
     with pytest.raises(SystemExit, match="the cycle does not close"):  # before: delivered, the seam read 0.0
         _cut(_keyed(tmp_path, "E", (SHORT - 1,), phase=EVEN), tmp_path / "E", length=SHORT, anchor=anchor)
-    report = json.loads((tmp_path / "E" / "walk.loop.report.json").read_text())
+    report = json.loads((tmp_path / "E" / "walk.loop.report.json").read_text(encoding="utf-8"))
     assert [(g["frame"], g["taken"]) for g in report["ghost_given_way"]] == [(SHORT - 1, {"source": 0})]
     assert report["seam_as_filmed"] == [SHORT - 1]
     assert report["resampled_seam_ratio"] == filmed["resampled_seam_ratio"] > loop_mod.SEAM_RATIO_MAX
@@ -429,13 +429,13 @@ def test_a_cell_given_way_is_a_repair_hint_and_the_restoration_does_not_bring_th
     w, h = Image.open(files[0]).size
     frames_report = tmp_path / "frames.json"
     frames_report.write_text(json.dumps({"kind": "sprite-gen-video-frames-report", "fps": 24.0, "frames": len(files),
-                                         "width": w, "height": h, "stream_index": 0, "key": "green"}))
+                                         "width": w, "height": h, "stream_index": 0, "key": "green"}), encoding="utf-8")
     clip = tmp_path / "clip.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-framerate", "24", "-i", str(keyed / "%04d.png"), "-c:v", "libx264",
                     "-pix_fmt", "yuv420p", str(clip)], check=True)
     manifest = tmp_path / "source.json"
     manifest.write_text(json.dumps(source.manifest(clip=clip, canvas=files[0], frames_report=frames_report, files=files,
-                                                   timestamps=source.timestamps(clip, 0))))
+                                                   timestamps=source.timestamps(clip, 0))), encoding="utf-8")
     inputs = dict(source_manifest=manifest, source_frames_dir=keyed, source_clip=clip, source_canvas=files[0],
                   source_frames_report=frames_report)
     out = tmp_path / "E"

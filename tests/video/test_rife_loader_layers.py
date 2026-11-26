@@ -46,7 +46,7 @@ def _telling_binary(root: Path) -> tuple[Path, Path]:
         f'printf "%s|%s|%s\\n" "${{VK_LOADER_LAYERS_DISABLE-unset}}" "${{VK_LOADER_LAYERS_ALLOW-unset}}" '
         f'"${{SPRITE_GEN_TEST_PASSED-unset}}" >> "{seen}"\n'
         'while [ $# -gt 0 ]; do case "$1" in -0) a="$2"; shift;; -o) o="$2"; shift;; esac; shift; done\n'
-        'cp "$a" "$o"\n')
+        'cp "$a" "$o"\n', encoding="utf-8")
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
     return binary, seen
 
@@ -64,7 +64,7 @@ def test_a_run_of_the_binary_leaves_the_loaders_implicit_layers_out_but_those_th
     a, b = _legs(36, 70), _legs(60, 46)
     rife.between(a, b, 0.5, binary=binary, model=tmp_path / rife.MODEL, tmp=tmp_path)
     rife.Rife(binary, tmp_path / rife.MODEL)(a, b, 0.5)
-    lines = seen.read_text().splitlines()
+    lines = seen.read_text(encoding="utf-8").splitlines()
     assert lines == [f"~implicit~|{rife.LOADER_LAYERS_ALLOW}|kept"] * 4
     assert rife.LOADER_LAYERS_ALLOW == "*device_select*,*optimus*,*switchable_graphics*"
 
@@ -79,7 +79,7 @@ def test_a_caller_that_names_the_layers_to_leave_out_keeps_its_own_choice(tmp_pa
     monkeypatch.setattr(rife, "WINDOWS", False)
     binary, seen = _telling_binary(tmp_path)
     rife.between(_legs(36, 70), _legs(60, 46), 0.5, binary=binary, model=tmp_path / rife.MODEL, tmp=tmp_path)
-    assert seen.read_text().splitlines() == [f"{given}|unset|unset"] * 2
+    assert seen.read_text(encoding="utf-8").splitlines() == [f"{given}|unset|unset"] * 2
 
 
 def _manifest(path: Path, text: str, bom: bool = False) -> Path:

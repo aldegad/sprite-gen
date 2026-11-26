@@ -37,7 +37,7 @@ def _run(tmp_path: Path, frames: list[Image.Image], name: str = "j", **kw) -> di
 
 
 def _meta(rep: dict) -> dict:
-    return json.loads(Path(rep["strip"]["path"]).with_suffix("").with_suffix(".strip.json").read_text())
+    return json.loads(Path(rep["strip"]["path"]).with_suffix("").with_suffix(".strip.json").read_text(encoding="utf-8"))
 
 
 def _cells(rep: dict) -> list[Image.Image]:
@@ -368,7 +368,7 @@ def test_video_set_hands_the_switches_to_each_cut_and_says_each_air(monkeypatch,
 
     def video(image, prompt, out, report, **kw):
         out.write_bytes(b"test-video")
-        report.write_text(json.dumps({"prompt": prompt}))
+        report.write_text(json.dumps({"prompt": prompt}), encoding="utf-8")
         return 0
 
     monkeypatch.setattr(batch.loop_mod, "run_loop", run_loop)

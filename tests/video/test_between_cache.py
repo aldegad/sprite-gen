@@ -229,12 +229,12 @@ def _picking_rife(root: Path, name: str = rife.MODEL) -> tuple[Path, Path]:
             race.unlink()
             weights.write_text(str(1 - pick))
         shutil.copyfile(args["-" + str(pick ^ FLIP)], args["-o"])
-        """))
+        """), encoding="utf-8")
     binary.chmod(0o700)
     model = binary.parent / name
     model.mkdir()
-    (model / "flownet.param").write_text("synthetic")
-    (model / "flownet.bin").write_text("0")
+    (model / "flownet.param").write_text("synthetic", encoding="utf-8")
+    (model / "flownet.bin").write_text("0", encoding="utf-8")
     return binary, model / "flownet.bin"
 
 
@@ -266,11 +266,11 @@ def test_the_same_rife_makes_its_frame_again_once_a_file_it_runs_from_changed(tm
 
     assert again(made) == (a.tobytes(), 0, 1)
     assert again(made) == (a.tobytes(), 1, 0)
-    weights.write_text("1")
+    weights.write_text("1", encoding="utf-8")
     assert again(made) == (b.tobytes(), 0, 1)
-    binary.write_text(binary.read_text().replace("FLIP = 0", "FLIP = 1"))
+    binary.write_text(binary.read_text(encoding="utf-8").replace("FLIP = 0", "FLIP = 1"), encoding="utf-8")
     assert again(made) == (a.tobytes(), 0, 1)
-    (weights.parent / "contextnet.bin").write_text("a file added")
+    (weights.parent / "contextnet.bin").write_text("a file added", encoding="utf-8")
     assert again(made) == (a.tobytes(), 0, 1)
     assert again(rife.Rife(binary, shutil.copytree(weights.parent, tmp_path / "elsewhere" / rife.MODEL))) == (a.tobytes(), 0, 1)
     shutil.rmtree(weights.parent)
@@ -296,10 +296,10 @@ def test_a_frame_made_while_its_rife_changed_is_handed_on_and_not_kept(tmp_path,
     frame = cache.frame(made, a, b, 0.5).tobytes()
     assert cache.record() == {"dir": str((tmp_path / "kept").resolve()), "hits": 0, "misses": 1, "unreadable": 0, "not_kept": 1}
     assert list((tmp_path / "kept").iterdir()) == []
-    weights.write_text("0")
+    weights.write_text("0", encoding="utf-8")
     race.touch()
     assert made(a, b, 0.5).tobytes() == frame and frame not in (a.tobytes(), b.tobytes())
-    weights.write_text("0")
+    weights.write_text("0", encoding="utf-8")
     after = rife.Cache(tmp_path / "kept")
     assert after.frame(made, a, b, 0.5).tobytes() == a.tobytes() and (after.hits, after.misses, after.not_kept) == (0, 1, 0)
 
@@ -311,7 +311,8 @@ def test_a_frame_kept_under_one_augmentation_is_made_again_under_another(monkeyp
     and by one with `-z` alone, and taken again by the next pass without. Every frame taken or made is the frame the same
     RIFE makes with no directory, byte for byte."""
     binary, weights = _picking_rife(tmp_path, "rife-v4.6")
-    binary.write_text(binary.read_text().replace("FLIP = 0", 'FLIP = int("-x" in sys.argv)'))
+    binary.write_text(binary.read_text(encoding="utf-8").replace("FLIP = 0", 'FLIP = int("-x" in sys.argv)'),
+                      encoding="utf-8")
     made = rife.Rife(binary, weights.parent)
     a, b = _dot(40, (255, 0, 0)), _dot(72, (0, 0, 255))
 
@@ -393,7 +394,7 @@ def test_video_cycle_align_between_cache_reports_hits_and_misses(tmp_path, monke
     for k, label in enumerate(("first", "again")):
         assert align.main([*argv, "--report", str(tmp_path / f"{label}.json")]) == 0
         said = json.loads(capsys.readouterr().out)["between_cache"]
-        written = json.loads((tmp_path / f"{label}.json").read_text())["between_cache"]
+        written = json.loads((tmp_path / f"{label}.json").read_text(encoding="utf-8"))["between_cache"]
         assert said == written and said["dir"] == str((tmp_path / "kept").resolve())
         made = said["hits"] + said["misses"]
         assert made > 0 and said["hits"] == (made if k else 0)

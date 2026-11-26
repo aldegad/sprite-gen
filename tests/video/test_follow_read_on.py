@@ -51,7 +51,7 @@ def cut(path, frames, name='run'):
     for k, frame in enumerate(frames):
         frame.save(path/'cycle'/f'frame-{k:03d}.png')
     strip.save(path/f'{name}.strip.png')
-    (path/f'{name}.strip.json').write_text(json.dumps(meta, indent=2)+'\n')
+    (path/f'{name}.strip.json').write_text(json.dumps(meta, indent=2)+'\n', encoding="utf-8")
     return path
 
 
@@ -65,7 +65,7 @@ def sha(path):
 
 
 def meta_of(loop_dir):
-    return json.loads(next(loop_dir.glob('*.strip.json')).read_text())
+    return json.loads(next(loop_dir.glob('*.strip.json')).read_text(encoding="utf-8"))
 
 
 def cells_of(loop_dir):
@@ -189,7 +189,7 @@ def test_t1_a_cut_that_did_not_record_its_crop_is_carried_by_its_cells_pixels(or
     meta = meta_of(legacy)
     for key in ('source_rect', 'sample_indices', 'source_cut'):
         meta.pop(key, None)
-    (legacy/'run.strip.json').write_text(json.dumps(meta, indent=2)+'\n')
+    (legacy/'run.strip.json').write_text(json.dumps(meta, indent=2)+'\n', encoding="utf-8")
     loop_dir = aligned(legacy, tmp_path/'legacy-turned')
     record = meta_of(loop_dir)['cycle_align']
     assert record['origin']['crop_origin'] is None and meta_of(loop_dir)['source_rect'] is not None
@@ -356,7 +356,8 @@ def strip_dir(path, frames):
         strip.paste(frame, (k*w, 0))
     path.mkdir()
     strip.save(path/'walk.strip.png')
-    (path/'walk.strip.json').write_text(json.dumps({'kind': 'periodic', 'frames': len(frames), 'w': w, 'h': h, 'delay_ms': 1000/24}))
+    (path/'walk.strip.json').write_text(json.dumps({'kind': 'periodic', 'frames': len(frames), 'w': w, 'h': h,
+                                                    'delay_ms': 1000/24}), encoding="utf-8")
     return path
 
 
@@ -417,7 +418,7 @@ def test_the_commands_take_read_on_and_stretch_floor(origin, tmp_path, capsys):
     region = f'{cx:g},{cy:g},{rx:g},{ry:g}'
     assert cli.main(['video-follow-inspect', '--loop-dir', str(loop_dir), '--region', region, '--on-fold', 'lower',
                      '--read-on', read_on, '--stretch-floor', '0.2', '--out-dir', str(tmp_path/'out')]) == 0
-    inspected = json.loads((tmp_path/'out'/follow_inspect.RECORD).read_text())
+    inspected = json.loads((tmp_path/'out'/follow_inspect.RECORD).read_text(encoding="utf-8"))
     assert inspected['inputs']['settings']['stretch_floor'] == 0.2 and inspected['inputs']['settings']['read_on'] == read_on
     capsys.readouterr()
     assert cli.main(['video-follow', '--loop-dir', str(loop_dir), '--region', region, '--on-fold', 'lower',

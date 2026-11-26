@@ -69,7 +69,7 @@ def test_a_ghost_kept_at_a_whole_time_is_a_take_to_film_again(tmp_path, capsys):
     capsys.readouterr()
     assert align.run(loop_dir=dirs, report=tmp_path / "align.json") == 0  # no frame made: no RIFE wanted
     captured = capsys.readouterr()
-    report = json.loads((tmp_path / "align.json").read_text())
+    report = json.loads((tmp_path / "align.json").read_text(encoding="utf-8"))
     assert report["applied"] is True
     e, s = _row(report, "E"), _row(report, "S")
     assert e["retake"] is not None and e["retake"]["reason"] == "filmed-ghost"  # before: null, and only a line
@@ -88,7 +88,7 @@ def test_a_ghost_kept_at_a_whole_time_is_a_take_to_film_again(tmp_path, capsys):
     assert json.loads(captured.out)["retake"] == report["retake"]
     line = f"video-cycle-align: warning: {e['dir']}: film this direction again (filmed-ghost) — frame(s) {kept['at']} show source frame(s) 10 of cycle.source/"
     assert line in captured.err
-    meta = json.loads((Path(e["dir"]) / "walk.strip.json").read_text())
+    meta = json.loads((Path(e["dir"]) / "walk.strip.json").read_text(encoding="utf-8"))
     assert meta["cycle_align"]["retake"] == e["retake"] and meta["cycle_align"]["ghost_at"] == e["ghost_at"]
 
 

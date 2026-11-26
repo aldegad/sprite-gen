@@ -134,7 +134,7 @@ def cut(tmp_path: Path, keyed: Path, start: int, *, name: str = "run") -> Path:
 
 
 def cells_of(meta_path: Path) -> tuple[dict, list[Image.Image]]:
-    meta = json.loads(meta_path.read_text())
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
     strip = Image.open(meta_path.with_name(meta_path.name[:-5] + ".png")).convert("RGBA")
     return meta, [strip.crop((k * meta["w"], 0, (k + 1) * meta["w"], meta["h"])) for k in range(meta["frames"])]
 
@@ -176,7 +176,7 @@ def test_stop_plays_the_start_backwards_from_the_loop_to_the_first_frame(tmp_pat
     assert out["seam"]["steps"] <= stop.SEAM_MAX and out["run_up"]["cycles"] <= stop.RUN_UP_MAX_CYCLES
     # The last cell is the clip's first frame — the still as filmed — at the loop's scale, pixel for pixel.
     smeta, cells = cells_of(tmp_path / "stop" / "stop.strip.json")
-    lmeta = json.loads(meta.read_text())
+    lmeta = json.loads(meta.read_text(encoding="utf-8"))
     first = Image.open(sorted(keyed.glob("*.png"))[0]).convert("RGBA")
     first = resize_cell(first, (round(first.width * lmeta["scale"]), round(first.height * lmeta["scale"])))
     assert cells[-1].crop(cells[-1].getbbox()).tobytes() == first.crop(first.getbbox()).tobytes()
@@ -191,7 +191,7 @@ def test_stop_plays_the_start_backwards_from_the_loop_to_the_first_frame(tmp_pat
     assert (smeta["held_fill"]["cells"], smeta["held_fill"]["poses"], smeta["held_fill"]["held_runs"]) == (len(shown), len(shown), [])
     with Image.open(tmp_path / "stop" / "stop.gif") as gif:
         assert gif.n_frames == len(shown) and gif.info.get("loop") is None
-    report = json.loads((tmp_path / "stop" / "stop.stop.report.json").read_text())
+    report = json.loads((tmp_path / "stop" / "stop.stop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "passed" and report["shown"] == shown
 
 
@@ -235,7 +235,7 @@ def test_stop_refuses_a_short_other_motion(tmp_path, other):
     meta = cut(tmp_path, keyed, run_from + PERIOD)
     with pytest.raises(SystemExit, match="another motion"):
         make(tmp_path, keyed, meta)
-    report = json.loads((tmp_path / "stop" / "stop.stop.report.json").read_text())
+    report = json.loads((tmp_path / "stop" / "stop.stop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["run_up"]["cycles"] <= stop.RUN_UP_MAX_CYCLES
     turn = report["turn_back"]
     # Back at a standing frame where the motion has ended and the setting-off starts, a step and more after leaving it.
@@ -253,7 +253,7 @@ def test_stop_refuses_a_start_that_holds_another_motion(tmp_path):
     meta = cut(tmp_path, keyed, run_from + PERIOD)
     with pytest.raises(SystemExit, match="another motion"):
         make(tmp_path, keyed, meta)
-    report = json.loads((tmp_path / "stop" / "stop.stop.report.json").read_text())
+    report = json.loads((tmp_path / "stop" / "stop.stop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["turn_back"]["steps"] <= stop.SAME_POSE
     assert report["run_up"]["cycles"] > stop.RUN_UP_MAX_CYCLES
     assert not (tmp_path / "stop" / "stop.strip.png").exists()
@@ -271,7 +271,7 @@ def test_stop_refuses_a_run_up_longer_than_a_setting_off(tmp_path):
     with pytest.raises(SystemExit, match="strides unlike the loop's") as refusal:
         make(tmp_path, keyed, meta)
     assert "another motion" not in str(refusal.value)
-    report = json.loads((tmp_path / "stop" / "stop.stop.report.json").read_text())
+    report = json.loads((tmp_path / "stop" / "stop.stop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["run_up"]["cycles"] > stop.RUN_UP_MAX_CYCLES
     assert report["turn_back"]["steps"] > stop.SAME_POSE
     out = make(tmp_path, keyed, meta, run_up_max=4.0)
@@ -285,7 +285,7 @@ def test_stop_refuses_a_seam_past_the_jump_line(tmp_path):
     meta = cut(tmp_path, keyed, run_from + PERIOD)
     with pytest.raises(SystemExit, match="jump line"):
         make(tmp_path, keyed, meta)
-    report = json.loads((tmp_path / "stop" / "stop.stop.report.json").read_text())
+    report = json.loads((tmp_path / "stop" / "stop.stop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["seam"]["steps"] > stop.SEAM_MAX
 
 
@@ -302,7 +302,7 @@ def test_stop_leaves_an_aligned_loop_from_the_cell_nearest_the_entry(tmp_path):
         strip.paste(c, (k * meta["w"], 0))
     aligned = tmp_path / "loop" / "run.aligned.strip.json"
     strip.save(aligned.with_name("run.aligned.strip.png"))
-    aligned.write_text(json.dumps(meta))
+    aligned.write_text(json.dumps(meta), encoding="utf-8")
     plain = make(tmp_path, keyed, meta_path, name="plain")
     turned_out = make(tmp_path, keyed, aligned, name="turned")
     assert turned_out["entry"]["frame"] == plain["entry"]["frame"]
@@ -341,11 +341,11 @@ def test_stop_names_a_filmed_ghost_and_keeps_it(tmp_path):
 def test_stop_refuses_a_loop_it_cannot_leave(tmp_path):
     keyed, run_from = clip(tmp_path, cycles=2)
     meta_path = cut(tmp_path, keyed, run_from + PERIOD)
-    meta = json.loads(meta_path.read_text())
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
     for change, match in (({"state": "idle"}, "walk or run"), ({"loop": False}, "plays once"), ({"source_cut": None}, "source cut")):
         bad = tmp_path / "loop" / "bad.strip.json"
         bad.with_name("bad.strip.png").write_bytes(meta_path.with_name("run.strip.png").read_bytes())
-        bad.write_text(json.dumps({**meta, **change}))
+        bad.write_text(json.dumps({**meta, **change}), encoding="utf-8")
         with pytest.raises(SystemExit, match=match):
             make(tmp_path, keyed, bad, name="bad")
     few = tmp_path / "few"
@@ -360,7 +360,7 @@ def test_stop_source_identity_is_the_loop_cut_from(tmp_path):
     keyed, run_from = clip(tmp_path, cycles=2)
     meta = cut(tmp_path, keyed, run_from + PERIOD)
     files = sorted(keyed.glob("*.png"))
-    assert json.loads(meta.read_text())["source_cut"]["source"] == evidence.source_identity(files, 24.0)
+    assert json.loads(meta.read_text(encoding="utf-8"))["source_cut"]["source"] == evidence.source_identity(files, 24.0)
 
 
 # --- Held cells (docs/loop-repair.md section 7): a clip that stalls in its setting-off ---------------------------------
@@ -444,7 +444,7 @@ def test_a_stop_whose_clip_stalls_has_its_held_cell_made_between_the_poses_besid
     assert smeta["holds"] == []  # no hold the motion means is left
     assert smeta["held_fill"]["made"] == [4] and smeta["frames"] == len(shown)
     # The closing still is the clip's first frame as filmed, held: the stop ends as it did.
-    lmeta = json.loads(meta.read_text())
+    lmeta = json.loads(meta.read_text(encoding="utf-8"))
     first = Image.open(sorted(keyed.glob("*.png"))[0]).convert("RGBA")
     first = resize_cell(first, (round(first.width * lmeta["scale"]), round(first.height * lmeta["scale"])))
     assert cells[-1].crop(cells[-1].getbbox()).tobytes() == first.crop(first.getbbox()).tobytes()
@@ -492,7 +492,7 @@ def test_no_rife_plays_the_stop_s_held_cells_as_filmed_and_says_how_to_install_i
     out = make(tmp_path, keyed, meta)
     assert out["status"] == "passed" and out["held_fill"]["made"] == []
     assert out["held_fill"]["unmade"]["cells"] == [4] and out["held_fill"]["unmade"]["why"] == "RIFE is not installed"
-    smeta = json.loads((tmp_path / "stop" / "stop.strip.json").read_text())
+    smeta = json.loads((tmp_path / "stop" / "stop.strip.json").read_text(encoding="utf-8"))
     assert smeta["held_fill"]["unmade"]["cells"] == [4] and "install" in smeta["held_fill"]["unmade"]
     assert pictures(tmp_path / "stop") == BEFORE["held"]
     err = capsys.readouterr().err
@@ -508,6 +508,6 @@ def test_a_stop_s_opening_pose_shown_twice_is_kept_as_filmed_and_listed_as_a_hol
     assert out["shown"][:2] == [13, 12]
     run = out["held_fill"]["before"]["held_runs"][0]
     assert (run["start"], run["length"], run["filled"], run["keep"]) == (0, 2, False, "opening")
-    smeta = json.loads((tmp_path / "stop" / "stop.strip.json").read_text())
+    smeta = json.loads((tmp_path / "stop" / "stop.strip.json").read_text(encoding="utf-8"))
     assert smeta["holds"] == [{"from": 0, "to": 1, "kind": "opening", "reason": "the cut's opening pose, kept as filmed"}]
     assert "video-stop: warning" not in capsys.readouterr().err

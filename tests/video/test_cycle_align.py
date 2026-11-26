@@ -255,7 +255,7 @@ def test_a_set_is_aligned_to_its_median_length_and_a_second_run_reads_the_source
     assert by["S"]["made_by_rife"] > 0 and by["N"]["made_by_rife"] > 0
     assert report["made_by_rife"] == len(rec.calls) == by["S"]["made_by_rife"] + by["N"]["made_by_rife"]
     for d in dirs:
-        meta = json.loads((d / "walk.strip.json").read_text())
+        meta = json.loads((d / "walk.strip.json").read_text(encoding="utf-8"))
         assert meta["frames"] == 24 and meta["cycle_frames"] == 24 and meta["cycle_align"]["to"] == 24
         assert meta["cycle_seconds"] == pytest.approx(1.0)
         assert len(list((d / "cycle").glob("frame-*.png"))) == 24
@@ -268,7 +268,8 @@ def test_a_set_is_aligned_to_its_median_length_and_a_second_run_reads_the_source
     again = align.align_set(dirs, interpolate=Recorder(), between="rife")
     assert again["lengths"] == [20, 24, 28]  # read from cycle.source, not the aligned cycle
     assert (dirs[0] / "walk.strip.png").read_bytes() == first
-    assert json.loads((tmp_path / "align.json").read_text())["kind"] == "sprite-gen-video-cycle-align-report"
+    assert (json.loads((tmp_path / "align.json").read_text(encoding="utf-8"))["kind"]
+            == "sprite-gen-video-cycle-align-report")
 
 
 @pytest.mark.slow
@@ -288,18 +289,18 @@ def test_each_loop_records_its_view_and_start_foot_and_a_view_per_loop_is_requir
 
 def test_loops_at_different_frame_rates_are_refused(tmp_path, walk_cut):
     a, b = walk_cut(tmp_path, "A", 20), walk_cut(tmp_path, "B", 24)
-    meta = json.loads((b / "walk.strip.json").read_text())
+    meta = json.loads((b / "walk.strip.json").read_text(encoding="utf-8"))
     meta["cycle_seconds"] = 24 / 30
-    (b / "walk.strip.json").write_text(json.dumps(meta))
+    (b / "walk.strip.json").write_text(json.dumps(meta), encoding="utf-8")
     with pytest.raises(SystemExit, match="different frame rates"):
         align.align_set([a, b], interpolate=Recorder())
 
 
 def test_a_loop_cut_before_the_cell_cap_was_recorded_is_refused_by_name(tmp_path, walk_cut):
     d = walk_cut(tmp_path, "A", 20)
-    meta = json.loads((d / "walk.strip.json").read_text())
+    meta = json.loads((d / "walk.strip.json").read_text(encoding="utf-8"))
     del meta["cell_height_cap"]
-    (d / "walk.strip.json").write_text(json.dumps(meta))
+    (d / "walk.strip.json").write_text(json.dumps(meta), encoding="utf-8")
     with pytest.raises(SystemExit, match="cell_height_cap"):
         align.align_set([d], interpolate=Recorder())
 
@@ -326,10 +327,10 @@ def test_a_loop_aligned_before_is_aligned_again_without_its_strip(tmp_path):
     """Only a first alignment reads the strip as cut; a later one keeps the origin the first recorded."""
     dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24))]
     align.align_set(dirs, interpolate=Recorder())
-    origin = json.loads((dirs[0] / "walk.strip.json").read_text())["cycle_align"]["origin"]
+    origin = json.loads((dirs[0] / "walk.strip.json").read_text(encoding="utf-8"))["cycle_align"]["origin"]
     (dirs[0] / "walk.strip.png").unlink()
     assert align.align_set(dirs, interpolate=Recorder(), length=22)["length"] == 22
-    meta = json.loads((dirs[0] / "walk.strip.json").read_text())
+    meta = json.loads((dirs[0] / "walk.strip.json").read_text(encoding="utf-8"))
     assert meta["cycle_align"]["origin"] == origin and (dirs[0] / "walk.strip.png").is_file()
 
 
@@ -408,7 +409,8 @@ def test_video_set_leaves_a_loop_its_body_rises_and_falls_four_times_in_out_of_t
         named = {}
         if cycles == 2:
             strip = loop / "walk.strip.json"
-            strip.write_text(json.dumps({**json.loads(strip.read_text()), "steps": 2}))
+            strip.write_text(json.dumps({**json.loads(strip.read_text(encoding="utf-8")), "steps": 2}),
+                             encoding="utf-8")
             named = {"cycle-four-steps": True}
         rows.append({"item": f"{direction}-walk", "direction": direction, "state": "walk", "dir": str(item), "ok": True,
                      "loop": {"n_out": length, **named}})
@@ -416,7 +418,7 @@ def test_video_set_leaves_a_loop_its_body_rises_and_falls_four_times_in_out_of_t
     assert out["walk"].get("lengths") == [20, 24], f"the loop of two cycles is aligned as one: {out['walk']}"
     assert out["walk"]["applied"] and out["walk"]["left_out"] == {"back-walk": ["cycle-four-steps"]}
     assert [r["loop"]["n_out"] for r in rows] == [out["walk"]["length"]] * 2 + [40] and "cycle_align" not in rows[2]["loop"]
-    meta = json.loads((tmp_path / "back-walk" / "loop" / "walk.strip.json").read_text())
+    meta = json.loads((tmp_path / "back-walk" / "loop" / "walk.strip.json").read_text(encoding="utf-8"))
     assert meta["frames"] == 40 and meta["steps"] == 2 and "cycle_align" not in meta
     assert f"four times in its cut ({local_cycle.FOUR_STEPS})" in capsys.readouterr().err
 
@@ -448,11 +450,11 @@ def test_video_cycle_align_alone_stops_on_a_loop_whose_cut_its_report_holds_and_
     dirs = [_cut(tmp_path, n, L, cycles=c, report=n == "N")
             for n, L, c in (("S", 20, 1), ("E", 24, 1), ("N", 40 if four else 28, 2 if four else 1))]
     report = dirs[2] / "walk.loop.report.json"
-    data = json.loads(report.read_text())
-    report.write_text(json.dumps({**data, "cycle": {**data["cycle"], "cut_witness": witness}}))
+    data = json.loads(report.read_text(encoding="utf-8"))
+    report.write_text(json.dumps({**data, "cycle": {**data["cycle"], "cut_witness": witness}}), encoding="utf-8")
     if four:
         strip = dirs[2] / "walk.strip.json"
-        strip.write_text(json.dumps({**json.loads(strip.read_text()), "steps": 2}))
+        strip.write_text(json.dumps({**json.loads(strip.read_text(encoding="utf-8")), "steps": 2}), encoding="utf-8")
     before = [(d / "walk.strip.png").read_bytes() for d in dirs]
     with pytest.raises(align.CycleSuspects) as stop:
         align.align_set(dirs, interpolate=Recorder(), between="rife")
@@ -495,7 +497,7 @@ def test_video_cycle_align_between_nearest_needs_no_rife(tmp_path, monkeypatch):
     assert report["between"] == "nearest" and report["made_by_rife"] == 0 and report["interpolator"] is None
     by = {Path(r["dir"]).name: r for r in report["loops"]}
     assert len(by["S"]["nearest_at"]) > 0 and by["E"]["nearest_at"] == []
-    assert all(json.loads((d / "walk.strip.json").read_text())["frames"] == 24 for d in dirs)
+    assert all(json.loads((d / "walk.strip.json").read_text(encoding="utf-8"))["frames"] == 24 for d in dirs)
 
 
 @pytest.mark.slow

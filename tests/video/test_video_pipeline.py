@@ -59,7 +59,7 @@ def test_attack_canvas_reserves_overhead_room_and_reports_placement(tmp_path: Pa
     assert abs(image.width / image.height - 16 / 9) < 0.01
     assert image.crop((x, y, x + 120, y + 160)).tobytes() == Image.open(still).tobytes()
     assert image.crop((0, 0, image.width, y)).getextrema() == ((0, 0), (255, 255), (0, 0))
-    assert json.loads(report.read_text()) == rep
+    assert json.loads(report.read_text(encoding="utf-8")) == rep
     assert rep["why"] == canvas_mod.STATE_CANVAS["attack"].why
     # Explicit zeros still give the pre-headroom, pre-trail wide layout.
     zero, zero_rep = canvas_mod.pad_canvas(Image.open(still), canvas_mod.profile_for("attack"), headroom=0, trail=0)
@@ -185,7 +185,8 @@ def test_run_loop_emits_strip_gif_webp_and_verifies(tmp_path: Path) -> None:
     assert rep["strip"]["body_h"] <= rep["strip"]["h"]
     assert rep["gif"]["n_frames"] == 8 and rep["gif"]["loop"] == 0 and rep["gif"]["corners_transparent"]
     assert rep["webp"]["n_frames"] == 8 and rep["webp"]["stale_rgb_under_alpha0"] == 0
-    assert json.loads((tmp_path / "out" / "walker.strip.json").read_text())["frames"] == rep["strip"]["frames"]
+    assert (json.loads((tmp_path / "out" / "walker.strip.json").read_text(encoding="utf-8"))["frames"]
+            == rep["strip"]["frames"])
     assert len(list((tmp_path / "out" / "cycle").glob("frame-*.png"))) == rep["cycle"]["length"]
 
 
@@ -360,14 +361,14 @@ def test_body_height_measures_the_clips_first_frame_not_a_raised_weapon(tmp_path
         im.save(path)
     rep = loop_mod.run_loop(tmp_path / "keyed", tmp_path / "out", fps=24.0, state="walk", min_len=None, max_len=None,
                             n_out=8, seam_max=9.0, name="w", report_path=None, body_height=48, repair="off")
-    meta = json.loads((tmp_path / "out" / "w.strip.json").read_text())
+    meta = json.loads((tmp_path / "out" / "w.strip.json").read_text(encoding="utf-8"))
     assert meta["body_ref"] == "first-frame"
     assert (meta["body_src_h"], meta["scale"], meta["body_h"]) == (48, 1.0, 48)  # the raised frames are 56 tall
     assert rep["strip"]["body_h"] == 48
     # without a target nothing changes: the tallest grounded frame, never scaled up
     loop_mod.run_loop(tmp_path / "keyed", tmp_path / "plain", fps=24.0, state="walk", min_len=None, max_len=None,
                       n_out=8, seam_max=9.0, name="w", report_path=None, repair="off")
-    plain = json.loads((tmp_path / "plain" / "w.strip.json").read_text())
+    plain = json.loads((tmp_path / "plain" / "w.strip.json").read_text(encoding="utf-8"))
     assert plain["body_ref"] == "tallest-grounded" and plain["body_src_h"] == 56
 
 
@@ -435,11 +436,11 @@ def test_run_set_runs_each_clip_once_and_tables_failures(tmp_path: Path, monkeyp
         calls.append((out.parent.name, _time.monotonic()))
         item = out.parent.name
         if item == "side-jump":
-            log.write_text("video: generation request refused (HTTP 429): resource-exhausted")
+            log.write_text("video: generation request refused (HTTP 429): resource-exhausted", encoding="utf-8")
             return 1
         out.write_bytes(b"\x00\x00\x00\x18ftypisom")
-        report.write_text("{}")
-        log.write_text("ok")
+        report.write_text("{}", encoding="utf-8")
+        log.write_text("ok", encoding="utf-8")
         return 0
 
     monkeypatch.setattr(batch_mod.time, "sleep", lambda s: None)  # no real stagger waits
@@ -457,7 +458,7 @@ def test_run_set_runs_each_clip_once_and_tables_failures(tmp_path: Path, monkeyp
     assert by["side-run"]["loop"]["review_recommended"] is True
     assert by["side-walk"]["loop"]["review_recommended"] is False
     assert payload["failed"] == ["side-jump"]
-    table = (tmp_path / "set" / "table.md").read_text()
+    table = (tmp_path / "set" / "table.md").read_text(encoding="utf-8")
     assert "| side | jump | - | - | - | - | - | FAIL" in table and "| side | walk | periodic | 12 | 12 | 0.50 | 12 | OK |" in table
     assert "| side | run | periodic | 12 | 12 | 0.50 | 12 | OK (review gait) |" in table
     assert (tmp_path / "set" / "set.report.json").is_file()

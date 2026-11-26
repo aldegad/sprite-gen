@@ -175,7 +175,7 @@ def stub_set(tmp_path, monkeypatch, *, bases, states, **kwargs):
     def video_stub(image, prompt, out, report, **kw):
         seen.setdefault(out.parent.name, {}).update(prompt=prompt, last_frame=kw.get("last_frame"))
         out.write_bytes(b"clip")
-        report.write_text(json.dumps({"prompt": prompt}))
+        report.write_text(json.dumps({"prompt": prompt}), encoding="utf-8")
         return 0
 
     def frames_stub(clip, out, **kw):
@@ -255,7 +255,7 @@ def test_a_once_return_that_does_not_come_back_is_refused(tmp_path) -> None:
         reached.save(frames / f"frame-{k:04d}.png")
     with pytest.raises(SystemExit, match="does not return to its first pose"):
         cut(tmp_path, frames)
-    assert json.loads((tmp_path / "out" / "punch.loop.report.json").read_text())["status"] == "failed"
+    assert json.loads((tmp_path / "out" / "punch.loop.report.json").read_text(encoding="utf-8"))["status"] == "failed"
 
 
 # The binary's calls the held fill makes on this cut, by model (`rife.model_name()`): rife-v4.25's frame between held cells

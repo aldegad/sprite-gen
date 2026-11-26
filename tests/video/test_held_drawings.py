@@ -140,10 +140,10 @@ def _copy(cut: Path, tmp_path: Path, name: str) -> Path:
 @pytest.mark.parametrize("hold, per_second", [(3, 8.0)])  # plumbing: the unit grid above reads every hold
 def test_video_loop_records_the_clips_drawings_a_second(tmp_path, hold, per_second):
     d = _cut(tmp_path, "S", 24, hold)
-    report = json.loads((d / "walk.loop.report.json").read_text())
+    report = json.loads((d / "walk.loop.report.json").read_text(encoding="utf-8"))
     assert report["drawings"]["hold"] == hold
     assert report["drawings"]["drawings_per_second"] == pytest.approx(per_second, abs=0.7)
-    meta = json.loads((d / "walk.strip.json").read_text())
+    meta = json.loads((d / "walk.strip.json").read_text(encoding="utf-8"))
     assert meta["drawings"] == {k: report["drawings"][k] for k in ("hold", "drawings_per_second", "contrast", "frames")}
 
 
@@ -177,9 +177,9 @@ def test_a_held_loop_stretched_past_what_an_interpolator_bridges_is_named_for_a_
     assert Path(report["retake"][0]["dir"]) == dirs[0]
     lines = [w for w in report["warnings"] if "film this direction again (held-drawings)" in w]
     assert len(lines) == 1 and "8 drawings a second" in lines[0] and lines[0].startswith(f"{dirs[0]}: ")  # every strip is `walk`
-    written = json.loads((tmp_path / "align.json").read_text())
+    written = json.loads((tmp_path / "align.json").read_text(encoding="utf-8"))
     assert written["retake"] == report["retake"]
-    meta = json.loads((dirs[0] / "walk.strip.json").read_text())
+    meta = json.loads((dirs[0] / "walk.strip.json").read_text(encoding="utf-8"))
     assert meta["cycle_align"]["retake"]["reason"] == "held-drawings"
 
 
@@ -219,16 +219,16 @@ def test_the_clips_hold_is_read_from_the_strip_and_the_cycle_is_the_fallback(tmp
     """`video-loop` writes the clip's hold into the strip metadata, and the alignment reads it there; a
     loop cut before that record is measured on its own cycle, read as a ring."""
     dirs = [_copy(on_twos, tmp_path, "NE"), _copy(every_frame, tmp_path, "S")]
-    meta = json.loads((dirs[0] / "walk.strip.json").read_text())
+    meta = json.loads((dirs[0] / "walk.strip.json").read_text(encoding="utf-8"))
     assert meta["drawings"]["hold"] == 2 and meta["drawings"]["drawings_per_second"] == pytest.approx(12.0)
     report = align.align_set(dirs, interpolate=_cross_fade, length=24)
     assert [r["drawings"]["source"] for r in report["loops"]] == ["span", "span"]  # the cut's own steps, over the clip's
-    again = json.loads((dirs[0] / "walk.strip.json").read_text())
+    again = json.loads((dirs[0] / "walk.strip.json").read_text(encoding="utf-8"))
     assert again["drawings"] == meta["drawings"]  # an alignment keeps the clip's record for the next one
     for d in dirs:
-        m = json.loads((d / "walk.strip.json").read_text())
+        m = json.loads((d / "walk.strip.json").read_text(encoding="utf-8"))
         del m["drawings"]
-        (d / "walk.strip.json").write_text(json.dumps(m))
+        (d / "walk.strip.json").write_text(json.dumps(m), encoding="utf-8")
     old = align.align_set(dirs, interpolate=_cross_fade, length=24)
     row = next(r for r in old["loops"] if Path(r["dir"]).name == "NE")
     assert row["drawings"]["source"] == "cycle" and row["drawings"]["hold"] == 2 and row["drawings"]["drawings"] == 8
@@ -262,7 +262,7 @@ def test_a_clip_held_for_part_of_its_length_is_read_where_it_was_cut(tmp_path, e
     24. Whether it is filmed again follows the cut: the clip's reading, over both kinds, would name a
     cycle drawn every frame and pass a held one."""
     d = _cut_at(tmp_path, "NE", _partly_held(88, held_frames, held_first=True), start, 16)
-    meta = json.loads((d / "walk.strip.json").read_text())
+    meta = json.loads((d / "walk.strip.json").read_text(encoding="utf-8"))
     assert meta["drawings"]["hold"] == clip_hold  # the clip's reading is kept as it was
     assert meta["cycle_drawings"]["hold"] == cut_hold and (meta["cycle_drawings"]["start"], meta["cycle_drawings"]["length"]) == (start, 16)
     report = align.align_set([d, _copy(every_frame, tmp_path, "S")], interpolate=_cross_fade, length=24)
@@ -294,7 +294,7 @@ def test_a_cut_too_short_to_read_leaves_the_clips_reading_and_says_so(tmp_path):
     m = held.measure_cycle([1.0, 0.1] * 20, start=0, length=short, fps=24.0)
     assert m["hold"] is None and "too few" in m["why"]
     d = _cut_at(tmp_path, "NE", _clip(short, 72, 2), 0, short)
-    meta = json.loads((d / "walk.strip.json").read_text())
+    meta = json.loads((d / "walk.strip.json").read_text(encoding="utf-8"))
     assert meta["cycle_drawings"]["hold"] is None and "too few" in meta["cycle_drawings"]["why"]
     row = align.held_drawings([Image.new("RGBA", (4, 4))] * short, fps=24.0, clip=meta["drawings"], cut=meta["cycle_drawings"])
     assert row["source"] == "clip" and row["hold"] == 2 and "too few" in row["span_why"]
