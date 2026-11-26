@@ -52,6 +52,7 @@ GPU_LANE = (
     "sprite_gen/cli.py",
     # what RIFE's own modules import at their top
     "sprite_gen/_deps.py",
+    "sprite_gen/util/cpus.py",
     "sprite_gen/util/console.py",
     "sprite_gen/video/frames.py",
     # what RIFE's tests read beside their own files: the suite's fixtures and pins, their recorded inputs and judgments
