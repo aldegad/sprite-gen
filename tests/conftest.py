@@ -165,10 +165,12 @@ def pytest_report_header(config: pytest.Config) -> str | None:
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Without `--full` the tests marked `slow` are deselected: a plain `pytest` is the fast bundle.
 
-    A test marked `real_rife` runs the real binary: skipped where `rife.locate()` finds none, and run
-    by `scripts/linux_lane.sh --rife-only` (`-m real_rife`). A test marked `torch_rife` runs RIFE's torch
-    backend: skipped where PyTorch, the model or the device is missing (`_torch_rife_missing`), and run by
-    the lanes with none skipped (`-m torch_rife`, docs/release.md)."""
+    With `--shard K/N` only the K-th of N shares runs (`share_of`), as each of the Linux lane's jobs does.
+
+    A test marked `real_rife` runs the real binary: skipped where `rife.locate()` finds none. A test marked
+    `torch_rife` runs RIFE's torch backend: skipped where PyTorch, the model or the device is missing
+    (`_torch_rife_missing`). The GPU lane (`scripts/cuda_lane.py`) runs both with none skipped
+    (`-m "real_rife or torch_rife"`, docs/release.md)."""
     if not config.getoption("full"):
         slow = [item for item in items if item.get_closest_marker("slow")]
         if slow:
@@ -197,8 +199,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 def _fail_unmeasured_skip(report: pytest.TestReport | pytest.CollectReport, node: pytest.Item | pytest.Collector) -> None:
-    """In the lane's RIFE-less run a skip that `--rife-only` will not run fails, by name: neither run would
-    measure it. `--rife-only` runs the tests marked real_rife or torch_rife; a skip of any other test, or of
+    """In the Linux lane's RIFE-less run a skip the GPU lane will not run fails, by name: neither lane would
+    measure it. The GPU lane runs the tests marked real_rife or torch_rife; a skip of any other test, or of
     a whole file, stands only where NOT_RIFE_SKIPS names it. Whatever skipped it: a skip mark, a fixture, the
     test body, the file at import."""
     if not report.skipped or hasattr(report, "wasxfail") or not node.config.getoption("rife_unmeasured", False):
@@ -209,8 +211,8 @@ def _fail_unmeasured_skip(report: pytest.TestReport | pytest.CollectReport, node
     path, line, reason = report.longrepr
     report.outcome = "failed"
     report.longrepr = (
-        "skipped where no RIFE is reachable, but not marked real_rife or torch_rife: `scripts/linux_lane.sh --rife-only` "
-        f"runs only the marked tests, so neither run measures it\n{path}:{line}: {reason}\n"
+        "skipped where no RIFE is reachable, but not marked real_rife or torch_rife: the GPU lane (`scripts/cuda_lane.py`) "
+        f"runs only the marked tests, so neither lane measures it\n{path}:{line}: {reason}\n"
         "A test that needs the real rife-ncnn-vulkan is marked `real_rife`; one that skips for another "
         "reason is named in NOT_RIFE_SKIPS (tests/conftest.py)."
     )

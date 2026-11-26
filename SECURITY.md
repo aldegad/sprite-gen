@@ -70,7 +70,9 @@ No CI runs on push or pull request, and this repository holds no workflow. The
 test gates and the release build run through `scripts/linux_lane.sh` in
 GitHub-hosted runner jobs the maintainer starts by hand for one commit at a time
 ([aldegad/sprite-gen-lane](https://github.com/aldegad/sprite-gen-lane): no
-secrets, no token scope). The RIFE torch backend's CUDA gates run on the
-maintainer's NVIDIA host through `scripts/cuda_lane.py`, which installs only
-hash-pinned packages that `safedeps check` passed at that very version (see
-[docs/release.md](docs/release.md)).
+secrets, no token scope). RIFE's tests (its binary on Vulkan, its torch backend
+on CUDA) run in the GPU lane, `scripts/cuda_lane.py`, which the maintainer
+starts by hand on their own NVIDIA host where a release's change reaches RIFE;
+no repository registers a self-hosted runner, so no pull request or fork can
+start it. It installs only hash-pinned packages that `safedeps check` passed at
+that very version (see [docs/release.md](docs/release.md)).

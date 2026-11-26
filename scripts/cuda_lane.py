@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The torch backend's CUDA gates, on the maintainer's NVIDIA host: the GPU run `scripts/linux_lane.sh` leaves to this
-lane (docs/release.md). Nothing runs on push or pull request. Standard library only.
+"""The GPU lane: every RIFE test on the maintainer's NVIDIA host, the rife-ncnn-vulkan binary on its Vulkan (real_rife)
+and the torch backend on CUDA (torch_rife), which `scripts/linux_lane.sh` on GPU-less runners leaves to this lane
+(docs/release.md). It runs where a change reaches them (`scripts/release_gates.py`), started by hand: nothing runs on
+push or pull request, and no runner of the repository's starts it. Standard library only.
 
 Two steps, on two machines:
 
@@ -21,22 +23,24 @@ what each check said (checks.json) and this file as HEAD holds it.
 hold a passing check of every line of its requirements.txt. Then, as the Linux lane installs a clean clone: a new
 virtual environment, every wheel of the list downloaded with its hash checked (from PyPI, or from --wheels for one PyPI
 does not hold, such as PyTorch's CUDA build for Windows, which comes from PyTorch's own index), installed from those
-files alone, the tree (`pip install -e src[dev]`, nothing more fetched), `pip check`, and the model (`sprite-gen rife
-install --backend torch --no-check`, into a directory of its own: the engine looks for no binary here, which is the
-Linux lane's to measure). On Windows a path of WINDOWS_MAX_PATH characters or more cannot be written where long paths
+files alone, the tree (`pip install -e src[dev]`, nothing more fetched), `pip check`, and RIFE (`sprite-gen rife
+install`, the binary and its models into a directory of its own, its check frame through the binary on this host's
+Vulkan). On Windows a path of WINDOWS_MAX_PATH characters or more cannot be written where long paths
 are not enabled, so `run` refuses before installing anything when the longest name a wheel writes would not fit under
 the virtual environment: the directory's path is then too long. Then:
 
   - the GPU and its driver (`nvidia-smi`), and PyTorch's CUDA (fails where PyTorch finds no GPU);
   - the install's check frame on CUDA (`sprite-gen rife install --backend torch` again, SPRITE_GEN_RIFE_DEVICE=cuda);
-  - every test marked torch_rife and not real_rife, on CUDA, none skipped. Those marked both set this machine's binary
-    beside the torch backend: the Linux lane runs them.
+  - every test marked real_rife or torch_rife (GATE_TESTS), none skipped: the binary installed here
+    (SPRITE_GEN_RIFE) and the torch backend on CUDA, those marked both setting the two side by side.
 
-Nowhere the engine looks holds a binary: no SPRITE_GEN_* from outside, an empty user data directory (LOCALAPPDATA on
-Windows, XDG_DATA_HOME elsewhere), no rife-ncnn-vulkan on PATH. TEMP, pip's cache and CUDA's cache point into the
+The engine finds only what this run installed: no SPRITE_GEN_* from outside but the run's own (SPRITE_GEN_RIFE, the
+model, the device), an empty user data directory (LOCALAPPDATA on Windows, XDG_DATA_HOME elsewhere), no rife-ncnn-vulkan
+on PATH. TEMP, pip's cache and CUDA's cache point into the
 directory, so the run writes nowhere else and deleting the directory removes everything it wrote. The run prints the
 commit, the GPU, its driver, `pip freeze` and what each step said, keeps it in run.json and logs/, and exits 0 only
-where every step passed. A commit has passed the CUDA lane where one run of it at that commit exited 0.
+where every step passed; run.json says which tests it ran (`gates`). A commit has passed the GPU lane where one run of
+it at that commit exited 0; `scripts/release_publish.py --gpu-lane <run.json>` writes it into the release page.
 """
 from __future__ import annotations
 
@@ -67,7 +71,7 @@ CHECK_TIMEOUT = 900  # seconds one `safedeps check` may take
 PACK_FILES = ("source.tar.gz", "SOURCE_SHA", "requirements.txt", "checks.json", "cuda_lane.py")
 PIN = re.compile(r"([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)==([0-9A-Za-z.+!_-]+)((?:\s+--hash=sha256:[0-9a-f]{64})+)")
 HOST_SPEC = re.compile(r"([a-z0-9]+):([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)@([0-9A-Za-z.+!_-]+)")
-GATE_TESTS = "torch_rife and not real_rife"
+GATE_TESTS = "real_rife or torch_rife"
 
 
 def _fail(why: str) -> NoReturn:
@@ -262,14 +266,14 @@ def run(where: Path, wheels: Path | None, rife_zip: Path | None) -> int:
                CUDA_CACHE_PATH=str(where / "cache" / "cuda"), PIP_DISABLE_PIP_VERSION_CHECK="1", PIP_NO_INPUT="1",
                PIP_CONFIG_FILE=os.devnull, PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8")
     env[data_key] = tempfile.mkdtemp(prefix="data-install-", dir=tmp)
-    rec: dict = {"commit": sha, "python": sys.version, "steps": [], "passed": False}
+    rec: dict = {"commit": sha, "python": sys.version, "gates": GATE_TESTS, "steps": [], "passed": False}
 
     def done(why: str | None = None) -> int:
         if why:
             rec["why"] = why
         (where / "run.json").write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
         if rec["passed"]:
-            print(f"cuda_lane: the torch backend's CUDA gates passed at {sha}", flush=True)
+            print(f"cuda_lane: the GPU lane ({GATE_TESTS}) passed at {sha}", flush=True)
             return 0
         print(f"cuda_lane: {why} at {sha}", file=sys.stderr, flush=True)
         return 1
@@ -321,24 +325,25 @@ def run(where: Path, wheels: Path | None, rife_zip: Path | None) -> int:
     freeze = step("pip freeze", [*pip, "freeze", "--exclude-editable"], "pip-freeze.log")
     rec["pip_freeze"] = freeze.stdout
     model_args = ["--zip", str(rife_zip.resolve())] if rife_zip else []
-    model = step("the model (sprite-gen rife install --backend torch --no-check)",
-                 [str(cli), "rife", "install", "--backend", "torch", "--dir", str(rife_dir), "--no-check", *model_args],
-                 "model.log", show=False)
+    model = step("RIFE (sprite-gen rife install: the binary and its models, its check frame on this host's Vulkan)",
+                 [str(cli), "rife", "install", "--dir", str(rife_dir), *model_args], "rife-install.log", show=False)
     if model.returncode:
-        return done("the model could not be installed")
+        return done("RIFE could not be installed, or its check frame failed on this host's Vulkan")
     installed = json.loads(model.stdout)
+    rec["binary"] = installed["binary"]
     rec["model"] = str(Path(installed["dir"]) / installed["model"])
 
-    # Nowhere the engine looks for the binary holds one: an empty data directory, nothing on PATH, no SPRITE_GEN_RIFE.
+    # The engine finds what this run installed and nothing else: SPRITE_GEN_RIFE and the model named, an empty data
+    # directory, no binary on PATH.
     data = tempfile.mkdtemp(prefix="data-", dir=tmp)
-    env.update(PATH=os.pathsep.join([str(bindir), env.get("PATH", "")]), SPRITE_GEN_RIFE_MODEL=rec["model"],
-               SPRITE_GEN_RIFE_DEVICE="cuda")
+    env.update(PATH=os.pathsep.join([str(bindir), env.get("PATH", "")]), SPRITE_GEN_RIFE=rec["binary"],
+               SPRITE_GEN_RIFE_MODEL=rec["model"], SPRITE_GEN_RIFE_DEVICE="cuda")
     env[data_key] = data
-    rec["env"] = {k: env[k] for k in (data_key, "SPRITE_GEN_RIFE_MODEL", "SPRITE_GEN_RIFE_DEVICE", "TEMP",
-                                      "PIP_CACHE_DIR", "CUDA_CACHE_PATH")}
+    rec["env"] = {k: env[k] for k in (data_key, "SPRITE_GEN_RIFE", "SPRITE_GEN_RIFE_MODEL", "SPRITE_GEN_RIFE_DEVICE",
+                                      "TEMP", "PIP_CACHE_DIR", "CUDA_CACHE_PATH")}
     on_path = shutil.which("rife-ncnn-vulkan", path=env["PATH"])
     if on_path:
-        return done(f"rife-ncnn-vulkan is on PATH ({on_path}); the torch gates run where no binary is")
+        return done(f"rife-ncnn-vulkan is on PATH ({on_path}); the lane measures the binary it installed")
     try:
         smi = subprocess.run(["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"],
                              capture_output=True, text=True)
@@ -359,15 +364,15 @@ def run(where: Path, wheels: Path | None, rife_zip: Path | None) -> int:
         return done("the install's check frame failed")
     # --full: every test, those marked slow too (a plain pytest is the fast bundle). No test marked: pytest exits 5
     # ("no tests ran"), and the lane with it.
-    marked = step(f"RIFE torch tests on CUDA (every test marked {GATE_TESTS}, none skipped)",
+    marked = step(f"RIFE tests (every test marked {GATE_TESTS}, none skipped: the binary on this host's Vulkan, torch on CUDA)",
                   [str(py), "-m", "pytest", "-q", "-rs", "-p", "no:cacheprovider", "--full", "--basetemp",
                    tempfile.mkdtemp(prefix="pytest-", dir=tmp), "-m", GATE_TESTS], "pytest.log", cwd=src)
     rec["pytest_summary"] = ([line for line in marked.stdout.splitlines() if line.strip()] or [""])[-1]
     rec["skipped"] = [line for line in marked.stdout.splitlines() if line.startswith("SKIPPED")]
     if marked.returncode != 0:
-        return done("a torch_rife test failed")
+        return done("a RIFE test failed")
     if rec["skipped"]:
-        return done("a torch_rife test skipped; this run is meant to measure them")
+        return done("a RIFE test skipped; this run is meant to measure them")
     rec["data_dir_after"] = sorted(p.name for p in Path(data).iterdir())
     rec["passed"] = True
     return done()
@@ -383,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--host-spec", action="append", default=[], metavar="ECOSYSTEM:NAME@VERSION",
                    help="what the host installs for the lane apart from the list (its Python, say); checked the same way")
     p.add_argument("--safedeps", default="safedeps", help="the safedeps command (default: safedeps on PATH)")
-    r = sub.add_parser("run", help="on the NVIDIA host: build the pack's environment and run the gates")
+    r = sub.add_parser("run", help="on the NVIDIA host: build the pack's environment and run every RIFE test")
     r.add_argument("--pack", type=Path, required=True, help="the directory `pack` wrote, copied to the host")
     r.add_argument("--wheels", type=Path, help="a directory of the list's wheels PyPI does not hold (PyTorch's CUDA "
                    "build for Windows, from PyTorch's index)")

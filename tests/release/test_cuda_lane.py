@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The CUDA lane (`scripts/cuda_lane.py`, docs/release.md) runs the torch backend's tests on CUDA on the maintainer's
-NVIDIA host, beside the Linux lane's run of them on the CPU (`scripts/linux_lane.sh`). A commit passes on the two
-together only where they install one PyTorch on one Python: its CUDA build there, its CPU build here.
+"""The GPU lane (`scripts/cuda_lane.py`, docs/release.md) runs every RIFE test on the maintainer's NVIDIA host: the
+binary on its Vulkan, the torch backend on CUDA, which the Linux lane (`scripts/linux_lane.sh`) on GPU-less runners
+leaves to it. It installs the Python the Linux lane does and the PyTorch the torch extra was measured on.
 
 The host installs nothing safedeps has not passed at that very version: `pack` stops at the first check that is not a
 pass, a check that did not finish among them, before it writes anything, and `run` refuses a pack that holds no passing
