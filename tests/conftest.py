@@ -124,10 +124,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
-def share_of(nodeid: str, shares: int) -> int:
-    """The share (0 to shares - 1) a test falls in: from its id alone, so every process that collects the suite,
-    each xdist worker and each job of the lane, places it alike, and the shares together hold every test once."""
-    return int.from_bytes(hashlib.sha256(nodeid.encode("utf-8")).digest()[:8], "big") % shares
+def share_of(key: str, shares: int) -> int:
+    """The share (0 to shares - 1) a test falls in, from its key (`share_key`) alone: every process that collects the
+    suite, each xdist worker and each job of the lane, places it alike, and the shares together hold every test once."""
+    return int.from_bytes(hashlib.sha256(key.encode("utf-8")).digest()[:8], "big") % shares
+
+
+def share_key(item: pytest.Item) -> str:
+    """What places a test in a share: its id, or the file of a module marked `one_share`, which then runs whole in one
+    share, so what it makes once for its tests (a module fixture) is made once a run and not once a share."""
+    return item.nodeid.partition("::")[0] if item.get_closest_marker("one_share") else item.nodeid
 
 
 def _shard(given: str) -> tuple[int, int]:
@@ -165,7 +171,7 @@ def pytest_report_header(config: pytest.Config) -> str | None:
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Without `--full` the tests marked `slow` are deselected: a plain `pytest` is the fast bundle.
 
-    With `--shard K/N` only the K-th of N shares runs (`share_of`), as each of the Linux lane's jobs does.
+    With `--shard K/N` only the K-th of N shares runs (`share_of`, `share_key`), as each of the Linux lane's jobs does.
 
     A test marked `real_rife` runs the real binary: skipped where `rife.locate()` finds none. A test marked
     `torch_rife` runs RIFE's torch backend: skipped where PyTorch, the model or the device is missing
@@ -178,10 +184,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             items[:] = [item for item in items if not item.get_closest_marker("slow")]
     if config.getoption("shard"):
         k, n = _shard(config.getoption("shard"))
-        other = [item for item in items if share_of(item.nodeid, n) != k - 1]
+        other = [item for item in items if share_of(share_key(item), n) != k - 1]
         if other:
             config.hook.pytest_deselected(items=other)
-            items[:] = [item for item in items if share_of(item.nodeid, n) == k - 1]
+            items[:] = [item for item in items if share_of(share_key(item), n) == k - 1]
     marked = [item for item in items if item.get_closest_marker("real_rife")]
     torched = [item for item in items if item.get_closest_marker("torch_rife")]
     if marked:

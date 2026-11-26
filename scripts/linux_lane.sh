@@ -146,9 +146,10 @@ test -f "$smoke/run/manifest.json"
 step "tests${shard:+ (share $shard)}"
 # Every test (--full): a plain pytest is the fast bundle, the tests marked slow deselected. Without RIFE, a
 # skip of a test not marked real_rife or torch_rife fails unless tests/conftest.py names it.
-# -n: the share over the host's processors; loadgroup keeps a module marked xdist_group on one worker, so what it makes once
-# for the module (a pack, a cut) is made once and not once a worker.
-.venv/bin/python -m pytest -q --full --rife-unmeasured -n "$WORKERS" --dist loadgroup ${shard:+--shard "$shard"}
+# -n: the share over the host's processors, handed out by file (loadfile), so what a module makes once for its tests (a
+# pack, a cut) is made once a share and not once a worker. (xdist_group and --dist loadgroup are not used: pytest-xdist
+# 3.8.0 marks the group on the test's id, which pytest 9 no longer lets a plugin change, so they group nothing.)
+.venv/bin/python -m pytest -q --full --rife-unmeasured -n "$WORKERS" --dist loadfile ${shard:+--shard "$shard"}
 
 echo "linux_lane: every gate${shard:+ of share $shard} passed at $sha"
 echo "linux_lane: RIFE is not this lane's: the GPU lane (scripts/cuda_lane.py) runs it where scripts/release_gates.py says a change reaches it"

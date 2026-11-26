@@ -37,8 +37,9 @@ def test_unmarked():
 '''
 
 
-def _collected(tmp_path: Path, *args: str) -> tuple[list[str], str]:
+def _collected(tmp_path: Path, *args: str, empty: bool = False) -> tuple[list[str], str]:
     # This repository's configuration, and tests/conftest.py as the one conftest (-p), over a file outside the suite.
+    # `empty`: a share may hold no test, which pytest ends with exit 5.
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only", "-c", str(ROOT / "pyproject.toml"), "--rootdir", str(tmp_path),
          "--noconftest", "-p", "conftest", "-p", "no:cacheprovider", "-p", "no:xdist", *args, str(tmp_path / "test_probe.py")],
@@ -46,7 +47,7 @@ def _collected(tmp_path: Path, *args: str) -> tuple[list[str], str]:
         capture_output=True,
         encoding="utf-8",
     )
-    assert proc.returncode == 0, f"{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}"
+    assert proc.returncode in ((0, 5) if empty else (0,)), f"{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}"
     return re.findall(r"<Function (\S+)>", proc.stdout), proc.stdout
 
 
@@ -73,6 +74,18 @@ def test_the_shares_of_a_run_hold_every_test_once(tmp_path):
     shares = [_collected(tmp_path, "--full", "--shard", f"{k}/3")[0] for k in (1, 2, 3)]
     assert sorted(sum(shares, [])) == sorted(every)
     assert all(shares), f"a share holds no test: {shares}"
+
+
+@pytest.mark.slow  # four runs of pytest
+def test_a_module_marked_one_share_runs_whole_in_one_share(tmp_path):
+    """A module whose tests read what it makes once (`one_share`) is placed by its file, not test by test: one share
+    holds all of it, so the lane makes that once a run."""
+    (tmp_path / "test_probe.py").write_text("import pytest\n\npytestmark = pytest.mark.one_share\n" + "".join(
+        f"\n\n@pytest.mark.parametrize('case', range(7))\ndef test_many_{i}(case):\n    pass\n" for i in range(5)))
+    every, said = _collected(tmp_path, "--full")
+    assert len(every) == 35, said
+    shares = [_collected(tmp_path, "--full", "--shard", f"{k}/3", empty=True)[0] for k in (1, 2, 3)]
+    assert sorted(len(s) for s in shares) == [0, 0, 35], shares
 
 
 def test_a_share_is_named_k_of_n(tmp_path):
