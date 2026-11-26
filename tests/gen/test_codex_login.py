@@ -77,6 +77,7 @@ def _generate(monkeypatch, tmp_path, login):
         return SimpleNamespace(returncode=0, stdout='{"type":"thread.started","thread_id":"aaaa-bbbb"}\n', stderr="")
 
     monkeypatch.setattr(codex_provider.subprocess, "run", run)
+    (tmp_path / "rollout.jsonl").write_text("", encoding="utf-8")  # the passed prompt is read from it
     monkeypatch.setattr(codex_provider, "_resolve_rollout", lambda *a, **k: tmp_path / "rollout.jsonl")
     monkeypatch.setattr(codex_provider, "_collect_inline_results", lambda _p: [codex_provider.InlineResult(_png())])
     result = codex_provider.CodexProvider(keep_session=True).generate(GenRequest(prompt="a slime", raw=tmp_path / "raw.png"),

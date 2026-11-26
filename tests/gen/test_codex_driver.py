@@ -75,6 +75,8 @@ def _save(**general: str) -> None:
 
 
 def test_the_built_in_light_driver_is_named_on_every_call_over_the_login_config(tmp_path, codex_runs):
+    # medium, not low: at low the driver passed image_gen the prompt without its last line in 2 of 6 calls
+    assert (codex_provider.DRIVER_MODEL, codex_provider.DRIVER_EFFORT) == ("gpt-6.1-terra", "medium")
     ref = tmp_path / "ref.png"
     Image.new("RGB", (4, 4)).save(ref)
     run = _generate(tmp_path, refs=[ref])

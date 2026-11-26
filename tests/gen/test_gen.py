@@ -285,6 +285,7 @@ def test_codex_prompt_reaches_the_child_process(tmp_path: Path, monkeypatch) -> 
 
     monkeypatch.setattr(codex_provider.subprocess, "run", _fake_run)
     monkeypatch.setattr(codex_provider, "codex_login", lambda: codex_provider.CodexLogin(codex_provider.AUTH_SOURCE_LOGIN))
+    (tmp_path / "x.jsonl").write_text("", encoding="utf-8")  # the passed prompt is read from it
     monkeypatch.setattr(
         codex_provider,
         "_resolve_rollout",
@@ -880,6 +881,7 @@ def test_codex_generate_reports_transparent_background_claim(tmp_path: Path, mon
 
     monkeypatch.setattr(codex_provider.subprocess, "run", _fake_run)
     monkeypatch.setattr(codex_provider, "codex_login", lambda: codex_provider.CodexLogin(codex_provider.AUTH_SOURCE_LOGIN))
+    (tmp_path / "x.jsonl").write_text("", encoding="utf-8")  # the passed prompt is read from it
     monkeypatch.setattr(
         codex_provider, "_resolve_rollout", lambda sid, root, *, preexisting: tmp_path / "x.jsonl"
     )

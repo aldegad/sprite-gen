@@ -30,6 +30,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,13 +57,14 @@ BINARY = "codex"
 LOGIN_HINT = "`codex login` signs your ChatGPT subscription in"
 
 # The driver: the model the `codex exec` session of a generation runs on (docs/gen.md, "The codex driver model").
-# image_gen draws the picture; the session only calls it once, so it runs on a light model at low reasoning effort,
-# named on every call over the login's own config.toml. Measured on three requests (plain, --ref, --transparent):
-# gpt-6.1-terra at low called image_gen once in each and took as long as a heavier model. `--model` names another
-# model for one call; `sprite-gen defaults save --codex-model / --codex-effort` saves one. The order: `--model`,
-# the saved one, these. A driver that cannot run fails naming it: nothing falls back to codex's own default.
+# image_gen draws the picture; the session only calls it once, so it runs on a light model, named on every call over
+# the login's own config.toml. Measured on three requests (plain, --ref, --transparent): gpt-6.1-terra at low called
+# image_gen once in each and took as long as a heavier model. At low it also passed image_gen the prompt without its
+# last line in 2 of 6 calls, so it runs at medium. `--model` names another model for one call; `sprite-gen defaults
+# save --codex-model / --codex-effort` saves one. The order: `--model`, the saved one, these. A driver that cannot
+# run fails naming it: nothing falls back to codex's own default.
 DRIVER_MODEL = "gpt-6.1-terra"
-DRIVER_EFFORT = "low"
+DRIVER_EFFORT = "medium"
 # The efforts the saved setting takes, the levels codex lists for its models (`low` is on every one). The value is
 # written into `-c model_reasoning_effort="…"`, so only these are taken.
 DRIVER_EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -236,6 +238,24 @@ _NATIVE_ALPHA_INSTRUCTION = (
     "background 를 요청하고 생성된 알파를 그대로 보존해라. 체커보드 무늬·흰색·단색 배경을 "
     "그림으로 그려 넣는 것은 금지다."
 )
+# The caller's prompt sits between these two markers, and the driver is told to pass the text between them to
+# image_gen as it is, its last line included: a driver left to it can drop the last line or write a line again.
+_PROMPT_BEGIN = "<<<프롬프트 시작>>>"
+_PROMPT_END = "<<<프롬프트 끝>>>"
+
+# What the driver passed to image_gen, set against the prompt asked for (`extra.prompt_passed`; docs/gen.md, "The
+# codex driver model"). codex 0.169.1 runs the session's tools through its `exec` tool: the driver writes JavaScript
+# that calls `tools.image_gen__imagegen({prompt: "…", …})`, and the rollout keeps that code as a `custom_tool_call`
+# named `exec` (`input`). The prompt passed is the `prompt` of that call's object, read when it is one string
+# literal; other code (a variable, a joined string, a template with `${…}`, a comment) is not guessed at and the
+# verdict is unknown. It is read from the record, never asked of the model.
+PASSED_SAME, PASSED_DIFFERS, PASSED_UNKNOWN = "same", "differs", "unknown"
+_EXEC_TOOL = "exec"
+_IMAGE_GEN_CALL_RE = re.compile(r"\btools\s*\.\s*image_gen__\w+\s*\(\s*\{")
+_JS_IDENT_RE = re.compile(r"[A-Za-z_$][\w$]*")
+_JS_HEX_RE = re.compile(r"[0-9A-Fa-f]+")
+_JS_QUOTES = ("\"", "'", "`")
+_JS_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "v": "\v"}
 
 
 @dataclass(frozen=True)
@@ -401,6 +421,161 @@ def _collect_inline_results(rollout: Path) -> list[InlineResult]:
     return results
 
 
+@dataclass(frozen=True)
+class PassedPrompt:
+    """What the driver passed to image_gen set against the prompt asked for: `verdict` (`PASSED_*`), both lengths in
+    characters with the surrounding whitespace aside, and why it is unknown (`reason`)."""
+
+    verdict: str
+    asked_chars: int
+    passed_chars: int | None = None
+    reason: str | None = None
+
+    def report(self) -> dict:
+        return {"verdict": self.verdict, "asked_chars": self.asked_chars, "passed_chars": self.passed_chars,
+                **({"reason": self.reason} if self.reason else {})}
+
+
+def passed_prompt(asked: str, passed: list[str | None]) -> PassedPrompt:
+    """The verdict on the last image_gen call of `passed` (`_passed_prompts`), whose picture is the one kept: the
+    same text as `asked` (surrounding whitespace aside), other text, or unknown when the record does not hold it."""
+    asked = asked.strip()
+    if not passed:
+        return PassedPrompt(PASSED_UNKNOWN, len(asked), reason="no image_gen call in the session record")
+    if passed[-1] is None:
+        return PassedPrompt(PASSED_UNKNOWN, len(asked),
+                            reason="the image_gen call's prompt is not one string literal in the session record")
+    last = passed[-1].strip()
+    return PassedPrompt(PASSED_SAME if last == asked else PASSED_DIFFERS, len(asked), len(last))
+
+
+def _passed_prompts(rollout: Path) -> list[str | None]:
+    """The `prompt` of each image_gen call the driver's `exec` code makes in `rollout`, in order; None where it is
+    not one string literal."""
+    passed: list[str | None] = []
+    with rollout.open(encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            payload = record.get("payload") if isinstance(record, dict) else None
+            if (not isinstance(payload, dict) or payload.get("type") != "custom_tool_call"
+                    or payload.get("name") != _EXEC_TOOL or not isinstance(payload.get("input"), str)):
+                continue
+            code = payload["input"]
+            passed += [_object_prompt(code, call.end() - 1) for call in _IMAGE_GEN_CALL_RE.finditer(code)]
+    return passed
+
+
+def _skip_space(code: str, i: int) -> int:
+    while i < len(code) and code[i].isspace():
+        i += 1
+    return i
+
+
+def _object_prompt(code: str, at: int) -> str | None:
+    """The `prompt` of the JavaScript object literal opening at `code[at]` ("{") when its value is one string literal,
+    else None: no such key, a value that is not a literal alone, a comment, or code this does not read."""
+    depth, i, key_next = 1, at + 1, True
+    while i < len(code):
+        ch = code[i]
+        if ch.isspace():
+            i += 1
+        elif depth == 1 and key_next:
+            if ch in _JS_QUOTES:
+                key, i = _js_string(code, i)
+            else:
+                name = _JS_IDENT_RE.match(code, i)
+                key, i = (name.group(), name.end()) if name else (None, i)
+            i = _skip_space(code, i)
+            if key is None or code[i:i + 1] != ":":
+                return None
+            i = _skip_space(code, i + 1)
+            if key == "prompt":
+                if i >= len(code) or code[i] not in _JS_QUOTES:
+                    return None
+                value, i = _js_string(code, i)
+                i = _skip_space(code, i)
+                return value if i < len(code) and code[i] in ",}" else None
+            key_next = False
+        elif ch in _JS_QUOTES:
+            skipped, i = _js_string(code, i)
+            if skipped is None:
+                return None
+        elif ch == "/":
+            return None  # a comment or a regular expression
+        else:
+            if ch in "{[(":
+                depth += 1
+            elif ch in "}])":
+                depth -= 1
+                if depth == 0:
+                    return None  # the object ended with no prompt
+            elif ch == "," and depth == 1:
+                key_next = True
+            i += 1
+    return None
+
+
+def _js_string(code: str, at: int) -> tuple[str | None, int]:
+    """The value of the JavaScript string literal opening at `code[at]` (a quote or a backtick) and the index after
+    it; None for a template with `${…}`, an escape this does not read, a lone surrogate, or no closing quote."""
+    quote, i, out = code[at], at + 1, []
+    while i < len(code):
+        ch = code[i]
+        if ch == quote:
+            try:
+                return "".join(out).encode("utf-16", "surrogatepass").decode("utf-16"), i + 1
+            except UnicodeDecodeError:
+                return None, i + 1
+        if ch == "\\":
+            value, i = _js_escape(code, i + 1)
+            if value is None:
+                return None, i
+            out.append(value)
+        elif quote == "`" and code.startswith("${", i):
+            return None, i
+        elif quote == "`" and ch == "\r":  # a template reads CR LF and CR as LF
+            out.append("\n")
+            i += 2 if code.startswith("\r\n", i) else 1
+        elif quote != "`" and ch in "\r\n":
+            return None, i  # a line break inside a quoted string is not JavaScript
+        else:
+            out.append(ch)
+            i += 1
+    return None, i
+
+
+def _js_escape(code: str, i: int) -> tuple[str | None, int]:
+    """What the escape after a backslash (`code[i]` on) stands for and the index after it; None where it is not read
+    (a legacy octal escape, a malformed one, nothing after the backslash)."""
+    ch = code[i:i + 1]
+    if ch in _JS_ESCAPES:
+        return _JS_ESCAPES[ch], i + 1
+    if ch == "0" and not code[i + 1:i + 2].isdigit():
+        return "\0", i + 1
+    if ch == "x":
+        digits = code[i + 1:i + 3]
+        return (chr(int(digits, 16)), i + 3) if len(digits) == 2 and _JS_HEX_RE.fullmatch(digits) else (None, i)
+    if ch == "u":
+        if code.startswith("{", i + 1):
+            end = code.find("}", i + 2)
+            digits = code[i + 2:end] if end != -1 else ""
+            if 1 <= len(digits) <= 6 and _JS_HEX_RE.fullmatch(digits) and int(digits, 16) <= 0x10FFFF:
+                return chr(int(digits, 16)), end + 1
+            return None, i
+        digits = code[i + 1:i + 5]
+        return (chr(int(digits, 16)), i + 5) if len(digits) == 4 and _JS_HEX_RE.fullmatch(digits) else (None, i)
+    if ch == "\r":  # a backslash before a line break continues the line
+        return "", i + (2 if code.startswith("\r\n", i) else 1)
+    if ch in ("\n", " ", " "):
+        return "", i + 1
+    if not ch or ch in "0123456789":
+        return None, i
+    return ch, i + 1
+
+
 def _decode_png(b64: str, dest: Path) -> None:
     raw = base64.b64decode(b64)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -411,20 +586,26 @@ def _decode_png(b64: str, dest: Path) -> None:
 def _build_prompt(user_prompt: str, *, native_alpha: bool = False) -> str:
     """Wrap the caller's prompt in the transport-level skill trigger.
 
-    The sprite-request prompt is the caller's SSoT and is passed through verbatim;
-    this adapter is the one place that owns the codex invocation contract. With
-    `native_alpha` the transport also carries the transparent-background request
+    The sprite-request prompt is the caller's SSoT and is passed through verbatim,
+    between `_PROMPT_BEGIN` and `_PROMPT_END`, and the driver is told to hand
+    image_gen the text between them as it is, its last line included; whether it
+    did is read from the session record (`passed_prompt`). This adapter is the one
+    place that owns the codex invocation contract. With `native_alpha` the
+    transport also carries the transparent-background request
     (`_NATIVE_ALPHA_INSTRUCTION`) — that is how image_gen is told to return alpha.
     """
     alpha_line = f"{_NATIVE_ALPHA_INSTRUCTION}\n" if native_alpha else ""
     return (
         f"{_SKILL_TRIGGER} 스킬로 built-in image_gen 도구를 정확히 1번 호출해서 "
-        "다음 프롬프트의 이미지 1장만 생성해줘.\n"
+        "아래 프롬프트의 이미지 1장만 생성해줘.\n"
+        f"image_gen 의 prompt 에는 아래 {_PROMPT_BEGIN} 와 {_PROMPT_END} 표시 사이의 글을 "
+        "한 글자도 더하거나 빼지 말고 그대로 넘겨라(마지막 줄 포함). 고쳐 쓰기·줄이기·덧붙이기 전부 금지.\n"
         "미리보기 전용이라 생성된 파일은 기본 경로에 그대로 두면 된다.\n"
         "파일 저장·이동·복사·셸 명령·코드 작성·경로 보고 전부 금지. 생성만 하고 끝.\n"
         f"{alpha_line}\n"
-        "프롬프트:\n"
+        f"{_PROMPT_BEGIN}\n"
         f"{user_prompt}\n"
+        f"{_PROMPT_END}\n"
     )
 
 
@@ -578,6 +759,11 @@ class CodexProvider:
             raise SystemExit(_no_image_records_message(rollout, codex_home, driver))
         final = results[-1]
         _decode_png(final.result, request.raw)
+        passed = passed_prompt(request.prompt, _passed_prompts(rollout))
+        if passed.verdict == PASSED_DIFFERS:
+            # The image is kept: it is drawn from what was passed, and the report says so (`extra.prompt_passed`).
+            print(f"[gen] codex: the driver passed image_gen other text than the prompt ({passed.asked_chars} "
+                  f"characters asked, {passed.passed_chars} passed); the image is kept", file=sys.stderr, flush=True)
 
         if not self.keep_session:
             try:
@@ -594,6 +780,7 @@ class CodexProvider:
                 "auth_source": login.source,
                 "driver": driver.report(),
                 "inline_results": len(results),
+                "prompt_passed": passed.report(),
                 "rollout_cleaned": not self.keep_session,
                 # codex's own claim about the output; the orchestrator measures
                 # the real alpha and publishes that, not this flag.
