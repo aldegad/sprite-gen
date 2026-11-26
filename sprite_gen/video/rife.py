@@ -710,7 +710,16 @@ def passes(a: Image.Image, b: Image.Image, t: float, *, binary: Path, model: Pat
 
 
 def _mask(mask: np.ndarray, size: int, op: type) -> np.ndarray:
-    return np.asarray(Image.fromarray(np.uint8(mask) * 255).filter(op(size))) > 0
+    """A mask under PIL's `op` (ImageFilter.MinFilter or MaxFilter) `size` pixels wide, as PIL filters it — the edge pixels
+    repeated outward — taken one axis at a time (`_square_min`, `_square_max`): the same pixels, where PIL ranks every
+    square of them."""
+    if size % 2 == 0:
+        raise ValueError(f"bad filter size {size}")  # as PIL refuses one
+    if op is ImageFilter.MinFilter:
+        return _square_min(mask, size // 2, mode="edge")
+    if op is ImageFilter.MaxFilter:
+        return _square_max(mask, size // 2, mode="edge")
+    raise ValueError(f"_mask: {op!r} is not ImageFilter.MinFilter or MaxFilter")
 
 
 def _square_min(a: np.ndarray, r: int, **pad) -> np.ndarray:
@@ -719,6 +728,14 @@ def _square_min(a: np.ndarray, r: int, **pad) -> np.ndarray:
     out = np.pad(a, r, **pad)
     for axis in (0, 1):
         out = np.lib.stride_tricks.sliding_window_view(out, 2 * r + 1, axis=axis).min(axis=-1)
+    return out
+
+
+def _square_max(a: np.ndarray, r: int, **pad) -> np.ndarray:
+    """Per pixel, the maximum over the square 2r+1 wide around it, as `_square_min` takes the minimum."""
+    out = np.pad(a, r, **pad)
+    for axis in (0, 1):
+        out = np.lib.stride_tricks.sliding_window_view(out, 2 * r + 1, axis=axis).max(axis=-1)
     return out
 
 
@@ -1170,9 +1187,9 @@ def _local_range(x: np.ndarray) -> np.ndarray:
     """Per pixel, the largest over the channels of max - min within CROSSFADE_RANGE pixels."""
     out = np.zeros(x.shape[:2], dtype=np.float32)
     for c in range(x.shape[2]):
-        channel = Image.fromarray(np.uint8(np.clip(x[..., c], 0, 1) * 255 + 0.5), "L")
-        hi = np.asarray(channel.filter(ImageFilter.MaxFilter(CROSSFADE_RANGE)), dtype=np.float32)
-        lo = np.asarray(channel.filter(ImageFilter.MinFilter(CROSSFADE_RANGE)), dtype=np.float32)
+        channel = np.uint8(np.clip(x[..., c], 0, 1) * 255 + 0.5)  # read as PIL's MaxFilter and MinFilter read it
+        hi = _square_max(channel, CROSSFADE_RANGE // 2, mode="edge").astype(np.float32)
+        lo = _square_min(channel, CROSSFADE_RANGE // 2, mode="edge").astype(np.float32)
         out = np.maximum(out, (hi - lo) / 255.0)
     return out
 
