@@ -19,16 +19,17 @@ push 나 PR 마다 도는 CI 는 없고, 이 레포에는 워크플로가 없다
 
 페이지를 내는 기계는 아무것도 빌드하지 않고 레인이 만든 것을 붙인다.
 
-## 리눅스 레인 — 몫 넷을 나란히
+## 리눅스 레인 — 몫 여섯을 나란히
 
-워크플로의 한 실행은 `suite` 잡 넷이다. 잡마다 `scripts/linux_lane.sh --shard K/4` 로 시험의 한 몫을 돈다:
-`tests/conftest.py` 가 시험마다 그 id 의 sha256 으로 몫 하나에 넣으므로, 네 몫을 합치면 모든 시험을 한 번씩
+워크플로의 한 실행은 `suite` 잡 여섯이다. 잡마다 `scripts/linux_lane.sh --shard K/6` 로 시험의 한 몫을 돈다:
+`tests/conftest.py` 가 시험마다 그 id 의 sha256 으로 몫 하나에 넣으므로, 여섯 몫을 합치면 모든 시험을 한 번씩
 돈다(`tests/release/test_fast_bundle.py` 가 본다). 잡 안에서는 그 몫을 러너의 프로세서마다 나눠 돈다(pytest-xdist,
 `pytest -n auto --dist loadfile`). 파일째 한 일꾼에 주므로, 모듈이 한 번 만들어 여러 시험이 읽는 것(모듈
 픽스처)은 몫마다 한 번 만든다. 그것이 몇 분짜리면(얼굴 팩) 그 모듈에 `one_share` 표시를 달아 모듈째 한 몫에 둔다:
 그러면 한 실행에 한 번 만든다. 일꾼마다 따로 만들면 일꾼 수만큼, 그것도 저마다 모든 프로세서로 만든다(네 일꾼이
-한꺼번에 만든 몫에서는 저마다 5분을 넘겼다). 같은 실행의 네 `suite` 잡이 모두 초록이면(뒤따르는 `verdict` 잡도 초록이다) 그 커밋은 리눅스
-레인을 통과한 것이다. `-f artifact=true` 로 돌리면 네 몫이 모두 통과한 뒤 `package` 잡이 그 커밋을 패키징한다(아래
+한꺼번에 만든 몫에서는 저마다 5분을 넘겼다). 같은 실행의 여섯 `suite` 잡이 모두 초록이면(뒤따르는 `verdict` 잡도 초록이다) 그 커밋은 리눅스
+레인을 통과한 것이다. 몫이 넷일 때는 얼굴 팩을 맡은 몫이 느린 러너에 걸리면 벽시계가 10분에 닿았다(9분 56초). 그래서 여섯으로
+나눈다. `-f artifact=true` 로 돌리면 여섯 몫이 모두 통과한 뒤 `package` 잡이 그 커밋을 패키징한다(아래
 "한 묶음" 4).
 
 레인은 RIFE 가 닿는 곳이 하나도 없는 상태로 돈다: `SPRITE_GEN_RIFE` 가 설정돼 있거나 PATH 에 rife-ncnn-vulkan 이
@@ -155,7 +156,7 @@ PyTorch 가 `pyproject.toml` 이 적은 하한인지도 `tests/release/test_cuda
    바꾸고, `pyproject.toml` 의 `version` 과 `SKILL.md` 의 `version:` 을 그 버전으로 맞춘다
    (둘의 일치는 `tests/packaging/test_version_ssot.py` 가 강제한다).
 2. **PR 로 `main` 머지** — `main` 은 보호 브랜치라 직접 push 가 거부된다. PR 을 최신 `main` 위에 올리고(그래야
-   머지 커밋의 트리가 PR 머리의 것과 같다), PR 머리의 SHA 로 리눅스 레인 워크플로를 한 번(`suite` 잡 넷)
+   머지 커밋의 트리가 PR 머리의 것과 같다), PR 머리의 SHA 로 리눅스 레인 워크플로를 한 번(`suite` 잡 여섯)
    `-f artifact=true` 와 함께 돌린다. 이 실행의 패키지가 태그의 패키지가 된다(아래 4).
 
    ```bash
@@ -171,7 +172,7 @@ PyTorch 가 `pyproject.toml` 이 적은 하한인지도 `tests/release/test_cuda
    git tag vX.Y.Z && git push origin vX.Y.Z
    ```
 
-4. **패키지를 받는다** — 2 의 실행에서. `package` 잡은 같은 실행의 네 몫이 모두 통과한 뒤에만 돌고,
+4. **패키지를 받는다** — 2 의 실행에서. `package` 잡은 같은 실행의 여섯 몫이 모두 통과한 뒤에만 돌고,
    `scripts/linux_lane.sh --package` 가 손대지 않은 두 번째 클론에서 wheel·sdist 를 빌드해 `SHA256SUMS`·
    `SOURCE_SHA`(잰 커밋) 와 함께 네 파일을 쓴다. 워크플로는 그 넷만 `package-<SHA>` 산출물로 14일 동안 남긴다.
 
