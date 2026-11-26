@@ -105,16 +105,31 @@ def test_match_equals_the_gathered_masked_ncc():
     assert unique >= 12 and tied >= 1
 
 
+
+def test_a_matcher_kept_across_pictures_of_other_sizes_gives_each_the_costs_a_fresh_one_does():
+    """One matcher (`auto_motion._matcher`) read against frames, wider and narrower searches and a cut-down picture in
+    turn, as `face_layer.fit` keeps one for a frame's every size and tilt: each read's costs are a fresh matcher's to
+    the bit, whatever it read before."""
+    reference = auto_motion._reference(auto_motion.motion_anchor._features(walker(0)), (44, 60, 72, 84))
+    kept = auto_motion._matcher(reference)
+    reads = [(walker(k), center, radius) for k, center, radius in ((3, (0, 0), 6), (9, (-9, -1), 12), (5, (2, 1), 6))]
+    reads.append((walker(7).crop((20, 30, 110, 120)), (20, 30), 4))  # the box 20 and 30 px nearer the corner
+    for picture, center, radius in reads + reads[:1]:
+        moving = auto_motion.motion_anchor._features(picture)
+        costs, xs, ys = kept(moving, center, radius)
+        fresh, fxs, fys = auto_motion._matcher(reference)(moving, center, radius)
+        assert (xs, ys) == (fxs, fys) and np.array_equal(costs, fresh)
+
 def _rounding(monkeypatch, seed):
     """FFT rounding as another machine might do it: every correlation off by up to 1e-12 of its
     largest value — more than numpy's FFTs differ by between machines (~1e-14), far under MATCH_TIE."""
     rng = np.random.default_rng(seed)
-    correlate = auto_motion._correlate
+    windows = auto_motion._windows
 
-    def noisy(region, kernel, rows, cols):
-        out = correlate(region, kernel, rows, cols)
+    def noisy(region_spectrum, kernel_spectrum, shape, rows, cols):
+        out = windows(region_spectrum, kernel_spectrum, shape, rows, cols)
         return out + rng.uniform(-1e-12, 1e-12, out.shape)*max(1.0, float(np.abs(out).max()))
-    monkeypatch.setattr(auto_motion, '_correlate', noisy)
+    monkeypatch.setattr(auto_motion, '_windows', noisy)
 
 
 def test_match_takes_the_tied_offset_nearest_the_centre_whatever_the_rounding(monkeypatch):

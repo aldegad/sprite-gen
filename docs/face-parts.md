@@ -23,7 +23,7 @@ sprite-gen face-bake --pack pack/ --voice line.wav --out baked/ --play greet --t
 |---|---|
 | `--request` | Face request JSON containing the reference, face, talking clip, and body clips. |
 | `--out` | Pack folder to write. It must not exist. The pack is written in a temporary folder beside it and renamed when whole. |
-| `--jobs` | Processes reading anchors at once. The default is one per CPU. Anchor reading takes most of a pack's time. |
+| `--jobs` | Processes reading anchors at once, and threads reading the other frames. Defaults to one per CPU this process may use, capped at the number of frames (no pool is started for a single frame). On Python 3.13 and later, `PYTHON_CPU_COUNT` sets that count, so a caller running several packs or test workers side by side can give each its share. Anchor reading takes most of a pack's time. |
 
 | `face-bake` flag | Meaning |
 |---|---|

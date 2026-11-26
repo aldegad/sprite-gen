@@ -1002,17 +1002,29 @@ def build_strip(frames: list[Image.Image], *, max_cells: int = STRIP_MAX_CELLS, 
 def img2webp_supports_exact(binary: str | None = None) -> bool:
     """libwebp added `-exact` to img2webp in 1.5.0 (checked against the 1.4.0 and 1.5.0 release
     binaries, 2026-09-09); older builds (Ubuntu 24.04: 1.3.x) reject the flag with "Unknown option"
-    and would rewrite RGB under alpha 0. Detected from `-h`, never assumed."""
+    and would rewrite RGB under alpha 0. Detected from `-h`, never assumed: asked once for each
+    binary file as it is on disk (its path, size and time written), again where it is another."""
     binary = binary or shutil.which("img2webp")
     if not binary:
         return False
+    try:
+        st = os.stat(binary)
+    except OSError:
+        return False
+    key = (os.path.realpath(binary), st.st_size, st.st_mtime_ns)
+    if key in _IMG2WEBP_EXACT:
+        return _IMG2WEBP_EXACT[key]
     try:
         # The help is ASCII and only "-exact" is looked for in it: a byte that is not UTF-8 is replaced
         proc = subprocess.run([binary, "-h"], capture_output=True, text=True, encoding="utf-8", errors="replace",
                               timeout=10)
     except (OSError, subprocess.TimeoutExpired):
-        return False
-    return "-exact" in (proc.stdout + proc.stderr)
+        return False  # not kept: asked again next time
+    _IMG2WEBP_EXACT[key] = "-exact" in (proc.stdout + proc.stderr)
+    return _IMG2WEBP_EXACT[key]
+
+
+_IMG2WEBP_EXACT: dict[tuple[str, int, int], bool] = {}  # what `-h` said, by binary file as it was on disk
 
 
 def write_webp(frames: list[Image.Image], out: Path, *, delay_ms: int, loop: int = 0) -> None:
@@ -1066,7 +1078,8 @@ def verify_animation(path: Path, *, expect_frames: int, check_stale: bool, expec
                 background_ok &= all(f.getpixel(c) == background_pixel for c in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)))
                 opaque &= f.getchannel("A").getextrema() == (255, 255)
             if check_stale:
-                stale += sum(1 for p in f.get_flattened_data() if p[3] == 0 and (p[0] or p[1] or p[2]))
+                px = np.asarray(f)
+                stale += int(np.count_nonzero((px[..., 3] == 0) & px[..., :3].any(axis=-1)))
         report = {"file": path.name, "format": im.format, "n_frames": n, "loop": loop, "size": list(im.size), "corners_transparent": corners_ok, "stale_rgb_under_alpha0": stale, "bytes": path.stat().st_size}
         if background is not None:
             report.update(background=background, opaque=opaque)
