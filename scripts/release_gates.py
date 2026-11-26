@@ -28,8 +28,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # The files whose change reaches the GPU lane. Its tests measure RIFE's frames (the binary on the host's Vulkan, the torch
 # backend on CUDA) and what a cut makes of them, so: the modules that run RIFE or ask it for frames — each module of the
-# package that imports rife, rife_torch or rife_install (tests/release/test_release_gates.py holds the list to that) —,
-# what its tests read beside their own files, and what the lane installs and runs. A test file reaches it by its marks
+# package that imports rife, rife_torch or rife_install, and each the three import at their top
+# (tests/release/test_release_gates.py holds the list to both) —, what its tests read beside their own files, and what
+# the lane installs and runs. A test file reaches it by its marks
 # (`MARKED`), read from the file as it is at the commit measured.
 GPU_LANE = (
     # RIFE and the modules that call it
@@ -49,6 +50,10 @@ GPU_LANE = (
     "sprite_gen/video/stop.py",
     "sprite_gen/scene/render.py",
     "sprite_gen/cli.py",
+    # what RIFE's own modules import at their top
+    "sprite_gen/_deps.py",
+    "sprite_gen/util/console.py",
+    "sprite_gen/video/frames.py",
     # what RIFE's tests read beside their own files: the suite's fixtures and pins, their recorded inputs and judgments
     "tests/conftest.py",
     "tests/picture_digest.py",

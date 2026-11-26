@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """The one table of what a change reaches (`scripts/release_gates.py`, docs/release.md): RIFE's tests run in the GPU lane
 only where a change reaches them, so the table must name every way in. Each module of the package that runs RIFE or asks
-it for frames (it imports rife, rife_torch or rife_install) is named; a test file reaches it by its marks, read on both
+it for frames (it imports rife, rife_torch or rife_install) is named, and each module of the package the three import
+at their top; a test file reaches it by its marks, read on both
 sides of the change, so a test newly marked and a mark taken off both count; a change elsewhere does not reach it. The
 record a release page ends with is tests/release/test_release_publish.py's."""
 
@@ -41,6 +42,27 @@ def test_every_module_that_runs_rife_is_in_the_table():
     assert not missing, f"these modules run RIFE or ask it for frames, and a change to them does not reach the GPU lane: {missing}"
     for name in ("rife.py", "rife_torch.py", "rife_install.py"):
         assert release_gates.reaches(f"sprite_gen/video/{name}", None)
+
+
+def _top_imports(path: Path) -> set[str]:
+    """The package's modules a file imports at its top, as paths from the root."""
+    found = set()
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "sprite_gen":
+            base = node.module.replace(".", "/")
+            for alias in node.names:
+                as_module = f"{base}/{alias.name}.py"
+                found.add(as_module if (ROOT / as_module).is_file() else f"{base}.py")
+        elif isinstance(node, ast.Import):
+            found.update(a.name.replace(".", "/") + ".py" for a in node.names if a.name.split(".")[0] == "sprite_gen")
+    return found
+
+
+def test_every_module_rife_imports_at_its_top_is_in_the_table():
+    imported = set().union(*(_top_imports(ROOT / "sprite_gen" / "video" / f"{m}.py") for m in sorted(RIFE_MODULES)))
+    assert "sprite_gen/video/frames.py" in imported, imported  # the reading reads
+    missing = sorted(p for p in imported if (ROOT / p).is_file() and not release_gates.reaches(p, None))
+    assert not missing, f"RIFE imports these and a change to them does not reach the GPU lane: {missing}"
 
 
 def test_each_pattern_of_the_table_names_a_file_that_is_there():

@@ -138,8 +138,9 @@ PyTorch 가 `pyproject.toml` 이 적은 하한인지도 `tests/release/test_cuda
 ## 무엇이 바뀌면 GPU 레인이 도나 — 표 하나
 
 `scripts/release_gates.py` 의 `GPU_LANE` 이 그 표다. RIFE 를 돌리거나 RIFE 에게 프레임을 묻는 패키지 모듈마다
-(`rife`, `rife_torch`, `rife_install` 을 import 하는 모듈 — `tests/release/test_release_gates.py` 가 목록을 그것에
-맞춘다), RIFE 의 시험이 자기 파일 밖에서 읽는 것(`tests/conftest.py`, `tests/picture_digest.py`,
+(`rife`, `rife_torch`, `rife_install` 을 import 하는 모듈), 그 세 모듈이 맨 위에서 import 하는 패키지 모듈마다
+(`sprite_gen/video/frames.py` 처럼 RIFE 가 쓰는 것 — `tests/release/test_release_gates.py` 가 두 목록을 그것에 맞춘다),
+RIFE 의 시험이 자기 파일 밖에서 읽는 것(`tests/conftest.py`, `tests/picture_digest.py`,
 `tests/video/*_inputs.py`, `tests/fixtures/rife-*`), 레인이 깔고 돌리는 것(`pyproject.toml`, `scripts/cuda_lane.py`,
 `scripts/release_gates.py`)이 이름 올라 있다. 시험 파일은 그 표시로 닿는다: 바뀐 시험 파일이 바뀌기 전이나 뒤에
 `real_rife`·`torch_rife` 표시를 가졌으면 닿은 것이다(표시를 떼는 변경도 닿는다).
