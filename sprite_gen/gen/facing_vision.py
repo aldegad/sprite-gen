@@ -20,9 +20,10 @@ from .facing import INSPECTION_PROMPT
 
 OPENAI_MODEL = "gpt-4.1-mini"
 GROK_MODEL = "grok-4.6"
-# What codex reads lettering on (`inspect_image`), named on the call over the login's own config, so a logo's text
-# check reads on the same model and effort on every machine (docs/logo.md, the text check). The facing check still
-# runs on the login's config.
+# What codex reads a picture on: a logo's lettering (`inspect_image`, docs/logo.md, the text check) and a facing
+# check (`inspect_facing`, docs/gen.md, "The codex driver model"). Named on the call over the login's own config, so
+# a check reads on the same model and effort on every machine. Not the light driver of a generation
+# (`codex_provider.DRIVER_MODEL`): the driver only calls image_gen, a read is the verdict a gate acts on.
 CODEX_READ_MODEL = "gpt-6-sol"
 CODEX_READ_EFFORT = "high"
 FACING_LABEL = "facing vision check"

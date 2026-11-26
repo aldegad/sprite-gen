@@ -116,5 +116,8 @@ def test_the_facing_check_still_asks_the_facing_question(monkeypatch, tmp_path) 
     assert text == "left"
     assert [prompt for _command, prompt in seen] == [facing.INSPECTION_PROMPT]
     command = seen[0][0]
-    assert "--model" not in command and "-c" not in command  # the facing check runs on the login's config, as before
-    assert "model" not in metadata and "effort" not in metadata
+    # the facing check reads on the named read model, as the text check does, not on the login's config and not on
+    # the light driver of a generation (docs/gen.md, "The codex driver model")
+    assert command[command.index("--model") + 1] == facing_vision.CODEX_READ_MODEL != codex_provider.DRIVER_MODEL
+    assert command[command.index("-c") + 1] == f'model_reasoning_effort="{facing_vision.CODEX_READ_EFFORT}"'
+    assert metadata["model"] == facing_vision.CODEX_READ_MODEL and metadata["effort"] == facing_vision.CODEX_READ_EFFORT

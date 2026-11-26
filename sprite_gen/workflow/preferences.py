@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 
+from sprite_gen.gen.codex_provider import driver_from
 from sprite_gen.spec.runio import atomic_write_text, publish_guard
 from .catalog import FIELDS, FLOWS, GENERAL_FIELDS, validate_choices, validate_general
 
@@ -50,11 +51,17 @@ def read_settings() -> dict:
 
 
 def save_settings(kind: str | None, choices: dict, *, expected_revision: str, clear: bool = False,
-                  general: dict | None = None) -> dict:
+                  general: dict | None = None, clear_general: tuple[str, ...] = ()) -> dict:
     """Only explicit user-approved calls write. First matching revision wins a race. `kind` and `choices` save or
-    `clear` one profile; `general` saves settings every profile shares (no `kind` needed for those alone)."""
+    `clear` one profile; `general` saves settings every profile shares (no `kind` needed for those alone), and
+    `clear` with `clear_general` removes the named ones (with or without a `kind`)."""
     general = validate_general(general or {})
-    if kind is not None or choices or clear:
+    unknown = [key for key in clear_general if key not in GENERAL_FIELDS]
+    if unknown:
+        raise ValueError(f"unknown general setting: {', '.join(unknown)}")
+    if clear_general and not clear:
+        raise ValueError("general settings are removed only by clear")
+    if kind is not None or choices or (clear and not clear_general):
         choices = validate_choices(kind, choices)
     if not expected_revision:
         raise ValueError("expected_revision is required; read current settings first")
@@ -68,12 +75,15 @@ def save_settings(kind: str | None, choices: dict, *, expected_revision: str, cl
         before = read_settings()
         if before["revision"] != expected_revision:
             raise ValueError("preferences changed since they were read; read again and reconfirm the intended change")
-        profiles = before["profiles"]
+        profiles, kept = before["profiles"], before["general"]
         if clear:
-            profiles.pop(kind, None)
+            if kind is not None:
+                profiles.pop(kind, None)
+            for key in clear_general:
+                kept.pop(key, None)
         elif choices:
             profiles[kind] = {**profiles.get(kind, {}), **choices}
-        payload = json.dumps({"version": VERSION, "profiles": profiles, "general": {**before["general"], **general}},
+        payload = json.dumps({"version": VERSION, "profiles": profiles, "general": {**kept, **general}},
                              ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         if not path.exists() or path.read_text(encoding="utf-8") != payload:
             atomic_write_text(path, payload)
@@ -87,25 +97,33 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     for key, field in FIELDS.items():
         parser.add_argument("--" + key.replace("_", "-"), choices=field["options"])
     for key, field in GENERAL_FIELDS.items():
-        parser.add_argument("--" + key.replace("_", "-"), choices=field["options"], help="shared by every profile; "
-                            "saved without --kind")
+        parser.add_argument("--" + key.replace("_", "-"), choices=field["options"], metavar=field.get("metavar"),
+                            help="shared by every profile; saved without --kind" + (
+                                f"; {field['help']}" if field.get("help") else ""))
+    parser.add_argument("--setting", action="append", choices=tuple(GENERAL_FIELDS), dest="clear_general",
+                        help="with clear: remove this shared setting (repeatable)")
 
 
 def run(**kwargs) -> int:
     args = argparse.Namespace(**kwargs)
     choices = {key: getattr(args, key, None) for key in FIELDS if getattr(args, key, None) is not None}
     general = {key: getattr(args, key, None) for key in GENERAL_FIELDS if getattr(args, key, None) is not None}
+    clear_general = tuple(getattr(args, "clear_general", None) or ())
     try:
         if args.action == "show":
-            if choices or general or args.kind or args.expected_revision:
+            if choices or general or clear_general or args.kind or args.expected_revision:
                 raise ValueError("show accepts no mutation arguments")
             result = read_settings()
         else:
             if args.action == "clear" and (choices or general):
                 raise ValueError("clear does not accept choices")
+            if args.action == "save" and clear_general:
+                raise ValueError("--setting names what clear removes")
             result = save_settings(args.kind, choices, expected_revision=args.expected_revision,
-                                   clear=args.action == "clear", general=general)
+                                   clear=args.action == "clear", general=general, clear_general=clear_general)
     except (ValueError, OSError) as exc:
         raise SystemExit(f"defaults: {exc}") from exc
+    # What a codex generation runs on with these settings and no --model (docs/gen.md, "The codex driver model").
+    result["codex_driver"] = driver_from(result["general"]).report()
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

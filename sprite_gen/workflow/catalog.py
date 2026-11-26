@@ -2,6 +2,8 @@
 """The two user journeys and their selectable fields, declared once."""
 from sprite_gen.gen import CODEX_UNAVAILABLE_ASK, CODEX_UNAVAILABLE_CHOICES, CODEX_UNAVAILABLE_SETTING, PROVIDERS
 from sprite_gen.gen.base import PROVIDER_CODEX, PROVIDER_GROK, PROVIDER_OPENAI
+from sprite_gen.gen.codex_provider import (DRIVER_EFFORT, DRIVER_EFFORT_SETTING, DRIVER_EFFORTS, DRIVER_MODEL,
+                                           DRIVER_MODEL_PATTERN, DRIVER_MODEL_SETTING)
 
 MOTION_METHODS = {
     "gpt-rows": {"label": "지피티 이미지 스프라이트", "provider": PROVIDER_CODEX, "doc": "docs/atlas-workflow.md",
@@ -40,14 +42,24 @@ FIELDS = {
     CURATION: {"options": {"open": "열기", "skip": "열지 않기"},
                "question": "큐레이션뷰에서 결과를 확인하고 골라볼까요?"},
 }
-# Settings every profile shares, asked once and saved beside the profiles (`preferences`, `general`). The one so
-# far: what a call that names no provider does when codex cannot run here (not signed in, or its usage used up) —
-# `gen.codex_unavailable_choice` reads it, docs/gen.md "When codex cannot run" owns the rule.
+# Settings every profile shares, saved beside the profiles (`preferences`, `general`). What a call that names no
+# provider does when codex cannot run here (not signed in, or its usage used up) — `gen.codex_unavailable_choice`
+# reads it, docs/gen.md "When codex cannot run" owns the rule; the guide asks it once. And the model and effort a
+# codex generation runs on (`codex_provider.resolve_driver`, docs/gen.md "The codex driver model"), saved only when
+# asked for. A field whose `options` is None takes any value its `pattern` matches.
 GENERAL_FIELDS = {
     CODEX_UNAVAILABLE_SETTING: {
         "options": {CODEX_UNAVAILABLE_ASK: "멈추고 묻기 (기본)", PROVIDER_GROK: "그록으로 만들기",
                     PROVIDER_OPENAI: "OpenAI API 로 만들기 (호출당 과금)"},
         "question": "지피티(codex)를 쓸 수 없을 때 — 로그인이 없거나 사용량을 다 썼을 때 — 어떻게 할까요?",
+    },
+    DRIVER_MODEL_SETTING: {
+        "options": None, "pattern": DRIVER_MODEL_PATTERN, "metavar": "MODEL",
+        "help": f"the model a codex generation runs on (built in: {DRIVER_MODEL}); --model still wins for one call",
+    },
+    DRIVER_EFFORT_SETTING: {
+        "options": {effort: effort for effort in DRIVER_EFFORTS},
+        "help": f"the reasoning effort a codex generation runs at (built in: {DRIVER_EFFORT})",
     },
 }
 if list(GENERAL_FIELDS[CODEX_UNAVAILABLE_SETTING]["options"]) != list(CODEX_UNAVAILABLE_CHOICES):
@@ -74,6 +86,12 @@ def validate_general(values: dict) -> dict:
     if not isinstance(values, dict):
         raise ValueError("general settings must be an object")
     for key, value in values.items():
-        if key not in GENERAL_FIELDS or not isinstance(value, str) or value not in GENERAL_FIELDS[key]["options"]:
+        field = GENERAL_FIELDS.get(key)
+        if field is None or not isinstance(value, str):
+            raise ValueError(f"invalid general setting: {key}")
+        if field["options"] is None:
+            if not field["pattern"].fullmatch(value):
+                raise ValueError(f"invalid general setting: {key}")
+        elif value not in field["options"]:
             raise ValueError(f"invalid general setting: {key}")
     return dict(values)

@@ -5,7 +5,9 @@ Every verb and every argument is read off the CLI's own parser (`cli.COMMANDS` a
 or flag added there is listed with nothing else written. The one fact the parser does not hold is which providers
 a verb may call and be billed by (`PROVIDER_CALLS`). Beside the verbs: where each provider is by default and the
 variables that move it (`gen.address`), its API key's variable, and the variable that turns subscription logins
-off (`gen.base.logins_on`). Printed as one compact JSON line, so an agent reads it once instead of every `--help`.
+off (`gen.base.logins_on`). And the one setting it reads: the model a codex generation runs on with no `--model`
+(`codex_provider.resolve_driver`), beside the built-in one. Printed as one compact JSON line, so an agent reads it
+once instead of every `--help`.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import PurePath
 from typing import Any
 
-from sprite_gen.gen import address, anthropic_api, openai_provider, xai
+from sprite_gen.gen import address, anthropic_api, codex_provider, openai_provider, xai
 from sprite_gen.gen.base import LOGINS_ENV
 from sprite_gen.util.console import utf8_streams
 
@@ -143,6 +145,8 @@ def document() -> dict[str, Any]:
         "providers": {name: {"base_url_env": provider.env, "base_url": provider.default, "key_env": KEY_ENVS[name]}
                       for name, provider in address.PROVIDERS.items()},
         "logins_env": LOGINS_ENV,
+        "codex_driver": {**codex_provider.resolve_driver().report(),
+                         "built_in": {"model": codex_provider.DRIVER_MODEL, "effort": codex_provider.DRIVER_EFFORT}},
         "verbs": verbs,
     }
 
