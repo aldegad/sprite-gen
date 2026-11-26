@@ -261,15 +261,22 @@ CALL_TIMEOUT_SECONDS = 600
 # pairs each image with the next and makes them at fractions spaced evenly along the folder, so a fraction of any
 # pair but the first is not the one asked for to the last bit, and the pairs between are made too.
 RUNS_AT_ONCE = 2
-# `binary_env`: what the Vulkan loader is told to leave out of a run of the binary, and to keep. A loader puts every
-# implicit layer a machine installs into each Vulkan process it starts: an overlay, a capture hook, a shader recorder,
-# none of them any part of a frame, and where a machine has them they are paid on every run. The layers that choose the
-# GPU are kept (`LOADER_LAYERS_ALLOW`: Mesa's device select, NVIDIA's Optimus, AMD's switchable graphics), so a run is
-# made on the GPU it was made on with them. A caller that sets VK_LOADER_LAYERS_DISABLE itself keeps its own choice.
-# Loaders older than 1.3.234 (1.3.262 for the allow list) read neither variable and start the run as before
-# (docs/loop-repair.md section 1, "Layers left out").
+# `binary_env`: the implicit layers left out of a run of the binary, and kept. A Vulkan loader puts every implicit layer
+# a machine installs into each process it starts: an overlay, a capture hook, a shader recorder, none of them any part
+# of a frame, and where a machine has them they are paid on every run (an overlay's was half of one on a desktop
+# NVIDIA GPU, docs/loop-repair.md section 1, "Layers left out"). The layers that choose the GPU are kept
+# (`GPU_CHOOSING_LAYERS`: Mesa's device select, NVIDIA's Optimus, AMD's switchable graphics), so a run is made on the
+# GPU it was made on with them. The loader is told so (VK_LOADER_LAYERS_DISABLE and _ALLOW), which loaders older than
+# 1.3.234 (1.3.262 for the allow list) do not read, starting the run as before, and which a Windows loader does not read
+# in an elevated process (an administrator's shell, an ssh session); so on Windows each layer the machine registers is
+# also left out by the variable its own manifest names for that (`disable_environment`), which every loader reads in
+# every process. A `Binary` says once which layers its runs leave out, and which manifests it could not read. A caller
+# that sets VK_LOADER_LAYERS_DISABLE itself keeps its own choice.
+GPU_CHOOSING_LAYERS = ("device_select", "optimus", "switchable_graphics")
 LOADER_LAYERS_DISABLE = "~implicit~"
-LOADER_LAYERS_ALLOW = "*device_select*,*optimus*,*switchable_graphics*"
+LOADER_LAYERS_ALLOW = ",".join(f"*{name}*" for name in GPU_CHOOSING_LAYERS)
+WINDOWS = sys.platform == "win32"
+IMPLICIT_LAYERS_KEY = r"SOFTWARE\Khronos\Vulkan\ImplicitLayers"
 # `Cache`: the first thing a kept frame's key is made from — another way of keying or keeping frames is another
 # name, so no frame kept the old way is taken — and the PNG text a kept frame names its own pixels' sha256 under.
 CACHE_FORMAT = "sprite-gen frame between, 1"
@@ -504,14 +511,95 @@ def model_bytes(model: Path) -> dict[str, bytes]:
     return files
 
 
+def registered_implicit_layers() -> list[Path]:
+    """The manifests of the implicit layers this machine registers, on: on Windows the values of IMPLICIT_LAYERS_KEY of
+    the machine and of the user, each a manifest's path whose data 0 is a layer on. The layers a GPU's driver registers
+    are kept elsewhere, under the driver's own key, and are not among them. Off Windows, none."""
+    if not WINDOWS:
+        return []
+    import winreg
+
+    found = []
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            key = winreg.OpenKey(hive, IMPLICIT_LAYERS_KEY)
+        except OSError:
+            continue
+        with key:
+            for i in range(winreg.QueryInfoKey(key)[1]):
+                name, data, _ = winreg.EnumValue(key, i)
+                if data == 0:
+                    found.append(Path(name))
+    return found
+
+
+class LayersLeftOut(NamedTuple):
+    """What leaves out of a process the implicit layers of some manifests (`implicit_layers_left_out`): the variables
+    with their values (`switches`), the layers they leave out by name, and each manifest that could not be read, with
+    why."""
+
+    switches: dict[str, str]
+    names: list[str]
+    unread: list[str]
+
+
+def implicit_layers_left_out(manifests: list[Path]) -> LayersLeftOut:
+    """The variables that leave out of a process the implicit layers in `manifests` (each layer's
+    `disable_environment`), but the layers that choose the GPU (GPU_CHOOSING_LAYERS, in their names in any case)."""
+    switches: dict[str, str] = {}
+    names: list[str] = []
+    unread: list[str] = []
+    for path in manifests:
+        try:
+            manifest = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+            layers = manifest["layers"] if "layers" in manifest else [manifest["layer"]]
+            found = [(str(layer["name"]), dict(layer.get("disable_environment") or {})) for layer in layers]
+        except OSError as exc:
+            unread.append(f"{path} ({exc.strerror or exc})")
+            continue
+        except (ValueError, KeyError, TypeError, AttributeError):
+            unread.append(f"{path} (not a layer manifest)")
+            continue
+        for name, switch in found:
+            if switch and not any(chooser in name.lower() for chooser in GPU_CHOOSING_LAYERS):
+                switches.update({str(k): str(v) for k, v in switch.items()})
+                names.append(name)
+    return LayersLeftOut(switches, names, unread)
+
+
+def layers_left_out() -> LayersLeftOut:
+    """What a run of the binary started now leaves out by the layers' own variables (`binary_env`): the layers this
+    machine registers (`registered_implicit_layers`), or none where the caller has set VK_LOADER_LAYERS_DISABLE."""
+    if "VK_LOADER_LAYERS_DISABLE" in os.environ:
+        return LayersLeftOut({}, [], [])
+    return implicit_layers_left_out(registered_implicit_layers())
+
+
+def left_out_lines(left_out: LayersLeftOut) -> list[str]:
+    """What a `Binary` says once of the layers its runs leave out: a line naming them, and a line naming the manifests
+    that could not be read, each where there are any."""
+    lines = []
+    if left_out.names:
+        lines.append(f"each run of {BINARY} leaves out the implicit Vulkan layers {', '.join(left_out.names)}, "
+                     f"by the variable each one's manifest names (docs/loop-repair.md section 1, \"Layers left out\")")
+    if left_out.unread:
+        lines.append(f"the implicit Vulkan layer manifests {', '.join(left_out.unread)} could not be read, and their "
+                     f"layers are not left out of a run of {BINARY}")
+    return lines
+
+
 def binary_env() -> dict[str, str]:
-    """The environment a run of the binary is started with: this process's, with the Vulkan loader told to leave out the
-    implicit layers but those that choose the GPU (LOADER_LAYERS_DISABLE, LOADER_LAYERS_ALLOW) where the caller has not
-    set VK_LOADER_LAYERS_DISABLE itself."""
+    """The environment a run of the binary is started with: this process's, with the implicit layers left out but those
+    that choose the GPU — the loader told so (LOADER_LAYERS_DISABLE, LOADER_LAYERS_ALLOW), and each layer the machine
+    registers left out by its own variable (`layers_left_out`; one the caller has set is kept at its value) — where the
+    caller has not set VK_LOADER_LAYERS_DISABLE itself."""
     env = dict(os.environ)
-    if "VK_LOADER_LAYERS_DISABLE" not in env:
-        env["VK_LOADER_LAYERS_DISABLE"] = LOADER_LAYERS_DISABLE
-        env.setdefault("VK_LOADER_LAYERS_ALLOW", LOADER_LAYERS_ALLOW)
+    if "VK_LOADER_LAYERS_DISABLE" in env:
+        return env
+    env["VK_LOADER_LAYERS_DISABLE"] = LOADER_LAYERS_DISABLE
+    env.setdefault("VK_LOADER_LAYERS_ALLOW", LOADER_LAYERS_ALLOW)
+    for name, value in layers_left_out().switches.items():
+        env.setdefault(name, value)
     return env
 
 
@@ -1376,12 +1464,23 @@ class Binary:
     def __init__(self, binary: Path, model: Path):
         self.binary, self.model = binary, model
         self.model_name = held_model(model)  # refused here, before a frame is asked for
+        self.said = False
+
+    def say(self) -> None:
+        """The layers its runs leave out, and the manifests it could not read (`left_out_lines`), said on stderr on the
+        first frame or read it is asked for, and not again."""
+        if not self.said:
+            self.said = True
+            for line in left_out_lines(layers_left_out()):
+                print(f"rife: {line}", file=sys.stderr, flush=True)
 
     def frame(self, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> tuple[np.ndarray, np.ndarray]:
+        self.say()
         with tempfile.TemporaryDirectory(prefix="sprite-gen-rife-") as td:
             return frame_runs(_binary_run(self.binary, self.model, Path(td), at_once=runs_at_once()), colour, cover, t)
 
     def read(self, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        self.say()
         with tempfile.TemporaryDirectory(prefix="sprite-gen-rife-") as td:
             run = _binary_run(self.binary, self.model, Path(td), at_once=runs_at_once())
             return (*frame_runs(run, colour, cover, t), pass_runs(run, colour, cover, t))
