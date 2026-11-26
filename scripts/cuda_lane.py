@@ -8,7 +8,7 @@ push or pull request, and no runner of the repository's starts it. Standard libr
 machine:
 
     .venv/bin/python scripts/cuda_lane.py pack --requirements <list> --out <empty dir> [--host-spec <eco>:<name>@<version> ...]
-    <python> -I <pack>/cuda_lane.py prepare --pack <pack> [--wheels <dir>] [--rife-zip <zip>]
+    <python> -I <pack>/cuda_lane.py prepare --pack <pack> [--wheels <dir>] [--rife-zip <zip>] [--tools <dir>]
     <python> -I <pack>/cuda_lane.py test --pack <pack> --chunk K/N [--budget <seconds>] [--leave <test> ...]  # each K
     <python> -I <pack>/cuda_lane.py verdict --pack <pack> --chunks N
 
@@ -23,7 +23,9 @@ writes HEAD's tree as `git archive` writes it (source.tar.gz), SOURCE_SHA, the l
 what each check said (checks.json) and this file as HEAD holds it.
 
 `prepare` runs on the host, in that directory, with Python PINNED_PYTHON. It refuses a directory whose checks.json does
-not hold a passing check of every line of its requirements.txt. Then, as the Linux lane installs a clean clone: a new
+not hold a passing check of every line of its requirements.txt, and a host where the tests cannot write and read video
+as the Linux lane's do: ffmpeg and img2webp of libwebp 1.5 or newer (its -exact flag) on PATH, --tools first where
+given (kept for every chunk), both refused before anything is made. Then, as the Linux lane installs a clean clone: a new
 virtual environment, every wheel of the list downloaded with its hash checked (from PyPI, or from --wheels for one PyPI
 does not hold, such as PyTorch's CUDA build for Windows, which comes from PyTorch's own index), installed from those
 files alone, the tree (`pip install -e src[dev]`, nothing more fetched), `pip check`, and RIFE (`sprite-gen rife
@@ -324,10 +326,13 @@ def _layout(where: Path) -> dict[str, Path]:
 DATA_KEY = "LOCALAPPDATA" if os.name == "nt" else "XDG_DATA_HOME"
 
 
-def _environment(where: Path) -> dict[str, str]:
-    """The run's environment: no SPRITE_GEN_* from outside, temporary files and caches inside where."""
+def _environment(where: Path, tools: Path | str | None = None) -> dict[str, str]:
+    """The run's environment: no SPRITE_GEN_* from outside, temporary files and caches inside where, the tools
+    directory given (`prepare --tools`) first on PATH."""
     tmp = where / "tmp"
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith("SPRITE_GEN_")}
+    if tools:
+        env["PATH"] = os.pathsep.join([str(tools), env.get("PATH", "")])
     env.update(TEMP=str(tmp), TMP=str(tmp), TMPDIR=str(tmp), PIP_CACHE_DIR=str(where / "cache" / "pip"),
                CUDA_CACHE_PATH=str(where / "cache" / "cuda"), PIP_DISABLE_PIP_VERSION_CHECK="1", PIP_NO_INPUT="1",
                PIP_CONFIG_FILE=os.devnull, PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8")
@@ -342,6 +347,32 @@ def _with_rife(env: dict[str, str], where: Path, binary: str, model: str, data: 
             DATA_KEY: data}
 
 
+TOOLS = ("ffmpeg", "img2webp")
+
+
+def tool_check(env: dict[str, str]) -> dict:
+    """Where ffmpeg and img2webp are on the PATH of env, as `scripts/linux_lane.sh` checks them: the cut writes its
+    WebP through img2webp -exact, which libwebp before 1.5 does not have. A tool missing stops the lane."""
+    found: dict = {}
+    for name in TOOLS:
+        exe = shutil.which(name, path=env.get("PATH", ""))
+        if not exe:
+            _fail(f"{name} is not on PATH: the RIFE tests write and read video through ffmpeg and img2webp of libwebp "
+                  "1.5 or newer (give their directory with --tools, or put them on the host's PATH)")
+        found[name] = {"path": exe}
+
+    def said(argv: list[str]) -> str:
+        proc = subprocess.run(argv, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        return proc.stdout + proc.stderr
+
+    found["ffmpeg"]["version"] = (said([found["ffmpeg"]["path"], "-version"]).splitlines() or [""])[0].strip()
+    # img2webp -version exits 1 without an output file; -h lists the flags, -exact among them from libwebp 1.5.
+    if "-exact" not in said([found["img2webp"]["path"], "-h"]):
+        _fail("img2webp has no -exact flag; libwebp must be 1.5 or newer")
+    found["img2webp"]["exact"] = True
+    return found
+
+
 def _prepared(where: Path, sha: str) -> dict:
     """prepare's record in where, where it prepared the environment at sha; else the lane stops."""
     path = where / "prepared.json"
@@ -354,7 +385,7 @@ def _prepared(where: Path, sha: str) -> dict:
     return rec
 
 
-def prepare(where: Path, wheels: Path | None, rife_zip: Path | None) -> int:
+def prepare(where: Path, wheels: Path | None, rife_zip: Path | None, tools: Path | None = None) -> int:
     """The steps of `prepare` above, in the pack at where: 0 where every step passed."""
     where = where.resolve()
     sha, _ = verify_pack(where)
@@ -367,12 +398,15 @@ def prepare(where: Path, wheels: Path | None, rife_zip: Path | None) -> int:
     made = [p.name for p in (src, venv, dl, rife_dir, tmp, logs) if p.exists()]
     if made:
         _fail(f"{where} already holds {', '.join(made)}; prepare each pack once")
+    tools = tools.resolve() if tools else None
+    env = _environment(where, tools)
+    found = tool_check(env)
     for d in (src, dl, rife_dir, tmp, logs):
         d.mkdir()
     py, cli = lay["py"], lay["cli"]
-    env = _environment(where)
     env[DATA_KEY] = tempfile.mkdtemp(prefix="data-install-", dir=tmp)
-    rec: dict = {"commit": sha, "python": sys.version, "gates": GATE_TESTS, "steps": [], "prepared": False}
+    rec: dict = {"commit": sha, "python": sys.version, "gates": GATE_TESTS, "steps": [], "prepared": False,
+                 "tools_dir": str(tools) if tools else None, "tools": found}
 
     def done(why: str | None = None) -> int:
         if why:
@@ -496,7 +530,7 @@ def run_chunk(where: Path, chunk: str, budget: float, leave: list[str] | None = 
         _fail(f"{out.name} is there already; run each chunk once")
     lay = _layout(where)
     tmp, logs = lay["tmp"], lay["logs"]
-    env = _with_rife(_environment(where), where, prepared["binary"], prepared["model"],
+    env = _with_rife(_environment(where, prepared.get("tools_dir")), where, prepared["binary"], prepared["model"],
                      tempfile.mkdtemp(prefix=f"data-{k}-of-{n}-", dir=tmp))
     env["PYTHONUNBUFFERED"] = "1"  # what a chunk stopped at its budget printed is kept, the test it stopped in too
     junit = logs / f"chunk-{k}-of-{n}.xml"
@@ -595,7 +629,7 @@ def verdict(where: Path, n: int) -> int:
     run = {"commit": sha, "gates": GATE_TESTS, "passed": True, "tests": len(collected), "ran": len(seen),
            "left": left or [], "chunks": chunks,
            "prepared_sha256": digest,
-           **{key: prepared[key] for key in ("python", "gpu", "probe", "pip_freeze", "binary", "model")
+           **{key: prepared[key] for key in ("python", "gpu", "probe", "pip_freeze", "binary", "model", "tools")
               if key in prepared}}
     (where / "run.json").write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
     print(f"cuda_lane: the GPU lane ({GATE_TESTS}) passed at {sha}: {len(seen)} of {len(collected)} tests in {n} "
@@ -620,6 +654,8 @@ def main(argv: list[str] | None = None) -> int:
                    "build for Windows, from PyTorch's index)")
     r.add_argument("--rife-zip", type=Path, help="the release zip `sprite-gen rife install` would download, already "
                    "downloaded (the engine checks its pinned SHA-256 either way)")
+    r.add_argument("--tools", type=Path, help="a directory holding ffmpeg and img2webp (libwebp 1.5 or newer), put first "
+                   "on PATH for prepare and every chunk, so the host's own PATH need not change")
     t = sub.add_parser("test", help="on the NVIDIA host: run chunk K of N of the RIFE tests")
     t.add_argument("--pack", type=Path, required=True)
     t.add_argument("--chunk", required=True, metavar="K/N", help="share K of N (pytest --shard K/N)")
@@ -636,7 +672,7 @@ def main(argv: list[str] | None = None) -> int:
         pack(Path(__file__).resolve().parents[1], a.requirements, a.out, a.host_spec, [a.safedeps])
         return 0
     if a.command == "prepare":
-        return prepare(a.pack, a.wheels, a.rife_zip)
+        return prepare(a.pack, a.wheels, a.rife_zip, a.tools)
     if a.command == "test":
         return run_chunk(a.pack, a.chunk, a.budget, a.leave)
     return verdict(a.pack, a.chunks)

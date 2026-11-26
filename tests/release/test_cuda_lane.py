@@ -457,3 +457,40 @@ def test_the_verdict_refuses_tests_left_unlike_or_run_too(tmp_path, capsys, spoi
         cuda_lane.verdict(where, 2)
     assert why in capsys.readouterr().err
     assert not (where / "run.json").exists()
+
+
+def _tool(where: Path, name: str, says: str) -> None:
+    exe = where / name
+    exe.write_text(f"#!/bin/sh\necho '{says}'\nexit 1\n", encoding="utf-8")
+    exe.chmod(0o755)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-ins are shell scripts")
+def test_prepare_finds_ffmpeg_and_an_img2webp_that_keeps_exact_alpha_first_in_the_tools_given(tmp_path):
+    tools, other = tmp_path / "tools", tmp_path / "other"
+    tools.mkdir(), other.mkdir()
+    _tool(tools, "ffmpeg", "ffmpeg version 9.1-lane Copyright")
+    _tool(tools, "img2webp", "  -exact ............ preserve RGB values in transparent area")
+    _tool(other, "img2webp", "  -lossy ............ lossy encoding")
+    env = cuda_lane._environment(tmp_path, tools)
+    assert env["PATH"].split(os.pathsep)[0] == str(tools)
+    found = cuda_lane.tool_check({**env, "PATH": os.pathsep.join([str(tools), str(other)])})
+    assert found == {"ffmpeg": {"path": str(tools / "ffmpeg"), "version": "ffmpeg version 9.1-lane Copyright"},
+                     "img2webp": {"path": str(tools / "img2webp"), "exact": True}}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-ins are shell scripts")
+@pytest.mark.parametrize("have, why", [
+    ({"ffmpeg": "ffmpeg version 9.1"}, "img2webp is not on PATH"),
+    ({"img2webp": "-exact"}, "ffmpeg is not on PATH"),
+    ({"ffmpeg": "ffmpeg version 9.1", "img2webp": "-lossy"}, "img2webp has no -exact flag; libwebp must be 1.5 or newer"),
+], ids=["no img2webp", "no ffmpeg", "an img2webp before libwebp 1.5"])
+def test_prepare_refuses_a_host_without_the_tools_the_tests_write_video_with_before_it_makes_anything(tmp_path, capsys,
+                                                                                                    have, why):
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name, says in have.items():
+        _tool(tools, name, says)
+    with pytest.raises(SystemExit):
+        cuda_lane.tool_check({"PATH": str(tools)})
+    assert why in capsys.readouterr().err

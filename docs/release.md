@@ -79,7 +79,7 @@ RIFE 의 torch 백엔드(`SPRITE_GEN_RIFE_BACKEND=torch`, docs/loop-repair.md 1�
 # safedeps 가 있는 기계에서, 잴 커밋을 체크아웃한 트리(커밋되지 않은 변경이 없는)로
 .venv/bin/python scripts/cuda_lane.py pack --requirements <목록> --out <빈 디렉터리> [--host-spec <생태계>:<이름>@<버전> ...]
 # 그 디렉터리를 호스트로 옮긴 뒤, 호스트에서 Python 3.14 로
-python -I <디렉터리>/cuda_lane.py prepare --pack <디렉터리> [--wheels <PyPI 에 없는 휠의 디렉터리>] [--rife-zip <zip>]
+python -I <디렉터리>/cuda_lane.py prepare --pack <디렉터리> [--wheels <PyPI 에 없는 휠의 디렉터리>] [--rife-zip <zip>] [--tools <디렉터리>]
 python -I <디렉터리>/cuda_lane.py test --pack <디렉터리> --chunk K/N [--budget <초>] [--leave <시험> ...]   # K = 1..N 마다 한 번
 python -I <디렉터리>/cuda_lane.py verdict --pack <디렉터리> --chunks N
 ```
@@ -101,7 +101,11 @@ GPU 레인은 손으로만 시작한다. 이 레포에는 워크플로가 없고
 아무것도 쓰지 않는다 — 그러면 호스트가 깔 것이 없다. 모든 검사가 통과해야 HEAD 의 트리(`git archive`),
 `SOURCE_SHA`, 검사한 목록(`requirements.txt`), 검사마다의 답(`checks.json`), 그 커밋의 `cuda_lane.py` 를 쓴다.
 `prepare` 는 `checks.json` 에 목록의 줄마다 통과한 검사가 없거나 목록이 검사한 것과 다르면 아무것도 만들지 않고
-멈춘다. 두 멈춤은 `tests/release/test_cuda_lane.py` 가 본다.
+멈춘다. 두 멈춤은 `tests/release/test_cuda_lane.py` 가 본다. 시험이 영상을 쓰고 읽는 도구가 없을 때도 아무것도 만들지
+않고 멈춘다: 리눅스 레인처럼 `ffmpeg` 와 libwebp 1.5 이상의 `img2webp`(`-exact` 가 있는 것)가 PATH 에 있어야 한다.
+`--tools <디렉터리>` 를 주면 그 디렉터리를 PATH 맨 앞에 두고 `prepared.json` 에 적어 토막마다 같게 쓴다. 그러면 호스트의
+PATH 를 바꾸지 않고 레인의 디렉터리 안에 둔 도구로 돈다. 찾은 도구의 경로와 `ffmpeg -version` 첫 줄은
+`prepared.json` 과 `run.json` 의 `tools` 에 남는다.
 
 `prepare` 는 리눅스 레인이 깨끗한 클론에 까는 것처럼 Python 3.14 의 새 가상 환경을 짓는다. 목록의 휠을 해시를
 확인하며 받고, 받은 파일만으로 깔고, 트리를 `pip install -e "src[dev]"` 로(더 받는 것 없이) 깔고, `pip check` 를
