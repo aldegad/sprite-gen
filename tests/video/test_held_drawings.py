@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -115,6 +116,27 @@ def _cut(tmp_path: Path, name: str, cycle: int, hold: int) -> Path:
     return out
 
 
+# The two loops most sets below align, each `_cut` once on a worker: the same clip and cut whatever the loop's folder is
+# called. Each test aligns a copy of its own (`_copy`).
+
+
+@pytest.fixture(scope="module")
+def on_twos(tmp_path_factory) -> Path:
+    """`_cut` of a cycle of 16 frames on twos (8 drawings)."""
+    return _cut(tmp_path_factory.mktemp("on-twos"), "loop", 16, 2)
+
+
+@pytest.fixture(scope="module")
+def every_frame(tmp_path_factory) -> Path:
+    """`_cut` of a cycle of 24 frames drawn every frame."""
+    return _cut(tmp_path_factory.mktemp("every-frame"), "loop", 24, 1)
+
+
+def _copy(cut: Path, tmp_path: Path, name: str) -> Path:
+    """A test's own copy of a loop cut once, at `tmp_path / name`, where `_cut` would have cut it."""
+    return Path(shutil.copytree(cut, tmp_path / name))
+
+
 @pytest.mark.parametrize("hold, per_second", [(3, 8.0)])  # plumbing: the unit grid above reads every hold
 def test_video_loop_records_the_clips_drawings_a_second(tmp_path, hold, per_second):
     d = _cut(tmp_path, "S", 24, hold)
@@ -135,10 +157,10 @@ def _follows(a: Image.Image, b: Image.Image, t: float) -> Image.Image:
 
 
 @pytest.mark.slow
-def test_a_held_loop_stretched_past_what_an_interpolator_bridges_is_named_for_a_retake(tmp_path, capsys):
+def test_a_held_loop_stretched_past_what_an_interpolator_bridges_is_named_for_a_retake(tmp_path, capsys, on_twos):
     """A cycle of 16 frames on twos (8 drawings) stretched to 24: 8 drawings a second, three frames
     apart, and the frames between them melt — a take to film again. The set is still aligned."""
-    dirs = [_cut(tmp_path, "NE", 16, 2), _cut(tmp_path, "SW", 24, 2), _cut(tmp_path, "E", 26, 1)]
+    dirs = [_copy(on_twos, tmp_path, "NE"), _cut(tmp_path, "SW", 24, 2), _cut(tmp_path, "E", 26, 1)]
     report = align.align_set(dirs, interpolate=_cross_fade, length=24, report_path=tmp_path / "align.json")
     assert report["applied"] is True and report["replaced"] > 0
     by = {Path(r["dir"]).name: r for r in report["loops"]}
@@ -161,28 +183,31 @@ def test_a_held_loop_stretched_past_what_an_interpolator_bridges_is_named_for_a_
     assert meta["cycle_align"]["retake"]["reason"] == "held-drawings"
 
 
-def test_a_held_loop_whose_frames_between_are_all_made_is_not_named(tmp_path):
-    dirs = [_cut(tmp_path, "NE", 16, 2), _cut(tmp_path, "S", 24, 1)]
+@pytest.mark.slow
+def test_a_held_loop_whose_frames_between_are_all_made_is_not_named(tmp_path, on_twos, every_frame):
+    dirs = [_copy(on_twos, tmp_path, "NE"), _copy(every_frame, tmp_path, "S")]
     report = align.align_set(dirs, interpolate=_follows, length=24)
     assert report["retake"] == [] and report["replaced"] == 0
     assert not any("film this direction again" in w for w in report["warnings"])
 
 
 @pytest.mark.slow
-def test_between_nearest_and_rife_name_the_frames_not_made(tmp_path):
+def test_between_nearest_and_rife_name_the_frames_not_made(tmp_path, on_twos, every_frame):
     """nearest makes no frame, so every one between drawings is taken; rife keeps a melted frame, a fault."""
-    nearest = align.align_set([_cut(tmp_path / "n", "NE", 16, 2), _cut(tmp_path / "n", "S", 24, 1)], length=24, between="nearest")
+    nearest = align.align_set([_copy(on_twos, tmp_path / "n", "NE"), _copy(every_frame, tmp_path / "n", "S")],
+                              length=24, between="nearest")
     row = next(r for r in nearest["loops"] if Path(r["dir"]).name == "NE")
     assert [r["reason"] for r in nearest["retake"]] == ["held-drawings"] and nearest["retake"][0]["unmade"] == len(row["nearest_at"]) == 16
-    kept = align.align_set([_cut(tmp_path / "r", "NE", 16, 2), _cut(tmp_path / "r", "S", 24, 1)], length=24,
+    kept = align.align_set([_copy(on_twos, tmp_path / "r", "NE"), _copy(every_frame, tmp_path / "r", "S")], length=24,
                            interpolate=_cross_fade, between="rife")
     assert kept["replaced"] == 0 and kept["retake"] and kept["retake"][0]["unmade"] > 0
 
 
-def test_a_held_loop_squeezed_past_on_twos_is_not_named(tmp_path):
+@pytest.mark.slow
+def test_a_held_loop_squeezed_past_on_twos_is_not_named(tmp_path, every_frame):
     """On twos, 32 frames to 24: sixteen drawings in a second, closer than on twos (12) and above
     RETAKE_DRAWINGS_MIN, so a melted frame there is no reason to film it again."""
-    dirs = [_cut(tmp_path, "A", 32, 2), _cut(tmp_path, "B", 24, 1)]
+    dirs = [_cut(tmp_path, "A", 32, 2), _copy(every_frame, tmp_path, "B")]
     report = align.align_set(dirs, interpolate=_cross_fade, length=24, cycles={"A": 1})  # the bob reads as two cycles
     row = next(r for r in report["loops"] if Path(r["dir"]).name == "A")
     assert row["drawings"]["hold"] == 2 and row["drawings"]["drawings"] == pytest.approx(16, abs=0.5)
@@ -190,10 +215,10 @@ def test_a_held_loop_squeezed_past_on_twos_is_not_named(tmp_path):
 
 
 @pytest.mark.slow
-def test_the_clips_hold_is_read_from_the_strip_and_the_cycle_is_the_fallback(tmp_path):
+def test_the_clips_hold_is_read_from_the_strip_and_the_cycle_is_the_fallback(tmp_path, on_twos, every_frame):
     """`video-loop` writes the clip's hold into the strip metadata, and the alignment reads it there; a
     loop cut before that record is measured on its own cycle, read as a ring."""
-    dirs = [_cut(tmp_path, "NE", 16, 2), _cut(tmp_path, "S", 24, 1)]
+    dirs = [_copy(on_twos, tmp_path, "NE"), _copy(every_frame, tmp_path, "S")]
     meta = json.loads((dirs[0] / "walk.strip.json").read_text())
     assert meta["drawings"]["hold"] == 2 and meta["drawings"]["drawings_per_second"] == pytest.approx(12.0)
     report = align.align_set(dirs, interpolate=_cross_fade, length=24)
@@ -226,11 +251,13 @@ def _cut_at(tmp_path: Path, name: str, frames: list[Image.Image], start: int, le
     return out
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("held_frames, start, clip_hold, cut_hold, named", [
     (48, 56, 2, 1, False),  # held for most of the clip, the cut every frame: the clip reads as held, the cut is not
     (24, 4, 1, 2, True),    # every frame for most of the clip, the cut held: the clip reads as drawn every frame, the cut is held
 ])
-def test_a_clip_held_for_part_of_its_length_is_read_where_it_was_cut(tmp_path, held_frames, start, clip_hold, cut_hold, named):
+def test_a_clip_held_for_part_of_its_length_is_read_where_it_was_cut(tmp_path, every_frame, held_frames, start,
+                                                                     clip_hold, cut_hold, named):
     """A cycle of 16 cut out of an 88-frame clip on twos for its first `held_frames` frames, stretched to
     24. Whether it is filmed again follows the cut: the clip's reading, over both kinds, would name a
     cycle drawn every frame and pass a held one."""
@@ -238,7 +265,7 @@ def test_a_clip_held_for_part_of_its_length_is_read_where_it_was_cut(tmp_path, h
     meta = json.loads((d / "walk.strip.json").read_text())
     assert meta["drawings"]["hold"] == clip_hold  # the clip's reading is kept as it was
     assert meta["cycle_drawings"]["hold"] == cut_hold and (meta["cycle_drawings"]["start"], meta["cycle_drawings"]["length"]) == (start, 16)
-    report = align.align_set([d, _cut(tmp_path, "S", 24, 1)], interpolate=_cross_fade, length=24)
+    report = align.align_set([d, _copy(every_frame, tmp_path, "S")], interpolate=_cross_fade, length=24)
     row = next(r for r in report["loops"] if Path(r["dir"]).name == "NE")
     assert row["drawings"]["source"] == "span" and row["drawings"]["hold"] == cut_hold and row["drawings"]["clip"]["hold"] == clip_hold
     assert row["drawings"]["drawings"] == (8 if cut_hold == 2 else 16)
@@ -275,8 +302,10 @@ def test_a_cut_too_short_to_read_leaves_the_clips_reading_and_says_so(tmp_path):
     assert before["source"] == "clip" and "cut before" in before["span_why"]  # a strip written before the cut's record
 
 
-def test_video_cycle_align_warns_and_prints_the_retake_with_exit_zero(tmp_path, capsys, monkeypatch):
-    dirs = [_cut(tmp_path, "NE", 16, 2), _cut(tmp_path, "S", 24, 1)]
+@pytest.mark.slow
+def test_video_cycle_align_warns_and_prints_the_retake_with_exit_zero(tmp_path, capsys, monkeypatch, on_twos,
+                                                                     every_frame):
+    dirs = [_copy(on_twos, tmp_path, "NE"), _copy(every_frame, tmp_path, "S")]
     monkeypatch.setattr(align.rife_mod, "Rife", lambda: _Fade())
     assert align.run(loop_dir=dirs, length=24, report=tmp_path / "align.json") == 0
     captured = capsys.readouterr()
@@ -292,14 +321,15 @@ class _Fade:
         return {"binary": "stand-in"}
 
 
-def test_video_set_carries_the_retake_into_its_record(tmp_path):
+@pytest.mark.slow
+def test_video_set_carries_the_retake_into_its_record(tmp_path, on_twos, every_frame):
     from sprite_gen.video import batch
 
     rows = []
-    for direction, cycle, hold in (("back", 16, 2), ("side", 24, 1)):
+    for direction, cut, cycle in (("back", on_twos, 16), ("side", every_frame, 24)):
         item = tmp_path / f"{direction}-walk"
         item.mkdir()
-        _cut(item, "loop", cycle, hold)
+        _copy(cut, item, "loop")
         rows.append({"item": f"{direction}-walk", "direction": direction, "state": "walk", "dir": str(item), "ok": True,
                      "loop": {"n_out": cycle}})
     out = batch.align_gaits(rows, tmp_path, "auto", interpolate=_cross_fade)

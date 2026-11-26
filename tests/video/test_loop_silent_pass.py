@@ -52,6 +52,7 @@ def _jumped() -> list[Image.Image]:
     return frames
 
 
+@pytest.mark.slow
 def test_a_frame_that_jumps_inside_the_loop_fails_it_on_the_steps_between_its_drawings(tmp_path: Path, capsys):
     """The wrap closes — the seam gate passes it — and a frame in the middle of the loop jumps 10 px and back."""
     keyed = _keyed(tmp_path, "walk", _jumped())
@@ -73,6 +74,7 @@ def test_a_frame_that_jumps_inside_the_loop_fails_it_on_the_steps_between_its_dr
     assert "video-loop: warning: the loop's largest step between drawings is" in capsys.readouterr().err
 
 
+@pytest.mark.slow
 def test_a_walk_held_on_threes_is_read_between_its_drawings(tmp_path: Path):
     """On threes each drawing shows for three frames: the frames step nothing and then three steps, and the largest of
     their steps is three times their mean. Between its drawings the walk steps evenly, and it passes."""
@@ -107,6 +109,7 @@ def _coloured(frames: list[Image.Image], colour: str) -> list[Image.Image]:
     return out
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("colour", COLOURS)
 def test_a_pixels_jitter_of_a_walk_that_barely_moves_is_not_held_to_the_bound(tmp_path: Path, colour: str):
     """The gait fallback's walk going away from the camera, its feet rising a whole crop row every three or four frames:
@@ -122,7 +125,8 @@ def test_a_pixels_jitter_of_a_walk_that_barely_moves_is_not_held_to_the_bound(tm
     assert all(max(map(abs, j["move"])) == 1 for j in gate["jitter"])
 
 
-@pytest.mark.parametrize("colour", COLOURS)
+# COLOURS: the grey near the backdrop alone takes a second, so that case alone is slow (pyproject.toml's marker)
+@pytest.mark.parametrize("colour", [*COLOURS[:2], pytest.param(COLOURS[2], marks=pytest.mark.slow)])
 def test_a_frame_moved_two_pixels_is_a_jump_in_any_colour(tmp_path: Path, colour: str):
     """The side walk standing in place, frame JUMP of the cut moved 2 px and back (6 px as the walk is cut 400 px tall),
     as drawn, black or in a grey near the backdrop: every frame's alpha is the same, and so is the verdict. The drawing
@@ -166,6 +170,7 @@ def test_a_group_refused_leaves_its_drawing_off_the_flow_unfixed():
     assert set(left) == {"frames", "off", "turn", "into", "out", "window", "refused"}
 
 
+@pytest.mark.slow
 def test_a_jump_the_repair_could_not_make_again_is_named_and_fails_the_loop(tmp_path: Path, capsys):
     """The frame that jumps inside the loop, the jump repair on, and a RIFE whose frame there is refused: the frame is
     left off the flow (`unfixed`), the step gate fails the loop and its line says why. Lifted, the loop is kept with the
@@ -212,6 +217,7 @@ def _side_keyed(root: Path) -> Path:
     return keyed
 
 
+@pytest.mark.slow
 def test_a_fixed_cut_the_clips_crossings_count_one_step_fails(tmp_path: Path, capsys):
     """A cut one step long joins the walk a step on: the silhouette closes — the seam gate passes it — and the legs swap
     at the wrap. The clip's crossings count it one step, and the cut fails; two steps long it passes, counted two."""
@@ -249,6 +255,7 @@ def test_a_fixed_cut_of_one_cycle_whose_crossings_mark_cycles_is_counted_two_ste
         assert loop_mod.odd_count({"kind": "fixed", "step_count": counted}) is False, arm
 
 
+@pytest.mark.slow
 def test_a_wrap_a_part_on_its_own_beat_leaves_open_says_so_in_its_failure_line(tmp_path: Path):
     """The front walker's tail swings on a beat of its own: the cut covers two steps by the clip's crossings and the
     overlapped wrap is turned off. The seam gate's line keeps its words up to the reason and gives that reason in place of

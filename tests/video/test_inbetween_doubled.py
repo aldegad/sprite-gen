@@ -144,10 +144,21 @@ def test_a_line_left_at_part_strength_is_a_double_outline_that_every_reading_bef
     assert faults(_readings(faded, a, b)) == [] and rife.doubled(faded, a, b) > DOUBLED_WARN
 
 
-def test_auto_gives_a_frame_with_a_double_outline_way_to_the_nearer_source_frame():
+def test_auto_gives_a_frame_with_a_double_outline_way_to_the_nearer_source_frame(monkeypatch):
     """Resampled two to four, each frame RIFE made leaving its first source frame's near-boot lines at 0.45: auto takes the
     nearer source frame at both (cells 1 and 3, half way rounding up), the fault named in the warning's words; rife
-    keeps both, named."""
+    keeps both, named. Both resamplings judge the same two frames made between the same source frames at the same
+    times: each is measured once (`align.measure_made`, kept by what it was asked), and rife reads auto's measures."""
+    measured: dict[tuple[int, int, int, float, bool], dict] = {}
+    measure = align.measure_made
+
+    def once(frame, x, y, t, *, reads):
+        key = (id(frame), id(x), id(y), t, reads)  # every frame asked about lives to the end of the test
+        if key not in measured:
+            measured[key] = measure(frame, x, y, t, reads=reads)
+        return dict(measured[key])
+
+    monkeypatch.setattr(align, "measure_made", once)
     a, b = _step(0), _step(1)
     there, back = _left(_step(0.5), a, 0.45), _left(_step(0.5), b, 0.45)
     out, facts = _resampled(a, b, there, back)
