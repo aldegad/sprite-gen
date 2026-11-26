@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from PIL import Image
 
@@ -430,11 +430,13 @@ class Band:
         return cls(((x0, y0, x1, y1), mask, c, float(np.sqrt((c * c).sum()))), patch.copy())
 
 
-def register(reference: tuple, feat: np.ndarray, centre: tuple[int, int] = (0, 0), radius: int = SEARCH) -> dict[str, Any]:
+def register(reference: tuple, feat: np.ndarray, centre: tuple[int, int] = (0, 0), radius: int = SEARCH,
+             match: Callable[..., tuple[np.ndarray, int, int]] | None = None) -> dict[str, Any]:
     """The shift (dx, dy) that lays `feat` over the reference: the engine's integer match (`auto_motion._match_costs`,
-    `auto_motion._best`) and a parabola through the cost at the best offset and its neighbours on each axis."""
+    `auto_motion._best`) and a parabola through the cost at the best offset and its neighbours on each axis. `match`,
+    where given, is `auto_motion._matcher(reference)`, kept by a caller that reads many pictures against it."""
     (x, y, _, _), _, _, _ = reference
-    costs, xs, ys = auto_motion._match_costs(reference, feat, centre, radius)
+    costs, xs, ys = (match if match is not None else auto_motion._matcher(reference))(feat, centre, radius)
     iy, ix = auto_motion._best(costs, xs, ys, reference, centre)
     dx, dy = x - (xs + ix), y - (ys + iy)
 
@@ -465,12 +467,13 @@ def fit(band: Band, feat: np.ndarray, geom: Geometry) -> dict[str, Any]:
         search = 2 * SEARCH
         first = register(band.reference, feat, (0, 0), search)
     loc, origin, size = _local(band.reference, FINE + 1)
+    fine = auto_motion._matcher(loc)  # every size and tilt is read against it: its transforms are made once
     c = np.asarray(geom.mouth)
 
     def at(t: np.ndarray, s: float, th: float) -> tuple[float, np.ndarray, bool]:
         m = sim(t[0], t[1], s, th, geom.mouth)
         wf = warp(feat, m @ shift(*origin), size)
-        rr = register(loc, wf.astype(np.float64), (0, 0), FINE)
+        rr = register(loc, wf.astype(np.float64), (0, 0), FINE, fine)
         return rr["cost"], m @ shift(-rr["sx"], -rr["sy"]), rr["edge"]
 
     def best_on(t: np.ndarray, scales: np.ndarray, thetas: np.ndarray) -> dict[str, Any]:
