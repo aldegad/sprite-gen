@@ -133,7 +133,7 @@ PyTorch 가 `pyproject.toml` 이 적은 하한인지도 `tests/release/test_cuda
 `real_rife`·`torch_rife` 표시를 가졌으면 닿은 것이다(표시를 떼는 변경도 닿는다).
 
 ```bash
-python scripts/release_gates.py --since <이전 릴리즈 태그, 또는 GPU 레인이 마지막으로 통과한 커밋> [--to <커밋>]
+.venv/bin/python scripts/release_gates.py --since <이전 릴리즈 태그, 또는 GPU 레인이 마지막으로 통과한 커밋> [--to <커밋>]
 ```
 
 은 닿은 파일을 이름 댄다. 닿은 것이 없으면 그 릴리즈에서 GPU 레인을 돌지 않아도 되고, 페이지에는 돌지 않았다고
@@ -160,7 +160,7 @@ python scripts/release_gates.py --since <이전 릴리즈 태그, 또는 GPU 레
 
    ```bash
    gh workflow run linux-lane.yml --repo aldegad/sprite-gen-lane -f sha=<PR 머리 SHA> -f ref=<브랜치나 PR> -f artifact=true
-   python scripts/release_gates.py --since <이전 릴리즈 태그> --to <PR 머리 SHA>
+   .venv/bin/python scripts/release_gates.py --since <이전 릴리즈 태그> --to <PR 머리 SHA>
    ```
 
    `release_gates.py` 가 GPU 레인에 닿은 파일을 대면, 그 SHA 로 `pack` 한 `scripts/cuda_lane.py` 를 GPU 호스트에서

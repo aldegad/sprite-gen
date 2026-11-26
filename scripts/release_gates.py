@@ -12,7 +12,7 @@ passed over in silence.
 
 Standard library only, as the other release scripts.
 
-    python scripts/release_gates.py --since v4.4.0 [--to HEAD]
+    .venv/bin/python scripts/release_gates.py --since v4.4.0 [--to HEAD]
 """
 from __future__ import annotations
 

@@ -239,6 +239,7 @@ def test_a_lane_build_of_the_pull_request_head_merged_unchanged_is_taken(harness
     tag = _tagged(harness)
     _git(harness.checkout, "checkout", "-q", "-b", "pr", "v1.2.0")
     (harness.checkout / "CHANGELOG.md").write_text(CHANGELOG, encoding="utf-8")
+    (harness.checkout / "docs" / "assets").mkdir(parents=True, exist_ok=True)  # git keeps no empty folder at v1.2.0
     (harness.checkout / "docs" / "assets" / "wave-cube.gif").write_bytes(GIF_BYTES)
     head = _commit(harness.checkout, "the pull request's head")
     assert head != tag and _git(harness.checkout, "rev-parse", "pr^{tree}") == _git(harness.checkout, "rev-parse", "v1.3.0^{tree}")
