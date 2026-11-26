@@ -306,7 +306,8 @@ class Reading:
         e, last = s + L, s + L - 1
         if len(c) < 3:
             return "uncertain", "no-range", "under two steps in the clip: no step range", [], [], None
-        m = float(statistics.median(b - a for a, b in zip(c, c[1:])))
+        intervals = [b - a for a, b in zip(c, c[1:])]
+        m = float(statistics.median(intervals))
         lo, hi = m / ROOT2, m * ROOT2
         step = m / self.per
 
@@ -324,7 +325,8 @@ class Reading:
             return "uncertain", "head-stall", f"plays the clip's head: {c[0] - self.head_limit:.1f}+ frames with no crossing, over {hi:.1f}", [], [], step
         if tail_played and after[0] > after[1] + EPS:
             return "uncertain", "tail-stall", f"plays the clip's tail: {self.tail_limit - c[-1]:.1f}+ frames with no crossing, over {hi:.1f}", [], [], step
-        bad = [(a, b) for a, b in zip(c, c[1:]) if played(a, b) and not lo - EPS <= b - a <= hi + EPS]
+        lower, upper = lo - EPS, hi + EPS
+        bad = [(a, b) for a, b in zip(c, c[1:]) if played(a, b) and not lower <= b - a <= upper]
         if bad:
             what = ", ".join(f"{a:g}->{b:g} ({b - a:.1f})" for a, b in bad)
             return ("uncertain", "step-long" if any(b - a > hi for a, b in bad) else "step-short",
@@ -341,10 +343,11 @@ class Reading:
             tails = np.linspace(*after, OPEN_SAMPLES)
         else:  # frame e alone lies past the last crossing, unplayed: any step the clip allows
             tails = np.linspace(c[-1] + max(lo, self.tail_limit - c[-1]), c[-1] + 10 * hi, OPEN_SAMPLES)
-        base = list(c)
+        base = c if type(c) is list else list(c)
 
         def ring(x: Any, y: Any) -> list[float]:
-            return ([x] if x is not None else []) + base + ([y] if y is not None else [])
+            with_head = base if x is None else [x] + base
+            return with_head if y is None else with_head + [y]
 
         def phases(t: int) -> list[list[float]]:
             # phi at t for every (head, tail): before the first crossing it reads the head alone, from the last on the
@@ -387,8 +390,13 @@ class Reading:
         deltas = [d for o in outs for d in o[4]]
         ms = [o[5] for o in outs if o[5] is not None]
         worst = max(deltas, key=abs) if deltas else None
-        rec.update(k=ks, delta=[round(float(min(deltas)), 3), round(float(max(deltas)), 3)] if deltas else None,
-                   phase=round(float(worst) * float(np.median(ms)), 1) if worst is not None and ms else None, ring=self.ring_count(s, L))
+        delta = [round(float(min(deltas)), 3), round(float(max(deltas)), 3)] if deltas else None
+        phase = None
+        if worst is not None and ms:
+            # NumPy reduces a singleton with a positive-zero accumulator.
+            median_step = 0.0 + ms[0] if len(ms) == 1 and type(ms[0]) is float else float(np.median(ms))
+            phase = round(float(worst) * median_step, 1)
+        rec.update(k=ks, delta=delta, phase=phase, ring=self.ring_count(s, L))
         if len(verdicts) > 1 or (verdicts == {"refuted"} and len(ks) > 1):
             whys = "; ".join(sorted({f"{o[0]}: {o[2]}" for o in outs}))
             return {**rec, "verdict": "uncertain", "code": "bounds", "why": f"what the clip does not show leaves it open: {whys}"}
