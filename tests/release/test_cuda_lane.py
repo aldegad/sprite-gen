@@ -538,6 +538,25 @@ def test_the_verdict_counts_a_test_the_split_left_and_that_ran_alone_as_run(tmp_
     assert rec["alone"] == [{"test": COLLECTED[2], "seconds": 612.0, "limit": 900, "rife_calls": 512}]
 
 
+def test_a_chunk_names_each_of_its_tests_past_a_third_of_the_budget_as_a_candidate_to_run_alone():
+    assert cuda_lane.ALONE_OVER == cuda_lane.CHUNK_BUDGET / 3 == 180
+    ran = {cuda_lane.junit_key(COLLECTED[2]): ["failed", 181.0], cuda_lane.junit_key(COLLECTED[0]): ["passed", 195.4],
+           cuda_lane.junit_key(COLLECTED[1]): ["passed", 180.0]}
+    assert cuda_lane.alone_candidates(ran, COLLECTED) == [{"test": COLLECTED[0], "seconds": 195.4},
+                                                          {"test": COLLECTED[2], "seconds": 181.0}]
+    assert cuda_lane.alone_candidates({}, COLLECTED) == []
+
+
+def test_the_verdict_gathers_the_chunks_candidates_to_run_alone_and_moves_none(tmp_path, capsys):
+    where = _prepared(tmp_path, {1: COLLECTED[:2], 2: COLLECTED[2:]})
+    _chunk(where, 2, 2, alone_candidates=[{"test": COLLECTED[2], "seconds": 195.4}])
+    assert cuda_lane.verdict(where, 2) == 0
+    rec = json.loads((where / "run.json").read_text(encoding="utf-8"))
+    assert rec["alone_candidates"] == [{"test": COLLECTED[2], "seconds": 195.4, "chunk": "2/2"}]
+    assert (rec["ran"], rec["within_budget"], rec["left"], rec["alone"]) == (3, 3, [], [])
+    assert f"a candidate to run alone (past 180 s in chunk 2/2): {COLLECTED[2]} in 195.4 s" in capsys.readouterr().out
+
+
 def test_a_test_run_alone_within_the_budget_counts_within_it(tmp_path):
     where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:2]})
     for k in (1, 2):

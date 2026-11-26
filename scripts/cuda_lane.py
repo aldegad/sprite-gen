@@ -51,8 +51,9 @@ budget is one, CHUNK_BUDGET; a limit is how far a run alone is measured, not a b
 commit on the environment `prepare` made, they left the same tests, each test run alone was one they left and passed
 there too, and together they ran every other test `prepare` collected, each once; it then writes run.json, and only
 then, counting the tests run within the budget and those run alone past it, apart, and naming the tests run alone
-(their time, and the binary's calls where the test recorded them as the pytest property rife_calls) and the tests
-left, not run. A release whose GPU lane run left tests, or ran one alone past a chunk's budget,
+(their time, and the binary's calls where the test recorded them as the pytest property rife_calls), the tests
+left, not run, and the candidates to run alone: a chunk names each of its tests that took more than a third of the
+budget (ALONE_OVER), and moves none. A release whose GPU lane run left tests, or ran one alone past a chunk's budget,
 says why on its page (`release_publish.py --gpu-unmeasured`, `--gpu-over-budget`).
 
 The engine finds only what this run installed: no SPRITE_GEN_* from outside but the run's own (SPRITE_GEN_RIFE, the
@@ -97,6 +98,10 @@ GATE_TESTS = "real_rife or torch_rife or rife_pinned"
 # Seconds one chunk's tests may take: with the interpreter's start, one call on the host stays under the ten minutes
 # a call may hold a remote machine.
 CHUNK_BUDGET = 540
+# A test that takes more than a third of the budget alone has a seat of its own (`test --alone`). A chunk names each of
+# its tests that ran past it as a candidate to run alone (`alone_candidates`), and moves nothing: a person adds the name
+# to what every chunk leaves (docs/release.md, "혼자 도는 시험").
+ALONE_OVER = CHUNK_BUDGET / 3
 CHUNK = re.compile(r"([1-9][0-9]*)/([1-9][0-9]*)")
 
 
@@ -561,6 +566,13 @@ def run_chunk(where: Path, chunk: str, budget: float, leave: list[str] | None = 
                       {"chunk": f"{k}/{n}", "left": leave})
 
 
+def alone_candidates(ran: dict[str, list], collected: list[str]) -> list[dict]:
+    """The tests of a chunk's `ran` (junit key: [outcome, seconds]) that took more than ALONE_OVER: each by its id and
+    seconds, in the order prepare collected them."""
+    return [{"test": nodeid, "seconds": ran[key][1]} for nodeid in collected
+            if (key := junit_key(nodeid)) in ran and (ran[key][1] or 0) > ALONE_OVER]
+
+
 def run_alone(where: Path, nodeid: str, limit: float) -> int:
     """One test `prepare` collected, run alone in the pack at where, its time measured up to limit: 0 where it passed."""
     where = where.resolve()
@@ -602,6 +614,12 @@ def _run_tests(where: Path, sha: str, prepared: dict, name: str, said_as: str, a
     props = junit_props(junit.read_bytes()) if junit.is_file() else {}
     if props:
         rec["props"] = props
+    if "chunk" in fields:
+        rec["alone_candidates"] = alone_candidates(rec["ran"], prepared.get("collected", []))
+        for found in rec["alone_candidates"]:
+            print(f"cuda_lane: {said_as}: {found['test']} took {found['seconds']:g} s, past a third of the budget "
+                  f"({ALONE_OVER:g} s): a candidate to run alone (leave it by name in every chunk, then --alone)",
+                  flush=True)
     rec["skipped"] = ([line for line in said.splitlines() if line.startswith("SKIPPED")] or
                       [key for key, (outcome, _) in rec["ran"].items() if outcome == "skipped"])
     rec["pytest_summary"] = ([line for line in said.splitlines() if line.strip()] or [""])[-1]
@@ -641,7 +659,7 @@ def verdict(where: Path, n: int) -> int:
     if not collected:
         _fail("prepared.json collected no test")
     seen: dict[str, str] = {}
-    chunks = []
+    chunks, candidates = [], []
     left: list[str] | None = None
     for k in range(1, n + 1):
         path = where / f"chunk-{k}-of-{n}.json"
@@ -670,6 +688,7 @@ def verdict(where: Path, n: int) -> int:
             if key not in collected:
                 _fail(f"{key} ran but was not collected by prepare")
             seen[key] = f"{k}/{n}"
+        candidates += [{**found, "chunk": rec["chunk"]} for found in rec.get("alone_candidates", [])]
         chunks.append({"chunk": rec["chunk"], "tests": len(rec.get("ran", {})), "seconds": rec.get("seconds"),
                        "budget": rec.get("budget"), "started": rec.get("started"),
                        "pytest_summary": rec.get("pytest_summary")})
@@ -711,7 +730,7 @@ def verdict(where: Path, n: int) -> int:
     over = [a for a in alone if (a["seconds"] or 0) > budget]
     run = {"commit": sha, "gates": GATE_TESTS, "passed": True, "tests": len(collected), "ran": len(seen),
            "left": left, "budget": budget, "within_budget": len(seen) - len(over), "over_budget": len(over),
-           "chunks": chunks, "alone": alone,
+           "chunks": chunks, "alone": alone, "alone_candidates": candidates,
            "prepared_sha256": digest,
            **{key: prepared[key] for key in ("python", "gpu", "probe", "pip_freeze", "binary", "model", "tools")
               if key in prepared}}
@@ -720,7 +739,9 @@ def verdict(where: Path, n: int) -> int:
           f"{len(seen) - len(over)} within the {budget:g} s budget ({n} chunks, {round(sum(c['seconds'] or 0 for c in chunks))} s"
           f"{', and alone' if len(alone) > len(over) else ''}), {len(over)} run alone past it" +
           "".join(f"; {a['test']} alone in {a['seconds']} s" for a in alone) +
-          (f"; left, not run: {', '.join(left)}" if left else ""), flush=True)
+          (f"; left, not run: {', '.join(left)}" if left else "") +
+          "".join(f"; a candidate to run alone (past {ALONE_OVER:g} s in chunk {c['chunk']}): {c['test']} in "
+                  f"{c['seconds']:g} s" for c in candidates), flush=True)
     return 0
 
 

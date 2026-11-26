@@ -128,7 +128,7 @@ PATH 를 바꾸지 않고 레인의 디렉터리 안에 둔 도구로 돈다. �
 시험은 토막으로 돈다. `test --chunk K/N` 은 모은 시험 가운데 몫 K 를(`pytest --shard K/N`, 리눅스 레인이 쓰는 그
 나눔) 돈다: 바이너리는 `prepare` 가 깐 것(`SPRITE_GEN_RIFE`)으로, torch 판은 CUDA 로, 둘이 함께 붙은 시험은 두
 백엔드를 나란히 두고. 하나라도 실패하거나 건너뛰면 그 토막은 실패다. 토막은 예산(기본 540초) 안에 끝나야 하고,
-넘으면 토막이 띄운 프로세스까지 모두 멈추고 실패로 남는다 — 그때는 N 을 키워 처음부터 다시 나눈다. 토막마다
+넘으면 토막이 띄운 프로세스까지 모두 멈추고 실패로 남는다. 어떤 부하에서든 넘으면 넘은 것이다. 그때는 그 토막을 예산 너머로 민 시험을 혼자 돌리고(아래 "혼자 도는 시험") 같은 N 으로 처음부터 다시 나눈다. 토막마다
 무엇을 어떻게 돌았는지(pytest 의 `--junitxml` 에서 읽은 시험마다의 결과와 시간)를 `chunk-K-of-N.json` 에 통과든
 실패든 남기고, 같은 토막은 한 번만 돈다. 시험 하나가 토막 예산 안에 들 수 없으면 그 시험을 이름으로
 남긴다(`--leave`, 나눔의 모든 토막에 같은 것을): pytest 가 그것을 빼고, 토막의 기록이 그 이름을 적는다. 토막이
@@ -140,9 +140,30 @@ pytest 속성 `rife_calls` 로 남기면(`request.node.user_properties`) 기록�
 `verdict --chunks N` 은 그 나눔의 토막 1..N 이 모두 pack 의 커밋에서 `prepare` 가 지은 환경으로 통과했고, 같은
 시험을 남겼고, 혼자 돈 시험마다 그 남긴 것 가운데 하나이며 같은 커밋과 환경에서 통과했고, 남긴 것 밖의 모은 시험
 전부를 한 번씩 돌았을 때만 `run.json` 을 쓴다. 거기에 예산 안에서 돈 시험 수와 예산을 넘겨 혼자 돈 시험 수를 따로,
-혼자 돈 시험(시간, 호출 수)과 돌지 않고 남은 시험을 적는다.
+혼자 돈 시험(시간, 호출 수)과 돌지 않고 남은 시험, 토막들이 말한 혼자 돌 후보를 적는다.
 시험을 남긴 실행으로 내는 릴리즈는 그 까닭을 `--gpu-unmeasured` 로 준다(아래 "Gates 칸"). 이 검사들은
 `tests/release/test_cuda_lane.py` 가 본다.
+
+### 혼자 도는 시험
+
+혼자서 예산의 삼분의 일(180초, `ALONE_OVER`)을 넘는 시험은 자기 자리를 갖는다. 나눔의 모든 토막이 그 이름을
+남기고(`--leave`), 그 시험은 혼자 돈다(`--alone`). 토막 안의 시험이 180초를 넘으면 토막이 그 이름과 시간을 혼자 돌
+후보로 말한다(출력 한 줄, `chunk-K-of-N.json` 의 `alone_candidates`, `run.json` 에 모음). 레인은 아무것도 옮기지
+않는다. 사람이 아래 표에 이름과 까닭을 더하고, 다음 나눔부터 남긴다.
+
+지금 혼자 도는 시험은 다섯이다(`tests/video/test_rife_cuts.py`, GPU 레인의 호스트 RTX 3060 에서 잰 값):
+
+| 시험 | 까닭 | 한도 |
+|---|---|---|
+| `test_a_public_cut_takes_as_many_poses_with_the_default_model_as_measured[knight-walk-ncnn]` | 공개 컷 통째의 포즈 수를 재는 시험이라 쪼개면 재는 대상이 바뀐다. 혼자 약 630초 | 900초 |
+| `test_a_public_cut_takes_as_many_poses_with_the_default_model_as_measured[pip-run-ncnn]` | 같은 까닭. 혼자 560초에서 멈추게 했을 때 끝나지 않았다 | 900초 |
+| `test_a_public_cut_takes_as_many_poses_with_the_default_model_as_measured[pip-jump-ncnn]` | 같은 까닭. 혼자 452초 | 540초 |
+| `test_the_default_model_s_frame_dragged_off_still_feet_is_caught_wherever_rife_v4_6_s_was[knight-walk-ncnn]` | 혼자 171초, 토막 안에서 195초. 그 토막이 예산을 넘었다 | 540초 |
+| `test_the_default_model_s_frame_dragged_off_still_feet_is_caught_wherever_rife_v4_6_s_was[pip-jump-ncnn]` | 혼자 188초 | 540초 |
+
+공개 컷이 예산을 넘는 것은 바이너리를 부를 때마다 약 1.2초가 준비에 들고(프레임 크기와 무관, 프로세스의 시작은
+0.02초) 컷 하나가 수백 번 부르기 때문이다. 그 준비를 컷마다 한 번으로 줄이는 것(바이너리를 한 번만 띄우기)은 아직
+정하지 않은 일이다. 한도는 그 시간을 끝까지 재기 위한 것이고, 넘으면 실패다.
 
 엔진은 이 실행이 깐 것만 찾는다: 밖에서 온 `SPRITE_GEN_*` 가 없고(실행이 정하는 바이너리, 모델, 장치뿐), 사용자
 데이터 디렉터리(윈도우는 `LOCALAPPDATA`, 그 밖은 `XDG_DATA_HOME`)가 비어 있고(토막마다 새로), PATH 에 rife-ncnn-vulkan 이 없다.
