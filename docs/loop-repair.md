@@ -286,6 +286,21 @@ started together is byte for byte the frame `rife.between` makes one run after a
 `0.6`. On an Apple M1 Max, wall time spent making the 233 frames (466 RIFE runs) of the public `knight-walk`
 cut at 60 fps dropped from 210 s to 121 s.
 
+### Layers left out
+
+A Vulkan loader loads every implicit layer installed on a machine into each Vulkan process it starts: overlays (ReShade, the Steam overlay), capture hooks (OBS's Vulkan capture hook) and shader recorders (Steam's Fossilize). None is part of a RIFE frame, yet their cost is paid on every run because `rife-ncnn-vulkan` starts a new process per run. On a Windows desktop with an NVIDIA GeForce RTX 3060 (driver 617.14, Vulkan loader 1.4.341, elevated process, those four layers registered), one run at 640 x 896 (same at 128 x 128) took 2.35 s: 0.013 s process start, 0.24 s Vulkan instance, about 0.87 s device, model and pipelines (frame written at 1.15 s; compute about 0.024 s per frame in folder runs of 1, 4 and 16 frames) and 1.2 s from frame written to exit. Setting only ReShade's disable variable dropped a run to 1.16 s with the same GPU line and frame sha256; leaving out only OBS's hook changed nothing measurable.
+
+`rife.binary_env()` builds the environment for every `rife-ncnn-vulkan` run (all runs go through `rife._call`). It now:
+
+- sets `VK_LOADER_LAYERS_DISABLE=~implicit~` and `VK_LOADER_LAYERS_ALLOW=*device_select*,*optimus*,*switchable_graphics*` so the loader leaves out implicit layers while keeping GPU-choosing layers (Mesa's device select, NVIDIA's Optimus, AMD's switchable graphics; `rife.GPU_CHOOSING_LAYERS`) on the same GPU;
+- on Windows, reads (without modifying) the implicit layer manifests under `SOFTWARE\Khronos\Vulkan\ImplicitLayers` for machine and user (`rife.registered_implicit_layers`) and sets each non-GPU-choosing layer's `disable_environment` variable in the child environment only (`rife.implicit_layers_left_out`, `rife.layers_left_out`), keeping any value the caller already set (about 0.8 ms per run).
+
+The Windows step is needed because the Windows loader ignores `VK_LOADER_LAYERS_*` in an elevated process (an administrator shell or ssh session), whereas every loader version reads a layer's `disable_environment` variable in every process. Driver-registered layers (`VK_LAYER_NV_optimus`, `VK_LAYER_NV_present`) are not under that key and stay in. Loaders older than 1.3.234 (1.3.262 for the allow list) ignore `VK_LOADER_LAYERS_*` and run as before; on macOS, the binary links MoltenVK directly with no loader. A caller setting `VK_LOADER_LAYERS_DISABLE` itself keeps its choice (an empty value keeps every layer in) and no layer's own variable is set; there is no other option to turn this off. On its first frame or read, a `rife.Binary` prints one stderr line naming the layers left out by their own variables (plus one for any unreadable manifests), and nothing when none is set.
+
+On that desktop, the loader log dropped from `VK_LAYER_NV_optimus`, `VK_LAYER_NV_present`, `VK_LAYER_OBS_HOOK` and `VK_LAYER_reshade` to only the two NVIDIA layers. Across six alternated runs each at 640 x 896 under load, median time fell from 2.47 s to 1.31 s with the same GPU line and frame sha256 across all 12 runs. On the public `knight-walk` cut from 24 to 60 fps (232 frames, 464 runs, two at a time), RIFE frame-making wall time per frame fell from 3.33 s to 2.03 s (about 39% less). On an Apple M1 Max, the cut was unchanged (178.9 s before, 181.5 s after; 104.2 s and 105.7 s frame-making). `tests/video/test_rife_loader_layers.py` checks the environment, manifest reading, stderr lines and, with the real binary, byte-for-byte identical frames at `t = 0.25` and `0.6` with the same GPU lines.
+
+Every run still starts the binary anew (about 0.24 s Vulkan instance and 0.87 s device, model and pipelines against about 0.024 s of compute per frame); only a persistent process would remove that, which this change does not do.
+
 ### Where — measured 2026-10-03
 
 One real pair: two frames of a Lite side walk two apart (545 x 544, premultiplied), the frame
