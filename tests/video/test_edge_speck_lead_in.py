@@ -287,7 +287,8 @@ def test_a_cut_after_a_lead_in_reads_the_standing_height_on_its_own_first_frame(
         ("cut-first-frame", 12, meta["body_src_h"], meta["scale"])
 
 
-@pytest.mark.parametrize("start, first, change", [(0.93, 112, 0.063)])  # the other sign: size_change, below
+# the other sign: size_change, below; the case takes a second, slow (pyproject.toml's marker)
+@pytest.mark.parametrize("start, first, change", [pytest.param(0.93, 112, 0.063, marks=pytest.mark.slow)])
 def test_a_cut_filmed_at_another_size_than_the_first_frame_reads_the_standing_height_on_its_own_first_frame(tmp_path, start, first, change):
     # Reframed by 7 % over its first 9 frames, the walker opens no lead-in (under LEAD_IN_MIN), and its walk is
     # filmed 7 % larger (or smaller) than its first frame: read there, the standing height delivered the walk
@@ -317,6 +318,7 @@ def _arm_swung_out(k: int) -> Image.Image:
     return image
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("pose", [walks.settling, _item_held_up, _arm_swung_out])
 def test_a_pose_the_first_frame_lacks_is_not_another_size(tmp_path, pose):
     # The first frame stands tall on straight legs and settles into the walk (5 % shorter, lighter, as broad);

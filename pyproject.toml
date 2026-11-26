@@ -44,6 +44,9 @@ dev = [
     # is required — the default `thread` method cannot interrupt a blocked
     # subprocess.wait(), which is exactly the case that hangs here.
     "pytest-timeout>=2.3",
+    # The lane splits the suite over the processes of each job (`pytest -n auto`, scripts/linux_lane.sh), and a
+    # local run may too: a plain `pytest` stays one process. 3.8 is the release the lane was measured on.
+    "pytest-xdist>=3.8",
 ]
 # RIFE's torch backend (SPRITE_GEN_RIFE_BACKEND=torch, docs/loop-repair.md section 1): the binary's model in PyTorch (rife-v4.25 by default), for a
 # GPU host the binary cannot run on (Vulkan-less CUDA). 2.13.0 is the release it was measured on. PyPI's Linux x86-64
@@ -77,15 +80,18 @@ pythonpath = ["tests"]
 # its first test.
 timeout = 120
 # One mark names a test of the real rife-ncnn-vulkan: tests/conftest.py skips it where no RIFE is
-# reachable, and `scripts/linux_lane.sh --rife-only` runs exactly the marked tests (`-m real_rife`).
+# reachable, and the GPU lane (`scripts/cuda_lane.py`) runs the marked tests with none skipped.
 # Another names a test of the torch backend: skipped where PyTorch or the model is missing, run by
-# the lanes with none skipped (`-m torch_rife`, on SPRITE_GEN_RIFE_DEVICE; docs/release.md).
+# the GPU lane with none skipped (on CUDA; docs/release.md). The GPU lane runs where a release's change
+# reaches them (`scripts/release_gates.py`); the Linux lane, which has no GPU, lets them skip.
 # The last names a slow test: a plain `pytest` is the fast bundle, which tests/conftest.py makes by
 # deselecting the marked tests, and `pytest --full` runs every test, as the release lane does.
 markers = [
-    "real_rife: runs the real rife-ncnn-vulkan; skipped where none is reachable, run by `scripts/linux_lane.sh --rife-only`",
-    "torch_rife: runs RIFE's torch backend; skipped where PyTorch or the model is missing, run by the lanes with `-m torch_rife`",
+    "real_rife: runs the real rife-ncnn-vulkan; skipped where none is reachable, run by the GPU lane (`scripts/cuda_lane.py`)",
+    "torch_rife: runs RIFE's torch backend; skipped where PyTorch or the model is missing, run by the GPU lane (`scripts/cuda_lane.py`)",
+    "rife_pinned: pins the RIFE binary's calls (`as_pinned`); pinned to none where no binary is found, as in the Linux lane, and run by the GPU lane (`scripts/cuda_lane.py`) for the binary's calls (tests/release/test_rife_pinned.py)",
     "slow: a case takes 1 s or more, or the function's cases 5 s or more together (an 8-core M1); deselected unless `pytest --full`",
+    "one_share: the module runs whole in one share of the lane (`pytest --shard`), so what its module fixtures make is made once a run",
 ]
 
 # The pipeline ships an importable sprite_gen package. The canonical invocation is the

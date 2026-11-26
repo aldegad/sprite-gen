@@ -192,6 +192,7 @@ SCREEN_CALLS = {"rife-v4.25": (8, 28), "rife-v4.6": 20}
 @pytest.mark.slow
 @pytest.mark.real_rife
 @pytest.mark.timeout(900)  # 20 to 28 calls of the binary at 128 x 192: seconds on a GPU, a minute or two on a CPU's Vulkan driver
+@pytest.mark.rife_pinned
 def test_real_rife_delivers_no_cell_carrying_a_filmed_ghost():
     """A filmed ghost resampled 4 to 8 through the real RIFE: before the screen the ghost itself was
     taken at its own time, unmeasured, and the frames made beside it carried it, judged only beyond it."""

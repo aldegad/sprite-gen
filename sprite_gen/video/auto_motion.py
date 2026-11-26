@@ -70,14 +70,19 @@ def _reference(a, box):
     return box, mask, centered, norm
 
 
-def _correlate(region, kernel, rows, cols):
-    """Valid-window cross-correlation of one 2-D channel with a 2-D kernel through one FFT pair.
+def _kernel_spectrum(kernel, shape):
+    """What a region's transform is multiplied by for a valid-window cross-correlation with `kernel`
+    (`_match_costs`): the kernel's transform at the region's size, conjugated."""
+    return np.conj(np.fft.rfft2(kernel, s=shape))
+
+
+def _windows(region_spectrum, kernel_spectrum, shape, rows, cols):
+    """Valid-window cross-correlation of one 2-D channel with a 2-D kernel, from their transforms.
 
     The transform is the size of the region, so the circular product only wraps for offsets
     past the last valid window; those are cut off and no wrapped pixel reaches a result.
     """
-    spectrum = np.fft.rfft2(region) * np.conj(np.fft.rfft2(kernel, s=region.shape))
-    return np.fft.irfft2(spectrum, s=region.shape)[:rows, :cols]
+    return np.fft.irfft2(region_spectrum * kernel_spectrum, s=shape)[:rows, :cols]
 
 
 def _match(reference, moving, center, radius):
@@ -116,31 +121,53 @@ def _match_costs(reference, moving, center, radius):
     are window correlations, so all offsets come out of a few FFTs instead of one gathered
     copy of the masked patch per offset (that copy was most of a walk loop's time).
     """
+    return _matcher(reference)(moving, center, radius)
+
+
+def _matcher(reference):
+    """`_match_costs` against one reference, as a function of (moving, center, radius) that keeps the
+    reference's transforms (its mask's and each channel's) by the size of the region they were made
+    at: a caller that reads many pictures against one reference (`face_layer.fit`) makes each once.
+    Every transform is made as `_match_costs` makes it, so the costs are the same to the bit."""
     (x, y, right, bottom), mask, feature, norm = reference
-    cx, cy = center
-    rx, ry = (radius, radius) if isinstance(radius, int) else radius
     height, width = mask.shape
-    xs, xe = max(0, x-cx-rx), min(moving.shape[1]-width, x-cx+rx)
-    ys, ye = max(0, y-cy-ry), min(moving.shape[0]-height, y-cy+ry)
-    if xs > xe or ys > ye:
-        raise ValueError("automatic motion anchor has no search overlap")
-    region = moving[ys:ye+height, xs:xe+width].astype(np.float64)
-    rows, cols = ye-ys+1, xe-xs+1
     weights = mask.astype(np.float64)
     count = weights.sum()
-    kernel = np.zeros((height, width, region.shape[2]))
-    kernel[mask] = feature
-    product = np.zeros((rows, cols))
-    energy = np.zeros((rows, cols))
-    for channel in range(region.shape[2]):
-        values = region[:, :, channel]
-        total = _correlate(values, weights, rows, cols)
-        # sum((p - mean p) * f) = sum(p * f) - mean p * sum(f); the reference was centered in
-        # float32, so its sum is near zero but not zero, and is kept rather than assumed away.
-        product += _correlate(values, kernel[:, :, channel], rows, cols) - total * kernel[:, :, channel].sum() / count
-        energy += _correlate(values * values, weights, rows, cols) - total * total / count
-    denominator = np.sqrt(np.maximum(energy, 0.0)) * norm
-    return 1 - product / np.maximum(1e-10, denominator), xs, ys
+    made = {}
+
+    def spectra(shape, channels):
+        if (shape, channels) not in made:
+            kernel = np.zeros((height, width, channels))
+            kernel[mask] = feature
+            made[shape, channels] = (_kernel_spectrum(weights, shape),
+                                     [(_kernel_spectrum(kernel[:, :, c], shape), kernel[:, :, c].sum()) for c in range(channels)])
+        return made[shape, channels]
+
+    def costs(moving, center, radius):
+        cx, cy = center
+        rx, ry = (radius, radius) if isinstance(radius, int) else radius
+        xs, xe = max(0, x-cx-rx), min(moving.shape[1]-width, x-cx+rx)
+        ys, ye = max(0, y-cy-ry), min(moving.shape[0]-height, y-cy+ry)
+        if xs > xe or ys > ye:
+            raise ValueError("automatic motion anchor has no search overlap")
+        region = moving[ys:ye+height, xs:xe+width].astype(np.float64)
+        rows, cols = ye-ys+1, xe-xs+1
+        shape = region.shape[:2]
+        mask_spectrum, kernels = spectra(shape, region.shape[2])
+        product = np.zeros((rows, cols))
+        energy = np.zeros((rows, cols))
+        for channel, (kernel_spectrum, kernel_sum) in enumerate(kernels):
+            values = region[:, :, channel]
+            spectrum = np.fft.rfft2(values)  # read twice: for the patch's sum and for its product with the reference
+            total = _windows(spectrum, mask_spectrum, shape, rows, cols)
+            # sum((p - mean p) * f) = sum(p * f) - mean p * sum(f); the reference was centered in
+            # float32, so its sum is near zero but not zero, and is kept rather than assumed away.
+            product += _windows(spectrum, kernel_spectrum, shape, rows, cols) - total * kernel_sum / count
+            energy += _windows(np.fft.rfft2(values * values), mask_spectrum, shape, rows, cols) - total * total / count
+        denominator = np.sqrt(np.maximum(energy, 0.0)) * norm
+        return 1 - product / np.maximum(1e-10, denominator), xs, ys
+
+    return costs
 
 
 def track_box(frames: list[Image.Image], box: tuple[int, int, int, int], radius: int) -> np.ndarray:

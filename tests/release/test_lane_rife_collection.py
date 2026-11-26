@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""`scripts/linux_lane.sh --rife-unmeasured` runs the suite where no RIFE is reachable, and the tests
-that need one skip; `--rife-only` runs the tests marked `real_rife` or `torch_rife` (`pytest -m real_rife`,
-`-m torch_rife`), none skipped. A test that skips without RIFE and is not marked is measured by neither run.
+"""`scripts/linux_lane.sh` runs the suite where no RIFE is reachable (`pytest --rife-unmeasured`), and the tests
+that need one skip; the GPU lane (`scripts/cuda_lane.py`) runs the tests marked `real_rife` or `torch_rife`
+(`pytest -m "real_rife or torch_rife"`), none skipped. A test that skips without RIFE and is not marked is measured
+by neither lane.
 
 Its collection: the suite is collected twice, with nothing else changed, once with a stand-in RIFE
 everywhere `rife.locate()` and `rife.locate_model()` look (SPRITE_GEN_RIFE, PATH, the install root) and
@@ -111,11 +112,11 @@ def test_every_test_rife_decides_is_marked_real_rife(tmp_path):
     unmarked = sorted(n for n in decided if not (present.get(n) or absent[n])[1])
     assert not unmarked, (
         "skipped or collected by whether RIFE is reachable, but not marked real_rife or torch_rife — "
-        "`scripts/linux_lane.sh --rife-only` would not run them:\n" + "\n".join(unmarked))
+        "the GPU lane (`scripts/cuda_lane.py`) would not run them:\n" + "\n".join(unmarked))
     assert decided, "no test is decided by RIFE: the stand-in or the conftest skip no longer reaches the marked tests"
 
 
-# Each way a test can skip where no RIFE is reachable: by its mark, which `--rife-only` runs, and,
+# Each way a test can skip where no RIFE is reachable: by its mark, which the GPU lane runs, and,
 # unmarked, by a skip mark, in a fixture, in its body, and with its whole file.
 GUARDS = '''
 import pytest
@@ -198,7 +199,7 @@ def test_the_rife_less_run_fails_each_unmarked_skip_by_name(tmp_path):
     outcomes = {case.get("name"): [e.tag for e in case if e.tag in ("skipped", "failure", "error")]
                 for case in ElementTree.parse(report).iter("testcase")}
     assert outcomes == {
-        "test_marked": ["skipped"],  # tests/conftest.py's skip, which --rife-only runs
+        "test_marked": ["skipped"],  # tests/conftest.py's skip, which the GPU lane runs
         "test_skip_mark": ["error"],  # skipped in setup, failed there
         "test_fixture_skip": ["error"],
         "test_body_skip": ["failure"],

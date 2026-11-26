@@ -35,6 +35,7 @@ def text(region):
     return ','.join(f'{v:g}' for v in region)
 
 
+@pytest.mark.slow
 def test_a_flat_share_of_0_is_the_region_of_four_numbers(tmp_path):
     four, four_record = swayed(tmp_path, 'four', '--region', text(CHEST))
     five, five_record = swayed(tmp_path, 'five', '--region', text(CHEST) + ',0')

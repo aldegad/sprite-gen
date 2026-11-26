@@ -155,6 +155,7 @@ def ungenerated_run(tmp_path: Path) -> Path:
 
 # --- 기본값: 시퀀스 첫 인스턴스 + 후처리 반영 ---------------------------------
 
+@pytest.mark.slow
 def test_default_anchor_is_the_curated_sequence_head_not_index_zero(direction_run: Path) -> None:
     run_dir = direction_run
     request = _request(run_dir)
@@ -197,6 +198,7 @@ def test_materialize_writes_ref_and_removes_legacy_snapshot(direction_run: Path)
 # 물면 request 의 *모든* 행에 매니페스트 행을 요구해서, "행 생성 직전에 매번 돌려라"
 # 라는 계약이 **항상** corrupt-manifest 로 죽는다 (validator 검증 2026-07-25 실측).
 
+@pytest.mark.slow
 def test_stage1_run_serves_the_anchor_ref(stage1_run: Path, capsys) -> None:
     """앵커 행만 추출된 시점에 액션 행의 identity ref 가 나와야 한다 (그게 유일한 용도다)."""
     run_dir = stage1_run

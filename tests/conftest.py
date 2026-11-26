@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import hashlib
 import os
 import re
 import shutil
@@ -115,6 +116,31 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="run every test; without it a run is the fast bundle, the tests marked slow deselected. "
         "The release lane (scripts/linux_lane.sh) runs with it",
     )
+    parser.addoption(
+        "--shard",
+        metavar="K/N",
+        help="run the K-th of N shares of the tests (1 <= K <= N); a test's share is read from its id alone, so "
+        "the N runs of the lane's jobs (scripts/linux_lane.sh --shard) together run every test once",
+    )
+
+
+def share_of(key: str, shares: int) -> int:
+    """The share (0 to shares - 1) a test falls in, from its key (`share_key`) alone: every process that collects the
+    suite, each xdist worker and each job of the lane, places it alike, and the shares together hold every test once."""
+    return int.from_bytes(hashlib.sha256(key.encode("utf-8")).digest()[:8], "big") % shares
+
+
+def share_key(item: pytest.Item) -> str:
+    """What places a test in a share: its id, or the file of a module marked `one_share`, which then runs whole in one
+    share, so what it makes once for its tests (a module fixture) is made once a run and not once a share."""
+    return item.nodeid.partition("::")[0] if item.get_closest_marker("one_share") else item.nodeid
+
+
+def _shard(given: str) -> tuple[int, int]:
+    k, slash, n = given.partition("/")
+    if slash and k.isdigit() and n.isdigit() and 1 <= int(k) <= int(n):
+        return int(k), int(n)
+    raise pytest.UsageError(f"--shard takes K/N with 1 <= K <= N, not {given!r}")
 
 
 def _torch_rife_missing() -> str | None:
@@ -145,15 +171,24 @@ def pytest_report_header(config: pytest.Config) -> str | None:
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Without `--full` the tests marked `slow` are deselected: a plain `pytest` is the fast bundle.
 
-    A test marked `real_rife` runs the real binary: skipped where `rife.locate()` finds none, and run
-    by `scripts/linux_lane.sh --rife-only` (`-m real_rife`). A test marked `torch_rife` runs RIFE's torch
-    backend: skipped where PyTorch, the model or the device is missing (`_torch_rife_missing`), and run by
-    the lanes with none skipped (`-m torch_rife`, docs/release.md)."""
+    With `--shard K/N` only the K-th of N shares runs (`share_of`, `share_key`), as each of the Linux lane's jobs does.
+
+    A test marked `real_rife` runs the real binary: skipped where `rife.locate()` finds none. A test marked
+    `torch_rife` runs RIFE's torch backend: skipped where PyTorch, the model or the device is missing
+    (`_torch_rife_missing`). A test marked `rife_pinned` pins the binary's calls (`as_pinned`) and is not skipped: where
+    no binary is found it is pinned to none. The GPU lane (`scripts/cuda_lane.py`) runs the three with none skipped
+    (`-m "real_rife or torch_rife or rife_pinned"`, docs/release.md)."""
     if not config.getoption("full"):
         slow = [item for item in items if item.get_closest_marker("slow")]
         if slow:
             config.hook.pytest_deselected(items=slow)
             items[:] = [item for item in items if not item.get_closest_marker("slow")]
+    if config.getoption("shard"):
+        k, n = _shard(config.getoption("shard"))
+        other = [item for item in items if share_of(share_key(item), n) != k - 1]
+        if other:
+            config.hook.pytest_deselected(items=other)
+            items[:] = [item for item in items if share_of(share_key(item), n) == k - 1]
     marked = [item for item in items if item.get_closest_marker("real_rife")]
     torched = [item for item in items if item.get_closest_marker("torch_rife")]
     if marked:
@@ -171,8 +206,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 def _fail_unmeasured_skip(report: pytest.TestReport | pytest.CollectReport, node: pytest.Item | pytest.Collector) -> None:
-    """In the lane's RIFE-less run a skip that `--rife-only` will not run fails, by name: neither run would
-    measure it. `--rife-only` runs the tests marked real_rife or torch_rife; a skip of any other test, or of
+    """In the Linux lane's RIFE-less run a skip the GPU lane will not run fails, by name: neither lane would
+    measure it. The GPU lane runs the tests marked real_rife or torch_rife; a skip of any other test, or of
     a whole file, stands only where NOT_RIFE_SKIPS names it. Whatever skipped it: a skip mark, a fixture, the
     test body, the file at import."""
     if not report.skipped or hasattr(report, "wasxfail") or not node.config.getoption("rife_unmeasured", False):
@@ -183,8 +218,8 @@ def _fail_unmeasured_skip(report: pytest.TestReport | pytest.CollectReport, node
     path, line, reason = report.longrepr
     report.outcome = "failed"
     report.longrepr = (
-        "skipped where no RIFE is reachable, but not marked real_rife or torch_rife: `scripts/linux_lane.sh --rife-only` "
-        f"runs only the marked tests, so neither run measures it\n{path}:{line}: {reason}\n"
+        "skipped where no RIFE is reachable, but not marked real_rife or torch_rife: the GPU lane (`scripts/cuda_lane.py`) "
+        f"runs only the marked tests, so neither lane measures it\n{path}:{line}: {reason}\n"
         "A test that needs the real rife-ncnn-vulkan is marked `real_rife`; one that skips for another "
         "reason is named in NOT_RIFE_SKIPS (tests/conftest.py)."
     )

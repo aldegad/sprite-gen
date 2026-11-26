@@ -95,6 +95,7 @@ def _first_difference(name: str, was: str, now: str) -> str:
     return f"{name}:\n" + "\n".join(diff)
 
 
+@pytest.mark.slow
 def test_the_table_is_the_one_the_fixture_was_drawn_from(frozen, drawn) -> None:
     assert sorted(drawn) == sorted(frozen)
     assert {name.split("/")[0] for name in frozen} == set(GROUPS)
@@ -102,6 +103,7 @@ def test_the_table_is_the_one_the_fixture_was_drawn_from(frozen, drawn) -> None:
 
 
 @pytest.mark.parametrize("group", GROUPS)
+@pytest.mark.slow
 def test_every_prompt_string_without_handed_is_2_22_0s_byte_for_byte(group, frozen, drawn) -> None:
     names = [name for name in frozen if name.split("/")[0] == group]
     changed = [name for name in names if drawn[name] != _as_measured(frozen[name])]
@@ -109,6 +111,7 @@ def test_every_prompt_string_without_handed_is_2_22_0s_byte_for_byte(group, froz
                          + _first_difference(changed[0], _as_measured(frozen[changed[0]]), drawn[changed[0]]))
 
 
+@pytest.mark.slow
 def test_only_the_diagonal_still_sentences_moved(frozen, drawn) -> None:
     """Each measured sentence is in every still `gen --direction` draws at its view, facing either way (twice in a
     facing regeneration), and in no clip, `video-prompt`, mid-step redraw or other view; those prompts, and only

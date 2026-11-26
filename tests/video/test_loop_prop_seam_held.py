@@ -81,7 +81,7 @@ def _cut(root: Path, keyed: Path, *extra: str) -> dict:
     out = root / "out"
     assert loop.main(["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk",
                       "--anchor", "motion-auto", "--repair", "off", *extra]) == 0
-    return json.loads((out / "loop.loop.report.json").read_text())
+    return json.loads((out / "loop.loop.report.json").read_text(encoding="utf-8"))
 
 
 def _foot_miss(start: int, length: int, swing: int = SWING) -> float:
@@ -116,7 +116,7 @@ def staffless(staffless_cut, tmp_path) -> tuple[Path, dict]:
     the alignment finds the report by name in the loop's directory, not by a path recorded in it."""
     root = tmp_path / "staffless"
     shutil.copytree(staffless_cut / "out", root / "out")
-    return root, json.loads((root / "out" / "loop.loop.report.json").read_text())
+    return root, json.loads((root / "out" / "loop.loop.report.json").read_text(encoding="utf-8"))
 
 
 @pytest.mark.slow
@@ -140,7 +140,7 @@ def test_motion_auto_takes_two_steps_where_the_held_staff_closes_only_there(held
     assert held_edge["side"] == "right" and held_edge["doubled"] is True
     assert held_edge["chosen"] == {"start": cycle["start"], "length": cycle["length"], "seam": held_edge["chosen"]["seam"], "closes": True}
     assert shape["chosen"]["steps"] == 2 and shape["applied"] is True
-    strip = json.loads((root / "out" / "loop.strip.json").read_text())
+    strip = json.loads((root / "out" / "loop.strip.json").read_text(encoding="utf-8"))
     assert strip["steps"] == 2 and "cycles" not in strip and strip["cycle_frames"] == cycle["length"]
     assert not any("held part" in line for line in report["jolt"]["warnings"])
 
@@ -185,7 +185,7 @@ def test_an_explicit_max_len_is_not_widened_by_a_window_two_steps_long(tmp_path)
     held_edge = cycle["seam_pop"]["held_edge"]
     assert held_edge["two_step_capped"] == {"max_len": 25, "lengths_over": [2 * STEP - 1, 2 * STEP + 1]}
     assert "two_step" not in held_edge and held_edge["chosen"]["closes"] is False
-    assert "steps" not in json.loads((tmp_path / "out" / "loop.strip.json").read_text())
+    assert "steps" not in json.loads((tmp_path / "out" / "loop.strip.json").read_text(encoding="utf-8"))
     (line,) = [line for line in report["jolt"]["warnings"] if "held part does not close" in line]
     assert "over --max-len 25" in line
 
@@ -364,6 +364,7 @@ def test_shape_rank_reads_no_held_side_when_the_first_choice_does_not_pop():
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 74 calls of the binary at 384 x 256 with rife-v4.25, 66 with rife-v4.6, on an Apple GPU and on llvmpipe (the held fill's frames between; the module's two cuts make 6 more): a minute on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.rife_pinned
 def test_cycle_align_aligns_a_two_step_loop_as_the_one_cycle_it_is(held, staffless, tmp_path, rife_runs):
     """The loop cut two steps long is one cycle: where its report witnesses its cut whole cycles, it returns half way
     at its second step, which is no suspect (status `steps`), and it is resampled to the set's length like the rest —
@@ -379,11 +380,11 @@ def test_cycle_align_aligns_a_two_step_loop_as_the_one_cycle_it_is(held, staffle
     for src, name in ((root / "out", "two"), (other / "out", "one")):
         shutil.copytree(src, tmp_path / name)
         path = tmp_path / name / "loop.loop.report.json"
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         cycle = data["cycle"]
         cycle["cut_witness"] = {"cut": [cycle["start"], cycle["length"]], "says": "two steps", "by": ["screen"]}
         ((cycle.get("step_count") or {}).get("cycles") or {}).pop("unwitnessed", None)
-        path.write_text(json.dumps(data))
+        path.write_text(json.dumps(data), encoding="utf-8")
         seen.append(tmp_path / name)
     out = align.align_set(seen, between="nearest")
     two, one = out["loops"]
@@ -392,8 +393,8 @@ def test_cycle_align_aligns_a_two_step_loop_as_the_one_cycle_it_is(held, staffle
     mine = [e for e in out["suspects"] if e["dir"] == str(seen[0].resolve())]
     assert mine and all(e["status"] == "steps" and e["steps"] == 2 and [c["cycles"] for c in e["candidates"]] == [2] for e in mine)
     assert isinstance(report["cycle"]["ratio"], float)  # a window two lengths long reads its wrap as a candidate does
-    assert json.loads((seen[0] / "loop.strip.json").read_text())["steps"] == 2
-    assert "steps" not in json.loads((seen[1] / "loop.strip.json").read_text())
+    assert json.loads((seen[0] / "loop.strip.json").read_text(encoding="utf-8"))["steps"] == 2
+    assert "steps" not in json.loads((seen[1] / "loop.strip.json").read_text(encoding="utf-8"))
     # As cut: held, by name, until the caller counts them.
     dirs = [root / "out", other / "out"]
     with pytest.raises(align.CycleSuspects, match="nothing witnessed its cut whole cycles") as stopped:
@@ -404,7 +405,7 @@ def test_cycle_align_aligns_a_two_step_loop_as_the_one_cycle_it_is(held, staffle
     # A count given for it is still the last word: one half taken out of it, no longer two steps.
     out = align.align_set(dirs, between="nearest", cycles={str(root / "out"): 2, str(other / "out"): 1})
     assert "cycle_taken" in out["loops"][0]
-    assert "steps" not in json.loads((root / "out" / "loop.strip.json").read_text())
+    assert "steps" not in json.loads((root / "out" / "loop.strip.json").read_text(encoding="utf-8"))
     assert as_pinned(rife_runs(), {"rife-v4.25": (54, 74), "rife-v4.6": 66}), rife_runs()
 
 
@@ -432,9 +433,10 @@ HELD_FILL_KEYS_3800 = {"held_fill"}
 NO_REPEAT_KEYS_400 = {"fps", "holds"}
 
 
+@pytest.mark.slow
 def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path, staffless):
     src, report = staffless
-    cut = json.loads((src / "out" / "loop.strip.json").read_text())
+    cut = json.loads((src / "out" / "loop.strip.json").read_text(encoding="utf-8"))
     # The cut names its cells' source: the keyed frames it read, its window in them, and each cell's frame
     # there — every frame of the window one cell, under one crop.
     start, length = report["cycle"]["start"], report["cycle"]["length"]
@@ -451,7 +453,7 @@ def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path, staff
     out = align.align_set(dirs, between="nearest", cycles={str(d): 1 for d in dirs})
     assert all("cycles_kept" not in row and "steps" not in row for row in out["loops"])
     for d in dirs:
-        meta = json.loads((d / "loop.strip.json").read_text())
+        meta = json.loads((d / "loop.strip.json").read_text(encoding="utf-8"))
         assert set(meta) == STRIP_KEYS_2350 | SOURCE_KEYS_2390 | CLIP_FEET_KEYS | HELD_FILL_KEYS_3800 | NO_REPEAT_KEYS_400
         # 4.0.0: a cut whose cells were made again after its repair (its read again) is aligned from its cut with the fill
         # off; 4.2.0: video-loop keeps that cut beside it (`cycle_source`), so the alignment cuts nothing again and writes

@@ -57,6 +57,47 @@ def _between() -> Between:
     return Between(walk_at, [k / 4 for k in range(4 * (N + 6))], period=N)
 
 
+# --- cuts more than one test reads, each made once on a worker ----------------------------------------------------
+# Each is the cut those tests made each for themselves: the same clip, length and fill. A test that aligns one, cuts it
+# again into it or changes it works on a copy of its own (`_copy`); one that only reads it reads it where it is. A cut's
+# report names the frames it was cut from, which stay where they are for an alignment or `cut_again` to cut it again.
+
+
+def _copy(cut: Path, tmp_path: Path, name: str) -> Path:
+    """A test's own copy of a cut made once, at `tmp_path / name`, where `_cut` would have cut it."""
+    return Path(shutil.copytree(cut, tmp_path / name))
+
+
+@pytest.fixture(scope="module")
+def held_filled(tmp_path_factory) -> Path:
+    """The held clip cut a cell long as video-loop cuts it when no fill is named: auto, the fill `_cut` names. Its held
+    cell made between by `Between`, its cut with the fill off kept beside it as `cycle.source/`."""
+    root = tmp_path_factory.mktemp("held-filled")
+    out = root / "cut"
+    loop_mod.run_loop(save(_held_clip(), root / "keyed"), out, fps=24.0, state="walk", min_len=None, max_len=None,
+                      n_out=None, seam_max=1000.0, name="walk", report_path=None, cycle_mode="fixed", start=0,
+                      length=N + 1, anchor="none", repair="off", interpolate=_between())
+    return out
+
+
+@pytest.fixture(scope="module")
+def held_off(tmp_path_factory) -> Path:
+    """The held clip cut a cell long with the fill off: frame 5 shown twice, nothing made."""
+    return _cut(tmp_path_factory.mktemp("held-off"), "cut", _held_clip(), length=N + 1, fill_held="off")
+
+
+@pytest.fixture(scope="module")
+def walk_off(tmp_path_factory) -> Path:
+    """The walk, no picture shown again, cut a cycle long with the fill off."""
+    return _cut(tmp_path_factory.mktemp("walk-off"), "cut", walk(N + 6), length=N, fill_held="off")
+
+
+@pytest.fixture(scope="module")
+def walk_off_longer(tmp_path_factory) -> Path:
+    """The walk cut four cells past a cycle with the fill off."""
+    return _cut(tmp_path_factory.mktemp("walk-off-longer"), "cut", walk(N + 6), length=N + 4, fill_held="off")
+
+
 # --- video-loop: the loop's last cells and its wrap ---------------------------------------------------------------
 
 
@@ -71,6 +112,7 @@ def test_a_loop_cut_whose_last_cells_show_one_picture_is_delivered_with_none_sho
     assert cells[0].tobytes() == frames[0].tobytes()
 
 
+@pytest.mark.slow
 def test_a_loop_cut_a_cell_too_long_has_its_last_cell_made_between_and_its_first_kept(tmp_path):
     # The cut runs one frame past the cycle: its last cell shows its first cell's picture again, across the wrap.
     frames = walk(N + 6)
@@ -107,13 +149,11 @@ def test_the_holds_the_motion_means_are_kept_and_listed_in_the_strip(tmp_path):
     assert [c.tobytes() for c in _cells(d)[5:9]] == [frames[5].tobytes()] * 4
 
 
-def test_a_loop_records_what_its_cut_was_asked_and_is_cut_again_from_it_the_same(tmp_path):
+def test_a_loop_records_what_its_cut_was_asked_and_is_cut_again_from_it_the_same(tmp_path, held_filled):
+    # The held clip cut with no fill named (`held_filled`): its report read where the cut wrote it, the cut again
+    # written elsewhere.
     frames = _held_clip()
-    keyed = save(frames, tmp_path / "k")
-    first = loop_mod.run_loop(keyed, tmp_path / "a", fps=24.0, state="walk", min_len=None, max_len=None, n_out=None,
-                              seam_max=1000.0, name="walk", report_path=None, cycle_mode="fixed", start=0, length=N + 1,
-                              anchor="none", repair="off", interpolate=_between())
-    report = json.loads(Path(first["report"]).read_text())
+    report = json.loads((held_filled / "walk.loop.report.json").read_text())
     assert report["cut_args"]["fill_held"] == "auto" and report["cut_args"]["length"] == N + 1
     again = loop_mod.cut_again(report, tmp_path / "b", report_path=tmp_path / "b.json", fill_held="off")
     assert again["held_fill"]["made"] == [] and [r["start"] for r in again["held_fill"]["held_runs"]] == [5]
@@ -136,9 +176,8 @@ def test_an_effect_s_lifetime_names_its_held_cells(tmp_path, capsys):
 # --- video-cycle-align: the cut as filmed in, no picture shown again out ------------------------------------------
 
 
-def test_an_aligned_set_whose_cuts_hold_a_picture_twice_delivers_none_shown_again(tmp_path):
-    clip = _held_clip()
-    dirs = [_cut(tmp_path, n, c, length=N + 1, fill_held="off") for n, c in (("A", clip), ("B", clip))]
+def test_an_aligned_set_whose_cuts_hold_a_picture_twice_delivers_none_shown_again(tmp_path, held_off):
+    dirs = [_copy(held_off, tmp_path, n) for n in ("A", "B")]
     report = align.align_set(dirs, interpolate=_between())
     for d, row in zip(dirs, report["loops"]):
         cells = _cells(d)
@@ -155,9 +194,10 @@ def _cut_before_it_kept_its_source(d: Path) -> Path:
     return d
 
 
-def test_the_alignment_cuts_a_filled_loop_again_with_the_fill_off_and_aligns_the_frames_as_filmed(tmp_path):
-    clip = _held_clip()
-    dirs = [_cut_before_it_kept_its_source(_cut(tmp_path, n, c, length=N + 1, interpolate=_between())) for n, c in (("A", clip), ("B", clip))]
+@pytest.mark.slow
+def test_the_alignment_cuts_a_filled_loop_again_with_the_fill_off_and_aligns_the_frames_as_filmed(
+        tmp_path, held_filled):
+    dirs = [_cut_before_it_kept_its_source(_copy(held_filled, tmp_path, n)) for n in ("A", "B")]
     assert all(_meta(d)["held_fill"]["made"] == [6] for d in dirs)  # video-loop on its own fills, a loop delivered
     report = align.align_set(dirs, interpolate=_between())
     for d, row in zip(dirs, report["loops"]):
@@ -171,9 +211,8 @@ def test_the_alignment_cuts_a_filled_loop_again_with_the_fill_off_and_aligns_the
     assert all("cut_again" not in r for r in again["loops"])
 
 
-def test_a_filled_loop_whose_cut_cannot_be_made_again_stops_the_set_naming_it(tmp_path):
-    clip = _held_clip()
-    dirs = [_cut_before_it_kept_its_source(_cut(tmp_path, n, c, length=N + 1, interpolate=_between())) for n, c in (("A", clip), ("B", clip))]
+def test_a_filled_loop_whose_cut_cannot_be_made_again_stops_the_set_naming_it(tmp_path, held_filled):
+    dirs = [_cut_before_it_kept_its_source(_copy(held_filled, tmp_path, n)) for n in ("A", "B")]
     report_path = dirs[1] / "walk.loop.report.json"
     report = json.loads(report_path.read_text())
     report.pop("cut_args")  # a report from before cuts recorded what they were asked
@@ -196,10 +235,12 @@ def _aligned_meta(d: Path) -> dict:
     return meta
 
 
+@pytest.mark.slow
 def test_a_set_with_a_filled_direction_is_aligned_without_the_clip_s_frames_as_it_is_with_them(tmp_path):
     # An app that aligns a set elsewhere than it cut it holds each loop as video-loop left it, and none of its clip's
     # frames. Before, a set with a direction whose held cells video-loop made stopped there ("cut it again with
-    # `video-loop --fill-held off`"): only the clip's frames could give the cut with the fill off.
+    # `video-loop --fill-held off`"): only the clip's frames could give the cut with the fill off. Its cuts are its own
+    # (not `held_filled` and `held_off`): it removes the frames they were cut from.
     clip = _held_clip()
     cut = [_cut(tmp_path, "A", clip, length=N + 1, interpolate=_between()),
            _cut(tmp_path, "B", clip, length=N + 1, fill_held="off")]
@@ -221,9 +262,11 @@ def test_a_set_with_a_filled_direction_is_aligned_without_the_clip_s_frames_as_i
     assert all(_shown_again(_cells(d)) == [] for d in held)
 
 
-def test_video_loop_keeps_a_filled_loop_s_cut_with_the_fill_off_beside_it_and_an_unfilled_one_s_as_it_was(tmp_path):
-    clip = _held_clip()
-    filled = _cut(tmp_path, "A", clip, length=N + 1, interpolate=_between())
+def test_video_loop_keeps_a_filled_loop_s_cut_with_the_fill_off_beside_it_and_an_unfilled_one_s_as_it_was(
+        tmp_path, held_filled, held_off):
+    # The filled loop and the one cut with the fill off are read where they were cut (`held_filled`, `held_off`): the
+    # cut again below is written elsewhere.
+    filled = held_filled
     unfilled = _cut(tmp_path, "B", walk(N + 6), length=N, interpolate=_between())  # no picture shown again: nothing made
     # The filled loop's cut with the fill off, as the alignment cut it from the clip's frames: frame 5 shown twice.
     report = json.loads((filled / "walk.loop.report.json").read_text())
@@ -240,7 +283,7 @@ def test_video_loop_keeps_a_filled_loop_s_cut_with_the_fill_off_beside_it_and_an
     assert not (filled / loop_mod.CUT_AGAIN_DIR).exists()
     # The delivered loop is the filled one; a loop with nothing made, and one cut with the fill off, keep nothing.
     assert _shown_again(_cells(filled)) == []
-    off = _cut(tmp_path, "C", clip, length=N + 1, fill_held="off")
+    off = held_off
     for d in (unfilled, off):
         assert not (d / align.SOURCE_DIR).exists() and "cycle_source" not in json.loads((d / "walk.loop.report.json").read_text())
 
@@ -258,9 +301,9 @@ def test_a_filled_loop_whose_cut_with_the_fill_off_fails_is_delivered_and_says_w
     assert "no cut with the fill off is kept beside it" in capsys.readouterr().err
 
 
-def test_an_aligned_set_asked_for_at_a_rate_of_its_own_is_given_frames_between_every_loop_alike(tmp_path):
-    clip = walk(N + 6)
-    dirs = [_cut(tmp_path, n, c, length=N, fill_held="off") for n, c in (("A", clip), ("B", clip))]
+@pytest.mark.slow
+def test_an_aligned_set_asked_for_at_a_rate_of_its_own_is_given_frames_between_every_loop_alike(tmp_path, walk_off):
+    dirs = [_copy(walk_off, tmp_path, n) for n in ("A", "B")]
     report = align.align_set(dirs, interpolate=_between(), out_fps=60.0)
     assert report["out_fps"] == 60.0
     for d in dirs:
@@ -278,13 +321,14 @@ def test_an_aligned_set_asked_for_at_a_rate_of_its_own_is_given_frames_between_e
 UNHELD_ALIGNED = "68abe86925f7ccd67dc86ed7b6d8214a4d3d7b0b3a3429e6c8b4ed8215e73d4c"
 
 
-def test_an_aligned_set_with_no_held_cell_is_delivered_as_before(tmp_path):
-    clip = walk(N + 6)
-    dirs = [_cut(tmp_path, n, c, length=L, fill_held="off") for n, c, L in (("A", clip, N), ("B", clip, N + 4))]
+@pytest.mark.slow
+def test_an_aligned_set_with_no_held_cell_is_delivered_as_before(tmp_path, walk_off, walk_off_longer):
+    # The two cuts are each made once (`walk_off`, `walk_off_longer`) and copied for each alignment.
+    dirs = [_copy(walk_off, tmp_path, "A"), _copy(walk_off_longer, tmp_path, "B")]
     align.align_set(dirs, interpolate=_between())
     pictures = picture_digest(sorted(p for d in dirs for p in (d / "cycle").glob("frame-*.png")))
     assert pictures == UNHELD_ALIGNED
-    off = [_cut(tmp_path, n + "off", c, length=L, fill_held="off") for n, c, L in (("A", clip, N), ("B", clip, N + 4))]
+    off = [_copy(walk_off, tmp_path, "Aoff"), _copy(walk_off_longer, tmp_path, "Boff")]
     align.align_set(off, interpolate=_between(), fill_held="off")
     assert picture_digest(sorted(p for d in off for p in (d / "cycle").glob("frame-*.png"))) == pictures
 

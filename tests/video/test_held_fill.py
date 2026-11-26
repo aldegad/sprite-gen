@@ -63,7 +63,7 @@ def _pictures(out: Path, name: str) -> dict[str, str]:
 
 
 def _meta(rep: dict) -> dict:
-    return json.loads(Path(rep["strip"]["path"]).with_suffix("").with_suffix(".strip.json").read_text())
+    return json.loads(Path(rep["strip"]["path"]).with_suffix("").with_suffix(".strip.json").read_text(encoding="utf-8"))
 
 
 def _cycle(rep: dict) -> list[Image.Image]:
@@ -140,7 +140,7 @@ def test_a_cut_with_no_held_cell_runs_no_rife_and_is_the_same_bytes_whichever_mo
     log = tmp_path / "rife" / "argv.txt"
     binary = tmp_path / "rife" / rife.BINARY
     binary.parent.mkdir()
-    binary.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexit 1\n')
+    binary.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexit 1\n', encoding="utf-8")
     binary.chmod(0o700)
     for name in rife.MODELS:
         (binary.parent / name).mkdir()
@@ -164,9 +164,31 @@ STALLED_OFF = {  # the stalled walk cut on the engine before the fill (886936e)
 STALLED_CUT = dict(state="walk", cycle_mode="fixed", start=0, length=N + 3, anchor="none", repair="off")
 
 
-def test_a_stalled_walk_has_its_held_cells_made_between_the_poses_beside_them(tmp_path):
+# The stalled walk's two cuts more than one test reads, each made once on a worker: the same frames and cut as each of
+# those tests made for itself. They read a cut where it was made, none writing into it.
+
+
+@pytest.fixture(scope="module")
+def stalled_filled(tmp_path_factory) -> tuple[dict, Between, Path]:
+    """The stalled walk cut with its held cells made by `Between`: the cut's report, the interpolator (`calls`, the
+    frames the cut asked it for) and the frames the cut read."""
+    root = tmp_path_factory.mktemp("stalled-filled")
+    keyed = save(shown_again(walk(), STALLED), root / "keyed")
     between = Between(walk_at, range(N + 6), period=N)
-    rep = _run(tmp_path, shown_again(walk(), STALLED), interpolate=between, **STALLED_CUT)
+    rep = loop_mod.run_loop(keyed, root / "cut", fps=24.0, min_len=None, max_len=None, n_out=None,
+                            seam_max=loop_mod.SEAM_RATIO_MAX, name="walk", report_path=None, interpolate=between,
+                            **STALLED_CUT)
+    return rep, between, keyed
+
+
+@pytest.fixture(scope="module")
+def stalled_off(tmp_path_factory) -> dict:
+    """The stalled walk cut with `--fill-held off` (`_run`, named `m`): nothing is made, so no RIFE is looked for."""
+    return _run(tmp_path_factory.mktemp("stalled-off"), shown_again(walk(), STALLED), fill_held="off", **STALLED_CUT)
+
+
+def test_a_stalled_walk_has_its_held_cells_made_between_the_poses_beside_them(stalled_filled):
+    rep, between, _ = stalled_filled
     record = rep["held_fill"]
     assert record["before"]["cells"] == N + 3 and record["before"]["poses"] == N
     assert [(r["start"], r["length"], r["filled"]) for r in record["before"]["held_runs"]] == [(5, 2, True), (14, 3, True)]
@@ -214,8 +236,8 @@ def test_an_interpolator_that_gives_the_pose_back_leaves_the_stalled_walk_as_fil
     assert "held cells 5-6 kept as filmed" in err and "held cells 14-16 kept as filmed" in err
 
 
-def test_fill_held_off_cuts_the_stalled_walk_as_before_and_still_names_its_runs(tmp_path):
-    rep = _run(tmp_path, shown_again(walk(), STALLED), fill_held="off", **STALLED_CUT)
+def test_fill_held_off_cuts_the_stalled_walk_as_before_and_still_names_its_runs(stalled_off):
+    rep = stalled_off
     assert _pictures(Path(rep["out_dir"]), "m") == STALLED_OFF
     record = rep["held_fill"]
     assert record["mode"] == "off" and record["made"] == []
@@ -224,14 +246,13 @@ def test_fill_held_off_cuts_the_stalled_walk_as_before_and_still_names_its_runs(
     assert (record["cells"], record["poses"]) == (N + 3, N)
 
 
-def test_no_rife_delivers_the_held_cells_as_filmed_and_says_which_motion(tmp_path, monkeypatch, capsys):
+def test_no_rife_delivers_the_held_cells_as_filmed_and_says_which_motion(tmp_path, monkeypatch, capsys, stalled_off):
     _no_rife(monkeypatch, tmp_path)
     rep = _run(tmp_path, shown_again(walk(), STALLED), name="stalled-walk", **STALLED_CUT)
     assert rep["status"] == "passed"
     out = Path(rep["out_dir"])
-    # The images are the cut as filmed: what --fill-held off delivers.
-    off = _run(tmp_path, shown_again(walk(), STALLED), name="off", fill_held="off", **STALLED_CUT)
-    assert {k: v for k, v in _bytes(out, "stalled-walk").items()} == _bytes(Path(off["out_dir"]), "off")
+    # The images are the cut as filmed: what --fill-held off delivers (`stalled_off`, which looks for no RIFE either).
+    assert {k: v for k, v in _bytes(out, "stalled-walk").items()} == _bytes(Path(stalled_off["out_dir"]), "m")
     record = rep["held_fill"]
     assert record["made"] == [] and record["unmade"]["cells"] == [6, 15, 16]
     assert record["unmade"]["install"] == loop_mod.rife_mod.install_command()
@@ -666,7 +687,7 @@ def test_video_set_hands_the_switches_to_each_cut(monkeypatch, tmp_path):
 
     def video(image, prompt, out, report, **kw):
         out.write_bytes(b"test-video")
-        report.write_text(json.dumps({"prompt": prompt}))
+        report.write_text(json.dumps({"prompt": prompt}), encoding="utf-8")
         return 0
 
     monkeypatch.setattr(batch.loop_mod, "run_loop", run_loop)
@@ -681,9 +702,10 @@ def test_video_set_hands_the_switches_to_each_cut(monkeypatch, tmp_path):
     assert result["items"][0]["loop"]["poses"] == "9/10"
 
 
-def test_a_cut_with_cells_made_is_not_restored_from_its_source_frames(tmp_path):
+def test_a_cut_with_cells_made_is_not_restored_from_its_source_frames(tmp_path, stalled_filled):
     """The source frames do not hold a cell made between two of them: restoration (`video-loop-repair`) reads the cut
-    as one it cannot project (`source-processing-unsupported`), as it reads a blended wrap."""
+    as one it cannot project (`source-processing-unsupported`), as it reads a blended wrap. The cut is the stalled
+    walk's with its cells made (`stalled_filled`), read with the frames it was cut from."""
     import shutil
     import subprocess
 
@@ -692,22 +714,20 @@ def test_a_cut_with_cells_made_is_not_restored_from_its_source_frames(tmp_path):
 
     if not shutil.which("ffmpeg") or not loop_mod.img2webp_supports_exact():
         pytest.skip("ffmpeg and img2webp >=1.5 required")
+    rep, _, keyed = stalled_filled
     filmed = shown_again(walk(), STALLED)
-    keyed = save(filmed, tmp_path / "keyed")
-    out = tmp_path / "cut"
-    loop_mod.run_loop(keyed, out, fps=24.0, min_len=None, max_len=None, n_out=None, seam_max=loop_mod.SEAM_RATIO_MAX,
-                      name="walk", report_path=None, interpolate=Between(walk_at, range(N + 6), period=N), **STALLED_CUT)
+    out = Path(rep["out_dir"])
     files = sorted(keyed.glob("*.png"))
     frames_report = tmp_path / "frames.json"
     frames_report.write_text(json.dumps({"kind": "sprite-gen-video-frames-report", "fps": 24.0, "frames": len(files),
                                          "width": filmed[0].width, "height": filmed[0].height, "stream_index": 0,
-                                         "key": "green"}))
+                                         "key": "green"}), encoding="utf-8")
     clip = tmp_path / "clip.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-framerate", "24", "-i", str(keyed / "%04d.png"), "-c:v", "libx264",
                     "-pix_fmt", "yuv420p", str(clip)], check=True)
     manifest = tmp_path / "source.json"
     manifest.write_text(json.dumps(source.manifest(clip=clip, canvas=files[0], frames_report=frames_report, files=files,
-                                                   timestamps=source.timestamps(clip, 0))))
+                                                   timestamps=source.timestamps(clip, 0))), encoding="utf-8")
     loop = Loop.read(out / "walk.strip.png", out / "walk.strip.json", out / "walk.loop.report.json")
     projection, issue = source.project(loop, source.Source.read(
         source_manifest=manifest, source_frames_dir=keyed, source_clip=clip, source_canvas=files[0],
@@ -728,6 +748,7 @@ def test_the_alignment_and_a_stop_refuse_a_loop_cut_at_a_rate_of_its_own(tmp_pat
         stop.read_loop(out / "walk60.strip.json")
 
 
+@pytest.mark.slow
 def test_the_curation_view_marks_the_cells_made_and_the_cells_still_held(tmp_path):
     """A loop's `cycle/` imported into the curation view (`unpack-atlas --pngs-dir`): each card of a cell the fill made
     says `made`, of a cell still showing the picture before it `held`."""
@@ -737,7 +758,7 @@ def test_the_curation_view_marks_the_cells_made_and_the_cells_still_held(tmp_pat
                **{**STALLED_CUT, "length": N + 7})
     assert rep["held_fill"]["made"] == [6, 15, 16]
     assert cli.main(["unpack-atlas", "--pngs-dir", str(Path(rep["out_dir"]) / "cycle"), "--out-dir", str(tmp_path / "run")]) == 0
-    rows = json.loads((tmp_path / "run" / "frames" / "frames-manifest.json").read_text())["rows"]
+    rows = json.loads((tmp_path / "run" / "frames" / "frames-manifest.json").read_text(encoding="utf-8"))["rows"]
     labels = rows[0]["labels"]
     assert [k for k, label in enumerate(labels) if label.endswith(" (made)")] == [6, 15, 16]
     assert [k for k, label in enumerate(labels) if label.endswith(" (held)")] == [24, 25, 26, 27]

@@ -283,6 +283,7 @@ def _far_as_written(self, a, b):
     return best
 
 
+@pytest.mark.slow
 def test_each_loop_a_mask_runs_gives_the_same_bytes_in_place_as_with_new_arrays_every_step(monkeypatch):
     # Every call of the three loops a frame's mask makes, of a frame filmed and of one made between two, is answered as
     # the loops first written answer it: the same dtype, the same bytes. The second least-cost reading's costs are
@@ -345,6 +346,7 @@ def test_a_lay_reads_the_order_from_the_frames_beside_the_wrap_alone(monkeypatch
     assert len(near) == 3 * 2 * parts.WRAP
 
 
+@pytest.mark.slow
 def test_a_tail_laid_behind_the_body_changes_none_of_its_solid_pixels():
     # The eased retime's case: the tail of a frame made a frame on, laid behind the body of the frame at its own time.
     masker = _masker("side")
@@ -369,6 +371,7 @@ def test_a_tail_laid_behind_the_body_changes_none_of_its_solid_pixels():
         assert _off(laid, drawn).sum() <= LEAK_MAX * _drawn(t, t, "side")[1].sum(), t
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("walker", ["back", "back_bushy"])
 def test_a_tail_in_front_of_the_body_is_not_laid_and_no_frame_is_read_for_it(walker, monkeypatch):
     # Laid behind the body, the tail would go under the legs and the hands it hangs over. The order is read first; no

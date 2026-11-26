@@ -352,7 +352,7 @@ def test_a_pin_that_redraws_the_first_frame_has_its_wrap_blended_to_under_a_step
     assert blend["cells"] == list(range(N - 1 - K, N - 1))
     assert blend["equalize"] == {"sigma": 0.5, "blurred": "still"}
     assert {"pose_share", "presence_share", "never_settled", "ramp_step_max_ratio", "bound_ratio", "seconds"} <= set(blend)
-    strip = json.loads((tmp_path / "auto" / "idle.strip.json").read_text())
+    strip = json.loads((tmp_path / "auto" / "idle.strip.json").read_text(encoding="utf-8"))
     assert strip["wrap_blend"] == {"cells": blend["cells"], "K": K}
     off = cut(tmp_path, keyed(tmp_path, frames, "keyed-off"), "off", wrap_blend="off", repair="off")
     assert off["wrap_blend"] == {"applied": False, "why": "--wrap-blend off"} and "wrap_blend" not in off["strip"]
@@ -421,6 +421,7 @@ def test_a_part_moved_on_a_redrawn_character_is_held_while_the_rest_is_blended(d
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 16 to 24 calls of the binary at 160 x 224 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.rife_pinned
 def test_the_checkpoints_part_on_a_flat_figure_is_cut_as_filmed_with_a_warning(tmp_path: Path, capsys, rife_runs) -> None:
     frames = []
     for t in range(N):
@@ -549,7 +550,7 @@ def test_a_pin_the_gate_refuses_fails_as_before_with_its_cut_as_filmed(tmp_path:
     for out, kw in (("auto", {}), ("off", {"wrap_blend": "off"})):
         with pytest.raises(SystemExit, match="the pinned clip does not end on its first frame"):
             cut(tmp_path, keyed(tmp_path, frames, f"keyed-{out}"), out, **kw)
-    report = json.loads((tmp_path / "auto" / "idle.loop.report.json").read_text())
+    report = json.loads((tmp_path / "auto" / "idle.loop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["wrap_blend"]["why"] == "the pin does not close: the clip is refused on it"
     written = outputs(tmp_path / "auto", "cycle.refused")
     assert len([name for name in written if name.startswith("frame-")]) == N - 1
@@ -575,6 +576,7 @@ def test_a_ramp_that_steps_past_the_cut_is_not_used_and_says_so() -> None:
 
 # --- 12-15. structures on a flat patch of a redrawn character --------------------------------------------------------------
 
+@pytest.mark.slow
 def test_the_checkpoints_oblique_line_is_held_line_for_line() -> None:
     frames, region = patch_clip("oblique", 8)
     assert pin_closes(frames)

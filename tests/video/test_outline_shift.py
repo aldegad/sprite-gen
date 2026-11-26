@@ -148,6 +148,7 @@ def test_jump_repair_takes_a_lighter_line_and_refuses_one_gone_to_fill(monkeypat
     assert out[1] is frames[1]
 
 
+@pytest.mark.slow
 def test_alignment_keeps_a_lighter_line_and_takes_the_nearer_frame_for_one_gone_to_fill():
     a, b = (_two_tone(*p) for p in FAR)
     lighter, melted = _two_tone(8, -8, lift=30), _legs_to_fill(_two_tone(8, -8))
@@ -157,12 +158,14 @@ def test_alignment_keeps_a_lighter_line_and_takes_the_nearer_frame_for_one_gone_
     assert facts["nearest_at"] == [1, 3] and all(m["faults"] == ["outline"] for m in facts["smear"])
 
 
+@pytest.mark.slow
 def test_a_boot_washed_lighter_on_art_painted_without_a_line_is_refused_on_the_dark_line(monkeypatch):
     """Painted without a line, the walker's edge is its fill, and its neighbours are not outlined: the frame
     between with its near boot washed 40 tones lighter — no further from the boot than a softened line at any
     rank, so read rank by rank nothing is lost — is the dark line's fault `outline`. The jump repair refuses it
     and the alignment takes the nearer frame; the frame between drawn whole is kept. The two-tone and the black
-    walker are outlined on all their edge and the painted one on a few % of it."""
+    walker are outlined on all their edge and the painted one on a few % of it. The washed frame's own reading
+    between a and b is the alignment's (`align.measure_made` at cell 1: `rife.smear(washed, a, b)`), read once."""
     frames = [_painted(20, -20), _painted(30, -30), _painted(-5, 5), _painted(10, -10)]
     washed = _painted(8, -8, wash=40)
     forced_flow_group(monkeypatch, [1], (0, 2), [0.5])
@@ -171,7 +174,8 @@ def test_a_boot_washed_lighter_on_art_painted_without_a_line_is_refused_on_the_d
     a, b = (_painted(*p) for p in FAR)
     out, facts = align.resample([a, b], 4, lambda x, y, t: washed)
     assert facts["nearest_at"] == [1, 3] and all(m["outline_shift"] is None and m["faults"] == ["outline"] for m in facts["smear"])
-    assert faults(_measure(_painted(8, -8), a, b)) == [] and _measure(washed, a, b)["outline_loss"] > OUTLINE_WARN
+    washed_between = next(m for m in facts["smear"] if m["at"] == 1)  # made from a to b at t 0.5
+    assert faults(_measure(_painted(8, -8), a, b)) == [] and washed_between["outline_loss"] > OUTLINE_WARN
     with monkeypatch.context() as patched:  # read as outlined art, its edge is lighter by less than 50/255 everywhere
         patched.setattr(rife, "OUTLINED", 0.0)
         assert rife.outline_shift(washed, a, b) == 0

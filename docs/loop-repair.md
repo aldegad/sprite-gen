@@ -262,6 +262,45 @@ drawn on twos gives between its drawings — the legs come out as one shape of f
 outline between them or around them. `rife.smear` measures all three, and a set alignment takes
 the nearer source frame where a made frame melted (section 4).
 
+### Runs started together
+
+`rife-ncnn-vulkan` is an external binary called once per run. A made frame is two runs (its colour and its
+coverage), and a read is 2 + 32 runs. On a GPU, process startup accounts for most of each run: on an Apple
+M4 Max a run at 640 x 896 spends about 0.3 s starting the binary while each further frame in the binary's
+folder mode costs about 0.03 s, and on an Apple M1 Max a single call measured 0.33 s at 128 x 128 and 0.37 s
+at 640 x 896.
+
+`rife.Binary` now starts the runs a frame or a read requests up to `rife.RUNS_AT_ONCE = 2` at a time
+(`rife.runs`, `rife.runs_at_once`), capped by the CPUs the process may use. Each run uses its own temporary
+folder and executes the exact command it did when run alone, so its output bytes are unchanged. Two is the
+cap because two runs cover a single frame; starting more would only launch a read's passes sooner, and on a
+GPU-less machine (Mesa's llvmpipe software Vulkan) every run already takes all the cores.
+
+The binary's folder mode is not used. It pairs each image in the folder with the next and spaces their
+fractions evenly along the folder, so any pair after the first does not get the requested fraction to the
+last bit, and the pairs between are generated too. The number of RIFE runs per cut is unchanged, and the
+torch backend (`SPRITE_GEN_RIFE_BACKEND=torch`), which loads once and runs in the process, is unchanged.
+
+`tests/video/test_rife_runs_at_once.py` checks with the real binary that a frame `Rife` makes with two runs
+started together is byte for byte the frame `rife.between` makes one run after another at `t = 0.25` and
+`0.6`. On an Apple M1 Max, wall time spent making the 233 frames (466 RIFE runs) of the public `knight-walk`
+cut at 60 fps dropped from 210 s to 121 s.
+
+### Layers left out
+
+A Vulkan loader loads every implicit layer installed on a machine into each Vulkan process it starts: overlays (ReShade, the Steam overlay), capture hooks (OBS's Vulkan capture hook) and shader recorders (Steam's Fossilize). None is part of a RIFE frame, yet their cost is paid on every run because `rife-ncnn-vulkan` starts a new process per run. On a Windows desktop with an NVIDIA GeForce RTX 3060 (driver 617.14, Vulkan loader 1.4.341, elevated process, those four layers registered), one run at 640 x 896 (same at 128 x 128) took 2.35 s: 0.013 s process start, 0.24 s Vulkan instance, about 0.87 s device, model and pipelines (frame written at 1.15 s; compute about 0.024 s per frame in folder runs of 1, 4 and 16 frames) and 1.2 s from frame written to exit. Setting only ReShade's disable variable dropped a run to 1.16 s with the same GPU line and frame sha256; leaving out only OBS's hook changed nothing measurable.
+
+`rife.binary_env()` builds the environment for every `rife-ncnn-vulkan` run (all runs go through `rife._call`). It now:
+
+- sets `VK_LOADER_LAYERS_DISABLE=~implicit~` and `VK_LOADER_LAYERS_ALLOW=*device_select*,*optimus*,*switchable_graphics*` so the loader leaves out implicit layers while keeping GPU-choosing layers (Mesa's device select, NVIDIA's Optimus, AMD's switchable graphics; `rife.GPU_CHOOSING_LAYERS`) on the same GPU;
+- on Windows, reads (without modifying) the implicit layer manifests under `SOFTWARE\Khronos\Vulkan\ImplicitLayers` for machine and user (`rife.registered_implicit_layers`) and sets each non-GPU-choosing layer's `disable_environment` variable in the child environment only (`rife.implicit_layers_left_out`, `rife.layers_left_out`), keeping any value the caller already set (about 0.8 ms per run).
+
+The Windows step is needed because the Windows loader ignores `VK_LOADER_LAYERS_*` in an elevated process (an administrator shell or ssh session), whereas every loader version reads a layer's `disable_environment` variable in every process. Driver-registered layers (`VK_LAYER_NV_optimus`, `VK_LAYER_NV_present`) are not under that key and stay in. Loaders older than 1.3.234 (1.3.262 for the allow list) ignore `VK_LOADER_LAYERS_*` and run as before; on macOS, the binary links MoltenVK directly with no loader. A caller setting `VK_LOADER_LAYERS_DISABLE` itself keeps its choice (an empty value keeps every layer in) and no layer's own variable is set; there is no other option to turn this off. On its first frame or read, a `rife.Binary` prints one stderr line naming the layers left out by their own variables (plus one for any unreadable manifests), and nothing when none is set.
+
+On that desktop, the loader log dropped from `VK_LAYER_NV_optimus`, `VK_LAYER_NV_present`, `VK_LAYER_OBS_HOOK` and `VK_LAYER_reshade` to only the two NVIDIA layers. Across six alternated runs each at 640 x 896 under load, median time fell from 2.47 s to 1.31 s with the same GPU line and frame sha256 across all 12 runs. On the public `knight-walk` cut from 24 to 60 fps (232 frames, 464 runs, two at a time), RIFE frame-making wall time per frame fell from 3.33 s to 2.03 s (about 39% less). On an Apple M1 Max, the cut was unchanged (178.9 s before, 181.5 s after; 104.2 s and 105.7 s frame-making). `tests/video/test_rife_loader_layers.py` checks the environment, manifest reading, stderr lines and, with the real binary, byte-for-byte identical frames at `t = 0.25` and `0.6` with the same GPU lines.
+
+Every run still starts the binary anew (about 0.24 s Vulkan instance and 0.87 s device, model and pipelines against about 0.024 s of compute per frame); only a persistent process would remove that, which this change does not do.
+
 ### Where — measured 2026-10-03
 
 One real pair: two frames of a Lite side walk two apart (545 x 544, premultiplied), the frame
@@ -481,8 +520,8 @@ On the T4 (driver 610.57.04, PyTorch 2.13.0 for CUDA 13.0, cuDNN 9.20, 2026-10-2
 through the executor, from another container of the same image, are the bytes made in the T4's own
 process: both walkers' frames, plain frames, and reads with their disagreement. The executor adds 0.1 to
 0.2 s to a frame, a read takes as long as in the process, and the probe, a T4 container's cold start,
-took 8.4 s. For a release the torch tests now run on CUDA in the CUDA lane, on the maintainer's NVIDIA host
-(docs/release.md).
+took 8.4 s. For a release the torch tests run on CUDA in the GPU lane, on the maintainer's NVIDIA host, where
+the release's change reaches RIFE (docs/release.md).
 
 ### Licences
 

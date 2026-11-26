@@ -77,6 +77,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, NamedTuple
 
@@ -84,6 +85,7 @@ import PIL
 from PIL import Image, ImageFilter, PngImagePlugin
 
 from sprite_gen._deps import np
+from sprite_gen.util import cpus
 from sprite_gen.video.frames import _components, _near
 
 BINARY = "rife-ncnn-vulkan"
@@ -250,6 +252,31 @@ TORN_WINDOW = 0.10
 # 960 x 960 frame on Modal's CPU, took about 30 s, and Modal's hosts differ by up to 2.5 times on one frame
 # (2026-10-15, docs/loop-repair.md section 1).
 CALL_TIMEOUT_SECONDS = 600
+# `Binary`: the runs of the binary a frame or a read asks for are started up to this many at a time (`runs_at_once`).
+# Every run starts the binary anew, and on a GPU starting it is most of a run: on an Apple M4 Max about 0.3 s of a run
+# at 640 x 896, where each frame more of a run handed a folder of pairs costs 0.03 s. Two started together take about
+# half the time of two one after another there, each the same command and so the same frame. Two are a frame's own
+# runs, its colour and its coverage; more would only start a read's passes sooner, and on a machine with no GPU
+# (Mesa's llvmpipe) every run already takes all the cores. The binary's folder of pairs is no way round the start: it
+# pairs each image with the next and makes them at fractions spaced evenly along the folder, so a fraction of any
+# pair but the first is not the one asked for to the last bit, and the pairs between are made too.
+RUNS_AT_ONCE = 2
+# `binary_env`: the implicit layers left out of a run of the binary, and kept. A Vulkan loader puts every implicit layer
+# a machine installs into each process it starts: an overlay, a capture hook, a shader recorder, none of them any part
+# of a frame, and where a machine has them they are paid on every run (an overlay's was half of one on a desktop
+# NVIDIA GPU, docs/loop-repair.md section 1, "Layers left out"). The layers that choose the GPU are kept
+# (`GPU_CHOOSING_LAYERS`: Mesa's device select, NVIDIA's Optimus, AMD's switchable graphics), so a run is made on the
+# GPU it was made on with them. The loader is told so (VK_LOADER_LAYERS_DISABLE and _ALLOW), which loaders older than
+# 1.3.234 (1.3.262 for the allow list) do not read, starting the run as before, and which a Windows loader does not read
+# in an elevated process (an administrator's shell, an ssh session); so on Windows each layer the machine registers is
+# also left out by the variable its own manifest names for that (`disable_environment`), which every loader reads in
+# every process. A `Binary` says once which layers its runs leave out, and which manifests it could not read. A caller
+# that sets VK_LOADER_LAYERS_DISABLE itself keeps its own choice.
+GPU_CHOOSING_LAYERS = ("device_select", "optimus", "switchable_graphics")
+LOADER_LAYERS_DISABLE = "~implicit~"
+LOADER_LAYERS_ALLOW = ",".join(f"*{name}*" for name in GPU_CHOOSING_LAYERS)
+WINDOWS = sys.platform == "win32"
+IMPLICIT_LAYERS_KEY = r"SOFTWARE\Khronos\Vulkan\ImplicitLayers"
 # `Cache`: the first thing a kept frame's key is made from — another way of keying or keeping frames is another
 # name, so no frame kept the old way is taken — and the PNG text a kept frame names its own pixels' sha256 under.
 CACHE_FORMAT = "sprite-gen frame between, 1"
@@ -484,10 +511,102 @@ def model_bytes(model: Path) -> dict[str, bytes]:
     return files
 
 
+def registered_implicit_layers() -> list[Path]:
+    """The manifests of the implicit layers this machine registers, on: on Windows the values of IMPLICIT_LAYERS_KEY of
+    the machine and of the user, each a manifest's path whose data 0 is a layer on. The layers a GPU's driver registers
+    are kept elsewhere, under the driver's own key, and are not among them. Off Windows, none."""
+    if not WINDOWS:
+        return []
+    import winreg
+
+    found = []
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            key = winreg.OpenKey(hive, IMPLICIT_LAYERS_KEY)
+        except OSError:
+            continue
+        with key:
+            for i in range(winreg.QueryInfoKey(key)[1]):
+                name, data, _ = winreg.EnumValue(key, i)
+                if data == 0:
+                    found.append(Path(name))
+    return found
+
+
+class LayersLeftOut(NamedTuple):
+    """What leaves out of a process the implicit layers of some manifests (`implicit_layers_left_out`): the variables
+    with their values (`switches`), the layers they leave out by name, and each manifest that could not be read, with
+    why."""
+
+    switches: dict[str, str]
+    names: list[str]
+    unread: list[str]
+
+
+def implicit_layers_left_out(manifests: list[Path]) -> LayersLeftOut:
+    """The variables that leave out of a process the implicit layers in `manifests` (each layer's
+    `disable_environment`), but the layers that choose the GPU (GPU_CHOOSING_LAYERS, in their names in any case)."""
+    switches: dict[str, str] = {}
+    names: list[str] = []
+    unread: list[str] = []
+    for path in manifests:
+        try:
+            manifest = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+            layers = manifest["layers"] if "layers" in manifest else [manifest["layer"]]
+            found = [(str(layer["name"]), dict(layer.get("disable_environment") or {})) for layer in layers]
+        except OSError as exc:
+            unread.append(f"{path} ({exc.strerror or exc})")
+            continue
+        except (ValueError, KeyError, TypeError, AttributeError):
+            unread.append(f"{path} (not a layer manifest)")
+            continue
+        for name, switch in found:
+            if switch and not any(chooser in name.lower() for chooser in GPU_CHOOSING_LAYERS):
+                switches.update({str(k): str(v) for k, v in switch.items()})
+                names.append(name)
+    return LayersLeftOut(switches, names, unread)
+
+
+def layers_left_out() -> LayersLeftOut:
+    """What a run of the binary started now leaves out by the layers' own variables (`binary_env`): the layers this
+    machine registers (`registered_implicit_layers`), or none where the caller has set VK_LOADER_LAYERS_DISABLE."""
+    if "VK_LOADER_LAYERS_DISABLE" in os.environ:
+        return LayersLeftOut({}, [], [])
+    return implicit_layers_left_out(registered_implicit_layers())
+
+
+def left_out_lines(left_out: LayersLeftOut) -> list[str]:
+    """What a `Binary` says once of the layers its runs leave out: a line naming them, and a line naming the manifests
+    that could not be read, each where there are any."""
+    lines = []
+    if left_out.names:
+        lines.append(f"each run of {BINARY} leaves out the implicit Vulkan layers {', '.join(left_out.names)}, "
+                     f"by the variable each one's manifest names (docs/loop-repair.md section 1, \"Layers left out\")")
+    if left_out.unread:
+        lines.append(f"the implicit Vulkan layer manifests {', '.join(left_out.unread)} could not be read, and their "
+                     f"layers are not left out of a run of {BINARY}")
+    return lines
+
+
+def binary_env() -> dict[str, str]:
+    """The environment a run of the binary is started with: this process's, with the implicit layers left out but those
+    that choose the GPU — the loader told so (LOADER_LAYERS_DISABLE, LOADER_LAYERS_ALLOW), and each layer the machine
+    registers left out by its own variable (`layers_left_out`; one the caller has set is kept at its value) — where the
+    caller has not set VK_LOADER_LAYERS_DISABLE itself."""
+    env = dict(os.environ)
+    if "VK_LOADER_LAYERS_DISABLE" in env:
+        return env
+    env["VK_LOADER_LAYERS_DISABLE"] = LOADER_LAYERS_DISABLE
+    env.setdefault("VK_LOADER_LAYERS_ALLOW", LOADER_LAYERS_ALLOW)
+    for name, value in layers_left_out().switches.items():
+        env.setdefault(name, value)
+    return env
+
+
 def _call(binary: Path, model: Path, a: Image.Image, b: Image.Image, t: float, tmp: Path,
           modes: tuple[str, ...] | None = None) -> Image.Image:
     """One run of the binary from `a` to `b` at `t`, with the augmentation `tta()` names for the model, or `modes`
-    (`passes`: none)."""
+    (`passes`: none), in `binary_env()`."""
     modes = tta(held_model(model)) if modes is None else modes
     a.save(tmp / "a.png")
     b.save(tmp / "b.png")
@@ -496,7 +615,7 @@ def _call(binary: Path, model: Path, a: Image.Image, b: Image.Image, t: float, t
     try:
         proc = subprocess.run(
             [str(binary), "-0", str(tmp / "a.png"), "-1", str(tmp / "b.png"), "-o", str(out), "-s", f"{t:.4f}", "-m", str(model), *modes],
-            capture_output=True, text=True, timeout=CALL_TIMEOUT_SECONDS,
+            capture_output=True, text=True, timeout=CALL_TIMEOUT_SECONDS, env=binary_env(),
         )
     except subprocess.TimeoutExpired as exc:
         raise RifeUnavailable(f"{binary.name} made no frame in {CALL_TIMEOUT_SECONDS} s and was stopped "
@@ -571,21 +690,31 @@ def _coverage(made: np.ndarray) -> np.ndarray:
     return np.asarray(Image.fromarray(made, "RGB").convert("L"))
 
 
+def runs(run: Run, asked: list[tuple[np.ndarray, np.ndarray, float, tuple[str, ...] | None]]) -> list[np.ndarray]:
+    """The runs `asked` (each a run's four arguments), what they make in their order: started together where `run` can
+    start them so (its `at_once`, the binary's in a `Binary`), else one after another. Each run is the run asked alone,
+    whichever way they are started."""
+    at_once = getattr(run, "at_once", None)
+    return at_once(asked) if at_once is not None else [run(*one) for one in asked]
+
+
 def frame_runs(run: Run, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> tuple[np.ndarray, np.ndarray]:
-    """A frame's two runs (`inputs`): the colour, then the coverage, from the first to the second at `t` with the
+    """A frame's two runs (`inputs`, `runs`): the colour and the coverage, from the first to the second at `t` with the
     augmentation every call asks for — (colour H x W x 3, coverage H x W), uint8, which `_joined` makes a frame."""
-    return run(colour[0], colour[1], t, None), _coverage(run(_grey(cover[0]), _grey(cover[1]), t, None))
+    rgb, grey = runs(run, [(colour[0], colour[1], t, None), (_grey(cover[0]), _grey(cover[1]), t, None)])
+    return rgb, _coverage(grey)
 
 
 def pass_runs(run: Run, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> np.ndarray:
-    """How far the sixteen single passes of a frame (`inputs`) disagree, per pixel (`passes`): PASS_CALLS runs."""
+    """How far the sixteen single passes of a frame (`inputs`) disagree, per pixel (`passes`): PASS_CALLS runs (`runs`)."""
     grey = [_grey(c) for c in cover]
+    turns = [(geometry, first, second, at) for geometry in PASS_GEOMETRIES for first, second, at in ((0, 1, t), (1, 0, 1 - t))]
+    made = runs(run, [(_turned(pair[first], geometry), _turned(pair[second], geometry), at, ())
+                      for geometry, first, second, at in turns for pair in (colour, grey)])
     rgbs, alphas = [], []
-    for geometry in PASS_GEOMETRIES:
-        for first, second, at in ((0, 1, t), (1, 0, 1 - t)):
-            made = [run(_turned(pair[first], geometry), _turned(pair[second], geometry), at, ()) for pair in (colour, grey)]
-            rgbs.append(_turned_back(made[0].astype(np.float32) / 255.0, geometry))
-            alphas.append(_turned_back(_coverage(made[1]).astype(np.float32)[..., None] / 255.0, geometry)[..., 0])
+    for k, (geometry, _, _, _) in enumerate(turns):
+        rgbs.append(_turned_back(made[2 * k].astype(np.float32) / 255.0, geometry))
+        alphas.append(_turned_back(_coverage(made[2 * k + 1]).astype(np.float32)[..., None] / 255.0, geometry)[..., 0])
     rgb, alpha = np.stack(rgbs), np.stack(alphas)
     pre = np.concatenate([rgb * alpha[..., None], alpha[..., None]], axis=-1)
     apart = np.sqrt(((pre[0::2].mean(axis=0) - pre[1::2].mean(axis=0)) ** 2).sum(axis=-1) / 4.0)
@@ -600,19 +729,41 @@ def padded(x: np.ndarray, multiple: int) -> np.ndarray:
     return out
 
 
-def _binary_run(binary: Path, model: Path, tmp: Path) -> Run:
+def runs_at_once() -> int:
+    """How many runs of the binary a `Binary` starts together (`runs`): RUNS_AT_ONCE, and no more than the CPUs this
+    process may use (`cpus.usable`)."""
+    return max(1, min(RUNS_AT_ONCE, cpus.usable()))
+
+
+def _binary_run(binary: Path, model: Path, tmp: Path, *, at_once: int = 1) -> Run:
     """A run of the binary (`_call`, its images written in `tmp`): each image handed to it as the model is handed one
     (`MODELS`) — rife-v4.25's padded with zeros to a multiple of 128 and the image it makes cut back to the pair's size,
-    rife-v4.6's as it is."""
+    rife-v4.6's as it is. With `at_once` over 1, runs asked together (`runs`) are started up to that many at a time,
+    each its images written in a folder of its own under `tmp`, and what they make handed back in the order asked; the
+    first that fails, in that order, is raised once every run started has ended."""
     pad = MODELS[held_model(model)].pad
 
-    def run(x: np.ndarray, y: np.ndarray, t: float, modes: tuple[str, ...] | None) -> np.ndarray:
+    def run_in(folder: Path, x: np.ndarray, y: np.ndarray, t: float, modes: tuple[str, ...] | None) -> np.ndarray:
         h, w = x.shape[:2]
         if pad:
             x, y = padded(x, pad), padded(y, pad)
         a, b = Image.fromarray(x, "RGB"), Image.fromarray(y, "RGB")
-        made = np.asarray(_call(binary, model, a, b, t, tmp) if modes is None else _call(binary, model, a, b, t, tmp, modes))
+        made = np.asarray(_call(binary, model, a, b, t, folder) if modes is None else _call(binary, model, a, b, t, folder, modes))
         return np.ascontiguousarray(made[:h, :w]) if pad else made
+
+    def run(x: np.ndarray, y: np.ndarray, t: float, modes: tuple[str, ...] | None) -> np.ndarray:
+        return run_in(tmp, x, y, t, modes)
+
+    def together(asked: list[tuple[np.ndarray, np.ndarray, float, tuple[str, ...] | None]]) -> list[np.ndarray]:
+        if len(asked) <= 1:
+            return [run(*one) for one in asked]
+        folders = [Path(tempfile.mkdtemp(prefix="run-", dir=tmp)) for _ in asked]
+        with ThreadPoolExecutor(max_workers=min(at_once, len(asked))) as pool:
+            started = [pool.submit(run_in, folder, *one) for folder, one in zip(folders, asked)]
+        return [s.result() for s in started]
+
+    if at_once > 1:
+        run.at_once = together  # type: ignore[attr-defined]
     return run
 
 
@@ -669,16 +820,48 @@ def passes(a: Image.Image, b: Image.Image, t: float, *, binary: Path, model: Pat
 
 
 def _mask(mask: np.ndarray, size: int, op: type) -> np.ndarray:
-    return np.asarray(Image.fromarray(np.uint8(mask) * 255).filter(op(size))) > 0
+    """A mask under PIL's `op` (ImageFilter.MinFilter or MaxFilter) `size` pixels wide, as PIL filters it — the edge pixels
+    repeated outward — taken one axis at a time (`_square_min`, `_square_max`): the same pixels, where PIL ranks every
+    square of them."""
+    if size % 2 == 0:
+        raise ValueError(f"bad filter size {size}")  # as PIL refuses one
+    if op is ImageFilter.MinFilter:
+        return _square_min(mask, size // 2, mode="edge")
+    if op is ImageFilter.MaxFilter:
+        return _square_max(mask, size // 2, mode="edge")
+    raise ValueError(f"_mask: {op!r} is not ImageFilter.MinFilter or MaxFilter")
 
 
 def _square_min(a: np.ndarray, r: int, **pad) -> np.ndarray:
     """Per pixel, the minimum over the square 2r+1 wide around it, one axis at a time, outside the frame as
     `np.pad` fills it with `pad`."""
+    return _square(a, r, np.minimum, pad)
+
+
+def _square_max(a: np.ndarray, r: int, **pad) -> np.ndarray:
+    """Per pixel, the maximum over the square 2r+1 wide around it, as `_square_min` takes the minimum."""
+    return _square(a, r, np.maximum, pad)
+
+
+def _square(a: np.ndarray, r: int, pick: Callable[..., np.ndarray], pad: dict) -> np.ndarray:
     out = np.pad(a, r, **pad)
     for axis in (0, 1):
-        out = np.lib.stride_tricks.sliding_window_view(out, 2 * r + 1, axis=axis).min(axis=-1)
+        out = _runs(out, 2 * r + 1, axis, pick)
     return out
+
+
+def _runs(a: np.ndarray, k: int, axis: int, pick: Callable[..., np.ndarray]) -> np.ndarray:
+    """`pick` (np.minimum or np.maximum) over every k in a row along `axis`: runs of 2, 4, 8, ... made from the runs half
+    as long, then the two longest that cover k, overlapping. The least or most of a run is read from its values alone,
+    so it is the same whichever runs it is read through."""
+    a = np.moveaxis(a, axis, 0)
+    span, out = 1, a
+    while 2 * span <= k:
+        out = pick(out[:-span], out[span:])
+        span *= 2
+    if span < k:
+        out = pick(out[:len(out) - (k - span)], out[k - span:])
+    return np.moveaxis(out, 0, axis)
 
 
 def _luma(x: np.ndarray) -> np.ndarray:
@@ -1129,9 +1312,9 @@ def _local_range(x: np.ndarray) -> np.ndarray:
     """Per pixel, the largest over the channels of max - min within CROSSFADE_RANGE pixels."""
     out = np.zeros(x.shape[:2], dtype=np.float32)
     for c in range(x.shape[2]):
-        channel = Image.fromarray(np.uint8(np.clip(x[..., c], 0, 1) * 255 + 0.5), "L")
-        hi = np.asarray(channel.filter(ImageFilter.MaxFilter(CROSSFADE_RANGE)), dtype=np.float32)
-        lo = np.asarray(channel.filter(ImageFilter.MinFilter(CROSSFADE_RANGE)), dtype=np.float32)
+        channel = np.uint8(np.clip(x[..., c], 0, 1) * 255 + 0.5)  # read as PIL's MaxFilter and MinFilter read it
+        hi = _square_max(channel, CROSSFADE_RANGE // 2, mode="edge").astype(np.float32)
+        lo = _square_min(channel, CROSSFADE_RANGE // 2, mode="edge").astype(np.float32)
         out = np.maximum(out, (hi - lo) / 255.0)
     return out
 
@@ -1274,20 +1457,32 @@ def _file_sha256(path: Path) -> str:
 
 class Binary:
     """rife-ncnn-vulkan as the runner of a `Rife`: each run one call of the binary, its images written in a directory of
-    its own for the frame. What its frames depend on is read anew every time it is asked (`identity`): the binary runs
-    from its files on disk, and reads its model from them, every call."""
+    its own, the runs a frame or a read asks for started together (`runs_at_once`). What its frames depend on is read
+    anew every time it is asked (`identity`): the binary runs from its files on disk, and reads its model from them, every
+    call."""
 
     def __init__(self, binary: Path, model: Path):
         self.binary, self.model = binary, model
         self.model_name = held_model(model)  # refused here, before a frame is asked for
+        self.said = False
+
+    def say(self) -> None:
+        """The layers its runs leave out, and the manifests it could not read (`left_out_lines`), said on stderr on the
+        first frame or read it is asked for, and not again."""
+        if not self.said:
+            self.said = True
+            for line in left_out_lines(layers_left_out()):
+                print(f"rife: {line}", file=sys.stderr, flush=True)
 
     def frame(self, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> tuple[np.ndarray, np.ndarray]:
+        self.say()
         with tempfile.TemporaryDirectory(prefix="sprite-gen-rife-") as td:
-            return frame_runs(_binary_run(self.binary, self.model, Path(td)), colour, cover, t)
+            return frame_runs(_binary_run(self.binary, self.model, Path(td), at_once=runs_at_once()), colour, cover, t)
 
     def read(self, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        self.say()
         with tempfile.TemporaryDirectory(prefix="sprite-gen-rife-") as td:
-            run = _binary_run(self.binary, self.model, Path(td))
+            run = _binary_run(self.binary, self.model, Path(td), at_once=runs_at_once())
             return (*frame_runs(run, colour, cover, t), pass_runs(run, colour, cover, t))
 
     def describe(self) -> dict[str, str]:

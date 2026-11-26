@@ -24,6 +24,13 @@ import talking_face as tf
 from sprite_gen.video import face_bake, face_layer as fl, face_pack
 from sprite_gen.video import parts as parts_mod
 
+# Every test but two reads the pack made once for the module, which takes about half a minute on an 8-core M1: the module is
+# slow as a whole (the two timeline tests that read no pack run with it in `pytest --full`). In the lane it runs whole in
+# one share (`one_share`) and, the lane handing out tests by file (`--dist loadfile`), on one worker of it, so the pack is
+# made once a run and not once a share and worker, each on every processor at once. On a four-processor runner busy
+# with the share's other tests the pack takes minutes: the first test, which makes it, gets ten.
+pytestmark = [pytest.mark.slow, pytest.mark.one_share, pytest.mark.timeout(600)]
+
 NODE = shutil.which("node")
 needs_node = pytest.mark.skipif(NODE is None, reason="node is not on PATH: the face player cannot run")
 

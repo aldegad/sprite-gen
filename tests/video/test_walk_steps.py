@@ -342,7 +342,7 @@ def _keyed(root: Path, draw, frames: int = FRAMES, hold: tuple[int, int] | None 
 def _cut(out: Path, keyed: Path, *extra: str) -> dict:
     assert loop.main(["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk",
                       "--anchor", "motion-auto", "--repair", "off", *extra]) == 0
-    return json.loads((out / "loop.loop.report.json").read_text())
+    return json.loads((out / "loop.loop.report.json").read_text(encoding="utf-8"))
 
 
 def _two_steps(report: dict, cycle: float) -> dict:
@@ -369,7 +369,7 @@ def test_a_half_step_diagonal_walk_is_cut_two_steps(tmp_path):
     assert counted["search"]["verdict"] == "refuted" and counted["search"]["k"] == [1] and counted["search"]["cut"][1] in (14, 15)
     # Its feet pass briefly and no view is given: whether its crossings mark cycles is not asked.
     assert "cycles" not in counted
-    strip = json.loads((tmp_path / "out" / "loop.strip.json").read_text())
+    strip = json.loads((tmp_path / "out" / "loop.strip.json").read_text(encoding="utf-8"))
     assert strip["steps"] == 2 and strip["cycle_frames"] == report["cycle"]["length"]
     # The step screen's pixel suspicion of a cycle twice as long is settled by the count.
     screen = report["cycle"]["step_screen"]
@@ -425,7 +425,7 @@ def test_a_walk_that_stalls_is_not_cut_across_the_stalled_step(tmp_path):
 def _one_cycle(out: Path, cycle: float) -> dict:
     """The cut in `out` is one cycle of the walker, `cycle` frames, two steps by its crossings read as cycles, and says
     so — in its strip too."""
-    report = json.loads((out / "loop.loop.report.json").read_text())
+    report = json.loads((out / "loop.loop.report.json").read_text(encoding="utf-8"))
     c = report["cycle"]
     counted = c["step_count"]
     assert abs(c["length"] - cycle) <= 1
@@ -434,7 +434,7 @@ def _one_cycle(out: Path, cycle: float) -> dict:
     assert abs(counted["step_range"][1] - cycle / 2) <= 1
     assert counted["cut"]["verdict"] == "two" and counted["cut"]["k"] == [2] and counted["cut"]["ring"] == 2
     assert abs(counted["cut"]["phase"]) <= crossings.PHASE_TOLERANCE
-    assert json.loads((out / "loop.strip.json").read_text())["steps"] == 2
+    assert json.loads((out / "loop.strip.json").read_text(encoding="utf-8"))["steps"] == 2
     assert report["status"] == "passed"
     return counted
 
@@ -496,6 +496,7 @@ def _unwitnessed(report: dict, interval: float) -> dict:
 @pytest.mark.parametrize("walker, view, interval, runs", [("behind", None, 17.5, {"rife-v4.25": (8, 10), "rife-v4.6": 12}),
                                                           ("behind", "back_diagonal", 17.5, {"rife-v4.25": (8, 10), "rife-v4.6": 12}),
                                                           ("outward", "front_diagonal", 16, 0)], ids=pin_id)
+@pytest.mark.rife_pinned
 def test_a_walk_whose_feet_meet_once_a_cycle_but_whose_body_does_not_bob_is_cut_two_intervals_with_a_warning(tmp_path, walker, view,
                                                                                                          interval, runs, rife_runs):
     """The two walkers whose feet meet once a cycle, their body held still: its top line does not rise and fall, and
@@ -532,6 +533,7 @@ def test_a_walk_whose_feet_meet_once_a_cycle_its_arms_swinging_past_its_sides_is
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # up to 12 calls of the binary at 300 x 220 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize("cycle, runs", [(16, 0), (18, 12)])
+@pytest.mark.rife_pinned
 def test_a_diagonal_walk_whose_near_foot_steps_out_is_cut_one_cycle_from_its_view(tmp_path, cycle, runs, rife_runs):
     """On a front diagonal the near foot steps out toward the camera and passes the far one apart: the feet meet on the
     screen once a cycle, and briefly — no pass hides. Given the view, the count asks the picture: the clip one interval
@@ -562,6 +564,7 @@ def test_a_diagonal_walk_whose_near_foot_steps_out_is_cut_one_cycle_from_its_vie
 @pytest.mark.timeout(900)  # up to 30 calls of the binary at 300 x 220 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize("cycle, runs", [(20, {"rife-v4.25": (12, 24), "rife-v4.6": 12}), (24, {"rife-v4.25": (12, 30), "rife-v4.6": 12})],
                          ids=pin_id)
+@pytest.mark.rife_pinned
 def test_a_walk_whose_feet_stay_apart_and_meet_once_a_cycle_is_cut_one_cycle_on_the_order_its_feet_are_drawn_in(tmp_path, cycle, runs, rife_runs):
     """Seen from the front, the feet apart, the foot stepping toward the camera drawn lower: the feet meet on the screen
     once a cycle, and the body does not rise and fall. The clip shows its two sides of feet are its two legs — seen apart
@@ -576,7 +579,8 @@ def test_a_walk_whose_feet_stay_apart_and_meet_once_a_cycle_is_cut_one_cycle_on_
     assert said["bob"]["says"] is None and said["order"]["says"] == "two steps" and "unwitnessed" not in said
     assert said["order"]["slides"] == [] and said["order"]["travel"] < local_cycle.ORDER_TRAVEL * said["order"]["spacing"]
     assert "the foot drawn nearer changes sides" in said["why"]
-    witness = json.loads((tmp_path / "front" / "loop.loop.report.json").read_text())["cycle"]["cut_witness"]
+    report = json.loads((tmp_path / "front" / "loop.loop.report.json").read_text(encoding="utf-8"))
+    witness = report["cycle"]["cut_witness"]
     assert witness["says"] == "two steps" and witness["by"] == ["order"] and "held" not in witness
     side = _cut(tmp_path / "side", keyed, "--view", "side")
     assert abs(side["cycle"]["length"] - 2 * cycle) <= 1.5 and local_cycle.unwitnessed(side["cycle"])
@@ -737,6 +741,7 @@ def test_a_wide_walk_whose_far_leg_is_drawn_a_few_tones_off_is_cut_two_steps(tmp
                                                      ("arc", 0, 60, {"rife-v4.25": (14, 22), "rife-v4.6": 22}),
                                                      ("sway", 0, 60, {"rife-v4.25": 6, "rife-v4.6": 12}),
                                                      ("ramp", 0, 60, {"rife-v4.25": 8, "rife-v4.6": 16})], ids=pin_id)
+@pytest.mark.rife_pinned
 def test_a_walk_whose_crossings_are_its_steps_carried_up_and_down_is_cut_two_steps(tmp_path, motion, bob, room, runs, rife_runs):
     """The wide walker with its legs drawn alike, carried up and down the screen with the whole picture (`_carried`;
     its legs, their steps and their crossings every 23 frames as they were): bobbing, along a smooth arc 24 px deep;
@@ -788,6 +793,7 @@ def test_a_walk_carried_up_and_down_whole_feet_and_all_is_cut_two_intervals_with
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # up to 8 calls of the binary at 300 x 340 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize("bob, runs", [(0, {"rife-v4.25": 4, "rife-v4.6": 8}), (3, {"rife-v4.25": (4, 6), "rife-v4.6": 4})], ids=pin_id)
+@pytest.mark.rife_pinned
 def test_a_walk_on_a_picture_shaken_twice_an_interval_is_cut_two_steps_with_a_warning(tmp_path, bob, runs, rife_runs):
     """The wide walker with its legs drawn alike, its crossings its steps every 23 frames, held still (or rising and
     falling on its legs once a step), on a picture shaken 3 px up and down twice an interval — dy = round(3 sin(4 pi k /
@@ -856,7 +862,7 @@ def test_a_walk_the_search_cuts_two_steps_in_phase_is_cut_as_before(tmp_path):
         plain = _cut(tmp_path / "unread", keyed)
     assert (plain["cycle"]["start"], plain["cycle"]["length"]) == (report["cycle"]["start"], report["cycle"]["length"])
     _same_cut(tmp_path / "read", tmp_path / "unread")
-    strips = [json.loads((tmp_path / d / "loop.strip.json").read_text()) for d in ("read", "unread")]
+    strips = [json.loads((tmp_path / d / "loop.strip.json").read_text(encoding="utf-8")) for d in ("read", "unread")]
     assert strips[0].pop("steps") == 2 and "steps" not in strips[1] and strips[0] == strips[1]
 
 
@@ -875,7 +881,8 @@ def test_a_body_with_no_feet_to_read_is_cut_as_the_search_cuts_it(tmp_path):
     counted = c["step_count"]
     assert counted["readable"] is False and counted["chosen_by"] == "search" and counted["why"]
     assert counted["search"]["cut"] == [c["start"], c["length"]]
-    assert "steps" not in report["cycle"] and "steps" not in json.loads((tmp_path / "out" / "loop.strip.json").read_text())
+    assert "steps" not in report["cycle"]
+    assert "steps" not in json.loads((tmp_path / "out" / "loop.strip.json").read_text(encoding="utf-8"))
     said = _held(report)
     assert said["cut"] == [c["start"], c["length"]] and said["says"] is None and abs(c["length"] - 16) <= 1
     frames = [_blob(k) for k in range(64)]

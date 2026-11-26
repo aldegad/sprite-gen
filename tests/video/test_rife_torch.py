@@ -469,8 +469,8 @@ def test_a_model_other_than_the_pinned_one_is_refused_and_one_not_there_is_not_i
         rife.locate_model()
     model = tmp_path / "other" / rife.MODEL
     model.mkdir(parents=True)
-    (model / "flownet.param").write_text("another model")
-    (model / "flownet.bin").write_text("another model")
+    (model / "flownet.param").write_text("another model", encoding="utf-8")
+    (model / "flownet.bin").write_text("another model", encoding="utf-8")
     monkeypatch.setenv("SPRITE_GEN_RIFE_MODEL", str(model))
     assert rife.locate_model() == model.resolve()
     pins = " or ".join(sorted(set(rife.MODEL_SHA256[rife.MODEL]["flownet.param"].values())))
@@ -505,6 +505,7 @@ class FakeRunner:
         return {"kind": "rife-torch", "device": self.ident["device"], "model": self.model.name}
 
 
+@pytest.mark.slow
 def test_a_report_names_the_torch_backend_and_counts_its_runs(monkeypatch, tmp_path):
     """`describe()` names what made the frames (`kind`): `rife-ncnn-vulkan` for the binary, as before, `rife-torch` for the
     torch backend; `counts()` names its runs as the overlapped wrap's record does — the binary's calls (`binary_calls`), the
@@ -525,6 +526,7 @@ def test_a_report_names_the_torch_backend_and_counts_its_runs(monkeypatch, tmp_p
     assert torch.counts() == {"runs": 2 + 2 + rife.PASS_CALLS} and torch.made == 2
 
 
+@pytest.mark.slow
 def test_the_loop_and_the_alignment_name_the_torch_backend_that_made_their_frames(monkeypatch, tmp_path):
     """Where `video-loop` and `video-cycle-align` find RIFE themselves and SPRITE_GEN_RIFE_BACKEND names torch, their reports
     name the torch backend as what made their frames — `kind` rife-torch, its device and model, the augmentation —

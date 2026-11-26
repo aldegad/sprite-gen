@@ -175,7 +175,7 @@ def stub_set(tmp_path, monkeypatch, *, bases, states, **kwargs):
     def video_stub(image, prompt, out, report, **kw):
         seen.setdefault(out.parent.name, {}).update(prompt=prompt, last_frame=kw.get("last_frame"))
         out.write_bytes(b"clip")
-        report.write_text(json.dumps({"prompt": prompt}))
+        report.write_text(json.dumps({"prompt": prompt}), encoding="utf-8")
         return 0
 
     def frames_stub(clip, out, **kw):
@@ -255,7 +255,7 @@ def test_a_once_return_that_does_not_come_back_is_refused(tmp_path) -> None:
         reached.save(frames / f"frame-{k:04d}.png")
     with pytest.raises(SystemExit, match="does not return to its first pose"):
         cut(tmp_path, frames)
-    assert json.loads((tmp_path / "out" / "punch.loop.report.json").read_text())["status"] == "failed"
+    assert json.loads((tmp_path / "out" / "punch.loop.report.json").read_text(encoding="utf-8"))["status"] == "failed"
 
 
 # The binary's calls the held fill makes on this cut, by model (`rife.model_name()`): rife-v4.25's frame between held cells
@@ -264,6 +264,8 @@ ONCE_RETURN_RUNS = {"rife-v4.25": (30, 44), "rife-v4.6": 36}
 
 
 @pytest.mark.timeout(900)  # 36 to 44 calls of the binary at 96 x 96 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.slow
+@pytest.mark.rife_pinned
 def test_a_once_return_cut_keeps_both_ends_and_plays_once(tmp_path, rife_runs) -> None:
     report = cut(tmp_path, punch_frames(tmp_path / "frames", (96, 96), count=90))
     assert as_pinned(rife_runs(), ONCE_RETURN_RUNS), rife_runs()

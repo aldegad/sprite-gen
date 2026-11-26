@@ -21,6 +21,15 @@ from sprite_gen.video import rife
 from tests.video.test_rife import _disc, _marked
 
 
+
+@pytest.fixture(autouse=True)
+def _one_run_at_a_time(monkeypatch):
+    """The stand-in numbers its calls in the order they come, and the tests read each call as the run the engine asks
+    for at that place (a frame's colour then its coverage, then a read's passes in turn): an order only runs started one
+    at a time give. Started together (`rife.runs_at_once`), each run is still the command it was alone
+    (tests/video/test_rife_runs_at_once.py)."""
+    monkeypatch.setattr(rife, "RUNS_AT_ONCE", 1)
+
 def _keeping_binary(tmp_path: Path) -> tuple[Path, Path]:
     """A stand-in binary that keeps every pair it is handed (`in-<n>-0.png`, `in-<n>-1.png`, its arguments in `argv.txt`)
     and returns its first image: (binary, the directory it keeps them in)."""
@@ -118,6 +127,7 @@ def _padded(n: int, multiple: int) -> int:
 
 
 @pytest.mark.parametrize("size", [(128, 96), (130, 97), (400, 771)])
+@pytest.mark.slow
 def test_rife_v4_25_is_handed_each_image_padded_with_zeros_to_128_and_the_frame_cut_back(tmp_path, size):
     """rife-v4.25: each image the binary is handed — the colour and the coverage of a frame, and each of a read's sixteen
     passes, turned or not — is the image RIFE is given (`rife.inputs`) at the top left of a canvas a multiple of 128 each

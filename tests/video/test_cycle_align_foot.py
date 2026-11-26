@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,23 @@ def _set(root: Path) -> list[Path]:
 VIEWS = ["front", "side@right", "side@right"]
 
 
+@pytest.fixture(scope="module")
+def cut_set(tmp_path_factory) -> Path:
+    """`_set`'s three loops and their keyed frames, cut once a module: every test that aligns the set starts from the
+    same three cuts of the same frames."""
+    root = tmp_path_factory.mktemp("set")
+    _set(root)
+    return root
+
+
+@pytest.fixture
+def dirs(cut_set: Path, tmp_path: Path) -> list[Path]:
+    """`_set(tmp_path)`: a copy of the module's three cuts for this test alone, laid out as `_set` cuts them (each keyed
+    folder beside its loop), so nothing an alignment rewrites reaches another test."""
+    shutil.copytree(cut_set, tmp_path, dirs_exist_ok=True)
+    return [tmp_path / name for name in ("S", "E", "W")]
+
+
 def _bytes(d: Path) -> dict[str, bytes]:
     return {name: (d / name).read_bytes() for name in OUTPUTS} | {p.name: p.read_bytes() for p in sorted((d / "cycle").glob("frame-*.png"))}
 
@@ -52,8 +70,7 @@ def _rows(report: dict) -> dict[str, dict]:
     return {Path(r["dir"]).name: r for r in report["loops"]}
 
 
-def test_a_loop_whose_foot_is_not_named_is_listed_with_its_two_strike_frames(tmp_path):
-    dirs = _set(tmp_path)
+def test_a_loop_whose_foot_is_not_named_is_listed_with_its_two_strike_frames(tmp_path, dirs):
     report = align.align_set(dirs, views=VIEWS, report_path=tmp_path / "walk.cycle-align.json")
     rows = _rows(report)
     assert [rows[k]["start_foot_source"] for k in "SEW"] == ["engine", "engine", None]
@@ -73,11 +90,10 @@ def test_a_loop_whose_foot_is_not_named_is_listed_with_its_two_strike_frames(tmp
 
 
 @pytest.mark.slow
-def test_the_foot_given_for_one_loop_turns_that_loop_alone_half_a_cycle(tmp_path):
+def test_the_foot_given_for_one_loop_turns_that_loop_alone_half_a_cycle(dirs):
     """Its left foot lands on the first strike: the loop starts half a cycle on, where its right
     lands. The other two loops come out byte for byte as they were. (A loop named by its directory
     goes through the same resolver: tests below and tests/video/test_cycle_suspects.py name it so.)"""
-    dirs = _set(tmp_path)
     align.align_set(dirs, views=VIEWS)
     before = {d.name: _bytes(d) for d in dirs}
     report = align.align_set(dirs, views=VIEWS, feet={"W": "left"})
@@ -99,8 +115,7 @@ def test_the_foot_given_for_one_loop_turns_that_loop_alone_half_a_cycle(tmp_path
     assert _bytes(dirs[2]) == turned
 
 
-def test_the_foot_given_that_lands_first_keeps_the_start_and_records_who_said_it(tmp_path):
-    dirs = _set(tmp_path)
+def test_the_foot_given_that_lands_first_keeps_the_start_and_records_who_said_it(dirs):
     align.align_set(dirs, views=VIEWS)
     before = {d.name: _bytes(d) for d in dirs}
     report = align.align_set(dirs, views=VIEWS, feet={"W": "right"})
@@ -110,8 +125,7 @@ def test_the_foot_given_that_lands_first_keeps_the_start_and_records_who_said_it
     assert w["strikes"] == [0, N // 2] and w["start_foot_source"] == "given" and w["foot_given"] == ["right", "left"]
 
 
-def test_a_foot_given_against_the_views_own_reading_is_taken_and_named(tmp_path):
-    dirs = _set(tmp_path)
+def test_a_foot_given_against_the_views_own_reading_is_taken_and_named(dirs):
     named = _rows(align.align_set(dirs, views=VIEWS))["E"]
     landing = named["foot"]["feet"][0]  # the own foot the shade says lands on the first strike
     other = "left" if landing == "right" else "right"
@@ -122,8 +136,7 @@ def test_a_foot_given_against_the_views_own_reading_is_taken_and_named(tmp_path)
     assert any(f"--foot says {other}" in line and f"said {landing}" in line for line in report["warnings"])
 
 
-def test_a_foot_for_no_loop_or_not_a_foot_is_refused_before_anything_is_rewritten(tmp_path):
-    dirs = _set(tmp_path)
+def test_a_foot_for_no_loop_or_not_a_foot_is_refused_before_anything_is_rewritten(dirs):
     align.align_set(dirs, views=VIEWS)
     before = {d.name: _bytes(d) for d in dirs}
     with pytest.raises(SystemExit, match="--foot nope=left names 0 of the --loop-dir given"):
@@ -143,8 +156,7 @@ def test_a_foot_for_no_loop_or_not_a_foot_is_refused_before_anything_is_rewritte
     assert {d.name: _bytes(d) for d in dirs} == before
 
 
-def test_the_command_takes_foot(tmp_path, capsys):
-    dirs = _set(tmp_path)
+def test_the_command_takes_foot(tmp_path, capsys, dirs):
     assert align.main([*(f"--loop-dir={d}" for d in dirs), *(f"--view={v}" for v in VIEWS), "--foot", "W=left",
                        "--report", str(tmp_path / "r.json")]) == 0
     out = json.loads(capsys.readouterr().out)
@@ -152,8 +164,7 @@ def test_the_command_takes_foot(tmp_path, capsys):
     assert [r["start_foot_source"] for r in out["loops"]] == ["engine", "engine", "given"]
 
 
-def test_a_stopped_set_carries_the_foot_given_into_the_command_that_settles_it(tmp_path, monkeypatch):
-    dirs = _set(tmp_path)
+def test_a_stopped_set_carries_the_foot_given_into_the_command_that_settles_it(tmp_path, monkeypatch, dirs):
     real = align.cycle_screen
 
     def suspect_w(frames, **kw):

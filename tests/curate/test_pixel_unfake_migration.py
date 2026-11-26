@@ -228,6 +228,7 @@ def test_reroll_reads_through_the_gate_not_raw(tmp_path) -> None:
         (run_dir / "sprite-request.json").read_text(encoding="utf-8"))["fit"]
 
 
+@pytest.mark.slow
 def test_no_production_path_reads_the_request_outside_the_gate() -> None:
     """프로덕션 코드가 `sprite-request.json` 을 게이트 밖에서 읽지 않는다 (구조 단정).
 

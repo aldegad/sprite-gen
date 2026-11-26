@@ -227,7 +227,7 @@ def test_video_loop_records_the_repair_and_plays_the_made_frame(tmp_path):
     on_disk = np.asarray(Image.open(tmp_path / "out" / "cycle" / "frame-010.png"))
     assert np.array_equal(on_disk, np.asarray(truth[10]))
     assert np.array_equal(np.asarray(Image.open(tmp_path / "out" / "cycle" / "frame-009.png")), np.asarray(reopened[9]))
-    assert json.loads((tmp_path / "w.json").read_text())["jump_repair"]["replaced"] == [10]
+    assert json.loads((tmp_path / "w.json").read_text(encoding="utf-8"))["jump_repair"]["replaced"] == [10]
     assert made == [0.5]
     # the jolt of the loop as it plays after the repair (docs/loop-repair.md section 3)
     jolt = rep["jolt"]
@@ -283,7 +283,7 @@ def test_a_jump_without_rife_is_cut_as_filmed_with_a_warning(tmp_path, monkeypat
     assert np.array_equal(on_disk, np.asarray(reopened[10]))  # the jump frame stays as filmed
     warning = [l for l in capsys.readouterr().err.splitlines() if "jump frame was not repaired" in l]
     assert len(warning) == 1 and "sprite-gen rife install" in warning[0]
-    assert json.loads((tmp_path / "w.json").read_text())["jump_repair"]["applied"] is False
+    assert json.loads((tmp_path / "w.json").read_text(encoding="utf-8"))["jump_repair"]["applied"] is False
 
 
 def test_a_smooth_walk_without_rife_has_nothing_to_warn_about(tmp_path, monkeypatch, capsys):
@@ -299,7 +299,7 @@ def test_repair_on_without_rife_is_refused_with_the_install_line(tmp_path, monke
     filmed, _ = _loop({10: 12})
     with pytest.raises(SystemExit, match=r"sprite-gen rife install.*--repair auto"):
         _run(tmp_path, _keyed(tmp_path, filmed), repair="on")
-    report = json.loads((tmp_path / "w.json").read_text())
+    report = json.loads((tmp_path / "w.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and "rife-ncnn-vulkan not found" in report["error"]
 
 
@@ -383,7 +383,7 @@ def test_a_bound_the_caller_passes_refuses_a_jolting_loop(tmp_path):
     stays = lambda a, b, t: popped[7]  # an in-between that cannot take the pop out
     with pytest.raises(SystemExit, match=r"^video-loop: loop jolts — the head moves sideways .* regenerate the clip$"):
         _run(tmp_path, _keyed(tmp_path, popped), interpolate=stays, head_step_max=repair.HEAD_STEP_REFERENCE)
-    report = json.loads((tmp_path / "w.json").read_text())
+    report = json.loads((tmp_path / "w.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["jolt"]["passed"] is False and report["jolt"]["over"]
     assert report["jolt"]["gate"] == {"jolt_max": None, "head_step_max": repair.HEAD_STEP_REFERENCE}
     assert report["jump_repair"]["replaced"] == [7]

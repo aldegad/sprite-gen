@@ -84,6 +84,7 @@ def _bound(args: tuple[str, ...], flag: str) -> int | None:
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # up to 22 calls of the binary at about 280 x 200 (a row's runs): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize("path, clip, args, ran, cut, runs", ROWS, ids=[f"{r[0]}{''.join(r[2][-2:])}" for r in ROWS])
+@pytest.mark.rife_pinned
 def test_an_explicit_window_holds_on_every_path(tmp_path, path, clip, args, ran, cut, runs, rife_runs):
     keyed = clip(tmp_path / "clip")
     report_path = tmp_path / "loop.json"
@@ -91,7 +92,7 @@ def test_an_explicit_window_holds_on_every_path(tmp_path, path, clip, args, ran,
         code = loop.main(["--frames-dir", str(keyed), "--out-dir", str(tmp_path / "out"), "--report", str(report_path), *args])
     except SystemExit as exc:
         code = exc.code
-    report = json.loads(report_path.read_text())
+    report = json.loads(report_path.read_text(encoding="utf-8"))
     assert ran(report), report.get("cycle")
     assert as_pinned(rife_runs(), runs), rife_runs()
     lo, hi = _bound(args, "--min-len"), _bound(args, "--max-len")
@@ -103,6 +104,7 @@ def test_an_explicit_window_holds_on_every_path(tmp_path, path, clip, args, ran,
     assert (lo is None or length >= lo) and (hi is None or length <= hi), (path, length, lo, hi)
 
 
+@pytest.mark.slow
 def test_a_count_the_window_leaves_no_room_for_fails_and_says_both(tmp_path):
     keyed = _slow(tmp_path / "clip")
     with pytest.raises(SystemExit) as stop:
@@ -110,7 +112,7 @@ def test_a_count_the_window_leaves_no_room_for_fails_and_says_both(tmp_path):
                    "--max-len", "25", "--steps", "1"])
     said = str(stop.value)
     assert "is one step, so the cycle is 41-43 frames long, and --max-len 25 leaves none of that" in said
-    report = json.loads((tmp_path / "out" / "loop.loop.report.json").read_text())
+    report = json.loads((tmp_path / "out" / "loop.loop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["error"] in said
     assert report["cycle"]["steps"]["counted_window"] == [41, 43] and report["cycle"]["steps"]["window"] is None
     assert report["cycle"]["steps"]["refused"] == "outside --max-len 25"
@@ -120,7 +122,7 @@ def test_a_one_shot_the_window_leaves_no_room_for_says_the_window(tmp_path):
     keyed = _hop(tmp_path / "clip")  # the hop is 16 frames: no one-shot that short
     with pytest.raises(SystemExit, match=r"no complete one-shot return .* — in 8-14 frames, inside --min-len 8 --max-len 14"):
         loop.main(["--frames-dir", str(keyed), "--out-dir", str(tmp_path / "out"), "--state", "jump", "--min-len", "8", "--max-len", "14"])
-    report = json.loads((tmp_path / "out" / "loop.loop.report.json").read_text())
+    report = json.loads((tmp_path / "out" / "loop.loop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed" and report["periodic_attempt"] is not None and report["cycle"]["kind"] == "one-shot"
 
 

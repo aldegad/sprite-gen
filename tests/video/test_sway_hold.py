@@ -26,6 +26,7 @@ from sprite_gen.video import sway
 
 from tests.video.test_follow_inspect import CHEST, N, TORSO, W, H, figure, strip_dir, sway as body_sway
 from tests.video.test_follow_read_on import aligned, cells_of as cut_cells, chest as cut_chest, meta_of, origin, origin_once  # noqa: F401 (fixtures)
+from tests.video.test_sway_band import swayed
 
 POLICY = 'own-pixels-grown/kept-edge-air/read-short-sloped/1'
 ARM = [(150, 60, 40), (120, 40, 25), (180, 90, 60)]  # an arm's fur in stripes 2 px high, redder to the right
@@ -110,16 +111,16 @@ def grow(mask, px):
 
 
 def arm_like(rgb):
-    """Pixels whose colour is within 25 of the arm's fur."""
+    """Pixels whose colour is within 25 of the arm's fur: each colour the cell holds measured once, not once a pixel."""
     fur = np.array([arm_colour(x, y) for y in range(6) for x in range(ARM_BOX[0], ARM_BOX[2]+1)], np.float64)
-    d = np.min(np.linalg.norm(rgb[..., None, :3].astype(np.float64) - fur, axis=-1), axis=-1)
-    return d < 25
+    colours, where = np.unique(rgb[..., :3].reshape(-1, 3), axis=0, return_inverse=True)
+    d = np.min(np.linalg.norm(colours[:, None, :].astype(np.float64) - fur, axis=-1), axis=-1)
+    return (d < 25)[where.reshape(-1)].reshape(rgb.shape[:2])
 
 
-def folded_reads(answer, k):
-    """Cell k's opaque pixels, neither kept nor beside a kept one, whose read takes the source backwards: the area each
-    takes, read off the move each read took (`held_cell`), at 0 or under."""
-    drawn, read = answer.held_cell(k)
+def folded_reads(drawn, read):
+    """A cell's opaque pixels, neither kept nor beside a kept one, whose read takes the source backwards: the area each
+    takes, read off the move each read took (`held_cell`'s: the cell drawn, how each pixel was read), at 0 or under."""
     kept = read['held'] | read['air']
     p = np.pad(kept, 1)
     beside = kept | p[:-2, 1:-1] | p[2:, 1:-1] | p[1:-1, :-2] | p[1:-1, 2:]
@@ -130,23 +131,39 @@ def folded_reads(answer, k):
     return int((counted[1:-1, 1:-1] & (area <= 0)).sum()), float(area[counted[1:-1, 1:-1]].min()) if counted[1:-1, 1:-1].any() else 1.0
 
 
+@pytest.fixture(scope='module')
+def banded_once(tmp_path_factory):
+    """The held figure swayed with --band auto and no hold mask (`hold_mask=None`, as one left out), made once for the
+    module: three cases read that same sway (`swayed`: its loop directory, which no case writes, its record and the answer
+    it moved the loop by)."""
+    loop_dir = strip_dir(tmp_path_factory.mktemp('banded')/'loop', held_figure)
+    return (loop_dir, *swayed(loop_dir, [CHEST], band='auto', hold_mask=None))
+
+
+@pytest.fixture(scope='module')
+def held_once(tmp_path_factory):
+    """The same with the arm's and the belt's mask, made once for the module for two cases: as `banded_once`, and the
+    mask."""
+    root = tmp_path_factory.mktemp('held')
+    mask, loop_dir = mask_png(root/'mask.png', ARM_BOX, BELT_BOX), strip_dir(root/'loop', held_figure)
+    return (loop_dir, *swayed(loop_dir, [CHEST], band='auto', hold_mask=mask), mask)
+
+
 # ---------------------------------------------------------------- off, nothing of it
 
-def test_without_a_hold_mask_the_band_is_as_ever(tmp_path):
-    plain, asked = strip_dir(tmp_path/'plain', held_figure), strip_dir(tmp_path/'asked', held_figure)
+def test_without_a_hold_mask_the_band_is_as_ever(banded_once, tmp_path):
+    plain = strip_dir(tmp_path/'plain', held_figure)
     assert cli.main(['video-sway', '--loop-dir', str(plain), '--region', text(CHEST), '--band', 'auto']) == 0
-    sway.sway_loop(asked, [CHEST], band='auto', hold_mask=None)
+    asked, _, _ = banded_once  # asked by the API with hold_mask=None
     assert (plain/'walk.strip.png').read_bytes() == (asked/'walk.strip.png').read_bytes()
     assert 'hold' not in json.loads((plain/'walk.strip.json').read_text())['follow']
 
 
 # ---------------------------------------------------------------- what is held
 
-def test_what_the_mask_holds_its_soft_edge_and_the_air_keep_their_bytes_in_every_cell(tmp_path):
-    mask = mask_png(tmp_path/'mask.png', ARM_BOX, BELT_BOX)
-    plain_dir, held_dir = strip_dir(tmp_path/'plain', held_figure), strip_dir(tmp_path/'held', held_figure)
-    sway.sway_loop(plain_dir, [CHEST], band='auto')
-    record = sway.sway_loop(held_dir, [CHEST], band='auto', hold_mask=mask)
+def test_what_the_mask_holds_its_soft_edge_and_the_air_keep_their_bytes_in_every_cell(banded_once, held_once, tmp_path):
+    plain_dir, _, plain_answer = banded_once  # the band without the mask, and the answer it moved the loop by
+    held_dir, record, _, mask = held_once  # with the arm's and the belt's mask
     source, plain, held = cells_of(strip_dir(tmp_path/'source', held_figure)), cells_of(plain_dir), cells_of(held_dir)
     arm_moved = arm_new_plain = 0
     for k in range(N):
@@ -160,8 +177,8 @@ def test_what_the_mask_holds_its_soft_edge_and_the_air_keep_their_bytes_in_every
             assert np.array_equal(held[k][where], source[k][where]), (k, what)
         arm_moved += not np.array_equal(plain[k][arm], source[k][arm])
         # No fur is drawn off the arm, and no pixel solid by the arm (2 px round it, off it and what it keeps) is left clear.
-        off = ~arm & ~soft
-        new = lambda cell: arm_like(cell) & (cell[..., 3] >= 128) & ~arm_like(source[k]) & off
+        off, source_fur = ~arm & ~soft, arm_like(source[k])  # the source's fur, read once for both cells
+        new = lambda cell: arm_like(cell) & (cell[..., 3] >= 128) & ~source_fur & off
         arm_new_plain += int(new(plain[k]).sum())
         assert not new(held[k]).any(), k
         near = grow(arm, 2) & ~arm & ~soft & ~notch & (source[k][..., 3] >= 128)
@@ -169,7 +186,7 @@ def test_what_the_mask_holds_its_soft_edge_and_the_air_keep_their_bytes_in_every
     assert arm_moved > N//2 and arm_new_plain > 0  # without the mask the band moves the arm and draws its fur on the chest
     hold = record['hold']
     assert (hold['policy'], hold['asked'], hold['grow_px']) == (POLICY, {'per_cell': False, 'sha256': hashlib.sha256(mask.read_bytes()).hexdigest()}, 3)
-    assert hold['edge_px'] == math.ceil(answer_of(strip_dir(tmp_path/'again', held_figure), [CHEST], band='auto').reach) + 2
+    assert hold['edge_px'] == math.ceil(plain_answer.reach) + 2
     assert [piece['px'] for piece in hold['pieces']] == [int(boxed(ARM_BOX).sum()), int(boxed(BELT_BOX).sum())]
     assert [piece['box'] for piece in hold['pieces']] == [list(ARM_BOX), list(BELT_BOX)]
     carry = hold['carry']['cells']
@@ -181,14 +198,14 @@ def test_what_the_mask_holds_its_soft_edge_and_the_air_keep_their_bytes_in_every
     assert hold['lay'] == [] and max(hold['ledger']['short_px']) > 0
 
 
-def test_pixels_no_read_round_the_mask_comes_near_are_the_bands_byte_for_byte(tmp_path):
+@pytest.mark.slow
+def test_pixels_no_read_round_the_mask_comes_near_are_the_bands_byte_for_byte(banded_once, tmp_path):
     mask = mask_png(tmp_path/'mask.png', ARM_BOX)
-    plain_dir, held_dir = strip_dir(tmp_path/'plain', held_figure), strip_dir(tmp_path/'held', held_figure)
-    sway.sway_loop(plain_dir, [CHEST], band='auto')
-    sway.sway_loop(held_dir, [CHEST], band='auto', hold_mask=mask)
+    plain_dir, _, _ = banded_once  # the band without the mask
+    held_dir = strip_dir(tmp_path/'held', held_figure)
+    _, answer = swayed(held_dir, [CHEST], band='auto', hold_mask=mask)  # the answer it moved the loop by
     plain, held = cells_of(plain_dir), cells_of(held_dir)
     assert sum(not np.array_equal(held[k], plain[k]) for k in range(N)) > N//2  # the mask holds what the band moved
-    answer = answer_of(strip_dir(tmp_path/'again', held_figure), [CHEST], band='auto', hold_mask=mask)
     # A read is shortened only within reach / HOLD_SLOPE (and a pixel and the margin) of what is kept, every way (its
     # share, lowered to rise by HOLD_SLOPE a px at most, is never over HOLD_SLOPE times that far), and its share is rounded
     # over HOLD_ROUND px each way: past that, the cell is the band's.
@@ -202,6 +219,7 @@ def test_pixels_no_read_round_the_mask_comes_near_are_the_bands_byte_for_byte(tm
     assert beyond > 0  # the band moves pixels out there, and they are moved as without the mask
 
 
+@pytest.mark.slow
 def test_a_steep_band_beside_the_mask_is_read_in_order(tmp_path):
     # A band the move at gain 1.3 does not fold and the move at 2.5 does, past a margin of 2, at the gain the fold rule
     # lowers it to: the band's own move leaves a pixel little of its area, and the arm's right side lies in it. Where the
@@ -210,18 +228,18 @@ def test_a_steep_band_beside_the_mask_is_read_in_order(tmp_path):
     per_gain = answer_of(strip_dir(tmp_path/'unit', held_figure), [CHEST], gain=1.0).reach_per_gain
     kw = dict(band=math.ceil(1.3*per_gain*math.pi/2), band_margin=2, on_fold='lower')
     held_dir = strip_dir(tmp_path/'held', held_figure)
-    record = sway.sway_loop(held_dir, [CHEST], hold_mask=mask, **kw)
+    record, answer = swayed(held_dir, [CHEST], hold_mask=mask, **kw)  # and the answer it moved the loop by
     source, held = cells_of(strip_dir(tmp_path/'source', held_figure)), cells_of(held_dir)
     for k in range(N):
         arm = boxed(ARM_BOX, body_sway(k))
         assert np.array_equal(held[k][arm], source[k][arm]), k
     assert record['fold']['lowered'] and min(record['band']['ledger']['jacobian_min']) < 0.2
-    answer = answer_of(strip_dir(tmp_path/'again', held_figure), [CHEST], hold_mask=mask, **kw)
     short = 0
     for k in range(N):
-        folded, least = folded_reads(answer, k)
+        drawn, read = answer.held_cell(k)  # drawn once a cell, and read for both
+        folded, least = folded_reads(drawn, read)
         assert folded == 0 and least > 0, (k, least)
-        short += int((answer.held_cell(k)[1]['share'] < 1).sum())
+        short += int((read['share'] < 1).sum())
     assert short > 0
     ledger = record['hold']['ledger']
     assert ledger['read_folded_px'] == [0]*N and ledger['read_folded_px_max'] == 0
@@ -233,15 +251,14 @@ def test_a_steep_band_beside_the_mask_is_read_in_order(tmp_path):
 
 # ---------------------------------------------------------------- the same hold on every path
 
-def test_a_folder_of_the_masks_carried_holds_as_the_one_mask(tmp_path):
-    mask = mask_png(tmp_path/'mask.png', ARM_BOX, BELT_BOX)
-    one_dir, folder_dir = strip_dir(tmp_path/'one', held_figure), strip_dir(tmp_path/'folder', held_figure)
-    one = sway.sway_loop(one_dir, [CHEST], band='auto', hold_mask=mask)
+@pytest.mark.slow
+def test_a_folder_of_the_masks_carried_holds_as_the_one_mask(held_once, tmp_path):
+    one_dir, one, answer, _ = held_once  # the one mask, carried, and the answer the loop was moved by
+    folder_dir = strip_dir(tmp_path/'folder', held_figure)
     source, held = cells_of(strip_dir(tmp_path/'source', held_figure)), cells_of(one_dir)
     for k in range(N):
         arm = boxed(ARM_BOX, body_sway(k))
         assert np.array_equal(held[k][arm], source[k][arm]), k
-    answer = answer_of(strip_dir(tmp_path/'again', held_figure), [CHEST], band='auto', hold_mask=mask)
     masks = tmp_path/'masks'
     masks.mkdir()
     for k in range(N):
@@ -254,6 +271,7 @@ def test_a_folder_of_the_masks_carried_holds_as_the_one_mask(tmp_path):
     assert given['hold']['ledger'] == one['hold']['ledger']
 
 
+@pytest.mark.slow
 def test_the_frames_are_held_as_the_strip(tmp_path):
     mask = mask_png(tmp_path/'mask.png', ARM_BOX, BELT_BOX)
     frames = tmp_path/'frames'
@@ -272,6 +290,7 @@ def test_the_frames_are_held_as_the_strip(tmp_path):
     assert json.loads((tmp_path/'out'/'sway.json').read_text())['hold'] == strip_record['hold']
 
 
+@pytest.mark.slow
 def test_a_turned_loop_held_on_the_cuts_reading_is_the_cuts_held_sway_cell_for_cell(origin, tmp_path):
     # The mask is drawn on the cut's first cell, where the regions were read; the turned loop carries it from there.
     o, read_on, _ = origin

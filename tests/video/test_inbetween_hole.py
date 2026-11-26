@@ -313,11 +313,18 @@ def _shifted(frame: Image.Image, dx: int, dy: int) -> Image.Image:
 KEPT = {"made_at": [1, 3], "nearest_at": [], "faults": [[], []], "delivered": True}
 
 
+def _resampled_and_holes(a: Image.Image, made: Image.Image, b: Image.Image) -> tuple[dict[str, object], dict[int, float]]:
+    """`_resampled`, and the hole the alignment read on each frame it made (`align.measure_made`), by cell: at 1, the frame
+    made from a to b at t 0.5, `rife.hole(made, a, b, 0.5)`; at 3, from b to a, `rife.hole(made, b, a, 0.5)` — read
+    once, by the alignment, not again by the test."""
+    out, facts = align.resample([a, b], 4, lambda x, y, t: made)
+    return ({"made_at": facts["made_at"], "nearest_at": facts["nearest_at"], "faults": [m["faults"] for m in facts["smear"]],
+             "delivered": out[1] is made and out[3] is made}, {m["at"]: m["hole"] for m in facts["smear"]})
+
+
 def _resampled(a: Image.Image, made: Image.Image, b: Image.Image) -> dict[str, object]:
     """What the alignment does resampling a and b to four frames, both frames made at t 0.5 being `made`."""
-    out, facts = align.resample([a, b], 4, lambda x, y, t: made)
-    return {"made_at": facts["made_at"], "nearest_at": facts["nearest_at"], "faults": [m["faults"] for m in facts["smear"]],
-            "delivered": out[1] is made and out[3] is made}
+    return _resampled_and_holes(a, made, b)[0]
 
 
 # Resampled to eight, the frames made at t 0.25, 0.5 and 0.75 each way all kept as made.
@@ -391,20 +398,23 @@ def test_alignment_keeps_a_clean_frame_and_one_with_the_gap_the_sources_have():
         assert all(m["faults"] == [] and m["hole"] == 0 for m in facts["smear"])
 
 
+@pytest.mark.slow
 def test_a_gap_both_source_frames_have_moved_with_the_body_is_theirs():
     """The body with its gap moved whole from one source frame to the next, across and diagonally, by each of MOVES, the
     frame between drawn halfway: each source frame moved half the way onto it gives it byte for byte. From 24 px on, the
     gap lies 5 px and more from where either source frame has it, but on the way the body moves, so it is theirs: every
-    frame is kept as made, and reads no hole."""
+    frame is kept as made, and reads no hole (`rife.hole(made, a, b, 0.5)`, as the alignment read it on the frame it made
+    at cell 1)."""
     seen = {}
     for move in MOVES:
         for down in (0, 1):
             dx, dy = move // 2, down * move // 2
             a, made, b = _body(-dx, -dy), _body(), _body(dx, dy)
             assert _shifted(a, dx, dy).tobytes() == made.tobytes() == _shifted(b, -dx, -dy).tobytes()
-            seen[move, "diagonally" if down else "across"] = (a, made, b, _resampled(a, made, b))
-    assert {k: v[3] for k, v in seen.items() if v[3] != KEPT} == {}
-    assert {k: rife.hole(made, a, b, 0.5) for k, (a, made, b, _) in seen.items()} == {k: 0.0 for k in seen}
+            kept, holes = _resampled_and_holes(a, made, b)
+            seen[move, "diagonally" if down else "across"] = (kept, holes[1])
+    assert {k: v[0] for k, v in seen.items() if v[0] != KEPT} == {}
+    assert {k: hole for k, (_, hole) in seen.items()} == {k: 0.0 for k in seen}
 
 
 def test_a_gap_one_source_frame_has_half_open_between_is_theirs():
@@ -431,19 +441,23 @@ def test_a_gap_moved_with_a_part_while_the_body_stays_is_theirs():
     assert _resampled(a, made, b) == KEPT and rife.hole(made, a, b, 0.5) == 0
 
 
+@pytest.mark.slow
 def test_a_hole_through_a_moving_body_is_still_read():
     """The parting figure moving 30 px, the frame between with a band 8 px wide through its body: wherever its pixels
     lay, in place or carried, both source frames show the body there, so the band reads as a hole over its own pixels
     and the frame gives way to the nearer source frame. (The body's fill is light, so its edge round the band also reads
-    as an outline lost.)"""
+    as an outline lost.) The hole each way is the alignment's own reading (`align.measure_made`): at cell 1
+    `rife.hole(holed, a, b, 0.5)`, at cell 3 `rife.hole(holed, b, a, 0.5)`, read once."""
     a, b = _parting(20, 10, 34), _parting(50, 10, 50)
     holed = _holed(_parting(35, 10, 42), (70, 40, 78, 80))
     out, facts = align.resample([a, b], 4, lambda x, y, t: holed)
     assert facts["made_at"] == [] and facts["nearest_at"] == [1, 3] and out[1] is b and out[3] is a
     assert all("hole" in m["faults"] for m in facts["smear"])
-    assert rife.hole(holed, a, b, 0.5) == rife.hole(holed, b, a, 0.5) == round(8 * 40 / int((np.asarray(holed)[..., 3] >= 128).sum()), 5)
+    holes = {m["at"]: m["hole"] for m in facts["smear"]}
+    assert holes[1] == holes[3] == round(8 * 40 / int((np.asarray(holed)[..., 3] >= 128).sum()), 5)
 
 
+@pytest.mark.slow
 def test_a_hole_a_part_carries_over_a_patterned_body_that_stays_is_kept_as_made():
     """A part with a hole through it moves over a striped body that stays, each frame between drawn exactly at its
     place: the hole is both source frames', carried with the part. Over the box round it the body's stillness fits
@@ -477,6 +491,7 @@ def test_every_pattern_contrast_and_move_reads_no_hole_where_a_part_carries_it()
     assert {k: v for k, v in seen.items() if v} == {}
 
 
+@pytest.mark.slow
 def test_the_gap_between_an_arm_and_a_patterned_torso_that_stays_is_theirs():
     """An arm moves 40 px down beside a torso that stays, patterned in blocks: the gap between them, carried with the arm,
     lies where the arm covers it in the other source frame, and over the box round it the torso's stillness fits better
@@ -509,6 +524,7 @@ TURNED = {"turn": 60, "d": 48}
 MOTIONS = ({"turn": 90, "d": 48}, {"grow": 2.0, "d": 48}, {"shear": 0.6, "d": 48}, {"swing": 45})
 
 
+@pytest.mark.slow
 def test_a_hole_both_source_frames_have_on_a_turning_plate_is_kept_as_made():
     """The third checkpoint validator's frame: the plate turns 60 degrees as it moves 48 px over the stripes, the frame
     between drawn exactly halfway. No motion of the figure carries the gap, turned as it is; it is one hole of each source
@@ -559,6 +575,7 @@ def _given_way(a: Image.Image, made: Image.Image, b: Image.Image) -> bool:
             and all("hole" in m["faults"] and m["hole"] > 0 for m in facts["smear"]))
 
 
+@pytest.mark.slow
 def test_a_hole_unlike_the_source_frames_or_off_its_way_or_out_of_reach_is_given_way():
     """The boundaries, on the plate moving 48 px over a body that stays, plain or striped, its gap 11 x 31 px in both
     source frames: the frame between gives way to the nearer source frame where its gap is unlike theirs — drawn 16 x 40 px
@@ -580,6 +597,7 @@ def test_a_hole_unlike_the_source_frames_or_off_its_way_or_out_of_reach_is_given
     assert seen == {k: True for k in seen}
 
 
+@pytest.mark.slow
 def test_each_hole_of_a_source_frame_is_one_hole_of_the_frame_between():
     """A plate with a row of four holes (`_row`) moves 32 px down over a body that stays, plain or striped: the frame
     between drawn exactly is kept as made, and so is one with the row drawn a pixel taller, where a hole of one source
@@ -604,6 +622,7 @@ def test_each_hole_of_a_source_frame_is_one_hole_of_the_frame_between():
     assert seen == {k: True for k in seen}
 
 
+@pytest.mark.slow
 def test_alike_holes_whose_ways_run_near_each_keep_their_own_two():
     """The fourth checkpoint validator's frame (`_way`): two alike holes 12 px apart move on a curved way over a body
     that stays, with the plate or through a plate that stays, and the frame between is drawn exactly, each hole 5 px
@@ -617,6 +636,7 @@ def test_alike_holes_whose_ways_run_near_each_keep_their_own_two():
     assert seen == {k: KEPT for k in seen}
 
 
+@pytest.mark.slow
 def test_holes_no_set_of_pairs_explains_together_give_way(monkeypatch):
     """The boundaries on the same way (`_way`), two and four holes, the plate moving or still. One hole more before the
     row, on the first hole's way: it could take the first hole's two, but the first and the second cannot then both
@@ -668,6 +688,7 @@ def test_a_hole_the_first_two_readings_give_the_source_frames_takes_no_pair():
     assert {k: _resampled(*(_beside(s, kept_by=k) for s in (0.0, 0.5, 1.0))) for k in (0, 1)} == {0: KEPT, 1: KEPT}
 
 
+@pytest.mark.slow
 def test_a_hole_more_whose_pair_the_first_two_readings_leave_free_is_read_as_theirs():
     """What the reading does not tell, pinned (docs/loop-repair.md section 4): a hole more than the source frames have
     is theirs where it lies within 4 px of where they have a hole, or where it pairs with one source frame's hole and

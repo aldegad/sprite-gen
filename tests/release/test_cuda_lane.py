@@ -1,20 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The CUDA lane (`scripts/cuda_lane.py`, docs/release.md) runs the torch backend's tests on CUDA on the maintainer's
-NVIDIA host, beside the Linux lane's run of them on the CPU (`scripts/linux_lane.sh`). A commit passes on the two
-together only where they install one PyTorch on one Python: its CUDA build there, its CPU build here.
+"""The GPU lane (`scripts/cuda_lane.py`, docs/release.md) runs every RIFE test on the maintainer's NVIDIA host: the
+binary on its Vulkan, the torch backend on CUDA, which the Linux lane (`scripts/linux_lane.sh`) on GPU-less runners
+leaves to it. It installs the Python the Linux lane does and the PyTorch the torch extra was measured on.
 
 The host installs nothing safedeps has not passed at that very version: `pack` stops at the first check that is not a
-pass, a check that did not finish among them, before it writes anything, and `run` refuses a pack that holds no passing
-check of every package before it makes anything. On Windows the run's directory must leave room under the virtual
-environment for the longest name a wheel writes. safedeps is stood in by a script that answers as safedeps does."""
+pass, a check that did not finish among them, before it writes anything, and `prepare` refuses a pack that holds no
+passing check of every package before it makes anything. On Windows the run's directory must leave room under the
+virtual environment for the longest name a wheel writes. safedeps is stood in by a script that answers as safedeps does.
+
+The tests run in chunks, each one call under the remote machines' ten minutes: a chunk is stopped at its budget, with
+everything it started, and says so; it reads which tests ran from pytest's own report; and the verdict is a pass only
+where every chunk of one split passed at the pack's commit, on the environment `prepare` made, and together they ran
+every test `prepare` collected, each once."""
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
 import tarfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -61,10 +68,12 @@ def _pinned(text: str, name: str) -> str:
     return found[0]
 
 
-def test_the_cuda_lane_installs_the_pytorch_and_the_python_the_linux_lane_does():
+def test_the_cuda_lane_installs_the_python_the_linux_lane_does_and_the_pytorch_the_extra_was_measured_on():
     linux = (ROOT / "scripts" / "linux_lane.sh").read_text(encoding="utf-8")
     cuda = (ROOT / "scripts" / "cuda_lane.py").read_text(encoding="utf-8")
-    assert _pinned(cuda, "TORCH_VERSION") == _pinned(linux, "TORCH_VERSION")
+    extra = re.search(r'^torch = \["torch>=([^,"]+),', (ROOT / "pyproject.toml").read_text(encoding="utf-8"), re.MULTILINE)
+    assert extra, "pyproject.toml's torch extra names its floor"
+    assert _pinned(cuda, "TORCH_VERSION") == extra.group(1)
     assert _pinned(cuda, "PINNED_PYTHON") == _pinned(linux, "PINNED_PYTHON")
 
 
@@ -194,18 +203,18 @@ SPOILED = {
 
 
 @pytest.mark.parametrize("spoiled", SPOILED.values(), ids=SPOILED.keys())
-def test_run_refuses_a_pack_without_a_passing_check_of_every_package_before_it_makes_anything(checkout, tmp_path,
-                                                                                               capsys, spoiled):
+def test_prepare_refuses_a_pack_without_a_passing_check_of_every_package_before_it_makes_anything(checkout, tmp_path,
+                                                                                                   capsys, spoiled):
     spoil, why = spoiled
     _pack(checkout, tmp_path, {})
     out = tmp_path / "pack"
     spoil(out)
     capsys.readouterr()
     with pytest.raises(SystemExit) as stopped:
-        cuda_lane.run(out, None, None)
+        cuda_lane.prepare(out, None, None)
     assert stopped.value.code == 1
     assert why in capsys.readouterr().err
-    assert sorted(p.name for p in out.iterdir()) == sorted(cuda_lane.PACK_FILES), "run made nothing"
+    assert sorted(p.name for p in out.iterdir()) == sorted(cuda_lane.PACK_FILES), "prepare made nothing"
 
 
 @pytest.mark.parametrize("text, why", [
@@ -255,3 +264,345 @@ def test_on_windows_the_run_directory_leaves_room_for_the_longest_name_a_wheel_w
     deep = "D:\\lane\\sprite-gen-cuda\\runs\\" + "0" * 40 + tail
     assert "run from a directory whose path is shorter by at least 7 characters" in cuda_lane.path_refusal(deep, wheels)
     assert cuda_lane.path_refusal("D:\\lane\\r\\0000000" + tail, wheels) is None
+
+
+@pytest.mark.parametrize("text, chunk", [("1/6", (1, 6)), ("6/6", (6, 6)), ("1/1", (1, 1))])
+def test_a_chunk_is_one_of_n(text, chunk):
+    assert cuda_lane.parse_chunk(text) == chunk
+
+
+@pytest.mark.parametrize("text", ["0/6", "7/6", "6", "a/6", "1/0", "-1/6", " 1/6"])
+def test_a_chunk_outside_its_split_is_refused(text, capsys):
+    with pytest.raises(SystemExit):
+        cuda_lane.parse_chunk(text)
+    assert f"--chunk {text} is not K/N" in capsys.readouterr().err
+
+
+JUNIT = """<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" tests="5">
+<testcase classname="tests.video.test_rife_cuts" name="test_the_public_cut[pip-run-ncnn]" time="181.5" />
+<testcase classname="tests.video.test_rife_torch.TestAlike" name="test_alike[rife-v4.25-mid50]" time="2.25" />
+<testcase classname="tests.video.test_rife" name="test_fails" time="1.0"><failure message="no">x</failure></testcase>
+<testcase classname="tests.video.test_rife" name="test_breaks" time="0.5"><error message="setup">y</error></testcase>
+<testcase classname="tests.video.test_rife" name="test_skips" time="0.0"><skipped message="no RIFE" /></testcase>
+</testsuite></testsuites>"""
+
+
+def test_a_chunk_reads_which_tests_ran_and_how_from_pytest_s_own_report():
+    ran = cuda_lane.junit_ran(JUNIT)
+    assert ran == {
+        cuda_lane.junit_key("tests/video/test_rife_cuts.py::test_the_public_cut[pip-run-ncnn]"): ["passed", 181.5],
+        cuda_lane.junit_key("tests/video/test_rife_torch.py::TestAlike::test_alike[rife-v4.25-mid50]"): ["passed", 2.25],
+        cuda_lane.junit_key("tests/video/test_rife.py::test_fails"): ["failed", 1.0],
+        cuda_lane.junit_key("tests/video/test_rife.py::test_breaks"): ["error", 0.5],
+        cuda_lane.junit_key("tests/video/test_rife.py::test_skips"): ["skipped", 0.0],
+    }
+    assert len({cuda_lane.junit_key(n) for n in ("tests/a/test_b.py::test_c", "tests/a/test_b.py::T::test_c",
+                                                 "tests/a_b/test_c.py::test_c")}) == 3
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in reads a process with signal 0")
+def test_a_command_past_its_budget_is_stopped_with_every_process_it_started(tmp_path):
+    pid_file = tmp_path / "grandchild.pid"
+    grandchild = "import time; time.sleep(120)"
+    child = (f"import subprocess, sys, time; p = subprocess.Popen([sys.executable, '-c', {grandchild!r}]); "
+             f"open({str(pid_file)!r}, 'w').write(str(p.pid)); print('started', flush=True); time.sleep(120)")
+    started = time.monotonic()
+    code, said, over = cuda_lane.run_bounded([sys.executable, "-c", child], budget=3, env=None, cwd=None)
+    assert over and code is None
+    assert "started" in said
+    assert time.monotonic() - started < 30
+    pid = int(pid_file.read_text())
+    stat = Path(f"/proc/{pid}/stat")
+    for _ in range(50):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        # Where nobody reaps an orphan (a container's first process), the ended grandchild stays a zombie.
+        try:
+            if stat.read_text().rpartition(")")[2].split()[0] == "Z":
+                break
+        except OSError:
+            pass
+        time.sleep(0.1)
+    else:
+        pytest.fail(f"the grandchild {pid} outlived the budget")
+    code, said, over = cuda_lane.run_bounded([sys.executable, "-c", "print('quick')"], budget=30, env=None, cwd=None)
+    assert (code, said.strip(), over) == (0, "quick", False)
+
+
+def test_a_chunk_refuses_a_pack_that_was_not_prepared(checkout, tmp_path, capsys):
+    _pack(checkout, tmp_path, {})
+    out = tmp_path / "pack"
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as stopped:
+        cuda_lane.run_chunk(out, "1/2", 540)
+    assert stopped.value.code == 1
+    assert "was not prepared: run `cuda_lane.py prepare` first" in capsys.readouterr().err
+    assert sorted(p.name for p in out.iterdir()) == sorted(cuda_lane.PACK_FILES), "the chunk made nothing"
+
+
+COLLECTED = ["tests/video/test_rife_cuts.py::test_the_public_cut[pip-run-ncnn]",
+             "tests/video/test_rife_torch.py::TestAlike::test_alike[rife-v4.25-mid50]",
+             "tests/video/test_rife.py::test_melts"]
+SHA = "a" * 40
+
+
+def _prepared(tmp_path: Path, chunks: dict[int, list[str]], n: int | None = None) -> Path:
+    """A pack prepared at SHA that collected COLLECTED, with chunk K of the split running chunks[K], each passed."""
+    where = tmp_path / "lane"
+    where.mkdir()
+    (where / "SOURCE_SHA").write_text(SHA + "\n", encoding="ascii")
+    prepared = {"commit": SHA, "gates": cuda_lane.GATE_TESTS, "prepared": True, "collected": COLLECTED,
+                "gpu": "NVIDIA GeForce RTX 3060, 617.14, 12288 MiB", "probe": "torch 2.13.0+cu130 cuda 13.0"}
+    (where / "prepared.json").write_text(json.dumps(prepared), encoding="utf-8")
+    n = n or len(chunks)
+    for k, nodeids in chunks.items():
+        rec = {"commit": SHA, "gates": cuda_lane.GATE_TESTS, "chunk": f"{k}/{n}",
+               "prepared_sha256": cuda_lane.sha256_of(where / "prepared.json"), "seconds": 300.0, "budget": 540,
+               "ran": {cuda_lane.junit_key(i): ["passed", 100.0] for i in nodeids}, "skipped": [], "passed": True,
+               "pytest_summary": f"{len(nodeids)} passed"}
+        (where / f"chunk-{k}-of-{n}.json").write_text(json.dumps(rec), encoding="utf-8")
+    return where
+
+
+def _chunk(where: Path, k: int, n: int, **change) -> None:
+    path = where / f"chunk-{k}-of-{n}.json"
+    rec = json.loads(path.read_text(encoding="utf-8"))
+    rec.update(change)
+    path.write_text(json.dumps(rec), encoding="utf-8")
+
+
+def test_the_verdict_is_a_pass_where_every_chunk_of_one_split_passed_and_together_they_ran_every_test(tmp_path):
+    import release_gates
+
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:]})
+    assert cuda_lane.verdict(where, 2) == 0
+    rec = release_gates.read_run(where / "run.json")
+    assert (rec["commit"], rec["gates"], rec["passed"]) == (SHA, "real_rife or torch_rife or rife_pinned", True)
+    assert rec["gpu"] == "NVIDIA GeForce RTX 3060, 617.14, 12288 MiB"
+    assert [c["chunk"] for c in rec["chunks"]] == ["1/2", "2/2"]
+
+
+def _not_prepared(where: Path) -> None:
+    (where / "prepared.json").write_text(json.dumps({"commit": SHA, "prepared": False, "why": "no GPU"}),
+                                         encoding="utf-8")
+
+
+SPOILED_CHUNKS = {
+    "a chunk missing": (lambda w: (w / "chunk-2-of-2.json").unlink(), "no chunk 2/2"),
+    "a chunk that failed": (lambda w: _chunk(w, 2, 2, passed=False, why="a RIFE test failed"),
+                            "chunk 2/2 did not pass (a RIFE test failed)"),
+    "a chunk that skipped one": (lambda w: _chunk(w, 2, 2, skipped=["SKIPPED [1] no RIFE"]), "chunk 2/2 skipped"),
+    "a chunk at another commit": (lambda w: _chunk(w, 2, 2, commit="b" * 40), f"chunk 2/2 is for {'b' * 40}"),
+    "a chunk of another environment": (lambda w: _chunk(w, 2, 2, prepared_sha256="0" * 64),
+                                       "chunk 2/2 ran on another environment than this pack's prepare made"),
+    "a chunk of another split": (lambda w: _chunk(w, 2, 2, chunk="2/3"), "chunk-2-of-2.json holds chunk 2/3"),
+    "a chunk held to a budget past the lane's": (lambda w: _chunk(w, 2, 2, budget=900),
+                                                 "chunk 2/2 was held to 900 s, past the lane's one budget of 540 s"),
+    "a test no chunk ran": (lambda w: _chunk(w, 2, 2, ran={cuda_lane.junit_key(COLLECTED[1]): ["passed", 1.0]}),
+                            f"no chunk ran {COLLECTED[2]}"),
+    "a test two chunks ran": (lambda w: _chunk(w, 2, 2, ran={cuda_lane.junit_key(i): ["passed", 1.0]
+                                                              for i in COLLECTED}), f"{COLLECTED[0]} ran in more than one chunk"),
+    "a test prepare did not collect": (lambda w: _chunk(w, 2, 2, ran={cuda_lane.junit_key(i): ["passed", 1.0]
+                                                                       for i in [*COLLECTED[1:], "tests/x.py::test_y"]}),
+                                       "tests.x::test_y ran but was not collected"),
+    "an environment not prepared": (_not_prepared, "was not prepared: run `cuda_lane.py prepare` first"),
+}
+
+
+@pytest.mark.parametrize("spoiled", SPOILED_CHUNKS.values(), ids=SPOILED_CHUNKS.keys())
+def test_the_verdict_refuses_chunks_that_do_not_make_one_whole_pass_and_writes_no_run_record(tmp_path, capsys, spoiled):
+    spoil, why = spoiled
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:]})
+    spoil(where)
+    with pytest.raises(SystemExit) as stopped:
+        cuda_lane.verdict(where, 2)
+    assert stopped.value.code == 1
+    assert why in capsys.readouterr().err
+    assert not (where / "run.json").exists()
+
+
+def test_a_chunk_hands_pytest_each_test_it_leaves_and_refuses_one_prepare_did_not_collect(capsys):
+    argv = cuda_lane.chunk_args(3, 10, [COLLECTED[0], COLLECTED[2]], COLLECTED)
+    assert argv[argv.index("--shard") + 1] == "3/10" and argv[argv.index("-m") + 1] == cuda_lane.GATE_TESTS
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--deselect"] == [COLLECTED[0], COLLECTED[2]]
+    assert "--deselect" not in cuda_lane.chunk_args(3, 10, [], COLLECTED)
+    with pytest.raises(SystemExit):
+        cuda_lane.chunk_args(3, 10, ["tests/video/test_rife.py::test_none"], COLLECTED)
+    assert "--leave tests/video/test_rife.py::test_none is not a test prepare collected" in capsys.readouterr().err
+
+
+def test_the_verdict_names_the_tests_every_chunk_left_and_counts_the_rest(tmp_path):
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:2]})
+    for k in (1, 2):
+        _chunk(where, k, 2, left=[COLLECTED[2]])
+    assert cuda_lane.verdict(where, 2) == 0
+    rec = json.loads((where / "run.json").read_text(encoding="utf-8"))
+    assert (rec["passed"], rec["left"], rec["ran"], rec["tests"]) == (True, [COLLECTED[2]], 2, 3)
+
+
+LEFT_SPOILED = {
+    "chunks that left other tests": (lambda w: (_chunk(w, 1, 2, left=[COLLECTED[2]]), _chunk(w, 2, 2, left=[])),
+                                     "chunk 2/2 left other tests than chunk 1/2"),
+    "a test left and run": (lambda w: [_chunk(w, k, 2, left=[COLLECTED[1]]) for k in (1, 2)],
+                            f"{COLLECTED[1]} was left and ran"),
+}
+
+
+@pytest.mark.parametrize("spoiled", LEFT_SPOILED.values(), ids=LEFT_SPOILED.keys())
+def test_the_verdict_refuses_tests_left_unlike_or_run_too(tmp_path, capsys, spoiled):
+    spoil, why = spoiled
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:]})
+    spoil(where)
+    with pytest.raises(SystemExit):
+        cuda_lane.verdict(where, 2)
+    assert why in capsys.readouterr().err
+    assert not (where / "run.json").exists()
+
+
+def _tool(where: Path, name: str, says: str) -> None:
+    exe = where / name
+    exe.write_text(f"#!/bin/sh\necho '{says}'\nexit 1\n", encoding="utf-8")
+    exe.chmod(0o755)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-ins are shell scripts")
+def test_prepare_finds_ffmpeg_and_an_img2webp_that_keeps_exact_alpha_first_in_the_tools_given(tmp_path):
+    tools, other = tmp_path / "tools", tmp_path / "other"
+    tools.mkdir(), other.mkdir()
+    _tool(tools, "ffmpeg", "ffmpeg version 9.1-lane Copyright")
+    _tool(tools, "img2webp", "  -exact ............ preserve RGB values in transparent area")
+    _tool(other, "img2webp", "  -lossy ............ lossy encoding")
+    env = cuda_lane._environment(tmp_path, tools)
+    assert env["PATH"].split(os.pathsep)[0] == str(tools)
+    found = cuda_lane.tool_check({**env, "PATH": os.pathsep.join([str(tools), str(other)])})
+    assert found == {"ffmpeg": {"path": str(tools / "ffmpeg"), "version": "ffmpeg version 9.1-lane Copyright"},
+                     "img2webp": {"path": str(tools / "img2webp"), "exact": True}}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-ins are shell scripts")
+@pytest.mark.parametrize("have, why", [
+    ({"ffmpeg": "ffmpeg version 9.1"}, "img2webp is not on PATH"),
+    ({"img2webp": "-exact"}, "ffmpeg is not on PATH"),
+    ({"ffmpeg": "ffmpeg version 9.1", "img2webp": "-lossy"}, "img2webp has no -exact flag; libwebp must be 1.5 or newer"),
+], ids=["no img2webp", "no ffmpeg", "an img2webp before libwebp 1.5"])
+def test_prepare_refuses_a_host_without_the_tools_the_tests_write_video_with_before_it_makes_anything(tmp_path, capsys,
+                                                                                                    have, why):
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name, says in have.items():
+        _tool(tools, name, says)
+    with pytest.raises(SystemExit):
+        cuda_lane.tool_check({"PATH": str(tools)})
+    assert why in capsys.readouterr().err
+
+
+def _alone(where: Path, nodeid: str, seconds: float = 612.0, **change) -> Path:
+    """A passing record of `nodeid` run alone (`cuda_lane.py test --alone`) at SHA on the pack's environment."""
+    path = where / f"alone-{cuda_lane.alone_name(nodeid)}.json"
+    rec = {"commit": SHA, "gates": cuda_lane.GATE_TESTS, "alone": nodeid,
+           "prepared_sha256": cuda_lane.sha256_of(where / "prepared.json"), "seconds": seconds, "limit": 900,
+           "ran": {cuda_lane.junit_key(nodeid): ["passed", seconds - 20]}, "skipped": [], "passed": True,
+           "props": {cuda_lane.junit_key(nodeid): {"rife_calls": "512"}}, "pytest_summary": "1 passed"}
+    rec.update(change)
+    path.write_text(json.dumps(rec), encoding="utf-8")
+    return path
+
+
+def test_a_test_run_alone_is_one_prepare_collected_and_is_handed_to_pytest_by_its_id(capsys):
+    assert cuda_lane.alone_args(COLLECTED[0], COLLECTED) == ["-m", cuda_lane.GATE_TESTS, COLLECTED[0]]
+    assert cuda_lane.alone_name(COLLECTED[0]) != cuda_lane.alone_name(COLLECTED[1])
+    with pytest.raises(SystemExit):
+        cuda_lane.alone_args("tests/video/test_rife.py::test_none", COLLECTED)
+    assert "--alone tests/video/test_rife.py::test_none is not a test prepare collected" in capsys.readouterr().err
+
+
+def test_a_chunk_keeps_the_properties_its_tests_recorded():
+    xml = JUNIT.replace('time="181.5" />', 'time="181.5"><properties><property name="rife_calls" value="512" />'
+                                          '</properties></testcase>')
+    assert cuda_lane.junit_props(xml) == {
+        cuda_lane.junit_key("tests/video/test_rife_cuts.py::test_the_public_cut[pip-run-ncnn]"): {"rife_calls": "512"}}
+    assert cuda_lane.junit_props(JUNIT) == {}
+
+
+def test_the_verdict_counts_a_test_the_split_left_and_that_ran_alone_as_run(tmp_path):
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:2]})
+    for k in (1, 2):
+        _chunk(where, k, 2, left=[COLLECTED[2]])
+    _alone(where, COLLECTED[2])
+    assert cuda_lane.verdict(where, 2) == 0
+    rec = json.loads((where / "run.json").read_text(encoding="utf-8"))
+    assert (rec["passed"], rec["left"], rec["ran"], rec["tests"], rec["budget"]) == (True, [], 3, 3, 540)
+    assert (rec["within_budget"], rec["over_budget"]) == (2, 1)
+    assert rec["alone"] == [{"test": COLLECTED[2], "seconds": 612.0, "limit": 900, "rife_calls": 512}]
+
+
+def test_a_chunk_names_each_of_its_tests_past_a_third_of_the_budget_as_a_candidate_to_run_alone():
+    assert cuda_lane.ALONE_OVER == cuda_lane.CHUNK_BUDGET / 3 == 180
+    ran = {cuda_lane.junit_key(COLLECTED[2]): ["failed", 181.0], cuda_lane.junit_key(COLLECTED[0]): ["passed", 195.4],
+           cuda_lane.junit_key(COLLECTED[1]): ["passed", 180.0]}
+    assert cuda_lane.alone_candidates(ran, COLLECTED) == [{"test": COLLECTED[0], "seconds": 195.4},
+                                                          {"test": COLLECTED[2], "seconds": 181.0}]
+    assert cuda_lane.alone_candidates({}, COLLECTED) == []
+
+
+def test_the_verdict_gathers_the_chunks_candidates_to_run_alone_and_moves_none(tmp_path, capsys):
+    where = _prepared(tmp_path, {1: COLLECTED[:2], 2: COLLECTED[2:]})
+    _chunk(where, 2, 2, alone_candidates=[{"test": COLLECTED[2], "seconds": 195.4}])
+    assert cuda_lane.verdict(where, 2) == 0
+    rec = json.loads((where / "run.json").read_text(encoding="utf-8"))
+    assert rec["alone_candidates"] == [{"test": COLLECTED[2], "seconds": 195.4, "chunk": "2/2"}]
+    assert (rec["ran"], rec["within_budget"], rec["left"], rec["alone"]) == (3, 3, [], [])
+    assert f"a candidate to run alone (past 180 s in chunk 2/2): {COLLECTED[2]} in 195.4 s" in capsys.readouterr().out
+
+
+def test_a_test_run_alone_within_the_budget_counts_within_it(tmp_path):
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:2]})
+    for k in (1, 2):
+        _chunk(where, k, 2, left=[COLLECTED[2]])
+    _alone(where, COLLECTED[2], seconds=452.0, limit=540)
+    assert cuda_lane.verdict(where, 2) == 0
+    rec = json.loads((where / "run.json").read_text(encoding="utf-8"))
+    assert (rec["within_budget"], rec["over_budget"], rec["ran"]) == (3, 0, 3)
+
+
+def test_a_test_is_run_alone_within_a_limit_of_its_own_and_a_chunk_within_the_one_budget():
+    """The budget is one, CHUNK_BUDGET, a chunk's; a test run alone is measured to a limit, which is not a budget: it
+    defaults to the budget, and one past it is red as a chunk past its budget is."""
+    alone = cuda_lane.parse(["test", "--pack", "p", "--alone", COLLECTED[0], "--limit", "900"])
+    assert (alone.alone, alone.limit, alone.budget) == (COLLECTED[0], 900.0, None)
+    assert cuda_lane.parse(["test", "--pack", "p", "--alone", COLLECTED[0]]).limit == cuda_lane.CHUNK_BUDGET
+    chunk = cuda_lane.parse(["test", "--pack", "p", "--chunk", "1/2"])
+    assert (chunk.budget, chunk.limit) == (cuda_lane.CHUNK_BUDGET, None)
+    for wrong in (["--chunk", "1/2", "--limit", "900"], ["--alone", COLLECTED[0], "--budget", "900"],
+                  ["--alone", COLLECTED[0], "--leave", COLLECTED[1]]):
+        with pytest.raises(SystemExit):
+            cuda_lane.parse(["test", "--pack", "p", *wrong])
+
+
+ALONE_SPOILED = {
+    "a run alone that failed": (lambda w: _alone(w, COLLECTED[2], passed=False, why="a RIFE test failed"),
+                                f"{COLLECTED[2]} alone did not pass (a RIFE test failed)"),
+    "a run alone the split did not leave": (lambda w: _alone(w, COLLECTED[1]),
+                                            f"{COLLECTED[1]} ran alone but the chunks of the split did not leave it"),
+    "a run alone at another commit": (lambda w: _alone(w, COLLECTED[2], commit="b" * 40),
+                                      f"{COLLECTED[2]} alone is for {'b' * 40}"),
+    "a run alone on another environment": (lambda w: _alone(w, COLLECTED[2], prepared_sha256="0" * 64),
+                                           f"{COLLECTED[2]} alone ran on another environment"),
+    "a run alone of other tests": (lambda w: _alone(w, COLLECTED[2], ran={cuda_lane.junit_key(COLLECTED[0]): ["passed", 1]}),
+                                   f"the run of {COLLECTED[2]} alone ran other tests"),
+}
+
+
+@pytest.mark.parametrize("spoiled", ALONE_SPOILED.values(), ids=ALONE_SPOILED.keys())
+def test_the_verdict_refuses_a_run_alone_that_does_not_stand_for_its_test(tmp_path, capsys, spoiled):
+    spoil, why = spoiled
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:2]})
+    for k in (1, 2):
+        _chunk(where, k, 2, left=[COLLECTED[2]])
+    spoil(where)
+    with pytest.raises(SystemExit):
+        cuda_lane.verdict(where, 2)
+    assert why in capsys.readouterr().err
+    assert not (where / "run.json").exists()

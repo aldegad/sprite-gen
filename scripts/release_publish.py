@@ -5,8 +5,18 @@ The gate this closes: a `vX.Y.Z` tag can be pushed, changelogged and announced w
 release page is never created, leaving an older version as Latest. The release chain runs this
 right after the tag is pushed (docs/release.md), and `--dry-run` rehearses the same decision on
 a branch. No CI runs on push or pull request: the wheel and sdist come from the Linux lane
-(`scripts/linux_lane.sh --artifact <dir>`, in the suite job of the lane workflow) and are attached
-with `--prebuilt <dir>`, so the machine that publishes builds nothing.
+(`scripts/linux_lane.sh --package <dir>`, the package job of the lane workflow, run once every share of
+the tests passed) and are attached with `--prebuilt <dir>`, so the machine that publishes builds
+nothing. The lane may have run at the pull request's head rather than at the tag: the files are the
+same where the two commits hold the same tree, and only then is the package taken.
+
+The page ends with the gates block (`scripts/release_gates.py`): the commit the Linux lane passed at,
+and whether the GPU lane ran RIFE's tests — passed at the tag's tree (`--gpu-lane <run.json>`), not
+run because no file it reaches changed since it last passed or since the release before, or not run
+for the reason `--gpu-unmeasured` gives, the files it reaches that changed named. A run that ran a test alone
+past a chunk's budget writes it as run, with its time, for the reason `--gpu-over-budget` gives. A reached GPU lane
+with neither a passing run nor a reason stops the release before anything is asked of `gh` beyond
+whether the page exists.
 
 Three outcomes, and no fourth:
 
@@ -24,7 +34,7 @@ Standard library only, same as `release_notes.py`; `gh`, `git` and `python -m bu
 only external commands.
 
     .venv/bin/python scripts/release_publish.py --tag v2.5.3 --dry-run
-    .venv/bin/python scripts/release_publish.py --tag v2.5.3 --prebuilt <lane artifact dir>
+    .venv/bin/python scripts/release_publish.py --tag v2.5.3 --prebuilt <lane artifact dir> [--gpu-lane <run.json>]
 """
 from __future__ import annotations
 
@@ -36,7 +46,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import release_notes  # noqa: E402  (sibling script, resolved by the line above)
+import release_gates  # noqa: E402  (sibling scripts, resolved by the line above)
+import release_notes  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 NOT_FOUND = "release not found"
@@ -95,13 +106,15 @@ def checksum_distribution(dist_dir: Path) -> list[Path]:
     return [*archives, sums]
 
 
-def take_prebuilt(prebuilt: Path, tag: str, *, cwd: Path) -> list[Path]:
-    """The wheel, sdist and SHA256SUMS a lane built for this tag's commit — checked, not rebuilt.
+def take_prebuilt(prebuilt: Path, tag: str, *, cwd: Path) -> tuple[list[Path], str]:
+    """The wheel, sdist and SHA256SUMS a lane built for this tag's tree — checked, not rebuilt — and
+    the commit it built them at.
 
     Nothing is attached unless the directory holds exactly one wheel and one sdist of the
     tag's version plus SHA256SUMS and SOURCE_SHA, SHA256SUMS matches both archives, and
-    SOURCE_SHA names the commit the tag points to in this checkout. A build of another commit,
-    a stray file or a changed archive stops the release instead of riding along.
+    SOURCE_SHA names a commit of this checkout whose tree is the tag's: the tag itself, or the
+    pull request head it was merged from unchanged. A build of another tree, a stray file or a
+    changed archive stops the release instead of riding along.
     """
     import hashlib
 
@@ -123,8 +136,10 @@ def take_prebuilt(prebuilt: Path, tag: str, *, cwd: Path) -> list[Path]:
         raise PublishError(f"{tag} is not a tag in {cwd}; tag the release commit first")
     tag_commit = proc.stdout.strip()
     source = (prebuilt / "SOURCE_SHA").read_text(encoding="utf-8").strip()
-    if source != tag_commit:
-        raise PublishError(f"{prebuilt} was built from {source or '(nothing)'}, but {tag} is {tag_commit}")
+    trees = [_run(["git", "rev-parse", "--verify", "--quiet", f"{c}^{{tree}}"], cwd=cwd) for c in (source or "-", tag_commit)]
+    if trees[0].returncode != 0 or trees[0].stdout != trees[1].stdout:
+        raise PublishError(f"{prebuilt} was built from {source or '(nothing)'}, whose tree is not that of {tag} "
+                           f"({tag_commit})")
     listed = {}
     for line in (prebuilt / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
         digest, _, name = line.partition("  ")
@@ -132,7 +147,7 @@ def take_prebuilt(prebuilt: Path, tag: str, *, cwd: Path) -> list[Path]:
     actual = {n: hashlib.sha256((prebuilt / n).read_bytes()).hexdigest() for n in (wheel, sdist)}
     if listed != actual:
         raise PublishError(f"SHA256SUMS in {prebuilt} does not match its archives")
-    return [prebuilt / wheel, prebuilt / sdist, prebuilt / "SHA256SUMS"]
+    return [prebuilt / wheel, prebuilt / sdist, prebuilt / "SHA256SUMS"], source
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -151,8 +166,18 @@ def main(argv: list[str] | None = None) -> int:
                         help="attach only the GIFs; for rehearsing the decision alone")
     parser.add_argument("--prebuilt", type=Path, default=None,
                         help="attach the wheel, sdist and SHA256SUMS that "
-                             "`scripts/linux_lane.sh --artifact` built for the tag's commit "
+                             "`scripts/linux_lane.sh --package` built for the tag's tree "
                              "instead of building here")
+    parser.add_argument("--gpu-lane", type=Path, default=None,
+                        help="the run.json of a passing GPU lane run (scripts/cuda_lane.py): at the tag's tree, "
+                             "or the last one, from which the change is measured")
+    parser.add_argument("--gpu-unmeasured", default=None, metavar="WHY",
+                        help="publish though files the GPU lane reaches changed and it did not pass at the tag's "
+                             "tree, or though the run given left tests by name; the page says what was not run, "
+                             "and why")
+    parser.add_argument("--gpu-over-budget", default=None, metavar="WHY",
+                        help="publish though the run given ran a test alone past a chunk's budget "
+                             "(`cuda_lane.py test --alone`); the page says it ran, its time, and why")
     parser.add_argument("--gh", default="gh", help="the gh executable to call")
     args = parser.parse_args(argv)
     if args.prebuilt is not None and (args.skip_build or args.dist_dir is not None):
@@ -176,11 +201,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         assets = [str(checkout / rel) for rel in page["assets"]]
+        lane_commit = None
+        if args.prebuilt is not None:
+            built, lane_commit = take_prebuilt(args.prebuilt.resolve(), args.tag, cwd=checkout)
+        gpu_run = release_gates.read_run(args.gpu_lane) if args.gpu_lane is not None else None
+        gates = release_gates.record(checkout, args.tag, gpu_run=gpu_run, unmeasured=args.gpu_unmeasured,
+                                     over_budget=args.gpu_over_budget,
+                                     lane_commit=lane_commit)
+        page["body"] = f"{page['body']}\n\n### Gates\n\n" + "\n".join(gates)
         if args.skip_build:
-            built: list[Path] = []
-        elif args.prebuilt is not None:
-            built = take_prebuilt(args.prebuilt.resolve(), args.tag, cwd=checkout)
-        else:
+            built = []
+        elif args.prebuilt is None:
             built = build_distribution(dist_dir, cwd=checkout)
         assets = [str(p) for p in built] + assets
 
@@ -205,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             raise PublishError(f"gh release create reported success but {args.tag} has no page")
         print(f"published {args.repo} {args.tag}: {proc.stdout.strip()}")
         return 0
-    except (release_notes.ReleaseNotesError, PublishError, OSError) as exc:
+    except (release_notes.ReleaseNotesError, release_gates.GateError, PublishError, OSError, ValueError) as exc:
         print(f"release_publish: {exc}", file=sys.stderr)
         return 2
 

@@ -63,16 +63,24 @@ def cut(tmp_path, frames):
     return directory, meta
 
 
-def test_the_frames_are_swayed_as_the_strip_cut_from_them_at_scale_1(tmp_path):
-    src = frames_dir(tmp_path/'cycle-frames')
+@pytest.fixture(scope='module')
+def swayed_frames(tmp_path_factory):
+    """The cycle's frames and those frames swayed by `video-sway --frames --fps 24 --on-fold lower` on the torso, made once
+    for the module (four cases read that same sway): the frames folder and the new folder, which no case writes."""
+    root = tmp_path_factory.mktemp('frames')
+    src, out = frames_dir(root/'cycle-frames'), root/'swayed'
+    assert cli.main(['video-sway', '--frames', str(src), '--out', str(out), '--region', ','.join(f'{v:g}' for v in TORSO),
+                     '--fps', '24', '--on-fold', 'lower']) == 0
+    return src, out
+
+
+def test_the_frames_are_swayed_as_the_strip_cut_from_them_at_scale_1(swayed_frames, tmp_path):
+    src, out = swayed_frames
     frames = [frame(k) for k in range(N)]
     loop_dir, meta = cut(tmp_path, frames)
     left, top = meta['source_rect'][:2]
     in_strip = (TORSO[0]-left, TORSO[1]-top, TORSO[2], TORSO[3])
     strip_record = sway.sway_loop(loop_dir, [in_strip], on_fold='lower')
-    out = tmp_path/'swayed'
-    assert cli.main(['video-sway', '--frames', str(src), '--out', str(out), '--region', ','.join(f'{v:g}' for v in TORSO),
-                     '--fps', '24', '--on-fold', 'lower']) == 0
     assert sorted(p.name for p in out.iterdir()) == sorted([*FILES, 'sway.json'])
     record = json.loads((out/'sway.json').read_text())
     for key in ('gain', 'dx_px', 'dy_px', 'reach_px', 'body_bob_px', 'fold', 'freq_hz', 'zeta'):
@@ -89,12 +97,9 @@ def test_the_frames_are_swayed_as_the_strip_cut_from_them_at_scale_1(tmp_path):
     assert moved > N//2, 'the frames path moved nothing'
 
 
-def test_the_frame_time_is_the_one_a_strip_meta_writes(tmp_path):
+def test_the_frame_time_is_the_one_a_strip_meta_writes(swayed_frames):
     """--fps 24 is read as the strip meta writes 24 frames a second, 41.67 ms: the exact 1000/24 ms is another sway."""
-    src = frames_dir(tmp_path/'cycle-frames')
-    out = tmp_path/'swayed'
-    assert cli.main(['video-sway', '--frames', str(src), '--out', str(out), '--region', ','.join(f'{v:g}' for v in TORSO),
-                     '--fps', '24', '--on-fold', 'lower']) == 0
+    _, out = swayed_frames
     frames = [frame(k) for k in range(N)]
     ask = sway.read_ask([TORSO], on_fold='lower')
     rounded, exact = sway.solve_cells(ask, frames, 41.67), sway.solve_cells(ask, frames, 1000/24)
@@ -103,30 +108,28 @@ def test_the_frame_time_is_the_one_a_strip_meta_writes(tmp_path):
     assert any(not np.array_equal(np.asarray(exact.moved(k)), written[k]) for k in range(N))
 
 
-def test_a_loops_cycle_folder_carries_its_own_frame_time(tmp_path):
+def test_a_loops_cycle_folder_carries_its_own_frame_time(swayed_frames, tmp_path):
     loop_dir, _ = cut(tmp_path, [frame(k) for k in range(N)])
     meta = json.loads((loop_dir/'walk.strip.json').read_text())
     assert (meta['cycle_frames'], meta['cycle_seconds']) == (N, 1.0)
     cycle = frames_dir(loop_dir/'cycle')
     region = ','.join(f'{v:g}' for v in TORSO)
     assert cli.main(['video-sway', '--frames', str(cycle), '--out', str(tmp_path/'a'), '--region', region, '--on-fold', 'lower']) == 0
-    assert cli.main(['video-sway', '--frames', str(cycle), '--out', str(tmp_path/'b'), '--region', region, '--on-fold', 'lower',
-                     '--fps', '24']) == 0
-    assert all((tmp_path/'a'/name).read_bytes() == (tmp_path/'b'/name).read_bytes() for name in FILES)
+    _, at_24 = swayed_frames  # the same frames swayed as `a` is, but with --fps 24 (in a folder of their own)
+    assert all((tmp_path/'a'/name).read_bytes() == (at_24/name).read_bytes() for name in FILES)
     assert json.loads((tmp_path/'a'/'sway.json').read_text())['frame_ms'] == 41.67
     with pytest.raises(SystemExit, match=r'--fps 30 is a frame of 33\.33 ms.*41\.67 ms'):
         cli.main(['video-sway', '--frames', str(cycle), '--out', str(tmp_path/'c'), '--region', region, '--fps', '30'])
     assert not (tmp_path/'c').exists()
 
 
-def test_the_old_name_sways_frames_alike(tmp_path):
-    src = frames_dir(tmp_path/'cycle-frames')
+def test_the_old_name_sways_frames_alike(swayed_frames, tmp_path):
+    src, by_new_name = swayed_frames  # the frames swayed by `video-sway`, as asked here
     region = ','.join(f'{v:g}' for v in TORSO)
-    for verb in ('video-sway', 'video-follow'):
-        assert cli.main([verb, '--frames', str(src), '--out', str(tmp_path/verb), '--region', region, '--fps', '24',
-                         '--on-fold', 'lower']) == 0
+    assert cli.main(['video-follow', '--frames', str(src), '--out', str(tmp_path/'video-follow'), '--region', region, '--fps', '24',
+                     '--on-fold', 'lower']) == 0
     for name in (*FILES, 'sway.json'):
-        assert (tmp_path/'video-sway'/name).read_bytes() == (tmp_path/'video-follow'/name).read_bytes(), name
+        assert (by_new_name/name).read_bytes() == (tmp_path/'video-follow'/name).read_bytes(), name
 
 
 def snapshot(path):

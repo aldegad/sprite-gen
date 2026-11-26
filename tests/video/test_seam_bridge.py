@@ -102,7 +102,7 @@ def _run(tmp_path: Path, keyed: Path, *, cycle_mode: str = "fixed", **kw) -> dic
 def _refused(tmp_path: Path, keyed: Path, match: str, **kw) -> dict:
     with pytest.raises(SystemExit, match=match):
         _run(tmp_path, keyed, **kw)
-    return json.loads((tmp_path / "idle.json").read_text())
+    return json.loads((tmp_path / "idle.json").read_text(encoding="utf-8"))
 
 
 def _report(tmp_path: Path, keyed: Path, **kw) -> dict:
@@ -111,7 +111,7 @@ def _report(tmp_path: Path, keyed: Path, **kw) -> dict:
         _run(tmp_path, keyed, **kw)
     except SystemExit:
         pass
-    return json.loads((tmp_path / "idle.json").read_text())
+    return json.loads((tmp_path / "idle.json").read_text(encoding="utf-8"))
 
 
 def _cells(out: Path) -> list[np.ndarray]:
@@ -143,7 +143,7 @@ def test_a_wrap_that_jumps_is_bridged_by_one_frame_and_the_loop_then_passes_the_
     assert np.array_equal(cells[N - 1], np.asarray(_figure(between.at(N - 2, 0, 0.5))))
     filmed = [np.asarray(Image.open(p).convert("RGBA")) for p in sorted(keyed.glob("*.png"))][:N]
     assert all(np.array_equal(cells[k], filmed[k]) for k in range(N - 1))  # every other frame is the clip's own
-    assert json.loads((tmp_path / "idle.json").read_text())["jump_repair"]["replaced"] == [N - 1]
+    assert json.loads((tmp_path / "idle.json").read_text(encoding="utf-8"))["jump_repair"]["replaced"] == [N - 1]
 
 
 def test_the_fewest_frames_are_tried_first_and_a_straight_line_that_does_not_close_makes_none(tmp_path, capsys):
@@ -323,7 +323,7 @@ def test_the_summary_names_the_frames_made_and_the_rife_that_made_them(tmp_path,
                           "--start", "0", "--length", str(N), "--name", "idle", "--report", str(tmp_path / "idle.json")]) == 0
     out = capsys.readouterr().out
     summary = json.loads(out[out.index("{"):])
-    report = json.loads((tmp_path / "idle.json").read_text())
+    report = json.loads((tmp_path / "idle.json").read_text(encoding="utf-8"))
     assert summary["jump_repair"] == {k: report["jump_repair"][k] for k in ("reading", "seam", "replaced", "seam_after")}
     assert summary["jump_repair"]["replaced"] == [N - 1]
     assert report["jump_repair"]["interpolator"] == {"kind": "rife-ncnn-vulkan", "binary": "rife-ncnn-vulkan", "model": "rife-v4.6",

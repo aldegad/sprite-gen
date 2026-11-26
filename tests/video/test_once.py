@@ -32,6 +32,8 @@ def cut(tmp_path, **kwargs):
 
 
 @pytest.mark.timeout(900)  # 20 calls of the binary at 128 x 96 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.slow
+@pytest.mark.rife_pinned
 def test_cut_keeps_final_pose_in_strip_and_once_previews(tmp_path, rife_runs):
     keyed(tmp_path / "keyed")
     report = cut(tmp_path)
@@ -57,7 +59,7 @@ def test_refuses_unfinished_or_clipped_body(tmp_path, kwargs, reason):
     keyed(tmp_path / "keyed", **kwargs)
     with pytest.raises(SystemExit, match=reason):
         cut(tmp_path)
-    report = json.loads((tmp_path / "out/death.loop.report.json").read_text())
+    report = json.loads((tmp_path / "out/death.loop.report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed"
 
 
@@ -124,6 +126,7 @@ def test_terminal_gate_rejects_still_and_accumulated_drift():
 
 
 @pytest.mark.parametrize("after", ["standing", "shaking", "clipped"])
+@pytest.mark.slow
 def test_once_cuts_at_the_first_settled_ground_pose_before_later_motion(tmp_path, after):
     files = keyed(tmp_path / "keyed")
     initial = Image.open(files / "0000.png")
@@ -163,13 +166,13 @@ def test_batch_sends_terminal_pin_and_does_not_reuse_a_changed_pin(tmp_path, mon
     def canvas_stub(still, out, **kw):
         Image.open(base).save(out)
         report = {"fit": "state", "shape": "wide", "canvas": [32, 32], "offset": [0, 0]}
-        kw["report_path"].write_text(json.dumps(report))
+        kw["report_path"].write_text(json.dumps(report), encoding="utf-8")
         return report
 
     def video_stub(image, prompt, out, report, **kw):
         seen.append(kw["last_frame"])
         out.write_bytes(b"clip")
-        report.write_text(json.dumps({"prompt": prompt}))
+        report.write_text(json.dumps({"prompt": prompt}), encoding="utf-8")
         return 0
 
     def frames_stub(clip, out, **kw):

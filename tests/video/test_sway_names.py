@@ -29,6 +29,7 @@ def _twin(loop_dir, tmp_path):
     return twin
 
 
+@pytest.mark.slow
 def test_the_new_verb_and_the_old_one_write_the_same_bytes(loop_dir, tmp_path):
     region = ','.join(f'{v:g}' for v in chest_region(loop_dir))
     twin = _twin(loop_dir, tmp_path)

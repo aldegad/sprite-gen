@@ -212,6 +212,7 @@ def test_a_scene_that_shows_no_cell_again_renders_byte_for_byte_as_before(case, 
 
 # --- Cells at the scene's times ----------------------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_a_24_fps_cut_in_a_60_fps_scene_shows_no_cell_twice(tmp_path):
     source = strip(tmp_path, "walk", cycle())
     spec = scene(tmp_path, source, fps=60, duration=1.0)
@@ -249,6 +250,7 @@ class Named:
         return self.inner(a, b, t)
 
 
+@pytest.mark.slow
 def test_a_between_cache_keeps_the_frames_made_for_the_next_render(tmp_path):
     source = strip(tmp_path, "walk", cycle())
     spec = scene(tmp_path, source, fps=60, duration=1.0)
@@ -269,6 +271,7 @@ def test_a_between_cache_keeps_the_frames_made_for_the_next_render(tmp_path):
     assert Renderer(load_scene(spec), interpolate=Between(walk_at, range(N), period=N)).between_cache_record() is None
 
 
+@pytest.mark.slow
 def test_a_scene_at_60_fps_closes_on_its_first_frame_as_the_loop_check_reads_it(tmp_path):
     from sprite_gen.scene.inspect_scene import inspect_scene
     source = strip(tmp_path, "walk", cycle())

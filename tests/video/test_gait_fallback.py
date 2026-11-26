@@ -82,7 +82,7 @@ def run(tmp_path, frames, *extra, cut=('--anchor', 'motion-auto'), state='walk')
         code = loop.main(args)
     except SystemExit as exc:
         code = exc
-    return code, json.loads((tmp_path/'loop.json').read_text()), output
+    return code, json.loads((tmp_path/'loop.json').read_text(encoding="utf-8")), output
 
 
 def test_drift_is_measured_on_the_fitted_height_and_undone_about_the_feet():
@@ -162,6 +162,7 @@ def test_a_clip_the_first_search_cuts_is_cut_without_the_fallback(tmp_path):
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 16 to 22 calls of the binary at 280 x 180 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.rife_pinned
 def test_a_cycle_longer_than_half_the_clip_is_found_by_the_fallback(tmp_path, rife_runs):
     frames = [walker(k, period=40) for k in range(73)]
     code, report, output = run(tmp_path, frames)
@@ -316,6 +317,7 @@ def test_the_held_loop_of_a_shrinking_walk_keeps_its_crown(tmp_path):
     assert edges['bottom'][0] <= edges['bottom'][1], edges
 
 
+@pytest.mark.slow
 def test_the_feet_are_read_one_cycle_on():
     frames = [walking_away(k) for k in range(73)]
     feet = gait_fallback.foot_drift(frames, gait_fallback.cycle_drift(frames, min_lag=12, max_lag=36))
@@ -373,6 +375,7 @@ def wrap_and_inner(output):
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 14 to 16 calls of the binary at 280 x 180 for the 2 % walk (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize('clip', ['walking away', 'shrinking 2 %'])
+@pytest.mark.rife_pinned
 def test_a_walk_cut_again_by_hand_is_held_at_its_size_and_its_feet(tmp_path, clip, rife_runs):
     """A cut the caller names (`--cycle fixed`, the recut path) of a walk that changes size: held over the whole clip
     before the cut is read, as a search's cut is, so the loop's last frame is the size of its first and stands on its
@@ -450,7 +453,7 @@ def test_a_walk_that_keeps_its_size_is_cut_as_filmed_either_way(tmp_path, cut):
         assert code == 0
         outputs.append(output)
     assert report['size_hold'] == {'applied': False, 'why': '--size-hold off'}
-    held = json.loads((tmp_path/'auto'/'loop.json').read_text())['size_hold']
+    held = json.loads((tmp_path/'auto'/'loop.json').read_text(encoding="utf-8"))['size_hold']
     assert held['applied'] is False and 'feet' not in held and 'padding_ltrb' not in held
     for path in ('loop.strip.png', 'loop.gif', 'cycle/frame-000.png', 'cycle/frame-023.png'):
         assert (outputs[0]/path).read_bytes() == (outputs[1]/path).read_bytes(), path
@@ -477,7 +480,7 @@ def test_a_cut_by_hand_that_keeps_its_size_is_not_held_for_what_the_clip_reads(t
         (tmp_path/mode).mkdir()
         code, _, outputs[mode] = run(tmp_path/mode, frames, '--size-hold', mode, cut=how, state=state)
         assert code == 0, code
-    hold = json.loads((tmp_path/'auto'/'loop.json').read_text())['size_hold']
+    hold = json.loads((tmp_path/'auto'/'loop.json').read_text(encoding="utf-8"))['size_hold']
     assert hold['applied'] is False and abs(hold['drift']) >= gait_fallback.SIZE_HOLD_MIN
     seen = hold['at_cut']
     assert seen['pairs'] == pairs and seen['change'] == 0 and seen['size'] is False and 'why' in hold

@@ -22,7 +22,9 @@ What holds, wherever RIFE runs (the binary on a GPU or on llvmpipe, `real_rife`;
   too.
 
 Each is many runs of RIFE at about 550 x 780 (padded to 640 x 896): minutes on a GPU, tens of minutes on llvmpipe or a
-CPU's PyTorch. So they are `slow`, run by `--full` (the lanes)."""
+CPU's PyTorch. So they are `slow`, run by `--full` (the lanes). The feet test asks for frames between the pairs a cut was
+filled at, most of which filling the cut already made: what it reads of a frame the cut's test made (`DRAG_READ`) is
+read there and not made again."""
 
 from __future__ import annotations
 
@@ -86,6 +88,29 @@ def test_the_fixture_is_what_was_measured():
     assert measured["pip-jump"]["rife-v4.25"]["taken"] == measured["pip-jump"]["rife-v4.25-torch"]["taken"]
 
 
+# What the feet test reads of a frame (each drag's least kept share, `_drag_read`), by cut, backend and recorded key, kept
+# where the cut's test made that very frame while filling the cut: the default model's frame between the same two
+# pictures at that time, as the feet test would ask for it.
+DRAG_READ: dict[tuple[str, str, str], dict[str, float | None]] = {}
+
+
+def _reading_drags(interpolate: rife.Interpolate, frames: list[Image.Image], cut: str, backend: str) -> rife.Interpolate:
+    """`interpolate`, keeping in DRAG_READ what the feet test reads of each frame it makes at one of the cut's drag keys."""
+    keys = set(_record()[cut]["drag"]["keys"])
+    index = {id(im): k for k, im in enumerate(frames)}
+
+    def made(a: Image.Image, b: Image.Image, t: float) -> Image.Image:
+        frame = interpolate(a, b, t)
+        key = f"{index.get(id(a), -1):02d}-{index.get(id(b), -1):02d}-{t:.6f}"
+        # Kept only where RIFE was handed the very time the feet test hands it for that key: the torch backend takes it
+        # as a float32 (the binary to four places), so a time the key rounds (2/9 as 0.222222) is made again there.
+        if key in keys and np.float32(t) == np.float32(float(key.rsplit("-", 1)[1])):
+            DRAG_READ[(cut, backend, key)] = _drag_read(np.asarray(frame), a, b)
+        return frame
+
+    return made
+
+
 @pytest.mark.slow
 @pytest.mark.timeout(5400)  # 450 to 550 runs of RIFE at 640 x 896: minutes on a GPU, tens of minutes on llvmpipe or a CPU
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -94,8 +119,11 @@ def test_a_public_cut_takes_as_many_poses_with_the_default_model_as_measured(req
     """The cut filled 24 -> 60 fps by the default model: its poses within the cut's bounds (BOUNDS); Pip's jump takes the
     cells PyTorch took from the published weights padded to 128."""
     rec = _record()[cut]
-    interpolate = _interpolator(request, backend, monkeypatch)
-    out, record = held_fill.upsample(_frames(cut), interpolate, ring=rec["ring"], fps=24, out_fps=60)
+    frames = _frames(cut)
+    made = _interpolator(request, backend, monkeypatch)
+    interpolate = _reading_drags(made, frames, cut, backend)
+    out, record = held_fill.upsample(frames, interpolate, ring=rec["ring"], fps=24, out_fps=60)
+    request.node.user_properties.append(("rife_calls", made.calls))  # what the GPU lane's record of the test says
     reading = held_fill.reading(held_fill.same_steps(out))
     low, high = BOUNDS[cut]
     assert reading["cells"] == rec["measured"]["rife-v4.25"]["cells"]
@@ -147,8 +175,15 @@ def _feet_kept(frame: Image.Image, a: Image.Image, b: Image.Image, top: int) -> 
     return min(kept, default=None)
 
 
+def _drag_read(made: np.ndarray, a: Image.Image, b: Image.Image) -> dict[str, float | None]:
+    """The least kept share the feet windows read of `made`, its feet band dragged 2 px sideways (h2) and 2 px up (v2)."""
+    top, bottom = _band(a, b)
+    return {kind: _feet_kept(Image.fromarray(_dragged(made, top, bottom, dx, dy)), a, b, top)
+            for kind, dx, dy in (("h2", 2, 0), ("v2", 0, -2))}
+
+
 @pytest.mark.slow
-@pytest.mark.timeout(3600)  # 88 and 91 frames, two runs each, at 640 x 896
+@pytest.mark.timeout(3600)  # 88 and 91 frames, two runs each, at 640 x 896 (fewer where the cut's test made them)
 @pytest.mark.parametrize("backend", BACKENDS)
 @pytest.mark.parametrize("cut", ["knight-walk", "pip-jump"])
 def test_the_default_model_s_frame_dragged_off_still_feet_is_caught_wherever_rife_v4_6_s_was(request, monkeypatch, cut,
@@ -156,19 +191,20 @@ def test_the_default_model_s_frame_dragged_off_still_feet_is_caught_wherever_rif
     """Each recorded key — a planted pair whose feet stand still (their feet bands' solid pixels overlapping 0.9 and over)
     and a t either model made there — made by the default model, its feet band dragged 2 px sideways (h2) and 2 px up
     (v2): every key whose rife-v4.6 frame the feet windows caught (kept under `held_fill.STILL_KEPT_MIN`) is caught for
-    this one too."""
+    this one too. A frame the cut's test made at a key while filling the cut is read there (DRAG_READ), not made again."""
     rec = _record()[cut]
     frames = _frames(cut)
     interpolate = _interpolator(request, backend, monkeypatch)
     caught: dict[str, set[str]] = {"h2": set(), "v2": set()}
     for key in rec["drag"]["keys"]:
-        i, j, t = key.split("-")
-        a, b = frames[int(i)], frames[int(j)]
-        made = np.asarray(interpolate(a, b, float(t)))
-        top, bottom = _band(a, b)
-        for kind, dx, dy in (("h2", 2, 0), ("v2", 0, -2)):
-            kept = _feet_kept(Image.fromarray(_dragged(made, top, bottom, dx, dy)), a, b, top)
+        read = DRAG_READ.get((cut, backend, key))
+        if read is None:
+            i, j, t = key.split("-")
+            a, b = frames[int(i)], frames[int(j)]
+            read = _drag_read(np.asarray(interpolate(a, b, float(t))), a, b)
+        for kind, kept in read.items():
             if kept is not None and kept < held_fill.STILL_KEPT_MIN:
                 caught[kind].add(key)
+    request.node.user_properties.append(("rife_calls", interpolate.calls))  # what the GPU lane's record of the test says
     for kind, wanted in rec["drag"]["caught_by_rife_v4_6"].items():
         assert not set(wanted) - caught[kind], (kind, sorted(set(wanted) - caught[kind]))

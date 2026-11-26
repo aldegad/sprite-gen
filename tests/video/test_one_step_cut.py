@@ -78,7 +78,7 @@ def _keyed(root: Path, cycle: float = CYCLE, frames: int = FRAMES) -> Path:
 def _cut(out: Path, keyed: Path, *extra: str) -> dict:
     assert loop.main(["--frames-dir", str(keyed), "--out-dir", str(out), "--state", "walk",
                       "--anchor", "motion-auto", "--repair", "off", *extra]) == 0
-    return json.loads((out / "loop.loop.report.json").read_text())
+    return json.loads((out / "loop.loop.report.json").read_text(encoding="utf-8"))
 
 
 def _arm_miss(start: int, length: int, cycle: float = CYCLE) -> float:
@@ -99,6 +99,7 @@ def slow(tmp_path_factory) -> tuple[Path, Path, dict]:
     return root, keyed, _cut(root / "out", keyed)
 
 
+@pytest.mark.slow
 def test_a_walk_cut_one_step_long_is_named_by_the_step_screen(slow):
     _, _, report = slow
     cycle = report["cycle"]
@@ -128,7 +129,8 @@ def _same_but_the_screen(a: Path, b: Path) -> None:
     assert all((a / "cycle" / f).read_bytes() == (b / "cycle" / f).read_bytes() for f in frames)
     # The report is JSON text, so the run dir appears in it JSON-escaped: on Windows its
     # backslashes are doubled, and a raw str(d) would match nothing.
-    left, right = (json.loads((d / "loop.loop.report.json").read_text(encoding="utf-8").replace(json.dumps(str(d))[1:-1], "@"))
+    left, right = (json.loads((d / "loop.loop.report.json").read_text(encoding="utf-8")
+                              .replace(json.dumps(str(d))[1:-1], "@"))
                    for d in (a, b))
     for report in (left, right):
         # The gait observation keeps a copy of the screen's record (sprite_gen/video/evidence.py): each
@@ -141,6 +143,7 @@ def _same_but_the_screen(a: Path, b: Path) -> None:
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 8 calls of the binary at 270 x 220 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize("cycle, suspect", [(CYCLE, True)])
+@pytest.mark.rife_pinned
 def test_the_step_screen_changes_nothing_but_its_own_record(tmp_path, monkeypatch, cycle, suspect, rife_runs):
     """A one-step cut: with the screen or without it, every image, the strip metadata and the report
     are the same but for its record, and the gait observation's copy of it. The screen is computed
@@ -164,6 +167,7 @@ def test_the_step_screen_reads_a_cycle_on_a_frame_count_that_is_not_whole(tmp_pa
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 8 calls of the binary at 280 x 220 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.rife_pinned
 def test_steps_1_cuts_the_walk_again_two_steps_long_where_its_arms_close(slow, tmp_path, rife_runs):
     root, keyed, first = slow
     report = _cut(tmp_path / "out", keyed, "--steps", "1")
@@ -179,7 +183,7 @@ def test_steps_1_cuts_the_walk_again_two_steps_long_where_its_arms_close(slow, t
     assert cycle["step_screen"]["leg_peaks"] == {"by": "stride", "count": 2}
     assert cycle["coverage"] == round((FRAMES - cycle["length"]) / cycle["length"], 4) > loop.COVERAGE_MIN
     assert cycle["choice"] == "closure" and not any("two steps long" in line for line in report["jolt"]["warnings"])
-    strip = json.loads((tmp_path / "out" / "loop.strip.json").read_text())
+    strip = json.loads((tmp_path / "out" / "loop.strip.json").read_text(encoding="utf-8"))
     assert strip["steps"] == 2 and strip["cycle_frames"] == cycle["length"]
 
 
@@ -189,7 +193,7 @@ def test_steps_2_keeps_the_cut_and_records_the_count(slow, tmp_path):
     report = _cut(tmp_path / "out", keyed, "--steps", "2")
     assert {k: report["cycle"][k] for k in ("start", "length")} == {k: first["cycle"][k] for k in ("start", "length")}
     assert report["cycle"]["steps"] == {"count": 2, "by": "given", "given": 2}
-    assert json.loads((tmp_path / "out" / "loop.strip.json").read_text())["steps"] == 2
+    assert json.loads((tmp_path / "out" / "loop.strip.json").read_text(encoding="utf-8"))["steps"] == 2
     for name in ("loop.strip.png", "loop.gif", "loop.webp"):
         assert (tmp_path / "out" / name).read_bytes() == (root / "out" / name).read_bytes()
 

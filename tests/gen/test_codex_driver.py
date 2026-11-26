@@ -147,6 +147,7 @@ def _cli(*args: str) -> subprocess.CompletedProcess[str]:
                           cwd=REPO_ROOT)
 
 
+@pytest.mark.slow
 def test_defaults_and_capabilities_say_the_driver_in_effect_and_clear_removes_it():
     built_in = {"model": codex_provider.DRIVER_MODEL, "effort": codex_provider.DRIVER_EFFORT,
                 "model_from": "built-in", "effort_from": "built-in"}
