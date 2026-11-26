@@ -421,6 +421,7 @@ def test_a_part_moved_on_a_redrawn_character_is_held_while_the_rest_is_blended(d
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 16 to 24 calls of the binary at 160 x 224 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.rife_pinned
 def test_the_checkpoints_part_on_a_flat_figure_is_cut_as_filmed_with_a_warning(tmp_path: Path, capsys, rife_runs) -> None:
     frames = []
     for t in range(N):

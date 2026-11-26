@@ -89,6 +89,7 @@ timeout = 120
 markers = [
     "real_rife: runs the real rife-ncnn-vulkan; skipped where none is reachable, run by the GPU lane (`scripts/cuda_lane.py`)",
     "torch_rife: runs RIFE's torch backend; skipped where PyTorch or the model is missing, run by the GPU lane (`scripts/cuda_lane.py`)",
+    "rife_pinned: pins the RIFE binary's calls (`as_pinned`); pinned to none where no binary is found, as in the Linux lane, and run by the GPU lane (`scripts/cuda_lane.py`) for the binary's calls (tests/release/test_rife_pinned.py)",
     "slow: a case takes 1 s or more, or the function's cases 5 s or more together (an 8-core M1); deselected unless `pytest --full`",
     "one_share: the module runs whole in one share of the lane (`pytest --shard`), so what its module fixtures make is made once a run",
 ]

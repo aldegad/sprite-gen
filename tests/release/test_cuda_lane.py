@@ -379,7 +379,7 @@ def test_the_verdict_is_a_pass_where_every_chunk_of_one_split_passed_and_togethe
     where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:]})
     assert cuda_lane.verdict(where, 2) == 0
     rec = release_gates.read_run(where / "run.json")
-    assert (rec["commit"], rec["gates"], rec["passed"]) == (SHA, "real_rife or torch_rife", True)
+    assert (rec["commit"], rec["gates"], rec["passed"]) == (SHA, "real_rife or torch_rife or rife_pinned", True)
     assert rec["gpu"] == "NVIDIA GeForce RTX 3060, 617.14, 12288 MiB"
     assert [c["chunk"] for c in rec["chunks"]] == ["1/2", "2/2"]
 

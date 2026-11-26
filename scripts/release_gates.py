@@ -2,10 +2,10 @@
 """Which gates a release's change reaches, and what the release record says of each: the one table (docs/release.md).
 
 The Linux lane (`scripts/linux_lane.sh`, GitHub-hosted runners) runs every test but RIFE's at the commit a release is
-made from, every time. RIFE's tests need a GPU: those marked real_rife (the rife-ncnn-vulkan binary) and torch_rife (its
-torch backend) run in the GPU lane (`scripts/cuda_lane.py` on the maintainer's NVIDIA host), and only where a change
+made from, every time. RIFE's tests need a GPU: those marked real_rife (the rife-ncnn-vulkan binary), rife_pinned (a pin of the binary's
+calls, pinned to none where no binary is found) and torch_rife (its torch backend) run in the GPU lane (`scripts/cuda_lane.py` on the maintainer's NVIDIA host), and only where a change
 since the commit that lane last passed at, or since the release before, reaches them: a file `GPU_LANE` names, or a test
-file that marks a test real_rife or torch_rife. `scripts/release_publish.py` writes the gates block of the release page
+file that marks a test with one of those marks. `scripts/release_publish.py` writes the gates block of the release page
 from `record()`: the commit each gate passed at, or that it did not run and why. A reached gate without a passing run is
 not a release until the maintainer says why it was not run (`--gpu-unmeasured`), which the page then says. Nothing is
 passed over in silence.
@@ -65,9 +65,11 @@ GPU_LANE = (
     "scripts/cuda_lane.py",
     "scripts/release_gates.py",
 )
-MARKED = re.compile(r"\bpytest\.mark\.(real_rife|torch_rife)\b|\bmark\.(real_rife|torch_rife)\b")
+MARKED = re.compile(r"\bpytest\.mark\.(real_rife|torch_rife|rife_pinned)\b|\bmark\.(real_rife|torch_rife|rife_pinned)\b")
 GATE = "GPU lane"
-WHAT = "RIFE's tests (real_rife on the host's Vulkan, torch_rife on CUDA), scripts/cuda_lane.py on the NVIDIA host"
+WHAT = ("RIFE's tests (real_rife and those pinning its calls, rife_pinned, on the host's Vulkan; torch_rife on CUDA), "
+        "scripts/cuda_lane.py on the NVIDIA host")
+GATES = "real_rife or torch_rife or rife_pinned"  # the tests a GPU lane run runs, cuda_lane.GATE_TESTS
 
 
 class GateError(RuntimeError):
@@ -83,7 +85,7 @@ def _git(root: Path, *args: str) -> str:
 
 def reaches(path: str, text: str | None) -> bool:
     """Whether a change to `path` (its text at the commit measured, None where the change removed it) reaches the GPU
-    lane: a file the table names, or a test file that marks a test real_rife or torch_rife."""
+    lane: a file the table names, or a test file that marks a test real_rife, torch_rife or rife_pinned."""
     if any(fnmatch.fnmatchcase(path, p) for p in GPU_LANE):  # `*` takes a `/` too: a pattern names a subtree
         return True
     return path.startswith("tests/") and path.endswith(".py") and text is not None and bool(MARKED.search(text))
@@ -125,7 +127,7 @@ def read_run(path: Path) -> dict:
     rec = json.loads(path.read_text(encoding="utf-8"))
     if not rec.get("passed") or not re.fullmatch(r"[0-9a-f]{40}", str(rec.get("commit", ""))):
         raise GateError(f"{path} is not a passing GPU lane run (passed: {rec.get('passed')}, why: {rec.get('why')})")
-    if rec.get("gates") != "real_rife or torch_rife":
+    if rec.get("gates") != GATES:
         raise GateError(f"{path} ran {rec.get('gates') or 'the torch tests alone'}, not every RIFE test: no GPU lane pass")
     return rec
 

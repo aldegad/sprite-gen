@@ -84,6 +84,7 @@ def _bound(args: tuple[str, ...], flag: str) -> int | None:
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # up to 22 calls of the binary at about 280 x 200 (a row's runs): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize("path, clip, args, ran, cut, runs", ROWS, ids=[f"{r[0]}{''.join(r[2][-2:])}" for r in ROWS])
+@pytest.mark.rife_pinned
 def test_an_explicit_window_holds_on_every_path(tmp_path, path, clip, args, ran, cut, runs, rife_runs):
     keyed = clip(tmp_path / "clip")
     report_path = tmp_path / "loop.json"

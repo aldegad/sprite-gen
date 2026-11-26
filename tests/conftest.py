@@ -175,8 +175,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
     A test marked `real_rife` runs the real binary: skipped where `rife.locate()` finds none. A test marked
     `torch_rife` runs RIFE's torch backend: skipped where PyTorch, the model or the device is missing
-    (`_torch_rife_missing`). The GPU lane (`scripts/cuda_lane.py`) runs both with none skipped
-    (`-m "real_rife or torch_rife"`, docs/release.md)."""
+    (`_torch_rife_missing`). A test marked `rife_pinned` pins the binary's calls (`as_pinned`) and is not skipped: where
+    no binary is found it is pinned to none. The GPU lane (`scripts/cuda_lane.py`) runs the three with none skipped
+    (`-m "real_rife or torch_rife or rife_pinned"`, docs/release.md)."""
     if not config.getoption("full"):
         slow = [item for item in items if item.get_closest_marker("slow")]
         if slow:

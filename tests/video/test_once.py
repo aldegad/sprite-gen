@@ -33,6 +33,7 @@ def cut(tmp_path, **kwargs):
 
 @pytest.mark.timeout(900)  # 20 calls of the binary at 128 x 96 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.slow
+@pytest.mark.rife_pinned
 def test_cut_keeps_final_pose_in_strip_and_once_previews(tmp_path, rife_runs):
     keyed(tmp_path / "keyed")
     report = cut(tmp_path)

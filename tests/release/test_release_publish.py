@@ -277,7 +277,8 @@ def test_prebuilt_does_not_combine_with_a_build_here(harness: Harness, tmp_path:
 
 # ---------------------------------------------------------------- the gates block: what ran, and what did not
 
-GPU = "GPU lane (RIFE's tests (real_rife on the host's Vulkan, torch_rife on CUDA), scripts/cuda_lane.py on the NVIDIA host)"
+GPU = ("GPU lane (RIFE's tests (real_rife and those pinning its calls, rife_pinned, on the host's Vulkan; torch_rife "
+       "on CUDA), scripts/cuda_lane.py on the NVIDIA host)")
 
 
 def _reach_the_gpu_lane(harness: Harness) -> None:
@@ -290,7 +291,7 @@ def _reach_the_gpu_lane(harness: Harness) -> None:
 
 def _gpu_run(tmp_path: Path, commit: str, **over: object) -> Path:
     run = tmp_path / f"run-{commit[:7]}-{len(list(tmp_path.glob('run-*.json')))}.json"
-    run.write_text(json.dumps({"commit": commit, "passed": True, "gates": "real_rife or torch_rife",
+    run.write_text(json.dumps({"commit": commit, "passed": True, "gates": "real_rife or torch_rife or rife_pinned",
                                "gpu": "a GPU, its driver"} | over), encoding="utf-8")
     return run
 

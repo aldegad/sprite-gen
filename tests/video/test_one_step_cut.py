@@ -142,6 +142,7 @@ def _same_but_the_screen(a: Path, b: Path) -> None:
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 8 calls of the binary at 270 x 220 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize("cycle, suspect", [(CYCLE, True)])
+@pytest.mark.rife_pinned
 def test_the_step_screen_changes_nothing_but_its_own_record(tmp_path, monkeypatch, cycle, suspect, rife_runs):
     """A one-step cut: with the screen or without it, every image, the strip metadata and the report
     are the same but for its record, and the gait observation's copy of it. The screen is computed
@@ -165,6 +166,7 @@ def test_the_step_screen_reads_a_cycle_on_a_frame_count_that_is_not_whole(tmp_pa
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 8 calls of the binary at 280 x 220 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.rife_pinned
 def test_steps_1_cuts_the_walk_again_two_steps_long_where_its_arms_close(slow, tmp_path, rife_runs):
     root, keyed, first = slow
     report = _cut(tmp_path / "out", keyed, "--steps", "1")

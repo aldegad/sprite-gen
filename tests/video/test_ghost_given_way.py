@@ -401,6 +401,7 @@ APP_RUNS = {"rife-v4.25": (12, 14), "rife-v4.6": 14}
 @pytest.mark.slow
 @pytest.mark.real_rife
 @pytest.mark.timeout(900)  # 12 to 14 calls of the binary at 280 x 221 (the held fill's frames between, the jump repair's, and the jump repair's of the cut with the fill off): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.rife_pinned
 def test_real_rife_the_applications_walk_gives_a_small_filmed_ghost_way(tmp_path, rife_runs):
     """B1b through the real RIFE, located as `video-loop` locates it."""
     report = _app_cut(tmp_path, None)

@@ -364,6 +364,7 @@ def test_shape_rank_reads_no_held_side_when_the_first_choice_does_not_pop():
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 74 calls of the binary at 384 x 256 with rife-v4.25, 66 with rife-v4.6, on an Apple GPU and on llvmpipe (the held fill's frames between; the module's two cuts make 6 more): a minute on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.rife_pinned
 def test_cycle_align_aligns_a_two_step_loop_as_the_one_cycle_it_is(held, staffless, tmp_path, rife_runs):
     """The loop cut two steps long is one cycle: where its report witnesses its cut whole cycles, it returns half way
     at its second step, which is no suspect (status `steps`), and it is resampled to the set's length like the rest —

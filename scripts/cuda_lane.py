@@ -34,8 +34,9 @@ Vulkan). On Windows a path of WINDOWS_MAX_PATH characters or more cannot be writ
 are not enabled, so `prepare` refuses before installing anything when the longest name a wheel writes would not fit
 under the virtual environment: the directory's path is then too long. Then the GPU and its driver (`nvidia-smi`),
 PyTorch's CUDA (fails where PyTorch finds no GPU), the install's check frame on CUDA (`sprite-gen rife install
---backend torch` again, SPRITE_GEN_RIFE_DEVICE=cuda), and the tests to run: every test marked real_rife or torch_rife
-(GATE_TESTS), collected. It keeps all of it in prepared.json and logs/.
+--backend torch` again, SPRITE_GEN_RIFE_DEVICE=cuda), and the tests to run: every test marked real_rife, torch_rife or
+rife_pinned (GATE_TESTS: a test pinning the binary's calls passes where no binary is found, pinned to none, so its
+binary's calls are measured here alone), collected. It keeps all of it in prepared.json and logs/.
 
 `test --chunk K/N` runs share K of N of those tests (`pytest --shard K/N`, tests/conftest.py), none skipped: the binary
 installed here (SPRITE_GEN_RIFE) and the torch backend on CUDA, those marked both setting the two side by side. A chunk
@@ -85,7 +86,7 @@ CHECK_TIMEOUT = 900  # seconds one `safedeps check` may take
 PACK_FILES = ("source.tar.gz", "SOURCE_SHA", "requirements.txt", "checks.json", "cuda_lane.py")
 PIN = re.compile(r"([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)==([0-9A-Za-z.+!_-]+)((?:\s+--hash=sha256:[0-9a-f]{64})+)")
 HOST_SPEC = re.compile(r"([a-z0-9]+):([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)@([0-9A-Za-z.+!_-]+)")
-GATE_TESTS = "real_rife or torch_rife"
+GATE_TESTS = "real_rife or torch_rife or rife_pinned"
 # Seconds one chunk's tests may take: with the interpreter's start, one call on the host stays under the ten minutes
 # a call may hold a remote machine.
 CHUNK_BUDGET = 540

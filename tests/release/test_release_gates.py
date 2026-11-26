@@ -74,9 +74,11 @@ def test_each_pattern_of_the_table_names_a_file_that_is_there():
 def test_a_test_file_reaches_it_by_its_marks():
     marked = "import pytest\n\n\n@pytest.mark.real_rife\ndef test_x():\n    pass\n"
     torched = "import pytest\n\npytestmark = pytest.mark.torch_rife\n"
+    pinned = "import pytest\n\n\n@pytest.mark.rife_pinned\ndef test_x():\n    pass\n"
     plain = "def test_x():\n    assert 'real_rife' in 'a test of the words'\n"
     assert release_gates.reaches("tests/video/test_new.py", marked)
     assert release_gates.reaches("tests/video/test_new.py", torched)
+    assert release_gates.reaches("tests/video/test_new.py", pinned)
     assert not release_gates.reaches("tests/video/test_new.py", plain)
     assert not release_gates.reaches("tests/video/test_new.py", None)
     for elsewhere in ("README.md", "docs/release.md", "sprite_gen/video/sway.py", "tests/video/test_sway_region.py"):
@@ -116,3 +118,22 @@ def test_the_files_a_change_reaches_are_read_on_both_sides(tmp_path):
     cut = _commit(repo, {"sprite_gen/video/loop.py": "CUT = 1\n", "tests/video/test_a.py": None})
     assert release_gates.reached(repo, unmarked, cut) == ["sprite_gen/video/loop.py"]
     assert release_gates.reached(repo, first, cut) == ["sprite_gen/video/loop.py", "tests/video/test_a.py"]
+
+
+def test_a_run_counts_where_it_ran_every_test_the_gpu_lane_runs_those_that_pin_rife_s_calls_among_them(tmp_path):
+    """A run that ran RIFE's marked tests but not those pinning its calls (rife_pinned, before they were in the lane)
+    is no GPU lane pass."""
+    import json
+    import cuda_lane
+    for gates, passes in ((cuda_lane.GATE_TESTS, True), ("real_rife or torch_rife", False)):
+        run = tmp_path / "run.json"
+        run.write_text(json.dumps({"commit": "a" * 40, "passed": True, "gates": gates}), encoding="utf-8")
+        if passes:
+            assert release_gates.read_run(run)["gates"] == "real_rife or torch_rife or rife_pinned"
+        else:
+            try:
+                release_gates.read_run(run)
+            except release_gates.GateError as e:
+                assert "not every RIFE test" in str(e)
+            else:
+                raise AssertionError(f"a run of {gates} was read as a pass")

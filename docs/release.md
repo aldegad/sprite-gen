@@ -13,7 +13,7 @@ push 나 PR 마다 도는 CI 는 없고, 이 레포에는 워크플로가 없다
   호스트 표준 러너(ubuntu x86-64, GPU 없음)에서 돌린다 — [aldegad/sprite-gen-lane](https://github.com/aldegad/sprite-gen-lane)
   의 `linux-lane.yml` 이다. 그 레포는 공개 클론으로 커밋을 받을 뿐 비밀값도, 잡 토큰의 권한도 없다. RIFE 의
   시험을 뺀 모든 시험을 릴리즈마다 돌고, wheel·sdist 를 빌드한다.
-- **GPU 레인** — `scripts/cuda_lane.py`. 메인테이너의 NVIDIA GPU 호스트에서 RIFE 의 시험(`real_rife`, `torch_rife`)을
+- **GPU 레인** — `scripts/cuda_lane.py`. 메인테이너의 NVIDIA GPU 호스트에서 RIFE 의 시험(`real_rife`, `torch_rife`, `rife_pinned`)을
   돈다. 바뀐 파일이 그 시험에 닿는 릴리즈에서만 돌고(`scripts/release_gates.py` 의 표, 아래 "무엇이 바뀌면 GPU 레인이
   도나"), 돌지 않은 릴리즈는 릴리즈 페이지에 그렇게 적힌다(아래 "Gates 칸").
 
@@ -34,7 +34,7 @@ push 나 PR 마다 도는 CI 는 없고, 이 레포에는 워크플로가 없다
 
 레인은 RIFE 가 닿는 곳이 하나도 없는 상태로 돈다: `SPRITE_GEN_RIFE` 가 설정돼 있거나 PATH 에 rife-ncnn-vulkan 이
 있으면 시작하지 않고, 엔진이 찾는 사용자 데이터 디렉터리를 비운다. 그래서 `real_rife`·`torch_rife` 가 붙은 시험은
-그 이유로 건너뛴다. 러너에는 GPU 가 없어, 그 시험들을 CPU 의 Vulkan 드라이버(Mesa llvmpipe)에서 돌리던 때는 그것이
+그 이유로 건너뛰고, `rife_pinned` 가 붙은 시험은 건너뛰지 않고 바이너리 호출 0 으로 고정된 채 돈다. 러너에는 GPU 가 없어, 그 시험들을 CPU 의 Vulkan 드라이버(Mesa llvmpipe)에서 돌리던 때는 그것이
 한 실행의 거의 전부를 차지했다.
 
 `scripts/linux_lane.sh` 는 `pytest` 호출마다 `--full` 을 전달해 모든 시험을 실행한다(GPU 레인도 같다). 일반
@@ -48,10 +48,14 @@ push 나 PR 마다 도는 CI 는 없고, 이 레포에는 워크플로가 없다
 실제 rife-ncnn-vulkan 을 돌리는 시험은 `real_rife` 표시를 단다(`pyproject.toml` 이 등록하고,
 `tests/conftest.py` 가 RIFE 를 못 찾으면 그 표시가 붙은 시험을 건너뛴다). 리눅스 레인(`--rife-unmeasured`)에서는
 그 시험들이 이 이유로 건너뛰고, GPU 레인은 `sprite-gen rife install`(그 확인 프레임)과 스위트 전체에서
-`real_rife` 나 `torch_rife` 가 붙은 시험(`pytest --full -m "real_rife or torch_rife"`)을 돈다 — 하나라도
-건너뛰거나, 표시된 시험이 없으면 실패다. 그래서 새 실제-RIFE 시험은 표시만 붙이면 GPU 레인이 저절로 걷는다.
+`real_rife`, `torch_rife`, `rife_pinned` 가 붙은 시험(`pytest --full -m "real_rife or torch_rife or rife_pinned"`)을
+돈다 — 하나라도 건너뛰거나, 표시된 시험이 없으면 실패다. 그래서 새 실제-RIFE 시험은 표시만 붙이면 GPU 레인이 저절로
+걷는다. 바이너리의 호출 수를 `as_pinned` 로 고정하는 시험은 `rife_pinned` 를 단다. 그 시험은 바이너리를 못 찾으면
+호출 0 으로 고정되어 건너뛰지 않고 통과하므로(리눅스 레인), 바이너리의 호출 수는 GPU 레인에서만 잰다.
+`as_pinned` 에 닿는 시험(본문에서든 모듈의 도우미나 픽스처를 거쳐서든)마다 그 표시가 있는지, 표시가 붙은
+시험마다 `as_pinned` 에 닿는지를 `tests/release/test_rife_pinned.py` 가 본다.
 
-컷의 기본 채움(`--fill-held auto`)으로 바이너리에 닿고 CPU 의 Vulkan 드라이버에서 기본 120 s 제한을 넘길 만큼 자주 실행하는 시험은 `real_rife` 표시 여부와 관계없이 긴 바이너리 시험처럼 `@pytest.mark.timeout(900)` 과 바이너리 호출 수 주석을 달고 `tests/conftest.py` 의 `as_pinned` 로 요청하는 RIFE 실행 수를 모델별로 고정한다(바이너리를 못 찾으면 호출 수를 0 으로, 즉 호출이 없는 것으로 고정하며, 이는 이전에 `rife_located()` 가 거짓일 때와 같다). `as_pinned` 는 고정값을 int 로 받으면 정확한 수로, `(floor, top)` 쌍으로 받으면 양 끝을 포함하여 floor 부터 top 까지로 고정하고, 고정값은 모델 이름을 키로 한 dict 로 모델별로 주거나 모든 모델에 같게 줄 수 있으며, 이 읽기 방식은 `tests/release/test_rife_pins.py` 가 고정한다. rife-v4.6 은 전처럼 정확한 수로 고정하고, rife-v4.25 만 두 끝 사이로 고정하며, 다른 모델에 쌍을 주면 ValueError 로 거부한다. 전에는 rife-v4.25 를 고정값 이하로만 고정했는데, 보간을 건너뛰는 변경(호출이 없거나 너무 적은 경우)도 그대로 통과한다는 검토 지적이 있어 지금은 하한과 상한 사이로 고정한다. 하한은 어느 프레임도 다른 분수에서 다시 만들지 않을 때 컷이 하는 호출 수로, 컷이 요청하는 프레임 하나마다 제때에 한 번씩 요청하는 두 번의 호출이다. 상한은 Apple GPU 와 llvmpipe(CPU 의 Vulkan 드라이버, 전에 리눅스 레인이 RIFE 를 돌리던 곳)에서 잰 수 가운데 큰 쪽이다. GPU 레인의 NVIDIA Vulkan 에서 잰 수는 아직 이 상한에 들어 있지 않다: 그 호스트에서 처음 돌 때 재어, 넘는 건은 그 수로 상한을 고친다. rife-v4.25 를 범위로 두는 까닭은 증강 없이 float16 으로 실행하여 프레임이 GPU 의 연산에 따라 달라지고, 그에 따라 거부되어 다른 분수에서 다시 만드는 프레임도 달라지기 때문이다. 하한은 컷이 요청하는 프레임을 세는 것이지, 채우려고 나선 유지 구간의 모든 셀을 세는 것이 아니다. 다시 시도할 분수가 남지 않은 채 거부된 프레임은 그 구간의 채움을 끝내며, 네 건에서는 그래서 컷이 셀마다 한 프레임씩 만들 때보다 바이너리를 적게 호출한다. 고정된 35 건을 두 기계에서 실행하여 그 중 24 건이 바이너리에 닿았고, 모든 건에서 두 기계가 같은 수의 프레임을 제때에 요청하여 하한은 건마다 하나의 수이며, 합성 걷기 하나에서 바이너리가 Apple GPU 에서는 8 번, llvmpipe 에서는 10 번 호출된 것 외에는 두 기계의 수가 같았고, 24 건 중 9 건은 어느 프레임도 다시 만들지 않아 하한과 상한이 같으므로 정확한 수로 고정되며, rife-v4.6 은 잰 모든 기계에서 수가 같았다. 바이너리를 몇 번만 실행하고 기본 제한 안에서 여유 있게 끝나는 시험은 둘 다 두지 않는다. 고정의 목적은 그대로다. CPU 의 Vulkan 드라이버에서는 실행 하나에 몇 초씩 걸리므로, 실행을 더 요구하는 변경이 시간 초과가 아니라 호출 수에서 걸린다. 지금은 프레임을 더 적게 요청하는 변경도 호출 수에서 걸린다.
+컷의 기본 채움(`--fill-held auto`)으로 바이너리에 닿고 CPU 의 Vulkan 드라이버에서 기본 120 s 제한을 넘길 만큼 자주 실행하는 시험은 `real_rife` 표시 여부와 관계없이 긴 바이너리 시험처럼 `@pytest.mark.timeout(900)` 과 바이너리 호출 수 주석을 달고 `tests/conftest.py` 의 `as_pinned` 로 요청하는 RIFE 실행 수를 모델별로 고정한다(바이너리를 못 찾으면 호출 수를 0 으로, 즉 호출이 없는 것으로 고정하며, 이는 이전에 `rife_located()` 가 거짓일 때와 같다). `as_pinned` 는 고정값을 int 로 받으면 정확한 수로, `(floor, top)` 쌍으로 받으면 양 끝을 포함하여 floor 부터 top 까지로 고정하고, 고정값은 모델 이름을 키로 한 dict 로 모델별로 주거나 모든 모델에 같게 줄 수 있으며, 이 읽기 방식은 `tests/release/test_rife_pins.py` 가 고정한다. rife-v4.6 은 전처럼 정확한 수로 고정하고, rife-v4.25 만 두 끝 사이로 고정하며, 다른 모델에 쌍을 주면 ValueError 로 거부한다. 전에는 rife-v4.25 를 고정값 이하로만 고정했는데, 보간을 건너뛰는 변경(호출이 없거나 너무 적은 경우)도 그대로 통과한다는 검토 지적이 있어 지금은 하한과 상한 사이로 고정한다. 하한은 어느 프레임도 다른 분수에서 다시 만들지 않을 때 컷이 하는 호출 수로, 컷이 요청하는 프레임 하나마다 제때에 한 번씩 요청하는 두 번의 호출이다. 상한은 Apple GPU 와 llvmpipe(CPU 의 Vulkan 드라이버, 전에 리눅스 레인이 RIFE 를 돌리던 곳)에서 잰 수 가운데 큰 쪽이다. GPU 레인의 NVIDIA Vulkan 에서 잰 수는 아직 이 상한에 들어 있지 않다: GPU 레인이 `rife_pinned` 시험을 돌 때 재어, 넘는 건은 그 수로 상한을 고친다. rife-v4.25 를 범위로 두는 까닭은 증강 없이 float16 으로 실행하여 프레임이 GPU 의 연산에 따라 달라지고, 그에 따라 거부되어 다른 분수에서 다시 만드는 프레임도 달라지기 때문이다. 하한은 컷이 요청하는 프레임을 세는 것이지, 채우려고 나선 유지 구간의 모든 셀을 세는 것이 아니다. 다시 시도할 분수가 남지 않은 채 거부된 프레임은 그 구간의 채움을 끝내며, 네 건에서는 그래서 컷이 셀마다 한 프레임씩 만들 때보다 바이너리를 적게 호출한다. 고정된 35 건을 두 기계에서 실행하여 그 중 24 건이 바이너리에 닿았고, 모든 건에서 두 기계가 같은 수의 프레임을 제때에 요청하여 하한은 건마다 하나의 수이며, 합성 걷기 하나에서 바이너리가 Apple GPU 에서는 8 번, llvmpipe 에서는 10 번 호출된 것 외에는 두 기계의 수가 같았고, 24 건 중 9 건은 어느 프레임도 다시 만들지 않아 하한과 상한이 같으므로 정확한 수로 고정되며, rife-v4.6 은 잰 모든 기계에서 수가 같았다. 바이너리를 몇 번만 실행하고 기본 제한 안에서 여유 있게 끝나는 시험은 둘 다 두지 않는다. 고정의 목적은 그대로다. CPU 의 Vulkan 드라이버에서는 실행 하나에 몇 초씩 걸리므로, 실행을 더 요구하는 변경이 시간 초과가 아니라 호출 수에서 걸린다. 지금은 프레임을 더 적게 요청하는 변경도 호출 수에서 걸린다.
 
 RIFE 의 torch 백엔드(`SPRITE_GEN_RIFE_BACKEND=torch`, docs/loop-repair.md 1절)를 돌리는 시험은
 `torch_rife` 표시를 단다(`pyproject.toml` 이 등록한다). `tests/conftest.py` 는 PyTorch 가 import 되지
@@ -117,7 +121,7 @@ PATH 를 바꾸지 않고 레인의 디렉터리 안에 둔 도구로 돈다. �
 
 - `nvidia-smi` 로 GPU 와 드라이버를, PyTorch 로 CUDA 를 확인한다(PyTorch 가 GPU 를 찾지 못하면 실패다).
 - 설치의 확인 프레임을 CUDA 로 만든다(`sprite-gen rife install --backend torch`, `SPRITE_GEN_RIFE_DEVICE=cuda`).
-- `real_rife` 나 `torch_rife` 가 붙은 시험 전부를 모은다(`pytest --collect-only`). 표시된 시험이 없으면 실패다.
+- `real_rife`, `torch_rife`, `rife_pinned` 가 붙은 시험 전부를 모은다(`pytest --collect-only`). 표시된 시험이 없으면 실패다.
   모은 것과 지금까지가 `prepared.json` 과 `logs/` 에 남는다.
 
 시험은 토막으로 돈다. `test --chunk K/N` 은 모은 시험 가운데 몫 K 를(`pytest --shard K/N`, 리눅스 레인이 쓰는 그
@@ -137,7 +141,7 @@ PATH 를 바꾸지 않고 레인의 디렉터리 안에 둔 도구로 돈다. �
 임시 디렉터리, pip 캐시, CUDA 캐시도 그 디렉터리 안을 가리키므로 실행은 디렉터리 밖에 아무것도 쓰지 않고,
 디렉터리를 통째로 지우면 실행이 쓴 것이 모두 지워진다.
 
-`run.json` 은 커밋, GPU 와 드라이버, `pip freeze`, 어느 시험을 돌았는지(`gates`, `real_rife or torch_rife`)와
+`run.json` 은 커밋, GPU 와 드라이버, `pip freeze`, 어느 시험을 돌았는지(`gates`, `real_rife or torch_rife or rife_pinned`)와
 토막마다의 시간을 적는다. GPU 레인이 통과했다는 것은 그 커밋에서 `verdict` 가 `run.json` 을 썼다는 뜻이고, 그
 `run.json` 을 `scripts/release_publish.py --gpu-lane` 에 준다(아래 "Gates 칸"). 두 레인이 같은 Python 을 까는지와, GPU 레인의
 PyTorch 가 `pyproject.toml` 이 적은 하한인지도 `tests/release/test_cuda_lane.py` 가 본다.
@@ -150,7 +154,7 @@ PyTorch 가 `pyproject.toml` 이 적은 하한인지도 `tests/release/test_cuda
 RIFE 의 시험이 자기 파일 밖에서 읽는 것(`tests/conftest.py`, `tests/picture_digest.py`,
 `tests/video/*_inputs.py`, `tests/fixtures/rife-*`), 레인이 깔고 돌리는 것(`pyproject.toml`, `scripts/cuda_lane.py`,
 `scripts/release_gates.py`)이 이름 올라 있다. 시험 파일은 그 표시로 닿는다: 바뀐 시험 파일이 바뀌기 전이나 뒤에
-`real_rife`·`torch_rife` 표시를 가졌으면 닿은 것이다(표시를 떼는 변경도 닿는다).
+`real_rife`·`torch_rife`·`rife_pinned` 표시를 가졌으면 닿은 것이다(표시를 떼는 변경도 닿는다).
 
 ```bash
 .venv/bin/python scripts/release_gates.py --since <이전 릴리즈 태그, 또는 GPU 레인이 마지막으로 통과한 커밋> [--to <커밋>]
@@ -234,7 +238,7 @@ RIFE 의 시험이 자기 파일 밖에서 읽는 것(`tests/conftest.py`, `test
     ("NOT RUN (<까닭>)").
   - 닿는 파일이 바뀌었는데 통과한 `run.json` 도 까닭도 없다 — 스크립트가 멈추고 페이지를 내지 않는다.
 
-`run.json` 이 통과가 아니거나, RIFE 의 시험 일부만 돌았으면(`gates` 가 `real_rife or torch_rife` 가 아니면) 통과로
+`run.json` 이 통과가 아니거나, RIFE 의 시험 일부만 돌았으면(`gates` 가 `real_rife or torch_rife or rife_pinned` 가 아니면) 통과로
 읽지 않고 멈춘다. 조용히 건너뛴 문은 없다: 돌지 않은 문은 돌지 않았다고, 왜인지와 함께 페이지에 남는다. 이 판정은
 `tests/release/test_release_publish.py` 가 본다.
 

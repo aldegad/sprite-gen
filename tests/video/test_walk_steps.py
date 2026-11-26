@@ -496,6 +496,7 @@ def _unwitnessed(report: dict, interval: float) -> dict:
 @pytest.mark.parametrize("walker, view, interval, runs", [("behind", None, 17.5, {"rife-v4.25": (8, 10), "rife-v4.6": 12}),
                                                           ("behind", "back_diagonal", 17.5, {"rife-v4.25": (8, 10), "rife-v4.6": 12}),
                                                           ("outward", "front_diagonal", 16, 0)], ids=pin_id)
+@pytest.mark.rife_pinned
 def test_a_walk_whose_feet_meet_once_a_cycle_but_whose_body_does_not_bob_is_cut_two_intervals_with_a_warning(tmp_path, walker, view,
                                                                                                          interval, runs, rife_runs):
     """The two walkers whose feet meet once a cycle, their body held still: its top line does not rise and fall, and
@@ -532,6 +533,7 @@ def test_a_walk_whose_feet_meet_once_a_cycle_its_arms_swinging_past_its_sides_is
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # up to 12 calls of the binary at 300 x 220 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize("cycle, runs", [(16, 0), (18, 12)])
+@pytest.mark.rife_pinned
 def test_a_diagonal_walk_whose_near_foot_steps_out_is_cut_one_cycle_from_its_view(tmp_path, cycle, runs, rife_runs):
     """On a front diagonal the near foot steps out toward the camera and passes the far one apart: the feet meet on the
     screen once a cycle, and briefly — no pass hides. Given the view, the count asks the picture: the clip one interval
@@ -562,6 +564,7 @@ def test_a_diagonal_walk_whose_near_foot_steps_out_is_cut_one_cycle_from_its_vie
 @pytest.mark.timeout(900)  # up to 30 calls of the binary at 300 x 220 (the held fill's frames between, both cuts): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize("cycle, runs", [(20, {"rife-v4.25": (12, 24), "rife-v4.6": 12}), (24, {"rife-v4.25": (12, 30), "rife-v4.6": 12})],
                          ids=pin_id)
+@pytest.mark.rife_pinned
 def test_a_walk_whose_feet_stay_apart_and_meet_once_a_cycle_is_cut_one_cycle_on_the_order_its_feet_are_drawn_in(tmp_path, cycle, runs, rife_runs):
     """Seen from the front, the feet apart, the foot stepping toward the camera drawn lower: the feet meet on the screen
     once a cycle, and the body does not rise and fall. The clip shows its two sides of feet are its two legs — seen apart
@@ -737,6 +740,7 @@ def test_a_wide_walk_whose_far_leg_is_drawn_a_few_tones_off_is_cut_two_steps(tmp
                                                      ("arc", 0, 60, {"rife-v4.25": (14, 22), "rife-v4.6": 22}),
                                                      ("sway", 0, 60, {"rife-v4.25": 6, "rife-v4.6": 12}),
                                                      ("ramp", 0, 60, {"rife-v4.25": 8, "rife-v4.6": 16})], ids=pin_id)
+@pytest.mark.rife_pinned
 def test_a_walk_whose_crossings_are_its_steps_carried_up_and_down_is_cut_two_steps(tmp_path, motion, bob, room, runs, rife_runs):
     """The wide walker with its legs drawn alike, carried up and down the screen with the whole picture (`_carried`;
     its legs, their steps and their crossings every 23 frames as they were): bobbing, along a smooth arc 24 px deep;
@@ -788,6 +792,7 @@ def test_a_walk_carried_up_and_down_whole_feet_and_all_is_cut_two_intervals_with
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # up to 8 calls of the binary at 300 x 340 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize("bob, runs", [(0, {"rife-v4.25": 4, "rife-v4.6": 8}), (3, {"rife-v4.25": (4, 6), "rife-v4.6": 4})], ids=pin_id)
+@pytest.mark.rife_pinned
 def test_a_walk_on_a_picture_shaken_twice_an_interval_is_cut_two_steps_with_a_warning(tmp_path, bob, runs, rife_runs):
     """The wide walker with its legs drawn alike, its crossings its steps every 23 frames, held still (or rising and
     falling on its legs once a step), on a picture shaken 3 px up and down twice an interval — dy = round(3 sin(4 pi k /

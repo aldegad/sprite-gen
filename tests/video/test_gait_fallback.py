@@ -162,6 +162,7 @@ def test_a_clip_the_first_search_cuts_is_cut_without_the_fallback(tmp_path):
 
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 16 to 22 calls of the binary at 280 x 180 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.rife_pinned
 def test_a_cycle_longer_than_half_the_clip_is_found_by_the_fallback(tmp_path, rife_runs):
     frames = [walker(k, period=40) for k in range(73)]
     code, report, output = run(tmp_path, frames)
@@ -374,6 +375,7 @@ def wrap_and_inner(output):
 @pytest.mark.slow
 @pytest.mark.timeout(900)  # 14 to 16 calls of the binary at 280 x 180 for the 2 % walk (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
 @pytest.mark.parametrize('clip', ['walking away', 'shrinking 2 %'])
+@pytest.mark.rife_pinned
 def test_a_walk_cut_again_by_hand_is_held_at_its_size_and_its_feet(tmp_path, clip, rife_runs):
     """A cut the caller names (`--cycle fixed`, the recut path) of a walk that changes size: held over the whole clip
     before the cut is read, as a search's cut is, so the loop's last frame is the size of its first and stands on its
