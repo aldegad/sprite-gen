@@ -72,13 +72,16 @@ RIFE 의 torch 백엔드(`SPRITE_GEN_RIFE_BACKEND=torch`, docs/loop-repair.md 1�
 ## GPU 레인 — RIFE 의 시험을 NVIDIA 호스트에서
 
 `scripts/cuda_lane.py` 는 메인테이너의 NVIDIA GPU 호스트에서 RIFE 의 시험을 돈다: 바이너리는 그 호스트의 Vulkan
-으로, torch 판은 CUDA 로. 표준 라이브러리만 쓰고, 두 기계에서 두 단계로 돈다:
+으로, torch 판은 CUDA 로. 표준 라이브러리만 쓴다. `pack` 은 한 기계에서, 나머지는 호스트에서 돌고, 호스트에서의
+호출 하나하나는 원격 장비를 잡아 두는 10분 안에 끝난다:
 
 ```bash
 # safedeps 가 있는 기계에서, 잴 커밋을 체크아웃한 트리(커밋되지 않은 변경이 없는)로
 .venv/bin/python scripts/cuda_lane.py pack --requirements <목록> --out <빈 디렉터리> [--host-spec <생태계>:<이름>@<버전> ...]
 # 그 디렉터리를 호스트로 옮긴 뒤, 호스트에서 Python 3.14 로
-python -I <디렉터리>/cuda_lane.py run --pack <디렉터리> [--wheels <PyPI 에 없는 휠의 디렉터리>] [--rife-zip <zip>]
+python -I <디렉터리>/cuda_lane.py prepare --pack <디렉터리> [--wheels <PyPI 에 없는 휠의 디렉터리>] [--rife-zip <zip>]
+python -I <디렉터리>/cuda_lane.py test --pack <디렉터리> --chunk K/N [--budget <초>]   # K = 1..N 마다 한 번
+python -I <디렉터리>/cuda_lane.py verdict --pack <디렉터리> --chunks N
 ```
 
 GPU 레인은 손으로만 시작한다. 이 레포에는 워크플로가 없고, 이 레포와 aldegad/sprite-gen-lane 어디에도 자체
@@ -97,31 +100,39 @@ GPU 레인은 손으로만 시작한다. 이 레포에는 워크플로가 없고
 끝나지 못한 검사(`error`, `check_did_not_finish`), 돌지 못한 safedeps 는 그 자리에서 `pack` 을 멈추고, `pack` 은
 아무것도 쓰지 않는다 — 그러면 호스트가 깔 것이 없다. 모든 검사가 통과해야 HEAD 의 트리(`git archive`),
 `SOURCE_SHA`, 검사한 목록(`requirements.txt`), 검사마다의 답(`checks.json`), 그 커밋의 `cuda_lane.py` 를 쓴다.
-`run` 은 `checks.json` 에 목록의 줄마다 통과한 검사가 없거나 목록이 검사한 것과 다르면 아무것도 만들지 않고
+`prepare` 는 `checks.json` 에 목록의 줄마다 통과한 검사가 없거나 목록이 검사한 것과 다르면 아무것도 만들지 않고
 멈춘다. 두 멈춤은 `tests/release/test_cuda_lane.py` 가 본다.
 
-`run` 은 리눅스 레인이 깨끗한 클론에 까는 것처럼 Python 3.14 의 새 가상 환경을 짓는다. 목록의 휠을 해시를
+`prepare` 는 리눅스 레인이 깨끗한 클론에 까는 것처럼 Python 3.14 의 새 가상 환경을 짓는다. 목록의 휠을 해시를
 확인하며 받고, 받은 파일만으로 깔고, 트리를 `pip install -e "src[dev]"` 로(더 받는 것 없이) 깔고, `pip check` 를
 돌리고, RIFE 를 `sprite-gen rife install` 로(바이너리와 모델, 그 확인 프레임은 호스트의 Vulkan 에서 바이너리로)
 실행의 디렉터리에 둔다. 윈도우는 긴 경로를 켜지 않은 곳에서 260자 이상인 경로를 쓰지 못하고, PyTorch
-2.13.0+cu130 휠에는 173자인 이름이 있다. 그래서 `run` 은 휠이 쓰는 가장 긴 경로가 가상 환경 아래에 들어가지
+2.13.0+cu130 휠에는 173자인 이름이 있다. 그래서 `prepare` 는 휠이 쓰는 가장 긴 경로가 가상 환경 아래에 들어가지
 않으면 깔기 전에 멈추고 몇 자를 줄여야 하는지 말한다. 호스트의 설정은 바꾸지 않고 디렉터리의 경로를 짧게
 잡는다(예를 들어 `<드라이브>:\<짧은 이름>\<SHA 앞 7자>`). 그리고 호스트의 GPU 에서:
 
 - `nvidia-smi` 로 GPU 와 드라이버를, PyTorch 로 CUDA 를 확인한다(PyTorch 가 GPU 를 찾지 못하면 실패다).
 - 설치의 확인 프레임을 CUDA 로 만든다(`sprite-gen rife install --backend torch`, `SPRITE_GEN_RIFE_DEVICE=cuda`).
-- `real_rife` 나 `torch_rife` 가 붙은 시험 전부를 돈다: 바이너리는 실행이 깐 것(`SPRITE_GEN_RIFE`)으로, torch 판은
-  CUDA 로. 하나라도 건너뛰거나 표시된 시험이 없으면 실패다. 둘이 함께 붙은 시험은 두 백엔드를 나란히 둔다.
+- `real_rife` 나 `torch_rife` 가 붙은 시험 전부를 모은다(`pytest --collect-only`). 표시된 시험이 없으면 실패다.
+  모은 것과 지금까지가 `prepared.json` 과 `logs/` 에 남는다.
+
+시험은 토막으로 돈다. `test --chunk K/N` 은 모은 시험 가운데 몫 K 를(`pytest --shard K/N`, 리눅스 레인이 쓰는 그
+나눔) 돈다: 바이너리는 `prepare` 가 깐 것(`SPRITE_GEN_RIFE`)으로, torch 판은 CUDA 로, 둘이 함께 붙은 시험은 두
+백엔드를 나란히 두고. 하나라도 실패하거나 건너뛰면 그 토막은 실패다. 토막은 예산(기본 540초) 안에 끝나야 하고,
+넘으면 토막이 띄운 프로세스까지 모두 멈추고 실패로 남는다 — 그때는 N 을 키워 처음부터 다시 나눈다. 토막마다
+무엇을 어떻게 돌았는지(pytest 의 `--junitxml` 에서 읽은 시험마다의 결과와 시간)를 `chunk-K-of-N.json` 에 통과든
+실패든 남기고, 같은 토막은 한 번만 돈다. `verdict --chunks N` 은 그 나눔의 토막 1..N 이 모두 pack 의 커밋에서
+`prepare` 가 지은 환경으로 통과했고, 함께 모은 시험 전부를 한 번씩 돌았을 때만 `run.json` 을 쓴다. 이 검사들은
+`tests/release/test_cuda_lane.py` 가 본다.
 
 엔진은 이 실행이 깐 것만 찾는다: 밖에서 온 `SPRITE_GEN_*` 가 없고(실행이 정하는 바이너리, 모델, 장치뿐), 사용자
-데이터 디렉터리(윈도우는 `LOCALAPPDATA`, 그 밖은 `XDG_DATA_HOME`)가 비어 있고, PATH 에 rife-ncnn-vulkan 이 없다.
+데이터 디렉터리(윈도우는 `LOCALAPPDATA`, 그 밖은 `XDG_DATA_HOME`)가 비어 있고(토막마다 새로), PATH 에 rife-ncnn-vulkan 이 없다.
 임시 디렉터리, pip 캐시, CUDA 캐시도 그 디렉터리 안을 가리키므로 실행은 디렉터리 밖에 아무것도 쓰지 않고,
 디렉터리를 통째로 지우면 실행이 쓴 것이 모두 지워진다.
 
-실행은 커밋, GPU 와 드라이버, `pip freeze`, 단계마다의 출력을 찍고 `run.json` 과 `logs/` 에 남긴다. `run.json` 은
-어느 시험을 돌았는지(`gates`, `real_rife or torch_rife`)도 적는다. 모든 단계가 통과해야 exit 0 이다. GPU 레인이
-통과했다는 것은 그 커밋에서 돈 실행 하나가 exit 0 으로 끝났다는 뜻이고, 그 `run.json` 을
-`scripts/release_publish.py --gpu-lane` 에 준다(아래 "Gates 칸"). 두 레인이 같은 Python 을 까는지와, GPU 레인의
+`run.json` 은 커밋, GPU 와 드라이버, `pip freeze`, 어느 시험을 돌았는지(`gates`, `real_rife or torch_rife`)와
+토막마다의 시간을 적는다. GPU 레인이 통과했다는 것은 그 커밋에서 `verdict` 가 `run.json` 을 썼다는 뜻이고, 그
+`run.json` 을 `scripts/release_publish.py --gpu-lane` 에 준다(아래 "Gates 칸"). 두 레인이 같은 Python 을 까는지와, GPU 레인의
 PyTorch 가 `pyproject.toml` 이 적은 하한인지도 `tests/release/test_cuda_lane.py` 가 본다.
 
 ## 무엇이 바뀌면 GPU 레인이 도나 — 표 하나
@@ -165,7 +176,7 @@ PyTorch 가 `pyproject.toml` 이 적은 하한인지도 `tests/release/test_cuda
    ```
 
    `release_gates.py` 가 GPU 레인에 닿은 파일을 대면, 그 SHA 로 `pack` 한 `scripts/cuda_lane.py` 를 GPU 호스트에서
-   돌리고 `run.json` 을 받아 둔다(위 "GPU 레인"). 닿은 것이 없으면 돌지 않는다.
+   `prepare`, 토막마다 `test`, `verdict` 로 돌리고 `run.json` 을 받아 둔다(위 "GPU 레인"). 닿은 것이 없으면 돌지 않는다.
 3. **태그 push** — 코드네임 접두사 없는 `vX.Y.Z` 로, 머지 커밋에.
 
    ```bash

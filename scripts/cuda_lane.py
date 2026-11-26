@@ -4,10 +4,13 @@ and the torch backend on CUDA (torch_rife), which `scripts/linux_lane.sh` on GPU
 (docs/release.md). It runs where a change reaches them (`scripts/release_gates.py`), started by hand: nothing runs on
 push or pull request, and no runner of the repository's starts it. Standard library only.
 
-Two steps, on two machines:
+`pack` runs on one machine, the rest on the host, each call there under the ten minutes a call may hold a remote
+machine:
 
     .venv/bin/python scripts/cuda_lane.py pack --requirements <list> --out <empty dir> [--host-spec <eco>:<name>@<version> ...]
-    <python> -I <pack>/cuda_lane.py run --pack <pack> [--wheels <dir>] [--rife-zip <zip>]
+    <python> -I <pack>/cuda_lane.py prepare --pack <pack> [--wheels <dir>] [--rife-zip <zip>]
+    <python> -I <pack>/cuda_lane.py test --pack <pack> --chunk K/N [--budget <seconds>]    # for each K of 1..N
+    <python> -I <pack>/cuda_lane.py verdict --pack <pack> --chunks N
 
 `pack` runs where a checkout of the commit being measured is (no uncommitted changes) and where safedeps is. The list
 names every package the host will install, one `name==version --hash=sha256:<hex>` each: the closure of the tree's
@@ -19,28 +22,33 @@ from the list, such as its Python) is checked with `safedeps check`. An answer t
 writes HEAD's tree as `git archive` writes it (source.tar.gz), SOURCE_SHA, the list as checked (requirements.txt),
 what each check said (checks.json) and this file as HEAD holds it.
 
-`run` runs on the host, in that directory, with Python PINNED_PYTHON. It refuses a directory whose checks.json does not
-hold a passing check of every line of its requirements.txt. Then, as the Linux lane installs a clean clone: a new
+`prepare` runs on the host, in that directory, with Python PINNED_PYTHON. It refuses a directory whose checks.json does
+not hold a passing check of every line of its requirements.txt. Then, as the Linux lane installs a clean clone: a new
 virtual environment, every wheel of the list downloaded with its hash checked (from PyPI, or from --wheels for one PyPI
 does not hold, such as PyTorch's CUDA build for Windows, which comes from PyTorch's own index), installed from those
 files alone, the tree (`pip install -e src[dev]`, nothing more fetched), `pip check`, and RIFE (`sprite-gen rife
 install`, the binary and its models into a directory of its own, its check frame through the binary on this host's
 Vulkan). On Windows a path of WINDOWS_MAX_PATH characters or more cannot be written where long paths
-are not enabled, so `run` refuses before installing anything when the longest name a wheel writes would not fit under
-the virtual environment: the directory's path is then too long. Then:
+are not enabled, so `prepare` refuses before installing anything when the longest name a wheel writes would not fit
+under the virtual environment: the directory's path is then too long. Then the GPU and its driver (`nvidia-smi`),
+PyTorch's CUDA (fails where PyTorch finds no GPU), the install's check frame on CUDA (`sprite-gen rife install
+--backend torch` again, SPRITE_GEN_RIFE_DEVICE=cuda), and the tests to run: every test marked real_rife or torch_rife
+(GATE_TESTS), collected. It keeps all of it in prepared.json and logs/.
 
-  - the GPU and its driver (`nvidia-smi`), and PyTorch's CUDA (fails where PyTorch finds no GPU);
-  - the install's check frame on CUDA (`sprite-gen rife install --backend torch` again, SPRITE_GEN_RIFE_DEVICE=cuda);
-  - every test marked real_rife or torch_rife (GATE_TESTS), none skipped: the binary installed here
-    (SPRITE_GEN_RIFE) and the torch backend on CUDA, those marked both setting the two side by side.
+`test --chunk K/N` runs share K of N of those tests (`pytest --shard K/N`, tests/conftest.py), none skipped: the binary
+installed here (SPRITE_GEN_RIFE) and the torch backend on CUDA, those marked both setting the two side by side. A chunk
+that runs past its budget (CHUNK_BUDGET seconds unless given) is stopped with every process it started, and fails. Each
+chunk keeps what it ran, read from pytest's own report (--junitxml), and how in chunk-K-of-N.json, red or green, and
+runs once. `verdict --chunks N` passes where every chunk 1..N of that split passed at the pack's commit on the
+environment `prepare` made, and together they ran every test `prepare` collected, each once; it then writes run.json,
+and only then.
 
 The engine finds only what this run installed: no SPRITE_GEN_* from outside but the run's own (SPRITE_GEN_RIFE, the
-model, the device), an empty user data directory (LOCALAPPDATA on Windows, XDG_DATA_HOME elsewhere), no rife-ncnn-vulkan
-on PATH. TEMP, pip's cache and CUDA's cache point into the
-directory, so the run writes nowhere else and deleting the directory removes everything it wrote. The run prints the
-commit, the GPU, its driver, `pip freeze` and what each step said, keeps it in run.json and logs/, and exits 0 only
-where every step passed; run.json says which tests it ran (`gates`). A commit has passed the GPU lane where one run of
-it at that commit exited 0; `scripts/release_publish.py --gpu-lane <run.json>` writes it into the release page.
+model, the device), an empty user data directory (LOCALAPPDATA on Windows, XDG_DATA_HOME elsewhere; a new one each
+chunk), no rife-ncnn-vulkan on PATH. TEMP, pip's cache and CUDA's cache point into the directory, so the run writes
+nowhere else and deleting the directory removes everything it wrote. A commit has passed the GPU lane where `verdict`
+wrote run.json for it; run.json names the commit, the GPU, its driver, `pip freeze`, the tests it ran (`gates`) and
+each chunk, and `scripts/release_publish.py --gpu-lane <run.json>` writes it into the release page.
 """
 from __future__ import annotations
 
@@ -50,6 +58,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -59,6 +68,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import NoReturn
+from xml.etree import ElementTree
 
 PINNED_PYTHON = "3.14"
 # The PyTorch the torch backend was measured on, as the Linux lane installs it (there its CPU build).
@@ -72,6 +82,10 @@ PACK_FILES = ("source.tar.gz", "SOURCE_SHA", "requirements.txt", "checks.json", 
 PIN = re.compile(r"([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)==([0-9A-Za-z.+!_-]+)((?:\s+--hash=sha256:[0-9a-f]{64})+)")
 HOST_SPEC = re.compile(r"([a-z0-9]+):([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)@([0-9A-Za-z.+!_-]+)")
 GATE_TESTS = "real_rife or torch_rife"
+# Seconds one chunk's tests may take: with the interpreter's start, one call on the host stays under the ten minutes
+# a call may hold a remote machine.
+CHUNK_BUDGET = 540
+CHUNK = re.compile(r"([1-9][0-9]*)/([1-9][0-9]*)")
 
 
 def _fail(why: str) -> NoReturn:
@@ -244,45 +258,136 @@ def path_refusal(site_packages: str, wheels: list[Path]) -> str | None:
             f"by at least {cut} character" + ("s" if cut > 1 else ""))
 
 
-def run(where: Path, wheels: Path | None, rife_zip: Path | None) -> int:
-    """The steps of `run` above, in the pack at where: 0 where every step passed."""
+def parse_chunk(text: str) -> tuple[int, int]:
+    """`K/N`, 1 <= K <= N: share K of N."""
+    m = CHUNK.fullmatch(text)
+    if not m or int(m.group(1)) > int(m.group(2)):
+        _fail(f"--chunk {text} is not K/N, 1 <= K <= N")
+    return int(m.group(1)), int(m.group(2))
+
+
+def junit_key(nodeid: str) -> str:
+    """A test's pytest node id as pytest's --junitxml report names it: `<classname>::<name>`, the file's path dotted
+    without .py and any class joined to it with dots."""
+    path, bracket, params = nodeid.partition("[")
+    names = path.split("::")
+    names[0] = re.sub(r"\.py$", "", names[0].replace("/", "."))
+    return ".".join(names[:-1]) + "::" + names[-1] + bracket + params
+
+
+def junit_ran(xml: str | bytes) -> dict[str, list]:
+    """What pytest's --junitxml report says ran: junit_key -> [passed | failed | error | skipped, seconds]."""
+    root = ElementTree.fromstring(xml.encode("utf-8") if isinstance(xml, str) else xml)
+    ran: dict[str, list] = {}
+    for case in root.iter("testcase"):
+        outcome = next((said for tag, said in (("failure", "failed"), ("error", "error"), ("skipped", "skipped"))
+                        if case.find(tag) is not None), "passed")
+        ran[f"{case.get('classname')}::{case.get('name')}"] = [outcome, float(case.get("time") or 0)]
+    return ran
+
+
+def run_bounded(argv: list[str], budget: float, env: dict[str, str] | None,
+                cwd: Path | None) -> tuple[int | None, str, bool]:
+    """argv with its output (stderr into stdout): (exit, output, False), or (None, output so far, True) where it ran
+    past budget seconds and was stopped with every process it started."""
+    windows = os.name == "nt"
+    group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if windows else {"start_new_session": True}
+    proc = subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            encoding="utf-8", errors="replace", **group)
+    try:
+        said, _ = proc.communicate(timeout=budget)
+        return proc.returncode, said, False
+    except subprocess.TimeoutExpired:
+        if windows:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+        said, _ = proc.communicate()
+        return None, said, True
+
+
+def sha256_of(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _layout(where: Path) -> dict[str, Path]:
+    windows = os.name == "nt"
+    paths = {name: where / name for name in ("src", "venv", "dl", "rife", "tmp", "logs")}
+    paths["bin"] = paths["venv"] / ("Scripts" if windows else "bin")
+    paths["py"] = paths["bin"] / ("python.exe" if windows else "python")
+    paths["cli"] = paths["bin"] / ("sprite-gen.exe" if windows else "sprite-gen")
+    return paths
+
+
+DATA_KEY = "LOCALAPPDATA" if os.name == "nt" else "XDG_DATA_HOME"
+
+
+def _environment(where: Path) -> dict[str, str]:
+    """The run's environment: no SPRITE_GEN_* from outside, temporary files and caches inside where."""
+    tmp = where / "tmp"
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("SPRITE_GEN_")}
+    env.update(TEMP=str(tmp), TMP=str(tmp), TMPDIR=str(tmp), PIP_CACHE_DIR=str(where / "cache" / "pip"),
+               CUDA_CACHE_PATH=str(where / "cache" / "cuda"), PIP_DISABLE_PIP_VERSION_CHECK="1", PIP_NO_INPUT="1",
+               PIP_CONFIG_FILE=os.devnull, PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8")
+    return env
+
+
+def _with_rife(env: dict[str, str], where: Path, binary: str, model: str, data: str) -> dict[str, str]:
+    """The engine finds what `prepare` installed and nothing else: SPRITE_GEN_RIFE and the model named, an empty data
+    directory, no binary on PATH."""
+    return {**env, "PATH": os.pathsep.join([str(_layout(where)["bin"]), env.get("PATH", "")]),
+            "SPRITE_GEN_RIFE": binary, "SPRITE_GEN_RIFE_MODEL": model, "SPRITE_GEN_RIFE_DEVICE": "cuda",
+            DATA_KEY: data}
+
+
+def _prepared(where: Path, sha: str) -> dict:
+    """prepare's record in where, where it prepared the environment at sha; else the lane stops."""
+    path = where / "prepared.json"
+    rec = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    if not rec.get("prepared"):
+        _fail(f"{where} was not prepared: run `cuda_lane.py prepare` first" +
+              (f" (it stopped: {rec['why']})" if rec.get("why") else ""))
+    if rec.get("commit") != sha:
+        _fail(f"prepared.json is for {rec.get('commit')}, not {sha}")
+    return rec
+
+
+def prepare(where: Path, wheels: Path | None, rife_zip: Path | None) -> int:
+    """The steps of `prepare` above, in the pack at where: 0 where every step passed."""
     where = where.resolve()
     sha, _ = verify_pack(where)
     here = "%d.%d" % sys.version_info[:2]
     if here != PINNED_PYTHON:
         _fail(f"this is Python {here}; the lane pins {PINNED_PYTHON}")
     windows = os.name == "nt"
-    src, venv, dl, rife_dir, tmp, logs = (where / name for name in ("src", "venv", "dl", "rife", "tmp", "logs"))
+    lay = _layout(where)
+    src, venv, dl, rife_dir, tmp, logs = (lay[name] for name in ("src", "venv", "dl", "rife", "tmp", "logs"))
     made = [p.name for p in (src, venv, dl, rife_dir, tmp, logs) if p.exists()]
     if made:
-        _fail(f"{where} already holds {', '.join(made)}; run each pack once")
+        _fail(f"{where} already holds {', '.join(made)}; prepare each pack once")
     for d in (src, dl, rife_dir, tmp, logs):
         d.mkdir()
-    bindir = venv / ("Scripts" if windows else "bin")
-    py, cli = bindir / ("python.exe" if windows else "python"), bindir / ("sprite-gen.exe" if windows else "sprite-gen")
-    data_key = "LOCALAPPDATA" if windows else "XDG_DATA_HOME"
-    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("SPRITE_GEN_")}
-    env.update(TEMP=str(tmp), TMP=str(tmp), TMPDIR=str(tmp), PIP_CACHE_DIR=str(where / "cache" / "pip"),
-               CUDA_CACHE_PATH=str(where / "cache" / "cuda"), PIP_DISABLE_PIP_VERSION_CHECK="1", PIP_NO_INPUT="1",
-               PIP_CONFIG_FILE=os.devnull, PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8")
-    env[data_key] = tempfile.mkdtemp(prefix="data-install-", dir=tmp)
-    rec: dict = {"commit": sha, "python": sys.version, "gates": GATE_TESTS, "steps": [], "passed": False}
+    py, cli = lay["py"], lay["cli"]
+    env = _environment(where)
+    env[DATA_KEY] = tempfile.mkdtemp(prefix="data-install-", dir=tmp)
+    rec: dict = {"commit": sha, "python": sys.version, "gates": GATE_TESTS, "steps": [], "prepared": False}
 
     def done(why: str | None = None) -> int:
         if why:
             rec["why"] = why
-        (where / "run.json").write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
-        if rec["passed"]:
-            print(f"cuda_lane: the GPU lane ({GATE_TESTS}) passed at {sha}", flush=True)
+        (where / "prepared.json").write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
+        if rec["prepared"]:
+            print(f"cuda_lane: prepared at {sha}; {len(rec['collected'])} tests ({GATE_TESTS}) to run in chunks "
+                  "(`cuda_lane.py test --chunk K/N`)", flush=True)
             return 0
         print(f"cuda_lane: {why} at {sha}", file=sys.stderr, flush=True)
         return 1
 
     def step(name: str, argv: list[str], log: str, show: bool = True, cwd: Path | None = None,
-             extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+             run_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         print(f"== {name}", flush=True)
         t0 = time.monotonic()
-        proc = subprocess.run(argv, cwd=cwd, env={**env, **(extra or {})}, capture_output=True, text=True,
+        proc = subprocess.run(argv, cwd=cwd, env=run_env or env, capture_output=True, text=True,
                               encoding="utf-8", errors="replace")
         said = proc.stdout + proc.stderr
         (logs / log).write_text(said, encoding="utf-8")
@@ -332,16 +437,10 @@ def run(where: Path, wheels: Path | None, rife_zip: Path | None) -> int:
     installed = json.loads(model.stdout)
     rec["binary"] = installed["binary"]
     rec["model"] = str(Path(installed["dir"]) / installed["model"])
-
-    # The engine finds what this run installed and nothing else: SPRITE_GEN_RIFE and the model named, an empty data
-    # directory, no binary on PATH.
-    data = tempfile.mkdtemp(prefix="data-", dir=tmp)
-    env.update(PATH=os.pathsep.join([str(bindir), env.get("PATH", "")]), SPRITE_GEN_RIFE=rec["binary"],
-               SPRITE_GEN_RIFE_MODEL=rec["model"], SPRITE_GEN_RIFE_DEVICE="cuda")
-    env[data_key] = data
-    rec["env"] = {k: env[k] for k in (data_key, "SPRITE_GEN_RIFE", "SPRITE_GEN_RIFE_MODEL", "SPRITE_GEN_RIFE_DEVICE",
-                                      "TEMP", "PIP_CACHE_DIR", "CUDA_CACHE_PATH")}
-    on_path = shutil.which("rife-ncnn-vulkan", path=env["PATH"])
+    gate_env = _with_rife(env, where, rec["binary"], rec["model"], tempfile.mkdtemp(prefix="data-prepare-", dir=tmp))
+    rec["env"] = {k: gate_env[k] for k in (DATA_KEY, "SPRITE_GEN_RIFE", "SPRITE_GEN_RIFE_MODEL",
+                                           "SPRITE_GEN_RIFE_DEVICE", "TEMP", "PIP_CACHE_DIR", "CUDA_CACHE_PATH")}
+    on_path = shutil.which("rife-ncnn-vulkan", path=gate_env["PATH"])
     if on_path:
         return done(f"rife-ncnn-vulkan is on PATH ({on_path}); the lane measures the binary it installed")
     try:
@@ -354,28 +453,124 @@ def run(where: Path, wheels: Path | None, rife_zip: Path | None) -> int:
     print(freeze.stdout.rstrip(), flush=True)
     probe = step("PyTorch", [str(py), "-c", "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, "
                              "'cudnn', torch.backends.cudnn.version(), 'gpu', torch.cuda.get_device_name() if "
-                             "torch.cuda.is_available() else None)"], "probe.log", cwd=src)
+                             "torch.cuda.is_available() else None)"], "probe.log", cwd=src, run_env=gate_env)
     rec["probe"] = probe.stdout.strip()
     if probe.returncode != 0 or "gpu None" in probe.stdout:
         return done("PyTorch finds no CUDA GPU here")
     if step("RIFE torch backend (sprite-gen rife install --backend torch, its check frame on CUDA)",
             [str(cli), "rife", "install", "--backend", "torch", "--dir", str(rife_dir)], "check-frame.log",
-            cwd=src).returncode:
+            cwd=src, run_env=gate_env).returncode:
         return done("the install's check frame failed")
-    # --full: every test, those marked slow too (a plain pytest is the fast bundle). No test marked: pytest exits 5
-    # ("no tests ran"), and the lane with it.
-    marked = step(f"RIFE tests (every test marked {GATE_TESTS}, none skipped: the binary on this host's Vulkan, torch on CUDA)",
-                  [str(py), "-m", "pytest", "-q", "-rs", "-p", "no:cacheprovider", "--full", "--basetemp",
-                   tempfile.mkdtemp(prefix="pytest-", dir=tmp), "-m", GATE_TESTS], "pytest.log", cwd=src)
-    rec["pytest_summary"] = ([line for line in marked.stdout.splitlines() if line.strip()] or [""])[-1]
-    rec["skipped"] = [line for line in marked.stdout.splitlines() if line.startswith("SKIPPED")]
-    if marked.returncode != 0:
-        return done("a RIFE test failed")
-    if rec["skipped"]:
-        return done("a RIFE test skipped; this run is meant to measure them")
-    rec["data_dir_after"] = sorted(p.name for p in Path(data).iterdir())
-    rec["passed"] = True
+    # --full: every test, those marked slow too (a plain pytest is the fast bundle).
+    collected = step(f"collect the RIFE tests (every test marked {GATE_TESTS})",
+                     [str(py), "-m", "pytest", "-q", "--collect-only", "-p", "no:cacheprovider", "--full", "-m",
+                      GATE_TESTS], "collect.log", show=False, cwd=src, run_env=gate_env)
+    rec["collected"] = [line.strip() for line in collected.stdout.splitlines() if "::" in line]
+    if collected.returncode != 0 or not rec["collected"]:
+        return done(f"no test marked {GATE_TESTS} was collected")
+    rec["prepared"] = True
     return done()
+
+
+def run_chunk(where: Path, chunk: str, budget: float) -> int:
+    """Chunk K/N of the tests `prepare` collected, in the pack at where: 0 where every test of it passed."""
+    where = where.resolve()
+    k, n = parse_chunk(chunk)
+    sha, _ = verify_pack(where)
+    prepared = _prepared(where, sha)
+    out = where / f"chunk-{k}-of-{n}.json"
+    if out.exists():
+        _fail(f"{out.name} is there already; run each chunk once")
+    lay = _layout(where)
+    tmp, logs = lay["tmp"], lay["logs"]
+    env = _with_rife(_environment(where), where, prepared["binary"], prepared["model"],
+                     tempfile.mkdtemp(prefix=f"data-{k}-of-{n}-", dir=tmp))
+    junit = logs / f"chunk-{k}-of-{n}.xml"
+    rec: dict = {"commit": sha, "gates": GATE_TESTS, "chunk": f"{k}/{n}",
+                 "prepared_sha256": sha256_of(where / "prepared.json"), "budget": budget,
+                 "started": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                 "log": f"logs/chunk-{k}-of-{n}.log", "passed": False}
+    print(f"cuda_lane: commit {sha}, chunk {k}/{n} of the tests marked {GATE_TESTS}, budget {budget} s", flush=True)
+    t0 = time.monotonic()
+    code, said, over = run_bounded(
+        [str(lay["py"]), "-m", "pytest", "-q", "-rs", "-p", "no:cacheprovider", "--full", "--basetemp",
+         tempfile.mkdtemp(prefix=f"pytest-{k}-of-{n}-", dir=tmp), "-m", GATE_TESTS, "--shard", f"{k}/{n}",
+         "--junitxml", str(junit)], budget, env, lay["src"])
+    rec["seconds"] = round(time.monotonic() - t0, 1)
+    (logs / f"chunk-{k}-of-{n}.log").write_text(said, encoding="utf-8")
+    print(said.rstrip(), flush=True)
+    rec["exit"] = code
+    rec["ran"] = junit_ran(junit.read_bytes()) if junit.is_file() else {}
+    rec["skipped"] = ([line for line in said.splitlines() if line.startswith("SKIPPED")] or
+                      [key for key, (outcome, _) in rec["ran"].items() if outcome == "skipped"])
+    rec["pytest_summary"] = ([line for line in said.splitlines() if line.strip()] or [""])[-1]
+    failed = [key for key, (outcome, _) in rec["ran"].items() if outcome in ("failed", "error")]
+    if over:
+        rec["why"] = f"the chunk ran past its budget of {budget} s and was stopped"
+    elif code == 5 and not rec["ran"]:
+        rec["passed"] = True  # no test of the split fell in this share
+    elif code != 0 or failed:
+        rec["why"] = "a RIFE test failed" + (f": {', '.join(failed)}" if failed else f" (pytest exit {code})")
+    elif rec["skipped"]:
+        rec["why"] = "a RIFE test skipped; the lane is meant to measure them"
+    else:
+        rec["passed"] = True
+    out.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
+    if rec["passed"]:
+        print(f"cuda_lane: chunk {k}/{n} passed at {sha}, {len(rec['ran'])} tests in {rec['seconds']} s", flush=True)
+        return 0
+    print(f"cuda_lane: chunk {k}/{n}: {rec['why']} at {sha}", file=sys.stderr, flush=True)
+    return 1
+
+
+def verdict(where: Path, n: int) -> int:
+    """run.json where every chunk 1..n passed at the pack's commit on the environment `prepare` made and together they
+    ran every test it collected, each once; else the lane stops and writes no run.json."""
+    where = where.resolve()
+    sha = (where / "SOURCE_SHA").read_text(encoding="ascii").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        _fail(f"SOURCE_SHA is not a commit: {sha!r}")
+    prepared = _prepared(where, sha)
+    digest = sha256_of(where / "prepared.json")
+    collected = {junit_key(nodeid): nodeid for nodeid in prepared.get("collected", [])}
+    if not collected:
+        _fail("prepared.json collected no test")
+    seen: dict[str, str] = {}
+    chunks = []
+    for k in range(1, n + 1):
+        path = where / f"chunk-{k}-of-{n}.json"
+        if not path.is_file():
+            _fail(f"no chunk {k}/{n} ({path.name}): run `cuda_lane.py test --chunk {k}/{n}`")
+        rec = json.loads(path.read_text(encoding="utf-8"))
+        if rec.get("chunk") != f"{k}/{n}":
+            _fail(f"{path.name} holds chunk {rec.get('chunk')}")
+        if rec.get("commit") != sha:
+            _fail(f"chunk {k}/{n} is for {rec.get('commit')}, not {sha}")
+        if rec.get("prepared_sha256") != digest:
+            _fail(f"chunk {k}/{n} ran on another environment than this pack's prepare made")
+        if rec.get("skipped"):
+            _fail(f"chunk {k}/{n} skipped {'; '.join(rec['skipped'])}")
+        if not rec.get("passed"):
+            _fail(f"chunk {k}/{n} did not pass ({rec.get('why')})")
+        for key in rec.get("ran", {}):
+            if key in seen:
+                _fail(f"{collected.get(key, key)} ran in more than one chunk ({seen[key]} and {k}/{n})")
+            if key not in collected:
+                _fail(f"{key} ran but was not collected by prepare")
+            seen[key] = f"{k}/{n}"
+        chunks.append({"chunk": rec["chunk"], "tests": len(rec.get("ran", {})), "seconds": rec.get("seconds"),
+                       "started": rec.get("started"), "pytest_summary": rec.get("pytest_summary")})
+    missing = [nodeid for key, nodeid in collected.items() if key not in seen]
+    if missing:
+        _fail(f"no chunk ran {', '.join(missing)}")
+    run = {"commit": sha, "gates": GATE_TESTS, "passed": True, "tests": len(collected), "chunks": chunks,
+           "prepared_sha256": digest,
+           **{key: prepared[key] for key in ("python", "gpu", "probe", "pip_freeze", "binary", "model")
+              if key in prepared}}
+    (where / "run.json").write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
+    print(f"cuda_lane: the GPU lane ({GATE_TESTS}) passed at {sha}: {len(collected)} tests in {n} chunks, "
+          f"{round(sum(c['seconds'] or 0 for c in chunks))} s", flush=True)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -388,18 +583,30 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--host-spec", action="append", default=[], metavar="ECOSYSTEM:NAME@VERSION",
                    help="what the host installs for the lane apart from the list (its Python, say); checked the same way")
     p.add_argument("--safedeps", default="safedeps", help="the safedeps command (default: safedeps on PATH)")
-    r = sub.add_parser("run", help="on the NVIDIA host: build the pack's environment and run every RIFE test")
+    r = sub.add_parser("prepare", help="on the NVIDIA host: build the pack's environment and collect the RIFE tests")
     r.add_argument("--pack", type=Path, required=True, help="the directory `pack` wrote, copied to the host")
     r.add_argument("--wheels", type=Path, help="a directory of the list's wheels PyPI does not hold (PyTorch's CUDA "
                    "build for Windows, from PyTorch's index)")
     r.add_argument("--rife-zip", type=Path, help="the release zip `sprite-gen rife install` would download, already "
                    "downloaded (the engine checks its pinned SHA-256 either way)")
+    t = sub.add_parser("test", help="on the NVIDIA host: run chunk K of N of the RIFE tests")
+    t.add_argument("--pack", type=Path, required=True)
+    t.add_argument("--chunk", required=True, metavar="K/N", help="share K of N (pytest --shard K/N)")
+    t.add_argument("--budget", type=float, default=CHUNK_BUDGET,
+                   help=f"seconds the chunk's tests may take before they are stopped (default {CHUNK_BUDGET})")
+    v = sub.add_parser("verdict", help="run.json, where every chunk of one split passed and together ran every test")
+    v.add_argument("--pack", type=Path, required=True)
+    v.add_argument("--chunks", type=int, required=True, metavar="N", help="the split's N")
     a = ap.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if a.command == "pack":
         pack(Path(__file__).resolve().parents[1], a.requirements, a.out, a.host_spec, [a.safedeps])
         return 0
-    return run(a.pack, a.wheels, a.rife_zip)
+    if a.command == "prepare":
+        return prepare(a.pack, a.wheels, a.rife_zip)
+    if a.command == "test":
+        return run_chunk(a.pack, a.chunk, a.budget)
+    return verdict(a.pack, a.chunks)
 
 
 if __name__ == "__main__":
