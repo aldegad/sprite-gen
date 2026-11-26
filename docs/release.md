@@ -80,7 +80,7 @@ RIFE 의 torch 백엔드(`SPRITE_GEN_RIFE_BACKEND=torch`, docs/loop-repair.md 1�
 .venv/bin/python scripts/cuda_lane.py pack --requirements <목록> --out <빈 디렉터리> [--host-spec <생태계>:<이름>@<버전> ...]
 # 그 디렉터리를 호스트로 옮긴 뒤, 호스트에서 Python 3.14 로
 python -I <디렉터리>/cuda_lane.py prepare --pack <디렉터리> [--wheels <PyPI 에 없는 휠의 디렉터리>] [--rife-zip <zip>]
-python -I <디렉터리>/cuda_lane.py test --pack <디렉터리> --chunk K/N [--budget <초>]   # K = 1..N 마다 한 번
+python -I <디렉터리>/cuda_lane.py test --pack <디렉터리> --chunk K/N [--budget <초>] [--leave <시험> ...]   # K = 1..N 마다 한 번
 python -I <디렉터리>/cuda_lane.py verdict --pack <디렉터리> --chunks N
 ```
 
@@ -121,8 +121,11 @@ GPU 레인은 손으로만 시작한다. 이 레포에는 워크플로가 없고
 백엔드를 나란히 두고. 하나라도 실패하거나 건너뛰면 그 토막은 실패다. 토막은 예산(기본 540초) 안에 끝나야 하고,
 넘으면 토막이 띄운 프로세스까지 모두 멈추고 실패로 남는다 — 그때는 N 을 키워 처음부터 다시 나눈다. 토막마다
 무엇을 어떻게 돌았는지(pytest 의 `--junitxml` 에서 읽은 시험마다의 결과와 시간)를 `chunk-K-of-N.json` 에 통과든
-실패든 남기고, 같은 토막은 한 번만 돈다. `verdict --chunks N` 은 그 나눔의 토막 1..N 이 모두 pack 의 커밋에서
-`prepare` 가 지은 환경으로 통과했고, 함께 모은 시험 전부를 한 번씩 돌았을 때만 `run.json` 을 쓴다. 이 검사들은
+실패든 남기고, 같은 토막은 한 번만 돈다. 시험 하나가 토막 예산 안에 들 수 없으면 그 시험을 이름으로
+남긴다(`--leave`, 나눔의 모든 토막에 같은 것을): pytest 가 그것을 빼고, 토막의 기록이 그 이름을 적는다.
+`verdict --chunks N` 은 그 나눔의 토막 1..N 이 모두 pack 의 커밋에서 `prepare` 가 지은 환경으로 통과했고, 같은
+시험을 남겼고, 남긴 것 밖의 모은 시험 전부를 한 번씩 돌았을 때만 `run.json` 을 쓰고, 남긴 시험을 거기 적는다.
+시험을 남긴 실행으로 내는 릴리즈는 그 까닭을 `--gpu-unmeasured` 로 준다(아래 "Gates 칸"). 이 검사들은
 `tests/release/test_cuda_lane.py` 가 본다.
 
 엔진은 이 실행이 깐 것만 찾는다: 밖에서 온 `SPRITE_GEN_*` 가 없고(실행이 정하는 바이너리, 모델, 장치뿐), 사용자
@@ -218,7 +221,9 @@ RIFE 의 시험이 자기 파일 밖에서 읽는 것(`tests/conftest.py`, `test
 - 리눅스 레인: `--prebuilt` 로 붙인 패키지를 만든 실행이 잰 커밋과, 그 트리가 태그의 트리라는 것. `--prebuilt`
   없이 그 자리에서 빌드했으면 리눅스 레인의 패키지를 붙이지 않았다는 것.
 - GPU 레인: 넷 중 하나.
-  - `--gpu-lane <run.json>` 의 실행이 태그의 트리에서 통과했다 — 통과한 커밋과 GPU.
+  - `--gpu-lane <run.json>` 의 실행이 태그의 트리에서 통과했다 — 통과한 커밋과 GPU. 그 실행이 시험을 이름으로
+    남겼으면 몇 개 가운데 몇 개를 돌았는지와, 남긴 시험을 `--gpu-unmeasured` 의 까닭과 함께 NOT RUN 으로 적는다.
+    까닭이 없으면 스크립트가 멈춘다.
   - 돌지 않았고, 이전 릴리즈 뒤로(`--gpu-lane` 이 태그와 다른 트리의 통과면 그 통과 뒤로) GPU 레인에 닿는 파일이
     바뀌지 않았다 — "did not run" 과 무엇에서부터 쟀는지.
   - 닿는 파일이 바뀌었는데 돌지 않았다 — `--gpu-unmeasured` 로 준 까닭이 그대로, 닿은 파일과 함께 적힌다

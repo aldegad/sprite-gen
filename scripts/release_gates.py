@@ -130,6 +130,18 @@ def read_run(path: Path) -> dict:
     return rec
 
 
+def _left(gpu_run: dict, unmeasured: str | None) -> str:
+    """What a run that left tests by name (`cuda_lane.py test --leave`) adds to its line: how many of the tests it ran,
+    and the tests left, not run, for the reason given; a run that left tests with no reason given stops the record."""
+    left = gpu_run.get("left") or []
+    if not left:
+        return ""
+    if not unmeasured:
+        raise GateError(f"the GPU lane run at {gpu_run['commit']} left {len(left)} tests: {', '.join(left)}; say why "
+                        "they were not run (--gpu-unmeasured)")
+    return f", {gpu_run.get('ran')} of {gpu_run.get('tests')} tests; NOT RUN ({unmeasured}): {', '.join(left)}"
+
+
 def record(root: Path, tag: str, *, gpu_run: dict | None = None, unmeasured: str | None = None,
            lane_commit: str | None = None) -> list[str]:
     """The gates block of the release page for `tag`, one line a gate. The GPU lane line is one of: it passed at the
@@ -147,7 +159,7 @@ def record(root: Path, tag: str, *, gpu_run: dict | None = None, unmeasured: str
         lines.append("- Linux lane: no package from it attached (built where this page was published)")
     if gpu_run is not None and tree(root, gpu_run["commit"]) == tag_tree:
         lines.append(f"- {GATE} ({WHAT}): passed at {gpu_run['commit']}, the tree of {tag}" +
-                     (f", on {gpu_run['gpu']}" if gpu_run.get("gpu") else ""))
+                     (f", on {gpu_run['gpu']}" if gpu_run.get("gpu") else "") + _left(gpu_run, unmeasured))
         return lines
     base = gpu_run["commit"] if gpu_run is not None else previous_release(root, tag)
     if base is None:
@@ -157,7 +169,8 @@ def record(root: Path, tag: str, *, gpu_run: dict | None = None, unmeasured: str
     if not files:
         since = (f"it last passed at {base}" + (f", on {gpu_run['gpu']}" if gpu_run.get("gpu") else "")
                  if gpu_run is not None else f"{base}, the release before")
-        lines.append(f"- {GATE} ({WHAT}): did not run — no file it reaches changed since {since} (scripts/release_gates.py)")
+        lines.append(f"- {GATE} ({WHAT}): did not run — no file it reaches changed since {since} (scripts/release_gates.py)" +
+                     (_left(gpu_run, unmeasured) if gpu_run is not None else ""))
         return lines
     if not unmeasured:
         raise GateError(f"files the {GATE} reaches changed since {base or 'the start'}: {', '.join(files)}; run it at "

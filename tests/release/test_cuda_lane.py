@@ -419,3 +419,41 @@ def test_the_verdict_refuses_chunks_that_do_not_make_one_whole_pass_and_writes_n
     assert stopped.value.code == 1
     assert why in capsys.readouterr().err
     assert not (where / "run.json").exists()
+
+
+def test_a_chunk_hands_pytest_each_test_it_leaves_and_refuses_one_prepare_did_not_collect(capsys):
+    argv = cuda_lane.chunk_args(3, 10, [COLLECTED[0], COLLECTED[2]], COLLECTED)
+    assert argv[argv.index("--shard") + 1] == "3/10" and argv[argv.index("-m") + 1] == cuda_lane.GATE_TESTS
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--deselect"] == [COLLECTED[0], COLLECTED[2]]
+    assert "--deselect" not in cuda_lane.chunk_args(3, 10, [], COLLECTED)
+    with pytest.raises(SystemExit):
+        cuda_lane.chunk_args(3, 10, ["tests/video/test_rife.py::test_none"], COLLECTED)
+    assert "--leave tests/video/test_rife.py::test_none is not a test prepare collected" in capsys.readouterr().err
+
+
+def test_the_verdict_names_the_tests_every_chunk_left_and_counts_the_rest(tmp_path):
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:2]})
+    for k in (1, 2):
+        _chunk(where, k, 2, left=[COLLECTED[2]])
+    assert cuda_lane.verdict(where, 2) == 0
+    rec = json.loads((where / "run.json").read_text(encoding="utf-8"))
+    assert (rec["passed"], rec["left"], rec["ran"], rec["tests"]) == (True, [COLLECTED[2]], 2, 3)
+
+
+LEFT_SPOILED = {
+    "chunks that left other tests": (lambda w: (_chunk(w, 1, 2, left=[COLLECTED[2]]), _chunk(w, 2, 2, left=[])),
+                                     "chunk 2/2 left other tests than chunk 1/2"),
+    "a test left and run": (lambda w: [_chunk(w, k, 2, left=[COLLECTED[1]]) for k in (1, 2)],
+                            f"{COLLECTED[1]} was left and ran"),
+}
+
+
+@pytest.mark.parametrize("spoiled", LEFT_SPOILED.values(), ids=LEFT_SPOILED.keys())
+def test_the_verdict_refuses_tests_left_unlike_or_run_too(tmp_path, capsys, spoiled):
+    spoil, why = spoiled
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:]})
+    spoil(where)
+    with pytest.raises(SystemExit):
+        cuda_lane.verdict(where, 2)
+    assert why in capsys.readouterr().err
+    assert not (where / "run.json").exists()

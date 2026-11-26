@@ -172,7 +172,8 @@ def main(argv: list[str] | None = None) -> int:
                              "or the last one, from which the change is measured")
     parser.add_argument("--gpu-unmeasured", default=None, metavar="WHY",
                         help="publish though files the GPU lane reaches changed and it did not pass at the tag's "
-                             "tree; the page says it was not run, and why")
+                             "tree, or though the run given left tests by name; the page says what was not run, "
+                             "and why")
     parser.add_argument("--gh", default="gh", help="the gh executable to call")
     args = parser.parse_args(argv)
     if args.prebuilt is not None and (args.skip_build or args.dist_dir is not None):

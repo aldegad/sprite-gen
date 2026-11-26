@@ -9,7 +9,7 @@ machine:
 
     .venv/bin/python scripts/cuda_lane.py pack --requirements <list> --out <empty dir> [--host-spec <eco>:<name>@<version> ...]
     <python> -I <pack>/cuda_lane.py prepare --pack <pack> [--wheels <dir>] [--rife-zip <zip>]
-    <python> -I <pack>/cuda_lane.py test --pack <pack> --chunk K/N [--budget <seconds>]    # for each K of 1..N
+    <python> -I <pack>/cuda_lane.py test --pack <pack> --chunk K/N [--budget <seconds>] [--leave <test> ...]  # each K
     <python> -I <pack>/cuda_lane.py verdict --pack <pack> --chunks N
 
 `pack` runs where a checkout of the commit being measured is (no uncommitted changes) and where safedeps is. The list
@@ -39,9 +39,11 @@ PyTorch's CUDA (fails where PyTorch finds no GPU), the install's check frame on 
 installed here (SPRITE_GEN_RIFE) and the torch backend on CUDA, those marked both setting the two side by side. A chunk
 that runs past its budget (CHUNK_BUDGET seconds unless given) is stopped with every process it started, and fails. Each
 chunk keeps what it ran, read from pytest's own report (--junitxml), and how in chunk-K-of-N.json, red or green, and
-runs once. `verdict --chunks N` passes where every chunk 1..N of that split passed at the pack's commit on the
-environment `prepare` made, and together they ran every test `prepare` collected, each once; it then writes run.json,
-and only then.
+runs once. A test that cannot run within a chunk's budget is left by name (--leave, the same tests for every chunk of
+the split): pytest deselects it and the chunk's record names it. `verdict --chunks N` passes where every chunk 1..N of
+that split passed at the pack's commit on the environment `prepare` made, they left the same tests, and together they
+ran every other test `prepare` collected, each once; it then writes run.json, and only then, naming the tests left. A
+release whose GPU lane run left tests says why on its page (`release_publish.py --gpu-unmeasured`).
 
 The engine finds only what this run installed: no SPRITE_GEN_* from outside but the run's own (SPRITE_GEN_RIFE, the
 model, the device), an empty user data directory (LOCALAPPDATA on Windows, XDG_DATA_HOME elsewhere; a new one each
@@ -472,12 +474,23 @@ def prepare(where: Path, wheels: Path | None, rife_zip: Path | None) -> int:
     return done()
 
 
-def run_chunk(where: Path, chunk: str, budget: float) -> int:
+def chunk_args(k: int, n: int, leave: list[str], collected: list[str]) -> list[str]:
+    """pytest's arguments for share k of n of the tests marked GATE_TESTS, those left deselected by name; a test left
+    that `prepare` did not collect stops the lane."""
+    for nodeid in leave:
+        if nodeid not in collected:
+            _fail(f"--leave {nodeid} is not a test prepare collected")
+    return ["-m", GATE_TESTS, "--shard", f"{k}/{n}", *[arg for nodeid in leave for arg in ("--deselect", nodeid)]]
+
+
+def run_chunk(where: Path, chunk: str, budget: float, leave: list[str] | None = None) -> int:
     """Chunk K/N of the tests `prepare` collected, in the pack at where: 0 where every test of it passed."""
     where = where.resolve()
     k, n = parse_chunk(chunk)
     sha, _ = verify_pack(where)
     prepared = _prepared(where, sha)
+    leave = list(leave or [])
+    args = chunk_args(k, n, leave, prepared.get("collected", []))
     out = where / f"chunk-{k}-of-{n}.json"
     if out.exists():
         _fail(f"{out.name} is there already; run each chunk once")
@@ -490,13 +503,13 @@ def run_chunk(where: Path, chunk: str, budget: float) -> int:
     rec: dict = {"commit": sha, "gates": GATE_TESTS, "chunk": f"{k}/{n}",
                  "prepared_sha256": sha256_of(where / "prepared.json"), "budget": budget,
                  "started": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                 "log": f"logs/chunk-{k}-of-{n}.log", "passed": False}
+                 "log": f"logs/chunk-{k}-of-{n}.log", "left": leave, "passed": False}
     print(f"cuda_lane: commit {sha}, chunk {k}/{n} of the tests marked {GATE_TESTS}, budget {budget} s", flush=True)
     t0 = time.monotonic()
     code, said, over = run_bounded(
         [str(lay["py"]), "-m", "pytest", "-v", "-rs", "-p", "no:cacheprovider", "--full", "--basetemp",
-         tempfile.mkdtemp(prefix=f"pytest-{k}-of-{n}-", dir=tmp), "-m", GATE_TESTS, "--shard", f"{k}/{n}",
-         "--junitxml", str(junit)], budget, env, lay["src"])
+         tempfile.mkdtemp(prefix=f"pytest-{k}-of-{n}-", dir=tmp), *args, "--junitxml", str(junit)], budget, env,
+        lay["src"])
     rec["seconds"] = round(time.monotonic() - t0, 1)
     (logs / f"chunk-{k}-of-{n}.log").write_text(said, encoding="utf-8")
     print(said.rstrip(), flush=True)
@@ -542,6 +555,7 @@ def verdict(where: Path, n: int) -> int:
         _fail("prepared.json collected no test")
     seen: dict[str, str] = {}
     chunks = []
+    left: list[str] | None = None
     for k in range(1, n + 1):
         path = where / f"chunk-{k}-of-{n}.json"
         if not path.is_file():
@@ -557,6 +571,10 @@ def verdict(where: Path, n: int) -> int:
             _fail(f"chunk {k}/{n} skipped {'; '.join(rec['skipped'])}")
         if not rec.get("passed"):
             _fail(f"chunk {k}/{n} did not pass ({rec.get('why')})")
+        if left is None:
+            left = sorted(rec.get("left", []))
+        elif sorted(rec.get("left", [])) != left:
+            _fail(f"chunk {k}/{n} left other tests than chunk 1/{n}")
         for key in rec.get("ran", {}):
             if key in seen:
                 _fail(f"{collected.get(key, key)} ran in more than one chunk ({seen[key]} and {k}/{n})")
@@ -565,16 +583,24 @@ def verdict(where: Path, n: int) -> int:
             seen[key] = f"{k}/{n}"
         chunks.append({"chunk": rec["chunk"], "tests": len(rec.get("ran", {})), "seconds": rec.get("seconds"),
                        "started": rec.get("started"), "pytest_summary": rec.get("pytest_summary")})
-    missing = [nodeid for key, nodeid in collected.items() if key not in seen]
+    left_keys = {junit_key(nodeid): nodeid for nodeid in left or []}
+    for key, nodeid in left_keys.items():
+        if key not in collected:
+            _fail(f"{nodeid} was left but prepare did not collect it")
+        if key in seen:
+            _fail(f"{nodeid} was left and ran")
+    missing = [nodeid for key, nodeid in collected.items() if key not in seen and key not in left_keys]
     if missing:
         _fail(f"no chunk ran {', '.join(missing)}")
-    run = {"commit": sha, "gates": GATE_TESTS, "passed": True, "tests": len(collected), "chunks": chunks,
+    run = {"commit": sha, "gates": GATE_TESTS, "passed": True, "tests": len(collected), "ran": len(seen),
+           "left": left or [], "chunks": chunks,
            "prepared_sha256": digest,
            **{key: prepared[key] for key in ("python", "gpu", "probe", "pip_freeze", "binary", "model")
               if key in prepared}}
     (where / "run.json").write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
-    print(f"cuda_lane: the GPU lane ({GATE_TESTS}) passed at {sha}: {len(collected)} tests in {n} chunks, "
-          f"{round(sum(c['seconds'] or 0 for c in chunks))} s", flush=True)
+    print(f"cuda_lane: the GPU lane ({GATE_TESTS}) passed at {sha}: {len(seen)} of {len(collected)} tests in {n} "
+          f"chunks, {round(sum(c['seconds'] or 0 for c in chunks))} s" +
+          (f"; left, not run: {', '.join(left)}" if left else ""), flush=True)
     return 0
 
 
@@ -599,6 +625,8 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--chunk", required=True, metavar="K/N", help="share K of N (pytest --shard K/N)")
     t.add_argument("--budget", type=float, default=CHUNK_BUDGET,
                    help=f"seconds the chunk's tests may take before they are stopped (default {CHUNK_BUDGET})")
+    t.add_argument("--leave", action="append", default=[], metavar="NODEID",
+                   help="a test that cannot run within a chunk's budget, deselected by name; give the same to every chunk")
     v = sub.add_parser("verdict", help="run.json, where every chunk of one split passed and together ran every test")
     v.add_argument("--pack", type=Path, required=True)
     v.add_argument("--chunks", type=int, required=True, metavar="N", help="the split's N")
@@ -610,7 +638,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.command == "prepare":
         return prepare(a.pack, a.wheels, a.rife_zip)
     if a.command == "test":
-        return run_chunk(a.pack, a.chunk, a.budget)
+        return run_chunk(a.pack, a.chunk, a.budget, a.leave)
     return verdict(a.pack, a.chunks)
 
 
