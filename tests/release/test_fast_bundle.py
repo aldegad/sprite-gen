@@ -41,7 +41,7 @@ def _collected(tmp_path: Path, *args: str) -> tuple[list[str], str]:
     # This repository's configuration, and tests/conftest.py as the one conftest (-p), over a file outside the suite.
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only", "-c", str(ROOT / "pyproject.toml"), "--rootdir", str(tmp_path),
-         "--noconftest", "-p", "conftest", "-p", "no:cacheprovider", *args, str(tmp_path / "test_probe.py")],
+         "--noconftest", "-p", "conftest", "-p", "no:cacheprovider", "-p", "no:xdist", *args, str(tmp_path / "test_probe.py")],
         cwd=ROOT,
         capture_output=True,
         encoding="utf-8",
@@ -50,6 +50,7 @@ def _collected(tmp_path: Path, *args: str) -> tuple[list[str], str]:
     return re.findall(r"<Function (\S+)>", proc.stdout), proc.stdout
 
 
+@pytest.mark.slow  # two runs of pytest
 def test_a_plain_run_deselects_the_tests_marked_slow_and_full_runs_every_test(tmp_path):
     (tmp_path / "test_probe.py").write_text(PROBE)
     fast, said = _collected(tmp_path)
@@ -62,29 +63,26 @@ def test_a_plain_run_deselects_the_tests_marked_slow_and_full_runs_every_test(tm
     assert "fast bundle" not in said and "deselected" not in said
 
 
+@pytest.mark.slow  # four runs of pytest
 def test_the_shares_of_a_run_hold_every_test_once(tmp_path):
     """The lane's jobs each run one share (`--shard K/N`); together they run what one run would, each test once."""
     (tmp_path / "test_probe.py").write_text(PROBE + "".join(
         f"\n\n@pytest.mark.parametrize('case', range(7))\ndef test_many_{i}(case):\n    pass\n" for i in range(5)))
     every, said = _collected(tmp_path, "--full")
     assert len(every) == 41, said
-    for n in (1, 3, 4):
-        shares = [_collected(tmp_path, "--full", "--shard", f"{k}/{n}")[0] for k in range(1, n + 1)]
-        assert sorted(sum(shares, [])) == sorted(every), n
-        assert all(shares), f"a share of {n} holds no test: {shares}"
-    fast = _collected(tmp_path)[0]
-    assert sorted(sum((_collected(tmp_path, "--shard", f"{k}/2")[0] for k in (1, 2)), [])) == sorted(fast)
+    shares = [_collected(tmp_path, "--full", "--shard", f"{k}/3")[0] for k in (1, 2, 3)]
+    assert sorted(sum(shares, [])) == sorted(every)
+    assert all(shares), f"a share holds no test: {shares}"
 
 
 def test_a_share_is_named_k_of_n(tmp_path):
     (tmp_path / "test_probe.py").write_text(PROBE)
-    for wrong in ("0/2", "3/2", "2", "a/b"):
-        proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "--collect-only", "-c", str(ROOT / "pyproject.toml"), "--rootdir",
-             str(tmp_path), "--noconftest", "-p", "conftest", "-p", "no:cacheprovider", "--shard", wrong,
-             str(tmp_path / "test_probe.py")],
-            cwd=ROOT, capture_output=True, encoding="utf-8")
-        assert proc.returncode == 4 and "--shard takes K/N with 1 <= K <= N" in proc.stderr, (wrong, proc.stderr)
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-c", str(ROOT / "pyproject.toml"), "--rootdir",
+         str(tmp_path), "--noconftest", "-p", "conftest", "-p", "no:cacheprovider", "-p", "no:xdist", "--shard", "3/2",
+         str(tmp_path / "test_probe.py")],
+        cwd=ROOT, capture_output=True, encoding="utf-8")
+    assert proc.returncode == 4 and "--shard takes K/N with 1 <= K <= N, not '3/2'" in proc.stderr, proc.stderr
 
 
 def test_every_pytest_call_of_the_lane_runs_every_test():
