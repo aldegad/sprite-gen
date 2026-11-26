@@ -164,6 +164,7 @@ def test_a_cut_with_no_air_is_not_retimed_and_says_why():
     assert out is frames and plan is None and record["applied"] is False and record["why"] == "no air in the cut"
 
 
+@pytest.mark.slow
 def test_video_loop_carries_the_root_motion_of_a_jump_and_retimes_its_air(tmp_path):
     rep = _run(tmp_path, J.jump(), "plain", state="jump", cycle_mode="once")
     meta = _meta(rep)
@@ -192,6 +193,7 @@ def test_video_loop_carries_the_root_motion_of_a_jump_and_retimes_its_air(tmp_pa
     assert record["poses"] == meta["held_fill"]["poses"] and record["cells"] == meta["frames"]
 
 
+@pytest.mark.slow
 def test_an_air_whose_frames_between_show_a_frame_beside_them_again_names_those_cells(tmp_path, capsys):
     # An interpolator that gives back the frame before makes no air cell between two frames: each is refused (`held`),
     # tried again only later within half a cell, and is the nearer frame, named in the record and in a warning line.
@@ -239,6 +241,7 @@ def test_no_rife_leaves_the_air_as_filmed_and_says_which_motion(tmp_path, monkey
     assert meta["root_motion"]["air"][0]["seconds"] == pytest.approx(J.AIR, abs=1e-3)
 
 
+@pytest.mark.slow
 def test_a_retimed_cut_records_each_cell_as_the_frame_it_is_and_a_cell_made_or_moved_as_not_filmed(tmp_path):
     """The strip's record of its cells (`cell_record`, video-sway --read-on-cut) of the jump with its air half as long
     again, on the clip's own canvas: a cell held_fill.at_times takes as a frame (`source_frames`) is that frame, one made between
@@ -271,6 +274,7 @@ def test_a_retimed_cut_records_each_cell_as_the_frame_it_is_and_a_cell_made_or_m
                         strip_sha256=sha)
 
 
+@pytest.mark.slow
 def test_a_retimed_cut_whose_frames_between_show_a_frame_again_records_those_cells_as_the_nearer_frame(tmp_path):
     """The same air half as long again with an interpolator that gives back the frame before: no cell between two
     frames is made (each refused, `held`), each is the nearer frame (`air_retime.shown_again`), and the strip's record of

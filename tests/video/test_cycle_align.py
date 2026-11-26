@@ -14,6 +14,8 @@ import json
 import math
 import os
 import re
+import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -224,6 +226,24 @@ def _cut(tmp_path: Path, name: str, length: int, cycles: int = 1, report: bool =
     return out
 
 
+@pytest.fixture(scope="module")
+def walk_cut(tmp_path_factory) -> Callable[[Path, str, int], Path]:
+    """`_cut` with one cycle and no report, each length cut once a module: `walk_cut(tmp_path, name, length)` is
+    `_cut(tmp_path, name, length)`, the same frames cut with the same options (the loop's name is only its folder's),
+    its keyed folder and loop copied under `name` for this test alone, since an alignment rewrites its loops and a test
+    may change the cut it is given."""
+    made: dict[int, Path] = {}
+
+    def copied(tmp_path: Path, name: str, length: int) -> Path:
+        if length not in made:
+            made[length] = _cut(tmp_path_factory.mktemp(f"walk-{length}"), "cut", length)
+        shutil.copytree(made[length].with_name("cut-keyed"), tmp_path / f"{name}-keyed")
+        shutil.copytree(made[length], tmp_path / name)
+        return tmp_path / name
+
+    return copied
+
+
 @pytest.mark.slow
 def test_a_set_is_aligned_to_its_median_length_and_a_second_run_reads_the_source(tmp_path):
     dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24), ("N", 28))]
@@ -266,8 +286,8 @@ def test_each_loop_records_its_view_and_start_foot_and_a_view_per_loop_is_requir
     assert any("no view given" in w for w in unseen["warnings"])
 
 
-def test_loops_at_different_frame_rates_are_refused(tmp_path):
-    a, b = _cut(tmp_path, "A", 20), _cut(tmp_path, "B", 24)
+def test_loops_at_different_frame_rates_are_refused(tmp_path, walk_cut):
+    a, b = walk_cut(tmp_path, "A", 20), walk_cut(tmp_path, "B", 24)
     meta = json.loads((b / "walk.strip.json").read_text())
     meta["cycle_seconds"] = 24 / 30
     (b / "walk.strip.json").write_text(json.dumps(meta))
@@ -275,8 +295,8 @@ def test_loops_at_different_frame_rates_are_refused(tmp_path):
         align.align_set([a, b], interpolate=Recorder())
 
 
-def test_a_loop_cut_before_the_cell_cap_was_recorded_is_refused_by_name(tmp_path):
-    d = _cut(tmp_path, "A", 20)
+def test_a_loop_cut_before_the_cell_cap_was_recorded_is_refused_by_name(tmp_path, walk_cut):
+    d = walk_cut(tmp_path, "A", 20)
     meta = json.loads((d / "walk.strip.json").read_text())
     del meta["cell_height_cap"]
     (d / "walk.strip.json").write_text(json.dumps(meta))
@@ -289,10 +309,10 @@ def _files(d: Path) -> dict[str, bytes | None]:
     return {p.relative_to(d).as_posix(): p.read_bytes() if p.is_file() else None for p in sorted(d.rglob("*"))}
 
 
-def test_a_loop_whose_strip_as_cut_is_missing_is_refused_by_name_and_the_set_left_as_it_was(tmp_path):
+def test_a_loop_whose_strip_as_cut_is_missing_is_refused_by_name_and_the_set_left_as_it_was(tmp_path, walk_cut):
     """A first alignment reads the strip as cut (`cycle_align.origin`): a loop directory without it is refused, its strip
     named, before any loop of the set is touched — no traceback, no `cycle.source/` left behind in it or the loop before it."""
-    dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24))]
+    dirs = [walk_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24))]
     (dirs[1] / "walk.strip.png").unlink()
     before = [_files(d) for d in dirs]
     with pytest.raises(SystemExit, match=rf"^video-cycle-align: {re.escape(str(dirs[1].resolve()))}: no walk\.strip\.png — .*cycle_align\.origin"):
@@ -458,8 +478,8 @@ def _no_rife(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("SPRITE_GEN_DATA_DIR", str(tmp_path / "data"))
 
 
-def test_video_cycle_align_without_rife_fails_and_leaves_the_set_as_cut(tmp_path, monkeypatch):
-    dirs = [_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24), ("N", 28))]
+def test_video_cycle_align_without_rife_fails_and_leaves_the_set_as_cut(tmp_path, monkeypatch, walk_cut):
+    dirs = [walk_cut(tmp_path, n, L) for n, L in (("S", 20), ("E", 24), ("N", 28))]
     before = [(d / "walk.strip.png").read_bytes() for d in dirs]
     _no_rife(monkeypatch, tmp_path)
     with pytest.raises(SystemExit, match=r"video-cycle-align: .*rife-ncnn-vulkan not found.*sprite-gen rife install"):
@@ -528,14 +548,14 @@ def test_a_made_frame_that_lost_its_outline_is_replaced_by_the_nearer_source_fra
     assert len([w for w in kept["warnings"] if "lost its outline" in w and "--between auto" in w]) == kept["made_by_rife"]
 
 
-def test_video_set_without_rife_skips_the_alignment_with_a_warning(tmp_path, monkeypatch, capsys):
+def test_video_set_without_rife_skips_the_alignment_with_a_warning(tmp_path, monkeypatch, capsys, walk_cut):
     from sprite_gen.video import batch
 
     rows = []
     for direction, length in (("front", 20), ("side", 24)):
         item = tmp_path / f"{direction}-walk"
         item.mkdir()
-        _cut(item, "loop", length)
+        walk_cut(item, "loop", length)
         rows.append({"item": f"{direction}-walk", "direction": direction, "state": "walk", "dir": str(item), "ok": True,
                      "loop": {"n_out": length}})
     _no_rife(monkeypatch, tmp_path)

@@ -21,6 +21,7 @@ and smears the body where it is told the frame breaks. For the feet they stand s
 
 from __future__ import annotations
 
+import functools
 import json
 from pathlib import Path
 
@@ -80,6 +81,12 @@ class Walk:
     def _drawn(self, x: float, smear: bool = False) -> Image.Image:
         return _figure(self.width, 8 + x, 96 + x, smear=smear)
 
+    @functools.cached_property
+    def path(self) -> tuple[float, ...]:
+        """The leg path of the cut's frames (`cadence.leg_path`), read once a walk: every jolt a test reads of it
+        (`_jolt`) is of the same frames."""
+        return tuple(cadence.leg_path(self.frames))
+
     def __call__(self, a: Image.Image, b: Image.Image, t: float) -> Image.Image:
         i = next(k for k, f in enumerate(self.frames) if f is a)
         self.calls.append((i, round(t, 4)))
@@ -89,16 +96,17 @@ class Walk:
 
 def _jolt(walk: Walk, cells: list[dict], length: int) -> float:
     """The largest beat jolt of a loop whose frames come from `cells` (`cadence.Beat`, the definition)."""
-    beat = cadence.Beat(cadence.leg_path(walk.frames), length)
+    beat = cadence.Beat(walk.path, length)
     return max(abs(j) for j in beat.jolts([beat.place(c) for c in cells]))
 
 
+@pytest.mark.slow
 def test_a_frame_half_way_between_two_held_drawings_is_made_again_where_the_nearer_drawing_breaks_the_beat():
     """A cut of 54 frames on threes (18 drawings) aligned to 24: a frame every 2.25 source frames, and every fourth is
     half way between two drawings, where RIFE smears. The nearer source frame there is the next drawing, two thirds of a
     beat early: the legs skip into it and halt out of it. Made again at 0.4 of its pair it stands 0.13 of a beat early."""
     walk = Walk(54, 3, first=-1, breaks=lambda i, t: abs(t - 0.5) < 0.08 and walk.at[i] != walk.at[(i + 1) % 54])
-    steps = cadence.leg_path(walk.frames)
+    steps = walk.path
     assert {round(s, 3) for k, s in enumerate(steps) if walk.at[k] == walk.at[(k + 1) % 54]} == {0.0}
     assert len({round(s, 3) for k, s in enumerate(steps) if walk.at[k] != walk.at[(k + 1) % 54]}) == 1
     cells: list[dict] = []
@@ -139,6 +147,7 @@ class SeenThrough(Walk):
         return frame
 
 
+@pytest.mark.slow
 def test_a_fraction_made_again_is_taken_only_where_it_reads_clean_in_every_window():
     """As the first case, but the frames made at 0.4 carry a block the background shows through: no fault, yet over
     RETIME_WINDOW_MAX in its window. Made only to keep the beat, it is passed over for the next clean fraction, 0.6."""
@@ -161,6 +170,7 @@ def _stretched(clean: dict[tuple[int, int], set[float]]) -> Walk:
     return Walk(20, 1, width=208, breaks=lambda i, t: i in (0, 1) and t not in clean[(i, i + 1)])
 
 
+@pytest.mark.slow
 def test_two_frames_side_by_side_are_made_again_as_a_run_whose_gaps_keep_the_beat():
     """Frame 1 made again nearest its own fraction (0.75, an eighth of a beat late) and frame 2 nearest its own (0.2, a
     fifth of a beat early) each stand within BEAT_JOLT of their time, but the gap between them jolts by a third of a beat.
@@ -175,6 +185,7 @@ def test_two_frames_side_by_side_are_made_again_as_a_run_whose_gaps_keep_the_bea
     assert facts["beat"]["retimed"] == [1, 2] and facts["beat"]["named"] == []
 
 
+@pytest.mark.slow
 def test_a_run_no_choice_keeps_on_the_beat_stays_on_the_nearer_frame_and_is_named():
     """With 0.55 not clean either, every choice for the two frames jolts a gap past BEAT_JOLT: both keep the nearer
     source frame, the run named."""
@@ -187,6 +198,7 @@ def test_a_run_no_choice_keeps_on_the_beat_stays_on_the_nearer_frame_and_is_name
     assert {m["at"]: m["method"] for m in facts["smear"] if m["faults"]} == {1: "nearest", 2: "nearest"}
 
 
+@pytest.mark.slow
 def test_a_frame_no_fraction_keeps_spreads_its_jolt_over_the_frames_beside_it():
     """Frame 4 of the cut of 20 stretched to 30 stands at source time 2.67, two thirds of the pair 2 and 3, where RIFE
     smears from 0.4 on: no fraction within BEAT_JOLT of its time is clean, and the nearer source frame stands half a beat
@@ -209,6 +221,7 @@ def test_a_frame_no_fraction_keeps_spreads_its_jolt_over_the_frames_beside_it():
     assert {3, 6} <= set(facts["made_at"])  # source frames before, made now
 
 
+@pytest.mark.slow
 def test_frames_given_way_that_keep_the_beat_are_delivered_as_before():
     """A cut of 40 frames squeezed to 24: a frame given way stands a fifth of a beat off its time on the nearer source
     frame, under BEAT_JOLT. Nothing is made again, and the loop is the one the nearer frame makes."""

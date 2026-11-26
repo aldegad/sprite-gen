@@ -91,6 +91,7 @@ def test_search_boundary_and_short_cycle_are_errors():
         motion._register(reference, motion._features(shifted), (0, 0))
 
 
+@pytest.mark.slow
 def test_cli_writes_corrected_cycle_and_gates_rendered_cells(tmp_path, corrected):
     source, (expected, report) = corrected
     keyed = tmp_path / "keyed"

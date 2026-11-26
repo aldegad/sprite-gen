@@ -60,6 +60,7 @@ def test_resample_says_why_each_ghost_was_kept():
         (8, 4, 5, None)]
 
 
+@pytest.mark.slow
 def test_a_ghost_kept_at_a_whole_time_is_a_take_to_film_again(tmp_path, capsys):
     """A1: S 20 and E 20, nothing resampled. E's frames 9, 10, 11 are filmed ghosts in a row: 9 and 11
     give way, 10 has no clean frame beside it and is delivered. Before, `retake` stayed empty and only
@@ -152,6 +153,7 @@ def test_real_rife_a_ghost_kept_at_a_made_time_is_a_take_to_film_again(tmp_path)
     assert real.made == 3 + sum(len(r["tried"]) for r in again)
 
 
+@pytest.mark.slow
 def test_a_held_loop_that_keeps_a_ghost_carries_both_reasons_held_drawings_first(tmp_path):
     """A3: a cycle of 16 on twos stretched to 24 is a held-drawings retake; its frames 6 to 9 are filmed
     ghosts (two drawings' pairs), and the cells with no clean frame beside them keep them. One record."""
@@ -183,6 +185,7 @@ def test_a_held_loop_that_keeps_a_ghost_carries_both_reasons_held_drawings_first
     assert lines and all(w.endswith("being filmed ghosts too (--between auto)") for w in lines)
 
 
+@pytest.mark.slow
 def test_a_held_loop_with_no_ghost_carries_no_ghost_reason(tmp_path):
     report = align.align_set([th._cut(tmp_path, "NE", 16, 2), th._cut(tmp_path, "S", 24, 1)], interpolate=th._cross_fade, length=24)
     again = _row(report, "NE")["retake"]

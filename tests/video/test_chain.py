@@ -94,6 +94,7 @@ def holds_file(tmp_path: Path, *holds: tuple[int, int]) -> Path:
 
 # --- the three times, each no picture shown again ------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_a_join_that_shows_one_picture_twice_is_made_between_where_the_nearer_frame_shows_it_again(tmp_path, monkeypatch):
     """The second clip starts on the frame the first ends on (a clip made from the other's last frame)."""
     d = clip(tmp_path, "a")
@@ -109,6 +110,7 @@ def test_a_join_that_shows_one_picture_twice_is_made_between_where_the_nearer_fr
     assert gate(bare["keyed_dir"]) == 1
 
 
+@pytest.mark.slow
 def test_an_even_resample_makes_its_places_between_where_the_nearer_frame_shows_one_again(tmp_path, monkeypatch):
     d = clip(tmp_path, "a", fps=24.0)
     pieces = [f"one={d}:0:9", f"two={d}:10:20"]
@@ -180,6 +182,7 @@ def test_a_join_s_bridge_makes_its_frames_between_and_they_take_a_place_on_the_c
 
 # --- what is kept ----------------------------------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_a_hold_on_the_list_stays_and_the_same_hold_on_no_list_is_made_between(tmp_path):
     frames = walk(N + 6)
     frames[6] = frames[5]

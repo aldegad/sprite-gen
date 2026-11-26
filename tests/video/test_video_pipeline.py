@@ -275,6 +275,7 @@ def test_strip_cap_is_on_pixels_not_cells() -> None:
     assert strip.width == meta["w"] * meta["frames"]
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_gif_frame_count_follows_cycle_length_at_a_fixed_playback_rate(tmp_path: Path) -> None:
     """A 2.5 s jump used to get the same 12 frames as a 1.1 s walk and play at ~5 fps
@@ -292,6 +293,7 @@ def test_gif_frame_count_follows_cycle_length_at_a_fixed_playback_rate(tmp_path:
     assert rep["n_out"] <= rep["cycle"]["length"] and rep2["n_out"] <= rep2["cycle"]["length"]
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(not HAS_IMG2WEBP, reason="img2webp not installed")
 def test_default_gif_rate_keeps_every_cycle_frame(tmp_path: Path) -> None:
     """24 fps source, 24 fps GIF: a 61-frame jump cycle stays 61 frames at ~42 ms."""

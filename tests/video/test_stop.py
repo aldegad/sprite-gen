@@ -8,9 +8,12 @@ reaches the loop by a jump, holds another motion before it, or runs on longer th
 """
 from __future__ import annotations
 
+import functools
+import io
 import json
 import math
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pytest
@@ -27,12 +30,33 @@ REST = 6
 SET_OFF = 8
 
 
+class Pose(NamedTuple):
+    """`runner`'s arguments: one picture of the runner."""
+    run: float
+    phase: float
+    dx: float = 0.0
+    dy: float = 0.0
+    arm_up: float = 0.0
+    crouch: float = 0.0
+    ghost: bool = False
+
+
 def runner(*, run: float, phase: float, dx: float = 0.0, dy: float = 0.0, arm_up: float = 0.0, crouch: float = 0.0,
            ghost: bool = False) -> Image.Image:
     """A side-view runner on GROUND: head, torso, two legs of different colours and an arm. `run` takes it from standing
     (0: upright, legs together, arm down) to running (1: leaning in, hips low, legs and arm swinging at `phase`, the body
     bobbing with the stride); `arm_up` raises the arm and `crouch` lowers the body instead. `ghost` lays a part-covered
-    copy of the front leg a little behind it, the band a video model leaves between two drawings."""
+    copy of the front leg a little behind it, the band a video model leaves between two drawings. Each pose is drawn
+    once a module (`drawn`); every call has its own copy."""
+    return drawn(Pose(run, phase, dx, dy, arm_up, crouch, ghost)).copy()
+
+
+@functools.cache
+def drawn(pose: Pose) -> Image.Image:
+    """`runner`'s picture of `pose`, drawn once a module: the clips of the tests share their standing, setting-off and
+    running frames (the same arguments, the same picture), and `clip_at` draws the default clip's again. Kept here and
+    never handed out: `runner` copies it, `png` encodes it."""
+    run, phase, dx, dy, arm_up, crouch, ghost = pose
     big = Image.new("RGBA", (W * SS, H * SS))
     d = ImageDraw.Draw(big)
     amp = run
@@ -66,31 +90,39 @@ def runner(*, run: float, phase: float, dx: float = 0.0, dy: float = 0.0, arm_up
     return big.convert("RGBa").resize((W, H), Image.Resampling.BOX).convert("RGBA")
 
 
+@functools.cache
+def png(pose: Pose) -> bytes:
+    """The PNG file `clip` writes for `pose`, encoded once a module: bytes, which no test can change."""
+    buf = io.BytesIO()
+    drawn(pose).save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def clip(tmp_path: Path, *, cycles: int = 3, drift: tuple[float, float] = (0.0, 0.0), other: int = 0,
          instant: bool = False, ghost_at: int | None = None, set_off: int = SET_OFF) -> tuple[Path, int]:
     """Keyed frames of a clip: REST standing frames, `other` frames of another motion (arm raised and waved, legs
     crouched, no stride), a setting-off of `set_off` frames from standing (none when `instant`: the stride is there at
     once), then the run, `cycles` cycles of PERIOD frames. `drift` moves the body across the frame while it sets off.
-    Returns the folder and the first frame of the run."""
-    frames = [runner(run=0.0, phase=0.0) for _ in range(REST)]
+    Returns the folder and the first frame of the run. Each frame is the runner's pose, encoded once a module (`png`)."""
+    frames = [Pose(run=0.0, phase=0.0) for _ in range(REST)]
     ramp = 0 if instant else set_off
     for k in range(other):
-        frames.append(runner(run=0.0, phase=0.0, arm_up=0.5 + 0.5 * abs(math.sin(k * math.pi / 5)), crouch=0.4 + 0.3 * math.sin(k * 0.7)))
+        frames.append(Pose(run=0.0, phase=0.0, arm_up=0.5 + 0.5 * abs(math.sin(k * math.pi / 5)), crouch=0.4 + 0.3 * math.sin(k * 0.7)))
 
-    def setting_off(k: int, ghost: bool = False) -> Image.Image:
+    def setting_off(k: int, ghost: bool = False) -> Pose:
         t = (k + 1) / (ramp + 1)
-        return runner(run=t, phase=2 * math.pi * k / PERIOD, dx=drift[0] * t, dy=drift[1] * t, ghost=ghost)
+        return Pose(run=t, phase=2 * math.pi * k / PERIOD, dx=drift[0] * t, dy=drift[1] * t, ghost=ghost)
 
     frames += [setting_off(k) for k in range(ramp)]
     run_from = len(frames)
     for k in range(cycles * PERIOD):
-        frames.append(runner(run=1.0, phase=2 * math.pi * (ramp + k) / PERIOD, dx=drift[0], dy=drift[1]))
+        frames.append(Pose(run=1.0, phase=2 * math.pi * (ramp + k) / PERIOD, dx=drift[0], dy=drift[1]))
     if ghost_at is not None:
         frames[ghost_at] = setting_off(ghost_at - REST - other, ghost=True)
     keyed = tmp_path / "keyed"
     keyed.mkdir()
-    for i, im in enumerate(frames):
-        im.save(keyed / f"frame-{i + 1:04d}.png")
+    for i, pose in enumerate(frames):
+        (keyed / f"frame-{i + 1:04d}.png").write_bytes(png(pose))
     return keyed, run_from
 
 
@@ -120,9 +152,18 @@ def make(tmp_path: Path, keyed: Path, meta: Path, **kwargs) -> dict:
     return stop.make_stop(keyed, meta, tmp_path / "stop", **kwargs)
 
 
-def test_stop_plays_the_start_backwards_from_the_loop_to_the_first_frame(tmp_path):
-    keyed, run_from = clip(tmp_path)
-    meta = cut(tmp_path, keyed, run_from + PERIOD)
+@pytest.fixture(scope="module")
+def plain_cut(tmp_path_factory) -> tuple[Path, Path, int]:
+    """`clip()` and its loop cut a cycle on: (the keyed frames, the loop's sidecar, the first frame of the run). The tests
+    that stop it cut the same frames with the same options, so it is cut once a module; they only read it, each stop
+    written in the test's own folder (`make`)."""
+    root = tmp_path_factory.mktemp("plain")
+    keyed, run_from = clip(root)
+    return keyed, cut(root, keyed, run_from + PERIOD), run_from
+
+
+def test_stop_plays_the_start_backwards_from_the_loop_to_the_first_frame(tmp_path, plain_cut):
+    keyed, meta, run_from = plain_cut
     out = make(tmp_path, keyed, meta)
     assert out["status"] == "passed"
     shown = out["shown"]
@@ -269,9 +310,8 @@ def test_stop_leaves_an_aligned_loop_from_the_cell_nearest_the_entry(tmp_path):
     assert turned_out["shown"] == plain["shown"]
 
 
-def test_stop_speed_and_frame_cap(tmp_path):
-    keyed, run_from = clip(tmp_path)
-    meta = cut(tmp_path, keyed, run_from + PERIOD)
+def test_stop_speed_and_frame_cap(tmp_path, plain_cut):
+    keyed, meta, _ = plain_cut
     once = make(tmp_path, keyed, meta, name="once")
     twice = make(tmp_path, keyed, meta, name="twice", speed=2)
     played = once["shown"]
@@ -358,6 +398,17 @@ def stalled(tmp_path: Path) -> tuple[Path, int]:
     return keyed, run_from
 
 
+@pytest.fixture(scope="module")
+def stalled_cut(tmp_path_factory) -> tuple[Path, Path]:
+    """`stalled()` and its loop cut a cycle on: (the keyed frames, the loop's sidecar). The tests that stop it cut the same
+    frames with the same options, so it is cut once a module; they only read it, each stop written in the test's own
+    folder (`make`). The stall lies in the setting-off, before the loop: the cut shows no picture twice and asks RIFE
+    for nothing, wherever it is made."""
+    root = tmp_path_factory.mktemp("stalled")
+    keyed, run_from = stalled(root)
+    return keyed, cut(root, keyed, run_from + PERIOD)
+
+
 def pictures(out: Path, name: str = "stop") -> dict[str, str]:
     from tests.picture_digest import picture_digest
     return {k: picture_digest([out / f"{name}.{k}" if k != "strip" else out / f"{name}.strip.png"]) for k in ("strip", "gif", "webp")}
@@ -372,12 +423,11 @@ def no_rife(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("SPRITE_GEN_DATA_DIR", str(tmp_path / "data"))
 
 
-def test_a_stop_whose_clip_stalls_has_its_held_cell_made_between_the_poses_beside_it(tmp_path, capsys):
+def test_a_stop_whose_clip_stalls_has_its_held_cell_made_between_the_poses_beside_it(tmp_path, capsys, stalled_cut):
     from sprite_gen.video import held_fill
     from tests.video.held_fill_inputs import Between
 
-    keyed, run_from = stalled(tmp_path)
-    meta = cut(tmp_path, keyed, run_from + PERIOD)
+    keyed, meta = stalled_cut
     between = Between(clip_at, range(len(sorted(keyed.glob("*.png")))))
     out = make(tmp_path, keyed, meta, interpolate=between)
     shown = out["shown"]
@@ -404,20 +454,18 @@ def test_a_stop_whose_clip_stalls_has_its_held_cell_made_between_the_poses_besid
     assert pictures(tmp_path / "stop") != BEFORE["held"]
 
 
-def test_a_stop_with_no_held_cell_is_the_pictures_it_was_and_asks_for_no_frame(tmp_path):
+def test_a_stop_with_no_held_cell_is_the_pictures_it_was_and_asks_for_no_frame(tmp_path, plain_cut):
     def never(a, b, t):
         raise AssertionError("a stop with no held cell asks for no frame between")
 
-    keyed, run_from = clip(tmp_path)
-    meta = cut(tmp_path, keyed, run_from + PERIOD)
+    keyed, meta, _ = plain_cut
     out = make(tmp_path, keyed, meta, interpolate=never)
     assert out["held_fill"]["made"] == [] and out["held_fill"]["before"]["held_runs"] == []
     assert pictures(tmp_path / "stop") == BEFORE["plain"]
 
 
-def test_fill_held_off_plays_the_stalled_stop_as_before_and_names_the_run(tmp_path, capsys):
-    keyed, run_from = stalled(tmp_path)
-    meta = cut(tmp_path, keyed, run_from + PERIOD)
+def test_fill_held_off_plays_the_stalled_stop_as_before_and_names_the_run(tmp_path, capsys, stalled_cut):
+    keyed, meta = stalled_cut
     out = make(tmp_path, keyed, meta, fill_held="off", interpolate=lambda a, b, t: pytest.fail("off makes no frame"))
     assert pictures(tmp_path / "stop") == BEFORE["held"]
     held = out["held_fill"]
@@ -429,9 +477,8 @@ def test_fill_held_off_plays_the_stalled_stop_as_before_and_names_the_run(tmp_pa
         stop.main(["--frames-dir", str(keyed), "--loop", str(meta), "--out-dir", str(tmp_path / "x"), "--fill-held", "on"])
 
 
-def test_a_frame_between_the_judge_refuses_keeps_the_stop_s_held_cells_as_filmed_and_says_so(tmp_path, capsys):
-    keyed, run_from = stalled(tmp_path)
-    meta = cut(tmp_path, keyed, run_from + PERIOD)
+def test_a_frame_between_the_judge_refuses_keeps_the_stop_s_held_cells_as_filmed_and_says_so(tmp_path, capsys, stalled_cut):
+    keyed, meta = stalled_cut
     out = make(tmp_path, keyed, meta, interpolate=lambda a, b, t: a.copy())  # gives the pose back: a held cell again
     run = out["held_fill"]["before"]["held_runs"][0]
     assert run["filled"] is False and "held" in run["faults"] and out["held_fill"]["made"] == []
@@ -439,10 +486,9 @@ def test_a_frame_between_the_judge_refuses_keeps_the_stop_s_held_cells_as_filmed
     assert "video-stop: warning: held cells 3-4 kept as filmed: a frame between was refused (held" in capsys.readouterr().err
 
 
-def test_no_rife_plays_the_stop_s_held_cells_as_filmed_and_says_how_to_install_it(tmp_path, monkeypatch, capsys):
+def test_no_rife_plays_the_stop_s_held_cells_as_filmed_and_says_how_to_install_it(tmp_path, monkeypatch, capsys, stalled_cut):
     no_rife(monkeypatch, tmp_path)
-    keyed, run_from = stalled(tmp_path)
-    meta = cut(tmp_path, keyed, run_from + PERIOD)
+    keyed, meta = stalled_cut
     out = make(tmp_path, keyed, meta)
     assert out["status"] == "passed" and out["held_fill"]["made"] == []
     assert out["held_fill"]["unmade"]["cells"] == [4] and out["held_fill"]["unmade"]["why"] == "RIFE is not installed"
