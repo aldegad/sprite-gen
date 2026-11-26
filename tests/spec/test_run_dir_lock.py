@@ -735,10 +735,24 @@ def _seen(code: str, *args: object) -> list[dict]:
     return [json.loads(line) for line in got.stdout.splitlines() if line.startswith("{")]
 
 
+def _ended(pid: int) -> bool:
+    """고아 `pid` 가 끝났나. 끝난 고아는 새 부모가 거둘 때까지 좀비로 남아 신호 0 에 찾힌다 — 컨테이너의 첫 프로세스처럼 아무도
+    거두지 않는 부모 밑에서는 끝까지(GitHub 호스트 러너의 레인 컨테이너에서 이 기다림이 시험마다 한도 10 s 를 다 채웠다). 그래서
+    리눅스에서는 그 상태(/proc/<pid>/stat 의 Z)도 끝난 것으로 읽는다. 거두는 부모가 있는 곳(macOS 의 launchd)에서는 신호 0 만으로
+    곧 끝난 것이 보인다."""
+    if not runio._pid_alive(pid):
+        return True
+    try:
+        line = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return line.rpartition(")")[2].split()[:1] == ["Z"]
+
+
 def _wait_gone(pid: int | None, timeout: float = 10.0) -> None:
     """시험이 띄운 프로세스의 자식(이제 고아)이 끝날 때까지 — 길어야 `timeout` 초."""
     deadline = time.monotonic() + timeout
-    while pid is not None and runio._pid_alive(pid) and time.monotonic() < deadline:
+    while pid is not None and not _ended(pid) and time.monotonic() < deadline:
         time.sleep(0.05)
 
 
@@ -883,6 +897,7 @@ def test_a_writer_that_still_holds_its_lock_removes_it_when_it_exits(tmp_path, s
     assert not os.path.lexists(lock), "쥔 락을 남기고 끝났다"
 
 
+@pytest.mark.slow
 def test_a_late_reclaimer_and_another_writer_queue_so_only_one_of_them_holds_the_run_dir(tmp_path, start) -> None:
     """죽은 주인의 락을 회수하는 일과 새 락을 만드는 일은 줄을 선다 (회수 경합, 설계 판정 eve-20261023-135225).
 
@@ -1034,6 +1049,7 @@ def test_a_holder_killed_inside_the_run_dirs_kernel_lock_leaves_it_to_no_child(t
 
 
 @_NO_FORK
+@pytest.mark.slow
 def test_a_fork_child_that_ends_leaves_its_parent_inside_the_run_dirs_kernel_lock(tmp_path, start) -> None:
     """fork 자식은 물려받은 커널 락 사본을 닫기만 하고 풀지 않는다 — 부모의 한 스레드가 런 폴더 커널 락 안에서 판정하는 동안
     다른 스레드가 fork 한 자식이 끝나도 writer 는 기다리고, 부모가 판정한 옛 락을 회수해 잡은 뒤에야 그 락을 대며 거절된다."""
@@ -1131,6 +1147,7 @@ def test_a_handler_fork_where_the_kernel_lock_fd_enters_or_leaves_the_record_lea
 
 @_NO_FORK
 @pytest.mark.parametrize("where", ["past-the-hook", "inside-the-hook"])
+@pytest.mark.slow
 def test_a_fork_from_another_thread_that_runs_runios_fork_hook_leaves_the_kernel_lock_to_no_child(tmp_path, where) -> None:
     """다른 스레드의 fork 는 runio 의 before 훅에 들어간 뒤 fork 시스템 호출 전에 GIL 을 놓고 기다릴 수 있다 — 훅 안의 두 문장 사이,
     또는 훅을 지나 뒤에 도는 logging 의 before 훅·임포트 락에서. 그동안 런 폴더 커널 락을 잡으러 들어간 스레드가 fd 를 열고
@@ -1150,6 +1167,7 @@ def test_a_fork_from_another_thread_that_runs_runios_fork_hook_leaves_the_kernel
 
 @_NO_FORK
 @pytest.mark.parametrize("finish", ["release", "exit"])
+@pytest.mark.slow
 def test_a_fork_from_another_thread_that_does_not_return_makes_the_writer_fail_loudly_and_leave_nothing(tmp_path,
                                                                                                          finish) -> None:
     """런 폴더 커널 락 헬퍼는 다른 스레드의 진행 중 fork 를 끝없이 기다리지 않는다 — 한도(여기서는 0.5 s) 안에 그 fork 가 돌아오지
