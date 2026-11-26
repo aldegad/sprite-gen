@@ -44,6 +44,9 @@ dev = [
     # is required — the default `thread` method cannot interrupt a blocked
     # subprocess.wait(), which is exactly the case that hangs here.
     "pytest-timeout>=2.3",
+    # The lane splits the suite over the processes of each job (`pytest -n auto`, scripts/linux_lane.sh), and a
+    # local run may too: a plain `pytest` stays one process. 3.8 is the release the lane was measured on.
+    "pytest-xdist>=3.8",
 ]
 # RIFE's torch backend (SPRITE_GEN_RIFE_BACKEND=torch, docs/loop-repair.md section 1): the binary's model in PyTorch (rife-v4.25 by default), for a
 # GPU host the binary cannot run on (Vulkan-less CUDA). 2.13.0 is the release it was measured on. PyPI's Linux x86-64

@@ -4,63 +4,47 @@
 # (aldegad/sprite-gen-lane's workflow, docs/release.md). Nothing runs on push or pull request.
 #
 # What the CI job ran, in the same order: a clean virtual environment installed the way the
-# quickstart does (`pip install -e ".[dev]"`), RIFE installed through the user's own path
-# (`sprite-gen rife install`, its check frame on the host's Vulkan driver), the quickstart smoke
-# (prepare -> extract -> compose) and the whole test suite. Then RIFE's torch backend on the CPU:
-# PyTorch (TORCH_VERSION, from PyTorch's CPU index) into the same environment, its install check
-# frame (`sprite-gen rife install --backend torch`) and every test marked torch_rife, none skipped
-# (SPRITE_GEN_RIFE_DEVICE=cpu). Its CUDA run is the CUDA lane's (`scripts/cuda_lane.py`, docs/release.md).
+# quickstart does (`pip install -e ".[dev]"`), the quickstart smoke (prepare -> extract -> compose)
+# and the test suite, every test (`--full`) but those of RIFE. The runner has no GPU: the tests
+# marked real_rife (the rife-ncnn-vulkan binary) or torch_rife (RIFE's torch backend) are the GPU
+# lane's (`scripts/cuda_lane.py` on the maintainer's NVIDIA host), which runs where a change reaches
+# them (`scripts/release_gates.py`); the release record says when it did not (docs/release.md).
 #
 # Run it from a clean clone of the commit being measured, on x86-64 Linux with:
 #   - Python 3.14 (`python3.14` on PATH, or named by SPRITE_GEN_LANE_PYTHON),
 #   - ffmpeg, and img2webp from libwebp >= 1.5 (its `-exact` flag),
-#   - Node.js (`node` on PATH), which runs the curator's JavaScript in tests/effects/test_breathe_*.py
-#     (not needed by `--rife-only`),
-#   - a Vulkan loader with a CPU driver (Mesa lavapipe is enough).
+#   - Node.js (`node` on PATH), which runs the curator's JavaScript in tests/effects/test_breathe_*.py.
 # The host's tools are not installed by this script: a missing one ends the run by name. The
 # environment it creates lives in the clone (.venv, ignored), as the quickstart's does.
 #
-# `--artifact <dir>` also packages the commit after the gates passed: the wheel and the sdist
-# built from a second, untouched clone, SHA256SUMS over both, and SOURCE_SHA naming the commit.
-# `scripts/release_publish.py --prebuilt <dir>` attaches exactly that (docs/release.md). <dir>
-# must be outside the checkout and empty.
+#   --shard K/N        the K-th of N shares of the tests (tests/conftest.py places each test in one share
+#                      by its id), so N jobs side by side run every test once. Each share runs over the
+#                      host's processors (`pytest -n auto`, SPRITE_GEN_LANE_WORKERS to name a number).
+#                      Without it, one run holds every test.
+#   --package <dir>    no tests: package the commit, the wheel and the sdist built from a second, untouched
+#                      clone, SHA256SUMS over both, and SOURCE_SHA naming the commit. The workflow runs it
+#                      only once every share of the same run passed. `scripts/release_publish.py --prebuilt
+#                      <dir>` attaches exactly that (docs/release.md). <dir> must be outside the checkout and
+#                      empty.
 #
-# RIFE needs a Vulkan driver that can run rife-ncnn-vulkan. On a host whose driver cannot (Mesa
-# lavapipe under WSL1 crashes in rife-ncnn-vulkan's first upload), the RIFE gates are split off,
-# never passed over in silence:
-#   --rife-unmeasured "<why>"  every gate but RIFE: no `rife install`, and the suite runs with an
-#                              empty data directory and no RIFE on PATH, so the tests that need
-#                              the real binary (marked `real_rife`) skip for that stated reason;
-#                              any other skip fails the run (`pytest --rife-unmeasured`) unless
-#                              tests/conftest.py names it as not RIFE's. The run ends by naming
-#                              what it did not measure and exits 3, not 0.
-#   --rife-only                the RIFE gates alone, on a host where Vulkan works: `rife install`
-#                              (its check frame), every test of the suite marked `real_rife`, and
-#                              the torch backend's gates above, none of it skipped — the tests
-#                              `--rife-unmeasured` let skip for RIFE (docs/release.md). The tests
-#                              marked both run with the torch backend's.
-# A commit has passed the lane when one run exits 0, or when a `--rife-unmeasured` run (exit 3)
-# and a `--rife-only` run (exit 0) of the same commit both did.
+# Where no RIFE is reachable the tests that need one skip for that reason; any other skip fails the run
+# (`pytest --rife-unmeasured`) unless tests/conftest.py names it as not RIFE's. A commit has passed the
+# lane when every share of one run exited 0.
 set -euo pipefail
 
-artifact_dir=""
-rife_unmeasured=""
-rife_only=0
+package_dir=""
+shard=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --artifact)
-      [ $# -ge 2 ] || { echo "linux_lane: --artifact needs a directory" >&2; exit 2; }
-      artifact_dir=$2
+    --package)
+      [ $# -ge 2 ] || { echo "linux_lane: --package needs a directory" >&2; exit 2; }
+      package_dir=$2
       shift 2
       ;;
-    --rife-unmeasured)
-      [ $# -ge 2 ] && [ -n "$2" ] || { echo "linux_lane: --rife-unmeasured needs the reason" >&2; exit 2; }
-      rife_unmeasured=$2
+    --shard)
+      [ $# -ge 2 ] && [[ "$2" =~ ^[1-9][0-9]*/[1-9][0-9]*$ ]] || { echo "linux_lane: --shard needs K/N" >&2; exit 2; }
+      shard=$2
       shift 2
-      ;;
-    --rife-only)
-      rife_only=1
-      shift
       ;;
     *)
       echo "linux_lane: unknown argument $1" >&2
@@ -69,16 +53,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ "$rife_only" = 1 ] && { [ -n "$rife_unmeasured" ] || [ -n "$artifact_dir" ]; }; then
-  echo "linux_lane: --rife-only measures RIFE alone; it takes neither --rife-unmeasured nor --artifact" >&2
+if [ -n "$package_dir" ] && [ -n "$shard" ]; then
+  echo "linux_lane: --package runs no tests; it takes no --shard" >&2
   exit 2
 fi
 
 PINNED_PYTHON=3.14
 PYTHON=${SPRITE_GEN_LANE_PYTHON:-python$PINNED_PYTHON}
-# The PyTorch the torch backend was measured on; its CPU build, as a host without a GPU installs it.
-TORCH_VERSION=2.13.0
-TORCH_CPU_INDEX=https://download.pytorch.org/whl/cpu
+WORKERS=${SPRITE_GEN_LANE_WORKERS:-auto}
 
 fail() {
   echo "linux_lane: $*" >&2
@@ -86,21 +68,6 @@ fail() {
 }
 step() {
   echo "== $*"
-}
-# RIFE's torch backend on the CPU: PyTorch into .venv, the install's check frame through it (the model
-# `sprite-gen rife install` already put in place), and every test marked torch_rife, none skipped.
-torch_gates() {
-  step "RIFE torch backend (PyTorch $TORCH_VERSION, CPU)"
-  .venv/bin/pip install --quiet --index-url "$TORCH_CPU_INDEX" "torch==$TORCH_VERSION"
-  .venv/bin/python -c 'import torch; print("torch", torch.__version__, "cuda", torch.version.cuda)'
-  SPRITE_GEN_RIFE_BACKEND=torch SPRITE_GEN_RIFE_DEVICE=cpu .venv/bin/sprite-gen rife install
-  step "RIFE torch tests (every test marked torch_rife, none skipped)"
-  torch_log=$(mktemp)
-  # No test marked: pytest exits 5 ("no tests ran"), and the lane with it. --full: a marked test that is
-  # also marked slow runs too.
-  SPRITE_GEN_RIFE_DEVICE=cpu .venv/bin/python -m pytest -q -rs --full -m torch_rife | tee "$torch_log"
-  ! grep -E '^SKIPPED' "$torch_log" >/dev/null || fail "a torch_rife test skipped; this run is meant to measure them"
-  rm -f "$torch_log"
 }
 
 cd "$(git rev-parse --show-toplevel)"
@@ -114,6 +81,36 @@ case "$("$PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])')" in
   "$PINNED_PYTHON") ;;
   *) fail "$PYTHON is $("$PYTHON" --version 2>&1); the lane pins $PINNED_PYTHON" ;;
 esac
+git diff --quiet && git diff --cached --quiet || fail "the checkout has uncommitted changes"
+[ ! -e .venv ] || fail ".venv already exists; run from a fresh clone"
+sha=$(git rev-parse HEAD)
+echo "commit $sha"
+
+if [ -n "$package_dir" ]; then
+  mkdir -p "$package_dir"
+  package_dir=$(cd "$package_dir" && pwd -P)
+  case "$package_dir/" in
+    "$root/"*) fail "--package must be outside the checkout" ;;
+  esac
+  [ -z "$(ls -A "$package_dir")" ] || fail "--package $package_dir is not empty"
+  step "package"
+  "$PYTHON" -m venv .venv
+  .venv/bin/pip install --quiet build
+  # From a second clone of the same commit, so nothing this run wrote (.venv) can reach the archives.
+  pkg=$(mktemp -d)
+  trap 'rm -rf "$pkg"' EXIT
+  git clone -q --no-hardlinks . "$pkg/src"
+  git -C "$pkg/src" checkout -q "$sha"
+  (cd "$pkg/src" && "$root/.venv/bin/python" -m build --outdir "$package_dir" > "$pkg/build.log" 2>&1) ||
+    { tail -20 "$pkg/build.log" >&2; fail "python -m build failed"; }
+  (cd "$package_dir" && sha256sum -- *.whl *.tar.gz > SHA256SUMS)
+  echo "$sha" > "$package_dir/SOURCE_SHA"
+  ls -l "$package_dir"
+  cat "$package_dir/SHA256SUMS"
+  echo "linux_lane: packaged $sha"
+  exit 0
+fi
+
 command -v ffmpeg >/dev/null || fail "ffmpeg is not on PATH"
 command -v img2webp >/dev/null || fail "img2webp (libwebp >= 1.5) is not on PATH"
 # img2webp -version exits 1 without an output file; -h is the honest probe. The probes read
@@ -121,59 +118,24 @@ command -v img2webp >/dev/null || fail "img2webp (libwebp >= 1.5) is not on PATH
 # SIGPIPE and the pipeline reads as a failure.
 img2webp -h 2>&1 | grep -- -exact >/dev/null || fail "img2webp has no -exact flag; libwebp must be 1.5 or newer"
 # Without node the curator's JavaScript tests skip, which no run of this lane would measure.
-[ "$rife_only" = 1 ] || command -v node >/dev/null || fail "node (Node.js) is not on PATH; the curator's JavaScript tests run it"
-/sbin/ldconfig -p | grep 'libvulkan\.so\.1' >/dev/null || fail "no Vulkan loader (libvulkan.so.1)"
-git diff --quiet && git diff --cached --quiet || fail "the checkout has uncommitted changes"
-[ ! -e .venv ] || fail ".venv already exists; run from a fresh clone"
-if [ -n "$artifact_dir" ]; then
-  mkdir -p "$artifact_dir"
-  artifact_dir=$(cd "$artifact_dir" && pwd -P)
-  case "$artifact_dir/" in
-    "$root/"*) fail "--artifact must be outside the checkout" ;;
-  esac
-  [ -z "$(ls -A "$artifact_dir")" ] || fail "--artifact $artifact_dir is not empty"
-fi
-sha=$(git rev-parse HEAD)
-echo "commit $sha"
-echo "$("$PYTHON" --version), $(ffmpeg -version | head -1 | cut -d' ' -f1-3)"
-[ "$rife_only" = 1 ] || echo "node $(node --version)"
+command -v node >/dev/null || fail "node (Node.js) is not on PATH; the curator's JavaScript tests run it"
+# Nowhere the engine looks may hold a RIFE: an empty data directory for the suite, nothing on PATH, no
+# SPRITE_GEN_RIFE. The tests that need the real binary or the torch backend then skip for the reason they name.
+[ -z "${SPRITE_GEN_RIFE:-}" ] || fail "SPRITE_GEN_RIFE is set; this lane runs without RIFE"
+! command -v rife-ncnn-vulkan >/dev/null || fail "rife-ncnn-vulkan is on PATH; this lane runs without RIFE"
+echo "$("$PYTHON" --version), $(ffmpeg -version | head -1 | cut -d' ' -f1-3), node $(node --version), $(nproc) processors"
 
 step "install (clean environment, as the quickstart does)"
 "$PYTHON" -m venv .venv
 .venv/bin/pip install --quiet -e ".[dev]"
 .venv/bin/pip freeze --exclude-editable
 
-if [ "$rife_only" = 1 ]; then
-  step "RIFE (sprite-gen rife install)"
-  .venv/bin/sprite-gen rife install
-  step "RIFE tests (every test marked real_rife, none skipped)"
-  rife_log=$(mktemp)
-  trap 'rm -f "$rife_log"' EXIT
-  # No test marked: pytest exits 5 ("no tests ran"), and the lane with it. --full: a marked test that is
-  # also marked slow runs too. Those marked torch_rife as well run with the torch backend's.
-  .venv/bin/python -m pytest -q -rs --full -m "real_rife and not torch_rife" | tee "$rife_log"
-  ! grep -E '^SKIPPED' "$rife_log" >/dev/null || fail "a RIFE test skipped; this run is meant to measure them"
-  torch_gates
-  echo "linux_lane: the RIFE gates passed at $sha"
-  exit 0
-fi
-
-if [ -n "$rife_unmeasured" ]; then
-  step "RIFE: not measured on this host ($rife_unmeasured)"
-  # Nowhere the engine looks may hold a RIFE: an empty data directory for the suite, nothing on
-  # PATH, no SPRITE_GEN_RIFE. The real-binary tests then skip for the reason they name.
-  [ -z "${SPRITE_GEN_RIFE:-}" ] || fail "SPRITE_GEN_RIFE is set; --rife-unmeasured runs without RIFE"
-  ! command -v rife-ncnn-vulkan >/dev/null || fail "rife-ncnn-vulkan is on PATH; --rife-unmeasured runs without RIFE"
-  no_rife_data=$(mktemp -d)
-  export XDG_DATA_HOME=$no_rife_data
-else
-  step "RIFE (sprite-gen rife install)"
-  .venv/bin/sprite-gen rife install
-fi
+no_rife_data=$(mktemp -d)
+export XDG_DATA_HOME=$no_rife_data
 
 step "quickstart smoke (prepare -> extract -> compose)"
 smoke=$(mktemp -d)
-trap 'rm -rf "$smoke" "${no_rife_data:-}"' EXIT
+trap 'rm -rf "$smoke" "$no_rife_data"' EXIT
 .venv/bin/python scripts/prepare_sprite_run.py --help > /dev/null
 cp -r tests/fixtures/run "$smoke/run"
 .venv/bin/python scripts/extract_sprite_row_frames.py --run-dir "$smoke/run"
@@ -181,40 +143,10 @@ cp -r tests/fixtures/run "$smoke/run"
 test -f "$smoke/run/sprite-sheet-alpha.png"
 test -f "$smoke/run/manifest.json"
 
-step "tests"
+step "tests${shard:+ (share $shard)}"
 # Every test (--full): a plain pytest is the fast bundle, the tests marked slow deselected. Without RIFE, a
-# skip of a test not marked real_rife or torch_rife fails unless tests/conftest.py names it. PyTorch is not
-# installed yet: the tests marked torch_rife skip here and run in torch_gates.
-.venv/bin/python -m pytest -q --full ${rife_unmeasured:+--rife-unmeasured}
+# skip of a test not marked real_rife or torch_rife fails unless tests/conftest.py names it.
+.venv/bin/python -m pytest -q --full --rife-unmeasured -n "$WORKERS" ${shard:+--shard "$shard"}
 
-if [ -z "$rife_unmeasured" ]; then
-  torch_gates
-fi
-
-if [ -n "$rife_unmeasured" ]; then
-  echo "linux_lane: every gate but RIFE passed at $sha"
-  echo "linux_lane: RIFE NOT MEASURED here ($rife_unmeasured): run \`scripts/linux_lane.sh --rife-only\` at $sha on a host where Vulkan works"
-else
-  echo "linux_lane: every gate passed at $sha"
-fi
-
-if [ -n "$artifact_dir" ]; then
-  step "package"
-  # From a second clone of the same commit, so nothing the gates wrote (.venv, egg-info, run
-  # outputs) can reach the archives.
-  pkg=$(mktemp -d)
-  trap 'rm -rf "$smoke" "$pkg" "${no_rife_data:-}"' EXIT
-  git clone -q --no-hardlinks . "$pkg/src"
-  git -C "$pkg/src" checkout -q "$sha"
-  .venv/bin/pip install --quiet build
-  (cd "$pkg/src" && "$root/.venv/bin/python" -m build --outdir "$artifact_dir" > "$pkg/build.log" 2>&1) ||
-    { tail -20 "$pkg/build.log" >&2; fail "python -m build failed"; }
-  (cd "$artifact_dir" && sha256sum -- *.whl *.tar.gz > SHA256SUMS)
-  echo "$sha" > "$artifact_dir/SOURCE_SHA"
-  ls -l "$artifact_dir"
-  cat "$artifact_dir/SHA256SUMS"
-fi
-
-if [ -n "$rife_unmeasured" ]; then
-  exit 3
-fi
+echo "linux_lane: every gate${shard:+ of share $shard} passed at $sha"
+echo "linux_lane: RIFE is not this lane's: the GPU lane (scripts/cuda_lane.py) runs it where scripts/release_gates.py says a change reaches it"

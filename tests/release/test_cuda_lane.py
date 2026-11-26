@@ -61,10 +61,12 @@ def _pinned(text: str, name: str) -> str:
     return found[0]
 
 
-def test_the_cuda_lane_installs_the_pytorch_and_the_python_the_linux_lane_does():
+def test_the_cuda_lane_installs_the_python_the_linux_lane_does_and_the_pytorch_the_extra_was_measured_on():
     linux = (ROOT / "scripts" / "linux_lane.sh").read_text(encoding="utf-8")
     cuda = (ROOT / "scripts" / "cuda_lane.py").read_text(encoding="utf-8")
-    assert _pinned(cuda, "TORCH_VERSION") == _pinned(linux, "TORCH_VERSION")
+    extra = re.search(r'^torch = \["torch>=([^,"]+),', (ROOT / "pyproject.toml").read_text(encoding="utf-8"), re.MULTILINE)
+    assert extra, "pyproject.toml's torch extra names its floor"
+    assert _pinned(cuda, "TORCH_VERSION") == extra.group(1)
     assert _pinned(cuda, "PINNED_PYTHON") == _pinned(linux, "PINNED_PYTHON")
 
 

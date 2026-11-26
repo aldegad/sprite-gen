@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import hashlib
 import os
 import re
 import shutil
@@ -115,6 +116,25 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="run every test; without it a run is the fast bundle, the tests marked slow deselected. "
         "The release lane (scripts/linux_lane.sh) runs with it",
     )
+    parser.addoption(
+        "--shard",
+        metavar="K/N",
+        help="run the K-th of N shares of the tests (1 <= K <= N); a test's share is read from its id alone, so "
+        "the N runs of the lane's jobs (scripts/linux_lane.sh --shard) together run every test once",
+    )
+
+
+def share_of(nodeid: str, shares: int) -> int:
+    """The share (0 to shares - 1) a test falls in: from its id alone, so every process that collects the suite,
+    each xdist worker and each job of the lane, places it alike, and the shares together hold every test once."""
+    return int.from_bytes(hashlib.sha256(nodeid.encode("utf-8")).digest()[:8], "big") % shares
+
+
+def _shard(given: str) -> tuple[int, int]:
+    k, slash, n = given.partition("/")
+    if slash and k.isdigit() and n.isdigit() and 1 <= int(k) <= int(n):
+        return int(k), int(n)
+    raise pytest.UsageError(f"--shard takes K/N with 1 <= K <= N, not {given!r}")
 
 
 def _torch_rife_missing() -> str | None:
@@ -154,6 +174,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         if slow:
             config.hook.pytest_deselected(items=slow)
             items[:] = [item for item in items if not item.get_closest_marker("slow")]
+    if config.getoption("shard"):
+        k, n = _shard(config.getoption("shard"))
+        other = [item for item in items if share_of(item.nodeid, n) != k - 1]
+        if other:
+            config.hook.pytest_deselected(items=other)
+            items[:] = [item for item in items if share_of(item.nodeid, n) == k - 1]
     marked = [item for item in items if item.get_closest_marker("real_rife")]
     torched = [item for item in items if item.get_closest_marker("torch_rife")]
     if marked:
