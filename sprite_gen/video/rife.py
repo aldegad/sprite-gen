@@ -77,6 +77,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, NamedTuple
 
@@ -250,6 +251,15 @@ TORN_WINDOW = 0.10
 # 960 x 960 frame on Modal's CPU, took about 30 s, and Modal's hosts differ by up to 2.5 times on one frame
 # (2026-10-15, docs/loop-repair.md section 1).
 CALL_TIMEOUT_SECONDS = 600
+# `Binary`: the runs of the binary a frame or a read asks for are started up to this many at a time (`runs_at_once`).
+# Every run starts the binary anew, and on a GPU starting it is most of a run: on an Apple M4 Max about 0.3 s of a run
+# at 640 x 896, where each frame more of a run handed a folder of pairs costs 0.03 s. Two started together take about
+# half the time of two one after another there, each the same command and so the same frame. Two are a frame's own
+# runs, its colour and its coverage; more would only start a read's passes sooner, and on a machine with no GPU
+# (Mesa's llvmpipe) every run already takes all the cores. The binary's folder of pairs is no way round the start: it
+# pairs each image with the next and makes them at fractions spaced evenly along the folder, so a fraction of any
+# pair but the first is not the one asked for to the last bit, and the pairs between are made too.
+RUNS_AT_ONCE = 2
 # `Cache`: the first thing a kept frame's key is made from — another way of keying or keeping frames is another
 # name, so no frame kept the old way is taken — and the PNG text a kept frame names its own pixels' sha256 under.
 CACHE_FORMAT = "sprite-gen frame between, 1"
@@ -571,21 +581,31 @@ def _coverage(made: np.ndarray) -> np.ndarray:
     return np.asarray(Image.fromarray(made, "RGB").convert("L"))
 
 
+def runs(run: Run, asked: list[tuple[np.ndarray, np.ndarray, float, tuple[str, ...] | None]]) -> list[np.ndarray]:
+    """The runs `asked` (each a run's four arguments), what they make in their order: started together where `run` can
+    start them so (its `at_once`, the binary's in a `Binary`), else one after another. Each run is the run asked alone,
+    whichever way they are started."""
+    at_once = getattr(run, "at_once", None)
+    return at_once(asked) if at_once is not None else [run(*one) for one in asked]
+
+
 def frame_runs(run: Run, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> tuple[np.ndarray, np.ndarray]:
-    """A frame's two runs (`inputs`): the colour, then the coverage, from the first to the second at `t` with the
+    """A frame's two runs (`inputs`, `runs`): the colour and the coverage, from the first to the second at `t` with the
     augmentation every call asks for — (colour H x W x 3, coverage H x W), uint8, which `_joined` makes a frame."""
-    return run(colour[0], colour[1], t, None), _coverage(run(_grey(cover[0]), _grey(cover[1]), t, None))
+    rgb, grey = runs(run, [(colour[0], colour[1], t, None), (_grey(cover[0]), _grey(cover[1]), t, None)])
+    return rgb, _coverage(grey)
 
 
 def pass_runs(run: Run, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> np.ndarray:
-    """How far the sixteen single passes of a frame (`inputs`) disagree, per pixel (`passes`): PASS_CALLS runs."""
+    """How far the sixteen single passes of a frame (`inputs`) disagree, per pixel (`passes`): PASS_CALLS runs (`runs`)."""
     grey = [_grey(c) for c in cover]
+    turns = [(geometry, first, second, at) for geometry in PASS_GEOMETRIES for first, second, at in ((0, 1, t), (1, 0, 1 - t))]
+    made = runs(run, [(_turned(pair[first], geometry), _turned(pair[second], geometry), at, ())
+                      for geometry, first, second, at in turns for pair in (colour, grey)])
     rgbs, alphas = [], []
-    for geometry in PASS_GEOMETRIES:
-        for first, second, at in ((0, 1, t), (1, 0, 1 - t)):
-            made = [run(_turned(pair[first], geometry), _turned(pair[second], geometry), at, ()) for pair in (colour, grey)]
-            rgbs.append(_turned_back(made[0].astype(np.float32) / 255.0, geometry))
-            alphas.append(_turned_back(_coverage(made[1]).astype(np.float32)[..., None] / 255.0, geometry)[..., 0])
+    for k, (geometry, _, _, _) in enumerate(turns):
+        rgbs.append(_turned_back(made[2 * k].astype(np.float32) / 255.0, geometry))
+        alphas.append(_turned_back(_coverage(made[2 * k + 1]).astype(np.float32)[..., None] / 255.0, geometry)[..., 0])
     rgb, alpha = np.stack(rgbs), np.stack(alphas)
     pre = np.concatenate([rgb * alpha[..., None], alpha[..., None]], axis=-1)
     apart = np.sqrt(((pre[0::2].mean(axis=0) - pre[1::2].mean(axis=0)) ** 2).sum(axis=-1) / 4.0)
@@ -600,19 +620,40 @@ def padded(x: np.ndarray, multiple: int) -> np.ndarray:
     return out
 
 
-def _binary_run(binary: Path, model: Path, tmp: Path) -> Run:
+def runs_at_once() -> int:
+    """How many runs of the binary a `Binary` starts together (`runs`): RUNS_AT_ONCE, and no more than the CPUs here."""
+    return max(1, min(RUNS_AT_ONCE, os.cpu_count() or 1))
+
+
+def _binary_run(binary: Path, model: Path, tmp: Path, *, at_once: int = 1) -> Run:
     """A run of the binary (`_call`, its images written in `tmp`): each image handed to it as the model is handed one
     (`MODELS`) — rife-v4.25's padded with zeros to a multiple of 128 and the image it makes cut back to the pair's size,
-    rife-v4.6's as it is."""
+    rife-v4.6's as it is. With `at_once` over 1, runs asked together (`runs`) are started up to that many at a time,
+    each its images written in a folder of its own under `tmp`, and what they make handed back in the order asked; the
+    first that fails, in that order, is raised once every run started has ended."""
     pad = MODELS[held_model(model)].pad
 
-    def run(x: np.ndarray, y: np.ndarray, t: float, modes: tuple[str, ...] | None) -> np.ndarray:
+    def run_in(folder: Path, x: np.ndarray, y: np.ndarray, t: float, modes: tuple[str, ...] | None) -> np.ndarray:
         h, w = x.shape[:2]
         if pad:
             x, y = padded(x, pad), padded(y, pad)
         a, b = Image.fromarray(x, "RGB"), Image.fromarray(y, "RGB")
-        made = np.asarray(_call(binary, model, a, b, t, tmp) if modes is None else _call(binary, model, a, b, t, tmp, modes))
+        made = np.asarray(_call(binary, model, a, b, t, folder) if modes is None else _call(binary, model, a, b, t, folder, modes))
         return np.ascontiguousarray(made[:h, :w]) if pad else made
+
+    def run(x: np.ndarray, y: np.ndarray, t: float, modes: tuple[str, ...] | None) -> np.ndarray:
+        return run_in(tmp, x, y, t, modes)
+
+    def together(asked: list[tuple[np.ndarray, np.ndarray, float, tuple[str, ...] | None]]) -> list[np.ndarray]:
+        if len(asked) <= 1:
+            return [run(*one) for one in asked]
+        folders = [Path(tempfile.mkdtemp(prefix="run-", dir=tmp)) for _ in asked]
+        with ThreadPoolExecutor(max_workers=min(at_once, len(asked))) as pool:
+            started = [pool.submit(run_in, folder, *one) for folder, one in zip(folders, asked)]
+        return [s.result() for s in started]
+
+    if at_once > 1:
+        run.at_once = together  # type: ignore[attr-defined]
     return run
 
 
@@ -1274,8 +1315,9 @@ def _file_sha256(path: Path) -> str:
 
 class Binary:
     """rife-ncnn-vulkan as the runner of a `Rife`: each run one call of the binary, its images written in a directory of
-    its own for the frame. What its frames depend on is read anew every time it is asked (`identity`): the binary runs
-    from its files on disk, and reads its model from them, every call."""
+    its own, the runs a frame or a read asks for started together (`runs_at_once`). What its frames depend on is read
+    anew every time it is asked (`identity`): the binary runs from its files on disk, and reads its model from them, every
+    call."""
 
     def __init__(self, binary: Path, model: Path):
         self.binary, self.model = binary, model
@@ -1283,11 +1325,11 @@ class Binary:
 
     def frame(self, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> tuple[np.ndarray, np.ndarray]:
         with tempfile.TemporaryDirectory(prefix="sprite-gen-rife-") as td:
-            return frame_runs(_binary_run(self.binary, self.model, Path(td)), colour, cover, t)
+            return frame_runs(_binary_run(self.binary, self.model, Path(td), at_once=runs_at_once()), colour, cover, t)
 
     def read(self, colour: list[np.ndarray], cover: list[np.ndarray], t: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         with tempfile.TemporaryDirectory(prefix="sprite-gen-rife-") as td:
-            run = _binary_run(self.binary, self.model, Path(td))
+            run = _binary_run(self.binary, self.model, Path(td), at_once=runs_at_once())
             return (*frame_runs(run, colour, cover, t), pass_runs(run, colour, cover, t))
 
     def describe(self) -> dict[str, str]:
