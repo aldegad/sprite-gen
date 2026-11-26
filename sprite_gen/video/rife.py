@@ -261,6 +261,15 @@ CALL_TIMEOUT_SECONDS = 600
 # pairs each image with the next and makes them at fractions spaced evenly along the folder, so a fraction of any
 # pair but the first is not the one asked for to the last bit, and the pairs between are made too.
 RUNS_AT_ONCE = 2
+# `binary_env`: what the Vulkan loader is told to leave out of a run of the binary, and to keep. A loader puts every
+# implicit layer a machine installs into each Vulkan process it starts: an overlay, a capture hook, a shader recorder,
+# none of them any part of a frame, and where a machine has them they are paid on every run. The layers that choose the
+# GPU are kept (`LOADER_LAYERS_ALLOW`: Mesa's device select, NVIDIA's Optimus, AMD's switchable graphics), so a run is
+# made on the GPU it was made on with them. A caller that sets VK_LOADER_LAYERS_DISABLE itself keeps its own choice.
+# Loaders older than 1.3.234 (1.3.262 for the allow list) read neither variable and start the run as before
+# (docs/loop-repair.md section 1, "Layers left out").
+LOADER_LAYERS_DISABLE = "~implicit~"
+LOADER_LAYERS_ALLOW = "*device_select*,*optimus*,*switchable_graphics*"
 # `Cache`: the first thing a kept frame's key is made from — another way of keying or keeping frames is another
 # name, so no frame kept the old way is taken — and the PNG text a kept frame names its own pixels' sha256 under.
 CACHE_FORMAT = "sprite-gen frame between, 1"
@@ -495,10 +504,21 @@ def model_bytes(model: Path) -> dict[str, bytes]:
     return files
 
 
+def binary_env() -> dict[str, str]:
+    """The environment a run of the binary is started with: this process's, with the Vulkan loader told to leave out the
+    implicit layers but those that choose the GPU (LOADER_LAYERS_DISABLE, LOADER_LAYERS_ALLOW) where the caller has not
+    set VK_LOADER_LAYERS_DISABLE itself."""
+    env = dict(os.environ)
+    if "VK_LOADER_LAYERS_DISABLE" not in env:
+        env["VK_LOADER_LAYERS_DISABLE"] = LOADER_LAYERS_DISABLE
+        env.setdefault("VK_LOADER_LAYERS_ALLOW", LOADER_LAYERS_ALLOW)
+    return env
+
+
 def _call(binary: Path, model: Path, a: Image.Image, b: Image.Image, t: float, tmp: Path,
           modes: tuple[str, ...] | None = None) -> Image.Image:
     """One run of the binary from `a` to `b` at `t`, with the augmentation `tta()` names for the model, or `modes`
-    (`passes`: none)."""
+    (`passes`: none), in `binary_env()`."""
     modes = tta(held_model(model)) if modes is None else modes
     a.save(tmp / "a.png")
     b.save(tmp / "b.png")
@@ -507,7 +527,7 @@ def _call(binary: Path, model: Path, a: Image.Image, b: Image.Image, t: float, t
     try:
         proc = subprocess.run(
             [str(binary), "-0", str(tmp / "a.png"), "-1", str(tmp / "b.png"), "-o", str(out), "-s", f"{t:.4f}", "-m", str(model), *modes],
-            capture_output=True, text=True, timeout=CALL_TIMEOUT_SECONDS,
+            capture_output=True, text=True, timeout=CALL_TIMEOUT_SECONDS, env=binary_env(),
         )
     except subprocess.TimeoutExpired as exc:
         raise RifeUnavailable(f"{binary.name} made no frame in {CALL_TIMEOUT_SECONDS} s and was stopped "
