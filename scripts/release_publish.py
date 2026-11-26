@@ -13,7 +13,8 @@ same where the two commits hold the same tree, and only then is the package take
 The page ends with the gates block (`scripts/release_gates.py`): the commit the Linux lane passed at,
 and whether the GPU lane ran RIFE's tests — passed at the tag's tree (`--gpu-lane <run.json>`), not
 run because no file it reaches changed since it last passed or since the release before, or not run
-for the reason `--gpu-unmeasured` gives, the files it reaches that changed named. A reached GPU lane
+for the reason `--gpu-unmeasured` gives, the files it reaches that changed named. A run that ran a test alone
+past a chunk's budget writes it as run, with its time, for the reason `--gpu-over-budget` gives. A reached GPU lane
 with neither a passing run nor a reason stops the release before anything is asked of `gh` beyond
 whether the page exists.
 
@@ -174,6 +175,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="publish though files the GPU lane reaches changed and it did not pass at the tag's "
                              "tree, or though the run given left tests by name; the page says what was not run, "
                              "and why")
+    parser.add_argument("--gpu-over-budget", default=None, metavar="WHY",
+                        help="publish though the run given ran a test alone past a chunk's budget "
+                             "(`cuda_lane.py test --alone`); the page says it ran, its time, and why")
     parser.add_argument("--gh", default="gh", help="the gh executable to call")
     args = parser.parse_args(argv)
     if args.prebuilt is not None and (args.skip_build or args.dist_dir is not None):
@@ -202,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
             built, lane_commit = take_prebuilt(args.prebuilt.resolve(), args.tag, cwd=checkout)
         gpu_run = release_gates.read_run(args.gpu_lane) if args.gpu_lane is not None else None
         gates = release_gates.record(checkout, args.tag, gpu_run=gpu_run, unmeasured=args.gpu_unmeasured,
+                                     over_budget=args.gpu_over_budget,
                                      lane_commit=lane_commit)
         page["body"] = f"{page['body']}\n\n### Gates\n\n" + "\n".join(gates)
         if args.skip_build:

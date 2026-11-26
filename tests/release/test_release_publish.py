@@ -361,3 +361,26 @@ def test_a_gpu_lane_run_that_left_tests_needs_the_reason_and_writes_both(harness
     assert proc.returncode == 0, proc.stderr
     assert (f"- {GPU}: passed at {tag}, the tree of v1.3.0, on a GPU, its driver, 71 of 73 tests; NOT RUN (one RIFE "
             f"call takes 3 s on the host): {', '.join(left)}") in harness.body()
+
+
+def test_a_gpu_lane_run_with_a_test_run_alone_past_a_chunk_s_budget_writes_it_as_run_with_the_reason(harness: Harness,
+                                                                                                    tmp_path: Path) -> None:
+    """A test that runs whole only past a chunk's budget ran alone (`cuda_lane.py test --alone`): the page writes it as
+    run, with its time and the binary's calls, for the reason given (--gpu-over-budget); with no reason the release
+    stops. A test run alone within the budget is counted and not named."""
+    _reach_the_gpu_lane(harness)
+    tag = _tagged(harness)
+    over = "tests/video/test_rife_cuts.py::test_a_public_cut[knight-walk-ncnn]"
+    within = "tests/video/test_rife_cuts.py::test_a_public_cut[pip-jump-ncnn]"
+    run = _gpu_run(tmp_path, tag, ran=109, tests=109, left=[], budget=540, within_budget=108, over_budget=1,
+                   alone=[{"test": over, "seconds": 641.2, "limit": 900, "rife_calls": 512},
+                          {"test": within, "seconds": 452.0, "limit": 540, "rife_calls": 330}])
+    proc = harness.run("--gpu-lane", str(run))
+    assert proc.returncode == 2 and f"the GPU lane run at {tag} ran 1 test alone past a chunk's 540 s budget" in proc.stderr
+    assert not harness.published()
+    proc = harness.run("--gpu-lane", str(run), "--gpu-over-budget", "each binary call spends 1.3 s starting")
+    assert proc.returncode == 0, proc.stderr
+    assert (f"- {GPU}: passed at {tag}, the tree of v1.3.0, on a GPU, its driver, 109 of 109 tests: 108 within a chunk's "
+            f"540 s budget, 1 run alone past it (each binary call spends 1.3 s starting): {over} in 641.2 s, 512 RIFE "
+            "calls") in harness.body()
+    assert within not in harness.body()

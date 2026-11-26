@@ -10,6 +10,7 @@ machine:
     .venv/bin/python scripts/cuda_lane.py pack --requirements <list> --out <empty dir> [--host-spec <eco>:<name>@<version> ...]
     <python> -I <pack>/cuda_lane.py prepare --pack <pack> [--wheels <dir>] [--rife-zip <zip>] [--tools <dir>]
     <python> -I <pack>/cuda_lane.py test --pack <pack> --chunk K/N [--budget <seconds>] [--leave <test> ...]  # each K
+    <python> -I <pack>/cuda_lane.py test --pack <pack> --alone <test> [--limit <seconds>]  # each test the chunks leave
     <python> -I <pack>/cuda_lane.py verdict --pack <pack> --chunks N
 
 `pack` runs where a checkout of the commit being measured is (no uncommitted changes) and where safedeps is. The list
@@ -43,10 +44,16 @@ installed here (SPRITE_GEN_RIFE) and the torch backend on CUDA, those marked bot
 that runs past its budget (CHUNK_BUDGET seconds unless given) is stopped with every process it started, and fails. Each
 chunk keeps what it ran, read from pytest's own report (--junitxml), and how in chunk-K-of-N.json, red or green, and
 runs once. A test that cannot run within a chunk's budget is left by name (--leave, the same tests for every chunk of
-the split): pytest deselects it and the chunk's record names it. `verdict --chunks N` passes where every chunk 1..N of
-that split passed at the pack's commit on the environment `prepare` made, they left the same tests, and together they
-ran every other test `prepare` collected, each once; it then writes run.json, and only then, naming the tests left. A
-release whose GPU lane run left tests says why on its page (`release_publish.py --gpu-unmeasured`).
+the split): pytest deselects it and the chunk's record names it. A test the chunks left may run alone (`test --alone`,
+its own record, alone-<name>.json), measured up to a limit (--limit, the budget unless given; past it the run is
+stopped and fails): one that runs whole only past the budget is run, not dropped, and its time is kept as measured. The
+budget is one, CHUNK_BUDGET; a limit is how far a run alone is measured, not a budget. `verdict --chunks N` passes where every chunk 1..N of that split passed at the pack's
+commit on the environment `prepare` made, they left the same tests, each test run alone was one they left and passed
+there too, and together they ran every other test `prepare` collected, each once; it then writes run.json, and only
+then, counting the tests run within the budget and those run alone past it, apart, and naming the tests run alone
+(their time, and the binary's calls where the test recorded them as the pytest property rife_calls) and the tests
+left, not run. A release whose GPU lane run left tests, or ran one alone past a chunk's budget,
+says why on its page (`release_publish.py --gpu-unmeasured`, `--gpu-over-budget`).
 
 The engine finds only what this run installed: no SPRITE_GEN_* from outside but the run's own (SPRITE_GEN_RIFE, the
 model, the device), an empty user data directory (LOCALAPPDATA on Windows, XDG_DATA_HOME elsewhere; a new one each
@@ -291,6 +298,18 @@ def junit_ran(xml: str | bytes) -> dict[str, list]:
     return ran
 
 
+def junit_props(xml: str | bytes) -> dict[str, dict[str, str]]:
+    """The properties each test recorded (`request.node.user_properties`), as pytest's --junitxml report writes them:
+    junit_key -> {name: value}; a test that recorded none is not named."""
+    root = ElementTree.fromstring(xml.encode("utf-8") if isinstance(xml, str) else xml)
+    props: dict[str, dict[str, str]] = {}
+    for case in root.iter("testcase"):
+        found = {p.get("name"): p.get("value") for p in case.iter("property")}
+        if found:
+            props[f"{case.get('classname')}::{case.get('name')}"] = found
+    return props
+
+
 def run_bounded(argv: list[str], budget: float, env: dict[str, str] | None,
                 cwd: Path | None) -> tuple[int | None, str, bool]:
     """argv with its output (stderr into stdout): (exit, output, False), or (None, output so far, True) where it ran
@@ -518,6 +537,18 @@ def chunk_args(k: int, n: int, leave: list[str], collected: list[str]) -> list[s
     return ["-m", GATE_TESTS, "--shard", f"{k}/{n}", *[arg for nodeid in leave for arg in ("--deselect", nodeid)]]
 
 
+def alone_args(nodeid: str, collected: list[str]) -> list[str]:
+    """pytest's arguments for one test `prepare` collected, run alone; any other test stops the lane."""
+    if nodeid not in collected:
+        _fail(f"--alone {nodeid} is not a test prepare collected")
+    return ["-m", GATE_TESTS, nodeid]
+
+
+def alone_name(nodeid: str) -> str:
+    """The name a test run alone keeps its record and log under: alone-<this>.json."""
+    return hashlib.sha256(nodeid.encode("utf-8")).hexdigest()[:16]
+
+
 def run_chunk(where: Path, chunk: str, budget: float, leave: list[str] | None = None) -> int:
     """Chunk K/N of the tests `prepare` collected, in the pack at where: 0 where every test of it passed."""
     where = where.resolve()
@@ -526,36 +557,57 @@ def run_chunk(where: Path, chunk: str, budget: float, leave: list[str] | None = 
     prepared = _prepared(where, sha)
     leave = list(leave or [])
     args = chunk_args(k, n, leave, prepared.get("collected", []))
-    out = where / f"chunk-{k}-of-{n}.json"
+    return _run_tests(where, sha, prepared, f"chunk-{k}-of-{n}", f"chunk {k}/{n}", args, budget,
+                      {"chunk": f"{k}/{n}", "left": leave})
+
+
+def run_alone(where: Path, nodeid: str, limit: float) -> int:
+    """One test `prepare` collected, run alone in the pack at where, its time measured up to limit: 0 where it passed."""
+    where = where.resolve()
+    sha, _ = verify_pack(where)
+    prepared = _prepared(where, sha)
+    args = alone_args(nodeid, prepared.get("collected", []))
+    return _run_tests(where, sha, prepared, f"alone-{alone_name(nodeid)}", f"{nodeid} alone", args, limit,
+                      {"alone": nodeid}, held_as="limit")
+
+
+def _run_tests(where: Path, sha: str, prepared: dict, name: str, said_as: str, args: list[str], budget: float,
+               fields: dict, held_as: str = "budget") -> int:
+    """pytest with args on the environment `prepare` made, stopped past budget seconds (a chunk's budget, or the limit
+    a test run alone is measured to: held_as names which), kept red or green in <name>.json."""
+    out = where / f"{name}.json"
     if out.exists():
         _fail(f"{out.name} is there already; run each chunk once")
     lay = _layout(where)
     tmp, logs = lay["tmp"], lay["logs"]
     env = _with_rife(_environment(where, prepared.get("tools_dir")), where, prepared["binary"], prepared["model"],
-                     tempfile.mkdtemp(prefix=f"data-{k}-of-{n}-", dir=tmp))
+                     tempfile.mkdtemp(prefix=f"data-{name}-", dir=tmp))
     env["PYTHONUNBUFFERED"] = "1"  # what a chunk stopped at its budget printed is kept, the test it stopped in too
-    junit = logs / f"chunk-{k}-of-{n}.xml"
-    rec: dict = {"commit": sha, "gates": GATE_TESTS, "chunk": f"{k}/{n}",
-                 "prepared_sha256": sha256_of(where / "prepared.json"), "budget": budget,
+    junit = logs / f"{name}.xml"
+    rec: dict = {"commit": sha, "gates": GATE_TESTS, **fields,
+                 "prepared_sha256": sha256_of(where / "prepared.json"), held_as: budget,
                  "started": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                 "log": f"logs/chunk-{k}-of-{n}.log", "left": leave, "passed": False}
-    print(f"cuda_lane: commit {sha}, chunk {k}/{n} of the tests marked {GATE_TESTS}, budget {budget} s", flush=True)
+                 "log": f"logs/{name}.log", "passed": False}
+    print(f"cuda_lane: commit {sha}, {said_as} of the tests marked {GATE_TESTS}, {held_as} {budget} s", flush=True)
     t0 = time.monotonic()
     code, said, over = run_bounded(
         [str(lay["py"]), "-m", "pytest", "-v", "-rs", "-p", "no:cacheprovider", "--full", "--basetemp",
-         tempfile.mkdtemp(prefix=f"pytest-{k}-of-{n}-", dir=tmp), *args, "--junitxml", str(junit)], budget, env,
+         tempfile.mkdtemp(prefix=f"pytest-{name}-", dir=tmp), *args, "--junitxml", str(junit)], budget, env,
         lay["src"])
     rec["seconds"] = round(time.monotonic() - t0, 1)
-    (logs / f"chunk-{k}-of-{n}.log").write_text(said, encoding="utf-8")
+    (logs / f"{name}.log").write_text(said, encoding="utf-8")
     print(said.rstrip(), flush=True)
     rec["exit"] = code
     rec["ran"] = junit_ran(junit.read_bytes()) if junit.is_file() else {}
+    props = junit_props(junit.read_bytes()) if junit.is_file() else {}
+    if props:
+        rec["props"] = props
     rec["skipped"] = ([line for line in said.splitlines() if line.startswith("SKIPPED")] or
                       [key for key, (outcome, _) in rec["ran"].items() if outcome == "skipped"])
     rec["pytest_summary"] = ([line for line in said.splitlines() if line.strip()] or [""])[-1]
     failed = [key for key, (outcome, _) in rec["ran"].items() if outcome in ("failed", "error")]
     if over:
-        rec["why"] = f"the chunk ran past its budget of {budget} s and was stopped"
+        rec["why"] = f"{said_as} ran past its {held_as} of {budget} s and was stopped"
         begun = [line.split(" ", 1)[0] for line in said.splitlines() if "::" in line and line.startswith("tests/")]
         done_ = {line.split(" ", 1)[0] for line in said.splitlines()
                  if re.search(r" (PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b", line) and line.startswith("tests/")}
@@ -570,9 +622,9 @@ def run_chunk(where: Path, chunk: str, budget: float, leave: list[str] | None = 
         rec["passed"] = True
     out.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
     if rec["passed"]:
-        print(f"cuda_lane: chunk {k}/{n} passed at {sha}, {len(rec['ran'])} tests in {rec['seconds']} s", flush=True)
+        print(f"cuda_lane: {said_as} passed at {sha}, {len(rec['ran'])} tests in {rec['seconds']} s", flush=True)
         return 0
-    print(f"cuda_lane: chunk {k}/{n}: {rec['why']} at {sha}", file=sys.stderr, flush=True)
+    print(f"cuda_lane: {said_as}: {rec['why']} at {sha}", file=sys.stderr, flush=True)
     return 1
 
 
@@ -606,6 +658,8 @@ def verdict(where: Path, n: int) -> int:
             _fail(f"chunk {k}/{n} skipped {'; '.join(rec['skipped'])}")
         if not rec.get("passed"):
             _fail(f"chunk {k}/{n} did not pass ({rec.get('why')})")
+        if (rec.get("budget") or 0) > CHUNK_BUDGET:
+            _fail(f"chunk {k}/{n} was held to {rec.get('budget'):g} s, past the lane's one budget of {CHUNK_BUDGET} s")
         if left is None:
             left = sorted(rec.get("left", []))
         elif sorted(rec.get("left", [])) != left:
@@ -617,8 +671,34 @@ def verdict(where: Path, n: int) -> int:
                 _fail(f"{key} ran but was not collected by prepare")
             seen[key] = f"{k}/{n}"
         chunks.append({"chunk": rec["chunk"], "tests": len(rec.get("ran", {})), "seconds": rec.get("seconds"),
-                       "started": rec.get("started"), "pytest_summary": rec.get("pytest_summary")})
-    left_keys = {junit_key(nodeid): nodeid for nodeid in left or []}
+                       "budget": rec.get("budget"), "started": rec.get("started"),
+                       "pytest_summary": rec.get("pytest_summary")})
+    alone = []
+    for path in sorted(where.glob("alone-*.json")):
+        rec = json.loads(path.read_text(encoding="utf-8"))
+        nodeid = str(rec.get("alone"))
+        if path.name != f"alone-{alone_name(nodeid)}.json":
+            _fail(f"{path.name} holds the run of {nodeid} alone")
+        if rec.get("commit") != sha:
+            _fail(f"{nodeid} alone is for {rec.get('commit')}, not {sha}")
+        if rec.get("prepared_sha256") != digest:
+            _fail(f"{nodeid} alone ran on another environment than this pack's prepare made")
+        if rec.get("skipped"):
+            _fail(f"{nodeid} alone skipped {'; '.join(rec['skipped'])}")
+        if not rec.get("passed"):
+            _fail(f"{nodeid} alone did not pass ({rec.get('why')})")
+        if nodeid not in (left or []):
+            _fail(f"{nodeid} ran alone but the chunks of the split did not leave it")
+        key = junit_key(nodeid)
+        if set(rec.get("ran", {})) != {key}:
+            _fail(f"the run of {nodeid} alone ran other tests: {', '.join(rec.get('ran', {})) or 'none'}")
+        seen[key] = "alone"
+        calls = (rec.get("props") or {}).get(key, {}).get("rife_calls")
+        alone.append({"test": nodeid, "seconds": rec.get("seconds"), "limit": rec.get("limit"),
+                      **({"rife_calls": int(calls)} if calls is not None else {})})
+    ran_alone = {a["test"] for a in alone}
+    left = [nodeid for nodeid in left or [] if nodeid not in ran_alone]
+    left_keys = {junit_key(nodeid): nodeid for nodeid in left}
     for key, nodeid in left_keys.items():
         if key not in collected:
             _fail(f"{nodeid} was left but prepare did not collect it")
@@ -627,19 +707,26 @@ def verdict(where: Path, n: int) -> int:
     missing = [nodeid for key, nodeid in collected.items() if key not in seen and key not in left_keys]
     if missing:
         _fail(f"no chunk ran {', '.join(missing)}")
+    budget = CHUNK_BUDGET
+    over = [a for a in alone if (a["seconds"] or 0) > budget]
     run = {"commit": sha, "gates": GATE_TESTS, "passed": True, "tests": len(collected), "ran": len(seen),
-           "left": left or [], "chunks": chunks,
+           "left": left, "budget": budget, "within_budget": len(seen) - len(over), "over_budget": len(over),
+           "chunks": chunks, "alone": alone,
            "prepared_sha256": digest,
            **{key: prepared[key] for key in ("python", "gpu", "probe", "pip_freeze", "binary", "model", "tools")
               if key in prepared}}
     (where / "run.json").write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
-    print(f"cuda_lane: the GPU lane ({GATE_TESTS}) passed at {sha}: {len(seen)} of {len(collected)} tests in {n} "
-          f"chunks, {round(sum(c['seconds'] or 0 for c in chunks))} s" +
+    print(f"cuda_lane: the GPU lane ({GATE_TESTS}) passed at {sha}: {len(seen)} of {len(collected)} tests, "
+          f"{len(seen) - len(over)} within the {budget:g} s budget ({n} chunks, {round(sum(c['seconds'] or 0 for c in chunks))} s"
+          f"{', and alone' if len(alone) > len(over) else ''}), {len(over)} run alone past it" +
+          "".join(f"; {a['test']} alone in {a['seconds']} s" for a in alone) +
           (f"; left, not run: {', '.join(left)}" if left else ""), flush=True)
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def parse(argv: list[str] | None = None) -> argparse.Namespace:
+    """The command line: for `test`, a chunk is held to the budget (--budget, CHUNK_BUDGET unless given) and a test run
+    alone to a limit (--limit, the budget unless given), which is how far its time is measured, not a budget."""
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawTextHelpFormatter)
     sub = ap.add_subparsers(dest="command", required=True)
     p = sub.add_parser("pack", help="check every package with safedeps, then pack HEAD for the host")
@@ -657,17 +744,40 @@ def main(argv: list[str] | None = None) -> int:
                    "downloaded (the engine checks its pinned SHA-256 either way)")
     r.add_argument("--tools", type=Path, help="a directory holding ffmpeg and img2webp (libwebp 1.5 or newer), put first "
                    "on PATH for prepare and every chunk, so the host's own PATH need not change")
-    t = sub.add_parser("test", help="on the NVIDIA host: run chunk K of N of the RIFE tests")
+    t = sub.add_parser("test", help="on the NVIDIA host: run chunk K of N of the RIFE tests, or one of them alone")
     t.add_argument("--pack", type=Path, required=True)
-    t.add_argument("--chunk", required=True, metavar="K/N", help="share K of N (pytest --shard K/N)")
-    t.add_argument("--budget", type=float, default=CHUNK_BUDGET,
-                   help=f"seconds the chunk's tests may take before they are stopped (default {CHUNK_BUDGET})")
+    which = t.add_mutually_exclusive_group(required=True)
+    which.add_argument("--chunk", metavar="K/N", help="share K of N (pytest --shard K/N)")
+    t.add_argument("--budget", type=float, default=None,
+                   help=f"with --chunk: seconds the chunk's tests may take before they are stopped, and fail "
+                        f"(default {CHUNK_BUDGET}, the budget)")
+    which.add_argument("--alone", metavar="NODEID",
+                       help="run this one test alone (one the chunks leave), in its own record")
+    t.add_argument("--limit", type=float, default=None,
+                   help="with --alone: how far the test's time is measured before it is stopped, and fails (default "
+                        "the budget); its time past the budget is kept and the release page names it")
     t.add_argument("--leave", action="append", default=[], metavar="NODEID",
                    help="a test that cannot run within a chunk's budget, deselected by name; give the same to every chunk")
     v = sub.add_parser("verdict", help="run.json, where every chunk of one split passed and together ran every test")
     v.add_argument("--pack", type=Path, required=True)
     v.add_argument("--chunks", type=int, required=True, metavar="N", help="the split's N")
     a = ap.parse_args(argv)
+    if a.command == "test":
+        if a.alone:
+            if a.leave:
+                t.error("--leave names what the chunks leave; a test run alone leaves nothing")
+            if a.budget is not None:
+                t.error("--budget holds a chunk; a test run alone is measured to --limit")
+            a.limit = CHUNK_BUDGET if a.limit is None else a.limit
+        else:
+            if a.limit is not None:
+                t.error("--limit measures a test run alone; a chunk is held to --budget")
+            a.budget = CHUNK_BUDGET if a.budget is None else a.budget
+    return a
+
+
+def main(argv: list[str] | None = None) -> int:
+    a = parse(argv)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if a.command == "pack":
         pack(Path(__file__).resolve().parents[1], a.requirements, a.out, a.host_spec, [a.safedeps])
@@ -675,6 +785,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.command == "prepare":
         return prepare(a.pack, a.wheels, a.rife_zip, a.tools)
     if a.command == "test":
+        if a.alone:
+            return run_alone(a.pack, a.alone, a.limit)
         return run_chunk(a.pack, a.chunk, a.budget, a.leave)
     return verdict(a.pack, a.chunks)
 

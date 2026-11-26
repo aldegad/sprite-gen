@@ -398,6 +398,8 @@ SPOILED_CHUNKS = {
     "a chunk of another environment": (lambda w: _chunk(w, 2, 2, prepared_sha256="0" * 64),
                                        "chunk 2/2 ran on another environment than this pack's prepare made"),
     "a chunk of another split": (lambda w: _chunk(w, 2, 2, chunk="2/3"), "chunk-2-of-2.json holds chunk 2/3"),
+    "a chunk held to a budget past the lane's": (lambda w: _chunk(w, 2, 2, budget=900),
+                                                 "chunk 2/2 was held to 900 s, past the lane's one budget of 540 s"),
     "a test no chunk ran": (lambda w: _chunk(w, 2, 2, ran={cuda_lane.junit_key(COLLECTED[1]): ["passed", 1.0]}),
                             f"no chunk ran {COLLECTED[2]}"),
     "a test two chunks ran": (lambda w: _chunk(w, 2, 2, ran={cuda_lane.junit_key(i): ["passed", 1.0]
@@ -494,3 +496,94 @@ def test_prepare_refuses_a_host_without_the_tools_the_tests_write_video_with_bef
     with pytest.raises(SystemExit):
         cuda_lane.tool_check({"PATH": str(tools)})
     assert why in capsys.readouterr().err
+
+
+def _alone(where: Path, nodeid: str, seconds: float = 612.0, **change) -> Path:
+    """A passing record of `nodeid` run alone (`cuda_lane.py test --alone`) at SHA on the pack's environment."""
+    path = where / f"alone-{cuda_lane.alone_name(nodeid)}.json"
+    rec = {"commit": SHA, "gates": cuda_lane.GATE_TESTS, "alone": nodeid,
+           "prepared_sha256": cuda_lane.sha256_of(where / "prepared.json"), "seconds": seconds, "limit": 900,
+           "ran": {cuda_lane.junit_key(nodeid): ["passed", seconds - 20]}, "skipped": [], "passed": True,
+           "props": {cuda_lane.junit_key(nodeid): {"rife_calls": "512"}}, "pytest_summary": "1 passed"}
+    rec.update(change)
+    path.write_text(json.dumps(rec), encoding="utf-8")
+    return path
+
+
+def test_a_test_run_alone_is_one_prepare_collected_and_is_handed_to_pytest_by_its_id(capsys):
+    assert cuda_lane.alone_args(COLLECTED[0], COLLECTED) == ["-m", cuda_lane.GATE_TESTS, COLLECTED[0]]
+    assert cuda_lane.alone_name(COLLECTED[0]) != cuda_lane.alone_name(COLLECTED[1])
+    with pytest.raises(SystemExit):
+        cuda_lane.alone_args("tests/video/test_rife.py::test_none", COLLECTED)
+    assert "--alone tests/video/test_rife.py::test_none is not a test prepare collected" in capsys.readouterr().err
+
+
+def test_a_chunk_keeps_the_properties_its_tests_recorded():
+    xml = JUNIT.replace('time="181.5" />', 'time="181.5"><properties><property name="rife_calls" value="512" />'
+                                          '</properties></testcase>')
+    assert cuda_lane.junit_props(xml) == {
+        cuda_lane.junit_key("tests/video/test_rife_cuts.py::test_the_public_cut[pip-run-ncnn]"): {"rife_calls": "512"}}
+    assert cuda_lane.junit_props(JUNIT) == {}
+
+
+def test_the_verdict_counts_a_test_the_split_left_and_that_ran_alone_as_run(tmp_path):
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:2]})
+    for k in (1, 2):
+        _chunk(where, k, 2, left=[COLLECTED[2]])
+    _alone(where, COLLECTED[2])
+    assert cuda_lane.verdict(where, 2) == 0
+    rec = json.loads((where / "run.json").read_text(encoding="utf-8"))
+    assert (rec["passed"], rec["left"], rec["ran"], rec["tests"], rec["budget"]) == (True, [], 3, 3, 540)
+    assert (rec["within_budget"], rec["over_budget"]) == (2, 1)
+    assert rec["alone"] == [{"test": COLLECTED[2], "seconds": 612.0, "limit": 900, "rife_calls": 512}]
+
+
+def test_a_test_run_alone_within_the_budget_counts_within_it(tmp_path):
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:2]})
+    for k in (1, 2):
+        _chunk(where, k, 2, left=[COLLECTED[2]])
+    _alone(where, COLLECTED[2], seconds=452.0, limit=540)
+    assert cuda_lane.verdict(where, 2) == 0
+    rec = json.loads((where / "run.json").read_text(encoding="utf-8"))
+    assert (rec["within_budget"], rec["over_budget"], rec["ran"]) == (3, 0, 3)
+
+
+def test_a_test_is_run_alone_within_a_limit_of_its_own_and_a_chunk_within_the_one_budget():
+    """The budget is one, CHUNK_BUDGET, a chunk's; a test run alone is measured to a limit, which is not a budget: it
+    defaults to the budget, and one past it is red as a chunk past its budget is."""
+    alone = cuda_lane.parse(["test", "--pack", "p", "--alone", COLLECTED[0], "--limit", "900"])
+    assert (alone.alone, alone.limit, alone.budget) == (COLLECTED[0], 900.0, None)
+    assert cuda_lane.parse(["test", "--pack", "p", "--alone", COLLECTED[0]]).limit == cuda_lane.CHUNK_BUDGET
+    chunk = cuda_lane.parse(["test", "--pack", "p", "--chunk", "1/2"])
+    assert (chunk.budget, chunk.limit) == (cuda_lane.CHUNK_BUDGET, None)
+    for wrong in (["--chunk", "1/2", "--limit", "900"], ["--alone", COLLECTED[0], "--budget", "900"],
+                  ["--alone", COLLECTED[0], "--leave", COLLECTED[1]]):
+        with pytest.raises(SystemExit):
+            cuda_lane.parse(["test", "--pack", "p", *wrong])
+
+
+ALONE_SPOILED = {
+    "a run alone that failed": (lambda w: _alone(w, COLLECTED[2], passed=False, why="a RIFE test failed"),
+                                f"{COLLECTED[2]} alone did not pass (a RIFE test failed)"),
+    "a run alone the split did not leave": (lambda w: _alone(w, COLLECTED[1]),
+                                            f"{COLLECTED[1]} ran alone but the chunks of the split did not leave it"),
+    "a run alone at another commit": (lambda w: _alone(w, COLLECTED[2], commit="b" * 40),
+                                      f"{COLLECTED[2]} alone is for {'b' * 40}"),
+    "a run alone on another environment": (lambda w: _alone(w, COLLECTED[2], prepared_sha256="0" * 64),
+                                           f"{COLLECTED[2]} alone ran on another environment"),
+    "a run alone of other tests": (lambda w: _alone(w, COLLECTED[2], ran={cuda_lane.junit_key(COLLECTED[0]): ["passed", 1]}),
+                                   f"the run of {COLLECTED[2]} alone ran other tests"),
+}
+
+
+@pytest.mark.parametrize("spoiled", ALONE_SPOILED.values(), ids=ALONE_SPOILED.keys())
+def test_the_verdict_refuses_a_run_alone_that_does_not_stand_for_its_test(tmp_path, capsys, spoiled):
+    spoil, why = spoiled
+    where = _prepared(tmp_path, {1: COLLECTED[:1], 2: COLLECTED[1:2]})
+    for k in (1, 2):
+        _chunk(where, k, 2, left=[COLLECTED[2]])
+    spoil(where)
+    with pytest.raises(SystemExit):
+        cuda_lane.verdict(where, 2)
+    assert why in capsys.readouterr().err
+    assert not (where / "run.json").exists()

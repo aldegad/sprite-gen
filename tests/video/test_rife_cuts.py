@@ -120,8 +120,10 @@ def test_a_public_cut_takes_as_many_poses_with_the_default_model_as_measured(req
     cells PyTorch took from the published weights padded to 128."""
     rec = _record()[cut]
     frames = _frames(cut)
-    interpolate = _reading_drags(_interpolator(request, backend, monkeypatch), frames, cut, backend)
+    made = _interpolator(request, backend, monkeypatch)
+    interpolate = _reading_drags(made, frames, cut, backend)
     out, record = held_fill.upsample(frames, interpolate, ring=rec["ring"], fps=24, out_fps=60)
+    request.node.user_properties.append(("rife_calls", made.calls))  # what the GPU lane's record of the test says
     reading = held_fill.reading(held_fill.same_steps(out))
     low, high = BOUNDS[cut]
     assert reading["cells"] == rec["measured"]["rife-v4.25"]["cells"]
@@ -203,5 +205,6 @@ def test_the_default_model_s_frame_dragged_off_still_feet_is_caught_wherever_rif
         for kind, kept in read.items():
             if kept is not None and kept < held_fill.STILL_KEPT_MIN:
                 caught[kind].add(key)
+    request.node.user_properties.append(("rife_calls", interpolate.calls))  # what the GPU lane's record of the test says
     for kind, wanted in rec["drag"]["caught_by_rife_v4_6"].items():
         assert not set(wanted) - caught[kind], (kind, sorted(set(wanted) - caught[kind]))
