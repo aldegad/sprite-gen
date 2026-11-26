@@ -108,10 +108,10 @@ flag. Rerun the set with the answer's flag; finished rows and items are reused.
 
 A codex generation is a `codex exec` session that calls `image_gen` once. `image_gen`
 draws the picture; the session's own model (the driver) only makes that one call. So
-the driver is a light model at low reasoning effort, named on every call
+the driver is a light model at medium reasoning effort, named on every call
 (`--model` and `-c model_reasoning_effort=…`) over the login's own `config.toml`,
 whose model and effort are what an interactive codex session runs on and may be the
-heaviest there is. The built-in driver is `gpt-6.1-terra` at `low` effort
+heaviest there is. The built-in driver is `gpt-6.1-terra` at `medium` effort
 (`codex_provider.DRIVER_MODEL`, `DRIVER_EFFORT`), the one place it is written.
 
 Which driver runs, in this order:
@@ -153,6 +153,25 @@ tokens are mostly codex's own instructions, nearly the same on each model, so wh
 call costs of a plan's usage is mostly the driver's rate, which is why a light model
 is named. `gpt-6.1-terra` is built in: as fast as the heavier model, while
 `gpt-6-luna` was about a tenth slower and read more uncached input.
+
+It runs at `medium`, not `low`: on three other requests (a character, a scene, one
+with `--ref`) drawn twice each, `gpt-6.1-terra` at `low` passed `image_gen` the
+prompt without its last line in 2 of 6 calls, and `gpt-6.2-astra` at `xhigh`
+rewrote a line of it in 4 of 6. `gpt-6.1-terra` at `medium`, on the same three once
+each: `image_gen` called 3 of 3, the prompt passed as written 3 of 3, 34.7 / 35.5 /
+36.0 seconds, no reasoning tokens.
+
+The driver is told to pass `image_gen` the caller's prompt as written, its last line
+included: the prompt sits between two markers, and the text between them is what to
+pass (`codex_provider._build_prompt`); sprite-gen does not change the prompt itself.
+What it passed is read from the session record, the `prompt` of the `image_gen` call
+in the code the driver ran, and the report keeps the verdict in `extra.prompt_passed`:
+`verdict` `same` or `differs` (the surrounding whitespace aside) with `asked_chars`
+and `passed_chars`, or `unknown` with a `reason` when the record holds no such call
+or its prompt is not one string written out. Other text is said on stderr in one line
+(`[gen] codex: the driver passed image_gen other text than the prompt (N characters
+asked, M passed); the image is kept`); the call does not fail, and the image, drawn
+from what was passed, is kept.
 
 The model codex reads a picture on is not the driver. The facing check
 (`inspect_facing`) and a logo's text check (`inspect_image`) read on `gpt-6-sol` at
