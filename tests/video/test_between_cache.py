@@ -279,10 +279,14 @@ def test_the_same_rife_makes_its_frame_again_once_a_file_it_runs_from_changed(tm
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="a shebang script cannot stand in for rife-ncnn-vulkan.exe")
-def test_a_frame_made_while_its_rife_changed_is_handed_on_and_not_kept(tmp_path):
+def test_a_frame_made_while_its_rife_changed_is_handed_on_and_not_kept(tmp_path, monkeypatch):
     """The model written over while a frame is made, between RIFE's two runs: the frame is what RIFE made — its colour
     from one model, its coverage from the other — and it is handed on as made, as a pass with no directory hands it
-    on, but not kept, as no key names what made it. The pass after makes the frame again."""
+    on, but not kept, as no key names what made it. The pass after makes the frame again. "Between" is an order only
+    runs started one at a time give: started together (`rife.runs_at_once`), which run reads the model before it is
+    written over changes from one pass to the next, while each run is still the command it was alone
+    (tests/video/test_rife_runs_at_once.py)."""
+    monkeypatch.setattr(rife, "RUNS_AT_ONCE", 1)
     binary, weights = _picking_rife(tmp_path)
     made = rife.Rife(binary, weights.parent)
     a, b = _dot(40, (255, 0, 0)), _dot(72, (0, 0, 255))
