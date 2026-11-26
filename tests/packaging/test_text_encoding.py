@@ -99,7 +99,7 @@ PACKAGE = ROOT / "sprite_gen"
 # call; any other change to it does not).
 RIFE_CALL = ('subprocess.run( [str(binary), "-0", str(tmp / "a.png"), "-1", str(tmp / "b.png"), "-o", str(out), '
              '"-s", f"{t:.4f}", "-m", str(model), *modes], capture_output=True, text=True, '
-             'timeout=CALL_TIMEOUT_SECONDS, )')
+             'timeout=CALL_TIMEOUT_SECONDS, env=binary_env(), )')
 NVIDIA_SMI_CALL = ('subprocess.run([smi, "--query-gpu=driver_version", "--format=csv,noheader"], capture_output=True, '
                    'text=True, timeout=30)')
 HEAL_CALL = "subprocess.run(cmd, capture_output=True, text=True, env=env)"
