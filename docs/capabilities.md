@@ -27,10 +27,13 @@ against every verb's printed options.
 | `version` | the installed package's version (`unknown` from a bare checkout) |
 | `providers` | per provider (`openai`, `xai`, `anthropic`): `base_url_env` (the variable that moves its calls), `base_url` (the documented address used when it is unset), `key_env` (its API key); docs/gen.md, [provider addresses](gen.md#provider-addresses) |
 | `logins_env` | `SPRITE_GEN_LOGINS`, where `off` turns subscription logins off ([subscription logins off](gen.md#subscription-logins-off)) |
+| `codex_driver` | the model and effort a codex generation runs on with no `--model`: `model`, `effort`, `model_from` and `effort_from` (`saved` or `built-in`), and `built_in` (`model`, `effort`); [the codex driver model](gen.md#the-codex-driver-model) |
 | `verbs` | every verb, in the order of `sprite-gen --help`'s table |
 
 The document says what the engine can do, not how this process is set up: a variable
-set in the environment does not change it.
+set in the environment does not change it. The one exception is `codex_driver`, read
+from the saved settings so a tool can show the driver in effect; a settings file that
+cannot be read stops the command.
 
 Each verb:
 

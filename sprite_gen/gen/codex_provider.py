@@ -55,6 +55,78 @@ LOGIN_PROBE_TIMEOUT_SECONDS = 15
 BINARY = "codex"
 LOGIN_HINT = "`codex login` signs your ChatGPT subscription in"
 
+# The driver: the model the `codex exec` session of a generation runs on (docs/gen.md, "The codex driver model").
+# image_gen draws the picture; the session only calls it once, so it runs on a light model at low reasoning effort,
+# named on every call over the login's own config.toml. Measured on three requests (plain, --ref, --transparent):
+# gpt-6.1-terra at low called image_gen once in each and took as long as a heavier model. `--model` names another
+# model for one call; `sprite-gen defaults save --codex-model / --codex-effort` saves one. The order: `--model`,
+# the saved one, these. A driver that cannot run fails naming it: nothing falls back to codex's own default.
+DRIVER_MODEL = "gpt-6.1-terra"
+DRIVER_EFFORT = "low"
+# The efforts the saved setting takes, the levels codex lists for its models (`low` is on every one). The value is
+# written into `-c model_reasoning_effort="…"`, so only these are taken.
+DRIVER_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+# Their keys among the settings every profile shares (`workflow.preferences`, `general`; `workflow.catalog`).
+DRIVER_MODEL_SETTING = "codex_model"
+DRIVER_EFFORT_SETTING = "codex_effort"
+DRIVER_FROM_FLAG, DRIVER_FROM_SAVED, DRIVER_FROM_BUILT_IN = "--model", "saved", "built-in"
+# What a model id may be: it is passed to `codex exec --model` as one argument.
+DRIVER_MODEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
+
+
+@dataclass(frozen=True)
+class Driver:
+    """The model and effort a generation's `codex exec` runs on, and where each came from (`DRIVER_FROM_*`)."""
+
+    model: str
+    effort: str
+    model_from: str
+    effort_from: str
+
+    def report(self) -> dict[str, str]:
+        return {"model": self.model, "effort": self.effort, "model_from": self.model_from,
+                "effort_from": self.effort_from}
+
+    def words(self) -> str:
+        return f"driver model {self.model!r} ({self.model_from}) at {self.effort} effort ({self.effort_from})"
+
+
+def driver_from(general: dict, model: str | None = None) -> Driver:
+    """The driver for `model` (`--model`, None when not given) over the saved settings `general`: `--model`, then the
+    saved one, then DRIVER_MODEL; the effort is the saved one, then DRIVER_EFFORT."""
+    saved_model, saved_effort = general.get(DRIVER_MODEL_SETTING), general.get(DRIVER_EFFORT_SETTING)
+    if model:
+        chosen, model_from = model, DRIVER_FROM_FLAG
+    elif saved_model:
+        chosen, model_from = saved_model, DRIVER_FROM_SAVED
+    else:
+        chosen, model_from = DRIVER_MODEL, DRIVER_FROM_BUILT_IN
+    if saved_effort:
+        return Driver(chosen, saved_effort, model_from, DRIVER_FROM_SAVED)
+    return Driver(chosen, DRIVER_EFFORT, model_from, DRIVER_FROM_BUILT_IN)
+
+
+def resolve_driver(model: str | None = None) -> Driver:
+    """`driver_from` over the saved settings. A settings file that cannot be read stops the call: a driver saved in
+    it is not replaced by the built-in one in silence."""
+    # The settings owner imports this package (its catalog names these keys), so it is imported here.
+    from sprite_gen.workflow.preferences import read_settings
+
+    try:
+        general = read_settings()["general"]
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"codex driver: cannot read the saved one: {exc}") from exc
+    return driver_from(general, model)
+
+
+def driver_refused(said: list[str], model: str) -> str | None:
+    """The first of what codex said (`_extract_stream_errors`) that refuses the driver model by name, or None. codex
+    0.169.1 says "The '<model>' model is not supported when using Codex with a ChatGPT account." and exits 1."""
+    quoted = (f"'{model}'", f"`{model}`", f'"{model}"')
+    return next((message for message in said if any(name in message for name in quoted)
+                 and any(words in message.lower() for words in ("not supported", "does not exist", "not found"))),
+                None)
+
 
 # What `codex exec` says when the codex usage of the account behind it is used up (2026-10-16, codex-rs source at
 # rust-v0.160.1 and rust-v0.153.4). codex classes three of its errors as its usage limit
@@ -356,25 +428,38 @@ def _build_prompt(user_prompt: str, *, native_alpha: bool = False) -> str:
     )
 
 
-def _no_image_records_message(rollout: Path, codex_home: Path) -> str:
+def _no_image_records_message(rollout: Path, codex_home: Path, driver: Driver) -> str:
     """State an empty rollout as a capability failure, not a list of guesses.
 
-    Built-in image generation is a capability of the account behind the active
-    Codex state root. When the session is not offered the tool, it cannot be
-    talked into it: not by the prompt, not by the model, and not by a config
-    toggle. The only remedy is to run against a state root whose account provides
-    it, so that is what this message says.
+    Built-in image generation is offered by the account behind the active Codex
+    state root, on the models that carry it. When the session is not offered the
+    tool, it cannot be talked into it: not by the prompt and not by a config
+    toggle. The remedies are a driver model that carries it and a state root whose
+    account provides it, so that is what this message says.
     """
     return (
         "codex-gen: the built-in image_gen tool never ran in this codex session — "
         f"zero {' / '.join((*_RESULT_TYPES, _IMAGE_GEN_EXTENSION_KIND))} records in {rollout}\n"
         f"  the prompt carries the official {_SKILL_TRIGGER} skill trigger, so the tool was "
         "not offered to the session rather than merely not chosen.\n"
-        f"  the account behind this Codex state root ({codex_home}) does not provide the "
-        "built-in image_gen capability.\n"
-        "  select a Codex state root whose account provides it (`codex login status`), or "
-        "generate with another provider. A config feature toggle does not grant it."
+        f"  the session ran on the {driver.words()}; a model that does not carry image_gen "
+        f"ends the same way: name another with --model (the built-in driver is {DRIVER_MODEL!r}).\n"
+        f"  on a driver that carries it, the account behind this Codex state root ({codex_home}) "
+        "does not provide the built-in image_gen capability: select a Codex state root whose "
+        "account provides it (`codex login status`), or generate with another provider. A config "
+        "feature toggle does not grant it."
     )
+
+
+def _driver_refused_message(driver: Driver, said: str) -> str:
+    to_change = {DRIVER_FROM_FLAG: "drop --model or name another",
+                 DRIVER_FROM_SAVED: "save another with `sprite-gen defaults save --codex-model MODEL`, clear the "
+                                    "saved one with `sprite-gen defaults clear --setting codex_model`, or name one "
+                                    "with --model",
+                 DRIVER_FROM_BUILT_IN: "name one with --model, or save one with `sprite-gen defaults save "
+                                       "--codex-model MODEL`"}[driver.model_from]
+    return (f"codex-gen: codex did not run the {driver.words()}: {said}\n"
+            f"  nothing fell back to codex's own default model; {to_change}.")
 
 
 class CodexProvider:
@@ -387,8 +472,8 @@ class CodexProvider:
         self.keep_session = keep_session
 
     def inspect_facing(self, path: Path, workdir: Path) -> tuple[str, dict]:
-        from .facing_vision import codex_inspect
-        return codex_inspect(path, workdir)
+        from .facing_vision import CODEX_READ_EFFORT, CODEX_READ_MODEL, codex_inspect
+        return codex_inspect(path, workdir, model=CODEX_READ_MODEL, effort=CODEX_READ_EFFORT)
 
     def inspect_image(self, path: Path, workdir: Path, prompt: str, *, label: str = "vision check") -> tuple[str, dict]:
         from .facing_vision import CODEX_READ_EFFORT, CODEX_READ_MODEL, codex_inspect
@@ -416,6 +501,7 @@ class CodexProvider:
         login = codex_login()
         if login.source is None:
             raise SystemExit(f"codex-gen: {login.reason}; {LOGIN_HINT}")
+        driver = resolve_driver(request.model)
         announce_codex_billing(login)
         sessions_root = codex_home / "sessions"
         preexisting_rollouts = set(_rollout_files(sessions_root))
@@ -437,9 +523,12 @@ class CodexProvider:
             str(gen_dir),
             "-C",
             str(workdir),
+            # before the image list, which takes every path after it
+            "--model",
+            driver.model,
+            "-c",
+            f'model_reasoning_effort="{driver.effort}"',
         ]
-        if request.model:
-            cmd += ["--model", request.model]
         for ref in request.refs:
             cmd += ["-i", str(Path(ref).expanduser().resolve())]
         cmd += ["-", ]
@@ -466,9 +555,12 @@ class CodexProvider:
             stream_errors = _extract_stream_errors(stdout)
             tail = (completed.stderr or "").strip().splitlines()[-20:]
             detail = "\n".join(stream_errors + tail).strip() or "(no error detail on stdout/stderr)"
-            message = f"codex-gen: codex exec exited {completed.returncode}\n{detail}"
+            message = f"codex-gen: codex exec exited {completed.returncode} on the {driver.words()}\n{detail}"
             said = usage_limit(stream_errors)
-            raise CodexUsageLimit(message, said) if said else SystemExit(message)
+            if said:
+                raise CodexUsageLimit(message, said)
+            refused = driver_refused(stream_errors, driver.model)
+            raise SystemExit(_driver_refused_message(driver, refused) if refused else message)
 
         session_id = _parse_session_id(stdout)
         if not session_id:
@@ -483,7 +575,7 @@ class CodexProvider:
         )
         results = _collect_inline_results(rollout)
         if not results:
-            raise SystemExit(_no_image_records_message(rollout, codex_home))
+            raise SystemExit(_no_image_records_message(rollout, codex_home, driver))
         final = results[-1]
         _decode_png(final.result, request.raw)
 
@@ -496,10 +588,11 @@ class CodexProvider:
         return ProviderRun(
             provider=self.name,
             elapsed_seconds=elapsed,
-            model=request.model,
+            model=driver.model,
             session_id=session_id,
             extra={
                 "auth_source": login.source,
+                "driver": driver.report(),
                 "inline_results": len(results),
                 "rollout_cleaned": not self.keep_session,
                 # codex's own claim about the output; the orchestrator measures

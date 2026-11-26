@@ -48,7 +48,7 @@ When the profile has no saved defaults, finish then offers: "이번 선택을 �
 
 ## One settings owner
 
-`preferences.json` in `~/.config/sprite-gen/` owns the `sprite` and `image` profiles separately, and beside them the `general` settings every profile shares: so far `codex_unavailable` (`ask`, `grok` or `openai`; what a call that names no provider does when codex cannot run — the rule is [gen](gen.md#when-codex-cannot-run--ask-or-what-you-chose)'s). `SPRITE_GEN_CONFIG_DIR` explicitly relocates that directory. A profile may be partial, for example saving only motion and curation when an existing base skipped image-provider selection. Missing fields prompt when needed. This storage is independent of a project or run; a run's numeric recipe and curation edits keep their existing owners.
+`preferences.json` in `~/.config/sprite-gen/` owns the `sprite` and `image` profiles separately, and beside them the `general` settings every profile shares: `codex_unavailable` (`ask`, `grok` or `openai`; what a call that names no provider does when codex cannot run — the rule is [gen](gen.md#when-codex-cannot-run--ask-or-what-you-chose)'s), and `codex_model` and `codex_effort` (the model and effort a codex generation runs on — [gen](gen.md#the-codex-driver-model)'s). `defaults show`, `save` and `clear` also print `codex_driver`, the driver in effect with these settings. `SPRITE_GEN_CONFIG_DIR` explicitly relocates that directory. A profile may be partial, for example saving only motion and curation when an existing base skipped image-provider selection. Missing fields prompt when needed. This storage is independent of a project or run; a run's numeric recipe and curation edits keep their existing owners.
 
 ```bash
 $SPRITE_GEN_ROOT/.venv/bin/sprite-gen defaults show
@@ -58,6 +58,10 @@ $SPRITE_GEN_ROOT/.venv/bin/sprite-gen defaults save --kind sprite \
 $SPRITE_GEN_ROOT/.venv/bin/sprite-gen defaults clear --kind image \
   --expected-revision REVISION_FROM_SHOW
 $SPRITE_GEN_ROOT/.venv/bin/sprite-gen defaults save --codex-unavailable ask \
+  --expected-revision REVISION_FROM_SHOW
+$SPRITE_GEN_ROOT/.venv/bin/sprite-gen defaults save --codex-model gpt-6.1-terra --codex-effort low \
+  --expected-revision REVISION_FROM_SHOW
+$SPRITE_GEN_ROOT/.venv/bin/sprite-gen defaults clear --setting codex_model \
   --expected-revision REVISION_FROM_SHOW
 ```
 

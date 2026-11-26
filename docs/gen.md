@@ -1,6 +1,6 @@
 # `sprite-gen gen` — provider-backed image generation (engine SSoT)
 
-> Owns: `sprite-gen gen` / `gen-set`: providers, default resolution and what a default codex that cannot run turns into, transparency strategy per provider, the billed knobs (`--quality`, `--resolution`), where every direct provider call goes (`SPRITE_GEN_<PROVIDER>_BASE_URL`) and turning subscription logins off (`SPRITE_GEN_LOGINS`), when a refused provider request is sent again (every direct provider call), row usage · Index: [docs/README.md](README.md)
+> Owns: `sprite-gen gen` / `gen-set`: providers, default resolution and what a default codex that cannot run turns into, the model a codex generation runs on (its driver) and the model codex reads a picture on, transparency strategy per provider, the billed knobs (`--quality`, `--resolution`), where every direct provider call goes (`SPRITE_GEN_<PROVIDER>_BASE_URL`) and turning subscription logins off (`SPRITE_GEN_LOGINS`), when a refused provider request is sent again (every direct provider call), row usage · Index: [docs/README.md](README.md)
 
 Generation is a first-class engine module (`sprite_gen/gen/`). One call = a prompt (+ optional reference images) → one **verified** PNG on
 disk, with an optional transparent output whose strategy is decided per provider
@@ -103,6 +103,65 @@ question and exit 75 once the rows under way have ended (a `gen-set` starts no
 further stage; a `video-set` lets its other items finish, as they need no codex), its
 report and `table.md` keep the question (`asked`), and the line names the set's own
 flag. Rerun the set with the answer's flag; finished rows and items are reused.
+
+## The codex driver model
+
+A codex generation is a `codex exec` session that calls `image_gen` once. `image_gen`
+draws the picture; the session's own model (the driver) only makes that one call. So
+the driver is a light model at low reasoning effort, named on every call
+(`--model` and `-c model_reasoning_effort=…`) over the login's own `config.toml`,
+whose model and effort are what an interactive codex session runs on and may be the
+heaviest there is. The built-in driver is `gpt-6.1-terra` at `low` effort
+(`codex_provider.DRIVER_MODEL`, `DRIVER_EFFORT`), the one place it is written.
+
+Which driver runs, in this order:
+
+1. `--model ID` on the call (`gen`, `gen-set`, `logo`, and so every path through the
+   codex provider) — the model; the effort stays the saved or built-in one.
+2. The saved one: `sprite-gen defaults save --codex-model MODEL` and
+   `--codex-effort low|medium|high|xhigh|max` (in the
+   [one settings file](user-workflow.md#one-settings-owner)); `sprite-gen defaults
+   clear --setting codex_model` (or `codex_effort`) removes it.
+3. The built-in one.
+
+The report keeps what ran: `model` and `extra.driver` (`model`, `effort`,
+`model_from` and `effort_from`: `--model`, `saved` or `built-in`). `sprite-gen
+defaults show` prints `codex_driver`, the driver a call with no `--model` runs on
+with the saved settings, and `sprite-gen capabilities` prints the same beside the
+built-in one (docs/capabilities.md), so another tool can read and show it.
+
+A driver codex does not run fails naming it. codex refuses a model the login does
+not serve (`The '<model>' model is not supported when using Codex with a ChatGPT
+account.`, exit 1); the call ends with that line, the driver, where it came from
+and how to change it, and nothing runs again on codex's own default model or on
+another provider. A driver that runs but is not offered `image_gen` ends with the
+empty-session failure, which names the driver too. A settings file that cannot be
+read stops a codex generation before codex runs, as a saved driver in it is not
+replaced by the built-in one in silence.
+
+Measured on codex 0.169.1 with three requests (a plain image, one with `--ref`, one
+with `--transparent`), each driver drawing all three:
+
+| Driver | `image_gen` called | Seconds (plain / ref / transparent) | Input tokens, 3 calls (uncached) | Output | Reasoning |
+|---|---|---|---|---|---|
+| `gpt-6-astra`, `medium` (a login's config) | 3 of 3 | 23.6 / 29.8 / 38.3 | 158,111 (46,367) | 416 | 0 |
+| `gpt-6.1-terra`, `low` | 3 of 3 | 24.1 / 27.4 / 38.7 | 178,779 (56,795) | 307 | 0 |
+| `gpt-6-luna`, `low` | 3 of 3 | 26.3 / 34.3 / 41.3 | 154,348 (63,852) | 529 | 0 |
+
+Each light driver called `image_gen` once per request and every image was made. The
+tokens are mostly codex's own instructions, nearly the same on each model, so what a
+call costs of a plan's usage is mostly the driver's rate, which is why a light model
+is named. `gpt-6.1-terra` is built in: as fast as the heavier model, while
+`gpt-6-luna` was about a tenth slower and read more uncached input.
+
+The model codex reads a picture on is not the driver. The facing check
+(`inspect_facing`) and a logo's text check (`inspect_image`) read on `gpt-6-sol` at
+`high` effort (`facing_vision.CODEX_READ_MODEL`, `CODEX_READ_EFFORT`; docs/logo.md),
+named on the call. A read is the verdict a gate acts on (a wrong facing mirrors the
+sprite); the driver only calls a tool. On four side views of known facing (two
+drawn, two mirrored) both `gpt-6-sol` at `high` and `gpt-6.1-terra` at `low` read
+all four right; four plain side views do not show a light model reads a diagonal or
+a back view as well, so reads stay on the read model.
 
 ## Direct Grok calls and authentication
 
@@ -221,7 +280,7 @@ sprite-gen gen \
   [--aspect-ratio 1:1]    # grok and openai, e.g. 1:1 or 16:9; grok single-ref edits inherit the source ratio; openai maps it to a gpt-image size
   [--quality low|medium|high|xhigh|max|auto] # billed effort; openai takes the range, grok takes auto/low/medium
   [--resolution 1k|1.5k|2k]  # grok output-size tier, priced with --quality
-  [--model ID] \
+  [--model ID]            # grok and openai: the image model; codex: the driver model for this call (below)
   [--layout-guide [figure]]  # attach the one-slot figure layout guide (bare flag)
   [--direction side|front|back|front_diagonal|back_diagonal [--facing right|left]] # add the engine's view sentence
   [--handed "the black smartwatch=left wrist" ...]  # with --direction: where an item on one side is in that view
