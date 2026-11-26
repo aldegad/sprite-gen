@@ -50,6 +50,32 @@ def answer_of(loop_dir, regions, **kw):
                       strip_sha256=hashlib.sha256(data).hexdigest())
 
 
+def swayed(loop_dir, regions, **kw):
+    """`sway.sway_loop` on the loop as asked, and the answer it moved the loop by (`sway.solve`'s, kept as it returned):
+    what `answer_of` asked the same way comes to on the loop's strip as cut, or on a strip of the same figure (the same
+    request on the same bytes), solved once and not again."""
+    answers = []
+    solve = sway.solve
+
+    def kept(*args, **kwargs):
+        answers.append(solve(*args, **kwargs))
+        return answers[-1]
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(sway, 'solve', kept)
+        record = sway.sway_loop(loop_dir, regions, **kw)
+    (answer,) = answers
+    return record, answer
+
+
+@pytest.fixture(scope='module')
+def banded_once(tmp_path_factory):
+    """The inspection's figure swayed with --band auto, made once for the module (three cases read that same sway): its
+    loop directory, which no case writes, and its record."""
+    loop_dir = strip_dir(tmp_path_factory.mktemp('banded')/'loop')
+    return loop_dir, sway.sway_loop(loop_dir, [CHEST], band='auto')
+
+
 def auto(reach):
     """The margin and band `auto` reads off a move's reach: the reach and a pixel, and the narrowest band it does not fold."""
     return math.ceil(reach)+1, math.ceil(reach*math.pi/2)+1
@@ -126,11 +152,10 @@ def test_without_a_band_the_record_and_the_strip_are_as_ever(tmp_path):
     assert 'band' not in record and 'carry_basis' not in record
 
 
-def test_auto_reads_the_margin_and_the_band_off_the_moves_reach(tmp_path):
-    loop_dir = strip_dir(tmp_path/'loop')
-    reach = answer_of(loop_dir, [CHEST]).reach_requested  # the move at the gain asked, before any band
+def test_auto_reads_the_margin_and_the_band_off_the_moves_reach(banded_once, tmp_path):
+    reach = answer_of(strip_dir(tmp_path/'loop'), [CHEST]).reach_requested  # the move at the gain asked, before any band
     margin, band = auto(reach)
-    record = sway.sway_loop(loop_dir, [CHEST], band='auto')
+    _, record = banded_once  # the same figure swayed with --band auto
     # The fold rule reads the band: auto is the narrowest the move at the gain asked does not fold.
     assert [r['radius_px'] for r in record['fold']['regions']] == [band] and not record['fold']['lowered']
     assert record['fold']['ratio'] == round(reach*math.pi/(2*band), 3) < 1
@@ -156,7 +181,7 @@ def test_the_fold_rule_reads_a_narrow_band_and_lowers_or_refuses_as_ever(tmp_pat
     assert lowered['reach_px']*math.pi/(2*band) < 1 and lowered['fold']['regions'][0]['radius_px'] == band
 
 
-def test_a_band_narrower_across_its_ring_than_its_px_lowers_or_refuses_by_its_steepest_slope(tmp_path):
+def test_a_band_narrower_across_its_ring_than_its_px_lowers_or_refuses_by_its_steepest_slope(banded_once, tmp_path):
     # Flat to a tenth of the radius above the centre, the band above runs out from a flat ellipse of another shape than
     # the outer one: across its ring it is narrower than its px, and the move at the gain asked, which the band's px
     # does not fold, folds the picture there.
@@ -172,13 +197,13 @@ def test_a_band_narrower_across_its_ring_than_its_px_lowers_or_refuses_by_its_st
     # The largest gain in steps of 0.01 whose steepest slope leaves every pixel some of its area.
     assert steepest['ratio'] == round(lowered['gain']*steepest['per_gain'], 3) < 1 <= round((lowered['gain']+0.01)*steepest['per_gain'], 2)
     assert min(lowered['band']['ledger']['jacobian_min']) > 0
-    whole = sway.sway_loop(strip_dir(tmp_path/'whole'), [CHEST], band='auto')
+    _, whole = banded_once  # the same figure swayed with --band auto, no --band-up
     assert whole['gain'] == 2.5 and whole['band']['regions'][0]['steepest']['ratio'] < 1
 
 
-def test_band_up_stops_the_flat_part_over_the_centre_and_runs_its_band_past_the_top(tmp_path):
-    whole_dir, up_dir = strip_dir(tmp_path/'whole'), strip_dir(tmp_path/'up')
-    whole = sway.sway_loop(whole_dir, [CHEST], band='auto')
+def test_band_up_stops_the_flat_part_over_the_centre_and_runs_its_band_past_the_top(banded_once, tmp_path):
+    whole_dir, whole = banded_once  # the same figure swayed with --band auto
+    up_dir = strip_dir(tmp_path/'up')
     up = sway.sway_loop(up_dir, [CHEST], band='auto', band_up=(0.4, 'auto'))
     moved_whole, moved_up = cells(whole_dir/'walk.strip.png'), cells(up_dir/'walk.strip.png')
     # Below the centre the two are one move; above it the upper part gives.
@@ -244,8 +269,7 @@ def test_the_flat_part_moves_whole_and_past_the_band_no_byte_changes(tmp_path):
     loop_dir, meta = cut(tmp_path, [frame(k) for k in range(N)])
     left, top = meta['source_rect'][:2]
     region = (TORSO[0]-left, TORSO[1]-top, 16.0, 20.0)
-    answer = answer_of(loop_dir, [region], band='auto', band_margin=2, on_fold='lower')
-    record = sway.sway_loop(loop_dir, [region], band='auto', band_margin=2, on_fold='lower')
+    record, answer = swayed(loop_dir, [region], band='auto', band_margin=2, on_fold='lower')  # the answer it moved the loop by
     strip, w = rgba(loop_dir/'walk.strip.png'), meta['w']
     _, band = auto(answer.reach_requested)
     flat, bands = (region[2]+2, region[3]+2, region[3]+2), (band, band, band)
@@ -310,6 +334,7 @@ def test_a_region_is_carried_by_its_own_pixels_where_the_part_slides_on_the_body
         assert abs(entry['px'][0]-(sx+ex-ex0)) < 0.1 and abs(entry['px'][1]-(sy+ey-ey0)) < 0.1, (k, entry)
 
 
+@pytest.mark.slow
 def test_cloth_with_no_pattern_is_carried_by_the_lay_and_a_warning_names_each_cell(tmp_path, capsys):
     loop_dir = strip_dir(tmp_path/'loop', sliding(lambda k: (0, 0), part=TORSO_COLOUR))
     lays = [[round(float(v), 4)+0.0 for v in answer_of(loop_dir, [CHEST]).carry(k)] for k in range(N)]
@@ -396,6 +421,7 @@ def test_the_ledger_counts_each_cell_and_a_warning_says_what_is_in_it(tmp_path, 
 
 # ---------------------------------------------------------------- the same band on every path
 
+@pytest.mark.slow
 def test_the_frames_are_banded_as_the_strip_cut_from_them(tmp_path):
     src = frames_dir(tmp_path/'cycle-frames')
     frames = [frame(k) for k in range(N)]
@@ -420,6 +446,7 @@ def test_the_frames_are_banded_as_the_strip_cut_from_them(tmp_path):
     assert {k: v for k, v in record['band'].items() if k != 'ledger'} == {k: v for k, v in strip_record['band'].items() if k != 'ledger'}
 
 
+@pytest.mark.slow
 def test_a_turned_loop_banded_on_the_cuts_reading_is_the_cuts_banded_sway_cell_for_cell(origin, tmp_path):
     o, read_on, followed = origin
     banded = sway.sway_loop(shutil.copytree(o, tmp_path/'banded'), [chest(o)], on_fold='lower', band='auto')

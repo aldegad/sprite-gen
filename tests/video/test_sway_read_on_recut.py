@@ -24,6 +24,7 @@ so on a release without it the same input fails on what comes out.
 """
 import json
 import math
+import shutil
 
 import numpy as np
 import pytest
@@ -36,6 +37,7 @@ from tests.video.test_follow_read_on import (Blend, H, N, PATCH, SHIFT, W, align
 from tests.video.test_gait_fallback import walking_away
 from tests.video.test_ghost_given_way import _cut as ghost_cut, _keyed as ghost_keyed
 from tests.video.test_loop_repair import _no_rife
+from tests.video.test_sway_band import swayed
 from tests.video.test_sway_region import mask_png
 
 CLIP = 2*N  # the clip's frames: the runner's stride twice
@@ -287,8 +289,26 @@ def aligned_cut(tmp_path, made=(), read_made=()):
     return b, a, aligned(b, tmp_path/'turned'), (cx, cy, 17.0, 17.0), mask_png(tmp_path/'mask.png', patch)
 
 
-def test_on_a_loop_aligned_from_the_cut_again_the_pair_is_carried_through_the_alignment(tmp_path):
-    b, a, loop_dir, region, mask = aligned_cut(tmp_path)
+@pytest.fixture(scope='module')
+def aligned_once(tmp_path_factory):
+    """`aligned_cut` with no cell made between, made once for the module: five cases start from it (`aligned_copy`)."""
+    root = tmp_path_factory.mktemp('aligned')
+    *_, region, _ = aligned_cut(root)
+    return root, region
+
+
+def aligned_copy(aligned_once, tmp_path):
+    """`aligned_cut(tmp_path)` with no cell made between, as the module made it once, copied into this case's tmp_path so
+    nothing a case writes reaches another: the cut, the cut the regions were read on, the aligned loop, the region and its
+    mask."""
+    root, region = aligned_once
+    shutil.copytree(root, tmp_path, dirs_exist_ok=True)
+    return tmp_path/'b', tmp_path/'a', tmp_path/'turned', region, tmp_path/'mask.png'
+
+
+@pytest.mark.slow
+def test_on_a_loop_aligned_from_the_cut_again_the_pair_is_carried_through_the_alignment(aligned_once, tmp_path):
+    b, a, loop_dir, region, mask = aligned_copy(aligned_once, tmp_path)
     record = meta_of(loop_dir)['cycle_align']
     assert record['origin']['strip_sha256'] == sha(b/'run.strip.png') and record['turned_by'] != 0
     # The cut's own record, kept beside its frames as filmed as it was, byte for byte, bound to the strip the origin names;
@@ -331,11 +351,13 @@ ALIGNED = {  # what the alignment kept of the cut's record, or what its record s
                                      r"\d+ of \d+ px differ")}
 
 
-@pytest.mark.parametrize('case', list(ALIGNED))
-def test_a_loop_aligned_from_a_cut_whose_kept_record_does_not_give_the_frame_as_filmed_is_refused_no_match(tmp_path, case):
+@pytest.mark.parametrize('case', [pytest.param(case, marks=pytest.mark.slow) if case == 'made' else case for case in ALIGNED])
+def test_a_loop_aligned_from_a_cut_whose_kept_record_does_not_give_the_frame_as_filmed_is_refused_no_match(aligned_once, tmp_path, case):
     change, said = ALIGNED[case]
-    b, a, loop_dir, region, mask = aligned_cut(tmp_path, made=(3,) if case == 'made' else (),
-                                               read_made=(0,) if case.startswith('read-made') else ())
+    made, read_made = ((3,) if case == 'made' else ()), ((0,) if case.startswith('read-made') else ())
+    # With no cell made between, the alignment the module made once, copied.
+    b, a, loop_dir, region, mask = (aligned_cut(tmp_path, made=made, read_made=read_made) if made or read_made
+                                    else aligned_copy(aligned_once, tmp_path))
     said = said.replace('<origin>', meta_of(loop_dir)['cycle_align']['origin']['strip_sha256'])
     if change is not None:
         change(loop_dir/loop.CYCLE_SOURCE_DIR/'run.strip.json', a)
@@ -343,12 +365,13 @@ def test_a_loop_aligned_from_a_cut_whose_kept_record_does_not_give_the_frame_as_
             region)
 
 
-def test_a_loop_aligned_to_more_cells_says_where_each_is_from_and_read_on_cut_reads_the_cut_s_own_record(tmp_path):
+@pytest.mark.slow
+def test_a_loop_aligned_to_more_cells_says_where_each_is_from_and_read_on_cut_reads_the_cut_s_own_record(aligned_once, tmp_path):
     # video-cycle-align stretching the cut (13 cells to 17, as a set stretches a loop of 18 to its 24). The aligned strip is
     # another strip of another length: its record holds no record of the cut's cells to go stale; the alignment's record
     # gives each of its cells, the frame of the cut it is or the two it is made between, and the cut's own record is kept
     # as it was beside the frames as filmed, 13 cells, for --read-on-cut to read.
-    b, a, _, region, mask = aligned_cut(tmp_path)
+    b, a, _, region, mask = aligned_copy(aligned_once, tmp_path)
     kw = dict(region_mask=mask, read_on=sha(a/'run.strip.png'), read_on_cut=a/'run.strip.png', **KW)
     made = aligned(b, tmp_path/'made', length=17, between='rife', interpolate=Blend())
     meta, cells = meta_of(made), cells_of(made)
@@ -393,12 +416,13 @@ def test_two_cuts_at_anchor_body_pair_the_frame_where_each_ramp_moved_it(tmp_pat
     assert ma['source_rect'][0] - mb['source_rect'][0] == 6 and ma['source_rect'][1] == mb['source_rect'][1]
     assert mb[CR]['cells'][3]['anchor_move_px'] == [-6, 0] and ma[CR]['cells'][0]['anchor_move_px'] == [0, 0]
     there = patch_in(b, 3)  # frame 4's patch where the second cut drew it
-    region, kw, answer = read_on_cut(a, b)
+    region, kw = read_on(a)
+    # and the answer it moved the loop by: `read_on_cut`'s, the same request on b's strip as cut
+    record, answer = swayed(b, [region], **kw)
     pair = answer.read_on
     assert (pair['relation'], pair['source_frame'], pair['cut_cell'], pair['base_cell']) == ('recut', 4, 3, 3)
     assert pair['shift_px'] == [0, 0] and pair['drift_px'] == [0.0, 0.0]
     assert there.sum() == patch_in(a, 0).sum() > 100 and np.array_equal(answer.mask.worn[0], there)
-    record = sway.sway_loop(b, [region], **kw)
     assert (record['read_on']['relation'], record['read_on']['shift_px']) == ('recut', [0, 0])
 
 
@@ -418,6 +442,7 @@ def test_two_cuts_at_anchor_body_whose_ramp_moves_nothing_pair_by_their_crops_al
     assert there.sum() > 100 and np.array_equal(answer.mask.worn[0], there)
 
 
+@pytest.mark.slow
 def test_two_cuts_at_anchor_motion_pair_the_frame_where_each_correction_laid_it(tmp_path):
     # The runner walking 2 px a frame, cut by video-loop at --anchor motion from frame 4 and from frame 1 on its head and
     # torso in each cut's first frame: each correction lays its frame k on a canvas padded for every frame, at the padding

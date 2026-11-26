@@ -28,7 +28,7 @@ from sprite_gen.video import sway
 
 from tests.video.test_follow_inspect import CHEST, HEAD, LEG, N, TORSO, W, H, covered, strip_dir, sway as body_sway
 from tests.video.test_follow_read_on import aligned, cells_of as cut_cells, chest as cut_chest, meta_of, origin, origin_once  # noqa: F401 (fixtures)
-from tests.video.test_sway_band import ramp, slide, sliding, whole_move
+from tests.video.test_sway_band import ramp, slide, sliding, swayed, whole_move
 
 POLICY = 'own-pixels-mask/held-outside/rim-sin2/1'
 PART = (71.0, 76.0, 21.0, 22.0)  # the part in cell 0: round above its centre, straight down its sides below
@@ -118,6 +118,26 @@ def cells_of(loop_dir):
     return [np.ascontiguousarray(strip[:, k*W:(k+1)*W]) for k in range(strip.shape[1]//W)]
 
 
+def part_swayed(root, **kw):
+    """A strip of the part figure swayed with a mask of the part, drawn on cell 0, as asked (`swayed`), in `root`: its loop
+    directory, its record and the answer it moved the loop by."""
+    loop_dir = strip_dir(root/'loop', part_figure)
+    return (loop_dir, *swayed(loop_dir, [PART], region_mask=mask_png(root/'mask.png', part_at(0)), **kw))
+
+
+@pytest.fixture(scope='module')
+def masked_once(tmp_path_factory):
+    """The part figure swayed with a mask of the part as `--region-mask` alone asks (`part_swayed`), made once for the
+    module: four cases read that same sway, none writes its loop."""
+    return part_swayed(tmp_path_factory.mktemp('masked'))
+
+
+@pytest.fixture(scope='module')
+def flush_once(tmp_path_factory):
+    """The same with the mask as drawn, not worn in (`--region-shrink 0`), made once for the module for three cases."""
+    return part_swayed(tmp_path_factory.mktemp('flush'), region_shrink=0)
+
+
 def grow4(mask, px):
     for _ in range(px):
         p = np.pad(mask, 1)
@@ -179,6 +199,7 @@ def held_kept(cells, source, slid=still, lift=still):
 
 # ---------------------------------------------------------------- off, nothing of it
 
+@pytest.mark.slow
 def test_without_a_region_mask_the_sway_is_as_ever(tmp_path):
     for name, kw, args in (('plain', {}, []), ('band', {'band': 'auto'}, ['--band', 'auto'])):
         by_cli, by_api = strip_dir(tmp_path/f'{name}-cli', part_figure), strip_dir(tmp_path/f'{name}-api', part_figure)
@@ -191,6 +212,7 @@ def test_without_a_region_mask_the_sway_is_as_ever(tmp_path):
 
 # ---------------------------------------------------------------- what is held, what moves
 
+@pytest.mark.slow
 def test_every_visible_pixel_outside_the_part_keeps_its_bytes_at_any_gain(tmp_path):
     mask = mask_png(tmp_path/'mask.png', part_at(0))
     source = cells_of(strip_dir(tmp_path/'source', part_figure))
@@ -210,12 +232,9 @@ def test_every_visible_pixel_outside_the_part_keeps_its_bytes_at_any_gain(tmp_pa
         assert ledger['held_changed_px_max'] == 0 and min(ledger['held_px']) > 0 and record['gain'] == gain
 
 
-def test_inside_its_rim_the_part_moves_whole_and_it_moves_into_the_air_and_no_further(tmp_path):
-    mask = mask_png(tmp_path/'mask.png', part_at(0))
-    loop_dir = strip_dir(tmp_path/'loop', part_figure)
-    record = sway.sway_loop(loop_dir, [PART], region_mask=mask, region_shrink=0)
+def test_inside_its_rim_the_part_moves_whole_and_it_moves_into_the_air_and_no_further(flush_once, tmp_path):
+    loop_dir, record, answer = flush_once  # the mask as drawn, and the answer the loop was moved by
     source, moved = cells_of(strip_dir(tmp_path/'source', part_figure)), cells_of(loop_dir)
-    answer = answer_of(strip_dir(tmp_path/'again', part_figure), [PART], region_mask=mask, region_shrink=0)
     lx, ly = record['region_mask']['rim']['across_px'], record['region_mask']['rim']['down_px']
     air = math.ceil(answer.reach) + 2
     into_air = whole = 0
@@ -235,10 +254,8 @@ def test_inside_its_rim_the_part_moves_whole_and_it_moves_into_the_air_and_no_fu
     assert record['region_mask']['air_px'] == air and record['region_mask']['soft_px'] == 2
 
 
-def test_the_parts_soft_edge_moves_with_it_and_a_soft_pixel_beside_the_torso_is_held(tmp_path):
-    mask = mask_png(tmp_path/'mask.png', part_at(0))
-    loop_dir = strip_dir(tmp_path/'loop', part_figure)
-    sway.sway_loop(loop_dir, [PART], region_mask=mask, region_shrink=0)
+def test_the_parts_soft_edge_moves_with_it_and_a_soft_pixel_beside_the_torso_is_held(flush_once, tmp_path):
+    loop_dir, _, _ = flush_once  # the mask as drawn
     source, moved = cells_of(strip_dir(tmp_path/'source', part_figure)), cells_of(loop_dir)
     near = edge_moved = 0
     for k in range(N):
@@ -254,6 +271,7 @@ def test_the_parts_soft_edge_moves_with_it_and_a_soft_pixel_beside_the_torso_is_
 
 # ---------------------------------------------------------------- carried by its own pixels
 
+@pytest.mark.slow
 def test_the_mask_is_carried_round_where_the_cell_before_had_it_first_and_the_record_says_so(tmp_path):
     for name, slid in (('slide', slide), ('ramp', ramp)):  # the ramp lies 12 px from the lay, past the search
         figure = lambda k, n=N, s=slid: part_figure(k, n, slide=s)
@@ -316,13 +334,11 @@ def test_where_neither_guess_settles_the_carry_of_the_cell_before_is_kept_never_
 
 # ---------------------------------------------------------------- the rim
 
-@pytest.mark.parametrize('gain', [2.5, 6.0])
-def test_the_rim_is_read_off_the_move_and_the_weight_is_sin2_of_the_distance_to_the_held_pixels(tmp_path, gain):
-    mask = mask_png(tmp_path/'mask.png', part_at(0))
-    loop_dir = strip_dir(tmp_path/'loop', part_figure)
-    record = sway.sway_loop(loop_dir, [PART], gain=gain, region_mask=mask)
+@pytest.mark.parametrize('gain', [2.5, pytest.param(6.0, marks=pytest.mark.slow)])
+def test_the_rim_is_read_off_the_move_and_the_weight_is_sin2_of_the_distance_to_the_held_pixels(masked_once, tmp_path, gain):
+    # At the default gain (2.5, what `read_ask` reads for a gain left out) the sway is the one the module made once.
+    loop_dir, record, answer = masked_once if gain == sway.GAIN_DEFAULT else part_swayed(tmp_path, gain=gain)
     held_kept(cells_of(loop_dir), cells_of(strip_dir(tmp_path/'source', part_figure)))
-    answer = answer_of(strip_dir(tmp_path/'again', part_figure), [PART], gain=gain, region_mask=mask)
     lx, ly, least = rim_for(answer.dx, answer.dy)
     rim = record['region_mask']['rim']
     assert (rim['across_px'], rim['down_px'], rim['least_px']) == (lx, ly, least) and rim['slope'] <= 0.9 == rim['slope_bound']
@@ -341,15 +357,12 @@ def test_the_rim_is_read_off_the_move_and_the_weight_is_sin2_of_the_distance_to_
     assert ledger['renormalised_px_max'] > 0  # reads that touch a held pixel are read from the others
 
 
-def test_a_wider_rim_moves_less_of_the_part_whole(tmp_path):
-    mask = mask_png(tmp_path/'mask.png', part_at(0))
-    narrow_dir, wide_dir = strip_dir(tmp_path/'narrow', part_figure), strip_dir(tmp_path/'wide', part_figure)
-    narrow = sway.sway_loop(narrow_dir, [PART], region_mask=mask)
-    wide = sway.sway_loop(wide_dir, [PART], region_mask=mask, region_rim=1.5)
+@pytest.mark.slow
+def test_a_wider_rim_moves_less_of_the_part_whole(masked_once, tmp_path):
+    narrow_dir, narrow, narrow_answer = masked_once  # the rim as ever, and the answer the loop was moved by
+    wide_dir, wide, wide_answer = part_swayed(tmp_path, region_rim=1.5)
     held_kept(cells_of(wide_dir), cells_of(strip_dir(tmp_path/'source', part_figure)))
     assert any(not np.array_equal(a, b) for a, b in zip(cells_of(narrow_dir), cells_of(wide_dir)))
-    narrow_answer = answer_of(strip_dir(tmp_path/'a', part_figure), [PART], region_mask=mask)
-    wide_answer = answer_of(strip_dir(tmp_path/'b', part_figure), [PART], region_mask=mask, region_rim=1.5)
     lx, ly, least = rim_for(wide_answer.dx, wide_answer.dy, 1.5)
     rim, was = wide['region_mask']['rim'], narrow['region_mask']['rim']
     assert (rim['across_px'], rim['down_px'], rim['least_px']) == (lx, ly, least) and wide['region_mask']['asked']['rim'] == 1.5
@@ -364,12 +377,10 @@ def test_a_wider_rim_moves_less_of_the_part_whole(tmp_path):
     assert whole_wide < whole_narrow
 
 
+@pytest.mark.slow
 def test_band_up_yields_above_the_centre(tmp_path):
-    mask = mask_png(tmp_path/'mask.png', part_at(0))
-    loop_dir = strip_dir(tmp_path/'up', part_figure)
-    record = sway.sway_loop(loop_dir, [PART], on_fold='lower', region_mask=mask, band_up=(0.2, 'auto'))
+    loop_dir, record, answer = part_swayed(tmp_path, on_fold='lower', band_up=(0.2, 'auto'))  # and the answer it moved by
     held_kept(cells_of(loop_dir), cells_of(strip_dir(tmp_path/'source', part_figure)))
-    answer = answer_of(strip_dir(tmp_path/'again', part_figure), [PART], on_fold='lower', region_mask=mask, band_up=(0.2, 'auto'))
     up = answer.mask.up
     lx, ly = record['region_mask']['rim']['across_px'], record['region_mask']['rim']['down_px']
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
@@ -395,6 +406,7 @@ def test_band_up_yields_above_the_centre(tmp_path):
 
 # ---------------------------------------------------------------- the mask as given: worn in, its crease
 
+@pytest.mark.slow
 def test_a_mask_drawn_2_px_large_holds_the_belly_once_it_is_worn_in(tmp_path):
     big = grow4(part_at(0), 2) & (np.asarray(part_figure(0))[..., 3] >= 128)  # past the part into the crease and the torso
     mask = mask_png(tmp_path/'big.png', big)
@@ -415,12 +427,13 @@ def test_a_mask_drawn_2_px_large_holds_the_belly_once_it_is_worn_in(tmp_path):
     assert masked['mask']['px'] == int(shrink4(big, 2).sum())
 
 
-def test_the_crease_ends_the_mask_on_the_darkest_row_under_it_before_it_is_worn_in(tmp_path):
+@pytest.mark.slow
+def test_the_crease_ends_the_mask_on_the_darkest_row_under_it_before_it_is_worn_in(flush_once, tmp_path):
     mask = mask_png(tmp_path/'mask.png', part_at(0))
     source = cells_of(strip_dir(tmp_path/'source', part_figure))
-    creased_dir, plain_dir = strip_dir(tmp_path/'creased', part_figure), strip_dir(tmp_path/'plain', part_figure)
+    creased_dir = strip_dir(tmp_path/'creased', part_figure)
     record = sway.sway_loop(creased_dir, [PART], region_mask=mask, region_shrink=0, region_crease=True)
-    sway.sway_loop(plain_dir, [PART], region_mask=mask, region_shrink=0)
+    plain_dir, _, _ = flush_once  # the same mask as drawn, without the crease
     creased, plain = cells_of(creased_dir), cells_of(plain_dir)
     yy = np.mgrid[0:H, 0:W][0]
     crease_moved = 0
@@ -443,12 +456,10 @@ def test_the_crease_ends_the_mask_on_the_darkest_row_under_it_before_it_is_worn_
 
 # ---------------------------------------------------------------- the same region on every path
 
-def test_a_folder_of_the_masks_carried_moves_as_the_one_mask(tmp_path):
-    mask = mask_png(tmp_path/'mask.png', part_at(0))
-    one_dir, folder_dir = strip_dir(tmp_path/'one', part_figure), strip_dir(tmp_path/'folder', part_figure)
-    one = sway.sway_loop(one_dir, [PART], region_mask=mask)
+def test_a_folder_of_the_masks_carried_moves_as_the_one_mask(masked_once, tmp_path):
+    one_dir, one, answer = masked_once  # the one mask, carried, and the answer the loop was moved by
+    folder_dir = strip_dir(tmp_path/'folder', part_figure)
     held_kept(cells_of(one_dir), cells_of(strip_dir(tmp_path/'source', part_figure)))
-    answer = answer_of(strip_dir(tmp_path/'again', part_figure), [PART], region_mask=mask)
     masks = tmp_path/'masks'
     masks.mkdir()
     for k in range(N):
@@ -462,6 +473,7 @@ def test_a_folder_of_the_masks_carried_moves_as_the_one_mask(tmp_path):
     assert masked['ledger'] == one['region_mask']['ledger'] and masked['rim'] == one['region_mask']['rim']
 
 
+@pytest.mark.slow
 def test_the_frames_are_moved_as_the_strip(tmp_path):
     mask = mask_png(tmp_path/'mask.png', part_at(0))
     frames = tmp_path/'frames'
@@ -479,6 +491,7 @@ def test_the_frames_are_moved_as_the_strip(tmp_path):
     assert json.loads((tmp_path/'out'/'sway.json').read_text())['region_mask'] == strip_record['region_mask']
 
 
+@pytest.mark.slow
 def test_a_turned_loop_moved_on_the_cuts_reading_is_the_cuts_cell_for_cell(origin, tmp_path):
     # The mask is drawn on the cut's first cell, where the regions were read; the turned loop carries it from there.
     o, read_on, _ = origin
@@ -546,7 +559,8 @@ def test_what_a_region_mask_is_refused_for_leaves_the_loop_as_it_was(tmp_path):
 
 # ---------------------------------------------------------------- the ledger
 
-def test_the_ledger_counts_each_cell_and_a_warning_says_what_is_in_it(tmp_path, capsys):
+@pytest.mark.slow
+def test_the_ledger_counts_each_cell_and_a_warning_says_what_is_in_it(masked_once, tmp_path, capsys):
     mask = mask_png(tmp_path/'mask.png', part_at(0))
     loop_dir = strip_dir(tmp_path/'loop', part_figure)
     assert cli.main(['video-sway', '--loop-dir', str(loop_dir), '--region', text(PART), '--region-mask', str(mask)]) == 0
@@ -564,7 +578,7 @@ def test_the_ledger_counts_each_cell_and_a_warning_says_what_is_in_it(tmp_path, 
         assert len(ledger[key]) == N and ledger[f'{key}_max'] == max(ledger[key]), key
     for key in ('move_most', 'pressed_box', 'area_least', 'stretched_box', 'area_most', 'jacobian_min', 'read_held_weight'):
         assert len(ledger[key]) == N, key
-    answer = answer_of(strip_dir(tmp_path/'again', part_figure), [PART], region_mask=mask)
+    answer = masked_once[2]  # the answer to the same ask, the module's sway's
     for k in range(N):  # the most a pixel of the part moves, and where
         offset = math.hypot(answer.dx[k], answer.dy[k])
         most = ledger['move_most'][k]
