@@ -485,6 +485,7 @@ def run_chunk(where: Path, chunk: str, budget: float) -> int:
     tmp, logs = lay["tmp"], lay["logs"]
     env = _with_rife(_environment(where), where, prepared["binary"], prepared["model"],
                      tempfile.mkdtemp(prefix=f"data-{k}-of-{n}-", dir=tmp))
+    env["PYTHONUNBUFFERED"] = "1"  # what a chunk stopped at its budget printed is kept, the test it stopped in too
     junit = logs / f"chunk-{k}-of-{n}.xml"
     rec: dict = {"commit": sha, "gates": GATE_TESTS, "chunk": f"{k}/{n}",
                  "prepared_sha256": sha256_of(where / "prepared.json"), "budget": budget,
@@ -493,7 +494,7 @@ def run_chunk(where: Path, chunk: str, budget: float) -> int:
     print(f"cuda_lane: commit {sha}, chunk {k}/{n} of the tests marked {GATE_TESTS}, budget {budget} s", flush=True)
     t0 = time.monotonic()
     code, said, over = run_bounded(
-        [str(lay["py"]), "-m", "pytest", "-q", "-rs", "-p", "no:cacheprovider", "--full", "--basetemp",
+        [str(lay["py"]), "-m", "pytest", "-v", "-rs", "-p", "no:cacheprovider", "--full", "--basetemp",
          tempfile.mkdtemp(prefix=f"pytest-{k}-of-{n}-", dir=tmp), "-m", GATE_TESTS, "--shard", f"{k}/{n}",
          "--junitxml", str(junit)], budget, env, lay["src"])
     rec["seconds"] = round(time.monotonic() - t0, 1)
@@ -507,6 +508,10 @@ def run_chunk(where: Path, chunk: str, budget: float) -> int:
     failed = [key for key, (outcome, _) in rec["ran"].items() if outcome in ("failed", "error")]
     if over:
         rec["why"] = f"the chunk ran past its budget of {budget} s and was stopped"
+        begun = [line.split(" ", 1)[0] for line in said.splitlines() if "::" in line and line.startswith("tests/")]
+        done_ = {line.split(" ", 1)[0] for line in said.splitlines()
+                 if re.search(r" (PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b", line) and line.startswith("tests/")}
+        rec["stopped_in"] = [nodeid for nodeid in begun if nodeid not in done_]
     elif code == 5 and not rec["ran"]:
         rec["passed"] = True  # no test of the split fell in this share
     elif code != 0 or failed:
