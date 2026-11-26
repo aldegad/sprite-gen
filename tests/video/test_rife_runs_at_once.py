@@ -29,6 +29,7 @@ def _legs(x_near: int, x_far: int) -> Image.Image:
     return Image.fromarray(im, "RGBA")
 
 
+@pytest.mark.slow  # two seconds on a GPU: the fast bundle leaves it to --full and the GPU lane
 @pytest.mark.real_rife
 def test_real_rife_frames_with_runs_started_together_are_the_runs_made_one_after_another(tmp_path):
     """The frame a `Rife` makes, its two runs started together, is byte for byte the frame `rife.between` makes with the
