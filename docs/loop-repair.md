@@ -262,6 +262,30 @@ drawn on twos gives between its drawings — the legs come out as one shape of f
 outline between them or around them. `rife.smear` measures all three, and a set alignment takes
 the nearer source frame where a made frame melted (section 4).
 
+### Runs started together
+
+`rife-ncnn-vulkan` is an external binary called once per run. A made frame is two runs (its colour and its
+coverage), and a read is 2 + 32 runs. On a GPU, process startup accounts for most of each run: on an Apple
+M4 Max a run at 640 x 896 spends about 0.3 s starting the binary while each further frame in the binary's
+folder mode costs about 0.03 s, and on an Apple M1 Max a single call measured 0.33 s at 128 x 128 and 0.37 s
+at 640 x 896.
+
+`rife.Binary` now starts the runs a frame or a read requests up to `rife.RUNS_AT_ONCE = 2` at a time
+(`rife.runs`, `rife.runs_at_once`), capped by the CPUs the process may use. Each run uses its own temporary
+folder and executes the exact command it did when run alone, so its output bytes are unchanged. Two is the
+cap because two runs cover a single frame; starting more would only launch a read's passes sooner, and on a
+GPU-less machine (Mesa's llvmpipe software Vulkan) every run already takes all the cores.
+
+The binary's folder mode is not used. It pairs each image in the folder with the next and spaces their
+fractions evenly along the folder, so any pair after the first does not get the requested fraction to the
+last bit, and the pairs between are generated too. The number of RIFE runs per cut is unchanged, and the
+torch backend (`SPRITE_GEN_RIFE_BACKEND=torch`), which loads once and runs in the process, is unchanged.
+
+`tests/video/test_rife_runs_at_once.py` checks with the real binary that a frame `Rife` makes with two runs
+started together is byte for byte the frame `rife.between` makes one run after another at `t = 0.25` and
+`0.6`. On an Apple M1 Max, wall time spent making the 233 frames (466 RIFE runs) of the public `knight-walk`
+cut at 60 fps dropped from 210 s to 121 s.
+
 ### Where — measured 2026-10-03
 
 One real pair: two frames of a Lite side walk two apart (545 x 544, premultiplied), the frame
