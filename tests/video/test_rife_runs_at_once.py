@@ -6,7 +6,6 @@ tests/video/test_rife.py's."""
 
 from __future__ import annotations
 
-import os
 import stat
 import sys
 from pathlib import Path
@@ -15,6 +14,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from sprite_gen.util import cpus
 from sprite_gen.video import rife
 
 
@@ -65,7 +65,7 @@ def _meeting_binary(root: Path, together: int) -> Path:
 def test_a_frames_two_runs_are_started_together_each_in_a_folder_of_its_own(tmp_path, monkeypatch):
     """The colour run and the coverage run of a frame are under way at once: a binary that answers only once two of it
     have started makes the frame (one after another, the first would wait for a second that never comes)."""
-    monkeypatch.setattr(os, "cpu_count", lambda: 4)  # whatever this machine has: two at once wants two CPUs
+    monkeypatch.setattr(cpus, "usable", lambda: 4)  # whatever this machine has: two at once wants two CPUs
     assert rife.runs_at_once() == rife.RUNS_AT_ONCE == 2
     binary = _meeting_binary(tmp_path, 2)
     interpolate = rife.Rife(binary, tmp_path / rife.MODEL)

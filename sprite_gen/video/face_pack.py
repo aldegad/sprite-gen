@@ -46,6 +46,7 @@ from typing import Any
 from PIL import Image
 
 from sprite_gen._deps import np
+from sprite_gen.util import cpus
 from sprite_gen.util.console import utf8_streams
 from sprite_gen.video import face_layer as fl
 
@@ -194,11 +195,11 @@ def read_request(path: Path) -> tuple[dict[str, Any], fl.Geometry, Image.Image, 
 # --- reading ------------------------------------------------------------------------------------------------------
 
 def each(fn, items, jobs: int) -> list[Any]:
-    """fn over items, in their order, on `jobs` threads (every frame is read on its own)."""
+    """fn over items, in their order, on `jobs` threads, no more than there are items (every frame is read on its own)."""
     items = list(items)
-    if jobs <= 1:
+    if jobs <= 1 or len(items) <= 1:
         return [fn(x) for x in items]
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
+    with ThreadPoolExecutor(max_workers=min(jobs, len(items))) as pool:
         return list(pool.map(fn, items))
 
 
@@ -234,10 +235,11 @@ def _on_ring(task: tuple[str, tuple[int, int, int], tuple[int, int], dict[str, A
 
 
 def _pool_map(fn, tasks: list[Any], work: dict[str, Any], jobs: int) -> list[Any]:
-    if jobs <= 1:
+    """fn over tasks, in their order, on `jobs` processes, no more than there are tasks, each given `work` once."""
+    if jobs <= 1 or len(tasks) <= 1:
         _work_init(work)
         return [fn(t) for t in tasks]
-    with ProcessPoolExecutor(max_workers=jobs, initializer=_work_init, initargs=(work,)) as pool:
+    with ProcessPoolExecutor(max_workers=min(jobs, len(tasks)), initializer=_work_init, initargs=(work,)) as pool:
         return list(pool.map(fn, tasks, chunksize=2))
 
 
@@ -304,7 +306,7 @@ def build(request: Path, out: Path, jobs: int = 0) -> dict[str, Any]:
     if out.exists():
         raise SystemExit(f"{PROG}: --out {out} exists; a pack is written whole into a new folder")
     fps = float(req.get("fps", 24))
-    jobs = jobs or os.cpu_count() or 1
+    jobs = jobs or cpus.usable()
     ref = np.asarray(reference, np.float32)
     clips = [talk, *bodies]
 
@@ -475,7 +477,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--request", type=Path, required=True,
                         help="the face request JSON: the reference and its face, the talking clip, the body clips (docs/face-parts.md)")
     parser.add_argument("--out", type=Path, required=True, help="the pack folder to write (must not exist)")
-    parser.add_argument("--jobs", type=int, default=0, help="threads that read frames at once (default: one a CPU)")
+    parser.add_argument("--jobs", type=int, default=0, help="threads that read frames at once (default: one a CPU this process may use)")
 
 
 def run(**kwargs: object) -> int:

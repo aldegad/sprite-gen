@@ -85,6 +85,7 @@ import PIL
 from PIL import Image, ImageFilter, PngImagePlugin
 
 from sprite_gen._deps import np
+from sprite_gen.util import cpus
 from sprite_gen.video.frames import _components, _near
 
 BINARY = "rife-ncnn-vulkan"
@@ -621,8 +622,9 @@ def padded(x: np.ndarray, multiple: int) -> np.ndarray:
 
 
 def runs_at_once() -> int:
-    """How many runs of the binary a `Binary` starts together (`runs`): RUNS_AT_ONCE, and no more than the CPUs here."""
-    return max(1, min(RUNS_AT_ONCE, os.cpu_count() or 1))
+    """How many runs of the binary a `Binary` starts together (`runs`): RUNS_AT_ONCE, and no more than the CPUs this
+    process may use (`cpus.usable`)."""
+    return max(1, min(RUNS_AT_ONCE, cpus.usable()))
 
 
 def _binary_run(binary: Path, model: Path, tmp: Path, *, at_once: int = 1) -> Run:
