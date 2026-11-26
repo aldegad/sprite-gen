@@ -86,6 +86,7 @@ is found unless it names an encoding.
 from __future__ import annotations
 
 import ast
+import functools
 import itertools
 from pathlib import Path
 
@@ -731,19 +732,23 @@ def locale_calls(source: str) -> list[tuple[int, str, str]]:
     return sorted(scan.found)
 
 
-def package_locale_calls() -> list[tuple[str, int, str, str]]:
-    """Each call of the package that reads or writes text in the locale's encoding: its file, line, call and why."""
-    return [(path.relative_to(ROOT).as_posix(), line, call, why)
-            for path in sorted(PACKAGE.rglob("*.py"))
-            for line, call, why in locale_calls(path.read_text(encoding="utf-8"))]
+@functools.cache
+def package_locale_calls() -> tuple[tuple[str, int, str, str], ...]:
+    """Each call of the package that reads or writes text in the locale's encoding: its file, line, call and why. The
+    package is scanned once a run (seconds): the tests that read the scan read the same tree."""
+    return tuple((path.relative_to(ROOT).as_posix(), line, call, why)
+                 for path in sorted(PACKAGE.rglob("*.py"))
+                 for line, call, why in locale_calls(path.read_text(encoding="utf-8")))
 
 
+@pytest.mark.slow
 def test_the_package_names_the_encoding_of_every_text_it_reads_or_writes():
     unexplained = [f"{path}:{line}: {call} — {why}" for path, line, call, why in package_locale_calls()
                    if (path, call) not in LOCALE_READS]
     assert not unexplained, "text read or written in the locale's encoding:\n" + "\n".join(unexplained)
 
 
+@pytest.mark.slow
 def test_every_allowed_locale_read_is_still_there():
     """Each entry of LOCALE_READS names a call the scan finds, as it is written: an entry for a call since given an
     encoding, moved or never there fails, and so does a scan that has stopped finding anything."""
@@ -1405,6 +1410,7 @@ def _unfolded() -> list[tuple[str, int]]:
     return cases
 
 
+@pytest.mark.slow
 def test_a_partial_bound_by_any_target_of_the_grammar_is_found_once():
     cases = _unfolded()
     wrong = [(source, found) for source, line in cases

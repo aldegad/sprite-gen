@@ -118,6 +118,7 @@ def _padded(n: int, multiple: int) -> int:
 
 
 @pytest.mark.parametrize("size", [(128, 96), (130, 97), (400, 771)])
+@pytest.mark.slow
 def test_rife_v4_25_is_handed_each_image_padded_with_zeros_to_128_and_the_frame_cut_back(tmp_path, size):
     """rife-v4.25: each image the binary is handed — the colour and the coverage of a frame, and each of a read's sixteen
     passes, turned or not — is the image RIFE is given (`rife.inputs`) at the top left of a canvas a multiple of 128 each

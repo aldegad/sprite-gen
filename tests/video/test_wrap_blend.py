@@ -575,6 +575,7 @@ def test_a_ramp_that_steps_past_the_cut_is_not_used_and_says_so() -> None:
 
 # --- 12-15. structures on a flat patch of a redrawn character --------------------------------------------------------------
 
+@pytest.mark.slow
 def test_the_checkpoints_oblique_line_is_held_line_for_line() -> None:
     frames, region = patch_clip("oblique", 8)
     assert pin_closes(frames)

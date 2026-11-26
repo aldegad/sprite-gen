@@ -99,6 +99,7 @@ def slow(tmp_path_factory) -> tuple[Path, Path, dict]:
     return root, keyed, _cut(root / "out", keyed)
 
 
+@pytest.mark.slow
 def test_a_walk_cut_one_step_long_is_named_by_the_step_screen(slow):
     _, _, report = slow
     cycle = report["cycle"]

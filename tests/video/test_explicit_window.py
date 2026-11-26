@@ -103,6 +103,7 @@ def test_an_explicit_window_holds_on_every_path(tmp_path, path, clip, args, ran,
     assert (lo is None or length >= lo) and (hi is None or length <= hi), (path, length, lo, hi)
 
 
+@pytest.mark.slow
 def test_a_count_the_window_leaves_no_room_for_fails_and_says_both(tmp_path):
     keyed = _slow(tmp_path / "clip")
     with pytest.raises(SystemExit) as stop:

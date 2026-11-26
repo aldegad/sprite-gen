@@ -264,6 +264,7 @@ ONCE_RETURN_RUNS = {"rife-v4.25": (30, 44), "rife-v4.6": 36}
 
 
 @pytest.mark.timeout(900)  # 36 to 44 calls of the binary at 96 x 96 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.slow
 def test_a_once_return_cut_keeps_both_ends_and_plays_once(tmp_path, rife_runs) -> None:
     report = cut(tmp_path, punch_frames(tmp_path / "frames", (96, 96), count=90))
     assert as_pinned(rife_runs(), ONCE_RETURN_RUNS), rife_runs()

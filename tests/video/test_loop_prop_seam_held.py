@@ -432,6 +432,7 @@ HELD_FILL_KEYS_3800 = {"held_fill"}
 NO_REPEAT_KEYS_400 = {"fps", "holds"}
 
 
+@pytest.mark.slow
 def test_cycle_align_writes_a_loop_without_a_held_part_as_before(tmp_path, staffless):
     src, report = staffless
     cut = json.loads((src / "out" / "loop.strip.json").read_text())

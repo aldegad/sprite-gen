@@ -316,6 +316,7 @@ def test_the_held_loop_of_a_shrinking_walk_keeps_its_crown(tmp_path):
     assert edges['bottom'][0] <= edges['bottom'][1], edges
 
 
+@pytest.mark.slow
 def test_the_feet_are_read_one_cycle_on():
     frames = [walking_away(k) for k in range(73)]
     feet = gait_fallback.foot_drift(frames, gait_fallback.cycle_drift(frames, min_lag=12, max_lag=36))

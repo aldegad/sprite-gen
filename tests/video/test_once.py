@@ -32,6 +32,7 @@ def cut(tmp_path, **kwargs):
 
 
 @pytest.mark.timeout(900)  # 20 calls of the binary at 128 x 96 (the held fill's frames between): seconds on a GPU, minutes on a CPU's Vulkan driver
+@pytest.mark.slow
 def test_cut_keeps_final_pose_in_strip_and_once_previews(tmp_path, rife_runs):
     keyed(tmp_path / "keyed")
     report = cut(tmp_path)
@@ -124,6 +125,7 @@ def test_terminal_gate_rejects_still_and_accumulated_drift():
 
 
 @pytest.mark.parametrize("after", ["standing", "shaking", "clipped"])
+@pytest.mark.slow
 def test_once_cuts_at_the_first_settled_ground_pose_before_later_motion(tmp_path, after):
     files = keyed(tmp_path / "keyed")
     initial = Image.open(files / "0000.png")

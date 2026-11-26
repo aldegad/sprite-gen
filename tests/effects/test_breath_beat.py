@@ -149,6 +149,7 @@ def test_what_the_beat_choice_refuses_and_what_it_leaves_alone(tmp_path) -> None
     assert "beat" not in _bake(src, tmp_path / "plain", "--breaths", "2")
 
 
+@pytest.mark.slow
 def test_the_sway_layer_sways_on_the_beat_chosen(tmp_path) -> None:
     out = tmp_path / "out"
     report = _avoid(_loop(tmp_path / "loop", BUMP), out)
