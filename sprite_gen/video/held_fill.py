@@ -58,6 +58,7 @@ from PIL import Image, ImageFilter
 from sprite_gen._deps import np
 from sprite_gen.video import held as held_mod
 from sprite_gen.video import legs as legs_mod
+from sprite_gen.video import per_frame
 from sprite_gen.video import rife as rife_mod
 from sprite_gen.video.interpolation_quality import faults, ghost_screen, looks
 
@@ -101,9 +102,22 @@ def same_steps(frames: Sequence[Image.Image]) -> list[bool]:
             for k in range(len(frames) - 1)]
 
 
+# What `judge` reads of a frame of the cut alone, or of two (`sprite_gen.video.per_frame`): every try between the same
+# two frames is judged against the same `a`, `b` and cell before, so each is read once, kept by its pixels.
+_THUMB = per_frame.Kept(64)  # same_picture: a frame's thumbnail, as `_thumbs` reads it
+_PREMULTIPLIED = per_frame.Kept(4)  # same_picture: `premultiplied`
+_STILL = per_frame.Kept(2)  # still_kept: `_still`, of the two
+
+
 def same_picture(frame: Image.Image, others: Sequence[Image.Image]) -> bool:
     """Whether `frame` shows the same picture as one of `others`: each pair read as `same_steps` reads a step."""
-    return any(same_steps([other, frame])[0] for other in others)
+    def thumb(f: Image.Image) -> np.ndarray:
+        return _THUMB((f,), lambda: _thumbs([f])[0])
+
+    def pixels(f: Image.Image) -> np.ndarray:
+        return _PREMULTIPLIED((f,), lambda: premultiplied(f))
+
+    return any(_same(thumb(other), thumb(frame)) and _same(pixels(other), pixels(frame)) for other in others)
 
 
 def runs(same: Sequence[bool]) -> list[dict[str, int]]:
@@ -146,17 +160,25 @@ def _edge(solid: np.ndarray) -> np.ndarray:
     return solid & ~inner
 
 
+def _still(a: Image.Image, b: Image.Image) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """`a` (RGBA, int16), the outline pixels `a` and `b` both draw in one place in one colour, and the rows either's
+    solid body spans (`still_kept`)."""
+    A, B = (np.asarray(im.convert("RGBA"), dtype=np.int16) for im in (a, b))
+    sa, sb = (x[..., 3] >= legs_mod.LOW_ALPHA for x in (A, B))
+    still = _edge(sa) & _edge(sb) & (np.abs(A[..., :3] - B[..., :3]).max(axis=-1) <= STILL_RGB)
+    return A, still, np.nonzero((sa | sb).any(axis=1))[0]
+
+
 def still_kept(frame: Image.Image, a: Image.Image, b: Image.Image) -> dict[str, Any]:
     """Whether a part standing still in `a` and `b` stands where it stood in `frame`, made between them: the outline
     pixels both draw in one place in one colour (`still`), and the share of them `frame` draws there too, within a
     pixel (`kept`), the least over windows of rife.GHOST_BAND of the body high that hold STILL_MIN_PX of them (`reads`
     false where none does)."""
-    A, B, F = (np.asarray(im.convert("RGBA"), dtype=np.int16) for im in (a, b, frame))
-    sa, sb, sf = (x[..., 3] >= legs_mod.LOW_ALPHA for x in (A, B, F))
-    still = _edge(sa) & _edge(sb) & (np.abs(A[..., :3] - B[..., :3]).max(axis=-1) <= STILL_RGB)
+    A, still, rows = _STILL((a, b), lambda: _still(a, b))
+    F = np.asarray(frame.convert("RGBA"), dtype=np.int16)
+    sf = F[..., 3] >= legs_mod.LOW_ALPHA
     drawn = sf & (np.abs(F[..., :3] - A[..., :3]).max(axis=-1) <= STILL_RGB)
     near = np.asarray(Image.fromarray(np.uint8(drawn) * 255).filter(ImageFilter.MaxFilter(3))) > 0
-    rows = np.nonzero((sa | sb).any(axis=1))[0]
     if not rows.size:
         return {"reads": False, "still_px": 0}
     top, bottom = int(rows[0]), int(rows[-1])

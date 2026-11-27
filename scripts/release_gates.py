@@ -55,6 +55,7 @@ GPU_LANE = (
     "sprite_gen/util/cpus.py",
     "sprite_gen/util/console.py",
     "sprite_gen/video/frames.py",
+    "sprite_gen/video/per_frame.py",
     # what RIFE's tests read beside their own files: the suite's fixtures and pins, their recorded inputs and judgments
     "tests/conftest.py",
     "tests/picture_digest.py",
