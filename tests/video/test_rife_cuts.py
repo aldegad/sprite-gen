@@ -22,7 +22,9 @@ What holds, wherever RIFE runs (the binary on a GPU or on llvmpipe, `real_rife`;
   too.
 
 Each is many runs of RIFE at about 550 x 780 (padded to 640 x 896): minutes on a GPU, tens of minutes on llvmpipe or a
-CPU's PyTorch. So they are `slow`, run by `--full` (the lanes). The feet test asks for frames between the pairs a cut was
+CPU's PyTorch. So they are `slow`, run by `--full` (the lanes). Through the binary a cut is filled in three pieces, each
+a test of its own within the GPU lane's budget, split at cells the filling starts again at, and a test joins them and
+holds what the cut whole held (`PIECES`); the torch backend fills each cut whole. The feet test asks for frames between the pairs a cut was
 filled at, most of which filling the cut already made: what it reads of a frame the cut's test made (`DRAG_READ`) is
 read there and not made again."""
 

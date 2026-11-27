@@ -102,6 +102,11 @@ CHUNK_BUDGET = 540
 # its tests that ran past it as a candidate to run alone (`alone_candidates`), and moves nothing: a person adds the name
 # to what every chunk leaves (docs/release.md, "혼자 도는 시험").
 ALONE_OVER = CHUNK_BUDGET / 3
+# A test filled in pieces, each a test of its own, is joined by another (tests/video/test_rife_cuts.py): every run of the
+# pack's tests is handed one folder for the pieces (PIECES_KEY) and the run's mark (RUN_KEY), the commit and the record
+# of the prepare, so a join reads this run's pieces and none an earlier run left. A join names the pieces it read in
+# the pytest property JOINED, and counts only where it ran alone after each of them had ended (`verdict`).
+PIECES_KEY, RUN_KEY, JOINED = "CUDA_LANE_PIECES", "CUDA_LANE_RUN", "joined_from"
 CHUNK = re.compile(r"([1-9][0-9]*)/([1-9][0-9]*)")
 
 
@@ -352,16 +357,21 @@ DATA_KEY = "LOCALAPPDATA" if os.name == "nt" else "XDG_DATA_HOME"
 
 
 def _environment(where: Path, tools: Path | str | None = None) -> dict[str, str]:
-    """The run's environment: no SPRITE_GEN_* from outside, temporary files and caches inside where, the tools
-    directory given (`prepare --tools`) first on PATH."""
+    """The run's environment: no SPRITE_GEN_* or CUDA_LANE_* from outside, temporary files and caches inside where, the
+    tools directory given (`prepare --tools`) first on PATH."""
     tmp = where / "tmp"
-    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("SPRITE_GEN_")}
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("SPRITE_GEN_", "CUDA_LANE_"))}
     if tools:
         env["PATH"] = os.pathsep.join([str(tools), env.get("PATH", "")])
     env.update(TEMP=str(tmp), TMP=str(tmp), TMPDIR=str(tmp), PIP_CACHE_DIR=str(where / "cache" / "pip"),
                CUDA_CACHE_PATH=str(where / "cache" / "cuda"), PIP_DISABLE_PIP_VERSION_CHECK="1", PIP_NO_INPUT="1",
                PIP_CONFIG_FILE=os.devnull, PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8")
     return env
+
+
+def pieces_env(where: Path, sha: str) -> dict[str, str]:
+    """The folder this run's pieces are kept in and the run's mark, handed to every test the run runs (PIECES_KEY)."""
+    return {PIECES_KEY: str(where / "pieces"), RUN_KEY: f"{sha}:{sha256_of(where / 'prepared.json')}"}
 
 
 def _with_rife(env: dict[str, str], where: Path, binary: str, model: str, data: str) -> dict[str, str]:
@@ -595,18 +605,19 @@ def _run_tests(where: Path, sha: str, prepared: dict, name: str, said_as: str, a
     env = _with_rife(_environment(where, prepared.get("tools_dir")), where, prepared["binary"], prepared["model"],
                      tempfile.mkdtemp(prefix=f"data-{name}-", dir=tmp))
     env["PYTHONUNBUFFERED"] = "1"  # what a chunk stopped at its budget printed is kept, the test it stopped in too
+    env.update(pieces_env(where, sha))
     junit = logs / f"{name}.xml"
     rec: dict = {"commit": sha, "gates": GATE_TESTS, **fields,
                  "prepared_sha256": sha256_of(where / "prepared.json"), held_as: budget,
                  "started": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                  "log": f"logs/{name}.log", "passed": False}
     print(f"cuda_lane: commit {sha}, {said_as} of the tests marked {GATE_TESTS}, {held_as} {budget} s", flush=True)
-    t0 = time.monotonic()
+    t0, rec["began"] = time.monotonic(), time.time()
     code, said, over = run_bounded(
         [str(lay["py"]), "-m", "pytest", "-v", "-rs", "-p", "no:cacheprovider", "--full", "--basetemp",
          tempfile.mkdtemp(prefix=f"pytest-{name}-", dir=tmp), *args, "--junitxml", str(junit)], budget, env,
         lay["src"])
-    rec["seconds"] = round(time.monotonic() - t0, 1)
+    rec["seconds"], rec["ended"] = round(time.monotonic() - t0, 1), time.time()
     (logs / f"{name}.log").write_text(said, encoding="utf-8")
     print(said.rstrip(), flush=True)
     rec["exit"] = code
@@ -688,11 +699,15 @@ def verdict(where: Path, n: int) -> int:
             if key not in collected:
                 _fail(f"{key} ran but was not collected by prepare")
             seen[key] = f"{k}/{n}"
+        for key, found in (rec.get("props") or {}).items():
+            if JOINED in found:
+                _fail(f"{collected.get(key, key)} joins pieces and ran in chunk {k}/{n}: a test joining pieces runs "
+                      f"alone, after them")
         candidates += [{**found, "chunk": rec["chunk"]} for found in rec.get("alone_candidates", [])]
         chunks.append({"chunk": rec["chunk"], "tests": len(rec.get("ran", {})), "seconds": rec.get("seconds"),
                        "budget": rec.get("budget"), "started": rec.get("started"),
                        "pytest_summary": rec.get("pytest_summary")})
-    alone = []
+    alone, clocks, joins = [], {}, {}
     for path in sorted(where.glob("alone-*.json")):
         rec = json.loads(path.read_text(encoding="utf-8"))
         nodeid = str(rec.get("alone"))
@@ -712,9 +727,19 @@ def verdict(where: Path, n: int) -> int:
         if set(rec.get("ran", {})) != {key}:
             _fail(f"the run of {nodeid} alone ran other tests: {', '.join(rec.get('ran', {})) or 'none'}")
         seen[key] = "alone"
+        clocks[nodeid] = (rec.get("began"), rec.get("ended"))
+        if JOINED in (rec.get("props") or {}).get(key, {}):
+            joins[nodeid] = json.loads(rec["props"][key][JOINED])
         calls = (rec.get("props") or {}).get(key, {}).get("rife_calls")
         alone.append({"test": nodeid, "seconds": rec.get("seconds"), "limit": rec.get("limit"),
                       **({"rife_calls": int(calls)} if calls is not None else {})})
+    for join, joined in joins.items():
+        for piece in joined:
+            if piece not in clocks:
+                _fail(f"{join} joins {piece}, which did not run alone")
+            began, ended = clocks[join][0], clocks[piece][1]
+            if began is None or ended is None or began < ended:
+                _fail(f"{join} ran alone before {piece} had ended: a test joining pieces runs after them")
     ran_alone = {a["test"] for a in alone}
     left = [nodeid for nodeid in left or [] if nodeid not in ran_alone]
     left_keys = {junit_key(nodeid): nodeid for nodeid in left}

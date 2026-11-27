@@ -666,3 +666,13 @@ def test_the_verdict_refuses_a_test_joining_pieces_that_ran_before_them_or_joins
     assert why in capsys.readouterr().err
     assert not (where / "run.json").exists()
 
+
+
+def test_the_verdict_refuses_a_test_joining_pieces_that_ran_in_a_chunk(tmp_path, capsys):
+    where = _prepared(tmp_path, {1: COLLECTED[:2], 2: COLLECTED[2:]})
+    _chunk(where, 2, 2, props={cuda_lane.junit_key(COLLECTED[2]): {"joined_from": json.dumps([COLLECTED[0]])}})
+    with pytest.raises(SystemExit):
+        cuda_lane.verdict(where, 2)
+    assert (f"{COLLECTED[2]} joins pieces and ran in chunk 2/2: a test joining pieces runs alone, after them"
+            in capsys.readouterr().err)
+    assert not (where / "run.json").exists()
