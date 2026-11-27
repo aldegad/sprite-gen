@@ -671,14 +671,25 @@ def bleed(frame: np.ndarray) -> np.ndarray:
 Run = Callable[[np.ndarray, np.ndarray, float, tuple[str, ...] | None], np.ndarray]
 
 
+# What RIFE is given of a frame (`_input`), kept by its pixels (`sprite_gen.video.per_frame`): every try of a cell, and
+# every cell between the same two frames, asks for the same two.
+_INPUT = per_frame.Kept(8)
+
+
+def _input(frame: Image.Image) -> tuple[np.ndarray, np.ndarray]:
+    """What RIFE is given of one frame: its colour image as `bleed` makes it (H x W x 3) and its coverage (H x W), uint8."""
+    x = np.asarray(frame.convert("RGBA"), dtype=np.float32) / 255.0
+    return np.uint8(np.clip(bleed(x), 0, 1) * 255 + 0.5), np.uint8(x[..., 3] * 255 + 0.5)
+
+
 def inputs(a: Image.Image, b: Image.Image) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """What RIFE is given for a frame between `a` and `b`: their colour images as `bleed` makes them (H x W x 3) and their
-    coverage (H x W), uint8 — the same wherever RIFE runs."""
+    coverage (H x W), uint8 — the same wherever RIFE runs. Each frame is read once (`_input`, kept by its pixels); the
+    arrays handed are the caller's own."""
     if a.size != b.size:
         raise ValueError(f"rife: frames differ in size ({a.size} vs {b.size})")
-    fa, fb = (np.asarray(f.convert("RGBA"), dtype=np.float32) / 255.0 for f in (a, b))
-    return ([np.uint8(np.clip(bleed(x), 0, 1) * 255 + 0.5) for x in (fa, fb)],
-            [np.uint8(x[..., 3] * 255 + 0.5) for x in (fa, fb)])
+    (ca, va), (cb, vb) = (_INPUT((f,), lambda f=f: _input(f)) for f in (a, b))
+    return [ca.copy(), cb.copy()], [va.copy(), vb.copy()]
 
 
 def _grey(cover: np.ndarray) -> np.ndarray:

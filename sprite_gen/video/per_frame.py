@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """What is read of one frame of a cut, or of two together, kept by the frames' pixels.
 
-A frame made between two frames of a cut is judged once a try (`held_fill.judge`), and every try of a cell, and every
-cell between the same two frames, is judged against the same two: what the judge reads of them alone is the same each
-time. A `Kept` holds such values, each under the frames' pixels (their mode, size and a digest of their bytes, so a
+A frame made between two frames of a cut is asked of RIFE (`rife.inputs`) and judged (`held_fill.judge`) once a try, and
+every try of a cell, and every cell between the same two frames, is made from and judged against the same two: what RIFE
+is given of each and what the judge reads of them alone is the same each time. A `Kept` holds such values, each under the frames' pixels (their mode, size and a digest of their bytes, so a
 frame with other pixels is read again whatever object it is), the latest `size` of them; a size of 0 keeps none. The
 values are those the reading function returns, its arrays made read-only so no caller changes one another reads.
 `MEMOS` names every `Kept`."""
