@@ -348,12 +348,13 @@ COLLECTED = ["tests/video/test_rife_cuts.py::test_the_public_cut[pip-run-ncnn]",
 SHA = "a" * 40
 
 
-def _prepared(tmp_path: Path, chunks: dict[int, list[str]], n: int | None = None) -> Path:
-    """A pack prepared at SHA that collected COLLECTED, with chunk K of the split running chunks[K], each passed."""
+def _prepared(tmp_path: Path, chunks: dict[int, list[str]], n: int | None = None,
+              collected: list[str] = COLLECTED) -> Path:
+    """A pack prepared at SHA that collected `collected`, with chunk K of the split running chunks[K], each passed."""
     where = tmp_path / "lane"
     where.mkdir()
     (where / "SOURCE_SHA").write_text(SHA + "\n", encoding="ascii")
-    prepared = {"commit": SHA, "gates": cuda_lane.GATE_TESTS, "prepared": True, "collected": COLLECTED,
+    prepared = {"commit": SHA, "gates": cuda_lane.GATE_TESTS, "prepared": True, "collected": collected,
                 "gpu": "NVIDIA GeForce RTX 3060, 617.14, 12288 MiB", "probe": "torch 2.13.0+cu130 cuda 13.0"}
     (where / "prepared.json").write_text(json.dumps(prepared), encoding="utf-8")
     n = n or len(chunks)
@@ -606,3 +607,62 @@ def test_the_verdict_refuses_a_run_alone_that_does_not_stand_for_its_test(tmp_pa
         cuda_lane.verdict(where, 2)
     assert why in capsys.readouterr().err
     assert not (where / "run.json").exists()
+
+
+def test_each_test_run_is_handed_the_folder_of_this_run_s_pieces_and_the_run_s_mark(tmp_path, monkeypatch):
+    """A test filled in pieces, each its own test, is joined by another (tests/video/test_rife_cuts.py): every run of
+    the pack's tests is handed one folder for the pieces and the run's mark, the commit and the prepare's record, so a
+    join reads this run's pieces and none an earlier run, or the operator's shell, left."""
+    where = _prepared(tmp_path, {1: COLLECTED})
+    assert cuda_lane.pieces_env(where, SHA) == {
+        cuda_lane.PIECES_KEY: str(where / "pieces"),
+        cuda_lane.RUN_KEY: f"{SHA}:{cuda_lane.sha256_of(where / 'prepared.json')}"}
+    assert (cuda_lane.PIECES_KEY, cuda_lane.RUN_KEY) == ("CUDA_LANE_PIECES", "CUDA_LANE_RUN")
+    monkeypatch.setenv("CUDA_LANE_PIECES", str(tmp_path / "an-earlier-run"))
+    monkeypatch.setenv("CUDA_LANE_RUN", f"{'b' * 40}:{'0' * 64}")
+    env = cuda_lane._environment(where)
+    assert "CUDA_LANE_PIECES" not in env and "CUDA_LANE_RUN" not in env
+
+
+JOINING = COLLECTED + ["tests/video/test_rife_cuts.py::test_a_piece[pip-jump-1of2]",
+                       "tests/video/test_rife_cuts.py::test_a_piece[pip-jump-2of2]",
+                       "tests/video/test_rife_cuts.py::test_joined[pip-jump]"]
+
+
+def _joining(tmp_path: Path, began: float, joins: list[str] | None = None) -> Path:
+    """A pack whose split left two pieces and the test joining them, each run alone: the pieces from 1000.0 to 1200.0
+    and from 1210.0 to 1510.0 on the host's clock, the join from `began`, joining `joins` (the two pieces)."""
+    where = _prepared(tmp_path, {1: COLLECTED[:2], 2: COLLECTED[2:]}, collected=JOINING)
+    first, second, join = JOINING[3:]
+    for k in (1, 2):
+        _chunk(where, k, 2, left=[first, second, join])
+    _alone(where, first, seconds=200.0, began=1000.0, ended=1200.0)
+    _alone(where, second, seconds=300.0, began=1210.0, ended=1510.0)
+    _alone(where, join, seconds=2.0, began=began, ended=began + 2.0,
+           props={cuda_lane.junit_key(join): {cuda_lane.JOINED: json.dumps(joins or [first, second])}})
+    return where
+
+
+def test_a_test_joining_pieces_counts_where_it_ran_alone_after_every_piece_had_ended(tmp_path):
+    assert cuda_lane.JOINED == "joined_from"
+    assert cuda_lane.verdict(_joining(tmp_path, began=1511.0), 2) == 0
+    rec = json.loads((tmp_path / "lane" / "run.json").read_text(encoding="utf-8"))
+    assert (rec["ran"], rec["left"], [a["test"] for a in rec["alone"]]) == (6, [], sorted(JOINING[3:], key=cuda_lane.alone_name))
+
+
+@pytest.mark.parametrize("began, joins, why", [
+    (1500.0, None, f"{JOINING[5]} ran alone before {JOINING[4]} had ended: a test joining pieces runs after them"),
+    (None, None, f"{JOINING[5]} ran alone before {JOINING[3]} had ended: a test joining pieces runs after them"),
+    (1511.0, [JOINING[3], COLLECTED[0]], f"{JOINING[5]} joins {COLLECTED[0]}, which did not run alone"),
+], ids=["before the second piece had ended", "with no clock", "joining a test that did not run alone"])
+def test_the_verdict_refuses_a_test_joining_pieces_that_ran_before_them_or_joins_one_not_run_alone(tmp_path, capsys,
+                                                                                                   began, joins, why):
+    where = _joining(tmp_path, began=1511.0 if began is None else began, joins=joins)
+    if began is None:
+        _alone(where, JOINING[5], seconds=2.0, props={cuda_lane.junit_key(JOINING[5]): {
+            cuda_lane.JOINED: json.dumps(JOINING[3:5])}})
+    with pytest.raises(SystemExit):
+        cuda_lane.verdict(where, 2)
+    assert why in capsys.readouterr().err
+    assert not (where / "run.json").exists()
+
