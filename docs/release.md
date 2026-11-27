@@ -136,10 +136,14 @@ PATH 를 바꾸지 않고 레인의 디렉터리 안에 둔 도구로 돈다. �
 주지 않으면 예산)까지 재고, 넘으면 멈추고 실패다. 예산은 하나(540초)이고, 한도는 혼자 도는 판의 시간을 끝까지 재는
 재기 한도이지 받아들인 예산이 아니다. 컷 통째여야만 뜻이 있어 예산 안에 들지 않는 시험은 빼지 않고 이렇게 돌리고, 잰
 시간을 그대로 남긴다. 시험이 바이너리 호출 수를
-pytest 속성 `rife_calls` 로 남기면(`request.node.user_properties`) 기록이 그것도 적는다.
+pytest 속성 `rife_calls` 로 남기면(`request.node.user_properties`) 기록이 그것도 적는다. 토막이든 혼자든 시험을
+돌릴 때마다 이번 판의 조각 폴더(`CUDA_LANE_PIECES`, 디렉터리의 `pieces/`)와 판의 표식(`CUDA_LANE_RUN`, 커밋과
+`prepared.json` 의 sha256)을 건네고, 기록에 시작과 끝 시각(`began`, `ended`)을 적는다. 조각으로 나눠 도는 시험이
+그 폴더에 조각을 두고, 이어 읽는 시험이 같은 표식의 조각만 읽는다(아래 "혼자 도는 시험").
 `verdict --chunks N` 은 그 나눔의 토막 1..N 이 모두 pack 의 커밋에서 `prepare` 가 지은 환경으로 통과했고, 같은
-시험을 남겼고, 혼자 돈 시험마다 그 남긴 것 가운데 하나이며 같은 커밋과 환경에서 통과했고, 남긴 것 밖의 모은 시험
-전부를 한 번씩 돌았을 때만 `run.json` 을 쓴다. 거기에 예산 안에서 돈 시험 수와 예산을 넘겨 혼자 돈 시험 수를 따로,
+시험을 남겼고, 혼자 돈 시험마다 그 남긴 것 가운데 하나이며 같은 커밋과 환경에서 통과했고, 조각을 이어 읽는 시험(읽은
+조각을 pytest 속성 `joined_from` 으로 남긴다)마다 혼자 돌았고 그 조각이 모두 혼자 돌아 끝난 뒤에 시작했고, 남긴
+것 밖의 모은 시험 전부를 한 번씩 돌았을 때만 `run.json` 을 쓴다. 거기에 예산 안에서 돈 시험 수와 예산을 넘겨 혼자 돈 시험 수를 따로,
 혼자 돈 시험(시간, 호출 수)과 돌지 않고 남은 시험, 토막들이 말한 혼자 돌 후보를 적는다.
 시험을 남긴 실행으로 내는 릴리즈는 그 까닭을 `--gpu-unmeasured` 로 준다(아래 "Gates 칸"). 이 검사들은
 `tests/release/test_cuda_lane.py` 가 본다.
@@ -151,21 +155,41 @@ pytest 속성 `rife_calls` 로 남기면(`request.node.user_properties`) 기록�
 후보로 말한다(출력 한 줄, `chunk-K-of-N.json` 의 `alone_candidates`, `run.json` 에 모음). 레인은 아무것도 옮기지
 않는다. 사람이 아래 표에 이름과 까닭을 더하고, 다음 나눔부터 남긴다.
 
-지금 혼자 도는 시험은 다섯이다(`tests/video/test_rife_cuts.py`, GPU 레인의 호스트 RTX 3060 에서 잰 값):
+지금 혼자 도는 시험은 열넷이다(`tests/video/test_rife_cuts.py`, GPU 레인의 호스트 RTX 3060 에서 잰 값). 바이너리로
+채우는 공개 컷 셋은 통째로 돌면 예산을 넘거나 턱밑이라 컷마다 조각 셋으로 나눠 돌고, 컷마다 한 시험이 그 조각을
+이어 읽는다:
 
-| 시험 | 까닭 | 한도 |
-|---|---|---|
-| `test_a_public_cut_takes_as_many_poses_with_the_default_model_as_measured[knight-walk-ncnn]` | 공개 컷 통째의 포즈 수를 재는 시험이라 쪼개면 재는 대상이 바뀐다. 혼자 약 630초 | 900초 |
-| `test_a_public_cut_takes_as_many_poses_with_the_default_model_as_measured[pip-run-ncnn]` | 같은 까닭. 혼자 560초에서 멈추게 했을 때 끝나지 않았다 | 900초 |
-| `test_a_public_cut_takes_as_many_poses_with_the_default_model_as_measured[pip-jump-ncnn]` | 같은 까닭. 혼자 452초 | 540초 |
-| `test_the_default_model_s_frame_dragged_off_still_feet_is_caught_wherever_rife_v4_6_s_was[knight-walk-ncnn]` | 혼자 171초, 토막 안에서 195초. 그 토막이 예산을 넘었다 | 540초 |
-| `test_the_default_model_s_frame_dragged_off_still_feet_is_caught_wherever_rife_v4_6_s_was[pip-jump-ncnn]` | 혼자 188초 | 540초 |
+- 조각 `test_a_piece_of_a_public_cut_is_filled_by_the_default_model_from_a_cell_the_filling_starts_again_at[<컷>-<k>of3]`:
+  컷의 칸 일부를 바이너리로 채우고, 그 프레임과 기록을 이번 판의 조각 폴더에 둔다.
+- 이음 `test_a_public_cut_joined_from_its_pieces_takes_as_many_poses_with_the_default_model_as_measured[<컷>]`: 이번
+  판이 둔 조각 셋을 이어, 통째 시험이 보던 것(칸 수, 포즈 범위, pip-jump 가 고른 칸)을 같은 값으로 본다. 바이너리를
+  부르지 않는다.
 
-공개 컷이 예산을 넘는 것은 바이너리를 부를 때마다 약 1.2초가 준비에 들고(프레임 크기와 무관, 프로세스의 시작은
+조각의 경계는 채우기가 다시 시작하는 칸이다. 프레임 시각에 떨어지거나 같은 그림을 보이는 두 프레임 사이에 있는 칸은
+그 프레임이고 앞 칸에 아무것도 묻지 않으므로(`held_fill.at_times`), 다음 칸이 받는 앞 프레임(`before`)이 통째로
+채울 때와 같다. 그래서 조각을 이은 것이 통째와 바이트까지 같다(Apple GPU 에서 세 컷, NVIDIA 에서 knight-walk 로
+확인). 경계가 그런 칸인지는 조각 시험과 이음 시험이 스스로 단언하고, RIFE 없이 도는
+`test_each_piece_of_a_public_cut_after_the_first_starts_at_a_cell_the_filling_starts_again_at` 가 모든 판에서 본다.
+누가 경계를 옮기면 그 시험들이 실패한다. pip-jump 는 칸 10 과 62 사이에 그런 칸이 없어 가운데 조각이 크다.
+
+이음 시험은 조각이 하나라도 이번 판에 남지 않았거나 다른 판의 표식이면 실패한다. 레인에서는 조각 셋이 모두 끝난
+뒤에 이음 시험을 혼자 돌린다. `verdict` 는 이음 시험이 토막 안에서 돌았거나, 이은 조각이 혼자 돌지 않았거나, 그
+조각이 끝나기 전에 시작했으면 실패한다.
+
+| 시험 | 칸 | 까닭 | 한도 |
+|---|---|---|---|
+| 조각 `[knight-walk-1of3]` `[knight-walk-2of3]` `[knight-walk-3of3]` | 0–19, 20–39, 40–64 | 통째는 649.2초(호출 464번)로 예산을 넘었다 | 각 540초 |
+| 조각 `[pip-run-1of3]` `[pip-run-2of3]` `[pip-run-3of3]` | 0–19, 20–39, 40–64 | 통째는 799.6초(호출 548번)로 예산을 넘었다 | 각 540초 |
+| 조각 `[pip-jump-1of3]` `[pip-jump-2of3]` `[pip-jump-3of3]` | 0–9, 10–61, 62–71 | 통째는 521.0초(호출 450번), 예산까지 19초 | 각 540초 |
+| 이음 `[knight-walk]` `[pip-run]` `[pip-jump]` | 전부 | 조각 셋이 끝난 뒤에 돈다 | 540초 |
+| `test_the_default_model_s_frame_dragged_off_still_feet_is_caught_wherever_rife_v4_6_s_was[knight-walk-ncnn]` | | 혼자 171초, 토막 안에서 195초. 그 토막이 예산을 넘었다 | 540초 |
+| `test_the_default_model_s_frame_dragged_off_still_feet_is_caught_wherever_rife_v4_6_s_was[pip-jump-ncnn]` | | 혼자 188초 | 540초 |
+
+공개 컷 통째가 예산을 넘는 것은 바이너리를 부를 때마다 약 1.2초가 준비에 들고(프레임 크기와 무관, 프로세스의 시작은
 0.02초) 컷 하나가 수백 번 부르기 때문이다. 그 준비를 컷마다 한 번으로 줄이는 것(바이너리를 한 번만 띄우기)은 아직
 정하지 않은 일이다. 한도는 그 시간을 끝까지 재기 위한 것이고, 넘으면 실패다.
 
-엔진은 이 실행이 깐 것만 찾는다: 밖에서 온 `SPRITE_GEN_*` 가 없고(실행이 정하는 바이너리, 모델, 장치뿐), 사용자
+엔진은 이 실행이 깐 것만 찾는다: 밖에서 온 `SPRITE_GEN_*` 와 `CUDA_LANE_*` 가 없고(실행이 정하는 바이너리, 모델, 장치뿐), 사용자
 데이터 디렉터리(윈도우는 `LOCALAPPDATA`, 그 밖은 `XDG_DATA_HOME`)가 비어 있고(토막마다 새로), PATH 에 rife-ncnn-vulkan 이 없다.
 임시 디렉터리, pip 캐시, CUDA 캐시도 그 디렉터리 안을 가리키므로 실행은 디렉터리 밖에 아무것도 쓰지 않고,
 디렉터리를 통째로 지우면 실행이 쓴 것이 모두 지워진다.

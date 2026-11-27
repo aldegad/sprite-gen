@@ -86,6 +86,7 @@ from PIL import Image, ImageFilter, PngImagePlugin
 
 from sprite_gen._deps import np
 from sprite_gen.util import cpus
+from sprite_gen.video import per_frame
 from sprite_gen.video.frames import _components, _near
 
 BINARY = "rife-ncnn-vulkan"
@@ -670,14 +671,25 @@ def bleed(frame: np.ndarray) -> np.ndarray:
 Run = Callable[[np.ndarray, np.ndarray, float, tuple[str, ...] | None], np.ndarray]
 
 
+# What RIFE is given of a frame (`_input`), kept by its pixels (`sprite_gen.video.per_frame`): every try of a cell, and
+# every cell between the same two frames, asks for the same two.
+_INPUT = per_frame.Kept(8)
+
+
+def _input(frame: Image.Image) -> tuple[np.ndarray, np.ndarray]:
+    """What RIFE is given of one frame: its colour image as `bleed` makes it (H x W x 3) and its coverage (H x W), uint8."""
+    x = np.asarray(frame.convert("RGBA"), dtype=np.float32) / 255.0
+    return np.uint8(np.clip(bleed(x), 0, 1) * 255 + 0.5), np.uint8(x[..., 3] * 255 + 0.5)
+
+
 def inputs(a: Image.Image, b: Image.Image) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """What RIFE is given for a frame between `a` and `b`: their colour images as `bleed` makes them (H x W x 3) and their
-    coverage (H x W), uint8 — the same wherever RIFE runs."""
+    coverage (H x W), uint8 — the same wherever RIFE runs. Each frame is read once (`_input`, kept by its pixels); the
+    arrays handed are the caller's own."""
     if a.size != b.size:
         raise ValueError(f"rife: frames differ in size ({a.size} vs {b.size})")
-    fa, fb = (np.asarray(f.convert("RGBA"), dtype=np.float32) / 255.0 for f in (a, b))
-    return ([np.uint8(np.clip(bleed(x), 0, 1) * 255 + 0.5) for x in (fa, fb)],
-            [np.uint8(x[..., 3] * 255 + 0.5) for x in (fa, fb)])
+    (ca, va), (cb, vb) = (_INPUT((f,), lambda f=f: _input(f)) for f in (a, b))
+    return [ca.copy(), cb.copy()], [va.copy(), vb.copy()]
 
 
 def _grey(cover: np.ndarray) -> np.ndarray:
@@ -868,6 +880,18 @@ def _luma(x: np.ndarray) -> np.ndarray:
     return x[..., 0] * 0.299 + x[..., 1] * 0.587 + x[..., 2] * 0.114
 
 
+# What the judge reads of a frame of the cut alone, or of two (`sprite_gen.video.per_frame`): every try of a cell, and every
+# cell between the same two frames, is judged against the same `a` and `b`, so each is read once, kept by its pixels. The
+# made frame is read each time.
+_OUTLINED = per_frame.Kept(64)  # outline_shift: `outlined`
+_EDGE_DARKNESS = per_frame.Kept(64)  # outline_shift: `_edge_darkness`
+_SMEAR_COUNTS = per_frame.Kept(64)  # smear: `_smear_counts`
+_CLEAR_NEAR = per_frame.Kept(8)  # hole: `_clear_near`
+_PREMULTIPLIED = per_frame.Kept(4)  # hole: `_premultiplied`
+_SPREAD = per_frame.Kept(2)  # crossfade: `_spread`, of the two
+_DIFFER = per_frame.Kept(2)  # crossfade: where the two differ, of the two
+
+
 def _smear_counts(frame: Image.Image) -> tuple[int, int, int, int, int]:
     """(dark pixels inside the solid body, one pixel in from its edge; solid pixels; part-covered
     pixels; pixels on the coverage's edge; those of them with no outline within OUTLINE_REACH)."""
@@ -893,7 +917,7 @@ def smear(made: Image.Image, a: Image.Image, b: Image.Image) -> dict[str, float]
     ghost, the outline is gone; a frame drawn without outlines loses none against neighbours that
     have none). Zero or less: nothing added, no outline lost."""
     dm, sm, pm, em, um = _smear_counts(made)
-    (da, _, pa, _, ua), (db, _, pb, _, ub) = _smear_counts(a), _smear_counts(b)
+    (da, _, pa, _, ua), (db, _, pb, _, ub) = (_SMEAR_COUNTS((f,), lambda f=f: _smear_counts(f)) for f in (a, b))
     solid = max(1, sm)
     return {"dark_excess": round((dm - max(da, db)) / solid, 5), "partial_excess": round((pm - max(pa, pb)) / solid, 5),
             "outline_loss": round((um - max(ua, ub)) / max(1, em), 5)}
@@ -937,9 +961,10 @@ def outline_shift(made: Image.Image, a: Image.Image, b: Image.Image) -> float | 
     None where either neighbour is outlined on less than OUTLINED of its edge (`outlined`): there a part can
     melt with no line to lose, lighter by less at every rank, and the dark line (`smear`'s `outline_loss`)
     judges alone (docs/loop-repair.md section 4)."""
-    if min(outlined(a), outlined(b)) < OUTLINED:
+    if min(_OUTLINED((f,), lambda f=f: outlined(f)) for f in (a, b)) < OUTLINED:
         return None
-    dm, da, db = (_edge_darkness(f) for f in (made, a, b))
+    dm = _edge_darkness(made)
+    da, db = (_EDGE_DARKNESS((f,), lambda f=f: _edge_darkness(f)) for f in (a, b))
     if not (dm.size and da.size and db.size):
         return 0.0
     rank = (np.arange(dm.size) + 0.5) / dm.size
@@ -1272,6 +1297,12 @@ def _searched(cands: dict[int, list[tuple[float, int, int]]]) -> list[int]:
     return list(best[2])
 
 
+def _clear_near(frame: Image.Image) -> tuple[np.ndarray, np.ndarray]:
+    """A frame's coverage (0..1) and the pixels within HOLE_REACH of its clear ones (`hole`)."""
+    alpha = np.asarray(frame.convert("RGBA").getchannel("A"), dtype=np.float32) / 255.0
+    return alpha, _near(alpha < 0.5, HOLE_REACH)
+
+
 def hole(made: Image.Image, a: Image.Image, b: Image.Image, t: float) -> float:
     """A hole a made frame at fraction `t` from `a` to `b` opened inside its silhouette that neither neighbour has there:
     of its pixels under solid that the outside cannot reach without crossing its solid body, those where neither
@@ -1286,14 +1317,14 @@ def hole(made: Image.Image, a: Image.Image, b: Image.Image, t: float) -> float:
     like it on its way. A gap the neighbours have — between an arm and the body or between two legs, kept, opened by a
     step, or moved with the body — is theirs, and so is a hole each has, carried by a part however it moves within
     reach. 0 where the frame has no solid body (docs/loop-repair.md section 4)."""
-    m, fa, fb = (np.asarray(f.convert("RGBA").getchannel("A"), dtype=np.float32) / 255.0 for f in (made, a, b))
+    m = np.asarray(made.convert("RGBA").getchannel("A"), dtype=np.float32) / 255.0
     solid = m >= 0.5
     if not solid.any():
         return 0.0
-    near_a, near_b = _near(fa < 0.5, HOLE_REACH), _near(fb < 0.5, HOLE_REACH)
+    (fa, near_a), (fb, near_b) = (_CLEAR_NEAR((f,), lambda f=f: _clear_near(f)) for f in (a, b))
     left = _opened(_enclosed(solid) & ~near_a & ~near_b, HOLE_THICK)
     if left.any():
-        pa, pb = _premultiplied(a), _premultiplied(b)
+        pa, pb = (_PREMULTIPLIED((f,), lambda f=f: _premultiplied(f)) for f in (a, b))
         rows = np.nonzero(solid.any(axis=1))[0]
         reach = max(1, int(round(HOLE_TRAVEL * int(rows[-1] - rows[0] + 1))))
         (ay, by), (ax, bx) = (_apart(v, t) for v in _travel(pa, pb, t, _bounds(solid | (fa >= 0.5) | (fb >= 0.5)), reach))
@@ -1319,6 +1350,19 @@ def _local_range(x: np.ndarray) -> np.ndarray:
     return out
 
 
+def _rgba_apart(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """How far apart two premultiplied RGBA frames (0..1) are, pixel by pixel (`crossfade`)."""
+    return np.sqrt(((x - y) ** 2).sum(-1) / 4.0)
+
+
+def _spread(a: Image.Image, b: Image.Image) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Two frames premultiplied (RGBA, 0..1), how far apart they are pixel by pixel, and the higher of their coverages
+    (`crossfade`)."""
+    fa, fb = (np.asarray(f.convert("RGBA"), dtype=np.float32) / 255.0 for f in (a, b))
+    pa, pb = (np.dstack([x[..., :3] * x[..., 3:], x[..., 3:]]) for x in (fa, fb))
+    return pa, pb, _rgba_apart(pa, pb), np.maximum(fa[..., 3], fb[..., 3])
+
+
 def crossfade(made: Image.Image, a: Image.Image, b: Image.Image, t: float) -> float:
     """A cross-fade of two drawings inside the silhouette, the coverage whole: the near and far boots
     of `a` and `b` both shown at part strength where a flow found nothing to follow. Read where two
@@ -1331,22 +1375,19 @@ def crossfade(made: Image.Image, a: Image.Image, b: Image.Image, t: float) -> fl
     is counted in up to four of them (nine where the window is an odd number of pixels wide); 0 where
     it shows no blend. Relative to the source frames' own edges, so a palette's lightness does not
     decide it (docs/loop-repair.md section 4)."""
-    m, fa, fb = (np.asarray(f.convert("RGBA"), dtype=np.float32) / 255.0 for f in (made, a, b))
-    pm, pa, pb = (np.dstack([x[..., :3] * x[..., 3:], x[..., 3:]]) for x in (m, fa, fb))
-
-    def dist(x: np.ndarray, y: np.ndarray) -> np.ndarray:  # premultiplied RGBA, 0..1
-        return np.sqrt(((x - y) ** 2).sum(-1) / 4.0)
-
-    d = dist(pa, pb)
+    m = np.asarray(made.convert("RGBA"), dtype=np.float32) / 255.0
+    pm = np.dstack([m[..., :3] * m[..., 3:], m[..., 3:]])
+    pa, pb, d, covered = _SPREAD((a, b), lambda: _spread(a, b))
+    dist = _rgba_apart
     solid = m[..., 3] >= 0.5
     blend = (solid & (d > 0.15) & (dist(pm, (1 - t) * pa + t * pb) < 0.35 * d)
              & (dist(pm, pa) > 0.25 * d) & (dist(pm, pb) > 0.25 * d))
     blend &= _mask(_mask(blend, GHOST_THICK, ImageFilter.MinFilter), GHOST_THICK, ImageFilter.MaxFilter)
     if not blend.any():
         return 0.0
-    rows = np.nonzero((np.maximum.reduce([fa[..., 3], fb[..., 3], m[..., 3]]) >= 0.5).any(axis=1))[0]
+    rows = np.nonzero((np.maximum(covered, m[..., 3]) >= 0.5).any(axis=1))[0]
     w = max(16, round(CROSSFADE_WINDOW * (rows[-1] - rows[0] + 1)))
-    changed = _mask(d > 0.08, CROSSFADE_RANGE, ImageFilter.MaxFilter)
+    changed = _DIFFER((a, b), lambda: _mask(d > 0.08, CROSSFADE_RANGE, ImageFilter.MaxFilter))
     ys, xs = np.nonzero(blend)
     y0, y1, x0, x1 = max(0, ys.min() - w), ys.max() + w, max(0, xs.min() - w), xs.max() + w
     rm, ra, rb = (np.zeros(d.shape, np.float32) for _ in range(3))
